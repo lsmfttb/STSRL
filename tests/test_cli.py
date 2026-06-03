@@ -438,6 +438,40 @@ def test_cli_lightspeed_battle_reward_components_writes_report_to_stderr_only(
     assert "  (disabled)" in captured.err
 
 
+def test_cli_lightspeed_battle_reward_design_writes_report_to_stderr_only(
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.setattr(
+        "sts_combat_rl.cli.LightSpeedAdapter",
+        FakeLightSpeedSmokeAdapter,
+    )
+
+    assert (
+        main(
+            [
+                "--lightspeed-battle-reward-design",
+                "--sim-episodes",
+                "2",
+                "--sim-steps",
+                "1",
+                "--reward-detail-limit",
+                "0",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 0
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Battle reward design draft summary" in captured.err
+    assert "reward preset: battle-v0" in captured.err
+    assert "long-term ledger totals:" in captured.err
+    assert "lowest-reward segments (limit 0):" in captured.err
+
+
 def test_cli_rejects_negative_reward_detail_limit(
     monkeypatch,
     capsys,

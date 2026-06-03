@@ -302,6 +302,19 @@ Segments with resource deltas, terminal losses/victories, truncation, or HP gain
 are highlighted for inspection; use `--reward-detail-limit 0` to hide details or
 raise the limit for a longer drilldown.
 
+To inspect the first segment-level reward draft:
+
+```bash
+python -m sts_combat_rl.cli --lightspeed-battle-reward-design --sim-seed 1 --sim-episodes 10 --sim-steps 200
+```
+
+The default `battle-v0` preset is intentionally conservative: battle success,
+terminal loss, truncation, HP delta, and a tiny decision-count penalty are
+weighted; max-HP, gold, and potion-count deltas are reported as a long-term
+ledger with zero default weight. This keeps hard-to-price long-term value
+visible without forcing it into the first no-potion battle reward. It still does
+not run RL or define a training environment.
+
 To check whether real CommunicationMod combat captures fit the same fixed-size
 feature shape, run:
 

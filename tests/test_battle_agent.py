@@ -26,6 +26,12 @@ from sts_combat_rl.sim.reward_components import (
     build_battle_reward_component_report,
     format_battle_reward_component_report,
 )
+from sts_combat_rl.sim.reward_design import (
+    BattleRewardWeights,
+    battle_reward_weights_from_preset,
+    build_battle_reward_design_report,
+    format_battle_reward_design_report,
+)
 
 
 class FakeBattleAgentAdapter:
@@ -296,6 +302,60 @@ def test_build_battle_reward_component_report_keeps_raw_components_unweighted() 
     assert "highlighted segments (limit 8):" in text
     assert "gold_delta=-2.00" in text
     assert "future signal gaps:" in text
+
+
+def test_build_battle_reward_design_report_scores_v0_without_long_term_weights() -> None:
+    rollouts = [
+        collect_battle_agent_rollout(
+            FakeBattleAgentAdapter(),
+            PreferredKindPolicy(),
+            seed=1,
+            max_steps=3,
+        )
+    ]
+
+    report = build_battle_reward_design_report(
+        rollouts,
+        battle_reward_weights_from_preset("battle-v0"),
+    )
+    text = format_battle_reward_design_report(report)
+
+    assert report.source_rollout_count == 1
+    assert report.segment_count == 2
+    assert report.score_stats.samples == 2
+    assert round(report.score_stats.total, 3) == -0.802
+    assert report.contribution_totals["battle_success_proxy"] == 1.0
+    assert report.contribution_totals["terminal_loss"] == -1.0
+    assert round(report.contribution_totals["hp_delta"], 3) == -0.8
+    assert round(report.contribution_totals["decision_count"], 3) == -0.002
+    assert report.contribution_totals["gold_delta"] == 0.0
+    assert report.long_term_ledger_totals["gold_delta"] == -2.0
+    assert report.long_term_ledger_totals["max_hp_delta"] == 2.0
+    assert report.problems == []
+    assert "Battle reward design draft summary" in text
+    assert "reward preset: battle-v0" in text
+    assert "long-term ledger totals:" in text
+    assert "Long-term resource deltas are ledgered but have zero default weight." in text
+
+
+def test_battle_reward_design_can_enable_long_term_weights_without_shape_change() -> None:
+    rollouts = [
+        collect_battle_agent_rollout(
+            FakeBattleAgentAdapter(),
+            PreferredKindPolicy(),
+            seed=1,
+            max_steps=3,
+        )
+    ]
+
+    report = build_battle_reward_design_report(
+        rollouts,
+        BattleRewardWeights(max_hp_delta=0.05, gold_delta=0.01),
+    )
+
+    assert round(report.contribution_totals["max_hp_delta"], 3) == 0.1
+    assert round(report.contribution_totals["gold_delta"], 3) == -0.02
+    assert round(report.score_stats.total, 3) == -0.722
 
 
 def _action(

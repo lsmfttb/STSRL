@@ -98,6 +98,16 @@ from sts_combat_rl.sim.reward_components import (
     build_battle_reward_component_report,
     format_battle_reward_component_report,
 )
+from sts_combat_rl.sim.reward_design import (
+    BATTLE_REWARD_PRESETS,
+    BattleRewardDesignReport,
+    BattleRewardScoreStats,
+    BattleRewardSegmentScore,
+    BattleRewardWeights,
+    battle_reward_weights_from_preset,
+    build_battle_reward_design_report,
+    format_battle_reward_design_report,
+)
 from sts_combat_rl.sim.policy_rollout import collect_policy_simulator_rollout
 from sts_combat_rl.sim.rollout import (
     RolloutBatch,
@@ -124,7 +134,12 @@ __all__ = [
     "BattleRewardComponentReport",
     "BattleRewardComponentStats",
     "BattleRewardSegmentHighlight",
+    "BattleRewardDesignReport",
+    "BattleRewardScoreStats",
+    "BattleRewardSegmentScore",
+    "BattleRewardWeights",
     "BATTLE_REWARD_COMPONENT_NAMES",
+    "BATTLE_REWARD_PRESETS",
     "DecisionBatch",
     "DecisionContext",
     "DecisionExample",
@@ -156,6 +171,7 @@ __all__ = [
     "build_battle_decision_batch",
     "build_battle_segment_report",
     "build_battle_reward_component_report",
+    "build_battle_reward_design_report",
     "build_decision_context",
     "collect_battle_agent_rollout",
     "collect_policy_simulator_rollout",
@@ -171,6 +187,7 @@ __all__ = [
     "format_battle_decision_batch_report",
     "format_battle_segment_report",
     "format_battle_reward_component_report",
+    "format_battle_reward_design_report",
     "format_policy_episode_evaluation_report",
     "format_policy_evaluation_report",
     "decision_context_from_example",
@@ -187,6 +204,7 @@ __all__ = [
     "run_policy_episode_evaluation",
     "run_simulator_calibration",
     "simulator_action_feature_size",
+    "battle_reward_weights_from_preset",
     "summarize_battle_agent_episode",
     "summarize_rollout_episode",
 ]
