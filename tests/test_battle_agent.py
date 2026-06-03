@@ -4,8 +4,10 @@ from sts_combat_rl.sim.battle_agent import (
     BATTLE_AGENT_CONTROLLER,
     AUTOPILOT_CONTROLLER,
     build_battle_decision_batch,
+    build_battle_segment_report,
     collect_battle_agent_rollout,
     format_battle_decision_batch_report,
+    format_battle_segment_report,
     format_battle_agent_sweep_report,
     run_battle_agent_sweep,
     summarize_battle_agent_episode,
@@ -68,6 +70,7 @@ class FakeBattleAgentAdapter:
                     "outcome": "UNDECIDED",
                     "battle_active": True,
                     "floor_num": floor,
+                    "cur_hp": 80 if floor == 1 else 75,
                     "battle_hand": [{"type": "ATTACK", "playable": True}],
                     "battle_monsters": [{"current_hp": 10, "targetable": True}],
                 },
@@ -80,6 +83,7 @@ class FakeBattleAgentAdapter:
                     "outcome": "UNDECIDED",
                     "battle_active": False,
                     "floor_num": 1,
+                    "cur_hp": 75,
                 },
             )
         return SimulatorSnapshot(
@@ -89,6 +93,7 @@ class FakeBattleAgentAdapter:
                 "outcome": "PLAYER_LOSS",
                 "battle_active": False,
                 "floor_num": 2,
+                "cur_hp": 0,
             },
         )
 
@@ -196,6 +201,45 @@ def test_build_battle_decision_batch_excludes_autopilot_steps() -> None:
     assert decision_batch.problems == []
     assert "Battle decision batch summary" in text
     assert "excluded autopilot steps: 1" in text
+
+
+def test_build_battle_segment_report_summarizes_combat_boundaries() -> None:
+    rollouts = [
+        collect_battle_agent_rollout(
+            FakeBattleAgentAdapter(),
+            PreferredKindPolicy(),
+            seed=1,
+            max_steps=3,
+        )
+    ]
+
+    report = build_battle_segment_report(rollouts)
+    text = format_battle_segment_report(report)
+
+    assert report.source_rollout_count == 1
+    assert len(report.segments) == 2
+    assert report.excluded_autopilot_steps == 1
+    assert report.total_battle_decisions == 2
+    assert report.end_reason_counts["battle_exited"] == 1
+    assert report.end_reason_counts["terminal_loss"] == 1
+    assert report.action_kind_counts["card"] == 2
+    assert report.hp_delta_count == 2
+    assert report.hp_delta_total == -80.0
+
+    first, second = report.segments
+    assert first.start_step_index == 0
+    assert first.end_step_index == 0
+    assert first.end_reason == "battle_exited"
+    assert first.start_hp == 80.0
+    assert first.end_hp == 75.0
+    assert first.hp_delta == -5.0
+    assert second.start_step_index == 2
+    assert second.end_reason == "terminal_loss"
+    assert second.start_hp == 75.0
+    assert second.end_hp == 0.0
+    assert second.hp_delta == -75.0
+    assert "Battle segment calibration summary" in text
+    assert "segments: 2" in text
 
 
 def _action(

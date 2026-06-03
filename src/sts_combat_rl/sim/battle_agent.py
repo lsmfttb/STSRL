@@ -41,6 +41,11 @@ class BattleAgentRolloutStep:
     chosen_action_id: int | str
     chosen_action_kind: str
     terminal_after_step: bool
+    floor: float | None = None
+    player_hp: float | None = None
+    next_screen_state: str = "(none)"
+    next_floor: float | None = None
+    next_player_hp: float | None = None
 
 
 @dataclass(frozen=True)
@@ -113,6 +118,44 @@ class BattleDecisionBatch:
     excluded_autopilot_steps: int = 0
 
 
+@dataclass(frozen=True)
+class BattleSegment:
+    """One contiguous battle-agent-controlled combat segment."""
+
+    rollout_index: int
+    seed: int | None
+    segment_index: int
+    start_step_index: int
+    end_step_index: int
+    decision_count: int
+    end_reason: str
+    rollout_outcome: str
+    start_floor: float | None = None
+    end_floor: float | None = None
+    start_hp: float | None = None
+    end_hp: float | None = None
+    hp_delta: float | None = None
+    action_kind_counts: Counter[str] = field(default_factory=Counter)
+
+
+@dataclass(frozen=True)
+class BattleSegmentReport:
+    """Aggregate combat-segment boundary calibration report."""
+
+    source_rollout_count: int
+    segments: list[BattleSegment] = field(default_factory=list)
+    excluded_autopilot_steps: int = 0
+    total_battle_decisions: int = 0
+    end_reason_counts: Counter[str] = field(default_factory=Counter)
+    rollout_outcome_counts: Counter[str] = field(default_factory=Counter)
+    decision_count_counts: Counter[str] = field(default_factory=Counter)
+    floor_counts: Counter[str] = field(default_factory=Counter)
+    action_kind_counts: Counter[str] = field(default_factory=Counter)
+    hp_delta_total: float = 0.0
+    hp_delta_count: int = 0
+    problems: list[str] = field(default_factory=list)
+
+
 def collect_battle_agent_rollout(
     adapter: SimulatorAdapter,
     battle_policy: DecisionPolicy,
@@ -165,6 +208,7 @@ def collect_battle_agent_rollout(
         chosen_action = actions[selected_index]
         transition = adapter.step(chosen_action)
         terminal = transition.terminal
+        next_raw = transition.snapshot.raw
         steps.append(
             BattleAgentRolloutStep(
                 step_index=step_index,
@@ -178,6 +222,11 @@ def collect_battle_agent_rollout(
                 chosen_action_id=chosen_action.action_id,
                 chosen_action_kind=chosen_action.kind,
                 terminal_after_step=terminal,
+                floor=_first_number(snapshot.raw, "floor_num", "floor"),
+                player_hp=_player_hp(snapshot.raw),
+                next_screen_state=str(next_raw.get("screen_state", "(none)")),
+                next_floor=_first_number(next_raw, "floor_num", "floor"),
+                next_player_hp=_player_hp(next_raw),
             )
         )
 
@@ -351,6 +400,95 @@ def build_battle_decision_batch(
     )
 
 
+def build_battle_segment_report(
+    rollouts: list[BattleAgentRollout],
+) -> BattleSegmentReport:
+    """Build combat-segment summaries without choosing a reward function."""
+
+    segments: list[BattleSegment] = []
+    problems: list[str] = []
+    excluded_autopilot_steps = 0
+    total_battle_decisions = 0
+    end_reason_counts: Counter[str] = Counter()
+    rollout_outcome_counts: Counter[str] = Counter()
+    decision_count_counts: Counter[str] = Counter()
+    floor_counts: Counter[str] = Counter()
+    action_kind_counts: Counter[str] = Counter()
+    hp_delta_total = 0.0
+    hp_delta_count = 0
+
+    for rollout_index, rollout in enumerate(rollouts):
+        problems.extend(
+            f"rollout {rollout_index}: {problem}" for problem in rollout.problems
+        )
+        active_steps: list[BattleAgentRolloutStep] = []
+        segment_index = 0
+        for step in rollout.steps:
+            if step.controller == BATTLE_AGENT_CONTROLLER:
+                active_steps.append(step)
+                if step.terminal_after_step:
+                    segment = _battle_segment(
+                        rollout_index,
+                        rollout,
+                        segment_index,
+                        active_steps,
+                        _terminal_end_reason(rollout.outcome),
+                    )
+                    segments.append(segment)
+                    segment_index += 1
+                    active_steps = []
+                continue
+
+            excluded_autopilot_steps += 1
+            if active_steps:
+                segment = _battle_segment(
+                    rollout_index,
+                    rollout,
+                    segment_index,
+                    active_steps,
+                    "battle_exited",
+                )
+                segments.append(segment)
+                segment_index += 1
+                active_steps = []
+
+        if active_steps:
+            segment = _battle_segment(
+                rollout_index,
+                rollout,
+                segment_index,
+                active_steps,
+                "truncated",
+            )
+            segments.append(segment)
+
+    for segment in segments:
+        total_battle_decisions += segment.decision_count
+        end_reason_counts[segment.end_reason] += 1
+        rollout_outcome_counts[segment.rollout_outcome] += 1
+        decision_count_counts[str(segment.decision_count)] += 1
+        floor_counts[_optional_number_label(segment.start_floor)] += 1
+        action_kind_counts.update(segment.action_kind_counts)
+        if segment.hp_delta is not None:
+            hp_delta_total += segment.hp_delta
+            hp_delta_count += 1
+
+    return BattleSegmentReport(
+        source_rollout_count=len(rollouts),
+        segments=segments,
+        excluded_autopilot_steps=excluded_autopilot_steps,
+        total_battle_decisions=total_battle_decisions,
+        end_reason_counts=end_reason_counts,
+        rollout_outcome_counts=rollout_outcome_counts,
+        decision_count_counts=decision_count_counts,
+        floor_counts=floor_counts,
+        action_kind_counts=action_kind_counts,
+        hp_delta_total=hp_delta_total,
+        hp_delta_count=hp_delta_count,
+        problems=problems,
+    )
+
+
 def summarize_battle_agent_episode(
     rollout: BattleAgentRollout,
 ) -> BattleAgentEpisodeSummary:
@@ -462,6 +600,44 @@ def format_battle_agent_sweep_report(report: BattleAgentSweepReport) -> str:
     return "\n".join(lines)
 
 
+def format_battle_segment_report(report: BattleSegmentReport) -> str:
+    """Format combat-segment boundary calibration for stderr."""
+
+    segment_count = len(report.segments)
+    average_decisions = (
+        report.total_battle_decisions / segment_count if segment_count else 0.0
+    )
+    average_hp_delta = (
+        report.hp_delta_total / report.hp_delta_count
+        if report.hp_delta_count
+        else 0.0
+    )
+
+    lines = [
+        "Battle segment calibration summary",
+        f"source rollouts: {report.source_rollout_count}",
+        f"segments: {segment_count}",
+        f"excluded autopilot steps: {report.excluded_autopilot_steps}",
+        f"total battle decisions: {report.total_battle_decisions}",
+        f"average battle decisions per segment: {average_decisions:.2f}",
+        f"hp delta samples: {report.hp_delta_count}",
+        f"average hp delta: {average_hp_delta:.2f}",
+    ]
+    _append_counter(lines, "end reasons", report.end_reason_counts)
+    _append_counter(lines, "rollout outcomes", report.rollout_outcome_counts)
+    _append_counter(lines, "segment decision counts", report.decision_count_counts)
+    _append_counter(lines, "segment start floors", report.floor_counts)
+    _append_counter(lines, "battle action kinds", report.action_kind_counts)
+
+    lines.append("problems:")
+    if report.problems:
+        lines.extend(f"  {problem}" for problem in report.problems)
+    else:
+        lines.append("  (none)")
+
+    return "\n".join(lines)
+
+
 def format_battle_decision_batch_report(batch: BattleDecisionBatch) -> str:
     """Format a battle-only decision batch report for stderr."""
 
@@ -548,6 +724,53 @@ def _selected_index_problem(
     return None
 
 
+def _battle_segment(
+    rollout_index: int,
+    rollout: BattleAgentRollout,
+    segment_index: int,
+    steps: list[BattleAgentRolloutStep],
+    end_reason: str,
+) -> BattleSegment:
+    first_step = steps[0]
+    last_step = steps[-1]
+    start_hp = first_step.player_hp
+    end_hp = (
+        last_step.next_player_hp
+        if last_step.next_player_hp is not None
+        else last_step.player_hp
+    )
+    hp_delta = (
+        end_hp - start_hp
+        if start_hp is not None and end_hp is not None
+        else None
+    )
+    return BattleSegment(
+        rollout_index=rollout_index,
+        seed=rollout.seed,
+        segment_index=segment_index,
+        start_step_index=first_step.step_index,
+        end_step_index=last_step.step_index,
+        decision_count=len(steps),
+        end_reason=end_reason,
+        rollout_outcome=rollout.outcome,
+        start_floor=first_step.floor,
+        end_floor=last_step.next_floor if last_step.next_floor is not None else last_step.floor,
+        start_hp=start_hp,
+        end_hp=end_hp,
+        hp_delta=hp_delta,
+        action_kind_counts=Counter(step.chosen_action_kind for step in steps),
+    )
+
+
+def _terminal_end_reason(outcome: str) -> str:
+    normalized = str(outcome).upper()
+    if normalized in {"PLAYER_LOSS", "LOSS", "DEFEAT", "PLAYER_DEFEAT"}:
+        return "terminal_loss"
+    if normalized in {"PLAYER_VICTORY", "VICTORY", "WIN", "PLAYER_WIN"}:
+        return "terminal_victory"
+    return "terminal"
+
+
 def _stable_size(
     current: int | None,
     observed: int,
@@ -608,6 +831,20 @@ def _first_number(
         if isinstance(value, (int, float)):
             return float(value)
     return None
+
+
+def _player_hp(data: Mapping[str, Any]) -> float | None:
+    direct = _first_number(data, "cur_hp", "current_hp")
+    if direct is not None:
+        return direct
+
+    battle_player = _mapping(data.get("battle_player"))
+    battle_hp = _first_number(battle_player, "current_hp", "cur_hp")
+    if battle_hp is not None:
+        return battle_hp
+
+    player = _mapping(data.get("player"))
+    return _first_number(player, "current_hp", "cur_hp")
 
 
 def _mapping(value: object) -> Mapping[str, Any]:

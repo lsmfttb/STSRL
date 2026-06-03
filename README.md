@@ -268,6 +268,17 @@ This builds a framework-neutral `DecisionBatch` from battle-agent decisions only
 Scripted autopilot decisions are counted as excluded steps and are not included
 as training examples. This still does not define rewards or run training.
 
+To calibrate battle episode boundaries before choosing a reward function:
+
+```bash
+python -m sts_combat_rl.cli --lightspeed-battle-segments-smoke --sim-seed 1 --sim-episodes 10 --sim-steps 200
+```
+
+This identifies contiguous battle-agent-controlled segments, reports whether
+each segment exited battle, ended in terminal loss/victory, or was truncated by
+the step limit, and summarizes available fields such as battle decision count
+and HP delta. It does not choose the final reward.
+
 To check whether real CommunicationMod combat captures fit the same fixed-size
 feature shape, run:
 

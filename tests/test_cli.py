@@ -371,6 +371,37 @@ def test_cli_lightspeed_battle_batch_smoke_writes_report_to_stderr_only(
     assert "battle examples: 2" in captured.err
 
 
+def test_cli_lightspeed_battle_segments_smoke_writes_report_to_stderr_only(
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.setattr(
+        "sts_combat_rl.cli.LightSpeedAdapter",
+        FakeLightSpeedSmokeAdapter,
+    )
+
+    assert (
+        main(
+            [
+                "--lightspeed-battle-segments-smoke",
+                "--sim-episodes",
+                "2",
+                "--sim-steps",
+                "1",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 0
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Battle segment calibration summary" in captured.err
+    assert "source rollouts: 2" in captured.err
+    assert "segments: 2" in captured.err
+
+
 def test_cli_rejects_replay_policy_for_online_policy_rollout(
     monkeypatch,
     capsys,
