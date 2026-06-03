@@ -31,6 +31,10 @@ from sts_combat_rl.sim.calibration import (
     run_communicationmod_feature_calibration,
     run_simulator_calibration,
 )
+from sts_combat_rl.sim.reward_components import (
+    build_battle_reward_component_report,
+    format_battle_reward_component_report,
+)
 from sts_combat_rl.sim.evaluation import (
     format_policy_episode_evaluation_report,
     run_policy_episode_evaluation,
@@ -137,6 +141,14 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Collect battle-agent rollouts, identify contiguous battle segments, "
             "and summarize battle boundary calibration to stderr."
+        ),
+    )
+    input_group.add_argument(
+        "--lightspeed-battle-reward-components",
+        action="store_true",
+        help=(
+            "Collect battle-agent rollouts and summarize raw reward-component "
+            "candidates to stderr without choosing reward weights."
         ),
     )
     input_group.add_argument(
@@ -303,6 +315,7 @@ def main(argv: list[str] | None = None) -> int:
         or args.lightspeed_battle_sweep
         or args.lightspeed_battle_batch_smoke
         or args.lightspeed_battle_segments_smoke
+        or args.lightspeed_battle_reward_components
     ):
         try:
             adapter = LightSpeedAdapter(seed=args.sim_seed, ascension=args.sim_ascension)
@@ -420,6 +433,33 @@ def main(argv: list[str] | None = None) -> int:
                     segment_report = build_battle_segment_report(battle_rollouts)
                     print(
                         format_battle_segment_report(segment_report),
+                        file=sys.stderr,
+                    )
+                elif args.lightspeed_battle_reward_components:
+                    battle_policy = _build_online_sim_policy(
+                        args.sim_policy,
+                        args.sim_seed,
+                    )
+                    non_combat_policy = _build_non_combat_driver_policy(
+                        args.sim_non_combat_policy,
+                        args.sim_seed,
+                    )
+                    battle_rollouts = [
+                        collect_battle_agent_rollout(
+                            adapter,
+                            battle_policy,
+                            seed=args.sim_seed + offset,
+                            max_steps=args.sim_steps,
+                            action_space=action_space,
+                            autopilot_policy=non_combat_policy,
+                        )
+                        for offset in range(args.sim_episodes)
+                    ]
+                    reward_report = build_battle_reward_component_report(
+                        battle_rollouts
+                    )
+                    print(
+                        format_battle_reward_component_report(reward_report),
                         file=sys.stderr,
                     )
                 else:

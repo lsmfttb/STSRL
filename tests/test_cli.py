@@ -403,6 +403,37 @@ def test_cli_lightspeed_battle_segments_smoke_writes_report_to_stderr_only(
     assert "segments: 2" in captured.err
 
 
+def test_cli_lightspeed_battle_reward_components_writes_report_to_stderr_only(
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.setattr(
+        "sts_combat_rl.cli.LightSpeedAdapter",
+        FakeLightSpeedSmokeAdapter,
+    )
+
+    assert (
+        main(
+            [
+                "--lightspeed-battle-reward-components",
+                "--sim-episodes",
+                "2",
+                "--sim-steps",
+                "1",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 0
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Battle reward component calibration summary" in captured.err
+    assert "source rollouts: 2" in captured.err
+    assert "components:" in captured.err
+
+
 def test_cli_lightspeed_battle_sweep_accepts_non_combat_policy(
     monkeypatch,
     capsys,

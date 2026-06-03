@@ -89,6 +89,14 @@ from sts_combat_rl.sim.policy import (
     evaluate_decision_policy,
     format_policy_evaluation_report,
 )
+from sts_combat_rl.sim.reward_components import (
+    BATTLE_REWARD_COMPONENT_NAMES,
+    FUTURE_REWARD_SIGNAL_GAPS,
+    BattleRewardComponentReport,
+    BattleRewardComponentStats,
+    build_battle_reward_component_report,
+    format_battle_reward_component_report,
+)
 from sts_combat_rl.sim.policy_rollout import collect_policy_simulator_rollout
 from sts_combat_rl.sim.rollout import (
     RolloutBatch,
@@ -112,12 +120,16 @@ __all__ = [
     "BattleDecisionBatch",
     "BattleSegment",
     "BattleSegmentReport",
+    "BattleRewardComponentReport",
+    "BattleRewardComponentStats",
+    "BATTLE_REWARD_COMPONENT_NAMES",
     "DecisionBatch",
     "DecisionContext",
     "DecisionExample",
     "DecisionPolicy",
     "EpisodeSummary",
     "FirstEligiblePolicy",
+    "FUTURE_REWARD_SIGNAL_GAPS",
     "ObservationValue",
     "POTION_ACTION_KINDS",
     "PolicyDecision",
@@ -141,6 +153,7 @@ __all__ = [
     "build_decision_batch",
     "build_battle_decision_batch",
     "build_battle_segment_report",
+    "build_battle_reward_component_report",
     "build_decision_context",
     "collect_battle_agent_rollout",
     "collect_policy_simulator_rollout",
@@ -155,6 +168,7 @@ __all__ = [
     "format_battle_agent_sweep_report",
     "format_battle_decision_batch_report",
     "format_battle_segment_report",
+    "format_battle_reward_component_report",
     "format_policy_episode_evaluation_report",
     "format_policy_evaluation_report",
     "decision_context_from_example",

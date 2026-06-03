@@ -286,6 +286,19 @@ each segment ended in a non-terminal battle exit, terminal loss/victory, or was
 truncated by the step limit, and summarizes available fields such as battle
 decision count and HP delta. It does not choose the final reward.
 
+To inspect raw reward-component candidates before choosing reward weights:
+
+```bash
+python -m sts_combat_rl.cli --lightspeed-battle-reward-components --sim-seed 1 --sim-episodes 10 --sim-steps 200
+```
+
+This reuses the same battle-agent/non-combat-driver split and reports raw
+components such as battle-success proxy, terminal loss, HP delta/loss/gain,
+decision count, max-HP delta, gold delta, and potion-count delta when both ends
+of the battle segment expose the field. It also reports future signal gaps such
+as relic counters and post-combat deck/reward deltas. It does not assign reward
+weights, run RL, or define a Gymnasium environment.
+
 To check whether real CommunicationMod combat captures fit the same fixed-size
 feature shape, run:
 

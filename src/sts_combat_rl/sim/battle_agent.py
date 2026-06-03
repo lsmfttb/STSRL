@@ -44,9 +44,15 @@ class BattleAgentRolloutStep:
     terminal_after_step: bool
     floor: float | None = None
     player_hp: float | None = None
+    player_max_hp: float | None = None
+    gold: float | None = None
+    potion_count: float | None = None
     next_screen_state: str = "(none)"
     next_floor: float | None = None
     next_player_hp: float | None = None
+    next_player_max_hp: float | None = None
+    next_gold: float | None = None
+    next_potion_count: float | None = None
 
 
 @dataclass(frozen=True)
@@ -136,6 +142,15 @@ class BattleSegment:
     start_hp: float | None = None
     end_hp: float | None = None
     hp_delta: float | None = None
+    start_max_hp: float | None = None
+    end_max_hp: float | None = None
+    max_hp_delta: float | None = None
+    start_gold: float | None = None
+    end_gold: float | None = None
+    gold_delta: float | None = None
+    start_potion_count: float | None = None
+    end_potion_count: float | None = None
+    potion_count_delta: float | None = None
     action_kind_counts: Counter[str] = field(default_factory=Counter)
 
 
@@ -228,6 +243,12 @@ def collect_battle_agent_rollout(
                 next_screen_state=str(next_raw.get("screen_state", "(none)")),
                 next_floor=_first_number(next_raw, "floor_num", "floor"),
                 next_player_hp=_player_hp(next_raw),
+                player_max_hp=_player_max_hp(snapshot.raw),
+                next_player_max_hp=_player_max_hp(next_raw),
+                gold=_first_number(snapshot.raw, "gold"),
+                next_gold=_first_number(next_raw, "gold"),
+                potion_count=_potion_count(snapshot.raw),
+                next_potion_count=_potion_count(next_raw),
             )
         )
 
@@ -744,10 +765,19 @@ def _battle_segment(
         if last_step.next_player_hp is not None
         else last_step.player_hp
     )
-    hp_delta = (
-        end_hp - start_hp
-        if start_hp is not None and end_hp is not None
-        else None
+    start_max_hp = first_step.player_max_hp
+    end_max_hp = (
+        last_step.next_player_max_hp
+        if last_step.next_player_max_hp is not None
+        else last_step.player_max_hp
+    )
+    start_gold = first_step.gold
+    end_gold = last_step.next_gold if last_step.next_gold is not None else last_step.gold
+    start_potion_count = first_step.potion_count
+    end_potion_count = (
+        last_step.next_potion_count
+        if last_step.next_potion_count is not None
+        else last_step.potion_count
     )
     return BattleSegment(
         rollout_index=rollout_index,
@@ -762,7 +792,16 @@ def _battle_segment(
         end_floor=last_step.next_floor if last_step.next_floor is not None else last_step.floor,
         start_hp=start_hp,
         end_hp=end_hp,
-        hp_delta=hp_delta,
+        hp_delta=_delta(start_hp, end_hp),
+        start_max_hp=start_max_hp,
+        end_max_hp=end_max_hp,
+        max_hp_delta=_delta(start_max_hp, end_max_hp),
+        start_gold=start_gold,
+        end_gold=end_gold,
+        gold_delta=_delta(start_gold, end_gold),
+        start_potion_count=start_potion_count,
+        end_potion_count=end_potion_count,
+        potion_count_delta=_delta(start_potion_count, end_potion_count),
         action_kind_counts=Counter(step.chosen_action_kind for step in steps),
     )
 
@@ -850,6 +889,37 @@ def _player_hp(data: Mapping[str, Any]) -> float | None:
 
     player = _mapping(data.get("player"))
     return _first_number(player, "current_hp", "cur_hp")
+
+
+def _player_max_hp(data: Mapping[str, Any]) -> float | None:
+    direct = _first_number(data, "max_hp", "maxHp")
+    if direct is not None:
+        return direct
+
+    battle_player = _mapping(data.get("battle_player"))
+    battle_max_hp = _first_number(battle_player, "max_hp", "maxHp")
+    if battle_max_hp is not None:
+        return battle_max_hp
+
+    player = _mapping(data.get("player"))
+    return _first_number(player, "max_hp", "maxHp")
+
+
+def _potion_count(data: Mapping[str, Any]) -> float | None:
+    direct = _first_number(data, "battle_potion_count", "potion_count")
+    if direct is not None:
+        return direct
+
+    potions = data.get("battle_potions", data.get("potions"))
+    if isinstance(potions, list):
+        return float(len(potions))
+    return None
+
+
+def _delta(start: float | None, end: float | None) -> float | None:
+    if start is None or end is None:
+        return None
+    return end - start
 
 
 def _mapping(value: object) -> Mapping[str, Any]:

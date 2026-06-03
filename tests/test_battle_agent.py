@@ -22,6 +22,10 @@ from sts_combat_rl.sim.features import (
     simulator_action_feature_size,
 )
 from sts_combat_rl.sim.policy import PolicyDecision, PreferredKindPolicy
+from sts_combat_rl.sim.reward_components import (
+    build_battle_reward_component_report,
+    format_battle_reward_component_report,
+)
 
 
 class FakeBattleAgentAdapter:
@@ -63,6 +67,8 @@ class FakeBattleAgentAdapter:
     def _snapshot(self) -> SimulatorSnapshot:
         if self.phase.startswith("battle"):
             floor = 1 if self.phase == "battle-1" else 2
+            max_hp = 80 if floor == 1 else 82
+            gold = 99 if floor == 1 else 101
             return SimulatorSnapshot(
                 observation=[floor],
                 raw={
@@ -71,6 +77,10 @@ class FakeBattleAgentAdapter:
                     "battle_active": True,
                     "floor_num": floor,
                     "cur_hp": 80 if floor == 1 else 75,
+                    "max_hp": max_hp,
+                    "gold": gold,
+                    "potion_count": 1,
+                    "battle_potion_count": 1,
                     "battle_hand": [{"type": "ATTACK", "playable": True}],
                     "battle_monsters": [{"current_hp": 10, "targetable": True}],
                 },
@@ -84,6 +94,9 @@ class FakeBattleAgentAdapter:
                     "battle_active": False,
                     "floor_num": 1,
                     "cur_hp": 75,
+                    "max_hp": 82,
+                    "gold": 101,
+                    "potion_count": 1,
                 },
             )
         return SimulatorSnapshot(
@@ -94,6 +107,9 @@ class FakeBattleAgentAdapter:
                 "battle_active": False,
                 "floor_num": 2,
                 "cur_hp": 0,
+                "max_hp": 82,
+                "gold": 101,
+                "potion_count": 1,
             },
         )
 
@@ -233,6 +249,12 @@ def test_build_battle_segment_report_summarizes_combat_boundaries() -> None:
     assert first.start_hp == 80.0
     assert first.end_hp == 75.0
     assert first.hp_delta == -5.0
+    assert first.start_max_hp == 80.0
+    assert first.end_max_hp == 82.0
+    assert first.max_hp_delta == 2.0
+    assert first.start_gold == 99.0
+    assert first.end_gold == 101.0
+    assert first.gold_delta == 2.0
     assert second.start_step_index == 2
     assert second.end_reason == "terminal_loss"
     assert second.start_hp == 75.0
@@ -240,6 +262,34 @@ def test_build_battle_segment_report_summarizes_combat_boundaries() -> None:
     assert second.hp_delta == -75.0
     assert "Battle segment calibration summary" in text
     assert "segments: 2" in text
+
+
+def test_build_battle_reward_component_report_keeps_raw_components_unweighted() -> None:
+    rollouts = [
+        collect_battle_agent_rollout(
+            FakeBattleAgentAdapter(),
+            PreferredKindPolicy(),
+            seed=1,
+            max_steps=3,
+        )
+    ]
+
+    report = build_battle_reward_component_report(rollouts)
+    text = format_battle_reward_component_report(report)
+
+    assert report.source_rollout_count == 1
+    assert report.segment_count == 2
+    assert report.components["battle_success_proxy"].samples == 2
+    assert report.components["battle_success_proxy"].total == 1.0
+    assert report.components["terminal_loss"].total == 1.0
+    assert report.components["hp_loss"].total == 80.0
+    assert report.components["max_hp_delta"].total == 2.0
+    assert report.components["gold_delta"].total == 2.0
+    assert report.components["potion_count_delta"].samples == 2
+    assert report.components["potion_count_delta"].total == 0.0
+    assert "Battle reward component calibration summary" in text
+    assert "no reward weights" in text
+    assert "future signal gaps:" in text
 
 
 def _action(
