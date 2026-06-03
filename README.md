@@ -258,6 +258,16 @@ advanced by a scripted autopilot and reported separately, so the battle-agent
 data path can be calibrated without treating route/reward/shop choices as agent
 decisions.
 
+To validate the battle-only decision batch that a future trainer would consume:
+
+```bash
+python -m sts_combat_rl.cli --lightspeed-battle-batch-smoke --sim-seed 1 --sim-episodes 10 --sim-steps 200
+```
+
+This builds a framework-neutral `DecisionBatch` from battle-agent decisions only.
+Scripted autopilot decisions are counted as excluded steps and are not included
+as training examples. This still does not define rewards or run training.
+
 To check whether real CommunicationMod combat captures fit the same fixed-size
 feature shape, run:
 

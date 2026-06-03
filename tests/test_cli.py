@@ -340,6 +340,37 @@ def test_cli_lightspeed_battle_sweep_writes_report_to_stderr_only(
     assert "total autopilot decisions: 0" in captured.err
 
 
+def test_cli_lightspeed_battle_batch_smoke_writes_report_to_stderr_only(
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.setattr(
+        "sts_combat_rl.cli.LightSpeedAdapter",
+        FakeLightSpeedSmokeAdapter,
+    )
+
+    assert (
+        main(
+            [
+                "--lightspeed-battle-batch-smoke",
+                "--sim-episodes",
+                "2",
+                "--sim-steps",
+                "1",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 0
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Battle decision batch summary" in captured.err
+    assert "source rollouts: 2" in captured.err
+    assert "battle examples: 2" in captured.err
+
+
 def test_cli_rejects_replay_policy_for_online_policy_rollout(
     monkeypatch,
     capsys,

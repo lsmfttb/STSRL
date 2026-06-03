@@ -3,7 +3,9 @@ from __future__ import annotations
 from sts_combat_rl.sim.battle_agent import (
     BATTLE_AGENT_CONTROLLER,
     AUTOPILOT_CONTROLLER,
+    build_battle_decision_batch,
     collect_battle_agent_rollout,
+    format_battle_decision_batch_report,
     format_battle_agent_sweep_report,
     run_battle_agent_sweep,
     summarize_battle_agent_episode,
@@ -163,6 +165,37 @@ def test_run_battle_agent_sweep_aggregates_battle_only_counts() -> None:
     assert report.problems == []
     assert "Battle agent seed sweep summary" in text
     assert "total battle decisions: 4" in text
+
+
+def test_build_battle_decision_batch_excludes_autopilot_steps() -> None:
+    rollouts = [
+        collect_battle_agent_rollout(
+            FakeBattleAgentAdapter(),
+            PreferredKindPolicy(),
+            seed=1,
+            max_steps=3,
+        )
+    ]
+
+    battle_batch = build_battle_decision_batch(rollouts)
+    decision_batch = battle_batch.decision_batch
+    text = format_battle_decision_batch_report(battle_batch)
+
+    assert battle_batch.source_rollout_count == 1
+    assert battle_batch.excluded_autopilot_steps == 1
+    assert decision_batch.rollout_count == 1
+    assert decision_batch.terminal_rollouts == 1
+    assert len(decision_batch.examples) == 2
+    assert {example.screen_state for example in decision_batch.examples} == {"BATTLE"}
+    assert [example.chosen_action_kind for example in decision_batch.examples] == [
+        "card",
+        "card",
+    ]
+    assert decision_batch.snapshot_feature_size == lightspeed_battle_feature_size()
+    assert decision_batch.action_feature_size == simulator_action_feature_size()
+    assert decision_batch.problems == []
+    assert "Battle decision batch summary" in text
+    assert "excluded autopilot steps: 1" in text
 
 
 def _action(

@@ -17,6 +17,9 @@ from sts_combat_rl.samples import analyze_sample_paths, format_sample_analysis
 from sts_combat_rl.sim.action_space import ActionSpaceConfig
 from sts_combat_rl.sim.batching import build_decision_batch, format_decision_batch_report
 from sts_combat_rl.sim.battle_agent import (
+    build_battle_decision_batch,
+    collect_battle_agent_rollout,
+    format_battle_decision_batch_report,
     format_battle_agent_sweep_report,
     run_battle_agent_sweep,
 )
@@ -116,6 +119,14 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Run a battle-agent seed sweep: the selected policy controls only "
             "battle states while a scripted autopilot advances non-combat states."
+        ),
+    )
+    input_group.add_argument(
+        "--lightspeed-battle-batch-smoke",
+        action="store_true",
+        help=(
+            "Collect battle-agent rollouts, drop scripted non-combat decisions, "
+            "build a battle-only decision batch, and summarize to stderr."
         ),
     )
     input_group.add_argument(
@@ -271,6 +282,7 @@ def main(argv: list[str] | None = None) -> int:
         or args.lightspeed_policy_rollout_smoke
         or args.lightspeed_episode_eval
         or args.lightspeed_battle_sweep
+        or args.lightspeed_battle_batch_smoke
     ):
         try:
             adapter = LightSpeedAdapter(seed=args.sim_seed, ascension=args.sim_ascension)
@@ -333,6 +345,26 @@ def main(argv: list[str] | None = None) -> int:
                     )
                     print(
                         format_battle_agent_sweep_report(battle_report),
+                        file=sys.stderr,
+                    )
+                elif args.lightspeed_battle_batch_smoke:
+                    battle_policy = _build_online_sim_policy(
+                        args.sim_policy,
+                        args.sim_seed,
+                    )
+                    battle_rollouts = [
+                        collect_battle_agent_rollout(
+                            adapter,
+                            battle_policy,
+                            seed=args.sim_seed + offset,
+                            max_steps=args.sim_steps,
+                            action_space=action_space,
+                        )
+                        for offset in range(args.sim_episodes)
+                    ]
+                    battle_batch = build_battle_decision_batch(battle_rollouts)
+                    print(
+                        format_battle_decision_batch_report(battle_batch),
                         file=sys.stderr,
                     )
                 else:

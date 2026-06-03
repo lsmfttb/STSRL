@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from sts_combat_rl.sim.action_space import ActionSpaceConfig, filter_eligible_actions
+from sts_combat_rl.sim.batching import DecisionBatch, DecisionExample
 from sts_combat_rl.sim.contract import SimulatorAction, SimulatorAdapter
 from sts_combat_rl.sim.features import (
     encode_lightspeed_battle_snapshot,
@@ -101,6 +102,15 @@ class BattleAgentSweepReport:
     battle_snapshot_feature_size_counts: Counter[str] = field(default_factory=Counter)
     battle_action_feature_size_counts: Counter[str] = field(default_factory=Counter)
     problems: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class BattleDecisionBatch:
+    """Framework-neutral decision batch containing only battle-agent steps."""
+
+    decision_batch: DecisionBatch
+    source_rollout_count: int
+    excluded_autopilot_steps: int = 0
 
 
 def collect_battle_agent_rollout(
@@ -270,6 +280,77 @@ def run_battle_agent_sweep(
     )
 
 
+def build_battle_decision_batch(
+    rollouts: list[BattleAgentRollout],
+) -> BattleDecisionBatch:
+    """Build a validated decision batch from only battle-agent decisions."""
+
+    examples: list[DecisionExample] = []
+    problems: list[str] = []
+    snapshot_feature_size: int | None = None
+    action_feature_size: int | None = None
+    terminal_rollouts = 0
+    excluded_autopilot_steps = 0
+
+    for rollout_index, rollout in enumerate(rollouts):
+        if rollout.terminal:
+            terminal_rollouts += 1
+        problems.extend(
+            f"rollout {rollout_index}: {problem}" for problem in rollout.problems
+        )
+
+        for step in rollout.steps:
+            if step.controller != BATTLE_AGENT_CONTROLLER:
+                excluded_autopilot_steps += 1
+                continue
+
+            snapshot_feature_size = _stable_size(
+                snapshot_feature_size,
+                len(step.snapshot_features),
+                f"rollout {rollout_index} step {step.step_index} snapshot",
+                problems,
+            )
+            for action_index, action_features in enumerate(step.legal_action_features):
+                action_feature_size = _stable_size(
+                    action_feature_size,
+                    len(action_features),
+                    (
+                        f"rollout {rollout_index} step {step.step_index} "
+                        f"action {action_index}"
+                    ),
+                    problems,
+                )
+            _validate_step_indices(rollout_index, step, problems)
+            examples.append(
+                DecisionExample(
+                    rollout_index=rollout_index,
+                    seed=rollout.seed,
+                    step_index=step.step_index,
+                    screen_state=step.screen_state,
+                    snapshot_features=step.snapshot_features,
+                    legal_action_features=step.legal_action_features,
+                    legal_action_kinds=step.legal_action_kinds,
+                    eligible_action_indices=step.eligible_action_indices,
+                    chosen_action_index=step.chosen_action_index,
+                    chosen_action_kind=step.chosen_action_kind,
+                    terminal_after_step=step.terminal_after_step,
+                )
+            )
+
+    return BattleDecisionBatch(
+        decision_batch=DecisionBatch(
+            examples=examples,
+            snapshot_feature_size=snapshot_feature_size,
+            action_feature_size=action_feature_size,
+            rollout_count=len(rollouts),
+            terminal_rollouts=terminal_rollouts,
+            problems=problems,
+        ),
+        source_rollout_count=len(rollouts),
+        excluded_autopilot_steps=excluded_autopilot_steps,
+    )
+
+
 def summarize_battle_agent_episode(
     rollout: BattleAgentRollout,
 ) -> BattleAgentEpisodeSummary:
@@ -381,6 +462,48 @@ def format_battle_agent_sweep_report(report: BattleAgentSweepReport) -> str:
     return "\n".join(lines)
 
 
+def format_battle_decision_batch_report(batch: BattleDecisionBatch) -> str:
+    """Format a battle-only decision batch report for stderr."""
+
+    decision_batch = batch.decision_batch
+    screen_states = Counter(
+        example.screen_state for example in decision_batch.examples
+    )
+    legal_action_counts = Counter(
+        str(len(example.legal_action_features))
+        for example in decision_batch.examples
+    )
+    eligible_action_counts = Counter(
+        str(len(example.eligible_action_indices))
+        for example in decision_batch.examples
+    )
+    chosen_action_kinds = Counter(
+        example.chosen_action_kind for example in decision_batch.examples
+    )
+
+    lines = [
+        "Battle decision batch summary",
+        f"source rollouts: {batch.source_rollout_count}",
+        f"terminal rollouts: {decision_batch.terminal_rollouts}",
+        f"battle examples: {len(decision_batch.examples)}",
+        f"excluded autopilot steps: {batch.excluded_autopilot_steps}",
+        f"snapshot feature size: {_optional_int(decision_batch.snapshot_feature_size)}",
+        f"action feature size: {_optional_int(decision_batch.action_feature_size)}",
+    ]
+    _append_counter(lines, "screen states", screen_states)
+    _append_counter(lines, "legal action counts", legal_action_counts)
+    _append_counter(lines, "eligible action counts", eligible_action_counts)
+    _append_counter(lines, "chosen action kinds", chosen_action_kinds)
+
+    lines.append("problems:")
+    if decision_batch.problems:
+        lines.extend(f"  {problem}" for problem in decision_batch.problems)
+    else:
+        lines.append("  (none)")
+
+    return "\n".join(lines)
+
+
 def build_decision_context(
     raw_snapshot: object,
     actions: list[SimulatorAction],
@@ -425,6 +548,40 @@ def _selected_index_problem(
     return None
 
 
+def _stable_size(
+    current: int | None,
+    observed: int,
+    label: str,
+    problems: list[str],
+) -> int:
+    if current is None:
+        return observed
+    if current != observed:
+        problems.append(
+            f"inconsistent feature size for {label}: expected {current}, got {observed}"
+        )
+    return current
+
+
+def _validate_step_indices(
+    rollout_index: int,
+    step: BattleAgentRolloutStep,
+    problems: list[str],
+) -> None:
+    legal_count = len(step.legal_action_features)
+    if step.chosen_action_index < 0 or step.chosen_action_index >= legal_count:
+        problems.append(
+            f"rollout {rollout_index} step {step.step_index}: "
+            f"chosen action index {step.chosen_action_index} outside {legal_count} actions"
+        )
+    for index in step.eligible_action_indices:
+        if index < 0 or index >= legal_count:
+            problems.append(
+                f"rollout {rollout_index} step {step.step_index}: "
+                f"eligible action index {index} outside {legal_count} actions"
+            )
+
+
 def _eligible_indices(
     actions: list[SimulatorAction],
     action_space: ActionSpaceConfig,
@@ -467,6 +624,10 @@ def _optional_number_label(value: float | None) -> str:
 
 def _seed_label(seed: int | None) -> str:
     return str(seed) if seed is not None else "(default)"
+
+
+def _optional_int(value: Any) -> str:
+    return str(value) if value is not None else "(none)"
 
 
 def _append_counter(lines: list[str], title: str, counter: Counter[str]) -> None:
