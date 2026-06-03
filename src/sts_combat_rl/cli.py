@@ -120,7 +120,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help=(
             "Run a battle-agent seed sweep: the selected policy controls only "
-            "battle states while a scripted autopilot advances non-combat states."
+            "battle states while a separate driver advances non-combat states."
         ),
     )
     input_group.add_argument(
@@ -228,6 +228,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
         default="preferred-kind",
         help="Policy used by --lightspeed-policy-smoke and policy rollout smoke.",
+    )
+    parser.add_argument(
+        "--sim-non-combat-policy",
+        choices=("preferred-kind", "first-eligible", "random-eligible"),
+        default="random-eligible",
+        help=(
+            "Non-combat driver policy used by battle-agent smokes. "
+            "The default is seeded random over eligible non-combat actions."
+        ),
     )
     return parser
 
@@ -344,6 +353,10 @@ def main(argv: list[str] | None = None) -> int:
                         file=sys.stderr,
                     )
                 elif args.lightspeed_battle_sweep:
+                    non_combat_policy = _build_non_combat_driver_policy(
+                        args.sim_non_combat_policy,
+                        args.sim_seed,
+                    )
                     battle_report = run_battle_agent_sweep(
                         adapter,
                         _build_online_sim_policy(args.sim_policy, args.sim_seed),
@@ -353,6 +366,7 @@ def main(argv: list[str] | None = None) -> int:
                         ],
                         max_steps=args.sim_steps,
                         action_space=action_space,
+                        autopilot_policy=non_combat_policy,
                     )
                     print(
                         format_battle_agent_sweep_report(battle_report),
@@ -363,6 +377,10 @@ def main(argv: list[str] | None = None) -> int:
                         args.sim_policy,
                         args.sim_seed,
                     )
+                    non_combat_policy = _build_non_combat_driver_policy(
+                        args.sim_non_combat_policy,
+                        args.sim_seed,
+                    )
                     battle_rollouts = [
                         collect_battle_agent_rollout(
                             adapter,
@@ -370,6 +388,7 @@ def main(argv: list[str] | None = None) -> int:
                             seed=args.sim_seed + offset,
                             max_steps=args.sim_steps,
                             action_space=action_space,
+                            autopilot_policy=non_combat_policy,
                         )
                         for offset in range(args.sim_episodes)
                     ]
@@ -383,6 +402,10 @@ def main(argv: list[str] | None = None) -> int:
                         args.sim_policy,
                         args.sim_seed,
                     )
+                    non_combat_policy = _build_non_combat_driver_policy(
+                        args.sim_non_combat_policy,
+                        args.sim_seed,
+                    )
                     battle_rollouts = [
                         collect_battle_agent_rollout(
                             adapter,
@@ -390,6 +413,7 @@ def main(argv: list[str] | None = None) -> int:
                             seed=args.sim_seed + offset,
                             max_steps=args.sim_steps,
                             action_space=action_space,
+                            autopilot_policy=non_combat_policy,
                         )
                         for offset in range(args.sim_episodes)
                     ]
@@ -511,6 +535,19 @@ def _build_online_sim_policy(
     if isinstance(policy, ReplayChosenPolicy):
         raise ValueError("replay-chosen is not valid for online policy rollouts")
     return policy
+
+
+def _build_non_combat_driver_policy(
+    policy_name: str,
+    seed: int,
+) -> FirstEligiblePolicy | PreferredKindPolicy | RandomEligiblePolicy:
+    if policy_name == "preferred-kind":
+        return PreferredKindPolicy()
+    if policy_name == "first-eligible":
+        return FirstEligiblePolicy()
+    if policy_name == "random-eligible":
+        return RandomEligiblePolicy(seed=seed)
+    raise ValueError(f"unknown non-combat driver policy: {policy_name}")
 
 
 if __name__ == "__main__":

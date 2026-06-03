@@ -337,7 +337,8 @@ def test_cli_lightspeed_battle_sweep_writes_report_to_stderr_only(
     assert captured.out == ""
     assert "Battle agent seed sweep summary" in captured.err
     assert "total battle decisions: 2" in captured.err
-    assert "total autopilot decisions: 0" in captured.err
+    assert "non-combat driver policy: random_eligible" in captured.err
+    assert "total non-combat driver decisions: 0" in captured.err
 
 
 def test_cli_lightspeed_battle_batch_smoke_writes_report_to_stderr_only(
@@ -400,6 +401,37 @@ def test_cli_lightspeed_battle_segments_smoke_writes_report_to_stderr_only(
     assert "Battle segment calibration summary" in captured.err
     assert "source rollouts: 2" in captured.err
     assert "segments: 2" in captured.err
+
+
+def test_cli_lightspeed_battle_sweep_accepts_non_combat_policy(
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.setattr(
+        "sts_combat_rl.cli.LightSpeedAdapter",
+        FakeLightSpeedSmokeAdapter,
+    )
+
+    assert (
+        main(
+            [
+                "--lightspeed-battle-sweep",
+                "--sim-non-combat-policy",
+                "preferred-kind",
+                "--sim-episodes",
+                "1",
+                "--sim-steps",
+                "1",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 0
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "non-combat driver policy: preferred_kind" in captured.err
 
 
 def test_cli_rejects_replay_policy_for_online_policy_rollout(

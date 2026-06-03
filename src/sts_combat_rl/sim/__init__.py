@@ -28,6 +28,7 @@ from sts_combat_rl.sim.batching import (
 from sts_combat_rl.sim.battle_agent import (
     AUTOPILOT_CONTROLLER,
     BATTLE_AGENT_CONTROLLER,
+    NON_COMBAT_DRIVER_CONTROLLER,
     BattleAgentEpisodeSummary,
     BattleAgentRollout,
     BattleAgentRolloutStep,
@@ -103,6 +104,7 @@ __all__ = [
     "ActionScorer",
     "AUTOPILOT_CONTROLLER",
     "BATTLE_AGENT_CONTROLLER",
+    "NON_COMBAT_DRIVER_CONTROLLER",
     "BattleAgentEpisodeSummary",
     "BattleAgentRollout",
     "BattleAgentRolloutStep",

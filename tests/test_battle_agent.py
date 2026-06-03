@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from sts_combat_rl.sim.battle_agent import (
     BATTLE_AGENT_CONTROLLER,
-    AUTOPILOT_CONTROLLER,
+    NON_COMBAT_DRIVER_CONTROLLER,
     build_battle_decision_batch,
     build_battle_segment_report,
     collect_battle_agent_rollout,
@@ -119,7 +119,7 @@ def test_collect_battle_agent_rollout_separates_battle_and_autopilot() -> None:
 
     assert [step.controller for step in rollout.steps] == [
         BATTLE_AGENT_CONTROLLER,
-        AUTOPILOT_CONTROLLER,
+        NON_COMBAT_DRIVER_CONTROLLER,
         BATTLE_AGENT_CONTROLLER,
     ]
     assert adapter.actions == ["card", "reward_gold", "card"]
@@ -200,7 +200,7 @@ def test_build_battle_decision_batch_excludes_autopilot_steps() -> None:
     assert decision_batch.action_feature_size == simulator_action_feature_size()
     assert decision_batch.problems == []
     assert "Battle decision batch summary" in text
-    assert "excluded autopilot steps: 1" in text
+    assert "excluded non-combat driver steps: 1" in text
 
 
 def test_build_battle_segment_report_summarizes_combat_boundaries() -> None:
@@ -220,7 +220,7 @@ def test_build_battle_segment_report_summarizes_combat_boundaries() -> None:
     assert len(report.segments) == 2
     assert report.excluded_autopilot_steps == 1
     assert report.total_battle_decisions == 2
-    assert report.end_reason_counts["battle_exited"] == 1
+    assert report.end_reason_counts["nonterminal_battle_exit"] == 1
     assert report.end_reason_counts["terminal_loss"] == 1
     assert report.action_kind_counts["card"] == 2
     assert report.hp_delta_count == 2
@@ -229,7 +229,7 @@ def test_build_battle_segment_report_summarizes_combat_boundaries() -> None:
     first, second = report.segments
     assert first.start_step_index == 0
     assert first.end_step_index == 0
-    assert first.end_reason == "battle_exited"
+    assert first.end_reason == "nonterminal_battle_exit"
     assert first.start_hp == 80.0
     assert first.end_hp == 75.0
     assert first.hp_delta == -5.0

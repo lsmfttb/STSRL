@@ -12,9 +12,9 @@ The current scope is intentionally small:
 
 This stage does not implement reinforcement learning, a Gymnasium environment, Stable-Baselines3 integration, action masks, or Slay the Spire game mechanics.
 
-The first agent target is battle-only. Non-combat screens can be advanced by
-scripted calibration helpers, but map/reward/shop/event navigation is not part
-of the current agent contract.
+The first agent target is battle-only. Non-combat screens can be advanced by a
+separate non-combat driver, but map/reward/shop/event navigation is not part of
+the current trainable agent contract.
 
 ## Install
 
@@ -166,6 +166,11 @@ patched `sts_lightspeed` battle snapshots and current legal actions. This is a
 pre-RL adapter utility only; it does not create a Gymnasium environment, action
 mask, policy, replay buffer, or trainer.
 
+The current battle snapshot encoder is a version-1 calibration shape with 272
+features. Keep it stable while simulator/live-sample alignment is being tested;
+future feature engineering should be introduced as a new encoder version rather
+than silently changing this baseline.
+
 The external `sts_lightspeed` spike patch artifacts are kept in:
 
 ```text
@@ -254,9 +259,11 @@ python -m sts_combat_rl.cli --lightspeed-battle-sweep --sim-seed 1 --sim-episode
 ```
 
 This uses the selected policy only on `BATTLE` states. Non-combat states are
-advanced by a scripted autopilot and reported separately, so the battle-agent
-data path can be calibrated without treating route/reward/shop choices as agent
-decisions.
+advanced by a separate non-combat driver and reported separately, so the
+battle-agent data path can be calibrated without treating route/reward/shop
+choices as agent decisions. For battle-agent smokes the default non-combat
+driver is seeded `random-eligible`; use `--sim-non-combat-policy preferred-kind`
+or `first-eligible` for deterministic comparisons.
 
 To validate the battle-only decision batch that a future trainer would consume:
 
@@ -265,7 +272,7 @@ python -m sts_combat_rl.cli --lightspeed-battle-batch-smoke --sim-seed 1 --sim-e
 ```
 
 This builds a framework-neutral `DecisionBatch` from battle-agent decisions only.
-Scripted autopilot decisions are counted as excluded steps and are not included
+Non-combat driver decisions are counted as excluded steps and are not included
 as training examples. This still does not define rewards or run training.
 
 To calibrate battle episode boundaries before choosing a reward function:
@@ -275,9 +282,9 @@ python -m sts_combat_rl.cli --lightspeed-battle-segments-smoke --sim-seed 1 --si
 ```
 
 This identifies contiguous battle-agent-controlled segments, reports whether
-each segment exited battle, ended in terminal loss/victory, or was truncated by
-the step limit, and summarizes available fields such as battle decision count
-and HP delta. It does not choose the final reward.
+each segment ended in a non-terminal battle exit, terminal loss/victory, or was
+truncated by the step limit, and summarizes available fields such as battle
+decision count and HP delta. It does not choose the final reward.
 
 To check whether real CommunicationMod combat captures fit the same fixed-size
 feature shape, run:

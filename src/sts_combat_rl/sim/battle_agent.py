@@ -1,7 +1,7 @@
 """Battle-agent-only simulator sweep helpers.
 
 The battle agent only selects actions in battle states. Non-combat states are
-advanced by a scripted autopilot so simulator rollouts can reach more battles
+advanced by a separate driver so simulator rollouts can reach more battles
 without making map/reward/shop navigation part of the agent contract.
 """
 
@@ -23,7 +23,8 @@ from sts_combat_rl.sim.policy import DecisionContext, DecisionPolicy, PreferredK
 
 
 BATTLE_AGENT_CONTROLLER = "battle_agent"
-AUTOPILOT_CONTROLLER = "autopilot"
+NON_COMBAT_DRIVER_CONTROLLER = "non_combat_driver"
+AUTOPILOT_CONTROLLER = NON_COMBAT_DRIVER_CONTROLLER
 
 
 @dataclass(frozen=True)
@@ -50,7 +51,7 @@ class BattleAgentRolloutStep:
 
 @dataclass(frozen=True)
 class BattleAgentRollout:
-    """A bounded rollout with battle-agent and autopilot decisions separated."""
+    """A bounded rollout with battle-agent and non-combat decisions separated."""
 
     seed: int | None
     requested_steps: int
@@ -185,7 +186,7 @@ def collect_battle_agent_rollout(
         controller = (
             BATTLE_AGENT_CONTROLLER
             if _is_battle_state(snapshot.raw, context.screen_state)
-            else AUTOPILOT_CONTROLLER
+            else NON_COMBAT_DRIVER_CONTROLLER
         )
         policy = battle_policy if controller == BATTLE_AGENT_CONTROLLER else active_autopilot
 
@@ -446,7 +447,7 @@ def build_battle_segment_report(
                     rollout,
                     segment_index,
                     active_steps,
-                    "battle_exited",
+                    "nonterminal_battle_exit",
                 )
                 segments.append(segment)
                 segment_index += 1
@@ -554,22 +555,26 @@ def format_battle_agent_sweep_report(report: BattleAgentSweepReport) -> str:
     lines = [
         "Battle agent seed sweep summary",
         f"battle policy: {report.battle_policy_name}",
-        f"autopilot policy: {report.autopilot_policy_name}",
+        f"non-combat driver policy: {report.autopilot_policy_name}",
         f"episodes: {episode_count}",
         f"requested steps per episode: {report.requested_steps_per_episode}",
         f"terminal episodes: {report.terminal_episodes}",
         f"total collected steps: {report.total_steps}",
         f"total battle decisions: {report.total_battle_decisions}",
-        f"total autopilot decisions: {report.total_autopilot_decisions}",
+        f"total non-combat driver decisions: {report.total_autopilot_decisions}",
         f"average collected steps: {average_steps:.2f}",
         f"average battle decisions: {average_battle_decisions:.2f}",
-        f"average autopilot decisions: {average_autopilot_decisions:.2f}",
+        f"average non-combat driver decisions: {average_autopilot_decisions:.2f}",
     ]
     _append_counter(lines, "outcomes", report.outcome_counts)
     _append_counter(lines, "final screen states", report.final_screen_state_counts)
     _append_counter(lines, "final floors", report.final_floor_counts)
     _append_counter(lines, "battle action kinds", report.battle_action_kind_counts)
-    _append_counter(lines, "autopilot action kinds", report.autopilot_action_kind_counts)
+    _append_counter(
+        lines,
+        "non-combat driver action kinds",
+        report.autopilot_action_kind_counts,
+    )
     _append_counter(
         lines,
         "battle legal action counts",
@@ -617,7 +622,7 @@ def format_battle_segment_report(report: BattleSegmentReport) -> str:
         "Battle segment calibration summary",
         f"source rollouts: {report.source_rollout_count}",
         f"segments: {segment_count}",
-        f"excluded autopilot steps: {report.excluded_autopilot_steps}",
+        f"excluded non-combat driver steps: {report.excluded_autopilot_steps}",
         f"total battle decisions: {report.total_battle_decisions}",
         f"average battle decisions per segment: {average_decisions:.2f}",
         f"hp delta samples: {report.hp_delta_count}",
@@ -662,7 +667,7 @@ def format_battle_decision_batch_report(batch: BattleDecisionBatch) -> str:
         f"source rollouts: {batch.source_rollout_count}",
         f"terminal rollouts: {decision_batch.terminal_rollouts}",
         f"battle examples: {len(decision_batch.examples)}",
-        f"excluded autopilot steps: {batch.excluded_autopilot_steps}",
+        f"excluded non-combat driver steps: {batch.excluded_autopilot_steps}",
         f"snapshot feature size: {_optional_int(decision_batch.snapshot_feature_size)}",
         f"action feature size: {_optional_int(decision_batch.action_feature_size)}",
     ]
