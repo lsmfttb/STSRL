@@ -250,6 +250,15 @@ def build_parser() -> argparse.ArgumentParser:
             "The default is seeded random over eligible non-combat actions."
         ),
     )
+    parser.add_argument(
+        "--reward-detail-limit",
+        type=int,
+        default=8,
+        help=(
+            "Maximum highlighted segments shown by "
+            "--lightspeed-battle-reward-components. Use 0 to hide details."
+        ),
+    )
     return parser
 
 
@@ -285,6 +294,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     if args.sim_episodes < 1:
         print("--sim-episodes must be positive", file=sys.stderr)
+        return 2
+    if args.reward_detail_limit < 0:
+        print("--reward-detail-limit must be non-negative", file=sys.stderr)
         return 2
 
     policy = ScriptedCombatPolicy()
@@ -459,7 +471,10 @@ def main(argv: list[str] | None = None) -> int:
                         battle_rollouts
                     )
                     print(
-                        format_battle_reward_component_report(reward_report),
+                        format_battle_reward_component_report(
+                            reward_report,
+                            detail_limit=args.reward_detail_limit,
+                        ),
                         file=sys.stderr,
                     )
                 else:

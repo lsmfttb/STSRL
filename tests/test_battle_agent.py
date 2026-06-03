@@ -68,7 +68,7 @@ class FakeBattleAgentAdapter:
         if self.phase.startswith("battle"):
             floor = 1 if self.phase == "battle-1" else 2
             max_hp = 80 if floor == 1 else 82
-            gold = 99 if floor == 1 else 101
+            gold = 101 if floor == 1 else 99
             return SimulatorSnapshot(
                 observation=[floor],
                 raw={
@@ -95,7 +95,7 @@ class FakeBattleAgentAdapter:
                     "floor_num": 1,
                     "cur_hp": 75,
                     "max_hp": 82,
-                    "gold": 101,
+                    "gold": 99,
                     "potion_count": 1,
                 },
             )
@@ -108,7 +108,7 @@ class FakeBattleAgentAdapter:
                 "floor_num": 2,
                 "cur_hp": 0,
                 "max_hp": 82,
-                "gold": 101,
+                "gold": 99,
                 "potion_count": 1,
             },
         )
@@ -252,9 +252,9 @@ def test_build_battle_segment_report_summarizes_combat_boundaries() -> None:
     assert first.start_max_hp == 80.0
     assert first.end_max_hp == 82.0
     assert first.max_hp_delta == 2.0
-    assert first.start_gold == 99.0
-    assert first.end_gold == 101.0
-    assert first.gold_delta == 2.0
+    assert first.start_gold == 101.0
+    assert first.end_gold == 99.0
+    assert first.gold_delta == -2.0
     assert second.start_step_index == 2
     assert second.end_reason == "terminal_loss"
     assert second.start_hp == 75.0
@@ -284,11 +284,17 @@ def test_build_battle_reward_component_report_keeps_raw_components_unweighted() 
     assert report.components["terminal_loss"].total == 1.0
     assert report.components["hp_loss"].total == 80.0
     assert report.components["max_hp_delta"].total == 2.0
-    assert report.components["gold_delta"].total == 2.0
+    assert report.components["gold_delta"].total == -2.0
     assert report.components["potion_count_delta"].samples == 2
     assert report.components["potion_count_delta"].total == 0.0
+    assert report.highlight_counts["gold_delta"] == 1
+    assert report.highlight_counts["max_hp_delta"] == 1
+    assert report.highlight_counts["terminal_loss"] == 1
+    assert len(report.highlights) == 2
     assert "Battle reward component calibration summary" in text
     assert "no reward weights" in text
+    assert "highlighted segments (limit 8):" in text
+    assert "gold_delta=-2.00" in text
     assert "future signal gaps:" in text
 
 

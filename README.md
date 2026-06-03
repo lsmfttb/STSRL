@@ -298,6 +298,9 @@ decision count, max-HP delta, gold delta, and potion-count delta when both ends
 of the battle segment expose the field. It also reports future signal gaps such
 as relic counters and post-combat deck/reward deltas. It does not assign reward
 weights, run RL, or define a Gymnasium environment.
+Segments with resource deltas, terminal losses/victories, truncation, or HP gain
+are highlighted for inspection; use `--reward-detail-limit 0` to hide details or
+raise the limit for a longer drilldown.
 
 To check whether real CommunicationMod combat captures fit the same fixed-size
 feature shape, run:

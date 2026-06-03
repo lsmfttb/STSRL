@@ -420,6 +420,8 @@ def test_cli_lightspeed_battle_reward_components_writes_report_to_stderr_only(
                 "2",
                 "--sim-steps",
                 "1",
+                "--reward-detail-limit",
+                "0",
                 "--log-file",
                 "-",
             ]
@@ -432,6 +434,35 @@ def test_cli_lightspeed_battle_reward_components_writes_report_to_stderr_only(
     assert "Battle reward component calibration summary" in captured.err
     assert "source rollouts: 2" in captured.err
     assert "components:" in captured.err
+    assert "highlighted segments (limit 0):" in captured.err
+    assert "  (disabled)" in captured.err
+
+
+def test_cli_rejects_negative_reward_detail_limit(
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.setattr(
+        "sts_combat_rl.cli.LightSpeedAdapter",
+        FakeLightSpeedSmokeAdapter,
+    )
+
+    assert (
+        main(
+            [
+                "--lightspeed-battle-reward-components",
+                "--reward-detail-limit",
+                "-1",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 2
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "--reward-detail-limit must be non-negative" in captured.err
 
 
 def test_cli_lightspeed_battle_sweep_accepts_non_combat_policy(

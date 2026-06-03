@@ -94,6 +94,7 @@ from sts_combat_rl.sim.reward_components import (
     FUTURE_REWARD_SIGNAL_GAPS,
     BattleRewardComponentReport,
     BattleRewardComponentStats,
+    BattleRewardSegmentHighlight,
     build_battle_reward_component_report,
     format_battle_reward_component_report,
 )
@@ -122,6 +123,7 @@ __all__ = [
     "BattleSegmentReport",
     "BattleRewardComponentReport",
     "BattleRewardComponentStats",
+    "BattleRewardSegmentHighlight",
     "BATTLE_REWARD_COMPONENT_NAMES",
     "DecisionBatch",
     "DecisionContext",
