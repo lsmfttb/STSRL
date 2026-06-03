@@ -1,0 +1,13 @@
+{
+  "screen_type": "EVENT",
+  "in_combat": false,
+  "turn": null,
+  "player": {
+    "current_hp": 70,
+    "max_hp": 80,
+    "block": 0,
+    "energy": null
+  },
+  "hand": [],
+  "monsters": []
+}

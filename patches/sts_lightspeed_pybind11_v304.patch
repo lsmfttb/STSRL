@@ -1,0 +1,7 @@
+diff --git a/pybind11 b/pybind11
+index 787d2c8..d03662f 160000
+--- a/pybind11
++++ b/pybind11
+@@ -1 +1 @@
+-Subproject commit 787d2c88cafa4d07fb38c9519c485a86323cfcf4
++Subproject commit d03662f0984f652b60e7ddce53d3868002275197

@@ -1,0 +1,41 @@
+{
+  "screen_type": "COMBAT",
+  "in_combat": true,
+  "turn": 1,
+  "player": {
+    "current_hp": 70,
+    "max_hp": 80,
+    "block": 0,
+    "energy": 3
+  },
+  "hand": [
+    {
+      "name": "Strike",
+      "card_id": "Strike_R",
+      "cost": 1,
+      "type": "ATTACK",
+      "upgraded": false,
+      "playable": true
+    },
+    {
+      "name": "Defend",
+      "card_id": "Defend_R",
+      "cost": 1,
+      "type": "SKILL",
+      "upgraded": false,
+      "playable": true
+    }
+  ],
+  "monsters": [
+    {
+      "name": "Jaw Worm",
+      "monster_id": "jaw_worm_0",
+      "current_hp": 40,
+      "max_hp": 40,
+      "block": 0,
+      "intent": "ATTACK",
+      "alive": true
+    }
+  ],
+  "extra_field": "preserved in raw"
+}

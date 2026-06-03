@@ -1,0 +1,136 @@
+"""Thin simulator adapter contract.
+
+This package intentionally contains no game mechanics and no RL framework glue.
+"""
+
+from sts_combat_rl.sim.calibration import (
+    CommunicationModFeatureCalibrationReport,
+    SimulatorCalibrationReport,
+    choose_calibration_action,
+    format_communicationmod_feature_calibration_report,
+    format_simulator_calibration_report,
+    run_communicationmod_feature_calibration,
+    run_simulator_calibration,
+)
+from sts_combat_rl.sim.action_space import (
+    ActionSpaceConfig,
+    POTION_ACTION_KINDS,
+    action_is_eligible,
+    choose_deterministic_action,
+    filter_eligible_actions,
+)
+from sts_combat_rl.sim.batching import (
+    DecisionBatch,
+    DecisionExample,
+    build_decision_batch,
+    format_decision_batch_report,
+)
+from sts_combat_rl.sim.contract import (
+    ObservationValue,
+    SimulatorAction,
+    SimulatorAdapter,
+    SimulatorSnapshot,
+    SimulatorTransition,
+)
+from sts_combat_rl.sim.evaluation import (
+    EpisodeSummary,
+    PolicyEpisodeEvaluationReport,
+    format_policy_episode_evaluation_report,
+    outcome_value,
+    run_policy_episode_evaluation,
+    summarize_rollout_episode,
+)
+from sts_combat_rl.sim.features import (
+    communicationmod_battle_feature_size,
+    encode_communicationmod_battle_snapshot,
+    encode_lightspeed_battle_snapshot,
+    encode_simulator_action,
+    encode_simulator_actions,
+    lightspeed_battle_feature_size,
+    normalize_communicationmod_battle_snapshot,
+    simulator_action_feature_size,
+)
+from sts_combat_rl.sim.lightspeed import LightSpeedAdapter
+from sts_combat_rl.sim.policy import (
+    ActionScorer,
+    DecisionContext,
+    DecisionPolicy,
+    FirstEligiblePolicy,
+    PolicyDecision,
+    PolicyEvaluation,
+    PolicySelection,
+    PreferredKindPolicy,
+    RandomEligiblePolicy,
+    ReplayChosenPolicy,
+    ScoredActionPolicy,
+    choose_highest_scored_eligible_index,
+    decision_context_from_example,
+    evaluate_decision_policy,
+    format_policy_evaluation_report,
+)
+from sts_combat_rl.sim.policy_rollout import collect_policy_simulator_rollout
+from sts_combat_rl.sim.rollout import (
+    RolloutBatch,
+    RolloutStep,
+    collect_simulator_rollout,
+    format_rollout_batch,
+)
+
+__all__ = [
+    "LightSpeedAdapter",
+    "CommunicationModFeatureCalibrationReport",
+    "ActionSpaceConfig",
+    "ActionScorer",
+    "DecisionBatch",
+    "DecisionContext",
+    "DecisionExample",
+    "DecisionPolicy",
+    "EpisodeSummary",
+    "FirstEligiblePolicy",
+    "ObservationValue",
+    "POTION_ACTION_KINDS",
+    "PolicyDecision",
+    "PolicyEpisodeEvaluationReport",
+    "PolicyEvaluation",
+    "PolicySelection",
+    "PreferredKindPolicy",
+    "RandomEligiblePolicy",
+    "ReplayChosenPolicy",
+    "RolloutBatch",
+    "RolloutStep",
+    "ScoredActionPolicy",
+    "SimulatorCalibrationReport",
+    "SimulatorAction",
+    "SimulatorAdapter",
+    "SimulatorSnapshot",
+    "SimulatorTransition",
+    "choose_calibration_action",
+    "choose_deterministic_action",
+    "choose_highest_scored_eligible_index",
+    "build_decision_batch",
+    "collect_policy_simulator_rollout",
+    "collect_simulator_rollout",
+    "communicationmod_battle_feature_size",
+    "encode_communicationmod_battle_snapshot",
+    "encode_lightspeed_battle_snapshot",
+    "encode_simulator_action",
+    "encode_simulator_actions",
+    "format_simulator_calibration_report",
+    "format_communicationmod_feature_calibration_report",
+    "format_policy_episode_evaluation_report",
+    "format_policy_evaluation_report",
+    "decision_context_from_example",
+    "lightspeed_battle_feature_size",
+    "normalize_communicationmod_battle_snapshot",
+    "action_is_eligible",
+    "evaluate_decision_policy",
+    "filter_eligible_actions",
+    "format_decision_batch_report",
+    "format_rollout_batch",
+    "outcome_value",
+    "run_communicationmod_feature_calibration",
+    "run_policy_episode_evaluation",
+    "run_simulator_calibration",
+    "simulator_action_feature_size",
+    "summarize_rollout_episode",
+]

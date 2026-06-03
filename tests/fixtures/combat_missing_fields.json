@@ -1,0 +1,16 @@
+{
+  "screen_type": "COMBAT",
+  "hand": [
+    {
+      "name": "Unknown Card"
+    }
+  ],
+  "monsters": [
+    {
+      "name": "Unknown Monster"
+    }
+  ],
+  "unexpected_nested": {
+    "kept": true
+  }
+}
