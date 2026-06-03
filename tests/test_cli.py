@@ -309,6 +309,37 @@ def test_cli_lightspeed_episode_eval_writes_report_to_stderr_only(
     assert "outcomes:" in captured.err
 
 
+def test_cli_lightspeed_battle_sweep_writes_report_to_stderr_only(
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.setattr(
+        "sts_combat_rl.cli.LightSpeedAdapter",
+        FakeLightSpeedSmokeAdapter,
+    )
+
+    assert (
+        main(
+            [
+                "--lightspeed-battle-sweep",
+                "--sim-episodes",
+                "2",
+                "--sim-steps",
+                "1",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 0
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Battle agent seed sweep summary" in captured.err
+    assert "total battle decisions: 2" in captured.err
+    assert "total autopilot decisions: 0" in captured.err
+
+
 def test_cli_rejects_replay_policy_for_online_policy_rollout(
     monkeypatch,
     capsys,

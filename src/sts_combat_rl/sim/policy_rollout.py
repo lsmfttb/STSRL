@@ -8,17 +8,12 @@ from __future__ import annotations
 
 from sts_combat_rl.sim.action_space import (
     ActionSpaceConfig,
-    filter_eligible_actions,
 )
 from sts_combat_rl.sim.contract import (
-    SimulatorAction,
     SimulatorAdapter,
 )
-from sts_combat_rl.sim.features import (
-    encode_lightspeed_battle_snapshot,
-    encode_simulator_actions,
-)
-from sts_combat_rl.sim.policy import DecisionContext, DecisionPolicy
+from sts_combat_rl.sim.battle_agent import build_decision_context
+from sts_combat_rl.sim.policy import DecisionPolicy
 from sts_combat_rl.sim.rollout import RolloutBatch, RolloutStep
 
 
@@ -45,7 +40,7 @@ def collect_policy_simulator_rollout(
             problems.append("no legal actions before terminal state")
             break
 
-        context = _decision_context(snapshot.raw, actions, active_action_space)
+        context = build_decision_context(snapshot.raw, actions, active_action_space)
         try:
             decision = policy.select_action(context)
         except ValueError as exc:
@@ -97,33 +92,3 @@ def collect_policy_simulator_rollout(
         initial_raw=initial_raw,
         final_raw=dict(snapshot.raw),
     )
-
-
-def _decision_context(
-    raw_snapshot: object,
-    actions: list[SimulatorAction],
-    action_space: ActionSpaceConfig,
-) -> DecisionContext:
-    raw = raw_snapshot if isinstance(raw_snapshot, dict) else {}
-    return DecisionContext(
-        screen_state=str(raw.get("screen_state", "(none)")),
-        snapshot_features=encode_lightspeed_battle_snapshot(raw),
-        legal_action_features=encode_simulator_actions(actions),
-        legal_action_kinds=[action.kind for action in actions],
-        eligible_action_indices=_eligible_indices(actions, action_space),
-    )
-
-
-def _eligible_indices(
-    actions: list[SimulatorAction],
-    action_space: ActionSpaceConfig,
-) -> list[int]:
-    eligible_action_ids = {
-        id(action)
-        for action in filter_eligible_actions(actions, action_space)
-    }
-    return [
-        index
-        for index, action in enumerate(actions)
-        if id(action) in eligible_action_ids
-    ]

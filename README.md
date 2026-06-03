@@ -12,6 +12,10 @@ The current scope is intentionally small:
 
 This stage does not implement reinforcement learning, a Gymnasium environment, Stable-Baselines3 integration, action masks, or Slay the Spire game mechanics.
 
+The first agent target is battle-only. Non-combat screens can be advanced by
+scripted calibration helpers, but map/reward/shop/event navigation is not part
+of the current agent contract.
+
 ## Install
 
 ```bash
@@ -243,6 +247,17 @@ algorithm, or environment wrapper. `replay-chosen` is only valid for offline
 `--lightspeed-policy-smoke`; online rollout/evaluation policies must choose from
 the current encoded candidate list.
 
+For the current battle-agent phase, prefer the battle-only sweep:
+
+```bash
+python -m sts_combat_rl.cli --lightspeed-battle-sweep --sim-seed 1 --sim-episodes 10 --sim-steps 200
+```
+
+This uses the selected policy only on `BATTLE` states. Non-combat states are
+advanced by a scripted autopilot and reported separately, so the battle-agent
+data path can be calibrated without treating route/reward/shop choices as agent
+decisions.
+
 To check whether real CommunicationMod combat captures fit the same fixed-size
 feature shape, run:
 
@@ -288,3 +303,5 @@ python -m sts_combat_rl.cli --mock tests/fixtures/combat_basic.json --log-file l
   from variable candidate lists before introducing any trainer or RL library.
 - Add only pre-training simulator episode statistics until outcome/progress
   fields are calibrated well enough to choose a training interface.
+- Keep the first trainable target battle-only; non-combat progression can stay
+  scripted until a separate run-management agent is explicitly in scope.

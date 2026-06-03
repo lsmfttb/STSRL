@@ -16,6 +16,10 @@ from sts_combat_rl.policy.scripted import ScriptedCombatPolicy
 from sts_combat_rl.samples import analyze_sample_paths, format_sample_analysis
 from sts_combat_rl.sim.action_space import ActionSpaceConfig
 from sts_combat_rl.sim.batching import build_decision_batch, format_decision_batch_report
+from sts_combat_rl.sim.battle_agent import (
+    format_battle_agent_sweep_report,
+    run_battle_agent_sweep,
+)
 from sts_combat_rl.sim.calibration import (
     format_communicationmod_feature_calibration_report,
     format_simulator_calibration_report,
@@ -104,6 +108,14 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Run several bounded simulator episodes through the policy interface "
             "and summarize pre-training outcome statistics to stderr."
+        ),
+    )
+    input_group.add_argument(
+        "--lightspeed-battle-sweep",
+        action="store_true",
+        help=(
+            "Run a battle-agent seed sweep: the selected policy controls only "
+            "battle states while a scripted autopilot advances non-combat states."
         ),
     )
     input_group.add_argument(
@@ -258,6 +270,7 @@ def main(argv: list[str] | None = None) -> int:
         or args.lightspeed_policy_smoke
         or args.lightspeed_policy_rollout_smoke
         or args.lightspeed_episode_eval
+        or args.lightspeed_battle_sweep
     ):
         try:
             adapter = LightSpeedAdapter(seed=args.sim_seed, ascension=args.sim_ascension)
@@ -305,6 +318,21 @@ def main(argv: list[str] | None = None) -> int:
                     )
                     print(
                         format_policy_episode_evaluation_report(episode_report),
+                        file=sys.stderr,
+                    )
+                elif args.lightspeed_battle_sweep:
+                    battle_report = run_battle_agent_sweep(
+                        adapter,
+                        _build_online_sim_policy(args.sim_policy, args.sim_seed),
+                        seeds=[
+                            args.sim_seed + offset
+                            for offset in range(args.sim_episodes)
+                        ],
+                        max_steps=args.sim_steps,
+                        action_space=action_space,
+                    )
+                    print(
+                        format_battle_agent_sweep_report(battle_report),
                         file=sys.stderr,
                     )
                 else:
