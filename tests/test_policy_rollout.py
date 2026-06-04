@@ -9,7 +9,12 @@ from sts_combat_rl.sim.features import (
     lightspeed_battle_feature_size,
     simulator_action_feature_size,
 )
-from sts_combat_rl.sim.policy import PolicyDecision, PreferredKindPolicy
+from sts_combat_rl.sim.model_scoring import ActionKindPriorScorer
+from sts_combat_rl.sim.policy import (
+    PolicyDecision,
+    PreferredKindPolicy,
+    ScoredActionPolicy,
+)
 from sts_combat_rl.sim.policy_rollout import collect_policy_simulator_rollout
 
 
@@ -87,6 +92,25 @@ def test_collect_policy_simulator_rollout_uses_policy_selection() -> None:
     assert step.chosen_action_kind == "card"
     assert len(step.snapshot_features) == lightspeed_battle_feature_size()
     assert len(step.legal_action_features[0]) == simulator_action_feature_size()
+
+
+def test_collect_policy_simulator_rollout_accepts_model_scorer_policy() -> None:
+    adapter = FakePolicyRolloutAdapter()
+
+    batch = collect_policy_simulator_rollout(
+        adapter,
+        ScoredActionPolicy(
+            ActionKindPriorScorer(),
+            name="action_kind_prior_scorer",
+        ),
+        seed=3,
+        max_steps=1,
+    )
+
+    assert adapter.last_action is not None
+    assert adapter.last_action.kind == "card"
+    assert batch.problems == []
+    assert batch.steps[0].chosen_action_kind == "card"
 
 
 def test_collect_policy_simulator_rollout_reports_invalid_policy_choice() -> None:

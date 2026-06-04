@@ -15,6 +15,7 @@ from sts_combat_rl.sim.policy import (
     evaluate_decision_policy,
     format_policy_evaluation_report,
 )
+from sts_combat_rl.sim.model_scoring import ActionKindPriorScorer, LinearActionScorer
 
 
 class FixedScorer:
@@ -95,6 +96,44 @@ def test_scored_policy_constrains_scores_to_eligible_indices() -> None:
     assert decision.legal_action_index == 2
     assert decision.score == 3.0
     assert "fixed:max_eligible_score" == decision.reason
+
+
+def test_action_kind_prior_scorer_can_drive_scored_policy() -> None:
+    context = DecisionContext(
+        screen_state="BATTLE",
+        snapshot_features=[1.0],
+        legal_action_features=[[0.0], [1.0], [2.0]],
+        legal_action_kinds=["end_turn", "card", "potion"],
+        eligible_action_indices=[0, 1],
+    )
+    policy = ScoredActionPolicy(
+        ActionKindPriorScorer(),
+        name="action_kind_prior_scorer",
+    )
+
+    decision = policy.select_action(context)
+
+    assert decision.legal_action_index == 1
+    assert decision.score == 3.0
+    assert decision.reason == "action_kind_prior:max_eligible_score"
+
+
+def test_linear_action_scorer_scores_context_without_training() -> None:
+    context = DecisionContext(
+        screen_state="BATTLE",
+        snapshot_features=[1.0, 2.0],
+        legal_action_features=[[0.0, 1.0], [2.0, 0.0]],
+        legal_action_kinds=["end_turn", "card"],
+        eligible_action_indices=[0, 1],
+    )
+    scorer = LinearActionScorer(
+        snapshot_weights=[0.5, 0.0],
+        action_weights=[1.0, -1.0],
+        bias=0.25,
+    )
+
+    assert scorer.score_actions(context) == [-0.25, 2.75]
+    assert ScoredActionPolicy(scorer).select_action(context).legal_action_index == 1
 
 
 def test_choose_highest_scored_eligible_index_validates_score_shape() -> None:

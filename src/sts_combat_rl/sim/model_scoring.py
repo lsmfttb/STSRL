@@ -15,6 +15,7 @@ import math
 from typing import Protocol
 
 from sts_combat_rl.sim.model_input import ModelInputBatch
+from sts_combat_rl.sim.policy import DecisionContext
 
 
 DEFAULT_ACTION_KIND_SCORE_PRIOR: Mapping[str, float] = {
@@ -44,11 +45,74 @@ class ActionKindPriorScorer:
     default_score: float = 0.0
     name: str = "action_kind_prior"
 
+    def score_actions(self, context: DecisionContext) -> list[float]:
+        return [
+            float(self.kind_scores.get(kind, self.default_score))
+            for kind in context.legal_action_kinds
+        ]
+
     def score_action_rows(self, batch: ModelInputBatch) -> list[float]:
         scores: list[float] = []
         for kinds in batch.action_kinds:
-            scores.extend(float(self.kind_scores.get(kind, self.default_score)) for kind in kinds)
+            scores.extend(
+                float(self.kind_scores.get(kind, self.default_score)) for kind in kinds
+            )
         return scores
+
+
+@dataclass(frozen=True)
+class LinearActionScorer:
+    """Fixed-weight scorer used to validate the future model adapter shape.
+
+    The weights are not learned here. Training can later replace this object
+    with a model-backed implementation exposing the same methods.
+    """
+
+    snapshot_weights: Sequence[float] = ()
+    action_weights: Sequence[float] = ()
+    bias: float = 0.0
+    name: str = "linear_action"
+
+    def score_actions(self, context: DecisionContext) -> list[float]:
+        base_score = self._snapshot_score(context.snapshot_features)
+        return [
+            base_score + self._action_score(action_features)
+            for action_features in context.legal_action_features
+        ]
+
+    def score_action_rows(self, batch: ModelInputBatch) -> list[float]:
+        scores: list[float] = []
+        for example_index, snapshot_features in enumerate(batch.snapshot_features):
+            if example_index + 1 >= len(batch.action_offsets):
+                raise ValueError(f"example {example_index}: missing action offset")
+            base_score = self._snapshot_score(snapshot_features)
+            action_start = batch.action_offsets[example_index]
+            action_end = batch.action_offsets[example_index + 1]
+            scores.extend(
+                base_score + self._action_score(action_features)
+                for action_features in batch.action_features[action_start:action_end]
+            )
+        return scores
+
+    def _snapshot_score(self, features: Sequence[float]) -> float:
+        if not self.snapshot_weights:
+            return float(self.bias)
+        if len(self.snapshot_weights) != len(features):
+            raise ValueError(
+                f"snapshot weight size {len(self.snapshot_weights)} does not "
+                f"match {len(features)} snapshot features"
+            )
+        return float(self.bias) + _dot(self.snapshot_weights, features)
+
+    def _action_score(self, features: Sequence[float]) -> float:
+        if not self.action_weights:
+            return 0.0
+        if len(self.action_weights) != len(features):
+            raise ValueError(
+                f"action weight size {len(self.action_weights)} does not "
+                f"match {len(features)} action features"
+            )
+        return _dot(self.action_weights, features)
 
 
 @dataclass(frozen=True)
@@ -95,9 +159,13 @@ def score_model_input_batch(
     """Score flattened action rows and choose eligible argmax per example."""
 
     active_scorer = scorer or ActionKindPriorScorer()
-    raw_scores = active_scorer.score_action_rows(batch)
-    scores = [float(score) for score in raw_scores]
     problems = list(batch.problems)
+    try:
+        raw_scores = active_scorer.score_action_rows(batch)
+        scores = [float(score) for score in raw_scores]
+    except ValueError as exc:
+        scores = []
+        problems.append(f"scorer {active_scorer.name}: {exc}")
     problems.extend(_score_shape_problems(batch, scores))
     selections = _select_eligible_argmax(batch, scores, problems)
     finite_scores = [score for score in scores if math.isfinite(score)]
@@ -298,6 +366,13 @@ def _item(values: list[object], index: int, default: object) -> object:
     if index < 0 or index >= len(values):
         return default
     return values[index]
+
+
+def _dot(weights: Sequence[float], features: Sequence[float]) -> float:
+    total = 0.0
+    for weight, feature in zip(weights, features, strict=True):
+        total += float(weight) * float(feature)
+    return total
 
 
 def _score_label(score: float) -> str:

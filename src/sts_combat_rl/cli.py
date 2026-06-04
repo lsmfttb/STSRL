@@ -54,12 +54,17 @@ from sts_combat_rl.sim.trainer_input import (
     build_trainer_input_dataset_smoke_report,
     format_trainer_input_dataset_smoke_report,
 )
+from sts_combat_rl.sim.training_readiness import (
+    build_training_readiness_report,
+    format_training_readiness_report,
+)
 from sts_combat_rl.sim.model_input import (
     build_model_input_batch,
     build_model_input_batch_smoke_report,
     format_model_input_batch_smoke_report,
 )
 from sts_combat_rl.sim.model_scoring import (
+    ActionKindPriorScorer,
     format_model_score_smoke_report,
     score_model_input_batch,
 )
@@ -73,6 +78,7 @@ from sts_combat_rl.sim.policy import (
     PreferredKindPolicy,
     RandomEligiblePolicy,
     ReplayChosenPolicy,
+    ScoredActionPolicy,
     evaluate_decision_policy,
     format_policy_evaluation_report,
 )
@@ -231,6 +237,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     input_group.add_argument(
+        "--lightspeed-battle-training-readiness",
+        action="store_true",
+        help=(
+            "Collect battle-agent rollouts and run the full pre-trainer "
+            "readiness checklist to stderr without training."
+        ),
+    )
+    input_group.add_argument(
         "--calibrate-combat-features",
         type=Path,
         nargs="+",
@@ -316,6 +330,7 @@ def build_parser() -> argparse.ArgumentParser:
             "first-eligible",
             "replay-chosen",
             "random-eligible",
+            "action-kind-prior-scorer",
         ),
         default="preferred-kind",
         help="Policy used by --lightspeed-policy-smoke and policy rollout smoke.",
@@ -419,6 +434,7 @@ def main(argv: list[str] | None = None) -> int:
         or args.lightspeed_battle_trainer_input_smoke
         or args.lightspeed_battle_model_input_smoke
         or args.lightspeed_battle_model_score_smoke
+        or args.lightspeed_battle_training_readiness
     ):
         try:
             adapter = LightSpeedAdapter(seed=args.sim_seed, ascension=args.sim_ascension)
@@ -755,6 +771,34 @@ def main(argv: list[str] | None = None) -> int:
                         ),
                         file=sys.stderr,
                     )
+                elif args.lightspeed_battle_training_readiness:
+                    battle_policy = _build_online_sim_policy(
+                        args.sim_policy,
+                        args.sim_seed,
+                    )
+                    non_combat_policy = _build_non_combat_driver_policy(
+                        args.sim_non_combat_policy,
+                        args.sim_seed,
+                    )
+                    battle_rollouts = [
+                        collect_battle_agent_rollout(
+                            adapter,
+                            battle_policy,
+                            seed=args.sim_seed + offset,
+                            max_steps=args.sim_steps,
+                            action_space=action_space,
+                            autopilot_policy=non_combat_policy,
+                        )
+                        for offset in range(args.sim_episodes)
+                    ]
+                    readiness_report = build_training_readiness_report(
+                        battle_rollouts,
+                        weights=battle_reward_weights_from_preset(args.reward_preset),
+                    )
+                    print(
+                        format_training_readiness_report(readiness_report),
+                        file=sys.stderr,
+                    )
                 else:
                     rollouts = [
                         collect_simulator_rollout(
@@ -843,7 +887,13 @@ def _timestamped_path(directory: Path, prefix: str, suffix: str) -> Path:
 def _build_sim_policy(
     policy_name: str,
     seed: int,
-) -> FirstEligiblePolicy | PreferredKindPolicy | ReplayChosenPolicy | RandomEligiblePolicy:
+) -> (
+    FirstEligiblePolicy
+    | PreferredKindPolicy
+    | ReplayChosenPolicy
+    | RandomEligiblePolicy
+    | ScoredActionPolicy
+):
     if policy_name == "preferred-kind":
         return PreferredKindPolicy()
     if policy_name == "first-eligible":
@@ -852,13 +902,18 @@ def _build_sim_policy(
         return ReplayChosenPolicy()
     if policy_name == "random-eligible":
         return RandomEligiblePolicy(seed=seed)
+    if policy_name == "action-kind-prior-scorer":
+        return ScoredActionPolicy(
+            ActionKindPriorScorer(),
+            name="action_kind_prior_scorer",
+        )
     raise ValueError(f"unknown simulator policy: {policy_name}")
 
 
 def _build_online_sim_policy(
     policy_name: str,
     seed: int,
-) -> FirstEligiblePolicy | PreferredKindPolicy | RandomEligiblePolicy:
+) -> FirstEligiblePolicy | PreferredKindPolicy | RandomEligiblePolicy | ScoredActionPolicy:
     if policy_name == "replay-chosen":
         raise ValueError(
             "replay-chosen is only valid for --lightspeed-policy-smoke, "

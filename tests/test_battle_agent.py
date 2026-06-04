@@ -65,8 +65,13 @@ from sts_combat_rl.sim.model_input import (
 )
 from sts_combat_rl.sim.model_scoring import (
     ActionKindPriorScorer,
+    LinearActionScorer,
     format_model_score_smoke_report,
     score_model_input_batch,
+)
+from sts_combat_rl.sim.training_readiness import (
+    build_training_readiness_report,
+    format_training_readiness_report,
 )
 
 
@@ -742,6 +747,43 @@ def test_model_score_smoke_ignores_high_scores_on_ineligible_rows() -> None:
     assert report.problems == []
 
 
+def test_linear_action_scorer_scores_model_input_batch_without_training() -> None:
+    batch = ModelInputBatch(
+        format_version=MODEL_INPUT_BATCH_FORMAT_VERSION,
+        reward_allocation="terminal_step",
+        snapshot_feature_size=2,
+        action_feature_size=2,
+        screen_states=["BATTLE"],
+        snapshot_features=[[1.0, 2.0]],
+        action_features=[[0.0, 1.0], [2.0, 0.0]],
+        action_offsets=[0, 2],
+        action_kinds=[["end_turn", "card"]],
+        eligible_action_indices=[[0, 1]],
+        eligible_action_rows=[[0, 1]],
+        chosen_action_indices=[1],
+        chosen_action_rows=[1],
+        chosen_action_kinds=["card"],
+        terminal_after_step=[False],
+        step_rewards=[0.0],
+        return_to_go=[1.0],
+    )
+
+    report = score_model_input_batch(
+        batch,
+        LinearActionScorer(
+            snapshot_weights=[0.5, 0.0],
+            action_weights=[1.0, -1.0],
+            bias=0.25,
+        ),
+    )
+
+    assert report.scoring_ok is True
+    assert report.selection_count == 1
+    assert report.selections[0].selected_action_index == 1
+    assert report.selections[0].selected_score == 2.75
+    assert report.problems == []
+
+
 def test_model_score_smoke_reports_bad_score_shape_and_values() -> None:
     batch = ModelInputBatch(
         format_version=MODEL_INPUT_BATCH_FORMAT_VERSION,
@@ -771,6 +813,86 @@ def test_model_score_smoke_reports_bad_score_shape_and_values() -> None:
     assert any("score count 1" in problem for problem in short_report.problems)
     assert nan_report.scoring_ok is False
     assert any("not finite" in problem for problem in nan_report.problems)
+
+
+def test_model_score_smoke_reports_linear_scorer_dimension_errors() -> None:
+    batch = ModelInputBatch(
+        format_version=MODEL_INPUT_BATCH_FORMAT_VERSION,
+        reward_allocation="terminal_step",
+        snapshot_feature_size=2,
+        action_feature_size=2,
+        screen_states=["BATTLE"],
+        snapshot_features=[[1.0, 2.0]],
+        action_features=[[0.0, 0.0], [1.0, 1.0]],
+        action_offsets=[0, 2],
+        action_kinds=[["end_turn", "card"]],
+        eligible_action_indices=[[0, 1]],
+        eligible_action_rows=[[0, 1]],
+        chosen_action_indices=[1],
+        chosen_action_rows=[1],
+        chosen_action_kinds=["card"],
+        terminal_after_step=[False],
+        step_rewards=[0.0],
+        return_to_go=[1.0],
+    )
+
+    report = score_model_input_batch(
+        batch,
+        LinearActionScorer(snapshot_weights=[1.0]),
+    )
+
+    assert report.scoring_ok is False
+    assert report.selection_count == 0
+    assert any("snapshot weight size 1" in problem for problem in report.problems)
+
+
+def test_training_readiness_report_accepts_full_pretrainer_path() -> None:
+    rollouts = [
+        collect_battle_agent_rollout(
+            FakeBattleAgentAdapter(),
+            PreferredKindPolicy(),
+            seed=1,
+            max_steps=3,
+        )
+    ]
+
+    report = build_training_readiness_report(
+        rollouts,
+        weights=battle_reward_weights_from_preset("battle-v0"),
+    )
+    text = format_training_readiness_report(report)
+
+    assert report.ready_for_first_training is True
+    assert report.source_rollout_count == 1
+    assert report.segment_count == 2
+    assert report.battle_example_count == 2
+    assert report.reward_label_count == 2
+    assert report.trainer_record_count == 2
+    assert report.model_example_count == 2
+    assert report.action_row_count == 4
+    assert report.score_count == 4
+    assert report.snapshot_feature_size == lightspeed_battle_feature_size()
+    assert report.action_feature_size == simulator_action_feature_size()
+    assert report.trainer_contract_ok is True
+    assert report.trainer_dataset_round_trip_ok is True
+    assert report.model_input_ok is True
+    assert report.model_context_rebuild_ok is True
+    assert report.model_scoring_ok is True
+    assert report.problems == []
+    assert "Training readiness summary" in text
+    assert "ready for first training: yes" in text
+    assert "limitations:" in text
+
+
+def test_training_readiness_report_blocks_empty_rollouts() -> None:
+    report = build_training_readiness_report(
+        [],
+        weights=battle_reward_weights_from_preset("battle-v0"),
+    )
+
+    assert report.ready_for_first_training is False
+    assert report.has_battle_examples is False
+    assert any("battle examples present" in problem for problem in report.problems)
 
 
 def _action(

@@ -86,6 +86,7 @@ from sts_combat_rl.sim.model_scoring import (
     DEFAULT_ACTION_KIND_SCORE_PRIOR,
     ActionKindPriorScorer,
     BatchActionScorer,
+    LinearActionScorer,
     ModelScoreSelection,
     ModelScoreSmokeReport,
     format_model_score_smoke_report,
@@ -152,6 +153,12 @@ from sts_combat_rl.sim.trainer_input import (
     load_trainer_input_dataset_jsonl_text,
     trainer_input_dataset_to_jsonl_text,
 )
+from sts_combat_rl.sim.training_readiness import (
+    TRAINING_READINESS_LIMITATIONS,
+    TrainingReadinessReport,
+    build_training_readiness_report,
+    format_training_readiness_report,
+)
 from sts_combat_rl.sim.policy_rollout import collect_policy_simulator_rollout
 from sts_combat_rl.sim.rollout import (
     RolloutBatch,
@@ -166,6 +173,7 @@ __all__ = [
     "ActionSpaceConfig",
     "ActionScorer",
     "ActionKindPriorScorer",
+    "LinearActionScorer",
     "AUTOPILOT_CONTROLLER",
     "BATTLE_AGENT_CONTROLLER",
     "NON_COMBAT_DRIVER_CONTROLLER",
@@ -194,6 +202,7 @@ __all__ = [
     "TrainerInputDataset",
     "TrainerInputDatasetSmokeReport",
     "TrainerInputRecord",
+    "TrainingReadinessReport",
     "BATTLE_REWARD_COMPONENT_NAMES",
     "BATTLE_REWARD_PRESETS",
     "DecisionBatch",
@@ -225,6 +234,7 @@ __all__ = [
     "TERMINAL_STEP_REWARD_ALLOCATION",
     "MODEL_INPUT_BATCH_FORMAT_VERSION",
     "TRAINER_INPUT_DATASET_FORMAT_VERSION",
+    "TRAINING_READINESS_LIMITATIONS",
     "choose_calibration_action",
     "choose_deterministic_action",
     "choose_highest_scored_eligible_index",
@@ -239,6 +249,7 @@ __all__ = [
     "build_trainer_input_contract_report",
     "build_trainer_input_dataset",
     "build_trainer_input_dataset_smoke_report",
+    "build_training_readiness_report",
     "build_decision_context",
     "collect_battle_agent_rollout",
     "collect_policy_simulator_rollout",
@@ -260,6 +271,7 @@ __all__ = [
     "format_reward_labeled_battle_decision_batch_report",
     "format_trainer_input_contract_report",
     "format_trainer_input_dataset_smoke_report",
+    "format_training_readiness_report",
     "format_policy_episode_evaluation_report",
     "format_policy_evaluation_report",
     "decision_context_from_model_input_batch",

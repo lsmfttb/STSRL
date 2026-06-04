@@ -634,6 +634,38 @@ def test_cli_lightspeed_battle_model_score_smoke_writes_report_to_stderr_only(
     assert "selection examples (limit 0):" in captured.err
 
 
+def test_cli_lightspeed_battle_training_readiness_writes_report_to_stderr_only(
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.setattr(
+        "sts_combat_rl.cli.LightSpeedAdapter",
+        FakeLightSpeedSmokeAdapter,
+    )
+
+    assert (
+        main(
+            [
+                "--lightspeed-battle-training-readiness",
+                "--sim-episodes",
+                "2",
+                "--sim-steps",
+                "1",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 0
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Training readiness summary" in captured.err
+    assert "ready for first training: yes" in captured.err
+    assert "checks:" in captured.err
+    assert "limitations:" in captured.err
+
+
 def test_cli_rejects_negative_reward_detail_limit(
     monkeypatch,
     capsys,
@@ -690,6 +722,37 @@ def test_cli_lightspeed_battle_sweep_accepts_non_combat_policy(
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "non-combat driver policy: preferred_kind" in captured.err
+
+
+def test_cli_lightspeed_battle_sweep_accepts_scorer_policy(
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.setattr(
+        "sts_combat_rl.cli.LightSpeedAdapter",
+        FakeLightSpeedSmokeAdapter,
+    )
+
+    assert (
+        main(
+            [
+                "--lightspeed-battle-sweep",
+                "--sim-policy",
+                "action-kind-prior-scorer",
+                "--sim-episodes",
+                "1",
+                "--sim-steps",
+                "1",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 0
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "battle policy: action_kind_prior_scorer" in captured.err
 
 
 def test_cli_rejects_replay_policy_for_online_policy_rollout(
