@@ -45,6 +45,10 @@ from sts_combat_rl.sim.reward_labeling import (
     build_reward_labeled_battle_decision_batch,
     format_reward_labeled_battle_decision_batch_report,
 )
+from sts_combat_rl.sim.trainer_input_contract import (
+    build_trainer_input_contract_report,
+    format_trainer_input_contract_report,
+)
 from sts_combat_rl.sim.evaluation import (
     format_policy_episode_evaluation_report,
     run_policy_episode_evaluation,
@@ -175,6 +179,14 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Collect battle-agent rollouts, build battle decision examples, "
             "and attach segment reward labels to stderr without training."
+        ),
+    )
+    input_group.add_argument(
+        "--lightspeed-battle-trainer-input-contract",
+        action="store_true",
+        help=(
+            "Collect a reward-labeled battle batch and validate future trainer "
+            "input fields to stderr without training."
         ),
     )
     input_group.add_argument(
@@ -362,6 +374,7 @@ def main(argv: list[str] | None = None) -> int:
         or args.lightspeed_battle_reward_components
         or args.lightspeed_battle_reward_design
         or args.lightspeed_battle_reward_batch_smoke
+        or args.lightspeed_battle_trainer_input_contract
     ):
         try:
             adapter = LightSpeedAdapter(seed=args.sim_seed, ascension=args.sim_ascension)
@@ -570,6 +583,37 @@ def main(argv: list[str] | None = None) -> int:
                         format_reward_labeled_battle_decision_batch_report(
                             labeled_batch
                         ),
+                        file=sys.stderr,
+                    )
+                elif args.lightspeed_battle_trainer_input_contract:
+                    battle_policy = _build_online_sim_policy(
+                        args.sim_policy,
+                        args.sim_seed,
+                    )
+                    non_combat_policy = _build_non_combat_driver_policy(
+                        args.sim_non_combat_policy,
+                        args.sim_seed,
+                    )
+                    battle_rollouts = [
+                        collect_battle_agent_rollout(
+                            adapter,
+                            battle_policy,
+                            seed=args.sim_seed + offset,
+                            max_steps=args.sim_steps,
+                            action_space=action_space,
+                            autopilot_policy=non_combat_policy,
+                        )
+                        for offset in range(args.sim_episodes)
+                    ]
+                    labeled_batch = build_reward_labeled_battle_decision_batch(
+                        battle_rollouts,
+                        battle_reward_weights_from_preset(args.reward_preset),
+                    )
+                    contract_report = build_trainer_input_contract_report(
+                        labeled_batch
+                    )
+                    print(
+                        format_trainer_input_contract_report(contract_report),
                         file=sys.stderr,
                     )
                 else:

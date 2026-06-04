@@ -328,6 +328,18 @@ segment gets the segment reward, and every decision gets
 `return_to_go=segment_reward`. This is data-shape calibration only, not a
 credit-assignment algorithm or trainer.
 
+To validate the future trainer input contract:
+
+```bash
+python -m sts_combat_rl.cli --lightspeed-battle-trainer-input-contract --sim-seed 1 --sim-episodes 10 --sim-steps 200
+```
+
+This builds the reward-labeled battle batch and checks the fields a future
+training loop would consume: snapshot features, variable legal-action features,
+chosen action index, eligible action indices, terminal flags, step reward,
+return-to-go, and reward label alignment. It still does not choose an RL
+algorithm, create a replay buffer, or train a model.
+
 To check whether real CommunicationMod combat captures fit the same fixed-size
 feature shape, run:
 

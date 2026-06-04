@@ -35,8 +35,13 @@ from sts_combat_rl.sim.reward_design import (
     format_battle_reward_design_report,
 )
 from sts_combat_rl.sim.reward_labeling import (
+    RewardLabeledBattleDecisionBatch,
     build_reward_labeled_battle_decision_batch,
     format_reward_labeled_battle_decision_batch_report,
+)
+from sts_combat_rl.sim.trainer_input_contract import (
+    build_trainer_input_contract_report,
+    format_trainer_input_contract_report,
 )
 
 
@@ -430,6 +435,71 @@ def test_reward_labeled_batch_uses_terminal_step_allocation() -> None:
     assert round(labels[1].return_to_go, 3) == 0.948
     assert labels[0].segment_reward == labels[1].segment_reward
     assert batch.problems == []
+
+
+def test_trainer_input_contract_accepts_reward_labeled_battle_batch() -> None:
+    rollouts = [
+        collect_battle_agent_rollout(
+            FakeBattleAgentAdapter(),
+            PreferredKindPolicy(),
+            seed=1,
+            max_steps=3,
+        )
+    ]
+    batch = build_reward_labeled_battle_decision_batch(
+        rollouts,
+        battle_reward_weights_from_preset("battle-v0"),
+    )
+
+    report = build_trainer_input_contract_report(batch)
+    text = format_trainer_input_contract_report(report)
+
+    assert report.contract_ok is True
+    assert report.example_count == 2
+    assert report.reward_label_count == 2
+    assert report.labels_aligned is True
+    assert report.snapshot_feature_size == lightspeed_battle_feature_size()
+    assert report.action_feature_size == simulator_action_feature_size()
+    assert report.final_step_labels == 2
+    assert report.nonfinal_step_labels == 0
+    assert round(report.segment_reward_total, 3) == -0.802
+    assert round(report.step_reward_total, 3) == -0.802
+    assert report.screen_state_counts["BATTLE"] == 2
+    assert report.problems == []
+    assert "Trainer input contract summary" in text
+    assert "contract ok: yes" in text
+
+
+def test_trainer_input_contract_reports_label_alignment_problems() -> None:
+    rollouts = [
+        collect_battle_agent_rollout(
+            FakeBattleAgentAdapter(),
+            PreferredKindPolicy(),
+            seed=1,
+            max_steps=3,
+        )
+    ]
+    batch = build_reward_labeled_battle_decision_batch(
+        rollouts,
+        battle_reward_weights_from_preset("battle-v0"),
+    )
+    bad_batch = RewardLabeledBattleDecisionBatch(
+        decision_batch=batch.decision_batch,
+        reward_labels=batch.reward_labels[:-1],
+        reward_design_report=batch.reward_design_report,
+        source_rollout_count=batch.source_rollout_count,
+        segment_count=batch.segment_count,
+        excluded_non_combat_driver_steps=batch.excluded_non_combat_driver_steps,
+        reward_allocation=batch.reward_allocation,
+        problems=[],
+    )
+
+    report = build_trainer_input_contract_report(bad_batch)
+
+    assert report.contract_ok is False
+    assert report.labels_aligned is False
+    assert any("example/label length mismatch" in problem for problem in report.problems)
+    assert any("final-step label count" in problem for problem in report.problems)
 
 
 def _action(
