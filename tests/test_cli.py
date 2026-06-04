@@ -536,6 +536,38 @@ def test_cli_lightspeed_battle_trainer_input_contract_writes_report_to_stderr_on
     assert "battle examples: 2" in captured.err
 
 
+def test_cli_lightspeed_battle_trainer_input_smoke_writes_report_to_stderr_only(
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.setattr(
+        "sts_combat_rl.cli.LightSpeedAdapter",
+        FakeLightSpeedSmokeAdapter,
+    )
+
+    assert (
+        main(
+            [
+                "--lightspeed-battle-trainer-input-smoke",
+                "--sim-episodes",
+                "2",
+                "--sim-steps",
+                "1",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 0
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Trainer input dataset smoke summary" in captured.err
+    assert "contract ok: yes" in captured.err
+    assert "JSONL round trip ok: yes" in captured.err
+    assert "records: 2" in captured.err
+
+
 def test_cli_rejects_negative_reward_detail_limit(
     monkeypatch,
     capsys,

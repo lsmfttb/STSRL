@@ -43,6 +43,14 @@ from sts_combat_rl.sim.trainer_input_contract import (
     build_trainer_input_contract_report,
     format_trainer_input_contract_report,
 )
+from sts_combat_rl.sim.trainer_input import (
+    TRAINER_INPUT_DATASET_FORMAT_VERSION,
+    build_trainer_input_dataset,
+    build_trainer_input_dataset_smoke_report,
+    format_trainer_input_dataset_smoke_report,
+    load_trainer_input_dataset_jsonl_text,
+    trainer_input_dataset_to_jsonl_text,
+)
 
 
 class FakeBattleAgentAdapter:
@@ -500,6 +508,71 @@ def test_trainer_input_contract_reports_label_alignment_problems() -> None:
     assert report.labels_aligned is False
     assert any("example/label length mismatch" in problem for problem in report.problems)
     assert any("final-step label count" in problem for problem in report.problems)
+
+
+def test_trainer_input_dataset_round_trips_reward_labeled_battle_batch() -> None:
+    rollouts = [
+        collect_battle_agent_rollout(
+            FakeBattleAgentAdapter(),
+            PreferredKindPolicy(),
+            seed=1,
+            max_steps=3,
+        )
+    ]
+    batch = build_reward_labeled_battle_decision_batch(
+        rollouts,
+        battle_reward_weights_from_preset("battle-v0"),
+    )
+
+    dataset = build_trainer_input_dataset(batch)
+    encoded = trainer_input_dataset_to_jsonl_text(dataset)
+    loaded = load_trainer_input_dataset_jsonl_text(encoded)
+
+    assert dataset.format_version == TRAINER_INPUT_DATASET_FORMAT_VERSION
+    assert dataset.reward_allocation == "terminal_step"
+    assert dataset.source_rollout_count == 1
+    assert dataset.segment_count == 2
+    assert dataset.snapshot_feature_size == lightspeed_battle_feature_size()
+    assert dataset.action_feature_size == simulator_action_feature_size()
+    assert len(dataset.records) == 2
+    assert dataset.records[0].example_index == 0
+    assert dataset.records[0].legal_action_kinds == ["end_turn", "card"]
+    assert dataset.records[0].eligible_action_indices == [0, 1]
+    assert dataset.records[0].chosen_action_index == 1
+    assert dataset.records[0].segment_index == 0
+    assert dataset.records[0].raw_reward_components["gold_delta"] == -2.0
+    assert '"type":"metadata"' in encoded
+    assert '"type":"record"' in encoded
+    assert loaded == dataset
+
+
+def test_trainer_input_dataset_smoke_report_checks_jsonl_round_trip() -> None:
+    rollouts = [
+        collect_battle_agent_rollout(
+            FakeBattleAgentAdapter(),
+            PreferredKindPolicy(),
+            seed=1,
+            max_steps=3,
+        )
+    ]
+    batch = build_reward_labeled_battle_decision_batch(
+        rollouts,
+        battle_reward_weights_from_preset("battle-v0"),
+    )
+
+    report = build_trainer_input_dataset_smoke_report(batch)
+    text = format_trainer_input_dataset_smoke_report(report)
+
+    assert report.contract_ok is True
+    assert report.round_trip_ok is True
+    assert report.record_count == 2
+    assert report.max_legal_actions == 2
+    assert report.max_eligible_actions == 2
+    assert round(report.step_reward_total, 3) == -0.802
+    assert report.problems == []
+    assert "Trainer input dataset smoke summary" in text
+    assert "JSONL round trip ok: yes" in text
+    assert "scope: dataset packaging only; no trainer, environment, or RL algorithm" in text
 
 
 def _action(
