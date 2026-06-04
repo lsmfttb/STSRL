@@ -23,7 +23,11 @@ from sts_combat_rl.sim.features import (
     lightspeed_battle_feature_size,
     simulator_action_feature_size,
 )
-from sts_combat_rl.sim.policy import PolicyDecision, PreferredKindPolicy
+from sts_combat_rl.sim.policy import (
+    PolicyDecision,
+    PreferredKindPolicy,
+    choose_highest_scored_eligible_index,
+)
 from sts_combat_rl.sim.reward_components import (
     build_battle_reward_component_report,
     format_battle_reward_component_report,
@@ -50,6 +54,13 @@ from sts_combat_rl.sim.trainer_input import (
     format_trainer_input_dataset_smoke_report,
     load_trainer_input_dataset_jsonl_text,
     trainer_input_dataset_to_jsonl_text,
+)
+from sts_combat_rl.sim.model_input import (
+    MODEL_INPUT_BATCH_FORMAT_VERSION,
+    build_model_input_batch,
+    build_model_input_batch_smoke_report,
+    decision_context_from_model_input_batch,
+    format_model_input_batch_smoke_report,
 )
 
 
@@ -573,6 +584,78 @@ def test_trainer_input_dataset_smoke_report_checks_jsonl_round_trip() -> None:
     assert "Trainer input dataset smoke summary" in text
     assert "JSONL round trip ok: yes" in text
     assert "scope: dataset packaging only; no trainer, environment, or RL algorithm" in text
+
+
+def test_model_input_batch_packs_variable_action_rows_for_scorer_context() -> None:
+    rollouts = [
+        collect_battle_agent_rollout(
+            FakeBattleAgentAdapter(),
+            PreferredKindPolicy(),
+            seed=1,
+            max_steps=3,
+        )
+    ]
+    reward_batch = build_reward_labeled_battle_decision_batch(
+        rollouts,
+        battle_reward_weights_from_preset("battle-v0"),
+    )
+    dataset = build_trainer_input_dataset(reward_batch)
+
+    batch = build_model_input_batch(dataset)
+    context = decision_context_from_model_input_batch(batch, 0)
+
+    assert batch.format_version == MODEL_INPUT_BATCH_FORMAT_VERSION
+    assert batch.reward_allocation == "terminal_step"
+    assert len(batch.example_refs) == 2
+    assert batch.snapshot_feature_size == lightspeed_battle_feature_size()
+    assert batch.action_feature_size == simulator_action_feature_size()
+    assert batch.action_offsets == [0, 2, 4]
+    assert len(batch.action_features) == 4
+    assert batch.action_kinds == [["end_turn", "card"], ["end_turn", "card"]]
+    assert batch.eligible_action_indices == [[0, 1], [0, 1]]
+    assert batch.eligible_action_rows == [[0, 1], [2, 3]]
+    assert batch.chosen_action_indices == [1, 1]
+    assert batch.chosen_action_rows == [1, 3]
+    assert batch.chosen_action_kinds == ["card", "card"]
+    assert round(sum(batch.step_rewards), 3) == -0.802
+    assert batch.problems == []
+    assert context.screen_state == "BATTLE"
+    assert context.legal_action_kinds == ["end_turn", "card"]
+    assert choose_highest_scored_eligible_index(context, [0.0, 1.0]) == 1
+
+
+def test_model_input_batch_smoke_report_checks_rebuilt_contexts() -> None:
+    rollouts = [
+        collect_battle_agent_rollout(
+            FakeBattleAgentAdapter(),
+            PreferredKindPolicy(),
+            seed=1,
+            max_steps=3,
+        )
+    ]
+    reward_batch = build_reward_labeled_battle_decision_batch(
+        rollouts,
+        battle_reward_weights_from_preset("battle-v0"),
+    )
+    dataset = build_trainer_input_dataset(reward_batch)
+
+    report = build_model_input_batch_smoke_report(dataset)
+    text = format_model_input_batch_smoke_report(report)
+
+    assert report.model_input_ok is True
+    assert report.context_rebuild_ok is True
+    assert report.example_count == 2
+    assert report.snapshot_rows == 2
+    assert report.action_rows == 4
+    assert report.action_offset_count == 3
+    assert report.max_legal_actions == 2
+    assert report.max_eligible_actions == 2
+    assert round(report.step_reward_total, 3) == -0.802
+    assert report.problems == []
+    assert "Model input batch smoke summary" in text
+    assert "model input ok: yes" in text
+    assert "context rebuild ok: yes" in text
+    assert "scope: model input packaging only; no trainer, environment, or RL algorithm" in text
 
 
 def _action(
