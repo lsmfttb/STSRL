@@ -41,6 +41,10 @@ from sts_combat_rl.sim.reward_design import (
     build_battle_reward_design_report,
     format_battle_reward_design_report,
 )
+from sts_combat_rl.sim.reward_labeling import (
+    build_reward_labeled_battle_decision_batch,
+    format_reward_labeled_battle_decision_batch_report,
+)
 from sts_combat_rl.sim.evaluation import (
     format_policy_episode_evaluation_report,
     run_policy_episode_evaluation,
@@ -166,6 +170,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     input_group.add_argument(
+        "--lightspeed-battle-reward-batch-smoke",
+        action="store_true",
+        help=(
+            "Collect battle-agent rollouts, build battle decision examples, "
+            "and attach segment reward labels to stderr without training."
+        ),
+    )
+    input_group.add_argument(
         "--calibrate-combat-features",
         type=Path,
         nargs="+",
@@ -277,7 +289,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--reward-preset",
         choices=BATTLE_REWARD_PRESETS,
         default="battle-v0",
-        help="Reward draft preset used by --lightspeed-battle-reward-design.",
+        help="Reward draft preset used by reward design and reward batch smokes.",
     )
     return parser
 
@@ -349,6 +361,7 @@ def main(argv: list[str] | None = None) -> int:
         or args.lightspeed_battle_segments_smoke
         or args.lightspeed_battle_reward_components
         or args.lightspeed_battle_reward_design
+        or args.lightspeed_battle_reward_batch_smoke
     ):
         try:
             adapter = LightSpeedAdapter(seed=args.sim_seed, ascension=args.sim_ascension)
@@ -526,6 +539,36 @@ def main(argv: list[str] | None = None) -> int:
                         format_battle_reward_design_report(
                             reward_design_report,
                             detail_limit=args.reward_detail_limit,
+                        ),
+                        file=sys.stderr,
+                    )
+                elif args.lightspeed_battle_reward_batch_smoke:
+                    battle_policy = _build_online_sim_policy(
+                        args.sim_policy,
+                        args.sim_seed,
+                    )
+                    non_combat_policy = _build_non_combat_driver_policy(
+                        args.sim_non_combat_policy,
+                        args.sim_seed,
+                    )
+                    battle_rollouts = [
+                        collect_battle_agent_rollout(
+                            adapter,
+                            battle_policy,
+                            seed=args.sim_seed + offset,
+                            max_steps=args.sim_steps,
+                            action_space=action_space,
+                            autopilot_policy=non_combat_policy,
+                        )
+                        for offset in range(args.sim_episodes)
+                    ]
+                    labeled_batch = build_reward_labeled_battle_decision_batch(
+                        battle_rollouts,
+                        battle_reward_weights_from_preset(args.reward_preset),
+                    )
+                    print(
+                        format_reward_labeled_battle_decision_batch_report(
+                            labeled_batch
                         ),
                         file=sys.stderr,
                     )

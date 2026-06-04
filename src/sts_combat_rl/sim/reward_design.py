@@ -82,6 +82,8 @@ class BattleRewardSegmentScore:
     rollout_index: int
     seed: int | None
     segment_index: int
+    start_step_index: int
+    end_step_index: int
     start_floor: float | None
     end_reason: str
     decision_count: int
@@ -256,6 +258,8 @@ def _score_segment(
         rollout_index=segment.rollout_index,
         seed=segment.seed,
         segment_index=segment.segment_index,
+        start_step_index=segment.start_step_index,
+        end_step_index=segment.end_step_index,
         start_floor=segment.start_floor,
         end_reason=segment.end_reason,
         decision_count=segment.decision_count,

@@ -315,6 +315,19 @@ ledger with zero default weight. This keeps hard-to-price long-term value
 visible without forcing it into the first no-potion battle reward. It still does
 not run RL or define a training environment.
 
+To validate the battle decision batch with parallel reward labels:
+
+```bash
+python -m sts_combat_rl.cli --lightspeed-battle-reward-batch-smoke --sim-seed 1 --sim-episodes 10 --sim-steps 200
+```
+
+This keeps the original battle-only `DecisionBatch` shape and attaches one
+aligned label per battle decision. The current allocation is terminal-step:
+non-final decisions get `step_reward=0`, the final decision in each battle
+segment gets the segment reward, and every decision gets
+`return_to_go=segment_reward`. This is data-shape calibration only, not a
+credit-assignment algorithm or trainer.
+
 To check whether real CommunicationMod combat captures fit the same fixed-size
 feature shape, run:
 

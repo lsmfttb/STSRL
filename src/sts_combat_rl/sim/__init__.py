@@ -108,6 +108,13 @@ from sts_combat_rl.sim.reward_design import (
     build_battle_reward_design_report,
     format_battle_reward_design_report,
 )
+from sts_combat_rl.sim.reward_labeling import (
+    TERMINAL_STEP_REWARD_ALLOCATION,
+    BattleDecisionRewardLabel,
+    RewardLabeledBattleDecisionBatch,
+    build_reward_labeled_battle_decision_batch,
+    format_reward_labeled_battle_decision_batch_report,
+)
 from sts_combat_rl.sim.policy_rollout import collect_policy_simulator_rollout
 from sts_combat_rl.sim.rollout import (
     RolloutBatch,
@@ -138,6 +145,7 @@ __all__ = [
     "BattleRewardScoreStats",
     "BattleRewardSegmentScore",
     "BattleRewardWeights",
+    "BattleDecisionRewardLabel",
     "BATTLE_REWARD_COMPONENT_NAMES",
     "BATTLE_REWARD_PRESETS",
     "DecisionBatch",
@@ -158,12 +166,14 @@ __all__ = [
     "ReplayChosenPolicy",
     "RolloutBatch",
     "RolloutStep",
+    "RewardLabeledBattleDecisionBatch",
     "ScoredActionPolicy",
     "SimulatorCalibrationReport",
     "SimulatorAction",
     "SimulatorAdapter",
     "SimulatorSnapshot",
     "SimulatorTransition",
+    "TERMINAL_STEP_REWARD_ALLOCATION",
     "choose_calibration_action",
     "choose_deterministic_action",
     "choose_highest_scored_eligible_index",
@@ -172,6 +182,7 @@ __all__ = [
     "build_battle_segment_report",
     "build_battle_reward_component_report",
     "build_battle_reward_design_report",
+    "build_reward_labeled_battle_decision_batch",
     "build_decision_context",
     "collect_battle_agent_rollout",
     "collect_policy_simulator_rollout",
@@ -188,6 +199,7 @@ __all__ = [
     "format_battle_segment_report",
     "format_battle_reward_component_report",
     "format_battle_reward_design_report",
+    "format_reward_labeled_battle_decision_batch_report",
     "format_policy_episode_evaluation_report",
     "format_policy_evaluation_report",
     "decision_context_from_example",

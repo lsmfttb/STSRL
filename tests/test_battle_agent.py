@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from sts_combat_rl.sim.battle_agent import (
     BATTLE_AGENT_CONTROLLER,
+    BattleAgentRollout,
+    BattleAgentRolloutStep,
     NON_COMBAT_DRIVER_CONTROLLER,
     build_battle_decision_batch,
     build_battle_segment_report,
@@ -31,6 +33,10 @@ from sts_combat_rl.sim.reward_design import (
     battle_reward_weights_from_preset,
     build_battle_reward_design_report,
     format_battle_reward_design_report,
+)
+from sts_combat_rl.sim.reward_labeling import (
+    build_reward_labeled_battle_decision_batch,
+    format_reward_labeled_battle_decision_batch_report,
 )
 
 
@@ -358,6 +364,74 @@ def test_battle_reward_design_can_enable_long_term_weights_without_shape_change(
     assert round(report.score_stats.total, 3) == -0.722
 
 
+def test_reward_labeled_battle_decision_batch_aligns_labels_with_examples() -> None:
+    rollouts = [
+        collect_battle_agent_rollout(
+            FakeBattleAgentAdapter(),
+            PreferredKindPolicy(),
+            seed=1,
+            max_steps=3,
+        )
+    ]
+
+    batch = build_reward_labeled_battle_decision_batch(
+        rollouts,
+        battle_reward_weights_from_preset("battle-v0"),
+    )
+    text = format_reward_labeled_battle_decision_batch_report(batch)
+
+    assert batch.source_rollout_count == 1
+    assert batch.segment_count == 2
+    assert batch.excluded_non_combat_driver_steps == 1
+    assert len(batch.decision_batch.examples) == 2
+    assert len(batch.reward_labels) == 2
+    assert batch.problems == []
+    assert [label.step_index for label in batch.reward_labels] == [
+        example.step_index for example in batch.decision_batch.examples
+    ]
+    assert [label.segment_index for label in batch.reward_labels] == [0, 1]
+    assert all(label.is_segment_final_step for label in batch.reward_labels)
+    assert round(sum(label.step_reward for label in batch.reward_labels), 3) == -0.802
+    assert round(sum({label.segment_index: label.segment_reward for label in batch.reward_labels}.values()), 3) == -0.802
+    assert batch.reward_labels[0].raw_reward_components["gold_delta"] == -2.0
+    assert "Reward-labeled battle decision batch summary" in text
+    assert "labels aligned: yes" in text
+    assert "reward allocation: terminal_step" in text
+
+
+def test_reward_labeled_batch_uses_terminal_step_allocation() -> None:
+    rollout = BattleAgentRollout(
+        seed=7,
+        requested_steps=3,
+        steps=[
+            _battle_rollout_step(0, player_hp=80, next_player_hp=78),
+            _battle_rollout_step(1, player_hp=78, next_player_hp=75),
+            _non_combat_rollout_step(2),
+        ],
+        terminal=False,
+        outcome="UNDECIDED",
+    )
+
+    batch = build_reward_labeled_battle_decision_batch(
+        [rollout],
+        battle_reward_weights_from_preset("battle-v0"),
+    )
+    labels = batch.reward_labels
+
+    assert len(batch.decision_batch.examples) == 2
+    assert len(labels) == 2
+    assert labels[0].segment_step_index == 0
+    assert labels[1].segment_step_index == 1
+    assert labels[0].is_segment_final_step is False
+    assert labels[1].is_segment_final_step is True
+    assert labels[0].step_reward == 0.0
+    assert round(labels[0].return_to_go, 3) == 0.948
+    assert round(labels[1].step_reward, 3) == 0.948
+    assert round(labels[1].return_to_go, 3) == 0.948
+    assert labels[0].segment_reward == labels[1].segment_reward
+    assert batch.problems == []
+
+
 def _action(
     action_id: str,
     kind: str,
@@ -368,4 +442,63 @@ def _action(
         label=action_id,
         kind=kind,
         raw={"scope": scope, "idx1": 0, "idx2": 0, "idx3": 0},
+    )
+
+
+def _battle_rollout_step(
+    step_index: int,
+    *,
+    player_hp: float,
+    next_player_hp: float,
+) -> BattleAgentRolloutStep:
+    return BattleAgentRolloutStep(
+        step_index=step_index,
+        controller=BATTLE_AGENT_CONTROLLER,
+        screen_state="BATTLE",
+        snapshot_features=[1.0, float(step_index)],
+        legal_action_features=[[1.0, 0.0], [0.0, 1.0]],
+        legal_action_kinds=["end_turn", "card"],
+        eligible_action_indices=[0, 1],
+        chosen_action_index=1,
+        chosen_action_id=f"card-{step_index}",
+        chosen_action_kind="card",
+        terminal_after_step=False,
+        floor=1.0,
+        player_hp=player_hp,
+        player_max_hp=80.0,
+        gold=99.0,
+        potion_count=1.0,
+        next_screen_state="BATTLE",
+        next_floor=1.0,
+        next_player_hp=next_player_hp,
+        next_player_max_hp=80.0,
+        next_gold=99.0,
+        next_potion_count=1.0,
+    )
+
+
+def _non_combat_rollout_step(step_index: int) -> BattleAgentRolloutStep:
+    return BattleAgentRolloutStep(
+        step_index=step_index,
+        controller=NON_COMBAT_DRIVER_CONTROLLER,
+        screen_state="REWARDS",
+        snapshot_features=[0.0, float(step_index)],
+        legal_action_features=[[1.0, 0.0]],
+        legal_action_kinds=["reward_gold"],
+        eligible_action_indices=[0],
+        chosen_action_index=0,
+        chosen_action_id="gold",
+        chosen_action_kind="reward_gold",
+        terminal_after_step=False,
+        floor=1.0,
+        player_hp=75.0,
+        player_max_hp=80.0,
+        gold=99.0,
+        potion_count=1.0,
+        next_screen_state="BATTLE",
+        next_floor=2.0,
+        next_player_hp=75.0,
+        next_player_max_hp=80.0,
+        next_gold=99.0,
+        next_potion_count=1.0,
     )

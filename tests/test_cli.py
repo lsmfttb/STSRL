@@ -472,6 +472,38 @@ def test_cli_lightspeed_battle_reward_design_writes_report_to_stderr_only(
     assert "lowest-reward segments (limit 0):" in captured.err
 
 
+def test_cli_lightspeed_battle_reward_batch_smoke_writes_report_to_stderr_only(
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.setattr(
+        "sts_combat_rl.cli.LightSpeedAdapter",
+        FakeLightSpeedSmokeAdapter,
+    )
+
+    assert (
+        main(
+            [
+                "--lightspeed-battle-reward-batch-smoke",
+                "--sim-episodes",
+                "2",
+                "--sim-steps",
+                "1",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 0
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Reward-labeled battle decision batch summary" in captured.err
+    assert "labels aligned: yes" in captured.err
+    assert "reward allocation: terminal_step" in captured.err
+    assert "battle examples: 2" in captured.err
+
+
 def test_cli_rejects_negative_reward_detail_limit(
     monkeypatch,
     capsys,
