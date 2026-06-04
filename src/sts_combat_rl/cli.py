@@ -55,8 +55,13 @@ from sts_combat_rl.sim.trainer_input import (
     format_trainer_input_dataset_smoke_report,
 )
 from sts_combat_rl.sim.model_input import (
+    build_model_input_batch,
     build_model_input_batch_smoke_report,
     format_model_input_batch_smoke_report,
+)
+from sts_combat_rl.sim.model_scoring import (
+    format_model_score_smoke_report,
+    score_model_input_batch,
 )
 from sts_combat_rl.sim.evaluation import (
     format_policy_episode_evaluation_report,
@@ -214,6 +219,15 @@ def build_parser() -> argparse.ArgumentParser:
             "Collect reward-labeled battle data, package it into flattened "
             "variable-action model input rows, and summarize to stderr "
             "without training."
+        ),
+    )
+    input_group.add_argument(
+        "--lightspeed-battle-model-score-smoke",
+        action="store_true",
+        help=(
+            "Collect reward-labeled battle data, pack flattened model input "
+            "rows, score every legal action row with a deterministic smoke "
+            "scorer, and validate eligible argmax to stderr without training."
         ),
     )
     input_group.add_argument(
@@ -404,6 +418,7 @@ def main(argv: list[str] | None = None) -> int:
         or args.lightspeed_battle_trainer_input_contract
         or args.lightspeed_battle_trainer_input_smoke
         or args.lightspeed_battle_model_input_smoke
+        or args.lightspeed_battle_model_score_smoke
     ):
         try:
             adapter = LightSpeedAdapter(seed=args.sim_seed, ascension=args.sim_ascension)
@@ -704,6 +719,40 @@ def main(argv: list[str] | None = None) -> int:
                     model_report = build_model_input_batch_smoke_report(dataset)
                     print(
                         format_model_input_batch_smoke_report(model_report),
+                        file=sys.stderr,
+                    )
+                elif args.lightspeed_battle_model_score_smoke:
+                    battle_policy = _build_online_sim_policy(
+                        args.sim_policy,
+                        args.sim_seed,
+                    )
+                    non_combat_policy = _build_non_combat_driver_policy(
+                        args.sim_non_combat_policy,
+                        args.sim_seed,
+                    )
+                    battle_rollouts = [
+                        collect_battle_agent_rollout(
+                            adapter,
+                            battle_policy,
+                            seed=args.sim_seed + offset,
+                            max_steps=args.sim_steps,
+                            action_space=action_space,
+                            autopilot_policy=non_combat_policy,
+                        )
+                        for offset in range(args.sim_episodes)
+                    ]
+                    labeled_batch = build_reward_labeled_battle_decision_batch(
+                        battle_rollouts,
+                        battle_reward_weights_from_preset(args.reward_preset),
+                    )
+                    dataset = build_trainer_input_dataset(labeled_batch)
+                    model_batch = build_model_input_batch(dataset)
+                    score_report = score_model_input_batch(model_batch)
+                    print(
+                        format_model_score_smoke_report(
+                            score_report,
+                            detail_limit=args.reward_detail_limit,
+                        ),
                         file=sys.stderr,
                     )
                 else:

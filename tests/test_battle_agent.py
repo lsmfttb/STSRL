@@ -57,10 +57,16 @@ from sts_combat_rl.sim.trainer_input import (
 )
 from sts_combat_rl.sim.model_input import (
     MODEL_INPUT_BATCH_FORMAT_VERSION,
+    ModelInputBatch,
     build_model_input_batch,
     build_model_input_batch_smoke_report,
     decision_context_from_model_input_batch,
     format_model_input_batch_smoke_report,
+)
+from sts_combat_rl.sim.model_scoring import (
+    ActionKindPriorScorer,
+    format_model_score_smoke_report,
+    score_model_input_batch,
 )
 
 
@@ -156,6 +162,17 @@ class BadBattlePolicy:
     def select_action(self, context: object) -> PolicyDecision:
         del context
         return PolicyDecision(legal_action_index=8, reason="bad")
+
+
+class FixedBatchScorer:
+    name = "fixed_batch"
+
+    def __init__(self, scores: list[float]) -> None:
+        self._scores = scores
+
+    def score_action_rows(self, batch: ModelInputBatch) -> list[float]:
+        del batch
+        return list(self._scores)
 
 
 def test_collect_battle_agent_rollout_separates_battle_and_autopilot() -> None:
@@ -656,6 +673,104 @@ def test_model_input_batch_smoke_report_checks_rebuilt_contexts() -> None:
     assert "model input ok: yes" in text
     assert "context rebuild ok: yes" in text
     assert "scope: model input packaging only; no trainer, environment, or RL algorithm" in text
+
+
+def test_model_score_smoke_selects_eligible_argmax_action_rows() -> None:
+    rollouts = [
+        collect_battle_agent_rollout(
+            FakeBattleAgentAdapter(),
+            PreferredKindPolicy(),
+            seed=1,
+            max_steps=3,
+        )
+    ]
+    reward_batch = build_reward_labeled_battle_decision_batch(
+        rollouts,
+        battle_reward_weights_from_preset("battle-v0"),
+    )
+    model_batch = build_model_input_batch(build_trainer_input_dataset(reward_batch))
+
+    report = score_model_input_batch(model_batch, ActionKindPriorScorer())
+    text = format_model_score_smoke_report(report, detail_limit=1)
+
+    assert report.scoring_ok is True
+    assert report.example_count == 2
+    assert report.action_rows == 4
+    assert report.score_count == 4
+    assert report.selection_count == 2
+    assert report.chosen_action_agreement == 2
+    assert report.min_score == 1.0
+    assert report.max_score == 3.0
+    assert report.selected_action_kind_counts["card"] == 2
+    assert report.problems == []
+    assert "Model score smoke summary" in text
+    assert "scoring ok: yes" in text
+    assert "agreement with collected actions: 2/2" in text
+    assert "selection examples (limit 1):" in text
+
+
+def test_model_score_smoke_ignores_high_scores_on_ineligible_rows() -> None:
+    batch = ModelInputBatch(
+        format_version=MODEL_INPUT_BATCH_FORMAT_VERSION,
+        reward_allocation="terminal_step",
+        snapshot_feature_size=2,
+        action_feature_size=2,
+        screen_states=["BATTLE"],
+        snapshot_features=[[1.0, 2.0]],
+        action_features=[[0.0, 0.0], [1.0, 1.0]],
+        action_offsets=[0, 2],
+        action_kinds=[["end_turn", "card"]],
+        eligible_action_indices=[[1]],
+        eligible_action_rows=[[1]],
+        chosen_action_indices=[1],
+        chosen_action_rows=[1],
+        chosen_action_kinds=["card"],
+        terminal_after_step=[False],
+        step_rewards=[0.0],
+        return_to_go=[1.0],
+    )
+
+    report = score_model_input_batch(batch, FixedBatchScorer([100.0, 2.0]))
+
+    assert report.scoring_ok is True
+    assert report.selection_count == 1
+    assert report.selections[0].selected_action_index == 1
+    assert report.selections[0].selected_action_row == 1
+    assert report.selections[0].selected_action_kind == "card"
+    assert report.selections[0].selected_score == 2.0
+    assert report.chosen_action_agreement == 1
+    assert report.problems == []
+
+
+def test_model_score_smoke_reports_bad_score_shape_and_values() -> None:
+    batch = ModelInputBatch(
+        format_version=MODEL_INPUT_BATCH_FORMAT_VERSION,
+        reward_allocation="terminal_step",
+        snapshot_feature_size=2,
+        action_feature_size=2,
+        screen_states=["BATTLE"],
+        snapshot_features=[[1.0, 2.0]],
+        action_features=[[0.0, 0.0], [1.0, 1.0]],
+        action_offsets=[0, 2],
+        action_kinds=[["end_turn", "card"]],
+        eligible_action_indices=[[0, 1]],
+        eligible_action_rows=[[0, 1]],
+        chosen_action_indices=[1],
+        chosen_action_rows=[1],
+        chosen_action_kinds=["card"],
+        terminal_after_step=[False],
+        step_rewards=[0.0],
+        return_to_go=[1.0],
+    )
+
+    short_report = score_model_input_batch(batch, FixedBatchScorer([1.0]))
+    nan_report = score_model_input_batch(batch, FixedBatchScorer([1.0, float("nan")]))
+
+    assert short_report.scoring_ok is False
+    assert short_report.selection_count == 0
+    assert any("score count 1" in problem for problem in short_report.problems)
+    assert nan_report.scoring_ok is False
+    assert any("not finite" in problem for problem in nan_report.problems)
 
 
 def _action(

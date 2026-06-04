@@ -600,6 +600,40 @@ def test_cli_lightspeed_battle_model_input_smoke_writes_report_to_stderr_only(
     assert "examples: 2" in captured.err
 
 
+def test_cli_lightspeed_battle_model_score_smoke_writes_report_to_stderr_only(
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.setattr(
+        "sts_combat_rl.cli.LightSpeedAdapter",
+        FakeLightSpeedSmokeAdapter,
+    )
+
+    assert (
+        main(
+            [
+                "--lightspeed-battle-model-score-smoke",
+                "--sim-episodes",
+                "2",
+                "--sim-steps",
+                "1",
+                "--reward-detail-limit",
+                "0",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 0
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Model score smoke summary" in captured.err
+    assert "scoring ok: yes" in captured.err
+    assert "agreement with collected actions: 2/2" in captured.err
+    assert "selection examples (limit 0):" in captured.err
+
+
 def test_cli_rejects_negative_reward_detail_limit(
     monkeypatch,
     capsys,
