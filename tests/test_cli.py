@@ -125,7 +125,9 @@ def test_cli_analyze_samples_writes_report_to_stderr_only(
         encoding="utf-8",
     )
     second_sample_file = tmp_path / "captured_2.jsonl"
-    second_sample_file.write_text(sample_file.read_text(encoding="utf-8"), encoding="utf-8")
+    second_sample_file.write_text(
+        sample_file.read_text(encoding="utf-8"), encoding="utf-8"
+    )
     monkeypatch.setattr(sys, "stdin", io.StringIO(""))
 
     assert (
@@ -176,8 +178,7 @@ def test_cli_lightspeed_rollout_smoke_writes_report_to_stderr_only(
     )
 
     assert (
-        main(["--lightspeed-rollout-smoke", "--sim-steps", "1", "--log-file", "-"])
-        == 0
+        main(["--lightspeed-rollout-smoke", "--sim-steps", "1", "--log-file", "-"]) == 0
     )
 
     captured = capsys.readouterr()
@@ -801,8 +802,7 @@ def test_cli_calibrate_combat_features_writes_report_to_stderr_only(
     monkeypatch.setattr(sys, "stdin", io.StringIO(""))
 
     assert (
-        main(["--calibrate-combat-features", str(sample_file), "--log-file", "-"])
-        == 0
+        main(["--calibrate-combat-features", str(sample_file), "--log-file", "-"]) == 0
     )
 
     captured = capsys.readouterr()

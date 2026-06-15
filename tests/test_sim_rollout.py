@@ -54,7 +54,9 @@ class FakeRolloutAdapter:
         )
 
 
-def test_collect_simulator_rollout_keeps_legal_potions_but_excludes_by_default() -> None:
+def test_collect_simulator_rollout_keeps_legal_potions_but_excludes_by_default() -> (
+    None
+):
     batch = collect_simulator_rollout(FakeRolloutAdapter(), seed=3, max_steps=1)
 
     assert batch.terminal is True

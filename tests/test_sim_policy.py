@@ -143,7 +143,9 @@ def test_choose_highest_scored_eligible_index_validates_score_shape() -> None:
 
 def test_choose_highest_scored_eligible_index_validates_score_values() -> None:
     with pytest.raises(ValueError, match="not finite"):
-        choose_highest_scored_eligible_index(_example(eligible=[1]), [0.0, float("nan"), 0.0])
+        choose_highest_scored_eligible_index(
+            _example(eligible=[1]), [0.0, float("nan"), 0.0]
+        )
 
 
 def test_replay_policy_reports_ineligible_rollout_choice() -> None:

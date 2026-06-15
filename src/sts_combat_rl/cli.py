@@ -15,7 +15,10 @@ from sts_combat_rl.logging_utils import DEFAULT_LOG_FILE, configure_logging
 from sts_combat_rl.policy.scripted import ScriptedCombatPolicy
 from sts_combat_rl.samples import analyze_sample_paths, format_sample_analysis
 from sts_combat_rl.sim.action_space import ActionSpaceConfig
-from sts_combat_rl.sim.batching import build_decision_batch, format_decision_batch_report
+from sts_combat_rl.sim.batching import (
+    build_decision_batch,
+    format_decision_batch_report,
+)
 from sts_combat_rl.sim.battle_agent import (
     build_battle_decision_batch,
     build_battle_segment_report,
@@ -385,7 +388,9 @@ def main(argv: list[str] | None = None) -> int:
     if log_file is not None:
         logger.info("writing debug log to %s", log_file)
     if args.manual:
-        logger.info("manual capture mode enabled; emitting only wait/state poll commands")
+        logger.info(
+            "manual capture mode enabled; emitting only wait/state poll commands"
+        )
     if args.sim_steps < 0:
         print("--sim-steps must be non-negative", file=sys.stderr)
         return 2
@@ -437,7 +442,9 @@ def main(argv: list[str] | None = None) -> int:
         or args.lightspeed_battle_training_readiness
     ):
         try:
-            adapter = LightSpeedAdapter(seed=args.sim_seed, ascension=args.sim_ascension)
+            adapter = LightSpeedAdapter(
+                seed=args.sim_seed, ascension=args.sim_ascension
+            )
             action_space = (
                 ActionSpaceConfig.include_all()
                 if args.include_potions
@@ -669,9 +676,7 @@ def main(argv: list[str] | None = None) -> int:
                         battle_rollouts,
                         battle_reward_weights_from_preset(args.reward_preset),
                     )
-                    contract_report = build_trainer_input_contract_report(
-                        labeled_batch
-                    )
+                    contract_report = build_trainer_input_contract_report(labeled_batch)
                     print(
                         format_trainer_input_contract_report(contract_report),
                         file=sys.stderr,
@@ -913,7 +918,12 @@ def _build_sim_policy(
 def _build_online_sim_policy(
     policy_name: str,
     seed: int,
-) -> FirstEligiblePolicy | PreferredKindPolicy | RandomEligiblePolicy | ScoredActionPolicy:
+) -> (
+    FirstEligiblePolicy
+    | PreferredKindPolicy
+    | RandomEligiblePolicy
+    | ScoredActionPolicy
+):
     if policy_name == "replay-chosen":
         raise ValueError(
             "replay-chosen is only valid for --lightspeed-policy-smoke, "

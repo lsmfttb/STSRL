@@ -97,9 +97,15 @@ def build_training_readiness_report(
     }
     problems = _readiness_problems(checks)
     problems.extend(f"reward batch: {problem}" for problem in labeled_batch.problems)
-    problems.extend(f"trainer contract: {problem}" for problem in trainer_contract.problems)
-    problems.extend(f"trainer dataset: {problem}" for problem in trainer_dataset_report.problems)
-    problems.extend(f"model input: {problem}" for problem in model_input_report.problems)
+    problems.extend(
+        f"trainer contract: {problem}" for problem in trainer_contract.problems
+    )
+    problems.extend(
+        f"trainer dataset: {problem}" for problem in trainer_dataset_report.problems
+    )
+    problems.extend(
+        f"model input: {problem}" for problem in model_input_report.problems
+    )
     problems.extend(f"model score: {problem}" for problem in score_report.problems)
 
     return TrainingReadinessReport(

@@ -96,7 +96,9 @@ def test_analyze_sample_paths_expands_directory_and_aggregates(tmp_path: Path) -
     assert "play 1 0: 2" in report
 
 
-def test_sample_request_hints_are_conservative_for_small_samples(tmp_path: Path) -> None:
+def test_sample_request_hints_are_conservative_for_small_samples(
+    tmp_path: Path,
+) -> None:
     sample_file = tmp_path / "captured.jsonl"
     sample_file.write_text(
         '{"available_commands":["play","end","wait","state"],'

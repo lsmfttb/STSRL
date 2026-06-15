@@ -14,7 +14,10 @@ from sts_combat_rl.comm.protocol import (
     ("command", "expected"),
     [
         (Command.start("IRONCLAD"), "start IRONCLAD"),
-        (Command.start("SILENT", ascension_level=20, seed="ABC123"), "start SILENT 20 ABC123"),
+        (
+            Command.start("SILENT", ascension_level=20, seed="ABC123"),
+            "start SILENT 20 ABC123",
+        ),
         (Command.play_card(0, 2), "play 1 2"),
         (Command.play_card(1), "play 2"),
         (Command.end_turn(), "end"),

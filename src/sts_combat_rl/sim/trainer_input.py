@@ -266,7 +266,9 @@ def load_trainer_input_dataset_jsonl(stream: TextIO) -> TrainerInputDataset:
         reward_allocation=str(metadata.get("reward_allocation", "")),
         source_rollout_count=_int(metadata.get("source_rollout_count")),
         segment_count=_int(metadata.get("segment_count")),
-        snapshot_feature_size=_optional_int_value(metadata.get("snapshot_feature_size")),
+        snapshot_feature_size=_optional_int_value(
+            metadata.get("snapshot_feature_size")
+        ),
         action_feature_size=_optional_int_value(metadata.get("action_feature_size")),
         records=records,
         problems=problems,
@@ -308,7 +310,9 @@ def _record_from_pair(
             for action_features in example.legal_action_features
         ],
         legal_action_kinds=list(example.legal_action_kinds),
-        eligible_action_indices=[int(index) for index in example.eligible_action_indices],
+        eligible_action_indices=[
+            int(index) for index in example.eligible_action_indices
+        ],
         chosen_action_index=int(example.chosen_action_index),
         chosen_action_kind=example.chosen_action_kind,
         terminal_after_step=bool(example.terminal_after_step),
@@ -383,8 +387,7 @@ def _record_from_dict(raw: dict[str, Any]) -> TrainerInputRecord:
         screen_state=str(raw.get("screen_state", "")),
         snapshot_features=_float_list(raw.get("snapshot_features")),
         legal_action_features=[
-            _float_list(action)
-            for action in _list(raw.get("legal_action_features"))
+            _float_list(action) for action in _list(raw.get("legal_action_features"))
         ],
         legal_action_kinds=[str(kind) for kind in _list(raw.get("legal_action_kinds"))],
         eligible_action_indices=[

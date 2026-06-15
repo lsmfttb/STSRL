@@ -266,9 +266,7 @@ def format_policy_evaluation_report(evaluation: PolicyEvaluation) -> str:
     rollout_action_kinds = Counter(
         selection.rollout_action_kind for selection in evaluation.selections
     )
-    selection_reasons = Counter(
-        selection.reason for selection in evaluation.selections
-    )
+    selection_reasons = Counter(selection.reason for selection in evaluation.selections)
 
     lines = [
         "Policy selection smoke summary",

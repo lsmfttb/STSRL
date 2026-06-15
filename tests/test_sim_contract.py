@@ -32,7 +32,9 @@ class TinyAdapter:
     def step(self, action: SimulatorAction) -> SimulatorTransition:
         self.steps += 1
         return SimulatorTransition(
-            snapshot=SimulatorSnapshot(observation=[self.steps], raw={"action": action.label}),
+            snapshot=SimulatorSnapshot(
+                observation=[self.steps], raw={"action": action.label}
+            ),
             terminal=True,
             info={"action_kind": action.kind},
         )

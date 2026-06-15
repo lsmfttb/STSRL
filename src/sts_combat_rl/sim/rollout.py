@@ -20,7 +20,6 @@ from sts_combat_rl.sim.action_space import (
 from sts_combat_rl.sim.contract import (
     SimulatorAction,
     SimulatorAdapter,
-    SimulatorSnapshot,
 )
 from sts_combat_rl.sim.features import (
     encode_lightspeed_battle_snapshot,
@@ -173,8 +172,7 @@ def _eligible_indices(
     action_space: ActionSpaceConfig,
 ) -> list[int]:
     eligible_action_ids = {
-        id(action)
-        for action in filter_eligible_actions(actions, action_space)
+        id(action) for action in filter_eligible_actions(actions, action_space)
     }
     return [
         index

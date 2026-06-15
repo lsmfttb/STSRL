@@ -114,7 +114,9 @@ def build_reward_labeled_battle_decision_batch(
                 )
             _validate_step_indices(rollout_index, step, problems)
             examples.append(_decision_example(rollout_index, rollout.seed, step))
-            labels.append(_reward_label(rollout_index, rollout.seed, step, label_context))
+            labels.append(
+                _reward_label(rollout_index, rollout.seed, step, label_context)
+            )
 
     if len(examples) != len(labels):
         problems.append(
@@ -151,7 +153,9 @@ def format_reward_labeled_battle_decision_batch_report(
     step_reward_total = sum(label.step_reward for label in batch.reward_labels)
     return_to_go_total = sum(label.return_to_go for label in batch.reward_labels)
     segment_reward_total = _segment_reward_total(batch.reward_labels)
-    final_step_count = sum(1 for label in batch.reward_labels if label.is_segment_final_step)
+    final_step_count = sum(
+        1 for label in batch.reward_labels if label.is_segment_final_step
+    )
     nonfinal_step_count = label_count - final_step_count
     label_end_reasons = Counter(
         label.segment_end_reason for label in batch.reward_labels
