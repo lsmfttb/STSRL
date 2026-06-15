@@ -1,5 +1,8 @@
 # Simulator Candidate Scan
 
+> Historical document. `sts_lightspeed` is now the authoritative simulator
+> target; see `docs/sts_lightspeed_wsl_spike.md` for the current setup.
+
 Scanned on 2026-06-03. External repositories were cloned only under
 `~/stsrl-spikes` in WSL, not into this repository.
 

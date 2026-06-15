@@ -1,0 +1,76 @@
+# Documentation Guide
+
+This directory separates current contracts, current status, active roadmaps,
+operational guides, and historical records. A document's role determines how
+it should be used during implementation and review.
+
+## Authority Order
+
+When documents disagree, use this order:
+
+1. [`../AGENTS.md`](../AGENTS.md): concise repository-wide contributor rules.
+2. [`project_architecture.md`](project_architecture.md): authoritative design
+   and ownership boundaries.
+3. [`current_status.md`](current_status.md): implemented capabilities, known
+   gaps, and current priorities.
+4. Active roadmap documents: intended future work within the architecture.
+5. Operational guides: commands and environment details.
+6. [`history/`](history/README.md): past investigations and superseded plans.
+
+`README.md` is the project entry point, not an exhaustive specification.
+
+## Current Documents
+
+### Contract
+
+- [`project_architecture.md`](project_architecture.md): controller boundaries,
+  information regimes, data provenance, objectives, artifact migration, and
+  code ownership.
+
+### Status
+
+- [`current_status.md`](current_status.md): concise state of implementation and
+  immediate work.
+- [`experiment_log.md`](experiment_log.md): curated dated results. Results
+  explain evidence; they do not create architectural rules.
+
+### Active Roadmaps
+
+- [`battle_dataset_search_and_sl_plan.md`](battle_dataset_search_and_sl_plan.md):
+  dataset distributions, evaluation, search development, and the separately
+  evaluated SL-enabled branch.
+- [`normal_information_search_and_resource_value_plan.md`](normal_information_search_and_resource_value_plan.md):
+  normal-information search, Oracle-to-normal transfer, complete public run
+  context, and continuation value.
+
+### Operations
+
+- [`sts_lightspeed_wsl_spike.md`](sts_lightspeed_wsl_spike.md): current external
+  simulator setup, patches, and verification commands.
+
+### History
+
+- [`history/README.md`](history/README.md): index of simulator comparisons,
+  rejected spikes, and the superseded first trainer plan.
+
+## Maintenance Rules
+
+- Put repository-wide invariants only in `project_architecture.md` and summarize
+  the most important ones in `AGENTS.md`.
+- Update `current_status.md` when implementation capability or the immediate
+  blocker changes.
+- Put future design in the relevant roadmap; do not mix dated experiment
+  narratives into roadmaps.
+- Put dated measurements in `experiment_log.md`.
+- Move superseded plans to `history/` instead of leaving contradictory current
+  instructions in place.
+- Prefer links over duplicating long commands, measurements, or design
+  arguments across several files.
+
+## Branch Workflow
+
+The current integration line is `codex/integration-current`. Concrete tasks use
+short-lived `codex/<topic>` branches with explicit ownership boundaries. The
+task model commits and reports its work; the integration owner reviews it,
+runs the required gates, and merges it. Do not use a dirty `main` worktree as a
+shared parallel-development base.
