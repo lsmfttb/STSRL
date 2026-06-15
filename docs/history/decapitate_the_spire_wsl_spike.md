@@ -1,5 +1,7 @@
 # decapitate-the-spire WSL Spike
 
+> Historical simulator investigation. It is not part of the current runtime.
+
 This spike stays outside the repository working tree under:
 
 ```text
@@ -80,9 +82,10 @@ adapter experiment.
 
 ## Next Adapter Spike
 
-Do not add RL or Gymnasium yet. The next code change should be a small optional
-adapter module, guarded so this repository does not import `decapitate_the_spire`
-unless the package is explicitly available.
+Do not add Gymnasium, Stable-Baselines3, deep-learning frameworks, or local game
+mechanics here. Any future code change should be a small optional adapter
+module, guarded so this repository does not import `decapitate_the_spire` unless
+the package is explicitly available.
 
 Minimal adapter goals:
 

@@ -1,5 +1,8 @@
 # Simulator Options
 
+> Historical document. This comparison predates the current `sts_lightspeed`
+> architecture decision.
+
 This project should keep CommunicationMod as a live-game calibration and smoke-test
 path. RL training needs a fast headless simulator or a simulator adapter; the
 real game loop is too slow and too stateful for high-throughput rollouts.
@@ -75,7 +78,7 @@ usable simulator implementation:
   int)` skeleton with no game state, step loop, or Python binding
 - Decision: reject current master as a usable training simulator
 
-For the broader candidate scan, see `docs/simulator_candidate_scan.md`.
+For the broader candidate scan, see `docs/history/simulator_candidate_scan.md`.
 
 `spirecomm` and CommunicationMod remain useful for live-game IO, but they do not
 solve throughput. They should not be the primary RL environment.
@@ -84,22 +87,34 @@ solve throughput. They should not be the primary RL environment.
 
 Do not integrate RL, Gymnasium, Stable-Baselines3, or game mechanics yet.
 
-The next simulator spike should only answer:
+The next simulator spike should establish the state-generation boundary needed
+by the detailed battle-agent roadmap in
+`docs/battle_dataset_search_and_sl_plan.md`. It should answer:
 
 - Should the `sts_lightspeed` shim live as a local patch, fork branch, or
   upstream patch proposal?
+- Can a battle-start state be checkpointed and restored without changing the
+  subsequent legal actions or outcomes?
+- If native checkpoint/restore is not immediately viable, can a seed plus a
+  deterministic action trace reproduce the same battle-start state?
+- Which structural metadata can the simulator expose directly for the natural,
+  stratified, and paired-counterfactual data pools?
 - Can the action/debug surface map back to CommunicationMod command concepts?
 - Does the first fixed-size Ironclad battle/action feature contract preserve the
   state needed by common combat decisions?
 - Can the optional Python adapter stay import-safe when `slaythespire` is absent?
 - Can first-pass Ironclad training ignore potions without destabilizing legal
   action selection, while preserving enough recorded data to add potions later?
-- Which training approach should consume the variable-action decision batch:
-  per-action scorer, padded action sets, or another framework-specific adapter?
+
+Do not begin large-scale collection until deterministic restore or replay has
+passed a reproducible verification gate. Model architecture is downstream of
+this state-generation and evaluation work; search remains the primary battle
+decision method, with learned models used only where they measurably improve
+search under equal compute.
 
 For WSL-specific notes, see `docs/sts_lightspeed_wsl_spike.md`,
-`docs/decapitate_the_spire_wsl_spike.md`, and
-`docs/conquer_the_spire_wsl_spike.md`.
+`docs/history/decapitate_the_spire_wsl_spike.md`, and
+`docs/history/conquer_the_spire_wsl_spike.md`.
 
 ## Adapter Boundary
 

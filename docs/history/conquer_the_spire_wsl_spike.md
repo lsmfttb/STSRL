@@ -1,5 +1,7 @@
 # conquer-the-spire WSL Build Spike
 
+> Historical simulator investigation. It is not part of the current runtime.
+
 This spike must stay outside the repository working tree. It should clone and
 build external simulator code under `~/stsrl-spikes` inside WSL.
 
