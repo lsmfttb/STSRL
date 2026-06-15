@@ -13,9 +13,8 @@ from typing import Any
 from sts_combat_rl.sim.batching import DecisionBatch, DecisionExample
 from sts_combat_rl.sim.battle_agent import (
     BATTLE_AGENT_CONTROLLER,
-    BattleAgentRollout,
-    BattleAgentRolloutStep,
 )
+from sts_combat_rl.sim.controlled_run import ControlledRun, ControlledRunStep
 from sts_combat_rl.sim.reward_design import (
     BattleRewardDesignReport,
     BattleRewardSegmentScore,
@@ -61,7 +60,7 @@ class RewardLabeledBattleDecisionBatch:
 
 
 def build_reward_labeled_battle_decision_batch(
-    rollouts: list[BattleAgentRollout],
+    rollouts: list[ControlledRun],
     weights: BattleRewardWeights | None = None,
 ) -> RewardLabeledBattleDecisionBatch:
     """Build battle decision examples with terminal-step segment reward labels."""
@@ -83,7 +82,7 @@ def build_reward_labeled_battle_decision_batch(
             terminal_rollouts += 1
 
         for step in rollout.steps:
-            if step.controller != BATTLE_AGENT_CONTROLLER:
+            if step.controller_role != BATTLE_AGENT_CONTROLLER:
                 excluded_non_combat_driver_steps += 1
                 continue
 
@@ -223,7 +222,7 @@ class _StepRewardContext:
 
 
 def _build_step_score_map(
-    rollouts: list[BattleAgentRollout],
+    rollouts: list[ControlledRun],
     reward_report: BattleRewardDesignReport,
 ) -> tuple[dict[tuple[int, int], _StepRewardContext], list[str]]:
     step_score_map: dict[tuple[int, int], _StepRewardContext] = {}
@@ -238,7 +237,7 @@ def _build_step_score_map(
         segment_steps = [
             step
             for step in rollouts[score.rollout_index].steps
-            if step.controller == BATTLE_AGENT_CONTROLLER
+            if step.controller_role == BATTLE_AGENT_CONTROLLER
             and score.start_step_index <= step.step_index <= score.end_step_index
         ]
         if len(segment_steps) != score.decision_count:
@@ -265,7 +264,7 @@ def _build_step_score_map(
 def _reward_label(
     rollout_index: int,
     seed: int | None,
-    step: BattleAgentRolloutStep,
+    step: ControlledRunStep,
     context: _StepRewardContext,
 ) -> BattleDecisionRewardLabel:
     score = context.score
@@ -290,7 +289,7 @@ def _reward_label(
 def _decision_example(
     rollout_index: int,
     seed: int | None,
-    step: BattleAgentRolloutStep,
+    step: ControlledRunStep,
 ) -> DecisionExample:
     return DecisionExample(
         rollout_index=rollout_index,
@@ -336,7 +335,7 @@ def _stable_size(
 
 def _validate_step_indices(
     rollout_index: int,
-    step: BattleAgentRolloutStep,
+    step: ControlledRunStep,
     problems: list[str],
 ) -> None:
     legal_count = len(step.legal_action_features)

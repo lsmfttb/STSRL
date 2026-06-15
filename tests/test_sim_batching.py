@@ -4,12 +4,14 @@ from sts_combat_rl.sim.batching import (
     build_decision_batch,
     format_decision_batch_report,
 )
-from sts_combat_rl.sim.rollout import RolloutBatch, RolloutStep
+from sts_combat_rl.sim.controlled_run import ControlledRun, ControlledRunStep
 
 
-def _step(step_index: int, legal_count: int, chosen_index: int) -> RolloutStep:
-    return RolloutStep(
+def _step(step_index: int, legal_count: int, chosen_index: int) -> ControlledRunStep:
+    return ControlledRunStep(
         step_index=step_index,
+        controller_role="chooser",
+        provenance=None,
         screen_state="BATTLE",
         snapshot_features=[1.0, 2.0],
         legal_action_features=[[float(index)] for index in range(legal_count)],
@@ -22,10 +24,28 @@ def _step(step_index: int, legal_count: int, chosen_index: int) -> RolloutStep:
     )
 
 
+def _rollout(
+    seed: int,
+    steps: list[ControlledRunStep],
+    terminal: bool = False,
+) -> ControlledRun:
+    return ControlledRun(
+        seed=seed,
+        requested_steps=len(steps),
+        steps=steps,
+        terminal=terminal,
+        outcome="UNDECIDED",
+        initial_raw={},
+        final_raw={},
+        controller_provenance={},
+        problems=[],
+    )
+
+
 def test_build_decision_batch_preserves_variable_action_lists() -> None:
     rollouts = [
-        RolloutBatch(seed=1, requested_steps=2, steps=[_step(0, 2, 1)]),
-        RolloutBatch(seed=2, requested_steps=2, steps=[_step(0, 4, 3)], terminal=True),
+        _rollout(1, [_step(0, 2, 1)]),
+        _rollout(2, [_step(0, 4, 3)], terminal=True),
     ]
 
     batch = build_decision_batch(rollouts)
@@ -43,11 +63,7 @@ def test_build_decision_batch_preserves_variable_action_lists() -> None:
 
 
 def test_build_decision_batch_reports_invalid_indices() -> None:
-    rollout = RolloutBatch(
-        seed=1,
-        requested_steps=1,
-        steps=[_step(0, 1, 3)],
-    )
+    rollout = _rollout(1, [_step(0, 1, 3)])
 
     batch = build_decision_batch([rollout])
 

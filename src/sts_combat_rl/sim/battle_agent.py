@@ -3,6 +3,11 @@
 The battle agent only selects actions in battle states. Non-combat states are
 advanced by a separate driver so simulator rollouts can reach more battles
 without making map/reward/shop navigation part of the agent contract.
+
+The authoritative controlled-run executor in ``controlled_run.py`` owns the
+select/validate/step loop. This module provides the routed controller that
+separates battle from non-combat decisions, and batch/segment/report builders
+that consume :class:`ControlledRun` results.
 """
 
 from __future__ import annotations
@@ -12,15 +17,19 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
-from sts_combat_rl.sim.action_space import ActionSpaceConfig, filter_eligible_actions
+from sts_combat_rl.sim.action_space import ActionSpaceConfig
 from sts_combat_rl.sim.batching import DecisionBatch, DecisionExample
-from sts_combat_rl.sim.contract import SimulatorAction, SimulatorAdapter
-from sts_combat_rl.sim.features import (
-    encode_lightspeed_battle_snapshot,
-    encode_simulator_actions,
+from sts_combat_rl.sim.controlled_run import (
+    ControlledRun,
+    ControlledRunStep,
+    execute_controlled_run,
+)
+from sts_combat_rl.sim.contract import SimulatorAdapter
+from sts_combat_rl.sim.online_controller import (
+    PolicyController,
+    RoutedRunController,
 )
 from sts_combat_rl.sim.policy import (
-    DecisionContext,
     DecisionPolicy,
     PreferredKindPolicy,
 )
@@ -29,48 +38,6 @@ from sts_combat_rl.sim.policy import (
 BATTLE_AGENT_CONTROLLER = "battle_agent"
 NON_COMBAT_DRIVER_CONTROLLER = "non_combat_driver"
 AUTOPILOT_CONTROLLER = NON_COMBAT_DRIVER_CONTROLLER
-
-
-@dataclass(frozen=True)
-class BattleAgentRolloutStep:
-    """One simulator step tagged by the controller that selected the action."""
-
-    step_index: int
-    controller: str
-    screen_state: str
-    snapshot_features: list[float]
-    legal_action_features: list[list[float]]
-    legal_action_kinds: list[str]
-    eligible_action_indices: list[int]
-    chosen_action_index: int
-    chosen_action_id: int | str
-    chosen_action_kind: str
-    terminal_after_step: bool
-    floor: float | None = None
-    player_hp: float | None = None
-    player_max_hp: float | None = None
-    gold: float | None = None
-    potion_count: float | None = None
-    next_screen_state: str = "(none)"
-    next_floor: float | None = None
-    next_player_hp: float | None = None
-    next_player_max_hp: float | None = None
-    next_gold: float | None = None
-    next_potion_count: float | None = None
-
-
-@dataclass(frozen=True)
-class BattleAgentRollout:
-    """A bounded rollout with battle-agent and non-combat decisions separated."""
-
-    seed: int | None
-    requested_steps: int
-    steps: list[BattleAgentRolloutStep] = field(default_factory=list)
-    terminal: bool = False
-    outcome: str = "UNKNOWN"
-    problems: list[str] = field(default_factory=list)
-    initial_raw: Mapping[str, Any] = field(default_factory=dict)
-    final_raw: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -184,93 +151,20 @@ def collect_battle_agent_rollout(
     max_steps: int = 200,
     action_space: ActionSpaceConfig | None = None,
     autopilot_policy: DecisionPolicy | None = None,
-) -> BattleAgentRollout:
+) -> ControlledRun:
     """Collect a bounded rollout where only battle states use battle_policy."""
 
-    active_action_space = action_space or ActionSpaceConfig.initial_no_potions()
     active_autopilot = autopilot_policy or PreferredKindPolicy()
-    snapshot = adapter.reset(seed=seed)
-    initial_raw = dict(snapshot.raw)
-    steps: list[BattleAgentRolloutStep] = []
-    problems: list[str] = []
-    terminal = False
-
-    for step_index in range(max_steps):
-        actions = list(adapter.legal_actions(snapshot))
-        if not actions:
-            problems.append("no legal actions before terminal state")
-            break
-
-        context = build_decision_context(snapshot.raw, actions, active_action_space)
-        controller = (
-            BATTLE_AGENT_CONTROLLER
-            if _is_battle_state(snapshot.raw, context.screen_state)
-            else NON_COMBAT_DRIVER_CONTROLLER
-        )
-        policy = (
-            battle_policy if controller == BATTLE_AGENT_CONTROLLER else active_autopilot
-        )
-
-        try:
-            selected_index = policy.select_action(context).legal_action_index
-        except ValueError as exc:
-            problems.append(f"{controller}: {exc}")
-            break
-
-        validation_problem = _selected_index_problem(
-            selected_index,
-            len(actions),
-            context.eligible_action_indices,
-            controller,
-        )
-        if validation_problem is not None:
-            problems.append(validation_problem)
-            break
-
-        chosen_action = actions[selected_index]
-        transition = adapter.step(chosen_action)
-        terminal = transition.terminal
-        next_raw = transition.snapshot.raw
-        steps.append(
-            BattleAgentRolloutStep(
-                step_index=step_index,
-                controller=controller,
-                screen_state=context.screen_state,
-                snapshot_features=context.snapshot_features,
-                legal_action_features=context.legal_action_features,
-                legal_action_kinds=context.legal_action_kinds,
-                eligible_action_indices=context.eligible_action_indices,
-                chosen_action_index=selected_index,
-                chosen_action_id=chosen_action.action_id,
-                chosen_action_kind=chosen_action.kind,
-                terminal_after_step=terminal,
-                floor=_first_number(snapshot.raw, "floor_num", "floor"),
-                player_hp=_player_hp(snapshot.raw),
-                next_screen_state=str(next_raw.get("screen_state", "(none)")),
-                next_floor=_first_number(next_raw, "floor_num", "floor"),
-                next_player_hp=_player_hp(next_raw),
-                player_max_hp=_player_max_hp(snapshot.raw),
-                next_player_max_hp=_player_max_hp(next_raw),
-                gold=_first_number(snapshot.raw, "gold"),
-                next_gold=_first_number(next_raw, "gold"),
-                potion_count=_potion_count(snapshot.raw),
-                next_potion_count=_potion_count(next_raw),
-            )
-        )
-
-        snapshot = transition.snapshot
-        if terminal:
-            break
-
-    return BattleAgentRollout(
+    controller = RoutedRunController(
+        battle=PolicyController(battle_policy),
+        non_combat=PolicyController(active_autopilot),
+    )
+    return execute_controlled_run(
+        adapter,
+        controller,
         seed=seed,
-        requested_steps=max_steps,
-        steps=steps,
-        terminal=terminal,
-        outcome=str(snapshot.raw.get("outcome", "UNKNOWN")),
-        problems=problems,
-        initial_raw=initial_raw,
-        final_raw=dict(snapshot.raw),
+        max_steps=max_steps,
+        action_space=action_space,
     )
 
 
@@ -362,7 +256,7 @@ def run_battle_agent_sweep(
 
 
 def build_battle_decision_batch(
-    rollouts: list[BattleAgentRollout],
+    rollouts: list[ControlledRun],
 ) -> BattleDecisionBatch:
     """Build a validated decision batch from only battle-agent decisions."""
 
@@ -381,7 +275,7 @@ def build_battle_decision_batch(
         )
 
         for step in rollout.steps:
-            if step.controller != BATTLE_AGENT_CONTROLLER:
+            if step.controller_role != BATTLE_AGENT_CONTROLLER:
                 excluded_autopilot_steps += 1
                 continue
 
@@ -433,7 +327,7 @@ def build_battle_decision_batch(
 
 
 def build_battle_segment_report(
-    rollouts: list[BattleAgentRollout],
+    rollouts: list[ControlledRun],
 ) -> BattleSegmentReport:
     """Build combat-segment summaries without choosing a reward function."""
 
@@ -453,10 +347,10 @@ def build_battle_segment_report(
         problems.extend(
             f"rollout {rollout_index}: {problem}" for problem in rollout.problems
         )
-        active_steps: list[BattleAgentRolloutStep] = []
+        active_steps: list[ControlledRunStep] = []
         segment_index = 0
         for step in rollout.steps:
-            if step.controller == BATTLE_AGENT_CONTROLLER:
+            if step.controller_role == BATTLE_AGENT_CONTROLLER:
                 active_steps.append(step)
                 if step.terminal_after_step:
                     segment = _battle_segment(
@@ -522,17 +416,19 @@ def build_battle_segment_report(
 
 
 def summarize_battle_agent_episode(
-    rollout: BattleAgentRollout,
+    rollout: ControlledRun,
 ) -> BattleAgentEpisodeSummary:
     """Summarize battle-agent decisions from one bounded rollout."""
 
     initial_raw = _mapping(rollout.initial_raw)
     final_raw = _mapping(rollout.final_raw)
     battle_steps = [
-        step for step in rollout.steps if step.controller == BATTLE_AGENT_CONTROLLER
+        step
+        for step in rollout.steps
+        if step.controller_role == BATTLE_AGENT_CONTROLLER
     ]
     autopilot_steps = [
-        step for step in rollout.steps if step.controller == AUTOPILOT_CONTROLLER
+        step for step in rollout.steps if step.controller_role == AUTOPILOT_CONTROLLER
     ]
     battle_action_feature_size_counts: Counter[str] = Counter(
         str(len(features))
@@ -710,55 +606,11 @@ def format_battle_decision_batch_report(batch: BattleDecisionBatch) -> str:
     return "\n".join(lines)
 
 
-def build_decision_context(
-    raw_snapshot: object,
-    actions: list[SimulatorAction],
-    action_space: ActionSpaceConfig,
-) -> DecisionContext:
-    """Build the policy input for the current simulator candidate list."""
-
-    raw = raw_snapshot if isinstance(raw_snapshot, Mapping) else {}
-    return DecisionContext(
-        screen_state=str(raw.get("screen_state", "(none)")),
-        snapshot_features=encode_lightspeed_battle_snapshot(raw),
-        legal_action_features=encode_simulator_actions(actions),
-        legal_action_kinds=[action.kind for action in actions],
-        eligible_action_indices=_eligible_indices(actions, action_space),
-    )
-
-
-def _is_battle_state(
-    raw_snapshot: object,
-    screen_state: str,
-) -> bool:
-    raw = raw_snapshot if isinstance(raw_snapshot, Mapping) else {}
-    return bool(raw.get("battle_active")) or screen_state == "BATTLE"
-
-
-def _selected_index_problem(
-    selected_index: int,
-    legal_count: int,
-    eligible_indices: list[int],
-    controller: str,
-) -> str | None:
-    if selected_index < 0 or selected_index >= legal_count:
-        return (
-            f"{controller} selected action index {selected_index} "
-            f"outside {legal_count} legal actions"
-        )
-    if selected_index not in eligible_indices:
-        return (
-            f"{controller} selected action index {selected_index} "
-            "outside the active action space"
-        )
-    return None
-
-
 def _battle_segment(
     rollout_index: int,
-    rollout: BattleAgentRollout,
+    rollout: ControlledRun,
     segment_index: int,
-    steps: list[BattleAgentRolloutStep],
+    steps: list[ControlledRunStep],
     end_reason: str,
 ) -> BattleSegment:
     first_step = steps[0]
@@ -840,7 +692,7 @@ def _stable_size(
 
 def _validate_step_indices(
     rollout_index: int,
-    step: BattleAgentRolloutStep,
+    step: ControlledRunStep,
     problems: list[str],
 ) -> None:
     legal_count = len(step.legal_action_features)
@@ -857,20 +709,6 @@ def _validate_step_indices(
             )
 
 
-def _eligible_indices(
-    actions: list[SimulatorAction],
-    action_space: ActionSpaceConfig,
-) -> list[int]:
-    eligible_action_ids = {
-        id(action) for action in filter_eligible_actions(actions, action_space)
-    }
-    return [
-        index
-        for index, action in enumerate(actions)
-        if id(action) in eligible_action_ids
-    ]
-
-
 def _first_number(
     data: Mapping[str, Any],
     *keys: str,
@@ -881,45 +719,6 @@ def _first_number(
             continue
         if isinstance(value, (int, float)):
             return float(value)
-    return None
-
-
-def _player_hp(data: Mapping[str, Any]) -> float | None:
-    direct = _first_number(data, "cur_hp", "current_hp")
-    if direct is not None:
-        return direct
-
-    battle_player = _mapping(data.get("battle_player"))
-    battle_hp = _first_number(battle_player, "current_hp", "cur_hp")
-    if battle_hp is not None:
-        return battle_hp
-
-    player = _mapping(data.get("player"))
-    return _first_number(player, "current_hp", "cur_hp")
-
-
-def _player_max_hp(data: Mapping[str, Any]) -> float | None:
-    direct = _first_number(data, "max_hp", "maxHp")
-    if direct is not None:
-        return direct
-
-    battle_player = _mapping(data.get("battle_player"))
-    battle_max_hp = _first_number(battle_player, "max_hp", "maxHp")
-    if battle_max_hp is not None:
-        return battle_max_hp
-
-    player = _mapping(data.get("player"))
-    return _first_number(player, "max_hp", "maxHp")
-
-
-def _potion_count(data: Mapping[str, Any]) -> float | None:
-    direct = _first_number(data, "battle_potion_count", "potion_count")
-    if direct is not None:
-        return direct
-
-    potions = data.get("battle_potions", data.get("potions"))
-    if isinstance(potions, list):
-        return float(len(potions))
     return None
 
 

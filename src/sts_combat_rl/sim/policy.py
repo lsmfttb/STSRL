@@ -8,11 +8,11 @@ does not implement RL, a trainer, a Gymnasium environment, or game mechanics.
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 import math
 import random
-from typing import Protocol
+from typing import Any, Protocol
 
 from sts_combat_rl.sim.action_space import DEFAULT_PREFERRED_ACTION_KINDS
 from sts_combat_rl.sim.batching import DecisionBatch, DecisionExample
@@ -69,6 +69,18 @@ class DecisionPolicy(Protocol):
 
     name: str
 
+    @property
+    def provenance_config(self) -> Mapping[str, Any]:
+        """Behavior-changing config this policy should publish as provenance.
+
+        A short policy name is not sufficient provenance, so each policy exposes
+        the settings that change its behavior (seed, preferred kinds, scorer
+        identity, ...). The ``OnlineController`` adapters fold this into the
+        controller provenance identity so two policies differing only in seed
+        get different identities. The default for policies that do not override
+        is an empty mapping.
+        """
+
     def select_action(self, context: DecisionContext) -> PolicyDecision:
         """Select one legal-action index for ``context``."""
 
@@ -88,6 +100,10 @@ class FirstEligiblePolicy:
 
     name: str = "first_eligible"
 
+    @property
+    def provenance_config(self) -> Mapping[str, Any]:
+        return {}
+
     def select_action(self, context: DecisionContext) -> PolicyDecision:
         return PolicyDecision(
             legal_action_index=_valid_eligible_indices(context)[0],
@@ -101,6 +117,10 @@ class PreferredKindPolicy:
 
     preferred_kinds: tuple[str, ...] = DEFAULT_PREFERRED_ACTION_KINDS
     name: str = "preferred_kind"
+
+    @property
+    def provenance_config(self) -> Mapping[str, Any]:
+        return {"preferred_kinds": tuple(self.preferred_kinds)}
 
     def select_action(self, context: DecisionContext) -> PolicyDecision:
         eligible_indices = _valid_eligible_indices(context)
@@ -124,6 +144,10 @@ class ReplayChosenPolicy:
 
     name: str = "replay_chosen"
 
+    @property
+    def provenance_config(self) -> Mapping[str, Any]:
+        return {}
+
     def select_action(
         self,
         example: DecisionContext | DecisionExample,
@@ -142,7 +166,12 @@ class RandomEligiblePolicy:
     name = "random_eligible"
 
     def __init__(self, seed: int | None = None) -> None:
+        self._seed = seed
         self._rng = random.Random(seed)
+
+    @property
+    def provenance_config(self) -> Mapping[str, Any]:
+        return {"seed": self._seed}
 
     def select_action(self, context: DecisionContext) -> PolicyDecision:
         return PolicyDecision(
@@ -157,6 +186,10 @@ class ScoredActionPolicy:
 
     scorer: ActionScorer
     name: str = "scored_action"
+
+    @property
+    def provenance_config(self) -> Mapping[str, Any]:
+        return {"scorer": self.scorer.name}
 
     def select_action(self, context: DecisionContext) -> PolicyDecision:
         scores = [float(score) for score in self.scorer.score_actions(context)]

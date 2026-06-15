@@ -16,7 +16,7 @@ from sts_combat_rl.sim.action_space import ActionSpaceConfig
 from sts_combat_rl.sim.contract import SimulatorAdapter
 from sts_combat_rl.sim.policy import DecisionPolicy
 from sts_combat_rl.sim.policy_rollout import collect_policy_simulator_rollout
-from sts_combat_rl.sim.rollout import RolloutBatch
+from sts_combat_rl.sim.controlled_run import ControlledRun
 
 
 @dataclass(frozen=True)
@@ -115,7 +115,7 @@ def run_policy_episode_evaluation(
     )
 
 
-def summarize_rollout_episode(rollout: RolloutBatch) -> EpisodeSummary:
+def summarize_rollout_episode(rollout: ControlledRun) -> EpisodeSummary:
     """Convert one policy rollout into an episode summary."""
 
     initial_raw = _mapping(rollout.initial_raw)

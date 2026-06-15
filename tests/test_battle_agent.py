@@ -2,8 +2,6 @@ from __future__ import annotations
 
 from sts_combat_rl.sim.battle_agent import (
     BATTLE_AGENT_CONTROLLER,
-    BattleAgentRollout,
-    BattleAgentRolloutStep,
     NON_COMBAT_DRIVER_CONTROLLER,
     build_battle_decision_batch,
     build_battle_segment_report,
@@ -23,6 +21,7 @@ from sts_combat_rl.sim.features import (
     lightspeed_battle_feature_size,
     simulator_action_feature_size,
 )
+from sts_combat_rl.sim.controlled_run import ControlledRun, ControlledRunStep
 from sts_combat_rl.sim.policy import (
     PolicyDecision,
     PreferredKindPolicy,
@@ -193,7 +192,7 @@ def test_collect_battle_agent_rollout_separates_battle_and_autopilot() -> None:
     )
     summary = summarize_battle_agent_episode(rollout)
 
-    assert [step.controller for step in rollout.steps] == [
+    assert [step.controller_role for step in rollout.steps] == [
         BATTLE_AGENT_CONTROLLER,
         NON_COMBAT_DRIVER_CONTROLLER,
         BATTLE_AGENT_CONTROLLER,
@@ -472,7 +471,7 @@ def test_reward_labeled_battle_decision_batch_aligns_labels_with_examples() -> N
 
 
 def test_reward_labeled_batch_uses_terminal_step_allocation() -> None:
-    rollout = BattleAgentRollout(
+    rollout = ControlledRun(
         seed=7,
         requested_steps=3,
         steps=[
@@ -482,6 +481,10 @@ def test_reward_labeled_batch_uses_terminal_step_allocation() -> None:
         ],
         terminal=False,
         outcome="UNDECIDED",
+        initial_raw={},
+        final_raw={},
+        controller_provenance={},
+        problems=[],
     )
 
     batch = build_reward_labeled_battle_decision_batch(
@@ -947,10 +950,11 @@ def _battle_rollout_step(
     *,
     player_hp: float,
     next_player_hp: float,
-) -> BattleAgentRolloutStep:
-    return BattleAgentRolloutStep(
+) -> ControlledRunStep:
+    return ControlledRunStep(
         step_index=step_index,
-        controller=BATTLE_AGENT_CONTROLLER,
+        controller_role=BATTLE_AGENT_CONTROLLER,
+        provenance=None,
         screen_state="BATTLE",
         snapshot_features=[1.0, float(step_index)],
         legal_action_features=[[1.0, 0.0], [0.0, 1.0]],
@@ -974,10 +978,11 @@ def _battle_rollout_step(
     )
 
 
-def _non_combat_rollout_step(step_index: int) -> BattleAgentRolloutStep:
-    return BattleAgentRolloutStep(
+def _non_combat_rollout_step(step_index: int) -> ControlledRunStep:
+    return ControlledRunStep(
         step_index=step_index,
-        controller=NON_COMBAT_DRIVER_CONTROLLER,
+        controller_role=NON_COMBAT_DRIVER_CONTROLLER,
+        provenance=None,
         screen_state="REWARDS",
         snapshot_features=[0.0, float(step_index)],
         legal_action_features=[[1.0, 0.0]],

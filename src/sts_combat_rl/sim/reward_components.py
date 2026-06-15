@@ -11,11 +11,11 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from sts_combat_rl.sim.battle_agent import (
-    BattleAgentRollout,
     BattleSegment,
     BattleSegmentReport,
     build_battle_segment_report,
 )
+from sts_combat_rl.sim.controlled_run import ControlledRun
 
 
 BATTLE_REWARD_COMPONENT_NAMES = (
@@ -108,7 +108,7 @@ class BattleRewardComponentReport:
 
 
 def build_battle_reward_component_report(
-    rollouts: list[BattleAgentRollout],
+    rollouts: list[ControlledRun],
 ) -> BattleRewardComponentReport:
     """Summarize raw reward-component candidates without assigning weights."""
 

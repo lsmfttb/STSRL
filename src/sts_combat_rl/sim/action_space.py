@@ -7,7 +7,7 @@ switch to `ActionSpaceConfig.include_all()` and reuse the same adapter surface.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
 from sts_combat_rl.sim.contract import SimulatorAction
@@ -86,3 +86,30 @@ def choose_deterministic_action(
         return actions[0]
 
     raise ValueError("all legal actions are excluded by the action-space config")
+
+
+def eligible_indices(
+    actions: Sequence[SimulatorAction],
+    config: ActionSpaceConfig | None = None,
+) -> list[int]:
+    """Return the positional indices of actions passing the action-space filter.
+
+    This is the single canonical implementation that was previously duplicated
+    in both ``rollout.py`` and ``battle_agent.py``. It uses ``id()`` matching
+    against ``filter_eligible_actions`` to preserve object identity across the
+    original action list.
+    """
+
+    active_config = config or ActionSpaceConfig.initial_no_potions()
+    eligible_action_ids = {
+        id(a) for a in filter_eligible_actions(actions, active_config)
+    }
+    return [
+        index
+        for index, action in enumerate(actions)
+        if id(action) in eligible_action_ids
+    ]
+
+
+ActionChooser = Callable[[list[SimulatorAction], ActionSpaceConfig], SimulatorAction]
+"""Legacy chooser callback: pick one action object given the candidates and config."""
