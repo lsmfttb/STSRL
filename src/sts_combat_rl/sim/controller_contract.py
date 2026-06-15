@@ -19,6 +19,7 @@ import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from types import MappingProxyType
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
@@ -62,6 +63,26 @@ def json_safe_mapping(value: Mapping[str, Any]) -> dict[str, Any]:
     return {str(key): json_safe_value(item) for key, item in value.items()}
 
 
+def _deep_freeze(value: Any) -> Any:
+    """Recursively convert mutable containers to immutable equivalents.
+
+    dict → MappingProxyType, list → tuple. Scalars pass through unchanged.
+    This ensures that ``ControllerProvenance.config`` cannot be mutated after
+    construction, protecting the content-addressed identity.
+    """
+
+    if isinstance(value, MappingProxyType):
+        # Already frozen; recurse into values.
+        return MappingProxyType({k: _deep_freeze(v) for k, v in value.items()})
+    if isinstance(value, Mapping):
+        return MappingProxyType({str(k): _deep_freeze(v) for k, v in value.items()})
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    if isinstance(value, Sequence):
+        return tuple(_deep_freeze(item) for item in value)
+    return value
+
+
 @dataclass(frozen=True)
 class ControllerProvenance:
     """Immutable, serializable record of one controller's behavior-changing config.
@@ -94,13 +115,15 @@ class ControllerProvenance:
         config: Mapping[str, Any] | None = None,
         schema_version: int = CONTROLLER_PROVENANCE_SCHEMA_VERSION,
     ) -> None:
-        # Defensive deep-copy via json_safe_mapping: produces an independent
-        # frozen dict of JSON-safe values, so mutating the caller's original
-        # dict never changes this provenance or its identity after creation.
+        # Defensive deep-copy via json_safe_mapping, then deep-freeze via
+        # _deep_freeze. The stored config is a MappingProxyType of tuples,
+        # so mutating either the caller's original dict or the provenance's
+        # own config never changes the identity after creation.
         safe_config = json_safe_mapping(config) if config is not None else {}
+        frozen_config = _deep_freeze(safe_config)
         object.__setattr__(self, "kind", kind)
         object.__setattr__(self, "name", name)
-        object.__setattr__(self, "config", safe_config)
+        object.__setattr__(self, "config", frozen_config)
         object.__setattr__(self, "schema_version", schema_version)
 
     @property

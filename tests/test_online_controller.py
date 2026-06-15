@@ -51,9 +51,15 @@ from sts_combat_rl.sim.online_controller import (
     is_battle_state,
 )
 from sts_combat_rl.sim.policy import (
+    DecisionContext,
     FirstEligiblePolicy,
     PreferredKindPolicy,
+    RandomEligiblePolicy,
     ScoredActionPolicy,
+)
+from sts_combat_rl.sim.model_scoring import (
+    ActionKindPriorScorer,
+    LinearActionScorer,
 )
 from sts_combat_rl.sim.action_space import ActionSpaceConfig
 
@@ -166,6 +172,24 @@ class TestControllerProvenance:
         # Identity must be unchanged because json_safe_mapping deep-copies.
         assert p.identity == identity_before
 
+    def test_config_is_deep_frozen_cannot_mutate(self) -> None:
+        """Mutating p.config directly does not change identity because config
+        is stored as MappingProxyType with tuple values."""
+        p = ControllerProvenance(
+            kind="k", name="n", config={"nested": {"x": 1}, "items": [1, 2]}
+        )
+        identity_before = p.identity
+        # p.config is a MappingProxyType — assignment raises TypeError
+        with pytest.raises(TypeError):
+            p.config["nested"] = {"x": 2}  # type: ignore[misc]
+        # Nested mapping is also frozen
+        with pytest.raises(TypeError):
+            p.config["nested"]["x"] = 2  # type: ignore[index]
+        # Lists are tuples — no append
+        assert isinstance(p.config["items"], tuple)
+        identity_after = p.identity
+        assert identity_before == identity_after
+
 
 # Need json import for the round-trip test
 import json  # noqa: E402
@@ -238,8 +262,8 @@ class TestPolicyController:
     def test_provenance_merges_policy_config(self) -> None:
         policy = PreferredKindPolicy(preferred_kinds=["card", "skill"])
         ctrl = PolicyController(policy)
-        # json_safe_mapping converts tuples to lists for JSON serializability
-        assert ctrl.provenance.config.get("preferred_kinds") == ["card", "skill"]
+        # _deep_freeze converts lists to tuples for immutability
+        assert ctrl.provenance.config.get("preferred_kinds") == ("card", "skill")
 
     def test_scored_policy_provenance_includes_scorer_config(self) -> None:
         """ScoredActionPolicy provenance must include full scorer config,
@@ -269,9 +293,57 @@ class TestPolicyController:
         # Same scorer name but different weights must produce different identity.
         assert ctrl_a.provenance.name == ctrl_b.provenance.name
         assert ctrl_a.provenance.identity != ctrl_b.provenance.identity
-        # The scorer_config must be present in provenance.
-        assert ctrl_a.provenance.config.get("scorer_config") == {"weights": [1.0, 2.0]}
-        assert ctrl_b.provenance.config.get("scorer_config") == {"weights": [3.0, 4.0]}
+        # The scorer_config must be present in provenance (deep-frozen as
+        # MappingProxyType with tuple values).
+        scorer_config_a = ctrl_a.provenance.config.get("scorer_config")
+        scorer_config_b = ctrl_b.provenance.config.get("scorer_config")
+        assert dict(scorer_config_a) == {"weights": (1.0, 2.0)}
+        assert dict(scorer_config_b) == {"weights": (3.0, 4.0)}
+
+    def test_linear_action_scorer_different_weights_different_identity(self) -> None:
+        """Two LinearActionScorers with different weights must produce
+        different controller identities through ScoredActionPolicy."""
+        scorer_a = LinearActionScorer(action_weights=[1.0, 2.0])
+        scorer_b = LinearActionScorer(action_weights=[3.0, 4.0])
+        policy_a = ScoredActionPolicy(scorer=scorer_a)
+        policy_b = ScoredActionPolicy(scorer=scorer_b)
+        ctrl_a = PolicyController(policy_a)
+        ctrl_b = PolicyController(policy_b)
+        assert ctrl_a.provenance.identity != ctrl_b.provenance.identity
+
+    def test_action_kind_prior_scorer_different_priors_different_identity(self) -> None:
+        """Two ActionKindPriorScorers with different kind_scores must produce
+        different controller identities through ScoredActionPolicy."""
+        scorer_a = ActionKindPriorScorer(kind_scores={"card": 3.0})
+        scorer_b = ActionKindPriorScorer(kind_scores={"card": 9.0})
+        policy_a = ScoredActionPolicy(scorer=scorer_a)
+        policy_b = ScoredActionPolicy(scorer=scorer_b)
+        ctrl_a = PolicyController(policy_a)
+        ctrl_b = PolicyController(policy_b)
+        assert ctrl_a.provenance.identity != ctrl_b.provenance.identity
+
+    def test_random_eligible_policy_rng_fingerprint_changes(self) -> None:
+        """RandomEligiblePolicy provenance changes after each use because the
+        RNG fingerprint advances, preventing identity collision when the same
+        policy object is reused across multiple controlled runs."""
+        policy = RandomEligiblePolicy(seed=42)
+        ctrl_first = PolicyController(policy)
+        identity_first = ctrl_first.provenance.identity
+
+        # Use the policy to advance its RNG
+        ctx = DecisionContext(
+            screen_state="BATTLE",
+            snapshot_features=[0.0],
+            legal_action_features=[[1.0], [2.0]],
+            legal_action_kinds=["card", "end_turn"],
+            eligible_action_indices=[0, 1],
+        )
+        policy.select_action(ctx)
+
+        # New controller from same policy should get different identity
+        ctrl_second = PolicyController(policy)
+        identity_second = ctrl_second.provenance.identity
+        assert identity_first != identity_second
 
 
 # ---------------------------------------------------------------------------
@@ -367,22 +439,27 @@ class TestChooserController:
         ctrl = deterministic_chooser_controller()
         assert ctrl.provenance.reproducible is True
 
-    def test_explicit_reproducible_override(self) -> None:
-        """Caller can explicitly set reproducible=True for a custom chooser."""
+    def test_custom_chooser_cannot_be_marked_reproducible(self) -> None:
+        """Custom choosers cannot be marked reproducible even with explicit
+        name; only the known deterministic chooser is reproducible."""
 
         def custom_chooser(
             actions: list[SimulatorAction], _cfg: ActionSpaceConfig
         ) -> SimulatorAction:
             return actions[0]
 
+        # Even naming it "deterministic_chooser" doesn't make it reproducible
+        # because the function reference is not choose_deterministic_action.
         ctrl = ChooserController(
-            custom_chooser, name="custom_chooser", reproducible=True
+            custom_chooser,
+            action_space=ActionSpaceConfig.initial_no_potions(),
+            name="deterministic_chooser",
         )
-        assert ctrl.provenance.reproducible is True
+        assert ctrl.provenance.reproducible is False
 
     def test_different_custom_choosers_same_name_get_same_identity(self) -> None:
         """Two different closures with the same name get the same provenance
-        identity — this is why custom choosers are non-reproducible."""
+        identity — this is the known limitation flagged as non-reproducible."""
 
         def custom_chooser_a(
             actions: list[SimulatorAction], _cfg: ActionSpaceConfig
@@ -400,6 +477,41 @@ class TestChooserController:
         assert ctrl_a.provenance.identity == ctrl_b.provenance.identity
         assert ctrl_a.provenance.reproducible is False
         assert ctrl_b.provenance.reproducible is False
+
+    def test_chooser_controller_stores_action_space_config(self) -> None:
+        """ChooserController provenance must record the effective action-space
+        config so different action spaces produce different identities."""
+        from sts_combat_rl.sim.action_space import choose_deterministic_action
+
+        no_potions = ActionSpaceConfig.initial_no_potions()
+        include_all = ActionSpaceConfig.include_all()
+
+        ctrl_no_potions = ChooserController(
+            choose_deterministic_action,
+            action_space=no_potions,
+        )
+        ctrl_include_all = ChooserController(
+            choose_deterministic_action,
+            action_space=include_all,
+        )
+        # Different action spaces must produce different identity
+        assert (
+            ctrl_no_potions.provenance.identity != ctrl_include_all.provenance.identity
+        )
+        # Action space config should be in provenance
+        assert "action_space" in ctrl_no_potions.provenance.config
+        assert "action_space" in ctrl_include_all.provenance.config
+
+    def test_deterministic_chooser_controller_preserves_identity(self) -> None:
+        """deterministic_chooser_controller uses choose_deterministic_action
+        directly (not a wrapper closure), so it is reproducible."""
+        from sts_combat_rl.sim.action_space import choose_deterministic_action
+
+        ctrl = deterministic_chooser_controller()
+        assert ctrl.provenance.reproducible is True
+        assert ctrl.provenance.name == "deterministic_chooser"
+        # The chooser reference must be the original function, not a wrapper
+        assert ctrl.chooser is choose_deterministic_action
 
 
 # ---------------------------------------------------------------------------
@@ -847,6 +959,32 @@ class TestNoHiddenDefaults:
                 seed=1,
                 max_steps=10,
             )
+
+
+# ---------------------------------------------------------------------------
+# Package export regression
+# ---------------------------------------------------------------------------
+
+
+class TestPackageExports:
+    def test_build_decision_context_importable_from_sim(self) -> None:
+        """build_decision_context must be importable from sts_combat_rl.sim."""
+        from sts_combat_rl.sim import build_decision_context
+
+        assert callable(build_decision_context)
+
+    def test_build_decision_context_in_all(self) -> None:
+        """build_decision_context must be in sim.__all__."""
+        import sts_combat_rl.sim
+
+        assert "build_decision_context" in sts_combat_rl.sim.__all__
+
+    def test_star_import_includes_build_decision_context(self) -> None:
+        """from sts_combat_rl.sim import * must include build_decision_context."""
+        namespace: dict[str, Any] = {}
+        # Use exec to simulate star import without polluting this module
+        exec("from sts_combat_rl.sim import *", namespace)  # noqa: S102
+        assert "build_decision_context" in namespace
 
 
 # ---------------------------------------------------------------------------

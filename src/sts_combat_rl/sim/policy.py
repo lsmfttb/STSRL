@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+import hashlib
 import math
 import random
 from typing import Any, Protocol
@@ -181,7 +182,13 @@ class RandomEligiblePolicy:
 
     @property
     def provenance_config(self) -> Mapping[str, Any]:
-        return {"seed": self._seed}
+        # Include a fingerprint of the current RNG state so that the same
+        # policy object reused across multiple controlled runs gets a different
+        # provenance identity per run. The full state tuple is large; we hash
+        # it to keep provenance compact.
+        rng_state = self._rng.getstate()
+        rng_fingerprint = hashlib.sha256(str(rng_state).encode("utf-8")).hexdigest()[:8]
+        return {"seed": self._seed, "rng_fingerprint": rng_fingerprint}
 
     def select_action(self, context: DecisionContext) -> PolicyDecision:
         return PolicyDecision(
@@ -199,9 +206,18 @@ class ScoredActionPolicy:
 
     @property
     def provenance_config(self) -> Mapping[str, Any]:
-        scorer_config = getattr(self.scorer, "provenance_config", {})
+        scorer_config = getattr(self.scorer, "provenance_config", None)
+        if scorer_config is None:
+            raise ValueError(
+                f"scorer {self.scorer.name!r} does not expose provenance_config; "
+                "all scorers used in controlled runs must publish their "
+                "behavior-changing settings for reproducible identity"
+            )
         if not isinstance(scorer_config, Mapping):
-            scorer_config = {}
+            raise ValueError(
+                f"scorer {self.scorer.name!r}.provenance_config must be a mapping, "
+                f"got {type(scorer_config).__name__}"
+            )
         return {"scorer_name": self.scorer.name, "scorer_config": dict(scorer_config)}
 
     def select_action(self, context: DecisionContext) -> PolicyDecision:

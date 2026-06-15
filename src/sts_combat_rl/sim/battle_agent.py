@@ -153,6 +153,11 @@ def collect_battle_agent_rollout(
 
     ``autopilot_policy`` must be supplied explicitly. A dataset helper may not
     silently construct a default battle or non-combat controller.
+
+    Each call constructs fresh ``PolicyController`` instances so that each run
+    gets independent provenance. Stateful policies (e.g. ``RandomEligiblePolicy``)
+    publish their starting RNG state in provenance, so the same policy object
+    reused across sweep iterations gets a different identity per run.
     """
 
     if autopilot_policy is None:
@@ -160,6 +165,8 @@ def collect_battle_agent_rollout(
             "autopilot_policy is required; pass an explicit non-combat driver "
             "policy (e.g. PreferredKindPolicy())"
         )
+    # Construct fresh controllers per run so provenance captures current
+    # stateful-policy state (e.g. starting RNG position).
     controller = RoutedRunController(
         battle=PolicyController(battle_policy),
         non_combat=PolicyController(autopilot_policy),

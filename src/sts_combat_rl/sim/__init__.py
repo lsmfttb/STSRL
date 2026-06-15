@@ -54,6 +54,7 @@ from sts_combat_rl.sim.controller_contract import (
 from sts_combat_rl.sim.controlled_run import (
     ControlledRun,
     ControlledRunStep,
+    build_decision_context,
     execute_controlled_run,
     format_controlled_run,
 )

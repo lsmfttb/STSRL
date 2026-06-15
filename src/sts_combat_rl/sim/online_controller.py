@@ -180,40 +180,42 @@ class RoutedRunController:
 class ChooserController:
     """Adapts the legacy action-chooser callback to the controller contract.
 
-    The legacy :func:`collect_simulator_rollout` selected a whole
-    :class:`SimulatorAction` via a chooser (default
-    :func:`choose_deterministic_action`) instead of going through a
-    :class:`DecisionPolicy`. This controller wraps such a callable so the legacy
-    path shares the authoritative executor without changing its behavior.
-
-    Not frozen: the chooser is a runtime callback that is not part of identity,
-    so it is stored mutably. Provenance records the chooser label and is
-    reproducible only when the deterministic chooser is supplied (the default
-    ``deterministic_chooser`` is reproducible). Custom choosers are marked
+    The deterministic chooser (:func:`choose_deterministic_action`) is the only
+    reproducible chooser because it is a known function whose behavior is fully
+    determined by its :class:`ActionSpaceConfig`. Custom chooser callbacks are
     non-reproducible because two different closures with the same name would
     receive identical provenance, violating the behavior-complete identity
-    requirement.
+    requirement. The ``reproducible`` flag cannot be overridden to ``True`` for
+    custom choosers — only the known deterministic chooser is reproducible.
+
+    The effective ``action_space`` is stored at construction so the chooser
+    acts under the same config the executor recorded in
+    ``ControlledRun.action_space_config``.
     """
 
     chooser: ActionChooser
+    action_space: ActionSpaceConfig = field(
+        default_factory=ActionSpaceConfig.initial_no_potions
+    )
     name: str = "deterministic_chooser"
-    reproducible: bool | None = None
     config: Mapping[str, Any] = field(default_factory=dict)
     provenance: ControllerProvenance = field(init=False, default=None)  # type: ignore[assignment]
 
     def __post_init__(self) -> None:
-        # Fail closed: custom (non-deterministic) choosers are non-reproducible
-        # unless the caller explicitly opts in. The deterministic chooser is
-        # reproducible by default because it is a known function.
-        if self.reproducible is None:
-            is_deterministic = self.chooser is choose_deterministic_action
-            effective_reproducible = is_deterministic
-        else:
-            effective_reproducible = bool(self.reproducible)
+        # Only the known deterministic chooser is reproducible.
+        is_deterministic = self.chooser is choose_deterministic_action
+        effective_reproducible = is_deterministic
+
+        # Name must match identity: the deterministic chooser keeps its
+        # canonical name; custom choosers get a different name.
+        effective_name = self.name
+        if is_deterministic and self.name == "custom_chooser":
+            effective_name = "deterministic_chooser"
 
         merged_config: dict[str, Any] = {
-            "chooser": self.name,
+            "chooser": effective_name,
             "reproducible": effective_reproducible,
+            "action_space": self.action_space.to_dict(),
         }
         merged_config.update(self.config)
         if not effective_reproducible:
@@ -223,7 +225,7 @@ class ChooserController:
             "provenance",
             ControllerProvenance(
                 kind="chooser",
-                name=self.name,
+                name=effective_name,
                 config=merged_config,
             ),
         )
@@ -238,7 +240,7 @@ class ChooserController:
     ) -> ControllerDecision:
         del adapter, snapshot, step_index
         action_list = list(actions)
-        selected = self.chooser(action_list, _action_space_from_context(context))
+        selected = self.chooser(action_list, self.action_space)
         try:
             selected_index = action_list.index(selected)
         except ValueError as exc:
@@ -252,25 +254,13 @@ class ChooserController:
         )
 
 
-def deterministic_chooser_controller() -> ChooserController:
+def deterministic_chooser_controller(
+    action_space: ActionSpaceConfig | None = None,
+) -> ChooserController:
     """Build a :class:`ChooserController` over the default deterministic chooser."""
 
     return ChooserController(
         chooser=choose_deterministic_action,
+        action_space=action_space or ActionSpaceConfig.initial_no_potions(),
         name="deterministic_chooser",
     )
-
-
-def _action_space_from_context(context: DecisionContext) -> ActionSpaceConfig:
-    """Recover the action-space config that produced a context's eligible mask.
-
-    The chooser contract wants an :class:`ActionSpaceConfig`, but the controller
-    only sees the precomputed ``context.eligible_action_indices``. We pass the
-    default no-potions config: the chooser only uses ``preferred_kinds`` and the
-    fallback flag for tie-breaking, both of which are identical on the default
-    config, and the executor's own eligibility check already enforces the real
-    filter. This keeps chooser behavior identical to the legacy path.
-    """
-
-    del context
-    return ActionSpaceConfig.initial_no_potions()

@@ -16,7 +16,6 @@ from collections import Counter
 from sts_combat_rl.sim.action_space import (
     ActionChooser,
     ActionSpaceConfig,
-    SimulatorAction,
 )
 from sts_combat_rl.sim.controlled_run import (
     ControlledRun,
@@ -51,19 +50,24 @@ def collect_simulator_rollout(
     active_action_space = action_space or ActionSpaceConfig.initial_no_potions()
 
     # Lazy import to keep the default import path lean.
-    from sts_combat_rl.sim.online_controller import ChooserController
-
-    def chooser_adapter(
-        actions: list[SimulatorAction],
-        _ctx: ActionSpaceConfig,
-    ) -> SimulatorAction:
-        del _ctx
-        return chooser(actions, active_action_space)
-
-    controller = ChooserController(
-        chooser=chooser_adapter,
-        name="custom_chooser",
+    from sts_combat_rl.sim.action_space import choose_deterministic_action
+    from sts_combat_rl.sim.online_controller import (
+        ChooserController,
+        deterministic_chooser_controller,
     )
+
+    if chooser is choose_deterministic_action:
+        # Use the canonical deterministic controller — reproducible identity.
+        controller = deterministic_chooser_controller(
+            action_space=active_action_space,
+        )
+    else:
+        # Custom chooser: wrap in ChooserController (non-reproducible).
+        controller = ChooserController(
+            chooser=chooser,
+            action_space=active_action_space,
+            name="custom_chooser",
+        )
 
     return execute_controlled_run(
         adapter,
