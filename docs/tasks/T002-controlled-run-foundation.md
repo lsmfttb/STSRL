@@ -1,6 +1,6 @@
 # T002: Controlled-Run Foundation
 
-Status: `BLOCKED` by T001.
+Status: `READY`.
 
 ## Objective
 

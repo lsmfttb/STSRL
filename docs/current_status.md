@@ -40,8 +40,7 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
 - `143` tests pass on Windows Python as of this review.
 - The two CommunicationMod fixture smokes pass.
 - `python -m compileall -q src tests` passes.
-- The current `main` quality baseline still has one Ruff unused-import error
-  and 26 files that fail `ruff format --check`.
+- `ruff check src tests` and `ruff format --check src tests` pass.
 
 ## Not Implemented On Main
 
@@ -68,11 +67,11 @@ already supports them.
 Executable task specifications live in [`tasks/`](tasks/README.md). The first
 tasks in dependency order are:
 
-1. [`T001`](tasks/T001-main-quality-baseline.md), currently `READY`: make the
-   existing `main` quality gates pass without changing behavior.
-2. [`T002`](tasks/T002-controlled-run-foundation.md), currently `BLOCKED` by
-   T001: establish explicit online controllers, provenance, and one
-   controlled-run execution path.
+1. [`T002`](tasks/T002-controlled-run-foundation.md), currently `READY`:
+   establish explicit online controllers, provenance, and one controlled-run
+   execution path.
+2. Review the remaining blocked task specifications against the architecture
+   as their prerequisites merge.
 
 Later tasks are dependency-ordered in the task index. A task is not ready for a
 new branch until its status is `READY`.

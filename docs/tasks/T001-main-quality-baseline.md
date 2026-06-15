@@ -1,6 +1,6 @@
 # T001: Main Quality Baseline
 
-Status: `READY`
+Status: `DONE` via PR #1, merged 2026-06-15.
 
 ## Objective
 
