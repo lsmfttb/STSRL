@@ -4,12 +4,20 @@ Status: `IN_REVIEW` in PR #2.
 
 Current review blockers:
 
-- scorer and custom-chooser behavior is not completely represented in
-  provenance;
-- effective action-space configuration is not persisted in run provenance;
-- rollout helpers still construct hidden default controllers;
-- provenance configuration is not deeply immutable;
-- the pull-request report required below is incomplete.
+- production scorer behavior is not completely represented in provenance;
+- chooser controllers do not preserve the effective action-space behavior, and
+  custom callbacks can still be incorrectly marked reproducible;
+- reused stateful seeded policies do not publish their starting runtime state
+  or equivalent sequence provenance;
+- provenance configuration is defensively copied but remains directly mutable;
+- the public simulator-package export for `build_decision_context` is broken.
+
+Resolved during review:
+
+- rollout helpers now reject missing generating controllers instead of
+  constructing hidden defaults;
+- `ControlledRun` records the effective action-space configuration;
+- the pull-request report is complete.
 
 ## Objective
 
