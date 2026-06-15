@@ -91,9 +91,9 @@ The history must be typed and versioned rather than stored only as prose or an
 unstructured action trace. Missing fields remain explicit. Public context is
 sanitized before it reaches normal controllers or model-input packing.
 
-The current implementation carries only part of this target, mainly encounter
-history and visible route context. That limitation belongs in
-`current_status.md`; it does not narrow the architectural target.
+The latest `main` does not yet carry this complete public context. That
+limitation belongs in `current_status.md`; it does not narrow the architectural
+target.
 
 ## Dependency Direction
 
@@ -286,16 +286,19 @@ boundary.
 
 ## Branch Collaboration
 
-The current integration line is `codex/integration-current`.
+`main` is the only integration line. The authoritative workflow is
+[`collaboration_workflow.md`](collaboration_workflow.md).
 
-- Create focused task branches named `codex/<topic>` from the integration line.
-- Give each task branch a clear file or subsystem ownership boundary.
-- The task model commits its work and reports tests, known gaps, and migration
-  or documentation impact.
-- The integration owner reviews the change, runs the required gates, and then
-  merges it into `codex/integration-current`.
-- Do not use a dirty `main` worktree as the base for parallel development.
-- Do not revert or overwrite unrelated changes from other agents or branches.
+- One published task corresponds to one fresh branch and one pull request.
+- Every task branch starts from latest `main`.
+- Parallel tasks use isolated worktrees and never switch branches in a shared
+  worktree.
+- The main maintainer owns project documentation, task publication, review,
+  and merging.
+- Task implementers own only their task branch and report documentation impact
+  rather than rewriting authoritative project documents.
+- Unmerged branches and artifacts are not implemented project capabilities.
+- Do not revert or overwrite unrelated changes from other tasks.
 
 Phase gates verify the actual generating controller and provenance, not only
 the shape of an output artifact.

@@ -4,8 +4,10 @@ This file contains concise, repository-wide rules for coding agents. Read these
 documents before making architectural changes:
 
 1. `docs/current_status.md`
-2. `docs/project_architecture.md`
-3. the relevant active roadmap under `docs/`
+2. the assigned task document under `docs/tasks/`
+3. `docs/collaboration_workflow.md`
+4. `docs/project_architecture.md`
+5. the relevant active roadmap under `docs/`
 
 Historical files under `docs/history/` explain past decisions but are not
 current contracts.
@@ -29,7 +31,7 @@ current contracts.
 - Normal-information controllers, features, labels, and search trees must not
   receive hidden RNG state, unrevealed future encounters, hidden draw order, or
   the hidden Act-3 second Boss.
-- Treat the current native `BattleScumSearcher2` as
+- Any integration of native `BattleScumSearcher2` must treat it as
   `full_simulator_state_oracle_like`, never as a normal-information baseline.
 - Preserve complete player-visible run context as the long-term state target:
   full visible history including events and choices, complete visible map and
@@ -103,7 +105,13 @@ current contracts.
 
 ## Parallel Development
 
-- Use focused branches with an explicit ownership boundary.
+- Implement only a published `READY` task.
+- One task uses one fresh branch and one pull request based on latest `main`.
+- `main` is the only integration line.
+- Use isolated worktrees for parallel tasks; never switch branches in a shared
+  worktree.
+- Project-level documentation and task specifications are owned by the main
+  maintainer. Report documentation impact in the pull request.
 - Do not revert or overwrite changes from other branches or agents.
 - Before merging, review behavior, provenance, artifact compatibility, tests,
   and documentation impact.
@@ -124,6 +132,6 @@ python -m sts_combat_rl.cli --mock tests/fixtures/non_combat.json
 Real simulator gates:
 
 ```powershell
-wsl.exe -d Ubuntu -e bash -lc "cd /mnt/d/DeadlycatCoding/STSRL && PYTHONPATH=/home/lsmft/stsrl-spikes/sts_lightspeed/build-py:/mnt/d/DeadlycatCoding/STSRL/src python3 -m sts_combat_rl.cli --lightspeed-battle-checkpoint-smoke --sim-seed 1 --sim-ascension 20 --sim-steps 200 --checkpoint-replay-steps 200 --log-file -"
-wsl.exe -d Ubuntu -e bash -lc "cd /mnt/d/DeadlycatCoding/STSRL && PYTHONPATH=/home/lsmft/stsrl-spikes/sts_lightspeed/build-py:/mnt/d/DeadlycatCoding/STSRL/src python3 -m sts_combat_rl.cli --lightspeed-battle-start-pool-restore-smoke POOL.jsonl --sim-ascension 20 --pool-restore-limit 0 --log-file -"
+wsl.exe -d Ubuntu -e bash -lc "cd /mnt/d/DeadlycatCoding/STSRL && PYTHONPATH=/home/lsmft/stsrl-spikes/sts_lightspeed/build-py:/mnt/d/DeadlycatCoding/STSRL/src python3 -m sts_combat_rl.cli --lightspeed-smoke --sim-seed 1 --sim-ascension 20 --sim-steps 200 --log-file -"
+wsl.exe -d Ubuntu -e bash -lc "cd /mnt/d/DeadlycatCoding/STSRL && PYTHONPATH=/home/lsmft/stsrl-spikes/sts_lightspeed/build-py:/mnt/d/DeadlycatCoding/STSRL/src python3 -m sts_combat_rl.cli --lightspeed-battle-training-readiness --sim-seed 1 --sim-episodes 3 --sim-ascension 20 --sim-steps 200 --log-file -"
 ```

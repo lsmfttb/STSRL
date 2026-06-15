@@ -31,8 +31,16 @@ When documents disagree, use this order:
 
 - [`current_status.md`](current_status.md): concise state of implementation and
   immediate work.
+- [`tasks/README.md`](tasks/README.md): executable task backlog, dependencies,
+  and readiness.
 - [`experiment_log.md`](experiment_log.md): curated dated results. Results
   explain evidence; they do not create architectural rules.
+
+### Collaboration
+
+- [`collaboration_workflow.md`](collaboration_workflow.md): authoritative
+  roles, one-task-one-branch workflow, task specification contract, review, and
+  merge process.
 
 ### Active Roadmaps
 
@@ -69,8 +77,7 @@ When documents disagree, use this order:
 
 ## Branch Workflow
 
-The current integration line is `codex/integration-current`. Concrete tasks use
-short-lived `codex/<topic>` branches with explicit ownership boundaries. The
-task model commits and reports its work; the integration owner reviews it,
-runs the required gates, and merges it. Do not use a dirty `main` worktree as a
-shared parallel-development base.
+`main` is the only integration line. Concrete work begins only from a `READY`
+task under `tasks/`, and each task receives one fresh branch and one pull
+request based on latest `main`. See `collaboration_workflow.md`; do not infer
+workflow from old branch names or historical documents.

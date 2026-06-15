@@ -4,6 +4,11 @@ This file preserves concise, dated evidence that still informs current work.
 It is not an architectural contract and does not define current defaults.
 Artifact paths and command options may age; verify them before reuse.
 
+Most entries below were produced by experimental work preserved in legacy
+commit `d56e10e` and local artifacts. They are research evidence, not proof that
+the corresponding command or capability exists on the latest `main`. Current
+implementation truth is recorded only in [`current_status.md`](current_status.md).
+
 ## 2026-06-15: Public Run Context
 
 - A rebuilt WSL A20 collection produced a current pool with 18

@@ -239,28 +239,28 @@ only on normal-information evaluation.
 
 ### Phase A: Checkpoint And Replay
 
-Status: complete.
+Status: pending [`T004`](tasks/T004-battle-start-checkpoint-pool.md).
 
 Exit gate: repeated restores reproduce snapshots, legal actions, transitions,
 and terminal results without local mechanics reconstruction.
 
 ### Phase B: Natural Pools And Provenance
 
-Status: infrastructure complete; coverage expansion continues.
+Status: pending T003, T004, and T010.
 
 Exit gate: current-schema natural checkpoints restore, carry complete controller
 provenance, and report structural coverage and migration loss honestly.
 
 ### Phase C: Fixed Structural Evaluation
 
-Status: infrastructure complete; Boss and later-act A20 coverage remain weak.
+Status: pending [`T005`](tasks/T005-fixed-battle-evaluation.md).
 
 Exit gate: search changes can be compared on deterministic structural cohorts
 without relying on full-run average floor.
 
 ### Phase D: Coverage And Stratified Search Data
 
-Status: active.
+Status: planned after Phases A-C. Relevant tasks include T007 and T008.
 
 Work:
 

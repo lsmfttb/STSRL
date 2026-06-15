@@ -26,7 +26,8 @@ Keep these controllers and artifacts separate:
 
 - `normal_public_policy`: policy/value model from public state and history;
 - `normal_belief_search`: search across public-consistent hidden futures;
-- `full_simulator_state_oracle_like`: current native hidden-state search;
+- `full_simulator_state_oracle_like`: planned integration of native hidden-state
+  search;
 - `sl_attempt_budgeted`: restart-enabled agent with a named attempt budget.
 
 Oracle actions are not direct normal-agent labels. An action optimal for one
@@ -208,21 +209,16 @@ targets. Normal-agent promotion uses only normal-information evaluation.
 
 ### N0: Public Contracts And Firewall
 
-Status: partial.
+Status: pending T003, T006, T007, T011, and T012.
 
-Implemented:
+Required work:
 
 - explicit Oracle-like provenance for native hidden-state search;
 - sanitized public controller boundary;
 - structured terminal resource outcome contract;
-- visible Boss, encounter history, and route context preservation;
-- tests against known hidden-field leakage.
-
-Remaining:
-
 - complete typed player-visible run history;
 - relic-counter visibility audit;
-- stronger end-to-end firewall for future belief search;
+- end-to-end hidden-field firewall;
 - structured history/map model encoder.
 
 Exit gate: complete public trajectories and terminal resources survive
@@ -230,7 +226,8 @@ collection/export/reload without hidden fields.
 
 ### N1: Honest Public Policy/Value Baseline
 
-Status: model plumbing exists; credible broad data and evaluation do not.
+Status: pending [`T009`](tasks/T009-pytorch-search-guidance.md) and sufficient
+data/evaluation coverage.
 
 Exit gate: a reproducible normal-information baseline reports per-component
 errors and fixed-cohort performance from sufficient A20 coverage.
