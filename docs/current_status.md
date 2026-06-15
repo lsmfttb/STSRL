@@ -67,9 +67,9 @@ already supports them.
 Executable task specifications live in [`tasks/`](tasks/README.md). The first
 tasks in dependency order are:
 
-1. [`T002`](tasks/T002-controlled-run-foundation.md), currently `READY`:
-   establish explicit online controllers, provenance, and one controlled-run
-   execution path.
+1. [`T002`](tasks/T002-controlled-run-foundation.md), currently `IN_REVIEW`:
+   resolve the documented provenance, hidden-default-controller, immutability,
+   and PR-report blockers.
 2. Review the remaining blocked task specifications against the architecture
    as their prerequisites merge.
 

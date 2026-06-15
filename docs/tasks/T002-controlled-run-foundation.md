@@ -1,6 +1,15 @@
 # T002: Controlled-Run Foundation
 
-Status: `READY`.
+Status: `IN_REVIEW` in PR #2.
+
+Current review blockers:
+
+- scorer and custom-chooser behavior is not completely represented in
+  provenance;
+- effective action-space configuration is not persisted in run provenance;
+- rollout helpers still construct hidden default controllers;
+- provenance configuration is not deeply immutable;
+- the pull-request report required below is incomplete.
 
 ## Objective
 
