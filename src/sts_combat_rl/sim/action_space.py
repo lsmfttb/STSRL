@@ -60,11 +60,7 @@ def filter_eligible_actions(
     config: ActionSpaceConfig | None = None,
 ) -> list[SimulatorAction]:
     active_config = config or ActionSpaceConfig.initial_no_potions()
-    return [
-        action
-        for action in actions
-        if action_is_eligible(action, active_config)
-    ]
+    return [action for action in actions if action_is_eligible(action, active_config)]
 
 
 def choose_deterministic_action(

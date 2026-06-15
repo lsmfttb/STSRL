@@ -209,7 +209,9 @@ def _validate_example(
     problems: list[str],
 ) -> None:
     if example.screen_state != "BATTLE":
-        problems.append(f"example {index}: expected BATTLE screen, got {example.screen_state}")
+        problems.append(
+            f"example {index}: expected BATTLE screen, got {example.screen_state}"
+        )
     if not example.snapshot_features:
         problems.append(f"example {index}: empty snapshot features")
     if (
@@ -245,7 +247,9 @@ def _validate_example(
         )
     if not example.eligible_action_indices:
         problems.append(f"example {index}: empty eligible action indices")
-    if len(set(example.eligible_action_indices)) != len(example.eligible_action_indices):
+    if len(set(example.eligible_action_indices)) != len(
+        example.eligible_action_indices
+    ):
         problems.append(f"example {index}: duplicate eligible action indices")
     for eligible_index in example.eligible_action_indices:
         if eligible_index < 0 or eligible_index >= legal_count:
@@ -297,8 +301,7 @@ def _validate_label(
             )
     elif not _close(label.step_reward, 0.0):
         problems.append(
-            f"label {index}: non-final step reward {label.step_reward:.6f} "
-            "is not zero"
+            f"label {index}: non-final step reward {label.step_reward:.6f} is not zero"
         )
     if not _close(label.return_to_go, label.segment_reward):
         problems.append(
@@ -340,7 +343,9 @@ def _validate_example_label_alignment(
         problems.append(
             f"example/label {index}: terminal segment end without terminal step flag"
         )
-    if example.terminal_after_step and not label.segment_end_reason.startswith("terminal_"):
+    if example.terminal_after_step and not label.segment_end_reason.startswith(
+        "terminal_"
+    ):
         problems.append(
             f"example/label {index}: terminal step flag on non-terminal segment end"
         )

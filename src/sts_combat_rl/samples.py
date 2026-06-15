@@ -102,7 +102,9 @@ def analyze_sample_file(
 
             if not isinstance(raw, dict):
                 analysis.non_object_json += 1
-                _add_problem(analysis, max_problems, line_number, "JSON value is not an object")
+                _add_problem(
+                    analysis, max_problems, line_number, "JSON value is not an object"
+                )
                 continue
 
             analysis.json_objects += 1
@@ -110,7 +112,9 @@ def analyze_sample_file(
                 analysis.communication_errors += 1
                 error_message = _stringify(raw.get("error"))
                 analysis.communication_error_counts[error_message] += 1
-                analysis.command_counts[format_command(Command.state("sample error"))] += 1
+                analysis.command_counts[
+                    format_command(Command.state("sample error"))
+                ] += 1
                 _add_problem(
                     analysis,
                     max_problems,
@@ -140,7 +144,11 @@ def analyze_sample_file(
             analysis.command_counts[format_command(command)] += 1
             analysis.screen_counts[state.screen_type or "(none)"] += 1
             analysis.action_phase_counts[state.action_phase or "(none)"] += 1
-            available = ", ".join(state.available_commands) if state.available_commands else "(none)"
+            available = (
+                ", ".join(state.available_commands)
+                if state.available_commands
+                else "(none)"
+            )
             analysis.available_command_counts[available] += 1
             _count_state_coverage(analysis, raw, state)
 
@@ -235,23 +243,33 @@ def format_sample_analysis(analysis: SampleAnalysis) -> str:
     _append_counter(lines, "event ids", analysis.event_id_counts)
     _append_counter(lines, "game over victory flags", analysis.game_over_victory_counts)
     _append_counter(lines, "rest options", analysis.rest_option_counts)
-    _append_counter(lines, "available command verbs", analysis.available_command_verb_counts)
+    _append_counter(
+        lines, "available command verbs", analysis.available_command_verb_counts
+    )
     _append_counter(lines, "available command sets", analysis.available_command_counts)
     _append_counter(lines, "choice counts", analysis.choice_count_counts)
     _append_counter(lines, "choice labels", analysis.choice_label_counts)
-    _append_counter(lines, "map next node symbols", analysis.map_next_node_symbol_counts)
+    _append_counter(
+        lines, "map next node symbols", analysis.map_next_node_symbol_counts
+    )
     _append_counter(lines, "monster counts", analysis.monster_count_counts)
     _append_counter(lines, "monster names", analysis.monster_name_counts)
     _append_counter(lines, "monster intents", analysis.monster_intent_counts)
     _append_counter(lines, "hand card types", analysis.card_type_counts)
     _append_counter(lines, "hand card ids", analysis.hand_card_id_counts)
     _append_counter(lines, "playable card types", analysis.playable_card_type_counts)
-    _append_counter(lines, "playable card target flags", analysis.playable_card_target_counts)
+    _append_counter(
+        lines, "playable card target flags", analysis.playable_card_target_counts
+    )
     _append_counter(lines, "potion counts", analysis.potion_count_counts)
     _append_counter(lines, "potion ids", analysis.potion_id_counts)
     _append_counter(lines, "potion can_use flags", analysis.potion_can_use_counts)
-    _append_counter(lines, "potion requires_target flags", analysis.potion_requires_target_counts)
-    _append_counter(lines, "potion can_discard flags", analysis.potion_can_discard_counts)
+    _append_counter(
+        lines, "potion requires_target flags", analysis.potion_requires_target_counts
+    )
+    _append_counter(
+        lines, "potion can_discard flags", analysis.potion_can_discard_counts
+    )
 
     lines.append("sample requests:")
     requests = sample_request_hints(analysis)
@@ -313,8 +331,7 @@ def sample_request_hints(analysis: SampleAnalysis) -> list[str]:
     missing_classes = sorted(SUPPORTED_CLASSES - seen_classes)
     if missing_classes:
         requests.append(
-            "capture supported character states: "
-            + ", ".join(missing_classes)
+            "capture supported character states: " + ", ".join(missing_classes)
         )
 
     if not _has_numeric_key_at_least(analysis.act_counts, 2):
@@ -347,7 +364,9 @@ def _count_state_coverage(
     raw: dict[str, Any],
     state: Any,
 ) -> None:
-    game_raw = _mapping_value(raw, "game_state") or _mapping_value(raw, "gameState") or raw
+    game_raw = (
+        _mapping_value(raw, "game_state") or _mapping_value(raw, "gameState") or raw
+    )
     combat_raw = _mapping_value(game_raw, "combat_state") or _mapping_value(
         game_raw,
         "combatState",
@@ -388,7 +407,9 @@ def _count_state_coverage(
         if "event_id" in screen_state_raw:
             _count_scalar(analysis.event_id_counts, screen_state_raw.get("event_id"))
         if "victory" in screen_state_raw:
-            _count_bool(analysis.game_over_victory_counts, screen_state_raw.get("victory"))
+            _count_bool(
+                analysis.game_over_victory_counts, screen_state_raw.get("victory")
+            )
 
         for node in _sequence_value(screen_state_raw, "next_nodes") or []:
             if isinstance(node, Mapping):
@@ -414,7 +435,9 @@ def _count_state_coverage(
         if card.playable:
             analysis.playable_card_type_counts[card_type] += 1
             target_flag = _bool_label(card.has_target)
-            analysis.playable_card_target_counts[f"{card_type} has_target={target_flag}"] += 1
+            analysis.playable_card_target_counts[
+                f"{card_type} has_target={target_flag}"
+            ] += 1
 
     potions = _sequence_value(game_raw, "potions")
     if potions is not None:
@@ -422,9 +445,13 @@ def _count_state_coverage(
         for potion in potions:
             if not isinstance(potion, Mapping):
                 continue
-            _count_scalar(analysis.potion_id_counts, potion.get("id") or potion.get("name"))
+            _count_scalar(
+                analysis.potion_id_counts, potion.get("id") or potion.get("name")
+            )
             _count_bool(analysis.potion_can_use_counts, potion.get("can_use"))
-            _count_bool(analysis.potion_requires_target_counts, potion.get("requires_target"))
+            _count_bool(
+                analysis.potion_requires_target_counts, potion.get("requires_target")
+            )
             _count_bool(analysis.potion_can_discard_counts, potion.get("can_discard"))
 
 

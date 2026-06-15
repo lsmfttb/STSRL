@@ -114,8 +114,7 @@ def build_battle_reward_component_report(
 
     segment_report = build_battle_segment_report(rollouts)
     builders = {
-        name: _RewardComponentStatsBuilder()
-        for name in BATTLE_REWARD_COMPONENT_NAMES
+        name: _RewardComponentStatsBuilder() for name in BATTLE_REWARD_COMPONENT_NAMES
     }
     highlights: list[BattleRewardSegmentHighlight] = []
     highlight_counts: Counter[str] = Counter()
@@ -127,9 +126,7 @@ def build_battle_reward_component_report(
         builders["terminal_victory"].add(
             _indicator(segment.end_reason == "terminal_victory")
         )
-        builders["terminal_loss"].add(
-            _indicator(segment.end_reason == "terminal_loss")
-        )
+        builders["terminal_loss"].add(_indicator(segment.end_reason == "terminal_loss"))
         builders["truncated"].add(_indicator(segment.end_reason == "truncated"))
         builders["decision_count"].add(float(segment.decision_count))
         builders["hp_delta"].add(segment.hp_delta)
@@ -320,7 +317,9 @@ def _segment_highlight_tags(segment: BattleSegment) -> tuple[str, ...]:
     return tuple(tags)
 
 
-def _highlight_sort_key(highlight: BattleRewardSegmentHighlight) -> tuple[int, int, int]:
+def _highlight_sort_key(
+    highlight: BattleRewardSegmentHighlight,
+) -> tuple[int, int, int]:
     priority = min(
         (_HIGHLIGHT_PRIORITY.get(tag, 99) for tag in highlight.tags),
         default=99,

@@ -126,7 +126,9 @@ def encode_communicationmod_battle_snapshot(raw: Mapping[str, Any]) -> list[floa
     )
 
 
-def normalize_communicationmod_battle_snapshot(raw: Mapping[str, Any]) -> dict[str, Any]:
+def normalize_communicationmod_battle_snapshot(
+    raw: Mapping[str, Any],
+) -> dict[str, Any]:
     """Map live CommunicationMod combat fields into the patched simulator shape."""
 
     game = _mapping(raw.get("game_state")) or _mapping(raw.get("gameState")) or raw
@@ -151,10 +153,14 @@ def normalize_communicationmod_battle_snapshot(raw: Mapping[str, Any]) -> dict[s
         "battle_exhaust_pile_size": len(_sequence(combat.get("exhaust_pile"))),
         "battle_monster_count": len(monsters),
         "battle_monsters_alive": sum(
-            1 for monster in monsters if _communicationmod_monster_alive(_mapping(monster))
+            1
+            for monster in monsters
+            if _communicationmod_monster_alive(_mapping(monster))
         ),
         "battle_potion_count": sum(
-            1 for potion in potions if _communicationmod_potion_present(_mapping(potion))
+            1
+            for potion in potions
+            if _communicationmod_potion_present(_mapping(potion))
         ),
         "battle_potion_capacity": len(potions),
         "battle_hand": [
@@ -165,8 +171,7 @@ def normalize_communicationmod_battle_snapshot(raw: Mapping[str, Any]) -> dict[s
             for monster in monsters
         ],
         "battle_potions": [
-            _normalize_communicationmod_potion(_mapping(potion))
-            for potion in potions
+            _normalize_communicationmod_potion(_mapping(potion)) for potion in potions
         ],
     }
 
@@ -209,9 +214,7 @@ def simulator_action_feature_size() -> int:
     """Return the stable feature length for `encode_simulator_action`."""
 
     return len(
-        encode_simulator_action(
-            SimulatorAction(action_id="empty", label="", raw={})
-        )
+        encode_simulator_action(SimulatorAction(action_id="empty", label="", raw={}))
     )
 
 

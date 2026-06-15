@@ -31,11 +31,7 @@ def test_stdio_client_can_capture_raw_json_lines(tmp_path: Path) -> None:
         logger=logging.getLogger("test_stdio_client_capture"),
         sample_capture_file=capture_file,
     )
-    input_stream = io.StringIO(
-        '  {"screen_type":"EVENT"}  \n'
-        "\n"
-        "{not valid json}\n"
-    )
+    input_stream = io.StringIO('  {"screen_type":"EVENT"}  \n\n{not valid json}\n')
     output_stream = io.StringIO()
 
     client.run(input_stream, output_stream)

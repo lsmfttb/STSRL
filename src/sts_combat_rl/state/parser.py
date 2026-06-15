@@ -30,12 +30,20 @@ def parse_game_state(raw: dict[str, Any]) -> GameState:
     player_raw = _first_mapping(state_raw, ("player", "player_state", "playerState"))
     player = _parse_player(player_raw, state_raw) if player_raw is not None else None
 
-    hand_items = _first_sequence(state_raw, ("hand", "cards", "hand_cards", "handCards"))
+    hand_items = _first_sequence(
+        state_raw, ("hand", "cards", "hand_cards", "handCards")
+    )
     hand = [_parse_card(item) for item in hand_items if isinstance(item, Mapping)]
 
-    monster_items = _first_sequence(state_raw, ("monsters", "monster_list", "monsterList"))
-    monsters = [_parse_monster(item) for item in monster_items if isinstance(item, Mapping)]
-    available_commands = _first_str_sequence(raw, ("available_commands", "availableCommands"))
+    monster_items = _first_sequence(
+        state_raw, ("monsters", "monster_list", "monsterList")
+    )
+    monsters = [
+        _parse_monster(item) for item in monster_items if isinstance(item, Mapping)
+    ]
+    available_commands = _first_str_sequence(
+        raw, ("available_commands", "availableCommands")
+    )
 
     return GameState(
         in_combat=in_combat,
@@ -60,7 +68,9 @@ def _parse_player(player_raw: Mapping[str, Any], root_raw: Mapping[str, Any]) ->
         energy = _first_int(root_raw, ("energy", "energy_current", "current_energy"))
 
     return Player(
-        current_hp=_first_int(player_raw, ("current_hp", "currentHp", "hp", "current_health")),
+        current_hp=_first_int(
+            player_raw, ("current_hp", "currentHp", "hp", "current_health")
+        ),
         max_hp=_first_int(player_raw, ("max_hp", "maxHp", "max_health")),
         block=_first_int(player_raw, ("block", "current_block"), default=0) or 0,
         energy=energy,
@@ -81,7 +91,9 @@ def _parse_card(card_raw: Mapping[str, Any]) -> Card:
             ("playable", "is_playable", "isPlayable", "can_play", "canPlay"),
             default=False,
         ),
-        has_target=_first_bool(card_raw, ("has_target", "hasTarget", "requires_target")),
+        has_target=_first_bool(
+            card_raw, ("has_target", "hasTarget", "requires_target")
+        ),
         raw=dict(card_raw),
     )
 
@@ -94,7 +106,8 @@ def _parse_monster(monster_raw: Mapping[str, Any]) -> Monster:
     alive = _parse_alive(monster_raw, current_hp)
 
     return Monster(
-        name=_first_str(monster_raw, ("name", "monster_name", "monsterName")) or "Unknown Monster",
+        name=_first_str(monster_raw, ("name", "monster_name", "monsterName"))
+        or "Unknown Monster",
         monster_id=_first_str(monster_raw, ("monster_id", "monsterId", "id", "uuid")),
         current_hp=current_hp,
         max_hp=_first_int(monster_raw, ("max_hp", "maxHp", "max_health")),
@@ -128,7 +141,9 @@ def _parse_in_combat(
 
 
 def _parse_upgraded(card_raw: Mapping[str, Any]) -> bool:
-    explicit = _first_bool(card_raw, ("upgraded", "is_upgraded", "isUpgraded"), default=None)
+    explicit = _first_bool(
+        card_raw, ("upgraded", "is_upgraded", "isUpgraded"), default=None
+    )
     if explicit is not None:
         return explicit
 
@@ -154,7 +169,9 @@ def _parse_alive(monster_raw: Mapping[str, Any], current_hp: int | None) -> bool
     return True
 
 
-def _first_mapping(data: Mapping[str, Any], keys: Sequence[str]) -> Mapping[str, Any] | None:
+def _first_mapping(
+    data: Mapping[str, Any], keys: Sequence[str]
+) -> Mapping[str, Any] | None:
     for key in keys:
         value = data.get(key)
         if isinstance(value, Mapping):

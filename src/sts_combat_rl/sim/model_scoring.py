@@ -248,7 +248,9 @@ def _score_shape_problems(
         return problems
     for action_row, score in enumerate(scores):
         if not math.isfinite(score):
-            problems.append(f"score for action row {action_row} is not finite: {score!r}")
+            problems.append(
+                f"score for action row {action_row} is not finite: {score!r}"
+            )
     return problems
 
 

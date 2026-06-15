@@ -109,7 +109,9 @@ class FakeBattleAgentAdapter:
             self.phase = "loss"
             terminal = True
 
-        return SimulatorTransition(snapshot=self._snapshot(), terminal=terminal, info={})
+        return SimulatorTransition(
+            snapshot=self._snapshot(), terminal=terminal, info={}
+        )
 
     def _snapshot(self) -> SimulatorSnapshot:
         if self.phase.startswith("battle"):
@@ -204,12 +206,16 @@ def test_collect_battle_agent_rollout_separates_battle_and_autopilot() -> None:
     assert summary.battle_action_kind_counts["card"] == 2
     assert summary.autopilot_action_kind_counts["reward_gold"] == 1
     assert summary.final_floor == 2.0
-    assert summary.battle_snapshot_feature_size_counts[
-        str(lightspeed_battle_feature_size())
-    ] == 2
-    assert summary.battle_action_feature_size_counts[
-        str(simulator_action_feature_size())
-    ] == 4
+    assert (
+        summary.battle_snapshot_feature_size_counts[
+            str(lightspeed_battle_feature_size())
+        ]
+        == 2
+    )
+    assert (
+        summary.battle_action_feature_size_counts[str(simulator_action_feature_size())]
+        == 4
+    )
     assert summary.problems == []
 
 
@@ -222,7 +228,10 @@ def test_collect_battle_agent_rollout_reports_battle_policy_errors() -> None:
     )
 
     assert rollout.steps == []
-    assert "battle_agent selected action index 8 outside 2 legal actions" in rollout.problems[0]
+    assert (
+        "battle_agent selected action index 8 outside 2 legal actions"
+        in rollout.problems[0]
+    )
 
 
 def test_run_battle_agent_sweep_aggregates_battle_only_counts() -> None:
@@ -356,7 +365,9 @@ def test_build_battle_reward_component_report_keeps_raw_components_unweighted() 
     assert "future signal gaps:" in text
 
 
-def test_build_battle_reward_design_report_scores_v0_without_long_term_weights() -> None:
+def test_build_battle_reward_design_report_scores_v0_without_long_term_weights() -> (
+    None
+):
     rollouts = [
         collect_battle_agent_rollout(
             FakeBattleAgentAdapter(),
@@ -387,10 +398,14 @@ def test_build_battle_reward_design_report_scores_v0_without_long_term_weights()
     assert "Battle reward design draft summary" in text
     assert "reward preset: battle-v0" in text
     assert "long-term ledger totals:" in text
-    assert "Long-term resource deltas are ledgered but have zero default weight." in text
+    assert (
+        "Long-term resource deltas are ledgered but have zero default weight." in text
+    )
 
 
-def test_battle_reward_design_can_enable_long_term_weights_without_shape_change() -> None:
+def test_battle_reward_design_can_enable_long_term_weights_without_shape_change() -> (
+    None
+):
     rollouts = [
         collect_battle_agent_rollout(
             FakeBattleAgentAdapter(),
@@ -438,7 +453,18 @@ def test_reward_labeled_battle_decision_batch_aligns_labels_with_examples() -> N
     assert [label.segment_index for label in batch.reward_labels] == [0, 1]
     assert all(label.is_segment_final_step for label in batch.reward_labels)
     assert round(sum(label.step_reward for label in batch.reward_labels), 3) == -0.802
-    assert round(sum({label.segment_index: label.segment_reward for label in batch.reward_labels}.values()), 3) == -0.802
+    assert (
+        round(
+            sum(
+                {
+                    label.segment_index: label.segment_reward
+                    for label in batch.reward_labels
+                }.values()
+            ),
+            3,
+        )
+        == -0.802
+    )
     assert batch.reward_labels[0].raw_reward_components["gold_delta"] == -2.0
     assert "Reward-labeled battle decision batch summary" in text
     assert "labels aligned: yes" in text
@@ -539,7 +565,9 @@ def test_trainer_input_contract_reports_label_alignment_problems() -> None:
 
     assert report.contract_ok is False
     assert report.labels_aligned is False
-    assert any("example/label length mismatch" in problem for problem in report.problems)
+    assert any(
+        "example/label length mismatch" in problem for problem in report.problems
+    )
     assert any("final-step label count" in problem for problem in report.problems)
 
 
@@ -605,7 +633,10 @@ def test_trainer_input_dataset_smoke_report_checks_jsonl_round_trip() -> None:
     assert report.problems == []
     assert "Trainer input dataset smoke summary" in text
     assert "JSONL round trip ok: yes" in text
-    assert "scope: dataset packaging only; no trainer, environment, or RL algorithm" in text
+    assert (
+        "scope: dataset packaging only; no trainer, environment, or RL algorithm"
+        in text
+    )
 
 
 def test_model_input_batch_packs_variable_action_rows_for_scorer_context() -> None:
@@ -677,7 +708,10 @@ def test_model_input_batch_smoke_report_checks_rebuilt_contexts() -> None:
     assert "Model input batch smoke summary" in text
     assert "model input ok: yes" in text
     assert "context rebuild ok: yes" in text
-    assert "scope: model input packaging only; no trainer, environment, or RL algorithm" in text
+    assert (
+        "scope: model input packaging only; no trainer, environment, or RL algorithm"
+        in text
+    )
 
 
 def test_model_score_smoke_selects_eligible_argmax_action_rows() -> None:

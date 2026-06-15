@@ -80,9 +80,13 @@ class LightSpeedAdapter:
             info={"action_id": action.action_id, "action_kind": action.kind},
         )
 
-    def _snapshot(self, raw_snapshot: dict[str, Any] | None = None) -> SimulatorSnapshot:
+    def _snapshot(
+        self, raw_snapshot: dict[str, Any] | None = None
+    ) -> SimulatorSnapshot:
         raw = dict(self._sim.snapshot()) if raw_snapshot is None else raw_snapshot
-        observation = [_to_observation_value(value) for value in self._sim.observation()]
+        observation = [
+            _to_observation_value(value) for value in self._sim.observation()
+        ]
         return SimulatorSnapshot(observation=observation, raw=raw)
 
     def _character_class(self) -> Any:

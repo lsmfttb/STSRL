@@ -19,7 +19,11 @@ from sts_combat_rl.sim.features import (
     encode_lightspeed_battle_snapshot,
     encode_simulator_actions,
 )
-from sts_combat_rl.sim.policy import DecisionContext, DecisionPolicy, PreferredKindPolicy
+from sts_combat_rl.sim.policy import (
+    DecisionContext,
+    DecisionPolicy,
+    PreferredKindPolicy,
+)
 
 
 BATTLE_AGENT_CONTROLLER = "battle_agent"
@@ -203,7 +207,9 @@ def collect_battle_agent_rollout(
             if _is_battle_state(snapshot.raw, context.screen_state)
             else NON_COMBAT_DRIVER_CONTROLLER
         )
-        policy = battle_policy if controller == BATTLE_AGENT_CONTROLLER else active_autopilot
+        policy = (
+            battle_policy if controller == BATTLE_AGENT_CONTROLLER else active_autopilot
+        )
 
         try:
             selected_index = policy.select_action(context).legal_action_index
@@ -315,14 +321,18 @@ def run_battle_agent_sweep(
         final_floor_counts[_optional_number_label(summary.final_floor)] += 1
         battle_action_kind_counts.update(summary.battle_action_kind_counts)
         autopilot_action_kind_counts.update(summary.autopilot_action_kind_counts)
-        battle_legal_action_count_counts.update(summary.battle_legal_action_count_counts)
+        battle_legal_action_count_counts.update(
+            summary.battle_legal_action_count_counts
+        )
         battle_eligible_action_count_counts.update(
             summary.battle_eligible_action_count_counts
         )
         battle_snapshot_feature_size_counts.update(
             summary.battle_snapshot_feature_size_counts
         )
-        battle_action_feature_size_counts.update(summary.battle_action_feature_size_counts)
+        battle_action_feature_size_counts.update(
+            summary.battle_action_feature_size_counts
+        )
         if summary.terminal:
             terminal_episodes += 1
         problems.extend(
@@ -634,9 +644,7 @@ def format_battle_segment_report(report: BattleSegmentReport) -> str:
         report.total_battle_decisions / segment_count if segment_count else 0.0
     )
     average_hp_delta = (
-        report.hp_delta_total / report.hp_delta_count
-        if report.hp_delta_count
-        else 0.0
+        report.hp_delta_total / report.hp_delta_count if report.hp_delta_count else 0.0
     )
 
     lines = [
@@ -668,16 +676,12 @@ def format_battle_decision_batch_report(batch: BattleDecisionBatch) -> str:
     """Format a battle-only decision batch report for stderr."""
 
     decision_batch = batch.decision_batch
-    screen_states = Counter(
-        example.screen_state for example in decision_batch.examples
-    )
+    screen_states = Counter(example.screen_state for example in decision_batch.examples)
     legal_action_counts = Counter(
-        str(len(example.legal_action_features))
-        for example in decision_batch.examples
+        str(len(example.legal_action_features)) for example in decision_batch.examples
     )
     eligible_action_counts = Counter(
-        str(len(example.eligible_action_indices))
-        for example in decision_batch.examples
+        str(len(example.eligible_action_indices)) for example in decision_batch.examples
     )
     chosen_action_kinds = Counter(
         example.chosen_action_kind for example in decision_batch.examples
@@ -772,7 +776,9 @@ def _battle_segment(
         else last_step.player_max_hp
     )
     start_gold = first_step.gold
-    end_gold = last_step.next_gold if last_step.next_gold is not None else last_step.gold
+    end_gold = (
+        last_step.next_gold if last_step.next_gold is not None else last_step.gold
+    )
     start_potion_count = first_step.potion_count
     end_potion_count = (
         last_step.next_potion_count
@@ -789,7 +795,9 @@ def _battle_segment(
         end_reason=end_reason,
         rollout_outcome=rollout.outcome,
         start_floor=first_step.floor,
-        end_floor=last_step.next_floor if last_step.next_floor is not None else last_step.floor,
+        end_floor=last_step.next_floor
+        if last_step.next_floor is not None
+        else last_step.floor,
         start_hp=start_hp,
         end_hp=end_hp,
         hp_delta=_delta(start_hp, end_hp),
@@ -854,8 +862,7 @@ def _eligible_indices(
     action_space: ActionSpaceConfig,
 ) -> list[int]:
     eligible_action_ids = {
-        id(action)
-        for action in filter_eligible_actions(actions, action_space)
+        id(action) for action in filter_eligible_actions(actions, action_space)
     }
     return [
         index

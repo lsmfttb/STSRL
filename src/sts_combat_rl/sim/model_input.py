@@ -117,7 +117,9 @@ def build_model_input_batch(dataset: TrainerInputDataset) -> ModelInputBatch:
         )
         screen_states.append(record.screen_state)
         snapshot_features.append(list(record.snapshot_features))
-        action_features.extend(list(features) for features in record.legal_action_features)
+        action_features.extend(
+            list(features) for features in record.legal_action_features
+        )
         action_offsets.append(action_start + legal_action_count)
         action_kinds.append(list(record.legal_action_kinds))
         eligible_action_indices.append(list(record.eligible_action_indices))
@@ -187,7 +189,9 @@ def build_model_input_batch_smoke_report(
             (len(indices) for indices in batch.eligible_action_indices),
             default=0,
         ),
-        terminal_after_step_count=sum(1 for value in batch.terminal_after_step if value),
+        terminal_after_step_count=sum(
+            1 for value in batch.terminal_after_step if value
+        ),
         step_reward_total=sum(batch.step_rewards),
         return_to_go_total=sum(batch.return_to_go),
         screen_state_counts=Counter(batch.screen_states),
@@ -255,7 +259,9 @@ def _model_input_shape_problems(batch: ModelInputBatch) -> list[str]:
     problems: list[str] = []
     example_count = len(batch.snapshot_features)
     if batch.format_version != MODEL_INPUT_BATCH_FORMAT_VERSION:
-        problems.append(f"unsupported model input format version: {batch.format_version}")
+        problems.append(
+            f"unsupported model input format version: {batch.format_version}"
+        )
     if len(batch.action_offsets) != example_count + 1:
         problems.append(
             f"action offset count {len(batch.action_offsets)} does not match "
@@ -390,7 +396,10 @@ def _validate_example_actions(
         )
 
     chosen_kind = _item(batch.chosen_action_kinds, example_index, "")
-    if 0 <= chosen_index < len(action_kinds) and chosen_kind != action_kinds[chosen_index]:
+    if (
+        0 <= chosen_index < len(action_kinds)
+        and chosen_kind != action_kinds[chosen_index]
+    ):
         problems.append(
             f"example {example_index}: chosen action kind {chosen_kind!r} does not "
             f"match legal action kind {action_kinds[chosen_index]!r}"
@@ -403,7 +412,9 @@ def _context_rebuild_problems(batch: ModelInputBatch) -> list[str]:
         try:
             context = decision_context_from_model_input_batch(batch, example_index)
         except (IndexError, ValueError) as exc:
-            problems.append(f"example {example_index}: failed to rebuild context: {exc}")
+            problems.append(
+                f"example {example_index}: failed to rebuild context: {exc}"
+            )
             continue
         legal_count = len(context.legal_action_features)
         if len(context.legal_action_kinds) != legal_count:

@@ -183,7 +183,9 @@ def format_simulator_calibration_report(report: SimulatorCalibrationReport) -> s
     _append_counter(lines, "observation sizes", report.observation_size_counts)
     _append_counter(lines, "battle feature sizes", report.battle_feature_size_counts)
     _append_counter(lines, "legal action counts", report.legal_action_count_counts)
-    _append_counter(lines, "eligible action counts", report.eligible_action_count_counts)
+    _append_counter(
+        lines, "eligible action counts", report.eligible_action_count_counts
+    )
     _append_counter(lines, "action feature sizes", report.action_feature_size_counts)
     _append_counter(lines, "screen states", report.screen_state_counts)
     _append_counter(lines, "legal action scopes", report.legal_action_scope_counts)
@@ -278,8 +280,12 @@ def _count_communicationmod_sample_file(
                 report.communication_errors += 1
                 continue
 
-            game = _mapping(raw.get("game_state")) or _mapping(raw.get("gameState")) or raw
-            combat = _mapping(game.get("combat_state")) or _mapping(game.get("combatState"))
+            game = (
+                _mapping(raw.get("game_state")) or _mapping(raw.get("gameState")) or raw
+            )
+            combat = _mapping(game.get("combat_state")) or _mapping(
+                game.get("combatState")
+            )
             if not combat:
                 report.non_combat_states += 1
                 continue

@@ -47,7 +47,9 @@ def collect_policy_simulator_rollout(
             problems.append(str(exc))
             break
 
-        if decision.legal_action_index < 0 or decision.legal_action_index >= len(actions):
+        if decision.legal_action_index < 0 or decision.legal_action_index >= len(
+            actions
+        ):
             problems.append(
                 f"policy selected action index {decision.legal_action_index} "
                 f"outside {len(actions)} legal actions"
