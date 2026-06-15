@@ -74,8 +74,10 @@ class ControllerProvenance:
         name: short human-readable label, typically the underlying policy or
             algorithm name. The name alone is not sufficient provenance.
         config: every behavior-changing setting (seed, information regime,
-            nested child provenance, ...). Values are JSON-coerced on
-            serialization so a native object never breaks identity hashing.
+            nested child provenance, ...). Values are defensively deep-copied
+            and JSON-coerced on construction so the provenance is immune to
+            later mutation of the caller's original dict, and a native object
+            never breaks identity hashing.
         schema_version: serialized-schema version this provenance was written
             for.
     """
@@ -84,6 +86,22 @@ class ControllerProvenance:
     name: str
     config: Mapping[str, Any] = field(default_factory=dict)
     schema_version: int = CONTROLLER_PROVENANCE_SCHEMA_VERSION
+
+    def __init__(
+        self,
+        kind: str,
+        name: str,
+        config: Mapping[str, Any] | None = None,
+        schema_version: int = CONTROLLER_PROVENANCE_SCHEMA_VERSION,
+    ) -> None:
+        # Defensive deep-copy via json_safe_mapping: produces an independent
+        # frozen dict of JSON-safe values, so mutating the caller's original
+        # dict never changes this provenance or its identity after creation.
+        safe_config = json_safe_mapping(config) if config is not None else {}
+        object.__setattr__(self, "kind", kind)
+        object.__setattr__(self, "name", name)
+        object.__setattr__(self, "config", safe_config)
+        object.__setattr__(self, "schema_version", schema_version)
 
     @property
     def identity(self) -> str:
@@ -159,7 +177,7 @@ def controller_provenance_from_dict(data: Mapping[str, Any]) -> ControllerProven
     return ControllerProvenance(
         kind=kind,
         name=name,
-        config=json_safe_mapping(config),
+        config=config,
         schema_version=schema_version,
     )
 

@@ -90,6 +90,16 @@ class ActionScorer(Protocol):
 
     name: str
 
+    @property
+    def provenance_config(self) -> Mapping[str, Any]:
+        """Behavior-changing config this scorer should publish as provenance.
+
+        Two scorers with different weights must produce different provenance
+        so that controllers wrapping them get different identities. The default
+        returns an empty mapping; concrete scorers must override this to
+        include all behavior-distinguishing settings.
+        """
+
     def score_actions(self, context: DecisionContext) -> Sequence[float]:
         """Return one score for each legal action in ``context``."""
 
@@ -189,7 +199,10 @@ class ScoredActionPolicy:
 
     @property
     def provenance_config(self) -> Mapping[str, Any]:
-        return {"scorer": self.scorer.name}
+        scorer_config = getattr(self.scorer, "provenance_config", {})
+        if not isinstance(scorer_config, Mapping):
+            scorer_config = {}
+        return {"scorer_name": self.scorer.name, "scorer_config": dict(scorer_config)}
 
     def select_action(self, context: DecisionContext) -> PolicyDecision:
         scores = [float(score) for score in self.scorer.score_actions(context)]

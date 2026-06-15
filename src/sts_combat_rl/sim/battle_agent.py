@@ -29,10 +29,7 @@ from sts_combat_rl.sim.online_controller import (
     PolicyController,
     RoutedRunController,
 )
-from sts_combat_rl.sim.policy import (
-    DecisionPolicy,
-    PreferredKindPolicy,
-)
+from sts_combat_rl.sim.policy import DecisionPolicy
 
 
 BATTLE_AGENT_CONTROLLER = "battle_agent"
@@ -152,12 +149,20 @@ def collect_battle_agent_rollout(
     action_space: ActionSpaceConfig | None = None,
     autopilot_policy: DecisionPolicy | None = None,
 ) -> ControlledRun:
-    """Collect a bounded rollout where only battle states use battle_policy."""
+    """Collect a bounded rollout where only battle states use battle_policy.
 
-    active_autopilot = autopilot_policy or PreferredKindPolicy()
+    ``autopilot_policy`` must be supplied explicitly. A dataset helper may not
+    silently construct a default battle or non-combat controller.
+    """
+
+    if autopilot_policy is None:
+        raise ValueError(
+            "autopilot_policy is required; pass an explicit non-combat driver "
+            "policy (e.g. PreferredKindPolicy())"
+        )
     controller = RoutedRunController(
         battle=PolicyController(battle_policy),
-        non_combat=PolicyController(active_autopilot),
+        non_combat=PolicyController(autopilot_policy),
     )
     return execute_controlled_run(
         adapter,
@@ -177,9 +182,17 @@ def run_battle_agent_sweep(
     action_space: ActionSpaceConfig | None = None,
     autopilot_policy: DecisionPolicy | None = None,
 ) -> BattleAgentSweepReport:
-    """Run a battle-agent-only seed sweep without training."""
+    """Run a battle-agent-only seed sweep without training.
 
-    active_autopilot = autopilot_policy or PreferredKindPolicy()
+    ``autopilot_policy`` must be supplied explicitly. A dataset helper may not
+    silently construct a default battle or non-combat controller.
+    """
+
+    if autopilot_policy is None:
+        raise ValueError(
+            "autopilot_policy is required; pass an explicit non-combat driver "
+            "policy (e.g. PreferredKindPolicy())"
+        )
     summaries: list[BattleAgentEpisodeSummary] = []
     problems: list[str] = []
     terminal_episodes = 0
@@ -203,7 +216,7 @@ def run_battle_agent_sweep(
             seed=seed,
             max_steps=max_steps,
             action_space=action_space,
-            autopilot_policy=active_autopilot,
+            autopilot_policy=autopilot_policy,
         )
         summary = summarize_battle_agent_episode(rollout)
         summaries.append(summary)
@@ -235,7 +248,7 @@ def run_battle_agent_sweep(
 
     return BattleAgentSweepReport(
         battle_policy_name=battle_policy.name,
-        autopilot_policy_name=active_autopilot.name,
+        autopilot_policy_name=autopilot_policy.name,
         requested_steps_per_episode=max_steps,
         episodes=summaries,
         terminal_episodes=terminal_episodes,

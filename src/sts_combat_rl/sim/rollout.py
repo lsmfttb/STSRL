@@ -35,42 +35,35 @@ def collect_simulator_rollout(
     action_space: ActionSpaceConfig | None = None,
     chooser: ActionChooser | None = None,
 ) -> ControlledRun:
-    """Collect a bounded rollout without training or mutating game mechanics."""
+    """Collect a bounded rollout without training or mutating game mechanics.
+
+    ``chooser`` must be supplied explicitly. A dataset helper may not silently
+    construct a default controller. Pass ``choose_deterministic_action`` for the
+    standard deterministic chooser.
+    """
+
+    if chooser is None:
+        raise ValueError(
+            "chooser is required; pass an explicit action chooser "
+            "(e.g. choose_deterministic_action)"
+        )
 
     active_action_space = action_space or ActionSpaceConfig.initial_no_potions()
 
     # Lazy import to keep the default import path lean.
     from sts_combat_rl.sim.online_controller import ChooserController
 
-    active_chooser = chooser
+    def chooser_adapter(
+        actions: list[SimulatorAction],
+        _ctx: ActionSpaceConfig,
+    ) -> SimulatorAction:
+        del _ctx
+        return chooser(actions, active_action_space)
 
-    if active_chooser is not None:
-
-        def chooser_adapter(
-            actions: list[SimulatorAction],
-            _ctx: ActionSpaceConfig,
-        ) -> SimulatorAction:
-            del _ctx
-            return active_chooser(actions, active_action_space)
-
-        controller = ChooserController(
-            chooser=chooser_adapter,
-            name="custom_chooser",
-        )
-    else:
-        from sts_combat_rl.sim.action_space import choose_deterministic_action
-
-        def default_adapter(
-            actions: list[SimulatorAction],
-            _ctx: ActionSpaceConfig,
-        ) -> SimulatorAction:
-            del _ctx
-            return choose_deterministic_action(actions, active_action_space)
-
-        controller = ChooserController(
-            chooser=default_adapter,
-            name="deterministic_chooser",
-        )
+    controller = ChooserController(
+        chooser=chooser_adapter,
+        name="custom_chooser",
+    )
 
     return execute_controlled_run(
         adapter,

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 
 import pytest
+from typing import Any
 
 from sts_combat_rl.sim.contract import (
     SimulatorAction,
@@ -33,7 +34,6 @@ from sts_combat_rl.sim.controller_contract import (
     legacy_policy_provenance,
     selected_index_problem,
 )
-from sts_combat_rl.sim.action_space import ActionSpaceConfig
 from sts_combat_rl.sim.controlled_run import (
     ControlledRun,
     ControlledRunStep,
@@ -53,7 +53,9 @@ from sts_combat_rl.sim.online_controller import (
 from sts_combat_rl.sim.policy import (
     FirstEligiblePolicy,
     PreferredKindPolicy,
+    ScoredActionPolicy,
 )
+from sts_combat_rl.sim.action_space import ActionSpaceConfig
 
 
 # ---------------------------------------------------------------------------
@@ -144,6 +146,26 @@ class TestControllerProvenance:
         assert isinstance(result["c"], str)
         assert result["c"] == str(unsafe)
 
+    def test_defensive_copy_mutation_does_not_change_identity(self) -> None:
+        """Mutating the caller's dict after construction does not affect identity."""
+        original_config: dict[str, Any] = {"weights": [1.0, 2.0]}
+        p = ControllerProvenance(kind="k", name="n", config=original_config)
+        identity_before = p.identity
+        original_config["weights"] = [9.0, 9.0]
+        original_config["extra"] = "surprise"
+        # Identity must be unchanged because provenance defensively copied.
+        assert p.identity == identity_before
+
+    def test_defensive_copy_nested_mutation_does_not_change_identity(self) -> None:
+        """Mutating a nested dict in the caller's original does not affect identity."""
+        nested: dict[str, Any] = {"inner": 42}
+        original_config: dict[str, Any] = {"nested": nested}
+        p = ControllerProvenance(kind="k", name="n", config=original_config)
+        identity_before = p.identity
+        nested["inner"] = 999
+        # Identity must be unchanged because json_safe_mapping deep-copies.
+        assert p.identity == identity_before
+
 
 # Need json import for the round-trip test
 import json  # noqa: E402
@@ -216,7 +238,40 @@ class TestPolicyController:
     def test_provenance_merges_policy_config(self) -> None:
         policy = PreferredKindPolicy(preferred_kinds=["card", "skill"])
         ctrl = PolicyController(policy)
-        assert ctrl.provenance.config.get("preferred_kinds") == ("card", "skill")
+        # json_safe_mapping converts tuples to lists for JSON serializability
+        assert ctrl.provenance.config.get("preferred_kinds") == ["card", "skill"]
+
+    def test_scored_policy_provenance_includes_scorer_config(self) -> None:
+        """ScoredActionPolicy provenance must include full scorer config,
+        not just scorer name, so that scorers with different weights get
+        different identities."""
+
+        class ConstantScorer:
+            name = "constant"
+
+            @property
+            def provenance_config(self) -> dict[str, Any]:
+                return {"weights": list(self._weights)}
+
+            def __init__(self, weights: list[float]) -> None:
+                self._weights = weights
+
+            def score_actions(self, context: Any) -> list[float]:
+                return list(self._weights[: len(context.legal_action_features)])
+
+        scorer_a = ConstantScorer([1.0, 2.0])
+        scorer_b = ConstantScorer([3.0, 4.0])
+        policy_a = ScoredActionPolicy(scorer=scorer_a)
+        policy_b = ScoredActionPolicy(scorer=scorer_b)
+        ctrl_a = PolicyController(policy_a)
+        ctrl_b = PolicyController(policy_b)
+
+        # Same scorer name but different weights must produce different identity.
+        assert ctrl_a.provenance.name == ctrl_b.provenance.name
+        assert ctrl_a.provenance.identity != ctrl_b.provenance.identity
+        # The scorer_config must be present in provenance.
+        assert ctrl_a.provenance.config.get("scorer_config") == {"weights": [1.0, 2.0]}
+        assert ctrl_b.provenance.config.get("scorer_config") == {"weights": [3.0, 4.0]}
 
 
 # ---------------------------------------------------------------------------
@@ -292,6 +347,59 @@ class TestChooserController:
         decision = ctrl.select_action(None, snapshot, actions, None, 0)
         # preferred_kinds = ("card", "end_turn"), so card at index 1 wins
         assert decision.selected_index == 1
+
+    def test_custom_chooser_not_reproducible_by_default(self) -> None:
+        """Custom chooser callbacks cannot be serialized, so they must be
+        marked non-reproducible to avoid identical provenance for different
+        behaviors."""
+
+        def custom_chooser(
+            actions: list[SimulatorAction], _cfg: ActionSpaceConfig
+        ) -> SimulatorAction:
+            return actions[0]
+
+        ctrl = ChooserController(custom_chooser, name="custom_chooser")
+        assert ctrl.provenance.reproducible is False
+
+    def test_deterministic_chooser_is_reproducible(self) -> None:
+        """The built-in deterministic chooser is a known function and is
+        reproducible by default."""
+        ctrl = deterministic_chooser_controller()
+        assert ctrl.provenance.reproducible is True
+
+    def test_explicit_reproducible_override(self) -> None:
+        """Caller can explicitly set reproducible=True for a custom chooser."""
+
+        def custom_chooser(
+            actions: list[SimulatorAction], _cfg: ActionSpaceConfig
+        ) -> SimulatorAction:
+            return actions[0]
+
+        ctrl = ChooserController(
+            custom_chooser, name="custom_chooser", reproducible=True
+        )
+        assert ctrl.provenance.reproducible is True
+
+    def test_different_custom_choosers_same_name_get_same_identity(self) -> None:
+        """Two different closures with the same name get the same provenance
+        identity — this is why custom choosers are non-reproducible."""
+
+        def custom_chooser_a(
+            actions: list[SimulatorAction], _cfg: ActionSpaceConfig
+        ) -> SimulatorAction:
+            return actions[0]
+
+        def custom_chooser_b(
+            actions: list[SimulatorAction], _cfg: ActionSpaceConfig
+        ) -> SimulatorAction:
+            return actions[-1]
+
+        ctrl_a = ChooserController(custom_chooser_a, name="custom_chooser")
+        ctrl_b = ChooserController(custom_chooser_b, name="custom_chooser")
+        # Same identity — this is the known limitation flagged as non-reproducible.
+        assert ctrl_a.provenance.identity == ctrl_b.provenance.identity
+        assert ctrl_a.provenance.reproducible is False
+        assert ctrl_b.provenance.reproducible is False
 
 
 # ---------------------------------------------------------------------------
@@ -605,6 +713,140 @@ class TestExecuteControlledRun:
         assert result.steps[0].player_hp == 80.0
         assert result.steps[1].player_hp == 75.0
         assert result.steps[2].player_hp == 70.0
+
+    def test_action_space_config_persisted_in_run(self) -> None:
+        """The effective action-space config is persisted in the ControlledRun
+        so that different action spaces produce different run provenance."""
+        adapter = FakeAdapter([("BATTLE", True)])
+        ctrl = AlwaysFirstController()
+
+        result_no_potions = execute_controlled_run(
+            adapter,
+            ctrl,
+            seed=1,
+            max_steps=10,
+            action_space=ActionSpaceConfig.initial_no_potions(),
+        )
+        result_include_all = execute_controlled_run(
+            adapter,
+            ctrl,
+            seed=1,
+            max_steps=10,
+            action_space=ActionSpaceConfig.include_all(),
+        )
+
+        # Both runs should have action_space_config set.
+        assert "excluded_kinds" in result_no_potions.action_space_config
+        assert "excluded_kinds" in result_include_all.action_space_config
+        # The no-potions config should list potion kinds as excluded.
+        assert "potion" in result_no_potions.action_space_config["excluded_kinds"]
+        # The include-all config should have empty excluded_kinds.
+        assert result_include_all.action_space_config["excluded_kinds"] == []
+
+    def test_action_space_config_default_no_potions(self) -> None:
+        """When action_space is not specified, the default no-potions config is
+        persisted."""
+        adapter = FakeAdapter([("BATTLE", True)])
+        ctrl = AlwaysFirstController()
+
+        result = execute_controlled_run(adapter, ctrl, seed=1, max_steps=10)
+        assert "potion" in result.action_space_config["excluded_kinds"]
+
+
+# ---------------------------------------------------------------------------
+# No hidden default controllers
+# ---------------------------------------------------------------------------
+
+
+class TestNoHiddenDefaults:
+    def test_collect_battle_agent_rollout_requires_autopilot_policy(self) -> None:
+        """collect_battle_agent_rollout must not silently construct a default
+        non-combat controller."""
+        from sts_combat_rl.sim.battle_agent import collect_battle_agent_rollout
+        from sts_combat_rl.sim.contract import SimulatorSnapshot
+
+        class MinimalAdapter:
+            def reset(self, seed=None):
+                return SimulatorSnapshot(observation=[], raw={})
+
+            def legal_actions(self, snapshot):
+                return []
+
+            def step(self, action):
+                from sts_combat_rl.sim.contract import SimulatorTransition
+
+                return SimulatorTransition(
+                    snapshot=SimulatorSnapshot(observation=[], raw={}),
+                    terminal=True,
+                    info={},
+                )
+
+        with pytest.raises(ValueError, match="autopilot_policy is required"):
+            collect_battle_agent_rollout(
+                MinimalAdapter(),
+                PreferredKindPolicy(),
+                seed=1,
+                max_steps=10,
+            )
+
+    def test_run_battle_agent_sweep_requires_autopilot_policy(self) -> None:
+        """run_battle_agent_sweep must not silently construct a default
+        non-combat controller."""
+        from sts_combat_rl.sim.battle_agent import run_battle_agent_sweep
+        from sts_combat_rl.sim.contract import SimulatorSnapshot
+
+        class MinimalAdapter:
+            def reset(self, seed=None):
+                return SimulatorSnapshot(observation=[], raw={})
+
+            def legal_actions(self, snapshot):
+                return []
+
+            def step(self, action):
+                from sts_combat_rl.sim.contract import SimulatorTransition
+
+                return SimulatorTransition(
+                    snapshot=SimulatorSnapshot(observation=[], raw={}),
+                    terminal=True,
+                    info={},
+                )
+
+        with pytest.raises(ValueError, match="autopilot_policy is required"):
+            run_battle_agent_sweep(
+                MinimalAdapter(),
+                PreferredKindPolicy(),
+                seeds=[1],
+                max_steps=10,
+            )
+
+    def test_collect_simulator_rollout_requires_chooser(self) -> None:
+        """collect_simulator_rollout must not silently construct a default
+        controller."""
+        from sts_combat_rl.sim.contract import SimulatorSnapshot
+        from sts_combat_rl.sim.rollout import collect_simulator_rollout
+
+        class MinimalAdapter:
+            def reset(self, seed=None):
+                return SimulatorSnapshot(observation=[], raw={})
+
+            def legal_actions(self, snapshot):
+                return []
+
+            def step(self, action):
+                from sts_combat_rl.sim.contract import SimulatorTransition
+
+                return SimulatorTransition(
+                    snapshot=SimulatorSnapshot(observation=[], raw={}),
+                    terminal=True,
+                    info={},
+                )
+
+        with pytest.raises(ValueError, match="chooser is required"):
+            collect_simulator_rollout(
+                MinimalAdapter(),
+                seed=1,
+                max_steps=10,
+            )
 
 
 # ---------------------------------------------------------------------------

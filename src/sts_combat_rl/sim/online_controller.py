@@ -188,22 +188,36 @@ class ChooserController:
 
     Not frozen: the chooser is a runtime callback that is not part of identity,
     so it is stored mutably. Provenance records the chooser label and is
-    reproducible only when a concrete chooser is supplied (the default
-    deterministic chooser is reproducible).
+    reproducible only when the deterministic chooser is supplied (the default
+    ``deterministic_chooser`` is reproducible). Custom choosers are marked
+    non-reproducible because two different closures with the same name would
+    receive identical provenance, violating the behavior-complete identity
+    requirement.
     """
 
     chooser: ActionChooser
     name: str = "deterministic_chooser"
-    reproducible: bool = True
+    reproducible: bool | None = None
     config: Mapping[str, Any] = field(default_factory=dict)
     provenance: ControllerProvenance = field(init=False, default=None)  # type: ignore[assignment]
 
     def __post_init__(self) -> None:
+        # Fail closed: custom (non-deterministic) choosers are non-reproducible
+        # unless the caller explicitly opts in. The deterministic chooser is
+        # reproducible by default because it is a known function.
+        if self.reproducible is None:
+            is_deterministic = self.chooser is choose_deterministic_action
+            effective_reproducible = is_deterministic
+        else:
+            effective_reproducible = bool(self.reproducible)
+
         merged_config: dict[str, Any] = {
             "chooser": self.name,
-            "reproducible": self.reproducible,
+            "reproducible": effective_reproducible,
         }
         merged_config.update(self.config)
+        if not effective_reproducible:
+            merged_config["reproducible"] = False
         object.__setattr__(
             self,
             "provenance",

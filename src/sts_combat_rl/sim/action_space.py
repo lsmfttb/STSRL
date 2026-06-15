@@ -46,6 +46,15 @@ class ActionSpaceConfig:
 
         return cls(excluded_kinds=frozenset())
 
+    def to_dict(self) -> dict[str, object]:
+        """Serialize the action-space config for provenance and artifact storage."""
+
+        return {
+            "excluded_kinds": sorted(self.excluded_kinds),
+            "preferred_kinds": list(self.preferred_kinds),
+            "allow_excluded_fallback": self.allow_excluded_fallback,
+        }
+
 
 def action_is_eligible(
     action: SimulatorAction,

@@ -124,6 +124,7 @@ class ControlledRun:
     initial_raw: Mapping[str, Any] = field(default_factory=dict)
     final_raw: Mapping[str, Any] = field(default_factory=dict)
     controller_provenance: Mapping[str, Any] = field(default_factory=dict)
+    action_space_config: Mapping[str, Any] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -266,6 +267,7 @@ def execute_controlled_run(
         initial_raw=initial_raw,
         final_raw=dict(snapshot.raw),
         controller_provenance=controller.provenance.to_dict(),
+        action_space_config=active_action_space.to_dict(),
     )
 
 
