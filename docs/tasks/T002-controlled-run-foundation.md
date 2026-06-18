@@ -4,13 +4,16 @@ Status: `IN_REVIEW` in PR #2.
 
 Current review blockers:
 
-- production scorer behavior is not completely represented in provenance;
-- chooser controllers do not preserve the effective action-space behavior, and
-  custom callbacks can still be incorrectly marked reproducible;
-- reused stateful seeded policies do not publish their starting runtime state
-  or equivalent sequence provenance;
-- provenance configuration is defensively copied but remains directly mutable;
-- the public simulator-package export for `build_decision_context` is broken.
+- `PolicyController` still accepts policies with no explicit
+  `provenance_config`, silently falling back to class/name provenance;
+- reused stateful seeded policies publish only an RNG fingerprint, not
+  reproducible starting RNG state or an equivalent deterministic sequence
+  contract;
+- caller-provided controller `config` can overwrite canonical provenance fields
+  such as information regime, policy class, chooser name, and action-space
+  config;
+- the pull-request report must include the task-required WSL
+  `--lightspeed-battle-sweep` command and result.
 
 Resolved during review:
 
@@ -18,6 +21,13 @@ Resolved during review:
   constructing hidden defaults;
 - `ControlledRun` records the effective action-space configuration;
 - the pull-request report is complete.
+- production scorer behavior is represented in provenance, and missing scorer
+  provenance fails closed;
+- chooser controllers preserve the effective action-space behavior for the
+  routed rollout helpers, and custom callbacks can no longer be marked
+  reproducible by flag;
+- provenance configuration is deep-frozen after construction;
+- the public simulator-package export for `build_decision_context` is restored.
 
 ## Objective
 

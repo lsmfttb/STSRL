@@ -68,8 +68,8 @@ Executable task specifications live in [`tasks/`](tasks/README.md). The first
 tasks in dependency order are:
 
 1. [`T002`](tasks/T002-controlled-run-foundation.md), currently `IN_REVIEW`:
-   resolve the documented production-scorer, chooser/action-space, stateful
-   policy provenance, deep-immutability, and public-export blockers.
+   resolve the documented missing-policy-provenance, stateful RNG provenance,
+   canonical-provenance-overwrite, and verification-report blockers.
 2. Review the remaining blocked task specifications against the architecture
    as their prerequisites merge.
 
