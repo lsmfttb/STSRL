@@ -4,16 +4,10 @@ Status: `IN_REVIEW` in PR #2.
 
 Current review blockers:
 
-- `PolicyController` still accepts policies with no explicit
-  `provenance_config`, silently falling back to class/name provenance;
-- reused stateful seeded policies publish only an RNG fingerprint, not
-  reproducible starting RNG state or an equivalent deterministic sequence
-  contract;
-- caller-provided controller `config` can overwrite canonical provenance fields
-  such as information regime, policy class, chooser name, and action-space
-  config;
-- the pull-request report must include the task-required WSL
-  `--lightspeed-battle-sweep` command and result.
+- `RoutedRunController` nests child provenance but does not propagate
+  `reproducible=False` when either child controller is non-reproducible. A
+  complete routed run with a non-reproducible non-combat driver can therefore
+  report top-level routed provenance as reproducible.
 
 Resolved during review:
 
@@ -28,6 +22,13 @@ Resolved during review:
   reproducible by flag;
 - provenance configuration is deep-frozen after construction;
 - the public simulator-package export for `build_decision_context` is restored.
+- `PolicyController` rejects policies with no explicit `provenance_config`;
+- reused stateful seeded policies are marked non-reproducible instead of
+  publishing an insufficient RNG fingerprint as reproducible provenance;
+- caller-provided controller `config` is namespaced under `extra` and can no
+  longer overwrite canonical provenance fields;
+- the pull-request report includes the task-required WSL
+  `--lightspeed-battle-sweep` command and result.
 
 ## Objective
 
