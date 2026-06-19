@@ -1,6 +1,6 @@
 # T011: Tactical Feature Contract V2
 
-Status: `BLOCKED` by T003.
+Status: `READY`.
 
 ## Objective
 
@@ -12,7 +12,13 @@ actions without receiving hidden information.
 
 `main` has fixed-size snapshot features and legal-action features sufficient
 for plumbing smokes. The representation is not a stable versioned feature
-contract and is too limited for serious model training.
+contract and is too limited for serious model training. T003 now provides
+versioned trainer-input artifacts, explicit migration, controller provenance,
+and occurrence-disambiguated action identities for this task to extend.
+
+## Dependencies
+
+- T003 is complete. This task has no remaining implementation dependency.
 
 ## Scope
 
@@ -34,6 +40,13 @@ contract and is too limited for serious model training.
   simulator-only, or explicitly unsupported.
 - Report missing public fields and unknown identities rather than silently
   collapsing them.
+
+Task-owned implementation boundaries are `src/sts_combat_rl/sim/features.py`,
+`src/sts_combat_rl/sim/model_input.py`, the tactical portions of
+`src/sts_combat_rl/sim/trainer_input.py` and `decision_record.py`, their tests,
+and a focused feature-audit command if required. T011 must not implement the
+live CommunicationMod controller; it only defines and audits the shared public
+contract consumed later by T013.
 
 ## Out Of Scope
 
@@ -71,6 +84,15 @@ contract and is too limited for serious model training.
 - Required live-unavailable fields are represented through documented
   missing-value paths rather than silently collapsed or guessed.
 - Standard local gates and the documented WSL coverage audit pass.
+
+## Required Verification
+
+Run the standard local gates. In addition, run the existing WSL simulator smoke
+at A20 and a task-provided, documented WSL feature-coverage audit over real
+A20 snapshots. The audit output must include the feature schema version,
+identity/unknown counts, missing-field counts, and the simulator/live field
+parity classification. It must fail clearly when a required public field is
+silently dropped.
 
 ## Legacy Reference
 

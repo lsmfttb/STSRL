@@ -1,6 +1,6 @@
 # T004: Battle-Start Checkpoint Pool
 
-Status: `BLOCKED` by T002, T003, and T010.
+Status: `BLOCKED` by T010.
 
 ## Objective
 

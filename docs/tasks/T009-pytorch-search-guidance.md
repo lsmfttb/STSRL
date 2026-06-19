@@ -1,6 +1,6 @@
 # T009: PyTorch Search-Guidance Model
 
-Status: `BLOCKED` by T003, T006, T007, T011, and T012.
+Status: `BLOCKED` by T006, T007, T011, and T012.
 
 ## Objective
 

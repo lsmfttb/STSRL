@@ -1,6 +1,6 @@
 # T008: A20 Constructed Battle Supplements
 
-Status: `BLOCKED` by T003 and T004.
+Status: `BLOCKED` by T004.
 
 ## Objective
 

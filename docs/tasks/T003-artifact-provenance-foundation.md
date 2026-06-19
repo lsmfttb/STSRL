@@ -1,6 +1,6 @@
 # T003: Artifact Provenance Foundation
 
-Status: `READY`.
+Status: `DONE`.
 
 ## Objective
 

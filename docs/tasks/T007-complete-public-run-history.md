@@ -1,6 +1,6 @@
 # T007: Complete Public Run History
 
-Status: `BLOCKED` by T002, T003, and T004.
+Status: `BLOCKED` by T004.
 
 ## Objective
 

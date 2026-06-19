@@ -1,6 +1,6 @@
 # T013: Live CommunicationMod Runtime Adapter
 
-Status: `BLOCKED` by T003 and T011.
+Status: `BLOCKED` by T011.
 
 ## Objective
 

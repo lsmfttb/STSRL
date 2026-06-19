@@ -268,7 +268,7 @@ and terminal results without local mechanics reconstruction.
 
 ### Phase B: Natural Pools And Provenance
 
-Status: pending T003, T004, and T010.
+Status: pending T004 and T010.
 
 Exit gate: current-schema natural checkpoints restore, carry complete controller
 provenance, and report structural coverage and migration loss honestly.
@@ -311,7 +311,7 @@ evaluation without leakage.
 
 ### Phase F2: Live Runtime Deployment Gate
 
-Status: pending T003, T011, and T013.
+Status: pending T011 and T013.
 
 Exit gate: a controller can consume captured CommunicationMod combat snapshots,
 select through the shared `OnlineController` contract, emit valid protocol

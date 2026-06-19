@@ -1,6 +1,6 @@
 # T006: Oracle Search Teacher Pipeline
 
-Status: `BLOCKED` by T003, T004, and T005.
+Status: `BLOCKED` by T004 and T005.
 
 ## Objective
 

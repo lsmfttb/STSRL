@@ -37,12 +37,14 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
   battle examples.
 - Framework-neutral trainer-input JSONL round trip, model-input packing, and
   deterministic action-score contract checks.
+- Versioned trainer-input artifact migration, complete decision provenance,
+  and occurrence-disambiguated portable action identities.
 - A training-readiness report that validates plumbing only. It does not train a
   model or demonstrate policy strength.
 
 ### Tests
 
-- `217` tests pass on Windows Python as of this review.
+- `241` tests pass on Windows Python as of this review.
 - The two CommunicationMod fixture smokes pass.
 - `python -m compileall -q src tests` passes.
 - `ruff check src tests` and `ruff format --check src tests` pass.
@@ -56,7 +58,6 @@ unmerged legacy work:
 - checkpoint capture/restore and battle-start pools;
 - fixed structural battle evaluation;
 - native Oracle-like search integration and search-teacher datasets;
-- artifact migrations and complete decision provenance;
 - PyTorch policy/value training;
 - live CommunicationMod runtime adapter for trained or search controllers;
 - structured persistent resource outcomes;
@@ -72,18 +73,20 @@ already supports them.
 Executable task specifications live in [`tasks/`](tasks/README.md). The first
 tasks in dependency order are:
 
-1. [`T003`](tasks/T003-artifact-provenance-foundation.md), currently `READY`:
-   add artifact schemas, provenance persistence, and migration support.
-2. [`T010`](tasks/T010-stochastic-non-combat-driver.md), currently `READY`:
+1. [`T010`](tasks/T010-stochastic-non-combat-driver.md), currently `READY`:
    add the versioned stochastic non-combat driver and calibration report.
-3. Review remaining blocked task specifications as their prerequisites merge.
+2. [`T011`](tasks/T011-tactical-feature-contract-v2.md), currently `READY`:
+   establish the versioned public tactical state/action feature contract and
+   live-runtime field parity audit.
+3. [`T004`](tasks/T004-battle-start-checkpoint-pool.md) remains blocked by
+   T010; review remaining blocked specifications as their prerequisites merge.
 
 Later tasks are dependency-ordered in the task index. A task is not ready for a
 new branch until its status is `READY`.
 
 Live-game deployment compatibility is now tracked as
 [`T013`](tasks/T013-live-communicationmod-runtime-adapter.md). It is blocked by
-T003 and T011. Simulator-only RL training does not depend on T013, but trained
+T011. Simulator-only RL training does not depend on T013, but trained
 or search controllers should not be described as runnable in the real game until
 that adapter, feature-parity, action-mapping, and runtime-provenance work
 passes review.
