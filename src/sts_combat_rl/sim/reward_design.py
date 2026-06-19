@@ -12,10 +12,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from sts_combat_rl.sim.battle_agent import (
-    BattleAgentRollout,
     BattleSegment,
     build_battle_segment_report,
 )
+from sts_combat_rl.sim.controlled_run import ControlledRun
 
 
 BATTLE_REWARD_PRESETS = ("battle-v0",)
@@ -122,7 +122,7 @@ def battle_reward_weights_from_preset(preset: str) -> BattleRewardWeights:
 
 
 def build_battle_reward_design_report(
-    rollouts: list[BattleAgentRollout],
+    rollouts: list[ControlledRun],
     weights: BattleRewardWeights | None = None,
 ) -> BattleRewardDesignReport:
     """Score battle segments with a draft reward, without running training."""

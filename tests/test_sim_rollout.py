@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from sts_combat_rl.sim.action_space import ActionSpaceConfig
+from sts_combat_rl.sim.action_space import (
+    ActionSpaceConfig,
+    choose_deterministic_action,
+)
 from sts_combat_rl.sim.contract import (
     SimulatorAction,
     SimulatorSnapshot,
@@ -57,7 +60,12 @@ class FakeRolloutAdapter:
 def test_collect_simulator_rollout_keeps_legal_potions_but_excludes_by_default() -> (
     None
 ):
-    batch = collect_simulator_rollout(FakeRolloutAdapter(), seed=3, max_steps=1)
+    batch = collect_simulator_rollout(
+        FakeRolloutAdapter(),
+        seed=3,
+        max_steps=1,
+        chooser=choose_deterministic_action,
+    )
 
     assert batch.terminal is True
     assert batch.outcome == "PLAYER_VICTORY"
@@ -80,6 +88,7 @@ def test_collect_simulator_rollout_can_include_potions_without_shape_change() ->
         seed=3,
         max_steps=1,
         action_space=ActionSpaceConfig.include_all(),
+        chooser=choose_deterministic_action,
     )
 
     step = batch.steps[0]

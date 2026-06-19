@@ -12,7 +12,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import Any
 
-from sts_combat_rl.sim.rollout import RolloutBatch, RolloutStep
+from sts_combat_rl.sim.controlled_run import ControlledRun, ControlledRunStep
 
 
 @dataclass(frozen=True)
@@ -44,7 +44,7 @@ class DecisionBatch:
     problems: list[str] = field(default_factory=list)
 
 
-def build_decision_batch(rollouts: list[RolloutBatch]) -> DecisionBatch:
+def build_decision_batch(rollouts: list[ControlledRun]) -> DecisionBatch:
     """Build a validated decision batch from one or more rollout batches."""
 
     examples: list[DecisionExample] = []
@@ -129,7 +129,7 @@ def format_decision_batch_report(batch: DecisionBatch) -> str:
 def _decision_example(
     rollout_index: int,
     seed: int | None,
-    step: RolloutStep,
+    step: ControlledRunStep,
 ) -> DecisionExample:
     return DecisionExample(
         rollout_index=rollout_index,
@@ -163,7 +163,7 @@ def _stable_size(
 
 def _validate_step_indices(
     rollout_index: int,
-    step: RolloutStep,
+    step: ControlledRunStep,
     problems: list[str],
 ) -> None:
     legal_count = len(step.legal_action_features)

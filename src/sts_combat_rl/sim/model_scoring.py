@@ -12,7 +12,7 @@ from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 import math
-from typing import Protocol
+from typing import Any, Protocol
 
 from sts_combat_rl.sim.model_input import ModelInputBatch
 from sts_combat_rl.sim.policy import DecisionContext
@@ -45,6 +45,13 @@ class ActionKindPriorScorer:
     default_score: float = 0.0
     name: str = "action_kind_prior"
 
+    @property
+    def provenance_config(self) -> Mapping[str, Any]:
+        return {
+            "kind_scores": dict(self.kind_scores),
+            "default_score": self.default_score,
+        }
+
     def score_actions(self, context: DecisionContext) -> list[float]:
         return [
             float(self.kind_scores.get(kind, self.default_score))
@@ -72,6 +79,14 @@ class LinearActionScorer:
     action_weights: Sequence[float] = ()
     bias: float = 0.0
     name: str = "linear_action"
+
+    @property
+    def provenance_config(self) -> Mapping[str, Any]:
+        return {
+            "snapshot_weights": list(self.snapshot_weights),
+            "action_weights": list(self.action_weights),
+            "bias": self.bias,
+        }
 
     def score_actions(self, context: DecisionContext) -> list[float]:
         base_score = self._snapshot_score(context.snapshot_features)

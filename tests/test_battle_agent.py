@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+from typing import Any
+
 from sts_combat_rl.sim.battle_agent import (
     BATTLE_AGENT_CONTROLLER,
-    BattleAgentRollout,
-    BattleAgentRolloutStep,
     NON_COMBAT_DRIVER_CONTROLLER,
     build_battle_decision_batch,
     build_battle_segment_report,
@@ -23,6 +23,7 @@ from sts_combat_rl.sim.features import (
     lightspeed_battle_feature_size,
     simulator_action_feature_size,
 )
+from sts_combat_rl.sim.controlled_run import ControlledRun, ControlledRunStep
 from sts_combat_rl.sim.policy import (
     PolicyDecision,
     PreferredKindPolicy,
@@ -166,6 +167,10 @@ class FakeBattleAgentAdapter:
 class BadBattlePolicy:
     name = "bad_battle"
 
+    @property
+    def provenance_config(self) -> dict[str, Any]:
+        return {}
+
     def select_action(self, context: object) -> PolicyDecision:
         del context
         return PolicyDecision(legal_action_index=8, reason="bad")
@@ -190,10 +195,11 @@ def test_collect_battle_agent_rollout_separates_battle_and_autopilot() -> None:
         PreferredKindPolicy(),
         seed=1,
         max_steps=3,
+        autopilot_policy=PreferredKindPolicy(),
     )
     summary = summarize_battle_agent_episode(rollout)
 
-    assert [step.controller for step in rollout.steps] == [
+    assert [step.controller_role for step in rollout.steps] == [
         BATTLE_AGENT_CONTROLLER,
         NON_COMBAT_DRIVER_CONTROLLER,
         BATTLE_AGENT_CONTROLLER,
@@ -225,6 +231,7 @@ def test_collect_battle_agent_rollout_reports_battle_policy_errors() -> None:
         BadBattlePolicy(),
         seed=1,
         max_steps=3,
+        autopilot_policy=PreferredKindPolicy(),
     )
 
     assert rollout.steps == []
@@ -240,6 +247,7 @@ def test_run_battle_agent_sweep_aggregates_battle_only_counts() -> None:
         PreferredKindPolicy(),
         seeds=[1, 2],
         max_steps=3,
+        autopilot_policy=PreferredKindPolicy(),
     )
     text = format_battle_agent_sweep_report(report)
 
@@ -262,6 +270,7 @@ def test_build_battle_decision_batch_excludes_autopilot_steps() -> None:
             PreferredKindPolicy(),
             seed=1,
             max_steps=3,
+            autopilot_policy=PreferredKindPolicy(),
         )
     ]
 
@@ -293,6 +302,7 @@ def test_build_battle_segment_report_summarizes_combat_boundaries() -> None:
             PreferredKindPolicy(),
             seed=1,
             max_steps=3,
+            autopilot_policy=PreferredKindPolicy(),
         )
     ]
 
@@ -338,6 +348,7 @@ def test_build_battle_reward_component_report_keeps_raw_components_unweighted() 
             PreferredKindPolicy(),
             seed=1,
             max_steps=3,
+            autopilot_policy=PreferredKindPolicy(),
         )
     ]
 
@@ -374,6 +385,7 @@ def test_build_battle_reward_design_report_scores_v0_without_long_term_weights()
             PreferredKindPolicy(),
             seed=1,
             max_steps=3,
+            autopilot_policy=PreferredKindPolicy(),
         )
     ]
 
@@ -412,6 +424,7 @@ def test_battle_reward_design_can_enable_long_term_weights_without_shape_change(
             PreferredKindPolicy(),
             seed=1,
             max_steps=3,
+            autopilot_policy=PreferredKindPolicy(),
         )
     ]
 
@@ -432,6 +445,7 @@ def test_reward_labeled_battle_decision_batch_aligns_labels_with_examples() -> N
             PreferredKindPolicy(),
             seed=1,
             max_steps=3,
+            autopilot_policy=PreferredKindPolicy(),
         )
     ]
 
@@ -472,7 +486,7 @@ def test_reward_labeled_battle_decision_batch_aligns_labels_with_examples() -> N
 
 
 def test_reward_labeled_batch_uses_terminal_step_allocation() -> None:
-    rollout = BattleAgentRollout(
+    rollout = ControlledRun(
         seed=7,
         requested_steps=3,
         steps=[
@@ -482,6 +496,10 @@ def test_reward_labeled_batch_uses_terminal_step_allocation() -> None:
         ],
         terminal=False,
         outcome="UNDECIDED",
+        initial_raw={},
+        final_raw={},
+        controller_provenance={},
+        problems=[],
     )
 
     batch = build_reward_labeled_battle_decision_batch(
@@ -511,6 +529,7 @@ def test_trainer_input_contract_accepts_reward_labeled_battle_batch() -> None:
             PreferredKindPolicy(),
             seed=1,
             max_steps=3,
+            autopilot_policy=PreferredKindPolicy(),
         )
     ]
     batch = build_reward_labeled_battle_decision_batch(
@@ -544,6 +563,7 @@ def test_trainer_input_contract_reports_label_alignment_problems() -> None:
             PreferredKindPolicy(),
             seed=1,
             max_steps=3,
+            autopilot_policy=PreferredKindPolicy(),
         )
     ]
     batch = build_reward_labeled_battle_decision_batch(
@@ -578,6 +598,7 @@ def test_trainer_input_dataset_round_trips_reward_labeled_battle_batch() -> None
             PreferredKindPolicy(),
             seed=1,
             max_steps=3,
+            autopilot_policy=PreferredKindPolicy(),
         )
     ]
     batch = build_reward_labeled_battle_decision_batch(
@@ -614,6 +635,7 @@ def test_trainer_input_dataset_smoke_report_checks_jsonl_round_trip() -> None:
             PreferredKindPolicy(),
             seed=1,
             max_steps=3,
+            autopilot_policy=PreferredKindPolicy(),
         )
     ]
     batch = build_reward_labeled_battle_decision_batch(
@@ -646,6 +668,7 @@ def test_model_input_batch_packs_variable_action_rows_for_scorer_context() -> No
             PreferredKindPolicy(),
             seed=1,
             max_steps=3,
+            autopilot_policy=PreferredKindPolicy(),
         )
     ]
     reward_batch = build_reward_labeled_battle_decision_batch(
@@ -684,6 +707,7 @@ def test_model_input_batch_smoke_report_checks_rebuilt_contexts() -> None:
             PreferredKindPolicy(),
             seed=1,
             max_steps=3,
+            autopilot_policy=PreferredKindPolicy(),
         )
     ]
     reward_batch = build_reward_labeled_battle_decision_batch(
@@ -721,6 +745,7 @@ def test_model_score_smoke_selects_eligible_argmax_action_rows() -> None:
             PreferredKindPolicy(),
             seed=1,
             max_steps=3,
+            autopilot_policy=PreferredKindPolicy(),
         )
     ]
     reward_batch = build_reward_labeled_battle_decision_batch(
@@ -887,6 +912,7 @@ def test_training_readiness_report_accepts_full_pretrainer_path() -> None:
             PreferredKindPolicy(),
             seed=1,
             max_steps=3,
+            autopilot_policy=PreferredKindPolicy(),
         )
     ]
 
@@ -947,10 +973,11 @@ def _battle_rollout_step(
     *,
     player_hp: float,
     next_player_hp: float,
-) -> BattleAgentRolloutStep:
-    return BattleAgentRolloutStep(
+) -> ControlledRunStep:
+    return ControlledRunStep(
         step_index=step_index,
-        controller=BATTLE_AGENT_CONTROLLER,
+        controller_role=BATTLE_AGENT_CONTROLLER,
+        provenance=None,
         screen_state="BATTLE",
         snapshot_features=[1.0, float(step_index)],
         legal_action_features=[[1.0, 0.0], [0.0, 1.0]],
@@ -974,10 +1001,11 @@ def _battle_rollout_step(
     )
 
 
-def _non_combat_rollout_step(step_index: int) -> BattleAgentRolloutStep:
-    return BattleAgentRolloutStep(
+def _non_combat_rollout_step(step_index: int) -> ControlledRunStep:
+    return ControlledRunStep(
         step_index=step_index,
-        controller=NON_COMBAT_DRIVER_CONTROLLER,
+        controller_role=NON_COMBAT_DRIVER_CONTROLLER,
+        provenance=None,
         screen_state="REWARDS",
         snapshot_features=[0.0, float(step_index)],
         legal_action_features=[[1.0, 0.0]],

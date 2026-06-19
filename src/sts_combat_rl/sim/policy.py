@@ -8,11 +8,11 @@ does not implement RL, a trainer, a Gymnasium environment, or game mechanics.
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 import math
 import random
-from typing import Protocol
+from typing import Any, Protocol
 
 from sts_combat_rl.sim.action_space import DEFAULT_PREFERRED_ACTION_KINDS
 from sts_combat_rl.sim.batching import DecisionBatch, DecisionExample
@@ -69,6 +69,18 @@ class DecisionPolicy(Protocol):
 
     name: str
 
+    @property
+    def provenance_config(self) -> Mapping[str, Any]:
+        """Behavior-changing config this policy should publish as provenance.
+
+        A short policy name is not sufficient provenance, so each policy exposes
+        the settings that change its behavior (seed, preferred kinds, scorer
+        identity, ...). The ``OnlineController`` adapters fold this into the
+        controller provenance identity so two policies differing only in seed
+        get different identities. The default for policies that do not override
+        is an empty mapping.
+        """
+
     def select_action(self, context: DecisionContext) -> PolicyDecision:
         """Select one legal-action index for ``context``."""
 
@@ -77,6 +89,16 @@ class ActionScorer(Protocol):
     """Scorer interface for future model wrappers over variable actions."""
 
     name: str
+
+    @property
+    def provenance_config(self) -> Mapping[str, Any]:
+        """Behavior-changing config this scorer should publish as provenance.
+
+        Two scorers with different weights must produce different provenance
+        so that controllers wrapping them get different identities. The default
+        returns an empty mapping; concrete scorers must override this to
+        include all behavior-distinguishing settings.
+        """
 
     def score_actions(self, context: DecisionContext) -> Sequence[float]:
         """Return one score for each legal action in ``context``."""
@@ -87,6 +109,10 @@ class FirstEligiblePolicy:
     """Baseline policy that selects the first currently eligible action."""
 
     name: str = "first_eligible"
+
+    @property
+    def provenance_config(self) -> Mapping[str, Any]:
+        return {}
 
     def select_action(self, context: DecisionContext) -> PolicyDecision:
         return PolicyDecision(
@@ -101,6 +127,10 @@ class PreferredKindPolicy:
 
     preferred_kinds: tuple[str, ...] = DEFAULT_PREFERRED_ACTION_KINDS
     name: str = "preferred_kind"
+
+    @property
+    def provenance_config(self) -> Mapping[str, Any]:
+        return {"preferred_kinds": tuple(self.preferred_kinds)}
 
     def select_action(self, context: DecisionContext) -> PolicyDecision:
         eligible_indices = _valid_eligible_indices(context)
@@ -124,6 +154,10 @@ class ReplayChosenPolicy:
 
     name: str = "replay_chosen"
 
+    @property
+    def provenance_config(self) -> Mapping[str, Any]:
+        return {}
+
     def select_action(
         self,
         example: DecisionContext | DecisionExample,
@@ -137,12 +171,29 @@ class ReplayChosenPolicy:
 
 
 class RandomEligiblePolicy:
-    """Seeded random baseline over eligible legal-action indices."""
+    """Seeded random baseline over eligible legal-action indices.
+
+    Provenance marks this policy non-reproducible. Although the seed is
+    published, the policy object's RNG advances on every decision and the
+    initial seed alone is not enough to reconstruct the controller's starting
+    RNG state for a run that begins mid-sequence (for example a battle policy
+    reused across a multi-seed sweep). For T002's provenance contract a
+    controller is reproducible only if its published provenance is sufficient
+    to reconstruct the controller's starting state; serializing the full Python
+    RNG state (or an equivalent deterministic per-run sequence contract) is
+    deferred to a later task. The seed is still recorded so the provenance
+    identity distinguishes differently-seeded policies.
+    """
 
     name = "random_eligible"
 
     def __init__(self, seed: int | None = None) -> None:
+        self._seed = seed
         self._rng = random.Random(seed)
+
+    @property
+    def provenance_config(self) -> Mapping[str, Any]:
+        return {"seed": self._seed, "reproducible": False}
 
     def select_action(self, context: DecisionContext) -> PolicyDecision:
         return PolicyDecision(
@@ -157,6 +208,22 @@ class ScoredActionPolicy:
 
     scorer: ActionScorer
     name: str = "scored_action"
+
+    @property
+    def provenance_config(self) -> Mapping[str, Any]:
+        scorer_config = getattr(self.scorer, "provenance_config", None)
+        if scorer_config is None:
+            raise ValueError(
+                f"scorer {self.scorer.name!r} does not expose provenance_config; "
+                "all scorers used in controlled runs must publish their "
+                "behavior-changing settings for reproducible identity"
+            )
+        if not isinstance(scorer_config, Mapping):
+            raise ValueError(
+                f"scorer {self.scorer.name!r}.provenance_config must be a mapping, "
+                f"got {type(scorer_config).__name__}"
+            )
+        return {"scorer_name": self.scorer.name, "scorer_config": dict(scorer_config)}
 
     def select_action(self, context: DecisionContext) -> PolicyDecision:
         scores = [float(score) for score in self.scorer.score_actions(context)]

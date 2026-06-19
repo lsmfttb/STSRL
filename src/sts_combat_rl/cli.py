@@ -14,7 +14,10 @@ from sts_combat_rl.comm.stdio_client import StdioClient
 from sts_combat_rl.logging_utils import DEFAULT_LOG_FILE, configure_logging
 from sts_combat_rl.policy.scripted import ScriptedCombatPolicy
 from sts_combat_rl.samples import analyze_sample_paths, format_sample_analysis
-from sts_combat_rl.sim.action_space import ActionSpaceConfig
+from sts_combat_rl.sim.action_space import (
+    ActionSpaceConfig,
+    choose_deterministic_action,
+)
 from sts_combat_rl.sim.batching import (
     build_decision_batch,
     format_decision_batch_report,
@@ -465,6 +468,7 @@ def main(argv: list[str] | None = None) -> int:
                         seed=args.sim_seed,
                         max_steps=args.sim_steps,
                         action_space=action_space,
+                        chooser=choose_deterministic_action,
                     )
                     print(format_rollout_batch(batch), file=sys.stderr)
                 elif args.lightspeed_policy_rollout_smoke:
@@ -811,6 +815,7 @@ def main(argv: list[str] | None = None) -> int:
                             seed=args.sim_seed + offset,
                             max_steps=args.sim_steps,
                             action_space=action_space,
+                            chooser=choose_deterministic_action,
                         )
                         for offset in range(args.sim_rollouts)
                     ]

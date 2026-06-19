@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from sts_combat_rl.sim.battle_agent import BattleAgentRollout
+from sts_combat_rl.sim.controlled_run import ControlledRun
 from sts_combat_rl.sim.model_input import (
     build_model_input_batch,
     build_model_input_batch_smoke_report,
@@ -67,7 +67,7 @@ class TrainingReadinessReport:
 
 
 def build_training_readiness_report(
-    rollouts: list[BattleAgentRollout],
+    rollouts: list[ControlledRun],
     *,
     weights: BattleRewardWeights | None = None,
     scorer: BatchActionScorer | None = None,
