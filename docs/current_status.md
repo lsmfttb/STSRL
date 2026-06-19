@@ -1,6 +1,6 @@
 # Current Status
 
-Last reviewed: 2026-06-15.
+Last reviewed: 2026-06-19.
 
 This document describes the latest `main` branch only. Results from local
 artifacts, old branches, or unmerged pull requests do not count as implemented
@@ -26,6 +26,11 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
 
 - Separate battle-policy and non-combat-driver selection during bounded
   simulator rollouts.
+- Explicit online-controller contract with immutable, serializable provenance.
+- `execute_controlled_run` as the authoritative complete-run advancement path
+  for current complete-run workflows.
+- Routed battle/non-combat controllers with separately inspectable child
+  provenance and composite reproducibility propagation.
 - Fixed-size tactical snapshot features and variable legal-action features.
 - Battle-only decision batches and contiguous battle-segment reports.
 - Candidate reward components, a draft scalar reward report, and reward-labeled
@@ -37,18 +42,17 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
 
 ### Tests
 
-- `143` tests pass on Windows Python as of this review.
+- `217` tests pass on Windows Python as of this review.
 - The two CommunicationMod fixture smokes pass.
 - `python -m compileall -q src tests` passes.
 - `ruff check src tests` and `ruff format --check src tests` pass.
+- The T002 A20 WSL battle sweep passes with 386 steps and no reported problems.
 
 ## Not Implemented On Main
 
 The following capabilities exist only as plans, experiment evidence, or
 unmerged legacy work:
 
-- explicit online-controller provenance and one authoritative controlled-run
-  executor;
 - checkpoint capture/restore and battle-start pools;
 - fixed structural battle evaluation;
 - native Oracle-like search integration and search-teacher datasets;
@@ -67,10 +71,11 @@ already supports them.
 Executable task specifications live in [`tasks/`](tasks/README.md). The first
 tasks in dependency order are:
 
-1. [`T002`](tasks/T002-controlled-run-foundation.md), currently `IN_REVIEW`:
-   resolve the documented routed-controller reproducibility propagation blocker.
-2. Review the remaining blocked task specifications against the architecture
-   as their prerequisites merge.
+1. [`T003`](tasks/T003-artifact-provenance-foundation.md), currently `READY`:
+   add artifact schemas, provenance persistence, and migration support.
+2. [`T010`](tasks/T010-stochastic-non-combat-driver.md), currently `READY`:
+   add the versioned stochastic non-combat driver and calibration report.
+3. Review remaining blocked task specifications as their prerequisites merge.
 
 Later tasks are dependency-ordered in the task index. A task is not ready for a
 new branch until its status is `READY`.

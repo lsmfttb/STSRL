@@ -1,6 +1,6 @@
 # T010: Stochastic Non-Combat Driver
 
-Status: `BLOCKED` by T002.
+Status: `READY`.
 
 ## Objective
 

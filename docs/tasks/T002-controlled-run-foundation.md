@@ -1,20 +1,23 @@
 # T002: Controlled-Run Foundation
 
-Status: `IN_REVIEW` in PR #2.
+Status: `DONE` in PR #2.
 
-Current review blockers:
+Merged into `main` at merge commit `a361555`.
 
-- `RoutedRunController` nests child provenance but does not propagate
-  `reproducible=False` when either child controller is non-reproducible. A
-  complete routed run with a non-reproducible non-combat driver can therefore
-  report top-level routed provenance as reproducible.
+Accepted behavior:
 
-Resolved during review:
-
+- controlled runs now use explicit online controllers with immutable,
+  serializable controller provenance;
+- `execute_controlled_run` is the authoritative complete-run advancement path
+  for current complete-run workflows;
+- routed battle/non-combat runs preserve separately inspectable child
+  provenance and propagate non-reproducibility to composite provenance;
 - rollout helpers now reject missing generating controllers instead of
   constructing hidden defaults;
-- `ControlledRun` records the effective action-space configuration;
-- the pull-request report is complete.
+- `ControlledRun` records the effective action-space configuration.
+
+Review-resolved issues:
+
 - production scorer behavior is represented in provenance, and missing scorer
   provenance fails closed;
 - chooser controllers preserve the effective action-space behavior for the

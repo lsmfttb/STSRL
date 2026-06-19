@@ -1,6 +1,6 @@
 # T003: Artifact Provenance Foundation
 
-Status: `BLOCKED` by T002.
+Status: `READY`.
 
 ## Objective
 
