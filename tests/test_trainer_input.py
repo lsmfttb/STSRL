@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 from io import StringIO
+import json
 from pathlib import Path
 
 import pytest
@@ -11,6 +12,7 @@ from sts_combat_rl.sim.trainer_input import (
     TRAINER_INPUT_DATASET_FORMAT_VERSION,
     dump_trainer_input_dataset_jsonl,
     load_trainer_input_dataset_jsonl_text,
+    trainer_input_dataset_to_jsonl_text,
 )
 
 
@@ -51,3 +53,37 @@ def test_trainer_input_writer_rejects_non_current_schema() -> None:
 
     with pytest.raises(ValueError, match="only emits current format version"):
         dump_trainer_input_dataset_jsonl(legacy, StringIO())
+
+
+def test_trainer_input_writer_rejects_non_current_record_schema() -> None:
+    text = Path("tests/fixtures/trainer_input_v1_legacy.jsonl").read_text(
+        encoding="utf-8"
+    )
+    current = load_trainer_input_dataset_jsonl_text(text)
+    bad_record = replace(current.records[0], record_schema_version=99)
+    corrupted = replace(current, records=[bad_record])
+
+    with pytest.raises(ValueError, match="record 0 schema 99"):
+        dump_trainer_input_dataset_jsonl(corrupted, StringIO())
+
+
+def test_trainer_input_loader_reports_malformed_action_identity() -> None:
+    text = Path("tests/fixtures/trainer_input_v1_legacy.jsonl").read_text(
+        encoding="utf-8"
+    )
+    current = load_trainer_input_dataset_jsonl_text(text)
+    rows = [
+        json.loads(line)
+        for line in trainer_input_dataset_to_jsonl_text(current).splitlines()
+    ]
+    record = rows[1]["record"]
+    record["legal_action_identities"][1]["stable_id"] = "bad"
+    record["chosen_action_identity"]["stable_id"] = "bad"
+    corrupted_text = "\n".join(
+        json.dumps(row, sort_keys=True, separators=(",", ":")) for row in rows
+    )
+
+    loaded = load_trainer_input_dataset_jsonl_text(corrupted_text)
+
+    assert any("legal action identity 1 is invalid" in item for item in loaded.problems)
+    assert any("chosen action identity is invalid" in item for item in loaded.problems)

@@ -437,6 +437,20 @@ def _require_current_dataset_schema(dataset: TrainerInputDataset) -> None:
             f"{DECISION_RECORD_SCHEMA_VERSION}, got "
             f"{dataset.decision_record_schema_version}"
         )
+    for record in dataset.records:
+        if record.record_schema_version != DECISION_RECORD_SCHEMA_VERSION:
+            raise ValueError(
+                "trainer input writer only emits current decision record schema "
+                f"{DECISION_RECORD_SCHEMA_VERSION}, got "
+                f"record {record.example_index} schema "
+                f"{record.record_schema_version}"
+            )
+        if record.record_schema_version != dataset.decision_record_schema_version:
+            raise ValueError(
+                f"record {record.example_index} schema "
+                f"{record.record_schema_version} does not match dataset schema "
+                f"{dataset.decision_record_schema_version}"
+            )
 
 
 def _migrate_trainer_input_v1_to_v2(

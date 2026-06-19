@@ -267,6 +267,12 @@ def decision_record_problems(record: DecisionRecord, *, label: str) -> list[str]
             f"{label}: {len(record.legal_action_identities)} action identities "
             f"but {legal_count} action rows"
         )
+    _append_action_identity_problems(
+        record.legal_action_identities,
+        record.chosen_action_identity,
+        label,
+        problems,
+    )
     _append_index_problems(
         record.eligible_action_indices,
         legal_count,
@@ -301,6 +307,24 @@ def decision_record_problems(record: DecisionRecord, *, label: str) -> list[str]
     if not record.source_metadata:
         problems.append(f"{label}: source metadata is missing")
     return problems
+
+
+def _append_action_identity_problems(
+    legal_action_identities: Sequence[Mapping[str, Any]],
+    chosen_action_identity: Mapping[str, Any],
+    label: str,
+    problems: list[str],
+) -> None:
+    for index, identity in enumerate(legal_action_identities):
+        try:
+            action_identity_from_dict(identity)
+        except ValueError as exc:
+            problems.append(f"{label}: legal action identity {index} is invalid: {exc}")
+    if chosen_action_identity:
+        try:
+            action_identity_from_dict(chosen_action_identity)
+        except ValueError as exc:
+            problems.append(f"{label}: chosen action identity is invalid: {exc}")
 
 
 def _append_index_problems(
