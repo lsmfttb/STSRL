@@ -260,19 +260,7 @@ def decision_record_problems(record: DecisionRecord, *, label: str) -> list[str]
             f"{label}: {len(record.legal_action_features)} action rows but "
             f"{len(record.legal_action_kinds)} action kinds"
         )
-    if record.legal_action_identities and (
-        len(record.legal_action_identities) != legal_count
-    ):
-        problems.append(
-            f"{label}: {len(record.legal_action_identities)} action identities "
-            f"but {legal_count} action rows"
-        )
-    _append_action_identity_problems(
-        record.legal_action_identities,
-        record.chosen_action_identity,
-        label,
-        problems,
-    )
+    problems.extend(decision_record_identity_problems(record, label=label))
     _append_index_problems(
         record.eligible_action_indices,
         legal_count,
@@ -294,6 +282,37 @@ def decision_record_problems(record: DecisionRecord, *, label: str) -> list[str]
         != record.legal_action_kinds[record.chosen_action_index]
     ):
         problems.append(f"{label}: chosen action kind does not match chosen action")
+    if not record.controller_provenance:
+        problems.append(f"{label}: controller provenance is missing")
+    if not record.source_metadata:
+        problems.append(f"{label}: source metadata is missing")
+    return problems
+
+
+def decision_record_identity_problems(
+    record: DecisionRecord,
+    *,
+    label: str,
+) -> list[str]:
+    """Return replay-identity problems for one current decision record."""
+
+    problems: list[str] = []
+    legal_count = len(record.legal_action_features)
+    if not record.legal_action_identities:
+        problems.append(f"{label}: legal action identities are missing")
+    elif len(record.legal_action_identities) != legal_count:
+        problems.append(
+            f"{label}: {len(record.legal_action_identities)} action identities "
+            f"but {legal_count} action rows"
+        )
+    if not record.chosen_action_identity:
+        problems.append(f"{label}: chosen action identity is missing")
+    _append_action_identity_problems(
+        record.legal_action_identities,
+        record.chosen_action_identity,
+        label,
+        problems,
+    )
     if (
         record.legal_action_identities
         and record.chosen_action_identity
@@ -302,10 +321,6 @@ def decision_record_problems(record: DecisionRecord, *, label: str) -> list[str]
         expected_identity = record.legal_action_identities[record.chosen_action_index]
         if record.chosen_action_identity != expected_identity:
             problems.append(f"{label}: chosen action identity does not match index")
-    if not record.controller_provenance:
-        problems.append(f"{label}: controller provenance is missing")
-    if not record.source_metadata:
-        problems.append(f"{label}: source metadata is missing")
     return problems
 
 
@@ -316,11 +331,17 @@ def _append_action_identity_problems(
     problems: list[str],
 ) -> None:
     for index, identity in enumerate(legal_action_identities):
+        if "stable_id" not in identity:
+            problems.append(
+                f"{label}: legal action identity {index} is missing stable_id"
+            )
         try:
             action_identity_from_dict(identity)
         except ValueError as exc:
             problems.append(f"{label}: legal action identity {index} is invalid: {exc}")
     if chosen_action_identity:
+        if "stable_id" not in chosen_action_identity:
+            problems.append(f"{label}: chosen action identity is missing stable_id")
         try:
             action_identity_from_dict(chosen_action_identity)
         except ValueError as exc:

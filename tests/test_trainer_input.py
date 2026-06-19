@@ -87,3 +87,91 @@ def test_trainer_input_loader_reports_malformed_action_identity() -> None:
 
     assert any("legal action identity 1 is invalid" in item for item in loaded.problems)
     assert any("chosen action identity is invalid" in item for item in loaded.problems)
+
+
+@pytest.mark.parametrize(
+    ("legal_action_identities", "chosen_action_identity", "expected_problems"),
+    [
+        ([], None, ("legal action identities are missing",)),
+        (None, {}, ("chosen action identity is missing",)),
+        (
+            [],
+            {},
+            (
+                "legal action identities are missing",
+                "chosen action identity is missing",
+            ),
+        ),
+    ],
+)
+def test_trainer_input_loader_reports_missing_action_identities(
+    legal_action_identities: list[dict[str, object]] | None,
+    chosen_action_identity: dict[str, object] | None,
+    expected_problems: tuple[str, ...],
+) -> None:
+    current = _current_dataset()
+    rows = [
+        json.loads(line)
+        for line in trainer_input_dataset_to_jsonl_text(current).splitlines()
+    ]
+    record = rows[1]["record"]
+    if legal_action_identities is not None:
+        record["legal_action_identities"] = legal_action_identities
+    if chosen_action_identity is not None:
+        record["chosen_action_identity"] = chosen_action_identity
+
+    loaded = load_trainer_input_dataset_jsonl_text(_jsonl_text(rows))
+
+    for expected in expected_problems:
+        assert any(expected in item for item in loaded.problems)
+
+
+@pytest.mark.parametrize(
+    ("legal_action_identities", "chosen_action_identity", "expected_problem"),
+    [
+        ([], None, "legal action identities are missing"),
+        (None, {}, "chosen action identity is missing"),
+        ([], {}, "legal action identities are missing"),
+    ],
+)
+def test_trainer_input_writer_rejects_missing_action_identities(
+    legal_action_identities: list[dict[str, object]] | None,
+    chosen_action_identity: dict[str, object] | None,
+    expected_problem: str,
+) -> None:
+    current = _current_dataset()
+    record = current.records[0]
+    corrupted = replace(
+        current,
+        records=[
+            replace(
+                record,
+                legal_action_identities=(
+                    record.legal_action_identities
+                    if legal_action_identities is None
+                    else legal_action_identities
+                ),
+                chosen_action_identity=(
+                    record.chosen_action_identity
+                    if chosen_action_identity is None
+                    else chosen_action_identity
+                ),
+            )
+        ],
+    )
+
+    with pytest.raises(ValueError, match=expected_problem):
+        dump_trainer_input_dataset_jsonl(corrupted, StringIO())
+
+
+def _current_dataset():
+    text = Path("tests/fixtures/trainer_input_v1_legacy.jsonl").read_text(
+        encoding="utf-8"
+    )
+    return load_trainer_input_dataset_jsonl_text(text)
+
+
+def _jsonl_text(rows: list[dict[str, object]]) -> str:
+    return "\n".join(
+        json.dumps(row, sort_keys=True, separators=(",", ":")) for row in rows
+    )

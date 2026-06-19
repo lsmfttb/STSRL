@@ -24,6 +24,7 @@ from sts_combat_rl.sim.artifact_versioning import (
 from sts_combat_rl.sim.decision_record import (
     DECISION_RECORD_SCHEMA_VERSION,
     DecisionRecord,
+    decision_record_identity_problems,
     decision_record_kwargs,
     decision_record_problems,
     legacy_index_action_identities,
@@ -450,6 +451,15 @@ def _require_current_dataset_schema(dataset: TrainerInputDataset) -> None:
                 f"record {record.example_index} schema "
                 f"{record.record_schema_version} does not match dataset schema "
                 f"{dataset.decision_record_schema_version}"
+            )
+        identity_problems = decision_record_identity_problems(
+            record,
+            label=f"record {record.example_index}",
+        )
+        if identity_problems:
+            raise ValueError(
+                "trainer input writer requires complete current action identities: "
+                + "; ".join(identity_problems)
             )
 
 
