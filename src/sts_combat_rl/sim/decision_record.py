@@ -307,12 +307,26 @@ def decision_record_identity_problems(
         )
     if not record.chosen_action_identity:
         problems.append(f"{label}: chosen action identity is missing")
-    _append_action_identity_problems(
+    legal_identities, chosen_identity = _append_action_identity_problems(
         record.legal_action_identities,
         record.chosen_action_identity,
         label,
         problems,
     )
+    _append_identity_action_consistency_problems(
+        legal_identities,
+        record.legal_action_kinds,
+        label,
+        problems,
+    )
+    if (
+        record.chosen_action_id is not None
+        and chosen_identity is not None
+        and _json_safe_action_id(record.chosen_action_id) != chosen_identity.action_id
+    ):
+        problems.append(
+            f"{label}: chosen action id does not match chosen action identity"
+        )
     if (
         record.legal_action_identities
         and record.chosen_action_identity
@@ -329,23 +343,63 @@ def _append_action_identity_problems(
     chosen_action_identity: Mapping[str, Any],
     label: str,
     problems: list[str],
-) -> None:
+) -> tuple[list[ActionIdentity | None], ActionIdentity | None]:
+    parsed_legal_identities: list[ActionIdentity | None] = []
     for index, identity in enumerate(legal_action_identities):
+        if not isinstance(identity, Mapping):
+            problems.append(f"{label}: legal action identity {index} is not an object")
+            parsed_legal_identities.append(None)
+            continue
         if "stable_id" not in identity:
             problems.append(
                 f"{label}: legal action identity {index} is missing stable_id"
             )
         try:
-            action_identity_from_dict(identity)
+            parsed_legal_identities.append(action_identity_from_dict(identity))
         except ValueError as exc:
             problems.append(f"{label}: legal action identity {index} is invalid: {exc}")
+            parsed_legal_identities.append(None)
+    parsed_chosen_identity: ActionIdentity | None = None
     if chosen_action_identity:
+        if not isinstance(chosen_action_identity, Mapping):
+            problems.append(f"{label}: chosen action identity is not an object")
+            return parsed_legal_identities, parsed_chosen_identity
         if "stable_id" not in chosen_action_identity:
             problems.append(f"{label}: chosen action identity is missing stable_id")
         try:
-            action_identity_from_dict(chosen_action_identity)
+            parsed_chosen_identity = action_identity_from_dict(chosen_action_identity)
         except ValueError as exc:
             problems.append(f"{label}: chosen action identity is invalid: {exc}")
+    return parsed_legal_identities, parsed_chosen_identity
+
+
+def _append_identity_action_consistency_problems(
+    legal_identities: Sequence[ActionIdentity | None],
+    legal_action_kinds: Sequence[str],
+    label: str,
+    problems: list[str],
+) -> None:
+    expected_occurrences: dict[str, int] = {}
+    for index, identity in enumerate(legal_identities):
+        if identity is None:
+            continue
+        if (
+            index < len(legal_action_kinds)
+            and identity.kind != legal_action_kinds[index]
+        ):
+            problems.append(
+                f"{label}: legal action identity {index} kind {identity.kind!r} "
+                f"does not match action kind {legal_action_kinds[index]!r}"
+            )
+        action_id_key = _action_id_key(identity.action_id)
+        expected_occurrence = expected_occurrences.get(action_id_key, 0)
+        if identity.occurrence != expected_occurrence:
+            problems.append(
+                f"{label}: legal action identity {index} occurrence "
+                f"{identity.occurrence} does not match expected "
+                f"{expected_occurrence} for action id {identity.action_id!r}"
+            )
+        expected_occurrences[action_id_key] = expected_occurrence + 1
 
 
 def _append_index_problems(

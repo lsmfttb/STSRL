@@ -7,7 +7,10 @@ from pathlib import Path
 
 import pytest
 
-from sts_combat_rl.sim.decision_record import DECISION_RECORD_SCHEMA_VERSION
+from sts_combat_rl.sim.decision_record import (
+    DECISION_RECORD_SCHEMA_VERSION,
+    stable_action_identity_id,
+)
 from sts_combat_rl.sim.trainer_input import (
     TRAINER_INPUT_DATASET_FORMAT_VERSION,
     dump_trainer_input_dataset_jsonl,
@@ -164,11 +167,104 @@ def test_trainer_input_writer_rejects_missing_action_identities(
         dump_trainer_input_dataset_jsonl(corrupted, StringIO())
 
 
+def _corrupt_identity_kind(record: dict[str, object]) -> None:
+    _replace_chosen_identity(record, kind="end_turn")
+
+
+def _corrupt_identity_duplicate_occurrence(record: dict[str, object]) -> None:
+    _replace_chosen_identity(record, occurrence=0)
+
+
+def _corrupt_identity_skipped_occurrence(record: dict[str, object]) -> None:
+    _replace_chosen_identity(record, occurrence=2)
+
+
+def _corrupt_chosen_action_id(record: dict[str, object]) -> None:
+    record["chosen_action_id"] = "not-the-chosen-identity"
+
+
+def _replace_chosen_identity(record: dict[str, object], **changes: object) -> None:
+    identities = record["legal_action_identities"]
+    assert isinstance(identities, list)
+    chosen_index = record["chosen_action_index"]
+    assert isinstance(chosen_index, int)
+    identity = dict(identities[chosen_index])
+    identity.update(changes)
+    identity["stable_id"] = stable_action_identity_id(
+        action_id=identity["action_id"],
+        occurrence=identity["occurrence"],
+        kind=identity["kind"],
+    )
+    identities[chosen_index] = identity
+    record["chosen_action_identity"] = dict(identity)
+
+
+@pytest.mark.parametrize(
+    ("corrupt_record", "expected_problem"),
+    [
+        (_corrupt_identity_kind, "does not match action kind"),
+        (
+            _corrupt_identity_duplicate_occurrence,
+            "occurrence 0 does not match expected 1",
+        ),
+        (
+            _corrupt_identity_skipped_occurrence,
+            "occurrence 2 does not match expected 1",
+        ),
+        (_corrupt_chosen_action_id, "chosen action id does not match"),
+    ],
+)
+def test_trainer_input_loader_reports_identity_action_inconsistency(
+    corrupt_record,
+    expected_problem: str,
+) -> None:
+    rows = _current_dataset_rows()
+    corrupt_record(rows[1]["record"])
+
+    loaded = load_trainer_input_dataset_jsonl_text(_jsonl_text(rows))
+
+    assert any(expected_problem in item for item in loaded.problems)
+
+
+@pytest.mark.parametrize(
+    ("corrupt_record", "expected_problem"),
+    [
+        (_corrupt_identity_kind, "does not match action kind"),
+        (
+            _corrupt_identity_duplicate_occurrence,
+            "occurrence 0 does not match expected 1",
+        ),
+        (
+            _corrupt_identity_skipped_occurrence,
+            "occurrence 2 does not match expected 1",
+        ),
+        (_corrupt_chosen_action_id, "chosen action id does not match"),
+    ],
+)
+def test_trainer_input_writer_rejects_identity_action_inconsistency(
+    corrupt_record,
+    expected_problem: str,
+) -> None:
+    rows = _current_dataset_rows()
+    corrupt_record(rows[1]["record"])
+    corrupted = load_trainer_input_dataset_jsonl_text(_jsonl_text(rows))
+
+    with pytest.raises(ValueError, match=expected_problem):
+        dump_trainer_input_dataset_jsonl(corrupted, StringIO())
+
+
 def _current_dataset():
     text = Path("tests/fixtures/trainer_input_v1_legacy.jsonl").read_text(
         encoding="utf-8"
     )
     return load_trainer_input_dataset_jsonl_text(text)
+
+
+def _current_dataset_rows() -> list[dict[str, object]]:
+    return [
+        json.loads(line)
+        for line in trainer_input_dataset_to_jsonl_text(_current_dataset()).splitlines()
+    ]
 
 
 def _jsonl_text(rows: list[dict[str, object]]) -> str:
