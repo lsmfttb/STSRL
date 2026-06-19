@@ -301,8 +301,15 @@ def _decision_example(
         legal_action_kinds=step.legal_action_kinds,
         eligible_action_indices=step.eligible_action_indices,
         chosen_action_index=step.chosen_action_index,
+        chosen_action_id=step.chosen_action_id,
+        legal_action_identities=list(step.legal_action_identities),
+        chosen_action_identity=dict(step.chosen_action_identity),
         chosen_action_kind=step.chosen_action_kind,
         terminal_after_step=step.terminal_after_step,
+        controller_provenance=(
+            step.provenance.to_dict() if step.provenance is not None else {}
+        ),
+        source_metadata=dict(step.source_metadata),
     )
 
 

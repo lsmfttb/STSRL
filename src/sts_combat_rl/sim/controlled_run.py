@@ -33,6 +33,10 @@ from sts_combat_rl.sim.controller_contract import (
     OnlineController,
     selected_index_problem,
 )
+from sts_combat_rl.sim.decision_record import (
+    action_identity_dicts_for_actions,
+    source_metadata_from_snapshot,
+)
 from sts_combat_rl.sim.features import (
     encode_lightspeed_battle_snapshot,
     encode_simulator_actions,
@@ -104,6 +108,9 @@ class ControlledRunStep:
     next_player_max_hp: float | None = None
     next_gold: float | None = None
     next_potion_count: float | None = None
+    legal_action_identities: list[dict[str, Any]] = field(default_factory=list)
+    chosen_action_identity: dict[str, Any] = field(default_factory=dict)
+    source_metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -214,6 +221,7 @@ def execute_controlled_run(
             break
 
         chosen_action = actions[decision.selected_index]
+        legal_action_identities = action_identity_dicts_for_actions(actions)
         transition = adapter.step(chosen_action)
         terminal = transition.terminal
         next_raw = transition.snapshot.raw
@@ -228,9 +236,16 @@ def execute_controlled_run(
             eligible_action_indices=context.eligible_action_indices,
             chosen_action_index=decision.selected_index,
             chosen_action_id=chosen_action.action_id,
+            legal_action_identities=legal_action_identities,
+            chosen_action_identity=legal_action_identities[decision.selected_index],
             chosen_action_kind=chosen_action.kind,
             terminal_after_step=terminal,
             provenance=decision.provenance,
+            source_metadata=source_metadata_from_snapshot(
+                snapshot.raw,
+                seed=seed,
+                source_kind="natural_run",
+            ),
             floor=_first_number(snapshot.raw, "floor_num", "floor"),
             player_hp=_player_hp(snapshot.raw),
             player_max_hp=_player_max_hp(snapshot.raw),

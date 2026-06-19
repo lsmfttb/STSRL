@@ -21,6 +21,14 @@ from sts_combat_rl.sim.action_space import (
     eligible_indices,
     filter_eligible_actions,
 )
+from sts_combat_rl.sim.artifact_versioning import (
+    ArtifactDocument,
+    ArtifactMigration,
+    ArtifactMigrationReport,
+    MigratedArtifact,
+    migrate_artifact_document,
+    preserved_migration_report,
+)
 from sts_combat_rl.sim.batching import (
     DecisionBatch,
     DecisionExample,
@@ -57,6 +65,16 @@ from sts_combat_rl.sim.controlled_run import (
     build_decision_context,
     execute_controlled_run,
     format_controlled_run,
+)
+from sts_combat_rl.sim.decision_record import (
+    DECISION_RECORD_SCHEMA_VERSION,
+    ActionIdentity,
+    DecisionRecord,
+    action_identities_for_actions,
+    action_identity_dicts_for_actions,
+    find_action_index_by_identity,
+    legacy_index_action_identities,
+    source_metadata_from_snapshot,
 )
 from sts_combat_rl.sim.online_controller import (
     BATTLE_AGENT_CONTROLLER_ROLE,
@@ -192,7 +210,11 @@ __all__ = [
     "ActionChooser",
     "ActionSpaceConfig",
     "ActionScorer",
+    "ActionIdentity",
     "ActionKindPriorScorer",
+    "ArtifactDocument",
+    "ArtifactMigration",
+    "ArtifactMigrationReport",
     "LinearActionScorer",
     "AUTOPILOT_CONTROLLER",
     "BATTLE_AGENT_CONTROLLER",
@@ -225,6 +247,7 @@ __all__ = [
     "ModelInputExampleRef",
     "ModelScoreSelection",
     "ModelScoreSmokeReport",
+    "MigratedArtifact",
     "TrainerInputContractReport",
     "TrainerInputDataset",
     "TrainerInputDatasetSmokeReport",
@@ -236,7 +259,9 @@ __all__ = [
     "DecisionContext",
     "DecisionExample",
     "DecisionPolicy",
+    "DecisionRecord",
     "DEFAULT_ACTION_KIND_SCORE_PRIOR",
+    "DECISION_RECORD_SCHEMA_VERSION",
     "EpisodeSummary",
     "FirstEligiblePolicy",
     "FUTURE_REWARD_SIGNAL_GAPS",
@@ -329,4 +354,11 @@ __all__ = [
     "summarize_battle_agent_episode",
     "summarize_rollout_episode",
     "trainer_input_dataset_to_jsonl_text",
+    "action_identities_for_actions",
+    "action_identity_dicts_for_actions",
+    "find_action_index_by_identity",
+    "legacy_index_action_identities",
+    "migrate_artifact_document",
+    "preserved_migration_report",
+    "source_metadata_from_snapshot",
 ]
