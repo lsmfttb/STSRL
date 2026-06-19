@@ -423,6 +423,26 @@ class TestRoutedRunController:
         assert "battle" in routed.provenance.config
         assert "non_combat" in routed.provenance.config
 
+    def test_non_reproducible_child_makes_routed_non_reproducible(self) -> None:
+        """A routed controller must be non-reproducible when either child is
+        non-reproducible, so the composite provenance does not falsely claim
+        reproducibility."""
+        battle = PolicyController(PreferredKindPolicy())
+        non_combat = PolicyController(RandomEligiblePolicy(seed=1))
+        routed = RoutedRunController(battle, non_combat)
+        # Battle child is reproducible, but non-combat child is not.
+        assert routed.provenance.reproducible is False
+        assert routed.provenance.config.get("reproducible") is False
+
+    def test_both_reproducible_children_makes_routed_reproducible(self) -> None:
+        """A routed controller is reproducible only when both children are."""
+        routed = RoutedRunController(
+            PolicyController(FirstEligiblePolicy()),
+            PolicyController(PreferredKindPolicy()),
+        )
+        assert routed.provenance.reproducible is True
+        assert routed.provenance.config.get("reproducible") is True
+
     def test_implements_protocol(self) -> None:
         routed = RoutedRunController(
             PolicyController(FirstEligiblePolicy()),

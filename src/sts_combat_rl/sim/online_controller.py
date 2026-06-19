@@ -149,6 +149,8 @@ class RoutedRunController:
     def __post_init__(self) -> None:
         battle_prov = self.battle.provenance
         non_combat_prov = self.non_combat.provenance
+        # A routed run is reproducible only when both children are reproducible.
+        all_reproducible = battle_prov.reproducible and non_combat_prov.reproducible
         object.__setattr__(
             self,
             "provenance",
@@ -158,6 +160,7 @@ class RoutedRunController:
                 config={
                     "battle": battle_prov.to_dict(),
                     "non_combat": non_combat_prov.to_dict(),
+                    "reproducible": all_reproducible,
                 },
             ),
         )
