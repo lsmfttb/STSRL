@@ -24,6 +24,7 @@ from sts_combat_rl.sim.features import (
     simulator_action_feature_size,
 )
 from sts_combat_rl.sim.controlled_run import ControlledRun, ControlledRunStep
+from sts_combat_rl.sim.decision_record import DECISION_RECORD_SCHEMA_VERSION
 from sts_combat_rl.sim.policy import (
     PolicyDecision,
     PreferredKindPolicy,
@@ -611,6 +612,8 @@ def test_trainer_input_dataset_round_trips_reward_labeled_battle_batch() -> None
     loaded = load_trainer_input_dataset_jsonl_text(encoded)
 
     assert dataset.format_version == TRAINER_INPUT_DATASET_FORMAT_VERSION
+    assert dataset.decision_record_schema_version == DECISION_RECORD_SCHEMA_VERSION
+    assert dataset.migration_report.migrated is False
     assert dataset.reward_allocation == "terminal_step"
     assert dataset.source_rollout_count == 1
     assert dataset.segment_count == 2
@@ -621,6 +624,14 @@ def test_trainer_input_dataset_round_trips_reward_labeled_battle_batch() -> None
     assert dataset.records[0].legal_action_kinds == ["end_turn", "card"]
     assert dataset.records[0].eligible_action_indices == [0, 1]
     assert dataset.records[0].chosen_action_index == 1
+    assert dataset.records[0].chosen_action_id == "card"
+    assert (
+        dataset.records[0].chosen_action_identity
+        == dataset.records[0].legal_action_identities[1]
+    )
+    assert dataset.records[0].controller_provenance["kind"] == "decision_policy"
+    assert dataset.records[0].source_metadata["source_kind"] == "natural_run"
+    assert dataset.records[0].source_metadata["seed"] == 1
     assert dataset.records[0].segment_index == 0
     assert dataset.records[0].raw_reward_components["gold_delta"] == -2.0
     assert '"type":"metadata"' in encoded

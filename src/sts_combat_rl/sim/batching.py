@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from sts_combat_rl.sim.controlled_run import ControlledRun, ControlledRunStep
+from sts_combat_rl.sim.decision_record import DECISION_RECORD_SCHEMA_VERSION
 
 
 @dataclass(frozen=True)
@@ -30,6 +31,12 @@ class DecisionExample:
     chosen_action_index: int
     chosen_action_kind: str
     terminal_after_step: bool
+    chosen_action_id: int | str | None = None
+    record_schema_version: int = DECISION_RECORD_SCHEMA_VERSION
+    legal_action_identities: list[dict[str, Any]] = field(default_factory=list)
+    chosen_action_identity: dict[str, Any] = field(default_factory=dict)
+    controller_provenance: dict[str, Any] = field(default_factory=dict)
+    source_metadata: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -141,8 +148,15 @@ def _decision_example(
         legal_action_kinds=step.legal_action_kinds,
         eligible_action_indices=step.eligible_action_indices,
         chosen_action_index=step.chosen_action_index,
+        chosen_action_id=step.chosen_action_id,
+        legal_action_identities=list(step.legal_action_identities),
+        chosen_action_identity=dict(step.chosen_action_identity),
         chosen_action_kind=step.chosen_action_kind,
         terminal_after_step=step.terminal_after_step,
+        controller_provenance=(
+            step.provenance.to_dict() if step.provenance is not None else {}
+        ),
+        source_metadata=dict(step.source_metadata),
     )
 
 
