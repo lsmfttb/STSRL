@@ -80,15 +80,30 @@ class PolicyController:
     provenance: ControllerProvenance = field(init=False, default=None)  # type: ignore[assignment]
 
     def __post_init__(self) -> None:
-        policy_config = getattr(self.policy, "provenance_config", {})
+        # Fail closed: a policy without an explicit provenance_config is an
+        # implicitly name-only legacy policy. A short name is not sufficient
+        # provenance — the policy must explicitly declare its behavior-changing
+        # settings (even an empty mapping is a valid declaration of "no
+        # behavior-changing config").
+        if not hasattr(self.policy, "provenance_config"):
+            raise ValueError(
+                f"policy {type(self.policy).__name__!r} has no provenance_config; "
+                "every policy used in a controlled run must publish its "
+                "behavior-changing settings as a mapping"
+            )
+        policy_config = self.policy.provenance_config
         if not isinstance(policy_config, Mapping):
             raise ValueError("policy.provenance_config must be a mapping")
-        merged_config: dict[str, Any] = {
-            "policy_class": type(self.policy).__name__,
-            "information_regime": PUBLIC_POLICY_INFORMATION_REGIME,
-        }
+        merged_config: dict[str, Any] = {}
         merged_config.update(policy_config)
-        merged_config.update(self.config)
+        # Caller-supplied extra config is namespaced under "extra" so it can
+        # never overwrite canonical provenance fields or the policy's own config.
+        if self.config:
+            merged_config["extra"] = dict(self.config)
+        # Canonical fields applied last so they are authoritative and never
+        # overwritable by the policy's own provenance or by caller extra config.
+        merged_config["policy_class"] = type(self.policy).__name__
+        merged_config["information_regime"] = PUBLIC_POLICY_INFORMATION_REGIME
         object.__setattr__(
             self,
             "provenance",
@@ -212,14 +227,16 @@ class ChooserController:
         if is_deterministic and self.name == "custom_chooser":
             effective_name = "deterministic_chooser"
 
-        merged_config: dict[str, Any] = {
-            "chooser": effective_name,
-            "reproducible": effective_reproducible,
-            "action_space": self.action_space.to_dict(),
-        }
-        merged_config.update(self.config)
-        if not effective_reproducible:
-            merged_config["reproducible"] = False
+        # Canonical fields are applied last so they are authoritative and never
+        # overwritable by caller extra config.
+        merged_config: dict[str, Any] = {}
+        # Caller-supplied extra config is namespaced under "extra" so it can
+        # never overwrite canonical provenance fields.
+        if self.config:
+            merged_config["extra"] = dict(self.config)
+        merged_config["chooser"] = effective_name
+        merged_config["reproducible"] = effective_reproducible
+        merged_config["action_space"] = self.action_space.to_dict()
         object.__setattr__(
             self,
             "provenance",

@@ -10,7 +10,6 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-import hashlib
 import math
 import random
 from typing import Any, Protocol
@@ -172,7 +171,19 @@ class ReplayChosenPolicy:
 
 
 class RandomEligiblePolicy:
-    """Seeded random baseline over eligible legal-action indices."""
+    """Seeded random baseline over eligible legal-action indices.
+
+    Provenance marks this policy non-reproducible. Although the seed is
+    published, the policy object's RNG advances on every decision and the
+    initial seed alone is not enough to reconstruct the controller's starting
+    RNG state for a run that begins mid-sequence (for example a battle policy
+    reused across a multi-seed sweep). For T002's provenance contract a
+    controller is reproducible only if its published provenance is sufficient
+    to reconstruct the controller's starting state; serializing the full Python
+    RNG state (or an equivalent deterministic per-run sequence contract) is
+    deferred to a later task. The seed is still recorded so the provenance
+    identity distinguishes differently-seeded policies.
+    """
 
     name = "random_eligible"
 
@@ -182,13 +193,7 @@ class RandomEligiblePolicy:
 
     @property
     def provenance_config(self) -> Mapping[str, Any]:
-        # Include a fingerprint of the current RNG state so that the same
-        # policy object reused across multiple controlled runs gets a different
-        # provenance identity per run. The full state tuple is large; we hash
-        # it to keep provenance compact.
-        rng_state = self._rng.getstate()
-        rng_fingerprint = hashlib.sha256(str(rng_state).encode("utf-8")).hexdigest()[:8]
-        return {"seed": self._seed, "rng_fingerprint": rng_fingerprint}
+        return {"seed": self._seed, "reproducible": False}
 
     def select_action(self, context: DecisionContext) -> PolicyDecision:
         return PolicyDecision(

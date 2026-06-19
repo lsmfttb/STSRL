@@ -322,28 +322,64 @@ class TestPolicyController:
         ctrl_b = PolicyController(policy_b)
         assert ctrl_a.provenance.identity != ctrl_b.provenance.identity
 
-    def test_random_eligible_policy_rng_fingerprint_changes(self) -> None:
-        """RandomEligiblePolicy provenance changes after each use because the
-        RNG fingerprint advances, preventing identity collision when the same
-        policy object is reused across multiple controlled runs."""
+    def test_random_eligible_policy_non_reproducible(self) -> None:
+        """RandomEligiblePolicy is marked non-reproducible: the published seed
+        is not enough to reconstruct the controller's starting RNG state when
+        the policy is reused across a multi-seed sweep. The identity is still
+        seed-distinct so differently-seeded policies do not collide."""
         policy = RandomEligiblePolicy(seed=42)
-        ctrl_first = PolicyController(policy)
-        identity_first = ctrl_first.provenance.identity
+        ctrl = PolicyController(policy)
+        # Reproducible is false because seed-only provenance cannot reconstruct
+        # the starting RNG state of a reused policy.
+        assert ctrl.provenance.reproducible is False
+        assert ctrl.provenance.config.get("reproducible") is False
+        assert ctrl.provenance.config.get("seed") == 42
 
-        # Use the policy to advance its RNG
-        ctx = DecisionContext(
-            screen_state="BATTLE",
-            snapshot_features=[0.0],
-            legal_action_features=[[1.0], [2.0]],
-            legal_action_kinds=["card", "end_turn"],
-            eligible_action_indices=[0, 1],
+    def test_random_eligible_policy_seed_distinct_identity(self) -> None:
+        """Differently-seeded RandomEligiblePolicies get distinct identities;
+        same seed gets the same identity (seed-distinct, not state-distinct)."""
+        ctrl_a = PolicyController(RandomEligiblePolicy(seed=1))
+        ctrl_b = PolicyController(RandomEligiblePolicy(seed=2))
+        ctrl_c = PolicyController(RandomEligiblePolicy(seed=1))
+        assert ctrl_a.provenance.identity != ctrl_b.provenance.identity
+        assert ctrl_a.provenance.identity == ctrl_c.provenance.identity
+
+    def test_policy_without_provenance_config_fails_closed(self) -> None:
+        """A policy object with no provenance_config attribute is rejected,
+        not silently given name-only provenance."""
+
+        class NameOnlyPolicy:
+            name = "name_only"
+
+            def select_action(self, context: DecisionContext) -> Any:
+                del context
+                return None
+
+        with pytest.raises(ValueError, match="no provenance_config"):
+            PolicyController(NameOnlyPolicy())  # type: ignore[arg-type]
+
+    def test_caller_config_cannot_overwrite_canonical_fields(self) -> None:
+        """Caller-supplied config must not overwrite canonical provenance fields
+        (policy_class, information_regime) or the policy's own provenance."""
+        policy = FirstEligiblePolicy()
+        # Caller tries to overwrite canonical fields and policy config.
+        ctrl = PolicyController(
+            policy,
+            config={
+                "policy_class": "FakeController",
+                "information_regime": "full_simulator_state_oracle_like",
+            },
         )
-        policy.select_action(ctx)
-
-        # New controller from same policy should get different identity
-        ctrl_second = PolicyController(policy)
-        identity_second = ctrl_second.provenance.identity
-        assert identity_first != identity_second
+        # Canonical fields are authoritative.
+        assert ctrl.provenance.config.get("policy_class") == "FirstEligiblePolicy"
+        assert ctrl.provenance.config.get("information_regime") == (
+            "normal_public_policy"
+        )
+        # Caller config is namespaced under "extra", never merged at the top.
+        assert ctrl.provenance.config.get("extra") == {
+            "policy_class": "FakeController",
+            "information_regime": "full_simulator_state_oracle_like",
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -512,6 +548,38 @@ class TestChooserController:
         assert ctrl.provenance.name == "deterministic_chooser"
         # The chooser reference must be the original function, not a wrapper
         assert ctrl.chooser is choose_deterministic_action
+
+    def test_caller_config_cannot_overwrite_canonical_fields(self) -> None:
+        """Caller-supplied config must not overwrite the canonical chooser name,
+        reproducible flag, or the recorded action-space config."""
+        from sts_combat_rl.sim.action_space import choose_deterministic_action
+
+        no_potions = ActionSpaceConfig.initial_no_potions()
+        ctrl = ChooserController(
+            choose_deterministic_action,
+            action_space=no_potions,
+            config={
+                "chooser": "fake_chooser",
+                "reproducible": False,
+                "action_space": {"injected": True},
+            },
+        )
+        # Canonical fields are authoritative.
+        assert ctrl.provenance.config.get("chooser") == "deterministic_chooser"
+        assert ctrl.provenance.config.get("reproducible") is True
+        # action_space is deep-frozen (nested MappingProxyType/tuples); compare
+        # the round-tripped serialized form rather than the raw to_dict().
+        from sts_combat_rl.sim.controller_contract import json_safe_mapping
+
+        assert json_safe_mapping(ctrl.provenance.config.get("action_space")) == (
+            json_safe_mapping(no_potions.to_dict())
+        )
+        # Caller config is namespaced under "extra".
+        assert ctrl.provenance.config.get("extra") == {
+            "chooser": "fake_chooser",
+            "reproducible": False,
+            "action_space": {"injected": True},
+        }
 
 
 # ---------------------------------------------------------------------------

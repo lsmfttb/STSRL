@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from sts_combat_rl.sim.battle_agent import (
     BATTLE_AGENT_CONTROLLER,
     NON_COMBAT_DRIVER_CONTROLLER,
@@ -164,6 +166,10 @@ class FakeBattleAgentAdapter:
 
 class BadBattlePolicy:
     name = "bad_battle"
+
+    @property
+    def provenance_config(self) -> dict[str, Any]:
+        return {}
 
     def select_action(self, context: object) -> PolicyDecision:
         del context
