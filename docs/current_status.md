@@ -58,6 +58,7 @@ unmerged legacy work:
 - native Oracle-like search integration and search-teacher datasets;
 - artifact migrations and complete decision provenance;
 - PyTorch policy/value training;
+- live CommunicationMod runtime adapter for trained or search controllers;
 - structured persistent resource outcomes;
 - sanitized public run context or complete public run history;
 - constructed A20 battle-start supplements;
@@ -79,6 +80,13 @@ tasks in dependency order are:
 
 Later tasks are dependency-ordered in the task index. A task is not ready for a
 new branch until its status is `READY`.
+
+Live-game deployment compatibility is now tracked as
+[`T013`](tasks/T013-live-communicationmod-runtime-adapter.md). It is blocked by
+T003 and T011. Simulator-only RL training does not depend on T013, but trained
+or search controllers should not be described as runnable in the real game until
+that adapter, feature-parity, action-mapping, and runtime-provenance work
+passes review.
 
 ## Legacy Integration Reference
 

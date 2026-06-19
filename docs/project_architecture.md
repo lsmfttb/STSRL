@@ -35,6 +35,35 @@ future sampling must come from the simulator.
 Real `sts_lightspeed` gates run through WSL. Game files, simulator binaries,
 save files, and large artifacts do not belong in this repository.
 
+## Real Game Runtime Boundary
+
+Training and evaluation may run entirely in `sts_lightspeed`, but a controller
+claimed to be live-game runnable must also operate behind the same public
+decision and legal-action contract in the actual game through CommunicationMod.
+
+The live runtime adapter owns:
+
+- parsing player-visible CommunicationMod snapshots into the sanitized public
+  decision context;
+- constructing the legal action list with stable public identities, duplicate
+  occurrence disambiguation, target parameters, and command payloads;
+- invoking an `OnlineController` without simulator-only fields;
+- mapping the selected legal action back to a CommunicationMod protocol
+  command;
+- recording runtime provenance, source format, missing fields, unsupported
+  fields, and selected action identity.
+
+The live adapter must not create a second feature contract, infer hidden state,
+call local Slay the Spire mechanics to invent legal actions, or let debug output
+contaminate stdout protocol commands. If a live state cannot be mapped to the
+published decision contract, the adapter fails closed with an explicit
+unsupported-state record or named fallback instead of emitting an arbitrary
+action.
+
+Captured CommunicationMod combat snapshots are the required compatibility test
+surface. Interactive live-game smoke tests are useful, but they do not replace
+fixture-based regression coverage.
+
 ## Information Regimes
 
 Every controller, dataset, checkpoint, and evaluation report declares its
@@ -132,6 +161,10 @@ Specialized loops are allowed only for a genuinely different boundary:
 
 They reuse shared controller selection and validation semantics. They do not
 silently choose a policy or redefine root action selection.
+
+Live CommunicationMod control is another distinct boundary: the external game
+advances state and the repository only consumes snapshots and emits protocol
+commands. It still uses the shared controller and action-selection contract.
 
 ## Non-Combat Driver
 

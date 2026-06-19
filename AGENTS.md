@@ -21,6 +21,9 @@ current contracts.
 - `sts_lightspeed` is the authoritative game implementation. Do not implement
   Slay the Spire mechanics locally.
 - Real `sts_lightspeed` gates run through WSL, not Windows Python.
+- Simulator-only training is allowed, but any trained or search controller
+  claimed live-game runnable must pass the CommunicationMod runtime adapter and
+  share the same public decision/action contract.
 - Do not add game files, jars, mods, save files, large binaries, Gymnasium, or
   Stable-Baselines3.
 - PyTorch battle-policy/value work is allowed behind the optional `train`

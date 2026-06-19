@@ -209,6 +209,28 @@ Broad training waits for explicit scale and distribution readiness. Smoke-scale
 training remains useful only for interface validation or named narrow
 curricula.
 
+## Live Game Deployment Compatibility
+
+Simulator-only training and evaluation do not require the real game process.
+However, a trained, search, or hybrid controller is not live-game runnable until
+it passes a CommunicationMod runtime adapter gate.
+
+That gate requires:
+
+- the same public tactical feature and legal-action contract used by simulator
+  training;
+- conversion from player-visible CommunicationMod snapshots to the shared
+  decision context;
+- stable action identity and duplicate-action disambiguation;
+- command-payload mapping back to CommunicationMod protocol commands;
+- runtime provenance and source-format logging;
+- explicit missing-field and unsupported-state behavior.
+
+This compatibility work is tracked by
+[`T013`](tasks/T013-live-communicationmod-runtime-adapter.md). It is a deployment
+gate, not a substitute for fixed battle evaluation or full-run performance
+measurement.
+
 ## SL-Enabled Branch
 
 The SL branch models the real restart behavior where an agent can replay a
@@ -286,6 +308,14 @@ Status: pending simulator hidden-future sampling.
 
 Exit gate: public-information belief search improves normal-information fixed
 evaluation without leakage.
+
+### Phase F2: Live Runtime Deployment Gate
+
+Status: pending T003, T011, and T013.
+
+Exit gate: a controller can consume captured CommunicationMod combat snapshots,
+select through the shared `OnlineController` contract, emit valid protocol
+commands, and record runtime provenance without simulator-only inputs.
 
 ### Phase G: SL Branch
 

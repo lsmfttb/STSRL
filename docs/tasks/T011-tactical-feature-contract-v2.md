@@ -29,6 +29,9 @@ contract and is too limited for serious model training.
   state-action interactions.
 - Version trainer-input and model-input schemas and migrate supported legacy
   fixtures explicitly.
+- Audit CommunicationMod/live-runtime availability for required public tactical
+  fields and legal-action fields. Classify each field as shared, live-missing,
+  simulator-only, or explicitly unsupported.
 - Report missing public fields and unknown identities rather than silently
   collapsing them.
 
@@ -45,6 +48,9 @@ contract and is too limited for serious model training.
 - Identity vocabularies have explicit unknown handling and versioning.
 - Variable-length entities remain structured until the model-input boundary.
 - Feature changes require a new schema version and migration impact report.
+- Do not create a simulator-only feature contract. Fields unavailable from the
+  live CommunicationMod path require explicit missing-value behavior and a
+  documented impact on runtime deployment.
 
 ## Deliverables
 
@@ -53,6 +59,7 @@ contract and is too limited for serious model training.
 - Tests covering monster/card/relic/potion identity, targets, ascension, unknown
   values, and hidden-field exclusion.
 - Feature coverage and missing-field report on real WSL A20 samples.
+- Simulator/live tactical-field parity report that T013 can consume.
 
 ## Acceptance Criteria
 
@@ -61,6 +68,8 @@ contract and is too limited for serious model training.
 - Actions with duplicate public IDs or different targets remain distinguishable.
 - No forbidden hidden field reaches the feature contract.
 - Existing supported artifacts migrate explicitly or fail with a clear reason.
+- Required live-unavailable fields are represented through documented
+  missing-value paths rather than silently collapsed or guessed.
 - Standard local gates and the documented WSL coverage audit pass.
 
 ## Legacy Reference
@@ -79,4 +88,5 @@ tests/test_battle_agent.py
 ## PR Report
 
 Include schema versions, feature inventory, unknown/missing-field counts,
-forbidden-field audit, migration impact, and exact verification results.
+simulator/live parity status, forbidden-field audit, migration impact, and exact
+verification results.
