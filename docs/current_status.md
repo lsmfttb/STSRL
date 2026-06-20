@@ -73,7 +73,7 @@ already supports them.
 Executable task specifications live in [`tasks/`](tasks/README.md). The first
 tasks in dependency order are:
 
-1. [`T010`](tasks/T010-stochastic-non-combat-driver.md), currently `READY`:
+1. [`T010`](tasks/T010-stochastic-non-combat-driver.md), currently `IN_REVIEW`:
    add the versioned stochastic non-combat driver and calibration report.
 2. [`T011`](tasks/T011-tactical-feature-contract-v2.md), currently `READY`:
    establish the versioned public tactical state/action feature contract and

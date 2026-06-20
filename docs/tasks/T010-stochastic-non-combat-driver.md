@@ -1,6 +1,6 @@
 # T010: Stochastic Non-Combat Driver
 
-Status: `READY`.
+Status: `IN_REVIEW`.
 
 ## Objective
 
@@ -32,15 +32,19 @@ random priors or report low-probability branch coverage.
   - taking keys and other Heart-related branches.
 - Add only the simulator-native visible actions and resource snapshots required
   to make those branches controllable and auditable.
-- Record complete driver provenance and category probabilities.
-- Produce a calibration report showing category and rare-branch counts across
-  a named A20 seed range.
+- Record complete driver provenance, published relative category weights, and
+  the normalization rule used after legal categories are known.
+- Produce a natural-calibration report showing reached screens, category
+  opportunities, selected-category counts, and unavailable structural
+  categories across a named A20 seed range.
 
 ## Out Of Scope
 
 - A learned non-combat policy or hand-written optimal route.
 - Deterministic preferred choices.
 - Battle policy changes, checkpoint pools, or constructed states.
+- Improving the battle controller merely to reach a particular non-combat
+  screen, including Boss relic rewards.
 - Removing legal branches because they are usually weak.
 
 ## Design Constraints
@@ -51,29 +55,49 @@ random priors or report low-probability branch coverage.
 - All randomness comes from explicit seeded sources.
 - Missing simulator-visible actions fail explicitly; Python must not implement
   game mechanics.
+- Conditional driver reachability and natural-run coverage are separate
+  measurements. A constructed, restored, or replaced Boss screen may test
+  conditional behavior but must never be reported as natural A20 coverage.
 
 ## Deliverables
 
 - Versioned driver and provenance.
 - Native patch files only where required for missing visible actions/resources.
 - Unit tests for hierarchical category selection, seeded reproducibility, and
-  rare-branch reachability.
-- Real WSL calibration report over a documented seed range.
+  conditional rare-branch reachability.
+- Real WSL natural-calibration report over a documented seed range, with both
+  opportunity and selection counts.
 
 ## Acceptance Criteria
 
 - Same seed and configuration reproduce the same decisions.
-- Different seeds reach every required low-probability category in the
-  documented calibration run.
+- Given a public legal-action context for each required category, the
+  documented deterministic driver-seed sweep can select every category. This
+  is the conditional reachability gate.
+- The natural A20 calibration reports the exact structural screens and
+  categories reached, category opportunities, and selected categories. A
+  category with no natural opportunity, such as an unreached Boss relic screen,
+  remains an explicit coverage gap rather than a driver failure or fabricated
+  positive result.
 - No legal category is made unreachable by a hard-coded preferred route.
-- Driver provenance fully determines behavior.
+- Driver provenance, battle-controller provenance, effective action-space
+  configuration, simulator configuration, published relative weights, and the
+  normalization rule fully determine the reported experiment behavior.
 - Standard local gates and documented WSL calibration pass.
 
 ## Required Verification
 
-Run the standard local gates. The PR must also run an A20 WSL calibration large
-enough to demonstrate each required low-probability category at least once and
-must report the exact seed range, episode count, and category counts.
+Run the standard local gates. The PR must also run an A20 WSL natural
+calibration over a documented contiguous seed range and report the exact seed
+range, episode count, max steps, ascension, battle-controller provenance,
+effective action-space configuration, category opportunity counts, selected
+category counts, and unavailable structural categories. The command must fail
+for driver or provenance errors, but an unreached structural screen alone is a
+reported natural-coverage gap, not a substitute for conditional reachability.
+
+Run focused conditional-reachability tests for every required category. These
+tests may use legal action contexts or a simulator-native fixture, but must not
+be presented as natural A20 coverage.
 
 ## Legacy Reference
 
@@ -89,6 +113,8 @@ tests/test_sim_policy.py
 
 ## PR Report
 
-Include the driver version, full category probability table, exact calibration
-command, rare-branch counts, missing native capabilities, and known
-distribution biases.
+Include the driver version, full relative-weight table and normalization rule,
+exact calibration command, complete experiment provenance, category
+opportunity/selection counts, unavailable structural categories, missing native
+capabilities, and known distribution biases. State conditional reachability and
+natural coverage separately.
