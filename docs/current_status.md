@@ -1,6 +1,6 @@
 # Current Status
 
-Last reviewed: 2026-06-19.
+Last reviewed: 2026-06-20.
 
 This document describes the latest `main` branch only. Results from local
 artifacts, old branches, or unmerged pull requests do not count as implemented
@@ -39,16 +39,21 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
   deterministic action-score contract checks.
 - Versioned trainer-input artifact migration, complete decision provenance,
   and occurrence-disambiguated portable action identities.
+- Versioned seeded stochastic non-combat driver with screen-level relative
+  weights, non-combat potion eligibility, conditional-reachability tests, and
+  natural A20 coverage/provenance calibration.
 - A training-readiness report that validates plumbing only. It does not train a
   model or demonstrate policy strength.
 
 ### Tests
 
-- `241` tests pass on Windows Python as of this review.
+- `252` tests pass on Windows Python as of this review.
 - The two CommunicationMod fixture smokes pass.
 - `python -m compileall -q src tests` passes.
 - `ruff check src tests` and `ruff format --check src tests` pass.
-- The T002 A20 WSL battle sweep passes with 386 steps and no reported problems.
+- The T010 A20 natural calibration over seeds `1..100` reports 2,303
+  non-combat decisions with complete provenance and no driver problems;
+  unreached Boss relic screens remain explicit natural-coverage gaps.
 
 ## Not Implemented On Main
 
@@ -73,13 +78,13 @@ already supports them.
 Executable task specifications live in [`tasks/`](tasks/README.md). The first
 tasks in dependency order are:
 
-1. [`T010`](tasks/T010-stochastic-non-combat-driver.md), currently `IN_REVIEW`:
-   add the versioned stochastic non-combat driver and calibration report.
+1. [`T004`](tasks/T004-battle-start-checkpoint-pool.md), currently `READY`:
+   add simulator-owned battle-start capture/restore, natural pools, structural
+   sampling, and coverage reporting.
 2. [`T011`](tasks/T011-tactical-feature-contract-v2.md), currently `READY`:
    establish the versioned public tactical state/action feature contract and
    live-runtime field parity audit.
-3. [`T004`](tasks/T004-battle-start-checkpoint-pool.md) remains blocked by
-   T010; review remaining blocked specifications as their prerequisites merge.
+3. Review remaining blocked specifications as their prerequisites merge.
 
 Later tasks are dependency-ordered in the task index. A task is not ready for a
 new branch until its status is `READY`.

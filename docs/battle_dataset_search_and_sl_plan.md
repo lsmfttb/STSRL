@@ -268,7 +268,7 @@ and terminal results without local mechanics reconstruction.
 
 ### Phase B: Natural Pools And Provenance
 
-Status: pending T004 and T010.
+Status: pending T004.
 
 Exit gate: current-schema natural checkpoints restore, carry complete controller
 provenance, and report structural coverage and migration loss honestly.

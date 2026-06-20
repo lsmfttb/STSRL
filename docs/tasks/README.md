@@ -11,13 +11,13 @@ starting work.
 | T001 | DONE | [Main quality baseline](T001-main-quality-baseline.md) | none | formatting and lint cleanup |
 | T002 | DONE | [Controlled-run foundation](T002-controlled-run-foundation.md) | T001 | controller contracts, controlled run, rollout executor |
 | T003 | DONE | [Artifact provenance foundation](T003-artifact-provenance-foundation.md) | T002 | artifact versioning, decision records |
-| T004 | BLOCKED | [Battle-start checkpoint pool](T004-battle-start-checkpoint-pool.md) | T002, T003, T010 | checkpoint restore, battle-start pool |
+| T004 | READY | [Battle-start checkpoint pool](T004-battle-start-checkpoint-pool.md) | T002, T003, T010 | checkpoint restore, battle-start pool |
 | T005 | BLOCKED | [Fixed structural battle evaluation](T005-fixed-battle-evaluation.md) | T004 | fixed evaluation set and runner |
 | T006 | BLOCKED | [Oracle search teacher pipeline](T006-oracle-search-teacher.md) | T003, T004, T005 | search policy, teacher, search dataset |
 | T007 | BLOCKED | [Complete public run history](T007-complete-public-run-history.md) | T002, T003, T004 | public context/history and native projections |
 | T008 | BLOCKED | [A20 constructed battle supplements](T008-a20-constructed-supplements.md) | T003, T004 | battle-start transforms and approximate HP policy |
 | T009 | BLOCKED | [PyTorch search-guidance model](T009-pytorch-search-guidance.md) | T003, T006, T007, T011, T012 | optional train dependency and policy/value model |
-| T010 | IN_REVIEW | [Stochastic non-combat driver](T010-stochastic-non-combat-driver.md) | T002 | non-combat policy and native visible action/resource support |
+| T010 | DONE | [Stochastic non-combat driver](T010-stochastic-non-combat-driver.md) | T002 | non-combat policy and native visible action/resource support |
 | T011 | READY | [Tactical feature contract v2](T011-tactical-feature-contract-v2.md) | T003 | feature, trainer-input, and model-input upgrades |
 | T012 | BLOCKED | [Structured battle resource outcomes](T012-structured-resource-outcomes.md) | T003, T004, T010 | persistent resource snapshots and outcome vectors |
 | T013 | BLOCKED | [Live CommunicationMod runtime adapter](T013-live-communicationmod-runtime-adapter.md) | T003, T011 | trained/search controller deployment in the real game |

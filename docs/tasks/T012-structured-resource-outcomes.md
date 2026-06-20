@@ -1,6 +1,6 @@
 # T012: Structured Battle Resource Outcomes
 
-Status: `BLOCKED` by T004 and T010.
+Status: `BLOCKED` by T004.
 
 ## Objective
 

@@ -1,6 +1,6 @@
 # T010: Stochastic Non-Combat Driver
 
-Status: `IN_REVIEW`.
+Status: `DONE`.
 
 ## Objective
 
