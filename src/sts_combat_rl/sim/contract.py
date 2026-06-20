@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 
 
 ObservationValue = int | float | bool
@@ -34,6 +34,21 @@ class SimulatorAction:
 
 
 @dataclass(frozen=True)
+class SimulatorCheckpoint:
+    """Opaque adapter-owned state saved for an exact in-process restore.
+
+    ``payload`` deliberately has no repository-defined shape: the authoritative
+    simulator owns both capture and restoration.  It must never be written to a
+    portable pool artifact or offered to a normal-information controller.
+    """
+
+    adapter_id: str
+    checkpoint_id: str
+    payload: Any = field(repr=False, compare=False)
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class SimulatorTransition:
     """Result of applying one simulator action."""
 
@@ -53,3 +68,27 @@ class SimulatorAdapter(Protocol):
 
     def step(self, action: SimulatorAction) -> SimulatorTransition:
         """Apply one previously legal action and return the next transition."""
+
+
+@runtime_checkable
+class CheckpointingSimulatorAdapter(SimulatorAdapter, Protocol):
+    """Optional native checkpoint capability owned by a simulator adapter.
+
+    Native checkpoints are process-local opaque restore handles.  Portable
+    artifacts instead store the seed, occurrence-disambiguated public action
+    trace, and expected battle-start snapshot needed for a fresh-process replay.
+    """
+
+    @property
+    def checkpoint_adapter_id(self) -> str:
+        """Return the process-local identity that owns native checkpoints."""
+
+    @property
+    def supports_checkpoint_restore(self) -> bool:
+        """Whether this adapter exposes authoritative capture and restore."""
+
+    def capture_checkpoint(self, snapshot: SimulatorSnapshot) -> SimulatorCheckpoint:
+        """Capture exactly the current native simulator state."""
+
+    def restore_checkpoint(self, checkpoint: SimulatorCheckpoint) -> SimulatorSnapshot:
+        """Restore an opaque checkpoint created by this adapter instance."""

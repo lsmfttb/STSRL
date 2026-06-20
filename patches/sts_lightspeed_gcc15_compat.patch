@@ -1,0 +1,15 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 8c05c3b..0000000 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -9,7 +9,7 @@ project(
+ file (GLOB_RECURSE sts_lightspeed_SOURCES CONFIGURE_DEPENDS "src/*.cpp")
+-
++
+ set(CMAKE_CXX_STANDARD 17)
+-set(CMAKE_CXX_FLAGS  "-Wno-shift-count-overflow -O3")
++set(CMAKE_CXX_FLAGS  "-Wno-shift-count-overflow -O3 -include algorithm")
+-
++
+ add_subdirectory(json)
+ add_subdirectory(pybind11)

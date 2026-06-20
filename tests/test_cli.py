@@ -6,6 +6,7 @@ import sys
 from sts_combat_rl.cli import main
 from sts_combat_rl.sim.contract import (
     SimulatorAction,
+    SimulatorCheckpoint,
     SimulatorSnapshot,
     SimulatorTransition,
 )
@@ -15,6 +16,15 @@ class FakeLightSpeedSmokeAdapter:
     def __init__(self, seed: int, ascension: int) -> None:
         self.seed = seed
         self.ascension = ascension
+        self._checkpoint_counter = 0
+
+    @property
+    def checkpoint_adapter_id(self) -> str:
+        return "fake-cli"
+
+    @property
+    def supports_checkpoint_restore(self) -> bool:
+        return True
 
     def reset(self, seed: int | None = None) -> SimulatorSnapshot:
         return SimulatorSnapshot(
@@ -51,6 +61,20 @@ class FakeLightSpeedSmokeAdapter:
             terminal=True,
             info={},
         )
+
+    def capture_checkpoint(self, snapshot: SimulatorSnapshot) -> SimulatorCheckpoint:
+        self._checkpoint_counter += 1
+        return SimulatorCheckpoint(
+            adapter_id=self.checkpoint_adapter_id,
+            checkpoint_id=f"fake-cli:{self._checkpoint_counter}",
+            payload=None,
+            metadata={"seed": self.seed, "snapshot": dict(snapshot.raw)},
+        )
+
+    def restore_checkpoint(self, checkpoint: SimulatorCheckpoint) -> SimulatorSnapshot:
+        if checkpoint.adapter_id != self.checkpoint_adapter_id:
+            raise ValueError("foreign checkpoint")
+        return self.reset(seed=checkpoint.metadata["seed"])
 
 
 def test_cli_stdin_mode_sends_ready_signal_then_commands(monkeypatch) -> None:
@@ -166,6 +190,71 @@ def test_cli_lightspeed_smoke_writes_report_to_stderr_only(
     assert "Simulator calibration summary" in captured.err
     assert "excluded action kinds:" in captured.err
     assert "chosen action kinds:" in captured.err
+
+
+def test_cli_checkpoint_commands_write_only_diagnostics_and_restore_pool(
+    monkeypatch,
+    tmp_path,
+    capsys,
+) -> None:
+    monkeypatch.setattr(
+        "sts_combat_rl.cli.LightSpeedAdapter",
+        FakeLightSpeedSmokeAdapter,
+    )
+    pool_path = tmp_path / "pool.jsonl"
+
+    assert (
+        main(
+            [
+                "--lightspeed-battle-checkpoint-verify",
+                "--sim-steps",
+                "1",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 0
+    )
+    checkpoint_output = capsys.readouterr()
+    assert checkpoint_output.out == ""
+    assert "determinism gate passed: yes" in checkpoint_output.err
+
+    assert (
+        main(
+            [
+                "--lightspeed-battle-start-pool",
+                str(pool_path),
+                "--sim-episodes",
+                "2",
+                "--sim-steps",
+                "1",
+                "--battle-start-sample-count",
+                "3",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 0
+    )
+    collect_output = capsys.readouterr()
+    assert collect_output.out == ""
+    assert pool_path.exists()
+    assert "natural battle starts: 2" in collect_output.err
+
+    assert (
+        main(
+            [
+                "--lightspeed-battle-start-pool-restore",
+                str(pool_path),
+                "--log-file",
+                "-",
+            ]
+        )
+        == 0
+    )
+    restore_output = capsys.readouterr()
+    assert restore_output.out == ""
+    assert "restore ok: yes" in restore_output.err
 
 
 def test_cli_lightspeed_rollout_smoke_writes_report_to_stderr_only(

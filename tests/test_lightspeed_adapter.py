@@ -84,6 +84,15 @@ class FakeStepSimulator:
         assert action.bits == 123
         self.steps += 1
         self.outcome = "PLAYER_LOSS"
+        snapshot = self.snapshot()
+        snapshot["completed_battle_outcome"] = "PLAYER_LOSS"
+        return snapshot
+
+    def capture_checkpoint(self) -> tuple[int, str, int]:
+        return self.seed, self.outcome, self.steps
+
+    def restore_checkpoint(self, checkpoint: tuple[int, str, int]) -> dict[str, object]:
+        self.seed, self.outcome, self.steps = checkpoint
         return self.snapshot()
 
 
@@ -112,9 +121,25 @@ def test_lightspeed_adapter_wraps_step_simulator_contract() -> None:
     assert transition.info == {
         "action_id": "battle:123",
         "action_kind": "end_turn",
+        "completed_battle_outcome": "PLAYER_LOSS",
     }
 
 
 def test_lightspeed_adapter_rejects_non_ironclad() -> None:
     with pytest.raises(ValueError, match="IRONCLAD"):
         LightSpeedAdapter(player_class="SILENT", module=FakeModule)
+
+
+def test_lightspeed_adapter_wraps_native_checkpoint_restore() -> None:
+    adapter = LightSpeedAdapter(seed=7, ascension=20, module=FakeModule)
+    initial = adapter.reset(seed=11)
+    checkpoint = adapter.capture_checkpoint(initial)
+    adapter.step(adapter.legal_actions(initial)[0])
+
+    restored = adapter.restore_checkpoint(checkpoint)
+
+    assert adapter.supports_checkpoint_restore is True
+    assert checkpoint.adapter_id == adapter.checkpoint_adapter_id
+    assert checkpoint.metadata["seed"] == 11
+    assert restored.observation == initial.observation
+    assert restored.raw == initial.raw
