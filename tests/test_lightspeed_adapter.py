@@ -86,6 +86,13 @@ class FakeStepSimulator:
         self.outcome = "PLAYER_LOSS"
         return self.snapshot()
 
+    def capture_checkpoint(self) -> tuple[int, str, int]:
+        return self.seed, self.outcome, self.steps
+
+    def restore_checkpoint(self, checkpoint: tuple[int, str, int]) -> dict[str, object]:
+        self.seed, self.outcome, self.steps = checkpoint
+        return self.snapshot()
+
 
 class FakeModule:
     CharacterClass = FakeCharacterClass
@@ -118,3 +125,18 @@ def test_lightspeed_adapter_wraps_step_simulator_contract() -> None:
 def test_lightspeed_adapter_rejects_non_ironclad() -> None:
     with pytest.raises(ValueError, match="IRONCLAD"):
         LightSpeedAdapter(player_class="SILENT", module=FakeModule)
+
+
+def test_lightspeed_adapter_wraps_native_checkpoint_restore() -> None:
+    adapter = LightSpeedAdapter(seed=7, ascension=20, module=FakeModule)
+    initial = adapter.reset(seed=11)
+    checkpoint = adapter.capture_checkpoint(initial)
+    adapter.step(adapter.legal_actions(initial)[0])
+
+    restored = adapter.restore_checkpoint(checkpoint)
+
+    assert adapter.supports_checkpoint_restore is True
+    assert checkpoint.adapter_id == adapter.checkpoint_adapter_id
+    assert checkpoint.metadata["seed"] == 11
+    assert restored.observation == initial.observation
+    assert restored.raw == initial.raw

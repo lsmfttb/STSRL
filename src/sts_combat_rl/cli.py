@@ -9,6 +9,12 @@ import os
 import sys
 from pathlib import Path
 
+from sts_combat_rl.commands.checkpoint_pool import (
+    collect_checkpoint_pool,
+    run_checkpoint_verification,
+    verify_checkpoint_pool_file,
+    write_checkpoint_pool,
+)
 from sts_combat_rl.comm.protocol import format_command, format_ready_signal
 from sts_combat_rl.comm.stdio_client import StdioClient
 from sts_combat_rl.logging_utils import DEFAULT_LOG_FILE, configure_logging
@@ -36,6 +42,13 @@ from sts_combat_rl.sim.calibration import (
     format_simulator_calibration_report,
     run_communicationmod_feature_calibration,
     run_simulator_calibration,
+)
+from sts_combat_rl.sim.checkpoint_verification import (
+    format_battle_checkpoint_verification_report,
+)
+from sts_combat_rl.sim.battle_start_pool import (
+    format_battle_start_pool_coverage_report,
+    format_battle_start_pool_restore_report,
 )
 from sts_combat_rl.sim.reward_components import (
     build_battle_reward_component_report,
@@ -256,6 +269,32 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     input_group.add_argument(
+        "--lightspeed-battle-checkpoint-verify",
+        action="store_true",
+        help=(
+            "Capture the first naturally reached battle start, restore its native "
+            "checkpoint twice, and verify a deterministic action trace."
+        ),
+    )
+    input_group.add_argument(
+        "--lightspeed-battle-start-pool",
+        type=Path,
+        metavar="PATH",
+        help=(
+            "Collect natural battle-start checkpoints from the configured seed range, "
+            "write a portable JSONL manifest to PATH, and report coverage to stderr."
+        ),
+    )
+    input_group.add_argument(
+        "--lightspeed-battle-start-pool-restore",
+        type=Path,
+        metavar="PATH",
+        help=(
+            "Load a portable battle-start pool manifest and verify fresh-adapter "
+            "seed/action-trace restores."
+        ),
+    )
+    input_group.add_argument(
         "--lightspeed-non-combat-calibration",
         action="store_true",
         help=(
@@ -383,6 +422,30 @@ def build_parser() -> argparse.ArgumentParser:
         default="battle-v0",
         help="Reward draft preset used by reward design and reward batch smokes.",
     )
+    parser.add_argument(
+        "--checkpoint-replay-steps",
+        type=int,
+        default=10,
+        help="Maximum battle actions used by --lightspeed-battle-checkpoint-verify.",
+    )
+    parser.add_argument(
+        "--battle-start-restore-limit",
+        type=int,
+        default=0,
+        help="Maximum pool records checked by restore verification; 0 means all.",
+    )
+    parser.add_argument(
+        "--battle-start-sample-count",
+        type=int,
+        default=0,
+        help="Reported seeded optimization draws for a pool; does not add coverage.",
+    )
+    parser.add_argument(
+        "--battle-start-structural-fraction",
+        type=float,
+        default=0.5,
+        help="Fraction of reported pool draws selected by uniform structural stratum.",
+    )
     return parser
 
 
@@ -424,6 +487,21 @@ def main(argv: list[str] | None = None) -> int:
     if args.reward_detail_limit < 0:
         print("--reward-detail-limit must be non-negative", file=sys.stderr)
         return 2
+    if args.checkpoint_replay_steps <= 0:
+        print("--checkpoint-replay-steps must be positive", file=sys.stderr)
+        return 2
+    if args.battle_start_restore_limit < 0:
+        print("--battle-start-restore-limit must be non-negative", file=sys.stderr)
+        return 2
+    if args.battle_start_sample_count < 0:
+        print("--battle-start-sample-count must be non-negative", file=sys.stderr)
+        return 2
+    if not 0.0 <= args.battle_start_structural_fraction <= 1.0:
+        print(
+            "--battle-start-structural-fraction must be between zero and one",
+            file=sys.stderr,
+        )
+        return 2
 
     policy = ScriptedCombatPolicy()
     client = StdioClient(
@@ -462,6 +540,9 @@ def main(argv: list[str] | None = None) -> int:
         or args.lightspeed_battle_model_score_smoke
         or args.lightspeed_battle_training_readiness
         or args.lightspeed_non_combat_calibration
+        or args.lightspeed_battle_checkpoint_verify
+        or args.lightspeed_battle_start_pool is not None
+        or args.lightspeed_battle_start_pool_restore is not None
     ):
         try:
             adapter = LightSpeedAdapter(
@@ -480,6 +561,65 @@ def main(argv: list[str] | None = None) -> int:
                     action_space=action_space,
                 )
                 print(format_simulator_calibration_report(report), file=sys.stderr)
+            elif args.lightspeed_battle_checkpoint_verify:
+                report = run_checkpoint_verification(
+                    adapter,
+                    battle_policy=_build_online_sim_policy(
+                        args.sim_policy,
+                        args.sim_seed,
+                    ),
+                    non_combat_policy=_build_non_combat_driver_policy(
+                        args.sim_non_combat_policy,
+                        args.sim_seed,
+                    ),
+                    seed=args.sim_seed,
+                    max_steps=args.sim_steps,
+                    replay_steps=args.checkpoint_replay_steps,
+                    action_space=action_space,
+                )
+                print(
+                    format_battle_checkpoint_verification_report(report),
+                    file=sys.stderr,
+                )
+                if not report.determinism_ok:
+                    return 1
+            elif args.lightspeed_battle_start_pool is not None:
+                pool, coverage = collect_checkpoint_pool(
+                    adapter,
+                    battle_policy=_build_online_sim_policy(
+                        args.sim_policy,
+                        args.sim_seed,
+                    ),
+                    non_combat_policy=_build_non_combat_driver_policy(
+                        args.sim_non_combat_policy,
+                        args.sim_seed,
+                    ),
+                    seeds=[
+                        args.sim_seed + offset for offset in range(args.sim_episodes)
+                    ],
+                    max_steps=args.sim_steps,
+                    action_space=action_space,
+                    sample_count=args.battle_start_sample_count,
+                    sampling_seed=args.sim_seed,
+                    structural_fraction=args.battle_start_structural_fraction,
+                )
+                write_checkpoint_pool(args.lightspeed_battle_start_pool, pool)
+                print(
+                    format_battle_start_pool_coverage_report(coverage),
+                    file=sys.stderr,
+                )
+            elif args.lightspeed_battle_start_pool_restore is not None:
+                report = verify_checkpoint_pool_file(
+                    args.lightspeed_battle_start_pool_restore,
+                    adapter_factory=lambda: LightSpeedAdapter(
+                        seed=args.sim_seed,
+                        ascension=args.sim_ascension,
+                    ),
+                    limit=args.battle_start_restore_limit,
+                )
+                print(format_battle_start_pool_restore_report(report), file=sys.stderr)
+                if not report.restore_ok:
+                    return 1
             elif args.lightspeed_non_combat_calibration:
                 battle_policy = _build_online_sim_policy(
                     args.sim_policy,

@@ -111,6 +111,10 @@ class ControlledRunStep:
     next_player_max_hp: float | None = None
     next_gold: float | None = None
     next_potion_count: float | None = None
+    battle_active: bool = False
+    next_battle_active: bool = False
+    battle_outcome: str | None = None
+    next_battle_outcome: str | None = None
     legal_action_identities: list[dict[str, Any]] = field(default_factory=list)
     chosen_action_identity: dict[str, Any] = field(default_factory=dict)
     source_metadata: dict[str, Any] = field(default_factory=dict)
@@ -263,6 +267,10 @@ def execute_controlled_run(
             next_player_max_hp=_player_max_hp(next_raw),
             next_gold=_first_number(next_raw, "gold"),
             next_potion_count=_potion_count(next_raw),
+            battle_active=bool(snapshot.raw.get("battle_active")),
+            next_battle_active=bool(next_raw.get("battle_active")),
+            battle_outcome=_battle_outcome(snapshot.raw),
+            next_battle_outcome=_battle_outcome(next_raw),
         )
         steps.append(step)
 
@@ -474,6 +482,18 @@ def _potion_count(data: Mapping[str, Any]) -> float | None:
     potions = data.get("battle_potions", data.get("potions"))
     if isinstance(potions, list):
         return float(len(potions))
+    return None
+
+
+def _battle_outcome(data: Mapping[str, Any]) -> str | None:
+    """Return a simulator-reported battle outcome without inferring mechanics."""
+
+    value = data.get("battle_outcome")
+    if isinstance(value, str) and value and value != "UNDECIDED":
+        return value
+    value = data.get("outcome")
+    if isinstance(value, str) and value and value != "UNDECIDED":
+        return value
     return None
 
 

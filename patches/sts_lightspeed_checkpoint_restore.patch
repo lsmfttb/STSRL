@@ -1,0 +1,58 @@
+diff --git a/bindings/slaythespire.cpp b/bindings/slaythespire.cpp
+index 61ee133..0000000 100644
+--- a/bindings/slaythespire.cpp
++++ b/bindings/slaythespire.cpp
+@@ -398,6 +398,12 @@ pybind11::list potionListSnapshot(const BattleContext &bc) {
+     return ret;
+ }
+-
++
++struct StepSimulatorCheckpoint {
++    GameContext gc;
++    BattleContext bc;
++    bool battleActive = false;
++};
++
+ struct StepSimulator {
+     GameContext gc;
+     BattleContext bc;
+@@ -570,6 +576,17 @@ struct StepSimulator {
+-
++
+         throw std::invalid_argument("unknown action scope");
+     }
++
++    StepSimulatorCheckpoint captureCheckpoint() const {
++        return StepSimulatorCheckpoint{gc, bc, battleActive};
++    }
++
++    pybind11::dict restoreCheckpoint(const StepSimulatorCheckpoint &checkpoint) {
++        gc = checkpoint.gc;
++        bc = checkpoint.bc;
++        battleActive = checkpoint.battleActive;
++        return snapshot();
++    }
+ };
+-
++
+ }
+@@ -546,6 +563,8 @@ PYBIND11_MODULE(slaythespire, m) {
+             return "<LightSpeedAction " + action.label + ">";
+         });
+-
++
++    pybind11::class_<StepSimulatorCheckpoint>(m, "StepSimulatorCheckpoint");
++
+     pybind11::class_<StepSimulator>(m, "StepSimulator")
+         .def(pybind11::init<CharacterClass, std::uint64_t, int>())
+         .def("reset", &StepSimulator::reset)
+@@ -552,6 +571,8 @@ PYBIND11_MODULE(slaythespire, m) {
+         .def("snapshot", &StepSimulator::snapshot)
+         .def("observation", &StepSimulator::observation)
+         .def("legal_actions", &StepSimulator::legalActions)
++        .def("capture_checkpoint", &StepSimulator::captureCheckpoint)
++        .def("restore_checkpoint", &StepSimulator::restoreCheckpoint)
+         .def("step", &StepSimulator::step);
+-
++
+     pybind11::class_<GameContext> gameContext(m, "GameContext");
