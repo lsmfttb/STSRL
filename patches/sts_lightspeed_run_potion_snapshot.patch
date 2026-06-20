@@ -1,0 +1,12 @@
+diff --git a/bindings/slaythespire.cpp b/bindings/slaythespire.cpp
+index bb8c6f2..161c116 100644
+--- a/bindings/slaythespire.cpp
++++ b/bindings/slaythespire.cpp
+@@ -448,5 +448,7 @@ public:
+         ret["max_hp"] = gc.maxHp;
+         ret["gold"] = gc.gold;
+         ret["ascension"] = gc.ascension;
+         ret["room_type"] = roomStrings[static_cast<int>(gc.curRoom)];
++        ret["potion_count"] = gc.potionCount;
++        ret["potion_capacity"] = gc.potionCapacity;
+         ret["battle_active"] = battleActive;

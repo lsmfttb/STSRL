@@ -1,0 +1,33 @@
+diff --git a/bindings/slaythespire.cpp b/bindings/slaythespire.cpp
+index d8f1ee2..bb8c6f2 100644
+--- a/bindings/slaythespire.cpp
++++ b/bindings/slaythespire.cpp
+@@ -496,2 +496,16 @@ public:
+             result.push_back(makeGameAction(gc, action));
+         }
++
++        for (int idx = 0; idx < gc.potionCapacity; ++idx) {
++            const auto potionIdx = static_cast<std::uint32_t>(idx);
++            const search::GameAction useAction(0x80000000U | potionIdx);
++            if (useAction.isValidAction(gc)) {
++                result.push_back(makeGameAction(gc, useAction));
++            }
++
++            const search::GameAction discardAction(0xC0000000U | potionIdx);
++            if (discardAction.isValidAction(gc)) {
++                result.push_back(makeGameAction(gc, discardAction));
++            }
++        }
++
+         return result;
+     }
+diff --git a/src/sim/search/GameAction.cpp b/src/sim/search/GameAction.cpp
+index eaa65da..28b39ca 100644
+--- a/src/sim/search/GameAction.cpp
++++ b/src/sim/search/GameAction.cpp
+@@ -425,4 +425,5 @@ void search::GameAction::execute(GameContext &gc) const {
+         } else {
+             gc.drinkPotionAtIdx(getIdx1());
+         }
++        return;
+     }

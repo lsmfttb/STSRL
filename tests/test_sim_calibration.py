@@ -70,6 +70,54 @@ class FakeCalibrationAdapter:
         )
 
 
+class FakeNonCombatCalibrationAdapter:
+    def __init__(self) -> None:
+        self.last_action: SimulatorAction | None = None
+
+    def reset(self, seed: int | None = None) -> SimulatorSnapshot:
+        del seed
+        return SimulatorSnapshot(
+            observation=[80],
+            raw={
+                "screen_state": "REWARDS",
+                "outcome": "UNDECIDED",
+                "battle_active": False,
+            },
+        )
+
+    def legal_actions(self, snapshot: SimulatorSnapshot) -> list[SimulatorAction]:
+        del snapshot
+        return [
+            SimulatorAction(
+                action_id="game:1",
+                label="potion reward",
+                kind="reward_potion",
+                raw={"scope": "game"},
+            ),
+            SimulatorAction(
+                action_id="game:2",
+                label="gold reward",
+                kind="reward_gold",
+                raw={"scope": "game"},
+            ),
+        ]
+
+    def step(self, action: SimulatorAction) -> SimulatorTransition:
+        self.last_action = action
+        return SimulatorTransition(
+            snapshot=SimulatorSnapshot(
+                observation=[80],
+                raw={
+                    "screen_state": "MAP_SCREEN",
+                    "outcome": "PLAYER_VICTORY",
+                    "battle_active": False,
+                },
+            ),
+            terminal=True,
+            info={},
+        )
+
+
 def test_choose_calibration_action_prefers_non_potion_card() -> None:
     actions = FakeCalibrationAdapter().legal_actions(
         SimulatorSnapshot(observation=[], raw={})
@@ -119,9 +167,20 @@ def test_run_simulator_calibration_summarizes_adapter_shapes() -> None:
     assert report.excluded_legal_action_kind_counts["potion"] == 1
     assert report.problems == []
     assert "Simulator calibration summary" in text
-    assert "excluded action kinds:" in text
+    assert "configured battle excluded action kinds:" in text
     assert "eligible action kinds:" in text
     assert "problems:\n  (none)" in text
+
+
+def test_simulator_calibration_keeps_non_combat_potion_rewards_eligible() -> None:
+    adapter = FakeNonCombatCalibrationAdapter()
+
+    report = run_simulator_calibration(adapter, seed=7, max_steps=1)
+
+    assert adapter.last_action is not None
+    assert adapter.last_action.kind == "reward_potion"
+    assert report.eligible_action_kind_counts["reward_potion"] == 1
+    assert report.excluded_legal_action_kind_counts["reward_potion"] == 0
 
 
 def test_run_communicationmod_feature_calibration_counts_live_fields(

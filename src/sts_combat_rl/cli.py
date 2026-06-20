@@ -79,12 +79,17 @@ from sts_combat_rl.sim.evaluation import (
     run_policy_episode_evaluation,
 )
 from sts_combat_rl.sim.lightspeed import LightSpeedAdapter
+from sts_combat_rl.sim.non_combat_calibration import (
+    format_non_combat_driver_calibration_report,
+    run_non_combat_driver_calibration,
+)
 from sts_combat_rl.sim.policy import (
     FirstEligiblePolicy,
     PreferredKindPolicy,
     RandomEligiblePolicy,
     ReplayChosenPolicy,
     ScoredActionPolicy,
+    StochasticNonCombatDriver,
     evaluate_decision_policy,
     format_policy_evaluation_report,
 )
@@ -251,6 +256,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     input_group.add_argument(
+        "--lightspeed-non-combat-calibration",
+        action="store_true",
+        help=(
+            "Run the versioned stochastic non-combat driver across the named "
+            "A20 simulator seed range and require all rare branches."
+        ),
+    )
+    input_group.add_argument(
         "--calibrate-combat-features",
         type=Path,
         nargs="+",
@@ -343,11 +356,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--sim-non-combat-policy",
-        choices=("preferred-kind", "first-eligible", "random-eligible"),
-        default="random-eligible",
+        choices=(
+            "stochastic-v1",
+            "preferred-kind",
+            "first-eligible",
+            "random-eligible",
+        ),
+        default="stochastic-v1",
         help=(
             "Non-combat driver policy used by battle-agent smokes. "
-            "The default is seeded random over eligible non-combat actions."
+            "The default is the seeded hierarchical stochastic driver."
         ),
     )
     parser.add_argument(
@@ -443,6 +461,7 @@ def main(argv: list[str] | None = None) -> int:
         or args.lightspeed_battle_model_input_smoke
         or args.lightspeed_battle_model_score_smoke
         or args.lightspeed_battle_training_readiness
+        or args.lightspeed_non_combat_calibration
     ):
         try:
             adapter = LightSpeedAdapter(
@@ -461,6 +480,31 @@ def main(argv: list[str] | None = None) -> int:
                     action_space=action_space,
                 )
                 print(format_simulator_calibration_report(report), file=sys.stderr)
+            elif args.lightspeed_non_combat_calibration:
+                battle_policy = _build_online_sim_policy(
+                    args.sim_policy,
+                    args.sim_seed,
+                )
+                report = run_non_combat_driver_calibration(
+                    adapter,
+                    battle_policy,
+                    seeds=[
+                        args.sim_seed + offset for offset in range(args.sim_episodes)
+                    ],
+                    driver_seed=args.sim_seed,
+                    max_steps=args.sim_steps,
+                    action_space=action_space,
+                    simulator_config={
+                        "ascension": args.sim_ascension,
+                        "player_class": "IRONCLAD",
+                    },
+                )
+                print(
+                    format_non_combat_driver_calibration_report(report),
+                    file=sys.stderr,
+                )
+                if not report.passed:
+                    return 1
             else:
                 if args.lightspeed_rollout_smoke:
                     batch = collect_simulator_rollout(
@@ -943,7 +987,14 @@ def _build_online_sim_policy(
 def _build_non_combat_driver_policy(
     policy_name: str,
     seed: int,
-) -> FirstEligiblePolicy | PreferredKindPolicy | RandomEligiblePolicy:
+) -> (
+    FirstEligiblePolicy
+    | PreferredKindPolicy
+    | RandomEligiblePolicy
+    | StochasticNonCombatDriver
+):
+    if policy_name == "stochastic-v1":
+        return StochasticNonCombatDriver(seed=seed)
     if policy_name == "preferred-kind":
         return PreferredKindPolicy()
     if policy_name == "first-eligible":

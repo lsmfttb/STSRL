@@ -10,6 +10,8 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+import hashlib
+import json
 import math
 import random
 from typing import Any, Protocol
@@ -27,6 +29,8 @@ class DecisionContext:
     legal_action_features: list[list[float]]
     legal_action_kinds: list[str]
     eligible_action_indices: list[int]
+    snapshot_metadata: Mapping[str, Any] = field(default_factory=dict)
+    legal_action_metadata: list[Mapping[str, Any]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -202,6 +206,172 @@ class RandomEligiblePolicy:
         )
 
 
+NON_COMBAT_DRIVER_V1_SCREEN_CATEGORY_RELATIVE_WEIGHTS: dict[str, dict[str, float]] = {
+    "REST_ROOM": {
+        "rest_heal": 0.30,
+        "rest_upgrade": 0.70,
+        "rest_other": 0.10,
+    },
+    "SHOP_ROOM": {
+        "shop_card_remove": 0.25,
+        "shop_reward_card": 0.25,
+        "shop_reward_potion": 0.15,
+        "shop_reward_relic": 0.25,
+        "shop_skip": 0.10,
+        "game_potion_use": 0.05,
+    },
+    "REWARDS": {
+        "reward_card": 1.00,
+        "reward_gold": 1.00,
+        "reward_key": 0.25,
+        "reward_potion": 1.00,
+        "ordinary_relic_take": 1.00,
+        "ordinary_relic_skip": 0.25,
+        "skip": 0.25,
+        "game_potion_use": 0.05,
+    },
+    "BOSS_RELIC_REWARDS": {
+        "boss_relic_take": 0.95,
+        "boss_relic_skip": 0.05,
+    },
+    "TREASURE_ROOM": {
+        "treasure_open": 0.90,
+        "treasure_leave": 0.10,
+    },
+}
+"""Relative category weights for the ``stochastic_non_combat_v1`` contract.
+
+At each decision the driver normalizes the positive weights only across the
+currently legal categories, then samples uniformly within the selected
+category. The values are therefore not unconditional probabilities.
+"""
+
+NON_COMBAT_DRIVER_V1_GLOBAL_CATEGORY_RELATIVE_WEIGHTS: dict[str, float] = {
+    "game_potion_use": 0.05,
+    "game_potion_discard": 0.01,
+}
+
+NON_COMBAT_DRIVER_V1_CONDITIONAL_CATEGORY_RELATIVE_WEIGHTS: dict[
+    str, dict[str, dict[str, object]]
+] = {
+    "REWARDS": {
+        "game_potion_discard": {
+            "when_present": "reward_potion",
+            "when_potion_slots_full": True,
+            "weight": 0.35,
+        },
+    },
+    "SHOP_ROOM": {
+        "game_potion_discard": {
+            "when_present": "shop_reward_potion",
+            "when_potion_slots_full": True,
+            "weight": 0.15,
+        },
+    },
+}
+
+
+class StochasticNonCombatDriver:
+    """Versioned seeded non-combat driver with hierarchical action sampling.
+
+    ``v1`` first chooses a visible decision category according to the published
+    screen-level priors, then samples uniformly among legal actions in that
+    category.  The random stream is reset for every controlled run from the
+    driver seed and simulator seed, so fresh and reused driver instances have
+    the same behavior for the same run configuration.
+
+    This is deliberately not a hand-written route policy.  Categories omitted
+    from the table receive the positive ``unknown_category_weight`` rather than
+    being filtered out.
+    """
+
+    name = "stochastic_non_combat_v1"
+    version = 1
+    _unknown_category_weight = 1.0
+
+    def __init__(self, seed: int) -> None:
+        if isinstance(seed, bool) or not isinstance(seed, int):
+            raise ValueError("stochastic non-combat driver seed must be an integer")
+        self._seed = seed
+        self._rng = random.Random(_driver_run_seed(seed, None))
+
+    @property
+    def provenance_config(self) -> Mapping[str, Any]:
+        return {
+            "seed": self._seed,
+            "version": self.version,
+            "screen_category_relative_weights": _copy_weight_table(
+                NON_COMBAT_DRIVER_V1_SCREEN_CATEGORY_RELATIVE_WEIGHTS
+            ),
+            "global_category_relative_weights": dict(
+                NON_COMBAT_DRIVER_V1_GLOBAL_CATEGORY_RELATIVE_WEIGHTS
+            ),
+            "conditional_category_relative_weights": _copy_conditional_weight_table(
+                NON_COMBAT_DRIVER_V1_CONDITIONAL_CATEGORY_RELATIVE_WEIGHTS
+            ),
+            "rest_option_categories": {
+                "0": "rest_heal",
+                "1": "rest_upgrade",
+                "other": "rest_other",
+            },
+            "boss_relic_option_categories": {
+                "0..2": "boss_relic_take",
+                "3": "boss_relic_skip",
+                "other": "boss_relic_unknown",
+            },
+            "within_category_selection": "uniform",
+            "unknown_category_relative_weight": self._unknown_category_weight,
+            "normalization_rule": (
+                "group eligible actions by category; normalize positive relative "
+                "weights across the currently legal categories; then sample "
+                "uniformly within the selected category"
+            ),
+            "random_stream": "sha256(driver_seed, simulator_seed)",
+            "reproducible": True,
+        }
+
+    def reset_for_run(self, simulator_seed: int | None) -> None:
+        """Reset the stream for one authoritative controlled run."""
+
+        self._rng = random.Random(_driver_run_seed(self._seed, simulator_seed))
+
+    def select_action(self, context: DecisionContext) -> PolicyDecision:
+        if _has_non_combat_potion_action(context) and not _has_potion_slot_metadata(
+            context
+        ):
+            raise ValueError(
+                "non-combat potion actions require visible potion_count and "
+                "potion_capacity from the simulator"
+            )
+
+        groups: dict[str, list[int]] = {}
+        for index in _valid_eligible_indices(context):
+            category = non_combat_action_category(context, index)
+            groups.setdefault(category, []).append(index)
+
+        categories = list(groups)
+        screen_weights = NON_COMBAT_DRIVER_V1_SCREEN_CATEGORY_RELATIVE_WEIGHTS.get(
+            context.screen_state.upper(), {}
+        )
+        selected_category = _weighted_choice(
+            self._rng,
+            categories,
+            [
+                _non_combat_category_weight(
+                    context,
+                    category,
+                    categories,
+                    screen_weights,
+                )
+                for category in categories
+            ],
+        )
+        return PolicyDecision(
+            legal_action_index=self._rng.choice(groups[selected_category]),
+            reason=f"{self.name}:{selected_category}",
+        )
+
+
 @dataclass(frozen=True)
 class ScoredActionPolicy:
     """Policy wrapper that chooses the highest-scored eligible action."""
@@ -370,6 +540,147 @@ def _valid_eligible_indices(context: DecisionContext) -> list[int]:
             f"eligible action index {invalid[0]} outside {legal_count} legal actions"
         )
     return list(context.eligible_action_indices)
+
+
+def non_combat_action_category(context: DecisionContext, index: int) -> str:
+    """Return the public, versioned category for one legal non-combat action."""
+
+    kind = context.legal_action_kinds[index]
+    screen_state = context.screen_state.upper()
+    metadata = _action_metadata(context, index)
+
+    if screen_state == "REST_ROOM" and kind == "rest":
+        option = metadata.get("idx1")
+        if option == 0:
+            return "rest_heal"
+        if option == 1:
+            return "rest_upgrade"
+        return "rest_other"
+
+    if screen_state == "BOSS_RELIC_REWARDS" and kind == "boss_relic":
+        option = metadata.get("idx1")
+        if option in {0, 1, 2}:
+            return "boss_relic_take"
+        if option == 3:
+            return "boss_relic_skip"
+        return "boss_relic_unknown"
+
+    if screen_state == "REWARDS":
+        if kind == "reward_relic":
+            return "ordinary_relic_take"
+        if kind == "skip" and "reward_relic" in context.legal_action_kinds:
+            return "ordinary_relic_skip"
+
+    return kind
+
+
+def _action_metadata(context: DecisionContext, index: int) -> Mapping[str, Any]:
+    if index < 0 or index >= len(context.legal_action_metadata):
+        return {}
+    metadata = context.legal_action_metadata[index]
+    return metadata if isinstance(metadata, Mapping) else {}
+
+
+def _non_combat_category_weight(
+    context: DecisionContext,
+    category: str,
+    available_categories: Sequence[str],
+    screen_weights: Mapping[str, float],
+) -> float:
+    conditional = NON_COMBAT_DRIVER_V1_CONDITIONAL_CATEGORY_RELATIVE_WEIGHTS.get(
+        context.screen_state.upper(), {}
+    ).get(category)
+    if conditional is not None:
+        required = str(conditional["when_present"])
+        requires_full_slots = bool(conditional.get("when_potion_slots_full"))
+        if required in available_categories and (
+            not requires_full_slots or _potion_slots_full(context)
+        ):
+            return float(conditional["weight"])
+
+    return screen_weights.get(
+        category,
+        NON_COMBAT_DRIVER_V1_GLOBAL_CATEGORY_RELATIVE_WEIGHTS.get(
+            category,
+            StochasticNonCombatDriver._unknown_category_weight,
+        ),
+    )
+
+
+def _potion_slots_full(context: DecisionContext) -> bool:
+    count = context.snapshot_metadata.get("potion_count")
+    capacity = context.snapshot_metadata.get("potion_capacity")
+    if (
+        isinstance(count, bool)
+        or isinstance(capacity, bool)
+        or not isinstance(count, (int, float))
+        or not isinstance(capacity, (int, float))
+    ):
+        return False
+    return capacity > 0 and count >= capacity
+
+
+def _has_non_combat_potion_action(context: DecisionContext) -> bool:
+    return any(
+        kind in {"game_potion_use", "game_potion_discard"}
+        for kind in context.legal_action_kinds
+    )
+
+
+def _has_potion_slot_metadata(context: DecisionContext) -> bool:
+    count = context.snapshot_metadata.get("potion_count")
+    capacity = context.snapshot_metadata.get("potion_capacity")
+    return (
+        isinstance(count, (int, float))
+        and not isinstance(count, bool)
+        and isinstance(capacity, (int, float))
+        and not isinstance(capacity, bool)
+    )
+
+
+def _weighted_choice(
+    rng: random.Random,
+    values: Sequence[str],
+    weights: Sequence[float],
+) -> str:
+    if len(values) != len(weights) or not values:
+        raise ValueError("weighted choice requires aligned non-empty values")
+    if any(not math.isfinite(weight) or weight <= 0.0 for weight in weights):
+        raise ValueError("weighted choice weights must be finite and positive")
+
+    threshold = rng.random() * sum(weights)
+    cumulative = 0.0
+    for value, weight in zip(values, weights, strict=True):
+        cumulative += weight
+        if threshold < cumulative:
+            return value
+    return values[-1]
+
+
+def _driver_run_seed(driver_seed: int, simulator_seed: int | None) -> int:
+    encoded = json.dumps(
+        {"driver_seed": driver_seed, "simulator_seed": simulator_seed},
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return int.from_bytes(hashlib.sha256(encoded).digest(), "big")
+
+
+def _copy_weight_table(
+    source: Mapping[str, Mapping[str, float]],
+) -> dict[str, dict[str, float]]:
+    return {screen: dict(weights) for screen, weights in source.items()}
+
+
+def _copy_conditional_weight_table(
+    source: Mapping[str, Mapping[str, Mapping[str, object]]],
+) -> dict[str, dict[str, dict[str, object]]]:
+    return {
+        screen: {
+            category: dict(condition) for category, condition in categories.items()
+        }
+        for screen, categories in source.items()
+    }
 
 
 def _selection_problems(
