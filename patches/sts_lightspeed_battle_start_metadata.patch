@@ -2,7 +2,7 @@ diff --git a/bindings/slaythespire.cpp b/bindings/slaythespire.cpp
 index 61ee133..0000000 100644
 --- a/bindings/slaythespire.cpp
 +++ b/bindings/slaythespire.cpp
-@@ -449,6 +449,9 @@ struct StepSimulator {
+@@ -449,7 +449,10 @@ struct StepSimulator {
          ret["cur_hp"] = gc.curHp;
          ret["max_hp"] = gc.maxHp;
          ret["gold"] = gc.gold;
@@ -13,3 +13,16 @@ index 61ee133..0000000 100644
 +            ret["encounter_id"] = monsterEncounterEnumNames[static_cast<int>(bc.encounter)];
              ret["battle_outcome"] = battleOutcomeLabel(bc.outcome);
              ret["battle_input_state"] = inputStateLabel(bc.inputState);
+@@ -499,8 +502,12 @@ struct StepSimulator {
+             }
+             battleAction.execute(bc);
+             if (bc.outcome != Outcome::UNDECIDED) {
++                const auto completedBattleOutcome = battleOutcomeLabel(bc.outcome);
+                 bc.exitBattle(gc);
+                 battleActive = false;
++                auto result = snapshot();
++                result["completed_battle_outcome"] = completedBattleOutcome;
++                return result;
+             }
+             return snapshot();
+         }

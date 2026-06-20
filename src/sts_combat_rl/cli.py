@@ -608,6 +608,8 @@ def main(argv: list[str] | None = None) -> int:
                     format_battle_start_pool_coverage_report(coverage),
                     file=sys.stderr,
                 )
+                if not coverage.completed_outcomes_complete:
+                    return 1
             elif args.lightspeed_battle_start_pool_restore is not None:
                 report = verify_checkpoint_pool_file(
                     args.lightspeed_battle_start_pool_restore,

@@ -2,7 +2,7 @@ diff --git a/bindings/slaythespire.cpp b/bindings/slaythespire.cpp
 index d8f1ee2..bb8c6f2 100644
 --- a/bindings/slaythespire.cpp
 +++ b/bindings/slaythespire.cpp
-@@ -496,2 +496,16 @@ public:
+@@ -496,4 +496,18 @@ public:
              result.push_back(makeGameAction(gc, action));
          }
 +

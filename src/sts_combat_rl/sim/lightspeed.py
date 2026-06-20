@@ -80,10 +80,14 @@ class LightSpeedAdapter:
 
         raw_snapshot = dict(self._sim.step(native))
         snapshot = self._snapshot(raw_snapshot)
+        info = {"action_id": action.action_id, "action_kind": action.kind}
+        completed_battle_outcome = raw_snapshot.get("completed_battle_outcome")
+        if isinstance(completed_battle_outcome, str):
+            info["completed_battle_outcome"] = completed_battle_outcome
         return SimulatorTransition(
             snapshot=snapshot,
             terminal=_is_terminal(raw_snapshot),
-            info={"action_id": action.action_id, "action_kind": action.kind},
+            info=info,
         )
 
     @property

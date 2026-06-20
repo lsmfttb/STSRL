@@ -84,7 +84,9 @@ class FakeStepSimulator:
         assert action.bits == 123
         self.steps += 1
         self.outcome = "PLAYER_LOSS"
-        return self.snapshot()
+        snapshot = self.snapshot()
+        snapshot["completed_battle_outcome"] = "PLAYER_LOSS"
+        return snapshot
 
     def capture_checkpoint(self) -> tuple[int, str, int]:
         return self.seed, self.outcome, self.steps
@@ -119,6 +121,7 @@ def test_lightspeed_adapter_wraps_step_simulator_contract() -> None:
     assert transition.info == {
         "action_id": "battle:123",
         "action_kind": "end_turn",
+        "completed_battle_outcome": "PLAYER_LOSS",
     }
 
 

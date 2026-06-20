@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from io import StringIO
 import json
 
@@ -106,24 +106,27 @@ class FakePoolAdapter:
     def _snapshot(self) -> SimulatorSnapshot:
         battle_active = self.phase in {1, 3}
         next_act = 2 if self.phase >= 3 else 1
-        battle_outcome = "UNDECIDED"
-        if self.phase == 2:
-            battle_outcome = "PLAYER_VICTORY"
+        raw: dict[str, object] = {
+            "screen_state": "BATTLE" if battle_active else "EVENT",
+            "battle_active": battle_active,
+            "outcome": "PLAYER_LOSS" if self.phase == 4 else "UNDECIDED",
+            "ascension": 20,
+            "act": next_act,
+            "floor_num": self.phase + 1,
+            "room_type": "ELITE" if self.phase == 3 else "MONSTER",
+            "encounter_id": f"ENCOUNTER_{self.phase}" if battle_active else None,
+        }
+        if battle_active:
+            raw["battle_outcome"] = "UNDECIDED"
+        elif self.phase == 2:
+            # Regression surface for a winning battle that enters rewards while
+            # the run itself remains undecided.
+            raw["completed_battle_outcome"] = "PLAYER_VICTORY"
         elif self.phase == 4:
-            battle_outcome = "PLAYER_LOSS"
+            raw["completed_battle_outcome"] = "PLAYER_LOSS"
         return SimulatorSnapshot(
             observation=[self.seed, self.phase],
-            raw={
-                "screen_state": "BATTLE" if battle_active else "EVENT",
-                "battle_active": battle_active,
-                "outcome": "PLAYER_LOSS" if self.phase == 4 else "UNDECIDED",
-                "battle_outcome": battle_outcome,
-                "ascension": 20,
-                "act": next_act,
-                "floor_num": self.phase + 1,
-                "room_type": "ELITE" if self.phase == 3 else "MONSTER",
-                "encounter_id": f"ENCOUNTER_{self.phase}" if battle_active else None,
-            },
+            raw=raw,
         )
 
 
@@ -177,6 +180,8 @@ def test_natural_pool_captures_provenance_coverage_and_seeded_sampling() -> None
     assert report.natural_battle_start_count == 4
     assert report.unique_source_start_count == 4
     assert report.reported_battle_win_count == 2
+    assert report.completed_battle_count == 4
+    assert report.completed_outcomes_complete is True
     assert report.later_act_source_run_count == 2
     assert sampled == same_sampled
     assert {sample.sampling_component for sample in sampled} <= {
@@ -188,6 +193,23 @@ def test_natural_pool_captures_provenance_coverage_and_seeded_sampling() -> None
         for sample in sampled
     )
     assert sampled_report.sampled_draw_count == 12
+
+
+def test_coverage_fails_when_a_completed_battle_omits_its_outcome() -> None:
+    pool = _pool()
+    missing_outcome = replace(
+        pool.records[0],
+        battle_completed=True,
+        battle_outcome=None,
+    )
+
+    report = build_battle_start_pool_coverage_report(
+        replace(pool, records=[missing_outcome, *pool.records[1:]])
+    )
+
+    assert report.completed_outcomes_complete is False
+    assert report.completed_battle_outcome_missing_count == 1
+    assert "completed battle outcomes are missing" in report.problems[0]
 
 
 def test_portable_pool_manifest_replays_duplicate_action_ids_in_fresh_adapters() -> (

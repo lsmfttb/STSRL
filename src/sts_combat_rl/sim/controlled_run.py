@@ -488,9 +488,10 @@ def _potion_count(data: Mapping[str, Any]) -> float | None:
 def _battle_outcome(data: Mapping[str, Any]) -> str | None:
     """Return a simulator-reported battle outcome without inferring mechanics."""
 
-    value = data.get("battle_outcome")
-    if isinstance(value, str) and value and value != "UNDECIDED":
-        return value
+    for field_name in ("completed_battle_outcome", "battle_outcome"):
+        value = data.get(field_name)
+        if isinstance(value, str) and value and value != "UNDECIDED":
+            return value
     value = data.get("outcome")
     if isinstance(value, str) and value and value != "UNDECIDED":
         return value

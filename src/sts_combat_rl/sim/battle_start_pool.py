@@ -69,6 +69,7 @@ BATTLE_START_POOL_MIGRATIONS = (
             "legacy replay fails closed when an id is duplicated",
             "v1 recorded policy names rather than complete controller configuration",
             "v1 did not declare checkpoint information regime or public context",
+            "v1 did not record whether a battle completed before collection ended",
         ),
     ),
 )
@@ -91,6 +92,7 @@ class BattleStartCheckpointRecord:
     snapshot_observation: tuple[ObservationValue, ...]
     snapshot_raw: dict[str, Any]
     battle_outcome: str | None = None
+    battle_completed: bool = False
     distribution_kind: str = NATURAL_DISTRIBUTION_KIND
     checkpoint_information_regime: str = CHECKPOINT_INFORMATION_REGIME
     public_context_status: str = PUBLIC_CONTEXT_UNAVAILABLE
@@ -150,6 +152,8 @@ class BattleStartPoolCoverageReport:
     terminal_run_count: int
     truncated_run_count: int
     reported_battle_win_count: int
+    completed_battle_count: int = 0
+    completed_battle_outcome_missing_count: int = 0
     reported_battle_outcome_counts: Counter[str] = field(default_factory=Counter)
     later_act_source_run_count: int = 0
     sampled_draw_count: int = 0
@@ -160,6 +164,12 @@ class BattleStartPoolCoverageReport:
     encounter_id_counts: Counter[str] = field(default_factory=Counter)
     missing_metadata_counts: Counter[str] = field(default_factory=Counter)
     problems: list[str] = field(default_factory=list)
+
+    @property
+    def completed_outcomes_complete(self) -> bool:
+        """Whether every battle that ended during collection kept its outcome."""
+
+        return self.completed_battle_outcome_missing_count == 0
 
 
 @dataclass(frozen=True)
@@ -244,6 +254,7 @@ def collect_natural_battle_start_pool(
             records[active_record_index] = replace(
                 record,
                 battle_outcome=step.next_battle_outcome,
+                battle_completed=True,
             )
             active_record_index = None
 
@@ -332,6 +343,8 @@ def build_battle_start_pool_coverage_report(
     missing_metadata_counts: Counter[str] = Counter()
     outcome_counts: Counter[str] = Counter()
     later_act_runs: set[str] = set()
+    completed_battle_count = 0
+    completed_battle_outcome_missing_count = 0
 
     for record in pool.records:
         for field_name, counter in (
@@ -349,8 +362,14 @@ def build_battle_start_pool_coverage_report(
         act = record.structural_metadata.get("act")
         if isinstance(act, int) and not isinstance(act, bool) and act > 1:
             later_act_runs.add(record.source_run_id)
+        if record.battle_completed:
+            completed_battle_count += 1
         if record.battle_outcome is None:
-            outcome_counts["(not-reported)"] += 1
+            if record.battle_completed:
+                completed_battle_outcome_missing_count += 1
+                outcome_counts["(completed-outcome-missing)"] += 1
+            else:
+                outcome_counts["(battle-not-completed)"] += 1
         else:
             outcome_counts[record.battle_outcome] += 1
 
@@ -371,6 +390,8 @@ def build_battle_start_pool_coverage_report(
         terminal_run_count=pool.terminal_run_count,
         truncated_run_count=pool.truncated_run_count,
         reported_battle_win_count=outcome_counts["PLAYER_VICTORY"],
+        completed_battle_count=completed_battle_count,
+        completed_battle_outcome_missing_count=completed_battle_outcome_missing_count,
         reported_battle_outcome_counts=outcome_counts,
         later_act_source_run_count=len(later_act_runs),
         sampled_draw_count=len(sampled),
@@ -380,7 +401,22 @@ def build_battle_start_pool_coverage_report(
         room_type_counts=room_type_counts,
         encounter_id_counts=encounter_id_counts,
         missing_metadata_counts=missing_metadata_counts,
-        problems=list(dict.fromkeys([*pool.problems, *sample_problems])),
+        problems=list(
+            dict.fromkeys(
+                [
+                    *pool.problems,
+                    *sample_problems,
+                    *(
+                        [
+                            "completed battle outcomes are missing from "
+                            f"{completed_battle_outcome_missing_count} records"
+                        ]
+                        if completed_battle_outcome_missing_count
+                        else []
+                    ),
+                ]
+            )
+        ),
     )
 
 
@@ -563,6 +599,7 @@ def record_to_manifest(record: BattleStartCheckpointRecord) -> dict[str, Any]:
         "snapshot_observation": list(record.snapshot_observation),
         "snapshot_raw": _json_safe_mapping(record.snapshot_raw),
         "battle_outcome": record.battle_outcome,
+        "battle_completed": record.battle_completed,
         "distribution_kind": record.distribution_kind,
         "checkpoint_information_regime": record.checkpoint_information_regime,
         "public_context_status": record.public_context_status,
@@ -591,6 +628,9 @@ def record_from_manifest(
     battle_outcome = raw.get("battle_outcome")
     if battle_outcome is not None and not isinstance(battle_outcome, str):
         raise ValueError(f"{label} battle_outcome must be a string or null")
+    battle_completed = raw.get("battle_completed")
+    if not isinstance(battle_completed, bool):
+        raise ValueError(f"{label} battle_completed must be a boolean")
     distribution_kind = raw.get("distribution_kind")
     if distribution_kind != NATURAL_DISTRIBUTION_KIND:
         raise ValueError(f"{label} must retain natural_run distribution_kind")
@@ -634,6 +674,7 @@ def record_from_manifest(
         snapshot_observation=tuple(observation),
         snapshot_raw=_require_mapping(raw.get("snapshot_raw"), f"{label} snapshot raw"),
         battle_outcome=battle_outcome,
+        battle_completed=battle_completed,
         distribution_kind=distribution_kind,
         checkpoint_information_regime=checkpoint_information_regime,
         public_context_status=public_context_status,
@@ -704,6 +745,11 @@ def format_battle_start_pool_coverage_report(
     lines.append(f"terminal source runs: {report.terminal_run_count}")
     lines.append(f"truncated source runs: {report.truncated_run_count}")
     lines.append(f"reported battle wins: {report.reported_battle_win_count}")
+    lines.append(f"completed battles: {report.completed_battle_count}")
+    lines.append(
+        "completed battles missing outcome: "
+        f"{report.completed_battle_outcome_missing_count}"
+    )
     lines.append(
         f"source runs with later-act starts: {report.later_act_source_run_count}"
     )
@@ -939,6 +985,7 @@ def _migrate_pool_v1_to_v2(document: ArtifactDocument) -> ArtifactDocument:
             record_battle, record_non_combat
         )
         raw["battle_outcome"] = None
+        raw["battle_completed"] = False
         raw["distribution_kind"] = NATURAL_DISTRIBUTION_KIND
         raw["checkpoint_information_regime"] = LEGACY_UNKNOWN_INFORMATION_REGIME
         raw["public_context_status"] = PUBLIC_CONTEXT_UNAVAILABLE
