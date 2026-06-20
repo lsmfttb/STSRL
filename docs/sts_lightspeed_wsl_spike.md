@@ -1,8 +1,8 @@
 # sts_lightspeed WSL Operations
 
-This guide lists simulator operations available on the latest `main`. Planned
-checkpoint, pool, search, and evaluation commands remain in their task
-specifications until merged.
+This guide lists simulator operations available on the latest `main`.
+Checkpoint verification and portable battle-start pools are current
+capabilities. Search and fixed evaluation remain task-scoped future work.
 
 ## Boundary
 
@@ -30,11 +30,24 @@ repository in WSL: /mnt/d/DeadlycatCoding/STSRL
 ```text
 patches/sts_lightspeed_step_simulator.patch
 patches/sts_lightspeed_pybind11_v304.patch
+patches/sts_lightspeed_checkpoint_restore.patch
+patches/sts_lightspeed_battle_start_metadata.patch
+patches/sts_lightspeed_run_potion_snapshot.patch
+patches/sts_lightspeed_non_combat_potion_actions.patch
+patches/sts_lightspeed_gcc15_compat.patch
 ```
 
-The current patch surface supports controlled reset, legal-action enumeration,
-stepping, and snapshots for the existing simulator and battle-agent data
-smokes.
+The canonical base is external commit `7476a81`. The patch order and a clean
+GCC 15 build gate are kept in `scripts/verify_lightspeed_patch_stack.sh`:
+
+```powershell
+wsl.exe -d Ubuntu -e bash -lc "cd /mnt/d/DeadlycatCoding/STSRL && bash scripts/verify_lightspeed_patch_stack.sh /home/lsmft/stsrl-spikes/sts_lightspeed"
+```
+
+The verifier uses a disposable worktree and does not replace `build-py`.
+Apply the same ordered stack and rebuild the system build before using the
+runtime gates below. Do not treat an older `build-py` as supporting checkpoint
+or completed-battle-outcome fields just because the Python branch is current.
 
 Additional patches preserved in legacy commit `d56e10e` are not current
 capabilities. They are mapped to focused tasks in [`tasks/`](tasks/README.md)
@@ -70,6 +83,23 @@ wsl.exe -d Ubuntu -e bash -lc "cd /mnt/d/DeadlycatCoding/STSRL && PYTHONPATH=/ho
 
 This gate validates current data plumbing only. It does not train a model or
 demonstrate agent strength.
+
+### Native Battle-Start Checkpoint Determinism
+
+```powershell
+wsl.exe -d Ubuntu -e bash -lc "cd /mnt/d/DeadlycatCoding/STSRL && PYTHONPATH=/home/lsmft/stsrl-spikes/sts_lightspeed/build-py:/mnt/d/DeadlycatCoding/STSRL/src python3 -m sts_combat_rl.cli --lightspeed-battle-checkpoint-verify --sim-seed 1 --sim-ascension 20 --sim-steps 200 --checkpoint-replay-steps 10 --log-file -"
+```
+
+### Natural Battle-Start Pool And Fresh Restore
+
+```powershell
+wsl.exe -d Ubuntu -e bash -lc "cd /mnt/d/DeadlycatCoding/STSRL && mkdir -p artifacts/checkpoints && PYTHONPATH=/home/lsmft/stsrl-spikes/sts_lightspeed/build-py:/mnt/d/DeadlycatCoding/STSRL/src python3 -m sts_combat_rl.cli --lightspeed-battle-start-pool artifacts/checkpoints/a20_seed1_3.jsonl --sim-seed 1 --sim-episodes 3 --sim-ascension 20 --sim-steps 200 --battle-start-sample-count 20 --log-file - && PYTHONPATH=/home/lsmft/stsrl-spikes/sts_lightspeed/build-py:/mnt/d/DeadlycatCoding/STSRL/src python3 -m sts_combat_rl.cli --lightspeed-battle-start-pool-restore artifacts/checkpoints/a20_seed1_3.jsonl --sim-seed 1 --sim-ascension 20 --log-file -"
+```
+
+The manifest excludes native checkpoint payloads. The restore command creates
+fresh adapters and replays the recorded source seed and public action
+identities; it must not be presented as cross-process native-checkpoint
+serialization.
 
 ## Troubleshooting
 

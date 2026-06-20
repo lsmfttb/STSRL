@@ -11,7 +11,7 @@ starting work.
 | T001 | DONE | [Main quality baseline](T001-main-quality-baseline.md) | none | formatting and lint cleanup |
 | T002 | DONE | [Controlled-run foundation](T002-controlled-run-foundation.md) | T001 | controller contracts, controlled run, rollout executor |
 | T003 | DONE | [Artifact provenance foundation](T003-artifact-provenance-foundation.md) | T002 | artifact versioning, decision records |
-| T004 | READY | [Battle-start checkpoint pool](T004-battle-start-checkpoint-pool.md) | T002, T003, T010 | checkpoint restore, battle-start pool |
+| T004 | DONE | [Battle-start checkpoint pool](T004-battle-start-checkpoint-pool.md) | T002, T003, T010 | checkpoint restore, battle-start pool |
 | T005 | BLOCKED | [Fixed structural battle evaluation](T005-fixed-battle-evaluation.md) | T004 | fixed evaluation set and runner |
 | T006 | BLOCKED | [Oracle search teacher pipeline](T006-oracle-search-teacher.md) | T003, T004, T005 | search policy, teacher, search dataset |
 | T007 | BLOCKED | [Complete public run history](T007-complete-public-run-history.md) | T002, T003, T004 | public context/history and native projections |

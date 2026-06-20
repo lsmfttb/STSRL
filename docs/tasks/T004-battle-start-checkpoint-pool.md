@@ -1,6 +1,6 @@
 # T004: Battle-Start Checkpoint Pool
 
-Status: `READY`.
+Status: `DONE`.
 
 ## Objective
 
@@ -10,11 +10,9 @@ and fixed battle evaluation.
 
 ## Current Main Baseline
 
-`main` has the authoritative `execute_controlled_run` path, complete
-controller provenance, versioned trainer-input artifacts, and the named
-stochastic non-combat driver. It cannot capture or restore a simulator state,
-freeze a battle start, or distinguish repeated sampling from unique
-battle-start coverage.
+`main` has the authoritative `execute_controlled_run` path, native
+process-local checkpoint restore, portable battle-start manifests, complete
+controller provenance, and the named stochastic non-combat driver.
 
 ## Dependencies
 
@@ -92,6 +90,20 @@ capture, fresh-process restore, small A20 natural-pool collection, and coverage
 audit. The verification must name the battle controller, non-combat driver,
 ascension, seed range, checkpoint count, unique-source count, and every
 reported restore mismatch.
+
+## Completion Record
+
+- Merged as PR #5 (`8057562`).
+- Current-schema manifests keep native checkpoint payloads in memory only and
+  restore in fresh adapters from source seed plus occurrence-disambiguated
+  action traces.
+- The clean canonical `sts_lightspeed` patch stack built from commit `7476a81`.
+  The A20 seed range `1..3` produced 13 starts: 10 `PLAYER_VICTORY`, 3
+  `PLAYER_LOSS`, no completed-outcome omissions, and 13/13 fresh-adapter
+  restores.
+- The pool deliberately does not provide complete sanitized public run context;
+  that remains T007. It is a source for later fixed evaluation, search labels,
+  and constructed supplements, not those workflows themselves.
 
 ## Legacy Reference
 

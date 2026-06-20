@@ -42,25 +42,35 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
 - Versioned seeded stochastic non-combat driver with screen-level relative
   weights, non-combat potion eligibility, conditional-reachability tests, and
   natural A20 coverage/provenance calibration.
+- Native, process-local simulator checkpoints and portable battle-start pool
+  manifests. Fresh adapters restore portable records by replaying the source
+  seed and occurrence-disambiguated action trace; opaque native state is never
+  serialized.
+- Seeded structural resampling of natural battle starts, with source identity,
+  sampling component, structural coverage, and completed battle outcomes kept
+  separate from repeated sample weight.
 - A training-readiness report that validates plumbing only. It does not train a
   model or demonstrate policy strength.
 
 ### Tests
 
-- `252` tests pass on Windows Python as of this review.
+- `261` tests pass on Windows Python as of this review.
 - The two CommunicationMod fixture smokes pass.
 - `python -m compileall -q src tests` passes.
 - `ruff check src tests` and `ruff format --check src tests` pass.
 - The T010 A20 natural calibration over seeds `1..100` reports 2,303
   non-combat decisions with complete provenance and no driver problems;
   unreached Boss relic screens remain explicit natural-coverage gaps.
+- The reproducible `sts_lightspeed` patch-stack build passes from external
+  commit `7476a81`. A T004 A20 pool over seeds `1..3` contains 13 natural
+  starts with 10 reported wins, 3 losses, no missing completed outcome, and
+  13/13 fresh-adapter portable restores.
 
 ## Not Implemented On Main
 
 The following capabilities exist only as plans, experiment evidence, or
 unmerged legacy work:
 
-- checkpoint capture/restore and battle-start pools;
 - fixed structural battle evaluation;
 - native Oracle-like search integration and search-teacher datasets;
 - PyTorch policy/value training;
@@ -78,13 +88,11 @@ already supports them.
 Executable task specifications live in [`tasks/`](tasks/README.md). The first
 tasks in dependency order are:
 
-1. [`T004`](tasks/T004-battle-start-checkpoint-pool.md), currently `READY`:
-   add simulator-owned battle-start capture/restore, natural pools, structural
-   sampling, and coverage reporting.
-2. [`T011`](tasks/T011-tactical-feature-contract-v2.md), currently `READY`:
+1. [`T011`](tasks/T011-tactical-feature-contract-v2.md), currently `READY`:
    establish the versioned public tactical state/action feature contract and
    live-runtime field parity audit.
-3. Review remaining blocked specifications as their prerequisites merge.
+2. Review T005, T007, T008, and T012 against the merged T004 artifact and
+   simulator contracts before changing their `BLOCKED` status.
 
 Later tasks are dependency-ordered in the task index. A task is not ready for a
 new branch until its status is `READY`.
