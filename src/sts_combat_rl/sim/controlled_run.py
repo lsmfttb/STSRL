@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any
 
 from sts_combat_rl.sim.action_space import (
     ActionSpaceConfig,
+    action_space_for_screen,
     eligible_indices,
 )
 from sts_combat_rl.sim.contract import (
@@ -97,6 +98,8 @@ class ControlledRunStep:
     chosen_action_kind: str
     terminal_after_step: bool
     provenance: ControllerProvenance
+    selection_reason: str = ""
+    decision_metadata: Mapping[str, Any] = field(default_factory=dict)
     floor: float | None = None
     player_hp: float | None = None
     player_max_hp: float | None = None
@@ -180,6 +183,7 @@ def execute_controlled_run(
         raise ValueError("controlled run max_steps cannot be negative")
 
     active_action_space = action_space or ActionSpaceConfig.initial_no_potions()
+    _reset_controller_for_run(controller, seed)
     snapshot = adapter.reset(seed=seed)
     initial_raw = dict(snapshot.raw)
     steps: list[ControlledRunStep] = []
@@ -241,6 +245,8 @@ def execute_controlled_run(
             chosen_action_kind=chosen_action.kind,
             terminal_after_step=terminal,
             provenance=decision.provenance,
+            selection_reason=decision.reason,
+            decision_metadata=dict(decision.metadata),
             source_metadata=source_metadata_from_snapshot(
                 snapshot.raw,
                 seed=seed,
@@ -306,13 +312,52 @@ def build_decision_context(
     from sts_combat_rl.sim.policy import DecisionContext
 
     raw = raw_snapshot if isinstance(raw_snapshot, Mapping) else {}
+    screen_state = str(raw.get("screen_state", "(none)"))
+    effective_action_space = action_space_for_screen(
+        action_space,
+        screen_state=screen_state,
+        battle_active=bool(raw.get("battle_active")),
+    )
     return DecisionContext(
-        screen_state=str(raw.get("screen_state", "(none)")),
+        screen_state=screen_state,
         snapshot_features=encode_lightspeed_battle_snapshot(raw),
         legal_action_features=encode_simulator_actions(list(actions)),
         legal_action_kinds=[action.kind for action in actions],
-        eligible_action_indices=eligible_indices(list(actions), action_space),
+        eligible_action_indices=eligible_indices(list(actions), effective_action_space),
+        snapshot_metadata=_public_non_combat_snapshot_metadata(raw),
+        legal_action_metadata=[_public_action_metadata(action) for action in actions],
     )
+
+
+def _reset_controller_for_run(controller: OnlineController, seed: int | None) -> None:
+    """Invoke the optional seeded run lifecycle without widening the protocol."""
+
+    reset_for_run = getattr(controller, "reset_for_run", None)
+    if callable(reset_for_run):
+        reset_for_run(seed)
+
+
+def _public_non_combat_snapshot_metadata(
+    raw: Mapping[str, Any],
+) -> dict[str, int | float]:
+    """Expose only visible resource counters needed by the non-combat driver."""
+
+    metadata: dict[str, int | float] = {}
+    for key in ("potion_count", "potion_capacity"):
+        value = raw.get(key)
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            metadata[key] = value
+    return metadata
+
+
+def _public_action_metadata(action: SimulatorAction) -> dict[str, int]:
+    """Expose visible legal-action parameters used for category selection."""
+
+    metadata: dict[str, int] = {}
+    idx1 = action.raw.get("idx1")
+    if isinstance(idx1, int) and not isinstance(idx1, bool):
+        metadata["idx1"] = idx1
+    return metadata
 
 
 # ---------------------------------------------------------------------------

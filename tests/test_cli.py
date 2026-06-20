@@ -338,8 +338,39 @@ def test_cli_lightspeed_battle_sweep_writes_report_to_stderr_only(
     assert captured.out == ""
     assert "Battle agent seed sweep summary" in captured.err
     assert "total battle decisions: 2" in captured.err
-    assert "non-combat driver policy: random_eligible" in captured.err
+    assert "non-combat driver policy: stochastic_non_combat_v1" in captured.err
     assert "total non-combat driver decisions: 0" in captured.err
+
+
+def test_cli_non_combat_calibration_reports_unreached_branches_without_failure(
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.setattr(
+        "sts_combat_rl.cli.LightSpeedAdapter",
+        FakeLightSpeedSmokeAdapter,
+    )
+
+    assert (
+        main(
+            [
+                "--lightspeed-non-combat-calibration",
+                "--sim-episodes",
+                "1",
+                "--sim-steps",
+                "1",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 0
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Stochastic non-combat driver calibration summary" in captured.err
+    assert "driver/provenance validation passed: yes" in captured.err
+    assert "unavailable structural categories:" in captured.err
 
 
 def test_cli_lightspeed_battle_batch_smoke_writes_report_to_stderr_only(

@@ -22,6 +22,7 @@ from sts_combat_rl.sim.action_space import (
     ActionChooser,
     ActionSpaceConfig,
     SimulatorAction,
+    action_space_for_screen,
     choose_deterministic_action,
 )
 from sts_combat_rl.sim.controller_contract import (
@@ -131,6 +132,13 @@ class PolicyController:
             score=decision.score,
         )
 
+    def reset_for_run(self, seed: int | None) -> None:
+        """Reset an optional stateful public policy for one controlled run."""
+
+        reset_for_run = getattr(self.policy, "reset_for_run", None)
+        if callable(reset_for_run):
+            reset_for_run(seed)
+
 
 @dataclass(frozen=True)
 class RoutedRunController:
@@ -192,6 +200,14 @@ class RoutedRunController:
             score=decision.score,
             metadata=metadata,
         )
+
+    def reset_for_run(self, seed: int | None) -> None:
+        """Reset child controllers that publish a per-run random lifecycle."""
+
+        for controller in (self.battle, self.non_combat):
+            reset_for_run = getattr(controller, "reset_for_run", None)
+            if callable(reset_for_run):
+                reset_for_run(seed)
 
 
 @dataclass
@@ -258,9 +274,15 @@ class ChooserController:
         context: DecisionContext,
         step_index: int,
     ) -> ControllerDecision:
-        del adapter, snapshot, step_index
+        del adapter, step_index
         action_list = list(actions)
-        selected = self.chooser(action_list, self.action_space)
+        screen_state = getattr(context, "screen_state", "(none)")
+        effective_action_space = action_space_for_screen(
+            self.action_space,
+            screen_state=screen_state,
+            battle_active=is_battle_state(snapshot.raw, screen_state),
+        )
+        selected = self.chooser(action_list, effective_action_space)
         try:
             selected_index = action_list.index(selected)
         except ValueError as exc:

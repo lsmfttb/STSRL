@@ -20,6 +20,7 @@ from typing import Any
 from sts_combat_rl.sim.action_space import ActionSpaceConfig
 from sts_combat_rl.sim.batching import DecisionBatch, DecisionExample
 from sts_combat_rl.sim.controlled_run import (
+    BeforeDecisionObserver,
     ControlledRun,
     ControlledRunStep,
     execute_controlled_run,
@@ -148,16 +149,18 @@ def collect_battle_agent_rollout(
     max_steps: int = 200,
     action_space: ActionSpaceConfig | None = None,
     autopilot_policy: DecisionPolicy | None = None,
+    before_decision: BeforeDecisionObserver | None = None,
 ) -> ControlledRun:
     """Collect a bounded rollout where only battle states use battle_policy.
 
     ``autopilot_policy`` must be supplied explicitly. A dataset helper may not
     silently construct a default battle or non-combat controller.
 
-    Each call constructs fresh ``PolicyController`` instances so that each run
-    gets independent provenance. Stateful policies (e.g. ``RandomEligiblePolicy``)
-    publish their starting RNG state in provenance, so the same policy object
-    reused across sweep iterations gets a different identity per run.
+    Each call constructs fresh ``PolicyController`` instances so each run gets
+    independent controller provenance. Policies that implement the optional
+    ``reset_for_run`` lifecycle receive the simulator seed at the start of the
+    authoritative executor; stateful policies without that lifecycle remain
+    explicitly non-reproducible in their provenance.
     """
 
     if autopilot_policy is None:
@@ -177,6 +180,7 @@ def collect_battle_agent_rollout(
         seed=seed,
         max_steps=max_steps,
         action_space=action_space,
+        before_decision=before_decision,
     )
 
 

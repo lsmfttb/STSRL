@@ -17,6 +17,7 @@ from typing import Any
 from sts_combat_rl.samples import expand_sample_paths
 from sts_combat_rl.sim.action_space import (
     ActionSpaceConfig,
+    action_space_for_screen,
     choose_deterministic_action,
     filter_eligible_actions,
 )
@@ -105,7 +106,12 @@ def run_simulator_calibration(
             break
 
         actions = list(adapter.legal_actions(snapshot))
-        _count_actions(report, actions, active_action_space)
+        effective_action_space = action_space_for_screen(
+            active_action_space,
+            screen_state=str(snapshot.raw.get("screen_state", "(none)")),
+            battle_active=bool(snapshot.raw.get("battle_active")),
+        )
+        _count_actions(report, actions, effective_action_space)
         if not actions:
             report.problems.append("no legal actions before terminal state")
             break
@@ -113,7 +119,7 @@ def run_simulator_calibration(
         if report.executed_steps >= max_steps:
             break
 
-        action = choose_calibration_action(actions, active_action_space)
+        action = choose_calibration_action(actions, effective_action_space)
         report.chosen_action_kind_counts[action.kind] += 1
         transition = adapter.step(action)
         report.executed_steps += 1
@@ -168,7 +174,7 @@ def format_simulator_calibration_report(report: SimulatorCalibrationReport) -> s
         "Simulator calibration summary",
         f"seed: {report.seed if report.seed is not None else '(default)'}",
         f"requested steps: {report.requested_steps}",
-        "excluded action kinds: "
+        "configured battle excluded action kinds: "
         + (
             ", ".join(report.excluded_action_kinds)
             if report.excluded_action_kinds

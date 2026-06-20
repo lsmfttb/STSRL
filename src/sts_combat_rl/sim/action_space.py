@@ -8,7 +8,7 @@ switch to `ActionSpaceConfig.include_all()` and reuse the same adapter surface.
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from sts_combat_rl.sim.contract import SimulatorAction
 
@@ -33,6 +33,7 @@ class ActionSpaceConfig:
     excluded_kinds: frozenset[str] = POTION_ACTION_KINDS
     preferred_kinds: tuple[str, ...] = DEFAULT_PREFERRED_ACTION_KINDS
     allow_excluded_fallback: bool = True
+    include_non_combat_potions: bool = True
 
     @classmethod
     def initial_no_potions(cls) -> "ActionSpaceConfig":
@@ -53,6 +54,7 @@ class ActionSpaceConfig:
             "excluded_kinds": sorted(self.excluded_kinds),
             "preferred_kinds": list(self.preferred_kinds),
             "allow_excluded_fallback": self.allow_excluded_fallback,
+            "include_non_combat_potions": self.include_non_combat_potions,
         }
 
 
@@ -118,6 +120,31 @@ def eligible_indices(
         for index, action in enumerate(actions)
         if id(action) in eligible_action_ids
     ]
+
+
+def action_space_for_screen(
+    config: ActionSpaceConfig,
+    *,
+    screen_state: str,
+    battle_active: bool,
+) -> ActionSpaceConfig:
+    """Return the effective filter for one decision state.
+
+    The initial action-space pass suppresses potion actions for *battle* policy
+    experiments only.  Natural non-combat drivers must keep their legal potion
+    rewards, purchases, discards, and uses so those branches remain reachable.
+    """
+
+    if (
+        config.include_non_combat_potions
+        and not battle_active
+        and screen_state != "BATTLE"
+    ):
+        return replace(
+            config,
+            excluded_kinds=frozenset(config.excluded_kinds - POTION_ACTION_KINDS),
+        )
+    return config
 
 
 ActionChooser = Callable[[list[SimulatorAction], ActionSpaceConfig], SimulatorAction]
