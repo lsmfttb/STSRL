@@ -783,3 +783,60 @@ def test_visible_screen_battle():
     )
     assert screen["screen_state"] == "BATTLE"
     assert screen["projection_available"] is False
+
+
+def test_visible_screen_rest():
+    screen, problems = _visible_screen_context(
+        {
+            "schema_id": "public_visible_screen-v1",
+            "screen_state": "REST_ROOM",
+            "projection_available": True,
+            "legal_actions": [],
+            "rest": {
+                "options": [
+                    {"option_index": 0, "label": "REST"},
+                    {"option_index": 1, "label": "SMITH"},
+                ],
+            },
+            "missing_fields": [],
+        }
+    )
+    assert screen["screen_state"] == "REST_ROOM"
+    assert "rest" in screen
+    assert screen["rest"]["options"][0]["label"] == "REST"
+    assert screen["rest"]["options"][1]["label"] == "SMITH"
+
+
+def test_visible_screen_shop_full():
+    screen, problems = _visible_screen_context(
+        {
+            "schema_id": "public_visible_screen-v1",
+            "screen_state": "SHOP_ROOM",
+            "projection_available": True,
+            "legal_actions": [],
+            "shop": {
+                "cards": [
+                    {
+                        "option_index": 0,
+                        "price": 50,
+                        "sold_out": False,
+                        "item": {
+                            "id": 1,
+                            "name": "Anger",
+                            "type": "ATTACK",
+                            "rarity": "COMMON",
+                            "upgraded": False,
+                        },
+                    },
+                ],
+                "card_remove_price": 75,
+                "card_remove_sold_out": False,
+            },
+            "missing_fields": [],
+        }
+    )
+    shop = screen["shop"]
+    assert shop["cards"][0]["price"] == 50
+    assert shop["cards"][0]["item"]["name"] == "Anger"
+    assert shop["card_remove_price"] == 75
+    assert shop["card_remove_sold_out"] is False
