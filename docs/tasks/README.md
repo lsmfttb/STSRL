@@ -18,9 +18,9 @@ starting work.
 | T008 | BLOCKED | [A20 constructed battle supplements](T008-a20-constructed-supplements.md) | T003, T004 | battle-start transforms and approximate HP policy |
 | T009 | BLOCKED | [PyTorch search-guidance model](T009-pytorch-search-guidance.md) | T003, T006, T007, T011, T012 | optional train dependency and policy/value model |
 | T010 | DONE | [Stochastic non-combat driver](T010-stochastic-non-combat-driver.md) | T002 | non-combat policy and native visible action/resource support |
-| T011 | READY | [Tactical feature contract v2](T011-tactical-feature-contract-v2.md) | T003 | feature, trainer-input, and model-input upgrades |
+| T011 | DONE | [Tactical feature contract v2](T011-tactical-feature-contract-v2.md) | T003 | feature, trainer-input, and model-input upgrades |
 | T012 | BLOCKED | [Structured battle resource outcomes](T012-structured-resource-outcomes.md) | T003, T004, T010 | persistent resource snapshots and outcome vectors |
-| T013 | BLOCKED | [Live CommunicationMod runtime adapter](T013-live-communicationmod-runtime-adapter.md) | T003, T011 | trained/search controller deployment in the real game |
+| T013 | READY | [Live CommunicationMod runtime adapter](T013-live-communicationmod-runtime-adapter.md) | T003, T011 | trained/search controller deployment in the real game |
 
 Only `READY` tasks should receive a new branch. After a prerequisite merges,
 the main maintainer reviews dependent specifications against the new `main`

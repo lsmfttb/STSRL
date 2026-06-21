@@ -1,6 +1,6 @@
 # Current Status
 
-Last reviewed: 2026-06-20.
+Last reviewed: 2026-06-21.
 
 This document describes the latest `main` branch only. Results from local
 artifacts, old branches, or unmerged pull requests do not count as implemented
@@ -31,7 +31,11 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
   for current complete-run workflows.
 - Routed battle/non-combat controllers with separately inspectable child
   provenance and composite reproducibility propagation.
-- Fixed-size tactical snapshot features and variable legal-action features.
+- Versioned `public-tactical-v2` structured state/action contract with a
+  compatibility numeric view. It carries visible hand, discard, and exhaust
+  members; monster identity, canonical intent category, and simulator current
+  move; player powers; potion identities; and relic identities with counters.
+  Simulator-only or live-missing fields remain explicit in the parity report.
 - Battle-only decision batches and contiguous battle-segment reports.
 - Candidate reward components, a draft scalar reward report, and reward-labeled
   battle examples.
@@ -52,9 +56,9 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
 - A training-readiness report that validates plumbing only. It does not train a
   model or demonstrate policy strength.
 
-### Tests
+### Tests And Runtime Evidence
 
-- `261` tests pass on Windows Python as of this review.
+- `274` tests pass on Windows Python as of this review.
 - The two CommunicationMod fixture smokes pass.
 - `python -m compileall -q src tests` passes.
 - `ruff check src tests` and `ruff format --check src tests` pass.
@@ -65,6 +69,12 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
   commit `7476a81`. A T004 A20 pool over seeds `1..3` contains 13 natural
   starts with 10 reported wins, 3 losses, no missing completed outcome, and
   13/13 fresh-adapter portable restores.
+- The T011 clean WSL patch stack and A20 tactical-feature audit pass. Across
+  one bounded seed it observed 81 battle snapshots and 497 legal actions with
+  `public-tactical-v2` state/action compatibility sizes of 4,634/92 and no
+  required simulator-projection failures. A captured CommunicationMod audit
+  covers 3,347 battle snapshots; its documented live-missing fields remain a
+  deployment constraint for T013, not an implicit simulator fallback.
 
 ## Not Implemented On Main
 
@@ -88,18 +98,19 @@ already supports them.
 Executable task specifications live in [`tasks/`](tasks/README.md). The first
 tasks in dependency order are:
 
-1. [`T011`](tasks/T011-tactical-feature-contract-v2.md), currently `READY`:
-   establish the versioned public tactical state/action feature contract and
-   live-runtime field parity audit.
+1. [`T013`](tasks/T013-live-communicationmod-runtime-adapter.md), currently
+   `READY`: implement the live CommunicationMod runtime adapter against the
+   published v2 tactical contract. It is a deployment gate, not a prerequisite
+   for simulator-only experiments.
 2. Review T005, T007, T008, and T012 against the merged T004 artifact and
    simulator contracts before changing their `BLOCKED` status.
 
 Later tasks are dependency-ordered in the task index. A task is not ready for a
 new branch until its status is `READY`.
 
-Live-game deployment compatibility is now tracked as
-[`T013`](tasks/T013-live-communicationmod-runtime-adapter.md). It is blocked by
-T011. Simulator-only RL training does not depend on T013, but trained
+Live-game deployment compatibility is tracked as
+[`T013`](tasks/T013-live-communicationmod-runtime-adapter.md). Simulator-only
+RL training does not depend on T013, but trained
 or search controllers should not be described as runnable in the real game until
 that adapter, feature-parity, action-mapping, and runtime-provenance work
 passes review.

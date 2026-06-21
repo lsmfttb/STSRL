@@ -311,7 +311,7 @@ evaluation without leakage.
 
 ### Phase F2: Live Runtime Deployment Gate
 
-Status: pending T011 and T013.
+Status: pending T013.
 
 Exit gate: a controller can consume captured CommunicationMod combat snapshots,
 select through the shared `OnlineController` contract, emit valid protocol

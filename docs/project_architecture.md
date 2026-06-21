@@ -124,6 +124,13 @@ The latest `main` does not yet carry this complete public context. That
 limitation belongs in `current_status.md`; it does not narrow the architectural
 target.
 
+The current immediate-combat contract is `public-tactical-v2`. Its structured
+state and action objects are authoritative; fixed-size numeric vectors are a
+compatibility view derived from those objects. The contract preserves explicit
+missing values and field-parity classifications so a simulator-only detail
+cannot silently become a live-runtime input. T013 must consume this contract
+rather than creating another live feature representation.
+
 ## Dependency Direction
 
 ```text

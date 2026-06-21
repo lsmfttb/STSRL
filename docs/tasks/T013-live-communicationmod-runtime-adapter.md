@@ -1,6 +1,6 @@
 # T013: Live CommunicationMod Runtime Adapter
 
-Status: `BLOCKED` by T011.
+Status: `READY`.
 
 ## Objective
 
@@ -19,7 +19,9 @@ not require it, but any claim that a controller is live-game runnable does.
 - CommunicationMod-style stdin/stdout protocol plumbing and mock fixture smokes;
 - centralized protocol command formatting;
 - simulator-side controller contracts and controlled complete-run execution;
-- fixed tactical features and legal-action features for plumbing tests.
+- the versioned `public-tactical-v2` structured state/action contract, its
+  explicit simulator/live parity report, and versioned trainer/model-input
+  artifacts.
 
 `main` does not yet have a live runtime adapter that converts a real
 CommunicationMod combat observation into the same decision/action interface used

@@ -1,6 +1,6 @@
 # T011: Tactical Feature Contract V2
 
-Status: `READY`.
+Status: `DONE`.
 
 ## Objective
 
@@ -112,3 +112,24 @@ tests/test_battle_agent.py
 Include schema versions, feature inventory, unknown/missing-field counts,
 simulator/live parity status, forbidden-field audit, migration impact, and exact
 verification results.
+
+## Completion Record
+
+Merged to `main` in PR #6 on 2026-06-21.
+
+- Implemented `public-tactical-v2`, `trainer-input` dataset v3, and model-input
+  batch v2, with sequential migration of supported v1/v2 artifacts.
+- Added explicit normal-public state/action structures, occurrence-safe public
+  action identities, hidden-field exclusion checks, and simulator/live parity
+  audits.
+- The authoritative simulator projection now includes discard/exhaust members,
+  canonical intent category plus exact simulator current move, and battle relic
+  identities/counters. Shared required projections fail the WSL audit when
+  absent.
+- Verification: 274 Windows tests, compileall, Ruff, mock protocol smokes, a
+  fresh-Windows-worktree WSL patch-stack build, an A20 simulator audit (81
+  snapshots, 497 actions), and a captured CommunicationMod audit (3,347
+  snapshots).
+
+T013 consumes this contract to provide the live action/command adapter. Its
+live-missing fields remain explicit and must not be reconstructed locally.

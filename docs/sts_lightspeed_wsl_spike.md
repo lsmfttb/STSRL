@@ -84,6 +84,24 @@ wsl.exe -d Ubuntu -e bash -lc "cd /mnt/d/DeadlycatCoding/STSRL && PYTHONPATH=/ho
 This gate validates current data plumbing only. It does not train a model or
 demonstrate agent strength.
 
+### Tactical Feature Contract Audit
+
+Run this only after rebuilding `build-py` from the current verified patch stack.
+It validates required simulator projections, reports schema/version, unknown
+identities, missing fields, and simulator/live field parity. It is not a
+live-controller smoke.
+
+```powershell
+wsl.exe -d Ubuntu -e bash -lc "cd /mnt/d/DeadlycatCoding/STSRL && PYTHONPATH=/home/lsmft/stsrl-spikes/sts_lightspeed/build-py:/mnt/d/DeadlycatCoding/STSRL/src python3 -m sts_combat_rl.cli --lightspeed-tactical-feature-audit --sim-seed 1 --sim-ascension 20 --sim-steps 200 --log-file -"
+```
+
+Captured CommunicationMod data can be checked against the same contract without
+launching the simulator:
+
+```powershell
+wsl.exe -d Ubuntu -e bash -lc "cd /mnt/d/DeadlycatCoding/STSRL && PYTHONPATH=/mnt/d/DeadlycatCoding/STSRL/src python3 -m sts_combat_rl.cli --audit-tactical-features tests/fixtures/real_samples --log-file -"
+```
+
 ### Native Battle-Start Checkpoint Determinism
 
 ```powershell

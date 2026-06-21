@@ -209,7 +209,7 @@ targets. Normal-agent promotion uses only normal-information evaluation.
 
 ### N0: Public Contracts And Firewall
 
-Status: pending T006, T007, T011, and T012.
+Status: pending T006, T007, and T012.
 
 Required work:
 
