@@ -1,8 +1,8 @@
 # sts_lightspeed WSL Operations
 
 This guide lists simulator operations available on the latest `main`.
-Checkpoint verification and portable battle-start pools are current
-capabilities. Search and fixed evaluation remain task-scoped future work.
+Checkpoint verification, portable battle-start pools, and fixed structural
+evaluation are current capabilities. Search remains task-scoped future work.
 
 ## Boundary
 
@@ -118,6 +118,22 @@ The manifest excludes native checkpoint payloads. The restore command creates
 fresh adapters and replays the recorded source seed and public action
 identities; it must not be presented as cross-process native-checkpoint
 serialization.
+
+### Fixed Structural Battle Evaluation
+
+After producing a portable pool with the current verified patch stack, freeze
+and evaluate a deterministic structural cohort. This is a plumbing and
+comparison gate, not a policy-strength benchmark:
+
+```powershell
+wsl.exe -d Ubuntu -e bash -lc "cd /mnt/d/DeadlycatCoding/STSRL && mkdir -p artifacts/evaluations && PYTHONPATH=/home/lsmft/stsrl-spikes/sts_lightspeed/build-py:/mnt/d/DeadlycatCoding/STSRL/src python3 -m sts_combat_rl.cli --lightspeed-fixed-battle-evaluation artifacts/checkpoints/a20_seed1_3.jsonl --fixed-evaluation-cohort artifacts/evaluations/a20_seed1_3_cohort.jsonl --fixed-evaluation-report artifacts/evaluations/a20_seed1_3_report.jsonl --sim-ascension 20 --sim-steps 200 --log-file -"
+```
+
+The command restores every selected start in a fresh adapter, reports restore,
+selection, controller, and simulator failures explicitly, and writes separate
+natural-weighted, encounter-macro, room-type-macro, and per-stratum results.
+Use a `build-py` rebuilt from the verified patch stack; an older system build
+can lack completed-battle outcome fields even when the repository is current.
 
 ## Troubleshooting
 

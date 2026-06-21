@@ -57,12 +57,17 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
 - Seeded structural resampling of natural battle starts, with source identity,
   sampling component, structural coverage, and completed battle outcomes kept
   separate from repeated sample weight.
+- Versioned fixed structural cohorts selected without replacement from portable
+  natural battle-start pools, plus fresh-adapter restored-battle evaluation.
+  Reports retain per-battle provenance and failures, controller telemetry, and
+  separate natural-weighted, encounter-macro, room-type-macro, and
+  per-stratum aggregates.
 - A training-readiness report that validates plumbing only. It does not train a
   model or demonstrate policy strength.
 
 ### Tests And Runtime Evidence
 
-- `349` tests pass on Windows Python as of this review.
+- `407` tests pass on Windows Python as of this review.
 - The two CommunicationMod fixture smokes pass.
 - `python -m compileall -q src tests` passes.
 - `ruff check src tests` and `ruff format --check src tests` pass.
@@ -73,6 +78,11 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
   commit `7476a81`. A T004 A20 pool over seeds `1..3` contains 13 natural
   starts with 10 reported wins, 3 losses, no missing completed outcome, and
   13/13 fresh-adapter portable restores.
+- T005's clean WSL patch-stack gate freezes 8 unique starts from that pool and
+  evaluates them through fresh portable restores with the normal-public
+  `preferred_kind` controller. The plumbing run reports 5 wins and 3 losses,
+  no truncation or evaluation errors, and all three aggregate views. This is
+  fixed-evaluation evidence only, not an A20 policy-strength result.
 - The T011 clean WSL patch stack and A20 tactical-feature audit pass. Across
   one bounded seed it observed 81 battle snapshots and 497 legal actions with
   `public-tactical-v2` state/action compatibility sizes of 4,634/92 and no
@@ -90,7 +100,6 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
 The following capabilities exist only as plans, experiment evidence, or
 unmerged legacy work:
 
-- fixed structural battle evaluation;
 - native Oracle-like search integration and search-teacher datasets;
 - PyTorch policy/value training;
 - interactive live-game or A20 performance validation for any controller;
@@ -107,14 +116,17 @@ already supports them.
 Executable task specifications live in [`tasks/`](tasks/README.md). The first
 tasks in dependency order are:
 
-1. T005, fixed structural battle evaluation, is `READY` from the current main
-   branch. It provides the comparison surface required before search promotion.
-2. T007, complete public run history, is `READY` from the current main branch.
+1. T005, fixed structural battle evaluation, is complete. It provides the
+   comparison surface required before search promotion.
+2. T006 now has all implementation prerequisites, but remains `BLOCKED` while
+   the main maintainer reviews and republishes its task specification against
+   the T005 evaluation contract.
+3. T007, complete public run history, is `READY` from the current main branch.
    It establishes the sanitized continuation-context boundary needed by
    constructed data and terminal-resource outcomes.
-3. T008 remains blocked by T007. T012 remains blocked by T005 and T007 so its
-   terminal-resource labels extend one stable evaluation and public-context
-   contract rather than creating parallel artifact fields.
+4. T008 remains blocked by T007. T012 now awaits T007 so its terminal-resource
+   labels extend one stable evaluation and public-context contract rather than
+   creating parallel artifact fields.
 
 Later tasks are dependency-ordered in the task index. A task is not ready for a
 new branch until its status is `READY`.

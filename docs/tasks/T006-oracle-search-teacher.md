@@ -1,11 +1,11 @@
 # T006: Oracle Search Teacher Pipeline
 
-Status: `BLOCKED` by T004 and T005.
+Status: `BLOCKED` pending a main-maintainer readiness review after T005.
 
 ## Objective
 
 Integrate the native full-simulator-state battle search as an explicitly
-Oracle-like teacher and evaluate it on fixed battle cohorts.
+Oracle-like teacher and evaluate it on T005 fixed battle cohorts.
 
 ## Scope
 
@@ -19,6 +19,14 @@ Oracle-like teacher and evaluate it on fixed battle cohorts.
 - Evaluate search budgets and selection rules on fixed cohorts.
 - Report simulations, simulator steps, wall-clock time, visits, means, and
   controller provenance.
+
+## Readiness Boundary
+
+T003, T004, and T005 are complete. Before publishing this task as `READY`, the
+main maintainer must review this specification against the current T005 cohort
+and report schemas, command boundary, and normal-information labeling rules.
+That review must resolve any compatibility changes in this document before an
+implementation branch is created.
 
 ## Out Of Scope
 

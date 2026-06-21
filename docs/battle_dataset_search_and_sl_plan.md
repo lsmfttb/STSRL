@@ -278,7 +278,7 @@ provenance, and report structural coverage and migration loss honestly.
 
 ### Phase C: Fixed Structural Evaluation
 
-Status: [`T005`](tasks/T005-fixed-battle-evaluation.md) is `READY`.
+Status: complete through [`T005`](tasks/T005-fixed-battle-evaluation.md).
 
 Exit gate: search changes can be compared on deterministic structural cohorts
 without relying on full-run average floor.

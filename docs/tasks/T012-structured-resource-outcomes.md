@@ -1,6 +1,6 @@
 # T012: Structured Battle Resource Outcomes
 
-Status: `BLOCKED` by T005 and T007.
+Status: `BLOCKED` by T007.
 
 ## Objective
 
@@ -11,15 +11,15 @@ hand-written reward weight.
 
 ## Current Main Baseline
 
-`main` has battle-segment reward diagnostics and T004 completed-battle outcome
-labels, but no complete public terminal resource snapshot or structured outcome
-schema. T005 will establish the fixed-evaluation output boundary, and T007 will
-establish the corresponding sanitized starting public context and history.
+`main` has battle-segment reward diagnostics, T004 completed-battle outcome
+labels, and T005 fixed-evaluation reports, but no complete public terminal
+resource snapshot or structured outcome schema. T007 will establish the
+corresponding sanitized starting public context and history.
 
 ## Dependencies
 
-- T003, T004, and T010 are complete.
-- T005 and T007 must merge before implementation starts.
+- T003, T004, T005, and T010 are complete.
+- T007 must merge before implementation starts.
 
 ## Scope
 

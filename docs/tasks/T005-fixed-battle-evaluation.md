@@ -1,6 +1,6 @@
 # T005: Fixed Structural Battle Evaluation
 
-Status: `READY`.
+Status: `DONE`.
 
 ## Objective
 
@@ -13,8 +13,19 @@ battle starts rather than by average floor from different natural runs.
 T004 provides current-schema natural battle-start pools. Each record has a
 portable source seed and occurrence-disambiguated action trace, structural
 metadata, source-controller provenance, and a fresh-adapter restore verifier.
-The pool's source checkpoints are natural A20 starts, but it does not yet have
-a fixed-cohort artifact or an evaluation runner.
+T005 adds versioned fixed-cohort selection and a restored-battle evaluator with
+separate natural-weighted, encounter-macro, room-type-macro, and per-stratum
+reports.
+
+## Completion
+
+Merged in PR #8 on 2026-06-21. The implementation provides portable cohort and
+report schemas, deterministic structural selection without replacement,
+fresh-adapter replay restore, explicit controller telemetry/failure reporting,
+and the `--lightspeed-fixed-battle-evaluation` command workflow. Local checks
+passed with 407 tests; the clean WSL patch-stack pool and fixed-evaluation
+gates also passed. The small WSL cohort is plumbing evidence, not a strength
+claim for its `preferred_kind` controller.
 
 ## Dependencies
 
