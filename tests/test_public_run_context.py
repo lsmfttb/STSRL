@@ -11,6 +11,7 @@ from sts_combat_rl.sim.public_run_context import (
     extract_public_location,
     extract_public_visible_screen,
     build_public_resource_delta,
+    public_run_context_missing_fields,
     public_run_context_problems,
     public_run_history_problems,
 )
@@ -460,3 +461,325 @@ def test_extract_location():
     assert location["room_type"] == "REST"
     assert location["current_map_node"] is not None
     assert location["current_map_node"]["symbol"] == "R"
+
+
+# ---------------------------------------------------------------------------
+# Empty vs unavailable distinction
+# ---------------------------------------------------------------------------
+
+
+def test_empty_history_is_not_unavailable():
+    """An empty but present run history must not be marked as missing."""
+    raw = {
+        "visible_act_boss": "Slime Boss",
+        "public_encounter_history": [],
+        "visible_map": [
+            {
+                "symbol": "M",
+                "room_type": "MONSTER",
+                "burning_elite": False,
+                "x": 0,
+                "y": 0,
+                "parents": [],
+                "children": [],
+            },
+        ],
+        "current_map_node": {
+            "symbol": "M",
+            "room_type": "MONSTER",
+            "burning_elite": False,
+            "x": 0,
+            "y": 0,
+            "parents": [],
+            "children": [],
+        },
+        "next_map_nodes": [],
+        "public_run_history": {
+            "schema_id": "public-run-history-v1",
+            "entries": [],
+            "missing_fields": [],
+        },
+    }
+    context = build_public_run_context(raw)
+    assert context["encounter_history"] == []
+    assert context["visible_map"]
+    assert context["current_map_node"] is not None
+    assert context["next_map_nodes"] == []
+    assert context["visible_act_boss"] == "Slime Boss"
+    assert context["run_history"]["entries"] == []
+    missing = public_run_context_missing_fields(context)
+    assert "encounter_history" not in missing
+    assert "visible_map" not in missing
+    assert "next_map_nodes" not in missing
+    assert "run_history" not in missing
+    assert public_run_context_problems(context) == []
+
+
+def test_empty_context_marks_all_as_missing():
+    """An empty context (no native projections at all) still marks all fields."""
+    context = empty_public_run_context()
+    missing = public_run_context_missing_fields(context)
+    assert "visible_act_boss" in missing
+    assert "encounter_history" in missing
+    assert "run_history" in missing
+    assert "visible_map" in missing
+    assert "current_map_node" in missing
+    assert "next_map_nodes" in missing
+
+
+# ---------------------------------------------------------------------------
+# Action identity preserves parameters
+# ---------------------------------------------------------------------------
+
+
+def test_action_identity_preserves_parameters():
+    from sts_combat_rl.sim.public_run_context import project_public_action_identity
+
+    identity = {
+        "scope": "battle",
+        "kind": "card",
+        "parameters": {"idx1": 0, "idx2": 1, "idx3": None},
+        "occurrence": 0,
+        "stable_id": '{"test":"value"}',
+    }
+    result = project_public_action_identity(identity)
+    assert result["scope"] == "battle"
+    assert result["kind"] == "card"
+    assert result["occurrence"] == 0
+    assert result["parameters"] == {"idx1": 0, "idx2": 1}
+
+
+def test_action_identity_drops_native_payload():
+    from sts_combat_rl.sim.public_run_context import project_public_action_identity
+
+    identity = {
+        "scope": "game",
+        "kind": "event",
+        "parameters": {},
+        "occurrence": 1,
+        "stable_id": "x",
+        "native": object(),
+        "bits": 0x0BAD,
+    }
+    result = project_public_action_identity(identity)
+    assert "native" not in result
+    assert "bits" not in result
+    assert "parameters" in result
+
+
+# ---------------------------------------------------------------------------
+# Visible screen round-trip fixtures for every required screen type
+# ---------------------------------------------------------------------------
+
+
+def _visible_screen_context(raw_screen: dict) -> dict:
+    raw = {"public_visible_screen": raw_screen}
+    screen = extract_public_visible_screen(raw)
+    problems = public_run_context_problems(
+        {
+            "schema_id": "test",
+            "schema_version": 1,
+            "run_history": {"schema_id": "x", "entries": []},
+            **screen,
+        },
+    )
+    return screen, problems
+
+
+def test_visible_screen_event():
+    screen, problems = _visible_screen_context(
+        {
+            "schema_id": "public_visible_screen-v1",
+            "screen_state": "EVENT_SCREEN",
+            "projection_available": True,
+            "legal_actions": [{"kind": "event", "idx1": 0, "idx2": 0, "idx3": 0}],
+            "event": {"event_id": "BigFish", "event_name": "The Joust"},
+            "missing_fields": ["event_option_details"],
+        }
+    )
+    assert screen["screen_state"] == "EVENT_SCREEN"
+    assert screen["event"]["event_id"] == "BigFish"
+    assert screen["legal_actions"][0]["kind"] == "event"
+
+
+def test_visible_screen_rewards():
+    screen, problems = _visible_screen_context(
+        {
+            "schema_id": "public_visible_screen-v1",
+            "screen_state": "REWARDS",
+            "projection_available": True,
+            "legal_actions": [],
+            "rewards": {
+                "gold": [{"option_index": 0, "amount": 25}],
+                "card_rewards": [
+                    {
+                        "reward_index": 0,
+                        "cards": [
+                            {
+                                "option_index": 0,
+                                "id": 3,
+                                "name": "Strike",
+                                "type": "ATTACK",
+                                "rarity": "BASIC",
+                                "upgraded": False,
+                            }
+                        ],
+                        "singing_bowl_available": False,
+                    }
+                ],
+                "relics": [{"option_index": 0, "id": 5, "name": "Vajra"}],
+                "potions": [],
+                "emerald_key": False,
+                "sapphire_key": False,
+            },
+            "missing_fields": [],
+        }
+    )
+    assert screen["rewards"]["card_rewards"][0]["cards"][0]["name"] == "Strike"
+
+
+def test_visible_screen_boss_relic():
+    screen, problems = _visible_screen_context(
+        {
+            "schema_id": "public_visible_screen-v1",
+            "screen_state": "BOSS_RELIC_REWARDS",
+            "projection_available": True,
+            "legal_actions": [],
+            "boss_relic_rewards": {
+                "relics": [{"option_index": 0, "id": 10, "name": "Black Blood"}],
+            },
+            "missing_fields": [],
+        }
+    )
+    assert screen["boss_relic_rewards"]["relics"][0]["name"] == "Black Blood"
+
+
+def test_visible_screen_card_select():
+    screen, problems = _visible_screen_context(
+        {
+            "schema_id": "public_visible_screen-v1",
+            "screen_state": "CARD_SELECT",
+            "projection_available": True,
+            "legal_actions": [],
+            "card_select": {
+                "select_type": "REMOVE",
+                "required_count": 1,
+                "selected_count": 0,
+                "options": [
+                    {
+                        "option_index": 0,
+                        "id": 3,
+                        "name": "Strike",
+                        "type": "ATTACK",
+                        "rarity": "BASIC",
+                        "upgraded": False,
+                    }
+                ],
+                "selected": [],
+            },
+            "missing_fields": [],
+        }
+    )
+    assert screen["card_select"]["select_type"] == "REMOVE"
+    assert screen["card_select"]["required_count"] == 1
+
+
+def test_visible_screen_shop():
+    screen, problems = _visible_screen_context(
+        {
+            "schema_id": "public_visible_screen-v1",
+            "screen_state": "SHOP_ROOM",
+            "projection_available": True,
+            "legal_actions": [],
+            "shop": {
+                "cards": [
+                    {
+                        "option_index": 0,
+                        "price": 50,
+                        "sold_out": False,
+                        "item": {
+                            "option_index": 0,
+                            "id": 1,
+                            "name": "Anger",
+                            "type": "ATTACK",
+                            "rarity": "COMMON",
+                            "upgraded": False,
+                        },
+                    },
+                ],
+                "relics": [],
+                "potions": [],
+                "card_remove_price": 75,
+                "card_remove_sold_out": False,
+            },
+            "missing_fields": [],
+        }
+    )
+    shop_card = screen["shop"]["cards"][0]
+    assert shop_card["price"] == 50
+    assert shop_card["item"]["name"] == "Anger"
+    assert screen["shop"]["card_remove_price"] == 75
+
+
+def test_visible_screen_treasure():
+    screen, problems = _visible_screen_context(
+        {
+            "schema_id": "public_visible_screen-v1",
+            "screen_state": "TREASURE_ROOM",
+            "projection_available": True,
+            "legal_actions": [],
+            "treasure": {"chest_size": "LARGE"},
+            "missing_fields": [],
+        }
+    )
+    assert screen["treasure"]["chest_size"] == "LARGE"
+
+
+def test_visible_screen_map():
+    screen, problems = _visible_screen_context(
+        {
+            "schema_id": "public_visible_screen-v1",
+            "screen_state": "MAP_SCREEN",
+            "projection_available": True,
+            "legal_actions": [],
+            "map": {
+                "visible_map": [
+                    {
+                        "symbol": "M",
+                        "room_type": "MONSTER",
+                        "burning_elite": False,
+                        "x": 0,
+                        "y": 0,
+                        "parents": [],
+                        "children": [],
+                    },
+                ],
+                "current_map_node": {
+                    "symbol": "M",
+                    "room_type": "MONSTER",
+                    "burning_elite": False,
+                    "x": 0,
+                    "y": 0,
+                    "parents": [],
+                    "children": [],
+                },
+                "next_map_nodes": [],
+            },
+            "missing_fields": [],
+        }
+    )
+    assert screen["map"]["visible_map"][0]["symbol"] == "M"
+
+
+def test_visible_screen_battle():
+    screen, problems = _visible_screen_context(
+        {
+            "schema_id": "public_visible_screen-v1",
+            "screen_state": "BATTLE",
+            "projection_available": False,
+            "legal_actions": [],
+            "missing_fields": ["battle_screen_uses_battle_snapshot"],
+        }
+    )
+    assert screen["screen_state"] == "BATTLE"
+    assert screen["projection_available"] is False

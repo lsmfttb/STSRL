@@ -2,8 +2,9 @@
 
 ``execute_controlled_run`` is the ONE complete-run advancement path. It owns:
 decision-context construction, action-space filtering, controller invocation,
-selected-index validation, simulator stepping, observer callbacks, and bounded
-termination. Every complete-run workflow routes through this executor.
+selected-index validation, simulator stepping, observer callbacks, bounded
+termination, and per-run public history accumulation. Every complete-run
+workflow routes through this executor.
 
 Specialized loops (calibration, replay, checkpoint restore, fixed evaluation)
 are allowed only for a genuinely different boundary and must reuse the shared
@@ -43,6 +44,11 @@ from sts_combat_rl.sim.features import (
     build_public_tactical_state,
     encode_lightspeed_battle_snapshot,
     encode_simulator_actions,
+)
+from sts_combat_rl.sim.public_run_context import (
+    append_run_history_entry,
+    build_public_run_context,
+    empty_public_run_history,
 )
 
 # DecisionContext is imported lazily inside build_decision_context to avoid
@@ -145,6 +151,7 @@ class ControlledRun:
     final_raw: Mapping[str, Any] = field(default_factory=dict)
     controller_provenance: Mapping[str, Any] = field(default_factory=dict)
     action_space_config: Mapping[str, Any] = field(default_factory=dict)
+    public_run_history: Mapping[str, Any] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -199,6 +206,7 @@ def execute_controlled_run(
     steps: list[ControlledRunStep] = []
     problems: list[str] = []
     terminal = False
+    run_history = empty_public_run_history(missing_fields=("public_run_history",))
 
     for step_index in range(max_steps):
         actions = list(adapter.legal_actions(snapshot))
@@ -206,7 +214,13 @@ def execute_controlled_run(
             problems.append("no legal actions before terminal state")
             break
 
-        context = build_decision_context(snapshot.raw, actions, active_action_space)
+        before_raw = dict(snapshot.raw)
+        context = build_decision_context(
+            before_raw,
+            actions,
+            active_action_space,
+            run_history=run_history,
+        )
 
         if before_decision is not None:
             try:
@@ -239,6 +253,13 @@ def execute_controlled_run(
         transition = adapter.step(chosen_action)
         terminal = transition.terminal
         next_raw = transition.snapshot.raw
+
+        run_history = append_run_history_entry(
+            run_history,
+            before_raw=before_raw,
+            action_identity=legal_action_identities[decision.selected_index],
+            after_raw=dict(next_raw),
+        )
 
         step = ControlledRunStep(
             step_index=step_index,
@@ -309,6 +330,7 @@ def execute_controlled_run(
         final_raw=dict(snapshot.raw),
         controller_provenance=controller.provenance.to_dict(),
         action_space_config=active_action_space.to_dict(),
+        public_run_history=run_history,
     )
 
 
@@ -321,16 +343,21 @@ def build_decision_context(
     raw_snapshot: object,
     actions: Sequence[SimulatorAction],
     action_space: ActionSpaceConfig,
+    *,
+    run_history: Mapping[str, Any] | None = None,
 ):
     """Build the policy input for the current simulator candidate list.
 
     This is the single canonical implementation, previously defined in
     ``battle_agent.py``. It encodes snapshot features, per-action features, and
     computes the eligible-action mask from the action-space config.
+
+    When ``run_history`` is provided, the per-step public run context carries
+    the accumulated history up to this point, so continuation-aware controllers
+    receive the history of decisions made so far.
     """
 
     from sts_combat_rl.sim.policy import DecisionContext
-    from sts_combat_rl.sim.public_run_context import build_public_run_context
 
     raw = raw_snapshot if isinstance(raw_snapshot, Mapping) else {}
     screen_state = str(raw.get("screen_state", "(none)"))
@@ -339,6 +366,9 @@ def build_decision_context(
         screen_state=screen_state,
         battle_active=bool(raw.get("battle_active")),
     )
+    public_context = build_public_run_context(raw)
+    if run_history is not None:
+        public_context["run_history"] = dict(run_history)
     return DecisionContext(
         screen_state=screen_state,
         snapshot_features=encode_lightspeed_battle_snapshot(raw),
@@ -350,7 +380,7 @@ def build_decision_context(
         tactical_state=build_public_tactical_state(raw),
         tactical_legal_actions=build_public_tactical_actions(list(actions), raw),
         tactical_feature_schema_id="public-tactical-v2",
-        public_run_context=build_public_run_context(raw),
+        public_run_context=public_context,
     )
 
 

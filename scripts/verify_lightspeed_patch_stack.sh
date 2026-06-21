@@ -29,6 +29,7 @@ for patch in \
     sts_lightspeed_step_simulator.patch \
     sts_lightspeed_checkpoint_restore.patch \
     sts_lightspeed_battle_start_metadata.patch \
+    sts_lightspeed_public_run_context.patch \
     sts_lightspeed_run_potion_snapshot.patch \
     sts_lightspeed_non_combat_potion_actions.patch \
     sts_lightspeed_gcc15_compat.patch; do

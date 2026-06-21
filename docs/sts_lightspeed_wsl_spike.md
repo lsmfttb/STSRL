@@ -32,6 +32,7 @@ patches/sts_lightspeed_step_simulator.patch
 patches/sts_lightspeed_pybind11_v304.patch
 patches/sts_lightspeed_checkpoint_restore.patch
 patches/sts_lightspeed_battle_start_metadata.patch
+patches/sts_lightspeed_public_run_context.patch
 patches/sts_lightspeed_run_potion_snapshot.patch
 patches/sts_lightspeed_non_combat_potion_actions.patch
 patches/sts_lightspeed_gcc15_compat.patch
@@ -134,6 +135,23 @@ selection, controller, and simulator failures explicitly, and writes separate
 natural-weighted, encounter-macro, room-type-macro, and per-stratum results.
 Use a `build-py` rebuilt from the verified patch stack; an older system build
 can lack completed-battle outcome fields even when the repository is current.
+
+### Public Run Context Audit
+
+After rebuilding `build-py` from the current verified patch stack (which must
+include `sts_lightspeed_public_run_context.patch`), audit the public run
+context boundary:
+
+```powershell
+wsl.exe -d Ubuntu -e bash -lc "cd /mnt/d/DeadlycatCoding/STSRL && PYTHONPATH=/home/lsmft/stsrl-spikes/sts_lightspeed/build-py:/mnt/d/DeadlycatCoding/STSRL/src python3 -m sts_combat_rl.cli --lightspeed-public-run-context-audit --sim-seed 1 --sim-episodes 3 --sim-ascension 20 --sim-steps 200 --log-file -"
+```
+
+This gate reports observed screen types, history lengths, map and boss
+coverage, missing native fields, and any forbidden-field leakage. It must exit
+code 1 on forbidden-field leakage or an unrecoverable schema problem. Unknown
+or unsupported screen types remain named gaps; the report's audit verdict is
+"yes" only when zero forbidden fields are detected and zero schema problems
+exist.
 
 ## Troubleshooting
 

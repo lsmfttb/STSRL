@@ -122,7 +122,9 @@ _ENCOUNTER_HISTORY_KEYS: frozenset[str] = frozenset(
     {"act", "floor", "room_type", "encounter_id"}
 )
 
-# Visible screen allowlist --- flat frozenset covering all screen-category keys.
+# Visible screen allowlist --- flat frozenset covering all screen-category keys
+# projected by the native ``public_visible_screen`` C++ projection.  The
+# projection emits keys whose names match the Python-side allowlist below.
 # Unknown keys at any nesting depth are rejected by the recursive validator.
 _PUBLIC_VISIBLE_SCREEN_KEYS: frozenset[str] = frozenset(
     {
@@ -130,66 +132,105 @@ _PUBLIC_VISIBLE_SCREEN_KEYS: frozenset[str] = frozenset(
         "screen_state",
         "projection_available",
         "legal_actions",
+        # legal_actions[] row keys
+        "kind",
+        "idx1",
+        "idx2",
+        "idx3",
+        "option",
+        # event screen
         "event_id",
+        "event_name",
+        "event",
         "event_options",
-        "options",
-        "option_id",
-        "option_index",
-        "option_label",
+        "event_option_details",
+        # rewards screen
         "rewards",
+        "gold",
+        "card_rewards",
         "reward_index",
         "reward_type",
+        "amount",
+        "option_index",
         "cards",
+        "relics",
+        "potions",
+        "emerald_key",
+        "sapphire_key",
+        "singing_bowl_available",
+        # boss_relic_rewards screen
+        "boss_relic_rewards",
+        # card_select screen
         "card_select",
+        "select_type",
         "selection_type",
         "selection_count",
         "selected_count",
+        "required_count",
+        "options",
         "selected",
-        "potions",
-        "relics",
-        "boss_relics",
+        # map screen
         "map",
         "visible_map",
-        "nodes",
-        "current_node",
         "current_map_node",
-        "next_nodes",
         "next_map_nodes",
         "visible_act_boss",
+        "nodes",
+        "current_node",
+        "next_nodes",
+        # treasure screen
         "treasure",
         "chest_size",
+        # rest screen
         "rest_options",
+        "rest_option_label",
+        "option_label",
+        # shop screen
         "shop",
         "shop_items",
+        "item",
+        "price",
+        "cost",
+        "sold_out",
         "remove_card_cost",
         "remove_card_sold_out",
         "card_remove_price",
-        "inventory",
-        "category",
+        # card/relic/potion identity (shared)
         "id",
         "name",
         "label",
         "type",
         "rarity",
-        "amount",
-        "index",
-        "price",
-        "cost",
         "upgraded",
         "upgrades",
         "upgrade_count",
+        "category",
+        "inventory",
+        "index",
         "enabled",
         "available",
         "skip_allowed",
         "requires_target",
         "target_index",
-        "sold_out",
-        "singing_bowl_available",
         "potion_slot_index",
         "relic_index",
         "card_index",
+        # nested map node keys (shared with allowlist)
+        "symbol",
+        "room_type",
+        "burning_elite",
+        "x",
+        "y",
+        "parents",
+        "children",
+        # generic
         "missing_fields",
     }
+)
+
+# Validate that the shared map-node keys match the independent allowlist.
+assert _PUBLIC_VISIBLE_SCREEN_KEYS.issuperset(_MAP_NODE_KEYS), (
+    "visible screen allowlist must contain every map-node key"
 )
 
 _RESOURCE_FIELDS = ("cur_hp", "max_hp", "gold", "potions", "deck", "relics")
@@ -221,7 +262,16 @@ _FORBIDDEN_FIELD_NAMES: frozenset[str] = frozenset(
 # ---------------------------------------------------------------------------
 
 
-def build_public_run_context(raw: Mapping[str, Any]) -> dict[str, Any]:
+def build_public_run_context(
+    raw: Mapping[str, Any],
+    *,
+    boss_present: bool | None = None,
+    encounter_present: bool | None = None,
+    history_present: bool | None = None,
+    map_present: bool | None = None,
+    current_present: bool | None = None,
+    next_present: bool | None = None,
+) -> dict[str, Any]:
     """Extract only explicitly player-visible run context from a snapshot.
 
     The snapshot is expected to carry the native projections from the
@@ -231,6 +281,10 @@ def build_public_run_context(raw: Mapping[str, Any]) -> dict[str, Any]:
 
     Every sub-object is projected through the module allowlists. Fields not
     supplied by the native projection are recorded in ``missing_fields``.
+
+    When the ``*_present`` keyword arguments are provided they override the
+    auto-detection from the raw snapshot.  This lets a caller that already
+    knows a field was projected pass that signal explicitly.
     """
 
     game = _mapping(raw.get("game_state")) or _mapping(raw.get("gameState")) or raw
@@ -238,31 +292,47 @@ def build_public_run_context(raw: Mapping[str, Any]) -> dict[str, Any]:
         game.get("screenState")
     )
 
-    boss_present, boss_value = _first_present(game, "visible_act_boss", "act_boss")
-    encounter_present, encounter_value = _first_present(
+    _boss_present, _boss_value = _first_present(game, "visible_act_boss", "act_boss")
+    _encounter_present, _encounter_value = _first_present(
         game, "public_encounter_history", "encounter_history"
     )
-    map_present, map_value = _first_present(game, "visible_map", "map")
-    current_present, current_value = _first_present(game, "current_map_node")
-    next_present, next_value = _first_present(game, "next_map_nodes")
+    _map_present, _map_value = _first_present(game, "visible_map", "map")
+    _current_present, _current_value = _first_present(game, "current_map_node")
+    _next_present, _next_value = _first_present(game, "next_map_nodes")
 
-    if not current_present and "current_node" in screen_state_src:
-        current_present, current_value = True, screen_state_src.get("current_node")
-    if not next_present and "next_nodes" in screen_state_src:
-        next_present, next_value = True, screen_state_src.get("next_nodes")
+    if not _current_present and "current_node" in screen_state_src:
+        _current_present, _current_value = True, screen_state_src.get("current_node")
+    if not _next_present and "next_nodes" in screen_state_src:
+        _next_present, _next_value = True, screen_state_src.get("next_nodes")
 
-    history_present, history_value = _first_present(
+    _history_present, _history_value = _first_present(
         game, "public_run_history", "run_history"
     )
 
+    bp = boss_present if boss_present is not None else _boss_present
+    ep = encounter_present if encounter_present is not None else _encounter_present
+    hp = history_present if history_present is not None else _history_present
+    mp = map_present if map_present is not None else _map_present
+    cp = current_present if current_present is not None else _current_present
+    np = next_present if next_present is not None else _next_present
+
+    boss_value = _boss_value if boss_present is None else _boss_value
+    encounter_value = (
+        _encounter_value if encounter_present is None else _encounter_value
+    )
+    history_value = _history_value if history_present is None else _history_value
+    map_value = _map_value if map_present is None else _map_value
+    current_value = _current_value if current_present is None else _current_value
+    next_value = _next_value if next_present is None else _next_value
+
     missing_fields: list[str] = []
     for field_name, present in (
-        ("visible_act_boss", boss_present),
-        ("encounter_history", encounter_present),
-        ("run_history", history_present),
-        ("visible_map", map_present),
-        ("current_map_node", current_present),
-        ("next_map_nodes", next_present),
+        ("visible_act_boss", bp),
+        ("encounter_history", ep),
+        ("run_history", hp),
+        ("visible_map", mp),
+        ("current_map_node", cp),
+        ("next_map_nodes", np),
     ):
         if not present:
             missing_fields.append(field_name)
@@ -272,19 +342,19 @@ def build_public_run_context(raw: Mapping[str, Any]) -> dict[str, Any]:
         "schema_version": PUBLIC_RUN_CONTEXT_SCHEMA_VERSION,
         "visible_act_boss": (
             str(boss_value)
-            if boss_present and boss_value is not None and _is_public_scalar(boss_value)
+            if bp and boss_value is not None and _is_public_scalar(boss_value)
             else None
         ),
         "encounter_history": _project_rows(encounter_value, _ENCOUNTER_HISTORY_KEYS),
         "run_history": (
             project_public_run_history(history_value)
-            if history_present
+            if hp
             else empty_public_run_history(missing_fields=("public_run_history",))
         ),
         "visible_map": _project_rows(map_value, _MAP_NODE_KEYS),
         "current_map_node": (
             _project_mapping(current_value, _MAP_NODE_KEYS)
-            if current_present and isinstance(current_value, Mapping)
+            if cp and isinstance(current_value, Mapping)
             else None
         ),
         "next_map_nodes": _project_rows(next_value, _MAP_NODE_KEYS),
@@ -418,13 +488,28 @@ def extract_public_visible_screen(raw: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def project_public_action_identity(action: Mapping[str, Any]) -> dict[str, Any]:
-    """Keep only the public action identity fields, discarding native payloads."""
+    """Keep only the public action identity fields, discarding native payloads.
 
-    return {
-        key: _json_scalar(action[key])
-        for key in _PUBLIC_ACTION_IDENTITY_KEYS
-        if key in action and _json_scalar(action[key]) is not None
-    }
+    Preserves the ``parameters`` mapping by allowlisting its scalar children
+    rather than dropping the entire map.
+    """
+
+    result: dict[str, Any] = {}
+    for key in _PUBLIC_ACTION_IDENTITY_KEYS:
+        if key not in action:
+            continue
+        value = action[key]
+        if key == "parameters" and isinstance(value, Mapping):
+            result["parameters"] = {
+                inner_key: _json_scalar(inner_value)
+                for inner_key, inner_value in value.items()
+                if _json_scalar(inner_value) is not None
+            }
+        else:
+            scalar = _json_scalar(value)
+            if scalar is not None:
+                result[key] = scalar
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -457,17 +542,19 @@ def extract_public_location(raw: Mapping[str, Any]) -> dict[str, Any]:
     if isinstance(current_node, Mapping):
         location["current_map_node"] = _project_mapping(current_node, _MAP_NODE_KEYS)
 
-    location["missing_fields"] = [
-        field_name
-        for field_name, present in (
-            ("screen_state", "screen_state" in raw),
-            ("act", "act" in raw),
-            ("floor", "floor" in raw or "floor_num" in raw),
-            ("room_type", "room_type" in raw),
-            ("current_map_node", "current_map_node" in raw),
-        )
-        if not present
-    ]
+    missing: list[str] = []
+    for field_name, required in (
+        ("screen_state", True),
+        ("act", True),
+        ("floor", True),
+        ("room_type", True),
+        ("current_map_node", True),
+    ):
+        if required and field_name not in raw:
+            if field_name == "floor" and "floor_num" in raw:
+                continue
+            missing.append(field_name)
+    location["missing_fields"] = missing
     return location
 
 
@@ -528,33 +615,18 @@ def build_public_resource_delta(
 
 
 def public_run_context_missing_fields(context: Mapping[str, Any]) -> list[str]:
-    """Return explicit missing-field paths for the run context."""
+    """Return explicit missing-field paths for the run context.
 
-    missing: list[str] = []
-    for field_name in (
-        "visible_act_boss",
-        "encounter_history",
-        "run_history",
-        "visible_map",
-        "current_map_node",
-        "next_map_nodes",
-    ):
-        value = context.get(field_name)
-        if field_name == "visible_act_boss":
-            if value is None:
-                missing.append(field_name)
-        elif field_name == "run_history":
-            if not isinstance(value, Mapping) or not value.get("entries"):
-                missing.append(field_name)
-        elif not isinstance(value, list) or not value:
-            missing.append(field_name)
-    if (
-        isinstance(context.get("visible_map"), list)
-        and context["visible_map"]
-        and context.get("current_map_node") is None
-    ):
-        missing.append("current_map_node")
-    return sorted(set(context.get("missing_fields", [])) | set(missing))
+    A field is missing only when the native projection did not supply it
+    (recorded in the explicit ``missing_fields`` list), not merely when its
+    value is empty.  An empty-but-present map, history, or encounter list is
+    valid and must not be conflated with unavailable data.
+    """
+
+    explicit = context.get("missing_fields")
+    if isinstance(explicit, list):
+        return sorted(name for name in explicit if isinstance(name, str))
+    return []
 
 
 def public_run_context_problems(context: Mapping[str, Any]) -> list[str]:
@@ -818,6 +890,8 @@ def _validate_location(value: Any, label: str, problems: list[str]) -> None:
                 problems,
             )
     _validate_string_list(value.get("missing_fields"), label, problems)
+    if isinstance(value, Mapping) and "missing_fields" not in value:
+        problems.append(f"{label} missing_fields must be a string list")
     _check_forbidden_fields(value, label, problems)
 
 
@@ -1035,6 +1109,8 @@ def _project_mapping(
                 for child in item
                 if isinstance(child, Mapping) or _json_scalar(child) is not None
             ]
+        elif key == "missing_fields":
+            projected[key] = _string_list(item)
         else:
             scalar = _json_scalar(item)
             if scalar is not None:

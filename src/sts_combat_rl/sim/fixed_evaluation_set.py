@@ -16,6 +16,7 @@ import random
 from typing import Any, TextIO
 
 from sts_combat_rl.sim.artifact_versioning import (
+    ArtifactDocument,
     ArtifactMigration,
     ArtifactMigrationReport,
     migrate_artifact_document,
@@ -26,11 +27,20 @@ from sts_combat_rl.sim.battle_start_pool import (
 )
 
 
-FIXED_COHORT_FORMAT_VERSION = 1
+FIXED_COHORT_FORMAT_VERSION = 2
 """Current schema version for the portable fixed-cohort artifact."""
 
-FIXED_COHORT_MIGRATIONS: tuple[ArtifactMigration, ...] = ()
-"""Sequential migrations; empty because version 1 is the first schema."""
+FIXED_COHORT_MIGRATIONS: tuple[ArtifactMigration, ...] = (
+    ArtifactMigration(
+        source_version=1,
+        target_version=2,
+        migrate=lambda document: _migrate_cohort_v1_to_v2(document),
+        losses=(
+            "v1 omitted public run context; migrated records mark context unavailable",
+        ),
+    ),
+)
+"""Sequential migrations from the cohort schema's initial version to current."""
 
 DEFAULT_STRUCTURAL_STRATUM_FIELDS = (
     "ascension",
@@ -682,6 +692,42 @@ def _cohort_record_from_manifest(
             raw.get("public_run_context"), f"{label} public_run_context"
         ),
     )
+
+
+def _migrate_cohort_v1_to_v2(document: ArtifactDocument) -> ArtifactDocument:
+    """Add explicit unavailable public run context to v1 cohort records."""
+
+    metadata = dict(document.metadata)
+    metadata["format_version"] = 2
+    unavailable_context = {
+        "schema_id": "public-run-context-v1",
+        "schema_version": 1,
+        "visible_act_boss": None,
+        "encounter_history": [],
+        "run_history": {
+            "schema_id": "public-run-history-v1",
+            "entries": [],
+            "missing_fields": ["public_run_history"],
+        },
+        "visible_map": [],
+        "current_map_node": None,
+        "next_map_nodes": [],
+        "missing_fields": [
+            "visible_act_boss",
+            "encounter_history",
+            "run_history",
+            "visible_map",
+            "current_map_node",
+            "next_map_nodes",
+        ],
+    }
+    migrated_records: list[dict[str, Any]] = []
+    for raw_record in document.records:
+        record = dict(raw_record)
+        if "public_run_context" not in record:
+            record["public_run_context"] = unavailable_context
+        migrated_records.append(record)
+    return ArtifactDocument(metadata=metadata, records=migrated_records)
 
 
 def _fixed_cohort_problems(cohort: FixedCohort) -> list[str]:
