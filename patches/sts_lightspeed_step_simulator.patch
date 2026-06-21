@@ -20,7 +20,7 @@ index a9afe35..61ee133 100644
  #include "game/Game.h"
  
  #include "slaythespire.h"
-@@ -21,6 +27,505 @@
+@@ -21,6 +27,506 @@
  
  using namespace sts;
  
@@ -347,6 +347,7 @@ index a9afe35..61ee133 100644
 +    ret["alive"] = monster.isAlive();
 +    ret["targetable"] = monster.isTargetable();
 +    ret["attacking"] = monster.isAttacking();
++    ret["intent"] = std::string(monsterMoveStrings[static_cast<int>(monster.moveHistory[0])]);
 +    ret["move_id"] = static_cast<int>(monster.moveHistory[0]);
 +    ret["last_move_id"] = static_cast<int>(monster.moveHistory[1]);
 +    ret["move_base_damage"] = damage.damage;

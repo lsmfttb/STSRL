@@ -575,6 +575,15 @@ def _validate_tactical_report(report: TacticalFeatureCoverageReport) -> None:
         expected_action_size
     }:
         report.problems.append("unexpected tactical action feature sizes")
+    if (
+        report.source == "sts_lightspeed"
+        and report.missing_field_counts["monsters.intent"]
+    ):
+        report.problems.append(
+            "required monster intent is absent from "
+            f"{report.missing_field_counts['monsters.intent']} simulator battle "
+            "snapshots; update the authoritative public simulator projection"
+        )
     report.problems[:] = list(dict.fromkeys(report.problems))
 
 

@@ -31,7 +31,9 @@ class FakeCalibrationAdapter:
                 "battle_active": True,
                 "battle_player": {"current_hp": 80, "energy": 3},
                 "battle_hand": [{"type": "ATTACK", "playable": True}],
-                "battle_monsters": [{"current_hp": 51, "targetable": True}],
+                "battle_monsters": [
+                    {"current_hp": 51, "targetable": True, "intent": "ATTACK"}
+                ],
             },
         )
 
@@ -122,6 +124,13 @@ class FakeNonCombatCalibrationAdapter:
         )
 
 
+class FakeMissingIntentAdapter(FakeCalibrationAdapter):
+    def reset(self, seed: int | None = None) -> SimulatorSnapshot:
+        snapshot = super().reset(seed)
+        snapshot.raw["battle_monsters"][0].pop("intent")
+        return snapshot
+
+
 def test_choose_calibration_action_prefers_non_potion_card() -> None:
     actions = FakeCalibrationAdapter().legal_actions(
         SimulatorSnapshot(observation=[], raw={})
@@ -204,6 +213,17 @@ def test_tactical_feature_coverage_audit_reports_schema_missing_and_parity() -> 
     assert report.problems == []
     assert "Tactical feature coverage audit" in text
     assert "simulator/live field parity:" in text
+
+
+def test_tactical_feature_coverage_audit_fails_without_simulator_intent() -> None:
+    report = run_tactical_feature_coverage_audit(
+        FakeMissingIntentAdapter(), seed=7, max_steps=1
+    )
+
+    assert report.missing_field_counts["monsters.intent"] == 1
+    assert any(
+        "required monster intent is absent" in problem for problem in report.problems
+    )
 
 
 def test_run_communicationmod_feature_calibration_counts_live_fields(

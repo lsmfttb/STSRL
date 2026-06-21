@@ -11,10 +11,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
+import json
 from typing import Any
 
 from sts_combat_rl.sim.contract import SimulatorAction
-from sts_combat_rl.sim.decision_record import action_identity_dicts_for_actions
 
 
 TACTICAL_FEATURE_SCHEMA_ID = "public-tactical-v2"
@@ -417,11 +417,9 @@ def build_public_tactical_actions(
 
     hand = _sequence(raw_snapshot.get("battle_hand"))
     monsters = _sequence(raw_snapshot.get("battle_monsters"))
-    identities = action_identity_dicts_for_actions(actions)
-    return [
-        _public_action(action, identities[index], hand, monsters)
-        for index, action in enumerate(actions)
-    ]
+    public_actions = [_public_action(action, hand, monsters) for action in actions]
+    _attach_public_action_identities(public_actions)
+    return public_actions
 
 
 def encode_lightspeed_battle_snapshot(raw: Mapping[str, Any]) -> list[float]:
@@ -743,6 +741,18 @@ def tactical_action_problems(actions: Sequence[Mapping[str, Any]]) -> list[str]:
                 problems.append(
                     f"action {index}: silently dropped required field {name}"
                 )
+        identity = _mapping(action.get("identity"))
+        if "action_id" in identity:
+            problems.append(
+                f"action {index}: simulator-native replay action_id reached "
+                "the public tactical contract"
+            )
+        parameters = _mapping(action.get("parameters"))
+        if "bits" in parameters:
+            problems.append(
+                f"action {index}: simulator-native action bits reached the public "
+                "tactical contract"
+            )
     return problems
 
 
@@ -773,12 +783,17 @@ def _public_visible_cards(raw: Mapping[str, Any]) -> list[dict[str, Any]]:
 
 
 def _public_monster(raw: Mapping[str, Any], index: int) -> dict[str, Any]:
+    # The authoritative simulator projects its current MMID label into
+    # ``intent``. The model preserves that public label; it does not infer an
+    # intent class from hidden monster state or Python mechanics.
     intent = _normalized_option(raw.get("intent"))
     return {
         "identity": _identity(raw, "monster", "id_label", "monster_id", "id", "name"),
         "instance_index": index,
         "intent": intent,
+        "intent_identity": _categorical_identity(intent, MONSTER_INTENTS),
         "state_machine": {
+            "current_move": intent or None,
             "move_id": _nullable_number(raw.get("move_id")),
             "last_move_id": _nullable_number(raw.get("last_move_id")),
             "second_last_move_id": _nullable_number(raw.get("second_last_move_id")),
@@ -848,7 +863,6 @@ def _public_power(raw: Mapping[str, Any], index: int) -> dict[str, Any]:
 
 def _public_action(
     action: SimulatorAction,
-    identity: Mapping[str, Any],
     hand: Sequence[Any],
     monsters: Sequence[Any],
 ) -> dict[str, Any]:
@@ -873,11 +887,6 @@ def _public_action(
     result = {
         "schema_id": TACTICAL_FEATURE_SCHEMA_ID,
         "schema_version": TACTICAL_FEATURE_SCHEMA_VERSION,
-        "identity": {
-            **dict(identity),
-            "vocabulary_version": IDENTITY_VOCABULARY_VERSION,
-            "status": "known" if identity.get("action_id") is not None else "missing",
-        },
         "scope": str(action.raw.get("scope", "")),
         "kind": str(action.kind),
         "label": str(action.label),
@@ -895,6 +904,54 @@ def _public_action(
     }
     result["missing_fields"] = ["scope"] if not result["scope"] else []
     return result
+
+
+def _attach_public_action_identities(actions: list[dict[str, Any]]) -> None:
+    """Attach action identities without importing simulator-native replay ids.
+
+    ``SimulatorAction.action_id`` is retained separately by decision records for
+    portable replay.  It is intentionally absent here: a normal-public model
+    may use only legal-action facts that a live runtime can also construct.
+    """
+
+    occurrences: dict[str, int] = {}
+    for action in actions:
+        payload = _public_action_identity_payload(action)
+        key = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        occurrence = occurrences.get(key, 0)
+        occurrences[key] = occurrence + 1
+        stable_id = json.dumps(
+            {"occurrence": occurrence, "public_action": payload},
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        action["identity"] = {
+            "scope": payload["scope"],
+            "kind": payload["kind"],
+            "parameters": payload["parameters"],
+            "selected_card_identity": payload["selected_card_identity"],
+            "selected_target_identity": payload["selected_target_identity"],
+            "occurrence": occurrence,
+            "stable_id": stable_id,
+            "vocabulary_version": IDENTITY_VOCABULARY_VERSION,
+            "status": "known",
+        }
+
+
+def _public_action_identity_payload(action: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the complete public basis for one model action identity."""
+
+    return {
+        "scope": str(action.get("scope", "")),
+        "kind": str(action.get("kind", "")),
+        "parameters": dict(_mapping(action.get("parameters"))),
+        "selected_card_identity": dict(
+            _mapping(_mapping(action.get("selected_card")).get("identity"))
+        ),
+        "selected_target_identity": dict(
+            _mapping(_mapping(action.get("selected_target")).get("identity"))
+        ),
+    }
 
 
 def _encode_public_card(card: Mapping[str, Any]) -> list[float]:
@@ -929,6 +986,7 @@ def _encode_public_monster(monster: Mapping[str, Any]) -> list[float]:
             1
             + 2
             + len(MONSTER_INTENTS)
+            + 2
             + 3
             + len(_MONSTER_SCALAR_FIELDS)
             + len(_MONSTER_BOOL_FIELDS)
@@ -943,6 +1001,8 @@ def _encode_public_monster(monster: Mapping[str, Any]) -> list[float]:
         _identity_code(identity),
         _identity_status_code(identity),
         *_one_hot(str(monster.get("intent", "")), MONSTER_INTENTS),
+        _identity_code(_mapping(monster.get("intent_identity"))),
+        _identity_status_code(_mapping(monster.get("intent_identity"))),
         *(
             _number(state_machine.get(name))
             for name in ("move_id", "last_move_id", "second_last_move_id")
@@ -1147,7 +1207,11 @@ def _identity(data: Mapping[str, Any], category: str, *keys: str) -> dict[str, s
 
 
 def _identity_code(identity: Mapping[str, Any]) -> float:
-    value = _identity_label(identity.get("action_id", identity.get("value")))
+    value = ""
+    for key in ("value", "stable_id", "action_id"):
+        value = _identity_label(identity.get(key))
+        if value:
+            break
     if not value:
         return 0.0
     number = 2166136261
@@ -1155,6 +1219,16 @@ def _identity_code(identity: Mapping[str, Any]) -> float:
         number ^= byte
         number = (number * 16777619) & 0xFFFFFFFF
     return float(number)
+
+
+def _categorical_identity(value: str, options: Sequence[str]) -> dict[str, str]:
+    """Represent an open public categorical label without collapsing OOV text."""
+
+    return {
+        "value": value or "__MISSING__",
+        "status": "known" if value in options else "unknown",
+        "vocabulary_version": IDENTITY_VOCABULARY_VERSION,
+    }
 
 
 def _identity_status_code(identity: Mapping[str, Any]) -> float:

@@ -13,6 +13,7 @@ from sts_combat_rl.sim.features import (
     encode_simulator_actions,
     lightspeed_battle_feature_size,
     simulator_action_feature_size,
+    tactical_action_problems,
     tactical_state_problems,
 )
 
@@ -282,6 +283,38 @@ def test_public_tactical_actions_keep_duplicate_ids_and_targets_distinct() -> No
     assert structured[0]["selected_target"]["identity"]["value"] == "Cultist"
     assert structured[1]["selected_target"]["identity"]["value"] == "JawWorm"
     assert encoded[0] != encoded[1]
+
+
+def test_public_tactical_actions_exclude_simulator_native_action_identity() -> None:
+    raw = {
+        "battle_hand": [{"id": "Strike_R", "type": "ATTACK"}],
+        "battle_monsters": [{"id": "Cultist", "intent": "ATTACK"}],
+    }
+    first = SimulatorAction(
+        action_id="battle:123",
+        label="Strike",
+        kind="card",
+        raw={"scope": "battle", "idx1": 0, "idx2": 0, "idx3": 0, "bits": 123},
+    )
+    second = SimulatorAction(
+        action_id="battle:456",
+        label="Strike",
+        kind="card",
+        raw={"scope": "battle", "idx1": 0, "idx2": 0, "idx3": 0, "bits": 456},
+    )
+
+    first_structured = build_public_tactical_actions([first], raw)
+    second_structured = build_public_tactical_actions([second], raw)
+
+    assert first_structured == second_structured
+    assert "action_id" not in first_structured[0]["identity"]
+    assert encode_simulator_action(first, raw) == encode_simulator_action(second, raw)
+    unsafe = {**first_structured[0], "identity": dict(first_structured[0]["identity"])}
+    unsafe["identity"]["action_id"] = "battle:123"
+    assert any(
+        "simulator-native replay action_id" in problem
+        for problem in tactical_action_problems([unsafe])
+    )
 
 
 def test_hidden_draw_order_and_rng_do_not_reach_public_tactical_contract() -> None:
