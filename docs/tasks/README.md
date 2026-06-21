@@ -20,7 +20,7 @@ starting work.
 | T010 | DONE | [Stochastic non-combat driver](T010-stochastic-non-combat-driver.md) | T002 | non-combat policy and native visible action/resource support |
 | T011 | DONE | [Tactical feature contract v2](T011-tactical-feature-contract-v2.md) | T003 | feature, trainer-input, and model-input upgrades |
 | T012 | BLOCKED | [Structured battle resource outcomes](T012-structured-resource-outcomes.md) | T003, T004, T010 | persistent resource snapshots and outcome vectors |
-| T013 | READY | [Live CommunicationMod runtime adapter](T013-live-communicationmod-runtime-adapter.md) | T003, T011 | trained/search controller deployment in the real game |
+| T013 | DONE | [Live CommunicationMod runtime adapter](T013-live-communicationmod-runtime-adapter.md) | T003, T011 | trained/search controller deployment in the real game |
 
 Only `READY` tasks should receive a new branch. After a prerequisite merges,
 the main maintainer reviews dependent specifications against the new `main`
@@ -63,10 +63,11 @@ are mapped as follows:
 - tactical feature, trainer-input, and model-input expansion: T011;
 - structured persistent resource outcomes: T012.
 
-Live CommunicationMod deployment compatibility is tracked by T013. Simulator-only
-training experiments do not depend on T013, but no trained or search controller
-may be described as live-game runnable until it passes that task's adapter,
-feature-parity, action-mapping, and runtime-provenance gates.
+T013 supplies the shared CommunicationMod adapter and captured-sample
+compatibility gate. Simulator-only training experiments do not depend on it.
+A trained or search controller still needs to use that adapter and earn its own
+captured-sample or interactive evaluation evidence before it is described as
+live-game validated.
 
 CLI decomposition and command modules are not a standalone task. Each task may
 move only its own workflows out of `cli.py`, following the architecture

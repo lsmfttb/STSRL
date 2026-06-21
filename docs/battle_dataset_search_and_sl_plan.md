@@ -311,7 +311,8 @@ evaluation without leakage.
 
 ### Phase F2: Live Runtime Deployment Gate
 
-Status: pending T013.
+Status: runtime adapter contract complete; interactive controller validation
+pending.
 
 Exit gate: a controller can consume captured CommunicationMod combat snapshots,
 select through the shared `OnlineController` contract, emit valid protocol

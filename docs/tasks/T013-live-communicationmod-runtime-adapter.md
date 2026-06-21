@@ -1,6 +1,6 @@
 # T013: Live CommunicationMod Runtime Adapter
 
-Status: `READY`.
+Status: `DONE`.
 
 ## Objective
 
@@ -155,3 +155,26 @@ Include:
 - provenance and decision-record schema compatibility notes;
 - exact verification commands and results;
 - whether any interactive live-game smoke was run.
+
+## Completion Record
+
+Merged to `main` in PR #7 on 2026-06-21.
+
+- Added the normal-public live adapter and `process_live_message()` runtime
+  entry point. It converts one CommunicationMod JSON message into at most one
+  centrally formatted protocol command and emits nothing on a fail-closed
+  result.
+- Uses the shared `public-tactical-v2` state/action contract, keeps simulator
+  details out of controller snapshots, preserves occurrence-safe action
+  identities, and records live source metadata plus controller provenance.
+- Legal actions require explicit play/use/discard and target requirements. For
+  current CommunicationMod captures without a targetability field, ordinary
+  targets are derived only from visible liveness (`is_gone` and current HP);
+  absent or contradictory evidence remains unsupported.
+- Verification: 349 Windows tests, compileall, Ruff, mock protocol smokes, and
+  captured-message regression coverage. Across 2,352 captured states containing
+  a playable targeted card and a positive-HP non-gone monster, target actions
+  were constructed in every state.
+
+No interactive CommunicationMod session was run, and no trained/search
+controller or A20 performance claim is established by this task.

@@ -18,6 +18,10 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
 
 - CommunicationMod-style stdin/stdout probe with protocol output isolated from
   logs.
+- Live CommunicationMod runtime entry point that consumes one JSON observation,
+  exposes only the sanitized public tactical contract to an `OnlineController`,
+  emits at most one protocol command, and fails closed on unsupported or
+  incomplete battle decisions.
 - Framework-neutral simulator contracts and a Python adapter for the external
   patched `sts_lightspeed` simulator.
 - Real simulator execution is documented and performed through WSL.
@@ -58,7 +62,7 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
 
 ### Tests And Runtime Evidence
 
-- `274` tests pass on Windows Python as of this review.
+- `349` tests pass on Windows Python as of this review.
 - The two CommunicationMod fixture smokes pass.
 - `python -m compileall -q src tests` passes.
 - `ruff check src tests` and `ruff format --check src tests` pass.
@@ -75,6 +79,11 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
   required simulator-projection failures. A captured CommunicationMod audit
   covers 3,347 battle snapshots; its documented live-missing fields remain a
   deployment constraint for T013, not an implicit simulator fallback.
+- T013 validates the live adapter against captured CommunicationMod messages:
+  public-state sanitization, duplicate actions, target/potion command mapping,
+  explicit targetability fallback, complete runtime provenance, and no-command
+  failure paths. Across the capture corpus, all 2,352 states with a playable
+  targeted card and a positive-HP non-gone monster produce target actions.
 
 ## Not Implemented On Main
 
@@ -84,7 +93,7 @@ unmerged legacy work:
 - fixed structural battle evaluation;
 - native Oracle-like search integration and search-teacher datasets;
 - PyTorch policy/value training;
-- live CommunicationMod runtime adapter for trained or search controllers;
+- interactive live-game or A20 performance validation for any controller;
 - structured persistent resource outcomes;
 - sanitized public run context or complete public run history;
 - constructed A20 battle-start supplements;
@@ -98,22 +107,16 @@ already supports them.
 Executable task specifications live in [`tasks/`](tasks/README.md). The first
 tasks in dependency order are:
 
-1. [`T013`](tasks/T013-live-communicationmod-runtime-adapter.md), currently
-   `READY`: implement the live CommunicationMod runtime adapter against the
-   published v2 tactical contract. It is a deployment gate, not a prerequisite
-   for simulator-only experiments.
-2. Review T005, T007, T008, and T012 against the merged T004 artifact and
+1. Review T005, T007, T008, and T012 against the merged T004 artifact and
    simulator contracts before changing their `BLOCKED` status.
 
 Later tasks are dependency-ordered in the task index. A task is not ready for a
 new branch until its status is `READY`.
 
-Live-game deployment compatibility is tracked as
-[`T013`](tasks/T013-live-communicationmod-runtime-adapter.md). Simulator-only
-RL training does not depend on T013, but trained
-or search controllers should not be described as runnable in the real game until
-that adapter, feature-parity, action-mapping, and runtime-provenance work
-passes review.
+The adapter and captured-sample compatibility gate in
+[`T013`](tasks/T013-live-communicationmod-runtime-adapter.md) is complete.
+Simulator-only RL training does not depend on it. No trained or search
+controller, nor any interactive real-game performance, has yet been validated.
 
 ## Legacy Integration Reference
 
