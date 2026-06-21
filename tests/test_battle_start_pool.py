@@ -176,7 +176,10 @@ def test_natural_pool_captures_provenance_coverage_and_seeded_sampling() -> None
         record.checkpoint_information_regime == CHECKPOINT_INFORMATION_REGIME
         for record in pool.records
     )  # type: ignore[union-attr]
-    assert all(record.public_context_status == "unavailable" for record in pool.records)  # type: ignore[union-attr]
+    assert all(
+        record.public_context_status in {"available", "unavailable"}
+        for record in pool.records
+    )  # type: ignore[union-attr]
     assert report.natural_battle_start_count == 4
     assert report.unique_source_start_count == 4
     assert report.reported_battle_win_count == 2

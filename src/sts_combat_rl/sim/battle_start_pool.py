@@ -34,7 +34,11 @@ from sts_combat_rl.sim.contract import (
     SimulatorCheckpoint,
     SimulatorSnapshot,
 )
-from sts_combat_rl.sim.controlled_run import ControlledRunStep, execute_controlled_run
+from sts_combat_rl.sim.controlled_run import (
+    ControlledRunStep,
+    _history_action_identity,
+    execute_controlled_run,
+)
 from sts_combat_rl.sim.controller_contract import (
     ControllerProvenance,
     controller_provenance_from_dict,
@@ -238,7 +242,7 @@ def collect_natural_battle_start_pool(
             context: object,
             step_index: int,
         ) -> None:
-            del actions, context, step_index
+            del actions, step_index
             nonlocal active_record_index, battle_index
             if not is_battle_snapshot(snapshot) or active_record_index is not None:
                 return
@@ -253,6 +257,7 @@ def collect_natural_battle_start_pool(
                 action_trace=action_trace,
                 controller=controller,
                 native_checkpoint=native_checkpoint,
+                public_run_context=getattr(context, "public_run_context", {}),
             )
             records.append(record)
             active_record_index = record.record_index
@@ -564,11 +569,12 @@ def restore_battle_start_record(
             before_raw = dict(restored.raw)
             actions = list(adapter.legal_actions(restored))
             index = _trace_action_index(actions, identity, trace_index)
-            restored = adapter.step(actions[index]).snapshot
+            chosen = actions[index]
+            restored = adapter.step(chosen).snapshot
             run_history = append_run_history_entry(
                 run_history,
                 before_raw=before_raw,
-                action_identity=actions[index].raw,
+                action_identity=_history_action_identity(identity, chosen),
                 after_raw=dict(restored.raw),
             )
         method = "seed_action_trace"
@@ -866,6 +872,7 @@ def _build_record(
     action_trace: Sequence[Mapping[str, Any]],
     controller: RoutedRunController,
     native_checkpoint: SimulatorCheckpoint,
+    public_run_context: Mapping[str, Any] | None = None,
 ) -> BattleStartCheckpointRecord:
     structural = source_metadata_from_snapshot(
         snapshot.raw,
@@ -894,7 +901,16 @@ def _build_record(
         snapshot_observation=tuple(snapshot.observation),
         snapshot_raw=dict(snapshot.raw),
         native_checkpoint=native_checkpoint,
-        public_run_context=build_public_run_context(snapshot.raw),
+        public_context_status=(
+            PUBLIC_CONTEXT_AVAILABLE
+            if public_run_context
+            else PUBLIC_CONTEXT_UNAVAILABLE
+        ),
+        public_run_context=(
+            dict(public_run_context)
+            if public_run_context
+            else build_public_run_context(snapshot.raw)
+        ),
     )
 
 
