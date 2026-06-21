@@ -9,6 +9,8 @@ from typing import Any
 from sts_combat_rl.comm.live_adapter import (
     LIVE_SOURCE_FORMAT,
     _is_combat_snapshot,
+    _monster_alive,
+    _monster_targetable,
     _parse_available_commands,
     _potion_can_discard,
     build_live_decision_context,
@@ -139,6 +141,7 @@ def _combat_snapshot() -> dict[str, Any]:
                         "block": 0,
                         "intent": "ATTACK",
                         "is_gone": False,
+                        "targetable": True,
                         "move_base_damage": 6,
                         "move_hits": 1,
                     },
@@ -150,6 +153,7 @@ def _combat_snapshot() -> dict[str, Any]:
                         "block": 6,
                         "intent": "BUFF_ATTACK",
                         "is_gone": False,
+                        "targetable": True,
                         "move_base_damage": 12,
                         "move_hits": 1,
                     },
@@ -185,6 +189,7 @@ def _combat_snapshot_end_only() -> dict[str, Any]:
                         "block": 0,
                         "intent": "ATTACK",
                         "is_gone": False,
+                        "targetable": True,
                     },
                 ],
             },
@@ -234,6 +239,7 @@ def _duplicate_cards_snapshot() -> dict[str, Any]:
                         "max_hp": 15,
                         "intent": "ATTACK",
                         "is_gone": False,
+                        "targetable": True,
                     },
                 ],
             },
@@ -282,6 +288,7 @@ def _potion_can_discard_false_snapshot() -> dict[str, Any]:
                         "max_hp": 20,
                         "intent": "ATTACK",
                         "is_gone": False,
+                        "targetable": True,
                     },
                 ],
             },
@@ -325,6 +332,7 @@ def _potion_can_discard_missing_snapshot() -> dict[str, Any]:
                         "max_hp": 20,
                         "intent": "ATTACK",
                         "is_gone": False,
+                        "targetable": True,
                     },
                 ],
             },
@@ -407,6 +415,7 @@ def _card_without_has_target_snapshot() -> dict[str, Any]:
                         "max_hp": 20,
                         "intent": "ATTACK",
                         "is_gone": False,
+                        "targetable": True,
                     },
                 ],
             },
@@ -460,6 +469,113 @@ def _potion_without_requires_target_snapshot() -> dict[str, Any]:
                         "max_hp": 20,
                         "intent": "ATTACK",
                         "is_gone": False,
+                        "targetable": True,
+                    },
+                ],
+            },
+        },
+    }
+
+
+def _monster_targetable_false_snapshot() -> dict[str, Any]:
+    """Combat snapshot with a monster explicitly marked ``targetable: false``.
+
+    The adapter must skip this monster for all targeting actions (cards and
+    potions) even when it is alive.
+    """
+    return {
+        "available_commands": ["play", "end", "potion", "key", "wait", "state"],
+        "game_state": {
+            "screen_type": "COMBAT",
+            "action_phase": "WAITING_ON_USER",
+            "ascension_level": 20,
+            "floor": 5,
+            "current_hp": 70,
+            "max_hp": 75,
+            "gold": 100,
+            "potions": [
+                {
+                    "name": "Fire Potion",
+                    "id": "Fire Potion",
+                    "can_use": True,
+                    "can_discard": True,
+                    "requires_target": True,
+                },
+            ],
+            "combat_state": {
+                "turn": 1,
+                "player": {"current_hp": 70, "max_hp": 75, "block": 0, "energy": 3},
+                "hand": [
+                    {
+                        "name": "Strike",
+                        "id": "Strike_R",
+                        "type": "ATTACK",
+                        "cost": 1,
+                        "is_playable": True,
+                        "has_target": True,
+                    },
+                ],
+                "monsters": [
+                    {
+                        "name": "Cultist",
+                        "id": "Cultist",
+                        "current_hp": 48,
+                        "max_hp": 50,
+                        "block": 0,
+                        "intent": "ATTACK",
+                        "is_gone": False,
+                        "targetable": False,
+                    },
+                ],
+            },
+        },
+    }
+
+
+def _monster_unknown_liveness_snapshot() -> dict[str, Any]:
+    """Combat snapshot with a monster missing both current_hp and is_gone.
+
+    The adapter must skip this monster for all targeting actions — unknown
+    liveness is not treated as alive.
+    """
+    return {
+        "available_commands": ["play", "end", "potion", "key", "wait", "state"],
+        "game_state": {
+            "screen_type": "COMBAT",
+            "action_phase": "WAITING_ON_USER",
+            "ascension_level": 20,
+            "floor": 5,
+            "current_hp": 70,
+            "max_hp": 75,
+            "gold": 100,
+            "potions": [
+                {
+                    "name": "Fire Potion",
+                    "id": "Fire Potion",
+                    "can_use": True,
+                    "can_discard": True,
+                    "requires_target": True,
+                },
+            ],
+            "combat_state": {
+                "turn": 1,
+                "player": {"current_hp": 70, "max_hp": 75, "block": 0, "energy": 3},
+                "hand": [
+                    {
+                        "name": "Strike",
+                        "id": "Strike_R",
+                        "type": "ATTACK",
+                        "cost": 1,
+                        "is_playable": True,
+                        "has_target": True,
+                    },
+                ],
+                "monsters": [
+                    {
+                        "name": "Mystery",
+                        "id": "Mystery",
+                        "intent": "ATTACK",
+                        # No current_hp, no is_gone — liveness unknown
                     },
                 ],
             },
@@ -522,6 +638,37 @@ class TestPotionCanDiscard:
 
     def test_none_is_not_legal(self) -> None:
         assert _potion_can_discard({"can_discard": None}) is False
+
+
+class TestMonsterAlive:
+    def test_alive_with_hp(self) -> None:
+        assert _monster_alive({"current_hp": 10, "is_gone": False}) is True
+
+    def test_dead_by_is_gone(self) -> None:
+        assert _monster_alive({"current_hp": 10, "is_gone": True}) is False
+
+    def test_dead_by_zero_hp(self) -> None:
+        assert _monster_alive({"current_hp": 0, "is_gone": False}) is False
+
+    def test_unknown_without_data(self) -> None:
+        assert _monster_alive({}) is None
+
+    def test_unknown_without_hp_or_gone(self) -> None:
+        assert _monster_alive({"name": "Mystery"}) is None
+
+
+class TestMonsterTargetable:
+    def test_explicit_true(self) -> None:
+        assert _monster_targetable({"targetable": True}) is True
+
+    def test_explicit_false(self) -> None:
+        assert _monster_targetable({"targetable": False}) is False
+
+    def test_absent_returns_none(self) -> None:
+        assert _monster_targetable({}) is None
+
+    def test_none_returns_none(self) -> None:
+        assert _monster_targetable({"targetable": None}) is None
 
 
 # ---------------------------------------------------------------------------
@@ -624,6 +771,58 @@ class TestBuildLiveLegalActions:
         # Discard is still legal (can_discard=True).
         discard_actions = [a for a in actions if a.kind == "potion_discard"]
         assert len(discard_actions) == 1
+
+    # --- monster targetability regression (P1) ---
+
+    def test_monster_targetable_false_skipped_for_cards(self) -> None:
+        """Card targeting actions skip monsters with targetable: false."""
+        snapshot = _monster_targetable_false_snapshot()
+        actions = build_live_legal_actions(snapshot)
+        card_targeting = [
+            a
+            for a in actions
+            if a.kind == "card" and a.raw.get("_live_target_index") is not None
+        ]
+        # Strike is targeting but the only monster is targetable:false.
+        assert len(card_targeting) == 0
+
+    def test_monster_targetable_false_skipped_for_potions(self) -> None:
+        """Potion targeting actions skip monsters with targetable: false."""
+        snapshot = _monster_targetable_false_snapshot()
+        actions = build_live_legal_actions(snapshot)
+        potion_targeting = [
+            a
+            for a in actions
+            if a.kind == "potion"
+            and a.raw.get("_live_potion_action") == "use"
+            and a.raw.get("_live_target_index") is not None
+        ]
+        assert len(potion_targeting) == 0
+
+    def test_monster_unknown_liveness_skipped_for_cards(self) -> None:
+        """Card targeting actions skip monsters with unknown liveness."""
+        snapshot = _monster_unknown_liveness_snapshot()
+        actions = build_live_legal_actions(snapshot)
+        card_targeting = [
+            a
+            for a in actions
+            if a.kind == "card" and a.raw.get("_live_target_index") is not None
+        ]
+        # Strike is targeting but the only monster has unknown liveness.
+        assert len(card_targeting) == 0
+
+    def test_monster_unknown_liveness_skipped_for_potions(self) -> None:
+        """Potion targeting actions skip monsters with unknown liveness."""
+        snapshot = _monster_unknown_liveness_snapshot()
+        actions = build_live_legal_actions(snapshot)
+        potion_targeting = [
+            a
+            for a in actions
+            if a.kind == "potion"
+            and a.raw.get("_live_potion_action") == "use"
+            and a.raw.get("_live_target_index") is not None
+        ]
+        assert len(potion_targeting) == 0
 
 
 # ---------------------------------------------------------------------------

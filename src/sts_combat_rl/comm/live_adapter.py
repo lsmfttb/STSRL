@@ -170,13 +170,32 @@ def _parse_available_commands(raw: Mapping[str, Any]) -> frozenset[str]:
     )
 
 
-def _monster_alive(monster: Mapping[str, Any]) -> bool:
+def _monster_alive(monster: Mapping[str, Any]) -> bool | None:
+    """Return whether a monster is alive from explicit live evidence.
+
+    Returns ``True`` only when positively alive (not gone + hp > 0 or hp
+    present), ``False`` when explicitly gone or hp == 0, and ``None`` when
+    liveness data is absent/ambiguous.
+    """
     if monster.get("is_gone") is True:
         return False
     hp = monster.get("current_hp", monster.get("currentHp"))
     if isinstance(hp, (int, float)) and not isinstance(hp, bool):
-        return hp > 0
-    return True
+        return float(hp) > 0.0
+    # No is_gone and no current_hp — liveness is unknown.
+    return None
+
+
+def _monster_targetable(monster: Mapping[str, Any]) -> bool | None:
+    """Read the explicit CommunicationMod ``targetable`` field.
+
+    Returns ``True`` only when the field is explicitly true; ``False`` when
+    explicitly false; ``None`` when absent/ambiguous.
+    """
+    targetable = monster.get("targetable")
+    if isinstance(targetable, bool):
+        return targetable
+    return None
 
 
 def _potion_can_discard(potion: Mapping[str, Any]) -> bool:
@@ -258,7 +277,13 @@ def build_live_legal_actions(
             if requires_target is True:
                 for monster_index, raw_monster in enumerate(monsters):
                     monster = _mapping(raw_monster)
-                    if not _monster_alive(monster):
+                    # Require explicit positive liveness AND targetability.
+                    # When either is absent/unknown, the monster is not a
+                    # valid target — the adapter must not invent targeting
+                    # actions against possibly-untargetable enemies.
+                    if _monster_alive(monster) is not True:
+                        continue
+                    if _monster_targetable(monster) is not True:
                         continue
                     action_counter += 1
                     actions.append(
@@ -341,7 +366,10 @@ def build_live_legal_actions(
                 if requires_target is True:
                     for monster_index, raw_monster in enumerate(monsters):
                         monster = _mapping(raw_monster)
-                        if not _monster_alive(monster):
+                        # Same explicit-positive gating as card targets.
+                        if _monster_alive(monster) is not True:
+                            continue
+                        if _monster_targetable(monster) is not True:
                             continue
                         action_counter += 1
                         actions.append(
