@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from io import StringIO
 
 import pytest
@@ -12,6 +13,7 @@ from sts_combat_rl.sim.battle_start_pool import (
     NaturalBattleStartPool,
 )
 from sts_combat_rl.sim.fixed_evaluation_set import (
+    FIXED_COHORT_FORMAT_VERSION,
     FixedCohortSelectionConfig,
     dump_fixed_cohort_jsonl,
     load_fixed_cohort_jsonl,
@@ -530,3 +532,111 @@ class TestCohortIdentity:
         c2, _ = select_fixed_cohort(pool2, selection_seed=1)
         # Identities should differ because the traces differ.
         assert c1.identity != c2.identity
+
+
+class TestFixedCohortMigration:
+    """Regression tests for the fixed-cohort v1→v2 migration."""
+
+    def test_v1_cohort_migrates_to_v2(self):
+        """A v1 cohort with a pre-T007 record loads correctly."""
+        metadata = {
+            "format_version": 1,
+            "source_pool_format_version": 2,
+            "source_pool_controller_provenance": {
+                "schema_version": 1,
+                "kind": "routed_run",
+                "name": "test",
+                "config": {},
+            },
+            "selection_config": {
+                "selection_seed": 1,
+                "stratum_quota": 1,
+                "required_strata": None,
+                "stratum_fields": ["ascension", "act", "room_type", "encounter_id"],
+            },
+            "record_count": 1,
+            "migration_report": {
+                "source_version": 1,
+                "target_version": 1,
+                "applied_versions": [],
+                "losses": [],
+            },
+            "problems": [],
+        }
+        record = {
+            "cohort_index": 0,
+            "source_pool_record_index": 0,
+            "source_checkpoint_id": "cp-0",
+            "source_run_id": "seed-1-run-0",
+            "source_seed": 1,
+            "source_battle_index": 0,
+            "structural_stratum": [20, 1, "MONSTER", "Cultist"],
+            "structural_metadata": {
+                "ascension": 20,
+                "act": 1,
+                "floor": 1,
+                "room_type": "MONSTER",
+                "encounter_id": "Cultist",
+                "seed": 1,
+                "source_kind": "natural_run",
+                "distribution_kind": "natural_run",
+                "source_run_id": "seed-1-run-0",
+                "source_battle_index": 0,
+            },
+            "source_controller_provenance": {
+                "schema_version": 1,
+                "kind": "routed_run",
+                "name": "test",
+                "config": {},
+            },
+            "source_battle_controller_provenance": {
+                "schema_version": 1,
+                "kind": "decision_policy",
+                "name": "test",
+                "config": {},
+            },
+            "source_non_combat_controller_provenance": {
+                "schema_version": 1,
+                "kind": "decision_policy",
+                "name": "test",
+                "config": {},
+            },
+            "action_trace": [],
+            "snapshot_observation": [],
+            "snapshot_raw": {},
+            "source_distribution_kind": "natural_run",
+            "checkpoint_information_regime": "full_simulator_state_oracle_like",
+            "public_context_status": "unavailable",
+        }
+        jsonl = (
+            json.dumps({"type": "metadata", "metadata": metadata})
+            + "\n"
+            + json.dumps({"type": "record", "record": record})
+            + "\n"
+        )
+        cohort = load_fixed_cohort_jsonl(StringIO(jsonl))
+        assert cohort.format_version == FIXED_COHORT_FORMAT_VERSION
+        assert cohort.migration_report.source_version == 1
+        assert cohort.migration_report.applied_versions == (2,)
+        assert cohort.records[0].public_run_context == {
+            "schema_id": "public-run-context-v1",
+            "schema_version": 1,
+            "visible_act_boss": None,
+            "encounter_history": [],
+            "run_history": {
+                "schema_id": "public-run-history-v1",
+                "entries": [],
+                "missing_fields": ["public_run_history"],
+            },
+            "visible_map": [],
+            "current_map_node": None,
+            "next_map_nodes": [],
+            "missing_fields": [
+                "visible_act_boss",
+                "encounter_history",
+                "run_history",
+                "visible_map",
+                "current_map_node",
+                "next_map_nodes",
+            ],
+        }

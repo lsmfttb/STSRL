@@ -317,6 +317,71 @@ def test_corrupted_context_is_reported() -> None:
     assert any("public run context" in p for p in verification.problems)
 
 
+def test_corrupted_map_edge_is_reported() -> None:
+    """verify_battle_start_pool_restores must flag a changed parent coordinate."""
+    pool = _pool()
+    stream = StringIO()
+    dump_natural_battle_start_pool_jsonl(pool, stream)  # type: ignore[arg-type]
+    loaded = load_natural_battle_start_pool_jsonl(StringIO(stream.getvalue()))
+
+    vm = loaded.records[0].public_run_context.get("visible_map", [])
+    if vm and vm[0].get("children"):
+        mutated = replace(
+            vm[0],
+            children=[{"x": 99, "y": 99}],
+        )
+        corrupted = replace(
+            loaded.records[0],
+            public_run_context={
+                **loaded.records[0].public_run_context,
+                "visible_map": [mutated, *vm[1:]],
+            },
+        )
+        loaded = replace(loaded, records=[corrupted, *loaded.records[1:]])
+
+        verification = verify_battle_start_pool_restores(
+            lambda: FakePoolAdapter("fresh"),
+            loaded,
+        )
+        assert not verification.restore_ok
+        assert any("children" in p for p in verification.problems)
+
+
+def test_corrupted_visible_screen_is_reported() -> None:
+    """verify_battle_start_pool_restores must flag a changed visible_screen field."""
+    pool = _pool()
+    stream = StringIO()
+    dump_natural_battle_start_pool_jsonl(pool, stream)  # type: ignore[arg-type]
+    loaded = load_natural_battle_start_pool_jsonl(StringIO(stream.getvalue()))
+
+    history = loaded.records[0].public_run_context.get("run_history", {})
+    entries = history.get("entries", [])
+    if entries:
+        entry0 = entries[0]
+        mutated_entry = {
+            **entry0,
+            "before": {
+                **entry0.get("before", {}),
+                "visible_screen": {"schema_id": "x", "screen_state": "TAMPERED"},
+            },
+        }
+        corrupted = replace(
+            loaded.records[0],
+            public_run_context={
+                **loaded.records[0].public_run_context,
+                "run_history": {**history, "entries": [mutated_entry, *entries[1:]]},
+            },
+        )
+        loaded = replace(loaded, records=[corrupted, *loaded.records[1:]])
+
+        verification = verify_battle_start_pool_restores(
+            lambda: FakePoolAdapter("fresh"),
+            loaded,
+        )
+        assert not verification.restore_ok
+        assert any("visible_screen" in p for p in verification.problems)
+
+
 def test_v1_migration_preserves_missing_duplicate_information_and_fails_closed() -> (
     None
 ):
