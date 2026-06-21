@@ -1,6 +1,19 @@
 # T007: Complete Public Run History
 
-Status: `READY`.
+Status: `BLOCKED`.
+
+## Review Freeze
+
+PR #9 attempted this task but is not mergeable. Its final native patch does
+not apply to the canonical external patch stack, and its scope combines
+multiple independently reviewable concerns. Do not resume work on that branch
+or publish a new implementation branch from this document as-is.
+
+The main maintainer must first publish smaller replacement task specifications
+from the findings in
+[`../t007_review_handoff_2026-06-22.md`](../t007_review_handoff_2026-06-22.md).
+Until then, this specification remains the historical statement of the desired
+capability, not an executable `READY` task.
 
 ## Objective
 

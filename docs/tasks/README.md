@@ -14,7 +14,7 @@ starting work.
 | T004 | DONE | [Battle-start checkpoint pool](T004-battle-start-checkpoint-pool.md) | T002, T003, T010 | checkpoint restore, battle-start pool |
 | T005 | DONE | [Fixed structural battle evaluation](T005-fixed-battle-evaluation.md) | T004 | fixed evaluation set and runner |
 | T006 | BLOCKED | [Oracle search teacher pipeline](T006-oracle-search-teacher.md) | T003, T004, T005 | search policy, teacher, search dataset |
-| T007 | READY | [Complete public run history](T007-complete-public-run-history.md) | T002, T003, T004, T011 | public context/history and native projections |
+| T007 | BLOCKED | [Complete public run history](T007-complete-public-run-history.md) | T002, T003, T004, T011 | public context/history and native projections |
 | T008 | BLOCKED | [A20 constructed battle supplements](T008-a20-constructed-supplements.md) | T003, T004, T007 | battle-start transforms and approximate HP policy |
 | T009 | BLOCKED | [PyTorch search-guidance model](T009-pytorch-search-guidance.md) | T003, T006, T007, T011, T012 | optional train dependency and policy/value model |
 | T010 | DONE | [Stochastic non-combat driver](T010-stochastic-non-combat-driver.md) | T002 | non-combat policy and native visible action/resource support |
@@ -35,8 +35,9 @@ document update before acceptance.
 
 - T005 is complete. It establishes the fixed-evaluation boundary without
   changing public-context schemas.
-- T007 is `READY` and establishes the public-context boundary and its
-  migrations.
+- T007 is `BLOCKED` after an unmergeable implementation attempt. See the
+  [T007 review handoff](../t007_review_handoff_2026-06-22.md); replacement
+  task specifications must be published before new implementation work.
 - T008 waits for T007 so constructed starts preserve complete visible context.
   T012 now waits only for T007 because it extends the fixed-evaluation output
   with dedicated terminal-resource labels. T006 has its implementation
@@ -45,7 +46,8 @@ document update before acceptance.
 
 ## Standard Local Gates
 
-Unless a task explicitly says otherwise, every task must pass:
+Unless a task explicitly says otherwise, every task must pass. Run these after
+an editable install or with `PYTHONPATH=src` in an uninstalled checkout:
 
 ```bash
 pytest

@@ -285,8 +285,10 @@ without relying on full-run average floor.
 
 ### Phase D: Coverage And Stratified Search Data
 
-Status: T007 is `READY`; T008 follows after T007, and broad coverage follows
-fixed evaluation rather than being inferred from natural-run floor statistics.
+Status: T007 is `BLOCKED` pending task redesign; see the
+[T007 review handoff](t007_review_handoff_2026-06-22.md). T008 remains blocked
+by its replacement public-context work, and broad coverage follows fixed
+evaluation rather than being inferred from natural-run floor statistics.
 
 Work:
 

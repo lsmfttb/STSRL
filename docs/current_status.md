@@ -1,6 +1,6 @@
 # Current Status
 
-Last reviewed: 2026-06-21.
+Last reviewed: 2026-06-22.
 
 This document describes the latest `main` branch only. Results from local
 artifacts, old branches, or unmerged pull requests do not count as implemented
@@ -67,7 +67,9 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
 
 ### Tests And Runtime Evidence
 
-- `407` tests pass on Windows Python as of this review.
+- `407` tests pass on Windows Python as of this review. In an uninstalled
+  checkout, set `PYTHONPATH=src` (or install the package) before invoking the
+  CLI directly.
 - The two CommunicationMod fixture smokes pass.
 - `python -m compileall -q src tests` passes.
 - `ruff check src tests` and `ruff format --check src tests` pass.
@@ -121,9 +123,11 @@ tasks in dependency order are:
 2. T006 now has all implementation prerequisites, but remains `BLOCKED` while
    the main maintainer reviews and republishes its task specification against
    the T005 evaluation contract.
-3. T007, complete public run history, is `READY` from the current main branch.
-   It establishes the sanitized continuation-context boundary needed by
-   constructed data and terminal-resource outcomes.
+3. T007, complete public run history, is `BLOCKED` pending task redesign. PR
+   #9 is an unmergeable implementation attempt; see
+   [`t007_review_handoff_2026-06-22.md`](t007_review_handoff_2026-06-22.md).
+   No branch may resume it until the main maintainer publishes replacement task
+   specifications.
 4. T008 remains blocked by T007. T012 now awaits T007 so its terminal-resource
    labels extend one stable evaluation and public-context contract rather than
    creating parallel artifact fields.
@@ -161,4 +165,6 @@ repository:    /mnt/d/DeadlycatCoding/STSRL
 ```
 
 See [`sts_lightspeed_wsl_spike.md`](sts_lightspeed_wsl_spike.md) for commands
-that are currently available on `main`.
+that are currently available on `main`. On 2026-06-22 the canonical `build-py`
+directory was absent; rebuild it before treating direct simulator smokes as
+current evidence.
