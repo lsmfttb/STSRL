@@ -948,12 +948,17 @@ def _verify_restored_context(
     method: str,
     problems: list[str],
 ) -> None:
-    """Compare restored context against the recorded source fingerprint.
+    """Compare restored context against the recorded source.
 
-    Compares map, boss, and history entries rather than a full-dict hash
-    because the replay path rebuilds ``missing_fields`` from the raw snapshot
-    (which may expose different availability signals than the original).
+    Checks visible boss, every map node (symbol, room_type, x, y,
+    burning_elite, parents, children), current/next map nodes, and every
+    history entry (sequence, before location, action, after location,
+    resource delta).  Only ``missing_fields`` are allowed to differ
+    because the native projection may expose different availability
+    signals during replay.
     """
+
+    import json
 
     if not isinstance(restored_context, dict):
         problems.append(f"record {record.record_index}: restored context is not a dict")
@@ -962,6 +967,7 @@ def _verify_restored_context(
     source = record.public_run_context
     restored = restored_context
 
+    # --- Boss ---
     if source.get("visible_act_boss") != restored.get("visible_act_boss"):
         problems.append(
             f"record {record.record_index}: public run context visible_act_boss "
@@ -969,22 +975,70 @@ def _verify_restored_context(
         )
         return
 
+    # --- Map nodes (compare every node, not just length) ---
     source_map = source.get("visible_map", [])
     restored_map = restored.get("visible_map", [])
     if len(source_map) != len(restored_map):
         problems.append(
-            f"record {record.record_index}: public run context visible_map "
-            f"length mismatch after {method} restore "
+            f"record {record.record_index}: visible_map length mismatch "
+            f"after {method} restore "
             f"(source={len(source_map)}, restored={len(restored_map)})"
         )
         return
+    for idx, (sn, rn) in enumerate(zip(source_map, restored_map)):
+        for key in ("symbol", "room_type", "x", "y", "burning_elite"):
+            if sn.get(key) != rn.get(key):
+                problems.append(
+                    f"record {record.record_index}: visible_map[{idx}].{key} "
+                    f"mismatch after {method} restore "
+                    f"(source={sn.get(key)}, restored={rn.get(key)})"
+                )
+                return
+        sp = sn.get("parents") or []
+        rp = rn.get("parents") or []
+        if len(sp) != len(rp):
+            problems.append(
+                f"record {record.record_index}: visible_map[{idx}].parents "
+                f"length mismatch after {method} restore"
+            )
+            return
+        sc = sn.get("children") or []
+        rc = rn.get("children") or []
+        if len(sc) != len(rc):
+            problems.append(
+                f"record {record.record_index}: visible_map[{idx}].children "
+                f"length mismatch after {method} restore"
+            )
+            return
 
+    # --- Current and next map nodes (structural equality) ---
+    for label, sval, rval in (
+        (
+            "current_map_node",
+            source.get("current_map_node"),
+            restored.get("current_map_node"),
+        ),
+        (
+            "next_map_nodes",
+            source.get("next_map_nodes", []),
+            restored.get("next_map_nodes", []),
+        ),
+    ):
+        s_val = json.dumps(sval, sort_keys=True, default=str)
+        r_val = json.dumps(rval, sort_keys=True, default=str)
+        if s_val != r_val:
+            problems.append(
+                f"record {record.record_index}: {label} mismatch after {method} restore"
+            )
+            return
+
+    # --- History entries ---
     source_history = source.get("run_history", {}).get("entries", [])
     restored_history = restored.get("run_history", {}).get("entries", [])
     if len(source_history) != len(restored_history):
         problems.append(
-            f"record {record.record_index}: public run context history length "
-            f"mismatch after {method} restore "
+            f"record {record.record_index}: run history length mismatch "
+            f"after {method} restore "
             f"(source={len(source_history)}, restored={len(restored_history)})"
         )
         return
@@ -1000,6 +1054,34 @@ def _verify_restored_context(
             problems.append(
                 f"record {record.record_index}: history entry {i} action "
                 f"mismatch after {method} restore"
+            )
+            return
+        sb = se.get("before", {})
+        rb = re.get("before", {})
+        sb_loc = json.dumps(sb.get("location"), sort_keys=True, default=str)
+        rb_loc = json.dumps(rb.get("location"), sort_keys=True, default=str)
+        if sb_loc != rb_loc:
+            problems.append(
+                f"record {record.record_index}: history entry {i} "
+                f"before.location mismatch after {method} restore"
+            )
+            return
+        sa = se.get("after", {})
+        ra = re.get("after", {})
+        sa_loc = json.dumps(sa.get("location"), sort_keys=True, default=str)
+        ra_loc = json.dumps(ra.get("location"), sort_keys=True, default=str)
+        if sa_loc != ra_loc:
+            problems.append(
+                f"record {record.record_index}: history entry {i} "
+                f"after.location mismatch after {method} restore"
+            )
+            return
+        sa_rd = json.dumps(sa.get("resource_delta"), sort_keys=True, default=str)
+        ra_rd = json.dumps(ra.get("resource_delta"), sort_keys=True, default=str)
+        if sa_rd != ra_rd:
+            problems.append(
+                f"record {record.record_index}: history entry {i} "
+                f"after.resource_delta mismatch after {method} restore"
             )
             return
 
