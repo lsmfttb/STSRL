@@ -40,8 +40,11 @@ from sts_combat_rl.sim.battle_agent import (
 from sts_combat_rl.sim.calibration import (
     format_communicationmod_feature_calibration_report,
     format_simulator_calibration_report,
+    format_tactical_feature_coverage_report,
     run_communicationmod_feature_calibration,
+    run_communicationmod_tactical_feature_audit,
     run_simulator_calibration,
+    run_tactical_feature_coverage_audit,
 )
 from sts_combat_rl.sim.checkpoint_verification import (
     format_battle_checkpoint_verification_report,
@@ -135,6 +138,15 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Run a bounded smoke calibration against a patched external "
             "slaythespire.StepSimulator and summarize to stderr."
+        ),
+    )
+    input_group.add_argument(
+        "--lightspeed-tactical-feature-audit",
+        action="store_true",
+        help=(
+            "Audit the versioned public tactical feature contract over bounded "
+            "sts_lightspeed snapshots and report schema, coverage, missing "
+            "fields, unknown identities, and live parity to stderr."
         ),
     )
     input_group.add_argument(
@@ -309,6 +321,15 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Summarize live CommunicationMod combat sample readiness for the "
             "fixed-size pre-RL feature encoder."
+        ),
+    )
+    input_group.add_argument(
+        "--audit-tactical-features",
+        type=Path,
+        nargs="+",
+        help=(
+            "Audit captured CommunicationMod combat snapshots against the "
+            "versioned public tactical feature contract."
         ),
     )
     parser.add_argument(
@@ -523,6 +544,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if (
         args.lightspeed_smoke
+        or args.lightspeed_tactical_feature_audit
         or args.lightspeed_rollout_smoke
         or args.lightspeed_batch_smoke
         or args.lightspeed_policy_smoke
@@ -561,6 +583,16 @@ def main(argv: list[str] | None = None) -> int:
                     action_space=action_space,
                 )
                 print(format_simulator_calibration_report(report), file=sys.stderr)
+            elif args.lightspeed_tactical_feature_audit:
+                report = run_tactical_feature_coverage_audit(
+                    adapter,
+                    seed=args.sim_seed,
+                    max_steps=args.sim_steps,
+                    action_space=action_space,
+                )
+                print(format_tactical_feature_coverage_report(report), file=sys.stderr)
+                if report.problems:
+                    return 1
             elif args.lightspeed_battle_checkpoint_verify:
                 report = run_checkpoint_verification(
                     adapter,
@@ -1044,6 +1076,17 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 0
+
+    if args.audit_tactical_features is not None:
+        try:
+            report = run_communicationmod_tactical_feature_audit(
+                args.audit_tactical_features
+            )
+        except OSError as exc:
+            print(f"failed to audit tactical features: {exc}", file=sys.stderr)
+            return 2
+        print(format_tactical_feature_coverage_report(report), file=sys.stderr)
+        return 1 if report.problems else 0
 
     if args.mock is not None:
         try:

@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from sts_combat_rl.sim.contract import SimulatorAction
 from sts_combat_rl.sim.features import (
+    TACTICAL_FEATURE_SCHEMA_ID,
+    TACTICAL_FEATURE_SCHEMA_VERSION,
+    build_public_tactical_actions,
+    build_public_tactical_state,
     communicationmod_battle_feature_size,
     encode_communicationmod_battle_snapshot,
     encode_lightspeed_battle_snapshot,
@@ -9,6 +13,7 @@ from sts_combat_rl.sim.features import (
     encode_simulator_actions,
     lightspeed_battle_feature_size,
     simulator_action_feature_size,
+    tactical_state_problems,
 )
 
 
@@ -180,3 +185,146 @@ def test_simulator_action_encoder_has_stable_size() -> None:
     assert encoded[-3:] == [2.0, 1.0, 0.0]
     assert len(encoded_actions) == 2
     assert len(encoded_actions[0]) == len(encoded_actions[1])
+
+
+def test_public_tactical_state_distinguishes_identity_intent_and_visible_resources() -> (
+    None
+):
+    raw = {
+        "battle_active": True,
+        "ascension": 20,
+        "battle_turn": 2,
+        "battle_player": {
+            "current_hp": 64,
+            "max_hp": 80,
+            "energy": 2,
+            "block": 7,
+            "powers": [{"id": "Strength", "amount": 3}],
+        },
+        "battle_hand": [
+            {
+                "id": "Strike_R",
+                "type": "ATTACK",
+                "upgraded": True,
+                "upgrade_count": 1,
+                "cost": 1,
+            }
+        ],
+        "battle_discard_pile": [{"id": "Defend_R", "type": "SKILL"}],
+        "battle_monsters": [
+            {
+                "id": "Cultist",
+                "intent": "ATTACK",
+                "move_id": 2,
+                "last_move_id": 1,
+                "current_hp": 48,
+                "powers": [{"id": "Ritual", "amount": 3}],
+            }
+        ],
+        "battle_potions": [{"id": "Fire Potion"}],
+        "relics": [{"id": "Burning Blood", "counter": 0}],
+    }
+    changed = {
+        **raw,
+        "battle_hand": [{**raw["battle_hand"][0], "id": "Bash"}],
+        "battle_monsters": [{**raw["battle_monsters"][0], "intent": "BUFF"}],
+    }
+
+    state = build_public_tactical_state(raw)
+
+    assert state["schema_id"] == TACTICAL_FEATURE_SCHEMA_ID
+    assert state["schema_version"] == TACTICAL_FEATURE_SCHEMA_VERSION
+    assert state["scalars"]["ascension"] == 20.0
+    assert state["cards"][0]["pile"] == "hand"
+    assert state["cards"][1]["pile"] == "discard"
+    assert state["cards"][0]["flags"]["upgraded"] is True
+    assert state["monsters"][0]["state_machine"]["move_id"] == 2.0
+    assert state["player"]["powers"][0]["identity"]["value"] == "Strength"
+    assert state["potions"][0]["identity"]["value"] == "Fire Potion"
+    assert state["relics"][0]["identity"]["value"] == "Burning Blood"
+    assert encode_lightspeed_battle_snapshot(raw) != encode_lightspeed_battle_snapshot(
+        changed
+    )
+    assert tactical_state_problems(state) == []
+
+
+def test_public_tactical_actions_keep_duplicate_ids_and_targets_distinct() -> None:
+    raw = {
+        "battle_hand": [{"id": "Strike_R", "type": "ATTACK", "requires_target": True}],
+        "battle_monsters": [
+            {"id": "Cultist", "intent": "ATTACK"},
+            {"id": "JawWorm", "intent": "BUFF"},
+        ],
+    }
+    actions = [
+        SimulatorAction(
+            action_id="card:Strike_R",
+            label="Strike Cultist",
+            kind="card",
+            raw={"scope": "battle", "idx1": 0, "idx2": 0, "idx3": 0},
+        ),
+        SimulatorAction(
+            action_id="card:Strike_R",
+            label="Strike Jaw Worm",
+            kind="card",
+            raw={"scope": "battle", "idx1": 0, "idx2": 1, "idx3": 0},
+        ),
+    ]
+
+    structured = build_public_tactical_actions(actions, raw)
+    encoded = encode_simulator_actions(actions, raw)
+
+    assert (
+        structured[0]["identity"]["stable_id"] != structured[1]["identity"]["stable_id"]
+    )
+    assert structured[0]["parameters"]["target_index"] == 0
+    assert structured[1]["parameters"]["target_index"] == 1
+    assert structured[0]["selected_target"]["identity"]["value"] == "Cultist"
+    assert structured[1]["selected_target"]["identity"]["value"] == "JawWorm"
+    assert encoded[0] != encoded[1]
+
+
+def test_hidden_draw_order_and_rng_do_not_reach_public_tactical_contract() -> None:
+    visible = {
+        "battle_active": True,
+        "ascension": 20,
+        "battle_player": {
+            "current_hp": 80,
+            "max_hp": 80,
+            "energy": 3,
+            "block": 0,
+        },
+        "battle_hand": [{"id": "Strike_R", "type": "ATTACK"}],
+        "battle_draw_pile_size": 4,
+    }
+    hidden_changed = {
+        **visible,
+        "battle_draw_pile": ["Bash", "Strike_R", "Defend_R"],
+        "rng_state": "different",
+        "future_monster_move": "ATTACK_DEBUFF",
+        "hidden_act_3_boss": "Awakened One",
+    }
+
+    assert build_public_tactical_state(visible) == build_public_tactical_state(
+        hidden_changed
+    )
+    assert encode_lightspeed_battle_snapshot(
+        visible
+    ) == encode_lightspeed_battle_snapshot(hidden_changed)
+
+
+def test_unknown_visible_identity_is_explicitly_preserved_and_counted() -> None:
+    state = build_public_tactical_state(
+        {
+            "battle_hand": [{"id": "FutureCard", "type": "SKILL"}],
+            "battle_monsters": [{"id": "FutureMonster", "intent": "MAGIC"}],
+        }
+    )
+
+    assert state["cards"][0]["identity"] == {
+        "value": "FutureCard",
+        "status": "unknown",
+        "vocabulary_version": "public-identity-v1",
+    }
+    assert state["unknown_identity_counts"]["card"] == 1
+    assert state["unknown_identity_counts"]["monster"] == 1

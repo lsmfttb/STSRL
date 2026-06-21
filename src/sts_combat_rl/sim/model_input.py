@@ -14,9 +14,17 @@ from typing import Any
 
 from sts_combat_rl.sim.policy import DecisionContext
 from sts_combat_rl.sim.trainer_input import TrainerInputDataset
+from sts_combat_rl.sim.features import (
+    IDENTITY_VOCABULARY_VERSION,
+    LEGACY_FEATURE_SCHEMA_ID,
+    TACTICAL_FEATURE_SCHEMA_ID,
+    TACTICAL_FEATURE_SCHEMA_VERSION,
+    tactical_action_problems,
+    tactical_state_problems,
+)
 
 
-MODEL_INPUT_BATCH_FORMAT_VERSION = 1
+MODEL_INPUT_BATCH_FORMAT_VERSION = 2
 
 
 @dataclass(frozen=True)
@@ -41,6 +49,9 @@ class ModelInputBatch:
     reward_allocation: str
     snapshot_feature_size: int | None
     action_feature_size: int | None
+    tactical_feature_schema_id: str = TACTICAL_FEATURE_SCHEMA_ID
+    tactical_feature_schema_version: int = TACTICAL_FEATURE_SCHEMA_VERSION
+    identity_vocabulary_version: str = IDENTITY_VOCABULARY_VERSION
     example_refs: list[ModelInputExampleRef] = field(default_factory=list)
     screen_states: list[str] = field(default_factory=list)
     snapshot_features: list[list[float]] = field(default_factory=list)
@@ -55,6 +66,8 @@ class ModelInputBatch:
     terminal_after_step: list[bool] = field(default_factory=list)
     step_rewards: list[float] = field(default_factory=list)
     return_to_go: list[float] = field(default_factory=list)
+    tactical_states: list[dict[str, Any]] = field(default_factory=list)
+    tactical_actions: list[dict[str, Any]] = field(default_factory=list)
     problems: list[str] = field(default_factory=list)
 
 
@@ -72,6 +85,8 @@ class ModelInputBatchSmokeReport:
     action_offset_count: int
     snapshot_feature_size: int | None
     action_feature_size: int | None
+    tactical_feature_schema_id: str
+    tactical_feature_schema_version: int
     max_legal_actions: int
     max_eligible_actions: int
     terminal_after_step_count: int
@@ -99,6 +114,8 @@ def build_model_input_batch(dataset: TrainerInputDataset) -> ModelInputBatch:
     terminal_after_step: list[bool] = []
     step_rewards: list[float] = []
     return_to_go: list[float] = []
+    tactical_states: list[dict[str, Any]] = []
+    tactical_actions: list[dict[str, Any]] = []
 
     for record in dataset.records:
         action_start = len(action_features)
@@ -132,12 +149,19 @@ def build_model_input_batch(dataset: TrainerInputDataset) -> ModelInputBatch:
         terminal_after_step.append(record.terminal_after_step)
         step_rewards.append(record.step_reward)
         return_to_go.append(record.return_to_go)
+        tactical_states.append(dict(record.tactical_state))
+        tactical_actions.extend(
+            dict(action) for action in record.tactical_legal_actions
+        )
 
     batch = ModelInputBatch(
         format_version=MODEL_INPUT_BATCH_FORMAT_VERSION,
         reward_allocation=dataset.reward_allocation,
         snapshot_feature_size=dataset.snapshot_feature_size,
         action_feature_size=dataset.action_feature_size,
+        tactical_feature_schema_id=dataset.tactical_feature_schema_id,
+        tactical_feature_schema_version=dataset.tactical_feature_schema_version,
+        identity_vocabulary_version=dataset.identity_vocabulary_version,
         example_refs=example_refs,
         screen_states=screen_states,
         snapshot_features=snapshot_features,
@@ -152,6 +176,8 @@ def build_model_input_batch(dataset: TrainerInputDataset) -> ModelInputBatch:
         terminal_after_step=terminal_after_step,
         step_rewards=step_rewards,
         return_to_go=return_to_go,
+        tactical_states=tactical_states,
+        tactical_actions=tactical_actions,
         problems=list(dataset.problems),
     )
     return replace(
@@ -184,6 +210,8 @@ def build_model_input_batch_smoke_report(
         action_offset_count=len(batch.action_offsets),
         snapshot_feature_size=batch.snapshot_feature_size,
         action_feature_size=batch.action_feature_size,
+        tactical_feature_schema_id=batch.tactical_feature_schema_id,
+        tactical_feature_schema_version=batch.tactical_feature_schema_version,
         max_legal_actions=max(legal_action_counts, default=0),
         max_eligible_actions=max(
             (len(indices) for indices in batch.eligible_action_indices),
@@ -218,6 +246,7 @@ def format_model_input_batch_smoke_report(
         f"action offset count: {report.action_offset_count}",
         f"snapshot feature size: {_optional_int(report.snapshot_feature_size)}",
         f"action feature size: {_optional_int(report.action_feature_size)}",
+        f"tactical feature schema: {report.tactical_feature_schema_id} v{report.tactical_feature_schema_version}",
         f"max legal actions: {report.max_legal_actions}",
         f"max eligible actions: {report.max_eligible_actions}",
         f"terminal_after_step records: {report.terminal_after_step_count}",
@@ -252,6 +281,45 @@ def decision_context_from_model_input_batch(
         legal_action_features=batch.action_features[action_start:action_end],
         legal_action_kinds=batch.action_kinds[example_index],
         eligible_action_indices=batch.eligible_action_indices[example_index],
+        tactical_state=(
+            batch.tactical_states[example_index]
+            if example_index < len(batch.tactical_states)
+            else {}
+        ),
+        tactical_legal_actions=(
+            batch.tactical_actions[action_start:action_end]
+            if batch.tactical_actions
+            else []
+        ),
+        tactical_feature_schema_id=batch.tactical_feature_schema_id,
+    )
+
+
+def migrate_model_input_batch(batch: ModelInputBatch) -> ModelInputBatch:
+    """Explicitly migrate an in-memory v1 numeric batch to v2 placeholders.
+
+    Model-input batches are not persisted artifacts today.  The conversion is
+    nevertheless explicit so callers cannot mistake old numeric-only inputs for
+    current structured tactical inputs.
+    """
+
+    if batch.format_version == MODEL_INPUT_BATCH_FORMAT_VERSION:
+        return batch
+    if batch.format_version != 1:
+        raise ValueError(
+            f"unsupported model input format version {batch.format_version}; "
+            f"current version is {MODEL_INPUT_BATCH_FORMAT_VERSION}"
+        )
+    return replace(
+        batch,
+        format_version=MODEL_INPUT_BATCH_FORMAT_VERSION,
+        tactical_feature_schema_id=LEGACY_FEATURE_SCHEMA_ID,
+        tactical_feature_schema_version=0,
+        identity_vocabulary_version="",
+        problems=[
+            *batch.problems,
+            "v1 model input has no structured tactical state/action inputs",
+        ],
     )
 
 
@@ -261,6 +329,21 @@ def _model_input_shape_problems(batch: ModelInputBatch) -> list[str]:
     if batch.format_version != MODEL_INPUT_BATCH_FORMAT_VERSION:
         problems.append(
             f"unsupported model input format version: {batch.format_version}"
+        )
+    if batch.tactical_feature_schema_id != TACTICAL_FEATURE_SCHEMA_ID:
+        problems.append(
+            "unsupported model tactical feature schema: "
+            f"{batch.tactical_feature_schema_id!r}"
+        )
+    if batch.tactical_feature_schema_version != TACTICAL_FEATURE_SCHEMA_VERSION:
+        problems.append(
+            "unsupported model tactical feature schema version: "
+            f"{batch.tactical_feature_schema_version}"
+        )
+    if batch.identity_vocabulary_version != IDENTITY_VOCABULARY_VERSION:
+        problems.append(
+            "unsupported model identity vocabulary version: "
+            f"{batch.identity_vocabulary_version!r}"
         )
     if len(batch.action_offsets) != example_count + 1:
         problems.append(
@@ -289,6 +372,26 @@ def _model_input_shape_problems(batch: ModelInputBatch) -> list[str]:
         ("return-to-go labels", len(batch.return_to_go)),
     ):
         _validate_parallel_length(label, observed, example_count, problems)
+
+    if batch.tactical_states or batch.tactical_actions:
+        _validate_parallel_length(
+            "tactical state rows", len(batch.tactical_states), example_count, problems
+        )
+        _validate_parallel_length(
+            "tactical action rows",
+            len(batch.tactical_actions),
+            len(batch.action_features),
+            problems,
+        )
+        for index, state in enumerate(batch.tactical_states):
+            problems.extend(
+                f"example {index}: {problem}"
+                for problem in tactical_state_problems(state)
+            )
+        problems.extend(
+            f"tactical action: {problem}"
+            for problem in tactical_action_problems(batch.tactical_actions)
+        )
 
     for index, snapshot_features in enumerate(batch.snapshot_features):
         _validate_feature_row(

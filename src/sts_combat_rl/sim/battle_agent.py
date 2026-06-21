@@ -340,6 +340,11 @@ def build_battle_decision_batch(
                         step.provenance.to_dict() if step.provenance is not None else {}
                     ),
                     source_metadata=dict(step.source_metadata),
+                    tactical_state=dict(step.tactical_state),
+                    tactical_legal_actions=[
+                        dict(action) for action in step.tactical_legal_actions
+                    ],
+                    feature_schema_id=step.feature_schema_id,
                 )
             )
 

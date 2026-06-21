@@ -929,3 +929,26 @@ def test_cli_calibrate_combat_features_writes_report_to_stderr_only(
     assert captured.out == ""
     assert "CommunicationMod feature calibration summary" in captured.err
     assert "feature sizes:" in captured.err
+
+
+def test_cli_audits_versioned_tactical_live_features_to_stderr_only(
+    monkeypatch,
+    tmp_path,
+    capsys,
+) -> None:
+    sample_file = tmp_path / "live.jsonl"
+    sample_file.write_text(
+        '{"game_state":{"act":1,"floor":1,"current_hp":80,"max_hp":80,'
+        '"gold":99,"combat_state":{"draw_pile":[],"discard_pile":[],'
+        '"exhaust_pile":[],"turn":1,"player":{"current_hp":80,'
+        '"max_hp":80,"energy":3,"block":0},"hand":[],"monsters":[]}}}\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+
+    assert main(["--audit-tactical-features", str(sample_file), "--log-file", "-"]) == 0
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Tactical feature coverage audit" in captured.err
+    assert "feature schema: public-tactical-v2 v2" in captured.err

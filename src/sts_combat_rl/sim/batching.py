@@ -37,6 +37,9 @@ class DecisionExample:
     chosen_action_identity: dict[str, Any] = field(default_factory=dict)
     controller_provenance: dict[str, Any] = field(default_factory=dict)
     source_metadata: dict[str, Any] = field(default_factory=dict)
+    tactical_state: dict[str, Any] = field(default_factory=dict)
+    tactical_legal_actions: list[dict[str, Any]] = field(default_factory=list)
+    feature_schema_id: str = "public-tactical-v2"
 
 
 @dataclass(frozen=True)
@@ -157,6 +160,9 @@ def _decision_example(
             step.provenance.to_dict() if step.provenance is not None else {}
         ),
         source_metadata=dict(step.source_metadata),
+        tactical_state=dict(step.tactical_state),
+        tactical_legal_actions=[dict(action) for action in step.tactical_legal_actions],
+        feature_schema_id=step.feature_schema_id,
     )
 
 

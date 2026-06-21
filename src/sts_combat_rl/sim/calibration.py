@@ -27,12 +27,21 @@ from sts_combat_rl.sim.contract import (
     SimulatorSnapshot,
 )
 from sts_combat_rl.sim.features import (
+    IDENTITY_VOCABULARY_VERSION,
+    TACTICAL_FEATURE_SCHEMA_ID,
+    TACTICAL_FEATURE_SCHEMA_VERSION,
+    build_public_tactical_actions,
+    build_public_tactical_state,
     communicationmod_battle_feature_size,
     encode_communicationmod_battle_snapshot,
     encode_lightspeed_battle_snapshot,
     encode_simulator_actions,
     lightspeed_battle_feature_size,
+    normalize_communicationmod_battle_snapshot,
     simulator_action_feature_size,
+    tactical_action_problems,
+    tactical_field_parity_rows,
+    tactical_state_problems,
 )
 
 
@@ -83,6 +92,26 @@ class CommunicationModFeatureCalibrationReport:
     problems: list[str] = field(default_factory=list)
 
 
+@dataclass
+class TacticalFeatureCoverageReport:
+    """Public-v2 feature audit usable for simulator and captured live inputs."""
+
+    source: str
+    feature_schema_id: str = TACTICAL_FEATURE_SCHEMA_ID
+    feature_schema_version: int = TACTICAL_FEATURE_SCHEMA_VERSION
+    identity_vocabulary_version: str = IDENTITY_VOCABULARY_VERSION
+    snapshot_count: int = 0
+    legal_action_count: int = 0
+    state_feature_size_counts: Counter[str] = field(default_factory=Counter)
+    action_feature_size_counts: Counter[str] = field(default_factory=Counter)
+    unknown_identity_counts: Counter[str] = field(default_factory=Counter)
+    missing_field_counts: Counter[str] = field(default_factory=Counter)
+    field_parity: list[dict[str, str]] = field(
+        default_factory=tactical_field_parity_rows
+    )
+    problems: list[str] = field(default_factory=list)
+
+
 def run_simulator_calibration(
     adapter: SimulatorAdapter,
     *,
@@ -128,6 +157,91 @@ def run_simulator_calibration(
 
     report.outcome = str(snapshot.raw.get("outcome", report.outcome))
     _validate_expected_feature_sizes(report)
+    return report
+
+
+def run_tactical_feature_coverage_audit(
+    adapter: SimulatorAdapter,
+    *,
+    seed: int | None = None,
+    max_steps: int = 200,
+    action_space: ActionSpaceConfig | None = None,
+) -> TacticalFeatureCoverageReport:
+    """Audit v2 public state/action coverage over real simulator snapshots."""
+
+    active_action_space = action_space or ActionSpaceConfig.initial_no_potions()
+    report = TacticalFeatureCoverageReport(source="sts_lightspeed")
+    snapshot = adapter.reset(seed=seed)
+    executed_steps = 0
+    for _ in range(max_steps + 1):
+        raw = snapshot.raw
+        if bool(raw.get("battle_active")):
+            actions = list(adapter.legal_actions(snapshot))
+            _count_tactical_snapshot(report, raw, actions)
+        if str(raw.get("outcome")) != "UNDECIDED" or executed_steps >= max_steps:
+            break
+        actions = list(adapter.legal_actions(snapshot))
+        if not actions:
+            report.problems.append("no legal actions before terminal state")
+            break
+        effective_action_space = action_space_for_screen(
+            active_action_space,
+            screen_state=str(raw.get("screen_state", "(none)")),
+            battle_active=bool(raw.get("battle_active")),
+        )
+        try:
+            action = choose_calibration_action(actions, effective_action_space)
+        except ValueError as exc:
+            report.problems.append(str(exc))
+            break
+        snapshot = adapter.step(action).snapshot
+        executed_steps += 1
+    _validate_tactical_report(report)
+    return report
+
+
+def run_communicationmod_tactical_feature_audit(
+    paths: Iterable[Path],
+    *,
+    max_problems: int = 10,
+) -> TacticalFeatureCoverageReport:
+    """Audit captured live combat snapshots against the shared v2 contract."""
+
+    sample_paths = expand_sample_paths(paths)
+    if not sample_paths:
+        raise FileNotFoundError("no JSONL sample files found")
+    report = TacticalFeatureCoverageReport(source="communicationmod_capture")
+    for path in sample_paths:
+        with path.open("r", encoding="utf-8") as file:
+            for line_number, line in enumerate(file, start=1):
+                try:
+                    value = json.loads(line)
+                except json.JSONDecodeError as exc:
+                    _add_problem(
+                        report.problems,
+                        max_problems,
+                        f"{path}: line {line_number}: invalid JSON: {exc.msg}",
+                    )
+                    continue
+                raw = _mapping(value)
+                if not raw or "error" in raw:
+                    continue
+                game = (
+                    _mapping(raw.get("game_state"))
+                    or _mapping(raw.get("gameState"))
+                    or raw
+                )
+                combat = _mapping(game.get("combat_state")) or _mapping(
+                    game.get("combatState")
+                )
+                if not combat:
+                    continue
+                _count_tactical_snapshot(
+                    report,
+                    normalize_communicationmod_battle_snapshot(raw),
+                    [],
+                )
+    _validate_tactical_report(report)
     return report
 
 
@@ -247,6 +361,38 @@ def format_communicationmod_feature_calibration_report(
     else:
         lines.append("  (none)")
 
+    return "\n".join(lines)
+
+
+def format_tactical_feature_coverage_report(
+    report: TacticalFeatureCoverageReport,
+) -> str:
+    """Format schema, coverage, unknown/missing, and parity audit evidence."""
+
+    lines = [
+        "Tactical feature coverage audit",
+        f"source: {report.source}",
+        f"feature schema: {report.feature_schema_id} v{report.feature_schema_version}",
+        f"identity vocabulary: {report.identity_vocabulary_version}",
+        f"battle snapshots: {report.snapshot_count}",
+        f"legal actions: {report.legal_action_count}",
+    ]
+    _append_counter(lines, "state feature sizes", report.state_feature_size_counts)
+    _append_counter(lines, "action feature sizes", report.action_feature_size_counts)
+    _append_counter(lines, "unknown identities", report.unknown_identity_counts)
+    _append_counter(lines, "missing public fields", report.missing_field_counts)
+    lines.append("simulator/live field parity:")
+    for row in report.field_parity:
+        lines.append(
+            "  "
+            + f"{row['field']}: {row['classification']} "
+            + f"(missing={row['missing_value_behavior']})"
+        )
+    lines.append("problems:")
+    if report.problems:
+        lines.extend(f"  {problem}" for problem in report.problems)
+    else:
+        lines.append("  (none)")
     return "\n".join(lines)
 
 
@@ -388,6 +534,48 @@ def _count_snapshot(
         report.battle_snapshots += 1
     else:
         report.non_battle_snapshots += 1
+
+
+def _count_tactical_snapshot(
+    report: TacticalFeatureCoverageReport,
+    raw: Mapping[str, Any],
+    actions: list[SimulatorAction],
+) -> None:
+    state = build_public_tactical_state(raw)
+    report.snapshot_count += 1
+    report.state_feature_size_counts[
+        str(len(encode_lightspeed_battle_snapshot(raw)))
+    ] += 1
+    for category, count in _mapping(state.get("unknown_identity_counts")).items():
+        report.unknown_identity_counts[str(category)] += int(count)
+    for field_name in _sequence(state.get("missing_fields")):
+        report.missing_field_counts[str(field_name)] += 1
+    report.problems.extend(tactical_state_problems(state))
+    structured_actions = build_public_tactical_actions(actions, raw)
+    report.legal_action_count += len(structured_actions)
+    for encoded in encode_simulator_actions(actions, raw):
+        report.action_feature_size_counts[str(len(encoded))] += 1
+    report.problems.extend(tactical_action_problems(structured_actions))
+    if len(structured_actions) != len(actions):
+        report.problems.append(
+            "tactical action count does not match legal action count"
+        )
+
+
+def _validate_tactical_report(report: TacticalFeatureCoverageReport) -> None:
+    if report.snapshot_count == 0:
+        report.problems.append("no battle snapshots were available for tactical audit")
+    expected_state_size = str(lightspeed_battle_feature_size())
+    if report.state_feature_size_counts and set(report.state_feature_size_counts) != {
+        expected_state_size
+    }:
+        report.problems.append("unexpected tactical state feature sizes")
+    expected_action_size = str(simulator_action_feature_size())
+    if report.action_feature_size_counts and set(report.action_feature_size_counts) != {
+        expected_action_size
+    }:
+        report.problems.append("unexpected tactical action feature sizes")
+    report.problems[:] = list(dict.fromkeys(report.problems))
 
 
 def _count_actions(

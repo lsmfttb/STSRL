@@ -4,9 +4,13 @@ from sts_combat_rl.sim.calibration import (
     choose_calibration_action,
     format_communicationmod_feature_calibration_report,
     format_simulator_calibration_report,
+    format_tactical_feature_coverage_report,
     run_communicationmod_feature_calibration,
+    run_communicationmod_tactical_feature_audit,
     run_simulator_calibration,
+    run_tactical_feature_coverage_audit,
 )
+from sts_combat_rl.sim.features import communicationmod_battle_feature_size
 from sts_combat_rl.sim.contract import (
     SimulatorAction,
     SimulatorSnapshot,
@@ -183,6 +187,25 @@ def test_simulator_calibration_keeps_non_combat_potion_rewards_eligible() -> Non
     assert report.excluded_legal_action_kind_counts["reward_potion"] == 0
 
 
+def test_tactical_feature_coverage_audit_reports_schema_missing_and_parity() -> None:
+    report = run_tactical_feature_coverage_audit(
+        FakeCalibrationAdapter(), seed=7, max_steps=1
+    )
+    text = format_tactical_feature_coverage_report(report)
+
+    assert report.snapshot_count == 1
+    assert report.legal_action_count == 3
+    assert report.feature_schema_id == "public-tactical-v2"
+    assert report.missing_field_counts["scalars.ascension"] == 1
+    assert any(row["classification"] == "simulator_only" for row in report.field_parity)
+    assert any(
+        row["classification"] == "explicitly_unsupported" for row in report.field_parity
+    )
+    assert report.problems == []
+    assert "Tactical feature coverage audit" in text
+    assert "simulator/live field parity:" in text
+
+
 def test_run_communicationmod_feature_calibration_counts_live_fields(
     tmp_path,
 ) -> None:
@@ -206,7 +229,7 @@ def test_run_communicationmod_feature_calibration_counts_live_fields(
 
     assert report.combat_states == 1
     assert report.non_combat_states == 0
-    assert report.feature_size_counts["272"] == 1
+    assert report.feature_size_counts[str(communicationmod_battle_feature_size())] == 1
     assert report.present_field_counts["player.energy"] == 1
     assert report.present_field_counts["card.type"] == 1
     assert report.present_field_counts["monster.intent"] == 1
@@ -214,3 +237,11 @@ def test_run_communicationmod_feature_calibration_counts_live_fields(
     assert report.problems == []
     assert "CommunicationMod feature calibration summary" in text
     assert "feature sizes:" in text
+
+    tactical = run_communicationmod_tactical_feature_audit([sample_file])
+    tactical_text = format_tactical_feature_coverage_report(tactical)
+
+    assert tactical.snapshot_count == 1
+    assert tactical.legal_action_count == 0
+    assert tactical.problems == []
+    assert "identity vocabulary: public-identity-v1" in tactical_text

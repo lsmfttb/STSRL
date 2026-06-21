@@ -39,6 +39,8 @@ from sts_combat_rl.sim.decision_record import (
     source_metadata_from_snapshot,
 )
 from sts_combat_rl.sim.features import (
+    build_public_tactical_actions,
+    build_public_tactical_state,
     encode_lightspeed_battle_snapshot,
     encode_simulator_actions,
 )
@@ -118,6 +120,9 @@ class ControlledRunStep:
     legal_action_identities: list[dict[str, Any]] = field(default_factory=list)
     chosen_action_identity: dict[str, Any] = field(default_factory=dict)
     source_metadata: dict[str, Any] = field(default_factory=dict)
+    tactical_state: dict[str, Any] = field(default_factory=dict)
+    tactical_legal_actions: list[dict[str, Any]] = field(default_factory=list)
+    feature_schema_id: str = "public-tactical-v2"
 
 
 @dataclass(frozen=True)
@@ -256,6 +261,11 @@ def execute_controlled_run(
                 seed=seed,
                 source_kind="natural_run",
             ),
+            tactical_state=dict(context.tactical_state),
+            tactical_legal_actions=[
+                dict(action) for action in context.tactical_legal_actions
+            ],
+            feature_schema_id=context.tactical_feature_schema_id,
             floor=_first_number(snapshot.raw, "floor_num", "floor"),
             player_hp=_player_hp(snapshot.raw),
             player_max_hp=_player_max_hp(snapshot.raw),
@@ -329,11 +339,14 @@ def build_decision_context(
     return DecisionContext(
         screen_state=screen_state,
         snapshot_features=encode_lightspeed_battle_snapshot(raw),
-        legal_action_features=encode_simulator_actions(list(actions)),
+        legal_action_features=encode_simulator_actions(list(actions), raw),
         legal_action_kinds=[action.kind for action in actions],
         eligible_action_indices=eligible_indices(list(actions), effective_action_space),
         snapshot_metadata=_public_non_combat_snapshot_metadata(raw),
         legal_action_metadata=[_public_action_metadata(action) for action in actions],
+        tactical_state=build_public_tactical_state(raw),
+        tactical_legal_actions=build_public_tactical_actions(list(actions), raw),
+        tactical_feature_schema_id="public-tactical-v2",
     )
 
 

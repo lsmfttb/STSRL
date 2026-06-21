@@ -29,6 +29,12 @@ from sts_combat_rl.sim.decision_record import (
     decision_record_problems,
     legacy_index_action_identities,
 )
+from sts_combat_rl.sim.features import (
+    IDENTITY_VOCABULARY_VERSION,
+    LEGACY_FEATURE_SCHEMA_ID,
+    TACTICAL_FEATURE_SCHEMA_ID,
+    TACTICAL_FEATURE_SCHEMA_VERSION,
+)
 from sts_combat_rl.sim.reward_labeling import (
     BattleDecisionRewardLabel,
     RewardLabeledBattleDecisionBatch,
@@ -38,16 +44,25 @@ from sts_combat_rl.sim.trainer_input_contract import (
 )
 
 
-TRAINER_INPUT_DATASET_FORMAT_VERSION = 2
+TRAINER_INPUT_DATASET_FORMAT_VERSION = 3
 TRAINER_INPUT_DATASET_MIGRATIONS = (
     ArtifactMigration(
         source_version=1,
-        target_version=TRAINER_INPUT_DATASET_FORMAT_VERSION,
+        target_version=2,
         migrate=lambda document: _migrate_trainer_input_v1_to_v2(document),
         losses=(
             "v1 omitted per-decision controller provenance",
             "v1 omitted legal action ids; migrated action identities are index-only",
             "v1 omitted source distribution metadata beyond seed",
+        ),
+    ),
+    ArtifactMigration(
+        source_version=2,
+        target_version=3,
+        migrate=lambda document: _migrate_trainer_input_v2_to_v3(document),
+        losses=(
+            "v2 fixed numeric features cannot reconstruct v2 structured tactical inputs",
+            "v2 omitted tactical feature-schema and identity-vocabulary provenance",
         ),
     ),
 )
@@ -82,6 +97,9 @@ class TrainerInputDataset:
     snapshot_feature_size: int | None
     action_feature_size: int | None
     decision_record_schema_version: int = DECISION_RECORD_SCHEMA_VERSION
+    tactical_feature_schema_id: str = TACTICAL_FEATURE_SCHEMA_ID
+    tactical_feature_schema_version: int = TACTICAL_FEATURE_SCHEMA_VERSION
+    identity_vocabulary_version: str = IDENTITY_VOCABULARY_VERSION
     generation_metadata: dict[str, Any] = field(default_factory=dict)
     records: list[TrainerInputRecord] = field(default_factory=list)
     problems: list[str] = field(default_factory=list)
@@ -141,6 +159,9 @@ def build_trainer_input_dataset(
         snapshot_feature_size=batch.decision_batch.snapshot_feature_size,
         action_feature_size=batch.decision_batch.action_feature_size,
         decision_record_schema_version=DECISION_RECORD_SCHEMA_VERSION,
+        tactical_feature_schema_id=TACTICAL_FEATURE_SCHEMA_ID,
+        tactical_feature_schema_version=TACTICAL_FEATURE_SCHEMA_VERSION,
+        identity_vocabulary_version=IDENTITY_VOCABULARY_VERSION,
         generation_metadata=_json_safe_dict(generation_metadata or {}),
         records=records,
         problems=list(contract.problems),
@@ -343,6 +364,15 @@ def load_trainer_input_dataset_jsonl(stream: TextIO) -> TrainerInputDataset:
                 DECISION_RECORD_SCHEMA_VERSION,
             )
         ),
+        tactical_feature_schema_id=str(
+            metadata.get("tactical_feature_schema_id", LEGACY_FEATURE_SCHEMA_ID)
+        ),
+        tactical_feature_schema_version=_int(
+            metadata.get("tactical_feature_schema_version")
+        ),
+        identity_vocabulary_version=str(
+            metadata.get("identity_vocabulary_version", "")
+        ),
         generation_metadata=_dict(metadata.get("generation_metadata")),
         records=records,
         problems=problems,
@@ -418,6 +448,9 @@ def _metadata_row(dataset: TrainerInputDataset) -> dict[str, Any]:
             "snapshot_feature_size": dataset.snapshot_feature_size,
             "action_feature_size": dataset.action_feature_size,
             "decision_record_schema_version": dataset.decision_record_schema_version,
+            "tactical_feature_schema_id": dataset.tactical_feature_schema_id,
+            "tactical_feature_schema_version": dataset.tactical_feature_schema_version,
+            "identity_vocabulary_version": dataset.identity_vocabulary_version,
             "generation_metadata": dataset.generation_metadata,
             "record_count": len(dataset.records),
             "migration_report": dataset.migration_report.to_dict(),
@@ -438,6 +471,24 @@ def _require_current_dataset_schema(dataset: TrainerInputDataset) -> None:
             f"{DECISION_RECORD_SCHEMA_VERSION}, got "
             f"{dataset.decision_record_schema_version}"
         )
+    if dataset.tactical_feature_schema_id != TACTICAL_FEATURE_SCHEMA_ID:
+        raise ValueError(
+            "trainer input writer only emits tactical feature schema "
+            f"{TACTICAL_FEATURE_SCHEMA_ID!r}, got "
+            f"{dataset.tactical_feature_schema_id!r}"
+        )
+    if dataset.tactical_feature_schema_version != TACTICAL_FEATURE_SCHEMA_VERSION:
+        raise ValueError(
+            "trainer input writer only emits tactical feature schema version "
+            f"{TACTICAL_FEATURE_SCHEMA_VERSION}, got "
+            f"{dataset.tactical_feature_schema_version}"
+        )
+    if dataset.identity_vocabulary_version != IDENTITY_VOCABULARY_VERSION:
+        raise ValueError(
+            "trainer input writer only emits identity vocabulary version "
+            f"{IDENTITY_VOCABULARY_VERSION!r}, got "
+            f"{dataset.identity_vocabulary_version!r}"
+        )
     for record in dataset.records:
         if record.record_schema_version != DECISION_RECORD_SCHEMA_VERSION:
             raise ValueError(
@@ -452,6 +503,12 @@ def _require_current_dataset_schema(dataset: TrainerInputDataset) -> None:
                 f"{record.record_schema_version} does not match dataset schema "
                 f"{dataset.decision_record_schema_version}"
             )
+        if record.feature_schema_id != dataset.tactical_feature_schema_id:
+            raise ValueError(
+                f"record {record.example_index} feature schema "
+                f"{record.feature_schema_id!r} does not match dataset schema "
+                f"{dataset.tactical_feature_schema_id!r}"
+            )
         identity_problems = decision_record_identity_problems(
             record,
             label=f"record {record.example_index}",
@@ -461,14 +518,23 @@ def _require_current_dataset_schema(dataset: TrainerInputDataset) -> None:
                 "trainer input writer requires complete current action identities: "
                 + "; ".join(identity_problems)
             )
+        record_problems = decision_record_problems(
+            record,
+            label=f"record {record.example_index}",
+        )
+        if record_problems:
+            raise ValueError(
+                "trainer input writer requires complete current tactical inputs: "
+                + "; ".join(record_problems)
+            )
 
 
 def _migrate_trainer_input_v1_to_v2(
     document: ArtifactDocument,
 ) -> ArtifactDocument:
     metadata = dict(document.metadata)
-    metadata["format_version"] = TRAINER_INPUT_DATASET_FORMAT_VERSION
-    metadata["decision_record_schema_version"] = DECISION_RECORD_SCHEMA_VERSION
+    metadata["format_version"] = 2
+    metadata["decision_record_schema_version"] = 1
     metadata.setdefault("generation_metadata", {})
 
     migrated_records: list[dict[str, Any]] = []
@@ -479,7 +545,7 @@ def _migrate_trainer_input_v1_to_v2(
         ]
         identities = legacy_index_action_identities(legal_action_kinds)
         chosen_index = _int(record.get("chosen_action_index"))
-        record["record_schema_version"] = DECISION_RECORD_SCHEMA_VERSION
+        record["record_schema_version"] = 1
         record["legal_action_identities"] = identities
         record["chosen_action_id"] = None
         record["chosen_action_identity"] = (
@@ -489,6 +555,28 @@ def _migrate_trainer_input_v1_to_v2(
         record["source_metadata"] = _legacy_source_metadata(record)
         migrated_records.append(record)
 
+    return ArtifactDocument(metadata=metadata, records=migrated_records)
+
+
+def _migrate_trainer_input_v2_to_v3(
+    document: ArtifactDocument,
+) -> ArtifactDocument:
+    """Add explicit v2 tactical contract placeholders to old numeric rows."""
+
+    metadata = dict(document.metadata)
+    metadata["format_version"] = 3
+    metadata["decision_record_schema_version"] = DECISION_RECORD_SCHEMA_VERSION
+    metadata["tactical_feature_schema_id"] = LEGACY_FEATURE_SCHEMA_ID
+    metadata["tactical_feature_schema_version"] = 0
+    metadata["identity_vocabulary_version"] = ""
+    migrated_records: list[dict[str, Any]] = []
+    for raw_record in document.records:
+        record = dict(raw_record)
+        record["record_schema_version"] = DECISION_RECORD_SCHEMA_VERSION
+        record["feature_schema_id"] = LEGACY_FEATURE_SCHEMA_ID
+        record["tactical_state"] = {}
+        record["tactical_legal_actions"] = []
+        migrated_records.append(record)
     return ArtifactDocument(metadata=metadata, records=migrated_records)
 
 
@@ -525,6 +613,9 @@ def _record_to_dict(record: TrainerInputRecord) -> dict[str, Any]:
         "terminal_after_step": record.terminal_after_step,
         "controller_provenance": record.controller_provenance,
         "source_metadata": record.source_metadata,
+        "feature_schema_id": record.feature_schema_id,
+        "tactical_state": record.tactical_state,
+        "tactical_legal_actions": record.tactical_legal_actions,
         "segment_index": record.segment_index,
         "segment_step_index": record.segment_step_index,
         "segment_decision_count": record.segment_decision_count,
@@ -566,6 +657,11 @@ def _record_from_dict(raw: dict[str, Any]) -> TrainerInputRecord:
         terminal_after_step=bool(raw.get("terminal_after_step")),
         controller_provenance=_dict(raw.get("controller_provenance")),
         source_metadata=_dict(raw.get("source_metadata")),
+        feature_schema_id=str(raw.get("feature_schema_id", LEGACY_FEATURE_SCHEMA_ID)),
+        tactical_state=_dict(raw.get("tactical_state")),
+        tactical_legal_actions=[
+            _dict(action) for action in _list(raw.get("tactical_legal_actions"))
+        ],
         segment_index=_int(raw.get("segment_index")),
         segment_step_index=_int(raw.get("segment_step_index")),
         segment_decision_count=_int(raw.get("segment_decision_count")),
@@ -596,12 +692,33 @@ def _dataset_shape_problems(dataset: TrainerInputDataset) -> list[str]:
             "unsupported decision record schema version: "
             f"{dataset.decision_record_schema_version}"
         )
+    if dataset.tactical_feature_schema_id != TACTICAL_FEATURE_SCHEMA_ID:
+        problems.append(
+            "unsupported tactical feature schema: "
+            f"{dataset.tactical_feature_schema_id!r}"
+        )
+    if dataset.tactical_feature_schema_version != TACTICAL_FEATURE_SCHEMA_VERSION:
+        problems.append(
+            "unsupported tactical feature schema version: "
+            f"{dataset.tactical_feature_schema_version}"
+        )
+    if dataset.identity_vocabulary_version != IDENTITY_VOCABULARY_VERSION:
+        problems.append(
+            "unsupported identity vocabulary version: "
+            f"{dataset.identity_vocabulary_version!r}"
+        )
     for record in dataset.records:
         if record.record_schema_version != dataset.decision_record_schema_version:
             problems.append(
                 f"record {record.example_index}: record schema "
                 f"{record.record_schema_version} does not match dataset schema "
                 f"{dataset.decision_record_schema_version}"
+            )
+        if record.feature_schema_id != dataset.tactical_feature_schema_id:
+            problems.append(
+                f"record {record.example_index}: tactical feature schema "
+                f"{record.feature_schema_id!r} does not match dataset schema "
+                f"{dataset.tactical_feature_schema_id!r}"
             )
         problems.extend(
             decision_record_problems(
