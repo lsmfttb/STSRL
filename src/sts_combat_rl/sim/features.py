@@ -30,6 +30,7 @@ MAX_DISCARD_CARDS = 64
 MAX_EXHAUST_CARDS = 64
 MAX_MONSTERS = 5
 MAX_POTIONS = 5
+MAX_RELICS = 64
 
 CARD_TYPES = ("ATTACK", "SKILL", "POWER", "CURSE", "STATUS")
 CARD_RARITIES = ("BASIC", "COMMON", "UNCOMMON", "RARE", "SPECIAL", "CURSE")
@@ -475,6 +476,7 @@ def encode_lightspeed_battle_snapshot(raw: Mapping[str, Any]) -> list[float]:
             _number(_mapping(state["availability"]).get("hand")),
             _number(_mapping(state["availability"]).get("discard_cards")),
             _number(_mapping(state["availability"]).get("exhaust_cards")),
+            _number(_mapping(state["availability"]).get("relics")),
         ]
     )
     cards = [
@@ -501,6 +503,9 @@ def encode_lightspeed_battle_snapshot(raw: Mapping[str, Any]) -> list[float]:
     potions = _sequence(state.get("potions"))
     for index in range(MAX_POTIONS):
         features.extend(_encode_public_potion(_mapping_at(potions, index)))
+    relics = _sequence(state.get("relics"))
+    for index in range(MAX_RELICS):
+        features.extend(_encode_public_relic(_mapping_at(relics, index)))
     return features
 
 
@@ -1091,6 +1096,22 @@ def _encode_public_potion(potion: Mapping[str, Any]) -> list[float]:
         _identity_status_code(identity),
         _bool(potion.get("is_empty_slot")),
         _number(potion.get("requires_target")),
+    ]
+
+
+def _encode_public_relic(relic: Mapping[str, Any]) -> list[float]:
+    """Encode public relic identity and its explicitly available counter."""
+
+    if not relic:
+        return [0.0] * 5
+    identity = _mapping(relic.get("identity"))
+    counter = relic.get("counter")
+    return [
+        1.0,
+        _identity_code(identity),
+        _identity_status_code(identity),
+        _number(counter),
+        1.0 if counter is not None else 0.0,
     ]
 
 

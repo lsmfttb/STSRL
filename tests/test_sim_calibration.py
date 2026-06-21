@@ -33,6 +33,7 @@ class FakeCalibrationAdapter:
                 "battle_hand": [{"type": "ATTACK", "playable": True}],
                 "battle_discard_pile": [],
                 "battle_exhaust_pile": [],
+                "battle_relics": [{"id": "Burning Blood", "counter": 0}],
                 "battle_monsters": [
                     {
                         "current_hp": 51,
@@ -138,6 +139,13 @@ class FakeMissingIntentCategoryAdapter(FakeCalibrationAdapter):
         return snapshot
 
 
+class FakeMissingRelicsAdapter(FakeCalibrationAdapter):
+    def reset(self, seed: int | None = None) -> SimulatorSnapshot:
+        snapshot = super().reset(seed)
+        snapshot.raw.pop("battle_relics")
+        return snapshot
+
+
 def test_choose_calibration_action_prefers_non_potion_card() -> None:
     actions = FakeCalibrationAdapter().legal_actions(
         SimulatorSnapshot(observation=[], raw={})
@@ -232,6 +240,18 @@ def test_tactical_feature_coverage_audit_fails_without_simulator_intent_category
     assert report.missing_field_counts["monsters.intent_category"] == 1
     assert any(
         "required canonical monster intent category is absent" in problem
+        for problem in report.problems
+    )
+
+
+def test_tactical_feature_coverage_audit_fails_without_simulator_relics() -> None:
+    report = run_tactical_feature_coverage_audit(
+        FakeMissingRelicsAdapter(), seed=7, max_steps=1
+    )
+
+    assert report.missing_field_counts["availability.relics"] == 1
+    assert any(
+        "required relic identities and counters is absent" in problem
         for problem in report.problems
     )
 

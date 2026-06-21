@@ -579,6 +579,8 @@ def _validate_tactical_report(report: TacticalFeatureCoverageReport) -> None:
         required_projection_fields = (
             ("availability.discard_cards", "discard-pile card members"),
             ("availability.exhaust_cards", "exhaust-pile card members"),
+            ("availability.relics", "relic identities and counters"),
+            ("relics.counter", "visible relic counters"),
             ("monsters.intent_category", "canonical monster intent category"),
             ("monsters.state_machine.current_move", "exact monster current move"),
         )

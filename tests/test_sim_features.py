@@ -283,6 +283,27 @@ def test_discard_and_exhaust_members_are_not_collapsed_to_counts_or_empty() -> N
     assert "availability.exhaust_cards" in unavailable["missing_fields"]
 
 
+def test_relic_identity_and_counter_are_distinguishable_inputs() -> None:
+    first = {"battle_relics": [{"id": "Burning Blood", "counter": 0}]}
+    changed_identity = {"battle_relics": [{"id": "Vajra", "counter": 0}]}
+    changed_counter = {"battle_relics": [{"id": "Burning Blood", "counter": 2}]}
+    unavailable = build_public_tactical_state({})
+
+    first_state = build_public_tactical_state(first)
+
+    assert first_state["relics"][0]["identity"]["value"] == "Burning Blood"
+    assert first_state["relics"][0]["counter"] == 0.0
+    assert first_state["availability"]["relics"] is True
+    assert encode_lightspeed_battle_snapshot(
+        first
+    ) != encode_lightspeed_battle_snapshot(changed_identity)
+    assert encode_lightspeed_battle_snapshot(
+        first
+    ) != encode_lightspeed_battle_snapshot(changed_counter)
+    assert unavailable["availability"]["relics"] is False
+    assert "availability.relics" in unavailable["missing_fields"]
+
+
 def test_simulator_and_communicationmod_share_intent_category_not_exact_move() -> None:
     simulator_raw = {
         "battle_monsters": [

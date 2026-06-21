@@ -20,7 +20,7 @@ index a9afe35..61ee133 100644
  #include "game/Game.h"
  
  #include "slaythespire.h"
-@@ -21,6 +27,521 @@
+@@ -21,6 +27,539 @@
  
  using namespace sts;
  
@@ -413,6 +413,23 @@ index a9afe35..61ee133 100644
 +    return ret;
 +}
 +
++pybind11::dict relicSnapshot(const RelicInstance &relic, int relicIdx) {
++    pybind11::dict ret;
++    ret["relic_index"] = relicIdx;
++    ret["id"] = static_cast<int>(relic.id);
++    ret["name"] = std::string(getRelicName(relic.id));
++    ret["counter"] = relic.data;
++    return ret;
++}
++
++pybind11::list relicListSnapshot(const GameContext &gc) {
++    pybind11::list ret;
++    for (int idx = 0; idx < gc.relics.size(); ++idx) {
++        ret.append(relicSnapshot(gc.relics.relics[idx], idx));
++    }
++    return ret;
++}
++
 +struct StepSimulator {
 +    GameContext gc;
 +    BattleContext bc;
@@ -473,6 +490,7 @@ index a9afe35..61ee133 100644
 +            ret["battle_potion_count"] = bc.potionCount;
 +            ret["battle_potion_capacity"] = bc.potionCapacity;
 +            ret["battle_potions"] = potionListSnapshot(bc);
++            ret["battle_relics"] = relicListSnapshot(gc);
 +        }
 +        return ret;
 +    }
@@ -542,7 +560,7 @@ index a9afe35..61ee133 100644
  PYBIND11_MODULE(slaythespire, m) {
      m.doc() = "pybind11 example plugin"; // optional module docstring
      m.def("play", &sts::py::play, "play Slay the Spire Console");
-@@ -41,6 +546,27 @@ PYBIND11_MODULE(slaythespire, m) {
+@@ -41,6 +564,27 @@ PYBIND11_MODULE(slaythespire, m) {
          .def_readwrite("print_logs", &search::ScumSearchAgent2::printLogs, "when set to true, the agent prints state information as it makes actions")
          .def("playout", &search::ScumSearchAgent2::playout);
  
