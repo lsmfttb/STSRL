@@ -1224,6 +1224,7 @@ def _normalize_communicationmod_potion(potion: Mapping[str, Any]) -> dict[str, A
         "numeric_id": potion.get("numeric_id"),
         "name": potion.get("name"),
         "can_use": potion.get("can_use", potion.get("is_usable")),
+        "can_discard": potion.get("can_discard"),
         "requires_target": potion.get("requires_target", potion.get("has_target")),
     }
 
