@@ -1,11 +1,11 @@
 diff --git a/bindings/slaythespire.cpp b/bindings/slaythespire.cpp
-index be631b1..64717e4 100644
+index be631b1..29f3970 100644
 --- a/bindings/slaythespire.cpp
 +++ b/bindings/slaythespire.cpp
-@@ -433,16 +433,265 @@ pybind11::list relicListSnapshot(const GameContext &gc) {
+@@ -433,16 +433,299 @@ pybind11::list relicListSnapshot(const GameContext &gc) {
      return ret;
  }
-
+ 
 +
 +// ---------------------------------------------------------------------------
 +// Public encounter history
@@ -110,10 +110,6 @@ index be631b1..64717e4 100644
 +    return ret;
 +}
 +
-+// ---------------------------------------------------------------------------
-+// Visible screen projection
-+// ---------------------------------------------------------------------------
-+
 +pybind11::dict publicVisibleScreenSnapshot(const GameContext &gc) {
 +    pybind11::dict ret;
 +    pybind11::list missingFields;
@@ -141,6 +137,27 @@ index be631b1..64717e4 100644
 +                gold.append(row);
 +            }
 +            rewards["gold"] = gold;
++            pybind11::list cardRewards;
++            for (int ridx = 0; ridx < rc.cardRewardCount; ++ridx) {
++                pybind11::dict cr;
++                cr["reward_index"] = ridx;
++                pybind11::list reward_cards;
++                for (int cidx = 0; cidx < rc.cardRewards[ridx].size(); ++cidx) {
++                    const auto &card = rc.cardRewards[ridx][cidx];
++                    pybind11::dict row;
++                    row["option_index"] = cidx;
++                    row["id"] = static_cast<int>(card.getId());
++                    row["name"] = std::string(card.getName());
++                    row["type"] = cardTypeLabel(card.getType());
++                    row["rarity"] = cardRarityStrings[static_cast<int>(card.getRarity())];
++                    row["upgraded"] = card.isUpgraded();
++                    reward_cards.append(row);
++                }
++                cr["cards"] = reward_cards;
++                cr["singing_bowl_available"] = gc.hasRelic(RelicId::SINGING_BOWL);
++                cardRewards.append(cr);
++            }
++            rewards["card_rewards"] = cardRewards;
 +            pybind11::list relics;
 +            for (int idx = 0; idx < rc.relicCount; ++idx) {
 +                pybind11::dict row;
@@ -183,7 +200,7 @@ index be631b1..64717e4 100644
 +            cs["select_type"] = "CARD_SELECT";
 +            cs["required_count"] = gc.info.toSelectCount;
 +            cs["selected_count"] = gc.info.haveSelectedCards.size();
-+            pybind11::list options;
++            pybind11::list selectOpts;
 +            for (int idx = 0; idx < gc.info.toSelectCards.size(); ++idx) {
 +                const auto &card = gc.info.toSelectCards[idx].card;
 +                pybind11::dict row;
@@ -193,9 +210,9 @@ index be631b1..64717e4 100644
 +                row["type"] = cardTypeLabel(card.getType());
 +                row["rarity"] = cardRarityStrings[static_cast<int>(card.getRarity())];
 +                row["upgraded"] = card.isUpgraded();
-+                options.append(row);
++                selectOpts.append(row);
 +            }
-+            cs["options"] = options;
++            cs["options"] = selectOpts;
 +            ret["card_select"] = cs;
 +            break;
 +        }
@@ -210,12 +227,29 @@ index be631b1..64717e4 100644
 +            ret["treasure"] = tr;
 +            break;
 +        }
-+        case ScreenState::REST_ROOM:
++        case ScreenState::REST_ROOM: {
++            pybind11::dict rr;
++            pybind11::list restOpts;
++            for (int idx = 0; idx < 7; ++idx) {
++                pybind11::dict row;
++                row["option_index"] = idx;
++                if (idx == 0) row["label"] = "REST";
++                else if (idx == 1) row["label"] = "SMITH";
++                else if (idx == 2) row["label"] = "RECALL";
++                else if (idx == 3) row["label"] = "LIFT";
++                else if (idx == 4) row["label"] = "TOKE";
++                else if (idx == 5) row["label"] = "DIG";
++                else row["label"] = "UNKNOWN";
++                restOpts.append(row);
++            }
++            rr["options"] = restOpts;
++            ret["rest"] = rr;
 +            break;
++        }
 +        case ScreenState::SHOP_ROOM: {
 +            const auto &shop = gc.info.shop;
 +            pybind11::dict sh;
-+            pybind11::list cards;
++            pybind11::list shopCards;
 +            for (int idx = 0; idx < 7; ++idx) {
 +                const auto price = shop.cardPrice(idx);
 +                pybind11::dict row;
@@ -232,9 +266,9 @@ index be631b1..64717e4 100644
 +                    item["upgraded"] = card.isUpgraded();
 +                    row["item"] = item;
 +                }
-+                cards.append(row);
++                shopCards.append(row);
 +            }
-+            sh["cards"] = cards;
++            sh["cards"] = shopCards;
 +            sh["card_remove_price"] = shop.removeCost;
 +            sh["card_remove_sold_out"] = shop.removeCost < 0;
 +            ret["shop"] = sh;
@@ -259,24 +293,24 @@ index be631b1..64717e4 100644
      bool battleActive = false;
 +    std::vector<PublicEncounterRecord> publicEncounterHistory;
  };
-
+ 
  struct StepSimulator {
      GameContext gc;
      BattleContext bc;
      bool battleActive = false;
 +    std::vector<PublicEncounterRecord> publicEncounterHistory;
-
+ 
      StepSimulator(CharacterClass cc, std::uint64_t seed, int ascension) : gc(cc, seed, ascension) {}
-
-@@ -450,6 +699,7 @@ struct StepSimulator {
+ 
+@@ -450,6 +733,7 @@ struct StepSimulator {
          gc = GameContext(cc, seed, ascension);
          bc = BattleContext();
          battleActive = false;
 +        publicEncounterHistory.clear();
      }
-
+ 
      void ensureBattleContext() {
-@@ -479,6 +729,12 @@ struct StepSimulator {
+@@ -479,6 +763,12 @@ struct StepSimulator {
          ret["gold"] = gc.gold;
          ret["ascension"] = gc.ascension;
          ret["room_type"] = roomStrings[static_cast<int>(gc.curRoom)];
@@ -289,7 +323,7 @@ index be631b1..64717e4 100644
          ret["battle_active"] = battleActive;
          if (battleActive) {
              ret["encounter_id"] = monsterEncounterEnumNames[static_cast<int>(bc.encounter)];
-@@ -545,6 +801,12 @@ struct StepSimulator {
+@@ -545,6 +835,12 @@ struct StepSimulator {
              battleAction.execute(bc);
              if (bc.outcome != Outcome::UNDECIDED) {
                  const auto completedBattleOutcome = battleOutcomeLabel(bc.outcome);
@@ -302,18 +336,17 @@ index be631b1..64717e4 100644
                  bc.exitBattle(gc);
                  battleActive = false;
                  auto result = snapshot();
-@@ -577,13 +839,13 @@ struct StepSimulator {
+@@ -577,13 +873,13 @@ struct StepSimulator {
          gc = checkpoint.gc;
          bc = checkpoint.bc;
          battleActive = checkpoint.battleActive;
 +        publicEncounterHistory = checkpoint.publicEncounterHistory;
          return snapshot();
      }
-+
  };
-
+ 
  }
--
+ 
 -
  PYBIND11_MODULE(slaythespire, m) {
      m.doc() = "pybind11 example plugin"; // optional module docstring
