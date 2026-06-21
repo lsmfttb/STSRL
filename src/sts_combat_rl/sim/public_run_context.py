@@ -185,6 +185,7 @@ _PUBLIC_VISIBLE_SCREEN_KEYS: frozenset[str] = frozenset(
         "rest_options",
         "rest_option_label",
         "option_label",
+        "rest",
         # shop screen
         "shop",
         "shop_items",
@@ -195,6 +196,7 @@ _PUBLIC_VISIBLE_SCREEN_KEYS: frozenset[str] = frozenset(
         "remove_card_cost",
         "remove_card_sold_out",
         "card_remove_price",
+        "card_remove_sold_out",
         # card/relic/potion identity (shared)
         "id",
         "name",

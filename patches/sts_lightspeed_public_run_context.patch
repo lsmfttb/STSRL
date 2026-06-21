@@ -5,7 +5,7 @@ index be631b1..29f3970 100644
 @@ -433,16 +433,299 @@ pybind11::list relicListSnapshot(const GameContext &gc) {
      return ret;
  }
- 
+
 +
 +// ---------------------------------------------------------------------------
 +// Public encounter history
@@ -293,22 +293,22 @@ index be631b1..29f3970 100644
      bool battleActive = false;
 +    std::vector<PublicEncounterRecord> publicEncounterHistory;
  };
- 
+
  struct StepSimulator {
      GameContext gc;
      BattleContext bc;
      bool battleActive = false;
 +    std::vector<PublicEncounterRecord> publicEncounterHistory;
- 
+
      StepSimulator(CharacterClass cc, std::uint64_t seed, int ascension) : gc(cc, seed, ascension) {}
- 
+
 @@ -450,6 +733,7 @@ struct StepSimulator {
          gc = GameContext(cc, seed, ascension);
          bc = BattleContext();
          battleActive = false;
 +        publicEncounterHistory.clear();
      }
- 
+
      void ensureBattleContext() {
 @@ -479,6 +763,12 @@ struct StepSimulator {
          ret["gold"] = gc.gold;
@@ -344,9 +344,9 @@ index be631b1..29f3970 100644
          return snapshot();
      }
  };
- 
+
  }
- 
+
 -
  PYBIND11_MODULE(slaythespire, m) {
      m.doc() = "pybind11 example plugin"; // optional module docstring
