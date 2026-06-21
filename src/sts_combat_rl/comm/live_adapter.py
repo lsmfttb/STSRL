@@ -42,7 +42,7 @@ logger = logging.getLogger("sts_combat_rl.live_adapter")
 
 LIVE_SOURCE_FORMAT = "communicationmod_live_v1"
 LIVE_INFORMATION_REGIME = "normal_public_policy"
-LIVE_SOURCE_KIND = "unknown"
+LIVE_SOURCE_KIND: str = "live_communicationmod"
 
 # Prefix for live-only action ids to avoid collision with simulator replay ids.
 _LIVE_ACTION_ID_PREFIX = "live"
@@ -252,6 +252,9 @@ def build_live_legal_actions(
             )
             if playable is not True:
                 continue
+            # Only construct card actions when targetability is explicitly known.
+            # When requires_target is None (field absent or ambiguous), the live
+            # adapter must not invent target or non-target actions.
             if requires_target is True:
                 for monster_index, raw_monster in enumerate(monsters):
                     monster = _mapping(raw_monster)
@@ -282,7 +285,7 @@ def build_live_legal_actions(
                             },
                         )
                     )
-            else:
+            elif requires_target is False:
                 action_counter += 1
                 actions.append(
                     SimulatorAction(
@@ -366,7 +369,7 @@ def build_live_legal_actions(
                                 },
                             )
                         )
-                else:
+                elif requires_target is False:
                     action_counter += 1
                     actions.append(
                         SimulatorAction(
@@ -507,8 +510,14 @@ def _fail_closed_result(
     step_index: int,
     tactical_state: dict[str, Any] | None = None,
     tactical_actions: list[dict[str, Any]] | None = None,
+    provenance: dict[str, Any] | None = None,
+    decision: ControllerDecision | None = None,
 ) -> LiveDecisionResult:
-    """Build a structured failure record without emitting a gameplay command."""
+    """Build a structured failure record without emitting a gameplay command.
+
+    Callers that have a controller decision (e.g. out-of-range selection) should
+    pass it so provenance is preserved for audit.
+    """
 
     state = tactical_state or {}
     actions = tactical_actions or []
@@ -516,8 +525,8 @@ def _fail_closed_result(
     return LiveDecisionResult(
         command=None,
         formatted_command="",
-        provenance=None,
-        decision=None,
+        provenance=provenance,
+        decision=decision,
         tactical_state=state,
         tactical_actions=actions,
         selected_action_index=None,
@@ -651,6 +660,8 @@ def invoke_live_controller(
             step_index=step_index,
             tactical_state=tactical_state,
             tactical_actions=tactical_actions,
+            provenance=provenance_dict,
+            decision=decision,
         )
 
     selected_action = live_actions[selected_index]
@@ -666,6 +677,8 @@ def invoke_live_controller(
             step_index=step_index,
             tactical_state=tactical_state,
             tactical_actions=tactical_actions,
+            provenance=provenance_dict,
+            decision=decision,
         )
 
     action_identity = {}
@@ -721,6 +734,7 @@ def process_live_message(
     *,
     output_stream: TextIO | None = None,
     fallback_command: Command | None = None,
+    step_index: int = 0,
 ) -> LiveDecisionResult:
     """Consume one CommunicationMod JSON line, invoke the controller, and emit.
 
@@ -734,6 +748,10 @@ def process_live_message(
       exception, out-of-range selection, or unmappable action): writes nothing.
 
     If ``output_stream`` is ``None``, ``sys.stdout`` is used.
+
+    ``step_index`` is forwarded to ``invoke_live_controller`` so the caller
+    controls the progression of decision provenance across a sequence of live
+    messages.
 
     Returns:
         The full ``LiveDecisionResult`` for audit/logging.
@@ -750,7 +768,7 @@ def process_live_message(
             {},
             is_combat=False,
             unsupported_reason="invalid JSON",
-            step_index=0,
+            step_index=step_index,
         )
         return result
 
@@ -759,14 +777,14 @@ def process_live_message(
             {},
             is_combat=False,
             unsupported_reason="state JSON must be an object",
-            step_index=0,
+            step_index=step_index,
         )
         return result
 
     result = invoke_live_controller(
         raw,
         controller,
-        step_index=0,
+        step_index=step_index,
         non_combat_fallback=fallback_command,
     )
 
