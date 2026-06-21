@@ -12,7 +12,7 @@ index d04312b..4794ae6 100644
  add_subdirectory(json)
  add_subdirectory(pybind11)
 diff --git a/bindings/slaythespire.cpp b/bindings/slaythespire.cpp
-index a9afe35..b0b969a 100644
+index a9afe35..64717e4 100644
 --- a/bindings/slaythespire.cpp
 +++ b/bindings/slaythespire.cpp
 @@ -9,11 +9,17 @@
@@ -33,7 +33,7 @@ index a9afe35..b0b969a 100644
  #include "game/Game.h"
  
  #include "slaythespire.h"
-@@ -21,6 +27,705 @@
+@@ -21,6 +27,825 @@
  
  using namespace sts;
  
@@ -545,31 +545,150 @@ index a9afe35..b0b969a 100644
 +        ret.append(row);
 +    }
 +    return ret;
-+
 +}
++
++// ---------------------------------------------------------------------------
++// Visible screen projection
++// ---------------------------------------------------------------------------
++
 +pybind11::dict publicVisibleScreenSnapshot(const GameContext &gc) {
-+    pybind11::dict ret; pybind11::list missingFields;
++    pybind11::dict ret;
++    pybind11::list missingFields;
 +    ret["schema_id"] = "public_visible_screen-v1";
 +    ret["screen_state"] = screenStateLabel(gc.screenState);
 +    ret["projection_available"] = true;
 +    ret["legal_actions"] = pybind11::list();
 +    switch (gc.screenState) {
-+        case ScreenState::EVENT_SCREEN: { pybind11::dict event;
++        case ScreenState::EVENT_SCREEN: {
++            pybind11::dict event;
 +            event["event_id"] = eventIdStrings[static_cast<int>(gc.curEvent)];
 +            event["event_name"] = eventGameNames[static_cast<int>(gc.curEvent)];
 +            ret["event"] = event;
-+            missingFields.append("event_option_details"); break; }
++            missingFields.append("event_option_details");
++            break;
++        }
++        case ScreenState::REWARDS: {
++            pybind11::dict rewards;
++            const auto &rc = gc.info.rewardsContainer;
++            pybind11::list gold;
++            for (int idx = 0; idx < rc.goldRewardCount; ++idx) {
++                pybind11::dict row;
++                row["option_index"] = idx;
++                row["amount"] = rc.gold[idx];
++                gold.append(row);
++            }
++            rewards["gold"] = gold;
++            pybind11::list relics;
++            for (int idx = 0; idx < rc.relicCount; ++idx) {
++                pybind11::dict row;
++                row["option_index"] = idx;
++                row["id"] = static_cast<int>(rc.relics[idx]);
++                row["name"] = std::string(getRelicName(rc.relics[idx]));
++                relics.append(row);
++            }
++            rewards["relics"] = relics;
++            pybind11::list potions;
++            for (int idx = 0; idx < rc.potionCount; ++idx) {
++                pybind11::dict row;
++                row["option_index"] = idx;
++                row["id"] = static_cast<int>(rc.potions[idx]);
++                row["name"] = potionLabel(rc.potions[idx]);
++                potions.append(row);
++            }
++            rewards["potions"] = potions;
++            rewards["emerald_key"] = rc.emeraldKey;
++            rewards["sapphire_key"] = rc.sapphireKey;
++            ret["rewards"] = rewards;
++            break;
++        }
++        case ScreenState::BOSS_RELIC_REWARDS: {
++            pybind11::dict br;
++            pybind11::list brelics;
++            for (int idx = 0; idx < 3; ++idx) {
++                pybind11::dict row;
++                row["option_index"] = idx;
++                row["id"] = static_cast<int>(gc.info.bossRelics[idx]);
++                row["name"] = std::string(getRelicName(gc.info.bossRelics[idx]));
++                brelics.append(row);
++            }
++            br["relics"] = brelics;
++            ret["boss_relic_rewards"] = br;
++            break;
++        }
++        case ScreenState::CARD_SELECT: {
++            pybind11::dict cs;
++            cs["select_type"] = "CARD_SELECT";
++            cs["required_count"] = gc.info.toSelectCount;
++            cs["selected_count"] = gc.info.haveSelectedCards.size();
++            pybind11::list options;
++            for (int idx = 0; idx < gc.info.toSelectCards.size(); ++idx) {
++                const auto &card = gc.info.toSelectCards[idx].card;
++                pybind11::dict row;
++                row["option_index"] = idx;
++                row["id"] = static_cast<int>(card.getId());
++                row["name"] = std::string(card.getName());
++                row["type"] = cardTypeLabel(card.getType());
++                row["rarity"] = cardRarityStrings[static_cast<int>(card.getRarity())];
++                row["upgraded"] = card.isUpgraded();
++                options.append(row);
++            }
++            cs["options"] = options;
++            ret["card_select"] = cs;
++            break;
++        }
 +        case ScreenState::MAP_SCREEN:
 +            ret["visible_map"] = visibleMapSnapshot(gc);
 +            ret["current_map_node"] = currentMapNodeSnapshot(gc);
-+            ret["next_map_nodes"] = nextMapNodesSnapshot(gc); break;
++            ret["next_map_nodes"] = nextMapNodesSnapshot(gc);
++            break;
++        case ScreenState::TREASURE_ROOM: {
++            pybind11::dict tr;
++            tr["chest_size"] = chestSizeEnumNames[static_cast<int>(gc.info.chestSize)];
++            ret["treasure"] = tr;
++            break;
++        }
++        case ScreenState::REST_ROOM:
++            break;
++        case ScreenState::SHOP_ROOM: {
++            const auto &shop = gc.info.shop;
++            pybind11::dict sh;
++            pybind11::list cards;
++            for (int idx = 0; idx < 7; ++idx) {
++                const auto price = shop.cardPrice(idx);
++                pybind11::dict row;
++                row["option_index"] = idx;
++                row["price"] = price;
++                row["sold_out"] = price < 0;
++                if (price >= 0) {
++                    const auto &card = shop.cards[idx];
++                    pybind11::dict item;
++                    item["id"] = static_cast<int>(card.getId());
++                    item["name"] = std::string(card.getName());
++                    item["type"] = cardTypeLabel(card.getType());
++                    item["rarity"] = cardRarityStrings[static_cast<int>(card.getRarity())];
++                    item["upgraded"] = card.isUpgraded();
++                    row["item"] = item;
++                }
++                cards.append(row);
++            }
++            sh["cards"] = cards;
++            sh["card_remove_price"] = shop.removeCost;
++            sh["card_remove_sold_out"] = shop.removeCost < 0;
++            ret["shop"] = sh;
++            break;
++        }
 +        case ScreenState::BATTLE:
 +            ret["projection_available"] = false;
-+            missingFields.append("battle_screen_uses_battle_snapshot"); break;
-+        case ScreenState::INVALID: default:
++            missingFields.append("battle_screen_uses_battle_snapshot");
++            break;
++        case ScreenState::INVALID:
++        default:
 +            ret["projection_available"] = false;
-+            missingFields.append("unsupported_screen_state"); break; }
-+    ret["missing_fields"] = missingFields; return ret; }
++            missingFields.append("unsupported_screen_state");
++            break;
++    }
++    ret["missing_fields"] = missingFields;
++    return ret;
 +}
 +struct StepSimulatorCheckpoint {
 +    GameContext gc;
@@ -736,10 +855,11 @@ index a9afe35..b0b969a 100644
 +
 +};
 +
++}
  PYBIND11_MODULE(slaythespire, m) {
      m.doc() = "pybind11 example plugin"; // optional module docstring
      m.def("play", &sts::py::play, "play Slay the Spire Console");
-@@ -41,6 +746,31 @@ PYBIND11_MODULE(slaythespire, m) {
+@@ -41,6 +866,31 @@ PYBIND11_MODULE(slaythespire, m) {
          .def_readwrite("print_logs", &search::ScumSearchAgent2::printLogs, "when set to true, the agent prints state information as it makes actions")
          .def("playout", &search::ScumSearchAgent2::playout);
  

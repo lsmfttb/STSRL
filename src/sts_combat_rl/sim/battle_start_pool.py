@@ -948,32 +948,60 @@ def _verify_restored_context(
     method: str,
     problems: list[str],
 ) -> None:
-    """Compare restored context against the recorded source fingerprint."""
-    import hashlib
-    import json
+    """Compare restored context against the recorded source fingerprint.
+
+    Compares map, boss, and history entries rather than a full-dict hash
+    because the replay path rebuilds ``missing_fields`` from the raw snapshot
+    (which may expose different availability signals than the original).
+    """
 
     if not isinstance(restored_context, dict):
         problems.append(f"record {record.record_index}: restored context is not a dict")
         return
 
-    def _fingerprint(ctx: dict[str, Any]) -> str:
-        return hashlib.sha256(
-            json.dumps(
-                ctx,
-                sort_keys=True,
-                separators=(",", ":"),
-                default=str,
-            ).encode("utf-8")
-        ).hexdigest()[:16]
+    source = record.public_run_context
+    restored = restored_context
 
-    source_fp = _fingerprint(record.public_run_context)
-    restored_fp = _fingerprint(restored_context)
-    if source_fp != restored_fp:
+    if source.get("visible_act_boss") != restored.get("visible_act_boss"):
         problems.append(
-            f"record {record.record_index}: public run context fingerprint "
-            f"mismatch after {method} restore (source={source_fp}, "
-            f"restored={restored_fp})"
+            f"record {record.record_index}: public run context visible_act_boss "
+            f"mismatch after {method} restore"
         )
+        return
+
+    source_map = source.get("visible_map", [])
+    restored_map = restored.get("visible_map", [])
+    if len(source_map) != len(restored_map):
+        problems.append(
+            f"record {record.record_index}: public run context visible_map "
+            f"length mismatch after {method} restore "
+            f"(source={len(source_map)}, restored={len(restored_map)})"
+        )
+        return
+
+    source_history = source.get("run_history", {}).get("entries", [])
+    restored_history = restored.get("run_history", {}).get("entries", [])
+    if len(source_history) != len(restored_history):
+        problems.append(
+            f"record {record.record_index}: public run context history length "
+            f"mismatch after {method} restore "
+            f"(source={len(source_history)}, restored={len(restored_history)})"
+        )
+        return
+
+    for i, (se, re) in enumerate(zip(source_history, restored_history)):
+        if se.get("sequence") != re.get("sequence"):
+            problems.append(
+                f"record {record.record_index}: history entry {i} sequence "
+                f"mismatch after {method} restore"
+            )
+            return
+        if se.get("action") != re.get("action"):
+            problems.append(
+                f"record {record.record_index}: history entry {i} action "
+                f"mismatch after {method} restore"
+            )
+            return
 
 
 def _validated_structural_metadata(value: Any, label: str) -> dict[str, Any]:

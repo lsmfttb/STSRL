@@ -373,6 +373,10 @@ def build_decision_context(
     public_context = build_public_run_context(raw)
     if run_history is not None:
         public_context["run_history"] = dict(run_history)
+        missing = public_context.get("missing_fields")
+        if isinstance(missing, list) and "run_history" in missing:
+            missing.remove("run_history")
+            public_context["missing_fields"] = missing
     return DecisionContext(
         screen_state=screen_state,
         snapshot_features=encode_lightspeed_battle_snapshot(raw),
