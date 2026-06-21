@@ -148,7 +148,12 @@ class FixedEvaluationAggregate:
 
 @dataclass(frozen=True)
 class AggregateSlice:
-    """One aggregate view of evaluation results."""
+    """One aggregate view of evaluation results.
+
+    Weighted slices store floating win/loss/HP-loss numerators and a separate
+    weight denominator so win_rate and mean_hp_loss are properly weighted even
+    when multiple selections come from the same stratum.
+    """
 
     battle_count: int = 0
     win_count: int = 0
@@ -160,8 +165,20 @@ class AggregateSlice:
     total_wall_clock_time_s: float = 0.0
     result_indices: list[int] = field(default_factory=list)
 
+    # Weighted accumulators (kept separate from integer display counts).
+    weighted_wins: float | None = None
+    weighted_losses: float | None = None
+    weighted_resolved: float | None = None
+    weighted_hp_loss_sum: float | None = None
+    weighted_hp_loss_weight: float | None = None
+
     @property
     def win_rate(self) -> float | None:
+        if self.weighted_wins is not None and self.weighted_losses is not None:
+            resolved = self.weighted_wins + self.weighted_losses
+            if resolved == 0:
+                return None
+            return self.weighted_wins / resolved
         resolvable = self.win_count + self.loss_count
         if resolvable == 0:
             return None
@@ -169,6 +186,13 @@ class AggregateSlice:
 
     @property
     def mean_hp_loss(self) -> float | None:
+        if (
+            self.weighted_hp_loss_sum is not None
+            and self.weighted_hp_loss_weight is not None
+        ):
+            if self.weighted_hp_loss_weight == 0:
+                return None
+            return self.weighted_hp_loss_sum / self.weighted_hp_loss_weight
         if self.total_hp_loss is None:
             return None
         resolvable = self.win_count + self.loss_count
@@ -465,16 +489,39 @@ def build_evaluation_aggregates(
 
     resolved = [r for r in report.battle_results if not r.is_error]
 
-    # Build per-stratum source-count lookup keyed by stratum string.
+    # Build per-stratum source-count lookup keyed by actual stratum tuples.
     weights: dict[tuple[Any, ...], float] = {}
     if per_stratum_source_counts:
         for key_str, count in per_stratum_source_counts.items():
-            parts = tuple(key_str.split("/"))
-            weights[parts] = float(count)
+            if not isinstance(count, int) or count <= 0:
+                continue
+            parts = key_str.split("/")
+            # Parse back: first two parts are ints (ascension, act), rest are strs.
+            parsed: list[Any] = []
+            for i, part in enumerate(parts):
+                if i < 2:
+                    try:
+                        parsed.append(int(part))
+                    except ValueError:
+                        parsed.append(part)
+                else:
+                    parsed.append(part)
+            weights[tuple(parsed)] = float(count)
 
-    # Natural-weighted: each resolved result weighted by its stratum's source count.
-    if weights:
-        natural_weighted = _build_weighted_aggregate_slice(resolved, weights)
+    # Build per-stratum selected counts from the resolved results.
+    selected_counts: dict[tuple[Any, ...], int] = {}
+    for r in resolved:
+        s = r.structural_stratum
+        selected_counts[s] = selected_counts.get(s, 0) + 1
+
+    # Natural-weighted: each resolved result weighted by source_count / selected_count.
+    if weights and selected_counts:
+        per_result_weights: dict[tuple[Any, ...], float] = {}
+        for stratum, source in weights.items():
+            sel = selected_counts.get(stratum, 0)
+            if sel > 0 and source > 0:
+                per_result_weights[stratum] = source / sel
+        natural_weighted = _build_weighted_aggregate_slice(resolved, per_result_weights)
     else:
         natural_weighted = _build_weighted_aggregate_slice(resolved, {})
 
@@ -592,21 +639,26 @@ def _build_weighted_aggregate_slice(
             weighted_hp_loss_sum += w * r.hp_loss
             weighted_hp_loss_count += w
 
-    # Round weighted counts to nearest integer for display.
+    # Store weighted values so win_rate/mean_hp_loss use true weighted ratios.
     return AggregateSlice(
         battle_count=len(results),
         win_count=round(weighted_wins),
         loss_count=round(weighted_losses),
         truncated_count=round(weighted_truncated),
         error_count=round(weighted_errors),
-        total_hp_loss=(
-            round(weighted_hp_loss_sum / weighted_hp_loss_count)
-            if weighted_hp_loss_count > 0
-            else None
-        ),
+        total_hp_loss=None,  # not used when weighted fields are present
         total_decision_count=total_decisions,
         total_wall_clock_time_s=total_wall,
         result_indices=indices,
+        weighted_wins=weighted_wins,
+        weighted_losses=weighted_losses,
+        weighted_resolved=weighted_wins + weighted_losses,
+        weighted_hp_loss_sum=(
+            weighted_hp_loss_sum if weighted_hp_loss_count > 0 else None
+        ),
+        weighted_hp_loss_weight=(
+            weighted_hp_loss_count if weighted_hp_loss_count > 0 else None
+        ),
     )
 
 
@@ -625,6 +677,7 @@ def dump_fixed_evaluation_report_jsonl(
         "max_battle_steps": report.max_battle_steps,
         "source_pool_format_version": report.source_pool_format_version,
         "selection_config": report.selection_config,
+        "per_stratum_source_counts": dict(report.per_stratum_source_counts),
         "battle_count": len(report.battle_results),
         "authoritative_wins": report.authoritative_wins,
         "losses": report.losses,
@@ -704,6 +757,9 @@ def load_fixed_evaluation_report_jsonl(
         ),
         selection_config=_require_mapping(
             metadata.get("selection_config"), "selection_config"
+        ),
+        per_stratum_source_counts=_per_stratum_counts_from_metadata(
+            metadata.get("per_stratum_source_counts"), "per_stratum_source_counts"
         ),
         battle_results=battle_results,
         problems=_require_string_list(
@@ -1113,3 +1169,17 @@ def _macro_win_rate(slices: list[AggregateSlice]) -> float | None:
     if not rates:
         return None
     return sum(rates) / len(rates)
+
+
+def _per_stratum_counts_from_metadata(value: Any, label: str) -> dict[str, int]:
+    """Validate and coerce per-stratum source counts from report metadata."""
+    if value is None:
+        return {}
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{label} must be an object")
+    result: dict[str, int] = {}
+    for key, val in value.items():
+        if isinstance(val, bool) or not isinstance(val, int) or val < 0:
+            raise ValueError(f"{label} values must be non-negative integers")
+        result[str(key)] = val
+    return result

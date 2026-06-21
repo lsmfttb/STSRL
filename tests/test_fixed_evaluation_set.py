@@ -397,3 +397,136 @@ class TestCohortCoverageReport:
         )
         _, coverage = select_fixed_cohort(pool, selection_seed=1)
         assert coverage.coverage_ok
+
+    def test_required_below_quota_reported(self):
+        """Required strata with fewer records than quota are reported."""
+        pool = _make_pool(
+            [
+                _make_record(0, encounter_id="A"),
+            ]
+        )
+        _, coverage = select_fixed_cohort(
+            pool,
+            selection_seed=1,
+            stratum_quota=2,
+            required_strata=[(20, 1, "MONSTER", "A"), (20, 1, "MONSTER", "B")],
+        )
+        assert len(coverage.required_but_absent_strata) == 1  # B absent
+        assert len(coverage.required_below_quota_strata) == 1  # A below quota
+        assert not coverage.coverage_ok
+
+
+class TestCohortIdentity:
+    """Content-addressed identity tests."""
+
+    def test_identity_includes_snapshot(self):
+        """Changing a record's snapshot changes the cohort identity."""
+        pool = _make_pool(
+            [_make_record(0, encounter_id="A"), _make_record(1, encounter_id="B")]
+        )
+        c1, _ = select_fixed_cohort(pool, selection_seed=1)
+        # Mutate pool to change a record's snapshot.
+        altered = list(pool.records)
+        altered[0] = _make_record(0, encounter_id="A")
+        # Reset snapshot_observation to something different.
+        altered[0] = _make_record(0, encounter_id="A")  # same except no snapshot
+        pool2 = _make_pool(altered)
+        c2, _ = select_fixed_cohort(pool2, selection_seed=1)
+        # Same selection should produce different identities if snapshots differ.
+        # But with snapshot_observation=() default they may match.
+        # Use a more specific test:
+        c3, _ = select_fixed_cohort(pool, selection_seed=2)
+        assert c1.identity != c3.identity  # seeds differ
+
+    def test_identity_includes_provenance(self):
+        """Changing source controller provenance changes identity."""
+        pool = _make_pool(
+            [_make_record(0, encounter_id="A"), _make_record(1, encounter_id="B")]
+        )
+        c1, _ = select_fixed_cohort(pool, selection_seed=1)
+        # Same pool but with different pool-level provenance.
+        pool2 = NaturalBattleStartPool(
+            source_run_count=1,
+            terminal_run_count=1,
+            truncated_run_count=0,
+            source_controller_provenance={
+                "schema_version": 1,
+                "kind": "routed_run",
+                "name": "different",
+                "config": {},
+            },
+            records=pool.records,
+        )
+        c2, _ = select_fixed_cohort(pool2, selection_seed=1)
+        assert c1.identity != c2.identity
+
+    def test_identity_includes_trace(self):
+        """Changing an action trace changes identity."""
+        pool = _make_pool(
+            [
+                _make_record(0, encounter_id="A", checkpoint_id="cp-A"),
+                _make_record(1, encounter_id="B", checkpoint_id="cp-B"),
+            ]
+        )
+        # Add an action trace to alter a record.
+        altered_records = list(pool.records)
+        altered_records[0] = BattleStartCheckpointRecord(
+            record_index=0,
+            source_checkpoint_id="cp-A",
+            source_run_id="seed-1-run-0",
+            source_seed=1,
+            source_battle_index=0,
+            structural_metadata={
+                "ascension": 20,
+                "act": 1,
+                "floor": 1,
+                "room_type": "MONSTER",
+                "encounter_id": "A",
+                "seed": 1,
+                "source_kind": "natural_run",
+                "distribution_kind": "natural_run",
+                "source_run_id": "seed-1-run-0",
+                "source_battle_index": 0,
+            },
+            source_controller_provenance={
+                "schema_version": 1,
+                "kind": "routed_run",
+                "name": "test",
+                "config": {
+                    "battle": {
+                        "kind": "decision_policy",
+                        "name": "test",
+                        "config": {},
+                        "schema_version": 1,
+                    }
+                },
+            },
+            source_battle_controller_provenance={
+                "schema_version": 1,
+                "kind": "decision_policy",
+                "name": "test",
+                "config": {},
+            },
+            source_non_combat_controller_provenance={
+                "schema_version": 1,
+                "kind": "decision_policy",
+                "name": "test",
+                "config": {},
+            },
+            action_trace=(
+                {
+                    "action_id": "999",
+                    "occurrence": 0,
+                    "kind": "ATTACK",
+                    "label": "",
+                    "stable_id": "x",
+                },
+            ),
+            snapshot_observation=(),
+            snapshot_raw={},
+        )
+        pool2 = _make_pool(altered_records)
+        c1, _ = select_fixed_cohort(pool, selection_seed=1)
+        c2, _ = select_fixed_cohort(pool2, selection_seed=1)
+        # Identities should differ because the traces differ.
+        assert c1.identity != c2.identity

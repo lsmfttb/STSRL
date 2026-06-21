@@ -124,10 +124,18 @@ class FixedCohort:
         payload = json.dumps(
             {
                 "source_pool_format_version": self.source_pool_format_version,
+                "source_pool_controller_provenance": self.source_pool_controller_provenance,
                 "selection_config": self.selection_config.to_dict(),
                 "record_checkpoint_ids": [r.source_checkpoint_id for r in self.records],
                 "record_seeds": [r.source_seed for r in self.records],
+                "record_source_run_ids": [r.source_run_id for r in self.records],
+                "record_source_battle_indices": [
+                    r.source_battle_index for r in self.records
+                ],
                 "record_strata": [list(r.structural_stratum) for r in self.records],
+                "record_structural_metadata": [
+                    dict(sorted(r.structural_metadata.items())) for r in self.records
+                ],
                 "record_snapshot_fingerprints": [
                     _record_fingerprint_string(r) for r in self.records
                 ],
@@ -143,6 +151,21 @@ class FixedCohort:
                 ],
                 "record_source_distribution_kinds": [
                     r.source_distribution_kind for r in self.records
+                ],
+                "record_checkpoint_information_regimes": [
+                    r.checkpoint_information_regime for r in self.records
+                ],
+                "record_public_context_statuses": [
+                    r.public_context_status for r in self.records
+                ],
+                "record_source_controller_provenances": [
+                    r.source_controller_provenance for r in self.records
+                ],
+                "record_source_battle_controller_provenances": [
+                    r.source_battle_controller_provenance for r in self.records
+                ],
+                "record_source_non_combat_controller_provenances": [
+                    r.source_non_combat_controller_provenance for r in self.records
                 ],
             },
             sort_keys=True,

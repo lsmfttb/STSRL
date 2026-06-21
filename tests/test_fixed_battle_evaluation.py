@@ -712,7 +712,153 @@ class TestEvaluationAggregates:
         assert aggs.natural_weighted.battle_count == 1
         assert aggs.natural_weighted.win_count == 1
 
-    def test_win_rate_no_resolvable(self):
+    def test_weighted_aggregate_100_1_case(self):
+        """Natural weighting: 100 sources in one stratum, 1 in another.
+
+        Two strata, each contributing one selected record (quota=1).
+        Source count 100 for stratum A, 1 for stratum B.
+        Expected weighted win rate: (50*1 + 50*0) / 100 = 0.5? No - with
+        source_weight / selected_count, per-result weight is source/selected.
+        A: 100/1=100, B: 1/1=1. Expected: (100*1 + 1*0) / (100+1) ≈ 0.99.
+        """
+        from sts_combat_rl.sim.fixed_battle_evaluation import (
+            _build_weighted_aggregate_slice,
+        )
+
+        results = [
+            self._make_result(0, "win", hp_loss=5, encounter_id="A"),
+            self._make_result(1, "loss", hp_loss=15, encounter_id="B"),
+        ]
+        weights = {(20, 1, "MONSTER", "A"): 100.0, (20, 1, "MONSTER", "B"): 1.0}
+        slc = _build_weighted_aggregate_slice(results, weights)
+        expected_wr = 100.0 / 101.0
+        assert slc.win_rate == pytest.approx(expected_wr, 0.01)
+        # Without weights, it would be 0.5.
+        unweighted = _build_weighted_aggregate_slice(results, {})
+        assert unweighted.win_rate == 0.5
+
+    def test_weighted_aggregate_hp_loss(self):
+        """Weighted HP loss: 100 weight for 5 loss, 1 weight for 15 loss.
+
+        Expected: (100*5 + 1*15) / (100 + 1) ≈ 5.099.
+        """
+        from sts_combat_rl.sim.fixed_battle_evaluation import (
+            _build_weighted_aggregate_slice,
+        )
+
+        results = [
+            self._make_result(0, "win", hp_loss=5, encounter_id="A"),
+            self._make_result(1, "loss", hp_loss=15, encounter_id="B"),
+        ]
+        weights = {(20, 1, "MONSTER", "A"): 100.0, (20, 1, "MONSTER", "B"): 1.0}
+        slc = _build_weighted_aggregate_slice(results, weights)
+        expected_mean = (100.0 * 5 + 1.0 * 15) / (100.0 + 1.0)
+        assert slc.mean_hp_loss == pytest.approx(expected_mean, 0.1)
+
+    def test_per_stratum_counts_persist_roundtrip(self):
+        """per_stratum_source_counts survives JSONL dump/load.
+
+        Two results: win in A (100 sources), loss in B (1 source).
+        After round-trip the loaded counts produce the expected weighted result.
+        """
+        result_a = SingleBattleEvaluationResult(
+            cohort_index=0,
+            source_checkpoint_id="cp-0",
+            source_seed=1,
+            source_run_id="r",
+            source_battle_index=0,
+            structural_stratum=(20, 1, "MONSTER", "A"),
+            structural_metadata={},
+            restoration_method="seed_action_trace",
+            controller_provenance={"kind": "test"},
+            information_regime="normal_public_policy",
+            action_space_config={},
+            termination_status="win",
+            terminal_absolute_hp=65,
+            hp_loss=5,
+            decision_count=3,
+            simulator_step_count=3,
+            wall_clock_time_s=0.3,
+        )
+        result_b = SingleBattleEvaluationResult(
+            cohort_index=1,
+            source_checkpoint_id="cp-1",
+            source_seed=1,
+            source_run_id="r",
+            source_battle_index=1,
+            structural_stratum=(20, 1, "MONSTER", "B"),
+            structural_metadata={},
+            restoration_method="seed_action_trace",
+            controller_provenance={"kind": "test"},
+            information_regime="normal_public_policy",
+            action_space_config={},
+            termination_status="loss",
+            terminal_absolute_hp=0,
+            hp_loss=15,
+            decision_count=3,
+            simulator_step_count=3,
+            wall_clock_time_s=0.3,
+        )
+        report = FixedEvaluationReport(
+            cohort_identity="id",
+            controller_provenance={"kind": "test", "name": "fake"},
+            information_regime="normal_public_policy",
+            action_space_config={},
+            max_battle_steps=200,
+            source_pool_format_version=2,
+            selection_config={},
+            per_stratum_source_counts={
+                "20/1/MONSTER/A": 100,
+                "20/1/MONSTER/B": 1,
+            },
+            battle_results=[result_a, result_b],
+        )
+
+        buf = StringIO()
+        dump_fixed_evaluation_report_jsonl(report, buf)
+        buf.seek(0)
+        loaded = load_fixed_evaluation_report_jsonl(buf)
+
+        assert loaded.per_stratum_source_counts == {
+            "20/1/MONSTER/A": 100,
+            "20/1/MONSTER/B": 1,
+        }
+        # Build aggregates with the loaded counts — should use weighted path.
+        aggs = build_evaluation_aggregates(
+            loaded, per_stratum_source_counts=loaded.per_stratum_source_counts
+        )
+        # Win in stratum A (weight 100), loss in stratum B (weight 1).
+        assert aggs.natural_weighted.win_rate == pytest.approx(100.0 / 101.0, 0.01)
+
+    def test_weighted_aggregate_quota_2(self):
+        """Two selected from a 100-source stratum: each weight = 100/2 = 50."""
+        from sts_combat_rl.sim.fixed_battle_evaluation import (
+            _build_weighted_aggregate_slice,
+        )
+
+        results = [
+            self._make_result(0, "win", hp_loss=5, encounter_id="A"),
+            self._make_result(1, "loss", hp_loss=10, encounter_id="A"),
+        ]
+        weights = {(20, 1, "MONSTER", "A"): 50.0}
+        slc = _build_weighted_aggregate_slice(results, weights)
+        assert slc.win_rate == 0.5
+        expected_mean = (50.0 * 5 + 50.0 * 10) / 100.0
+        assert slc.mean_hp_loss == pytest.approx(expected_mean, 0.1)
+
+    def test_weighted_aggregate_no_weights_fallback(self):
+        """Empty weights dict falls back to equal-weight."""
+        from sts_combat_rl.sim.fixed_battle_evaluation import (
+            _build_weighted_aggregate_slice,
+        )
+
+        results = [
+            self._make_result(0, "win", hp_loss=5, encounter_id="A"),
+            self._make_result(1, "loss", hp_loss=15, encounter_id="B"),
+        ]
+        slc = _build_weighted_aggregate_slice(results, {})
+        assert slc.win_rate == 0.5
+        assert slc.mean_hp_loss == 10.0
         """All errors/truncations => win_rate is None."""
         results = [
             self._make_result(0, "truncated"),
