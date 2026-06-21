@@ -107,8 +107,14 @@ already supports them.
 Executable task specifications live in [`tasks/`](tasks/README.md). The first
 tasks in dependency order are:
 
-1. Review T005, T007, T008, and T012 against the merged T004 artifact and
-   simulator contracts before changing their `BLOCKED` status.
+1. T005, fixed structural battle evaluation, is `READY` from the current main
+   branch. It provides the comparison surface required before search promotion.
+2. T007, complete public run history, is `READY` from the current main branch.
+   It establishes the sanitized continuation-context boundary needed by
+   constructed data and terminal-resource outcomes.
+3. T008 remains blocked by T007. T012 remains blocked by T005 and T007 so its
+   terminal-resource labels extend one stable evaluation and public-context
+   contract rather than creating parallel artifact fields.
 
 Later tasks are dependency-ordered in the task index. A task is not ready for a
 new branch until its status is `READY`.

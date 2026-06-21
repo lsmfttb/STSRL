@@ -128,9 +128,10 @@ future continuation-aware models:
 - complete visible map, current node, and available routes;
 - visible Act Boss.
 
-The current encounter-history and route-context implementation is only a
-partial step. Dataset schemas should preserve structured raw fields so future
-encoder upgrades do not require recollecting all battles.
+The latest `main` does not yet preserve a complete public run context. T007 is
+the active task that will add it; until then, datasets must retain explicit
+context unavailability rather than implying that encounter metadata is a
+substitute for full history or map state.
 
 ## Evaluation
 
@@ -261,28 +262,31 @@ only on normal-information evaluation.
 
 ### Phase A: Checkpoint And Replay
 
-Status: pending [`T004`](tasks/T004-battle-start-checkpoint-pool.md).
+Status: complete through [`T004`](tasks/T004-battle-start-checkpoint-pool.md).
 
 Exit gate: repeated restores reproduce snapshots, legal actions, transitions,
 and terminal results without local mechanics reconstruction.
 
 ### Phase B: Natural Pools And Provenance
 
-Status: pending T004.
+Status: complete through T004 for natural pool capture, portable restore, and
+structural coverage reporting. Broader A20 coverage remains a measurement gap,
+not an unimplemented pool feature.
 
 Exit gate: current-schema natural checkpoints restore, carry complete controller
 provenance, and report structural coverage and migration loss honestly.
 
 ### Phase C: Fixed Structural Evaluation
 
-Status: pending [`T005`](tasks/T005-fixed-battle-evaluation.md).
+Status: [`T005`](tasks/T005-fixed-battle-evaluation.md) is `READY`.
 
 Exit gate: search changes can be compared on deterministic structural cohorts
 without relying on full-run average floor.
 
 ### Phase D: Coverage And Stratified Search Data
 
-Status: planned after Phases A-C. Relevant tasks include T007 and T008.
+Status: T007 is `READY`; T008 follows after T007, and broad coverage follows
+fixed evaluation rather than being inferred from natural-run floor statistics.
 
 Work:
 

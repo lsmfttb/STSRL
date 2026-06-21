@@ -1,63 +1,104 @@
 # T012: Structured Battle Resource Outcomes
 
-Status: `BLOCKED` by T004.
+Status: `BLOCKED` by T005 and T007.
 
 ## Objective
 
-Preserve battle-end persistent resources as a structured outcome vector so
-future continuation-value learning can value them contextually instead of using
-fixed hand-written reward weights.
+Preserve battle result, terminal absolute HP, and persistent battle-end
+resources as a versioned structured outcome. Future continuation models must be
+able to value these components contextually instead of inheriting one fixed
+hand-written reward weight.
 
 ## Current Main Baseline
 
-`main` reports simple battle-segment deltas such as HP, max HP, gold, and potion
-count. It does not preserve complete persistent identities and counters or a
-versioned structured outcome schema.
+`main` has battle-segment reward diagnostics and T004 completed-battle outcome
+labels, but no complete public terminal resource snapshot or structured outcome
+schema. T005 will establish the fixed-evaluation output boundary, and T007 will
+establish the corresponding sanitized starting public context and history.
+
+## Dependencies
+
+- T003, T004, and T010 are complete.
+- T005 and T007 must merge before implementation starts.
 
 ## Scope
 
-- Define a versioned structured battle outcome containing:
-  - battle result;
-  - terminal absolute current HP;
-  - potion identities and slot changes;
-  - gold and max-HP changes;
-  - persistent deck changes and curses;
-  - relic additions/removals and exposed persistent counters;
-  - keys and other exposed persistent resources.
-- Capture before/after public resource snapshots through authoritative
-  simulator data.
-- Preserve components separately through decision/training records.
-- Report per-component presence, missing native fields, and change frequency.
-- Keep any scalar reward report as a separate diagnostic view.
+- Define a versioned structured battle-outcome schema with independent fields
+  for authoritative battle result, terminal absolute current HP, terminal max
+  HP, gold, potion slots/identities, deck/card changes including curses, relic
+  identities/additions/removals and exposed persistent counters, keys, and
+  other exposed persistent resources.
+- Capture sanitized before/after public resource snapshots through authoritative
+  simulator data at the exact battle boundary. Preserve both terminal snapshots
+  and derived component deltas where derivation is possible; missing values and
+  unavailable counters must remain field-level explicit.
+- Persist the outcome through checkpoint-derived records, battle decision and
+  trainer-input artifacts, and fixed-evaluation reports. Provide sequential
+  migrations for supported historical schemas and explicit loss for unrecoverable
+  terminal fields.
+- Report component presence, change frequency, missing native coverage, and
+  terminal outcome counts separately. Keep any existing scalar reward report as
+  an optional diagnostic view with clearly separate provenance.
+- Add focused native projection patches only for missing authoritative public
+  terminal fields. Do not infer a counter or inventory identity from local game
+  rules.
 
 ## Out Of Scope
 
-- Learning continuation value or PyTorch heads.
-- Choosing permanent fixed weights for resource components.
-- Complete run history, hidden counters, or local game-mechanics inference.
+- Learning a continuation value, adding PyTorch heads, choosing permanent
+  component weights, potion-use policy, complete run-history implementation, or
+  hidden relic counters.
+- Replacing an authoritative terminal loss/win label with a scalar reward or
+  normalizing current HP by max HP.
 
 ## Design Constraints
 
-- Terminal HP is absolute, never normalized by max HP.
-- Missing native fields remain explicit.
-- Battle death and persistent resource outcomes remain separate labels.
-- Only player-visible or authoritative terminal outcomes enter normal data.
+- Death, terminal absolute current HP, and every resource component are
+  independently inspectable labels. `current_hp / max_hp` is never a stored
+  target or replacement for absolute HP.
+- Inventory identity/order and exposed counters must remain distinguishable
+  from count-only summaries. Unknown, absent, and empty must not collapse.
+- Normal-public artifacts receive only player-visible/authoritatively exposed
+  terminal data. Oracle-like source provenance remains separately declared.
+- The dedicated outcome schema may reference T007 context but must not duplicate
+  its entire typed history or create a second public-context contract.
+- Writers emit the current schema only; readers migrate before business logic
+  and never guess a missing terminal identity or counter.
 
 ## Deliverables
 
-- Structured outcome schema and persistence.
-- Native patch files only for missing authoritative public resource fields.
-- Component-level reports and tests.
-- Real WSL battle collection audit.
+- Structured outcome schema, sanitizers, validators, reader/writer, and
+  migrations.
+- Authoritative before/after resource capture surface and focused adapter/patch
+  support.
+- Integration with decision/trainer artifacts and T005 fixed-evaluation reports.
+- Component-level report, fixtures, and WSL resource-outcome audit.
 
 ## Acceptance Criteria
 
-- Outcome records round-trip without losing identities or exposed counters.
-- Death, absolute HP, and each persistent resource component remain separately
-  inspectable.
-- No component is permanently collapsed into one scalar target.
-- Missing fields and unsupported counters are reported.
-- Standard local gates and documented WSL resource audit pass.
+- Records round-trip without losing terminal battle result, absolute current HP,
+  known identities, slot order, exposed counters, or explicit missingness.
+- Death, HP, gold, max HP, potion, deck/curse, relic/counter, key, and other
+  exposed components can be inspected independently; no required component is
+  permanently scalarized.
+- Terminal records cannot be marked successful solely from a missing/nonterminal
+  outcome; error and unavailable states are reported separately.
+- Fixed-evaluation output names the structured outcome schema/version when it
+  is present and explicitly reports unavailability for older cohorts.
+- Reports list per-component availability/change counts and every unsupported
+  native field.
+- Legacy artifacts migrate with explicit loss and current-schema output passes
+  validation without raw simulator state.
+
+## Required Verification
+
+Run the standard local gates, focused schema/migration tests, decision/trainer
+round trips, and fixed-evaluation integration tests. The task must add and run
+a WSL `--lightspeed-battle-resource-outcome-audit` command against a bounded A20
+pool and report terminal outcomes, component presence/change counts, missing
+fields, controller provenance, and source distribution. The PR report must
+include the exact command and results; a small audit validates plumbing only,
+not continuation-value quality.
 
 ## Legacy Reference
 
@@ -70,7 +111,13 @@ src/sts_combat_rl/sim/resource_outcome.py
 tests/test_resource_outcome.py
 ```
 
+The legacy implementation may contain useful native projection work but lacks
+the T005/T007 current contracts. Port selectively and preserve explicit
+missingness rather than filling gaps from old fields.
+
 ## PR Report
 
-Include the schema inventory, native field coverage, component change counts,
-missing fields, and exact verification results.
+Include task ID, schema inventory, native field coverage, migration losses,
+component change/missing counts, fixed-evaluation compatibility, exact local and
+WSL verification, legacy files consulted, known limitations, and any unmet
+acceptance criterion.
