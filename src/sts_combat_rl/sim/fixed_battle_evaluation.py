@@ -99,6 +99,7 @@ class FixedEvaluationReport:
     max_battle_steps: int
     source_pool_format_version: int
     selection_config: dict[str, Any]
+    per_stratum_source_counts: dict[str, int] = field(default_factory=dict)
     format_version: int = FIXED_EVALUATION_REPORT_FORMAT_VERSION
     battle_results: list[SingleBattleEvaluationResult] = field(default_factory=list)
     problems: list[str] = field(default_factory=list)
@@ -348,8 +349,14 @@ def _evaluate_one_battle(
             outcome = _battle_outcome(current.raw)
             if outcome == "PLAYER_VICTORY":
                 termination_status = "win"
-            elif outcome == "PLAYER_LOSS" or outcome is not None:
+            elif outcome == "PLAYER_LOSS":
                 termination_status = "loss"
+            elif outcome is not None:
+                # An unrecognised terminal label is not a win or loss.
+                problems.append(
+                    f"no legal actions with unrecognised outcome {outcome!r}"
+                )
+                termination_status = "error"
             else:
                 problems.append("no legal actions without terminal outcome")
                 termination_status = "error"
@@ -445,13 +452,31 @@ def _evaluate_one_battle(
 
 def build_evaluation_aggregates(
     report: FixedEvaluationReport,
+    *,
+    per_stratum_source_counts: Mapping[str, int] | None = None,
 ) -> FixedEvaluationAggregate:
-    """Compute natural-weighted, encounter-macro, room-type-macro, per-stratum."""
+    """Compute natural-weighted, encounter-macro, room-type-macro, per-stratum.
+
+    Natural weighting uses per-stratum source counts (number of available pool
+    sources per stratum) as observation weights so that the reported aggregate
+    reflects the source-pool distribution, not the equal-stratum cohort.
+    If source counts are not available, falls back to equal-weighted.
+    """
 
     resolved = [r for r in report.battle_results if not r.is_error]
 
-    # Natural-weighted: all successfully evaluated battles.
-    natural_weighted = _build_aggregate_slice(resolved)
+    # Build per-stratum source-count lookup keyed by stratum string.
+    weights: dict[tuple[Any, ...], float] = {}
+    if per_stratum_source_counts:
+        for key_str, count in per_stratum_source_counts.items():
+            parts = tuple(key_str.split("/"))
+            weights[parts] = float(count)
+
+    # Natural-weighted: each resolved result weighted by its stratum's source count.
+    if weights:
+        natural_weighted = _build_weighted_aggregate_slice(resolved, weights)
+    else:
+        natural_weighted = _build_weighted_aggregate_slice(resolved, {})
 
     # Encounter-macro: average over encounter identity groups.
     encounter_groups: dict[str, list[SingleBattleEvaluationResult]] = {}
@@ -518,6 +543,69 @@ def _build_aggregate_slice(
         total_hp_loss=total_hp_loss,
         total_decision_count=sum(r.decision_count for r in results),
         total_wall_clock_time_s=sum(r.wall_clock_time_s for r in results),
+        result_indices=indices,
+    )
+
+
+def _build_weighted_aggregate_slice(
+    results: list[SingleBattleEvaluationResult],
+    weights: Mapping[tuple[Any, ...], float],
+) -> AggregateSlice:
+    """Compute a source-weighted aggregate with natural-distribution weights.
+
+    Each result contributes weight `w` where `w = weights.get(stratum, 1.0)`.
+    Win/loss counts are weighted; HP loss mean is weighted.
+    """
+    if not weights:
+        return _build_aggregate_slice(results)
+
+    total_weight = 0.0
+    weighted_wins = 0.0
+    weighted_losses = 0.0
+    weighted_hp_loss_sum = 0.0
+    weighted_hp_loss_count = 0.0
+    weighted_truncated = 0.0
+    weighted_errors = 0.0
+    total_decisions = 0
+    total_wall = 0.0
+    indices: list[int] = []
+
+    for r in results:
+        w = weights.get(r.structural_stratum, 1.0)
+        total_weight += w
+        indices.append(r.cohort_index)
+        total_decisions += r.decision_count
+        total_wall += r.wall_clock_time_s
+
+        if r.is_authoritative_win:
+            weighted_wins += w
+        elif r.termination_status == "loss":
+            weighted_losses += w
+        elif r.is_truncated:
+            weighted_truncated += w
+        elif r.is_error:
+            weighted_errors += w
+
+        if r.hp_loss is not None and (
+            r.is_authoritative_win or r.termination_status == "loss"
+        ):
+            weighted_hp_loss_sum += w * r.hp_loss
+            weighted_hp_loss_count += w
+
+    # Round weighted counts to nearest integer for display.
+    return AggregateSlice(
+        battle_count=len(results),
+        win_count=round(weighted_wins),
+        loss_count=round(weighted_losses),
+        truncated_count=round(weighted_truncated),
+        error_count=round(weighted_errors),
+        total_hp_loss=(
+            round(weighted_hp_loss_sum / weighted_hp_loss_count)
+            if weighted_hp_loss_count > 0
+            else None
+        ),
+        total_decision_count=total_decisions,
+        total_wall_clock_time_s=total_wall,
         result_indices=indices,
     )
 
@@ -633,7 +721,10 @@ def load_fixed_evaluation_report_jsonl(
 def format_fixed_evaluation_report(report: FixedEvaluationReport) -> str:
     """Format a fixed evaluation report for stderr output."""
 
-    aggregates = build_evaluation_aggregates(report)
+    aggregates = build_evaluation_aggregates(
+        report,
+        per_stratum_source_counts=report.per_stratum_source_counts,
+    )
 
     lines = ["Fixed battle evaluation report"]
     lines.append(f"cohort identity: {report.cohort_identity}")

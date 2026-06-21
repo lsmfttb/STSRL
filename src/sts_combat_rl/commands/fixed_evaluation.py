@@ -65,6 +65,23 @@ def run_fixed_evaluation(
         max_battle_steps=max_battle_steps,
     )
 
+    # Attach per-stratum source counts for natural weighting.
+    evaluation = FixedEvaluationReport(
+        cohort_identity=evaluation.cohort_identity,
+        controller_provenance=evaluation.controller_provenance,
+        information_regime=evaluation.information_regime,
+        action_space_config=evaluation.action_space_config,
+        max_battle_steps=evaluation.max_battle_steps,
+        source_pool_format_version=evaluation.source_pool_format_version,
+        selection_config=evaluation.selection_config,
+        per_stratum_source_counts={
+            "/".join(str(v) for v in s): c
+            for s, c in coverage.per_stratum_source_counts.items()
+        },
+        battle_results=evaluation.battle_results,
+        problems=evaluation.problems,
+    )
+
     return cohort, coverage, evaluation
 
 

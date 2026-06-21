@@ -115,12 +115,35 @@ class FixedCohort:
 
     @property
     def identity(self) -> str:
-        """Content-addressed identity that changes with any input."""
+        """Content-addressed identity that changes with any input.
+
+        Hashes everything that makes a cohort distinct: pool identity, selection
+        config, per-record identity (checkpoint id, seed, stratum, trace,
+        fingerprint, source provenance).
+        """
         payload = json.dumps(
             {
                 "source_pool_format_version": self.source_pool_format_version,
                 "selection_config": self.selection_config.to_dict(),
                 "record_checkpoint_ids": [r.source_checkpoint_id for r in self.records],
+                "record_seeds": [r.source_seed for r in self.records],
+                "record_strata": [list(r.structural_stratum) for r in self.records],
+                "record_snapshot_fingerprints": [
+                    _record_fingerprint_string(r) for r in self.records
+                ],
+                "record_action_trace_fingerprints": [
+                    hashlib.sha256(
+                        json.dumps(
+                            [dict(sorted(i.items())) for i in r.action_trace],
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        ).encode("utf-8")
+                    ).hexdigest()[:12]
+                    for r in self.records
+                ],
+                "record_source_distribution_kinds": [
+                    r.source_distribution_kind for r in self.records
+                ],
             },
             sort_keys=True,
             separators=(",", ":"),
@@ -640,6 +663,23 @@ def _fixed_cohort_problems(cohort: FixedCohort) -> list[str]:
                 f"{record.source_distribution_kind}"
             )
     return list(dict.fromkeys(problems))
+
+
+def _record_fingerprint_string(record: FixedCohortRecord) -> str:
+    """Deterministic content digest for identity-including fields."""
+    payload = json.dumps(
+        {
+            "source_checkpoint_id": record.source_checkpoint_id,
+            "source_seed": record.source_seed,
+            "structural_stratum": list(record.structural_stratum),
+            "source_distribution_kind": record.source_distribution_kind,
+            "snapshot_observation": list(record.snapshot_observation),
+            "snapshot_raw": dict(sorted(record.snapshot_raw.items())),
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
 
 
 def _format_stratum(stratum: tuple[Any, ...]) -> str:
