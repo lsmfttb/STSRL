@@ -357,11 +357,12 @@ def _evaluate_one_battle(
     # Play battle actions.
     decision_count = 0
     simulator_step_count = 0
+    # Aggregate per-decision controller telemetry.
+    controller_telemetry: dict[str, Any] = {}
     termination_status = "error"
     current = snapshot
 
     for step_index in range(max_battle_steps):
-        simulator_step_count += 1
         try:
             actions = list(adapter.legal_actions(current))
         except (RuntimeError, ValueError) as exc:
@@ -369,14 +370,12 @@ def _evaluate_one_battle(
             termination_status = "error"
             break
         if not actions:
-            # No legal actions — check if battle is over.
             outcome = _battle_outcome(current.raw)
             if outcome == "PLAYER_VICTORY":
                 termination_status = "win"
             elif outcome == "PLAYER_LOSS":
                 termination_status = "loss"
             elif outcome is not None:
-                # An unrecognised terminal label is not a win or loss.
                 problems.append(
                     f"no legal actions with unrecognised outcome {outcome!r}"
                 )
@@ -417,7 +416,28 @@ def _evaluate_one_battle(
             problems.append(f"step error at index {step_index}: {exc}")
             termination_status = "error"
             break
+        simulator_step_count += 1
         current = transition.snapshot
+
+        # Collect controller-provided compute telemetry from decision metadata.
+        for key, value in decision.metadata.items():
+            if key == "controller_role":
+                continue
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                controller_telemetry.setdefault(key, 0.0)
+                controller_telemetry[key] += float(value)
+            elif isinstance(value, dict):
+                controller_telemetry.setdefault(key, {})
+                # Shallow merge integer/float leaves.
+                if isinstance(controller_telemetry[key], dict):
+                    for sub_key, sub_val in value.items():
+                        if isinstance(sub_val, (int, float)) and not isinstance(
+                            sub_val, bool
+                        ):
+                            controller_telemetry[key].setdefault(sub_key, 0.0)
+                            controller_telemetry[key][sub_key] += float(sub_val)
+            else:
+                controller_telemetry.setdefault(key, []).append(value)
 
         if transition.terminal or not _is_battle_state(current):
             outcome = _battle_outcome(current.raw)
@@ -466,6 +486,9 @@ def _evaluate_one_battle(
         decision_count=decision_count,
         simulator_step_count=simulator_step_count,
         wall_clock_time_s=0.0,  # filled in by caller
+        controller_compute_telemetry=(
+            dict(controller_telemetry) if controller_telemetry else None
+        ),
         battle_initial_hp=int(initial_hp) if initial_hp is not None else None,
         battle_initial_max_hp=int(initial_max_hp)
         if initial_max_hp is not None
@@ -484,15 +507,21 @@ def build_evaluation_aggregates(
     Natural weighting uses per-stratum source counts (number of available pool
     sources per stratum) as observation weights so that the reported aggregate
     reflects the source-pool distribution, not the equal-stratum cohort.
-    If source counts are not available, falls back to equal-weighted.
+    If ``per_stratum_source_counts`` is ``None``, the report's own
+    ``per_stratum_source_counts`` is used as the default.
     """
 
     resolved = [r for r in report.battle_results if not r.is_error]
 
+    # Default to report values when explicitly None.
+    effective_counts = per_stratum_source_counts
+    if effective_counts is None:
+        effective_counts = report.per_stratum_source_counts
+
     # Build per-stratum source-count lookup keyed by actual stratum tuples.
     weights: dict[tuple[Any, ...], float] = {}
-    if per_stratum_source_counts:
-        for key_str, count in per_stratum_source_counts.items():
+    if effective_counts:
+        for key_str, count in effective_counts.items():
             if not isinstance(count, int) or count <= 0:
                 continue
             parts = key_str.split("/")
