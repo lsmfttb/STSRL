@@ -40,6 +40,10 @@ from sts_combat_rl.sim.controller_contract import (
     controller_provenance_from_dict,
     legacy_policy_provenance,
 )
+from sts_combat_rl.sim.public_run_context import (
+    build_public_run_context,
+    public_run_context_problems,
+)
 from sts_combat_rl.sim.decision_record import (
     action_identity_from_dict,
     find_action_index_by_identity,
@@ -48,21 +52,23 @@ from sts_combat_rl.sim.decision_record import (
 from sts_combat_rl.sim.online_controller import RoutedRunController
 
 
-BATTLE_START_POOL_FORMAT_VERSION = 2
+BATTLE_START_POOL_FORMAT_VERSION = 3
 """Current portable JSONL schema version for natural battle-start pools."""
 
 LEGACY_BATTLE_START_POOL_FORMAT_VERSION = 1
+LEGACY_V2_BATTLE_START_POOL_FORMAT_VERSION = 2
 NATURAL_DISTRIBUTION_KIND = "natural_run"
 NATURAL_SAMPLING_COMPONENT = "natural"
 STRUCTURAL_SAMPLING_COMPONENT = "structural_uniform"
 CHECKPOINT_INFORMATION_REGIME = "full_simulator_state_oracle_like"
 LEGACY_UNKNOWN_INFORMATION_REGIME = "unknown"
+PUBLIC_CONTEXT_AVAILABLE = "available"
 PUBLIC_CONTEXT_UNAVAILABLE = "unavailable"
 
 BATTLE_START_POOL_MIGRATIONS = (
     ArtifactMigration(
         source_version=LEGACY_BATTLE_START_POOL_FORMAT_VERSION,
-        target_version=BATTLE_START_POOL_FORMAT_VERSION,
+        target_version=LEGACY_V2_BATTLE_START_POOL_FORMAT_VERSION,
         migrate=lambda document: _migrate_pool_v1_to_v2(document),
         losses=(
             "v1 recorded action ids without duplicate occurrence indices; "
@@ -70,6 +76,14 @@ BATTLE_START_POOL_MIGRATIONS = (
             "v1 recorded policy names rather than complete controller configuration",
             "v1 did not declare checkpoint information regime or public context",
             "v1 did not record whether a battle completed before collection ended",
+        ),
+    ),
+    ArtifactMigration(
+        source_version=LEGACY_V2_BATTLE_START_POOL_FORMAT_VERSION,
+        target_version=BATTLE_START_POOL_FORMAT_VERSION,
+        migrate=lambda document: _migrate_pool_v2_to_v3(document),
+        losses=(
+            "v2 omitted public run context; migrated records mark context unavailable",
         ),
     ),
 )
@@ -96,6 +110,7 @@ class BattleStartCheckpointRecord:
     distribution_kind: str = NATURAL_DISTRIBUTION_KIND
     checkpoint_information_regime: str = CHECKPOINT_INFORMATION_REGIME
     public_context_status: str = PUBLIC_CONTEXT_UNAVAILABLE
+    public_run_context: dict[str, Any] = field(default_factory=dict)
     native_checkpoint: SimulatorCheckpoint | None = field(
         default=None,
         repr=False,
@@ -603,6 +618,7 @@ def record_to_manifest(record: BattleStartCheckpointRecord) -> dict[str, Any]:
         "distribution_kind": record.distribution_kind,
         "checkpoint_information_regime": record.checkpoint_information_regime,
         "public_context_status": record.public_context_status,
+        "public_run_context": _json_safe_value(record.public_run_context),
     }
 
 
@@ -642,6 +658,9 @@ def record_from_manifest(
         raw.get("public_context_status"),
         f"{label} public context status",
     )
+    public_run_context = _require_mapping(
+        raw.get("public_run_context"), f"{label} public_run_context"
+    )
     return BattleStartCheckpointRecord(
         record_index=_require_non_negative_int(
             raw.get("record_index"), f"{label} index"
@@ -678,6 +697,7 @@ def record_from_manifest(
         distribution_kind=distribution_kind,
         checkpoint_information_regime=checkpoint_information_regime,
         public_context_status=public_context_status,
+        public_run_context=public_run_context,
     )
 
 
@@ -713,8 +733,19 @@ def natural_battle_start_pool_problems(pool: NaturalBattleStartPool) -> list[str
             problems.append(
                 f"record {index} has an invalid checkpoint information regime"
             )
-        if record.public_context_status != PUBLIC_CONTEXT_UNAVAILABLE:
+        if record.public_context_status not in {
+            PUBLIC_CONTEXT_AVAILABLE,
+            PUBLIC_CONTEXT_UNAVAILABLE,
+        }:
             problems.append(f"record {index} has an invalid public context status")
+        if (
+            record.public_context_status == PUBLIC_CONTEXT_AVAILABLE
+            and record.public_run_context
+        ):
+            problems.extend(
+                f"record {index}: {problem}"
+                for problem in public_run_context_problems(record.public_run_context)
+            )
         for provenance_name, provenance in (
             ("controller", record.source_controller_provenance),
             ("battle controller", record.source_battle_controller_provenance),
@@ -835,6 +866,7 @@ def _build_record(
         snapshot_observation=tuple(snapshot.observation),
         snapshot_raw=dict(snapshot.raw),
         native_checkpoint=native_checkpoint,
+        public_run_context=build_public_run_context(snapshot.raw),
     )
 
 
@@ -924,9 +956,12 @@ def _information_regime(value: Any, label: str) -> str:
 
 
 def _public_context_status(value: Any, label: str) -> str:
-    if value != PUBLIC_CONTEXT_UNAVAILABLE:
-        raise ValueError(f"{label} must explicitly be {PUBLIC_CONTEXT_UNAVAILABLE!r}")
-    return value
+    if value not in {PUBLIC_CONTEXT_AVAILABLE, PUBLIC_CONTEXT_UNAVAILABLE}:
+        raise ValueError(
+            f"{label} must be {PUBLIC_CONTEXT_AVAILABLE!r} or "
+            f"{PUBLIC_CONTEXT_UNAVAILABLE!r}"
+        )
+    return str(value)
 
 
 def _migrate_pool_v1_to_v2(document: ArtifactDocument) -> ArtifactDocument:
@@ -938,7 +973,7 @@ def _migrate_pool_v1_to_v2(document: ArtifactDocument) -> ArtifactDocument:
     metadata["source_controller_provenance"] = _legacy_routed_provenance(
         battle, non_combat
     )
-    metadata["format_version"] = BATTLE_START_POOL_FORMAT_VERSION
+    metadata["format_version"] = LEGACY_V2_BATTLE_START_POOL_FORMAT_VERSION
     migrated_records: list[dict[str, Any]] = []
     for index, source in enumerate(document.records):
         raw = dict(source)
@@ -989,7 +1024,66 @@ def _migrate_pool_v1_to_v2(document: ArtifactDocument) -> ArtifactDocument:
         raw["distribution_kind"] = NATURAL_DISTRIBUTION_KIND
         raw["checkpoint_information_regime"] = LEGACY_UNKNOWN_INFORMATION_REGIME
         raw["public_context_status"] = PUBLIC_CONTEXT_UNAVAILABLE
+        raw["public_run_context"] = {
+            "schema_id": "public-run-context-v1",
+            "schema_version": 1,
+            "visible_act_boss": None,
+            "encounter_history": [],
+            "run_history": {
+                "schema_id": "public-run-history-v1",
+                "entries": [],
+                "missing_fields": ["public_run_history"],
+            },
+            "visible_map": [],
+            "current_map_node": None,
+            "next_map_nodes": [],
+            "missing_fields": [
+                "visible_act_boss",
+                "encounter_history",
+                "run_history",
+                "visible_map",
+                "current_map_node",
+                "next_map_nodes",
+            ],
+        }
         migrated_records.append(raw)
+    return ArtifactDocument(metadata=metadata, records=migrated_records)
+
+
+def _migrate_pool_v2_to_v3(document: ArtifactDocument) -> ArtifactDocument:
+    """Add explicit unavailable public run context to v2 pool records."""
+
+    metadata = dict(document.metadata)
+    metadata["format_version"] = BATTLE_START_POOL_FORMAT_VERSION
+    available_context_from_v2 = {
+        "schema_id": "public-run-context-v1",
+        "schema_version": 1,
+        "visible_act_boss": None,
+        "encounter_history": [],
+        "run_history": {
+            "schema_id": "public-run-history-v1",
+            "entries": [],
+            "missing_fields": ["public_run_history"],
+        },
+        "visible_map": [],
+        "current_map_node": None,
+        "next_map_nodes": [],
+        "missing_fields": [
+            "visible_act_boss",
+            "encounter_history",
+            "run_history",
+            "visible_map",
+            "current_map_node",
+            "next_map_nodes",
+        ],
+    }
+    migrated_records: list[dict[str, Any]] = []
+    for raw_record in document.records:
+        record = dict(raw_record)
+        record["public_run_context"] = record.get(
+            "public_run_context", available_context_from_v2
+        )
+        migrated_records.append(record)
     return ArtifactDocument(metadata=metadata, records=migrated_records)
 
 

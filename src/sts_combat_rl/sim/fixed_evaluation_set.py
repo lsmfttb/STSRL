@@ -93,6 +93,7 @@ class FixedCohortRecord:
     source_distribution_kind: str = "natural_run"
     checkpoint_information_regime: str = "full_simulator_state_oracle_like"
     public_context_status: str = "unavailable"
+    public_run_context: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -157,6 +158,17 @@ class FixedCohort:
                 ],
                 "record_public_context_statuses": [
                     r.public_context_status for r in self.records
+                ],
+                "record_public_context_fingerprints": [
+                    hashlib.sha256(
+                        json.dumps(
+                            r.public_run_context,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                            default=str,
+                        ).encode("utf-8")
+                    ).hexdigest()[:12]
+                    for r in self.records
                 ],
                 "record_source_controller_provenances": [
                     r.source_controller_provenance for r in self.records
@@ -291,6 +303,7 @@ def select_fixed_cohort(
                         source_distribution_kind=record.distribution_kind,
                         checkpoint_information_regime=record.checkpoint_information_regime,
                         public_context_status=record.public_context_status,
+                        public_run_context=dict(record.public_run_context),
                     )
                 )
                 changed = True
@@ -575,6 +588,7 @@ def _cohort_record_to_manifest(record: FixedCohortRecord) -> dict[str, Any]:
         "source_distribution_kind": record.source_distribution_kind,
         "checkpoint_information_regime": record.checkpoint_information_regime,
         "public_context_status": record.public_context_status,
+        "public_run_context": _json_safe_value(record.public_run_context),
     }
 
 
@@ -664,6 +678,9 @@ def _cohort_record_from_manifest(
         source_distribution_kind=source_distribution_kind,
         checkpoint_information_regime=checkpoint_information_regime,
         public_context_status=public_context_status,
+        public_run_context=_require_mapping(
+            raw.get("public_run_context"), f"{label} public_run_context"
+        ),
     )
 
 

@@ -1,0 +1,473 @@
+diff --git a/bindings/slaythespire.cpp b/bindings/slaythespire.cpp
+--- a/bindings/slaythespire.cpp
++++ b/bindings/slaythespire.cpp
+@@ -454,6 +454,300 @@ pybind11::list relicListSnapshot(const GameContext &gc) {
+     return ret;
+ }
+
++// ---------------------------------------------------------------------------
++// Public encounter history
++// ---------------------------------------------------------------------------
++
++struct PublicEncounterRecord {
++    int act = 0;
++    int floorNum = 0;
++    Room room = Room::INVALID;
++    MonsterEncounter encounter = MonsterEncounter::INVALID;
++};
++
++std::string visibleActBossLabel(const GameContext &gc) {
++    if (gc.act < 1 || gc.act > 4 || gc.boss == MonsterEncounter::INVALID) {
++        return "";
++    }
++    return monsterEncounterEnumNames[static_cast<int>(gc.boss)];
++}
++
++// ---------------------------------------------------------------------------
++// Map node projection
++// ---------------------------------------------------------------------------
++
++pybind11::dict publicMapNodeSnapshot(const MapNode &node, bool burningElite) {
++    pybind11::dict ret;
++    ret["symbol"] = std::string(1, node.getRoomSymbol());
++    ret["room_type"] = roomStrings[static_cast<int>(node.room)];
++    ret["burning_elite"] = burningElite;
++    ret["x"] = node.x;
++    ret["y"] = node.y;
++
++    pybind11::list parents;
++    for (int idx = 0; idx < node.parentCount; ++idx) {
++        pybind11::dict parent;
++        parent["x"] = node.parents[idx];
++        parent["y"] = node.y - 1;
++        parents.append(parent);
++    }
++    ret["parents"] = parents;
++
++    pybind11::list children;
++    for (int idx = 0; idx < node.edgeCount; ++idx) {
++        pybind11::dict child;
++        child["x"] = node.edges[idx];
++        child["y"] = node.y + 1;
++        children.append(child);
++    }
++    ret["children"] = children;
++    return ret;
++}
++
++pybind11::list visibleMapSnapshot(const GameContext &gc) {
++    pybind11::list ret;
++    if (gc.map == nullptr) {
++        return ret;
++    }
++    for (int y = 0; y < 15; ++y) {
++        for (int x = 0; x < 7; ++x) {
++            const auto &node = gc.map->getNode(x, y);
++            if (node.parentCount > 0 || node.edgeCount > 0) {
++                ret.append(publicMapNodeSnapshot(
++                        node,
++                        x == gc.map->burningEliteX && y == gc.map->burningEliteY));
++            }
++        }
++    }
++    return ret;
++}
++
++pybind11::dict currentMapNodeSnapshot(const GameContext &gc) {
++    if (gc.map == nullptr
++            || gc.curMapNodeX < 0 || gc.curMapNodeX >= 7
++            || gc.curMapNodeY < 0 || gc.curMapNodeY >= 15) {
++        return pybind11::dict();
++    }
++    return publicMapNodeSnapshot(
++            gc.map->getNode(gc.curMapNodeX, gc.curMapNodeY),
++            gc.curMapNodeX == gc.map->burningEliteX
++                    && gc.curMapNodeY == gc.map->burningEliteY);
++}
++
++pybind11::list nextMapNodesSnapshot(const GameContext &gc) {
++    pybind11::list ret;
++    if (gc.map == nullptr || gc.curMapNodeY >= 14) {
++        return ret;
++    }
++    if (gc.curMapNodeY < 0) {
++        for (int x = 0; x < 7; ++x) {
++            const auto &node = gc.map->getNode(x, 0);
++            if (node.edgeCount > 0) {
++                ret.append(publicMapNodeSnapshot(
++                        node,
++                        x == gc.map->burningEliteX && gc.map->burningEliteY == 0));
++            }
++        }
++        return ret;
++    }
++    const auto &current = gc.map->getNode(gc.curMapNodeX, gc.curMapNodeY);
++    for (int idx = 0; idx < current.edgeCount; ++idx) {
++        const auto nextY = gc.curMapNodeY + 1;
++        const auto nextX = current.edges[idx];
++        ret.append(publicMapNodeSnapshot(
++                gc.map->getNode(nextX, nextY),
++                nextX == gc.map->burningEliteX && nextY == gc.map->burningEliteY));
++    }
++    return ret;
++}
++
++pybind11::list publicEncounterHistorySnapshot(
++        const std::vector<PublicEncounterRecord> &history) {
++    pybind11::list ret;
++    for (const auto &record : history) {
++        pybind11::dict row;
++        row["act"] = record.act;
++        row["floor"] = record.floorNum;
++        row["room_type"] = roomStrings[static_cast<int>(record.room)];
++        row["encounter_id"] =
++                monsterEncounterEnumNames[static_cast<int>(record.encounter)];
++        ret.append(row);
++    }
++    return ret;
++}
++
++// ---------------------------------------------------------------------------
++// Visible screen projection helpers
++// ---------------------------------------------------------------------------
++
++std::string cardSelectScreenTypeLabel(CardSelectScreenType type) {
++    switch (type) {
++        case CardSelectScreenType::TRANSFORM:       return "TRANSFORM";
++        case CardSelectScreenType::TRANSFORM_UPGRADE: return "TRANSFORM_UPGRADE";
++        case CardSelectScreenType::UPGRADE:          return "UPGRADE";
++        case CardSelectScreenType::REMOVE:           return "REMOVE";
++        case CardSelectScreenType::DUPLICATE:        return "DUPLICATE";
++        case CardSelectScreenType::OBTAIN:           return "OBTAIN";
++        case CardSelectScreenType::BOTTLE:           return "BOTTLE";
++        case CardSelectScreenType::BONFIRE_SPIRITS:  return "BONFIRE_SPIRITS";
++        case CardSelectScreenType::INVALID:
++        default:                                     return "INVALID";
++    }
++}
++
++std::string restOptionLabel(int optionIdx) {
++    switch (optionIdx) {
++        case 0:  return "REST";
++        case 1:  return "SMITH";
++        case 2:  return "RECALL";
++        case 3:  return "LIFT";
++        case 4:  return "TOKE";
++        case 5:  return "DIG";
++        case 6:  return "SKIP";
++        default: return "UNKNOWN";
++    }
++}
++
++pybind11::dict publicCardSnapshot(const Card &card, int optionIdx) {
++    pybind11::dict ret;
++    ret["option_index"] = optionIdx;
++    ret["id"] = static_cast<int>(card.getId());
++    ret["name"] = std::string(card.getName());
++    ret["type"] = cardTypeLabel(card.getType());
++    ret["rarity"] = cardRarityStrings[static_cast<int>(card.getRarity())];
++    ret["upgraded"] = card.isUpgraded();
++    return ret;
++}
++
++pybind11::dict publicRelicSnapshot(RelicId relic, int optionIdx) {
++    pybind11::dict ret;
++    ret["option_index"] = optionIdx;
++    ret["id"] = static_cast<int>(relic);
++    ret["name"] = std::string(getRelicName(relic));
++    return ret;
++}
++
++pybind11::dict publicPotionSnapshot(Potion potion, int optionIdx) {
++    pybind11::dict ret;
++    ret["option_index"] = optionIdx;
++    ret["id"] = static_cast<int>(potion);
++    ret["name"] = potionLabel(potion);
++    return ret;
++}
++
++pybind11::list publicGameScreenActionsSnapshot(const GameContext &gc) {
++    pybind11::list ret;
++    const auto appendAction = [&ret, &gc](const search::GameAction &action) {
++        pybind11::dict row;
++        row["kind"] = gameActionKind(gc, action);
++        row["idx1"] = action.getIdx1();
++        row["idx2"] = action.getIdx2();
++        row["idx3"] = action.getIdx3();
++        if (gc.screenState == ScreenState::REST_ROOM) {
++            row["option"] = restOptionLabel(action.getIdx1());
++        }
++        ret.append(row);
++    };
++    for (const auto &action : search::GameAction::getAllActionsInState(gc)) {
++        appendAction(action);
++    }
++    if (gc.screenState != ScreenState::BATTLE) {
++        for (int idx = 0; idx < gc.potionCapacity; ++idx) {
++            const auto potionIdx = static_cast<std::uint32_t>(idx);
++            const search::GameAction useAction(0x80000000U | potionIdx);
++            if (useAction.isValidAction(gc)) {
++                appendAction(useAction);
++            }
++            const search::GameAction discardAction(0xC0000000U | potionIdx);
++            if (discardAction.isValidAction(gc)) {
++                appendAction(discardAction);
++            }
++        }
++    }
++    return ret;
++}
++
++pybind11::dict publicRewardsScreenSnapshot(const GameContext &gc) {
++    const auto &rewards = gc.info.rewardsContainer;
++    pybind11::dict ret;
++    pybind11::list gold;
++    for (int idx = 0; idx < rewards.goldRewardCount; ++idx) {
++        pybind11::dict row;
++        row["option_index"] = idx;
++        row["amount"] = rewards.gold[idx];
++        gold.append(row);
++    }
++    ret["gold"] = gold;
++    pybind11::list cardRewards;
++    for (int rewardIdx = 0; rewardIdx < rewards.cardRewardCount; ++rewardIdx) {
++        pybind11::dict reward;
++        reward["reward_index"] = rewardIdx;
++        pybind11::list cards;
++        for (int cardIdx = 0; cardIdx < rewards.cardRewards[rewardIdx].size(); ++cardIdx) {
++            cards.append(publicCardSnapshot(rewards.cardRewards[rewardIdx][cardIdx], cardIdx));
++        }
++        reward["cards"] = cards;
++        reward["singing_bowl_available"] = gc.hasRelic(RelicId::SINGING_BOWL);
++        cardRewards.append(reward);
++    }
++    ret["card_rewards"] = cardRewards;
++    pybind11::list relics;
++    for (int idx = 0; idx < rewards.relicCount; ++idx) {
++        relics.append(publicRelicSnapshot(rewards.relics[idx], idx));
++    }
++    ret["relics"] = relics;
++    pybind11::list potions;
++    for (int idx = 0; idx < rewards.potionCount; ++idx) {
++        potions.append(publicPotionSnapshot(rewards.potions[idx], idx));
++    }
++    ret["potions"] = potions;
++    ret["emerald_key"] = rewards.emeraldKey;
++    ret["sapphire_key"] = rewards.sapphireKey;
++    return ret;
++}
++
++pybind11::dict publicBossRelicRewardsSnapshot(const GameContext &gc) {
++    pybind11::dict ret;
++    pybind11::list relics;
++    for (int idx = 0; idx < 3; ++idx) {
++        relics.append(publicRelicSnapshot(gc.info.bossRelics[idx], idx));
++    }
++    ret["relics"] = relics;
++    return ret;
++}
++
++pybind11::dict publicCardSelectScreenSnapshot(const GameContext &gc) {
++    pybind11::dict ret;
++    ret["select_type"] = cardSelectScreenTypeLabel(gc.info.selectScreenType);
++    ret["required_count"] = gc.info.toSelectCount;
++    ret["selected_count"] = gc.info.haveSelectedCards.size();
++    pybind11::list options;
++    for (int idx = 0; idx < gc.info.toSelectCards.size(); ++idx) {
++        options.append(publicCardSnapshot(gc.info.toSelectCards[idx].card, idx));
++    }
++    ret["options"] = options;
++    pybind11::list selected;
++    for (int idx = 0; idx < gc.info.haveSelectedCards.size(); ++idx) {
++        selected.append(publicCardSnapshot(gc.info.haveSelectedCards[idx].card, idx));
++    }
++    ret["selected"] = selected;
++    return ret;
++}
++
++pybind11::dict publicMapScreenSnapshot(const GameContext &gc) {
++    pybind11::dict ret;
++    ret["visible_map"] = visibleMapSnapshot(gc);
++    ret["current_map_node"] = currentMapNodeSnapshot(gc);
++    ret["next_map_nodes"] = nextMapNodesSnapshot(gc);
++    return ret;
++}
++
++pybind11::dict publicTreasureRoomSnapshot(const GameContext &gc) {
++    pybind11::dict ret;
++    ret["chest_size"] = chestSizeEnumNames[static_cast<int>(gc.info.chestSize)];
++    return ret;
++}
++
++pybind11::dict publicShopScreenSnapshot(const GameContext &gc) {
++    const auto &shop = gc.info.shop;
++    pybind11::dict ret;
++    pybind11::list cards;
++    for (int idx = 0; idx < 7; ++idx) {
++        const auto price = shop.cardPrice(idx);
++        pybind11::dict row;
++        row["option_index"] = idx;
++        row["price"] = price;
++        row["sold_out"] = price < 0;
++        if (price >= 0) {
++            row["item"] = publicCardSnapshot(shop.cards[idx], idx);
++        }
++        cards.append(row);
++    }
++    ret["cards"] = cards;
++    pybind11::list relics;
++    for (int idx = 0; idx < 3; ++idx) {
++        const auto price = shop.relicPrice(idx);
++        pybind11::dict row;
++        row["option_index"] = idx;
++        row["price"] = price;
++        row["sold_out"] = price < 0;
++        if (price >= 0) {
++            row["item"] = publicRelicSnapshot(shop.relics[idx], idx);
++        }
++        relics.append(row);
++    }
++    ret["relics"] = relics;
++    pybind11::list potions;
++    for (int idx = 0; idx < 3; ++idx) {
++        const auto price = shop.potionPrice(idx);
++        pybind11::dict row;
++        row["option_index"] = idx;
++        row["price"] = price;
++        row["sold_out"] = price < 0;
++        if (price >= 0) {
++            row["item"] = publicPotionSnapshot(shop.potions[idx], idx);
++        }
++        potions.append(row);
++    }
++    ret["potions"] = potions;
++    ret["card_remove_price"] = shop.removeCost;
++    ret["card_remove_sold_out"] = shop.removeCost < 0;
++    return ret;
++}
++
++pybind11::dict publicVisibleScreenSnapshot(const GameContext &gc) {
++    pybind11::dict ret;
++    pybind11::list missingFields;
++    ret["schema_id"] = "public_visible_screen-v1";
++    ret["screen_state"] = screenStateLabel(gc.screenState);
++    ret["projection_available"] = true;
++    ret["legal_actions"] = publicGameScreenActionsSnapshot(gc);
++    switch (gc.screenState) {
++        case ScreenState::EVENT_SCREEN: {
++            pybind11::dict event;
++            event["event_id"] = eventIdStrings[static_cast<int>(gc.curEvent)];
++            event["event_name"] = eventGameNames[static_cast<int>(gc.curEvent)];
++            ret["event"] = event;
++            missingFields.append("event_option_details");
++            break;
++        }
++        case ScreenState::REWARDS:
++            ret["rewards"] = publicRewardsScreenSnapshot(gc);
++            break;
++        case ScreenState::BOSS_RELIC_REWARDS:
++            ret["boss_relic_rewards"] = publicBossRelicRewardsSnapshot(gc);
++            break;
++        case ScreenState::CARD_SELECT:
++            ret["card_select"] = publicCardSelectScreenSnapshot(gc);
++            break;
++        case ScreenState::MAP_SCREEN:
++            ret["map"] = publicMapScreenSnapshot(gc);
++            break;
++        case ScreenState::TREASURE_ROOM:
++            ret["treasure"] = publicTreasureRoomSnapshot(gc);
++            break;
++        case ScreenState::REST_ROOM:
++            break;
++        case ScreenState::SHOP_ROOM:
++            ret["shop"] = publicShopScreenSnapshot(gc);
++            break;
++        case ScreenState::BATTLE:
++            ret["projection_available"] = false;
++            missingFields.append("battle_screen_uses_battle_snapshot");
++            break;
++        case ScreenState::INVALID:
++        default:
++            ret["projection_available"] = false;
++            missingFields.append("unsupported_screen_state");
++            break;
++    }
++    ret["missing_fields"] = missingFields;
++    return ret;
++}
++
++// ---------------------------------------------------------------------------
++// StepSimulator checkpoint (extended)
++// ---------------------------------------------------------------------------
++
+ struct StepSimulatorCheckpoint {
+     GameContext gc;
+     BattleContext bc;
+     bool battleActive = false;
++    std::vector<PublicEncounterRecord> publicEncounterHistory;
+ };
+
+ struct StepSimulator {
+     GameContext gc;
+     BattleContext bc;
+     bool battleActive = false;
++    std::vector<PublicEncounterRecord> publicEncounterHistory;
+
+     StepSimulator(CharacterClass cc, std::uint64_t seed, int ascension) : gc(cc, seed, ascension) {}
+
+@@ -471,6 +765,7 @@ struct StepSimulator {
+         gc = GameContext(cc, seed, ascension);
+         bc = BattleContext();
+         battleActive = false;
++        publicEncounterHistory.clear();
+     }
+
+     void ensureBattleContext() {
+@@ -509,6 +804,12 @@ struct StepSimulator {
+         ret["green_key"] = gc.greenKey;
+         ret["red_key"] = gc.redKey;
+         ret["relic_data_visibility"] = "unverified";
++        ret["act_boss"] = visibleActBossLabel(gc);
++        ret["public_encounter_history"] =
++                publicEncounterHistorySnapshot(publicEncounterHistory);
++        ret["visible_map"] = visibleMapSnapshot(gc);
++        ret["current_map_node"] = currentMapNodeSnapshot(gc);
++        ret["next_map_nodes"] = nextMapNodesSnapshot(gc);
++        ret["public_visible_screen"] = publicVisibleScreenSnapshot(gc);
+         ret["battle_active"] = battleActive;
+         if (battleActive) {
+             ret["encounter_id"] = monsterEncounterEnumNames[static_cast<int>(bc.encounter)];
+@@ -657,6 +958,12 @@ struct StepSimulator {
+             }
+             battleAction.execute(bc);
+             if (bc.outcome != Outcome::UNDECIDED) {
++                publicEncounterHistory.push_back({
++                        gc.act,
++                        gc.floorNum,
++                        gc.curRoom,
++                        bc.encounter,
++                });
+                 bc.exitBattle(gc);
+                 battleActive = false;
+             }
+@@ -823,13 +1130,19 @@ struct StepSimulator {
+     }
+
+     StepSimulatorCheckpoint captureCheckpoint() const {
+-        return StepSimulatorCheckpoint{gc, bc, battleActive};
++        return StepSimulatorCheckpoint{
++                gc,
++                bc,
++                battleActive,
++                publicEncounterHistory,
++        };
+     }
+
+     pybind11::dict restoreCheckpoint(const StepSimulatorCheckpoint &checkpoint) {
+         gc = checkpoint.gc;
+         bc = checkpoint.bc;
+         battleActive = checkpoint.battleActive;
++        publicEncounterHistory = checkpoint.publicEncounterHistory;
+         return snapshot();
+     }
+ };

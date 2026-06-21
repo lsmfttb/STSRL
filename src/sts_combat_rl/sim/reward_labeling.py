@@ -313,6 +313,7 @@ def _decision_example(
         tactical_state=dict(step.tactical_state),
         tactical_legal_actions=[dict(action) for action in step.tactical_legal_actions],
         feature_schema_id=step.feature_schema_id,
+        public_run_context=dict(step.public_run_context),
     )
 
 

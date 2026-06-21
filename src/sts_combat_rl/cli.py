@@ -87,6 +87,10 @@ from sts_combat_rl.sim.trainer_input import (
     build_trainer_input_dataset_smoke_report,
     format_trainer_input_dataset_smoke_report,
 )
+from sts_combat_rl.sim.public_run_context_audit import (
+    format_public_run_context_audit_report,
+    run_public_run_context_audit,
+)
 from sts_combat_rl.sim.training_readiness import (
     build_training_readiness_report,
     format_training_readiness_report,
@@ -334,6 +338,15 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Run the versioned stochastic non-combat driver across the named "
             "A20 simulator seed range and require all rare branches."
+        ),
+    )
+    input_group.add_argument(
+        "--lightspeed-public-run-context-audit",
+        action="store_true",
+        help=(
+            "Run bounded A20 episodes through the simulator, collect the public "
+            "run context at every step, and audit coverage and forbidden-field "
+            "leakage to stderr."
         ),
     )
     input_group.add_argument(
@@ -603,6 +616,7 @@ def main(argv: list[str] | None = None) -> int:
         or args.lightspeed_battle_training_readiness
         or args.lightspeed_non_combat_calibration
         or args.lightspeed_battle_checkpoint_verify
+        or args.lightspeed_public_run_context_audit
         or args.lightspeed_battle_start_pool is not None
         or args.lightspeed_battle_start_pool_restore is not None
         or args.lightspeed_fixed_battle_evaluation is not None
@@ -747,6 +761,21 @@ def main(argv: list[str] | None = None) -> int:
                     file=sys.stderr,
                 )
                 if not report.passed:
+                    return 1
+            elif args.lightspeed_public_run_context_audit:
+                audit_report = run_public_run_context_audit(
+                    adapter,
+                    seeds=[
+                        args.sim_seed + offset for offset in range(args.sim_episodes)
+                    ],
+                    max_steps=args.sim_steps,
+                    action_space=action_space,
+                )
+                print(
+                    format_public_run_context_audit_report(audit_report),
+                    file=sys.stderr,
+                )
+                if not audit_report.audit_ok:
                     return 1
             else:
                 if args.lightspeed_rollout_smoke:

@@ -123,6 +123,7 @@ class ControlledRunStep:
     tactical_state: dict[str, Any] = field(default_factory=dict)
     tactical_legal_actions: list[dict[str, Any]] = field(default_factory=list)
     feature_schema_id: str = "public-tactical-v2"
+    public_run_context: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -266,6 +267,7 @@ def execute_controlled_run(
                 dict(action) for action in context.tactical_legal_actions
             ],
             feature_schema_id=context.tactical_feature_schema_id,
+            public_run_context=dict(context.public_run_context),
             floor=_first_number(snapshot.raw, "floor_num", "floor"),
             player_hp=_player_hp(snapshot.raw),
             player_max_hp=_player_max_hp(snapshot.raw),
@@ -328,6 +330,7 @@ def build_decision_context(
     """
 
     from sts_combat_rl.sim.policy import DecisionContext
+    from sts_combat_rl.sim.public_run_context import build_public_run_context
 
     raw = raw_snapshot if isinstance(raw_snapshot, Mapping) else {}
     screen_state = str(raw.get("screen_state", "(none)"))
@@ -347,6 +350,7 @@ def build_decision_context(
         tactical_state=build_public_tactical_state(raw),
         tactical_legal_actions=build_public_tactical_actions(list(actions), raw),
         tactical_feature_schema_id="public-tactical-v2",
+        public_run_context=build_public_run_context(raw),
     )
 
 

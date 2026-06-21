@@ -44,7 +44,7 @@ from sts_combat_rl.sim.trainer_input_contract import (
 )
 
 
-TRAINER_INPUT_DATASET_FORMAT_VERSION = 3
+TRAINER_INPUT_DATASET_FORMAT_VERSION = 4
 TRAINER_INPUT_DATASET_MIGRATIONS = (
     ArtifactMigration(
         source_version=1,
@@ -63,6 +63,14 @@ TRAINER_INPUT_DATASET_MIGRATIONS = (
         losses=(
             "v2 fixed numeric features cannot reconstruct v2 structured tactical inputs",
             "v2 omitted tactical feature-schema and identity-vocabulary provenance",
+        ),
+    ),
+    ArtifactMigration(
+        source_version=3,
+        target_version=4,
+        migrate=lambda document: _migrate_trainer_input_v3_to_v4(document),
+        losses=(
+            "v3 omitted public run context; migrated records mark context unavailable",
         ),
     ),
 )
@@ -580,6 +588,43 @@ def _migrate_trainer_input_v2_to_v3(
     return ArtifactDocument(metadata=metadata, records=migrated_records)
 
 
+def _migrate_trainer_input_v3_to_v4(
+    document: ArtifactDocument,
+) -> ArtifactDocument:
+    """Add explicit unavailable public run context to v3 records."""
+
+    metadata = dict(document.metadata)
+    metadata["format_version"] = 4
+    metadata.setdefault("public_run_context_schema_id", "public-run-context-v1")
+    migrated_records: list[dict[str, Any]] = []
+    for raw_record in document.records:
+        record = dict(raw_record)
+        record["public_run_context"] = {
+            "schema_id": "public-run-context-v1",
+            "schema_version": 1,
+            "visible_act_boss": None,
+            "encounter_history": [],
+            "run_history": {
+                "schema_id": "public-run-history-v1",
+                "entries": [],
+                "missing_fields": ["public_run_history"],
+            },
+            "visible_map": [],
+            "current_map_node": None,
+            "next_map_nodes": [],
+            "missing_fields": [
+                "visible_act_boss",
+                "encounter_history",
+                "run_history",
+                "visible_map",
+                "current_map_node",
+                "next_map_nodes",
+            ],
+        }
+        migrated_records.append(record)
+    return ArtifactDocument(metadata=metadata, records=migrated_records)
+
+
 def _legacy_source_metadata(record: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "source_kind": "unknown",
@@ -616,6 +661,7 @@ def _record_to_dict(record: TrainerInputRecord) -> dict[str, Any]:
         "feature_schema_id": record.feature_schema_id,
         "tactical_state": record.tactical_state,
         "tactical_legal_actions": record.tactical_legal_actions,
+        "public_run_context": record.public_run_context,
         "segment_index": record.segment_index,
         "segment_step_index": record.segment_step_index,
         "segment_decision_count": record.segment_decision_count,
@@ -662,6 +708,7 @@ def _record_from_dict(raw: dict[str, Any]) -> TrainerInputRecord:
         tactical_legal_actions=[
             _dict(action) for action in _list(raw.get("tactical_legal_actions"))
         ],
+        public_run_context=_dict(raw.get("public_run_context")),
         segment_index=_int(raw.get("segment_index")),
         segment_step_index=_int(raw.get("segment_step_index")),
         segment_decision_count=_int(raw.get("segment_decision_count")),

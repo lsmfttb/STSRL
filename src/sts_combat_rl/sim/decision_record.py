@@ -40,6 +40,7 @@ DECISION_RECORD_FIELD_NAMES = (
     "feature_schema_id",
     "tactical_state",
     "tactical_legal_actions",
+    "public_run_context",
 )
 
 
@@ -86,6 +87,7 @@ class DecisionRecord:
     feature_schema_id: str = "public-tactical-v2"
     tactical_state: dict[str, Any] = field(default_factory=dict)
     tactical_legal_actions: list[dict[str, Any]] = field(default_factory=list)
+    public_run_context: dict[str, Any] = field(default_factory=dict)
 
 
 def action_identities_for_actions(
@@ -294,6 +296,7 @@ def decision_record_problems(record: DecisionRecord, *, label: str) -> list[str]
     if not record.source_metadata:
         problems.append(f"{label}: source metadata is missing")
     problems.extend(_tactical_feature_problems(record, label=label))
+    problems.extend(_public_run_context_problems(record, label=label))
     return problems
 
 
@@ -328,6 +331,29 @@ def _tactical_feature_problems(record: DecisionRecord, *, label: str) -> list[st
         f"{label}: {problem}"
         for problem in tactical_action_problems(record.tactical_legal_actions)
     )
+    return problems
+
+
+def _public_run_context_problems(
+    record: DecisionRecord,
+    *,
+    label: str,
+) -> list[str]:
+    """Validate the public run context on a decision record."""
+
+    from sts_combat_rl.sim.public_run_context import (
+        public_run_context_problems,
+    )
+
+    problems: list[str] = []
+    if not isinstance(record.public_run_context, dict):
+        problems.append(f"{label}: public_run_context must be a dict")
+        return problems
+    if record.public_run_context:
+        problems.extend(
+            f"{label}: {problem}"
+            for problem in public_run_context_problems(record.public_run_context)
+        )
     return problems
 
 

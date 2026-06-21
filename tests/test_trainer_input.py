@@ -46,7 +46,7 @@ def test_trainer_input_v1_fixture_migrates_to_current_schema() -> None:
     assert (
         dataset.migration_report.target_version == TRAINER_INPUT_DATASET_FORMAT_VERSION
     )
-    assert dataset.migration_report.applied_versions == (2, 3)
+    assert dataset.migration_report.applied_versions == (2, 3, 4)
     assert "v1 omitted per-decision controller provenance" in (
         dataset.migration_report.losses
     )

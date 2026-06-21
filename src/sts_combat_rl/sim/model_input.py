@@ -24,7 +24,7 @@ from sts_combat_rl.sim.features import (
 )
 
 
-MODEL_INPUT_BATCH_FORMAT_VERSION = 2
+MODEL_INPUT_BATCH_FORMAT_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -68,6 +68,7 @@ class ModelInputBatch:
     return_to_go: list[float] = field(default_factory=list)
     tactical_states: list[dict[str, Any]] = field(default_factory=list)
     tactical_actions: list[dict[str, Any]] = field(default_factory=list)
+    public_run_contexts: list[dict[str, Any]] = field(default_factory=list)
     problems: list[str] = field(default_factory=list)
 
 
@@ -116,6 +117,7 @@ def build_model_input_batch(dataset: TrainerInputDataset) -> ModelInputBatch:
     return_to_go: list[float] = []
     tactical_states: list[dict[str, Any]] = []
     tactical_actions: list[dict[str, Any]] = []
+    public_run_contexts: list[dict[str, Any]] = []
 
     for record in dataset.records:
         action_start = len(action_features)
@@ -153,6 +155,7 @@ def build_model_input_batch(dataset: TrainerInputDataset) -> ModelInputBatch:
         tactical_actions.extend(
             dict(action) for action in record.tactical_legal_actions
         )
+        public_run_contexts.append(dict(record.public_run_context))
 
     batch = ModelInputBatch(
         format_version=MODEL_INPUT_BATCH_FORMAT_VERSION,
@@ -178,6 +181,7 @@ def build_model_input_batch(dataset: TrainerInputDataset) -> ModelInputBatch:
         return_to_go=return_to_go,
         tactical_states=tactical_states,
         tactical_actions=tactical_actions,
+        public_run_contexts=public_run_contexts,
         problems=list(dataset.problems),
     )
     return replace(
@@ -292,6 +296,11 @@ def decision_context_from_model_input_batch(
             else []
         ),
         tactical_feature_schema_id=batch.tactical_feature_schema_id,
+        public_run_context=(
+            batch.public_run_contexts[example_index]
+            if example_index < len(batch.public_run_contexts)
+            else {}
+        ),
     )
 
 
@@ -316,6 +325,31 @@ def migrate_model_input_batch(batch: ModelInputBatch) -> ModelInputBatch:
         tactical_feature_schema_id=LEGACY_FEATURE_SCHEMA_ID,
         tactical_feature_schema_version=0,
         identity_vocabulary_version="",
+        public_run_contexts=[
+            {
+                "schema_id": "public-run-context-v1",
+                "schema_version": 1,
+                "visible_act_boss": None,
+                "encounter_history": [],
+                "run_history": {
+                    "schema_id": "public-run-history-v1",
+                    "entries": [],
+                    "missing_fields": ["public_run_history"],
+                },
+                "visible_map": [],
+                "current_map_node": None,
+                "next_map_nodes": [],
+                "missing_fields": [
+                    "visible_act_boss",
+                    "encounter_history",
+                    "run_history",
+                    "visible_map",
+                    "current_map_node",
+                    "next_map_nodes",
+                ],
+            }
+            for _ in range(len(batch.snapshot_features))
+        ],
         problems=[
             *batch.problems,
             "v1 model input has no structured tactical state/action inputs",
@@ -392,6 +426,27 @@ def _model_input_shape_problems(batch: ModelInputBatch) -> list[str]:
             f"tactical action: {problem}"
             for problem in tactical_action_problems(batch.tactical_actions)
         )
+
+    if batch.public_run_contexts:
+        _validate_parallel_length(
+            "public run context rows",
+            len(batch.public_run_contexts),
+            example_count,
+            problems,
+        )
+        for index, ctx in enumerate(batch.public_run_contexts):
+            if not isinstance(ctx, dict):
+                problems.append(f"example {index}: public_run_context must be a dict")
+                continue
+            if ctx and ctx.get("schema_id"):
+                from sts_combat_rl.sim.public_run_context import (
+                    public_run_context_problems,
+                )
+
+                problems.extend(
+                    f"example {index}: {problem}"
+                    for problem in public_run_context_problems(ctx)
+                )
 
     for index, snapshot_features in enumerate(batch.snapshot_features):
         _validate_feature_row(
