@@ -115,6 +115,30 @@ class FakePoolAdapter:
             "floor_num": self.phase + 1,
             "room_type": "ELITE" if self.phase == 3 else "MONSTER",
             "encounter_id": f"ENCOUNTER_{self.phase}" if battle_active else None,
+            # Synthetic map data so the context verifier can exercise
+            # map-node and edge-coordinate comparators.
+            "visible_map": [
+                {
+                    "symbol": "M",
+                    "room_type": "MONSTER",
+                    "burning_elite": False,
+                    "x": 0,
+                    "y": 0,
+                    "parents": [],
+                    "children": [{"x": 1, "y": 1}],
+                },
+            ],
+            "current_map_node": {
+                "symbol": "M",
+                "room_type": "MONSTER",
+                "burning_elite": False,
+                "x": 0,
+                "y": 0,
+                "parents": [],
+                "children": [{"x": 1, "y": 1}],
+            },
+            "next_map_nodes": [],
+            "visible_act_boss": "Slime Boss",
         }
         if battle_active:
             raw["battle_outcome"] = "UNDECIDED"
@@ -318,31 +342,26 @@ def test_corrupted_context_is_reported() -> None:
 
 
 def test_corrupted_map_node_is_reported() -> None:
-    """Context verifier must report a visible_map node field mismatch.
-
-    The FakePoolAdapter's snapshot carries no map fields, so the replay
-    always produces 0 nodes.  This test injects a node on the source
-    side and asserts a length mismatch is reported — exercising the
-    map-verification path, though the per-node children comparator
-    requires a real simulator adapter with native map projections.
-    """
+    """Context verifier must flag a visible_map children coordinate mismatch."""
     pool = _pool()
     record = pool.records[0]
+    # The FakePoolAdapter's snapshot now carries synthetic map data.
+    # Corrupt the source record's child coordinate so the per-node
+    # children comparator fires.
+    corrupted_node = {
+        "symbol": "M",
+        "room_type": "MONSTER",
+        "burning_elite": False,
+        "x": 0,
+        "y": 0,
+        "parents": [],
+        "children": [{"x": 99, "y": 99}],
+    }
     corrupted = replace(
         record,
         public_run_context={
             **record.public_run_context,
-            "visible_map": [
-                {
-                    "symbol": "M",
-                    "room_type": "MONSTER",
-                    "burning_elite": False,
-                    "x": 0,
-                    "y": 0,
-                    "parents": [],
-                    "children": [{"x": 1, "y": 1}],
-                },
-            ],
+            "visible_map": [corrupted_node],
             "missing_fields": [
                 f
                 for f in record.public_run_context.get("missing_fields", [])
@@ -357,8 +376,8 @@ def test_corrupted_map_node_is_reported() -> None:
         pool,
     )
     assert not verification.restore_ok
-    assert any("visible_map" in p for p in verification.problems), (
-        f"expected visible_map mismatch, got: {verification.problems}"
+    assert any("children" in p for p in verification.problems), (
+        f"expected children mismatch, got: {verification.problems}"
     )
 
 
