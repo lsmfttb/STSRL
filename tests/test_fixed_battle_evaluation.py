@@ -125,6 +125,15 @@ def _make_cohort_record(
             "config": {},
         },
         action_trace=action_trace,
+        snapshot_observation=(1.0, 2.0, 3.0),
+        snapshot_raw={
+            "screen_state": "BATTLE",
+            "battle_active": True,
+            "cur_hp": 70,
+            "max_hp": 80,
+            "floor_num": 5,
+        },
+        source_distribution_kind="natural_run",
     )
 
 
@@ -188,7 +197,7 @@ class _FakeEvalAdapter:
     def __init__(self, seed: int = 1, ascension: int = 20):
         self.seed = seed
         self.ascension = ascension
-        self._step_count = 0
+        self._current_step = 0
         self._terminal = False
 
     @property
@@ -200,7 +209,7 @@ class _FakeEvalAdapter:
         return "fake-adapter"
 
     def reset(self, *, seed: int | None = None) -> SimulatorSnapshot:
-        self._step_count = 0
+        self._current_step = 0
         self._terminal = False
         return _make_snapshot(
             raw={
@@ -209,7 +218,6 @@ class _FakeEvalAdapter:
                 "cur_hp": 70,
                 "max_hp": 80,
                 "floor_num": 5,
-                "seed": seed if seed is not None else self.seed,
             }
         )
 
@@ -217,9 +225,9 @@ class _FakeEvalAdapter:
         return [_make_action(1, "ATTACK", "Strike")]
 
     def step(self, action: SimulatorAction) -> SimulatorTransition:
-        self._step_count += 1
+        self._current_step += 1
         # After a few steps, pretend the player wins.
-        if self._step_count >= 3:
+        if self._current_step >= 3:
             return SimulatorTransition(
                 snapshot=_make_snapshot(
                     raw={
@@ -240,7 +248,7 @@ class _FakeEvalAdapter:
                 raw={
                     "screen_state": "BATTLE",
                     "battle_active": True,
-                    "cur_hp": 70 - self._step_count * 2,
+                    "cur_hp": 70 - self._current_step * 2,
                     "max_hp": 80,
                     "floor_num": 5,
                 }
@@ -323,8 +331,9 @@ class _FakeLossAdapter:
             raw={
                 "screen_state": "BATTLE",
                 "battle_active": True,
-                "cur_hp": 10,
+                "cur_hp": 70,
                 "max_hp": 80,
+                "floor_num": 5,
             }
         )
 

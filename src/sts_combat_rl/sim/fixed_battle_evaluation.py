@@ -22,6 +22,10 @@ from sts_combat_rl.sim.artifact_versioning import (
     migrate_artifact_document,
     preserved_migration_report,
 )
+from sts_combat_rl.sim.checkpoint_verification import (
+    freeze_value,
+    snapshot_fingerprint,
+)
 from sts_combat_rl.sim.contract import (
     CheckpointingSimulatorAdapter,
     SimulatorSnapshot,
@@ -278,9 +282,25 @@ def _evaluate_one_battle(
     adapter = adapter_factory()
 
     # Restore the battle start.
+    restore_problem: str | None = None
     try:
         snapshot, restoration_method = _restore_cohort_record(adapter, cohort_record)
     except (RuntimeError, ValueError) as exc:
+        snapshot = None
+        restoration_method = "failed"
+        restore_problem = f"restore failed: {exc}"
+
+    # Verify fingerprint match after successful restore.
+    if snapshot is not None and not _restore_matches_record(snapshot, cohort_record):
+        restore_problem = (
+            f"restored snapshot does not match cohort record fingerprint "
+            f"(method={restoration_method})"
+        )
+        snapshot = None
+        restoration_method = "failed"
+        # Don't raise — push into the result as a named failure.
+
+    if restore_problem is not None:
         return SingleBattleEvaluationResult(
             cohort_index=cohort_record.cohort_index,
             source_checkpoint_id=cohort_record.source_checkpoint_id,
@@ -299,8 +319,11 @@ def _evaluate_one_battle(
             decision_count=0,
             simulator_step_count=0,
             wall_clock_time_s=0.0,
-            problems=[f"restore failed: {exc}"],
+            problems=[restore_problem],
         )
+
+    # At this point snapshot is not None.
+    assert snapshot is not None
 
     # Record initial HP.
     initial_hp = _player_hp(snapshot.raw)
@@ -314,7 +337,12 @@ def _evaluate_one_battle(
 
     for step_index in range(max_battle_steps):
         simulator_step_count += 1
-        actions = list(adapter.legal_actions(current))
+        try:
+            actions = list(adapter.legal_actions(current))
+        except (RuntimeError, ValueError) as exc:
+            problems.append(f"legal_actions error at step {step_index}: {exc}")
+            termination_status = "error"
+            break
         if not actions:
             # No legal actions — check if battle is over.
             outcome = _battle_outcome(current.raw)
@@ -352,22 +380,32 @@ def _evaluate_one_battle(
 
         decision_count += 1
         chosen_action = actions[decision.selected_index]
-        transition = adapter.step(chosen_action)
+        try:
+            transition = adapter.step(chosen_action)
+        except (RuntimeError, ValueError) as exc:
+            problems.append(f"step error at index {step_index}: {exc}")
+            termination_status = "error"
+            break
         current = transition.snapshot
 
         if transition.terminal or not _is_battle_state(current):
             outcome = _battle_outcome(current.raw)
             if outcome == "PLAYER_VICTORY":
                 termination_status = "win"
-            elif outcome == "PLAYER_LOSS" or outcome is not None:
+            elif outcome == "PLAYER_LOSS":
                 termination_status = "loss"
+            elif outcome is not None:
+                # An outcome field exists but isn't a recognized terminal.
+                problems.append(f"terminal with unrecognised outcome {outcome!r}")
+                termination_status = "error"
             else:
-                # Battle ended but outcome unclear — check HP.
+                # Battle ended but no authoritative outcome.
                 final_hp = _player_hp(current.raw)
                 if final_hp is not None and final_hp <= 0:
                     termination_status = "loss"
                 else:
-                    termination_status = "loss"  # conservative
+                    problems.append("terminal transition without authoritative outcome")
+                    termination_status = "error"
             break
     else:
         termination_status = "truncated"
@@ -645,6 +683,16 @@ def format_fixed_evaluation_report(report: FixedEvaluationReport) -> str:
             f"  {enc_id}: {slc.battle_count} battles, {slc.win_count}W/{slc.loss_count}L, {wr_str}"
         )
 
+    # Encounter-macro aggregate (average of per-encounter results).
+    enc_slices = list(aggregates.encounter_macro.values())
+    if enc_slices:
+        enc_macro_wr = _macro_win_rate(enc_slices)
+        lines.append(
+            f"  encounter-macro win rate: {enc_macro_wr:.4f}"
+            if enc_macro_wr is not None
+            else "  encounter-macro win rate: N/A"
+        )
+
     # Room-type-macro.
     lines.append("")
     lines.append(f"── room-type-macro ({len(aggregates.room_type_macro)} types) ──")
@@ -656,6 +704,16 @@ def format_fixed_evaluation_report(report: FixedEvaluationReport) -> str:
         )
         lines.append(
             f"  {rt}: {slc.battle_count} battles, {slc.win_count}W/{slc.loss_count}L, {wr_str}"
+        )
+
+    # Room-type-macro aggregate (average of per-room-type results).
+    rt_slices = list(aggregates.room_type_macro.values())
+    if rt_slices:
+        rt_macro_wr = _macro_win_rate(rt_slices)
+        lines.append(
+            f"  room-type-macro win rate: {rt_macro_wr:.4f}"
+            if rt_macro_wr is not None
+            else "  room-type-macro win rate: N/A"
         )
 
     # Per-stratum.
@@ -690,9 +748,9 @@ def _restore_cohort_record(
 ) -> tuple[SimulatorSnapshot, str]:
     """Restore a cohort record by replaying seed + action trace in a fresh adapter.
 
-    This deliberately does NOT use restore_battle_start_record because cohort
-    records do not carry snapshot_observation/snapshot_raw needed for fingerprint
-    matching.  Instead it performs the seed/action-trace replay directly.
+    Uses the source seed and occurrence-disambiguated action trace stored in the
+    cohort record.  The caller is responsible for verifying the restored snapshot
+    matches the cohort fingerprint after this returns.
     """
 
     snapshot = adapter.reset(seed=cohort_record.source_seed)
@@ -701,6 +759,20 @@ def _restore_cohort_record(
         index = find_action_index_by_identity(actions, identity)
         snapshot = adapter.step(actions[index]).snapshot
     return snapshot, "seed_action_trace"
+
+
+def _restore_matches_record(
+    snapshot: SimulatorSnapshot,
+    cohort_record: FixedCohortRecord,
+) -> bool:
+    """Check that a restored snapshot matches the cohort record fingerprint."""
+    if not cohort_record.snapshot_observation and not cohort_record.snapshot_raw:
+        # No fingerprint stored — cannot verify.
+        return False
+    expected = freeze_value(
+        (cohort_record.snapshot_observation, cohort_record.snapshot_raw)
+    )
+    return snapshot_fingerprint(snapshot) == expected
 
 
 # ── Battle-state helpers ────────────────────────────────────────────────────
@@ -934,3 +1006,19 @@ def _optional_mapping(value: Any) -> dict[str, Any] | None:
     if not isinstance(value, Mapping):
         raise ValueError("controller compute telemetry must be an object or null")
     return {str(key): item for key, item in value.items()}
+
+
+def _macro_win_rate(slices: list[AggregateSlice]) -> float | None:
+    """Average of per-group win rates (equal weight per group).
+
+    Groups with no resolvable battles (0 wins + 0 losses) are skipped.
+    If no groups have resolvable battles, returns None.
+    """
+    rates: list[float] = []
+    for slc in slices:
+        wr = slc.win_rate
+        if wr is not None:
+            rates.append(wr)
+    if not rates:
+        return None
+    return sum(rates) / len(rates)

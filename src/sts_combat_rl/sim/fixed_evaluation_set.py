@@ -88,7 +88,9 @@ class FixedCohortRecord:
     source_battle_controller_provenance: dict[str, Any]
     source_non_combat_controller_provenance: dict[str, Any]
     action_trace: tuple[dict[str, Any], ...]
-    distribution_kind: str = FIXED_EVALUATION_SET_DISTRIBUTION_KIND
+    snapshot_observation: tuple[Any, ...] = ()
+    snapshot_raw: dict[str, Any] = field(default_factory=dict)
+    source_distribution_kind: str = "natural_run"
     checkpoint_information_regime: str = "full_simulator_state_oracle_like"
     public_context_status: str = "unavailable"
 
@@ -140,14 +142,17 @@ class CohortCoverageReport:
     observed_strata: Counter[tuple[Any, ...]] = field(default_factory=Counter)
     under_covered_strata: Counter[tuple[Any, ...]] = field(default_factory=Counter)
     required_but_absent_strata: list[tuple[Any, ...]] = field(default_factory=list)
+    required_below_quota_strata: list[tuple[Any, ...]] = field(default_factory=list)
     malformed_records: list[int] = field(default_factory=list)
     quota_saturated_strata: Counter[tuple[Any, ...]] = field(default_factory=Counter)
+    per_stratum_source_counts: dict[tuple[Any, ...], int] = field(default_factory=dict)
     problems: list[str] = field(default_factory=list)
 
     @property
     def coverage_ok(self) -> bool:
         return (
             not self.required_but_absent_strata
+            and not self.required_below_quota_strata
             and not self.malformed_records
             and not self.problems
         )
@@ -235,6 +240,11 @@ def select_fixed_cohort(
                         source_battle_controller_provenance=record.source_battle_controller_provenance,
                         source_non_combat_controller_provenance=record.source_non_combat_controller_provenance,
                         action_trace=record.action_trace,
+                        snapshot_observation=record.snapshot_observation,
+                        snapshot_raw=dict(record.snapshot_raw),
+                        source_distribution_kind=record.distribution_kind,
+                        checkpoint_information_regime=record.checkpoint_information_regime,
+                        public_context_status=record.public_context_status,
                     )
                 )
                 changed = True
@@ -255,6 +265,7 @@ def select_fixed_cohort(
 
     problems: list[str] = []
     required_absent: list[tuple[Any, ...]] = []
+    required_below_quota: list[tuple[Any, ...]] = []
 
     if config.required_strata is not None:
         for required in config.required_strata:
@@ -264,11 +275,14 @@ def select_fixed_cohort(
                 problems.append(
                     f"required stratum {required_tuple} is absent from the pool"
                 )
-            elif required_tuple not in selected_by_stratum:
-                problems.append(
-                    f"required stratum {required_tuple} could not be filled to quota"
-                )
-                required_absent.append(required_tuple)
+            else:
+                selected_count_for = len(selected_by_stratum.get(required_tuple, []))
+                if selected_count_for < stratum_quota:
+                    required_below_quota.append(required_tuple)
+                    problems.append(
+                        f"required stratum {required_tuple} selected "
+                        f"{selected_count_for} / {stratum_quota} (below quota)"
+                    )
     else:
         # When no required-strata configuration is supplied, report that
         # unobserved global strata are unknown rather than claiming complete
@@ -294,8 +308,10 @@ def select_fixed_cohort(
         observed_strata=observed_strata,
         under_covered_strata=under_covered_strata,
         required_but_absent_strata=required_absent,
+        required_below_quota_strata=required_below_quota,
         malformed_records=malformed,
         quota_saturated_strata=quota_saturated,
+        per_stratum_source_counts={s: len(recs) for s, recs in buckets.items()},
         problems=problems,
     )
 
@@ -464,7 +480,13 @@ def format_cohort_coverage_report(report: CohortCoverageReport) -> str:
             lines.append(f"  - {_format_stratum(stratum)}")
     else:
         lines.append("  (none)")
-    if not report.required_but_absent_strata and report.observed_strata:
+    lines.append("required strata below quota:")
+    if report.required_below_quota_strata:
+        for stratum in report.required_below_quota_strata:
+            lines.append(f"  - {_format_stratum(stratum)}")
+    else:
+        lines.append("  (none)")
+    if not report.required_but_absent_strata and not report.required_below_quota_strata:
         lines.append(
             "  (unobserved global strata are unknown — no required "
             "strata were configured)"
@@ -502,7 +524,9 @@ def _cohort_record_to_manifest(record: FixedCohortRecord) -> dict[str, Any]:
         "action_trace": [
             _json_safe_mapping(identity) for identity in record.action_trace
         ],
-        "distribution_kind": record.distribution_kind,
+        "snapshot_observation": list(record.snapshot_observation),
+        "snapshot_raw": _json_safe_mapping(record.snapshot_raw),
+        "source_distribution_kind": record.source_distribution_kind,
         "checkpoint_information_regime": record.checkpoint_information_regime,
         "public_context_status": record.public_context_status,
     }
@@ -525,6 +549,35 @@ def _cohort_record_from_manifest(
         _require_mapping(entry, f"{label} action trace {i}")
         for i, entry in enumerate(action_trace_raw)
     )
+
+    observation_raw = raw.get("snapshot_observation")
+    if not isinstance(observation_raw, list):
+        raise ValueError(f"{label} snapshot_observation must be a list")
+    snapshot_observation = tuple(observation_raw)
+
+    snapshot_raw_raw = raw.get("snapshot_raw")
+    snapshot_raw = (
+        _require_mapping(snapshot_raw_raw, f"{label} snapshot_raw")
+        if snapshot_raw_raw is not None
+        else {}
+    )
+
+    source_distribution_kind = raw.get("source_distribution_kind")
+    if not isinstance(source_distribution_kind, str) or not source_distribution_kind:
+        raise ValueError(f"{label} source_distribution_kind must be a non-empty string")
+
+    checkpoint_information_regime = raw.get("checkpoint_information_regime")
+    if (
+        not isinstance(checkpoint_information_regime, str)
+        or not checkpoint_information_regime
+    ):
+        raise ValueError(
+            f"{label} checkpoint_information_regime must be a non-empty string"
+        )
+
+    public_context_status = raw.get("public_context_status")
+    if not isinstance(public_context_status, str) or not public_context_status:
+        raise ValueError(f"{label} public_context_status must be a non-empty string")
 
     return FixedCohortRecord(
         cohort_index=_require_non_negative_int(
@@ -560,6 +613,11 @@ def _cohort_record_from_manifest(
             f"{label} source_non_combat_controller_provenance",
         ),
         action_trace=action_trace,
+        snapshot_observation=snapshot_observation,
+        snapshot_raw=snapshot_raw,
+        source_distribution_kind=source_distribution_kind,
+        checkpoint_information_regime=checkpoint_information_regime,
+        public_context_status=public_context_status,
     )
 
 
@@ -576,10 +634,10 @@ def _fixed_cohort_problems(cohort: FixedCohort) -> list[str]:
                 f"duplicate source checkpoint id {record.source_checkpoint_id}"
             )
         checkpoint_ids.add(record.source_checkpoint_id)
-        if record.distribution_kind != FIXED_EVALUATION_SET_DISTRIBUTION_KIND:
+        if record.source_distribution_kind != "natural_run":
             problems.append(
-                f"record {index} has wrong distribution kind: "
-                f"{record.distribution_kind}"
+                f"record {index} source_distribution_kind must be natural_run: "
+                f"{record.source_distribution_kind}"
             )
     return list(dict.fromkeys(problems))
 

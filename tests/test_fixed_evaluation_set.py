@@ -12,7 +12,6 @@ from sts_combat_rl.sim.battle_start_pool import (
     NaturalBattleStartPool,
 )
 from sts_combat_rl.sim.fixed_evaluation_set import (
-    FIXED_EVALUATION_SET_DISTRIBUTION_KIND,
     FixedCohortSelectionConfig,
     dump_fixed_cohort_jsonl,
     load_fixed_cohort_jsonl,
@@ -278,11 +277,11 @@ class TestSelectFixedCohort:
         assert "kind" in cohort.source_pool_controller_provenance
 
     def test_cohort_records_have_fixed_evaluation_distribution_kind(self):
-        """All cohort records are tagged with the fixed evaluation distribution."""
+        """All cohort records retain source distribution kind as natural_run."""
         pool = _make_pool([_make_record(0)])
         cohort, _ = select_fixed_cohort(pool, selection_seed=1)
         for record in cohort.records:
-            assert record.distribution_kind == FIXED_EVALUATION_SET_DISTRIBUTION_KIND
+            assert record.source_distribution_kind == "natural_run"
 
     def test_config_to_dict_and_back(self):
         """Selection config round-trips through dict."""
