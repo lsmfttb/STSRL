@@ -12,7 +12,7 @@ index d04312b..4794ae6 100644
  add_subdirectory(json)
  add_subdirectory(pybind11)
 diff --git a/bindings/slaythespire.cpp b/bindings/slaythespire.cpp
-index a9afe35..a09d310 100644
+index a9afe35..b0b969a 100644
 --- a/bindings/slaythespire.cpp
 +++ b/bindings/slaythespire.cpp
 @@ -9,11 +9,17 @@
@@ -33,7 +33,7 @@ index a9afe35..a09d310 100644
  #include "game/Game.h"
  
  #include "slaythespire.h"
-@@ -21,6 +27,696 @@
+@@ -21,6 +27,705 @@
  
  using namespace sts;
  
@@ -545,6 +545,31 @@ index a9afe35..a09d310 100644
 +        ret.append(row);
 +    }
 +    return ret;
++
++}
++pybind11::dict publicVisibleScreenSnapshot(const GameContext &gc) {
++    pybind11::dict ret; pybind11::list missingFields;
++    ret["schema_id"] = "public_visible_screen-v1";
++    ret["screen_state"] = screenStateLabel(gc.screenState);
++    ret["projection_available"] = true;
++    ret["legal_actions"] = pybind11::list();
++    switch (gc.screenState) {
++        case ScreenState::EVENT_SCREEN: { pybind11::dict event;
++            event["event_id"] = eventIdStrings[static_cast<int>(gc.curEvent)];
++            event["event_name"] = eventGameNames[static_cast<int>(gc.curEvent)];
++            ret["event"] = event;
++            missingFields.append("event_option_details"); break; }
++        case ScreenState::MAP_SCREEN:
++            ret["visible_map"] = visibleMapSnapshot(gc);
++            ret["current_map_node"] = currentMapNodeSnapshot(gc);
++            ret["next_map_nodes"] = nextMapNodesSnapshot(gc); break;
++        case ScreenState::BATTLE:
++            ret["projection_available"] = false;
++            missingFields.append("battle_screen_uses_battle_snapshot"); break;
++        case ScreenState::INVALID: default:
++            ret["projection_available"] = false;
++            missingFields.append("unsupported_screen_state"); break; }
++    ret["missing_fields"] = missingFields; return ret; }
 +}
 +struct StepSimulatorCheckpoint {
 +    GameContext gc;
@@ -600,8 +625,7 @@ index a9afe35..a09d310 100644
 +        ret["visible_map"] = visibleMapSnapshot(gc);
 +        ret["current_map_node"] = currentMapNodeSnapshot(gc);
 +        ret["next_map_nodes"] = nextMapNodesSnapshot(gc);
-+        ret["potion_count"] = gc.potionCount;
-+        ret["potion_capacity"] = gc.potionCapacity;
++        ret["public_visible_screen"] = publicVisibleScreenSnapshot(gc);
 +        ret["battle_active"] = battleActive;
 +        if (battleActive) {
 +            ret["encounter_id"] = monsterEncounterEnumNames[static_cast<int>(bc.encounter)];
@@ -652,20 +676,6 @@ index a9afe35..a09d310 100644
 +        for (const auto &action : search::GameAction::getAllActionsInState(gc)) {
 +            result.push_back(makeGameAction(gc, action));
 +        }
-+
-+        for (int idx = 0; idx < gc.potionCapacity; ++idx) {
-+            const auto potionIdx = static_cast<std::uint32_t>(idx);
-+            const search::GameAction useAction(0x80000000U | potionIdx);
-+            if (useAction.isValidAction(gc)) {
-+                result.push_back(makeGameAction(gc, useAction));
-+            }
-+
-+            const search::GameAction discardAction(0xC0000000U | potionIdx);
-+            if (discardAction.isValidAction(gc)) {
-+                result.push_back(makeGameAction(gc, discardAction));
-+            }
-+        }
-+
 +        return result;
 +    }
 +
@@ -713,7 +723,7 @@ index a9afe35..a09d310 100644
 +    }
 +
 +    StepSimulatorCheckpoint captureCheckpoint() const {
-+        return StepSimulatorCheckpoint{gc, bc, battleActive, publicEncounterHistory};
++        return StepSimulatorCheckpoint{gc, bc, battleActive};
 +    }
 +
 +    pybind11::dict restoreCheckpoint(const StepSimulatorCheckpoint &checkpoint) {
@@ -726,11 +736,10 @@ index a9afe35..a09d310 100644
 +
 +};
 +
-+
  PYBIND11_MODULE(slaythespire, m) {
      m.doc() = "pybind11 example plugin"; // optional module docstring
      m.def("play", &sts::py::play, "play Slay the Spire Console");
-@@ -41,6 +737,31 @@ PYBIND11_MODULE(slaythespire, m) {
+@@ -41,6 +746,31 @@ PYBIND11_MODULE(slaythespire, m) {
          .def_readwrite("print_logs", &search::ScumSearchAgent2::printLogs, "when set to true, the agent prints state information as it makes actions")
          .def("playout", &search::ScumSearchAgent2::playout);
  
@@ -762,22 +771,10 @@ index a9afe35..a09d310 100644
      pybind11::class_<GameContext> gameContext(m, "GameContext");
      gameContext.def(pybind11::init<CharacterClass, std::uint64_t, int>())
          .def("pick_reward_card", &sts::py::pickRewardCard, "choose to obtain the card at the specified index in the card reward list")
-@@ -836,5 +1557,6 @@ PYBIND11_MODULE(slaythespire, m) {
- }
- 
- // os.add_dll_directory("C:\\Program Files\\mingw-w64\\x86_64-8.1.0-posix-seh-rt_v6-rev0\\mingw64\\bin")
-+}
- 
- 
-diff --git a/src/sim/search/GameAction.cpp b/src/sim/search/GameAction.cpp
-index 8c977ee..482f03f 100644
---- a/src/sim/search/GameAction.cpp
-+++ b/src/sim/search/GameAction.cpp
-@@ -428,6 +428,7 @@ void search::GameAction::execute(GameContext &gc) const {
-         } else {
-             gc.drinkPotionAtIdx(getIdx1());
-         }
-+        return;
-     }
- 
-     switch (gc.screenState) {
+diff --git a/pybind11 b/pybind11
+index 787d2c8..d03662f 160000
+--- a/pybind11
++++ b/pybind11
+@@ -1 +1 @@
+-Subproject commit 787d2c88cafa4d07fb38c9519c485a86323cfcf4
++Subproject commit d03662f0984f652b60e7ddce53d3868002275197
