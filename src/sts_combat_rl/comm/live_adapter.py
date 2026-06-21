@@ -173,9 +173,9 @@ def _parse_available_commands(raw: Mapping[str, Any]) -> frozenset[str]:
 def _monster_alive(monster: Mapping[str, Any]) -> bool | None:
     """Return whether a monster is alive from explicit live evidence.
 
-    Returns ``True`` only when positively alive (not gone + hp > 0 or hp
-    present), ``False`` when explicitly gone or hp == 0, and ``None`` when
-    liveness data is absent/ambiguous.
+    Returns ``True`` only when positively alive (not gone + hp > 0),
+    ``False`` when explicitly gone or hp == 0, and ``None`` when liveness
+    data is entirely absent/ambiguous.
     """
     if monster.get("is_gone") is True:
         return False
@@ -187,14 +187,25 @@ def _monster_alive(monster: Mapping[str, Any]) -> bool | None:
 
 
 def _monster_targetable(monster: Mapping[str, Any]) -> bool | None:
-    """Read the explicit CommunicationMod ``targetable`` field.
+    """Determine whether a CommunicationMod monster can be targeted.
 
-    Returns ``True`` only when the field is explicitly true; ``False`` when
-    explicitly false; ``None`` when absent/ambiguous.
+    Tiered fallback:
+    1. Honour the explicit ``targetable`` field when it is a bool.
+    2. Otherwise, derive from public liveness evidence: a monster is targetable
+       when it has not been marked ``is_gone`` and has positive ``current_hp``.
+    3. Return ``None`` (unknown) only when no public liveness fields are
+       present at all — this is the fail-closed case.
     """
     targetable = monster.get("targetable")
     if isinstance(targetable, bool):
         return targetable
+    # Fall back to public liveness — the same evidence the player sees.
+    if monster.get("is_gone") is True:
+        return False
+    hp = monster.get("current_hp", monster.get("currentHp"))
+    if isinstance(hp, (int, float)) and not isinstance(hp, bool):
+        return float(hp) > 0.0
+    # No is_gone AND no current_hp — targetability is unknown.  Fail-closed.
     return None
 
 

@@ -583,6 +583,71 @@ def _monster_unknown_liveness_snapshot() -> dict[str, Any]:
     }
 
 
+def _real_format_targeting_snapshot() -> dict[str, Any]:
+    """Real-format CommunicationMod combat snapshot with targeted cards.
+
+    This mirrors actual captures in tests/fixtures/real_samples/ — monsters
+    have is_gone, current_hp, and half_dead but NOT targetable.  The adapter
+    must still produce targeting actions via the public-liveness fallback.
+    """
+    return {
+        "available_commands": ["play", "end", "key", "wait", "state"],
+        "game_state": {
+            "screen_type": "COMBAT",
+            "action_phase": "WAITING_ON_USER",
+            "ascension_level": 20,
+            "floor": 5,
+            "current_hp": 68,
+            "max_hp": 75,
+            "gold": 120,
+            "potions": [],
+            "combat_state": {
+                "turn": 2,
+                "player": {"current_hp": 65, "max_hp": 75, "block": 6, "energy": 3},
+                "hand": [
+                    {
+                        "name": "Strike",
+                        "id": "Strike_R",
+                        "type": "ATTACK",
+                        "cost": 1,
+                        "is_playable": True,
+                        "has_target": True,
+                    },
+                ],
+                "monsters": [
+                    {
+                        # Real-format: no targetable field.
+                        # is_gone=False + current_hp>0 → targetable via fallback.
+                        "name": "Cultist",
+                        "id": "Cultist",
+                        "current_hp": 48,
+                        "max_hp": 50,
+                        "block": 0,
+                        "intent": "ATTACK",
+                        "is_gone": False,
+                        "half_dead": False,
+                        "move_base_damage": 6,
+                        "move_hits": 1,
+                    },
+                    {
+                        # Real-format: is_gone=True → not targetable.
+                        "name": "AcidSlime_S",
+                        "id": "AcidSlime_S",
+                        "current_hp": 0,
+                        "max_hp": 13,
+                        "block": 0,
+                        "intent": "DEBUFF",
+                        "is_gone": True,
+                        "half_dead": False,
+                        "move_base_damage": 3,
+                        "move_hits": 1,
+                    },
+                ],
+            },
+        },
+    }
+
+
 # ---------------------------------------------------------------------------
 # Snapshot detection
 # ---------------------------------------------------------------------------
@@ -664,11 +729,22 @@ class TestMonsterTargetable:
     def test_explicit_false(self) -> None:
         assert _monster_targetable({"targetable": False}) is False
 
-    def test_absent_returns_none(self) -> None:
-        assert _monster_targetable({}) is None
-
     def test_none_returns_none(self) -> None:
         assert _monster_targetable({"targetable": None}) is None
+
+    def test_fallback_to_liveness_current_hp(self) -> None:
+        """Without targetable field, derives from is_gone + current_hp."""
+        assert _monster_targetable({"current_hp": 10, "is_gone": False}) is True
+
+    def test_fallback_is_gone_not_targetable(self) -> None:
+        assert _monster_targetable({"current_hp": 10, "is_gone": True}) is False
+
+    def test_fallback_zero_hp_not_targetable(self) -> None:
+        assert _monster_targetable({"current_hp": 0, "is_gone": False}) is False
+
+    def test_fallback_unknown_when_no_data(self) -> None:
+        """Fully absent liveness data — targetability unknown."""
+        assert _monster_targetable({}) is None
 
 
 # ---------------------------------------------------------------------------
@@ -823,6 +899,35 @@ class TestBuildLiveLegalActions:
             and a.raw.get("_live_target_index") is not None
         ]
         assert len(potion_targeting) == 0
+
+    # --- real-format regression (P1): targetable field is absent ---
+
+    def test_real_format_without_targetable_field_produces_targeting(self):
+        """Targeting actions are built from public liveness when targetable absent."""
+        snapshot = _real_format_targeting_snapshot()
+        actions = build_live_legal_actions(snapshot)
+        card_targeting = [
+            a
+            for a in actions
+            if a.kind == "card" and a.raw.get("_live_target_index") is not None
+        ]
+        # Strike has has_target=True, one real-format monster alive + not gone.
+        # is_gone=True monster is not targeted.
+        assert len(card_targeting) == 1
+        # The single targeting action should target monster 0 (Cultist).
+        assert card_targeting[0].raw["target_index"] == 0
+
+    def test_real_format_excludes_gone_monster_from_targets(self):
+        """Gone monsters (is_gone=True) are not targeted even without targetable."""
+        snapshot = _real_format_targeting_snapshot()
+        actions = build_live_legal_actions(snapshot)
+        target_indices = {
+            a.raw["target_index"]
+            for a in actions
+            if a.kind == "card" and a.raw.get("_live_target_index") is not None
+        }
+        # Monster 1 (AcidSlime_S) is is_gone=True — must not be a target.
+        assert 1 not in target_indices
 
 
 # ---------------------------------------------------------------------------
