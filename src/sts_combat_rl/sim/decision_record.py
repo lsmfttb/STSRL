@@ -16,6 +16,7 @@ DECISION_SOURCE_KINDS = (
     "stratified_training",
     "constructed_supplement",
     "paired_counterfactual",
+    "live_communicationmod",
     "unknown",
 )
 

@@ -1209,7 +1209,7 @@ def _normalize_communicationmod_monster(monster: Mapping[str, Any]) -> dict[str,
         "max_hp": monster.get("max_hp"),
         "block": monster.get("block"),
         "alive": _communicationmod_monster_alive(monster),
-        "targetable": _communicationmod_monster_alive(monster),
+        "targetable": _communicationmod_monster_targetable(monster),
         "attacking": _intent_category_is_attacking(intent_category),
         "move_base_damage": monster.get("move_base_damage"),
         "move_hits": monster.get("move_hits"),
@@ -1224,6 +1224,7 @@ def _normalize_communicationmod_potion(potion: Mapping[str, Any]) -> dict[str, A
         "numeric_id": potion.get("numeric_id"),
         "name": potion.get("name"),
         "can_use": potion.get("can_use", potion.get("is_usable")),
+        "can_discard": potion.get("can_discard"),
         "requires_target": potion.get("requires_target", potion.get("has_target")),
     }
 
@@ -1243,6 +1244,19 @@ def _communicationmod_monster_alive(monster: Mapping[str, Any]) -> bool:
     if monster.get("is_gone") is True:
         return False
     return _number(monster.get("current_hp")) > 0.0
+
+
+def _communicationmod_monster_targetable(monster: Mapping[str, Any]) -> bool | None:
+    """Return the explicit CommunicationMod ``targetable`` field.
+
+    Returns ``True`` only when explicitly true, ``False`` when explicitly false,
+    and ``None`` when absent or not a bool.  This lets the live adapter skip
+    monsters whose targetability is unknown (fail-closed).
+    """
+    targetable = monster.get("targetable")
+    if isinstance(targetable, bool):
+        return targetable
+    return None
 
 
 def _communicationmod_monster_attacking(monster: Mapping[str, Any]) -> bool:
