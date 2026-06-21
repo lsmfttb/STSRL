@@ -239,6 +239,78 @@ def test_portable_pool_manifest_replays_duplicate_action_ids_in_fresh_adapters()
     assert verification.replay_restored_count == 4
 
 
+def test_captured_records_have_available_context_with_history() -> None:
+    """Newly captured records must carry available context with typed history."""
+    pool = _pool()
+    assert len(pool.records) == 4  # type: ignore[union-attr]
+    for record in pool.records:  # type: ignore[union-attr]
+        assert record.public_context_status == "available"
+        ctx = record.public_run_context
+        assert ctx["schema_id"] == "public-run-context-v1"
+        history = ctx["run_history"]
+        assert history["schema_id"] == "public-run-history-v1"
+        entries = history["entries"]
+        # A battle start should have at least one preceding decision
+        assert len(entries) >= 1
+        for entry in entries:
+            assert isinstance(entry["sequence"], int)
+            assert "parameters" in entry["action"]
+            assert isinstance(entry["action"]["parameters"], dict)
+
+
+def test_replay_context_fingerprint_matches_record() -> None:
+    """Fresh replay must produce a context whose fingerprint equals the record."""
+    pool = _pool()
+    stream = StringIO()
+    dump_natural_battle_start_pool_jsonl(pool, stream)  # type: ignore[arg-type]
+    loaded = load_natural_battle_start_pool_jsonl(StringIO(stream.getvalue()))
+
+    restored, replay_context, method = restore_battle_start_record(
+        FakePoolAdapter("fresh"), loaded.records[1]
+    )
+    assert method == "seed_action_trace"
+    assert restored.raw == loaded.records[1].snapshot_raw
+
+    import hashlib
+    import json
+
+    def _fp(ctx):
+        return hashlib.sha256(
+            json.dumps(ctx, sort_keys=True, separators=(",", ":"), default=str).encode(
+                "utf-8"
+            )
+        ).hexdigest()[:16]
+
+    assert _fp(replay_context) == _fp(loaded.records[1].public_run_context)
+
+
+def test_corrupted_context_is_reported() -> None:
+    """verify_battle_start_pool_restores must flag a context fingerprint mismatch."""
+    pool = _pool()
+    stream = StringIO()
+    dump_natural_battle_start_pool_jsonl(pool, stream)  # type: ignore[arg-type]
+    loaded = load_natural_battle_start_pool_jsonl(StringIO(stream.getvalue()))
+
+    # Corrupt the public_run_context of one record
+    corrupted = replace(
+        loaded.records[0],
+        public_run_context={
+            **loaded.records[0].public_run_context,
+            "visible_act_boss": "WRONG_BOSS",
+        },
+    )
+    loaded = replace(loaded, records=[corrupted, *loaded.records[1:]])
+
+    verification = verify_battle_start_pool_restores(
+        lambda: FakePoolAdapter("fresh"),
+        loaded,
+    )
+    assert not verification.restore_ok
+    assert any(
+        "public run context fingerprint mismatch" in p for p in verification.problems
+    )
+
+
 def test_v1_migration_preserves_missing_duplicate_information_and_fails_closed() -> (
     None
 ):
