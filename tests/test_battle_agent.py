@@ -846,6 +846,39 @@ def test_model_input_v1_migration_marks_missing_structured_tactical_inputs() -> 
     assert "v1 model input has no structured tactical state/action inputs" in (
         migrated.problems
     )
+    assert len(migrated.public_run_contexts) == 0
+
+
+def test_model_input_v2_batch_migrates_to_v3_with_unavailable_context() -> None:
+    """A v2 model-input batch carries unavailable context after migration."""
+    v2 = ModelInputBatch(
+        format_version=2,
+        reward_allocation="terminal_step",
+        snapshot_feature_size=1,
+        action_feature_size=1,
+        screen_states=["BATTLE"],
+        snapshot_features=[[1.0]],
+        action_features=[[0.0], [1.0]],
+        action_offsets=[0, 2],
+        action_kinds=[["end_turn", "card"]],
+        eligible_action_indices=[[0, 1]],
+        eligible_action_rows=[[0, 1]],
+        chosen_action_indices=[1],
+        chosen_action_rows=[1],
+        chosen_action_kinds=["card"],
+        terminal_after_step=[False],
+        step_rewards=[0.0],
+        return_to_go=[0.0],
+    )
+
+    migrated = migrate_model_input_batch(v2)
+
+    assert migrated.format_version == MODEL_INPUT_BATCH_FORMAT_VERSION
+    assert len(migrated.public_run_contexts) == 1
+    ctx = migrated.public_run_contexts[0]
+    assert ctx["schema_id"] == "public-run-context-v1"
+    assert ctx["visible_act_boss"] is None
+    assert ctx["missing_fields"]
 
 
 def test_linear_action_scorer_scores_model_input_batch_without_training() -> None:
