@@ -362,30 +362,31 @@ def test_corrupted_visible_screen_is_reported() -> None:
     record = pool.records[0]
     history = record.public_run_context.get("run_history", {})
     entries = history.get("entries", [])
-    if entries:
-        entry0 = entries[0]
-        mutated_entry = {
-            **entry0,
-            "before": {
-                **entry0.get("before", {}),
-                "visible_screen": {"schema_id": "x", "screen_state": "TAMPERED"},
-            },
-        }
-        corrupted = replace(
-            record,
-            public_run_context={
-                **record.public_run_context,
-                "run_history": {**history, "entries": [mutated_entry, *entries[1:]]},
-            },
-        )
-        pool = replace(pool, records=[corrupted, *pool.records[1:]])
+    # The pool's fake adapter produces at least one history entry per record.
+    assert entries, "pool must produce history entries for this test"
+    entry0 = entries[0]
+    mutated_entry = {
+        **entry0,
+        "before": {
+            **entry0.get("before", {}),
+            "visible_screen": {"schema_id": "x", "screen_state": "TAMPERED"},
+        },
+    }
+    corrupted = replace(
+        record,
+        public_run_context={
+            **record.public_run_context,
+            "run_history": {**history, "entries": [mutated_entry, *entries[1:]]},
+        },
+    )
+    pool = replace(pool, records=[corrupted, *pool.records[1:]])
 
-        verification = verify_battle_start_pool_restores(
-            lambda: FakePoolAdapter("fresh"),
-            pool,
-        )
-        assert not verification.restore_ok
-        assert any("visible_screen" in p for p in verification.problems)
+    verification = verify_battle_start_pool_restores(
+        lambda: FakePoolAdapter("fresh"),
+        pool,
+    )
+    assert not verification.restore_ok
+    assert any("visible_screen" in p for p in verification.problems)
 
 
 def test_v1_migration_preserves_missing_duplicate_information_and_fails_closed() -> (
