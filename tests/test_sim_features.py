@@ -12,6 +12,7 @@ from sts_combat_rl.sim.features import (
     encode_simulator_action,
     encode_simulator_actions,
     lightspeed_battle_feature_size,
+    normalize_communicationmod_battle_snapshot,
     simulator_action_feature_size,
     tactical_action_problems,
     tactical_state_problems,
@@ -247,6 +248,73 @@ def test_public_tactical_state_distinguishes_identity_intent_and_visible_resourc
         changed
     )
     assert tactical_state_problems(state) == []
+
+
+def test_discard_and_exhaust_members_are_not_collapsed_to_counts_or_empty() -> None:
+    first = {
+        "battle_discard_pile_size": 1,
+        "battle_exhaust_pile_size": 1,
+        "battle_discard_pile": [{"id": "Defend_R", "type": "SKILL"}],
+        "battle_exhaust_pile": [{"id": "Bash", "type": "ATTACK"}],
+    }
+    second = {
+        **first,
+        "battle_discard_pile": [{"id": "Bash", "type": "ATTACK"}],
+        "battle_exhaust_pile": [{"id": "Defend_R", "type": "SKILL"}],
+    }
+
+    first_state = build_public_tactical_state(first)
+    second_state = build_public_tactical_state(second)
+    unavailable = build_public_tactical_state(
+        {
+            "battle_discard_pile_size": 1,
+            "battle_exhaust_pile_size": 1,
+        }
+    )
+
+    assert first_state["cards"] != second_state["cards"]
+    assert encode_lightspeed_battle_snapshot(
+        first
+    ) != encode_lightspeed_battle_snapshot(second)
+    assert unavailable["cards"] == []
+    assert unavailable["availability"]["discard_cards"] is False
+    assert unavailable["availability"]["exhaust_cards"] is False
+    assert "availability.discard_cards" in unavailable["missing_fields"]
+    assert "availability.exhaust_cards" in unavailable["missing_fields"]
+
+
+def test_simulator_and_communicationmod_share_intent_category_not_exact_move() -> None:
+    simulator_raw = {
+        "battle_monsters": [
+            {
+                "id": "Cultist",
+                "intent_category": "ATTACK",
+                "current_move": "CULTIST_DARK_STRIKE",
+            }
+        ]
+    }
+    live_raw = {
+        "game_state": {
+            "combat_state": {
+                "monsters": [{"id": "Cultist", "intent": "ATTACK_DEBUFF"}],
+            }
+        }
+    }
+
+    normalized_live = normalize_communicationmod_battle_snapshot(live_raw)
+    simulator_state = build_public_tactical_state(simulator_raw)
+    live_state = build_public_tactical_state(normalized_live)
+    simulator_monster = simulator_state["monsters"][0]
+    live_monster = live_state["monsters"][0]
+
+    assert normalized_live["battle_monsters"][0]["intent_category"] == "ATTACK"
+    assert simulator_monster["intent_category"] == live_monster["intent_category"]
+    assert simulator_monster["state_machine"]["current_move"] == "CULTIST_DARK_STRIKE"
+    assert live_monster["state_machine"]["current_move"] is None
+    assert (
+        "monsters.state_machine.current_move" not in simulator_state["missing_fields"]
+    )
+    assert "monsters.state_machine.current_move" in live_state["missing_fields"]
 
 
 def test_public_tactical_actions_keep_duplicate_ids_and_targets_distinct() -> None:

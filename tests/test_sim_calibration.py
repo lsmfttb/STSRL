@@ -31,8 +31,15 @@ class FakeCalibrationAdapter:
                 "battle_active": True,
                 "battle_player": {"current_hp": 80, "energy": 3},
                 "battle_hand": [{"type": "ATTACK", "playable": True}],
+                "battle_discard_pile": [],
+                "battle_exhaust_pile": [],
                 "battle_monsters": [
-                    {"current_hp": 51, "targetable": True, "intent": "ATTACK"}
+                    {
+                        "current_hp": 51,
+                        "targetable": True,
+                        "intent_category": "ATTACK",
+                        "current_move": "CULTIST_DARK_STRIKE",
+                    }
                 ],
             },
         )
@@ -124,10 +131,10 @@ class FakeNonCombatCalibrationAdapter:
         )
 
 
-class FakeMissingIntentAdapter(FakeCalibrationAdapter):
+class FakeMissingIntentCategoryAdapter(FakeCalibrationAdapter):
     def reset(self, seed: int | None = None) -> SimulatorSnapshot:
         snapshot = super().reset(seed)
-        snapshot.raw["battle_monsters"][0].pop("intent")
+        snapshot.raw["battle_monsters"][0].pop("intent_category")
         return snapshot
 
 
@@ -215,14 +222,17 @@ def test_tactical_feature_coverage_audit_reports_schema_missing_and_parity() -> 
     assert "simulator/live field parity:" in text
 
 
-def test_tactical_feature_coverage_audit_fails_without_simulator_intent() -> None:
+def test_tactical_feature_coverage_audit_fails_without_simulator_intent_category() -> (
+    None
+):
     report = run_tactical_feature_coverage_audit(
-        FakeMissingIntentAdapter(), seed=7, max_steps=1
+        FakeMissingIntentCategoryAdapter(), seed=7, max_steps=1
     )
 
-    assert report.missing_field_counts["monsters.intent"] == 1
+    assert report.missing_field_counts["monsters.intent_category"] == 1
     assert any(
-        "required monster intent is absent" in problem for problem in report.problems
+        "required canonical monster intent category is absent" in problem
+        for problem in report.problems
     )
 
 

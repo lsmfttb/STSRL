@@ -23,29 +23,22 @@ IDENTITY_VOCABULARY_VERSION = "public-identity-v1"
 LEGACY_FEATURE_SCHEMA_ID = "legacy-unversioned"
 
 MAX_HAND_CARDS = 10
+# sts_lightspeed uses a 64-card fixed group for discard/exhaust piles.  The
+# structured contract remains unbounded; these are the compatibility-vector
+# capacities, with the public pile counts retained alongside them.
+MAX_DISCARD_CARDS = 64
+MAX_EXHAUST_CARDS = 64
 MAX_MONSTERS = 5
 MAX_POTIONS = 5
 
 CARD_TYPES = ("ATTACK", "SKILL", "POWER", "CURSE", "STATUS")
 CARD_RARITIES = ("BASIC", "COMMON", "UNCOMMON", "RARE", "SPECIAL", "CURSE")
-MONSTER_INTENTS = (
-    "NONE",
-    "ATTACK",
-    "ATTACK_BUFF",
-    "ATTACK_DEBUFF",
-    "ATTACK_DEFEND",
-    "BUFF",
-    "DEBUFF",
-    "STRONG_DEBUFF",
-    "DEFEND",
-    "DEFEND_DEBUFF",
-    "DEFEND_BUFF",
-    "ESCAPE",
-    "MAGIC",
-    "SLEEP",
-    "STUN",
-    "UNKNOWN",
-)
+# ``intent_category`` is deliberately smaller than either runtime's native
+# vocabulary.  CommunicationMod exposes UI intent categories (for example
+# ``ATTACK_DEBUFF``), whereas sts_lightspeed has exact MMID names.  This is the
+# shared normal-information projection; the simulator's exact current move is
+# kept separately and explicitly live-missing.
+MONSTER_INTENT_CATEGORIES = ("ATTACK", "NON_ATTACK", "UNKNOWN")
 ACTION_SCOPES = ("battle", "game")
 ACTION_KINDS = (
     "card",
@@ -245,10 +238,16 @@ TACTICAL_FIELD_PARITY: tuple[TacticalFieldParity, ...] = (
         "hand.cards", "shared", "empty_list", "Visible hand card instances."
     ),
     TacticalFieldParity(
-        "monsters.identity_intent_status",
+        "discard_and_exhaust.cards",
+        "shared",
+        "availability_false_and_empty_list",
+        "Visible discard/exhaust members; absence is not an empty pile.",
+    ),
+    TacticalFieldParity(
+        "monsters.identity_intent_category_status",
         "shared",
         "empty_list",
-        "Visible enemy state.",
+        "Visible enemy identity and canonical UI-compatible intent category.",
     ),
     TacticalFieldParity(
         "potions.identity", "shared", "empty_list", "Visible potion slots."
@@ -272,10 +271,11 @@ TACTICAL_FIELD_PARITY: tuple[TacticalFieldParity, ...] = (
         "Current live snapshot format omits these fields.",
     ),
     TacticalFieldParity(
-        "monster.move_history",
+        "monster.current_move_and_move_history",
         "live_missing",
         "null",
-        "Current live format exposes intent, not all state-machine history.",
+        "Exact simulator MMID and state-machine history are unavailable in the "
+        "current CommunicationMod format.",
     ),
     TacticalFieldParity(
         "relic.visible_counters",
@@ -342,14 +342,33 @@ def build_public_tactical_state(raw: Mapping[str, Any]) -> dict[str, Any]:
 
     player = _mapping(raw.get("battle_player"))
     hand = _sequence(raw.get("battle_hand"))
+    discard_pile = _sequence(raw.get("battle_discard_pile"))
+    exhaust_pile = _sequence(raw.get("battle_exhaust_pile"))
     monsters = _sequence(raw.get("battle_monsters"))
     potions = _sequence(raw.get("battle_potions", raw.get("potions")))
     relics = _sequence(raw.get("battle_relics", raw.get("relics")))
     pile_summaries = {
-        "hand": _nullable_number(raw.get("battle_hand_size"), fallback=len(hand)),
+        "hand": _nullable_number(
+            raw.get("battle_hand_size"),
+            fallback=len(hand) if _has_sequence_field(raw, "battle_hand") else None,
+        ),
         "draw": _nullable_number(raw.get("battle_draw_pile_size")),
-        "discard": _nullable_number(raw.get("battle_discard_pile_size")),
-        "exhaust": _nullable_number(raw.get("battle_exhaust_pile_size")),
+        "discard": _nullable_number(
+            raw.get("battle_discard_pile_size"),
+            fallback=(
+                len(discard_pile)
+                if _has_sequence_field(raw, "battle_discard_pile")
+                else None
+            ),
+        ),
+        "exhaust": _nullable_number(
+            raw.get("battle_exhaust_pile_size"),
+            fallback=(
+                len(exhaust_pile)
+                if _has_sequence_field(raw, "battle_exhaust_pile")
+                else None
+            ),
+        ),
     }
     state = {
         "schema_id": TACTICAL_FEATURE_SCHEMA_ID,
@@ -385,7 +404,9 @@ def build_public_tactical_state(raw: Mapping[str, Any]) -> dict[str, Any]:
         },
         "piles": pile_summaries,
         "availability": {
-            "hand": "battle_hand" in raw,
+            "hand": _has_sequence_field(raw, "battle_hand"),
+            "discard_cards": _has_sequence_field(raw, "battle_discard_pile"),
+            "exhaust_cards": _has_sequence_field(raw, "battle_exhaust_pile"),
             "monsters": "battle_monsters" in raw,
             "potions": "battle_potions" in raw or "potions" in raw,
             "relics": "battle_relics" in raw or "relics" in raw,
@@ -451,6 +472,9 @@ def encode_lightspeed_battle_snapshot(raw: Mapping[str, Any]) -> list[float]:
             _number(scalars.get("potion_capacity")),
             float(len(_sequence(_mapping(state["player"]).get("powers")))),
             float(len(_sequence(state.get("relics")))),
+            _number(_mapping(state["availability"]).get("hand")),
+            _number(_mapping(state["availability"]).get("discard_cards")),
+            _number(_mapping(state["availability"]).get("exhaust_cards")),
         ]
     )
     cards = [
@@ -460,6 +484,17 @@ def encode_lightspeed_battle_snapshot(raw: Mapping[str, Any]) -> list[float]:
     ]
     for index in range(MAX_HAND_CARDS):
         features.extend(_encode_public_card(_mapping_at(cards, index)))
+    for pile, capacity in (
+        ("discard", MAX_DISCARD_CARDS),
+        ("exhaust", MAX_EXHAUST_CARDS),
+    ):
+        pile_cards = [
+            card
+            for card in _sequence(state.get("cards"))
+            if _mapping(card).get("pile") == pile
+        ]
+        for index in range(capacity):
+            features.extend(_encode_public_card(_mapping_at(pile_cards, index)))
     monsters = _sequence(state.get("monsters"))
     for index in range(MAX_MONSTERS):
         features.extend(_encode_public_monster(_mapping_at(monsters, index)))
@@ -488,7 +523,7 @@ def normalize_communicationmod_battle_snapshot(
     hand = _sequence(combat.get("hand"))
     monsters = _sequence(combat.get("monsters"))
     potions = _sequence(game.get("potions"))
-    return {
+    normalized = {
         "battle_active": bool(combat),
         "act": game.get("act"),
         "ascension": game.get("ascension_level", game.get("ascension")),
@@ -498,40 +533,59 @@ def normalize_communicationmod_battle_snapshot(
         "gold": game.get("gold"),
         "battle_player": _normalize_communicationmod_player(player, combat),
         "battle_turn": combat.get("turn"),
-        "battle_hand_size": len(hand),
-        "battle_draw_pile_size": len(_sequence(combat.get("draw_pile"))),
-        "battle_discard_pile_size": len(_sequence(combat.get("discard_pile"))),
-        "battle_exhaust_pile_size": len(_sequence(combat.get("exhaust_pile"))),
-        "battle_monster_count": len(monsters),
+        "battle_hand_size": len(hand) if _has_sequence_field(combat, "hand") else None,
+        "battle_draw_pile_size": (
+            len(_sequence(combat.get("draw_pile")))
+            if _has_sequence_field(combat, "draw_pile")
+            else None
+        ),
+        "battle_discard_pile_size": (
+            len(_sequence(combat.get("discard_pile")))
+            if _has_sequence_field(combat, "discard_pile")
+            else None
+        ),
+        "battle_exhaust_pile_size": (
+            len(_sequence(combat.get("exhaust_pile")))
+            if _has_sequence_field(combat, "exhaust_pile")
+            else None
+        ),
+        "battle_monster_count": len(monsters)
+        if _has_sequence_field(combat, "monsters")
+        else None,
         "battle_monsters_alive": sum(
             _communicationmod_monster_alive(_mapping(item)) for item in monsters
-        ),
+        )
+        if _has_sequence_field(combat, "monsters")
+        else None,
         "battle_potion_count": sum(
             _communicationmod_potion_present(_mapping(item)) for item in potions
-        ),
-        "battle_potion_capacity": len(potions),
-        "battle_hand": [
-            _normalize_communicationmod_card(_mapping(item)) for item in hand
-        ],
-        "battle_discard_pile": [
-            _normalize_communicationmod_card(_mapping(item))
-            for item in _sequence(combat.get("discard_pile"))
-        ],
-        "battle_exhaust_pile": [
-            _normalize_communicationmod_card(_mapping(item))
-            for item in _sequence(combat.get("exhaust_pile"))
-        ],
-        "battle_monsters": [
-            _normalize_communicationmod_monster(_mapping(item)) for item in monsters
-        ],
-        "battle_potions": [
+        )
+        if _has_sequence_field(game, "potions")
+        else None,
+        "battle_potion_capacity": len(potions)
+        if _has_sequence_field(game, "potions")
+        else None,
+    }
+    for source_key, target_key, normalizer in (
+        ("hand", "battle_hand", _normalize_communicationmod_card),
+        ("discard_pile", "battle_discard_pile", _normalize_communicationmod_card),
+        ("exhaust_pile", "battle_exhaust_pile", _normalize_communicationmod_card),
+        ("monsters", "battle_monsters", _normalize_communicationmod_monster),
+    ):
+        if _has_sequence_field(combat, source_key):
+            normalized[target_key] = [
+                normalizer(_mapping(item)) for item in _sequence(combat.get(source_key))
+            ]
+    if _has_sequence_field(game, "potions"):
+        normalized["battle_potions"] = [
             _normalize_communicationmod_potion(_mapping(item)) for item in potions
-        ],
-        "relics": [
+        ]
+    if _has_sequence_field(game, "relics"):
+        normalized["relics"] = [
             _normalize_communicationmod_relic(item)
             for item in _sequence(game.get("relics"))
-        ],
-    }
+        ]
+    return normalized
 
 
 def lightspeed_battle_feature_size() -> int:
@@ -622,7 +676,14 @@ def public_tactical_missing_fields(state: Mapping[str, Any]) -> list[str]:
         if name not in piles or piles.get(name) is None:
             missing.append(f"piles.{name}")
     availability = _mapping(state.get("availability"))
-    for name in ("hand", "monsters", "potions", "relics"):
+    for name in (
+        "hand",
+        "discard_cards",
+        "exhaust_cards",
+        "monsters",
+        "potions",
+        "relics",
+    ):
         if not availability.get(name):
             missing.append(f"availability.{name}")
     for card in _sequence(state.get("cards")):
@@ -643,8 +704,8 @@ def public_tactical_missing_fields(state: Mapping[str, Any]) -> list[str]:
         raw_monster = _mapping(monster)
         if _mapping(raw_monster.get("identity")).get("status") == "missing":
             missing.append("monsters.identity")
-        if not raw_monster.get("intent"):
-            missing.append("monsters.intent")
+        if not raw_monster.get("intent_category"):
+            missing.append("monsters.intent_category")
         for name, value in _mapping(raw_monster.get("state_machine")).items():
             if value is None:
                 missing.append(f"monsters.state_machine.{name}")
@@ -783,21 +844,25 @@ def _public_visible_cards(raw: Mapping[str, Any]) -> list[dict[str, Any]]:
 
 
 def _public_monster(raw: Mapping[str, Any], index: int) -> dict[str, Any]:
-    # The authoritative simulator projects its current MMID label into
-    # ``intent``. The model preserves that public label; it does not infer an
-    # intent class from hidden monster state or Python mechanics.
-    intent = _normalized_option(raw.get("intent"))
+    # A simulator must project the canonical category itself.  The live adapter
+    # derives the same category from its already-public UI label, while the
+    # exact simulator MMID remains explicitly unavailable in live snapshots.
+    intent_category = _canonical_intent_category(raw)
+    current_move = _normalized_option(raw.get("current_move"))
     return {
         "identity": _identity(raw, "monster", "id_label", "monster_id", "id", "name"),
         "instance_index": index,
-        "intent": intent,
-        "intent_identity": _categorical_identity(intent, MONSTER_INTENTS),
+        "intent_category": intent_category,
+        "intent_category_identity": _categorical_identity(
+            intent_category, MONSTER_INTENT_CATEGORIES
+        ),
         "state_machine": {
-            "current_move": intent or None,
+            "current_move": current_move or None,
             "move_id": _nullable_number(raw.get("move_id")),
             "last_move_id": _nullable_number(raw.get("last_move_id")),
             "second_last_move_id": _nullable_number(raw.get("second_last_move_id")),
         },
+        "current_move_identity": _optional_categorical_identity(current_move),
         "scalars": {
             name: _nullable_number(raw.get(name)) for name in _MONSTER_SCALAR_FIELDS
         },
@@ -805,7 +870,7 @@ def _public_monster(raw: Mapping[str, Any], index: int) -> dict[str, Any]:
             **{name: _nullable_bool(raw.get(name)) for name in _MONSTER_BOOL_FIELDS},
             "attacking": _nullable_bool(raw.get("attacking"))
             if "attacking" in raw
-            else _intent_has_attack(intent),
+            else _intent_category_is_attacking(intent_category),
         },
         "powers": _public_powers(raw),
         "powers_available": _powers_available(raw),
@@ -985,7 +1050,8 @@ def _encode_public_monster(monster: Mapping[str, Any]) -> list[float]:
         return [0.0] * (
             1
             + 2
-            + len(MONSTER_INTENTS)
+            + len(MONSTER_INTENT_CATEGORIES)
+            + 2
             + 2
             + 3
             + len(_MONSTER_SCALAR_FIELDS)
@@ -1000,9 +1066,11 @@ def _encode_public_monster(monster: Mapping[str, Any]) -> list[float]:
         1.0,
         _identity_code(identity),
         _identity_status_code(identity),
-        *_one_hot(str(monster.get("intent", "")), MONSTER_INTENTS),
-        _identity_code(_mapping(monster.get("intent_identity"))),
-        _identity_status_code(_mapping(monster.get("intent_identity"))),
+        *_one_hot(str(monster.get("intent_category", "")), MONSTER_INTENT_CATEGORIES),
+        _identity_code(_mapping(monster.get("intent_category_identity"))),
+        _identity_status_code(_mapping(monster.get("intent_category_identity"))),
+        _identity_code(_mapping(monster.get("current_move_identity"))),
+        _identity_status_code(_mapping(monster.get("current_move_identity"))),
         *(
             _number(state_machine.get(name))
             for name in ("move_id", "last_move_id", "second_last_move_id")
@@ -1104,19 +1172,24 @@ def _normalize_communicationmod_card(card: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _normalize_communicationmod_monster(monster: Mapping[str, Any]) -> dict[str, Any]:
+    intent_category = _canonical_intent_category(monster)
     return {
         "id": monster.get("id", monster.get("monster_id")),
         "name": monster.get("name"),
-        "intent": monster.get("intent"),
-        "move_id": monster.get("move_id"),
-        "last_move_id": monster.get("last_move_id"),
-        "second_last_move_id": monster.get("second_last_move_id"),
+        "intent_category": intent_category,
+        # CommunicationMod exposes the rendered intent category, not an exact
+        # current MMID or monster state-machine history.  Do not guess either
+        # from the UI category or optional unrelated fields.
+        "current_move": None,
+        "move_id": None,
+        "last_move_id": None,
+        "second_last_move_id": None,
         "current_hp": monster.get("current_hp"),
         "max_hp": monster.get("max_hp"),
         "block": monster.get("block"),
         "alive": _communicationmod_monster_alive(monster),
         "targetable": _communicationmod_monster_alive(monster),
-        "attacking": _communicationmod_monster_attacking(monster),
+        "attacking": _intent_category_is_attacking(intent_category),
         "move_base_damage": monster.get("move_base_damage"),
         "move_hits": monster.get("move_hits"),
         "powers": list(_sequence(monster.get("powers"))),
@@ -1152,7 +1225,7 @@ def _communicationmod_monster_alive(monster: Mapping[str, Any]) -> bool:
 
 
 def _communicationmod_monster_attacking(monster: Mapping[str, Any]) -> bool:
-    return _intent_has_attack(monster.get("intent"))
+    return _intent_category_is_attacking(_canonical_intent_category(monster))
 
 
 def _communicationmod_potion_present(potion: Mapping[str, Any]) -> bool:
@@ -1224,11 +1297,23 @@ def _identity_code(identity: Mapping[str, Any]) -> float:
 def _categorical_identity(value: str, options: Sequence[str]) -> dict[str, str]:
     """Represent an open public categorical label without collapsing OOV text."""
 
+    if not value:
+        return {
+            "value": "__MISSING__",
+            "status": "missing",
+            "vocabulary_version": IDENTITY_VOCABULARY_VERSION,
+        }
     return {
-        "value": value or "__MISSING__",
+        "value": value,
         "status": "known" if value in options else "unknown",
         "vocabulary_version": IDENTITY_VOCABULARY_VERSION,
     }
+
+
+def _optional_categorical_identity(value: str) -> dict[str, str]:
+    """Keep a simulator-only exact public label distinct from its absence."""
+
+    return _categorical_identity(value, ())
 
 
 def _identity_status_code(identity: Mapping[str, Any]) -> float:
@@ -1245,8 +1330,28 @@ def _one_hot(value: str, options: Sequence[str]) -> list[float]:
     return [1.0 if value == option else 0.0 for option in options]
 
 
-def _intent_has_attack(intent: Any) -> bool:
-    return "ATTACK" in _normalized_option(intent)
+def _canonical_intent_category(monster: Mapping[str, Any]) -> str:
+    """Return the cross-runtime public intent category without game inference."""
+
+    projected = _normalized_option(monster.get("intent_category"))
+    if projected:
+        return projected if projected in MONSTER_INTENT_CATEGORIES else "UNKNOWN"
+    return _canonical_live_intent_category(monster.get("intent"))
+
+
+def _canonical_live_intent_category(intent: Any) -> str:
+    """Normalize a documented CommunicationMod UI intent label only."""
+
+    label = _normalized_option(intent)
+    if not label:
+        return ""
+    if label == "UNKNOWN":
+        return "UNKNOWN"
+    return "ATTACK" if "ATTACK" in label else "NON_ATTACK"
+
+
+def _intent_category_is_attacking(intent_category: str) -> bool:
+    return intent_category == "ATTACK"
 
 
 def _action_requires_target(
@@ -1315,6 +1420,14 @@ def _sequence(value: Any) -> Sequence[Any]:
         value
         if isinstance(value, Sequence) and not isinstance(value, (str, bytes))
         else ()
+    )
+
+
+def _has_sequence_field(data: Mapping[str, Any], key: str) -> bool:
+    """Whether a snapshot actually supplied a public list field."""
+
+    return isinstance(data.get(key), Sequence) and not isinstance(
+        data.get(key), (str, bytes)
     )
 
 

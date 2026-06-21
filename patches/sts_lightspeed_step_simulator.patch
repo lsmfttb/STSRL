@@ -20,7 +20,7 @@ index a9afe35..61ee133 100644
  #include "game/Game.h"
  
  #include "slaythespire.h"
-@@ -21,6 +27,506 @@
+@@ -21,6 +27,521 @@
  
  using namespace sts;
  
@@ -312,10 +312,13 @@ index a9afe35..61ee133 100644
 +    return ret;
 +}
 +
-+pybind11::dict cardSnapshot(const BattleContext &bc, int handIdx) {
-+    const auto &card = bc.cards.hand[handIdx];
++pybind11::dict cardSnapshot(
++        const BattleContext &bc,
++        const CardInstance &card,
++        int pileIdx,
++        bool cardIsPlayable) {
 +    pybind11::dict ret;
-+    ret["hand_index"] = handIdx;
++    ret["pile_index"] = pileIdx;
 +    ret["id"] = static_cast<int>(card.getId());
 +    ret["name"] = std::string(card.getName());
 +    ret["type"] = cardTypeLabel(card.getType());
@@ -324,7 +327,7 @@ index a9afe35..61ee133 100644
 +    ret["upgraded"] = card.isUpgraded();
 +    ret["upgrade_count"] = card.getUpgradeCount();
 +    ret["requires_target"] = card.requiresTarget();
-+    ret["playable"] = card.canUseOnAnyTarget(bc);
++    ret["playable"] = cardIsPlayable && card.canUseOnAnyTarget(bc);
 +    ret["free_to_play_once"] = card.freeToPlayOnce;
 +    ret["retain"] = card.retain;
 +    ret["ethereal"] = card.isEthereal();
@@ -347,7 +350,8 @@ index a9afe35..61ee133 100644
 +    ret["alive"] = monster.isAlive();
 +    ret["targetable"] = monster.isTargetable();
 +    ret["attacking"] = monster.isAttacking();
-+    ret["intent"] = std::string(monsterMoveStrings[static_cast<int>(monster.moveHistory[0])]);
++    ret["intent_category"] = monster.isAttacking() ? "ATTACK" : "NON_ATTACK";
++    ret["current_move"] = std::string(monsterMoveStrings[static_cast<int>(monster.moveHistory[0])]);
 +    ret["move_id"] = static_cast<int>(monster.moveHistory[0]);
 +    ret["last_move_id"] = static_cast<int>(monster.moveHistory[1]);
 +    ret["move_base_damage"] = damage.damage;
@@ -379,7 +383,16 @@ index a9afe35..61ee133 100644
 +pybind11::list handSnapshot(const BattleContext &bc) {
 +    pybind11::list ret;
 +    for (int idx = 0; idx < bc.cards.cardsInHand; ++idx) {
-+        ret.append(cardSnapshot(bc, idx));
++        ret.append(cardSnapshot(bc, bc.cards.hand[idx], idx, true));
++    }
++    return ret;
++}
++
++template <typename Pile>
++pybind11::list pileSnapshot(const BattleContext &bc, const Pile &pile) {
++    pybind11::list ret;
++    for (int idx = 0; idx < static_cast<int>(pile.size()); ++idx) {
++        ret.append(cardSnapshot(bc, pile[idx], idx, false));
 +    }
 +    return ret;
 +}
@@ -452,6 +465,8 @@ index a9afe35..61ee133 100644
 +            ret["battle_draw_pile_size"] = static_cast<int>(bc.cards.drawPile.size());
 +            ret["battle_discard_pile_size"] = static_cast<int>(bc.cards.discardPile.size());
 +            ret["battle_exhaust_pile_size"] = static_cast<int>(bc.cards.exhaustPile.size());
++            ret["battle_discard_pile"] = pileSnapshot(bc, bc.cards.discardPile);
++            ret["battle_exhaust_pile"] = pileSnapshot(bc, bc.cards.exhaustPile);
 +            ret["battle_monster_count"] = bc.monsters.monsterCount;
 +            ret["battle_monsters_alive"] = bc.monsters.monstersAlive;
 +            ret["battle_monsters"] = monsterGroupSnapshot(bc);
