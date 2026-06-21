@@ -15,6 +15,11 @@ from sts_combat_rl.commands.checkpoint_pool import (
     verify_checkpoint_pool_file,
     write_checkpoint_pool,
 )
+from sts_combat_rl.commands.fixed_evaluation import (
+    run_fixed_evaluation_from_pool_path,
+    write_fixed_cohort,
+    write_fixed_evaluation_report,
+)
 from sts_combat_rl.comm.protocol import format_command, format_ready_signal
 from sts_combat_rl.comm.stdio_client import StdioClient
 from sts_combat_rl.logging_utils import DEFAULT_LOG_FILE, configure_logging
@@ -52,6 +57,12 @@ from sts_combat_rl.sim.checkpoint_verification import (
 from sts_combat_rl.sim.battle_start_pool import (
     format_battle_start_pool_coverage_report,
     format_battle_start_pool_restore_report,
+)
+from sts_combat_rl.sim.fixed_evaluation_set import (
+    format_cohort_coverage_report,
+)
+from sts_combat_rl.sim.fixed_battle_evaluation import (
+    format_fixed_evaluation_report,
 )
 from sts_combat_rl.sim.reward_components import (
     build_battle_reward_component_report,
@@ -111,6 +122,7 @@ from sts_combat_rl.sim.policy import (
 )
 from sts_combat_rl.sim.policy_rollout import collect_policy_simulator_rollout
 from sts_combat_rl.sim.rollout import collect_simulator_rollout, format_rollout_batch
+from sts_combat_rl.sim.online_controller import PolicyController
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -307,6 +319,16 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     input_group.add_argument(
+        "--lightspeed-fixed-battle-evaluation",
+        type=Path,
+        metavar="POOL_PATH",
+        help=(
+            "Load a portable battle-start pool, select a fixed structural cohort, "
+            "evaluate the named controller on each restored battle start, and write "
+            "cohort and evaluation report artifacts."
+        ),
+    )
+    input_group.add_argument(
         "--lightspeed-non-combat-calibration",
         action="store_true",
         help=(
@@ -467,6 +489,24 @@ def build_parser() -> argparse.ArgumentParser:
         default=0.5,
         help="Fraction of reported pool draws selected by uniform structural stratum.",
     )
+    parser.add_argument(
+        "--fixed-evaluation-cohort",
+        type=Path,
+        metavar="PATH",
+        help="Write the selected fixed evaluation cohort to this JSONL path.",
+    )
+    parser.add_argument(
+        "--fixed-evaluation-report",
+        type=Path,
+        metavar="PATH",
+        help="Write the fixed evaluation report to this JSONL path.",
+    )
+    parser.add_argument(
+        "--fixed-evaluation-seed",
+        type=int,
+        default=1,
+        help="Selection seed for the fixed cohort (default: 1).",
+    )
     return parser
 
 
@@ -565,6 +605,7 @@ def main(argv: list[str] | None = None) -> int:
         or args.lightspeed_battle_checkpoint_verify
         or args.lightspeed_battle_start_pool is not None
         or args.lightspeed_battle_start_pool_restore is not None
+        or args.lightspeed_fixed_battle_evaluation is not None
     ):
         try:
             adapter = LightSpeedAdapter(
@@ -653,6 +694,34 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 print(format_battle_start_pool_restore_report(report), file=sys.stderr)
                 if not report.restore_ok:
+                    return 1
+            elif args.lightspeed_fixed_battle_evaluation is not None:
+                battle_policy = _build_online_sim_policy(
+                    args.sim_policy,
+                    args.sim_seed,
+                )
+                battle_controller = PolicyController(battle_policy)
+                cohort, coverage, eval_report = run_fixed_evaluation_from_pool_path(
+                    adapter_factory=lambda: LightSpeedAdapter(
+                        seed=args.sim_seed,
+                        ascension=args.sim_ascension,
+                    ),
+                    pool_path=args.lightspeed_fixed_battle_evaluation,
+                    controller=battle_controller,
+                    selection_seed=args.fixed_evaluation_seed,
+                    action_space=action_space,
+                    max_battle_steps=args.sim_steps,
+                )
+                if args.fixed_evaluation_cohort is not None:
+                    write_fixed_cohort(args.fixed_evaluation_cohort, cohort)
+                if args.fixed_evaluation_report is not None:
+                    write_fixed_evaluation_report(
+                        args.fixed_evaluation_report, eval_report
+                    )
+                print(format_cohort_coverage_report(coverage), file=sys.stderr)
+                print(file=sys.stderr)
+                print(format_fixed_evaluation_report(eval_report), file=sys.stderr)
+                if not eval_report.evaluation_successful:
                     return 1
             elif args.lightspeed_non_combat_calibration:
                 battle_policy = _build_online_sim_policy(
