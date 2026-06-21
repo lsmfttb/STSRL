@@ -317,13 +317,17 @@ def test_corrupted_context_is_reported() -> None:
     assert any("public run context" in p for p in verification.problems)
 
 
-def test_corrupted_map_edge_is_reported() -> None:
-    """verify_battle_start_pool_restores must flag any visible_map mismatch."""
+def test_corrupted_map_node_is_reported() -> None:
+    """Context verifier must report a visible_map node field mismatch.
+
+    The FakePoolAdapter's snapshot carries no map fields, so the replay
+    always produces 0 nodes.  This test injects a node on the source
+    side and asserts a length mismatch is reported — exercising the
+    map-verification path, though the per-node children comparator
+    requires a real simulator adapter with native map projections.
+    """
     pool = _pool()
     record = pool.records[0]
-    # The fake adapter produces no map data, so source and restore both
-    # have 0 nodes. Inject a node on the source side so a length
-    # mismatch is reported — that exercises the map-verification path.
     corrupted = replace(
         record,
         public_run_context={
@@ -336,7 +340,7 @@ def test_corrupted_map_edge_is_reported() -> None:
                     "x": 0,
                     "y": 0,
                     "parents": [],
-                    "children": [{"x": 99, "y": 99}],
+                    "children": [{"x": 1, "y": 1}],
                 },
             ],
             "missing_fields": [
@@ -353,7 +357,9 @@ def test_corrupted_map_edge_is_reported() -> None:
         pool,
     )
     assert not verification.restore_ok
-    assert any("visible_map" in p for p in verification.problems)
+    assert any("visible_map" in p for p in verification.problems), (
+        f"expected visible_map mismatch, got: {verification.problems}"
+    )
 
 
 def test_corrupted_visible_screen_is_reported() -> None:
