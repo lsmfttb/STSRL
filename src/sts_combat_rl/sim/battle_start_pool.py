@@ -1010,6 +1010,33 @@ def _verify_restored_context(
                 f"length mismatch after {method} restore"
             )
             return
+        # Compare parent/child coordinate values, not just length
+        for pidx, (spi, rpi) in enumerate(
+            zip(
+                sorted(sp, key=lambda n: (n.get("x", 0), n.get("y", 0))),
+                sorted(rp, key=lambda n: (n.get("x", 0), n.get("y", 0))),
+            )
+        ):
+            for key in ("x", "y"):
+                if spi.get(key) != rpi.get(key):
+                    problems.append(
+                        f"record {record.record_index}: visible_map[{idx}].parents[{pidx}].{key} "
+                        f"mismatch after {method} restore"
+                    )
+                    return
+        for cidx, (sci, rci) in enumerate(
+            zip(
+                sorted(sc, key=lambda n: (n.get("x", 0), n.get("y", 0))),
+                sorted(rc, key=lambda n: (n.get("x", 0), n.get("y", 0))),
+            )
+        ):
+            for key in ("x", "y"):
+                if sci.get(key) != rci.get(key):
+                    problems.append(
+                        f"record {record.record_index}: visible_map[{idx}].children[{cidx}].{key} "
+                        f"mismatch after {method} restore"
+                    )
+                    return
 
     # --- Current and next map nodes (structural equality) ---
     for label, sval, rval in (
@@ -1064,6 +1091,14 @@ def _verify_restored_context(
             problems.append(
                 f"record {record.record_index}: history entry {i} "
                 f"before.location mismatch after {method} restore"
+            )
+            return
+        sb_vs = json.dumps(sb.get("visible_screen"), sort_keys=True, default=str)
+        rb_vs = json.dumps(rb.get("visible_screen"), sort_keys=True, default=str)
+        if sb_vs != rb_vs:
+            problems.append(
+                f"record {record.record_index}: history entry {i} "
+                f"before.visible_screen mismatch after {method} restore"
             )
             return
         sa = se.get("after", {})
