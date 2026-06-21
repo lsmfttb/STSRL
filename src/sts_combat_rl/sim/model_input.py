@@ -305,7 +305,7 @@ def decision_context_from_model_input_batch(
 
 
 def migrate_model_input_batch(batch: ModelInputBatch) -> ModelInputBatch:
-    """Explicitly migrate an in-memory v1 numeric batch to v2 placeholders.
+    """Explicitly migrate an in-memory v1/v2 numeric batch to v3 placeholders.
 
     Model-input batches are not persisted artifacts today.  The conversion is
     nevertheless explicit so callers cannot mistake old numeric-only inputs for
@@ -314,7 +314,7 @@ def migrate_model_input_batch(batch: ModelInputBatch) -> ModelInputBatch:
 
     if batch.format_version == MODEL_INPUT_BATCH_FORMAT_VERSION:
         return batch
-    if batch.format_version != 1:
+    if batch.format_version not in {1, 2}:
         raise ValueError(
             f"unsupported model input format version {batch.format_version}; "
             f"current version is {MODEL_INPUT_BATCH_FORMAT_VERSION}"
@@ -352,7 +352,8 @@ def migrate_model_input_batch(batch: ModelInputBatch) -> ModelInputBatch:
         ],
         problems=[
             *batch.problems,
-            "v1 model input has no structured tactical state/action inputs",
+            f"v{batch.format_version} model input "
+            "has no structured tactical state/action inputs",
         ],
     )
 

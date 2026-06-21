@@ -250,6 +250,10 @@ def execute_controlled_run(
 
         chosen_action = actions[decision.selected_index]
         legal_action_identities = action_identity_dicts_for_actions(actions)
+        history_action_identity = _history_action_identity(
+            legal_action_identities[decision.selected_index],
+            chosen_action,
+        )
         transition = adapter.step(chosen_action)
         terminal = transition.terminal
         next_raw = transition.snapshot.raw
@@ -257,7 +261,7 @@ def execute_controlled_run(
         run_history = append_run_history_entry(
             run_history,
             before_raw=before_raw,
-            action_identity=legal_action_identities[decision.selected_index],
+            action_identity=history_action_identity,
             after_raw=dict(next_raw),
         )
 
@@ -469,6 +473,32 @@ def _controller_label(decision: ControllerDecision) -> str:
     """Extract a human-readable controller label from a decision's metadata."""
 
     return str(decision.metadata.get("controller_role", decision.provenance.identity))
+
+
+def _history_action_identity(
+    stored_identity: dict[str, Any],
+    chosen_action: SimulatorAction,
+) -> dict[str, Any]:
+    """Build a history-entry action identity from the stored identity and raw action.
+
+    Combines the occurrence-disambiguated identity with allowlisted parameters
+    (``idx1``, ``idx2``, ``idx3``) extracted from the native action without
+    exposing raw simulator objects.
+    """
+
+    result = dict(stored_identity)
+    raw = chosen_action.raw
+    parameters: dict[str, Any] = {}
+    for key in ("idx1", "idx2", "idx3"):
+        value = raw.get(key)
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, (int, float)):
+            parameters[key] = int(value)
+        elif value is not None:
+            parameters[key] = str(value)
+    result["parameters"] = parameters
+    return result
 
 
 def _exception_problems(exc: BaseException) -> list[str]:

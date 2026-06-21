@@ -534,27 +534,51 @@ def load_natural_battle_start_pool_jsonl(stream: TextIO) -> NaturalBattleStartPo
 def restore_battle_start_record(
     adapter: CheckpointingSimulatorAdapter,
     record: BattleStartCheckpointRecord,
-) -> tuple[SimulatorSnapshot, str]:
-    """Restore natively when possible, otherwise replay in a fresh adapter."""
+) -> tuple[SimulatorSnapshot, dict[str, Any], str]:
+    """Restore natively when possible, otherwise replay in a fresh adapter.
 
+    Returns ``(snapshot, public_run_context, method)``.  When replaying from
+    a seed trace, the public run context is rebuilt from the replay steps so
+    callers can verify it against the recorded context fingerprint.
+    """
+
+    from sts_combat_rl.sim.public_run_context import (
+        append_run_history_entry,
+        build_public_run_context,
+        empty_public_run_history,
+    )
+
+    run_history = empty_public_run_history(missing_fields=("public_run_history",))
     if (
         record.native_checkpoint is not None
         and record.native_checkpoint.adapter_id == adapter.checkpoint_adapter_id
     ):
         restored = adapter.restore_checkpoint(record.native_checkpoint)
         method = "native_checkpoint"
+        run_history = record.public_run_context.get(
+            "run_history", empty_public_run_history()
+        )
     else:
         restored = adapter.reset(seed=record.source_seed)
         for trace_index, identity in enumerate(record.action_trace):
+            before_raw = dict(restored.raw)
             actions = list(adapter.legal_actions(restored))
             index = _trace_action_index(actions, identity, trace_index)
             restored = adapter.step(actions[index]).snapshot
+            run_history = append_run_history_entry(
+                run_history,
+                before_raw=before_raw,
+                action_identity=actions[index].raw,
+                after_raw=dict(restored.raw),
+            )
         method = "seed_action_trace"
     if not _snapshot_matches_record(restored, record):
         raise ValueError(
             f"record {record.record_index}: restored snapshot does not match source"
         )
-    return restored, method
+    replay_context = build_public_run_context(restored.raw)
+    replay_context["run_history"] = run_history
+    return restored, replay_context, method
 
 
 def verify_battle_start_pool_restores(
@@ -574,7 +598,11 @@ def verify_battle_start_pool_restores(
     problems: list[str] = []
     for record in selected:
         try:
-            _, method = restore_battle_start_record(adapter_factory(), record)
+            _, replay_context, method = restore_battle_start_record(
+                adapter_factory(), record
+            )
+            if record.public_context_status == PUBLIC_CONTEXT_AVAILABLE:
+                _verify_restored_context(record, replay_context, method, problems)
         except (RuntimeError, ValueError) as exc:
             problems.append(f"record {record.record_index}: {exc}")
             continue
@@ -896,6 +924,40 @@ def _snapshot_matches_record(
 ) -> bool:
     expected = freeze_value((record.snapshot_observation, record.snapshot_raw))
     return snapshot_fingerprint(snapshot) == expected
+
+
+def _verify_restored_context(
+    record: BattleStartCheckpointRecord,
+    restored_context: dict[str, Any],
+    method: str,
+    problems: list[str],
+) -> None:
+    """Compare restored context against the recorded source fingerprint."""
+    import hashlib
+    import json
+
+    if not isinstance(restored_context, dict):
+        problems.append(f"record {record.record_index}: restored context is not a dict")
+        return
+
+    def _fingerprint(ctx: dict[str, Any]) -> str:
+        return hashlib.sha256(
+            json.dumps(
+                ctx,
+                sort_keys=True,
+                separators=(",", ":"),
+                default=str,
+            ).encode("utf-8")
+        ).hexdigest()[:16]
+
+    source_fp = _fingerprint(record.public_run_context)
+    restored_fp = _fingerprint(restored_context)
+    if source_fp != restored_fp:
+        problems.append(
+            f"record {record.record_index}: public run context fingerprint "
+            f"mismatch after {method} restore (source={source_fp}, "
+            f"restored={restored_fp})"
+        )
 
 
 def _validated_structural_metadata(value: Any, label: str) -> dict[str, Any]:

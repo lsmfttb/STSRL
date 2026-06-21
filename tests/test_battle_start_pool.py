@@ -220,7 +220,7 @@ def test_portable_pool_manifest_replays_duplicate_action_ids_in_fresh_adapters()
     dump_natural_battle_start_pool_jsonl(pool, stream)  # type: ignore[arg-type]
     loaded = load_natural_battle_start_pool_jsonl(StringIO(stream.getvalue()))
 
-    restored, method = restore_battle_start_record(
+    restored, replay_context, method = restore_battle_start_record(
         FakePoolAdapter("fresh"), loaded.records[1]
     )
     verification = verify_battle_start_pool_restores(
