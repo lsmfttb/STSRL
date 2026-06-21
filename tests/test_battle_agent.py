@@ -64,6 +64,7 @@ from sts_combat_rl.sim.model_input import (
     build_model_input_batch_smoke_report,
     decision_context_from_model_input_batch,
     format_model_input_batch_smoke_report,
+    migrate_model_input_batch,
 )
 from sts_combat_rl.sim.model_scoring import (
     ActionKindPriorScorer,
@@ -698,6 +699,11 @@ def test_model_input_batch_packs_variable_action_rows_for_scorer_context() -> No
     assert batch.action_feature_size == simulator_action_feature_size()
     assert batch.action_offsets == [0, 2, 4]
     assert len(batch.action_features) == 4
+    assert batch.tactical_feature_schema_id == "public-tactical-v2"
+    assert len(batch.tactical_states) == 2
+    assert len(batch.tactical_actions) == 4
+    assert batch.tactical_states[0]["schema_version"] == 2
+    assert batch.tactical_actions[1]["kind"] == "card"
     assert batch.action_kinds == [["end_turn", "card"], ["end_turn", "card"]]
     assert batch.eligible_action_indices == [[0, 1], [0, 1]]
     assert batch.eligible_action_rows == [[0, 1], [2, 3]]
@@ -708,6 +714,8 @@ def test_model_input_batch_packs_variable_action_rows_for_scorer_context() -> No
     assert batch.problems == []
     assert context.screen_state == "BATTLE"
     assert context.legal_action_kinds == ["end_turn", "card"]
+    assert context.tactical_state == batch.tactical_states[0]
+    assert context.tactical_legal_actions == batch.tactical_actions[:2]
     assert choose_highest_scored_eligible_index(context, [0.0, 1.0]) == 1
 
 
@@ -815,6 +823,23 @@ def test_model_score_smoke_ignores_high_scores_on_ineligible_rows() -> None:
     assert report.selections[0].selected_score == 2.0
     assert report.chosen_action_agreement == 1
     assert report.problems == []
+
+
+def test_model_input_v1_migration_marks_missing_structured_tactical_inputs() -> None:
+    legacy = ModelInputBatch(
+        format_version=1,
+        reward_allocation="terminal_step",
+        snapshot_feature_size=1,
+        action_feature_size=1,
+    )
+
+    migrated = migrate_model_input_batch(legacy)
+
+    assert migrated.format_version == MODEL_INPUT_BATCH_FORMAT_VERSION
+    assert migrated.tactical_feature_schema_id == "legacy-unversioned"
+    assert "v1 model input has no structured tactical state/action inputs" in (
+        migrated.problems
+    )
 
 
 def test_linear_action_scorer_scores_model_input_batch_without_training() -> None:

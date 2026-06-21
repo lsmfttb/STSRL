@@ -31,6 +31,9 @@ class DecisionContext:
     eligible_action_indices: list[int]
     snapshot_metadata: Mapping[str, Any] = field(default_factory=dict)
     legal_action_metadata: list[Mapping[str, Any]] = field(default_factory=list)
+    tactical_state: Mapping[str, Any] = field(default_factory=dict)
+    tactical_legal_actions: list[Mapping[str, Any]] = field(default_factory=list)
+    tactical_feature_schema_id: str = "public-tactical-v2"
 
 
 @dataclass(frozen=True)
@@ -437,6 +440,9 @@ def decision_context_from_example(example: DecisionExample) -> DecisionContext:
         legal_action_features=example.legal_action_features,
         legal_action_kinds=example.legal_action_kinds,
         eligible_action_indices=example.eligible_action_indices,
+        tactical_state=example.tactical_state,
+        tactical_legal_actions=example.tactical_legal_actions,
+        tactical_feature_schema_id=example.feature_schema_id,
     )
 
 

@@ -9,10 +9,23 @@ import pytest
 
 from sts_combat_rl.sim.decision_record import (
     DECISION_RECORD_SCHEMA_VERSION,
+    action_identity_dicts_for_actions,
     stable_action_identity_id,
+)
+from sts_combat_rl.sim.contract import SimulatorAction
+from sts_combat_rl.sim.features import (
+    IDENTITY_VOCABULARY_VERSION,
+    TACTICAL_FEATURE_SCHEMA_ID,
+    TACTICAL_FEATURE_SCHEMA_VERSION,
+    build_public_tactical_actions,
+    build_public_tactical_state,
+    encode_lightspeed_battle_snapshot,
+    encode_simulator_actions,
 )
 from sts_combat_rl.sim.trainer_input import (
     TRAINER_INPUT_DATASET_FORMAT_VERSION,
+    TrainerInputDataset,
+    TrainerInputRecord,
     dump_trainer_input_dataset_jsonl,
     load_trainer_input_dataset_jsonl_text,
     trainer_input_dataset_to_jsonl_text,
@@ -33,9 +46,7 @@ def test_trainer_input_v1_fixture_migrates_to_current_schema() -> None:
     assert (
         dataset.migration_report.target_version == TRAINER_INPUT_DATASET_FORMAT_VERSION
     )
-    assert dataset.migration_report.applied_versions == (
-        TRAINER_INPUT_DATASET_FORMAT_VERSION,
-    )
+    assert dataset.migration_report.applied_versions == (2, 3)
     assert "v1 omitted per-decision controller provenance" in (
         dataset.migration_report.losses
     )
@@ -44,14 +55,18 @@ def test_trainer_input_v1_fixture_migrates_to_current_schema() -> None:
     assert record.legal_action_identities[0]["action_id"] is None
     assert record.legal_action_identities[1]["occurrence"] == 1
     assert record.chosen_action_identity == record.legal_action_identities[1]
+    assert dataset.tactical_feature_schema_id == "legacy-unversioned"
+    assert record.tactical_state == {}
+    assert record.tactical_legal_actions == []
+    assert (
+        "v2 fixed numeric features cannot reconstruct v2 structured tactical inputs"
+        in (dataset.migration_report.losses)
+    )
     assert any("controller provenance is missing" in item for item in dataset.problems)
 
 
 def test_trainer_input_writer_rejects_non_current_schema() -> None:
-    text = Path("tests/fixtures/trainer_input_v1_legacy.jsonl").read_text(
-        encoding="utf-8"
-    )
-    current = load_trainer_input_dataset_jsonl_text(text)
+    current = _current_dataset()
     legacy = replace(current, format_version=1)
 
     with pytest.raises(ValueError, match="only emits current format version"):
@@ -59,10 +74,7 @@ def test_trainer_input_writer_rejects_non_current_schema() -> None:
 
 
 def test_trainer_input_writer_rejects_non_current_record_schema() -> None:
-    text = Path("tests/fixtures/trainer_input_v1_legacy.jsonl").read_text(
-        encoding="utf-8"
-    )
-    current = load_trainer_input_dataset_jsonl_text(text)
+    current = _current_dataset()
     bad_record = replace(current.records[0], record_schema_version=99)
     corrupted = replace(current, records=[bad_record])
 
@@ -71,10 +83,7 @@ def test_trainer_input_writer_rejects_non_current_record_schema() -> None:
 
 
 def test_trainer_input_loader_reports_malformed_action_identity() -> None:
-    text = Path("tests/fixtures/trainer_input_v1_legacy.jsonl").read_text(
-        encoding="utf-8"
-    )
-    current = load_trainer_input_dataset_jsonl_text(text)
+    current = _current_dataset()
     rows = [
         json.loads(line)
         for line in trainer_input_dataset_to_jsonl_text(current).splitlines()
@@ -254,10 +263,94 @@ def test_trainer_input_writer_rejects_identity_action_inconsistency(
 
 
 def _current_dataset():
-    text = Path("tests/fixtures/trainer_input_v1_legacy.jsonl").read_text(
-        encoding="utf-8"
+    raw = {
+        "battle_active": True,
+        "ascension": 20,
+        "battle_turn": 1,
+        "battle_player": {
+            "current_hp": 70,
+            "max_hp": 80,
+            "energy": 3,
+            "block": 0,
+        },
+        "battle_hand_size": 1,
+        "battle_draw_pile_size": 4,
+        "battle_discard_pile_size": 0,
+        "battle_exhaust_pile_size": 0,
+        "battle_hand": [
+            {
+                "id": "Strike_R",
+                "type": "ATTACK",
+                "cost": 1,
+                "playable": True,
+                "requires_target": True,
+            }
+        ],
+        "battle_monsters": [
+            {"id": "Cultist", "current_hp": 48, "intent": "ATTACK"},
+            {"id": "JawWorm", "current_hp": 40, "intent": "BUFF"},
+        ],
+    }
+    actions = [
+        SimulatorAction(
+            action_id="card:Strike_R",
+            label="Strike Cultist",
+            kind="card",
+            raw={"scope": "battle", "idx1": 0, "idx2": 0, "idx3": 0},
+        ),
+        SimulatorAction(
+            action_id="card:Strike_R",
+            label="Strike Jaw Worm",
+            kind="card",
+            raw={"scope": "battle", "idx1": 0, "idx2": 1, "idx3": 0},
+        ),
+    ]
+    identities = action_identity_dicts_for_actions(actions)
+    record = TrainerInputRecord(
+        example_index=0,
+        rollout_index=0,
+        seed=11,
+        step_index=3,
+        screen_state="BATTLE",
+        snapshot_features=encode_lightspeed_battle_snapshot(raw),
+        legal_action_features=encode_simulator_actions(actions, raw),
+        legal_action_kinds=[action.kind for action in actions],
+        legal_action_identities=identities,
+        eligible_action_indices=[0, 1],
+        chosen_action_index=1,
+        chosen_action_id=actions[1].action_id,
+        chosen_action_identity=identities[1],
+        chosen_action_kind="card",
+        terminal_after_step=True,
+        controller_provenance={"controller": "test"},
+        source_metadata={"source_kind": "natural_run"},
+        feature_schema_id=TACTICAL_FEATURE_SCHEMA_ID,
+        tactical_state=build_public_tactical_state(raw),
+        tactical_legal_actions=build_public_tactical_actions(actions, raw),
+        segment_index=0,
+        segment_step_index=0,
+        segment_decision_count=1,
+        segment_end_reason="terminal_victory",
+        is_segment_final_step=True,
+        segment_reward=1.0,
+        step_reward=1.0,
+        return_to_go=1.0,
+        reward_contributions={"win": 1.0},
+        raw_reward_components={"hp_delta": None},
     )
-    return load_trainer_input_dataset_jsonl_text(text)
+    return TrainerInputDataset(
+        format_version=TRAINER_INPUT_DATASET_FORMAT_VERSION,
+        reward_allocation="terminal_step",
+        source_rollout_count=1,
+        segment_count=1,
+        snapshot_feature_size=len(record.snapshot_features),
+        action_feature_size=len(record.legal_action_features[0]),
+        decision_record_schema_version=DECISION_RECORD_SCHEMA_VERSION,
+        tactical_feature_schema_id=TACTICAL_FEATURE_SCHEMA_ID,
+        tactical_feature_schema_version=TACTICAL_FEATURE_SCHEMA_VERSION,
+        identity_vocabulary_version=IDENTITY_VOCABULARY_VERSION,
+        records=[record],
+    )
 
 
 def _current_dataset_rows() -> list[dict[str, object]]:

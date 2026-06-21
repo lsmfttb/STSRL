@@ -10,7 +10,7 @@ from typing import Any
 from sts_combat_rl.sim.contract import SimulatorAction
 
 
-DECISION_RECORD_SCHEMA_VERSION = 1
+DECISION_RECORD_SCHEMA_VERSION = 2
 DECISION_SOURCE_KINDS = (
     "natural_run",
     "stratified_training",
@@ -36,6 +36,9 @@ DECISION_RECORD_FIELD_NAMES = (
     "terminal_after_step",
     "controller_provenance",
     "source_metadata",
+    "feature_schema_id",
+    "tactical_state",
+    "tactical_legal_actions",
 )
 
 
@@ -79,6 +82,9 @@ class DecisionRecord:
     chosen_action_identity: dict[str, Any] = field(default_factory=dict)
     controller_provenance: dict[str, Any] = field(default_factory=dict)
     source_metadata: dict[str, Any] = field(default_factory=dict)
+    feature_schema_id: str = "public-tactical-v2"
+    tactical_state: dict[str, Any] = field(default_factory=dict)
+    tactical_legal_actions: list[dict[str, Any]] = field(default_factory=list)
 
 
 def action_identities_for_actions(
@@ -286,6 +292,41 @@ def decision_record_problems(record: DecisionRecord, *, label: str) -> list[str]
         problems.append(f"{label}: controller provenance is missing")
     if not record.source_metadata:
         problems.append(f"{label}: source metadata is missing")
+    problems.extend(_tactical_feature_problems(record, label=label))
+    return problems
+
+
+def _tactical_feature_problems(record: DecisionRecord, *, label: str) -> list[str]:
+    """Validate v2 structured tactical inputs without creating an import cycle."""
+
+    from sts_combat_rl.sim.features import (
+        TACTICAL_FEATURE_SCHEMA_ID,
+        tactical_action_problems,
+        tactical_state_problems,
+    )
+
+    problems: list[str] = []
+    if record.feature_schema_id != TACTICAL_FEATURE_SCHEMA_ID:
+        problems.append(
+            f"{label}: unsupported tactical feature schema {record.feature_schema_id!r}"
+        )
+        return problems
+    if not record.tactical_state:
+        problems.append(f"{label}: tactical state is missing")
+    else:
+        problems.extend(
+            f"{label}: {problem}"
+            for problem in tactical_state_problems(record.tactical_state)
+        )
+    if len(record.tactical_legal_actions) != len(record.legal_action_features):
+        problems.append(
+            f"{label}: {len(record.tactical_legal_actions)} tactical actions but "
+            f"{len(record.legal_action_features)} action rows"
+        )
+    problems.extend(
+        f"{label}: {problem}"
+        for problem in tactical_action_problems(record.tactical_legal_actions)
+    )
     return problems
 
 

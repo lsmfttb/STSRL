@@ -1,0 +1,5 @@
+# External simulator verification runs shell and applies patch artifacts under
+# WSL.  Keep these executable/interchange formats LF even when core.autocrlf
+# is enabled in a Windows checkout.
+*.sh text eol=lf
+*.patch text eol=lf
