@@ -35,9 +35,11 @@ for patch in \
     git apply "$repo_root/patches/$patch"
 done
 
+git apply --unidiff-zero "$repo_root/patches/sts_lightspeed_public_projection.patch"
+
 cmake -S . -B build-t004-py -DCMAKE_POLICY_VERSION_MINIMUM=3.5
 cmake --build build-t004-py --target slaythespire -j 2
 PYTHONPATH="$worktree/build-t004-py" python3 -c \
-    "import slaythespire; assert hasattr(slaythespire.StepSimulator, 'capture_checkpoint')"
+    "import slaythespire; assert hasattr(slaythespire.StepSimulator, 'capture_checkpoint'); assert hasattr(slaythespire.StepSimulator, 'public_projection')"
 
 echo "clean sts_lightspeed patch-stack build passed"

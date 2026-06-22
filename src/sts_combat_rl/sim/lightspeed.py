@@ -16,6 +16,10 @@ from sts_combat_rl.sim.contract import (
     SimulatorSnapshot,
     SimulatorTransition,
 )
+from sts_combat_rl.sim.native_public_projection import (
+    NativePublicProjection,
+    parse_native_public_projection,
+)
 
 
 class LightSpeedAdapter:
@@ -142,6 +146,17 @@ class LightSpeedAdapter:
         raw = dict(raw_snapshot) if raw_snapshot is not None else None
         return self._snapshot(raw)
 
+    def public_projection(self, snapshot: SimulatorSnapshot) -> NativePublicProjection:
+        """Read the current raw native public projection for a T014 audit only."""
+
+        if not hasattr(self._sim, "public_projection"):
+            raise RuntimeError(
+                "slaythespire.StepSimulator does not expose public_projection; "
+                "apply the T014 native public-projection patch and rebuild"
+            )
+        self._assert_snapshot_is_current(snapshot)
+        return parse_native_public_projection(dict(self._sim.public_projection()))
+
     def _snapshot(
         self, raw_snapshot: dict[str, Any] | None = None
     ) -> SimulatorSnapshot:
@@ -166,7 +181,18 @@ class LightSpeedAdapter:
 
     @staticmethod
     def _snapshot_fingerprint(snapshot: SimulatorSnapshot) -> tuple[object, object]:
-        return tuple(snapshot.observation), _freeze_snapshot_value(snapshot.raw)
+        # ``completed_battle_outcome`` is a one-transition annotation returned
+        # by StepSimulator.step().  It is intentionally retained on the
+        # transition snapshot for battle-outcome labeling, but it is not part
+        # of the simulator state and disappears from the next native snapshot.
+        # Do not reject a legitimate reward-screen checkpoint solely because
+        # that transient label is still attached to the Python snapshot.
+        stateful_raw = {
+            key: value
+            for key, value in snapshot.raw.items()
+            if key != "completed_battle_outcome"
+        }
+        return tuple(snapshot.observation), _freeze_snapshot_value(stateful_raw)
 
 
 def _import_lightspeed_module() -> Any:

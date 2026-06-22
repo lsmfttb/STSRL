@@ -1,0 +1,106 @@
+diff --git a/bindings/slaythespire.cpp b/bindings/slaythespire.cpp
+index 161c116..0000000 100644
+--- a/bindings/slaythespire.cpp
++++ b/bindings/slaythespire.cpp
+@@ -440,0 +441,30 @@
++pybind11::dict publicProjectionAvailable(
++        const pybind11::object &value,
++        const char *source) {
++    pybind11::dict ret;
++    ret["availability"] = "available";
++    ret["source"] = source;
++    ret["value"] = value;
++    return ret;
++}
++
++pybind11::dict publicProjectionUnavailable(
++        const char *availability,
++        const char *reason) {
++    pybind11::dict ret;
++    ret["availability"] = availability;
++    ret["reason"] = reason;
++    return ret;
++}
++
++pybind11::dict publicProjectionActionSnapshot(const LightSpeedAction &action) {
++    pybind11::dict ret;
++    ret["scope"] = action.scope;
++    ret["bits"] = action.bits;
++    ret["kind"] = action.kind;
++    ret["idx1"] = action.idx1;
++    ret["idx2"] = action.idx2;
++    ret["idx3"] = action.idx3;
++    ret["label"] = action.label;
++    return ret;
++}
+@@ -550,0 +581,68 @@
++    pybind11::dict publicProjection() {
++        ensureBattleContext();
++        pybind11::dict ret;
++        ret["schema_id"] = "native-public-projection-v1";
++        ret["external_base_commit"] = "7476a81";
++        ret["patch_identity"] = "sts_lightspeed_public_projection.patch";
++        ret["screen_identity"] = publicProjectionAvailable(
++                pybind11::str(screenStateLabel(gc.screenState)),
++                "GameContext::screenState");
++        ret["visible_act_boss"] = publicProjectionUnavailable(
++                "unavailable",
++                "no audited native source is exposed by this patch");
++        ret["visible_map_graph"] = publicProjectionUnavailable(
++                "unavailable",
++                "no audited native source is exposed by this patch");
++        ret["current_map_node"] = publicProjectionUnavailable(
++                "unavailable",
++                "no audited native source is exposed by this patch");
++        ret["immediately_legal_routes"] = publicProjectionUnavailable(
++                "unavailable",
++                "no audited native source is exposed by this patch");
++
++        pybind11::dict resourceFields;
++        if (battleActive) {
++            resourceFields["current_hp"] = publicProjectionAvailable(
++                    pybind11::int_(bc.player.curHp), "BattleContext::player.curHp");
++            resourceFields["max_hp"] = publicProjectionAvailable(
++                    pybind11::int_(bc.player.maxHp), "BattleContext::player.maxHp");
++            resourceFields["gold"] = publicProjectionAvailable(
++                    pybind11::int_(bc.player.gold), "BattleContext::player.gold");
++            resourceFields["potion_count"] = publicProjectionAvailable(
++                    pybind11::int_(bc.potionCount), "BattleContext::potionCount");
++            resourceFields["potion_capacity"] = publicProjectionAvailable(
++                    pybind11::int_(bc.potionCapacity), "BattleContext::potionCapacity");
++        } else {
++            resourceFields["current_hp"] = publicProjectionAvailable(
++                    pybind11::int_(gc.curHp), "GameContext::curHp");
++            resourceFields["max_hp"] = publicProjectionAvailable(
++                    pybind11::int_(gc.maxHp), "GameContext::maxHp");
++            resourceFields["gold"] = publicProjectionAvailable(
++                    pybind11::int_(gc.gold), "GameContext::gold");
++            resourceFields["potion_count"] = publicProjectionAvailable(
++                    pybind11::int_(gc.potionCount), "GameContext::potionCount");
++            resourceFields["potion_capacity"] = publicProjectionAvailable(
++                    pybind11::int_(gc.potionCapacity), "GameContext::potionCapacity");
++        }
++        resourceFields["deck"] = publicProjectionUnavailable(
++                "unavailable", "not yet audited for raw projection");
++        resourceFields["relics"] = publicProjectionUnavailable(
++                "unavailable", "not yet audited for raw projection");
++        resourceFields["potion_identities"] = publicProjectionUnavailable(
++                "unavailable", "not yet audited for raw projection");
++        resourceFields["keys"] = publicProjectionUnavailable(
++                "unavailable", "not yet audited for raw projection");
++        ret["persistent_resources"] = publicProjectionAvailable(
++                resourceFields, "StepSimulator::publicProjection");
++        ret["screen_payload"] = publicProjectionUnavailable(
++                "unsupported", "screen-specific payloads are not exposed by this patch");
++
++        pybind11::list candidates;
++        for (const auto &action : legalActions()) {
++            candidates.append(publicProjectionActionSnapshot(action));
++        }
++        ret["candidate_actions"] = publicProjectionAvailable(
++                candidates, "StepSimulator::legalActions");
++        return ret;
++    }
++
+@@ -643,0 +742,1 @@
++        .def("public_projection", &StepSimulator::publicProjection)
