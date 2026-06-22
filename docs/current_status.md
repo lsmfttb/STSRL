@@ -61,6 +61,13 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
   persistent resources with native source counts. Visible Act Boss, complete
   map/routes, current node, and screen-specific payloads remain explicit
   capability gaps. The raw projection is not a sanitized controller input.
+- Versioned sanitized in-memory public run context
+  (`public-run-context-v1`) and ordered public history entries
+  (`public-run-history-entry-v1`) are attached to controlled-run and live
+  `DecisionContext` construction. `execute_controlled_run` appends one
+  contiguous typed history entry after each successful visible transition,
+  rejects malformed raw native projections before controller use, and keeps
+  artifact propagation/replay/audit out of current writers until T016.
 - Seeded structural resampling of natural battle starts, with source identity,
   sampling component, structural coverage, and completed battle outcomes kept
   separate from repeated sample weight.
@@ -74,7 +81,7 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
 
 ### Tests And Runtime Evidence
 
-- `417` tests pass on Windows Python as of this review. In an uninstalled
+- `422` tests pass on Windows Python as of this review. In an uninstalled
   checkout, set `PYTHONPATH=src` (or install the package) before invoking the
   CLI directly.
 - The two CommunicationMod fixture smokes pass.
@@ -120,7 +127,8 @@ unmerged legacy work:
 - PyTorch policy/value training;
 - interactive live-game or A20 performance validation for any controller;
 - structured persistent resource outcomes;
-- sanitized public run context or complete public run history;
+- public-context artifact propagation, portable replay comparison, and WSL
+  context coverage audit;
 - constructed A20 battle-start supplements;
 - normal-information belief search.
 
@@ -143,13 +151,12 @@ tasks in dependency order are:
 4. T014, native public projection capability, is complete. It provides only
    the reproducible raw native capability matrix, action parity, and checkpoint
    evidence; it does not provide sanitized controller context.
-5. T015, public run context and controlled history, is `READY`. It consumes
-   T014's accepted raw capability matrix and must produce the sanitized
-   in-memory public context/history contract without persisting it in existing
-   artifacts.
-6. T016 remains blocked by T015. T008, T009, and T012 remain blocked by the
-   applicable T016 public-context completion work. This prevents parallel
-   context/resource schemas.
+5. T015, public run context and controlled history, is complete. It provides
+   the sanitized in-memory public context/history contract and intentionally
+   leaves existing persisted artifacts unchanged.
+6. T016, public-context artifacts, replay, and audit, is `READY`. T008, T009,
+   and T012 remain blocked by the applicable T016 public-context completion
+   work. This prevents parallel context/resource schemas.
 
 Later tasks are dependency-ordered in the task index. A task is not ready for a
 new branch until its status is `READY`.

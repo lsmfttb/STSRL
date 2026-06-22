@@ -1,6 +1,6 @@
 # T016: Public-Context Artifacts, Replay, And Audit
 
-Status: `BLOCKED` by T015.
+Status: `READY`.
 
 ## Objective
 

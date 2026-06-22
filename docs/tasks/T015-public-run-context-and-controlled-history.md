@@ -1,6 +1,6 @@
 # T015: Public Run Context And Controlled History
 
-Status: `READY`.
+Status: `DONE`.
 
 ## Objective
 

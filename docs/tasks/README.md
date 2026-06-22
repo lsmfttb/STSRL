@@ -22,8 +22,8 @@ starting work.
 | T012 | BLOCKED | [Structured battle resource outcomes](T012-structured-resource-outcomes.md) | T003, T004, T010, T016 | persistent resource snapshots and outcome vectors |
 | T013 | DONE | [Live CommunicationMod runtime adapter](T013-live-communicationmod-runtime-adapter.md) | T003, T011 | trained/search controller deployment in the real game |
 | T014 | DONE | [Native public projection capability](T014-native-public-projection-capability.md) | T002, T003, T004, T010, T011 | native public projection and action parity |
-| T015 | READY | [Public run context and controlled history](T015-public-run-context-and-controlled-history.md) | T002, T003, T004, T011, T014 | sanitized context and ordered history |
-| T016 | BLOCKED | [Public-context artifacts, replay, and audit](T016-public-context-artifacts-replay-and-audit.md) | T003, T004, T005, T011, T014, T015 | migrations, replay, and coverage audit |
+| T015 | DONE | [Public run context and controlled history](T015-public-run-context-and-controlled-history.md) | T002, T003, T004, T011, T014 | sanitized context and ordered history |
+| T016 | READY | [Public-context artifacts, replay, and audit](T016-public-context-artifacts-replay-and-audit.md) | T003, T004, T005, T011, T014, T015 | migrations, replay, and coverage audit |
 
 Only `READY` tasks should receive a new branch. After a prerequisite merges,
 the main maintainer reviews dependent specifications against the new `main`
@@ -42,8 +42,8 @@ document update before acceptance.
   on immutable T005 cohorts and cannot be reported as normal-information or
   real-game performance.
 - T007 is `CANCELLED`. Its replacement sequence completed T014 for native
-  capability; T015 is now `READY` for sanitized context/history, then T016 for
-  artifact propagation/replay/audit. See the
+  capability and T015 for sanitized in-memory context/history. T016 is now
+  `READY` for artifact propagation/replay/audit. See the
   [T007 review handoff](../t007_review_handoff_2026-06-22.md).
 - T008 and T012 wait for T016 so constructed starts and terminal-resource
   labels extend one stable complete-context contract. T009 remains blocked by
