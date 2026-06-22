@@ -1,6 +1,6 @@
 # T015: Public Run Context And Controlled History
 
-Status: `BLOCKED` by T014.
+Status: `READY`.
 
 ## Objective
 
@@ -10,20 +10,26 @@ player-visible decision in `execute_controlled_run`.
 
 ## Current Main Baseline
 
-T014 must first establish the native field/candidate capability matrix and
-checkpoint behavior. Current `main` exposes only `public-tactical-v2`; battle
-start records explicitly retain no complete public context. T003 supplies
-decision provenance/migration infrastructure and T002 supplies the authoritative
-controlled-run path.
+T014 established the raw native field/candidate capability matrix and
+checkpoint behavior. Current `main` exposes `public-tactical-v2` plus the raw
+`native-public-projection-v1` audit surface. That raw projection reports
+current screen identity, candidate actions from `StepSimulator::legalActions`,
+and currently available persistent resources; visible Act Boss, complete map,
+current node, legal routes, and screen-specific payloads remain explicitly
+unavailable or unsupported.
+
+Battle-start records still explicitly retain no complete public context. T003
+supplies decision provenance/migration infrastructure and T002 supplies the
+authoritative controlled-run path.
 
 ## Dependencies
 
-- T002, T003, T004, T011, and T014 must be complete.
+- T002, T003, T004, T011, and T014 are complete.
 
 ## Scope
 
-- Define the nested public run-context and typed history schemas after T014's
-  capability matrix is accepted. The context includes a current public
+- Define the nested public run-context and typed history schemas using T014's
+  accepted capability matrix. The context includes a current public
   persistent-resource snapshot, visible current-Act Boss, complete currently
   visible map/routes when available, current location, and explicit field-level
   missingness.

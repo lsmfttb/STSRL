@@ -54,6 +54,13 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
   manifests. Fresh adapters restore portable records by replaying the source
   seed and occurrence-disambiguated action trace; opaque native state is never
   serialized.
+- Versioned raw native public projection capability
+  (`native-public-projection-v1`) on `StepSimulator`, with a diagnostic
+  capability report and audit gate. It reports current screen identity,
+  candidate actions from `StepSimulator::legalActions`, and currently audited
+  persistent resources with native source counts. Visible Act Boss, complete
+  map/routes, current node, and screen-specific payloads remain explicit
+  capability gaps. The raw projection is not a sanitized controller input.
 - Seeded structural resampling of natural battle starts, with source identity,
   sampling component, structural coverage, and completed battle outcomes kept
   separate from repeated sample weight.
@@ -67,7 +74,7 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
 
 ### Tests And Runtime Evidence
 
-- `407` tests pass on Windows Python as of this review. In an uninstalled
+- `417` tests pass on Windows Python as of this review. In an uninstalled
   checkout, set `PYTHONPATH=src` (or install the package) before invoking the
   CLI directly.
 - The two CommunicationMod fixture smokes pass.
@@ -96,6 +103,13 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
   explicit targetability fallback, complete runtime provenance, and no-command
   failure paths. Across the capture corpus, all 2,352 states with a playable
   targeted card and a positive-HP non-gone monster produce target actions.
+- T014 validates the raw native public-projection capability over seeds `1..3`
+  at A20 with 289 current decision screens: `BATTLE=236`, `CARD_SELECT=2`,
+  `EVENT_SCREEN=4`, `MAP_SCREEN=16`, and `REWARDS=31`. The canonical
+  `build-py` audit reports 1,209 resource snapshot comparisons, 0 resource
+  mismatches, 289 candidate-action parity passes, 289 checkpoint projection
+  passes, no checkpoint failures, and explicit coverage gaps for
+  `BOSS_RELIC_REWARDS`, `REST_ROOM`, `SHOP_ROOM`, and `TREASURE_ROOM`.
 
 ## Not Implemented On Main
 
@@ -126,11 +140,16 @@ tasks in dependency order are:
 3. T007 is `CANCELLED`. PR #9 remains closed and is not a branch base. Its
    former cross-cutting scope is split into T014--T016; see
    [`t007_review_handoff_2026-06-22.md`](t007_review_handoff_2026-06-22.md).
-4. T014, native public projection capability, is `READY`. It owns only the
-   reproducible native capability matrix, raw projection, action parity, and
-   checkpoint evidence. T015 and T016 remain blocked behind it.
-5. T008, T009, and T012 remain blocked by the applicable T016 public-context
-   completion work. This prevents parallel context/resource schemas.
+4. T014, native public projection capability, is complete. It provides only
+   the reproducible raw native capability matrix, action parity, and checkpoint
+   evidence; it does not provide sanitized controller context.
+5. T015, public run context and controlled history, is `READY`. It consumes
+   T014's accepted raw capability matrix and must produce the sanitized
+   in-memory public context/history contract without persisting it in existing
+   artifacts.
+6. T016 remains blocked by T015. T008, T009, and T012 remain blocked by the
+   applicable T016 public-context completion work. This prevents parallel
+   context/resource schemas.
 
 Later tasks are dependency-ordered in the task index. A task is not ready for a
 new branch until its status is `READY`.
@@ -166,6 +185,6 @@ repository:    /mnt/d/DeadlycatCoding/STSRL
 
 See [`sts_lightspeed_wsl_spike.md`](sts_lightspeed_wsl_spike.md) for commands
 that are currently available on `main`. The clean canonical patch-stack build
-was reverified on 2026-06-22 from external commit `7476a81`; the canonical
-`build-py` directory is still absent, so rebuild it before treating direct
-simulator smokes as current evidence.
+and canonical `build-py` public-projection audit were reverified on 2026-06-22
+from external commit `7476a81`. The previous stale `build-py` directory was
+backed up as `build-py.pre-t014-20260622224003`.

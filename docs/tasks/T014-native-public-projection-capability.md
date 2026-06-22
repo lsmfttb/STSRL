@@ -1,6 +1,6 @@
 # T014: Native Public Projection Capability
 
-Status: `READY`.
+Status: `DONE`.
 
 ## Objective
 
@@ -122,6 +122,39 @@ wsl.exe -d Ubuntu -e bash -lc "cd /mnt/d/DeadlycatCoding/STSRL && PYTHONPATH=/ho
 The PR report must state every observed screen type, unobserved screen type,
 field availability, native source, candidate-action parity result, checkpoint
 result, external commit, patch-stack identity, and known real-game parity gap.
+
+## Completion Evidence
+
+Merged PR: <https://github.com/lsmfttb/STSRL/pull/10>
+
+Merge commit: `640c8e2`.
+
+The accepted implementation adds `native-public-projection-v1` as a raw native
+capability surface on `StepSimulator`, plus
+`native-public-projection-capability-report-v1` and the
+`--lightspeed-public-projection-capability-audit` gate. The raw projection is
+not consumed by controllers, artifact writers, model inputs, or
+`DecisionContext`.
+
+Final canonical WSL verification on 2026-06-22 rebuilt
+`/home/lsmft/stsrl-spikes/sts_lightspeed/build-py` from external base
+`7476a81` plus the verified patch stack and reported:
+
+```text
+current decision screens observed: 289
+resource snapshot comparisons: 1209
+resource snapshot mismatches: 0
+candidate-action parity passes: 289
+checkpoint projection passes: 289
+checkpoint projection failures: 0
+audit passed: yes
+problems: (none)
+```
+
+Observed screen counts were `BATTLE=236`, `CARD_SELECT=2`,
+`EVENT_SCREEN=4`, `MAP_SCREEN=16`, and `REWARDS=31`. Coverage gaps remain
+explicit for `BOSS_RELIC_REWARDS`, `REST_ROOM`, `SHOP_ROOM`, and
+`TREASURE_ROOM`.
 
 ## Legacy Reference
 

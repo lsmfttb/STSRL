@@ -35,6 +35,7 @@ patches/sts_lightspeed_battle_start_metadata.patch
 patches/sts_lightspeed_run_potion_snapshot.patch
 patches/sts_lightspeed_non_combat_potion_actions.patch
 patches/sts_lightspeed_gcc15_compat.patch
+patches/sts_lightspeed_public_projection.patch
 ```
 
 The canonical base is external commit `7476a81`. The patch order and a clean
@@ -46,8 +47,10 @@ wsl.exe -d Ubuntu -e bash -lc "cd /mnt/d/DeadlycatCoding/STSRL && bash scripts/v
 
 The verifier uses a disposable worktree and does not replace `build-py`.
 Apply the same ordered stack and rebuild the system build before using the
-runtime gates below. Do not treat an older `build-py` as supporting checkpoint
-or completed-battle-outcome fields just because the Python branch is current.
+runtime gates below. Do not treat an older `build-py` as supporting current
+native fields just because the Python branch is current. On 2026-06-22,
+`build-py` was rebuilt from this patch stack for T014; the previous stale
+directory was backed up as `build-py.pre-t014-20260622224003`.
 
 Additional patches preserved in legacy commit `d56e10e` are not current
 capabilities. They are mapped to focused tasks in [`tasks/`](tasks/README.md)
@@ -107,6 +110,23 @@ wsl.exe -d Ubuntu -e bash -lc "cd /mnt/d/DeadlycatCoding/STSRL && PYTHONPATH=/mn
 ```powershell
 wsl.exe -d Ubuntu -e bash -lc "cd /mnt/d/DeadlycatCoding/STSRL && PYTHONPATH=/home/lsmft/stsrl-spikes/sts_lightspeed/build-py:/mnt/d/DeadlycatCoding/STSRL/src python3 -m sts_combat_rl.cli --lightspeed-battle-checkpoint-verify --sim-seed 1 --sim-ascension 20 --sim-steps 200 --checkpoint-replay-steps 10 --log-file -"
 ```
+
+### Native Public-Projection Capability Audit
+
+This T014 gate audits the raw native public projection, candidate-action parity,
+checkpoint projection preservation, field availability, native source counts,
+and explicit screen coverage gaps. It is a capability audit, not a sanitized
+controller-context or real-game parity claim.
+
+```powershell
+wsl.exe -d Ubuntu -e bash -lc "cd /mnt/d/DeadlycatCoding/STSRL && PYTHONPATH=/home/lsmft/stsrl-spikes/sts_lightspeed/build-py:/mnt/d/DeadlycatCoding/STSRL/src python3 -m sts_combat_rl.cli --lightspeed-public-projection-capability-audit --sim-seed 1 --sim-episodes 3 --sim-ascension 20 --sim-steps 200 --log-file -"
+```
+
+The accepted A20 smoke observed 289 current decision screens, 1,209 resource
+snapshot comparisons, no resource mismatches, 289 candidate-action parity
+passes, 289 checkpoint projection passes, no checkpoint failures, and explicit
+coverage gaps for `BOSS_RELIC_REWARDS`, `REST_ROOM`, `SHOP_ROOM`, and
+`TREASURE_ROOM`.
 
 ### Natural Battle-Start Pool And Fresh Restore
 

@@ -209,8 +209,9 @@ targets. Normal-agent promotion uses only normal-information evaluation.
 
 ### N0: Public Contracts And Firewall
 
-Status: pending T006, T012, and the T014--T016 public-context replacement
-sequence.
+Status: pending T006, T012, and the T015--T016 public-context replacement
+sequence. T014's raw native capability boundary is complete; it is not itself
+the sanitized normal-information state contract.
 
 Required work:
 
