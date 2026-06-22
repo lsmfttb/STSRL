@@ -120,6 +120,7 @@ class NativePublicProjection:
     screen_identity: str
     fields: Mapping[str, NativeProjectionField]
     resource_fields: Mapping[str, NativeProjectionField]
+    resource_values: Mapping[str, int]
     candidate_actions: tuple[NativeProjectionAction, ...]
     canonical_payload: str
 
@@ -149,6 +150,14 @@ class ProjectionCheckpointResult:
     candidate_actions_match: bool
 
 
+@dataclass(frozen=True)
+class SnapshotResourceValue:
+    """One player-visible resource value exposed by the current snapshot."""
+
+    value: int
+    source: str
+
+
 @dataclass
 class NativePublicProjectionCapabilityReport:
     """Versioned audit report; it is diagnostic, not a persisted run artifact."""
@@ -165,15 +174,23 @@ class NativePublicProjectionCapabilityReport:
     field_availability_counts: dict[str, Counter[str]] = field(
         default_factory=lambda: defaultdict(Counter)
     )
+    field_source_counts: dict[str, Counter[str]] = field(
+        default_factory=lambda: defaultdict(Counter)
+    )
     screen_capability_matrix: dict[str, dict[str, Counter[str]]] = field(
         default_factory=lambda: defaultdict(lambda: defaultdict(Counter))
     )
     resource_availability_counts: dict[str, Counter[str]] = field(
         default_factory=lambda: defaultdict(Counter)
     )
+    resource_source_counts: dict[str, Counter[str]] = field(
+        default_factory=lambda: defaultdict(Counter)
+    )
     candidate_sources_by_screen: dict[str, Counter[str]] = field(
         default_factory=lambda: defaultdict(Counter)
     )
+    resource_snapshot_comparisons: int = 0
+    resource_snapshot_mismatches: int = 0
     candidate_parity_passes: int = 0
     checkpoint_passes: int = 0
     checkpoint_failures: int = 0
@@ -200,15 +217,19 @@ class NativePublicProjectionCapabilityReport:
             "decisions_observed": self.decisions_observed,
             "screen_counts": dict(sorted(self.screen_counts.items())),
             "field_availability_counts": _counter_table(self.field_availability_counts),
+            "field_source_counts": _counter_table(self.field_source_counts),
             "screen_capability_matrix": _screen_capability_matrix(
                 self.screen_capability_matrix
             ),
             "resource_availability_counts": _counter_table(
                 self.resource_availability_counts
             ),
+            "resource_source_counts": _counter_table(self.resource_source_counts),
             "candidate_sources_by_screen": _counter_table(
                 self.candidate_sources_by_screen
             ),
+            "resource_snapshot_comparisons": self.resource_snapshot_comparisons,
+            "resource_snapshot_mismatches": self.resource_snapshot_mismatches,
             "candidate_parity_passes": self.candidate_parity_passes,
             "checkpoint_passes": self.checkpoint_passes,
             "checkpoint_failures": self.checkpoint_failures,
@@ -244,6 +265,7 @@ class NativePublicProjectionAuditCollector:
 
         self.report.decisions_observed += 1
         self._record_projection_metadata(projection, label)
+        self._record_resource_snapshot_consistency(projection, snapshot, label)
         self._record_candidate_parity(projection, actions, label)
         self._record_checkpoint_parity(projection, snapshot, label)
 
@@ -292,6 +314,8 @@ class NativePublicProjectionAuditCollector:
             self.report.field_availability_counts[field_name][
                 field_value.availability
             ] += 1
+            if field_value.source is not None:
+                self.report.field_source_counts[field_name][field_value.source] += 1
             self.report.screen_capability_matrix[projection.screen_identity][
                 field_name
             ][field_value.availability] += 1
@@ -299,6 +323,8 @@ class NativePublicProjectionAuditCollector:
             self.report.resource_availability_counts[field_name][
                 field_value.availability
             ] += 1
+            if field_value.source is not None:
+                self.report.resource_source_counts[field_name][field_value.source] += 1
         source = projection.candidate_source
         if source is None:
             self.report.problems.append(
@@ -308,6 +334,26 @@ class NativePublicProjectionAuditCollector:
             self.report.candidate_sources_by_screen[projection.screen_identity][
                 source
             ] += 1
+
+    def _record_resource_snapshot_consistency(
+        self,
+        projection: NativePublicProjection,
+        snapshot: SimulatorSnapshot,
+        label: str,
+    ) -> None:
+        for field_name, projected_value in projection.resource_values.items():
+            expected = _snapshot_public_resource_value(snapshot.raw, field_name)
+            if expected is None:
+                continue
+            self.report.resource_snapshot_comparisons += 1
+            if projected_value == expected.value:
+                continue
+            self.report.resource_snapshot_mismatches += 1
+            self.report.problems.append(
+                f"{label}: persistent_resources.{field_name} mismatch: "
+                f"projection={projected_value!r}, "
+                f"snapshot {expected.source}={expected.value!r}"
+            )
 
     def _record_candidate_parity(
         self,
@@ -422,6 +468,14 @@ def parse_native_public_projection(raw: object) -> NativePublicProjection:
             )
             for field_name in RESOURCE_FIELD_NAMES
         }
+        parsed_resource_values = {
+            field_name: _resource_int_value(
+                resource_values[field_name],
+                f"persistent resource field {field_name}",
+            )
+            for field_name, field_value in resource_fields.items()
+            if field_value.availability == "available"
+        }
     else:
         resource_fields = {
             field_name: NativeProjectionField(
@@ -430,6 +484,7 @@ def parse_native_public_projection(raw: object) -> NativePublicProjection:
             )
             for field_name in RESOURCE_FIELD_NAMES
         }
+        parsed_resource_values = {}
 
     candidates: tuple[NativeProjectionAction, ...] = ()
     if fields["candidate_actions"].availability == "available":
@@ -452,6 +507,7 @@ def parse_native_public_projection(raw: object) -> NativePublicProjection:
         screen_identity=screen_value,
         fields=fields,
         resource_fields=resource_fields,
+        resource_values=parsed_resource_values,
         candidate_actions=candidates,
         canonical_payload=_canonical_payload(payload),
     )
@@ -471,6 +527,8 @@ def format_native_public_projection_capability_report(
         f"episodes: {report.completed_episodes}/{report.requested_episodes}",
         f"max steps per episode: {report.max_steps}",
         f"current decision screens observed: {report.decisions_observed}",
+        f"resource snapshot comparisons: {report.resource_snapshot_comparisons}",
+        f"resource snapshot mismatches: {report.resource_snapshot_mismatches}",
         f"candidate-action parity passes: {report.candidate_parity_passes}",
         f"checkpoint projection passes: {report.checkpoint_passes}",
         f"checkpoint projection failures: {report.checkpoint_failures}",
@@ -478,6 +536,7 @@ def format_native_public_projection_capability_report(
     ]
     _append_counter(lines, "observed screen counts", report.screen_counts)
     _append_counter_table(lines, "field availability", report.field_availability_counts)
+    _append_counter_table(lines, "field native sources", report.field_source_counts)
     _append_screen_capability_matrix(
         lines,
         "observed screen capability matrix",
@@ -485,6 +544,9 @@ def format_native_public_projection_capability_report(
     )
     _append_counter_table(
         lines, "persistent-resource availability", report.resource_availability_counts
+    )
+    _append_counter_table(
+        lines, "persistent-resource native sources", report.resource_source_counts
     )
     _append_counter_table(
         lines, "candidate-action sources by screen", report.candidate_sources_by_screen
@@ -530,6 +592,93 @@ def _field_value(value: object, label: str) -> object:
     if "value" not in field:
         raise ValueError(f"native projection field {label} has no value")
     return field["value"]
+
+
+def _resource_int_value(value: object, label: str) -> int:
+    raw_value = _field_value(value, label)
+    if isinstance(raw_value, bool) or not isinstance(raw_value, int):
+        raise ValueError(f"{label} value must be an integer")
+    return raw_value
+
+
+def _snapshot_public_resource_value(
+    raw_snapshot: Mapping[str, Any],
+    field_name: str,
+) -> SnapshotResourceValue | None:
+    """Return the player-visible snapshot value for a projected resource.
+
+    The check intentionally keys off visible/current snapshot fields rather
+    than the projection's claimed source.  That makes stale GameContext values
+    fail in battle states when BattleContext exposes the player-visible value.
+    """
+
+    battle_active = bool(raw_snapshot.get("battle_active"))
+    battle_player = _maybe_mapping(raw_snapshot.get("battle_player"))
+    if field_name == "current_hp":
+        if battle_active:
+            return _first_snapshot_int(
+                ("battle_player_hp", raw_snapshot.get("battle_player_hp")),
+                (
+                    "battle_player.current_hp",
+                    battle_player.get("current_hp") if battle_player else None,
+                ),
+                (
+                    "battle_player.cur_hp",
+                    battle_player.get("cur_hp") if battle_player else None,
+                ),
+            )
+        return _first_snapshot_int(("cur_hp", raw_snapshot.get("cur_hp")))
+    if field_name == "max_hp":
+        if battle_active:
+            return _first_snapshot_int(
+                (
+                    "battle_player.max_hp",
+                    battle_player.get("max_hp") if battle_player else None,
+                ),
+                (
+                    "battle_player.maxHp",
+                    battle_player.get("maxHp") if battle_player else None,
+                ),
+            )
+        return _first_snapshot_int(("max_hp", raw_snapshot.get("max_hp")))
+    if field_name == "gold":
+        if battle_active:
+            return _first_snapshot_int(
+                (
+                    "battle_player.gold",
+                    battle_player.get("gold") if battle_player else None,
+                )
+            )
+        return _first_snapshot_int(("gold", raw_snapshot.get("gold")))
+    if field_name == "potion_count":
+        if battle_active:
+            return _first_snapshot_int(
+                ("battle_potion_count", raw_snapshot.get("battle_potion_count"))
+            )
+        return _first_snapshot_int(("potion_count", raw_snapshot.get("potion_count")))
+    if field_name == "potion_capacity":
+        if battle_active:
+            return _first_snapshot_int(
+                ("battle_potion_capacity", raw_snapshot.get("battle_potion_capacity"))
+            )
+        return _first_snapshot_int(
+            ("potion_capacity", raw_snapshot.get("potion_capacity"))
+        )
+    return None
+
+
+def _first_snapshot_int(
+    *candidates: tuple[str, object],
+) -> SnapshotResourceValue | None:
+    for source, value in candidates:
+        if isinstance(value, bool) or not isinstance(value, int):
+            continue
+        return SnapshotResourceValue(value=value, source=source)
+    return None
+
+
+def _maybe_mapping(value: object) -> Mapping[str, Any] | None:
+    return value if isinstance(value, Mapping) else None
 
 
 def _mapping(value: object, label: str) -> Mapping[str, Any]:

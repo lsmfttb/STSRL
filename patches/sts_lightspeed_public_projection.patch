@@ -33,7 +33,7 @@ index 161c116..0000000 100644
 +    ret["label"] = action.label;
 +    return ret;
 +}
-@@ -550,0 +581,55 @@
+@@ -550,0 +581,68 @@
 +    pybind11::dict publicProjection() {
 +        ensureBattleContext();
 +        pybind11::dict ret;
@@ -57,16 +57,29 @@ index 161c116..0000000 100644
 +                "no audited native source is exposed by this patch");
 +
 +        pybind11::dict resourceFields;
-+        resourceFields["current_hp"] = publicProjectionAvailable(
-+                pybind11::int_(gc.curHp), "GameContext::curHp");
-+        resourceFields["max_hp"] = publicProjectionAvailable(
-+                pybind11::int_(gc.maxHp), "GameContext::maxHp");
-+        resourceFields["gold"] = publicProjectionAvailable(
-+                pybind11::int_(gc.gold), "GameContext::gold");
-+        resourceFields["potion_count"] = publicProjectionAvailable(
-+                pybind11::int_(gc.potionCount), "GameContext::potionCount");
-+        resourceFields["potion_capacity"] = publicProjectionAvailable(
-+                pybind11::int_(gc.potionCapacity), "GameContext::potionCapacity");
++        if (battleActive) {
++            resourceFields["current_hp"] = publicProjectionAvailable(
++                    pybind11::int_(bc.player.curHp), "BattleContext::player.curHp");
++            resourceFields["max_hp"] = publicProjectionAvailable(
++                    pybind11::int_(bc.player.maxHp), "BattleContext::player.maxHp");
++            resourceFields["gold"] = publicProjectionAvailable(
++                    pybind11::int_(bc.player.gold), "BattleContext::player.gold");
++            resourceFields["potion_count"] = publicProjectionAvailable(
++                    pybind11::int_(bc.potionCount), "BattleContext::potionCount");
++            resourceFields["potion_capacity"] = publicProjectionAvailable(
++                    pybind11::int_(bc.potionCapacity), "BattleContext::potionCapacity");
++        } else {
++            resourceFields["current_hp"] = publicProjectionAvailable(
++                    pybind11::int_(gc.curHp), "GameContext::curHp");
++            resourceFields["max_hp"] = publicProjectionAvailable(
++                    pybind11::int_(gc.maxHp), "GameContext::maxHp");
++            resourceFields["gold"] = publicProjectionAvailable(
++                    pybind11::int_(gc.gold), "GameContext::gold");
++            resourceFields["potion_count"] = publicProjectionAvailable(
++                    pybind11::int_(gc.potionCount), "GameContext::potionCount");
++            resourceFields["potion_capacity"] = publicProjectionAvailable(
++                    pybind11::int_(gc.potionCapacity), "GameContext::potionCapacity");
++        }
 +        resourceFields["deck"] = publicProjectionUnavailable(
 +                "unavailable", "not yet audited for raw projection");
 +        resourceFields["relics"] = publicProjectionUnavailable(
@@ -76,7 +89,7 @@ index 161c116..0000000 100644
 +        resourceFields["keys"] = publicProjectionUnavailable(
 +                "unavailable", "not yet audited for raw projection");
 +        ret["persistent_resources"] = publicProjectionAvailable(
-+                resourceFields, "GameContext");
++                resourceFields, "StepSimulator::publicProjection");
 +        ret["screen_payload"] = publicProjectionUnavailable(
 +                "unsupported", "screen-specific payloads are not exposed by this patch");
 +
@@ -89,5 +102,5 @@ index 161c116..0000000 100644
 +        return ret;
 +    }
 +
-@@ -643,0 +729,1 @@
+@@ -643,0 +742,1 @@
 +        .def("public_projection", &StepSimulator::publicProjection)

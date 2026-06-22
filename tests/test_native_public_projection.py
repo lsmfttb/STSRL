@@ -43,13 +43,26 @@ def _projection_raw(
     *,
     candidate_bits: int = 7,
     current_hp: int = 80,
+    max_hp: int = 80,
+    gold: int = 99,
+    potion_count: int = 1,
+    potion_capacity: int = 3,
+    resource_sources: dict[str, str] | None = None,
 ) -> dict[str, object]:
+    sources = resource_sources or {}
     resources = {
-        "current_hp": _available(current_hp, "GameContext::curHp"),
-        "max_hp": _available(80, "GameContext::maxHp"),
-        "gold": _available(99, "GameContext::gold"),
-        "potion_count": _available(1, "GameContext::potionCount"),
-        "potion_capacity": _available(3, "GameContext::potionCapacity"),
+        "current_hp": _available(
+            current_hp, sources.get("current_hp", "GameContext::curHp")
+        ),
+        "max_hp": _available(max_hp, sources.get("max_hp", "GameContext::maxHp")),
+        "gold": _available(gold, sources.get("gold", "GameContext::gold")),
+        "potion_count": _available(
+            potion_count, sources.get("potion_count", "GameContext::potionCount")
+        ),
+        "potion_capacity": _available(
+            potion_capacity,
+            sources.get("potion_capacity", "GameContext::potionCapacity"),
+        ),
         "deck": _unavailable(),
         "relics": _unavailable(),
         "potion_identities": _unavailable(),
@@ -73,6 +86,33 @@ def _projection_raw(
             [_candidate(candidate_bits)], "StepSimulator::legalActions"
         ),
     }
+
+
+def _battle_snapshot(
+    *,
+    current_hp: int = 80,
+    max_hp: int = 80,
+    potion_count: int = 1,
+    potion_capacity: int = 3,
+) -> SimulatorSnapshot:
+    return SimulatorSnapshot(
+        observation=[],
+        raw={
+            "screen_state": "BATTLE",
+            "battle_active": True,
+            "battle_player_hp": current_hp,
+            "battle_player": {
+                "current_hp": current_hp,
+                "max_hp": max_hp,
+            },
+            "battle_potion_count": potion_count,
+            "battle_potion_capacity": potion_capacity,
+            "cur_hp": 999,
+            "max_hp": max_hp,
+            "potion_count": 0,
+            "potion_capacity": 0,
+        },
+    )
 
 
 class FakeProjectionAdapter:
@@ -157,6 +197,7 @@ def test_parser_retains_only_typed_audit_view_and_duplicate_safe_candidates() ->
     assert projection.screen_identity == "BATTLE"
     assert projection.fields["visible_map_graph"].availability == "unavailable"
     assert projection.resource_fields["current_hp"].source == "GameContext::curHp"
+    assert projection.resource_values["current_hp"] == 80
     assert [
         identity["occurrence"] for identity in projection.candidate_action_identities()
     ] == [
@@ -202,8 +243,16 @@ def test_audit_records_one_current_screen_and_accepts_native_parity_checkpoint()
     None
 ):
     adapter = FakeProjectionAdapter()
+    adapter._raw = _projection_raw(
+        resource_sources={
+            "current_hp": "BattleContext::player.curHp",
+            "max_hp": "BattleContext::player.maxHp",
+            "potion_count": "BattleContext::potionCount",
+            "potion_capacity": "BattleContext::potionCapacity",
+        }
+    )
     collector = NativePublicProjectionAuditCollector(adapter)
-    snapshot = SimulatorSnapshot(observation=[], raw={"screen_state": "BATTLE"})
+    snapshot = _battle_snapshot()
 
     collector.observe_decision(snapshot, _actions(), seed=5, step_index=2)
     report = collector.finalize(
@@ -215,6 +264,8 @@ def test_audit_records_one_current_screen_and_accepts_native_parity_checkpoint()
     assert report.passed is True
     assert report.decisions_observed == 1
     assert report.screen_counts == {"BATTLE": 1}
+    assert report.resource_snapshot_comparisons == 4
+    assert report.resource_snapshot_mismatches == 0
     assert report.candidate_parity_passes == 1
     assert report.checkpoint_passes == 1
     assert "SHOP_ROOM" in report.coverage_gaps
@@ -224,6 +275,38 @@ def test_audit_records_one_current_screen_and_accepts_native_parity_checkpoint()
     assert report.to_dict()["screen_capability_matrix"]["BATTLE"][
         "candidate_actions"
     ] == {"available": 1}
+    assert report.to_dict()["resource_source_counts"]["current_hp"] == {
+        "BattleContext::player.curHp": 1
+    }
+    assert report.to_dict()["field_source_counts"]["candidate_actions"] == {
+        "StepSimulator::legalActions": 1
+    }
+
+
+def test_audit_fails_when_projected_battle_resource_is_stale() -> None:
+    adapter = FakeProjectionAdapter()
+    adapter._raw = _projection_raw(current_hp=68)
+    collector = NativePublicProjectionAuditCollector(adapter)
+
+    collector.observe_decision(
+        _battle_snapshot(current_hp=62),
+        _actions(),
+        seed=1,
+        step_index=15,
+    )
+    report = collector.finalize(
+        requested_episodes=1,
+        completed_episodes=1,
+        max_steps=20,
+    )
+
+    assert report.passed is False
+    assert report.resource_snapshot_mismatches == 1
+    assert any(
+        "persistent_resources.current_hp mismatch" in problem
+        and "battle_player_hp=62" in problem
+        for problem in report.problems
+    )
 
 
 def test_audit_fails_on_occurrence_safe_candidate_action_mismatch() -> None:
