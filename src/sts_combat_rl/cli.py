@@ -23,6 +23,9 @@ from sts_combat_rl.commands.fixed_evaluation import (
 from sts_combat_rl.commands.public_projection import (
     run_public_projection_capability_audit,
 )
+from sts_combat_rl.commands.public_context import (
+    run_public_context_audit,
+)
 from sts_combat_rl.comm.protocol import format_command, format_ready_signal
 from sts_combat_rl.comm.stdio_client import StdioClient
 from sts_combat_rl.logging_utils import DEFAULT_LOG_FILE, configure_logging
@@ -106,6 +109,9 @@ from sts_combat_rl.sim.model_scoring import (
 )
 from sts_combat_rl.sim.native_public_projection import (
     format_native_public_projection_capability_report,
+)
+from sts_combat_rl.sim.public_context_audit import (
+    format_public_context_artifact_audit_report,
 )
 from sts_combat_rl.sim.evaluation import (
     format_policy_episode_evaluation_report,
@@ -349,6 +355,15 @@ def build_parser() -> argparse.ArgumentParser:
             "Audit the versioned raw native public-projection capability, "
             "candidate-action parity, and checkpoint preservation over bounded "
             "sts_lightspeed controlled runs."
+        ),
+    )
+    input_group.add_argument(
+        "--lightspeed-public-context-audit",
+        action="store_true",
+        help=(
+            "Audit T016 sanitized public-context artifacts, action-set parity, "
+            "portable replay comparison, missingness, and forbidden-field gates "
+            "over bounded sts_lightspeed controlled runs."
         ),
     )
     input_group.add_argument(
@@ -618,6 +633,7 @@ def main(argv: list[str] | None = None) -> int:
         or args.lightspeed_battle_training_readiness
         or args.lightspeed_non_combat_calibration
         or args.lightspeed_public_projection_capability_audit
+        or args.lightspeed_public_context_audit
         or args.lightspeed_battle_checkpoint_verify
         or args.lightspeed_battle_start_pool is not None
         or args.lightspeed_battle_start_pool_restore is not None
@@ -660,6 +676,23 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 print(
                     format_native_public_projection_capability_report(report),
+                    file=sys.stderr,
+                )
+                if not report.passed:
+                    return 1
+            elif args.lightspeed_public_context_audit:
+                report = run_public_context_audit(
+                    adapter_factory=lambda: LightSpeedAdapter(
+                        seed=args.sim_seed,
+                        ascension=args.sim_ascension,
+                    ),
+                    seed=args.sim_seed,
+                    episodes=args.sim_episodes,
+                    max_steps=args.sim_steps,
+                    action_space=action_space,
+                )
+                print(
+                    format_public_context_artifact_audit_report(report),
                     file=sys.stderr,
                 )
                 if not report.passed:

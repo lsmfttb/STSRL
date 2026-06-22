@@ -40,13 +40,34 @@ from sts_combat_rl.sim.decision_record import find_action_index_by_identity
 from sts_combat_rl.sim.fixed_evaluation_set import (
     FixedCohortRecord,
 )
+from sts_combat_rl.sim.public_context_artifacts import (
+    PUBLIC_CONTEXT_AVAILABLE,
+    PUBLIC_CONTEXT_LEGACY_LOSS,
+    PUBLIC_CONTEXT_LEGACY_UNAVAILABLE,
+    public_context_artifact_problems,
+    public_context_mismatches,
+    sanitize_public_context_artifact,
+)
+from sts_combat_rl.sim.public_run_context import (
+    append_public_history_entry,
+    build_public_history_entry,
+    build_public_run_context,
+    read_native_public_projection,
+)
 
 
-FIXED_EVALUATION_REPORT_FORMAT_VERSION = 1
+FIXED_EVALUATION_REPORT_FORMAT_VERSION = 2
 """Current schema version for the fixed evaluation report."""
 
-FIXED_EVALUATION_REPORT_MIGRATIONS: tuple[ArtifactMigration, ...] = ()
-"""Sequential migrations; empty for version 1."""
+FIXED_EVALUATION_REPORT_MIGRATIONS: tuple[ArtifactMigration, ...] = (
+    ArtifactMigration(
+        source_version=1,
+        target_version=2,
+        migrate=lambda document: _migrate_fixed_evaluation_report_v1_to_v2(document),
+        losses=(PUBLIC_CONTEXT_LEGACY_LOSS,),
+    ),
+)
+"""Sequential migrations for fixed evaluation reports."""
 
 
 @dataclass(frozen=True)
@@ -73,6 +94,10 @@ class SingleBattleEvaluationResult:
     controller_compute_telemetry: dict[str, Any] | None = None
     battle_initial_hp: int | None = None
     battle_initial_max_hp: int | None = None
+    public_context_status: str = PUBLIC_CONTEXT_LEGACY_UNAVAILABLE
+    public_run_context: dict[str, Any] = field(default_factory=dict)
+    public_context_replay_status: str = "not_checked"
+    public_context_replay_mismatches: list[str] = field(default_factory=list)
     problems: list[str] = field(default_factory=list)
 
     @property
@@ -263,6 +288,10 @@ def evaluate_fixed_cohort(
             controller_compute_telemetry=result.controller_compute_telemetry,
             battle_initial_hp=result.battle_initial_hp,
             battle_initial_max_hp=result.battle_initial_max_hp,
+            public_context_status=result.public_context_status,
+            public_run_context=result.public_run_context,
+            public_context_replay_status=result.public_context_replay_status,
+            public_context_replay_mismatches=result.public_context_replay_mismatches,
             problems=result.problems,
         )
         battle_results.append(result)
@@ -308,11 +337,23 @@ def _evaluate_one_battle(
 
     # Restore the battle start.
     restore_problem: str | None = None
+    public_context_status = cohort_record.public_context_status
+    public_run_context = dict(cohort_record.public_run_context)
+    public_context_replay_status = (
+        PUBLIC_CONTEXT_LEGACY_UNAVAILABLE
+        if public_context_status == PUBLIC_CONTEXT_LEGACY_UNAVAILABLE
+        else "not_checked"
+    )
+    public_context_replay_mismatches: list[str] = []
     try:
-        snapshot, restoration_method = _restore_cohort_record(adapter, cohort_record)
+        snapshot, restoration_method, replayed_public_context = _restore_cohort_record(
+            adapter,
+            cohort_record,
+        )
     except (RuntimeError, ValueError) as exc:
         snapshot = None
         restoration_method = "failed"
+        replayed_public_context = {}
         restore_problem = f"restore failed: {exc}"
 
     # Verify fingerprint match after successful restore.
@@ -324,6 +365,27 @@ def _evaluate_one_battle(
         snapshot = None
         restoration_method = "failed"
         # Don't raise — push into the result as a named failure.
+
+    if (
+        snapshot is not None
+        and restore_problem is None
+        and public_context_status == PUBLIC_CONTEXT_AVAILABLE
+    ):
+        public_context_replay_mismatches = public_context_mismatches(
+            sanitize_public_context_artifact(
+                public_run_context,
+                label=f"cohort {cohort_record.cohort_index}",
+            ),
+            replayed_public_context,
+            label=f"cohort {cohort_record.cohort_index} public context replay",
+        )
+        public_context_replay_status = (
+            "matched" if not public_context_replay_mismatches else "mismatch"
+        )
+        if public_context_replay_mismatches:
+            restore_problem = "; ".join(public_context_replay_mismatches)
+            snapshot = None
+            restoration_method = "failed"
 
     if restore_problem is not None:
         return SingleBattleEvaluationResult(
@@ -344,6 +406,10 @@ def _evaluate_one_battle(
             decision_count=0,
             simulator_step_count=0,
             wall_clock_time_s=0.0,
+            public_context_status=public_context_status,
+            public_run_context=public_run_context,
+            public_context_replay_status=public_context_replay_status,
+            public_context_replay_mismatches=public_context_replay_mismatches,
             problems=[restore_problem],
         )
 
@@ -361,6 +427,11 @@ def _evaluate_one_battle(
     controller_telemetry: dict[str, Any] = {}
     termination_status = "error"
     current = snapshot
+    public_history = (
+        _history_from_public_context(public_run_context)
+        if public_context_status == PUBLIC_CONTEXT_AVAILABLE
+        else []
+    )
 
     for step_index in range(max_battle_steps):
         try:
@@ -385,7 +456,27 @@ def _evaluate_one_battle(
                 termination_status = "error"
             break
 
-        context = build_decision_context(current.raw, actions, active_action_space)
+        try:
+            pre_public_context = (
+                _public_context_for_snapshot(
+                    adapter,
+                    current,
+                    actions,
+                    history=public_history,
+                )
+                if public_context_status == PUBLIC_CONTEXT_AVAILABLE
+                else {}
+            )
+            context = build_decision_context(
+                current.raw,
+                actions,
+                active_action_space,
+                public_run_context=pre_public_context,
+            )
+        except (RuntimeError, ValueError) as exc:
+            problems.append(f"public context error at step {step_index}: {exc}")
+            termination_status = "error"
+            break
 
         try:
             decision = controller.select_action(
@@ -417,7 +508,34 @@ def _evaluate_one_battle(
             termination_status = "error"
             break
         simulator_step_count += 1
-        current = transition.snapshot
+        next_snapshot = transition.snapshot
+        if public_context_status == PUBLIC_CONTEXT_AVAILABLE:
+            try:
+                post_public_context = _public_context_for_snapshot(
+                    adapter,
+                    next_snapshot,
+                    (),
+                    history=public_history,
+                    include_candidates=False,
+                )
+                history_entry = build_public_history_entry(
+                    history_index=len(public_history),
+                    step_index=step_index,
+                    pre_context=pre_public_context,
+                    post_context=post_public_context,
+                    selected_action_index=decision.selected_index,
+                )
+                public_history = append_public_history_entry(
+                    public_history,
+                    history_entry,
+                )
+            except (RuntimeError, ValueError) as exc:
+                problems.append(
+                    f"public context history error at step {step_index}: {exc}"
+                )
+                termination_status = "error"
+                break
+        current = next_snapshot
 
         # Collect controller-provided compute telemetry from decision metadata.
         for key, value in decision.metadata.items():
@@ -493,6 +611,10 @@ def _evaluate_one_battle(
         battle_initial_max_hp=int(initial_max_hp)
         if initial_max_hp is not None
         else None,
+        public_context_status=public_context_status,
+        public_run_context=public_run_context,
+        public_context_replay_status=public_context_replay_status,
+        public_context_replay_mismatches=public_context_replay_mismatches,
         problems=problems,
     )
 
@@ -824,6 +946,23 @@ def format_fixed_evaluation_report(report: FixedEvaluationReport) -> str:
     lines.append(
         f"evaluation successful: {'yes' if report.evaluation_successful else 'no'}"
     )
+    replay_status_counts = {
+        status: sum(
+            1
+            for result in report.battle_results
+            if result.public_context_replay_status == status
+        )
+        for status in sorted(
+            {result.public_context_replay_status for result in report.battle_results}
+        )
+    }
+    lines.append("public-context replay statuses:")
+    if replay_status_counts:
+        lines.extend(
+            f"  {status}: {count}" for status, count in replay_status_counts.items()
+        )
+    else:
+        lines.append("  (none)")
 
     # Natural-weighted.
     nw = aggregates.natural_weighted
@@ -921,7 +1060,7 @@ def format_fixed_evaluation_report(report: FixedEvaluationReport) -> str:
 def _restore_cohort_record(
     adapter: CheckpointingSimulatorAdapter,
     cohort_record: FixedCohortRecord,
-) -> tuple[SimulatorSnapshot, str]:
+) -> tuple[SimulatorSnapshot, str, dict[str, Any]]:
     """Restore a cohort record by replaying seed + action trace in a fresh adapter.
 
     Uses the source seed and occurrence-disambiguated action trace stored in the
@@ -930,11 +1069,40 @@ def _restore_cohort_record(
     """
 
     snapshot = adapter.reset(seed=cohort_record.source_seed)
+    public_history: list[dict[str, Any]] = []
     for trace_index, identity in enumerate(cohort_record.action_trace):
         actions = list(adapter.legal_actions(snapshot))
+        pre_context = _public_context_for_snapshot(
+            adapter,
+            snapshot,
+            actions,
+            history=public_history,
+        )
         index = find_action_index_by_identity(actions, identity)
-        snapshot = adapter.step(actions[index]).snapshot
-    return snapshot, "seed_action_trace"
+        transition = adapter.step(actions[index])
+        post_context = _public_context_for_snapshot(
+            adapter,
+            transition.snapshot,
+            (),
+            history=public_history,
+            include_candidates=False,
+        )
+        history_entry = build_public_history_entry(
+            history_index=len(public_history),
+            step_index=trace_index,
+            pre_context=pre_context,
+            post_context=post_context,
+            selected_action_index=index,
+        )
+        public_history = append_public_history_entry(public_history, history_entry)
+        snapshot = transition.snapshot
+    final_context = _public_context_for_snapshot(
+        adapter,
+        snapshot,
+        list(adapter.legal_actions(snapshot)),
+        history=public_history,
+    )
+    return snapshot, "seed_action_trace", final_context
 
 
 def _restore_matches_record(
@@ -952,6 +1120,31 @@ def _restore_matches_record(
 
 
 # ── Battle-state helpers ────────────────────────────────────────────────────
+
+
+def _public_context_for_snapshot(
+    adapter: CheckpointingSimulatorAdapter,
+    snapshot: SimulatorSnapshot,
+    actions: Sequence[Any],
+    *,
+    history: Sequence[Mapping[str, Any]],
+    include_candidates: bool = True,
+) -> dict[str, Any]:
+    projection = read_native_public_projection(adapter, snapshot)
+    return build_public_run_context(
+        snapshot.raw,
+        actions,
+        projection=projection,
+        history=history,
+        include_candidates=include_candidates,
+    )
+
+
+def _history_from_public_context(context: Mapping[str, Any]) -> list[dict[str, Any]]:
+    history = context.get("history")
+    if not isinstance(history, Sequence) or isinstance(history, (str, bytes)):
+        return []
+    return [dict(entry) for entry in history if isinstance(entry, Mapping)]
 
 
 def _is_battle_state(snapshot: SimulatorSnapshot) -> bool:
@@ -1041,6 +1234,12 @@ def _eval_result_to_manifest(result: SingleBattleEvaluationResult) -> dict[str, 
         "controller_compute_telemetry": result.controller_compute_telemetry,
         "battle_initial_hp": result.battle_initial_hp,
         "battle_initial_max_hp": result.battle_initial_max_hp,
+        "public_context_status": result.public_context_status,
+        "public_run_context": _json_safe_mapping(result.public_run_context),
+        "public_context_replay_status": result.public_context_replay_status,
+        "public_context_replay_mismatches": list(
+            result.public_context_replay_mismatches
+        ),
         "problems": list(result.problems),
     }
 
@@ -1053,6 +1252,14 @@ def _eval_result_from_manifest(
     stratum_raw = raw.get("structural_stratum")
     if not isinstance(stratum_raw, list):
         raise ValueError(f"{label} structural_stratum must be a list")
+    public_context_status = str(
+        raw.get("public_context_status", PUBLIC_CONTEXT_LEGACY_UNAVAILABLE)
+    )
+    public_run_context = _public_run_context(
+        raw.get("public_run_context"),
+        public_context_status=public_context_status,
+        label=label,
+    )
 
     return SingleBattleEvaluationResult(
         cohort_index=_require_non_negative_int(
@@ -1109,8 +1316,54 @@ def _eval_result_from_manifest(
         battle_initial_max_hp=_optional_int(
             raw.get("battle_initial_max_hp"), f"{label} battle_initial_max_hp"
         ),
+        public_context_status=public_context_status,
+        public_run_context=public_run_context,
+        public_context_replay_status=str(
+            raw.get("public_context_replay_status", "not_checked")
+        ),
+        public_context_replay_mismatches=_require_string_list(
+            raw.get("public_context_replay_mismatches", []),
+            f"{label} public_context_replay_mismatches",
+        ),
         problems=_require_string_list(raw.get("problems", []), f"{label} problems"),
     )
+
+
+def _public_run_context(
+    value: Any,
+    *,
+    public_context_status: str,
+    label: str,
+) -> dict[str, Any]:
+    if public_context_status == "unavailable":
+        public_context_status = PUBLIC_CONTEXT_LEGACY_UNAVAILABLE
+    if public_context_status == PUBLIC_CONTEXT_LEGACY_UNAVAILABLE:
+        if value not in (None, {}):
+            raise ValueError(f"{label} legacy public context must be empty")
+        return {}
+    problems = public_context_artifact_problems(
+        status=public_context_status,
+        context=value,
+        label=label,
+        require_candidate_actions=True,
+    )
+    if problems:
+        raise ValueError("; ".join(problems))
+    return sanitize_public_context_artifact(value, label=label)
+
+
+def _migrate_fixed_evaluation_report_v1_to_v2(document: Any) -> Any:
+    metadata = dict(document.metadata)
+    metadata["format_version"] = FIXED_EVALUATION_REPORT_FORMAT_VERSION
+    migrated_records: list[dict[str, Any]] = []
+    for source in document.records:
+        raw = dict(source)
+        raw["public_context_status"] = PUBLIC_CONTEXT_LEGACY_UNAVAILABLE
+        raw["public_run_context"] = {}
+        raw["public_context_replay_status"] = "legacy_unavailable"
+        raw["public_context_replay_mismatches"] = []
+        migrated_records.append(raw)
+    return type(document)(metadata=metadata, records=migrated_records)
 
 
 def _write_row(stream: TextIO, row: Mapping[str, Any]) -> None:

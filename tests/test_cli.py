@@ -13,6 +13,9 @@ from sts_combat_rl.sim.contract import (
 from sts_combat_rl.sim.native_public_projection import (
     NativePublicProjectionCapabilityReport,
 )
+from sts_combat_rl.sim.public_context_audit import (
+    PublicContextArtifactAuditReport,
+)
 
 
 class FakeLightSpeedSmokeAdapter:
@@ -234,6 +237,51 @@ def test_cli_public_projection_audit_routes_and_writes_stderr_only(
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "Native public-projection capability audit" in captured.err
+    assert "episodes: 2/2" in captured.err
+
+
+def test_cli_public_context_audit_routes_and_writes_stderr_only(
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.setattr(
+        "sts_combat_rl.cli.LightSpeedAdapter",
+        FakeLightSpeedSmokeAdapter,
+    )
+    report = PublicContextArtifactAuditReport(
+        requested_episodes=2,
+        completed_episodes=2,
+        max_steps=10,
+        decisions_observed=2,
+        candidate_parity_passes=2,
+        context_available_count=2,
+        replay_checked_count=1,
+        replay_matched_count=1,
+        battle_start_record_count=1,
+    )
+    monkeypatch.setattr(
+        "sts_combat_rl.cli.run_public_context_audit",
+        lambda *args, **kwargs: report,
+    )
+
+    assert (
+        main(
+            [
+                "--lightspeed-public-context-audit",
+                "--sim-episodes",
+                "2",
+                "--sim-steps",
+                "10",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 0
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Public-context artifact replay audit" in captured.err
     assert "episodes: 2/2" in captured.err
 
 

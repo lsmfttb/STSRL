@@ -46,23 +46,38 @@ from sts_combat_rl.sim.decision_record import (
     source_metadata_from_snapshot,
 )
 from sts_combat_rl.sim.online_controller import RoutedRunController
+from sts_combat_rl.sim.public_context_artifacts import (
+    PUBLIC_CONTEXT_AVAILABLE,
+    PUBLIC_CONTEXT_LEGACY_LOSS,
+    PUBLIC_CONTEXT_LEGACY_UNAVAILABLE,
+    public_context_artifact_problems,
+    public_context_mismatches,
+    sanitize_public_context_artifact,
+)
+from sts_combat_rl.sim.public_run_context import (
+    append_public_history_entry,
+    build_public_history_entry,
+    build_public_run_context,
+    read_native_public_projection,
+)
 
 
-BATTLE_START_POOL_FORMAT_VERSION = 2
+BATTLE_START_POOL_FORMAT_VERSION = 3
 """Current portable JSONL schema version for natural battle-start pools."""
 
 LEGACY_BATTLE_START_POOL_FORMAT_VERSION = 1
+PUBLIC_CONTEXT_POOL_FORMAT_VERSION = 3
 NATURAL_DISTRIBUTION_KIND = "natural_run"
 NATURAL_SAMPLING_COMPONENT = "natural"
 STRUCTURAL_SAMPLING_COMPONENT = "structural_uniform"
 CHECKPOINT_INFORMATION_REGIME = "full_simulator_state_oracle_like"
 LEGACY_UNKNOWN_INFORMATION_REGIME = "unknown"
-PUBLIC_CONTEXT_UNAVAILABLE = "unavailable"
+PUBLIC_CONTEXT_UNAVAILABLE = PUBLIC_CONTEXT_LEGACY_UNAVAILABLE
 
 BATTLE_START_POOL_MIGRATIONS = (
     ArtifactMigration(
         source_version=LEGACY_BATTLE_START_POOL_FORMAT_VERSION,
-        target_version=BATTLE_START_POOL_FORMAT_VERSION,
+        target_version=2,
         migrate=lambda document: _migrate_pool_v1_to_v2(document),
         losses=(
             "v1 recorded action ids without duplicate occurrence indices; "
@@ -71,6 +86,12 @@ BATTLE_START_POOL_MIGRATIONS = (
             "v1 did not declare checkpoint information regime or public context",
             "v1 did not record whether a battle completed before collection ended",
         ),
+    ),
+    ArtifactMigration(
+        source_version=2,
+        target_version=PUBLIC_CONTEXT_POOL_FORMAT_VERSION,
+        migrate=lambda document: _migrate_pool_v2_to_v3(document),
+        losses=(PUBLIC_CONTEXT_LEGACY_LOSS,),
     ),
 )
 
@@ -95,7 +116,8 @@ class BattleStartCheckpointRecord:
     battle_completed: bool = False
     distribution_kind: str = NATURAL_DISTRIBUTION_KIND
     checkpoint_information_regime: str = CHECKPOINT_INFORMATION_REGIME
-    public_context_status: str = PUBLIC_CONTEXT_UNAVAILABLE
+    public_context_status: str = PUBLIC_CONTEXT_LEGACY_UNAVAILABLE
+    public_run_context: dict[str, Any] = field(default_factory=dict)
     native_checkpoint: SimulatorCheckpoint | None = field(
         default=None,
         repr=False,
@@ -181,6 +203,10 @@ class BattleStartPoolRestoreReport:
     restored_count: int
     native_restored_count: int
     replay_restored_count: int
+    context_compared_count: int = 0
+    context_matched_count: int = 0
+    context_legacy_unavailable_count: int = 0
+    context_mismatch_count: int = 0
     problems: list[str] = field(default_factory=list)
 
     @property
@@ -223,10 +249,11 @@ def collect_natural_battle_start_pool(
             context: object,
             step_index: int,
         ) -> None:
-            del actions, context, step_index
+            del actions, step_index
             nonlocal active_record_index, battle_index
             if not is_battle_snapshot(snapshot) or active_record_index is not None:
                 return
+            public_run_context = _context_public_run_context(context)
             native_checkpoint = adapter.capture_checkpoint(snapshot)
             record = _build_record(
                 record_index=len(records),
@@ -238,6 +265,7 @@ def collect_natural_battle_start_pool(
                 action_trace=action_trace,
                 controller=controller,
                 native_checkpoint=native_checkpoint,
+                public_run_context=public_run_context,
             )
             records.append(record)
             active_record_index = record.record_index
@@ -522,18 +550,27 @@ def restore_battle_start_record(
 ) -> tuple[SimulatorSnapshot, str]:
     """Restore natively when possible, otherwise replay in a fresh adapter."""
 
-    if (
+    if record.public_context_status == PUBLIC_CONTEXT_AVAILABLE:
+        restored, replayed_context = _restore_by_seed_action_trace(adapter, record)
+        method = "seed_action_trace"
+        mismatches = public_context_mismatches(
+            sanitize_public_context_artifact(
+                record.public_run_context,
+                label=f"record {record.record_index}",
+            ),
+            replayed_context,
+            label=f"record {record.record_index} public context replay",
+        )
+        if mismatches:
+            raise ValueError("; ".join(mismatches))
+    elif (
         record.native_checkpoint is not None
         and record.native_checkpoint.adapter_id == adapter.checkpoint_adapter_id
     ):
         restored = adapter.restore_checkpoint(record.native_checkpoint)
         method = "native_checkpoint"
     else:
-        restored = adapter.reset(seed=record.source_seed)
-        for trace_index, identity in enumerate(record.action_trace):
-            actions = list(adapter.legal_actions(restored))
-            index = _trace_action_index(actions, identity, trace_index)
-            restored = adapter.step(actions[index]).snapshot
+        restored, _ = _restore_by_seed_action_trace(adapter, record)
         method = "seed_action_trace"
     if not _snapshot_matches_record(restored, record):
         raise ValueError(
@@ -556,14 +593,26 @@ def verify_battle_start_pool_restores(
     restored_count = 0
     native_count = 0
     replay_count = 0
+    context_compared_count = 0
+    context_matched_count = 0
+    context_legacy_unavailable_count = 0
+    context_mismatch_count = 0
     problems: list[str] = []
     for record in selected:
+        if record.public_context_status == PUBLIC_CONTEXT_AVAILABLE:
+            context_compared_count += 1
+        else:
+            context_legacy_unavailable_count += 1
         try:
             _, method = restore_battle_start_record(adapter_factory(), record)
         except (RuntimeError, ValueError) as exc:
             problems.append(f"record {record.record_index}: {exc}")
+            if record.public_context_status == PUBLIC_CONTEXT_AVAILABLE:
+                context_mismatch_count += 1
             continue
         restored_count += 1
+        if record.public_context_status == PUBLIC_CONTEXT_AVAILABLE:
+            context_matched_count += 1
         if method == "native_checkpoint":
             native_count += 1
         else:
@@ -574,6 +623,10 @@ def verify_battle_start_pool_restores(
         restored_count=restored_count,
         native_restored_count=native_count,
         replay_restored_count=replay_count,
+        context_compared_count=context_compared_count,
+        context_matched_count=context_matched_count,
+        context_legacy_unavailable_count=context_legacy_unavailable_count,
+        context_mismatch_count=context_mismatch_count,
         problems=problems,
     )
 
@@ -603,6 +656,7 @@ def record_to_manifest(record: BattleStartCheckpointRecord) -> dict[str, Any]:
         "distribution_kind": record.distribution_kind,
         "checkpoint_information_regime": record.checkpoint_information_regime,
         "public_context_status": record.public_context_status,
+        "public_run_context": _json_safe_mapping(record.public_run_context),
     }
 
 
@@ -642,6 +696,11 @@ def record_from_manifest(
         raw.get("public_context_status"),
         f"{label} public context status",
     )
+    public_run_context = _public_run_context(
+        raw.get("public_run_context"),
+        public_context_status=public_context_status,
+        label=label,
+    )
     return BattleStartCheckpointRecord(
         record_index=_require_non_negative_int(
             raw.get("record_index"), f"{label} index"
@@ -678,6 +737,7 @@ def record_from_manifest(
         distribution_kind=distribution_kind,
         checkpoint_information_regime=checkpoint_information_regime,
         public_context_status=public_context_status,
+        public_run_context=public_run_context,
     )
 
 
@@ -713,8 +773,16 @@ def natural_battle_start_pool_problems(pool: NaturalBattleStartPool) -> list[str
             problems.append(
                 f"record {index} has an invalid checkpoint information regime"
             )
-        if record.public_context_status != PUBLIC_CONTEXT_UNAVAILABLE:
-            problems.append(f"record {index} has an invalid public context status")
+        problems.extend(
+            public_context_artifact_problems(
+                status=record.public_context_status,
+                context=record.public_run_context,
+                label=f"record {index}",
+                require_candidate_actions=(
+                    record.public_context_status == PUBLIC_CONTEXT_AVAILABLE
+                ),
+            )
+        )
         for provenance_name, provenance in (
             ("controller", record.source_controller_provenance),
             ("battle controller", record.source_battle_controller_provenance),
@@ -787,6 +855,12 @@ def format_battle_start_pool_restore_report(
     lines.append(f"restored records: {report.restored_count}")
     lines.append(f"native restores: {report.native_restored_count}")
     lines.append(f"seed/action-trace restores: {report.replay_restored_count}")
+    lines.append(f"public-context comparisons: {report.context_compared_count}")
+    lines.append(f"public-context matches: {report.context_matched_count}")
+    lines.append(
+        f"public-context legacy losses: {report.context_legacy_unavailable_count}"
+    )
+    lines.append(f"public-context mismatches: {report.context_mismatch_count}")
     lines.append(f"restore ok: {'yes' if report.restore_ok else 'no'}")
     lines.append("problems:")
     if report.problems:
@@ -807,6 +881,7 @@ def _build_record(
     action_trace: Sequence[Mapping[str, Any]],
     controller: RoutedRunController,
     native_checkpoint: SimulatorCheckpoint,
+    public_run_context: Mapping[str, Any],
 ) -> BattleStartCheckpointRecord:
     structural = source_metadata_from_snapshot(
         snapshot.raw,
@@ -834,8 +909,79 @@ def _build_record(
         action_trace=tuple(dict(identity) for identity in action_trace),
         snapshot_observation=tuple(snapshot.observation),
         snapshot_raw=dict(snapshot.raw),
+        public_context_status=PUBLIC_CONTEXT_AVAILABLE,
+        public_run_context=sanitize_public_context_artifact(
+            public_run_context,
+            label=f"record {record_index}",
+        ),
         native_checkpoint=native_checkpoint,
     )
+
+
+def _restore_by_seed_action_trace(
+    adapter: CheckpointingSimulatorAdapter,
+    record: BattleStartCheckpointRecord,
+) -> tuple[SimulatorSnapshot, dict[str, Any]]:
+    snapshot = adapter.reset(seed=record.source_seed)
+    public_history: list[dict[str, Any]] = []
+    for trace_index, identity in enumerate(record.action_trace):
+        actions = list(adapter.legal_actions(snapshot))
+        pre_context = _public_context_for_snapshot(
+            adapter,
+            snapshot,
+            actions,
+            history=public_history,
+        )
+        index = _trace_action_index(actions, identity, trace_index)
+        transition = adapter.step(actions[index])
+        post_context = _public_context_for_snapshot(
+            adapter,
+            transition.snapshot,
+            (),
+            history=public_history,
+            include_candidates=False,
+        )
+        history_entry = build_public_history_entry(
+            history_index=len(public_history),
+            step_index=trace_index,
+            pre_context=pre_context,
+            post_context=post_context,
+            selected_action_index=index,
+        )
+        public_history = append_public_history_entry(public_history, history_entry)
+        snapshot = transition.snapshot
+    final_context = _public_context_for_snapshot(
+        adapter,
+        snapshot,
+        list(adapter.legal_actions(snapshot)),
+        history=public_history,
+    )
+    return snapshot, final_context
+
+
+def _public_context_for_snapshot(
+    adapter: CheckpointingSimulatorAdapter,
+    snapshot: SimulatorSnapshot,
+    actions: Sequence[SimulatorAction],
+    *,
+    history: Sequence[Mapping[str, Any]],
+    include_candidates: bool = True,
+) -> dict[str, Any]:
+    projection = read_native_public_projection(adapter, snapshot)
+    return build_public_run_context(
+        snapshot.raw,
+        actions,
+        projection=projection,
+        history=history,
+        include_candidates=include_candidates,
+    )
+
+
+def _context_public_run_context(context: object) -> dict[str, Any]:
+    value = getattr(context, "public_run_context", None)
+    if not isinstance(value, Mapping):
+        raise ValueError("decision context public_run_context is missing")
+    return sanitize_public_context_artifact(value, label="decision context")
 
 
 def _trace_action_index(
@@ -924,9 +1070,27 @@ def _information_regime(value: Any, label: str) -> str:
 
 
 def _public_context_status(value: Any, label: str) -> str:
-    if value != PUBLIC_CONTEXT_UNAVAILABLE:
-        raise ValueError(f"{label} must explicitly be {PUBLIC_CONTEXT_UNAVAILABLE!r}")
-    return value
+    if value == "unavailable":
+        return PUBLIC_CONTEXT_LEGACY_UNAVAILABLE
+    if value not in {PUBLIC_CONTEXT_AVAILABLE, PUBLIC_CONTEXT_LEGACY_UNAVAILABLE}:
+        raise ValueError(
+            f"{label} must be {PUBLIC_CONTEXT_AVAILABLE!r} or "
+            f"{PUBLIC_CONTEXT_LEGACY_UNAVAILABLE!r}"
+        )
+    return str(value)
+
+
+def _public_run_context(
+    value: Any,
+    *,
+    public_context_status: str,
+    label: str,
+) -> dict[str, Any]:
+    if public_context_status == PUBLIC_CONTEXT_LEGACY_UNAVAILABLE:
+        if value not in (None, {}):
+            raise ValueError(f"{label} legacy public context must be empty")
+        return {}
+    return sanitize_public_context_artifact(value, label=label)
 
 
 def _migrate_pool_v1_to_v2(document: ArtifactDocument) -> ArtifactDocument:
@@ -938,7 +1102,7 @@ def _migrate_pool_v1_to_v2(document: ArtifactDocument) -> ArtifactDocument:
     metadata["source_controller_provenance"] = _legacy_routed_provenance(
         battle, non_combat
     )
-    metadata["format_version"] = BATTLE_START_POOL_FORMAT_VERSION
+    metadata["format_version"] = 2
     migrated_records: list[dict[str, Any]] = []
     for index, source in enumerate(document.records):
         raw = dict(source)
@@ -988,7 +1152,21 @@ def _migrate_pool_v1_to_v2(document: ArtifactDocument) -> ArtifactDocument:
         raw["battle_completed"] = False
         raw["distribution_kind"] = NATURAL_DISTRIBUTION_KIND
         raw["checkpoint_information_regime"] = LEGACY_UNKNOWN_INFORMATION_REGIME
-        raw["public_context_status"] = PUBLIC_CONTEXT_UNAVAILABLE
+        raw["public_context_status"] = PUBLIC_CONTEXT_LEGACY_UNAVAILABLE
+        migrated_records.append(raw)
+    return ArtifactDocument(metadata=metadata, records=migrated_records)
+
+
+def _migrate_pool_v2_to_v3(document: ArtifactDocument) -> ArtifactDocument:
+    metadata = dict(document.metadata)
+    metadata["format_version"] = BATTLE_START_POOL_FORMAT_VERSION
+    migrated_records: list[dict[str, Any]] = []
+    for source in document.records:
+        raw = dict(source)
+        status = raw.get("public_context_status")
+        if status in (None, "unavailable"):
+            raw["public_context_status"] = PUBLIC_CONTEXT_LEGACY_UNAVAILABLE
+        raw["public_run_context"] = {}
         migrated_records.append(raw)
     return ArtifactDocument(metadata=metadata, records=migrated_records)
 

@@ -24,13 +24,27 @@ from sts_combat_rl.sim.artifact_versioning import (
 from sts_combat_rl.sim.battle_start_pool import (
     NaturalBattleStartPool,
 )
+from sts_combat_rl.sim.public_context_artifacts import (
+    PUBLIC_CONTEXT_LEGACY_LOSS,
+    PUBLIC_CONTEXT_LEGACY_UNAVAILABLE,
+    public_context_artifact_problems,
+    public_context_digestable,
+    sanitize_public_context_artifact,
+)
 
 
-FIXED_COHORT_FORMAT_VERSION = 1
+FIXED_COHORT_FORMAT_VERSION = 2
 """Current schema version for the portable fixed-cohort artifact."""
 
-FIXED_COHORT_MIGRATIONS: tuple[ArtifactMigration, ...] = ()
-"""Sequential migrations; empty because version 1 is the first schema."""
+FIXED_COHORT_MIGRATIONS: tuple[ArtifactMigration, ...] = (
+    ArtifactMigration(
+        source_version=1,
+        target_version=2,
+        migrate=lambda document: _migrate_fixed_cohort_v1_to_v2(document),
+        losses=(PUBLIC_CONTEXT_LEGACY_LOSS,),
+    ),
+)
+"""Sequential migrations for portable fixed-cohort artifacts."""
 
 DEFAULT_STRUCTURAL_STRATUM_FIELDS = (
     "ascension",
@@ -92,7 +106,8 @@ class FixedCohortRecord:
     snapshot_raw: dict[str, Any] = field(default_factory=dict)
     source_distribution_kind: str = "natural_run"
     checkpoint_information_regime: str = "full_simulator_state_oracle_like"
-    public_context_status: str = "unavailable"
+    public_context_status: str = PUBLIC_CONTEXT_LEGACY_UNAVAILABLE
+    public_run_context: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -157,6 +172,10 @@ class FixedCohort:
                 ],
                 "record_public_context_statuses": [
                     r.public_context_status for r in self.records
+                ],
+                "record_public_context_fingerprints": [
+                    _public_context_fingerprint(r.public_run_context)
+                    for r in self.records
                 ],
                 "record_source_controller_provenances": [
                     r.source_controller_provenance for r in self.records
@@ -291,6 +310,7 @@ def select_fixed_cohort(
                         source_distribution_kind=record.distribution_kind,
                         checkpoint_information_regime=record.checkpoint_information_regime,
                         public_context_status=record.public_context_status,
+                        public_run_context=dict(record.public_run_context),
                     )
                 )
                 changed = True
@@ -575,6 +595,7 @@ def _cohort_record_to_manifest(record: FixedCohortRecord) -> dict[str, Any]:
         "source_distribution_kind": record.source_distribution_kind,
         "checkpoint_information_regime": record.checkpoint_information_regime,
         "public_context_status": record.public_context_status,
+        "public_run_context": _json_safe_mapping(record.public_run_context),
     }
 
 
@@ -624,6 +645,13 @@ def _cohort_record_from_manifest(
     public_context_status = raw.get("public_context_status")
     if not isinstance(public_context_status, str) or not public_context_status:
         raise ValueError(f"{label} public_context_status must be a non-empty string")
+    if public_context_status == "unavailable":
+        public_context_status = PUBLIC_CONTEXT_LEGACY_UNAVAILABLE
+    public_run_context = _public_run_context(
+        raw.get("public_run_context"),
+        public_context_status=public_context_status,
+        label=label,
+    )
 
     return FixedCohortRecord(
         cohort_index=_require_non_negative_int(
@@ -664,6 +692,7 @@ def _cohort_record_from_manifest(
         source_distribution_kind=source_distribution_kind,
         checkpoint_information_regime=checkpoint_information_regime,
         public_context_status=public_context_status,
+        public_run_context=public_run_context,
     )
 
 
@@ -685,6 +714,14 @@ def _fixed_cohort_problems(cohort: FixedCohort) -> list[str]:
                 f"record {index} source_distribution_kind must be natural_run: "
                 f"{record.source_distribution_kind}"
             )
+        problems.extend(
+            public_context_artifact_problems(
+                status=record.public_context_status,
+                context=record.public_run_context,
+                label=f"record {index}",
+                require_candidate_actions=bool(record.public_run_context),
+            )
+        )
     return list(dict.fromkeys(problems))
 
 
@@ -703,6 +740,40 @@ def _record_fingerprint_string(record: FixedCohortRecord) -> str:
         separators=(",", ":"),
     )
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
+
+
+def _public_context_fingerprint(context: Mapping[str, Any]) -> str:
+    payload = json.dumps(
+        public_context_digestable(context),
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
+
+
+def _public_run_context(
+    value: Any,
+    *,
+    public_context_status: str,
+    label: str,
+) -> dict[str, Any]:
+    if public_context_status == PUBLIC_CONTEXT_LEGACY_UNAVAILABLE:
+        if value not in (None, {}):
+            raise ValueError(f"{label} legacy public context must be empty")
+        return {}
+    return sanitize_public_context_artifact(value, label=label)
+
+
+def _migrate_fixed_cohort_v1_to_v2(document: Any) -> Any:
+    metadata = dict(document.metadata)
+    metadata["format_version"] = FIXED_COHORT_FORMAT_VERSION
+    migrated_records: list[dict[str, Any]] = []
+    for source in document.records:
+        raw = dict(source)
+        raw["public_context_status"] = PUBLIC_CONTEXT_LEGACY_UNAVAILABLE
+        raw["public_run_context"] = {}
+        migrated_records.append(raw)
+    return type(document)(metadata=metadata, records=migrated_records)
 
 
 def _format_stratum(stratum: tuple[Any, ...]) -> str:
