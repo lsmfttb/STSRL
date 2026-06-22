@@ -34,6 +34,7 @@ class DecisionContext:
     tactical_state: Mapping[str, Any] = field(default_factory=dict)
     tactical_legal_actions: list[Mapping[str, Any]] = field(default_factory=list)
     tactical_feature_schema_id: str = "public-tactical-v2"
+    public_run_context: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

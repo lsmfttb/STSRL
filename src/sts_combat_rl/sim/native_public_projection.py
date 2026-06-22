@@ -41,6 +41,8 @@ PROJECTION_FIELD_NAMES = (
     "candidate_actions",
 )
 PROJECTION_AVAILABILITY_VALUES = frozenset({"available", "unavailable", "unsupported"})
+_AVAILABLE_FIELD_KEYS = frozenset({"availability", "source", "value"})
+_MISSING_FIELD_KEYS = frozenset({"availability", "reason"})
 RESOURCE_FIELD_NAMES = (
     "current_hp",
     "max_hp",
@@ -64,6 +66,17 @@ KNOWN_SCREEN_STATES = frozenset(
         "SHOP_ROOM",
         "TREASURE_ROOM",
     }
+)
+_TOP_LEVEL_RAW_KEYS = frozenset(
+    {
+        "schema_id",
+        "external_base_commit",
+        "patch_identity",
+        *PROJECTION_FIELD_NAMES,
+    }
+)
+_CANDIDATE_ACTION_KEYS = frozenset(
+    {"scope", "bits", "kind", "label", "idx1", "idx2", "idx3"}
 )
 
 
@@ -430,6 +443,7 @@ class NativePublicProjectionAuditCollector:
 def parse_native_public_projection(raw: object) -> NativePublicProjection:
     """Validate one raw native payload and retain only audit-safe information."""
 
+    validate_native_public_projection_raw(raw)
     payload = _mapping(raw, "native public projection")
     schema_id = _required_string(payload, "schema_id", "native public projection")
     if schema_id != NATIVE_PUBLIC_PROJECTION_SCHEMA_ID:
@@ -513,6 +527,24 @@ def parse_native_public_projection(raw: object) -> NativePublicProjection:
     )
 
 
+def validate_native_public_projection_raw(raw: object) -> None:
+    """Strictly validate the raw native projection shape before sanitization.
+
+    The parser below intentionally retains only a typed audit view.  T015 needs
+    an earlier conformance gate so unknown raw keys cannot disappear merely
+    because later sanitized outputs ignore them.
+    """
+
+    payload = _mapping(raw, "native public projection")
+    _reject_unknown_keys(payload, _TOP_LEVEL_RAW_KEYS, "native public projection")
+    for field_name in PROJECTION_FIELD_NAMES:
+        _validate_projection_field(
+            payload.get(field_name),
+            f"native projection field {field_name}",
+            field_name=field_name,
+        )
+
+
 def format_native_public_projection_capability_report(
     report: NativePublicProjectionCapabilityReport,
 ) -> str:
@@ -554,6 +586,53 @@ def format_native_public_projection_capability_report(
     _append_values(lines, "coverage gaps", report.coverage_gaps)
     _append_values(lines, "problems", report.problems)
     return "\n".join(lines)
+
+
+def _validate_projection_field(
+    value: object,
+    label: str,
+    *,
+    field_name: str,
+) -> None:
+    field = _mapping(value, label)
+    availability = _required_string(field, "availability", label)
+    if availability not in PROJECTION_AVAILABILITY_VALUES:
+        raise ValueError(f"{label} has unsupported availability {availability!r}")
+    expected_keys = (
+        _AVAILABLE_FIELD_KEYS if availability == "available" else _MISSING_FIELD_KEYS
+    )
+    _reject_unknown_keys(field, expected_keys, label)
+    if availability != "available":
+        return
+    if field_name == "persistent_resources":
+        resource_values = _mapping(field["value"], "persistent_resources value")
+        _reject_unknown_keys(
+            resource_values,
+            frozenset(RESOURCE_FIELD_NAMES),
+            "persistent_resources value",
+        )
+        for resource_name in RESOURCE_FIELD_NAMES:
+            _validate_projection_field(
+                resource_values.get(resource_name),
+                f"persistent resource field {resource_name}",
+                field_name=resource_name,
+            )
+        return
+    if field_name == "candidate_actions":
+        candidate_values = field["value"]
+        if not isinstance(candidate_values, Sequence) or isinstance(
+            candidate_values, (str, bytes)
+        ):
+            raise ValueError("candidate_actions value must be a list")
+        for index, candidate in enumerate(candidate_values):
+            candidate_mapping = _mapping(candidate, f"candidate action {index}")
+            _reject_unknown_keys(
+                candidate_mapping,
+                _CANDIDATE_ACTION_KEYS,
+                f"candidate action {index}",
+            )
+        return
+    _validate_json_compatible_value(field["value"], f"{label}.value")
 
 
 def _parse_field(value: object, label: str) -> NativeProjectionField:
@@ -685,6 +764,34 @@ def _mapping(value: object, label: str) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
         raise ValueError(f"{label} must be an object")
     return value
+
+
+def _reject_unknown_keys(
+    data: Mapping[str, Any],
+    allowed: frozenset[str],
+    label: str,
+) -> None:
+    for key in data:
+        if not isinstance(key, str):
+            raise ValueError(f"{label} key {key!r} must be a string")
+        if key not in allowed:
+            raise ValueError(f"{label} has unknown key {key!r}")
+
+
+def _validate_json_compatible_value(value: object, label: str) -> None:
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            if not isinstance(key, str):
+                raise ValueError(f"{label} key {key!r} must be a string")
+            _validate_json_compatible_value(item, f"{label}.{key}")
+        return
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        for index, item in enumerate(value):
+            _validate_json_compatible_value(item, f"{label}[{index}]")
+        return
+    raise ValueError(f"{label} must contain only JSON-compatible values")
 
 
 def _required_string(data: Mapping[str, Any], key: str, label: str) -> str:

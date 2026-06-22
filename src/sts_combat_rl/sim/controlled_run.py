@@ -44,6 +44,12 @@ from sts_combat_rl.sim.features import (
     encode_lightspeed_battle_snapshot,
     encode_simulator_actions,
 )
+from sts_combat_rl.sim.public_run_context import (
+    append_public_history_entry,
+    build_public_history_entry,
+    build_public_run_context,
+    read_native_public_projection,
+)
 
 # DecisionContext is imported lazily inside build_decision_context to avoid
 # a circular import: controlled_run → policy → batching → controlled_run.
@@ -123,6 +129,8 @@ class ControlledRunStep:
     tactical_state: dict[str, Any] = field(default_factory=dict)
     tactical_legal_actions: list[dict[str, Any]] = field(default_factory=list)
     feature_schema_id: str = "public-tactical-v2"
+    public_run_context: dict[str, Any] = field(default_factory=dict)
+    public_history_entry: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -144,6 +152,8 @@ class ControlledRun:
     final_raw: Mapping[str, Any] = field(default_factory=dict)
     controller_provenance: Mapping[str, Any] = field(default_factory=dict)
     action_space_config: Mapping[str, Any] = field(default_factory=dict)
+    public_run_context: Mapping[str, Any] = field(default_factory=dict)
+    public_history: list[dict[str, Any]] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -197,6 +207,8 @@ def execute_controlled_run(
     initial_raw = dict(snapshot.raw)
     steps: list[ControlledRunStep] = []
     problems: list[str] = []
+    public_history: list[dict[str, Any]] = []
+    final_public_context: dict[str, Any] = {}
     terminal = False
 
     for step_index in range(max_steps):
@@ -205,7 +217,31 @@ def execute_controlled_run(
             problems.append("no legal actions before terminal state")
             break
 
-        context = build_decision_context(snapshot.raw, actions, active_action_space)
+        pre_projection, projection_problem = _read_public_projection_for_context(
+            adapter,
+            snapshot,
+        )
+        if projection_problem is not None:
+            problems.append(projection_problem)
+            break
+
+        try:
+            pre_public_context = build_public_run_context(
+                snapshot.raw,
+                actions,
+                projection=pre_projection,
+                history=public_history,
+            )
+        except ValueError as exc:
+            problems.append(str(exc))
+            break
+
+        context = build_decision_context(
+            snapshot.raw,
+            actions,
+            active_action_space,
+            public_run_context=pre_public_context,
+        )
 
         if before_decision is not None:
             try:
@@ -238,6 +274,42 @@ def execute_controlled_run(
         transition = adapter.step(chosen_action)
         terminal = transition.terminal
         next_raw = transition.snapshot.raw
+        post_projection, projection_problem = _read_public_projection_for_context(
+            adapter,
+            transition.snapshot,
+        )
+        if projection_problem is not None:
+            problems.append(projection_problem)
+        try:
+            post_public_context = build_public_run_context(
+                next_raw,
+                (),
+                projection=post_projection if projection_problem is None else None,
+                history=public_history,
+                include_candidates=False,
+            )
+            history_entry = build_public_history_entry(
+                history_index=len(public_history),
+                step_index=step_index,
+                pre_context=pre_public_context,
+                post_context=post_public_context,
+                selected_action_index=decision.selected_index,
+            )
+            public_history = append_public_history_entry(
+                public_history,
+                history_entry,
+            )
+            final_public_context = build_public_run_context(
+                next_raw,
+                (),
+                projection=post_projection if projection_problem is None else None,
+                history=public_history,
+                include_candidates=False,
+            )
+        except ValueError as exc:
+            problems.append(str(exc))
+            history_entry = {}
+            final_public_context = {}
 
         step = ControlledRunStep(
             step_index=step_index,
@@ -266,6 +338,8 @@ def execute_controlled_run(
                 dict(action) for action in context.tactical_legal_actions
             ],
             feature_schema_id=context.tactical_feature_schema_id,
+            public_run_context=dict(context.public_run_context),
+            public_history_entry=history_entry,
             floor=_first_number(snapshot.raw, "floor_num", "floor"),
             player_hp=_player_hp(snapshot.raw),
             player_max_hp=_player_max_hp(snapshot.raw),
@@ -293,7 +367,7 @@ def execute_controlled_run(
                 break
 
         snapshot = transition.snapshot
-        if terminal:
+        if terminal or projection_problem is not None:
             break
 
     return ControlledRun(
@@ -307,6 +381,8 @@ def execute_controlled_run(
         final_raw=dict(snapshot.raw),
         controller_provenance=controller.provenance.to_dict(),
         action_space_config=active_action_space.to_dict(),
+        public_run_context=final_public_context,
+        public_history=public_history,
     )
 
 
@@ -319,6 +395,8 @@ def build_decision_context(
     raw_snapshot: object,
     actions: Sequence[SimulatorAction],
     action_space: ActionSpaceConfig,
+    *,
+    public_run_context: Mapping[str, Any] | None = None,
 ):
     """Build the policy input for the current simulator candidate list.
 
@@ -347,6 +425,7 @@ def build_decision_context(
         tactical_state=build_public_tactical_state(raw),
         tactical_legal_actions=build_public_tactical_actions(list(actions), raw),
         tactical_feature_schema_id="public-tactical-v2",
+        public_run_context=dict(public_run_context or {}),
     )
 
 
@@ -356,6 +435,16 @@ def _reset_controller_for_run(controller: OnlineController, seed: int | None) ->
     reset_for_run = getattr(controller, "reset_for_run", None)
     if callable(reset_for_run):
         reset_for_run(seed)
+
+
+def _read_public_projection_for_context(
+    adapter: SimulatorAdapter,
+    snapshot: SimulatorSnapshot,
+) -> tuple[Any | None, str | None]:
+    try:
+        return read_native_public_projection(adapter, snapshot), None
+    except (RuntimeError, ValueError) as exc:
+        return None, str(exc)
 
 
 def _public_non_combat_snapshot_metadata(
