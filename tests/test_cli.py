@@ -10,6 +10,9 @@ from sts_combat_rl.sim.contract import (
     SimulatorSnapshot,
     SimulatorTransition,
 )
+from sts_combat_rl.sim.native_public_projection import (
+    NativePublicProjectionCapabilityReport,
+)
 
 
 class FakeLightSpeedSmokeAdapter:
@@ -190,6 +193,48 @@ def test_cli_lightspeed_smoke_writes_report_to_stderr_only(
     assert "Simulator calibration summary" in captured.err
     assert "excluded action kinds:" in captured.err
     assert "chosen action kinds:" in captured.err
+
+
+def test_cli_public_projection_audit_routes_and_writes_stderr_only(
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.setattr(
+        "sts_combat_rl.cli.LightSpeedAdapter",
+        FakeLightSpeedSmokeAdapter,
+    )
+    report = NativePublicProjectionCapabilityReport(
+        requested_episodes=2,
+        completed_episodes=2,
+        max_steps=10,
+        decisions_observed=2,
+        candidate_parity_passes=2,
+        checkpoint_passes=2,
+    )
+    monkeypatch.setattr(
+        "sts_combat_rl.cli.run_public_projection_capability_audit",
+        lambda *args, **kwargs: report,
+    )
+
+    assert (
+        main(
+            [
+                "--lightspeed-public-projection-capability-audit",
+                "--sim-episodes",
+                "2",
+                "--sim-steps",
+                "10",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 0
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Native public-projection capability audit" in captured.err
+    assert "episodes: 2/2" in captured.err
 
 
 def test_cli_checkpoint_commands_write_only_diagnostics_and_restore_pool(

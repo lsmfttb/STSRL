@@ -5,6 +5,7 @@ from dataclasses import dataclass
 import pytest
 
 from sts_combat_rl.sim.lightspeed import LightSpeedAdapter
+from sts_combat_rl.sim.contract import SimulatorSnapshot
 
 
 class FakeCharacterClass:
@@ -143,3 +144,26 @@ def test_lightspeed_adapter_wraps_native_checkpoint_restore() -> None:
     assert checkpoint.metadata["seed"] == 11
     assert restored.observation == initial.observation
     assert restored.raw == initial.raw
+
+
+def test_lightspeed_snapshot_fingerprint_ignores_transition_only_battle_outcome() -> (
+    None
+):
+    stateful = LightSpeedAdapter._snapshot_fingerprint(
+        SimulatorSnapshot(
+            observation=[11, 3],
+            raw={"screen_state": "REWARDS", "outcome": "UNDECIDED"},
+        )
+    )
+    transition_labeled = LightSpeedAdapter._snapshot_fingerprint(
+        SimulatorSnapshot(
+            observation=[11, 3],
+            raw={
+                "screen_state": "REWARDS",
+                "outcome": "UNDECIDED",
+                "completed_battle_outcome": "PLAYER_VICTORY",
+            },
+        )
+    )
+
+    assert stateful == transition_labeled
