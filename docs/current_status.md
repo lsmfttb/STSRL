@@ -124,7 +124,7 @@ tasks in dependency order are:
    the main maintainer reviews and republishes its task specification against
    the T005 evaluation contract.
 3. T007, complete public run history, is `BLOCKED` pending task redesign. PR
-   #9 is an unmergeable implementation attempt; see
+   #9 was closed without merge after an unmergeable implementation attempt; see
    [`t007_review_handoff_2026-06-22.md`](t007_review_handoff_2026-06-22.md).
    No branch may resume it until the main maintainer publishes replacement task
    specifications.

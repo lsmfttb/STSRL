@@ -4,10 +4,11 @@ Status: `BLOCKED`.
 
 ## Review Freeze
 
-PR #9 attempted this task but is not mergeable. Its final native patch does
-not apply to the canonical external patch stack, and its scope combines
-multiple independently reviewable concerns. Do not resume work on that branch
-or publish a new implementation branch from this document as-is.
+PR #9 attempted this task and was closed without merge on 2026-06-22. Its
+final native patch does not apply to the canonical external patch stack, and
+its scope combines multiple independently reviewable concerns. Do not resume
+work on that branch or publish a new implementation branch from this document
+as-is.
 
 The main maintainer must first publish smaller replacement task specifications
 from the findings in

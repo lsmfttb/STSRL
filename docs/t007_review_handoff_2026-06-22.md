@@ -8,9 +8,9 @@ not evidence that public run context is implemented.
 
 ## Decision
 
-Do not merge PR #9, `Add public run context schema and pipeline integration`.
-Close it without merging after confirming its branch head remains reachable as
-a read-only research reference. Do not continue work on its existing branch.
+PR #9, `Add public run context schema and pipeline integration`, was closed
+without merge on 2026-06-22. Its branch head remains reachable as a read-only
+research reference. Do not continue work on its existing branch.
 
 The implementation reference is:
 
@@ -150,8 +150,9 @@ merges. Each replacement requires a new branch and PR based on current `main`.
 
 ## Next Maintainer Checklist
 
-1. Keep `main` at its clean baseline; do not merge or cherry-pick PR #9.
-2. Close PR #9 after confirming its remote branch is retained as reference.
+1. Keep `main` at its clean baseline; do not cherry-pick from closed PR #9.
+2. Preserve its remote branch until replacement specifications capture any
+   useful reference material.
 3. Publish replacement task specifications before authorizing another branch.
 4. Rebuild the canonical WSL `build-py` shim before direct simulator work.
 5. Update task readiness and current status only after replacement work merges.

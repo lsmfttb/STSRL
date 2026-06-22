@@ -35,7 +35,8 @@ document update before acceptance.
 
 - T005 is complete. It establishes the fixed-evaluation boundary without
   changing public-context schemas.
-- T007 is `BLOCKED` after an unmergeable implementation attempt. See the
+- T007 is `BLOCKED`; PR #9 was closed without merge after an unmergeable
+  implementation attempt. See the
   [T007 review handoff](../t007_review_handoff_2026-06-22.md); replacement
   task specifications must be published before new implementation work.
 - T008 waits for T007 so constructed starts preserve complete visible context.
