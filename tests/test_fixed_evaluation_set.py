@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from io import StringIO
 
 import pytest
@@ -11,6 +12,7 @@ from sts_combat_rl.sim.battle_start_pool import (
     BattleStartCheckpointRecord,
     NaturalBattleStartPool,
 )
+from sts_combat_rl.sim.contract import SimulatorAction
 from sts_combat_rl.sim.fixed_evaluation_set import (
     FixedCohortSelectionConfig,
     dump_fixed_cohort_jsonl,
@@ -18,6 +20,29 @@ from sts_combat_rl.sim.fixed_evaluation_set import (
     format_cohort_coverage_report,
     select_fixed_cohort,
 )
+from sts_combat_rl.sim.public_context_artifacts import PUBLIC_CONTEXT_LEGACY_LOSS
+from sts_combat_rl.sim.public_run_context import build_public_run_context
+
+
+def _make_public_context() -> dict[str, object]:
+    raw = {
+        "screen_state": "BATTLE",
+        "battle_active": True,
+        "act": 1,
+        "floor_num": 1,
+        "room_type": "MONSTER",
+        "cur_hp": 70,
+        "max_hp": 80,
+    }
+    actions = [
+        SimulatorAction(
+            action_id="card:Strike_R",
+            label="Strike",
+            kind="card",
+            raw={"scope": "battle", "idx1": 0, "idx2": 0, "idx3": 0},
+        )
+    ]
+    return build_public_run_context(raw, actions, projection=None)
 
 
 def _make_record(
@@ -31,6 +56,8 @@ def _make_record(
     room_type: str = "MONSTER",
     encounter_id: str = "Cultist",
     checkpoint_id: str | None = None,
+    public_context_status: str = "legacy_unavailable",
+    public_run_context: dict[str, object] | None = None,
 ) -> BattleStartCheckpointRecord:
     cid = checkpoint_id or f"cp-{record_index}"
     return BattleStartCheckpointRecord(
@@ -79,6 +106,8 @@ def _make_record(
         action_trace=(),
         snapshot_observation=(),
         snapshot_raw={},
+        public_context_status=public_context_status,
+        public_run_context=public_run_context or {},
     )
 
 
@@ -358,6 +387,52 @@ class TestFixedCohortSerialization:
         buf = StringIO()
         with pytest.raises(ValueError, match="invalid fixed cohort"):
             dump_fixed_cohort_jsonl(broken, buf)
+
+    def test_available_public_context_round_trips_from_source_pool(self):
+        public_context = _make_public_context()
+        pool = _make_pool(
+            [
+                _make_record(
+                    0,
+                    public_context_status="available",
+                    public_run_context=public_context,
+                )
+            ]
+        )
+        cohort, _ = select_fixed_cohort(pool, selection_seed=1)
+
+        buf = StringIO()
+        dump_fixed_cohort_jsonl(cohort, buf)
+        buf.seek(0)
+        loaded = load_fixed_cohort_jsonl(buf)
+
+        record = loaded.records[0]
+        assert record.public_context_status == "available"
+        assert record.public_run_context == public_context
+        assert record.public_run_context["schema_version"] == 1
+        assert (
+            record.public_run_context["missing_fields"]
+            == public_context["missing_fields"]
+        )
+
+    def test_v1_migration_records_explicit_public_context_loss(self):
+        pool = _make_pool([_make_record(0)])
+        cohort, _ = select_fixed_cohort(pool, selection_seed=1)
+        buf = StringIO()
+        dump_fixed_cohort_jsonl(cohort, buf)
+        rows = [json.loads(line) for line in buf.getvalue().splitlines()]
+        rows[0]["metadata"]["format_version"] = 1
+        for row in rows[1:]:
+            row["record"].pop("public_context_status", None)
+            row["record"].pop("public_run_context", None)
+        legacy_text = "\n".join(json.dumps(row, sort_keys=True) for row in rows)
+
+        loaded = load_fixed_cohort_jsonl(StringIO(legacy_text))
+
+        assert loaded.migration_report.applied_versions == (2,)
+        assert PUBLIC_CONTEXT_LEGACY_LOSS in loaded.migration_report.losses
+        assert loaded.records[0].public_context_status == "legacy_unavailable"
+        assert loaded.records[0].public_run_context == {}
 
 
 class TestCohortCoverageReport:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from io import StringIO
 
 import pytest
@@ -29,6 +30,8 @@ from sts_combat_rl.sim.fixed_battle_evaluation import (
     format_fixed_evaluation_report,
     load_fixed_evaluation_report_jsonl,
 )
+from sts_combat_rl.sim.public_context_artifacts import PUBLIC_CONTEXT_LEGACY_LOSS
+from sts_combat_rl.sim.public_run_context import build_public_run_context
 
 
 # ── Test helpers ────────────────────────────────────────────────────────────
@@ -66,6 +69,12 @@ def _make_action(
         label=label,
         raw={"idx1": 0, "idx2": 1},
     )
+
+
+def _make_public_context() -> dict[str, object]:
+    snapshot = _make_snapshot()
+    actions = [_make_action()]
+    return build_public_run_context(snapshot.raw, actions, projection=None)
 
 
 def _make_transition(
@@ -929,6 +938,108 @@ class TestEvaluationReportSerialization:
         assert lr.terminal_absolute_hp == 65
         assert lr.hp_loss == 5
         assert lr.controller_compute_telemetry == {"nodes": 42}
+
+    def test_public_context_fields_round_trip(self):
+        public_context = _make_public_context()
+        result = SingleBattleEvaluationResult(
+            cohort_index=0,
+            source_checkpoint_id="cp-0",
+            source_seed=1,
+            source_run_id="run-0",
+            source_battle_index=0,
+            structural_stratum=(20, 1, "MONSTER", "Cultist"),
+            structural_metadata={"encounter_id": "Cultist"},
+            restoration_method="seed_action_trace",
+            controller_provenance={"kind": "test"},
+            information_regime="normal_public_policy",
+            action_space_config={},
+            termination_status="error",
+            terminal_absolute_hp=None,
+            hp_loss=None,
+            decision_count=0,
+            simulator_step_count=0,
+            wall_clock_time_s=0.0,
+            public_context_status="available",
+            public_run_context=public_context,
+            public_context_replay_status="mismatch",
+            public_context_replay_mismatches=[
+                "result 0 public context replay: $.current.screen.value differs"
+            ],
+        )
+        report = FixedEvaluationReport(
+            cohort_identity="id-abc",
+            controller_provenance={"kind": "test", "name": "fake"},
+            information_regime="normal_public_policy",
+            action_space_config={},
+            max_battle_steps=200,
+            source_pool_format_version=2,
+            selection_config={"selection_seed": 1},
+            battle_results=[result],
+        )
+
+        buf = StringIO()
+        dump_fixed_evaluation_report_jsonl(report, buf)
+        buf.seek(0)
+        loaded = load_fixed_evaluation_report_jsonl(buf)
+
+        loaded_result = loaded.battle_results[0]
+        assert loaded_result.public_context_status == "available"
+        assert loaded_result.public_run_context == public_context
+        assert loaded_result.public_context_replay_status == "mismatch"
+        assert loaded_result.public_context_replay_mismatches == [
+            "result 0 public context replay: $.current.screen.value differs"
+        ]
+
+    def test_v1_migration_records_explicit_public_context_loss(self):
+        result = SingleBattleEvaluationResult(
+            cohort_index=0,
+            source_checkpoint_id="cp-0",
+            source_seed=1,
+            source_run_id="run-0",
+            source_battle_index=0,
+            structural_stratum=(20, 1, "MONSTER", "Cultist"),
+            structural_metadata={"encounter_id": "Cultist"},
+            restoration_method="seed_action_trace",
+            controller_provenance={"kind": "test"},
+            information_regime="normal_public_policy",
+            action_space_config={},
+            termination_status="win",
+            terminal_absolute_hp=65,
+            hp_loss=5,
+            decision_count=3,
+            simulator_step_count=3,
+            wall_clock_time_s=0.3,
+        )
+        report = FixedEvaluationReport(
+            cohort_identity="id-abc",
+            controller_provenance={"kind": "test", "name": "fake"},
+            information_regime="normal_public_policy",
+            action_space_config={},
+            max_battle_steps=200,
+            source_pool_format_version=2,
+            selection_config={"selection_seed": 1},
+            battle_results=[result],
+        )
+        buf = StringIO()
+        dump_fixed_evaluation_report_jsonl(report, buf)
+        rows = [json.loads(line) for line in buf.getvalue().splitlines()]
+        rows[0]["metadata"]["format_version"] = 1
+        for row in rows[1:]:
+            row["result"].pop("public_context_status", None)
+            row["result"].pop("public_run_context", None)
+            row["result"].pop("public_context_replay_status", None)
+            row["result"].pop("public_context_replay_mismatches", None)
+        legacy_text = "\n".join(json.dumps(row, sort_keys=True) for row in rows)
+
+        loaded = load_fixed_evaluation_report_jsonl(StringIO(legacy_text))
+
+        loaded_result = loaded.battle_results[0]
+        assert loaded.migration_report.applied_versions == (2,)
+        assert PUBLIC_CONTEXT_LEGACY_LOSS in loaded.migration_report.losses
+        assert loaded_result.public_context_status == "legacy_unavailable"
+        assert loaded_result.public_run_context == {}
+        assert loaded_result.public_context_replay_status == "legacy_unavailable"
+        assert loaded_result.public_context_replay_mismatches == []
 
     def test_load_missing_metadata_raises(self):
         buf = StringIO('{"type": "result", "result": {}}\n')
