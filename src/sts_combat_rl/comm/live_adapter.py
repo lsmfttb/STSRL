@@ -34,6 +34,7 @@ from sts_combat_rl.sim.features import (
     tactical_field_parity_rows,
 )
 from sts_combat_rl.sim.policy import DecisionContext
+from sts_combat_rl.sim.public_run_context import build_public_run_context
 
 if TYPE_CHECKING:
     from sts_combat_rl.sim.controller_contract import OnlineController
@@ -462,6 +463,8 @@ def build_live_decision_context(
     """
 
     normalized = normalize_communicationmod_battle_snapshot(raw_snapshot)
+    public_snapshot = dict(normalized)
+    public_snapshot.setdefault("screen_state", "BATTLE")
     snapshot_features = encode_communicationmod_battle_snapshot(raw_snapshot)
     tactical_state = build_public_tactical_state(normalized)
     tactical_legal_actions = build_public_tactical_actions(actions, normalized)
@@ -477,6 +480,12 @@ def build_live_decision_context(
         tactical_state=tactical_state,
         tactical_legal_actions=tactical_legal_actions,
         tactical_feature_schema_id=TACTICAL_FEATURE_SCHEMA_ID,
+        public_run_context=build_public_run_context(
+            public_snapshot,
+            actions,
+            projection=None,
+            history=(),
+        ),
     )
 
 
