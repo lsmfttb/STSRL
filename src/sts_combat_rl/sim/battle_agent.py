@@ -345,6 +345,10 @@ def build_battle_decision_batch(
                         dict(action) for action in step.tactical_legal_actions
                     ],
                     feature_schema_id=step.feature_schema_id,
+                    public_context_status=(
+                        "available" if step.public_run_context else "legacy_unavailable"
+                    ),
+                    public_run_context=dict(step.public_run_context),
                 )
             )
 

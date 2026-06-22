@@ -40,6 +40,8 @@ class DecisionExample:
     tactical_state: dict[str, Any] = field(default_factory=dict)
     tactical_legal_actions: list[dict[str, Any]] = field(default_factory=list)
     feature_schema_id: str = "public-tactical-v2"
+    public_context_status: str = "available"
+    public_run_context: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -163,6 +165,10 @@ def _decision_example(
         tactical_state=dict(step.tactical_state),
         tactical_legal_actions=[dict(action) for action in step.tactical_legal_actions],
         feature_schema_id=step.feature_schema_id,
+        public_context_status="available"
+        if step.public_run_context
+        else "legacy_unavailable",
+        public_run_context=dict(step.public_run_context),
     )
 
 

@@ -117,6 +117,20 @@ from sts_combat_rl.sim.battle_start_pool import (
     sample_battle_start_pool,
     verify_battle_start_pool_restores,
 )
+from sts_combat_rl.sim.public_context_artifacts import (
+    PUBLIC_CONTEXT_AVAILABLE,
+    PUBLIC_CONTEXT_LEGACY_UNAVAILABLE,
+    PUBLIC_CONTEXT_LEGACY_LOSS,
+    public_context_artifact_problems,
+    public_context_mismatches,
+    sanitize_public_context_artifact,
+)
+from sts_combat_rl.sim.public_context_audit import (
+    PUBLIC_CONTEXT_AUDIT_REPORT_SCHEMA_ID,
+    PublicContextArtifactAuditReport,
+    format_public_context_artifact_audit_report,
+    run_public_context_artifact_audit,
+)
 from sts_combat_rl.sim.checkpoint_verification import (
     BattleCheckpointVerificationReport,
     format_battle_checkpoint_verification_report,
@@ -384,7 +398,12 @@ __all__ = [
     "BattleStartPoolCoverageReport",
     "BattleStartPoolRestoreReport",
     "NaturalBattleStartPool",
+    "PUBLIC_CONTEXT_AUDIT_REPORT_SCHEMA_ID",
+    "PUBLIC_CONTEXT_AVAILABLE",
+    "PUBLIC_CONTEXT_LEGACY_LOSS",
+    "PUBLIC_CONTEXT_LEGACY_UNAVAILABLE",
     "PUBLIC_CONTEXT_UNAVAILABLE",
+    "PublicContextArtifactAuditReport",
     "SampledBattleStart",
     "TERMINAL_STEP_REWARD_ALLOCATION",
     "MODEL_INPUT_BATCH_FORMAT_VERSION",
@@ -457,6 +476,7 @@ __all__ = [
     "format_battle_reward_design_report",
     "format_model_input_batch_smoke_report",
     "format_model_score_smoke_report",
+    "format_public_context_artifact_audit_report",
     "format_reward_labeled_battle_decision_batch_report",
     "format_trainer_input_contract_report",
     "format_trainer_input_dataset_smoke_report",
@@ -498,6 +518,7 @@ __all__ = [
     "run_non_combat_driver_calibration",
     "run_battle_agent_sweep",
     "run_policy_episode_evaluation",
+    "run_public_context_artifact_audit",
     "read_native_public_projection",
     "run_simulator_calibration",
     "run_tactical_feature_coverage_audit",
@@ -505,6 +526,7 @@ __all__ = [
     "score_model_input_batch",
     "selected_index_problem",
     "sanitize_public_run_context",
+    "sanitize_public_context_artifact",
     "simulator_action_feature_size",
     "tactical_action_problems",
     "tactical_field_parity_rows",
@@ -524,5 +546,7 @@ __all__ = [
     "preserved_migration_report",
     "source_metadata_from_snapshot",
     "forbidden_public_context_problems",
+    "public_context_artifact_problems",
+    "public_context_mismatches",
     "public_history_problems",
 ]

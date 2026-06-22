@@ -10,7 +10,7 @@ from typing import Any
 from sts_combat_rl.sim.contract import SimulatorAction
 
 
-DECISION_RECORD_SCHEMA_VERSION = 2
+DECISION_RECORD_SCHEMA_VERSION = 3
 DECISION_SOURCE_KINDS = (
     "natural_run",
     "stratified_training",
@@ -40,6 +40,8 @@ DECISION_RECORD_FIELD_NAMES = (
     "feature_schema_id",
     "tactical_state",
     "tactical_legal_actions",
+    "public_context_status",
+    "public_run_context",
 )
 
 
@@ -86,6 +88,8 @@ class DecisionRecord:
     feature_schema_id: str = "public-tactical-v2"
     tactical_state: dict[str, Any] = field(default_factory=dict)
     tactical_legal_actions: list[dict[str, Any]] = field(default_factory=list)
+    public_context_status: str = "available"
+    public_run_context: dict[str, Any] = field(default_factory=dict)
 
 
 def action_identities_for_actions(
@@ -294,7 +298,22 @@ def decision_record_problems(record: DecisionRecord, *, label: str) -> list[str]
     if not record.source_metadata:
         problems.append(f"{label}: source metadata is missing")
     problems.extend(_tactical_feature_problems(record, label=label))
+    problems.extend(_public_context_problems(record, label=label))
     return problems
+
+
+def _public_context_problems(record: DecisionRecord, *, label: str) -> list[str]:
+    from sts_combat_rl.sim.public_context_artifacts import (
+        public_context_artifact_problems,
+    )
+
+    return public_context_artifact_problems(
+        status=record.public_context_status,
+        context=record.public_run_context,
+        label=label,
+        require_available=True,
+        require_candidate_actions=True,
+    )
 
 
 def _tactical_feature_problems(record: DecisionRecord, *, label: str) -> list[str]:

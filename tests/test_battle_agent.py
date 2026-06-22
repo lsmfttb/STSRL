@@ -704,6 +704,11 @@ def test_model_input_batch_packs_variable_action_rows_for_scorer_context() -> No
     assert len(batch.tactical_actions) == 4
     assert batch.tactical_states[0]["schema_version"] == 2
     assert batch.tactical_actions[1]["kind"] == "card"
+    assert batch.public_context_statuses == ["available", "available"]
+    assert batch.public_run_contexts[0]["schema_id"] == "public-run-context-v1"
+    assert batch.public_run_contexts[0]["candidate_actions"]["availability"] == (
+        "available"
+    )
     assert batch.action_kinds == [["end_turn", "card"], ["end_turn", "card"]]
     assert batch.eligible_action_indices == [[0, 1], [0, 1]]
     assert batch.eligible_action_rows == [[0, 1], [2, 3]]
@@ -716,6 +721,7 @@ def test_model_input_batch_packs_variable_action_rows_for_scorer_context() -> No
     assert context.legal_action_kinds == ["end_turn", "card"]
     assert context.tactical_state == batch.tactical_states[0]
     assert context.tactical_legal_actions == batch.tactical_actions[:2]
+    assert context.public_run_context == batch.public_run_contexts[0]
     assert choose_highest_scored_eligible_index(context, [0.0, 1.0]) == 1
 
 
@@ -831,12 +837,16 @@ def test_model_input_v1_migration_marks_missing_structured_tactical_inputs() -> 
         reward_allocation="terminal_step",
         snapshot_feature_size=1,
         action_feature_size=1,
+        snapshot_features=[[0.0]],
     )
 
     migrated = migrate_model_input_batch(legacy)
 
     assert migrated.format_version == MODEL_INPUT_BATCH_FORMAT_VERSION
     assert migrated.tactical_feature_schema_id == "legacy-unversioned"
+    assert migrated.public_context_statuses == ["legacy_unavailable"]
+    assert migrated.public_run_contexts == [{}]
+    assert any("public run context/history" in problem for problem in migrated.problems)
     assert "v1 model input has no structured tactical state/action inputs" in (
         migrated.problems
     )

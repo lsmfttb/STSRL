@@ -35,6 +35,10 @@ from sts_combat_rl.sim.features import (
     TACTICAL_FEATURE_SCHEMA_ID,
     TACTICAL_FEATURE_SCHEMA_VERSION,
 )
+from sts_combat_rl.sim.public_context_artifacts import (
+    PUBLIC_CONTEXT_LEGACY_LOSS,
+    PUBLIC_CONTEXT_LEGACY_UNAVAILABLE,
+)
 from sts_combat_rl.sim.reward_labeling import (
     BattleDecisionRewardLabel,
     RewardLabeledBattleDecisionBatch,
@@ -44,7 +48,7 @@ from sts_combat_rl.sim.trainer_input_contract import (
 )
 
 
-TRAINER_INPUT_DATASET_FORMAT_VERSION = 3
+TRAINER_INPUT_DATASET_FORMAT_VERSION = 4
 TRAINER_INPUT_DATASET_MIGRATIONS = (
     ArtifactMigration(
         source_version=1,
@@ -64,6 +68,12 @@ TRAINER_INPUT_DATASET_MIGRATIONS = (
             "v2 fixed numeric features cannot reconstruct v2 structured tactical inputs",
             "v2 omitted tactical feature-schema and identity-vocabulary provenance",
         ),
+    ),
+    ArtifactMigration(
+        source_version=3,
+        target_version=4,
+        migrate=lambda document: _migrate_trainer_input_v3_to_v4(document),
+        losses=(PUBLIC_CONTEXT_LEGACY_LOSS,),
     ),
 )
 
@@ -580,6 +590,24 @@ def _migrate_trainer_input_v2_to_v3(
     return ArtifactDocument(metadata=metadata, records=migrated_records)
 
 
+def _migrate_trainer_input_v3_to_v4(
+    document: ArtifactDocument,
+) -> ArtifactDocument:
+    """Add explicit public-context legacy-loss markers to old rows."""
+
+    metadata = dict(document.metadata)
+    metadata["format_version"] = TRAINER_INPUT_DATASET_FORMAT_VERSION
+    metadata["decision_record_schema_version"] = DECISION_RECORD_SCHEMA_VERSION
+    migrated_records: list[dict[str, Any]] = []
+    for raw_record in document.records:
+        record = dict(raw_record)
+        record["record_schema_version"] = DECISION_RECORD_SCHEMA_VERSION
+        record["public_context_status"] = PUBLIC_CONTEXT_LEGACY_UNAVAILABLE
+        record["public_run_context"] = {}
+        migrated_records.append(record)
+    return ArtifactDocument(metadata=metadata, records=migrated_records)
+
+
 def _legacy_source_metadata(record: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "source_kind": "unknown",
@@ -616,6 +644,8 @@ def _record_to_dict(record: TrainerInputRecord) -> dict[str, Any]:
         "feature_schema_id": record.feature_schema_id,
         "tactical_state": record.tactical_state,
         "tactical_legal_actions": record.tactical_legal_actions,
+        "public_context_status": record.public_context_status,
+        "public_run_context": record.public_run_context,
         "segment_index": record.segment_index,
         "segment_step_index": record.segment_step_index,
         "segment_decision_count": record.segment_decision_count,
@@ -662,6 +692,10 @@ def _record_from_dict(raw: dict[str, Any]) -> TrainerInputRecord:
         tactical_legal_actions=[
             _dict(action) for action in _list(raw.get("tactical_legal_actions"))
         ],
+        public_context_status=str(
+            raw.get("public_context_status", PUBLIC_CONTEXT_LEGACY_UNAVAILABLE)
+        ),
+        public_run_context=_dict(raw.get("public_run_context")),
         segment_index=_int(raw.get("segment_index")),
         segment_step_index=_int(raw.get("segment_step_index")),
         segment_decision_count=_int(raw.get("segment_decision_count")),

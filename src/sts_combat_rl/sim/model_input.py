@@ -22,9 +22,14 @@ from sts_combat_rl.sim.features import (
     tactical_action_problems,
     tactical_state_problems,
 )
+from sts_combat_rl.sim.public_context_artifacts import (
+    PUBLIC_CONTEXT_LEGACY_LOSS,
+    PUBLIC_CONTEXT_LEGACY_UNAVAILABLE,
+    public_context_artifact_problems,
+)
 
 
-MODEL_INPUT_BATCH_FORMAT_VERSION = 2
+MODEL_INPUT_BATCH_FORMAT_VERSION = 3
 
 
 @dataclass(frozen=True)
@@ -68,6 +73,8 @@ class ModelInputBatch:
     return_to_go: list[float] = field(default_factory=list)
     tactical_states: list[dict[str, Any]] = field(default_factory=list)
     tactical_actions: list[dict[str, Any]] = field(default_factory=list)
+    public_context_statuses: list[str] = field(default_factory=list)
+    public_run_contexts: list[dict[str, Any]] = field(default_factory=list)
     problems: list[str] = field(default_factory=list)
 
 
@@ -116,6 +123,8 @@ def build_model_input_batch(dataset: TrainerInputDataset) -> ModelInputBatch:
     return_to_go: list[float] = []
     tactical_states: list[dict[str, Any]] = []
     tactical_actions: list[dict[str, Any]] = []
+    public_context_statuses: list[str] = []
+    public_run_contexts: list[dict[str, Any]] = []
 
     for record in dataset.records:
         action_start = len(action_features)
@@ -153,6 +162,8 @@ def build_model_input_batch(dataset: TrainerInputDataset) -> ModelInputBatch:
         tactical_actions.extend(
             dict(action) for action in record.tactical_legal_actions
         )
+        public_context_statuses.append(record.public_context_status)
+        public_run_contexts.append(dict(record.public_run_context))
 
     batch = ModelInputBatch(
         format_version=MODEL_INPUT_BATCH_FORMAT_VERSION,
@@ -178,6 +189,8 @@ def build_model_input_batch(dataset: TrainerInputDataset) -> ModelInputBatch:
         return_to_go=return_to_go,
         tactical_states=tactical_states,
         tactical_actions=tactical_actions,
+        public_context_statuses=public_context_statuses,
+        public_run_contexts=public_run_contexts,
         problems=list(dataset.problems),
     )
     return replace(
@@ -292,6 +305,11 @@ def decision_context_from_model_input_batch(
             else []
         ),
         tactical_feature_schema_id=batch.tactical_feature_schema_id,
+        public_run_context=(
+            batch.public_run_contexts[example_index]
+            if example_index < len(batch.public_run_contexts)
+            else {}
+        ),
     )
 
 
@@ -305,21 +323,36 @@ def migrate_model_input_batch(batch: ModelInputBatch) -> ModelInputBatch:
 
     if batch.format_version == MODEL_INPUT_BATCH_FORMAT_VERSION:
         return batch
-    if batch.format_version != 1:
+    if batch.format_version not in {1, 2}:
         raise ValueError(
             f"unsupported model input format version {batch.format_version}; "
             f"current version is {MODEL_INPUT_BATCH_FORMAT_VERSION}"
         )
+    problems = [
+        *batch.problems,
+        PUBLIC_CONTEXT_LEGACY_LOSS,
+    ]
+    if batch.format_version == 1:
+        problems.append("v1 model input has no structured tactical state/action inputs")
     return replace(
         batch,
         format_version=MODEL_INPUT_BATCH_FORMAT_VERSION,
-        tactical_feature_schema_id=LEGACY_FEATURE_SCHEMA_ID,
-        tactical_feature_schema_version=0,
-        identity_vocabulary_version="",
-        problems=[
-            *batch.problems,
-            "v1 model input has no structured tactical state/action inputs",
+        tactical_feature_schema_id=(
+            LEGACY_FEATURE_SCHEMA_ID
+            if batch.format_version == 1
+            else batch.tactical_feature_schema_id
+        ),
+        tactical_feature_schema_version=(
+            0 if batch.format_version == 1 else batch.tactical_feature_schema_version
+        ),
+        identity_vocabulary_version=(
+            "" if batch.format_version == 1 else batch.identity_vocabulary_version
+        ),
+        public_context_statuses=[
+            PUBLIC_CONTEXT_LEGACY_UNAVAILABLE for _ in batch.snapshot_features
         ],
+        public_run_contexts=[{} for _ in batch.snapshot_features],
+        problems=problems,
     )
 
 
@@ -392,6 +425,31 @@ def _model_input_shape_problems(batch: ModelInputBatch) -> list[str]:
             f"tactical action: {problem}"
             for problem in tactical_action_problems(batch.tactical_actions)
         )
+    if batch.public_context_statuses or batch.public_run_contexts:
+        _validate_parallel_length(
+            "public context statuses",
+            len(batch.public_context_statuses),
+            example_count,
+            problems,
+        )
+        _validate_parallel_length(
+            "public run contexts",
+            len(batch.public_run_contexts),
+            example_count,
+            problems,
+        )
+        for index, (status, context) in enumerate(
+            zip(batch.public_context_statuses, batch.public_run_contexts)
+        ):
+            problems.extend(
+                public_context_artifact_problems(
+                    status=status,
+                    context=context,
+                    label=f"example {index}",
+                    require_available=True,
+                    require_candidate_actions=True,
+                )
+            )
 
     for index, snapshot_features in enumerate(batch.snapshot_features):
         _validate_feature_row(

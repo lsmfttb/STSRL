@@ -30,6 +30,7 @@ from sts_combat_rl.sim.trainer_input import (
     load_trainer_input_dataset_jsonl_text,
     trainer_input_dataset_to_jsonl_text,
 )
+from sts_combat_rl.sim.public_run_context import build_public_run_context
 
 
 def test_trainer_input_v1_fixture_migrates_to_current_schema() -> None:
@@ -46,7 +47,7 @@ def test_trainer_input_v1_fixture_migrates_to_current_schema() -> None:
     assert (
         dataset.migration_report.target_version == TRAINER_INPUT_DATASET_FORMAT_VERSION
     )
-    assert dataset.migration_report.applied_versions == (2, 3)
+    assert dataset.migration_report.applied_versions == (2, 3, 4)
     assert "v1 omitted per-decision controller provenance" in (
         dataset.migration_report.losses
     )
@@ -62,6 +63,9 @@ def test_trainer_input_v1_fixture_migrates_to_current_schema() -> None:
         "v2 fixed numeric features cannot reconstruct v2 structured tactical inputs"
         in (dataset.migration_report.losses)
     )
+    assert record.public_context_status == "legacy_unavailable"
+    assert record.public_run_context == {}
+    assert any("public run context" in item for item in dataset.migration_report.losses)
     assert any("controller provenance is missing" in item for item in dataset.problems)
 
 
@@ -264,8 +268,12 @@ def test_trainer_input_writer_rejects_identity_action_inconsistency(
 
 def _current_dataset():
     raw = {
+        "screen_state": "BATTLE",
         "battle_active": True,
         "ascension": 20,
+        "act": 1,
+        "floor_num": 3,
+        "room_type": "MONSTER",
         "battle_turn": 1,
         "battle_player": {
             "current_hp": 70,
@@ -327,6 +335,12 @@ def _current_dataset():
         feature_schema_id=TACTICAL_FEATURE_SCHEMA_ID,
         tactical_state=build_public_tactical_state(raw),
         tactical_legal_actions=build_public_tactical_actions(actions, raw),
+        public_context_status="available",
+        public_run_context=build_public_run_context(
+            raw,
+            actions,
+            projection=None,
+        ),
         segment_index=0,
         segment_step_index=0,
         segment_decision_count=1,

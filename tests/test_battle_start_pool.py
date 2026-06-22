@@ -176,7 +176,8 @@ def test_natural_pool_captures_provenance_coverage_and_seeded_sampling() -> None
         record.checkpoint_information_regime == CHECKPOINT_INFORMATION_REGIME
         for record in pool.records
     )  # type: ignore[union-attr]
-    assert all(record.public_context_status == "unavailable" for record in pool.records)  # type: ignore[union-attr]
+    assert all(record.public_context_status == "available" for record in pool.records)  # type: ignore[union-attr]
+    assert all(record.public_run_context for record in pool.records)  # type: ignore[union-attr]
     assert report.natural_battle_start_count == 4
     assert report.unique_source_start_count == 4
     assert report.reported_battle_win_count == 2
@@ -234,6 +235,7 @@ def test_portable_pool_manifest_replays_duplicate_action_ids_in_fresh_adapters()
     assert loaded.records[1].action_trace[2]["occurrence"] == 0
     assert verification.restore_ok is True
     assert verification.replay_restored_count == 4
+    assert verification.context_matched_count == 4
 
 
 def test_v1_migration_preserves_missing_duplicate_information_and_fails_closed() -> (
@@ -285,6 +287,7 @@ def test_v1_migration_preserves_missing_duplicate_information_and_fails_closed()
         loaded.records[1].checkpoint_information_regime
         == LEGACY_UNKNOWN_INFORMATION_REGIME
     )
+    assert loaded.records[1].public_context_status == "legacy_unavailable"
     assert loaded.records[1].action_trace[2]["occurrence"] is None
     with pytest.raises(ValueError, match="omitted duplicate occurrence"):
         restore_battle_start_record(FakePoolAdapter("fresh"), loaded.records[1])
