@@ -50,7 +50,7 @@ contract consumed later by T013.
 
 ## Out Of Scope
 
-- Complete run history and route context, which belong to T007.
+- Complete run history and route context, which belong to T015/T016.
 - Learned deck-quality summaries or hand-written strategic deck ratings.
 - PyTorch model implementation or training.
 - Hidden draw order, hidden RNG, or unrevealed monster moves.

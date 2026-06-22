@@ -102,7 +102,7 @@ reported restore mismatch.
   `PLAYER_LOSS`, no completed-outcome omissions, and 13/13 fresh-adapter
   restores.
 - The pool deliberately does not provide complete sanitized public run context;
-  that remains T007. It is a source for later fixed evaluation, search labels,
+  that remains T015/T016. It is a source for later fixed evaluation, search labels,
   and constructed supplements, not those workflows themselves.
 
 ## Legacy Reference

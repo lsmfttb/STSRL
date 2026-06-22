@@ -128,8 +128,9 @@ future continuation-aware models:
 - complete visible map, current node, and available routes;
 - visible Act Boss.
 
-The latest `main` does not yet preserve a complete public run context. T007 is
-the active task that will add it; until then, datasets must retain explicit
+The latest `main` does not yet preserve a complete public run context. T014 is
+the active native-capability task; T015 and T016 will add the sanitized history
+and its persisted/replayable form. Until then, datasets must retain explicit
 context unavailability rather than implying that encounter metadata is a
 substitute for full history or map state.
 
@@ -285,10 +286,11 @@ without relying on full-run average floor.
 
 ### Phase D: Coverage And Stratified Search Data
 
-Status: T007 is `BLOCKED` pending task redesign; see the
-[T007 review handoff](t007_review_handoff_2026-06-22.md). T008 remains blocked
-by its replacement public-context work, and broad coverage follows fixed
-evaluation rather than being inferred from natural-run floor statistics.
+Status: T007 is cancelled. T014 is `READY` for the native capability boundary;
+T015 and T016 then add sanitized context/history and persisted replay/audit.
+See the [T007 review handoff](t007_review_handoff_2026-06-22.md). T008 remains
+blocked by T016, and broad coverage follows fixed evaluation rather than being
+inferred from natural-run floor statistics.
 
 Work:
 

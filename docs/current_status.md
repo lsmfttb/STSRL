@@ -120,17 +120,17 @@ tasks in dependency order are:
 
 1. T005, fixed structural battle evaluation, is complete. It provides the
    comparison surface required before search promotion.
-2. T006 now has all implementation prerequisites, but remains `BLOCKED` while
-   the main maintainer reviews and republishes its task specification against
-   the T005 evaluation contract.
-3. T007, complete public run history, is `BLOCKED` pending task redesign. PR
-   #9 was closed without merge after an unmergeable implementation attempt; see
+2. T006, Oracle search teacher pipeline, is `READY`. It is confined to the
+   explicitly Oracle-like simulator regime and must compare named budgets on
+   immutable T005 cohorts.
+3. T007 is `CANCELLED`. PR #9 remains closed and is not a branch base. Its
+   former cross-cutting scope is split into T014--T016; see
    [`t007_review_handoff_2026-06-22.md`](t007_review_handoff_2026-06-22.md).
-   No branch may resume it until the main maintainer publishes replacement task
-   specifications.
-4. T008 remains blocked by T007. T012 now awaits T007 so its terminal-resource
-   labels extend one stable evaluation and public-context contract rather than
-   creating parallel artifact fields.
+4. T014, native public projection capability, is `READY`. It owns only the
+   reproducible native capability matrix, raw projection, action parity, and
+   checkpoint evidence. T015 and T016 remain blocked behind it.
+5. T008, T009, and T012 remain blocked by the applicable T016 public-context
+   completion work. This prevents parallel context/resource schemas.
 
 Later tasks are dependency-ordered in the task index. A task is not ready for a
 new branch until its status is `READY`.
@@ -165,6 +165,7 @@ repository:    /mnt/d/DeadlycatCoding/STSRL
 ```
 
 See [`sts_lightspeed_wsl_spike.md`](sts_lightspeed_wsl_spike.md) for commands
-that are currently available on `main`. On 2026-06-22 the canonical `build-py`
-directory was absent; rebuild it before treating direct simulator smokes as
-current evidence.
+that are currently available on `main`. The clean canonical patch-stack build
+was reverified on 2026-06-22 from external commit `7476a81`; the canonical
+`build-py` directory is still absent, so rebuild it before treating direct
+simulator smokes as current evidence.

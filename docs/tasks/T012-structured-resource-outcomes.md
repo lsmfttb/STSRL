@@ -1,6 +1,6 @@
 # T012: Structured Battle Resource Outcomes
 
-Status: `BLOCKED` by T007.
+Status: `BLOCKED` by T016.
 
 ## Objective
 
@@ -13,13 +13,13 @@ hand-written reward weight.
 
 `main` has battle-segment reward diagnostics, T004 completed-battle outcome
 labels, and T005 fixed-evaluation reports, but no complete public terminal
-resource snapshot or structured outcome schema. T007 will establish the
+resource snapshot or structured outcome schema. T016 will establish the
 corresponding sanitized starting public context and history.
 
 ## Dependencies
 
 - T003, T004, T005, and T010 are complete.
-- T007 must merge before implementation starts.
+- T016 must merge before implementation starts.
 
 ## Scope
 
@@ -60,7 +60,7 @@ corresponding sanitized starting public context and history.
   from count-only summaries. Unknown, absent, and empty must not collapse.
 - Normal-public artifacts receive only player-visible/authoritatively exposed
   terminal data. Oracle-like source provenance remains separately declared.
-- The dedicated outcome schema may reference T007 context but must not duplicate
+- The dedicated outcome schema may reference T016 context but must not duplicate
   its entire typed history or create a second public-context contract.
 - Writers emit the current schema only; readers migrate before business logic
   and never guess a missing terminal identity or counter.
@@ -112,7 +112,7 @@ tests/test_resource_outcome.py
 ```
 
 The legacy implementation may contain useful native projection work but lacks
-the T005/T007 current contracts. Port selectively and preserve explicit
+the T005/T016 current contracts. Port selectively and preserve explicit
 missingness rather than filling gaps from old fields.
 
 ## PR Report

@@ -1,6 +1,6 @@
 # T009: PyTorch Search-Guidance Model
 
-Status: `BLOCKED` by T006, T007, T011, and T012.
+Status: `BLOCKED` by T006, T011, T012, and T016.
 
 ## Objective
 
@@ -11,7 +11,7 @@ explicit scale/distribution gates and public-information inputs.
 
 - Add PyTorch only behind the optional `train` dependency group.
 - Consume sanitized public tactical state, legal actions, and the public run
-  context available after T007.
+  context available after T016.
 - Predict legal-action policy targets and separately auditable value/outcome
   targets, including battle outcome and terminal absolute current HP.
 - Preserve structured resource targets rather than permanently collapsing them
