@@ -15,15 +15,15 @@ starting work.
 | T005 | DONE | [Fixed structural battle evaluation](T005-fixed-battle-evaluation.md) | T004 | fixed evaluation set and runner |
 | T006 | READY | [Oracle search teacher pipeline](T006-oracle-search-teacher.md) | T003, T004, T005 | search policy, teacher, search dataset |
 | T007 | CANCELLED | [Complete public run history (superseded)](T007-complete-public-run-history.md) | — | replaced by T014--T016 |
-| T008 | BLOCKED | [A20 constructed battle supplements](T008-a20-constructed-supplements.md) | T003, T004, T016 | battle-start transforms and approximate HP policy |
+| T008 | READY | [A20 constructed battle supplements](T008-a20-constructed-supplements.md) | T003, T004, T016 | battle-start transforms and approximate HP policy |
 | T009 | BLOCKED | [PyTorch search-guidance model](T009-pytorch-search-guidance.md) | T003, T006, T011, T012, T016 | optional train dependency and policy/value model |
 | T010 | DONE | [Stochastic non-combat driver](T010-stochastic-non-combat-driver.md) | T002 | non-combat policy and native visible action/resource support |
 | T011 | DONE | [Tactical feature contract v2](T011-tactical-feature-contract-v2.md) | T003 | feature, trainer-input, and model-input upgrades |
-| T012 | BLOCKED | [Structured battle resource outcomes](T012-structured-resource-outcomes.md) | T003, T004, T010, T016 | persistent resource snapshots and outcome vectors |
+| T012 | READY | [Structured battle resource outcomes](T012-structured-resource-outcomes.md) | T003, T004, T010, T016 | persistent resource snapshots and outcome vectors |
 | T013 | DONE | [Live CommunicationMod runtime adapter](T013-live-communicationmod-runtime-adapter.md) | T003, T011 | trained/search controller deployment in the real game |
 | T014 | DONE | [Native public projection capability](T014-native-public-projection-capability.md) | T002, T003, T004, T010, T011 | native public projection and action parity |
 | T015 | DONE | [Public run context and controlled history](T015-public-run-context-and-controlled-history.md) | T002, T003, T004, T011, T014 | sanitized context and ordered history |
-| T016 | READY | [Public-context artifacts, replay, and audit](T016-public-context-artifacts-replay-and-audit.md) | T003, T004, T005, T011, T014, T015 | migrations, replay, and coverage audit |
+| T016 | DONE | [Public-context artifacts, replay, and audit](T016-public-context-artifacts-replay-and-audit.md) | T003, T004, T005, T011, T014, T015 | migrations, replay, and coverage audit |
 
 Only `READY` tasks should receive a new branch. After a prerequisite merges,
 the main maintainer reviews dependent specifications against the new `main`
@@ -42,12 +42,12 @@ document update before acceptance.
   on immutable T005 cohorts and cannot be reported as normal-information or
   real-game performance.
 - T007 is `CANCELLED`. Its replacement sequence completed T014 for native
-  capability and T015 for sanitized in-memory context/history. T016 is now
-  `READY` for artifact propagation/replay/audit. See the
+  capability, T015 for sanitized in-memory context/history, and T016 for
+  artifact propagation/replay/audit. See the
   [T007 review handoff](../t007_review_handoff_2026-06-22.md).
-- T008 and T012 wait for T016 so constructed starts and terminal-resource
-  labels extend one stable complete-context contract. T009 remains blocked by
-  its named data/search prerequisites.
+- T008 and T012 are `READY` and extend the stable complete-context contract
+  into constructed starts and terminal-resource labels. T009 remains blocked
+  by its remaining named data/search prerequisites.
 
 ## Standard Local Gates
 

@@ -1,6 +1,6 @@
 # T016: Public-Context Artifacts, Replay, And Audit
 
-Status: `READY`.
+Status: `DONE`.
 
 ## Objective
 

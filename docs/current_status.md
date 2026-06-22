@@ -1,6 +1,6 @@
 # Current Status
 
-Last reviewed: 2026-06-22.
+Last reviewed: 2026-06-23.
 
 This document describes the latest `main` branch only. Results from local
 artifacts, old branches, or unmerged pull requests do not count as implemented
@@ -66,8 +66,15 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
   (`public-run-history-entry-v1`) are attached to controlled-run and live
   `DecisionContext` construction. `execute_controlled_run` appends one
   contiguous typed history entry after each successful visible transition,
-  rejects malformed raw native projections before controller use, and keeps
-  artifact propagation/replay/audit out of current writers until T016.
+  rejects malformed raw native projections before controller use, and exposes
+  the stable in-memory context/history contract used by current artifacts.
+- Current public-context artifact propagation and audit. Battle-start pools,
+  fixed cohorts, fixed evaluation reports, battle decisions, trainer inputs,
+  and model inputs preserve public-context status, sanitized public run
+  context, and explicit context-loss provenance. Portable replay compares
+  reconstructed public context, and the WSL-facing public-context audit checks
+  schema validity, forbidden hidden fields, candidate parity, replay
+  mismatches, and coverage.
 - Seeded structural resampling of natural battle starts, with source identity,
   sampling component, structural coverage, and completed battle outcomes kept
   separate from repeated sample weight.
@@ -81,7 +88,7 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
 
 ### Tests And Runtime Evidence
 
-- `422` tests pass on Windows Python as of this review. In an uninstalled
+- `428` tests pass on Windows Python as of this review. In an uninstalled
   checkout, set `PYTHONPATH=src` (or install the package) before invoking the
   CLI directly.
 - The two CommunicationMod fixture smokes pass.
@@ -117,6 +124,12 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
   mismatches, 289 candidate-action parity passes, 289 checkpoint projection
   passes, no checkpoint failures, and explicit coverage gaps for
   `BOSS_RELIC_REWARDS`, `REST_ROOM`, `SHOP_ROOM`, and `TREASURE_ROOM`.
+- T016 validates public-context artifact propagation and replay audit over a
+  WSL A20 bounded run with 327 current decision screens, 15 battle-start
+  records, 15/15 replay public-context matches, and 0 parity, schema,
+  forbidden-field, replay, or run failures. The current natural coverage gaps
+  remain `BOSS_RELIC_REWARDS`, `REST_ROOM`, `SHOP_ROOM`, and `TREASURE_ROOM`.
+  The same post-review WSL smoke and battle-training-readiness gates pass.
 
 ## Not Implemented On Main
 
@@ -127,8 +140,6 @@ unmerged legacy work:
 - PyTorch policy/value training;
 - interactive live-game or A20 performance validation for any controller;
 - structured persistent resource outcomes;
-- public-context artifact propagation, portable replay comparison, and WSL
-  context coverage audit;
 - constructed A20 battle-start supplements;
 - normal-information belief search.
 
@@ -152,11 +163,14 @@ tasks in dependency order are:
    the reproducible raw native capability matrix, action parity, and checkpoint
    evidence; it does not provide sanitized controller context.
 5. T015, public run context and controlled history, is complete. It provides
-   the sanitized in-memory public context/history contract and intentionally
-   leaves existing persisted artifacts unchanged.
-6. T016, public-context artifacts, replay, and audit, is `READY`. T008, T009,
-   and T012 remain blocked by the applicable T016 public-context completion
-   work. This prevents parallel context/resource schemas.
+   the sanitized in-memory public context/history contract that T016 now
+   persists through current artifacts.
+6. T016, public-context artifacts, replay, and audit, is complete. It extends
+   the T015 public-context contract through current persisted artifacts,
+   portable replay comparison, and the WSL context audit.
+7. T008, A20 constructed battle supplements, and T012, structured battle
+   resource outcomes, are `READY`. T009 remains blocked until its remaining
+   search/data prerequisites, including T006 and T012, are complete.
 
 Later tasks are dependency-ordered in the task index. A task is not ready for a
 new branch until its status is `READY`.

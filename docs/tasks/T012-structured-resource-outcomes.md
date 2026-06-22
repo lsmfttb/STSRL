@@ -1,6 +1,6 @@
 # T012: Structured Battle Resource Outcomes
 
-Status: `BLOCKED` by T016.
+Status: `READY`.
 
 ## Objective
 
@@ -13,13 +13,13 @@ hand-written reward weight.
 
 `main` has battle-segment reward diagnostics, T004 completed-battle outcome
 labels, and T005 fixed-evaluation reports, but no complete public terminal
-resource snapshot or structured outcome schema. T016 will establish the
-corresponding sanitized starting public context and history.
+resource snapshot or structured outcome schema. T016 establishes the
+corresponding sanitized starting public context and history in current
+artifacts.
 
 ## Dependencies
 
-- T003, T004, T005, and T010 are complete.
-- T016 must merge before implementation starts.
+- T003, T004, T005, T010, and T016 are complete.
 
 ## Scope
 

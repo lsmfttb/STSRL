@@ -1,6 +1,6 @@
 # T008: A20 Constructed Battle Supplements
 
-Status: `BLOCKED` by T016.
+Status: `READY`.
 
 ## Objective
 
@@ -10,15 +10,14 @@ that supplement, but never replace, natural A20 data or natural evaluation.
 ## Current Main Baseline
 
 T004 can restore natural battle-start records but has no constructed-state
-schema or authoritative transform surface. Current records explicitly lack
-complete public run context. T016 will make that context available so a
-transform can preserve visible history, map, routes, and visible Boss rather
-than constructing an ambiguous continuation state.
+schema or authoritative transform surface. T016 makes complete public run
+context available in current artifacts so a transform can preserve visible
+history, map, routes, and visible Boss rather than constructing an ambiguous
+continuation state.
 
 ## Dependencies
 
-- T003 and T004 are complete.
-- T016 must merge before implementation starts.
+- T003, T004, and T016 are complete.
 
 ## Scope
 
