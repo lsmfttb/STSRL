@@ -60,13 +60,24 @@ from sts_combat_rl.sim.public_run_context import (
     build_public_run_context,
     read_native_public_projection,
 )
+from sts_combat_rl.sim.resource_outcome import (
+    BATTLE_RESOURCE_OUTCOME_AVAILABLE,
+    BATTLE_RESOURCE_OUTCOME_LEGACY_LOSS,
+    battle_resource_outcome_problems,
+    available_battle_resource_outcome,
+    build_battle_resource_outcome,
+    is_authoritative_terminal_battle_result,
+    legacy_unavailable_battle_resource_outcome,
+    unavailable_battle_resource_outcome,
+)
 
 
-BATTLE_START_POOL_FORMAT_VERSION = 3
+BATTLE_START_POOL_FORMAT_VERSION = 4
 """Current portable JSONL schema version for natural battle-start pools."""
 
 LEGACY_BATTLE_START_POOL_FORMAT_VERSION = 1
 PUBLIC_CONTEXT_POOL_FORMAT_VERSION = 3
+STRUCTURED_RESOURCE_OUTCOME_POOL_FORMAT_VERSION = 4
 NATURAL_DISTRIBUTION_KIND = "natural_run"
 NATURAL_SAMPLING_COMPONENT = "natural"
 STRUCTURAL_SAMPLING_COMPONENT = "structural_uniform"
@@ -93,6 +104,12 @@ BATTLE_START_POOL_MIGRATIONS = (
         migrate=lambda document: _migrate_pool_v2_to_v3(document),
         losses=(PUBLIC_CONTEXT_LEGACY_LOSS,),
     ),
+    ArtifactMigration(
+        source_version=PUBLIC_CONTEXT_POOL_FORMAT_VERSION,
+        target_version=STRUCTURED_RESOURCE_OUTCOME_POOL_FORMAT_VERSION,
+        migrate=lambda document: _migrate_pool_v3_to_v4(document),
+        losses=(BATTLE_RESOURCE_OUTCOME_LEGACY_LOSS,),
+    ),
 )
 
 
@@ -114,6 +131,8 @@ class BattleStartCheckpointRecord:
     snapshot_raw: dict[str, Any]
     battle_outcome: str | None = None
     battle_completed: bool = False
+    completed_battle_resource_outcome_status: str = "legacy_unavailable"
+    completed_battle_resource_outcome: dict[str, Any] = field(default_factory=dict)
     distribution_kind: str = NATURAL_DISTRIBUTION_KIND
     checkpoint_information_regime: str = CHECKPOINT_INFORMATION_REGIME
     public_context_status: str = PUBLIC_CONTEXT_LEGACY_UNAVAILABLE
@@ -177,6 +196,7 @@ class BattleStartPoolCoverageReport:
     completed_battle_count: int = 0
     completed_battle_outcome_missing_count: int = 0
     reported_battle_outcome_counts: Counter[str] = field(default_factory=Counter)
+    resource_outcome_status_counts: Counter[str] = field(default_factory=Counter)
     later_act_source_run_count: int = 0
     sampled_draw_count: int = 0
     sampling_component_counts: Counter[str] = field(default_factory=Counter)
@@ -279,11 +299,41 @@ def collect_natural_battle_start_pool(
             if step.next_battle_active and not step.terminal_after_step:
                 return
             record = records[active_record_index]
-            records[active_record_index] = replace(
-                record,
-                battle_outcome=step.next_battle_outcome,
-                battle_completed=True,
-            )
+            if is_authoritative_terminal_battle_result(step.next_battle_outcome):
+                outcome_status, outcome_payload = available_battle_resource_outcome(
+                    build_battle_resource_outcome(
+                        record.snapshot_raw,
+                        step.next_snapshot_raw,
+                        battle_result=step.next_battle_outcome,
+                    )
+                )
+                records[active_record_index] = replace(
+                    record,
+                    battle_outcome=step.next_battle_outcome,
+                    battle_completed=True,
+                    completed_battle_resource_outcome_status=outcome_status,
+                    completed_battle_resource_outcome=outcome_payload,
+                )
+            else:
+                unavailable_reason = (
+                    "missing_authoritative_battle_outcome"
+                    if step.next_battle_outcome is None
+                    else "unrecognized_terminal_battle_outcome"
+                )
+                outcome_status, outcome_payload = unavailable_battle_resource_outcome(
+                    unavailable_reason
+                )
+                records[active_record_index] = replace(
+                    record,
+                    battle_outcome=step.next_battle_outcome,
+                    battle_completed=False,
+                    completed_battle_resource_outcome_status=outcome_status,
+                    completed_battle_resource_outcome=outcome_payload,
+                )
+                problems.append(
+                    f"{source_run_id}: battle {record.source_battle_index} ended "
+                    "without authoritative terminal outcome"
+                )
             active_record_index = None
 
         controlled = execute_controlled_run(
@@ -370,6 +420,7 @@ def build_battle_start_pool_coverage_report(
     encounter_id_counts: Counter[str] = Counter()
     missing_metadata_counts: Counter[str] = Counter()
     outcome_counts: Counter[str] = Counter()
+    resource_outcome_status_counts: Counter[str] = Counter()
     later_act_runs: set[str] = set()
     completed_battle_count = 0
     completed_battle_outcome_missing_count = 0
@@ -400,6 +451,9 @@ def build_battle_start_pool_coverage_report(
                 outcome_counts["(battle-not-completed)"] += 1
         else:
             outcome_counts[record.battle_outcome] += 1
+        resource_outcome_status_counts[
+            record.completed_battle_resource_outcome_status
+        ] += 1
 
     component_counts = Counter(sample.sampling_component for sample in sampled)
     sample_problems = [
@@ -421,6 +475,7 @@ def build_battle_start_pool_coverage_report(
         completed_battle_count=completed_battle_count,
         completed_battle_outcome_missing_count=completed_battle_outcome_missing_count,
         reported_battle_outcome_counts=outcome_counts,
+        resource_outcome_status_counts=resource_outcome_status_counts,
         later_act_source_run_count=len(later_act_runs),
         sampled_draw_count=len(sampled),
         sampling_component_counts=component_counts,
@@ -653,6 +708,12 @@ def record_to_manifest(record: BattleStartCheckpointRecord) -> dict[str, Any]:
         "snapshot_raw": _json_safe_mapping(record.snapshot_raw),
         "battle_outcome": record.battle_outcome,
         "battle_completed": record.battle_completed,
+        "completed_battle_resource_outcome_status": (
+            record.completed_battle_resource_outcome_status
+        ),
+        "completed_battle_resource_outcome": _json_safe_mapping(
+            record.completed_battle_resource_outcome
+        ),
         "distribution_kind": record.distribution_kind,
         "checkpoint_information_regime": record.checkpoint_information_regime,
         "public_context_status": record.public_context_status,
@@ -685,6 +746,15 @@ def record_from_manifest(
     battle_completed = raw.get("battle_completed")
     if not isinstance(battle_completed, bool):
         raise ValueError(f"{label} battle_completed must be a boolean")
+    resource_outcome_status = _resource_outcome_status(
+        raw.get("completed_battle_resource_outcome_status"),
+        f"{label} completed battle resource outcome status",
+    )
+    resource_outcome = _resource_outcome_payload(
+        raw.get("completed_battle_resource_outcome"),
+        status=resource_outcome_status,
+        label=f"{label} completed battle resource outcome",
+    )
     distribution_kind = raw.get("distribution_kind")
     if distribution_kind != NATURAL_DISTRIBUTION_KIND:
         raise ValueError(f"{label} must retain natural_run distribution_kind")
@@ -734,6 +804,8 @@ def record_from_manifest(
         snapshot_raw=_require_mapping(raw.get("snapshot_raw"), f"{label} snapshot raw"),
         battle_outcome=battle_outcome,
         battle_completed=battle_completed,
+        completed_battle_resource_outcome_status=resource_outcome_status,
+        completed_battle_resource_outcome=resource_outcome,
         distribution_kind=distribution_kind,
         checkpoint_information_regime=checkpoint_information_regime,
         public_context_status=public_context_status,
@@ -781,6 +853,14 @@ def natural_battle_start_pool_problems(pool: NaturalBattleStartPool) -> list[str
                 require_candidate_actions=(
                     record.public_context_status == PUBLIC_CONTEXT_AVAILABLE
                 ),
+            )
+        )
+        problems.extend(
+            battle_resource_outcome_problems(
+                record.completed_battle_resource_outcome_status,
+                record.completed_battle_resource_outcome,
+                label=f"record {index} completed battle resource outcome",
+                require_available=record.battle_completed,
             )
         )
         for provenance_name, provenance in (
@@ -834,6 +914,8 @@ def format_battle_start_pool_coverage_report(
     _append_counter(lines, report.encounter_id_counts)
     lines.append("reported battle outcomes:")
     _append_counter(lines, report.reported_battle_outcome_counts)
+    lines.append("structured resource outcome statuses:")
+    _append_counter(lines, report.resource_outcome_status_counts)
     lines.append("missing structural metadata:")
     _append_counter(lines, report.missing_metadata_counts)
     lines.append("problems:")
@@ -894,6 +976,9 @@ def _build_record(
             "source_battle_index": source_battle_index,
         }
     )
+    resource_outcome_status, resource_outcome = unavailable_battle_resource_outcome(
+        "battle_not_completed_during_collection"
+    )
     return BattleStartCheckpointRecord(
         record_index=record_index,
         source_checkpoint_id=source_checkpoint_id,
@@ -909,6 +994,8 @@ def _build_record(
         action_trace=tuple(dict(identity) for identity in action_trace),
         snapshot_observation=tuple(snapshot.observation),
         snapshot_raw=dict(snapshot.raw),
+        completed_battle_resource_outcome_status=resource_outcome_status,
+        completed_battle_resource_outcome=resource_outcome,
         public_context_status=PUBLIC_CONTEXT_AVAILABLE,
         public_run_context=sanitize_public_context_artifact(
             public_run_context,
@@ -1080,6 +1167,32 @@ def _public_context_status(value: Any, label: str) -> str:
     return str(value)
 
 
+def _resource_outcome_status(value: Any, label: str) -> str:
+    from sts_combat_rl.sim.resource_outcome import BATTLE_RESOURCE_OUTCOME_STATUSES
+
+    if value not in BATTLE_RESOURCE_OUTCOME_STATUSES:
+        raise ValueError(f"{label} has invalid value {value!r}")
+    return str(value)
+
+
+def _resource_outcome_payload(
+    value: Any,
+    *,
+    status: str,
+    label: str,
+) -> dict[str, Any]:
+    payload = _require_mapping(value, label)
+    problems = battle_resource_outcome_problems(
+        status,
+        payload,
+        label=label,
+        require_available=status == BATTLE_RESOURCE_OUTCOME_AVAILABLE,
+    )
+    if problems:
+        raise ValueError("; ".join(problems))
+    return payload
+
+
 def _public_run_context(
     value: Any,
     *,
@@ -1159,7 +1272,7 @@ def _migrate_pool_v1_to_v2(document: ArtifactDocument) -> ArtifactDocument:
 
 def _migrate_pool_v2_to_v3(document: ArtifactDocument) -> ArtifactDocument:
     metadata = dict(document.metadata)
-    metadata["format_version"] = BATTLE_START_POOL_FORMAT_VERSION
+    metadata["format_version"] = PUBLIC_CONTEXT_POOL_FORMAT_VERSION
     migrated_records: list[dict[str, Any]] = []
     for source in document.records:
         raw = dict(source)
@@ -1167,6 +1280,19 @@ def _migrate_pool_v2_to_v3(document: ArtifactDocument) -> ArtifactDocument:
         if status in (None, "unavailable"):
             raw["public_context_status"] = PUBLIC_CONTEXT_LEGACY_UNAVAILABLE
         raw["public_run_context"] = {}
+        migrated_records.append(raw)
+    return ArtifactDocument(metadata=metadata, records=migrated_records)
+
+
+def _migrate_pool_v3_to_v4(document: ArtifactDocument) -> ArtifactDocument:
+    metadata = dict(document.metadata)
+    metadata["format_version"] = BATTLE_START_POOL_FORMAT_VERSION
+    status, payload = legacy_unavailable_battle_resource_outcome()
+    migrated_records: list[dict[str, Any]] = []
+    for source in document.records:
+        raw = dict(source)
+        raw["completed_battle_resource_outcome_status"] = status
+        raw["completed_battle_resource_outcome"] = payload
         migrated_records.append(raw)
     return ArtifactDocument(metadata=metadata, records=migrated_records)
 

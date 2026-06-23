@@ -47,7 +47,7 @@ def test_trainer_input_v1_fixture_migrates_to_current_schema() -> None:
     assert (
         dataset.migration_report.target_version == TRAINER_INPUT_DATASET_FORMAT_VERSION
     )
-    assert dataset.migration_report.applied_versions == (2, 3, 4)
+    assert dataset.migration_report.applied_versions == (2, 3, 4, 5)
     assert "v1 omitted per-decision controller provenance" in (
         dataset.migration_report.losses
     )
@@ -65,7 +65,13 @@ def test_trainer_input_v1_fixture_migrates_to_current_schema() -> None:
     )
     assert record.public_context_status == "legacy_unavailable"
     assert record.public_run_context == {}
+    assert record.structured_battle_outcome_status == "legacy_unavailable"
+    assert record.structured_battle_outcome == {}
     assert any("public run context" in item for item in dataset.migration_report.losses)
+    assert any(
+        "structured battle resource outcome" in item
+        for item in dataset.migration_report.losses
+    )
     assert any("controller provenance is missing" in item for item in dataset.problems)
 
 

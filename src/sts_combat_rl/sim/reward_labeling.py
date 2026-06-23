@@ -43,6 +43,8 @@ class BattleDecisionRewardLabel:
     return_to_go: float
     reward_contributions: dict[str, float] = field(default_factory=dict)
     raw_reward_components: dict[str, float | None] = field(default_factory=dict)
+    structured_battle_outcome_status: str = "legacy_unavailable"
+    structured_battle_outcome: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -159,6 +161,9 @@ def format_reward_labeled_battle_decision_batch_report(
     label_end_reasons = Counter(
         label.segment_end_reason for label in batch.reward_labels
     )
+    outcome_statuses = Counter(
+        label.structured_battle_outcome_status for label in batch.reward_labels
+    )
     segment_decision_counts = Counter(
         str(label.segment_decision_count)
         for label in batch.reward_labels
@@ -191,6 +196,7 @@ def format_reward_labeled_battle_decision_batch_report(
     _append_counter(lines, "screen states", screen_states)
     _append_counter(lines, "chosen action kinds", chosen_action_kinds)
     _append_counter(lines, "label end reasons", label_end_reasons)
+    _append_counter(lines, "structured outcome statuses", outcome_statuses)
     _append_counter(lines, "segment decision counts", segment_decision_counts)
 
     if batch.reward_design_report is not None:
@@ -283,6 +289,8 @@ def _reward_label(
         return_to_go=score.reward,
         reward_contributions=score.contributions,
         raw_reward_components=score.raw_components,
+        structured_battle_outcome_status=score.structured_battle_outcome_status,
+        structured_battle_outcome=dict(score.structured_battle_outcome),
     )
 
 

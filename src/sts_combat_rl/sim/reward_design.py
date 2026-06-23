@@ -90,6 +90,8 @@ class BattleRewardSegmentScore:
     reward: float
     contributions: dict[str, float] = field(default_factory=dict)
     raw_components: dict[str, float | None] = field(default_factory=dict)
+    structured_battle_outcome_status: str = "legacy_unavailable"
+    structured_battle_outcome: dict[str, Any] = field(default_factory=dict)
     action_kind_counts: Counter[str] = field(default_factory=Counter)
 
 
@@ -266,6 +268,8 @@ def _score_segment(
         reward=reward,
         contributions=contributions,
         raw_components=raw_components,
+        structured_battle_outcome_status=segment.structured_battle_outcome_status,
+        structured_battle_outcome=dict(segment.structured_battle_outcome),
         action_kind_counts=segment.action_kind_counts,
     )
 

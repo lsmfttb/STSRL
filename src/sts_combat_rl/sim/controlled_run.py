@@ -131,6 +131,8 @@ class ControlledRunStep:
     feature_schema_id: str = "public-tactical-v2"
     public_run_context: dict[str, Any] = field(default_factory=dict)
     public_history_entry: dict[str, Any] = field(default_factory=dict)
+    snapshot_raw: dict[str, Any] = field(default_factory=dict)
+    next_snapshot_raw: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -340,6 +342,8 @@ def execute_controlled_run(
             feature_schema_id=context.tactical_feature_schema_id,
             public_run_context=dict(context.public_run_context),
             public_history_entry=history_entry,
+            snapshot_raw=dict(snapshot.raw),
+            next_snapshot_raw=dict(next_raw),
             floor=_first_number(snapshot.raw, "floor_num", "floor"),
             player_hp=_player_hp(snapshot.raw),
             player_max_hp=_player_max_hp(snapshot.raw),

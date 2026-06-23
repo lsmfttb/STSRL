@@ -33,6 +33,10 @@ from sts_combat_rl.commands.public_projection import (
 from sts_combat_rl.commands.public_context import (
     run_public_context_audit,
 )
+from sts_combat_rl.commands.resource_outcome import (
+    format_battle_resource_outcome_audit_report,
+    run_battle_resource_outcome_audit,
+)
 from sts_combat_rl.comm.protocol import format_command, format_ready_signal
 from sts_combat_rl.comm.stdio_client import StdioClient
 from sts_combat_rl.logging_utils import DEFAULT_LOG_FILE, configure_logging
@@ -313,6 +317,14 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Collect battle-agent rollouts and run the full pre-trainer "
             "readiness checklist to stderr without training."
+        ),
+    )
+    input_group.add_argument(
+        "--lightspeed-battle-resource-outcome-audit",
+        action="store_true",
+        help=(
+            "Collect a bounded natural A20 battle-start pool and audit "
+            "structured battle-end public resource outcomes to stderr."
         ),
     )
     input_group.add_argument(
@@ -691,6 +703,7 @@ def main(argv: list[str] | None = None) -> int:
         or args.lightspeed_battle_model_input_smoke
         or args.lightspeed_battle_model_score_smoke
         or args.lightspeed_battle_training_readiness
+        or args.lightspeed_battle_resource_outcome_audit
         or args.lightspeed_non_combat_calibration
         or args.lightspeed_public_projection_capability_audit
         or args.lightspeed_public_context_audit
@@ -755,6 +768,29 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 print(
                     format_public_context_artifact_audit_report(report),
+                    file=sys.stderr,
+                )
+                if not report.passed:
+                    return 1
+            elif args.lightspeed_battle_resource_outcome_audit:
+                report = run_battle_resource_outcome_audit(
+                    adapter,
+                    battle_policy=_build_online_sim_policy(
+                        args.sim_policy,
+                        args.sim_seed,
+                    ),
+                    non_combat_policy=_build_non_combat_driver_policy(
+                        args.sim_non_combat_policy,
+                        args.sim_seed,
+                    ),
+                    seeds=[
+                        args.sim_seed + offset for offset in range(args.sim_episodes)
+                    ],
+                    max_steps=args.sim_steps,
+                    action_space=action_space,
+                )
+                print(
+                    format_battle_resource_outcome_audit_report(report),
                     file=sys.stderr,
                 )
                 if not report.passed:

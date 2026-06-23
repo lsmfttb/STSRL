@@ -43,12 +43,20 @@ from sts_combat_rl.sim.reward_labeling import (
     BattleDecisionRewardLabel,
     RewardLabeledBattleDecisionBatch,
 )
+from sts_combat_rl.sim.resource_outcome import (
+    BATTLE_RESOURCE_OUTCOME_AVAILABLE,
+    BATTLE_RESOURCE_OUTCOME_LEGACY_LOSS,
+    BATTLE_RESOURCE_OUTCOME_SCHEMA_ID,
+    BATTLE_RESOURCE_OUTCOME_SCHEMA_VERSION,
+    battle_resource_outcome_problems,
+    legacy_unavailable_battle_resource_outcome,
+)
 from sts_combat_rl.sim.trainer_input_contract import (
     build_trainer_input_contract_report,
 )
 
 
-TRAINER_INPUT_DATASET_FORMAT_VERSION = 4
+TRAINER_INPUT_DATASET_FORMAT_VERSION = 5
 TRAINER_INPUT_DATASET_MIGRATIONS = (
     ArtifactMigration(
         source_version=1,
@@ -75,6 +83,12 @@ TRAINER_INPUT_DATASET_MIGRATIONS = (
         migrate=lambda document: _migrate_trainer_input_v3_to_v4(document),
         losses=(PUBLIC_CONTEXT_LEGACY_LOSS,),
     ),
+    ArtifactMigration(
+        source_version=4,
+        target_version=5,
+        migrate=lambda document: _migrate_trainer_input_v4_to_v5(document),
+        losses=(BATTLE_RESOURCE_OUTCOME_LEGACY_LOSS,),
+    ),
 )
 
 
@@ -94,6 +108,8 @@ class TrainerInputRecord(DecisionRecord):
     return_to_go: float
     reward_contributions: dict[str, float] = field(default_factory=dict)
     raw_reward_components: dict[str, float | None] = field(default_factory=dict)
+    structured_battle_outcome_status: str = "legacy_unavailable"
+    structured_battle_outcome: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -110,6 +126,10 @@ class TrainerInputDataset:
     tactical_feature_schema_id: str = TACTICAL_FEATURE_SCHEMA_ID
     tactical_feature_schema_version: int = TACTICAL_FEATURE_SCHEMA_VERSION
     identity_vocabulary_version: str = IDENTITY_VOCABULARY_VERSION
+    structured_battle_outcome_schema_id: str = BATTLE_RESOURCE_OUTCOME_SCHEMA_ID
+    structured_battle_outcome_schema_version: int = (
+        BATTLE_RESOURCE_OUTCOME_SCHEMA_VERSION
+    )
     generation_metadata: dict[str, Any] = field(default_factory=dict)
     records: list[TrainerInputRecord] = field(default_factory=list)
     problems: list[str] = field(default_factory=list)
@@ -144,6 +164,7 @@ class TrainerInputDatasetSmokeReport:
     screen_state_counts: Counter[str] = field(default_factory=Counter)
     chosen_action_kind_counts: Counter[str] = field(default_factory=Counter)
     label_end_reason_counts: Counter[str] = field(default_factory=Counter)
+    structured_outcome_status_counts: Counter[str] = field(default_factory=Counter)
     problems: list[str] = field(default_factory=list)
 
 
@@ -172,6 +193,8 @@ def build_trainer_input_dataset(
         tactical_feature_schema_id=TACTICAL_FEATURE_SCHEMA_ID,
         tactical_feature_schema_version=TACTICAL_FEATURE_SCHEMA_VERSION,
         identity_vocabulary_version=IDENTITY_VOCABULARY_VERSION,
+        structured_battle_outcome_schema_id=BATTLE_RESOURCE_OUTCOME_SCHEMA_ID,
+        structured_battle_outcome_schema_version=BATTLE_RESOURCE_OUTCOME_SCHEMA_VERSION,
         generation_metadata=_json_safe_dict(generation_metadata or {}),
         records=records,
         problems=list(contract.problems),
@@ -230,6 +253,9 @@ def build_trainer_input_dataset_smoke_report(
         label_end_reason_counts=Counter(
             record.segment_end_reason for record in dataset.records
         ),
+        structured_outcome_status_counts=Counter(
+            record.structured_battle_outcome_status for record in dataset.records
+        ),
         problems=problems,
     )
 
@@ -260,6 +286,11 @@ def format_trainer_input_dataset_smoke_report(
     _append_counter(lines, "screen states", report.screen_state_counts)
     _append_counter(lines, "chosen action kinds", report.chosen_action_kind_counts)
     _append_counter(lines, "label end reasons", report.label_end_reason_counts)
+    _append_counter(
+        lines,
+        "structured outcome statuses",
+        report.structured_outcome_status_counts,
+    )
     lines.append("migration losses:")
     if report.migration_losses:
         lines.extend(f"  {loss}" for loss in report.migration_losses)
@@ -383,6 +414,18 @@ def load_trainer_input_dataset_jsonl(stream: TextIO) -> TrainerInputDataset:
         identity_vocabulary_version=str(
             metadata.get("identity_vocabulary_version", "")
         ),
+        structured_battle_outcome_schema_id=str(
+            metadata.get(
+                "structured_battle_outcome_schema_id",
+                BATTLE_RESOURCE_OUTCOME_SCHEMA_ID,
+            )
+        ),
+        structured_battle_outcome_schema_version=_int(
+            metadata.get(
+                "structured_battle_outcome_schema_version",
+                BATTLE_RESOURCE_OUTCOME_SCHEMA_VERSION,
+            )
+        ),
         generation_metadata=_dict(metadata.get("generation_metadata")),
         records=records,
         problems=problems,
@@ -444,6 +487,8 @@ def _record_from_pair(
             str(name): None if value is None else float(value)
             for name, value in label.raw_reward_components.items()
         },
+        structured_battle_outcome_status=label.structured_battle_outcome_status,
+        structured_battle_outcome=_json_safe_dict(label.structured_battle_outcome),
     )
 
 
@@ -461,6 +506,12 @@ def _metadata_row(dataset: TrainerInputDataset) -> dict[str, Any]:
             "tactical_feature_schema_id": dataset.tactical_feature_schema_id,
             "tactical_feature_schema_version": dataset.tactical_feature_schema_version,
             "identity_vocabulary_version": dataset.identity_vocabulary_version,
+            "structured_battle_outcome_schema_id": (
+                dataset.structured_battle_outcome_schema_id
+            ),
+            "structured_battle_outcome_schema_version": (
+                dataset.structured_battle_outcome_schema_version
+            ),
             "generation_metadata": dataset.generation_metadata,
             "record_count": len(dataset.records),
             "migration_report": dataset.migration_report.to_dict(),
@@ -499,6 +550,22 @@ def _require_current_dataset_schema(dataset: TrainerInputDataset) -> None:
             f"{IDENTITY_VOCABULARY_VERSION!r}, got "
             f"{dataset.identity_vocabulary_version!r}"
         )
+    if dataset.structured_battle_outcome_schema_id != BATTLE_RESOURCE_OUTCOME_SCHEMA_ID:
+        raise ValueError(
+            "trainer input writer only emits structured battle outcome schema "
+            f"{BATTLE_RESOURCE_OUTCOME_SCHEMA_ID!r}, got "
+            f"{dataset.structured_battle_outcome_schema_id!r}"
+        )
+    if (
+        dataset.structured_battle_outcome_schema_version
+        != BATTLE_RESOURCE_OUTCOME_SCHEMA_VERSION
+    ):
+        raise ValueError(
+            "trainer input writer only emits structured battle outcome schema "
+            "version "
+            f"{BATTLE_RESOURCE_OUTCOME_SCHEMA_VERSION}, got "
+            f"{dataset.structured_battle_outcome_schema_version}"
+        )
     for record in dataset.records:
         if record.record_schema_version != DECISION_RECORD_SCHEMA_VERSION:
             raise ValueError(
@@ -536,6 +603,20 @@ def _require_current_dataset_schema(dataset: TrainerInputDataset) -> None:
             raise ValueError(
                 "trainer input writer requires complete current tactical inputs: "
                 + "; ".join(record_problems)
+            )
+        outcome_problems = battle_resource_outcome_problems(
+            record.structured_battle_outcome_status,
+            record.structured_battle_outcome,
+            label=f"record {record.example_index} structured battle outcome",
+            require_available=(
+                record.structured_battle_outcome_status
+                == BATTLE_RESOURCE_OUTCOME_AVAILABLE
+            ),
+        )
+        if outcome_problems:
+            raise ValueError(
+                "trainer input writer requires valid structured battle outcomes: "
+                + "; ".join(outcome_problems)
             )
 
 
@@ -596,7 +677,7 @@ def _migrate_trainer_input_v3_to_v4(
     """Add explicit public-context legacy-loss markers to old rows."""
 
     metadata = dict(document.metadata)
-    metadata["format_version"] = TRAINER_INPUT_DATASET_FORMAT_VERSION
+    metadata["format_version"] = 4
     metadata["decision_record_schema_version"] = DECISION_RECORD_SCHEMA_VERSION
     migrated_records: list[dict[str, Any]] = []
     for raw_record in document.records:
@@ -604,6 +685,27 @@ def _migrate_trainer_input_v3_to_v4(
         record["record_schema_version"] = DECISION_RECORD_SCHEMA_VERSION
         record["public_context_status"] = PUBLIC_CONTEXT_LEGACY_UNAVAILABLE
         record["public_run_context"] = {}
+        migrated_records.append(record)
+    return ArtifactDocument(metadata=metadata, records=migrated_records)
+
+
+def _migrate_trainer_input_v4_to_v5(
+    document: ArtifactDocument,
+) -> ArtifactDocument:
+    """Add explicit structured battle outcome legacy-loss markers."""
+
+    metadata = dict(document.metadata)
+    metadata["format_version"] = TRAINER_INPUT_DATASET_FORMAT_VERSION
+    metadata["structured_battle_outcome_schema_id"] = BATTLE_RESOURCE_OUTCOME_SCHEMA_ID
+    metadata["structured_battle_outcome_schema_version"] = (
+        BATTLE_RESOURCE_OUTCOME_SCHEMA_VERSION
+    )
+    status, payload = legacy_unavailable_battle_resource_outcome()
+    migrated_records: list[dict[str, Any]] = []
+    for raw_record in document.records:
+        record = dict(raw_record)
+        record["structured_battle_outcome_status"] = status
+        record["structured_battle_outcome"] = payload
         migrated_records.append(record)
     return ArtifactDocument(metadata=metadata, records=migrated_records)
 
@@ -656,6 +758,8 @@ def _record_to_dict(record: TrainerInputRecord) -> dict[str, Any]:
         "return_to_go": record.return_to_go,
         "reward_contributions": record.reward_contributions,
         "raw_reward_components": record.raw_reward_components,
+        "structured_battle_outcome_status": record.structured_battle_outcome_status,
+        "structured_battle_outcome": record.structured_battle_outcome,
     }
 
 
@@ -712,6 +816,13 @@ def _record_from_dict(raw: dict[str, Any]) -> TrainerInputRecord:
             str(name): None if value is None else _float(value)
             for name, value in _dict(raw.get("raw_reward_components")).items()
         },
+        structured_battle_outcome_status=str(
+            raw.get(
+                "structured_battle_outcome_status",
+                "legacy_unavailable",
+            )
+        ),
+        structured_battle_outcome=_dict(raw.get("structured_battle_outcome")),
     )
 
 
@@ -740,6 +851,19 @@ def _dataset_shape_problems(dataset: TrainerInputDataset) -> list[str]:
         problems.append(
             "unsupported identity vocabulary version: "
             f"{dataset.identity_vocabulary_version!r}"
+        )
+    if dataset.structured_battle_outcome_schema_id != BATTLE_RESOURCE_OUTCOME_SCHEMA_ID:
+        problems.append(
+            "unsupported structured battle outcome schema: "
+            f"{dataset.structured_battle_outcome_schema_id!r}"
+        )
+    if (
+        dataset.structured_battle_outcome_schema_version
+        != BATTLE_RESOURCE_OUTCOME_SCHEMA_VERSION
+    ):
+        problems.append(
+            "unsupported structured battle outcome schema version: "
+            f"{dataset.structured_battle_outcome_schema_version}"
         )
     for record in dataset.records:
         if record.record_schema_version != dataset.decision_record_schema_version:
@@ -793,6 +917,17 @@ def _dataset_shape_problems(dataset: TrainerInputDataset) -> list[str]:
                 problems.append(
                     f"record {record.example_index}: {label} is not finite: {value!r}"
                 )
+        problems.extend(
+            battle_resource_outcome_problems(
+                record.structured_battle_outcome_status,
+                record.structured_battle_outcome,
+                label=f"record {record.example_index} structured battle outcome",
+                require_available=(
+                    record.structured_battle_outcome_status
+                    == BATTLE_RESOURCE_OUTCOME_AVAILABLE
+                ),
+            )
+        )
     return problems
 
 
