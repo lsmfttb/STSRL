@@ -18,6 +18,9 @@ dev = [
   "pytest>=8.0",
   "ruff>=0.5"
 ]
+train = [
+  "torch>=2.0"
+]
 
 [project.scripts]
 sts-combat-probe = "sts_combat_rl.cli:main"
