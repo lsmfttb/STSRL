@@ -286,12 +286,14 @@ without relying on full-run average floor.
 
 ### Phase D: Coverage And Stratified Search Data
 
-Status: T007 is cancelled. T014 completed the native capability boundary; T015
-is `READY` for sanitized context/history and T016 then adds persisted
-replay/audit. See the
-[T007 review handoff](t007_review_handoff_2026-06-22.md). T008 remains blocked
-by T016, and broad coverage follows fixed evaluation rather than being inferred
-from natural-run floor statistics.
+Status: T007 is cancelled. T014 completed the native capability boundary, T015
+completed sanitized context/history, and T016 completed persisted
+context/replay/audit. See the
+[T007 review handoff](t007_review_handoff_2026-06-22.md). T017 is the next
+published maintenance task so T006, T008, and T012 add future native simulator
+surface on a stable source-integration path rather than extending the old local
+patch stack. Broad coverage follows fixed evaluation rather than being
+inferred from natural-run floor statistics.
 
 Work:
 

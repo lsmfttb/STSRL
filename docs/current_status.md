@@ -139,6 +139,8 @@ unmerged legacy work:
 - native Oracle-like search integration and search-teacher datasets;
 - PyTorch policy/value training;
 - interactive live-game or A20 performance validation for any controller;
+- stable external `sts_lightspeed` source integration replacing the local
+  ordered patch-stack workflow;
 - structured persistent resource outcomes;
 - constructed A20 battle-start supplements;
 - normal-information belief search.
@@ -153,24 +155,28 @@ tasks in dependency order are:
 
 1. T005, fixed structural battle evaluation, is complete. It provides the
    comparison surface required before search promotion.
-2. T006, Oracle search teacher pipeline, is `READY`. It is confined to the
-   explicitly Oracle-like simulator regime and must compare named budgets on
-   immutable T005 cohorts.
-3. T007 is `CANCELLED`. PR #9 remains closed and is not a branch base. Its
+2. T017, stable `sts_lightspeed` source integration, is `READY`. It replaces
+   the day-to-day local patch-stack workflow with a pinned external source
+   integration before more native simulator surface is added.
+3. T006, Oracle search teacher pipeline, is blocked by T017. It is confined to
+   the explicitly Oracle-like simulator regime and must compare named budgets
+   on immutable T005 cohorts after the simulator source integration is stable.
+4. T007 is `CANCELLED`. PR #9 remains closed and is not a branch base. Its
    former cross-cutting scope is split into T014--T016; see
    [`t007_review_handoff_2026-06-22.md`](t007_review_handoff_2026-06-22.md).
-4. T014, native public projection capability, is complete. It provides only
+5. T014, native public projection capability, is complete. It provides only
    the reproducible raw native capability matrix, action parity, and checkpoint
    evidence; it does not provide sanitized controller context.
-5. T015, public run context and controlled history, is complete. It provides
+6. T015, public run context and controlled history, is complete. It provides
    the sanitized in-memory public context/history contract that T016 now
    persists through current artifacts.
-6. T016, public-context artifacts, replay, and audit, is complete. It extends
+7. T016, public-context artifacts, replay, and audit, is complete. It extends
    the T015 public-context contract through current persisted artifacts,
    portable replay comparison, and the WSL context audit.
-7. T008, A20 constructed battle supplements, and T012, structured battle
-   resource outcomes, are `READY`. T009 remains blocked until its remaining
-   search/data prerequisites, including T006 and T012, are complete.
+8. T008, A20 constructed battle supplements, and T012, structured battle
+   resource outcomes, are blocked by T017 before adding more native simulator
+   surface. T009 remains blocked until its remaining search/data prerequisites,
+   including T006 and T012, are complete.
 
 Later tasks are dependency-ordered in the task index. A task is not ready for a
 new branch until its status is `READY`.

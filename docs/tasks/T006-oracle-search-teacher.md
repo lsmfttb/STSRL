@@ -1,6 +1,6 @@
 # T006: Oracle Search Teacher Pipeline
 
-Status: `READY`.
+Status: `BLOCKED` by T017.
 
 ## Objective
 
@@ -22,23 +22,26 @@ versioned fixed cohorts and per-battle reports containing controller
 provenance, information regime, simulator steps, wall-clock time, and an
 explicit controller-compute telemetry field.
 
-The canonical WSL patch stack based on external `sts_lightspeed` commit
-`7476a81` builds cleanly. It contains native search sources but does not yet
-expose root statistics or a repository `OnlineController` for them. Current
-portable records have `public_context_status="unavailable"`; teacher rows must
-preserve that explicit limitation rather than implying complete public history.
+The current WSL `sts_lightspeed` patch stack based on external commit
+`7476a81` builds cleanly, but T017 will replace it with a pinned external
+source integration before this task adds another native surface. The existing
+native code contains search sources but does not yet expose root statistics or
+a repository `OnlineController` for them. Current portable records preserve
+explicit public-context status; teacher rows must retain that status rather
+than implying complete public history.
 
 ## Dependencies
 
 - T003, T004, and T005 are complete.
+- T017 must merge before implementation starts.
 
 ## Scope
 
-- Add the smallest focused `sts_lightspeed` patch surface needed to invoke the
-  native `BattleScumSearcher2` from a restored battle and obtain one root row
-  for every legal root action. Generate the patch from the canonical applied
-  stack; do not rewrite existing wrapper, CMake, submodule, checkpoint, or
-  action definitions.
+- After T017 merges, add the smallest focused `sts_lightspeed` source surface
+  needed to invoke the native `BattleScumSearcher2` from a restored battle and
+  obtain one root row for every legal root action. Extend the T017-managed
+  pinned source integration and manifest; do not append another ad hoc patch to
+  the retired ordered patch-stack workflow.
 - Implement a versioned `OracleSearchController` that satisfies
   `OnlineController`, is explicitly allowed to copy/use simulator state, and
   returns a currently eligible legal-action index by occurrence-disambiguated
@@ -85,8 +88,8 @@ preserve that explicit limitation rather than implying complete public history.
 ## Design Constraints
 
 - The final game is the mechanism authority. `sts_lightspeed` is the current
-  large-scale simulation substrate; every result and patch report must name its
-  external commit and patch-stack identity.
+  large-scale simulation substrate; every result and native-source report must
+  name its external source identity.
 - All controller, dataset, and evaluation outputs use exactly
   `full_simulator_state_oracle_like`. No normal-public artifact may silently
   consume native hidden state.
@@ -105,8 +108,8 @@ preserve that explicit limitation rather than implying complete public history.
 
 ## Deliverables
 
-- Focused reproducible native-search patch and adapter exposure with a
-  canonical patch-stack build check.
+- Focused reproducible native-search source changes and adapter exposure with
+  the T017-managed source verification check.
 - `OracleSearchController`, root-statistics mapping/validation, provenance,
   telemetry, and unit tests.
 - Versioned Oracle-teacher artifact, reader/writer/migration path, collector,
@@ -131,7 +134,8 @@ preserve that explicit limitation rather than implying complete public history.
   same immutable cohort and cannot be confused in a report.
 - Reports include simulations, simulator steps, wall-clock time, root rows,
   controller telemetry, source checkpoint provenance, and every failure.
-- A clean canonical patch stack builds and the required local/WSL checks pass.
+- The T017-managed source integration builds cleanly and the required
+  local/WSL checks pass.
 
 ## Required Verification
 
@@ -139,7 +143,7 @@ Run the standard local gates from `tasks/README.md`, focused root-mapping,
 artifact, controller, and cohort-loading tests, and:
 
 ```powershell
-wsl.exe -d Ubuntu -e bash -lc "cd /mnt/d/DeadlycatCoding/STSRL && bash scripts/verify_lightspeed_patch_stack.sh /home/lsmft/stsrl-spikes/sts_lightspeed"
+wsl.exe -d Ubuntu -e bash -lc "cd /mnt/d/DeadlycatCoding/STSRL && bash scripts/verify_lightspeed_source.sh /home/lsmft/stsrl-spikes/sts_lightspeed"
 wsl.exe -d Ubuntu -e bash -lc "cd /mnt/d/DeadlycatCoding/STSRL && PYTHONPATH=/home/lsmft/stsrl-spikes/sts_lightspeed/build-py:/mnt/d/DeadlycatCoding/STSRL/src python3 -m sts_combat_rl.cli --lightspeed-oracle-search-teacher /tmp/t006-pool.jsonl --oracle-teacher-output /tmp/t006-teacher.jsonl --oracle-search-simulations 20 --sim-ascension 20 --sim-steps 200 --log-file -"
 wsl.exe -d Ubuntu -e bash -lc "cd /mnt/d/DeadlycatCoding/STSRL && PYTHONPATH=/home/lsmft/stsrl-spikes/sts_lightspeed/build-py:/mnt/d/DeadlycatCoding/STSRL/src python3 -m sts_combat_rl.cli --lightspeed-oracle-fixed-evaluation /tmp/t006-cohort.jsonl --oracle-search-simulations 20 --oracle-root-selection highest_mean --sim-ascension 20 --sim-steps 200 --log-file -"
 ```
@@ -148,7 +152,7 @@ The PR must first create `/tmp/t006-pool.jsonl` and freeze
 `/tmp/t006-cohort.jsonl` using the current T004/T005 workflows. The new
 commands must fail nonzero on invalid artifacts, a cohort restore mismatch,
 root-action ambiguity, illegal selection, truncation, or evaluation error.
-The report must name the exact external simulator commit and patch identity.
+The report must name the exact external simulator source identity.
 
 ## Legacy Reference
 
@@ -172,7 +176,7 @@ be cherry-picked wholesale.
 
 ## PR Report
 
-Include task ID, patch-stack/external simulator identity, native API inventory,
+Include task ID, external simulator source identity, native API inventory,
 teacher artifact schema and migration behavior, source pool/cohort identities,
 all controller and information-regime provenance, both root-selection results,
 root-mapping/telemetry failures, exact local/WSL results, legacy files

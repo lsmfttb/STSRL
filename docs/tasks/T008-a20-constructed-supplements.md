@@ -1,6 +1,6 @@
 # T008: A20 Constructed Battle Supplements
 
-Status: `READY`.
+Status: `BLOCKED` by T017.
 
 ## Objective
 
@@ -18,6 +18,8 @@ continuation state.
 ## Dependencies
 
 - T003, T004, and T016 are complete.
+- T017 must merge before implementation starts because this task adds native
+  battle-start transform surface.
 
 ## Scope
 
