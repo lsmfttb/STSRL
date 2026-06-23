@@ -7,9 +7,9 @@
   },
   "integration": {
     "repository_url": "https://github.com/lsmfttb/sts_lightspeed.git",
-    "branch": "stsrl/t018-terminal-resource-identity-v1",
-    "ref": "refs/heads/stsrl/t018-terminal-resource-identity-v1",
-    "commit": "c291d5cbcc4dae660ada925085ca62c6e3d85039"
+    "branch": "stsrl/t008-constructed-battle-start-v1",
+    "ref": "refs/heads/stsrl/t008-constructed-battle-start-v1",
+    "commit": "e9f0e7f104ea2bd908ba5b8f6528c240e6c92ad9"
   },
   "python_module": {
     "name": "slaythespire",
@@ -154,6 +154,17 @@
         "StepSimulator.public_projection.persistent_resources.relics",
         "StepSimulator.public_projection.persistent_resources.potion_identities",
         "StepSimulator.public_projection.persistent_resources.keys"
+      ]
+    },
+    {
+      "id": "constructed_battle_start_transforms",
+      "description": "Native same-ascension battle-start rebuild surface for T008 constructed supplements, including bounded HP additions, simulator-sampled potion additions, and legal ordinary/elite encounter alternatives.",
+      "task_provenance": [
+        "T008"
+      ],
+      "required_python_api": [
+        "StepSimulator.legal_battle_start_encounters",
+        "StepSimulator.rebuild_battle_start"
       ]
     }
   ],

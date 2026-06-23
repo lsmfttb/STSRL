@@ -160,6 +160,8 @@ for method_name in (
     "restore_checkpoint",
     "public_projection",
     "battle_search",
+    "legal_battle_start_encounters",
+    "rebuild_battle_start",
 ):
     if not hasattr(sim, method_name):
         fail(f"StepSimulator.{method_name} is missing")
@@ -306,6 +308,22 @@ for _ in range(200):
 else:
     fail("could not reach a battle to verify StepSimulator.battle_search")
 
+encounter_candidates = sim.legal_battle_start_encounters()
+if not isinstance(encounter_candidates, list) or not encounter_candidates:
+    fail("StepSimulator.legal_battle_start_encounters() must return candidates")
+first_candidate = encounter_candidates[0]
+if not isinstance(first_candidate, dict):
+    fail("battle-start encounter candidates must be objects")
+for key in ("id", "encounter_id"):
+    if key not in first_candidate:
+        fail(f"battle-start encounter candidate missing required field {key!r}")
+
+rebuilt = sim.rebuild_battle_start(0, False, -1)
+if not isinstance(rebuilt, dict):
+    fail("StepSimulator.rebuild_battle_start() must return a dict snapshot")
+if rebuilt.get("screen_state") != "BATTLE" or not rebuilt.get("battle_active"):
+    fail("StepSimulator.rebuild_battle_start() must preserve an active battle")
+
 search = sim.battle_search(3, False)
 if not isinstance(search, dict):
     fail("StepSimulator.battle_search() must return a dict")
@@ -349,6 +367,7 @@ observed_capabilities = {
     "native_public_projection",
     "native_battle_search_root",
     "native_terminal_resource_identity",
+    "constructed_battle_start_transforms",
 }
 missing = sorted(observed_capabilities.difference(expected_capabilities))
 if missing:

@@ -15,6 +15,10 @@ from sts_combat_rl.commands.checkpoint_pool import (
     verify_checkpoint_pool_file,
     write_checkpoint_pool,
 )
+from sts_combat_rl.commands.constructed_battle_start import (
+    run_constructed_battle_start_audit,
+    write_constructed_battle_start_artifact,
+)
 from sts_combat_rl.commands.fixed_evaluation import (
     run_fixed_evaluation_from_pool_path,
     write_fixed_cohort,
@@ -74,6 +78,10 @@ from sts_combat_rl.sim.checkpoint_verification import (
 from sts_combat_rl.sim.battle_start_pool import (
     format_battle_start_pool_coverage_report,
     format_battle_start_pool_restore_report,
+)
+from sts_combat_rl.sim.constructed_battle_start import (
+    ConstructedBattleStartPolicy,
+    format_constructed_battle_start_audit_report,
 )
 from sts_combat_rl.sim.fixed_evaluation_set import (
     format_cohort_coverage_report,
@@ -328,6 +336,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     input_group.add_argument(
+        "--lightspeed-constructed-battle-start-audit",
+        action="store_true",
+        help=(
+            "Collect a bounded natural A20 battle-start pool, audit seeded "
+            "constructed supplement proposals, and report transform counts, "
+            "caps, and unsupported native operations to stderr."
+        ),
+    )
+    input_group.add_argument(
         "--lightspeed-battle-checkpoint-verify",
         action="store_true",
         help=(
@@ -562,6 +579,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="Fraction of reported pool draws selected by uniform structural stratum.",
     )
     parser.add_argument(
+        "--constructed-start-output",
+        type=Path,
+        metavar="PATH",
+        help=(
+            "Write --lightspeed-constructed-battle-start-audit JSONL artifact to PATH."
+        ),
+    )
+    parser.add_argument(
+        "--constructed-start-pool",
+        type=Path,
+        metavar="PATH",
+        help=(
+            "Load an existing portable natural battle-start pool for "
+            "--lightspeed-constructed-battle-start-audit instead of collecting "
+            "a fresh bounded pool."
+        ),
+    )
+    parser.add_argument(
         "--fixed-evaluation-cohort",
         type=Path,
         metavar="PATH",
@@ -704,6 +739,7 @@ def main(argv: list[str] | None = None) -> int:
         or args.lightspeed_battle_model_score_smoke
         or args.lightspeed_battle_training_readiness
         or args.lightspeed_battle_resource_outcome_audit
+        or args.lightspeed_constructed_battle_start_audit
         or args.lightspeed_non_combat_calibration
         or args.lightspeed_public_projection_capability_audit
         or args.lightspeed_public_context_audit
@@ -791,6 +827,39 @@ def main(argv: list[str] | None = None) -> int:
                 )
                 print(
                     format_battle_resource_outcome_audit_report(report),
+                    file=sys.stderr,
+                )
+                if not report.passed:
+                    return 1
+            elif args.lightspeed_constructed_battle_start_audit:
+                artifact, report = run_constructed_battle_start_audit(
+                    adapter_factory=lambda: LightSpeedAdapter(
+                        seed=args.sim_seed,
+                        ascension=args.sim_ascension,
+                    ),
+                    battle_policy=_build_online_sim_policy(
+                        args.sim_policy,
+                        args.sim_seed,
+                    ),
+                    non_combat_policy=_build_non_combat_driver_policy(
+                        args.sim_non_combat_policy,
+                        args.sim_seed,
+                    ),
+                    seeds=[
+                        args.sim_seed + offset for offset in range(args.sim_episodes)
+                    ],
+                    max_steps=args.sim_steps,
+                    transform_policy=ConstructedBattleStartPolicy(seed=args.sim_seed),
+                    action_space=action_space,
+                    source_pool_path=args.constructed_start_pool,
+                )
+                if args.constructed_start_output is not None:
+                    write_constructed_battle_start_artifact(
+                        args.constructed_start_output,
+                        artifact,
+                    )
+                print(
+                    format_constructed_battle_start_audit_report(report),
                     file=sys.stderr,
                 )
                 if not report.passed:

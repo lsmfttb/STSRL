@@ -34,12 +34,13 @@ def test_default_lightspeed_source_manifest_names_pinned_integration() -> None:
         "https://github.com/lsmfttb/sts_lightspeed.git"
     )
     assert manifest.integration.ref == (
-        "refs/heads/stsrl/t018-terminal-resource-identity-v1"
+        "refs/heads/stsrl/t008-constructed-battle-start-v1"
     )
-    assert manifest.integration.commit == ("c291d5cbcc4dae660ada925085ca62c6e3d85039")
+    assert manifest.integration.commit == ("e9f0e7f104ea2bd908ba5b8f6528c240e6c92ad9")
     assert set(REQUIRED_NATIVE_CAPABILITY_IDS).issubset(manifest.capability_ids)
     assert "native_battle_search_root" in manifest.capability_ids
     assert "native_terminal_resource_identity" in manifest.capability_ids
+    assert "constructed_battle_start_transforms" in manifest.capability_ids
     assert manifest.legacy_patch_stack.status == "retired_provenance"
 
 
@@ -98,8 +99,8 @@ def test_lightspeed_source_manifest_requires_current_capability_inventory() -> N
     payload["supported_native_capabilities"] = [
         item
         for item in capabilities
-        if item["id"] != "native_terminal_resource_identity"
+        if item["id"] != "constructed_battle_start_transforms"
     ]
 
-    with pytest.raises(ValueError, match="native_terminal_resource_identity"):
+    with pytest.raises(ValueError, match="constructed_battle_start_transforms"):
         parse_lightspeed_source_manifest(payload)

@@ -23,6 +23,7 @@ REQUIRED_NATIVE_CAPABILITY_IDS = (
     "native_public_projection",
     "native_battle_search_root",
     "native_terminal_resource_identity",
+    "constructed_battle_start_transforms",
 )
 _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 

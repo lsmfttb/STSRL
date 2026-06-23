@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+from collections import Counter
 import io
 import sys
 
 from sts_combat_rl.cli import main
+from sts_combat_rl.sim.constructed_battle_start import (
+    ConstructedBattleStartAuditReport,
+)
 from sts_combat_rl.sim.contract import (
     SimulatorAction,
     SimulatorCheckpoint,
@@ -406,6 +410,79 @@ def test_cli_checkpoint_commands_write_only_diagnostics_and_restore_pool(
     restore_output = capsys.readouterr()
     assert restore_output.out == ""
     assert "restore ok: yes" in restore_output.err
+
+
+def test_cli_constructed_battle_start_audit_writes_stderr_and_artifact(
+    monkeypatch,
+    tmp_path,
+    capsys,
+) -> None:
+    calls: dict[str, object] = {}
+
+    def fake_audit(**kwargs):
+        calls["source_pool_path"] = kwargs["source_pool_path"]
+        return (
+            object(),
+            ConstructedBattleStartAuditReport(
+                source_record_count=1,
+                audit_record_count=3,
+                constructed_record_count=1,
+                first_battle_source_count=0,
+                later_battle_source_count=1,
+                transform_policy={"version": "constructed_battle_start_v1", "seed": 1},
+                distribution_counts=Counter(
+                    {"natural_run": 1, "constructed_supplement": 1}
+                ),
+            ),
+        )
+
+    def fake_write(path, artifact):
+        calls["written_artifact"] = artifact
+        path.write_text("fake\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        "sts_combat_rl.cli.run_constructed_battle_start_audit",
+        fake_audit,
+    )
+    monkeypatch.setattr(
+        "sts_combat_rl.cli.LightSpeedAdapter",
+        FakeLightSpeedSmokeAdapter,
+    )
+    monkeypatch.setattr(
+        "sts_combat_rl.cli.write_constructed_battle_start_artifact",
+        fake_write,
+    )
+    output_path = tmp_path / "constructed.jsonl"
+    pool_path = tmp_path / "pool.jsonl"
+
+    assert (
+        main(
+            [
+                "--lightspeed-constructed-battle-start-audit",
+                "--constructed-start-output",
+                str(output_path),
+                "--constructed-start-pool",
+                str(pool_path),
+                "--sim-ascension",
+                "20",
+                "--sim-episodes",
+                "1",
+                "--sim-steps",
+                "1",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 0
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert output_path.exists()
+    assert calls["source_pool_path"] == pool_path
+    assert "written_artifact" in calls
+    assert "Constructed battle-start supplement audit" in captured.err
+    assert "source natural battle starts: 1" in captured.err
 
 
 def test_cli_oracle_search_teacher_and_fixed_eval_routes_write_stderr_only(
