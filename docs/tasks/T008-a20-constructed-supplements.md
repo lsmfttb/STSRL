@@ -1,6 +1,6 @@
 # T008: A20 Constructed Battle Supplements
 
-Status: `READY`.
+Status: `DONE`.
 
 ## Objective
 
@@ -9,11 +9,14 @@ that supplement, but never replace, natural A20 data or natural evaluation.
 
 ## Current Main Baseline
 
-T004 can restore natural battle-start records but has no constructed-state
-schema or authoritative transform surface. T016 makes complete public run
-context available in current artifacts so a transform can preserve visible
-history, map, routes, and visible Boss rather than constructing an ambiguous
-continuation state.
+T008 is complete on `main`. The current source manifest pins
+`refs/heads/stsrl/t008-constructed-battle-start-v1` at
+`e9f0e7f104ea2bd908ba5b8f6528c240e6c92ad9`, which exposes the native
+constructed battle-start transform surface. The accepted WSL audit over a
+portable A20 pool produced 11 constructed supplement rows from 13 natural
+source starts, preserved source public context, kept natural and constructed
+distribution counts separate, and reported no unsupported native operations or
+cap/Boss/ascension violations.
 
 ## Dependencies
 

@@ -30,8 +30,8 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
   (`scripts/verify_lightspeed_source.sh`). The manifest pins upstream
   `gamerpuppy/sts_lightspeed` base commit
   `7476a81954020087da31d41d16fddf475746ec2d` and integration ref
-  `refs/heads/stsrl/t018-terminal-resource-identity-v1` at commit
-  `c291d5cbcc4dae660ada925085ca62c6e3d85039`. The old ordered patch stack is
+  `refs/heads/stsrl/t008-constructed-battle-start-v1` at commit
+  `e9f0e7f104ea2bd908ba5b8f6528c240e6c92ad9`. The old ordered patch stack is
   retained only as retired provenance.
 
 ### Battle-Agent Data Spike
@@ -91,6 +91,18 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
   Reports retain per-battle provenance and failures, controller telemetry, and
   separate natural-weighted, encounter-macro, room-type-macro, and
   per-stratum aggregates.
+- Versioned constructed A20 battle-start supplements
+  (`constructed-battle-start-v1`) with a seeded conservative transform policy
+  (`constructed-battle-start-policy-v1`). Constructed rows retain immutable
+  natural source identity, source checkpoint provenance, complete source public
+  context/status, eligibility, proposal, requested and actual authoritative
+  changes, native-support status, and separate resulting distribution tags.
+  Supported T008 transforms are bounded current-HP additions, native
+  simulator-sampled potion additions, and legal same-ascension ordinary/elite
+  encounter alternatives through `StepSimulator.rebuild_battle_start` and
+  `StepSimulator.legal_battle_start_encounters`. First-battle, cap,
+  same-ascension, and visible-Boss constraints fail closed; unsupported or
+  no-op proposals remain audit rows rather than constructed training rows.
 - Explicitly Oracle-like native battle search teacher pipeline. The pinned
   `sts_lightspeed` source exposes `StepSimulator.battle_search`; the
   `OracleSearchController`, teacher JSONL artifact, and same-cohort Oracle
@@ -118,7 +130,7 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
 
 ### Tests And Runtime Evidence
 
-- `455` tests pass on Windows Python as of this review. In an uninstalled
+- `464` tests pass on Windows Python as of this review. In an uninstalled
   checkout, set `PYTHONPATH=src` (or install the package) before invoking the
   CLI directly.
 - The two CommunicationMod fixture smokes pass.
@@ -161,13 +173,14 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
   forbidden-field, replay, or run failures. The current natural coverage gaps
   remain `BOSS_RELIC_REWARDS`, `REST_ROOM`, `SHOP_ROOM`, and `TREASURE_ROOM`.
   The same post-review WSL smoke and battle-training-readiness gates pass.
-- The T017/T018-managed pinned external source integration currently validates from
-  manifest `sts-lightspeed-source-manifest-v1` version 1. The canonical source
-  verifier builds integration commit
-  `c291d5cbcc4dae660ada925085ca62c6e3d85039`,
+- The T017/T018/T008-managed pinned external source integration currently
+  validates from manifest `sts-lightspeed-source-manifest-v1` version 1. The
+  canonical source verifier builds integration commit
+  `e9f0e7f104ea2bd908ba5b8f6528c240e6c92ad9`,
   initializes `json` and `pybind11`, imports `slaythespire.StepSimulator`, and
   asserts the current native capability inventory including
-  `native_battle_search_root` and `native_terminal_resource_identity`.
+  `native_battle_search_root`, `native_terminal_resource_identity`, and
+  `constructed_battle_start_transforms`.
   Missing-manifest and wrong-commit verifier
   checks fail nonzero. `/home/lsmft/stsrl-spikes/sts_lightspeed/build-py` was
   rebuilt from that pinned source and imports `slaythespire` from the rebuilt
@@ -189,6 +202,17 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
   missing outcomes, no pool or structural audit problems, no unsupported native
   fields, and no T018 identity gate problems. The post-review WSL smoke and
   battle-training-readiness gates pass.
+- T008 validates conservative constructed A20 battle-start supplements over a
+  portable natural pool. The accepted WSL audit over seeds `1..3` at A20
+  reported 13 natural source starts, 3 first-battle sources, 10 later-battle
+  sources, 39 transform audit rows, 11 constructed rows, resulting
+  distributions `natural_run: 13` and `constructed_supplement: 11`, no
+  unsupported native operations, no cap/Boss/ascension violations, and source
+  public-context status available for every audit row. Repeating the same
+  audit over the same pool, policy seed, and pinned native source produced
+  matching artifact SHA256 digests and identical record manifests. The
+  post-review WSL source verifier, smoke, and battle-training-readiness gates
+  pass with `constructed_battle_start_transforms` in the source identity.
 
 ## Not Implemented On Main
 
@@ -197,7 +221,6 @@ unmerged legacy work:
 
 - PyTorch policy/value training;
 - interactive live-game or A20 performance validation for any controller;
-- constructed A20 battle-start supplements;
 - normal-information belief search.
 
 Do not use documentation or results from these areas as evidence that `main`
@@ -234,10 +257,12 @@ tasks in dependency order are:
 9. T018, native terminal resource identity surface, is complete. It extends the
    pinned native source and structured outcome audit to cover terminal potion
    slots, deck/curses, relic identities/counters, and key flags.
-10. T008, A20 constructed battle supplements, and T009, PyTorch
-    search-guidance model, are `READY`. T009 must keep broad neural training
-    fail-closed on under-covered data unless a named smoke or narrow-curriculum
-    override is explicitly reported.
+10. T008, A20 constructed battle supplements, is complete. It adds
+    conservative constructed supplements without replacing natural A20 data or
+    natural evaluation.
+11. T009, PyTorch search-guidance model, is `READY`. T009 must keep broad
+    neural training fail-closed on under-covered data unless a named smoke or
+    narrow-curriculum override is explicitly reported.
 
 Later tasks are dependency-ordered in the task index. A task is not ready for a
 new branch until its status is `READY`.

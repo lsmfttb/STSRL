@@ -4,8 +4,8 @@ This guide lists simulator operations available on the latest `main`.
 Checkpoint verification, portable battle-start pools, fixed structural
 evaluation, Oracle-like native search teacher collection, Oracle fixed-cohort
 comparison, structured battle resource outcome auditing with native terminal
-resource identities, and the pinned external source integration are current
-capabilities.
+resource identities, conservative constructed battle-start supplements, and
+the pinned external source integration are current capabilities.
 
 ## Boundary
 
@@ -39,8 +39,8 @@ The canonical day-to-day source integration is recorded in
 upstream:     https://github.com/gamerpuppy/sts_lightspeed.git
 base commit:  7476a81954020087da31d41d16fddf475746ec2d
 integration:  https://github.com/lsmfttb/sts_lightspeed.git
-ref:          refs/heads/stsrl/t018-terminal-resource-identity-v1
-commit:       c291d5cbcc4dae660ada925085ca62c6e3d85039
+ref:          refs/heads/stsrl/t008-constructed-battle-start-v1
+commit:       e9f0e7f104ea2bd908ba5b8f6528c240e6c92ad9
 module:       slaythespire.StepSimulator
 ```
 
@@ -69,16 +69,16 @@ cleanup() {
   git -C "$source" worktree prune >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
-git -C "$source" fetch https://github.com/lsmfttb/sts_lightspeed.git refs/heads/stsrl/t018-terminal-resource-identity-v1
-git -C "$source" worktree add --detach "$worktree" c291d5cbcc4dae660ada925085ca62c6e3d85039 >/dev/null
+git -C "$source" fetch https://github.com/lsmfttb/sts_lightspeed.git refs/heads/stsrl/t008-constructed-battle-start-v1
+git -C "$source" worktree add --detach "$worktree" e9f0e7f104ea2bd908ba5b8f6528c240e6c92ad9 >/dev/null
 cd "$worktree"
 git submodule update --init json pybind11
 if [ -d "$source/build-py" ]; then
-  mv "$source/build-py" "$source/build-py.pre-t018-$(date +%Y%m%d%H%M%S)"
+  mv "$source/build-py" "$source/build-py.pre-t008-$(date +%Y%m%d%H%M%S)"
 fi
 cmake -S "$worktree" -B "$source/build-py" -DCMAKE_POLICY_VERSION_MINIMUM=3.5
 cmake --build "$source/build-py" --target slaythespire -j 2
-PYTHONPATH="$source/build-py" python3 -c "import slaythespire; sim=slaythespire.StepSimulator(slaythespire.CharacterClass.IRONCLAD, 1, 20); snap=sim.snapshot(); assert hasattr(sim, 'battle_search'); assert all(k in snap for k in ('potions', 'deck', 'relics', 'blue_key', 'green_key', 'red_key')); print(slaythespire.__file__)"
+PYTHONPATH="$source/build-py" python3 -c "import slaythespire; sim=slaythespire.StepSimulator(slaythespire.CharacterClass.IRONCLAD, 1, 20); snap=sim.snapshot(); assert hasattr(sim, 'battle_search'); assert hasattr(sim, 'legal_battle_start_encounters'); assert hasattr(sim, 'rebuild_battle_start'); assert all(k in snap for k in ('potions', 'deck', 'relics', 'blue_key', 'green_key', 'red_key')); print(slaythespire.__file__)"
 ```
 
 Current WSL-facing reports for the required runtime gates print the manifest
@@ -202,6 +202,27 @@ The manifest excludes native checkpoint payloads. The restore command creates
 fresh adapters and replays the recorded source seed and public action
 identities; it must not be presented as cross-process native-checkpoint
 serialization.
+
+### Constructed Battle-Start Supplement Audit
+
+This T008 gate first writes a portable natural A20 source pool, then audits
+seeded constructed supplement proposals against that immutable pool. It reports
+source counts, first/later-battle eligibility, per-transform audit rows,
+constructed rows, distribution counts, native support, cap/Boss/ascension
+violations, and source public-context status. Constructed rows supplement
+natural data and remain separately tagged.
+
+```powershell
+wsl.exe -d Ubuntu -e bash -lc "cd /mnt/d/DeadlycatCoding/STSRL && rm -f /tmp/t008_pool.jsonl /tmp/t008_constructed.jsonl && PYTHONPATH=/home/lsmft/stsrl-spikes/sts_lightspeed/build-py:/mnt/d/DeadlycatCoding/STSRL/src python3 -m sts_combat_rl.cli --lightspeed-battle-start-pool /tmp/t008_pool.jsonl --sim-seed 1 --sim-episodes 3 --sim-ascension 20 --sim-steps 120 --log-file - && PYTHONPATH=/home/lsmft/stsrl-spikes/sts_lightspeed/build-py:/mnt/d/DeadlycatCoding/STSRL/src python3 -m sts_combat_rl.cli --lightspeed-constructed-battle-start-audit --constructed-start-pool /tmp/t008_pool.jsonl --constructed-start-output /tmp/t008_constructed.jsonl --sim-seed 1 --sim-episodes 3 --sim-ascension 20 --sim-steps 120 --log-file -"
+```
+
+The accepted T008 A20 audit over seeds `1..3` reported 13 natural source
+starts, 3 first-battle sources, 10 later-battle sources, 39 transform audit
+rows, 11 constructed rows, resulting distributions `natural_run: 13` and
+`constructed_supplement: 11`, no unsupported native operations, no
+cap/Boss/ascension violations, and source public context available for every
+audit row. Repeating the same audit over the same pool and policy seed produced
+matching artifact SHA256 digests.
 
 ### Fixed Structural Battle Evaluation
 

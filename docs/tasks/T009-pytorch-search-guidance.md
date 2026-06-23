@@ -4,11 +4,12 @@ Status: `READY`.
 
 ## Current Main Baseline
 
-T006, T011, T012, T016, and T018 are complete. Current A20 data is still
-smoke-scale, so broad neural training must fail closed until the explicit
-scale/distribution gate passes. T009 may implement model plumbing, checkpoint
-schemas, diagnostics, and named smoke or narrow-curriculum overrides, but it
-must not report under-covered smoke data as evidence of model strength.
+T006, T008, T011, T012, T016, and T018 are complete. Current A20 data is still
+smoke-scale even with the T008 constructed supplements, so broad neural
+training must fail closed until the explicit scale/distribution gate passes.
+T009 may implement model plumbing, checkpoint schemas, diagnostics, and named
+smoke or narrow-curriculum overrides, but it must not report under-covered
+smoke data as evidence of model strength.
 
 ## Dependencies
 

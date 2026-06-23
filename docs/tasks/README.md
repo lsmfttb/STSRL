@@ -15,7 +15,7 @@ starting work.
 | T005 | DONE | [Fixed structural battle evaluation](T005-fixed-battle-evaluation.md) | T004 | fixed evaluation set and runner |
 | T006 | DONE | [Oracle search teacher pipeline](T006-oracle-search-teacher.md) | T003, T004, T005, T017 | search policy, teacher, search dataset |
 | T007 | CANCELLED | [Complete public run history (superseded)](T007-complete-public-run-history.md) | — | replaced by T014--T016 |
-| T008 | READY | [A20 constructed battle supplements](T008-a20-constructed-supplements.md) | T003, T004, T016, T017 | battle-start transforms and approximate HP policy |
+| T008 | DONE | [A20 constructed battle supplements](T008-a20-constructed-supplements.md) | T003, T004, T016, T017 | battle-start transforms and approximate HP policy |
 | T009 | READY | [PyTorch search-guidance model](T009-pytorch-search-guidance.md) | T003, T006, T011, T012, T016, T018 | optional train dependency and policy/value model |
 | T010 | DONE | [Stochastic non-combat driver](T010-stochastic-non-combat-driver.md) | T002 | non-combat policy and native visible action/resource support |
 | T011 | DONE | [Tactical feature contract v2](T011-tactical-feature-contract-v2.md) | T003 | feature, trainer-input, and model-input upgrades |
@@ -55,8 +55,10 @@ document update before acceptance.
 - T018 is complete. It extends the pinned native source and structured outcome
   audit so terminal potion slots, deck/curses, relic identities/counters, and
   key flags are available where the game exposes them.
-- T008 and T009 are `READY`. T009 may implement model plumbing and the
-  fail-closed broad-training gate, but smoke-scale data must remain a smoke or
+- T008 is complete. It adds conservative, explicitly tagged constructed A20
+  battle-start supplements through the pinned native source transform surface.
+- T009 is `READY`. It may implement model plumbing and the fail-closed
+  broad-training gate, but smoke-scale data must remain a smoke or
   narrow-curriculum override rather than evidence of neural strength.
 
 ## Standard Local Gates

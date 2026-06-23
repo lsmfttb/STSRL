@@ -128,11 +128,13 @@ future continuation-aware models:
 - complete visible map, current node, and available routes;
 - visible Act Boss.
 
-The latest `main` does not yet preserve a complete public run context. T014
-completed the raw native-capability boundary; T015 is the active sanitized
-context/history task, and T016 will add the persisted/replayable form. Until
-then, datasets must retain explicit context unavailability rather than implying
-that encounter metadata is a substitute for full history or map state.
+The latest `main` preserves the current sanitized public run context and
+ordered public history through active in-memory decisions and current persisted
+artifacts. T014 completed the raw native-capability boundary, T015 completed
+the sanitized context/history contract, and T016 added persisted artifact
+propagation, portable replay comparison, and context coverage audit. Remaining
+native projection gaps, such as complete map/route payloads on some screens,
+stay explicit status fields rather than guessed context.
 
 ## Evaluation
 
@@ -295,13 +297,16 @@ native search teacher/evaluation path. T012 completed the structured outcome
 schema and explicit missingness boundary; T018 completed native
 identity-bearing terminal resource coverage through the T017-managed source
 integration rather than the old local patch stack. Broad coverage follows fixed
-evaluation rather than being inferred from natural-run floor statistics.
+evaluation rather than being inferred from natural-run floor statistics. T008
+completed conservative constructed A20 battle-start supplements, but the
+accepted audit remains smoke-scale evidence for the transform workflow rather
+than a broad coverage gate.
 
 Work:
 
 - improve natural state generation;
-- add conservative constructed supplements;
-- collect a reported natural/balanced mixture;
+- measure natural, stratified, and constructed mixture coverage;
+- collect a reported natural/balanced/constructed mixture;
 - retain complete public history and context;
 - satisfy broad-training readiness per ascension and act.
 
