@@ -71,7 +71,14 @@ _OTHER_RESOURCE_KEYS = (
     "room_type",
     "act_boss",
 )
-_EMPTY_POTION_NAMES = {"", "EMPTY_POTION_SLOT", "POTION SLOT", "Potion Slot"}
+_EMPTY_POTION_NAMES = {
+    "",
+    "EMPTY_POTION_ID",
+    "EMPTY_POTION_SLOT",
+    "Empty Potion Slot",
+    "POTION SLOT",
+    "Potion Slot",
+}
 
 
 @dataclass(frozen=True)
@@ -256,7 +263,7 @@ def extract_public_resource_snapshot(raw: Mapping[str, Any]) -> PublicResourceSn
     potion_slots = _potion_slots_field(raw)
     deck = _sequence_field(raw, ("deck", "master_deck"), "deck")
     curses = _curses_field(deck)
-    relics = _sequence_field(raw, ("relics",), "relics")
+    relics = _sequence_field(raw, ("relics", "battle_relics"), "relics")
     keys = _keys_field(raw)
     other = _other_resources_field(raw)
     return PublicResourceSnapshot(
@@ -546,7 +553,12 @@ def _first_int_field(
 
 
 def _potion_slots_field(raw: Mapping[str, Any]) -> ResourceField:
-    for key in ("potions", "battle_potions"):
+    keys = (
+        ("battle_potions", "potions")
+        if bool(raw.get("battle_active"))
+        else ("potions", "battle_potions")
+    )
+    for key in keys:
         value = raw.get(key)
         if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
             slots = tuple(
@@ -605,17 +617,16 @@ def _curses_field(deck: ResourceField) -> ResourceField:
 
 
 def _keys_field(raw: Mapping[str, Any]) -> ResourceField:
-    values: dict[str, bool | None] = {}
+    values: dict[str, bool] = {}
     missing: list[str] = []
     for key in _KEY_NAMES:
         value = raw.get(key)
         if isinstance(value, bool):
             values[key] = value
         else:
-            values[key] = None
             missing.append(key)
-    if len(missing) == len(_KEY_NAMES):
-        return _missing_field("missing key flags")
+    if missing:
+        return _missing_field(f"missing key flags: {', '.join(missing)}")
     return _available_field(values, "key_flags")
 
 
@@ -787,11 +798,12 @@ def _changed_delta(delta: Any) -> bool:
 
 
 def _is_empty_potion(item: Mapping[str, Any]) -> bool:
-    for key in ("id", "name", "potion_id"):
+    for key in ("id", "id_label", "name", "potion_id"):
         value = item.get(key)
         if value is None:
             continue
-        return str(value) in _EMPTY_POTION_NAMES
+        if str(value) in _EMPTY_POTION_NAMES:
+            return True
     return False
 
 

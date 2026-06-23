@@ -34,11 +34,12 @@ def test_default_lightspeed_source_manifest_names_pinned_integration() -> None:
         "https://github.com/lsmfttb/sts_lightspeed.git"
     )
     assert manifest.integration.ref == (
-        "refs/heads/stsrl/t006-oracle-search-teacher-v1"
+        "refs/heads/stsrl/t018-terminal-resource-identity-v1"
     )
-    assert manifest.integration.commit == ("78c3fa86ea4d8ef2c8c490aabfb8047d38d6d077")
+    assert manifest.integration.commit == ("c291d5cbcc4dae660ada925085ca62c6e3d85039")
     assert set(REQUIRED_NATIVE_CAPABILITY_IDS).issubset(manifest.capability_ids)
     assert "native_battle_search_root" in manifest.capability_ids
+    assert "native_terminal_resource_identity" in manifest.capability_ids
     assert manifest.legacy_patch_stack.status == "retired_provenance"
 
 
@@ -95,8 +96,10 @@ def test_lightspeed_source_manifest_requires_current_capability_inventory() -> N
     payload = _default_manifest_payload()
     capabilities = list(payload["supported_native_capabilities"])  # type: ignore[index]
     payload["supported_native_capabilities"] = [
-        item for item in capabilities if item["id"] != "native_battle_search_root"
+        item
+        for item in capabilities
+        if item["id"] != "native_terminal_resource_identity"
     ]
 
-    with pytest.raises(ValueError, match="native_battle_search_root"):
+    with pytest.raises(ValueError, match="native_terminal_resource_identity"):
         parse_lightspeed_source_manifest(payload)

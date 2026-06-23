@@ -1,3 +1,10 @@
+from sts_combat_rl.commands.resource_outcome import (
+    build_battle_resource_outcome_audit_report,
+)
+from sts_combat_rl.sim.battle_start_pool import (
+    BattleStartCheckpointRecord,
+    NaturalBattleStartPool,
+)
 from sts_combat_rl.sim.resource_outcome import (
     BATTLE_RESOURCE_OUTCOME_SCHEMA_ID,
     BATTLE_RESOURCE_OUTCOME_AVAILABLE,
@@ -71,6 +78,81 @@ def test_structured_battle_outcome_keeps_missing_fields_explicit() -> None:
     assert report.problem_counts["terminal max_hp: missing any of max_hp, maxHp"] == 1
 
 
+def test_structured_battle_outcome_reads_t018_native_identity_fields() -> None:
+    start = {
+        "battle_active": True,
+        "cur_hp": 70,
+        "max_hp": 80,
+        "gold": 99,
+        "battle_potion_capacity": 2,
+        "battle_potions": [
+            {
+                "potion_index": 0,
+                "id": 1,
+                "id_label": "EMPTY_POTION_ID",
+                "name": "EMPTY_POTION_SLOT",
+            },
+            {
+                "potion_index": 1,
+                "id": 42,
+                "id_label": "WEAK_POTION",
+                "name": "Weak Potion",
+            },
+        ],
+        "deck": [
+            _card("AscendersBane", "CURSE"),
+            _card("Strike_R", "ATTACK"),
+        ],
+        "battle_relics": [
+            {
+                "relic_index": 0,
+                "id": 86,
+                "id_label": "Burning Blood",
+                "name": "Burning Blood",
+                "counter": 0,
+            }
+        ],
+        "blue_key": False,
+        "green_key": False,
+        "red_key": False,
+    }
+    terminal = {
+        **start,
+        "battle_active": False,
+        "outcome": "PLAYER_VICTORY",
+        "completed_battle_outcome": "PLAYER_VICTORY",
+        "cur_hp": 66,
+        "potions": [
+            {
+                "potion_index": 0,
+                "id": 1,
+                "id_label": "EMPTY_POTION_ID",
+                "name": "EMPTY_POTION_SLOT",
+            },
+            {
+                "potion_index": 1,
+                "id": 1,
+                "id_label": "EMPTY_POTION_ID",
+                "name": "EMPTY_POTION_SLOT",
+            },
+        ],
+        "relics": start["battle_relics"],
+    }
+
+    outcome = build_battle_resource_outcome(start, terminal)
+
+    assert outcome.start.potion_slots.source == "battle_potions"
+    assert outcome.start.potion_slots.value[0]["is_empty"] is True
+    assert outcome.start.relics.source == "battle_relics"
+    assert outcome.start.curses.value[0]["id"] == "AscendersBane"
+    assert outcome.terminal.keys.value == {
+        "blue_key": False,
+        "green_key": False,
+        "red_key": False,
+    }
+    assert outcome.deltas["potion_slots_delta"]["removed"][0]["name"] == "Weak Potion"
+
+
 def test_require_available_demands_authoritative_terminal_result() -> None:
     missing_outcome = build_battle_resource_outcome(
         {"battle_active": True, "cur_hp": 5, "max_hp": 80},
@@ -98,6 +180,75 @@ def test_require_available_demands_authoritative_terminal_result() -> None:
         label="nonterminal",
         require_available=True,
     ) == ["nonterminal: terminal battle result is not authoritative"]
+
+
+def test_resource_outcome_audit_fails_missing_t018_identity_components() -> None:
+    outcome = build_battle_resource_outcome(
+        {"battle_active": True, "cur_hp": 5, "max_hp": 80},
+        {
+            "battle_active": False,
+            "cur_hp": 0,
+            "max_hp": 80,
+            "completed_battle_outcome": "PLAYER_LOSS",
+        },
+        battle_result="PLAYER_LOSS",
+    )
+    status, payload = available_battle_resource_outcome(outcome)
+    pool = _pool_with_completed_outcome(status, payload)
+
+    report = build_battle_resource_outcome_audit_report(
+        pool,
+        requested_seeds=(1,),
+        max_steps=10,
+    )
+
+    assert report.passed is False
+    assert report.identity_component_missing_counts["deck"] == 1
+    assert any(
+        "T018 identity-bearing component deck" in problem
+        for problem in report.identity_component_problems
+    )
+
+
+def test_partial_key_flags_are_missing_and_fail_t018_identity_audit() -> None:
+    start = _raw(
+        current_hp=50,
+        max_hp=80,
+        gold=100,
+        potion_names=["Potion Slot", "Potion Slot"],
+        deck=[_card("Strike_R", "ATTACK")],
+        relic_counter=0,
+    )
+    terminal = _raw(
+        current_hp=45,
+        max_hp=80,
+        gold=100,
+        potion_names=["Potion Slot", "Potion Slot"],
+        deck=[_card("Strike_R", "ATTACK")],
+        relic_counter=0,
+        outcome="PLAYER_VICTORY",
+    )
+    del terminal["green_key"]
+    del terminal["red_key"]
+
+    outcome = build_battle_resource_outcome(start, terminal)
+    status, payload = available_battle_resource_outcome(outcome)
+    pool = _pool_with_completed_outcome(status, payload)
+    report = build_battle_resource_outcome_audit_report(
+        pool,
+        requested_seeds=(1,),
+        max_steps=10,
+    )
+
+    assert outcome.terminal.keys.status == "missing"
+    assert outcome.terminal.keys.reason == "missing key flags: green_key, red_key"
+    assert "terminal keys: missing key flags: green_key, red_key" in outcome.problems
+    assert report.passed is False
+    assert report.identity_component_missing_counts["keys"] == 1
+    assert any(
+        "T018 identity-bearing component keys" in problem
+        for problem in report.identity_component_problems
+    )
 
 
 def _raw(
@@ -138,3 +289,39 @@ def _raw(
 
 def _card(card_id: str, card_type: str) -> dict[str, object]:
     return {"id": card_id, "name": card_id, "type": card_type}
+
+
+def _pool_with_completed_outcome(
+    status: str,
+    payload: dict[str, object],
+) -> NaturalBattleStartPool:
+    record = BattleStartCheckpointRecord(
+        record_index=0,
+        source_checkpoint_id="checkpoint-0",
+        source_run_id="run-0",
+        source_seed=1,
+        source_battle_index=0,
+        structural_metadata={
+            "ascension": 20,
+            "act": 1,
+            "room_type": "MONSTER",
+            "encounter_id": "FakeEncounter",
+        },
+        source_controller_provenance={"name": "test"},
+        source_battle_controller_provenance={"name": "battle"},
+        source_non_combat_controller_provenance={"name": "non_combat"},
+        action_trace=(),
+        snapshot_observation=(),
+        snapshot_raw={},
+        battle_outcome="PLAYER_LOSS",
+        battle_completed=True,
+        completed_battle_resource_outcome_status=status,
+        completed_battle_resource_outcome=payload,
+    )
+    return NaturalBattleStartPool(
+        source_run_count=1,
+        terminal_run_count=0,
+        truncated_run_count=0,
+        source_controller_provenance={"name": "test"},
+        records=[record],
+    )

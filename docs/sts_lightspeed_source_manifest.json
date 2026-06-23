@@ -7,9 +7,9 @@
   },
   "integration": {
     "repository_url": "https://github.com/lsmfttb/sts_lightspeed.git",
-    "branch": "stsrl/t006-oracle-search-teacher-v1",
-    "ref": "refs/heads/stsrl/t006-oracle-search-teacher-v1",
-    "commit": "78c3fa86ea4d8ef2c8c490aabfb8047d38d6d077"
+    "branch": "stsrl/t018-terminal-resource-identity-v1",
+    "ref": "refs/heads/stsrl/t018-terminal-resource-identity-v1",
+    "commit": "c291d5cbcc4dae660ada925085ca62c6e3d85039"
   },
   "python_module": {
     "name": "slaythespire",
@@ -135,6 +135,25 @@
         "StepSimulator.battle_search.schema_id",
         "StepSimulator.battle_search.root_rows",
         "StepSimulator.battle_search.native_simulator_steps"
+      ]
+    },
+    {
+      "id": "native_terminal_resource_identity",
+      "description": "Player-visible terminal resource identities and exposed counters for structured battle outcomes.",
+      "task_provenance": [
+        "T018"
+      ],
+      "required_python_api": [
+        "StepSimulator.snapshot.potions",
+        "StepSimulator.snapshot.deck",
+        "StepSimulator.snapshot.relics",
+        "StepSimulator.snapshot.blue_key",
+        "StepSimulator.snapshot.green_key",
+        "StepSimulator.snapshot.red_key",
+        "StepSimulator.public_projection.persistent_resources.deck",
+        "StepSimulator.public_projection.persistent_resources.relics",
+        "StepSimulator.public_projection.persistent_resources.potion_identities",
+        "StepSimulator.public_projection.persistent_resources.keys"
       ]
     }
   ],
