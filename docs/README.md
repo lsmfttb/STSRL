@@ -54,7 +54,7 @@ When documents disagree, use this order:
 ### Operations
 
 - [`sts_lightspeed_wsl_spike.md`](sts_lightspeed_wsl_spike.md): current external
-  simulator setup, patches, and verification commands.
+  simulator setup, pinned source manifest, and verification commands.
 
 ### History
 

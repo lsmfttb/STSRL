@@ -1,0 +1,142 @@
+{
+  "schema_id": "sts-lightspeed-source-manifest-v1",
+  "manifest_version": 1,
+  "upstream": {
+    "repository_url": "https://github.com/gamerpuppy/sts_lightspeed.git",
+    "base_commit": "7476a81954020087da31d41d16fddf475746ec2d"
+  },
+  "integration": {
+    "repository_url": "https://github.com/lsmfttb/sts_lightspeed.git",
+    "branch": "stsrl/t017-current-native-surface-v1",
+    "ref": "refs/heads/stsrl/t017-current-native-surface-v1",
+    "commit": "820a2f884c5cfacdec10dd1937365e4172683e0a"
+  },
+  "python_module": {
+    "name": "slaythespire",
+    "simulator_class": "StepSimulator"
+  },
+  "build": {
+    "cmake_policy_version_minimum": "3.5",
+    "cmake_target": "slaythespire",
+    "build_directory": "build-stsrl-source-py",
+    "submodules": [
+      "json",
+      "pybind11"
+    ]
+  },
+  "native_projection_contract": {
+    "schema_id": "native-public-projection-v1",
+    "external_base_commit_label": "7476a81",
+    "patch_identity": "sts_lightspeed_public_projection.patch"
+  },
+  "supported_native_capabilities": [
+    {
+      "id": "step_simulation",
+      "description": "StepSimulator reset, observation, snapshot, legal action, and step surface used by controlled-run workflows.",
+      "task_provenance": [
+        "T002",
+        "T010"
+      ],
+      "required_python_api": [
+        "CharacterClass.IRONCLAD",
+        "StepSimulator.reset",
+        "StepSimulator.snapshot",
+        "StepSimulator.observation",
+        "StepSimulator.legal_actions",
+        "StepSimulator.step"
+      ]
+    },
+    {
+      "id": "checkpoint_capture_restore",
+      "description": "Opaque process-local checkpoint capture and restore for battle-start pools and fixed evaluation.",
+      "task_provenance": [
+        "T004"
+      ],
+      "required_python_api": [
+        "StepSimulator.capture_checkpoint",
+        "StepSimulator.restore_checkpoint"
+      ]
+    },
+    {
+      "id": "battle_start_metadata",
+      "description": "Visible structural metadata in snapshots for natural battle-start coverage and restore provenance.",
+      "task_provenance": [
+        "T004",
+        "T005"
+      ],
+      "required_python_api": [
+        "StepSimulator.snapshot.act",
+        "StepSimulator.snapshot.floor_num",
+        "StepSimulator.snapshot.room_type",
+        "StepSimulator.snapshot.ascension"
+      ]
+    },
+    {
+      "id": "run_potion_snapshot",
+      "description": "Visible potion count and capacity snapshot fields used by run context and non-combat decisions.",
+      "task_provenance": [
+        "T010",
+        "T014",
+        "T016"
+      ],
+      "required_python_api": [
+        "StepSimulator.snapshot.potion_count",
+        "StepSimulator.snapshot.potion_capacity"
+      ]
+    },
+    {
+      "id": "non_combat_potion_actions",
+      "description": "Native legal-action surface for non-combat potion use and discard branches.",
+      "task_provenance": [
+        "T010"
+      ],
+      "required_python_api": [
+        "StepSimulator.legal_actions.scope",
+        "StepSimulator.legal_actions.kind",
+        "StepSimulator.legal_actions.bits",
+        "StepSimulator.legal_actions.idx1",
+        "StepSimulator.legal_actions.idx2",
+        "StepSimulator.legal_actions.idx3"
+      ]
+    },
+    {
+      "id": "gcc15_build_compatibility",
+      "description": "Source-level compatibility fixes required for the current WSL GCC 15 build environment.",
+      "task_provenance": [
+        "T014"
+      ],
+      "required_python_api": [
+        "cmake.target.slaythespire"
+      ]
+    },
+    {
+      "id": "native_public_projection",
+      "description": "Raw native public-projection audit surface with candidate-action parity and current persistent-resource fields.",
+      "task_provenance": [
+        "T014",
+        "T015",
+        "T016"
+      ],
+      "required_python_api": [
+        "StepSimulator.public_projection",
+        "StepSimulator.public_projection.schema_id",
+        "StepSimulator.public_projection.candidate_actions",
+        "StepSimulator.public_projection.persistent_resources"
+      ]
+    }
+  ],
+  "legacy_patch_stack": {
+    "status": "retired_provenance",
+    "verifier_script": "scripts/verify_lightspeed_patch_stack.sh",
+    "patches": [
+      "patches/sts_lightspeed_step_simulator.patch",
+      "patches/sts_lightspeed_pybind11_v304.patch",
+      "patches/sts_lightspeed_checkpoint_restore.patch",
+      "patches/sts_lightspeed_battle_start_metadata.patch",
+      "patches/sts_lightspeed_run_potion_snapshot.patch",
+      "patches/sts_lightspeed_non_combat_potion_actions.patch",
+      "patches/sts_lightspeed_gcc15_compat.patch",
+      "patches/sts_lightspeed_public_projection.patch"
+    ]
+  }
+}

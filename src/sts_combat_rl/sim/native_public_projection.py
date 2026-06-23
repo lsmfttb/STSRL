@@ -21,6 +21,10 @@ from sts_combat_rl.sim.contract import (
     SimulatorSnapshot,
 )
 from sts_combat_rl.sim.decision_record import action_identity_dicts_for_actions
+from sts_combat_rl.sim.lightspeed_source import (
+    format_lightspeed_source_identity,
+    lightspeed_source_identity_dict,
+)
 
 
 NATIVE_PUBLIC_PROJECTION_SCHEMA_ID = "native-public-projection-v1"
@@ -179,6 +183,9 @@ class NativePublicProjectionCapabilityReport:
     api_schema_id: str = NATIVE_PUBLIC_PROJECTION_SCHEMA_ID
     external_base_commit: str = NATIVE_PUBLIC_PROJECTION_EXTERNAL_BASE_COMMIT
     patch_identity: str = NATIVE_PUBLIC_PROJECTION_PATCH_ID
+    source_identity: dict[str, Any] = field(
+        default_factory=lightspeed_source_identity_dict
+    )
     requested_episodes: int = 0
     completed_episodes: int = 0
     max_steps: int = 0
@@ -224,6 +231,7 @@ class NativePublicProjectionCapabilityReport:
             "api_schema_id": self.api_schema_id,
             "external_base_commit": self.external_base_commit,
             "patch_identity": self.patch_identity,
+            "source_identity": dict(self.source_identity),
             "requested_episodes": self.requested_episodes,
             "completed_episodes": self.completed_episodes,
             "max_steps": self.max_steps,
@@ -556,6 +564,7 @@ def format_native_public_projection_capability_report(
         f"native API schema: {report.api_schema_id}",
         f"external base commit: {report.external_base_commit}",
         f"patch identity: {report.patch_identity}",
+        format_lightspeed_source_identity(report.source_identity),
         f"episodes: {report.completed_episodes}/{report.requested_episodes}",
         f"max steps per episode: {report.max_steps}",
         f"current decision screens observed: {report.decisions_observed}",

@@ -22,9 +22,17 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
   exposes only the sanitized public tactical contract to an `OnlineController`,
   emits at most one protocol command, and fails closed on unsupported or
   incomplete battle decisions.
-- Framework-neutral simulator contracts and a Python adapter for the external
-  patched `sts_lightspeed` simulator.
+- Framework-neutral simulator contracts and a Python adapter for the pinned
+  external `sts_lightspeed` source integration.
 - Real simulator execution is documented and performed through WSL.
+- Versioned external `sts_lightspeed` source manifest
+  (`docs/sts_lightspeed_source_manifest.json`) and canonical source verifier
+  (`scripts/verify_lightspeed_source.sh`). The manifest pins upstream
+  `gamerpuppy/sts_lightspeed` base commit
+  `7476a81954020087da31d41d16fddf475746ec2d` and integration ref
+  `refs/heads/stsrl/t017-current-native-surface-v1` at commit
+  `820a2f884c5cfacdec10dd1937365e4172683e0a`. The old ordered patch stack is
+  retained only as retired provenance.
 
 ### Battle-Agent Data Spike
 
@@ -97,16 +105,17 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
 - The T010 A20 natural calibration over seeds `1..100` reports 2,303
   non-combat decisions with complete provenance and no driver problems;
   unreached Boss relic screens remain explicit natural-coverage gaps.
-- The reproducible `sts_lightspeed` patch-stack build passes from external
-  commit `7476a81`. A T004 A20 pool over seeds `1..3` contains 13 natural
-  starts with 10 reported wins, 3 losses, no missing completed outcome, and
-  13/13 fresh-adapter portable restores.
-- T005's clean WSL patch-stack gate freezes 8 unique starts from that pool and
-  evaluates them through fresh portable restores with the normal-public
-  `preferred_kind` controller. The plumbing run reports 5 wins and 3 losses,
-  no truncation or evaluation errors, and all three aggregate views. This is
-  fixed-evaluation evidence only, not an A20 policy-strength result.
-- The T011 clean WSL patch stack and A20 tactical-feature audit pass. Across
+- The legacy ordered `sts_lightspeed` patch-stack build passed from external
+  commit `7476a81` before T017 retired that workflow. A T004 A20 pool over
+  seeds `1..3` contains 13 natural starts with 10 reported wins, 3 losses, no
+  missing completed outcome, and 13/13 fresh-adapter portable restores.
+- T005's legacy clean WSL patch-stack gate freezes 8 unique starts from that
+  pool and evaluates them through fresh portable restores with the
+  normal-public `preferred_kind` controller. The plumbing run reports 5 wins
+  and 3 losses, no truncation or evaluation errors, and all three aggregate
+  views. This is fixed-evaluation evidence only, not an A20 policy-strength
+  result.
+- The T011 clean WSL gate and A20 tactical-feature audit pass. Across
   one bounded seed it observed 81 battle snapshots and 497 legal actions with
   `public-tactical-v2` state/action compatibility sizes of 4,634/92 and no
   required simulator-projection failures. A captured CommunicationMod audit
@@ -130,6 +139,19 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
   forbidden-field, replay, or run failures. The current natural coverage gaps
   remain `BOSS_RELIC_REWARDS`, `REST_ROOM`, `SHOP_ROOM`, and `TREASURE_ROOM`.
   The same post-review WSL smoke and battle-training-readiness gates pass.
+- T017 validates the pinned external source integration from manifest
+  `sts-lightspeed-source-manifest-v1` version 1. The canonical source verifier
+  builds integration commit `820a2f884c5cfacdec10dd1937365e4172683e0a`,
+  initializes `json` and `pybind11`, imports `slaythespire.StepSimulator`, and
+  asserts the current native capability inventory. Missing-manifest and
+  wrong-commit verifier checks fail nonzero. `/home/lsmft/stsrl-spikes/sts_lightspeed/build-py`
+  was rebuilt from that pinned source and imports `slaythespire` from the
+  rebuilt directory. The required WSL smoke, public-projection capability,
+  public-context replay, and battle-training-readiness gates pass. The
+  public-projection audit reports 289 current decision screens, 1,209 resource
+  snapshot comparisons, no mismatches, 289 candidate-action parity passes, and
+  289 checkpoint projection passes; the public-context audit reports 327
+  current decision screens and 15/15 replay public-context matches.
 
 ## Not Implemented On Main
 
@@ -139,8 +161,6 @@ unmerged legacy work:
 - native Oracle-like search integration and search-teacher datasets;
 - PyTorch policy/value training;
 - interactive live-game or A20 performance validation for any controller;
-- stable external `sts_lightspeed` source integration replacing the local
-  ordered patch-stack workflow;
 - structured persistent resource outcomes;
 - constructed A20 battle-start supplements;
 - normal-information belief search.
@@ -155,10 +175,11 @@ tasks in dependency order are:
 
 1. T005, fixed structural battle evaluation, is complete. It provides the
    comparison surface required before search promotion.
-2. T017, stable `sts_lightspeed` source integration, is `READY`. It replaces
-   the day-to-day local patch-stack workflow with a pinned external source
-   integration before more native simulator surface is added.
-3. T006, Oracle search teacher pipeline, is blocked by T017. It is confined to
+2. T017, stable `sts_lightspeed` source integration, replaces the day-to-day
+   local patch-stack workflow with a pinned external source integration before
+   more native simulator surface is added.
+3. T006, Oracle search teacher pipeline, is blocked on maintainer review of the
+   T017 source-integration result. It is confined to
    the explicitly Oracle-like simulator regime and must compare named budgets
    on immutable T005 cohorts after the simulator source integration is stable.
 4. T007 is `CANCELLED`. PR #9 remains closed and is not a branch base. Its
@@ -211,7 +232,9 @@ repository:    /mnt/d/DeadlycatCoding/STSRL
 ```
 
 See [`sts_lightspeed_wsl_spike.md`](sts_lightspeed_wsl_spike.md) for commands
-that are currently available on `main`. The clean canonical patch-stack build
-and canonical `build-py` public-projection audit were reverified on 2026-06-22
-from external commit `7476a81`. The previous stale `build-py` directory was
-backed up as `build-py.pre-t014-20260622224003`.
+that are currently available on `main`. The canonical day-to-day source path is
+the pinned integration recorded in
+[`sts_lightspeed_source_manifest.json`](sts_lightspeed_source_manifest.json)
+and verified by `scripts/verify_lightspeed_source.sh`. Runtime gates use
+`/home/lsmft/stsrl-spikes/sts_lightspeed/build-py` rebuilt from that pinned
+source.

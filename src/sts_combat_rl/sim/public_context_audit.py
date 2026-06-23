@@ -25,6 +25,10 @@ from sts_combat_rl.sim.decision_record import source_metadata_from_snapshot
 from sts_combat_rl.sim.native_public_projection import KNOWN_SCREEN_STATES
 from sts_combat_rl.sim.online_controller import PolicyController, RoutedRunController
 from sts_combat_rl.sim.policy import PreferredKindPolicy, StochasticNonCombatDriver
+from sts_combat_rl.sim.lightspeed_source import (
+    format_lightspeed_source_identity,
+    lightspeed_source_identity_dict,
+)
 from sts_combat_rl.sim.public_context_artifacts import (
     PUBLIC_CONTEXT_AVAILABLE,
     public_context_artifact_problems,
@@ -42,6 +46,9 @@ class PublicContextArtifactAuditReport:
     """Focused T016 audit report for persisted public context readiness."""
 
     report_schema_id: str = PUBLIC_CONTEXT_AUDIT_REPORT_SCHEMA_ID
+    source_identity: dict[str, Any] = field(
+        default_factory=lightspeed_source_identity_dict
+    )
     requested_episodes: int = 0
     completed_episodes: int = 0
     max_steps: int = 0
@@ -77,6 +84,7 @@ class PublicContextArtifactAuditReport:
     def to_dict(self) -> dict[str, Any]:
         return {
             "report_schema_id": self.report_schema_id,
+            "source_identity": dict(self.source_identity),
             "requested_episodes": self.requested_episodes,
             "completed_episodes": self.completed_episodes,
             "max_steps": self.max_steps,
@@ -304,6 +312,7 @@ def format_public_context_artifact_audit_report(
     lines = [
         "Public-context artifact replay audit",
         f"report schema: {report.report_schema_id}",
+        format_lightspeed_source_identity(report.source_identity),
         f"episodes: {report.completed_episodes}/{report.requested_episodes}",
         f"max steps per episode: {report.max_steps}",
         f"current decision screens observed: {report.decisions_observed}",
