@@ -210,6 +210,47 @@ def test_resource_outcome_audit_fails_missing_t018_identity_components() -> None
     )
 
 
+def test_partial_key_flags_are_missing_and_fail_t018_identity_audit() -> None:
+    start = _raw(
+        current_hp=50,
+        max_hp=80,
+        gold=100,
+        potion_names=["Potion Slot", "Potion Slot"],
+        deck=[_card("Strike_R", "ATTACK")],
+        relic_counter=0,
+    )
+    terminal = _raw(
+        current_hp=45,
+        max_hp=80,
+        gold=100,
+        potion_names=["Potion Slot", "Potion Slot"],
+        deck=[_card("Strike_R", "ATTACK")],
+        relic_counter=0,
+        outcome="PLAYER_VICTORY",
+    )
+    del terminal["green_key"]
+    del terminal["red_key"]
+
+    outcome = build_battle_resource_outcome(start, terminal)
+    status, payload = available_battle_resource_outcome(outcome)
+    pool = _pool_with_completed_outcome(status, payload)
+    report = build_battle_resource_outcome_audit_report(
+        pool,
+        requested_seeds=(1,),
+        max_steps=10,
+    )
+
+    assert outcome.terminal.keys.status == "missing"
+    assert outcome.terminal.keys.reason == "missing key flags: green_key, red_key"
+    assert "terminal keys: missing key flags: green_key, red_key" in outcome.problems
+    assert report.passed is False
+    assert report.identity_component_missing_counts["keys"] == 1
+    assert any(
+        "T018 identity-bearing component keys" in problem
+        for problem in report.identity_component_problems
+    )
+
+
 def _raw(
     *,
     current_hp: int,

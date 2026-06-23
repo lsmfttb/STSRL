@@ -617,17 +617,16 @@ def _curses_field(deck: ResourceField) -> ResourceField:
 
 
 def _keys_field(raw: Mapping[str, Any]) -> ResourceField:
-    values: dict[str, bool | None] = {}
+    values: dict[str, bool] = {}
     missing: list[str] = []
     for key in _KEY_NAMES:
         value = raw.get(key)
         if isinstance(value, bool):
             values[key] = value
         else:
-            values[key] = None
             missing.append(key)
-    if len(missing) == len(_KEY_NAMES):
-        return _missing_field("missing key flags")
+    if missing:
+        return _missing_field(f"missing key flags: {', '.join(missing)}")
     return _available_field(values, "key_flags")
 
 
