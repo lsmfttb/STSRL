@@ -327,9 +327,14 @@ def _persistent_resources(
     for field_name in RESOURCE_FIELD_NAMES:
         field = projection.resource_fields[field_name]
         if field.availability == "available":
-            fields[field_name] = _available_field(
-                projection.resource_values[field_name]
-            )
+            if field_name in projection.resource_values:
+                fields[field_name] = _available_field(
+                    projection.resource_values[field_name]
+                )
+            else:
+                fields[field_name] = _unavailable_field(
+                    f"{field_name} value is not retained by the parsed projection"
+                )
         elif field.availability == "unsupported":
             fields[field_name] = _unsupported_field(
                 field.reason or f"{field_name} unsupported"

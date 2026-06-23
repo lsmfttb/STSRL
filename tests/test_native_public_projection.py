@@ -227,6 +227,68 @@ def test_parser_keeps_persistent_resource_unavailability_explicit() -> None:
     assert projection.resource_fields["deck"].reason == "native resources not exposed"
 
 
+def test_parser_accepts_t018_identity_resources_without_numeric_snapshot_values() -> (
+    None
+):
+    raw = _projection_raw()
+    persistent_resources = raw["persistent_resources"]
+    assert isinstance(persistent_resources, dict)
+    resources = persistent_resources["value"]
+    assert isinstance(resources, dict)
+    resources["deck"] = _available(
+        [
+            {
+                "deck_index": 0,
+                "id": 15,
+                "id_label": "ASCENDERS_BANE",
+                "name": "Ascender's Bane",
+                "type": "CURSE",
+            }
+        ],
+        "GameContext::deck",
+    )
+    resources["relics"] = _available(
+        [
+            {
+                "relic_index": 0,
+                "id": 86,
+                "id_label": "Burning Blood",
+                "name": "Burning Blood",
+                "counter": 0,
+            }
+        ],
+        "GameContext::relics",
+    )
+    resources["potion_identities"] = _available(
+        [
+            {
+                "potion_index": 0,
+                "id": 1,
+                "id_label": "EMPTY_POTION_ID",
+                "name": "EMPTY_POTION_SLOT",
+            }
+        ],
+        "GameContext::potions",
+    )
+    resources["keys"] = _available(
+        {"blue_key": False, "green_key": False, "red_key": False},
+        "GameContext::keyFlags",
+    )
+
+    projection = parse_native_public_projection(raw)
+
+    assert projection.resource_fields["deck"].availability == "available"
+    assert projection.resource_fields["deck"].source == "GameContext::deck"
+    assert projection.resource_fields["keys"].source == "GameContext::keyFlags"
+    assert projection.resource_values == {
+        "current_hp": 80,
+        "max_hp": 80,
+        "gold": 99,
+        "potion_count": 1,
+        "potion_capacity": 3,
+    }
+
+
 def test_lightspeed_adapter_reads_parsed_native_projection_only_from_current_state() -> (
     None
 ):

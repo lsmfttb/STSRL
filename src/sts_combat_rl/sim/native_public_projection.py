@@ -58,6 +58,15 @@ RESOURCE_FIELD_NAMES = (
     "potion_identities",
     "keys",
 )
+NUMERIC_RESOURCE_FIELD_NAMES = frozenset(
+    {
+        "current_hp",
+        "max_hp",
+        "gold",
+        "potion_count",
+        "potion_capacity",
+    }
+)
 KNOWN_SCREEN_STATES = frozenset(
     {
         "BATTLE",
@@ -497,6 +506,7 @@ def parse_native_public_projection(raw: object) -> NativePublicProjection:
             )
             for field_name, field_value in resource_fields.items()
             if field_value.availability == "available"
+            and field_name in NUMERIC_RESOURCE_FIELD_NAMES
         }
     else:
         resource_fields = {

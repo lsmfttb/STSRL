@@ -25,6 +25,9 @@ from sts_combat_rl.sim.resource_outcome import (
 )
 
 
+T018_IDENTITY_COMPONENTS = ("potion_slots", "deck", "curses", "relics", "keys")
+
+
 @dataclass(frozen=True)
 class BattleResourceOutcomeAuditReport:
     """Audit result for current structured battle-end resource outcomes."""
@@ -44,6 +47,8 @@ class BattleResourceOutcomeAuditReport:
             source_record_count=0
         )
     )
+    identity_component_missing_counts: Counter[str] = field(default_factory=Counter)
+    identity_component_problems: tuple[str, ...] = ()
     known_limitations: tuple[str, ...] = ()
     pool_problems: list[str] = field(default_factory=list)
 
@@ -54,6 +59,7 @@ class BattleResourceOutcomeAuditReport:
             and self.completed_battle_outcome_missing_count == 0
             and not self.pool_problems
             and self.component_report.passed
+            and not self.identity_component_problems
         )
 
 
@@ -100,6 +106,8 @@ def build_battle_resource_outcome_audit_report(
         for record in pool.records
     ]
     component_report = build_battle_resource_outcome_component_report(rows)
+    identity_missing_counts = _identity_component_missing_counts(component_report)
+    identity_problems = tuple(_identity_component_problems(identity_missing_counts))
     return BattleResourceOutcomeAuditReport(
         requested_seeds=requested_seeds,
         max_steps=max_steps,
@@ -116,6 +124,8 @@ def build_battle_resource_outcome_audit_report(
         ),
         terminal_outcome_counts=coverage.reported_battle_outcome_counts,
         component_report=component_report,
+        identity_component_missing_counts=identity_missing_counts,
+        identity_component_problems=identity_problems,
         known_limitations=tuple(_known_limitations(component_report)),
         pool_problems=list(coverage.problems),
     )
@@ -150,6 +160,16 @@ def format_battle_resource_outcome_audit_report(
     lines.append(
         format_battle_resource_outcome_component_report(report.component_report)
     )
+    _append_counter(
+        lines,
+        "T018 identity missing/unavailable counts",
+        report.identity_component_missing_counts,
+    )
+    lines.append("T018 identity gate problems:")
+    if report.identity_component_problems:
+        lines.extend(f"  - {problem}" for problem in report.identity_component_problems)
+    else:
+        lines.append("  (none)")
     lines.append("known limitations:")
     if report.known_limitations:
         lines.extend(f"  - {limitation}" for limitation in report.known_limitations)
@@ -175,10 +195,9 @@ def _append_counter(lines: list[str], title: str, values: Counter[str]) -> None:
 def _known_limitations(
     component_report: BattleResourceOutcomeComponentReport,
 ) -> list[str]:
-    identity_components = ("potion_slots", "deck", "curses", "relics", "keys")
     missing_components = [
         name
-        for name in identity_components
+        for name in T018_IDENTITY_COMPONENTS
         if (
             component_report.component_presence_counts.get(name, Counter()).get(
                 "missing", 0
@@ -196,4 +215,26 @@ def _known_limitations(
         f"in this audit: {', '.join(missing_components)}",
         "current audit success means structured plumbing and explicit missingness "
         "are valid; it does not prove full native resource identity coverage",
+    ]
+
+
+def _identity_component_missing_counts(
+    component_report: BattleResourceOutcomeComponentReport,
+) -> Counter[str]:
+    missing_counts: Counter[str] = Counter()
+    for name in T018_IDENTITY_COMPONENTS:
+        counts = component_report.component_presence_counts.get(name, Counter())
+        missing = counts.get("missing", 0) + counts.get("unavailable", 0)
+        if missing:
+            missing_counts[name] = missing
+    return missing_counts
+
+
+def _identity_component_problems(missing_counts: Counter[str]) -> list[str]:
+    return [
+        (
+            f"T018 identity-bearing component {name} is missing or unavailable "
+            f"in {count} terminal outcome(s)"
+        )
+        for name, count in sorted(missing_counts.items())
     ]

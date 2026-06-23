@@ -179,9 +179,42 @@ for key in (
     "gold",
     "potion_count",
     "potion_capacity",
+    "potions",
+    "deck",
+    "relics",
+    "blue_key",
+    "green_key",
+    "red_key",
 ):
     if key not in snapshot:
         fail(f"snapshot missing required field {key!r}")
+for key in ("potions", "deck", "relics"):
+    if not isinstance(snapshot.get(key), list):
+        fail(f"snapshot {key!r} must be a list")
+for key in ("blue_key", "green_key", "red_key"):
+    if not isinstance(snapshot.get(key), bool):
+        fail(f"snapshot {key!r} must be a bool")
+if snapshot["deck"]:
+    first_card = snapshot["deck"][0]
+    if not isinstance(first_card, dict):
+        fail("snapshot deck entries must be objects")
+    for key in ("deck_index", "id", "id_label", "name", "type"):
+        if key not in first_card:
+            fail(f"snapshot deck entry missing required field {key!r}")
+if snapshot["relics"]:
+    first_relic = snapshot["relics"][0]
+    if not isinstance(first_relic, dict):
+        fail("snapshot relic entries must be objects")
+    for key in ("relic_index", "id", "id_label", "name", "counter"):
+        if key not in first_relic:
+            fail(f"snapshot relic entry missing required field {key!r}")
+if snapshot["potions"]:
+    first_potion = snapshot["potions"][0]
+    if not isinstance(first_potion, dict):
+        fail("snapshot potion entries must be objects")
+    for key in ("potion_index", "id", "id_label", "name"):
+        if key not in first_potion:
+            fail(f"snapshot potion entry missing required field {key!r}")
 
 observation = sim.observation()
 if not isinstance(observation, list) or not observation:
@@ -244,6 +277,19 @@ for key in ("current_hp", "max_hp", "gold", "potion_count", "potion_capacity"):
     field = resource_values.get(key)
     if not isinstance(field, dict) or field.get("availability") != "available":
         fail(f"persistent resource {key!r} must be available")
+for key in ("deck", "relics", "potion_identities", "keys"):
+    field = resource_values.get(key)
+    if not isinstance(field, dict) or field.get("availability") != "available":
+        fail(f"persistent resource {key!r} must be available")
+    value = field.get("value")
+    if key == "keys":
+        if not isinstance(value, dict):
+            fail("persistent resource 'keys' value must be an object")
+        for flag in ("blue_key", "green_key", "red_key"):
+            if not isinstance(value.get(flag), bool):
+                fail(f"persistent resource key flag {flag!r} must be a bool")
+    elif not isinstance(value, list):
+        fail(f"persistent resource {key!r} value must be a list")
 
 battle_snapshot = sim.snapshot()
 for _ in range(200):
@@ -302,6 +348,7 @@ observed_capabilities = {
     "gcc15_build_compatibility",
     "native_public_projection",
     "native_battle_search_root",
+    "native_terminal_resource_identity",
 }
 missing = sorted(observed_capabilities.difference(expected_capabilities))
 if missing:
