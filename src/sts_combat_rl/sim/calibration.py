@@ -43,6 +43,10 @@ from sts_combat_rl.sim.features import (
     tactical_field_parity_rows,
     tactical_state_problems,
 )
+from sts_combat_rl.sim.lightspeed_source import (
+    format_lightspeed_source_identity,
+    lightspeed_source_identity_dict,
+)
 
 
 @dataclass
@@ -69,6 +73,9 @@ class SimulatorCalibrationReport:
     chosen_action_kind_counts: Counter[str] = field(default_factory=Counter)
     screen_state_counts: Counter[str] = field(default_factory=Counter)
     problems: list[str] = field(default_factory=list)
+    source_identity: dict[str, Any] = field(
+        default_factory=lightspeed_source_identity_dict
+    )
 
 
 @dataclass
@@ -286,6 +293,7 @@ def format_simulator_calibration_report(report: SimulatorCalibrationReport) -> s
 
     lines = [
         "Simulator calibration summary",
+        format_lightspeed_source_identity(report.source_identity),
         f"seed: {report.seed if report.seed is not None else '(default)'}",
         f"requested steps: {report.requested_steps}",
         "configured battle excluded action kinds: "

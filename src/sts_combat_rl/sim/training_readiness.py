@@ -8,8 +8,13 @@ Gymnasium environment, RL algorithm, or game mechanics.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 from sts_combat_rl.sim.controlled_run import ControlledRun
+from sts_combat_rl.sim.lightspeed_source import (
+    format_lightspeed_source_identity,
+    lightspeed_source_identity_dict,
+)
 from sts_combat_rl.sim.model_input import (
     build_model_input_batch,
     build_model_input_batch_smoke_report,
@@ -64,6 +69,9 @@ class TrainingReadinessReport:
     model_scoring_ok: bool
     problems: list[str] = field(default_factory=list)
     limitations: tuple[str, ...] = TRAINING_READINESS_LIMITATIONS
+    source_identity: dict[str, Any] = field(
+        default_factory=lightspeed_source_identity_dict
+    )
 
 
 def build_training_readiness_report(
@@ -137,6 +145,7 @@ def format_training_readiness_report(report: TrainingReadinessReport) -> str:
     lines = [
         "Training readiness summary",
         "scope: first battle-agent trainer readiness only; no training is run",
+        format_lightspeed_source_identity(report.source_identity),
         f"ready for first training: {_yes_no(report.ready_for_first_training)}",
         f"source rollouts: {report.source_rollout_count}",
         f"segments: {report.segment_count}",

@@ -1,8 +1,9 @@
 # sts_lightspeed WSL Operations
 
 This guide lists simulator operations available on the latest `main`.
-Checkpoint verification, portable battle-start pools, and fixed structural
-evaluation are current capabilities. Search remains task-scoped future work.
+Checkpoint verification, portable battle-start pools, fixed structural
+evaluation, and the pinned external source integration are current
+capabilities. Search remains task-scoped future work.
 
 ## Boundary
 
@@ -12,8 +13,9 @@ The authoritative simulator checkout stays outside this repository:
 ~/stsrl-spikes/sts_lightspeed
 ```
 
-This repository stores Python adapters and reproducible source patches. It does
-not vendor simulator binaries, game files, saves, or game mechanics.
+This repository stores Python adapters, the source manifest, and legacy patches
+kept as provenance. It does not vendor simulator source, simulator binaries,
+game files, saves, or game mechanics.
 
 Real simulator gates run through WSL, not Windows Python.
 
@@ -23,9 +25,68 @@ Real simulator gates run through WSL, not Windows Python.
 external checkout: ~/stsrl-spikes/sts_lightspeed
 system build:      ~/stsrl-spikes/sts_lightspeed/build-py
 repository in WSL: /mnt/d/DeadlycatCoding/STSRL
+source manifest:   docs/sts_lightspeed_source_manifest.json
 ```
 
-## Patches Present On Main
+## Pinned Source Integration
+
+The canonical day-to-day source integration is recorded in
+[`sts_lightspeed_source_manifest.json`](sts_lightspeed_source_manifest.json):
+
+```text
+upstream:     https://github.com/gamerpuppy/sts_lightspeed.git
+base commit:  7476a81954020087da31d41d16fddf475746ec2d
+integration:  https://github.com/lsmfttb/sts_lightspeed.git
+ref:          refs/heads/stsrl/t017-current-native-surface-v1
+commit:       820a2f884c5cfacdec10dd1937365e4172683e0a
+module:       slaythespire.StepSimulator
+```
+
+Verify the pinned source in a disposable worktree:
+
+```powershell
+wsl.exe -d Ubuntu -e bash -lc "cd /mnt/d/DeadlycatCoding/STSRL && bash scripts/verify_lightspeed_source.sh /home/lsmft/stsrl-spikes/sts_lightspeed"
+```
+
+The verifier reads the manifest, fetches the pinned ref, checks that it resolves
+to the recorded commit, initializes `json` and `pybind11`, builds the Python
+module in the disposable worktree, and asserts the native API capabilities
+required by current `main`.
+
+Rebuild the system `build-py` used by runtime gates only after the verifier
+passes. This WSL bash command leaves tracked local changes in the external
+checkout untouched, builds from a disposable worktree at the pinned integration
+commit, backs up the previous `build-py`, and replaces only the build
+directory:
+
+```bash
+source=/home/lsmft/stsrl-spikes/sts_lightspeed
+worktree=$(mktemp -d /tmp/stsrl-t017-rebuild-source.XXXXXX)
+cleanup() {
+  git -C "$source" worktree remove --force "$worktree" >/dev/null 2>&1 || true
+  git -C "$source" worktree prune >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+git -C "$source" fetch https://github.com/lsmfttb/sts_lightspeed.git refs/heads/stsrl/t017-current-native-surface-v1
+git -C "$source" worktree add --detach "$worktree" 820a2f884c5cfacdec10dd1937365e4172683e0a >/dev/null
+cd "$worktree"
+git submodule update --init json pybind11
+if [ -d "$source/build-py" ]; then
+  mv "$source/build-py" "$source/build-py.pre-t017-$(date +%Y%m%d%H%M%S)"
+fi
+cmake -S "$worktree" -B "$source/build-py" -DCMAKE_POLICY_VERSION_MINIMUM=3.5
+cmake --build "$source/build-py" --target slaythespire -j 2
+PYTHONPATH="$source/build-py" python3 -c "import slaythespire; print(slaythespire.__file__)"
+```
+
+Current WSL-facing reports for the required runtime gates print the manifest
+schema/version, upstream/base commit, integration ref/commit, Python module,
+native capability inventory, legacy patch-stack disposition, and canonical
+verifier command.
+
+## Legacy Patch-Stack Provenance
+
+The old ordered patches remain in the repository as reviewable provenance:
 
 ```text
 patches/sts_lightspeed_step_simulator.patch
@@ -38,19 +99,16 @@ patches/sts_lightspeed_gcc15_compat.patch
 patches/sts_lightspeed_public_projection.patch
 ```
 
-The canonical base is external commit `7476a81`. The patch order and a clean
-GCC 15 build gate are kept in `scripts/verify_lightspeed_patch_stack.sh`:
+The old verifier, `scripts/verify_lightspeed_patch_stack.sh`, is retained only
+for historical equivalence checks against external commit `7476a81`:
 
 ```powershell
 wsl.exe -d Ubuntu -e bash -lc "cd /mnt/d/DeadlycatCoding/STSRL && bash scripts/verify_lightspeed_patch_stack.sh /home/lsmft/stsrl-spikes/sts_lightspeed"
 ```
 
-The verifier uses a disposable worktree and does not replace `build-py`.
-Apply the same ordered stack and rebuild the system build before using the
-runtime gates below. Do not treat an older `build-py` as supporting current
-native fields just because the Python branch is current. On 2026-06-22,
-`build-py` was rebuilt from this patch stack for T014; the previous stale
-directory was backed up as `build-py.pre-t014-20260622224003`.
+Future native-heavy tasks must extend the pinned source integration and update
+the manifest rather than appending ad hoc patches to this retired stack unless
+a later task explicitly reopens the patch-stack workflow.
 
 Additional patches preserved in legacy commit `d56e10e` are not current
 capabilities. They are mapped to focused tasks in [`tasks/`](tasks/README.md)
@@ -89,7 +147,8 @@ demonstrate agent strength.
 
 ### Tactical Feature Contract Audit
 
-Run this only after rebuilding `build-py` from the current verified patch stack.
+Run this only after rebuilding `build-py` from the current verified pinned
+source integration.
 It validates required simulator projections, reports schema/version, unknown
 identities, missing fields, and simulator/live field parity. It is not a
 live-controller smoke.
@@ -141,7 +200,7 @@ serialization.
 
 ### Fixed Structural Battle Evaluation
 
-After producing a portable pool with the current verified patch stack, freeze
+After producing a portable pool with the current verified pinned source, freeze
 and evaluate a deterministic structural cohort. This is a plumbing and
 comparison gate, not a policy-strength benchmark:
 
@@ -152,7 +211,7 @@ wsl.exe -d Ubuntu -e bash -lc "cd /mnt/d/DeadlycatCoding/STSRL && mkdir -p artif
 The command restores every selected start in a fresh adapter, reports restore,
 selection, controller, and simulator failures explicitly, and writes separate
 natural-weighted, encounter-macro, room-type-macro, and per-stratum results.
-Use a `build-py` rebuilt from the verified patch stack; an older system build
+Use a `build-py` rebuilt from the verified pinned source; an older system build
 can lack completed-battle outcome fields even when the repository is current.
 
 ## Troubleshooting
