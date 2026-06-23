@@ -32,6 +32,7 @@ from sts_combat_rl.sim.fixed_battle_evaluation import (
 )
 from sts_combat_rl.sim.public_context_artifacts import PUBLIC_CONTEXT_LEGACY_LOSS
 from sts_combat_rl.sim.public_run_context import build_public_run_context
+from sts_combat_rl.sim.resource_outcome import BATTLE_RESOURCE_OUTCOME_LEGACY_LOSS
 
 
 # ── Test helpers ────────────────────────────────────────────────────────────
@@ -404,6 +405,11 @@ class TestEvaluateFixedCohort:
             "native_checkpoint",
         )
         assert report.battle_results[0].decision_count > 0
+        assert report.battle_results[0].structured_battle_outcome_status == "available"
+        assert (
+            report.battle_results[0].structured_battle_outcome["schema_id"]
+            == "structured-battle-outcome-v1"
+        )
 
     def test_truncation_reported(self):
         cohort_records = [_make_cohort_record(0)]
@@ -421,6 +427,9 @@ class TestEvaluateFixedCohort:
         assert report.truncations == 1
         assert not report.evaluation_successful
         assert report.battle_results[0].termination_status == "truncated"
+        assert (
+            report.battle_results[0].structured_battle_outcome_status == "unavailable"
+        )
         assert len(report.problems) >= 1
         assert any("truncat" in p for p in report.problems)
 
@@ -438,6 +447,9 @@ class TestEvaluateFixedCohort:
         )
         assert report.errors == 1
         assert report.battle_results[0].termination_status == "error"
+        assert (
+            report.battle_results[0].structured_battle_outcome_status == "unavailable"
+        )
         assert report.battle_results[0].restoration_method == "failed"
         assert len(report.battle_results[0].problems) >= 1
 
@@ -1034,12 +1046,15 @@ class TestEvaluationReportSerialization:
         loaded = load_fixed_evaluation_report_jsonl(StringIO(legacy_text))
 
         loaded_result = loaded.battle_results[0]
-        assert loaded.migration_report.applied_versions == (2,)
+        assert loaded.migration_report.applied_versions == (2, 3)
         assert PUBLIC_CONTEXT_LEGACY_LOSS in loaded.migration_report.losses
+        assert BATTLE_RESOURCE_OUTCOME_LEGACY_LOSS in loaded.migration_report.losses
         assert loaded_result.public_context_status == "legacy_unavailable"
         assert loaded_result.public_run_context == {}
         assert loaded_result.public_context_replay_status == "legacy_unavailable"
         assert loaded_result.public_context_replay_mismatches == []
+        assert loaded_result.structured_battle_outcome_status == "legacy_unavailable"
+        assert loaded_result.structured_battle_outcome == {}
 
     def test_load_missing_metadata_raises(self):
         buf = StringIO('{"type": "result", "result": {}}\n')

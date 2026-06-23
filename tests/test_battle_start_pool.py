@@ -183,6 +183,7 @@ def test_natural_pool_captures_provenance_coverage_and_seeded_sampling() -> None
     assert report.reported_battle_win_count == 2
     assert report.completed_battle_count == 4
     assert report.completed_outcomes_complete is True
+    assert report.resource_outcome_status_counts["available"] == 4
     assert report.later_act_source_run_count == 2
     assert sampled == same_sampled
     assert {sample.sampling_component for sample in sampled} <= {
@@ -233,6 +234,11 @@ def test_portable_pool_manifest_replays_duplicate_action_ids_in_fresh_adapters()
     assert restored.raw == loaded.records[1].snapshot_raw
     assert loaded.records[1].native_checkpoint is None
     assert loaded.records[1].action_trace[2]["occurrence"] == 0
+    assert loaded.records[1].completed_battle_resource_outcome_status == "available"
+    assert (
+        loaded.records[1].completed_battle_resource_outcome["schema_id"]
+        == "structured-battle-outcome-v1"
+    )
     assert verification.restore_ok is True
     assert verification.replay_restored_count == 4
     assert verification.context_matched_count == 4

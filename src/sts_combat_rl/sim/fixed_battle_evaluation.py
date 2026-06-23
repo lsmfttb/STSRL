@@ -7,6 +7,7 @@ a versioned evaluation report with per-battle and aggregate results.
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 import json
@@ -54,9 +55,19 @@ from sts_combat_rl.sim.public_run_context import (
     build_public_run_context,
     read_native_public_projection,
 )
+from sts_combat_rl.sim.resource_outcome import (
+    BATTLE_RESOURCE_OUTCOME_LEGACY_LOSS,
+    BATTLE_RESOURCE_OUTCOME_SCHEMA_ID,
+    BATTLE_RESOURCE_OUTCOME_SCHEMA_VERSION,
+    battle_resource_outcome_problems,
+    available_battle_resource_outcome,
+    build_battle_resource_outcome,
+    legacy_unavailable_battle_resource_outcome,
+    unavailable_battle_resource_outcome,
+)
 
 
-FIXED_EVALUATION_REPORT_FORMAT_VERSION = 2
+FIXED_EVALUATION_REPORT_FORMAT_VERSION = 3
 """Current schema version for the fixed evaluation report."""
 
 FIXED_EVALUATION_REPORT_MIGRATIONS: tuple[ArtifactMigration, ...] = (
@@ -65,6 +76,12 @@ FIXED_EVALUATION_REPORT_MIGRATIONS: tuple[ArtifactMigration, ...] = (
         target_version=2,
         migrate=lambda document: _migrate_fixed_evaluation_report_v1_to_v2(document),
         losses=(PUBLIC_CONTEXT_LEGACY_LOSS,),
+    ),
+    ArtifactMigration(
+        source_version=2,
+        target_version=3,
+        migrate=lambda document: _migrate_fixed_evaluation_report_v2_to_v3(document),
+        losses=(BATTLE_RESOURCE_OUTCOME_LEGACY_LOSS,),
     ),
 )
 """Sequential migrations for fixed evaluation reports."""
@@ -98,6 +115,8 @@ class SingleBattleEvaluationResult:
     public_run_context: dict[str, Any] = field(default_factory=dict)
     public_context_replay_status: str = "not_checked"
     public_context_replay_mismatches: list[str] = field(default_factory=list)
+    structured_battle_outcome_status: str = "legacy_unavailable"
+    structured_battle_outcome: dict[str, Any] = field(default_factory=dict)
     problems: list[str] = field(default_factory=list)
 
     @property
@@ -292,6 +311,8 @@ def evaluate_fixed_cohort(
             public_run_context=result.public_run_context,
             public_context_replay_status=result.public_context_replay_status,
             public_context_replay_mismatches=result.public_context_replay_mismatches,
+            structured_battle_outcome_status=result.structured_battle_outcome_status,
+            structured_battle_outcome=result.structured_battle_outcome,
             problems=result.problems,
         )
         battle_results.append(result)
@@ -410,6 +431,12 @@ def _evaluate_one_battle(
             public_run_context=public_run_context,
             public_context_replay_status=public_context_replay_status,
             public_context_replay_mismatches=public_context_replay_mismatches,
+            structured_battle_outcome_status=unavailable_battle_resource_outcome(
+                "restore_failed"
+            )[0],
+            structured_battle_outcome=unavailable_battle_resource_outcome(
+                "restore_failed"
+            )[1],
             problems=[restore_problem],
         )
 
@@ -585,6 +612,20 @@ def _evaluate_one_battle(
     hp_loss: int | None = None
     if initial_hp is not None and terminal_hp is not None:
         hp_loss = initial_hp - terminal_hp
+    if termination_status in {"win", "loss"}:
+        structured_outcome_status, structured_outcome = (
+            available_battle_resource_outcome(
+                build_battle_resource_outcome(
+                    snapshot.raw,
+                    current.raw,
+                    battle_result=_battle_outcome(current.raw),
+                )
+            )
+        )
+    else:
+        structured_outcome_status, structured_outcome = (
+            unavailable_battle_resource_outcome(termination_status)
+        )
 
     return SingleBattleEvaluationResult(
         cohort_index=cohort_record.cohort_index,
@@ -615,6 +656,8 @@ def _evaluate_one_battle(
         public_run_context=public_run_context,
         public_context_replay_status=public_context_replay_status,
         public_context_replay_mismatches=public_context_replay_mismatches,
+        structured_battle_outcome_status=structured_outcome_status,
+        structured_battle_outcome=structured_outcome,
         problems=problems,
     )
 
@@ -829,6 +872,10 @@ def dump_fixed_evaluation_report_jsonl(
         "source_pool_format_version": report.source_pool_format_version,
         "selection_config": report.selection_config,
         "per_stratum_source_counts": dict(report.per_stratum_source_counts),
+        "structured_battle_outcome_schema_id": BATTLE_RESOURCE_OUTCOME_SCHEMA_ID,
+        "structured_battle_outcome_schema_version": (
+            BATTLE_RESOURCE_OUTCOME_SCHEMA_VERSION
+        ),
         "battle_count": len(report.battle_results),
         "authoritative_wins": report.authoritative_wins,
         "losses": report.losses,
@@ -946,6 +993,21 @@ def format_fixed_evaluation_report(report: FixedEvaluationReport) -> str:
     lines.append(
         f"evaluation successful: {'yes' if report.evaluation_successful else 'no'}"
     )
+    lines.append(
+        "structured outcome schema: "
+        f"{BATTLE_RESOURCE_OUTCOME_SCHEMA_ID} v{BATTLE_RESOURCE_OUTCOME_SCHEMA_VERSION}"
+    )
+    outcome_status_counts = Counter(
+        result.structured_battle_outcome_status for result in report.battle_results
+    )
+    lines.append("structured outcome statuses:")
+    if outcome_status_counts:
+        lines.extend(
+            f"  {status}: {count}"
+            for status, count in sorted(outcome_status_counts.items())
+        )
+    else:
+        lines.append("  (none)")
     replay_status_counts = {
         status: sum(
             1
@@ -1240,6 +1302,10 @@ def _eval_result_to_manifest(result: SingleBattleEvaluationResult) -> dict[str, 
         "public_context_replay_mismatches": list(
             result.public_context_replay_mismatches
         ),
+        "structured_battle_outcome_status": result.structured_battle_outcome_status,
+        "structured_battle_outcome": _json_safe_mapping(
+            result.structured_battle_outcome
+        ),
         "problems": list(result.problems),
     }
 
@@ -1259,6 +1325,15 @@ def _eval_result_from_manifest(
         raw.get("public_run_context"),
         public_context_status=public_context_status,
         label=label,
+    )
+    structured_outcome_status = _resource_outcome_status(
+        raw.get("structured_battle_outcome_status"),
+        f"{label} structured battle outcome status",
+    )
+    structured_outcome = _resource_outcome_payload(
+        raw.get("structured_battle_outcome"),
+        status=structured_outcome_status,
+        label=f"{label} structured battle outcome",
     )
 
     return SingleBattleEvaluationResult(
@@ -1325,6 +1400,8 @@ def _eval_result_from_manifest(
             raw.get("public_context_replay_mismatches", []),
             f"{label} public_context_replay_mismatches",
         ),
+        structured_battle_outcome_status=structured_outcome_status,
+        structured_battle_outcome=structured_outcome,
         problems=_require_string_list(raw.get("problems", []), f"{label} problems"),
     )
 
@@ -1352,9 +1429,30 @@ def _public_run_context(
     return sanitize_public_context_artifact(value, label=label)
 
 
+def _resource_outcome_status(value: Any, label: str) -> str:
+    from sts_combat_rl.sim.resource_outcome import BATTLE_RESOURCE_OUTCOME_STATUSES
+
+    if value not in BATTLE_RESOURCE_OUTCOME_STATUSES:
+        raise ValueError(f"{label} has invalid value {value!r}")
+    return str(value)
+
+
+def _resource_outcome_payload(
+    value: Any,
+    *,
+    status: str,
+    label: str,
+) -> dict[str, Any]:
+    payload = _require_mapping(value, label)
+    problems = battle_resource_outcome_problems(status, payload, label=label)
+    if problems:
+        raise ValueError("; ".join(problems))
+    return payload
+
+
 def _migrate_fixed_evaluation_report_v1_to_v2(document: Any) -> Any:
     metadata = dict(document.metadata)
-    metadata["format_version"] = FIXED_EVALUATION_REPORT_FORMAT_VERSION
+    metadata["format_version"] = 2
     migrated_records: list[dict[str, Any]] = []
     for source in document.records:
         raw = dict(source)
@@ -1362,6 +1460,23 @@ def _migrate_fixed_evaluation_report_v1_to_v2(document: Any) -> Any:
         raw["public_run_context"] = {}
         raw["public_context_replay_status"] = "legacy_unavailable"
         raw["public_context_replay_mismatches"] = []
+        migrated_records.append(raw)
+    return type(document)(metadata=metadata, records=migrated_records)
+
+
+def _migrate_fixed_evaluation_report_v2_to_v3(document: Any) -> Any:
+    metadata = dict(document.metadata)
+    metadata["format_version"] = FIXED_EVALUATION_REPORT_FORMAT_VERSION
+    metadata["structured_battle_outcome_schema_id"] = BATTLE_RESOURCE_OUTCOME_SCHEMA_ID
+    metadata["structured_battle_outcome_schema_version"] = (
+        BATTLE_RESOURCE_OUTCOME_SCHEMA_VERSION
+    )
+    status, payload = legacy_unavailable_battle_resource_outcome()
+    migrated_records: list[dict[str, Any]] = []
+    for source in document.records:
+        raw = dict(source)
+        raw["structured_battle_outcome_status"] = status
+        raw["structured_battle_outcome"] = payload
         migrated_records.append(raw)
     return type(document)(metadata=metadata, records=migrated_records)
 

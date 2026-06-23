@@ -31,6 +31,11 @@ from sts_combat_rl.sim.online_controller import (
     RoutedRunController,
 )
 from sts_combat_rl.sim.policy import DecisionPolicy
+from sts_combat_rl.sim.resource_outcome import (
+    available_battle_resource_outcome,
+    build_battle_resource_outcome,
+    unavailable_battle_resource_outcome,
+)
 
 
 BATTLE_AGENT_CONTROLLER = "battle_agent"
@@ -120,6 +125,8 @@ class BattleSegment:
     start_potion_count: float | None = None
     end_potion_count: float | None = None
     potion_count_delta: float | None = None
+    structured_battle_outcome_status: str = "legacy_unavailable"
+    structured_battle_outcome: dict[str, Any] = field(default_factory=dict)
     action_kind_counts: Counter[str] = field(default_factory=Counter)
 
 
@@ -677,6 +684,20 @@ def _battle_segment(
         if last_step.next_potion_count is not None
         else last_step.potion_count
     )
+    if end_reason == "truncated":
+        structured_outcome_status, structured_outcome = (
+            unavailable_battle_resource_outcome(end_reason)
+        )
+    else:
+        structured_outcome_status, structured_outcome = (
+            available_battle_resource_outcome(
+                build_battle_resource_outcome(
+                    first_step.snapshot_raw,
+                    last_step.next_snapshot_raw,
+                    battle_result=last_step.next_battle_outcome,
+                )
+            )
+        )
     return BattleSegment(
         rollout_index=rollout_index,
         seed=rollout.seed,
@@ -702,6 +723,8 @@ def _battle_segment(
         start_potion_count=start_potion_count,
         end_potion_count=end_potion_count,
         potion_count_delta=_delta(start_potion_count, end_potion_count),
+        structured_battle_outcome_status=structured_outcome_status,
+        structured_battle_outcome=structured_outcome,
         action_kind_counts=Counter(step.chosen_action_kind for step in steps),
     )
 

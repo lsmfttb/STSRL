@@ -18,6 +18,7 @@ from sts_combat_rl.sim.reward_labeling import (
     RewardLabeledBattleDecisionBatch,
     TERMINAL_STEP_REWARD_ALLOCATION,
 )
+from sts_combat_rl.sim.resource_outcome import battle_resource_outcome_problems
 
 
 _TOLERANCE = 1e-9
@@ -313,6 +314,13 @@ def _validate_label(
     for name, value in label.raw_reward_components.items():
         if value is not None:
             _validate_finite(value, f"label {index}: raw component {name}", problems)
+    problems.extend(
+        battle_resource_outcome_problems(
+            label.structured_battle_outcome_status,
+            label.structured_battle_outcome,
+            label=f"label {index}: structured battle outcome",
+        )
+    )
 
 
 def _validate_example_label_alignment(
