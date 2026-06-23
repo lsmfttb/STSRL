@@ -175,13 +175,12 @@ tasks in dependency order are:
 
 1. T005, fixed structural battle evaluation, is complete. It provides the
    comparison surface required before search promotion.
-2. T017, stable `sts_lightspeed` source integration, replaces the day-to-day
-   local patch-stack workflow with a pinned external source integration before
-   more native simulator surface is added.
-3. T006, Oracle search teacher pipeline, is blocked on maintainer review of the
-   T017 source-integration result. It is confined to
-   the explicitly Oracle-like simulator regime and must compare named budgets
-   on immutable T005 cohorts after the simulator source integration is stable.
+2. T017, stable `sts_lightspeed` source integration, is complete. It replaces
+   the day-to-day local patch-stack workflow with a pinned external source
+   integration for future native simulator surface.
+3. T006, Oracle search teacher pipeline, is `READY`. It is confined to the
+   explicitly Oracle-like simulator regime and must compare named budgets on
+   immutable T005 cohorts after the simulator source integration is stable.
 4. T007 is `CANCELLED`. PR #9 remains closed and is not a branch base. Its
    former cross-cutting scope is split into T014--T016; see
    [`t007_review_handoff_2026-06-22.md`](t007_review_handoff_2026-06-22.md).
@@ -195,9 +194,9 @@ tasks in dependency order are:
    the T015 public-context contract through current persisted artifacts,
    portable replay comparison, and the WSL context audit.
 8. T008, A20 constructed battle supplements, and T012, structured battle
-   resource outcomes, are blocked by T017 before adding more native simulator
-   surface. T009 remains blocked until its remaining search/data prerequisites,
-   including T006 and T012, are complete.
+   resource outcomes, are `READY` and should extend native simulator surface
+   through the T017-managed source integration. T009 remains blocked until its
+   remaining search/data prerequisites, including T006 and T012, are complete.
 
 Later tasks are dependency-ordered in the task index. A task is not ready for a
 new branch until its status is `READY`.

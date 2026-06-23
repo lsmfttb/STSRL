@@ -1,6 +1,6 @@
 # T006: Oracle Search Teacher Pipeline
 
-Status: `BLOCKED` by T017.
+Status: `READY`.
 
 ## Objective
 
@@ -22,26 +22,23 @@ versioned fixed cohorts and per-battle reports containing controller
 provenance, information regime, simulator steps, wall-clock time, and an
 explicit controller-compute telemetry field.
 
-The current WSL `sts_lightspeed` patch stack based on external commit
-`7476a81` builds cleanly, but T017 will replace it with a pinned external
-source integration before this task adds another native surface. The existing
-native code contains search sources but does not yet expose root statistics or
-a repository `OnlineController` for them. Current portable records preserve
-explicit public-context status; teacher rows must retain that status rather
-than implying complete public history.
+T017 replaced the former day-to-day patch-stack workflow with a pinned
+external source integration. The existing native code contains search sources
+but does not yet expose root statistics or a repository `OnlineController` for
+them. Current portable records preserve explicit public-context status; teacher
+rows must retain that status rather than implying complete public history.
 
 ## Dependencies
 
-- T003, T004, and T005 are complete.
-- T017 must merge before implementation starts.
+- T003, T004, T005, and T017 are complete.
 
 ## Scope
 
-- After T017 merges, add the smallest focused `sts_lightspeed` source surface
-  needed to invoke the native `BattleScumSearcher2` from a restored battle and
-  obtain one root row for every legal root action. Extend the T017-managed
-  pinned source integration and manifest; do not append another ad hoc patch to
-  the retired ordered patch-stack workflow.
+- Add the smallest focused `sts_lightspeed` source surface needed to invoke
+  the native `BattleScumSearcher2` from a restored battle and obtain one root
+  row for every legal root action. Extend the T017-managed pinned source
+  integration and manifest; do not append another ad hoc patch to the retired
+  ordered patch-stack workflow.
 - Implement a versioned `OracleSearchController` that satisfies
   `OnlineController`, is explicitly allowed to copy/use simulator state, and
   returns a currently eligible legal-action index by occurrence-disambiguated

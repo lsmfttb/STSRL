@@ -1,6 +1,6 @@
 # T012: Structured Battle Resource Outcomes
 
-Status: `BLOCKED` by T017.
+Status: `READY`.
 
 ## Objective
 
@@ -19,9 +19,7 @@ artifacts.
 
 ## Dependencies
 
-- T003, T004, T005, T010, and T016 are complete.
-- T017 must merge before implementation starts because this task may extend
-  native resource snapshot surface.
+- T003, T004, T005, T010, T016, and T017 are complete.
 
 ## Scope
 

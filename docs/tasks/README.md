@@ -13,18 +13,18 @@ starting work.
 | T003 | DONE | [Artifact provenance foundation](T003-artifact-provenance-foundation.md) | T002 | artifact versioning, decision records |
 | T004 | DONE | [Battle-start checkpoint pool](T004-battle-start-checkpoint-pool.md) | T002, T003, T010 | checkpoint restore, battle-start pool |
 | T005 | DONE | [Fixed structural battle evaluation](T005-fixed-battle-evaluation.md) | T004 | fixed evaluation set and runner |
-| T006 | BLOCKED | [Oracle search teacher pipeline](T006-oracle-search-teacher.md) | T003, T004, T005, T017 | search policy, teacher, search dataset |
+| T006 | READY | [Oracle search teacher pipeline](T006-oracle-search-teacher.md) | T003, T004, T005, T017 | search policy, teacher, search dataset |
 | T007 | CANCELLED | [Complete public run history (superseded)](T007-complete-public-run-history.md) | — | replaced by T014--T016 |
-| T008 | BLOCKED | [A20 constructed battle supplements](T008-a20-constructed-supplements.md) | T003, T004, T016, T017 | battle-start transforms and approximate HP policy |
+| T008 | READY | [A20 constructed battle supplements](T008-a20-constructed-supplements.md) | T003, T004, T016, T017 | battle-start transforms and approximate HP policy |
 | T009 | BLOCKED | [PyTorch search-guidance model](T009-pytorch-search-guidance.md) | T003, T006, T011, T012, T016 | optional train dependency and policy/value model |
 | T010 | DONE | [Stochastic non-combat driver](T010-stochastic-non-combat-driver.md) | T002 | non-combat policy and native visible action/resource support |
 | T011 | DONE | [Tactical feature contract v2](T011-tactical-feature-contract-v2.md) | T003 | feature, trainer-input, and model-input upgrades |
-| T012 | BLOCKED | [Structured battle resource outcomes](T012-structured-resource-outcomes.md) | T003, T004, T010, T016, T017 | persistent resource snapshots and outcome vectors |
+| T012 | READY | [Structured battle resource outcomes](T012-structured-resource-outcomes.md) | T003, T004, T010, T016, T017 | persistent resource snapshots and outcome vectors |
 | T013 | DONE | [Live CommunicationMod runtime adapter](T013-live-communicationmod-runtime-adapter.md) | T003, T011 | trained/search controller deployment in the real game |
 | T014 | DONE | [Native public projection capability](T014-native-public-projection-capability.md) | T002, T003, T004, T010, T011 | native public projection and action parity |
 | T015 | DONE | [Public run context and controlled history](T015-public-run-context-and-controlled-history.md) | T002, T003, T004, T011, T014 | sanitized context and ordered history |
 | T016 | DONE | [Public-context artifacts, replay, and audit](T016-public-context-artifacts-replay-and-audit.md) | T003, T004, T005, T011, T014, T015 | migrations, replay, and coverage audit |
-| T017 | READY | [Stable sts_lightspeed source integration](T017-stable-lightspeed-source-integration.md) | T004, T010, T014, T016 | external source manifest and verifier |
+| T017 | DONE | [Stable sts_lightspeed source integration](T017-stable-lightspeed-source-integration.md) | T004, T010, T014, T016 | external source manifest and verifier |
 
 Only `READY` tasks should receive a new branch. After a prerequisite merges,
 the main maintainer reviews dependent specifications against the new `main`
@@ -39,19 +39,19 @@ document update before acceptance.
 
 - T005 is complete. It establishes the fixed-evaluation boundary without
   changing public-context schemas.
-- T017 is `READY`; it replaces the day-to-day local `sts_lightspeed`
-  patch-stack workflow with a pinned external source integration before more
-  native surface is added.
-- T006 is `BLOCKED` by T017. It adds an explicitly Oracle-like
-  teacher/evaluation path on immutable T005 cohorts and cannot be reported as
-  normal-information or real-game performance.
+- T017 is complete. It replaces the day-to-day local `sts_lightspeed`
+  patch-stack workflow with a pinned external source integration for future
+  native-surface tasks.
+- T006 is `READY`. It adds an explicitly Oracle-like teacher/evaluation path
+  on immutable T005 cohorts and cannot be reported as normal-information or
+  real-game performance.
 - T007 is `CANCELLED`. Its replacement sequence completed T014 for native
   capability, T015 for sanitized in-memory context/history, and T016 for
   artifact propagation/replay/audit. See the
   [T007 review handoff](../t007_review_handoff_2026-06-22.md).
-- T008 and T012 are `BLOCKED` by T017 before they extend native simulator
-  surface for constructed starts and terminal-resource labels. T009 remains
-  blocked by its remaining named data/search prerequisites.
+- T008 and T012 are `READY` and now extend native simulator surface through
+  the T017-managed source integration. T009 remains blocked by its remaining
+  named data/search prerequisites.
 
 ## Standard Local Gates
 

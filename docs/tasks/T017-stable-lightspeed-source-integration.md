@@ -1,6 +1,6 @@
 # T017: Stable sts_lightspeed Source Integration
 
-Status: `READY`.
+Status: `DONE`.
 
 ## Objective
 
