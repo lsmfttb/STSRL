@@ -7,9 +7,9 @@
   },
   "integration": {
     "repository_url": "https://github.com/lsmfttb/sts_lightspeed.git",
-    "branch": "stsrl/t017-current-native-surface-v1",
-    "ref": "refs/heads/stsrl/t017-current-native-surface-v1",
-    "commit": "820a2f884c5cfacdec10dd1937365e4172683e0a"
+    "branch": "stsrl/t006-oracle-search-teacher-v1",
+    "ref": "refs/heads/stsrl/t006-oracle-search-teacher-v1",
+    "commit": "78c3fa86ea4d8ef2c8c490aabfb8047d38d6d077"
   },
   "python_module": {
     "name": "slaythespire",
@@ -122,6 +122,19 @@
         "StepSimulator.public_projection.schema_id",
         "StepSimulator.public_projection.candidate_actions",
         "StepSimulator.public_projection.persistent_resources"
+      ]
+    },
+    {
+      "id": "native_battle_search_root",
+      "description": "Oracle-like BattleScumSearcher2 root statistics exposed through StepSimulator.battle_search for T006 teacher collection and fixed evaluation.",
+      "task_provenance": [
+        "T006"
+      ],
+      "required_python_api": [
+        "StepSimulator.battle_search",
+        "StepSimulator.battle_search.schema_id",
+        "StepSimulator.battle_search.root_rows",
+        "StepSimulator.battle_search.native_simulator_steps"
       ]
     }
   ],

@@ -20,6 +20,13 @@ from sts_combat_rl.commands.fixed_evaluation import (
     write_fixed_cohort,
     write_fixed_evaluation_report,
 )
+from sts_combat_rl.commands.oracle_search import (
+    collect_oracle_teacher_from_pool_path,
+    format_oracle_fixed_evaluation_comparison,
+    format_oracle_teacher_collection,
+    run_oracle_fixed_evaluation_comparison_from_cohort_path,
+    write_oracle_teacher_dataset,
+)
 from sts_combat_rl.commands.public_projection import (
     run_public_projection_capability_audit,
 )
@@ -135,6 +142,10 @@ from sts_combat_rl.sim.policy import (
 from sts_combat_rl.sim.policy_rollout import collect_policy_simulator_rollout
 from sts_combat_rl.sim.rollout import collect_simulator_rollout, format_rollout_batch
 from sts_combat_rl.sim.online_controller import PolicyController
+from sts_combat_rl.sim.oracle_search import (
+    ORACLE_ROOT_SELECTION_RULES,
+    OracleSearchController,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -341,6 +352,25 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     input_group.add_argument(
+        "--lightspeed-oracle-search-teacher",
+        type=Path,
+        metavar="POOL_PATH",
+        help=(
+            "Load a portable battle-start pool, restore each source checkpoint, "
+            "run native hidden-state battle search, and write an Oracle teacher "
+            "JSONL artifact."
+        ),
+    )
+    input_group.add_argument(
+        "--lightspeed-oracle-fixed-evaluation",
+        type=Path,
+        metavar="COHORT_PATH",
+        help=(
+            "Load an immutable fixed battle cohort unchanged and evaluate the "
+            "Oracle search controller on the same restored starts."
+        ),
+    )
+    input_group.add_argument(
         "--lightspeed-non-combat-calibration",
         action="store_true",
         help=(
@@ -537,6 +567,24 @@ def build_parser() -> argparse.ArgumentParser:
         default=1,
         help="Selection seed for the fixed cohort (default: 1).",
     )
+    parser.add_argument(
+        "--oracle-teacher-output",
+        type=Path,
+        metavar="PATH",
+        help="Write --lightspeed-oracle-search-teacher output to this JSONL path.",
+    )
+    parser.add_argument(
+        "--oracle-search-simulations",
+        type=int,
+        default=100,
+        help="Native BattleScumSearcher2 root playout count for Oracle search.",
+    )
+    parser.add_argument(
+        "--oracle-root-selection",
+        choices=ORACLE_ROOT_SELECTION_RULES,
+        default="highest_mean",
+        help="Oracle root statistic used for teacher/evaluation action selection.",
+    )
     return parser
 
 
@@ -593,6 +641,18 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 2
+    if args.oracle_search_simulations <= 0:
+        print("--oracle-search-simulations must be positive", file=sys.stderr)
+        return 2
+    if (
+        args.lightspeed_oracle_search_teacher is not None
+        and args.oracle_teacher_output is None
+    ):
+        print(
+            "--lightspeed-oracle-search-teacher requires --oracle-teacher-output",
+            file=sys.stderr,
+        )
+        return 2
 
     policy = ScriptedCombatPolicy()
     client = StdioClient(
@@ -638,6 +698,8 @@ def main(argv: list[str] | None = None) -> int:
         or args.lightspeed_battle_start_pool is not None
         or args.lightspeed_battle_start_pool_restore is not None
         or args.lightspeed_fixed_battle_evaluation is not None
+        or args.lightspeed_oracle_search_teacher is not None
+        or args.lightspeed_oracle_fixed_evaluation is not None
     ):
         try:
             adapter = LightSpeedAdapter(
@@ -785,6 +847,53 @@ def main(argv: list[str] | None = None) -> int:
                 print(file=sys.stderr)
                 print(format_fixed_evaluation_report(eval_report), file=sys.stderr)
                 if not eval_report.evaluation_successful:
+                    return 1
+            elif args.lightspeed_oracle_search_teacher is not None:
+                oracle_controller = OracleSearchController(
+                    simulations=args.oracle_search_simulations,
+                    root_selection_rule=args.oracle_root_selection,
+                    action_space=action_space,
+                )
+                teacher_dataset = collect_oracle_teacher_from_pool_path(
+                    adapter_factory=lambda: LightSpeedAdapter(
+                        seed=args.sim_seed,
+                        ascension=args.sim_ascension,
+                    ),
+                    pool_path=args.lightspeed_oracle_search_teacher,
+                    controller=oracle_controller,
+                    action_space=action_space,
+                )
+                print(
+                    format_oracle_teacher_collection(teacher_dataset), file=sys.stderr
+                )
+                if teacher_dataset.problems:
+                    return 1
+                write_oracle_teacher_dataset(
+                    args.oracle_teacher_output,
+                    teacher_dataset,
+                )
+            elif args.lightspeed_oracle_fixed_evaluation is not None:
+                comparison = run_oracle_fixed_evaluation_comparison_from_cohort_path(
+                    adapter_factory=lambda: LightSpeedAdapter(
+                        seed=args.sim_seed,
+                        ascension=args.sim_ascension,
+                    ),
+                    cohort_path=args.lightspeed_oracle_fixed_evaluation,
+                    simulations=args.oracle_search_simulations,
+                    primary_selection_rule=args.oracle_root_selection,
+                    action_space=action_space,
+                    max_battle_steps=args.sim_steps,
+                )
+                if args.fixed_evaluation_report is not None:
+                    write_fixed_evaluation_report(
+                        args.fixed_evaluation_report,
+                        comparison.primary_report,
+                    )
+                print(
+                    format_oracle_fixed_evaluation_comparison(comparison),
+                    file=sys.stderr,
+                )
+                if not comparison.evaluation_successful:
                     return 1
             elif args.lightspeed_non_combat_calibration:
                 battle_policy = _build_online_sim_policy(

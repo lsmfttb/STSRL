@@ -21,6 +21,7 @@ REQUIRED_NATIVE_CAPABILITY_IDS = (
     "non_combat_potion_actions",
     "gcc15_build_compatibility",
     "native_public_projection",
+    "native_battle_search_root",
 )
 _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 

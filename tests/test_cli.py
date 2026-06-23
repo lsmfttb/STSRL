@@ -39,6 +39,13 @@ class FakeLightSpeedSmokeAdapter:
                 "screen_state": "BATTLE",
                 "outcome": "UNDECIDED",
                 "battle_active": True,
+                "ascension": self.ascension,
+                "act": 1,
+                "floor_num": 1,
+                "room_type": "MONSTER",
+                "encounter_id": "FakeEncounter",
+                "cur_hp": 10,
+                "max_hp": 80,
             },
         )
 
@@ -49,7 +56,7 @@ class FakeLightSpeedSmokeAdapter:
                 action_id="battle:1",
                 label="end",
                 kind="end_turn",
-                raw={"scope": "battle", "idx1": 0, "idx2": 0, "idx3": 0},
+                raw={"scope": "battle", "bits": 1, "idx1": 0, "idx2": 0, "idx3": 0},
             )
         ]
 
@@ -62,6 +69,14 @@ class FakeLightSpeedSmokeAdapter:
                     "screen_state": "BATTLE",
                     "outcome": "PLAYER_LOSS",
                     "battle_active": False,
+                    "ascension": self.ascension,
+                    "act": 1,
+                    "floor_num": 1,
+                    "room_type": "MONSTER",
+                    "encounter_id": "FakeEncounter",
+                    "cur_hp": 0,
+                    "max_hp": 80,
+                    "completed_battle_outcome": "PLAYER_LOSS",
                 },
             ),
             terminal=True,
@@ -81,6 +96,49 @@ class FakeLightSpeedSmokeAdapter:
         if checkpoint.adapter_id != self.checkpoint_adapter_id:
             raise ValueError("foreign checkpoint")
         return self.reset(seed=checkpoint.metadata["seed"])
+
+    def battle_search(
+        self,
+        snapshot: SimulatorSnapshot,
+        *,
+        simulations: int,
+        include_potions: bool = False,
+    ) -> dict[str, object]:
+        del snapshot, include_potions
+        return {
+            "schema_id": "native-battle-search-root-v1",
+            "native_api": "StepSimulator.battle_search.v1",
+            "patch_identity": "sts_lightspeed_battle_search_root_v1",
+            "information_regime": "full_simulator_state_oracle_like",
+            "simulations_requested": simulations,
+            "root_visits": simulations,
+            "include_potions": False,
+            "native_simulator_steps": 3,
+            "model_calls": None,
+            "best_action_value": 0.1,
+            "min_action_value": 0.1,
+            "outcome_player_hp": 1,
+            "root_row_count": 1,
+            "search_edge_count": 1,
+            "unsearched_legal_action_count": 0,
+            "unmapped_search_edge_count": 0,
+            "root_rows": [
+                {
+                    "scope": "battle",
+                    "bits": 1,
+                    "kind": "end_turn",
+                    "label": "end",
+                    "idx1": 0,
+                    "idx2": 0,
+                    "idx3": 0,
+                    "search_tree_present": True,
+                    "search_edge_index": 0,
+                    "visits": simulations,
+                    "evaluation_sum": float(simulations) * 0.1,
+                    "mean_value": 0.1,
+                }
+            ],
+        }
 
 
 def test_cli_stdin_mode_sends_ready_signal_then_commands(monkeypatch) -> None:
@@ -348,6 +406,117 @@ def test_cli_checkpoint_commands_write_only_diagnostics_and_restore_pool(
     restore_output = capsys.readouterr()
     assert restore_output.out == ""
     assert "restore ok: yes" in restore_output.err
+
+
+def test_cli_oracle_search_teacher_and_fixed_eval_routes_write_stderr_only(
+    monkeypatch,
+    tmp_path,
+    capsys,
+) -> None:
+    monkeypatch.setattr(
+        "sts_combat_rl.cli.LightSpeedAdapter",
+        FakeLightSpeedSmokeAdapter,
+    )
+    pool_path = tmp_path / "pool.jsonl"
+    teacher_path = tmp_path / "teacher.jsonl"
+    cohort_path = tmp_path / "cohort.jsonl"
+
+    assert (
+        main(
+            [
+                "--lightspeed-battle-start-pool",
+                str(pool_path),
+                "--sim-episodes",
+                "1",
+                "--sim-steps",
+                "1",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
+
+    assert (
+        main(
+            [
+                "--lightspeed-oracle-search-teacher",
+                str(pool_path),
+                "--oracle-teacher-output",
+                str(teacher_path),
+                "--oracle-search-simulations",
+                "3",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 0
+    )
+    teacher_output = capsys.readouterr()
+    assert teacher_output.out == ""
+    assert teacher_path.exists()
+    assert "Oracle search teacher collection" in teacher_output.err
+    assert "records: 1" in teacher_output.err
+    assert "native simulator steps: 3" in teacher_output.err
+
+    assert (
+        main(
+            [
+                "--lightspeed-fixed-battle-evaluation",
+                str(pool_path),
+                "--fixed-evaluation-cohort",
+                str(cohort_path),
+                "--sim-steps",
+                "1",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
+
+    assert (
+        main(
+            [
+                "--lightspeed-oracle-fixed-evaluation",
+                str(cohort_path),
+                "--oracle-root-selection",
+                "most_visits",
+                "--oracle-search-simulations",
+                "3",
+                "--sim-steps",
+                "1",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 0
+    )
+    fixed_output = capsys.readouterr()
+    assert fixed_output.out == ""
+    assert "sts_lightspeed source identity" in fixed_output.err
+    assert "Fixed battle evaluation report" in fixed_output.err
+    assert "controller: oracle_search_v1_most_visits_s3" in fixed_output.err
+
+
+def test_cli_oracle_teacher_requires_output_path(capsys) -> None:
+    assert (
+        main(
+            [
+                "--lightspeed-oracle-search-teacher",
+                "pool.jsonl",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 2
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "requires --oracle-teacher-output" in captured.err
 
 
 def test_cli_lightspeed_rollout_smoke_writes_report_to_stderr_only(
