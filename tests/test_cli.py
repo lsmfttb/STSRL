@@ -408,6 +408,43 @@ def test_cli_checkpoint_commands_write_only_diagnostics_and_restore_pool(
     assert "restore ok: yes" in restore_output.err
 
 
+def test_cli_constructed_battle_start_audit_writes_stderr_and_artifact(
+    monkeypatch,
+    tmp_path,
+    capsys,
+) -> None:
+    monkeypatch.setattr(
+        "sts_combat_rl.cli.LightSpeedAdapter",
+        FakeLightSpeedSmokeAdapter,
+    )
+    output_path = tmp_path / "constructed.jsonl"
+
+    assert (
+        main(
+            [
+                "--lightspeed-constructed-battle-start-audit",
+                "--constructed-start-output",
+                str(output_path),
+                "--sim-ascension",
+                "20",
+                "--sim-episodes",
+                "1",
+                "--sim-steps",
+                "1",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 0
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert output_path.exists()
+    assert "Constructed battle-start supplement audit" in captured.err
+    assert "source natural battle starts: 1" in captured.err
+
+
 def test_cli_oracle_search_teacher_and_fixed_eval_routes_write_stderr_only(
     monkeypatch,
     tmp_path,

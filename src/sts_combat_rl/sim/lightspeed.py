@@ -179,6 +179,47 @@ class LightSpeedAdapter:
             )
         )
 
+    def legal_battle_start_encounters(
+        self,
+        snapshot: SimulatorSnapshot,
+    ) -> list[dict[str, Any]]:
+        """Return native same-structure battle-start encounter candidates."""
+
+        if not hasattr(self._sim, "legal_battle_start_encounters"):
+            raise RuntimeError(
+                "slaythespire.StepSimulator does not expose "
+                "legal_battle_start_encounters; build the T008 battle-start "
+                "transform native source integration"
+            )
+        self._assert_snapshot_is_current(snapshot)
+        return [dict(row) for row in self._sim.legal_battle_start_encounters()]
+
+    def rebuild_battle_start(
+        self,
+        snapshot: SimulatorSnapshot,
+        *,
+        hp_bonus: int = 0,
+        add_random_potion: bool = False,
+        encounter_id: int | None = None,
+    ) -> SimulatorSnapshot:
+        """Apply an authoritative native battle-start rebuild transform."""
+
+        if not hasattr(self._sim, "rebuild_battle_start"):
+            raise RuntimeError(
+                "slaythespire.StepSimulator does not expose rebuild_battle_start; "
+                "build the T008 battle-start transform native source integration"
+            )
+        self._assert_snapshot_is_current(snapshot)
+        native_encounter = -1 if encounter_id is None else int(encounter_id)
+        raw_snapshot = dict(
+            self._sim.rebuild_battle_start(
+                int(hp_bonus),
+                bool(add_random_potion),
+                native_encounter,
+            )
+        )
+        return self._snapshot(raw_snapshot)
+
     def _snapshot(
         self, raw_snapshot: dict[str, Any] | None = None
     ) -> SimulatorSnapshot:
