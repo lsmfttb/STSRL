@@ -199,6 +199,7 @@ class ConstructedBattleStartAuditReport:
     def passed(self) -> bool:
         return (
             self.source_record_count > 0
+            and self.constructed_record_count > 0
             and self.cap_violation_count == 0
             and self.boss_replacement_violation_count == 0
             and self.ascension_violation_count == 0
@@ -271,15 +272,14 @@ def build_training_mixture_manifest(
 ) -> TrainingMixtureManifest:
     """Report mixture counts without relabeling constructed rows as natural."""
 
-    distribution_counts = Counter(
-        record.resulting_distribution_kind for record in records
-    )
-    distribution_counts[NATURAL_DISTRIBUTION_KIND] += len(pool.records)
     constructed_count = sum(
         1
         for record in records
         if record.resulting_distribution_kind == CONSTRUCTED_DISTRIBUTION_KIND
     )
+    distribution_counts = Counter({NATURAL_DISTRIBUTION_KIND: len(pool.records)})
+    if constructed_count:
+        distribution_counts[CONSTRUCTED_DISTRIBUTION_KIND] = constructed_count
     unsupported_counts = Counter(
         record.transform_type
         for record in records
@@ -336,6 +336,10 @@ def build_constructed_battle_start_audit_report(
             if "ascension" in problem:
                 ascension_violations += 1
 
+    problems = list(artifact.problems)
+    if artifact.mixture_manifest.constructed_record_count == 0:
+        problems.append("no constructed supplement rows were produced")
+
     return ConstructedBattleStartAuditReport(
         source_record_count=artifact.source_record_count,
         audit_record_count=len(artifact.records),
@@ -361,7 +365,7 @@ def build_constructed_battle_start_audit_report(
         source_context_status_counts=Counter(
             artifact.mixture_manifest.source_context_status_counts
         ),
-        problems=list(artifact.problems),
+        problems=problems,
     )
 
 
@@ -1324,13 +1328,26 @@ def _proposal_seed(
         {
             "policy_version": policy.version,
             "policy_seed": policy.seed,
-            "source_checkpoint_id": source.source_checkpoint_id,
-            "source_record_index": source.record_index,
+            "source_identity": _stable_source_identity(source),
             "transform_type": transform_type,
         },
         sort_keys=True,
     ).encode("utf-8")
     return int.from_bytes(hashlib.sha256(payload).digest()[:8], "big")
+
+
+def _stable_source_identity(source: BattleStartCheckpointRecord) -> dict[str, Any]:
+    return {
+        "source_seed": source.source_seed,
+        "source_run_id": source.source_run_id,
+        "source_battle_index": source.source_battle_index,
+        "structural_metadata": _json_safe_mapping(source.structural_metadata),
+        "action_trace": [
+            _json_safe_mapping(identity) for identity in source.action_trace
+        ],
+        "snapshot_observation": list(source.snapshot_observation),
+        "snapshot_raw": _json_safe_mapping(source.snapshot_raw),
+    }
 
 
 def _visible_prior_battle_opportunities(

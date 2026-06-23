@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from io import StringIO
 from typing import Any
 
@@ -361,8 +361,10 @@ def test_noop_and_unsupported_transforms_remain_natural() -> None:
         if record.native_support_status == "unsupported"
     )
     assert unsupported_report.unsupported_native_operation_counts
-    assert unsupported_report.passed is True
+    assert unsupported_report.passed is False
+    assert "no constructed supplement rows were produced" in unsupported_report.problems
     assert "unsupported native operations:" in text
+    assert "audit passed: no" in text
 
 
 def test_constructed_artifact_preserves_source_and_round_trips_jsonl() -> None:
@@ -381,7 +383,11 @@ def test_constructed_artifact_preserves_source_and_round_trips_jsonl() -> None:
     assert loaded.mixture_manifest.source_natural_count == len(pool.records)
     assert loaded.mixture_manifest.distribution_counts[
         NATURAL_DISTRIBUTION_KIND
-    ] >= len(pool.records)
+    ] == len(pool.records)
+    assert (
+        loaded.mixture_manifest.distribution_counts[CONSTRUCTED_DISTRIBUTION_KIND]
+        == loaded.mixture_manifest.constructed_record_count
+    )
     assert all(
         record.source_record["distribution_kind"] == NATURAL_DISTRIBUTION_KIND
         for record in loaded.records
@@ -417,6 +423,47 @@ def test_constructed_artifact_rejects_non_a20_sources() -> None:
             pool,
             policy=_trigger_policy(),
         )
+
+
+def test_proposals_do_not_depend_on_process_local_checkpoint_ids() -> None:
+    pool = _pool()
+    volatile_pool = replace(
+        pool,
+        records=[
+            replace(
+                record,
+                source_checkpoint_id=f"volatile-process-{record.record_index}",
+            )
+            for record in pool.records
+        ],
+    )
+    policy = ConstructedBattleStartPolicy(
+        seed=11,
+        hp_probability=0.5,
+        potion_probability=0.5,
+        encounter_probability=0.5,
+    )
+
+    first = build_constructed_battle_start_artifact(
+        lambda: FakeConstructedAdapter(),
+        pool,
+        policy=policy,
+    )
+    volatile = build_constructed_battle_start_artifact(
+        lambda: FakeConstructedAdapter(),
+        volatile_pool,
+        policy=policy,
+    )
+
+    assert [record.proposal_seed for record in first.records] == [
+        record.proposal_seed for record in volatile.records
+    ]
+    assert [record.proposal for record in first.records] == [
+        record.proposal for record in volatile.records
+    ]
+    assert [record.actual_change for record in first.records] == [
+        record.actual_change for record in volatile.records
+    ]
 
 
 def test_constructed_policy_rejects_automatic_probability() -> None:

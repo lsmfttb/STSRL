@@ -587,6 +587,16 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--constructed-start-pool",
+        type=Path,
+        metavar="PATH",
+        help=(
+            "Load an existing portable natural battle-start pool for "
+            "--lightspeed-constructed-battle-start-audit instead of collecting "
+            "a fresh bounded pool."
+        ),
+    )
+    parser.add_argument(
         "--fixed-evaluation-cohort",
         type=Path,
         metavar="PATH",
@@ -841,6 +851,7 @@ def main(argv: list[str] | None = None) -> int:
                     max_steps=args.sim_steps,
                     transform_policy=ConstructedBattleStartPolicy(seed=args.sim_seed),
                     action_space=action_space,
+                    source_pool_path=args.constructed_start_pool,
                 )
                 if args.constructed_start_output is not None:
                     write_constructed_battle_start_artifact(
