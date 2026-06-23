@@ -176,6 +176,8 @@ unmerged legacy work:
 - PyTorch policy/value training;
 - interactive live-game or A20 performance validation for any controller;
 - structured persistent resource outcomes;
+- native terminal resource identity coverage for potion slots, deck/curses,
+  relic identities/counters, and keys;
 - constructed A20 battle-start supplements;
 - normal-information belief search.
 
@@ -208,9 +210,11 @@ tasks in dependency order are:
    the T015 public-context contract through current persisted artifacts,
    portable replay comparison, and the WSL context audit.
 8. T008, A20 constructed battle supplements, and T012, structured battle
-   resource outcomes, are `READY` and should extend native simulator surface
-   through the T017-managed source integration. T009 remains blocked until its
-   remaining data prerequisite, T012, is complete.
+   resource outcomes, are `READY`. T012 is limited to the structured schema,
+   artifact propagation, migration, reporting, and explicit native missingness
+   boundary. Full native identity-bearing terminal resource coverage is split
+   into T018. T009 remains blocked until T012, T018, and its remaining data
+   prerequisites are complete.
 
 Later tasks are dependency-ordered in the task index. A task is not ready for a
 new branch until its status is `READY`.

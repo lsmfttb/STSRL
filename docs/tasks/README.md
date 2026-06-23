@@ -16,7 +16,7 @@ starting work.
 | T006 | DONE | [Oracle search teacher pipeline](T006-oracle-search-teacher.md) | T003, T004, T005, T017 | search policy, teacher, search dataset |
 | T007 | CANCELLED | [Complete public run history (superseded)](T007-complete-public-run-history.md) | — | replaced by T014--T016 |
 | T008 | READY | [A20 constructed battle supplements](T008-a20-constructed-supplements.md) | T003, T004, T016, T017 | battle-start transforms and approximate HP policy |
-| T009 | BLOCKED | [PyTorch search-guidance model](T009-pytorch-search-guidance.md) | T003, T006, T011, T012, T016 | optional train dependency and policy/value model |
+| T009 | BLOCKED | [PyTorch search-guidance model](T009-pytorch-search-guidance.md) | T003, T006, T011, T012, T016, T018 | optional train dependency and policy/value model |
 | T010 | DONE | [Stochastic non-combat driver](T010-stochastic-non-combat-driver.md) | T002 | non-combat policy and native visible action/resource support |
 | T011 | DONE | [Tactical feature contract v2](T011-tactical-feature-contract-v2.md) | T003 | feature, trainer-input, and model-input upgrades |
 | T012 | READY | [Structured battle resource outcomes](T012-structured-resource-outcomes.md) | T003, T004, T010, T016, T017 | persistent resource snapshots and outcome vectors |
@@ -25,6 +25,7 @@ starting work.
 | T015 | DONE | [Public run context and controlled history](T015-public-run-context-and-controlled-history.md) | T002, T003, T004, T011, T014 | sanitized context and ordered history |
 | T016 | DONE | [Public-context artifacts, replay, and audit](T016-public-context-artifacts-replay-and-audit.md) | T003, T004, T005, T011, T014, T015 | migrations, replay, and coverage audit |
 | T017 | DONE | [Stable sts_lightspeed source integration](T017-stable-lightspeed-source-integration.md) | T004, T010, T014, T016 | external source manifest and verifier |
+| T018 | BLOCKED | [Native terminal resource identity surface](T018-native-terminal-resource-identity.md) | T012, T017 | native terminal potion/deck/relic/key identities |
 
 Only `READY` tasks should receive a new branch. After a prerequisite merges,
 the main maintainer reviews dependent specifications against the new `main`
@@ -49,9 +50,11 @@ document update before acceptance.
   capability, T015 for sanitized in-memory context/history, and T016 for
   artifact propagation/replay/audit. See the
   [T007 review handoff](../t007_review_handoff_2026-06-22.md).
-- T008 and T012 are `READY` and now extend native simulator surface through
-  the T017-managed source integration. T009 remains blocked by T012 and its
-  remaining named data prerequisites.
+- T008 and T012 are `READY`. T012 is limited to structured outcome schema,
+  artifact propagation, migration, reporting, and explicit native missingness.
+  Full native identity-bearing terminal resource coverage is split into T018.
+  T009 remains blocked by T012, T018, and its remaining named data
+  prerequisites.
 
 ## Standard Local Gates
 
@@ -86,7 +89,8 @@ are mapped as follows:
 - PyTorch policy/value model and training gates: T009;
 - stochastic non-combat behavior and native potion/resource visibility: T010;
 - tactical feature, trainer-input, and model-input expansion: T011;
-- structured persistent resource outcomes: T012.
+- structured persistent resource outcomes and explicit missingness: T012;
+- native terminal resource identity coverage: T018.
 
 T013 supplies the shared CommunicationMod adapter and captured-sample
 compatibility gate. Simulator-only training experiments do not depend on it.

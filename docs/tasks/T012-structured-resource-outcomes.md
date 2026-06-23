@@ -39,9 +39,11 @@ artifacts.
 - Report component presence, change frequency, missing native coverage, and
   terminal outcome counts separately. Keep any existing scalar reward report as
   an optional diagnostic view with clearly separate provenance.
-- Add focused native projection patches only for missing authoritative public
-  terminal fields. Do not infer a counter or inventory identity from local game
-  rules.
+- Current T012 acceptance is the schema, artifact propagation, migration,
+  reporting, and missingness boundary. Full native/adaptor coverage for
+  identity-bearing terminal resources is split into T018. T012 must report
+  those native gaps explicitly and must not claim full identity coverage until
+  T018 lands.
 
 ## Out Of Scope
 
@@ -69,24 +71,26 @@ artifacts.
 
 - Structured outcome schema, sanitizers, validators, reader/writer, and
   migrations.
-- Authoritative before/after resource capture surface and focused adapter/patch
-  support.
+- Authoritative before/after resource capture through currently exposed
+  simulator snapshot fields, with explicit field-level missingness or
+  unavailability for unsupported identity-bearing resources.
 - Integration with decision/trainer artifacts and T005 fixed-evaluation reports.
 - Component-level report, fixtures, and WSL resource-outcome audit.
 
 ## Acceptance Criteria
 
 - Records round-trip without losing terminal battle result, absolute current HP,
-  known identities, slot order, exposed counters, or explicit missingness.
+  currently known identities, slot order, exposed counters, or explicit
+  missingness.
 - Death, HP, gold, max HP, potion, deck/curse, relic/counter, key, and other
-  exposed components can be inspected independently; no required component is
-  permanently scalarized.
+  exposed components can be inspected independently as available, missing, or
+  unavailable; no required component is permanently scalarized.
 - Terminal records cannot be marked successful solely from a missing/nonterminal
   outcome; error and unavailable states are reported separately.
 - Fixed-evaluation output names the structured outcome schema/version when it
   is present and explicitly reports unavailability for older cohorts.
-- Reports list per-component availability/change counts and every unsupported
-  native field.
+- Reports list per-component availability/change counts, every unsupported
+  native field, and every known native identity-coverage limitation.
 - Legacy artifacts migrate with explicit loss and current-schema output passes
   validation without raw simulator state.
 
@@ -98,7 +102,7 @@ a WSL `--lightspeed-battle-resource-outcome-audit` command against a bounded A20
 pool and report terminal outcomes, component presence/change counts, missing
 fields, controller provenance, and source distribution. The PR report must
 include the exact command and results; a small audit validates plumbing only,
-not continuation-value quality.
+not continuation-value quality or full native identity coverage.
 
 ## Legacy Reference
 
@@ -106,7 +110,6 @@ Consult selectively:
 
 ```text
 patches/sts_lightspeed_run_potion_snapshot.patch
-patches/sts_lightspeed_run_resource_snapshot.patch
 src/sts_combat_rl/sim/resource_outcome.py
 tests/test_resource_outcome.py
 ```
