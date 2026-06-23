@@ -379,6 +379,53 @@ class _FakeLossAdapter:
 # ── Tests ───────────────────────────────────────────────────────────────────
 
 
+class _FakeMissingOutcomeTerminalAdapter:
+    """Adapter that reaches GAME_OVER without an authoritative battle outcome."""
+
+    supports_checkpoint_restore = True
+    checkpoint_adapter_id = "fake-missing-outcome-adapter"
+
+    def __init__(self, seed: int = 1, ascension: int = 20):
+        self.seed = seed
+        self.ascension = ascension
+
+    def reset(self, *, seed: int | None = None) -> SimulatorSnapshot:
+        return _make_snapshot(
+            raw={
+                "screen_state": "BATTLE",
+                "battle_active": True,
+                "cur_hp": 70,
+                "max_hp": 80,
+                "floor_num": 5,
+            }
+        )
+
+    def legal_actions(self, snapshot: SimulatorSnapshot) -> list[SimulatorAction]:
+        return [_make_action(1, "ATTACK", "Strike")]
+
+    def step(self, action: SimulatorAction) -> SimulatorTransition:
+        return SimulatorTransition(
+            snapshot=_make_snapshot(
+                raw={
+                    "screen_state": "GAME_OVER",
+                    "battle_active": False,
+                    "cur_hp": 0,
+                    "max_hp": 80,
+                }
+            ),
+            terminal=True,
+            info={},
+        )
+
+    def capture_checkpoint(self, snapshot: SimulatorSnapshot) -> SimulatorCheckpoint:
+        return SimulatorCheckpoint(
+            checkpoint_id="moc", adapter_id=self.checkpoint_adapter_id, native={}
+        )
+
+    def restore_checkpoint(self, checkpoint: SimulatorCheckpoint) -> SimulatorSnapshot:
+        return self.reset(seed=self.seed)
+
+
 class TestEvaluateFixedCohort:
     """Controller evaluation on restored battle starts."""
 
@@ -501,6 +548,32 @@ class TestEvaluateFixedCohort:
         assert report.losses == 1
         assert report.authoritative_wins == 0
         assert report.battle_results[0].termination_status == "loss"
+
+    def test_missing_terminal_outcome_is_error_not_inferred_loss(self):
+        cohort_records = [_make_cohort_record(0)]
+        controller = _FakeWinController()
+        report = evaluate_fixed_cohort(
+            adapter_factory=lambda: _FakeMissingOutcomeTerminalAdapter(),
+            cohort_records=cohort_records,
+            controller=controller,
+            cohort_identity="test",
+            source_pool_format_version=2,
+            selection_config={"selection_seed": 1},
+            max_battle_steps=200,
+        )
+
+        result = report.battle_results[0]
+        assert report.errors == 1
+        assert report.losses == 0
+        assert not report.evaluation_successful
+        assert result.termination_status == "error"
+        assert result.terminal_absolute_hp == 0
+        assert result.structured_battle_outcome_status == "unavailable"
+        assert (
+            result.structured_battle_outcome["reason"]
+            == "missing_authoritative_battle_outcome"
+        )
+        assert "terminal transition without authoritative outcome" in result.problems
 
     def test_hp_tracking(self):
         cohort_records = [_make_cohort_record(0)]

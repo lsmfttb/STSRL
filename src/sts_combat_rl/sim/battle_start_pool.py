@@ -61,10 +61,12 @@ from sts_combat_rl.sim.public_run_context import (
     read_native_public_projection,
 )
 from sts_combat_rl.sim.resource_outcome import (
+    BATTLE_RESOURCE_OUTCOME_AVAILABLE,
     BATTLE_RESOURCE_OUTCOME_LEGACY_LOSS,
     battle_resource_outcome_problems,
     available_battle_resource_outcome,
     build_battle_resource_outcome,
+    is_authoritative_terminal_battle_result,
     legacy_unavailable_battle_resource_outcome,
     unavailable_battle_resource_outcome,
 )
@@ -297,20 +299,41 @@ def collect_natural_battle_start_pool(
             if step.next_battle_active and not step.terminal_after_step:
                 return
             record = records[active_record_index]
-            outcome_status, outcome_payload = available_battle_resource_outcome(
-                build_battle_resource_outcome(
-                    record.snapshot_raw,
-                    step.next_snapshot_raw,
-                    battle_result=step.next_battle_outcome,
+            if is_authoritative_terminal_battle_result(step.next_battle_outcome):
+                outcome_status, outcome_payload = available_battle_resource_outcome(
+                    build_battle_resource_outcome(
+                        record.snapshot_raw,
+                        step.next_snapshot_raw,
+                        battle_result=step.next_battle_outcome,
+                    )
                 )
-            )
-            records[active_record_index] = replace(
-                record,
-                battle_outcome=step.next_battle_outcome,
-                battle_completed=True,
-                completed_battle_resource_outcome_status=outcome_status,
-                completed_battle_resource_outcome=outcome_payload,
-            )
+                records[active_record_index] = replace(
+                    record,
+                    battle_outcome=step.next_battle_outcome,
+                    battle_completed=True,
+                    completed_battle_resource_outcome_status=outcome_status,
+                    completed_battle_resource_outcome=outcome_payload,
+                )
+            else:
+                unavailable_reason = (
+                    "missing_authoritative_battle_outcome"
+                    if step.next_battle_outcome is None
+                    else "unrecognized_terminal_battle_outcome"
+                )
+                outcome_status, outcome_payload = unavailable_battle_resource_outcome(
+                    unavailable_reason
+                )
+                records[active_record_index] = replace(
+                    record,
+                    battle_outcome=step.next_battle_outcome,
+                    battle_completed=False,
+                    completed_battle_resource_outcome_status=outcome_status,
+                    completed_battle_resource_outcome=outcome_payload,
+                )
+                problems.append(
+                    f"{source_run_id}: battle {record.source_battle_index} ended "
+                    "without authoritative terminal outcome"
+                )
             active_record_index = None
 
         controlled = execute_controlled_run(
@@ -1159,7 +1182,12 @@ def _resource_outcome_payload(
     label: str,
 ) -> dict[str, Any]:
     payload = _require_mapping(value, label)
-    problems = battle_resource_outcome_problems(status, payload, label=label)
+    problems = battle_resource_outcome_problems(
+        status,
+        payload,
+        label=label,
+        require_available=status == BATTLE_RESOURCE_OUTCOME_AVAILABLE,
+    )
     if problems:
         raise ValueError("; ".join(problems))
     return payload

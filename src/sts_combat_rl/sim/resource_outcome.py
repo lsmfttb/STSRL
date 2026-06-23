@@ -345,8 +345,13 @@ def battle_resource_outcome_problems(
             parsed = battle_resource_outcome_from_dict(outcome)
         except ValueError as exc:
             return [f"{label}: invalid structured outcome: {exc}"]
-        if require_available and parsed.battle_result.status != FIELD_AVAILABLE:
-            problems.append(f"{label}: terminal battle result is unavailable")
+        if require_available:
+            if parsed.battle_result.status != FIELD_AVAILABLE:
+                problems.append(f"{label}: terminal battle result is unavailable")
+            elif not is_authoritative_terminal_battle_result(
+                parsed.battle_result.value
+            ):
+                problems.append(f"{label}: terminal battle result is not authoritative")
         return list(dict.fromkeys(problems))
     if status == BATTLE_RESOURCE_OUTCOME_UNAVAILABLE:
         if set(outcome) - {"reason"}:
@@ -385,6 +390,12 @@ def available_battle_resource_outcome(
     return BATTLE_RESOURCE_OUTCOME_AVAILABLE, battle_resource_outcome_to_dict(outcome)
 
 
+def is_authoritative_terminal_battle_result(value: Any) -> bool:
+    """Whether a raw battle outcome is a recognized terminal win/loss label."""
+
+    return _battle_survived(str(value)) is not None
+
+
 def build_battle_resource_outcome_component_report(
     rows: Sequence[tuple[str, Mapping[str, Any]]],
 ) -> BattleResourceOutcomeComponentReport:
@@ -404,6 +415,7 @@ def build_battle_resource_outcome_component_report(
             status,
             raw_outcome,
             label=f"row {index}",
+            require_available=status == BATTLE_RESOURCE_OUTCOME_AVAILABLE,
         )
         problems.extend(row_problems)
         problem_counts.update(row_problems)

@@ -130,6 +130,17 @@ class FakePoolAdapter:
         )
 
 
+class MissingOutcomePoolAdapter(FakePoolAdapter):
+    """Pool adapter that exits one battle without an authoritative outcome."""
+
+    def _snapshot(self) -> SimulatorSnapshot:
+        snapshot = super()._snapshot()
+        raw = dict(snapshot.raw)
+        if self.phase == 2:
+            raw.pop("completed_battle_outcome", None)
+        return SimulatorSnapshot(observation=snapshot.observation, raw=raw)
+
+
 def _controller() -> RoutedRunController:
     return RoutedRunController(
         battle=PolicyController(FirstEligiblePolicy()),
@@ -212,6 +223,27 @@ def test_coverage_fails_when_a_completed_battle_omits_its_outcome() -> None:
     assert report.completed_outcomes_complete is False
     assert report.completed_battle_outcome_missing_count == 1
     assert "completed battle outcomes are missing" in report.problems[0]
+
+
+def test_collector_marks_battle_exit_without_outcome_unavailable() -> None:
+    pool = collect_natural_battle_start_pool(
+        MissingOutcomePoolAdapter(),
+        _controller(),
+        seeds=[7],
+        max_steps=4,
+    )
+    report = build_battle_start_pool_coverage_report(pool)
+
+    assert pool.records[0].battle_completed is False
+    assert pool.records[0].completed_battle_resource_outcome_status == "unavailable"
+    assert (
+        pool.records[0].completed_battle_resource_outcome["reason"]
+        == "missing_authoritative_battle_outcome"
+    )
+    assert any(
+        "without authoritative terminal outcome" in problem
+        for problem in report.problems
+    )
 
 
 def test_portable_pool_manifest_replays_duplicate_action_ids_in_fresh_adapters() -> (

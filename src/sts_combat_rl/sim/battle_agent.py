@@ -34,6 +34,7 @@ from sts_combat_rl.sim.policy import DecisionPolicy
 from sts_combat_rl.sim.resource_outcome import (
     available_battle_resource_outcome,
     build_battle_resource_outcome,
+    is_authoritative_terminal_battle_result,
     unavailable_battle_resource_outcome,
 )
 
@@ -684,11 +685,7 @@ def _battle_segment(
         if last_step.next_potion_count is not None
         else last_step.potion_count
     )
-    if end_reason == "truncated":
-        structured_outcome_status, structured_outcome = (
-            unavailable_battle_resource_outcome(end_reason)
-        )
-    else:
+    if is_authoritative_terminal_battle_result(last_step.next_battle_outcome):
         structured_outcome_status, structured_outcome = (
             available_battle_resource_outcome(
                 build_battle_resource_outcome(
@@ -697,6 +694,18 @@ def _battle_segment(
                     battle_result=last_step.next_battle_outcome,
                 )
             )
+        )
+    else:
+        if end_reason.startswith("terminal"):
+            unavailable_reason = (
+                "missing_authoritative_battle_outcome"
+                if last_step.next_battle_outcome is None
+                else "unrecognized_terminal_battle_outcome"
+            )
+        else:
+            unavailable_reason = end_reason
+        structured_outcome_status, structured_outcome = (
+            unavailable_battle_resource_outcome(unavailable_reason)
         )
     return BattleSegment(
         rollout_index=rollout_index,

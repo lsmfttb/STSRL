@@ -44,6 +44,7 @@ from sts_combat_rl.sim.reward_labeling import (
     RewardLabeledBattleDecisionBatch,
 )
 from sts_combat_rl.sim.resource_outcome import (
+    BATTLE_RESOURCE_OUTCOME_AVAILABLE,
     BATTLE_RESOURCE_OUTCOME_LEGACY_LOSS,
     BATTLE_RESOURCE_OUTCOME_SCHEMA_ID,
     BATTLE_RESOURCE_OUTCOME_SCHEMA_VERSION,
@@ -607,6 +608,10 @@ def _require_current_dataset_schema(dataset: TrainerInputDataset) -> None:
             record.structured_battle_outcome_status,
             record.structured_battle_outcome,
             label=f"record {record.example_index} structured battle outcome",
+            require_available=(
+                record.structured_battle_outcome_status
+                == BATTLE_RESOURCE_OUTCOME_AVAILABLE
+            ),
         )
         if outcome_problems:
             raise ValueError(
@@ -917,6 +922,10 @@ def _dataset_shape_problems(dataset: TrainerInputDataset) -> list[str]:
                 record.structured_battle_outcome_status,
                 record.structured_battle_outcome,
                 label=f"record {record.example_index} structured battle outcome",
+                require_available=(
+                    record.structured_battle_outcome_status
+                    == BATTLE_RESOURCE_OUTCOME_AVAILABLE
+                ),
             )
         )
     return problems

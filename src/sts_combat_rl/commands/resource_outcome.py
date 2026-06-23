@@ -44,6 +44,7 @@ class BattleResourceOutcomeAuditReport:
             source_record_count=0
         )
     )
+    known_limitations: tuple[str, ...] = ()
     pool_problems: list[str] = field(default_factory=list)
 
     @property
@@ -115,6 +116,7 @@ def build_battle_resource_outcome_audit_report(
         ),
         terminal_outcome_counts=coverage.reported_battle_outcome_counts,
         component_report=component_report,
+        known_limitations=tuple(_known_limitations(component_report)),
         pool_problems=list(coverage.problems),
     )
 
@@ -148,6 +150,11 @@ def format_battle_resource_outcome_audit_report(
     lines.append(
         format_battle_resource_outcome_component_report(report.component_report)
     )
+    lines.append("known limitations:")
+    if report.known_limitations:
+        lines.extend(f"  - {limitation}" for limitation in report.known_limitations)
+    else:
+        lines.append("  (none)")
     lines.append("pool problems:")
     if report.pool_problems:
         lines.extend(f"  - {problem}" for problem in report.pool_problems)
@@ -163,3 +170,30 @@ def _append_counter(lines: list[str], title: str, values: Counter[str]) -> None:
         return
     for key in sorted(values):
         lines.append(f"  {key}: {values[key]}")
+
+
+def _known_limitations(
+    component_report: BattleResourceOutcomeComponentReport,
+) -> list[str]:
+    identity_components = ("potion_slots", "deck", "curses", "relics", "keys")
+    missing_components = [
+        name
+        for name in identity_components
+        if (
+            component_report.component_presence_counts.get(name, Counter()).get(
+                "missing", 0
+            )
+            + component_report.component_presence_counts.get(name, Counter()).get(
+                "unavailable", 0
+            )
+        )
+        > 0
+    ]
+    if not missing_components:
+        return []
+    return [
+        "identity-bearing terminal resource fields remain missing or unavailable "
+        f"in this audit: {', '.join(missing_components)}",
+        "current audit success means structured plumbing and explicit missingness "
+        "are valid; it does not prove full native resource identity coverage",
+    ]

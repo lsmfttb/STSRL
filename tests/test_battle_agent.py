@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any
 
 from sts_combat_rl.sim.battle_agent import (
@@ -339,8 +340,53 @@ def test_build_battle_segment_report_summarizes_combat_boundaries() -> None:
     assert second.start_hp == 75.0
     assert second.end_hp == 0.0
     assert second.hp_delta == -75.0
+    assert first.structured_battle_outcome_status == "unavailable"
+    assert second.structured_battle_outcome_status == "available"
     assert "Battle segment calibration summary" in text
     assert "segments: 2" in text
+
+
+def test_battle_segment_requires_authoritative_terminal_outcome() -> None:
+    terminal_step = replace(
+        _battle_rollout_step(0, player_hp=5, next_player_hp=0),
+        terminal_after_step=True,
+        next_screen_state="GAME_OVER",
+        next_battle_active=False,
+        next_battle_outcome=None,
+        snapshot_raw={
+            "screen_state": "BATTLE",
+            "battle_active": True,
+            "cur_hp": 5,
+            "max_hp": 80,
+        },
+        next_snapshot_raw={
+            "screen_state": "GAME_OVER",
+            "battle_active": False,
+            "cur_hp": 0,
+            "max_hp": 80,
+        },
+    )
+    rollout = ControlledRun(
+        seed=7,
+        requested_steps=1,
+        steps=[terminal_step],
+        terminal=True,
+        outcome="PLAYER_LOSS",
+        initial_raw={},
+        final_raw={},
+        controller_provenance={},
+        problems=[],
+    )
+
+    report = build_battle_segment_report([rollout])
+    segment = report.segments[0]
+
+    assert segment.end_reason == "terminal_loss"
+    assert segment.structured_battle_outcome_status == "unavailable"
+    assert (
+        segment.structured_battle_outcome["reason"]
+        == "missing_authoritative_battle_outcome"
+    )
 
 
 def test_build_battle_reward_component_report_keeps_raw_components_unweighted() -> None:

@@ -18,7 +18,10 @@ from sts_combat_rl.sim.reward_labeling import (
     RewardLabeledBattleDecisionBatch,
     TERMINAL_STEP_REWARD_ALLOCATION,
 )
-from sts_combat_rl.sim.resource_outcome import battle_resource_outcome_problems
+from sts_combat_rl.sim.resource_outcome import (
+    BATTLE_RESOURCE_OUTCOME_AVAILABLE,
+    battle_resource_outcome_problems,
+)
 
 
 _TOLERANCE = 1e-9
@@ -319,6 +322,10 @@ def _validate_label(
             label.structured_battle_outcome_status,
             label.structured_battle_outcome,
             label=f"label {index}: structured battle outcome",
+            require_available=(
+                label.structured_battle_outcome_status
+                == BATTLE_RESOURCE_OUTCOME_AVAILABLE
+            ),
         )
     )
 

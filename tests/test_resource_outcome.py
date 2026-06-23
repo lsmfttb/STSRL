@@ -71,6 +71,35 @@ def test_structured_battle_outcome_keeps_missing_fields_explicit() -> None:
     assert report.problem_counts["terminal max_hp: missing any of max_hp, maxHp"] == 1
 
 
+def test_require_available_demands_authoritative_terminal_result() -> None:
+    missing_outcome = build_battle_resource_outcome(
+        {"battle_active": True, "cur_hp": 5, "max_hp": 80},
+        {"battle_active": False, "cur_hp": 0, "max_hp": 80},
+    )
+    status, payload = available_battle_resource_outcome(missing_outcome)
+
+    assert battle_resource_outcome_problems(
+        status,
+        payload,
+        label="missing",
+        require_available=True,
+    ) == ["missing: terminal battle result is unavailable"]
+
+    nonterminal_outcome = build_battle_resource_outcome(
+        {"battle_active": True, "cur_hp": 5, "max_hp": 80},
+        {"battle_active": False, "cur_hp": 0, "max_hp": 80},
+        battle_result="UNDECIDED",
+    )
+    status, payload = available_battle_resource_outcome(nonterminal_outcome)
+
+    assert battle_resource_outcome_problems(
+        status,
+        payload,
+        label="nonterminal",
+        require_available=True,
+    ) == ["nonterminal: terminal battle result is not authoritative"]
+
+
 def _raw(
     *,
     current_hp: int,

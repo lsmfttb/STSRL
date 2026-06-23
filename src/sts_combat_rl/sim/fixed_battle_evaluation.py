@@ -56,12 +56,14 @@ from sts_combat_rl.sim.public_run_context import (
     read_native_public_projection,
 )
 from sts_combat_rl.sim.resource_outcome import (
+    BATTLE_RESOURCE_OUTCOME_AVAILABLE,
     BATTLE_RESOURCE_OUTCOME_LEGACY_LOSS,
     BATTLE_RESOURCE_OUTCOME_SCHEMA_ID,
     BATTLE_RESOURCE_OUTCOME_SCHEMA_VERSION,
     battle_resource_outcome_problems,
     available_battle_resource_outcome,
     build_battle_resource_outcome,
+    is_authoritative_terminal_battle_result,
     legacy_unavailable_battle_resource_outcome,
     unavailable_battle_resource_outcome,
 )
@@ -453,6 +455,7 @@ def _evaluate_one_battle(
     # Aggregate per-decision controller telemetry.
     controller_telemetry: dict[str, Any] = {}
     termination_status = "error"
+    structured_outcome_unavailable_reason = "error"
     current = snapshot
     public_history = (
         _history_from_public_context(public_run_context)
@@ -477,9 +480,15 @@ def _evaluate_one_battle(
                 problems.append(
                     f"no legal actions with unrecognised outcome {outcome!r}"
                 )
+                structured_outcome_unavailable_reason = (
+                    "unrecognized_terminal_battle_outcome"
+                )
                 termination_status = "error"
             else:
                 problems.append("no legal actions without terminal outcome")
+                structured_outcome_unavailable_reason = (
+                    "missing_authoritative_battle_outcome"
+                )
                 termination_status = "error"
             break
 
@@ -593,18 +602,20 @@ def _evaluate_one_battle(
             elif outcome is not None:
                 # An outcome field exists but isn't a recognized terminal.
                 problems.append(f"terminal with unrecognised outcome {outcome!r}")
+                structured_outcome_unavailable_reason = (
+                    "unrecognized_terminal_battle_outcome"
+                )
                 termination_status = "error"
             else:
-                # Battle ended but no authoritative outcome.
-                final_hp = _player_hp(current.raw)
-                if final_hp is not None and final_hp <= 0:
-                    termination_status = "loss"
-                else:
-                    problems.append("terminal transition without authoritative outcome")
-                    termination_status = "error"
+                problems.append("terminal transition without authoritative outcome")
+                structured_outcome_unavailable_reason = (
+                    "missing_authoritative_battle_outcome"
+                )
+                termination_status = "error"
             break
     else:
         termination_status = "truncated"
+        structured_outcome_unavailable_reason = "truncated"
         problems.append(f"battle did not finish within {max_battle_steps} steps")
 
     # Compute terminal HP and HP loss.
@@ -612,19 +623,23 @@ def _evaluate_one_battle(
     hp_loss: int | None = None
     if initial_hp is not None and terminal_hp is not None:
         hp_loss = initial_hp - terminal_hp
-    if termination_status in {"win", "loss"}:
+    terminal_battle_outcome = _battle_outcome(current.raw)
+    if termination_status in {
+        "win",
+        "loss",
+    } and is_authoritative_terminal_battle_result(terminal_battle_outcome):
         structured_outcome_status, structured_outcome = (
             available_battle_resource_outcome(
                 build_battle_resource_outcome(
                     snapshot.raw,
                     current.raw,
-                    battle_result=_battle_outcome(current.raw),
+                    battle_result=terminal_battle_outcome,
                 )
             )
         )
     else:
         structured_outcome_status, structured_outcome = (
-            unavailable_battle_resource_outcome(termination_status)
+            unavailable_battle_resource_outcome(structured_outcome_unavailable_reason)
         )
 
     return SingleBattleEvaluationResult(
@@ -1444,7 +1459,12 @@ def _resource_outcome_payload(
     label: str,
 ) -> dict[str, Any]:
     payload = _require_mapping(value, label)
-    problems = battle_resource_outcome_problems(status, payload, label=label)
+    problems = battle_resource_outcome_problems(
+        status,
+        payload,
+        label=label,
+        require_available=status == BATTLE_RESOURCE_OUTCOME_AVAILABLE,
+    )
     if problems:
         raise ValueError("; ".join(problems))
     return payload
