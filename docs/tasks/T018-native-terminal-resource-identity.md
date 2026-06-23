@@ -1,6 +1,6 @@
 # T018: Native Terminal Resource Identity Surface
 
-Status: `READY`.
+Status: `DONE`.
 
 ## Objective
 
@@ -14,10 +14,12 @@ identity-bearing terminal resource coverage.
 
 ## Current Main Baseline
 
-`main` has the T017-managed source manifest and native verifier. T012 is the
-schema/plumbing task for structured outcomes. Before T018, current WSL audits
-may still report potion slot identities, deck/curses, relic identities/counters,
-and key flags as missing or unavailable.
+T018 is complete on `main`. The source manifest pins
+`refs/heads/stsrl/t018-terminal-resource-identity-v1` at
+`c291d5cbcc4dae660ada925085ca62c6e3d85039`, and the native verifier asserts
+the `native_terminal_resource_identity` capability. The accepted WSL
+resource-outcome audit reports terminal potion slots, deck/curses, relics, and
+key flags available for the bounded A20 smoke where the game exposes them.
 
 ## Dependencies
 

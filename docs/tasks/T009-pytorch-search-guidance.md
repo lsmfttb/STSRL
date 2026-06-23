@@ -1,6 +1,18 @@
 # T009: PyTorch Search-Guidance Model
 
-Status: `BLOCKED` by T006, T011, T012, and T016.
+Status: `READY`.
+
+## Current Main Baseline
+
+T006, T011, T012, T016, and T018 are complete. Current A20 data is still
+smoke-scale, so broad neural training must fail closed until the explicit
+scale/distribution gate passes. T009 may implement model plumbing, checkpoint
+schemas, diagnostics, and named smoke or narrow-curriculum overrides, but it
+must not report under-covered smoke data as evidence of model strength.
+
+## Dependencies
+
+- T003, T006, T011, T012, T016, and T018 are complete.
 
 ## Objective
 

@@ -3,8 +3,9 @@
 This guide lists simulator operations available on the latest `main`.
 Checkpoint verification, portable battle-start pools, fixed structural
 evaluation, Oracle-like native search teacher collection, Oracle fixed-cohort
-comparison, structured battle resource outcome auditing, and the pinned
-external source integration are current capabilities.
+comparison, structured battle resource outcome auditing with native terminal
+resource identities, and the pinned external source integration are current
+capabilities.
 
 ## Boundary
 
@@ -38,8 +39,8 @@ The canonical day-to-day source integration is recorded in
 upstream:     https://github.com/gamerpuppy/sts_lightspeed.git
 base commit:  7476a81954020087da31d41d16fddf475746ec2d
 integration:  https://github.com/lsmfttb/sts_lightspeed.git
-ref:          refs/heads/stsrl/t006-oracle-search-teacher-v1
-commit:       78c3fa86ea4d8ef2c8c490aabfb8047d38d6d077
+ref:          refs/heads/stsrl/t018-terminal-resource-identity-v1
+commit:       c291d5cbcc4dae660ada925085ca62c6e3d85039
 module:       slaythespire.StepSimulator
 ```
 
@@ -68,16 +69,16 @@ cleanup() {
   git -C "$source" worktree prune >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
-git -C "$source" fetch https://github.com/lsmfttb/sts_lightspeed.git refs/heads/stsrl/t006-oracle-search-teacher-v1
-git -C "$source" worktree add --detach "$worktree" 78c3fa86ea4d8ef2c8c490aabfb8047d38d6d077 >/dev/null
+git -C "$source" fetch https://github.com/lsmfttb/sts_lightspeed.git refs/heads/stsrl/t018-terminal-resource-identity-v1
+git -C "$source" worktree add --detach "$worktree" c291d5cbcc4dae660ada925085ca62c6e3d85039 >/dev/null
 cd "$worktree"
 git submodule update --init json pybind11
 if [ -d "$source/build-py" ]; then
-  mv "$source/build-py" "$source/build-py.pre-t006-$(date +%Y%m%d%H%M%S)"
+  mv "$source/build-py" "$source/build-py.pre-t018-$(date +%Y%m%d%H%M%S)"
 fi
 cmake -S "$worktree" -B "$source/build-py" -DCMAKE_POLICY_VERSION_MINIMUM=3.5
 cmake --build "$source/build-py" --target slaythespire -j 2
-PYTHONPATH="$source/build-py" python3 -c "import slaythespire; sim=slaythespire.StepSimulator(slaythespire.CharacterClass.IRONCLAD, 1, 20); assert hasattr(sim, 'battle_search'); print(slaythespire.__file__)"
+PYTHONPATH="$source/build-py" python3 -c "import slaythespire; sim=slaythespire.StepSimulator(slaythespire.CharacterClass.IRONCLAD, 1, 20); snap=sim.snapshot(); assert hasattr(sim, 'battle_search'); assert all(k in snap for k in ('potions', 'deck', 'relics', 'blue_key', 'green_key', 'red_key')); print(slaythespire.__file__)"
 ```
 
 Current WSL-facing reports for the required runtime gates print the manifest
@@ -182,11 +183,14 @@ controller-context or real-game parity claim.
 wsl.exe -d Ubuntu -e bash -lc "cd /mnt/d/DeadlycatCoding/STSRL && PYTHONPATH=/home/lsmft/stsrl-spikes/sts_lightspeed/build-py:/mnt/d/DeadlycatCoding/STSRL/src python3 -m sts_combat_rl.cli --lightspeed-public-projection-capability-audit --sim-seed 1 --sim-episodes 3 --sim-ascension 20 --sim-steps 200 --log-file -"
 ```
 
-The accepted A20 smoke observed 289 current decision screens, 1,209 resource
-snapshot comparisons, no resource mismatches, 289 candidate-action parity
-passes, 289 checkpoint projection passes, no checkpoint failures, and explicit
-coverage gaps for `BOSS_RELIC_REWARDS`, `REST_ROOM`, `SHOP_ROOM`, and
-`TREASURE_ROOM`.
+The accepted T018 A20 smoke observed 289 current decision screens, 1,209
+resource snapshot comparisons, no resource mismatches, 289 candidate-action
+parity passes, 289 checkpoint projection passes, no checkpoint failures, and
+explicit coverage gaps for `BOSS_RELIC_REWARDS`, `REST_ROOM`, `SHOP_ROOM`, and
+`TREASURE_ROOM`. Native persistent resources `deck`, `relics`,
+`potion_identities`, and `keys` were available on all observed screens; the
+sanitized public run context still treats those list/dict values as explicit
+missing paths rather than normal controller inputs.
 
 ### Natural Battle-Start Pool And Fresh Restore
 
@@ -244,21 +248,20 @@ not normal-information or live-game performance.
 
 ### Structured Battle Resource Outcome Audit
 
-This T012 gate validates schema plumbing, artifact propagation, explicit
-missingness, and component-level reporting for battle-end resource outcomes. It
-does not prove full native identity-bearing resource coverage; remaining
-identity gaps are reported as known limitations and owned by T018.
+This T012/T018 gate validates schema plumbing, artifact propagation, explicit
+missingness, component-level reporting, and native terminal resource identity
+coverage for battle-end resource outcomes. It fails if required T018
+identity-bearing components are missing or unavailable.
 
 ```powershell
 wsl.exe -d Ubuntu -e bash -lc "cd /mnt/d/DeadlycatCoding/STSRL && PYTHONPATH=/home/lsmft/stsrl-spikes/sts_lightspeed/build-py:/mnt/d/DeadlycatCoding/STSRL/src python3 -m sts_combat_rl.cli --lightspeed-battle-resource-outcome-audit --sim-seed 1 --sim-episodes 3 --sim-ascension 20 --sim-steps 200 --log-file -"
 ```
 
-The accepted A20 smoke over seeds `1..3` reported 13 natural starts, 13
+The accepted T018 A20 smoke over seeds `1..3` reported 13 natural starts, 13
 completed battles, 10 `PLAYER_VICTORY`, 3 `PLAYER_LOSS`, 13 available
-structured outcome records, and no pool or structural audit problems. It also
-reported known limitations for identity-bearing fields still missing or
-unavailable in the current native surface: `potion_slots`, `deck`, `curses`,
-`relics`, and `keys`.
+structured outcome records, no pool or structural audit problems, no
+unsupported native fields, and no T018 identity gate problems. Terminal
+`potion_slots`, `deck`, `curses`, `relics`, and `keys` were all available.
 
 ## Troubleshooting
 

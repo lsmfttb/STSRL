@@ -16,7 +16,7 @@ starting work.
 | T006 | DONE | [Oracle search teacher pipeline](T006-oracle-search-teacher.md) | T003, T004, T005, T017 | search policy, teacher, search dataset |
 | T007 | CANCELLED | [Complete public run history (superseded)](T007-complete-public-run-history.md) | — | replaced by T014--T016 |
 | T008 | READY | [A20 constructed battle supplements](T008-a20-constructed-supplements.md) | T003, T004, T016, T017 | battle-start transforms and approximate HP policy |
-| T009 | BLOCKED | [PyTorch search-guidance model](T009-pytorch-search-guidance.md) | T003, T006, T011, T012, T016, T018 | optional train dependency and policy/value model |
+| T009 | READY | [PyTorch search-guidance model](T009-pytorch-search-guidance.md) | T003, T006, T011, T012, T016, T018 | optional train dependency and policy/value model |
 | T010 | DONE | [Stochastic non-combat driver](T010-stochastic-non-combat-driver.md) | T002 | non-combat policy and native visible action/resource support |
 | T011 | DONE | [Tactical feature contract v2](T011-tactical-feature-contract-v2.md) | T003 | feature, trainer-input, and model-input upgrades |
 | T012 | DONE | [Structured battle resource outcomes](T012-structured-resource-outcomes.md) | T003, T004, T010, T016, T017 | persistent resource snapshots and outcome vectors |
@@ -25,7 +25,7 @@ starting work.
 | T015 | DONE | [Public run context and controlled history](T015-public-run-context-and-controlled-history.md) | T002, T003, T004, T011, T014 | sanitized context and ordered history |
 | T016 | DONE | [Public-context artifacts, replay, and audit](T016-public-context-artifacts-replay-and-audit.md) | T003, T004, T005, T011, T014, T015 | migrations, replay, and coverage audit |
 | T017 | DONE | [Stable sts_lightspeed source integration](T017-stable-lightspeed-source-integration.md) | T004, T010, T014, T016 | external source manifest and verifier |
-| T018 | READY | [Native terminal resource identity surface](T018-native-terminal-resource-identity.md) | T012, T017 | native terminal potion/deck/relic/key identities |
+| T018 | DONE | [Native terminal resource identity surface](T018-native-terminal-resource-identity.md) | T012, T017 | native terminal potion/deck/relic/key identities |
 
 Only `READY` tasks should receive a new branch. After a prerequisite merges,
 the main maintainer reviews dependent specifications against the new `main`
@@ -52,9 +52,12 @@ document update before acceptance.
   [T007 review handoff](../t007_review_handoff_2026-06-22.md).
 - T012 is complete. It establishes the structured outcome schema, artifact
   propagation, migration, reporting, and explicit native missingness boundary.
-- T008 and T018 are `READY`. T018 owns full native identity-bearing terminal
-  resource coverage. T009 remains blocked by T018 and its remaining named data
-  prerequisites.
+- T018 is complete. It extends the pinned native source and structured outcome
+  audit so terminal potion slots, deck/curses, relic identities/counters, and
+  key flags are available where the game exposes them.
+- T008 and T009 are `READY`. T009 may implement model plumbing and the
+  fail-closed broad-training gate, but smoke-scale data must remain a smoke or
+  narrow-curriculum override rather than evidence of neural strength.
 
 ## Standard Local Gates
 

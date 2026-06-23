@@ -30,8 +30,8 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
   (`scripts/verify_lightspeed_source.sh`). The manifest pins upstream
   `gamerpuppy/sts_lightspeed` base commit
   `7476a81954020087da31d41d16fddf475746ec2d` and integration ref
-  `refs/heads/stsrl/t006-oracle-search-teacher-v1` at commit
-  `78c3fa86ea4d8ef2c8c490aabfb8047d38d6d077`. The old ordered patch stack is
+  `refs/heads/stsrl/t018-terminal-resource-identity-v1` at commit
+  `c291d5cbcc4dae660ada925085ca62c6e3d85039`. The old ordered patch stack is
   retained only as retired provenance.
 
 ### Battle-Agent Data Spike
@@ -105,16 +105,20 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
   migrations for historical artifacts. Successful terminal records require an
   authoritative terminal battle outcome; missing or unrecognized outcomes are
   reported as explicit unavailable/error states rather than inferred from HP.
-  The WSL audit reports per-component availability, change counts, unsupported
-  native fields, terminal outcomes, source provenance, and known native
-  identity-coverage limitations. Full potion/deck/relic/key identity coverage
-  remains T018.
+  The T018 native source surface and WSL audit now provide required
+  identity-bearing terminal resource components where the game exposes them:
+  potion slot identities/order, deck/card identities including curses, relic
+  identities and exposed counters, and all three key flags. Partial key-flag
+  coverage fails closed as explicit missingness. These identity values are used
+  for structured terminal outcomes; sanitized public run context still keeps
+  list/dict identity resource values out of normal controller input and reports
+  those paths as explicit missing fields.
 - A training-readiness report that validates plumbing only. It does not train a
   model or demonstrate policy strength.
 
 ### Tests And Runtime Evidence
 
-- `451` tests pass on Windows Python as of this review. In an uninstalled
+- `455` tests pass on Windows Python as of this review. In an uninstalled
   checkout, set `PYTHONPATH=src` (or install the package) before invoking the
   CLI directly.
 - The two CommunicationMod fixture smokes pass.
@@ -157,13 +161,14 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
   forbidden-field, replay, or run failures. The current natural coverage gaps
   remain `BOSS_RELIC_REWARDS`, `REST_ROOM`, `SHOP_ROOM`, and `TREASURE_ROOM`.
   The same post-review WSL smoke and battle-training-readiness gates pass.
-- The T017-managed pinned external source integration currently validates from
+- The T017/T018-managed pinned external source integration currently validates from
   manifest `sts-lightspeed-source-manifest-v1` version 1. The canonical source
   verifier builds integration commit
-  `78c3fa86ea4d8ef2c8c490aabfb8047d38d6d077`,
+  `c291d5cbcc4dae660ada925085ca62c6e3d85039`,
   initializes `json` and `pybind11`, imports `slaythespire.StepSimulator`, and
   asserts the current native capability inventory including
-  `native_battle_search_root`. Missing-manifest and wrong-commit verifier
+  `native_battle_search_root` and `native_terminal_resource_identity`.
+  Missing-manifest and wrong-commit verifier
   checks fail nonzero. `/home/lsmft/stsrl-spikes/sts_lightspeed/build-py` was
   rebuilt from that pinned source and imports `slaythespire` from the rebuilt
   directory. The required WSL smoke, public-projection capability,
@@ -177,13 +182,13 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
   Oracle fixed evaluation at 20 simulations evaluated both `highest_mean` and
   `most_visits` on the same cohort with no truncations, restore errors, or
   root-mapping failures.
-- T012 validates structured battle resource outcome plumbing. The WSL
-  resource-outcome audit over seeds `1..3` at A20 reports 13 natural starts,
-  13 completed battles, 10 `PLAYER_VICTORY`, 3 `PLAYER_LOSS`, 13 available
-  structured outcome records, no completed battles missing outcomes, no pool
-  or structural audit problems, and explicit known limitations for
-  identity-bearing fields: `potion_slots`, `deck`, `curses`, `relics`, and
-  `keys`. The post-review WSL smoke and battle-training-readiness gates pass.
+- T012/T018 validate structured battle resource outcome plumbing and native
+  identity coverage. The WSL resource-outcome audit over seeds `1..3` at A20
+  reports 13 natural starts, 13 completed battles, 10 `PLAYER_VICTORY`, 3
+  `PLAYER_LOSS`, 13 available structured outcome records, no completed battles
+  missing outcomes, no pool or structural audit problems, no unsupported native
+  fields, and no T018 identity gate problems. The post-review WSL smoke and
+  battle-training-readiness gates pass.
 
 ## Not Implemented On Main
 
@@ -192,8 +197,6 @@ unmerged legacy work:
 
 - PyTorch policy/value training;
 - interactive live-game or A20 performance validation for any controller;
-- native terminal resource identity coverage for potion slots, deck/curses,
-  relic identities/counters, and keys;
 - constructed A20 battle-start supplements;
 - normal-information belief search.
 
@@ -227,11 +230,14 @@ tasks in dependency order are:
    portable replay comparison, and the WSL context audit.
 8. T012, structured battle resource outcomes, is complete. It provides schema,
    artifact propagation, migration, reporting, and explicit native missingness
-   for battle-end resources, but not full identity-bearing native terminal
-   coverage.
-9. T008, A20 constructed battle supplements, and T018, native terminal resource
-   identity surface, are `READY`. T009 remains blocked until T018 and its
-   remaining data prerequisites are complete.
+   for battle-end resources.
+9. T018, native terminal resource identity surface, is complete. It extends the
+   pinned native source and structured outcome audit to cover terminal potion
+   slots, deck/curses, relic identities/counters, and key flags.
+10. T008, A20 constructed battle supplements, and T009, PyTorch
+    search-guidance model, are `READY`. T009 must keep broad neural training
+    fail-closed on under-covered data unless a named smoke or narrow-curriculum
+    override is explicitly reported.
 
 Later tasks are dependency-ordered in the task index. A task is not ready for a
 new branch until its status is `READY`.
