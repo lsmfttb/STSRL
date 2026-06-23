@@ -290,7 +290,8 @@ Status: T007 is cancelled. T014 completed the native capability boundary, T015
 completed sanitized context/history, and T016 completed persisted
 context/replay/audit. See the
 [T007 review handoff](t007_review_handoff_2026-06-22.md). T017 completed the
-stable source-integration path, so T006, T008, and T012 can add future native
+stable source-integration path, and T006 added the explicitly Oracle-like
+native search teacher/evaluation path. T008 and T012 can add future native
 simulator surface without extending the old local patch stack. Broad coverage
 follows fixed evaluation rather than being inferred from natural-run floor
 statistics.

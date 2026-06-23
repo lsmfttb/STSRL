@@ -1,6 +1,6 @@
 # T006: Oracle Search Teacher Pipeline
 
-Status: `READY`.
+Status: `DONE`.
 
 ## Objective
 

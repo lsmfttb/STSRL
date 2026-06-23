@@ -2,8 +2,9 @@
 
 This guide lists simulator operations available on the latest `main`.
 Checkpoint verification, portable battle-start pools, fixed structural
-evaluation, and the pinned external source integration are current
-capabilities. Search remains task-scoped future work.
+evaluation, Oracle-like native search teacher collection, Oracle fixed-cohort
+comparison, and the pinned external source integration are current
+capabilities.
 
 ## Boundary
 
@@ -37,8 +38,8 @@ The canonical day-to-day source integration is recorded in
 upstream:     https://github.com/gamerpuppy/sts_lightspeed.git
 base commit:  7476a81954020087da31d41d16fddf475746ec2d
 integration:  https://github.com/lsmfttb/sts_lightspeed.git
-ref:          refs/heads/stsrl/t017-current-native-surface-v1
-commit:       820a2f884c5cfacdec10dd1937365e4172683e0a
+ref:          refs/heads/stsrl/t006-oracle-search-teacher-v1
+commit:       78c3fa86ea4d8ef2c8c490aabfb8047d38d6d077
 module:       slaythespire.StepSimulator
 ```
 
@@ -61,22 +62,22 @@ directory:
 
 ```bash
 source=/home/lsmft/stsrl-spikes/sts_lightspeed
-worktree=$(mktemp -d /tmp/stsrl-t017-rebuild-source.XXXXXX)
+worktree=$(mktemp -d /tmp/stsrl-rebuild-source.XXXXXX)
 cleanup() {
   git -C "$source" worktree remove --force "$worktree" >/dev/null 2>&1 || true
   git -C "$source" worktree prune >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
-git -C "$source" fetch https://github.com/lsmfttb/sts_lightspeed.git refs/heads/stsrl/t017-current-native-surface-v1
-git -C "$source" worktree add --detach "$worktree" 820a2f884c5cfacdec10dd1937365e4172683e0a >/dev/null
+git -C "$source" fetch https://github.com/lsmfttb/sts_lightspeed.git refs/heads/stsrl/t006-oracle-search-teacher-v1
+git -C "$source" worktree add --detach "$worktree" 78c3fa86ea4d8ef2c8c490aabfb8047d38d6d077 >/dev/null
 cd "$worktree"
 git submodule update --init json pybind11
 if [ -d "$source/build-py" ]; then
-  mv "$source/build-py" "$source/build-py.pre-t017-$(date +%Y%m%d%H%M%S)"
+  mv "$source/build-py" "$source/build-py.pre-t006-$(date +%Y%m%d%H%M%S)"
 fi
 cmake -S "$worktree" -B "$source/build-py" -DCMAKE_POLICY_VERSION_MINIMUM=3.5
 cmake --build "$source/build-py" --target slaythespire -j 2
-PYTHONPATH="$source/build-py" python3 -c "import slaythespire; print(slaythespire.__file__)"
+PYTHONPATH="$source/build-py" python3 -c "import slaythespire; sim=slaythespire.StepSimulator(slaythespire.CharacterClass.IRONCLAD, 1, 20); assert hasattr(sim, 'battle_search'); print(slaythespire.__file__)"
 ```
 
 Current WSL-facing reports for the required runtime gates print the manifest
@@ -213,6 +214,33 @@ selection, controller, and simulator failures explicitly, and writes separate
 natural-weighted, encounter-macro, room-type-macro, and per-stratum results.
 Use a `build-py` rebuilt from the verified pinned source; an older system build
 can lack completed-battle outcome fields even when the repository is current.
+
+### Oracle Search Teacher Collection
+
+This T006 workflow uses hidden simulator state and must be reported only as
+`full_simulator_state_oracle_like` teacher/diagnostic data:
+
+```powershell
+wsl.exe -d Ubuntu -e bash -lc "cd /mnt/d/DeadlycatCoding/STSRL && PYTHONPATH=/home/lsmft/stsrl-spikes/sts_lightspeed/build-py:/mnt/d/DeadlycatCoding/STSRL/src python3 -m sts_combat_rl.cli --lightspeed-oracle-search-teacher /tmp/t006-pool.jsonl --oracle-teacher-output /tmp/t006-teacher.jsonl --oracle-search-simulations 20 --sim-ascension 20 --sim-steps 200 --log-file -"
+```
+
+The pool must first be created with the current battle-start-pool workflow.
+The teacher artifact preserves source checkpoint provenance, occurrence-safe
+legal-action identities, root statistics, the direct teacher action, the soft
+root-visit target, optional behavior action, public-context availability, and
+Oracle controller provenance.
+
+### Oracle Fixed-Cohort Evaluation
+
+This T006 workflow loads an existing fixed cohort unchanged and evaluates
+`highest_mean` plus the `most_visits` diagnostic on the same cohort:
+
+```powershell
+wsl.exe -d Ubuntu -e bash -lc "cd /mnt/d/DeadlycatCoding/STSRL && PYTHONPATH=/home/lsmft/stsrl-spikes/sts_lightspeed/build-py:/mnt/d/DeadlycatCoding/STSRL/src python3 -m sts_combat_rl.cli --lightspeed-oracle-fixed-evaluation /tmp/t006-cohort.jsonl --oracle-search-simulations 20 --oracle-root-selection highest_mean --sim-ascension 20 --sim-steps 200 --log-file -"
+```
+
+Results from this command are Oracle-like diagnostic evidence only. They are
+not normal-information or live-game performance.
 
 ## Troubleshooting
 

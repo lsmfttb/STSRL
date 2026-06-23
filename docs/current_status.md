@@ -30,8 +30,8 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
   (`scripts/verify_lightspeed_source.sh`). The manifest pins upstream
   `gamerpuppy/sts_lightspeed` base commit
   `7476a81954020087da31d41d16fddf475746ec2d` and integration ref
-  `refs/heads/stsrl/t017-current-native-surface-v1` at commit
-  `820a2f884c5cfacdec10dd1937365e4172683e0a`. The old ordered patch stack is
+  `refs/heads/stsrl/t006-oracle-search-teacher-v1` at commit
+  `78c3fa86ea4d8ef2c8c490aabfb8047d38d6d077`. The old ordered patch stack is
   retained only as retired provenance.
 
 ### Battle-Agent Data Spike
@@ -91,12 +91,20 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
   Reports retain per-battle provenance and failures, controller telemetry, and
   separate natural-weighted, encounter-macro, room-type-macro, and
   per-stratum aggregates.
+- Explicitly Oracle-like native battle search teacher pipeline. The pinned
+  `sts_lightspeed` source exposes `StepSimulator.battle_search`; the
+  `OracleSearchController`, teacher JSONL artifact, and same-cohort Oracle
+  fixed evaluation all declare `full_simulator_state_oracle_like`, retain
+  occurrence-safe legal-action identities, keep teacher action and soft visit
+  target separate, and compare `highest_mean` with a `most_visits` diagnostic
+  on immutable T005 cohorts. This is diagnostic upper-bound/search-teacher
+  infrastructure only, not normal-information or live-game performance.
 - A training-readiness report that validates plumbing only. It does not train a
   model or demonstrate policy strength.
 
 ### Tests And Runtime Evidence
 
-- `428` tests pass on Windows Python as of this review. In an uninstalled
+- `445` tests pass on Windows Python as of this review. In an uninstalled
   checkout, set `PYTHONPATH=src` (or install the package) before invoking the
   CLI directly.
 - The two CommunicationMod fixture smokes pass.
@@ -139,26 +147,32 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
   forbidden-field, replay, or run failures. The current natural coverage gaps
   remain `BOSS_RELIC_REWARDS`, `REST_ROOM`, `SHOP_ROOM`, and `TREASURE_ROOM`.
   The same post-review WSL smoke and battle-training-readiness gates pass.
-- T017 validates the pinned external source integration from manifest
-  `sts-lightspeed-source-manifest-v1` version 1. The canonical source verifier
-  builds integration commit `820a2f884c5cfacdec10dd1937365e4172683e0a`,
+- The T017-managed pinned external source integration currently validates from
+  manifest `sts-lightspeed-source-manifest-v1` version 1. The canonical source
+  verifier builds integration commit
+  `78c3fa86ea4d8ef2c8c490aabfb8047d38d6d077`,
   initializes `json` and `pybind11`, imports `slaythespire.StepSimulator`, and
-  asserts the current native capability inventory. Missing-manifest and
-  wrong-commit verifier checks fail nonzero. `/home/lsmft/stsrl-spikes/sts_lightspeed/build-py`
-  was rebuilt from that pinned source and imports `slaythespire` from the
-  rebuilt directory. The required WSL smoke, public-projection capability,
-  public-context replay, and battle-training-readiness gates pass. The
-  public-projection audit reports 289 current decision screens, 1,209 resource
-  snapshot comparisons, no mismatches, 289 candidate-action parity passes, and
-  289 checkpoint projection passes; the public-context audit reports 327
-  current decision screens and 15/15 replay public-context matches.
+  asserts the current native capability inventory including
+  `native_battle_search_root`. Missing-manifest and wrong-commit verifier
+  checks fail nonzero. `/home/lsmft/stsrl-spikes/sts_lightspeed/build-py` was
+  rebuilt from that pinned source and imports `slaythespire` from the rebuilt
+  directory. The required WSL smoke, public-projection capability,
+  public-context replay, and battle-training-readiness gates pass.
+- T006 validates Oracle-like search teacher collection and fixed-cohort
+  comparison on the T004/T005 A20 smoke data. A fresh pool over seeds `1..3`
+  produced 13 natural starts; the frozen cohort selected 8 starts with
+  identity `c29d7852c941d592`. Teacher collection at 20 native simulations
+  produced 13 rows, 120 root rows, 260 root visits, and 3,621 native simulator
+  steps with deterministic non-timing JSONL content across repeated runs.
+  Oracle fixed evaluation at 20 simulations evaluated both `highest_mean` and
+  `most_visits` on the same cohort with no truncations, restore errors, or
+  root-mapping failures.
 
 ## Not Implemented On Main
 
 The following capabilities exist only as plans, experiment evidence, or
 unmerged legacy work:
 
-- native Oracle-like search integration and search-teacher datasets;
 - PyTorch policy/value training;
 - interactive live-game or A20 performance validation for any controller;
 - structured persistent resource outcomes;
@@ -178,9 +192,9 @@ tasks in dependency order are:
 2. T017, stable `sts_lightspeed` source integration, is complete. It replaces
    the day-to-day local patch-stack workflow with a pinned external source
    integration for future native simulator surface.
-3. T006, Oracle search teacher pipeline, is `READY`. It is confined to the
-   explicitly Oracle-like simulator regime and must compare named budgets on
-   immutable T005 cohorts after the simulator source integration is stable.
+3. T006, Oracle search teacher pipeline, is complete. It is confined to the
+   explicitly Oracle-like simulator regime and provides diagnostic teacher data
+   and same-cohort Oracle fixed-evaluation comparison only.
 4. T007 is `CANCELLED`. PR #9 remains closed and is not a branch base. Its
    former cross-cutting scope is split into T014--T016; see
    [`t007_review_handoff_2026-06-22.md`](t007_review_handoff_2026-06-22.md).
@@ -196,7 +210,7 @@ tasks in dependency order are:
 8. T008, A20 constructed battle supplements, and T012, structured battle
    resource outcomes, are `READY` and should extend native simulator surface
    through the T017-managed source integration. T009 remains blocked until its
-   remaining search/data prerequisites, including T006 and T012, are complete.
+   remaining data prerequisite, T012, is complete.
 
 Later tasks are dependency-ordered in the task index. A task is not ready for a
 new branch until its status is `READY`.

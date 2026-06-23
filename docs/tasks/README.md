@@ -13,7 +13,7 @@ starting work.
 | T003 | DONE | [Artifact provenance foundation](T003-artifact-provenance-foundation.md) | T002 | artifact versioning, decision records |
 | T004 | DONE | [Battle-start checkpoint pool](T004-battle-start-checkpoint-pool.md) | T002, T003, T010 | checkpoint restore, battle-start pool |
 | T005 | DONE | [Fixed structural battle evaluation](T005-fixed-battle-evaluation.md) | T004 | fixed evaluation set and runner |
-| T006 | READY | [Oracle search teacher pipeline](T006-oracle-search-teacher.md) | T003, T004, T005, T017 | search policy, teacher, search dataset |
+| T006 | DONE | [Oracle search teacher pipeline](T006-oracle-search-teacher.md) | T003, T004, T005, T017 | search policy, teacher, search dataset |
 | T007 | CANCELLED | [Complete public run history (superseded)](T007-complete-public-run-history.md) | — | replaced by T014--T016 |
 | T008 | READY | [A20 constructed battle supplements](T008-a20-constructed-supplements.md) | T003, T004, T016, T017 | battle-start transforms and approximate HP policy |
 | T009 | BLOCKED | [PyTorch search-guidance model](T009-pytorch-search-guidance.md) | T003, T006, T011, T012, T016 | optional train dependency and policy/value model |
@@ -42,7 +42,7 @@ document update before acceptance.
 - T017 is complete. It replaces the day-to-day local `sts_lightspeed`
   patch-stack workflow with a pinned external source integration for future
   native-surface tasks.
-- T006 is `READY`. It adds an explicitly Oracle-like teacher/evaluation path
+- T006 is complete. It adds an explicitly Oracle-like teacher/evaluation path
   on immutable T005 cohorts and cannot be reported as normal-information or
   real-game performance.
 - T007 is `CANCELLED`. Its replacement sequence completed T014 for native
@@ -50,8 +50,8 @@ document update before acceptance.
   artifact propagation/replay/audit. See the
   [T007 review handoff](../t007_review_handoff_2026-06-22.md).
 - T008 and T012 are `READY` and now extend native simulator surface through
-  the T017-managed source integration. T009 remains blocked by its remaining
-  named data/search prerequisites.
+  the T017-managed source integration. T009 remains blocked by T012 and its
+  remaining named data prerequisites.
 
 ## Standard Local Gates
 
