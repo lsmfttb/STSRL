@@ -34,10 +34,11 @@ def test_default_lightspeed_source_manifest_names_pinned_integration() -> None:
         "https://github.com/lsmfttb/sts_lightspeed.git"
     )
     assert manifest.integration.ref == (
-        "refs/heads/stsrl/t017-current-native-surface-v1"
+        "refs/heads/stsrl/t006-oracle-search-teacher-v1"
     )
-    assert manifest.integration.commit == ("820a2f884c5cfacdec10dd1937365e4172683e0a")
+    assert manifest.integration.commit == ("78c3fa86ea4d8ef2c8c490aabfb8047d38d6d077")
     assert set(REQUIRED_NATIVE_CAPABILITY_IDS).issubset(manifest.capability_ids)
+    assert "native_battle_search_root" in manifest.capability_ids
     assert manifest.legacy_patch_stack.status == "retired_provenance"
 
 
@@ -94,8 +95,8 @@ def test_lightspeed_source_manifest_requires_current_capability_inventory() -> N
     payload = _default_manifest_payload()
     capabilities = list(payload["supported_native_capabilities"])  # type: ignore[index]
     payload["supported_native_capabilities"] = [
-        item for item in capabilities if item["id"] != "native_public_projection"
+        item for item in capabilities if item["id"] != "native_battle_search_root"
     ]
 
-    with pytest.raises(ValueError, match="native_public_projection"):
+    with pytest.raises(ValueError, match="native_battle_search_root"):
         parse_lightspeed_source_manifest(payload)

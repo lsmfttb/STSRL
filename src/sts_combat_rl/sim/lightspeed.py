@@ -157,6 +157,28 @@ class LightSpeedAdapter:
         self._assert_snapshot_is_current(snapshot)
         return parse_native_public_projection(dict(self._sim.public_projection()))
 
+    def battle_search(
+        self,
+        snapshot: SimulatorSnapshot,
+        *,
+        simulations: int,
+        include_potions: bool = False,
+    ) -> dict[str, Any]:
+        """Run native hidden-state battle search on the current battle state."""
+
+        if not hasattr(self._sim, "battle_search"):
+            raise RuntimeError(
+                "slaythespire.StepSimulator does not expose battle_search; "
+                "build the T006 oracle-search native source integration"
+            )
+        self._assert_snapshot_is_current(snapshot)
+        return dict(
+            self._sim.battle_search(
+                int(simulations),
+                bool(include_potions),
+            )
+        )
+
     def _snapshot(
         self, raw_snapshot: dict[str, Any] | None = None
     ) -> SimulatorSnapshot:

@@ -159,6 +159,7 @@ for method_name in (
     "capture_checkpoint",
     "restore_checkpoint",
     "public_projection",
+    "battle_search",
 ):
     if not hasattr(sim, method_name):
         fail(f"StepSimulator.{method_name} is missing")
@@ -244,6 +245,53 @@ for key in ("current_hp", "max_hp", "gold", "potion_count", "potion_capacity"):
     if not isinstance(field, dict) or field.get("availability") != "available":
         fail(f"persistent resource {key!r} must be available")
 
+battle_snapshot = sim.snapshot()
+for _ in range(200):
+    if battle_snapshot.get("screen_state") == "BATTLE" and battle_snapshot.get(
+        "battle_active"
+    ):
+        break
+    actions = sim.legal_actions()
+    if not isinstance(actions, list) or not actions:
+        fail("could not reach battle: legal_actions returned no actions")
+    battle_snapshot = sim.step(actions[0])
+    if not isinstance(battle_snapshot, dict):
+        fail("StepSimulator.step() must return a dict while reaching battle")
+else:
+    fail("could not reach a battle to verify StepSimulator.battle_search")
+
+search = sim.battle_search(3, False)
+if not isinstance(search, dict):
+    fail("StepSimulator.battle_search() must return a dict")
+if search.get("schema_id") != "native-battle-search-root-v1":
+    fail("native battle search schema id mismatch")
+if search.get("native_api") != "StepSimulator.battle_search.v1":
+    fail("native battle search api id mismatch")
+if search.get("patch_identity") != "sts_lightspeed_battle_search_root_v1":
+    fail("native battle search patch identity mismatch")
+if search.get("information_regime") != "full_simulator_state_oracle_like":
+    fail("native battle search information regime mismatch")
+if search.get("simulations_requested") != 3:
+    fail("native battle search simulations_requested mismatch")
+if not isinstance(search.get("native_simulator_steps"), int):
+    fail("native battle search simulator step count is missing")
+root_rows = search.get("root_rows")
+if not isinstance(root_rows, list) or not root_rows:
+    fail("native battle search root_rows must be a non-empty list")
+required_root_fields = {
+    "scope",
+    "bits",
+    "kind",
+    "label",
+    "search_tree_present",
+    "visits",
+    "evaluation_sum",
+    "mean_value",
+}
+if not required_root_fields.issubset(root_rows[0]):
+    missing_fields = sorted(required_root_fields.difference(root_rows[0]))
+    fail("native battle search root row missing fields: " + ", ".join(missing_fields))
+
 expected_capabilities = set(manifest.capability_ids)
 observed_capabilities = {
     "step_simulation",
@@ -253,6 +301,7 @@ observed_capabilities = {
     "non_combat_potion_actions",
     "gcc15_build_compatibility",
     "native_public_projection",
+    "native_battle_search_root",
 }
 missing = sorted(observed_capabilities.difference(expected_capabilities))
 if missing:
