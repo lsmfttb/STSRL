@@ -99,12 +99,22 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
   target separate, and compare `highest_mean` with a `most_visits` diagnostic
   on immutable T005 cohorts. This is diagnostic upper-bound/search-teacher
   infrastructure only, not normal-information or live-game performance.
+- Versioned structured battle resource outcomes. Current battle-start pools,
+  battle segments, reward labels, trainer inputs, and fixed-evaluation reports
+  carry `structured-battle-outcome-v1` status/payload fields with sequential
+  migrations for historical artifacts. Successful terminal records require an
+  authoritative terminal battle outcome; missing or unrecognized outcomes are
+  reported as explicit unavailable/error states rather than inferred from HP.
+  The WSL audit reports per-component availability, change counts, unsupported
+  native fields, terminal outcomes, source provenance, and known native
+  identity-coverage limitations. Full potion/deck/relic/key identity coverage
+  remains T018.
 - A training-readiness report that validates plumbing only. It does not train a
   model or demonstrate policy strength.
 
 ### Tests And Runtime Evidence
 
-- `445` tests pass on Windows Python as of this review. In an uninstalled
+- `451` tests pass on Windows Python as of this review. In an uninstalled
   checkout, set `PYTHONPATH=src` (or install the package) before invoking the
   CLI directly.
 - The two CommunicationMod fixture smokes pass.
@@ -167,6 +177,13 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
   Oracle fixed evaluation at 20 simulations evaluated both `highest_mean` and
   `most_visits` on the same cohort with no truncations, restore errors, or
   root-mapping failures.
+- T012 validates structured battle resource outcome plumbing. The WSL
+  resource-outcome audit over seeds `1..3` at A20 reports 13 natural starts,
+  13 completed battles, 10 `PLAYER_VICTORY`, 3 `PLAYER_LOSS`, 13 available
+  structured outcome records, no completed battles missing outcomes, no pool
+  or structural audit problems, and explicit known limitations for
+  identity-bearing fields: `potion_slots`, `deck`, `curses`, `relics`, and
+  `keys`. The post-review WSL smoke and battle-training-readiness gates pass.
 
 ## Not Implemented On Main
 
@@ -175,7 +192,6 @@ unmerged legacy work:
 
 - PyTorch policy/value training;
 - interactive live-game or A20 performance validation for any controller;
-- structured persistent resource outcomes;
 - native terminal resource identity coverage for potion slots, deck/curses,
   relic identities/counters, and keys;
 - constructed A20 battle-start supplements;
@@ -209,12 +225,13 @@ tasks in dependency order are:
 7. T016, public-context artifacts, replay, and audit, is complete. It extends
    the T015 public-context contract through current persisted artifacts,
    portable replay comparison, and the WSL context audit.
-8. T008, A20 constructed battle supplements, and T012, structured battle
-   resource outcomes, are `READY`. T012 is limited to the structured schema,
+8. T012, structured battle resource outcomes, is complete. It provides schema,
    artifact propagation, migration, reporting, and explicit native missingness
-   boundary. Full native identity-bearing terminal resource coverage is split
-   into T018. T009 remains blocked until T012, T018, and its remaining data
-   prerequisites are complete.
+   for battle-end resources, but not full identity-bearing native terminal
+   coverage.
+9. T008, A20 constructed battle supplements, and T018, native terminal resource
+   identity surface, are `READY`. T009 remains blocked until T018 and its
+   remaining data prerequisites are complete.
 
 Later tasks are dependency-ordered in the task index. A task is not ready for a
 new branch until its status is `READY`.

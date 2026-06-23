@@ -1,6 +1,6 @@
 # T012: Structured Battle Resource Outcomes
 
-Status: `READY`.
+Status: `DONE`.
 
 ## Objective
 

@@ -1,6 +1,6 @@
 # T018: Native Terminal Resource Identity Surface
 
-Status: `BLOCKED`.
+Status: `READY`.
 
 ## Objective
 
@@ -21,7 +21,7 @@ and key flags as missing or unavailable.
 
 ## Dependencies
 
-- T012 and T017 must be complete.
+- T012 and T017 are complete.
 
 ## Scope
 

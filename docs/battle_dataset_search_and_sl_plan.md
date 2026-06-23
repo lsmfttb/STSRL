@@ -291,9 +291,9 @@ completed sanitized context/history, and T016 completed persisted
 context/replay/audit. See the
 [T007 review handoff](t007_review_handoff_2026-06-22.md). T017 completed the
 stable source-integration path, and T006 added the explicitly Oracle-like
-native search teacher/evaluation path. T012 now owns the structured outcome
+native search teacher/evaluation path. T012 completed the structured outcome
 schema and explicit missingness boundary; full native identity-bearing terminal
-resource coverage is split into T018 and should extend the T017-managed source
+resource coverage is now T018 and should extend the T017-managed source
 integration rather than the old local patch stack. Broad coverage follows fixed
 evaluation rather than being inferred from natural-run floor statistics.
 

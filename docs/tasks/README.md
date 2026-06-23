@@ -19,13 +19,13 @@ starting work.
 | T009 | BLOCKED | [PyTorch search-guidance model](T009-pytorch-search-guidance.md) | T003, T006, T011, T012, T016, T018 | optional train dependency and policy/value model |
 | T010 | DONE | [Stochastic non-combat driver](T010-stochastic-non-combat-driver.md) | T002 | non-combat policy and native visible action/resource support |
 | T011 | DONE | [Tactical feature contract v2](T011-tactical-feature-contract-v2.md) | T003 | feature, trainer-input, and model-input upgrades |
-| T012 | READY | [Structured battle resource outcomes](T012-structured-resource-outcomes.md) | T003, T004, T010, T016, T017 | persistent resource snapshots and outcome vectors |
+| T012 | DONE | [Structured battle resource outcomes](T012-structured-resource-outcomes.md) | T003, T004, T010, T016, T017 | persistent resource snapshots and outcome vectors |
 | T013 | DONE | [Live CommunicationMod runtime adapter](T013-live-communicationmod-runtime-adapter.md) | T003, T011 | trained/search controller deployment in the real game |
 | T014 | DONE | [Native public projection capability](T014-native-public-projection-capability.md) | T002, T003, T004, T010, T011 | native public projection and action parity |
 | T015 | DONE | [Public run context and controlled history](T015-public-run-context-and-controlled-history.md) | T002, T003, T004, T011, T014 | sanitized context and ordered history |
 | T016 | DONE | [Public-context artifacts, replay, and audit](T016-public-context-artifacts-replay-and-audit.md) | T003, T004, T005, T011, T014, T015 | migrations, replay, and coverage audit |
 | T017 | DONE | [Stable sts_lightspeed source integration](T017-stable-lightspeed-source-integration.md) | T004, T010, T014, T016 | external source manifest and verifier |
-| T018 | BLOCKED | [Native terminal resource identity surface](T018-native-terminal-resource-identity.md) | T012, T017 | native terminal potion/deck/relic/key identities |
+| T018 | READY | [Native terminal resource identity surface](T018-native-terminal-resource-identity.md) | T012, T017 | native terminal potion/deck/relic/key identities |
 
 Only `READY` tasks should receive a new branch. After a prerequisite merges,
 the main maintainer reviews dependent specifications against the new `main`
@@ -50,10 +50,10 @@ document update before acceptance.
   capability, T015 for sanitized in-memory context/history, and T016 for
   artifact propagation/replay/audit. See the
   [T007 review handoff](../t007_review_handoff_2026-06-22.md).
-- T008 and T012 are `READY`. T012 is limited to structured outcome schema,
-  artifact propagation, migration, reporting, and explicit native missingness.
-  Full native identity-bearing terminal resource coverage is split into T018.
-  T009 remains blocked by T012, T018, and its remaining named data
+- T012 is complete. It establishes the structured outcome schema, artifact
+  propagation, migration, reporting, and explicit native missingness boundary.
+- T008 and T018 are `READY`. T018 owns full native identity-bearing terminal
+  resource coverage. T009 remains blocked by T018 and its remaining named data
   prerequisites.
 
 ## Standard Local Gates

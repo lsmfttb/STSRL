@@ -3,8 +3,8 @@
 This guide lists simulator operations available on the latest `main`.
 Checkpoint verification, portable battle-start pools, fixed structural
 evaluation, Oracle-like native search teacher collection, Oracle fixed-cohort
-comparison, and the pinned external source integration are current
-capabilities.
+comparison, structured battle resource outcome auditing, and the pinned
+external source integration are current capabilities.
 
 ## Boundary
 
@@ -241,6 +241,24 @@ wsl.exe -d Ubuntu -e bash -lc "cd /mnt/d/DeadlycatCoding/STSRL && PYTHONPATH=/ho
 
 Results from this command are Oracle-like diagnostic evidence only. They are
 not normal-information or live-game performance.
+
+### Structured Battle Resource Outcome Audit
+
+This T012 gate validates schema plumbing, artifact propagation, explicit
+missingness, and component-level reporting for battle-end resource outcomes. It
+does not prove full native identity-bearing resource coverage; remaining
+identity gaps are reported as known limitations and owned by T018.
+
+```powershell
+wsl.exe -d Ubuntu -e bash -lc "cd /mnt/d/DeadlycatCoding/STSRL && PYTHONPATH=/home/lsmft/stsrl-spikes/sts_lightspeed/build-py:/mnt/d/DeadlycatCoding/STSRL/src python3 -m sts_combat_rl.cli --lightspeed-battle-resource-outcome-audit --sim-seed 1 --sim-episodes 3 --sim-ascension 20 --sim-steps 200 --log-file -"
+```
+
+The accepted A20 smoke over seeds `1..3` reported 13 natural starts, 13
+completed battles, 10 `PLAYER_VICTORY`, 3 `PLAYER_LOSS`, 13 available
+structured outcome records, and no pool or structural audit problems. It also
+reported known limitations for identity-bearing fields still missing or
+unavailable in the current native surface: `potion_slots`, `deck`, `curses`,
+`relics`, and `keys`.
 
 ## Troubleshooting
 
