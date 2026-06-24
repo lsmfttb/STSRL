@@ -1,6 +1,6 @@
 # Current Status
 
-Last reviewed: 2026-06-23.
+Last reviewed: 2026-06-24.
 
 This document describes the latest `main` branch only. Results from local
 artifacts, old branches, or unmerged pull requests do not count as implemented
@@ -53,6 +53,10 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
   battle examples.
 - Framework-neutral trainer-input JSONL round trip, model-input packing, and
   deterministic action-score contract checks.
+- Offline trainer-input preflight for exported trainer JSONL artifacts. It
+  validates current-schema loading, model-input packing, context rebuild,
+  deterministic scoring shape, and the T009 broad-training gate without
+  importing PyTorch.
 - Versioned trainer-input artifact migration, complete decision provenance,
   and occurrence-disambiguated portable action identities.
 - Versioned seeded stochastic non-combat driver with screen-level relative
@@ -125,12 +129,27 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
   for structured terminal outcomes; sanitized public run context still keeps
   list/dict identity resource values out of normal controller input and reports
   those paths as explicit missing fields.
+- Optional PyTorch policy/value plumbing behind the `train` dependency group.
+  The T009 model consumes public tactical features, legal action features, and
+  a compact sanitized public-run-context summary; scores state-action policy
+  rows; predicts battle survival and terminal absolute current HP; and keeps
+  structured terminal resource heads separate. Broad training is guarded by a
+  fail-closed per-ascension/per-act scale and distribution gate that counts
+  stable source identities rather than repeated sampled rows and cannot use A0
+  coverage to satisfy A20 requirements. Named `smoke` and `narrow_curriculum`
+  overrides may run diagnostic training but never mark broad training ready.
+  Checkpoints use `torch-policy-value-checkpoint-v1`, include exact
+  trainer-input SHA-256 artifact provenance, controller and information-regime
+  summaries, target-source summaries, distribution/source/sampling counts,
+  stable source identity summaries, and semantic contract validation on load.
+  Raw policy/value diagnostics are reported separately; model-guided fixed
+  search evaluation is currently `not_run`.
 - A training-readiness report that validates plumbing only. It does not train a
   model or demonstrate policy strength.
 
 ### Tests And Runtime Evidence
 
-- `464` tests pass on Windows Python as of this review. In an uninstalled
+- `475` tests pass on Windows Python as of this review. In an uninstalled
   checkout, set `PYTHONPATH=src` (or install the package) before invoking the
   CLI directly.
 - The two CommunicationMod fixture smokes pass.
@@ -213,14 +232,30 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
   matching artifact SHA256 digests and identical record manifests. The
   post-review WSL source verifier, smoke, and battle-training-readiness gates
   pass with `constructed_battle_start_transforms` in the source identity.
+- T009 validates optional PyTorch search-guidance plumbing. The accepted local
+  review ran focused T009 tests, full Windows tests, compileall, ruff, both
+  CommunicationMod fixture smokes, trainer-input preflight, and a one-epoch
+  smoke-override PyTorch training command that wrote a checkpoint while still
+  reporting `broad training allowed: no` and
+  `search-guided fixed evaluation: not_run`. Regression checks confirm that
+  repeated samples from the same source checkpoint do not increase unique
+  coverage, missing stable source identity fails closed, checkpoint
+  provenance contains the trainer-input SHA-256 artifact id and controller /
+  information-regime summaries, and tampered semantic checkpoint fields or
+  incomplete training-data provenance are rejected on load. The accepted WSL
+  smoke, battle-training-readiness, battle-start pool, and fixed-evaluation
+  gates pass; the fixed-evaluation smoke selected 8 battles from 13 natural
+  starts and reported 5 wins, 3 losses, 0 truncations/errors, and evaluation
+  successful.
 
 ## Not Implemented On Main
 
 The following capabilities exist only as plans, experiment evidence, or
 unmerged legacy work:
 
-- PyTorch policy/value training;
 - interactive live-game or A20 performance validation for any controller;
+- broad neural training on a scale/distribution-approved A20 dataset;
+- model-guided native search or fixed-evaluation performance improvement;
 - normal-information belief search.
 
 Do not use documentation or results from these areas as evidence that `main`
@@ -260,9 +295,10 @@ tasks in dependency order are:
 10. T008, A20 constructed battle supplements, is complete. It adds
     conservative constructed supplements without replacing natural A20 data or
     natural evaluation.
-11. T009, PyTorch search-guidance model, is `READY`. T009 must keep broad
-    neural training fail-closed on under-covered data unless a named smoke or
-    narrow-curriculum override is explicitly reported.
+11. T009, PyTorch search-guidance model, is complete. It provides optional
+    model plumbing, fail-closed broad-training gates, checkpoint provenance,
+    and diagnostic smoke/narrow-curriculum training only; broad neural
+    training and model-guided search performance remain future promotion work.
 
 Later tasks are dependency-ordered in the task index. A task is not ready for a
 new branch until its status is `READY`.

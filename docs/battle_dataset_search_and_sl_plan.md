@@ -209,9 +209,11 @@ The action identifies a possible transition from the state. Decision quality
 therefore requires state-action interactions; an action-only linear score is a
 plumbing baseline, not a credible final model.
 
-Broad training waits for explicit scale and distribution readiness. Smoke-scale
-training remains useful only for interface validation or named narrow
-curricula.
+T009 now provides optional PyTorch policy/value plumbing, checkpoint
+provenance, trainer-input preflight, and a fail-closed broad-training gate.
+Broad training still waits for explicit scale and distribution readiness.
+Smoke-scale training remains useful only for interface validation or named
+narrow curricula.
 
 ## Live Game Deployment Compatibility
 
@@ -300,7 +302,8 @@ integration rather than the old local patch stack. Broad coverage follows fixed
 evaluation rather than being inferred from natural-run floor statistics. T008
 completed conservative constructed A20 battle-start supplements, but the
 accepted audit remains smoke-scale evidence for the transform workflow rather
-than a broad coverage gate.
+than a broad coverage gate. T009 completed the optional PyTorch training
+plumbing and broad-training gate, but not the coverage requirement itself.
 
 Work:
 
@@ -315,7 +318,9 @@ training and evaluation.
 
 ### Phase E: Search Improvement
 
-Status: pending meaningful coverage.
+Status: T009 completed optional PyTorch policy/value plumbing and diagnostic
+training reports. Model-guided search integration and meaningful held-out or
+fixed-cohort improvement remain pending meaningful coverage.
 
 Exit gate: a search change improves fixed evaluation at equal simulation or
 wall-clock budget without natural-weighted regression.

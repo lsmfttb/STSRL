@@ -1,15 +1,18 @@
 # T009: PyTorch Search-Guidance Model
 
-Status: `READY`.
+Status: `DONE`.
 
 ## Current Main Baseline
 
-T006, T008, T011, T012, T016, and T018 are complete. Current A20 data is still
-smoke-scale even with the T008 constructed supplements, so broad neural
-training must fail closed until the explicit scale/distribution gate passes.
-T009 may implement model plumbing, checkpoint schemas, diagnostics, and named
-smoke or narrow-curriculum overrides, but it must not report under-covered
-smoke data as evidence of model strength.
+T009 is complete on `main`. The current implementation provides optional
+PyTorch model plumbing behind the `train` dependency group, offline trainer
+input preflight, a fail-closed broad-training scale/distribution gate,
+versioned checkpoint save/load with semantic schema checks and training-data
+provenance, and named smoke/narrow-curriculum override support. Current A20
+data is still smoke-scale even with the T008 constructed supplements, so broad
+neural training remains blocked until the explicit scale/distribution gate
+passes. Raw model diagnostics are not policy-strength evidence, and
+model-guided search fixed evaluation is reported as `not_run`.
 
 ## Dependencies
 
