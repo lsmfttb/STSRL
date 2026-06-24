@@ -1,6 +1,6 @@
 # T019: Codebase Mechanical Refactor
 
-Status: `READY`.
+Status: `DONE`.
 
 ## Objective
 
@@ -13,9 +13,14 @@ clarifying module ownership.
 
 ## Current Main Baseline
 
-The foundation backlog is complete. Current `main` passes the standard Windows
-quality gates and WSL simulator gates, but the post-backlog maintainer review
-identified maintainability risks:
+T019 is complete on `main`. PR #19 merged as commit
+`e5c11103d074a934f930c3b38540856fcd761018`. The accepted implementation kept
+behavior unchanged while splitting CLI parser construction, validation, path
+helpers, simulator policy builders, and `sts_lightspeed` command routing out
+of `src/sts_combat_rl/cli.py`.
+
+The foundation backlog is complete. Before T019, the post-backlog maintainer
+review identified maintainability risks:
 
 - `src/sts_combat_rl/cli.py` is about 1,700 lines and still owns many argument
   definitions, validations, and command branches.

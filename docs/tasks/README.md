@@ -26,12 +26,12 @@ starting work.
 | T016 | DONE | [Public-context artifacts, replay, and audit](T016-public-context-artifacts-replay-and-audit.md) | T003, T004, T005, T011, T014, T015 | migrations, replay, and coverage audit |
 | T017 | DONE | [Stable sts_lightspeed source integration](T017-stable-lightspeed-source-integration.md) | T004, T010, T014, T016 | external source manifest and verifier |
 | T018 | DONE | [Native terminal resource identity surface](T018-native-terminal-resource-identity.md) | T012, T017 | native terminal potion/deck/relic/key identities |
-| T019 | READY | [Codebase mechanical refactor](T019-codebase-mechanical-refactor.md) | T001--T018 except cancelled T007 | CLI decomposition and export cleanup |
+| T019 | DONE | [Codebase mechanical refactor](T019-codebase-mechanical-refactor.md) | T001--T018 except cancelled T007 | CLI decomposition and export cleanup |
 | T020 | READY | [sts_lightspeed fork maintenance line](T020-sts-lightspeed-fork-maintenance.md) | T017 | single active fork integration branch |
 
 The published foundation task set is complete: T001--T006 and T008--T018 are
-`DONE`, and T007 is `CANCELLED`. T019 and T020 are the currently published
-`READY` maintenance tasks.
+`DONE`, T007 is `CANCELLED`, and T019 is `DONE`. T020 is the currently
+published `READY` maintenance task.
 
 Only `READY` tasks should receive a new branch. After a prerequisite merges,
 the main maintainer reviews dependent specifications against the new `main`
@@ -46,10 +46,6 @@ document update before acceptance.
 
 The currently published `READY` queue is:
 
-- T019: codebase mechanical refactor. This is a behavior-preserving cleanup
-  task for CLI decomposition, command routing ownership, and public export
-  audit. It should not change simulator, training, search, artifact, or
-  evaluation semantics.
 - T020: `sts_lightspeed` fork maintenance line. This task establishes a single
   documented active fork integration branch while preserving exact-commit
   source-manifest reproducibility.
@@ -113,9 +109,10 @@ A trained or search controller still needs to use that adapter and earn its own
 captured-sample or interactive evaluation evidence before it is described as
 live-game validated.
 
-CLI decomposition and command-module cleanup are now published as T019. Feature
-tasks other than T019 may move only their own workflows out of `cli.py`,
-following the architecture contract.
+CLI decomposition and command-module cleanup completed in T019. Feature tasks
+may move only their own workflows out of CLI routing, following the
+architecture contract, unless a later dedicated cleanup task explicitly
+authorizes broader mechanical refactor.
 
 Pure-Python linear scorer, policy-gradient, and policy-comparison experiments
 from the legacy commit are explicitly unscheduled. They are preserved by the

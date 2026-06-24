@@ -13,10 +13,9 @@ primary battle policy, and learned policies or values are expected to guide or
 accelerate search. Non-combat decisions remain outside the trainable agent.
 
 The published foundation backlog is complete: T001--T006 and T008--T018 are
-`DONE`, and T007 is `CANCELLED` because it was superseded by T014--T016. The
-current published `READY` maintenance tasks are T019, for behavior-preserving
-codebase refactor, and T020, for `sts_lightspeed` fork integration-line
-maintenance.
+`DONE`, T007 is `CANCELLED` because it was superseded by T014--T016, and T019
+is `DONE`. The current published `READY` maintenance task is T020, for
+`sts_lightspeed` fork integration-line maintenance.
 
 ## Implemented On Main
 
@@ -24,6 +23,14 @@ maintenance.
 
 - CommunicationMod-style stdin/stdout probe with protocol output isolated from
   logs.
+- T019 mechanical CLI refactor. `src/sts_combat_rl/cli.py` is now a thin
+  entrypoint for parser construction, top-level validation, logging/capture
+  setup, PyTorch training dispatch, `sts_lightspeed` command dispatch, mock
+  handling, and stdin protocol mode. Parser construction, CLI validation,
+  timestamped path helpers, simulator policy builders, and lightspeed routing
+  live in focused modules under `src/sts_combat_rl/commands/`. The broad
+  `sts_combat_rl.sim` export surface is explicitly audited by regression tests
+  rather than silently growing.
 - Live CommunicationMod runtime entry point that consumes one JSON observation,
   exposes only the sanitized public tactical contract to an `OnlineController`,
   emits at most one protocol command, and fails closed on unsupported or
@@ -155,7 +162,7 @@ maintenance.
 
 ### Tests And Runtime Evidence
 
-- `475` tests pass on Windows Python as of this review. In an uninstalled
+- `479` tests pass on Windows Python as of this review. In an uninstalled
   checkout, set `PYTHONPATH=src` (or install the package) before invoking the
   CLI directly.
 - The two CommunicationMod fixture smokes pass.
@@ -259,6 +266,11 @@ maintenance.
   without importing PyTorch, WSL `--lightspeed-smoke`, and WSL
   `--lightspeed-battle-training-readiness` all pass on the pinned T008
   `sts_lightspeed` source.
+- After T019 merged on 2026-06-24, the behavior-preserving refactor gate
+  passed on `main`: 479 Windows tests, compileall, ruff check, ruff format
+  check, both CommunicationMod fixture smokes, default CLI import without
+  importing PyTorch, and diff whitespace check. `ruff format --check` emitted
+  non-fatal cache-write warnings but exited successfully.
 
 ## Not Implemented On Main
 
@@ -276,12 +288,9 @@ already supports them.
 ## Immediate Work
 
 Executable task specifications live in [`tasks/`](tasks/README.md). The
-currently published `READY` tasks are:
+currently published `READY` task is:
 
-1. [`T019`](tasks/T019-codebase-mechanical-refactor.md): behavior-preserving
-   codebase refactor for CLI decomposition, command routing ownership, and
-   public export audit.
-2. [`T020`](tasks/T020-sts-lightspeed-fork-maintenance.md): `sts_lightspeed`
+1. [`T020`](tasks/T020-sts-lightspeed-fork-maintenance.md): `sts_lightspeed`
    fork maintenance-line cleanup, establishing one active fork integration
    branch while preserving exact source-manifest commit pinning.
 
@@ -313,22 +322,25 @@ artifact migrations are covered, optional PyTorch stays isolated behind the
 simulator gates run through WSL against the pinned source manifest.
 
 No urgent correctness-driven cleanup is required before publishing the next
-research task. The main maintainability risks are size and routing complexity:
+research task. T019 removed the largest CLI routing hotspot:
 
-- `src/sts_combat_rl/cli.py` is about 1,700 lines and still owns many argument
-  definitions, validations, and command branches. Workflows have been moved
-  into `src/sts_combat_rl/commands/`, but CLI routing is now large enough to
-  justify a dedicated mechanical decomposition task.
+- `src/sts_combat_rl/cli.py` is about 190 lines and now delegates parser
+  construction, validation, path helpers, simulator policy construction, and
+  lightspeed command routing to focused command/helper modules. The largest
+  new routing modules are `commands/cli_parser.py` and
+  `commands/lightspeed_cli.py`; this is acceptable as the first mechanical
+  split and keeps behavior reviewable.
 - Several simulator modules are intentionally feature-complete but large:
   `torch_policy_value.py`, `constructed_battle_start.py`,
   `fixed_battle_evaluation.py`, `features.py`, and `battle_start_pool.py` are
   each over 1,200 lines. Split only when a task can preserve current schemas
   and tests without changing behavior.
 - `src/sts_combat_rl/sim/__init__.py` exports a broad compatibility surface.
-  It is convenient for tests and callers, but future cleanup should reduce
-  accidental public API growth.
+  T019 added explicit export-surface regression tests, but future cleanup may
+  still reduce accidental public API growth under a dedicated compatibility
+  task.
 
-The first cleanup pass is now published as
+The first cleanup pass is complete as
 [`T019`](tasks/T019-codebase-mechanical-refactor.md). Remaining cleanup should
 continue to be published as explicit maintenance tasks, not mixed into
 model/search/data PRs. Suggested boundaries after T019 are:
