@@ -785,6 +785,9 @@ def save_torch_policy_value_checkpoint(
 
     if not result.report.training_ok:
         raise ValueError("refusing to save a failed PyTorch policy/value checkpoint")
+    validated_training_data_provenance = _validate_training_data_provenance(
+        training_data_provenance
+    )
     torch.save(
         {
             "schema_id": TORCH_POLICY_VALUE_CHECKPOINT_SCHEMA_ID,
@@ -815,9 +818,7 @@ def save_torch_policy_value_checkpoint(
             "training_report": _json_safe_value(
                 _training_report_metadata(result.report)
             ),
-            "training_data_provenance": _json_safe_value(
-                dict(training_data_provenance or {})
-            ),
+            "training_data_provenance": validated_training_data_provenance,
             "metadata": _json_safe_value(dict(metadata or {})),
         },
         path,
@@ -841,6 +842,10 @@ def load_torch_policy_value_checkpoint(
         )
     if raw.get("model_class") != TORCH_POLICY_VALUE_MODEL_CLASS:
         raise ValueError("unsupported PyTorch policy/value model class")
+    _validate_checkpoint_semantic_contract(raw)
+    training_data_provenance = _validate_training_data_provenance(
+        raw.get("training_data_provenance")
+    )
     try:
         config = TorchPolicyValueTrainingConfig(**_mapping(raw.get("training_config")))
         state_size = _positive_int(raw.get("state_feature_size"), "state_feature_size")
@@ -860,9 +865,6 @@ def load_torch_policy_value_checkpoint(
         raise ValueError("checkpoint model dimensions or state are invalid") from exc
     if not isinstance(state_dict, Mapping):
         raise ValueError("checkpoint model_state_dict must be a mapping")
-    resource_names = tuple(
-        str(name) for name in _list(raw.get("resource_target_names"))
-    )
     model = PolicyValueNetwork(
         state_size,
         action_size,
@@ -876,7 +878,7 @@ def load_torch_policy_value_checkpoint(
             raw.get("public_context_feature_schema_id"),
             "public_context_feature_schema_id",
         ),
-        resource_target_names=resource_names,
+        resource_target_names=RESOURCE_TARGET_NAMES,
     )
     try:
         model.load_state_dict(state_dict, strict=True)
@@ -887,8 +889,273 @@ def load_torch_policy_value_checkpoint(
         model=model,
         config=config,
         metadata=_mapping(raw.get("metadata")),
-        training_data_provenance=_mapping(raw.get("training_data_provenance")),
+        training_data_provenance=training_data_provenance,
     )
+
+
+def _validate_checkpoint_semantic_contract(raw: Mapping[str, Any]) -> None:
+    _require_exact(
+        raw.get("tactical_feature_schema_id"),
+        TACTICAL_FEATURE_SCHEMA_ID,
+        "tactical_feature_schema_id",
+    )
+    _require_exact(
+        raw.get("tactical_feature_schema_version"),
+        TACTICAL_FEATURE_SCHEMA_VERSION,
+        "tactical_feature_schema_version",
+    )
+    _require_exact(
+        raw.get("identity_vocabulary_version"),
+        IDENTITY_VOCABULARY_VERSION,
+        "identity_vocabulary_version",
+    )
+    _require_exact(
+        raw.get("public_context_feature_schema_id"),
+        PUBLIC_CONTEXT_FEATURE_SCHEMA_ID,
+        "public_context_feature_schema_id",
+    )
+    _require_exact(
+        raw.get("public_context_feature_size"),
+        len(PUBLIC_CONTEXT_FEATURE_NAMES),
+        "public_context_feature_size",
+    )
+    _require_exact(
+        _list(raw.get("public_context_feature_names")),
+        list(PUBLIC_CONTEXT_FEATURE_NAMES),
+        "public_context_feature_names",
+    )
+    _require_exact(
+        _list(raw.get("resource_target_names")),
+        list(RESOURCE_TARGET_NAMES),
+        "resource_target_names",
+    )
+    _require_exact(
+        _list(raw.get("resource_target_scales")),
+        list(RESOURCE_TARGET_SCALES),
+        "resource_target_scales",
+    )
+    _require_exact(
+        raw.get("policy_target_kind"),
+        POLICY_TARGET_KIND_BEHAVIOR,
+        "policy_target_kind",
+    )
+    _require_exact(
+        raw.get("outcome_target_kind"),
+        OUTCOME_TARGET_KIND,
+        "outcome_target_kind",
+    )
+    _require_exact(raw.get("hp_target_kind"), HP_TARGET_KIND, "hp_target_kind")
+    _require_exact(
+        raw.get("structured_resource_target_kind"),
+        STRUCTURED_RESOURCE_TARGET_KIND,
+        "structured_resource_target_kind",
+    )
+
+
+def _validate_training_data_provenance(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ValueError("training_data_provenance must be a mapping")
+
+    raw = dict(value)
+    trainer_input_sha256 = _required_string(
+        raw.get("trainer_input_sha256"),
+        "training_data_provenance.trainer_input_sha256",
+    )
+    if len(trainer_input_sha256) != 64 or any(
+        char not in "0123456789abcdefABCDEF" for char in trainer_input_sha256
+    ):
+        raise ValueError(
+            "training_data_provenance.trainer_input_sha256 must be a SHA-256 hex digest"
+        )
+
+    trainer_input_artifact_id = _required_string(
+        raw.get("trainer_input_artifact_id"),
+        "training_data_provenance.trainer_input_artifact_id",
+    )
+    expected_artifact_id = f"trainer-input-sha256:{trainer_input_sha256}"
+    if trainer_input_artifact_id != expected_artifact_id:
+        raise ValueError(
+            "training_data_provenance.trainer_input_artifact_id must match "
+            "trainer_input_sha256"
+        )
+    _required_string(
+        raw.get("trainer_input_path"), "training_data_provenance.trainer_input_path"
+    )
+    _positive_int(
+        raw.get("trainer_input_byte_count"),
+        "training_data_provenance.trainer_input_byte_count",
+    )
+    _positive_int(
+        raw.get("trainer_record_count"),
+        "training_data_provenance.trainer_record_count",
+    )
+    _non_negative_int(
+        raw.get("source_rollout_count"),
+        "training_data_provenance.source_rollout_count",
+    )
+    _non_negative_int(
+        raw.get("segment_count"), "training_data_provenance.segment_count"
+    )
+    _non_negative_int(
+        raw.get("trainer_input_format_version"),
+        "training_data_provenance.trainer_input_format_version",
+    )
+    _required_mapping(
+        raw.get("generation_metadata"),
+        "training_data_provenance.generation_metadata",
+    )
+    _required_mapping(
+        raw.get("dataset_migration_report"),
+        "training_data_provenance.dataset_migration_report",
+    )
+    _validate_controller_provenance_summary(raw.get("controller_provenance_summary"))
+    _required_count_mapping(
+        raw.get("information_regime_counts"),
+        "training_data_provenance.information_regime_counts",
+        allow_empty=False,
+    )
+    _required_count_mapping(
+        raw.get("source_information_regime_counts"),
+        "training_data_provenance.source_information_regime_counts",
+        allow_empty=False,
+    )
+    _validate_target_source_summary(raw.get("target_source_summary"))
+    _required_count_mapping(
+        raw.get("distribution_counts"),
+        "training_data_provenance.distribution_counts",
+        allow_empty=False,
+    )
+    _required_count_mapping(
+        raw.get("source_kind_counts"),
+        "training_data_provenance.source_kind_counts",
+        allow_empty=False,
+    )
+    _required_count_mapping(
+        raw.get("sampling_component_counts"),
+        "training_data_provenance.sampling_component_counts",
+        allow_empty=False,
+    )
+    _validate_stable_source_identity_summary(raw.get("stable_source_identity_summary"))
+    _required_mapping(raw.get("gate_report"), "training_data_provenance.gate_report")
+    return _json_safe_value(raw)
+
+
+def _validate_controller_provenance_summary(value: Any) -> None:
+    summary = _required_mapping(
+        value, "training_data_provenance.controller_provenance_summary"
+    )
+    _positive_int(
+        summary.get("unique_controller_provenance_count"),
+        (
+            "training_data_provenance.controller_provenance_summary."
+            "unique_controller_provenance_count"
+        ),
+    )
+    provenances = summary.get("provenances")
+    if not isinstance(provenances, list) or not provenances:
+        raise ValueError(
+            "training_data_provenance.controller_provenance_summary.provenances "
+            "must be a non-empty list"
+        )
+    for index, provenance in enumerate(provenances):
+        label = (
+            "training_data_provenance.controller_provenance_summary.provenances"
+            f"[{index}]"
+        )
+        row = _required_mapping(provenance, label)
+        digest = _required_string(row.get("digest"), f"{label}.digest")
+        if not digest.startswith("sha256:"):
+            raise ValueError(f"{label}.digest must use sha256: prefix")
+        _positive_int(row.get("count"), f"{label}.count")
+        _required_mapping(row.get("provenance"), f"{label}.provenance")
+
+
+def _validate_target_source_summary(value: Any) -> None:
+    summary = _required_mapping(value, "training_data_provenance.target_source_summary")
+    expected = {
+        "policy_target_kind": POLICY_TARGET_KIND_BEHAVIOR,
+        "outcome_target_kind": OUTCOME_TARGET_KIND,
+        "hp_target_kind": HP_TARGET_KIND,
+        "structured_resource_target_kind": STRUCTURED_RESOURCE_TARGET_KIND,
+        "structured_resource_target_names": list(RESOURCE_TARGET_NAMES),
+    }
+    for key, expected_value in expected.items():
+        _require_exact(
+            summary.get(key),
+            expected_value,
+            f"training_data_provenance.target_source_summary.{key}",
+        )
+    for key in (
+        "policy_target_source",
+        "outcome_target_source",
+        "hp_target_source",
+        "structured_resource_target_source",
+    ):
+        _required_string(
+            summary.get(key), f"training_data_provenance.target_source_summary.{key}"
+        )
+
+
+def _validate_stable_source_identity_summary(value: Any) -> None:
+    summary = _required_mapping(
+        value, "training_data_provenance.stable_source_identity_summary"
+    )
+    _non_negative_int(
+        summary.get("unique_source_count"),
+        "training_data_provenance.stable_source_identity_summary.unique_source_count",
+    )
+    _non_negative_int(
+        summary.get("missing_source_identity_count"),
+        (
+            "training_data_provenance.stable_source_identity_summary."
+            "missing_source_identity_count"
+        ),
+    )
+    _required_count_mapping(
+        summary.get("identity_kind_counts"),
+        (
+            "training_data_provenance.stable_source_identity_summary."
+            "identity_kind_counts"
+        ),
+        allow_empty=True,
+    )
+
+
+def _require_exact(value: Any, expected: Any, label: str) -> None:
+    if value != expected:
+        raise ValueError(
+            f"checkpoint {label} {value!r} does not match current {expected!r}"
+        )
+
+
+def _required_mapping(value: Any, label: str) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{label} must be a mapping")
+    return dict(value)
+
+
+def _required_count_mapping(
+    value: Any,
+    label: str,
+    *,
+    allow_empty: bool,
+) -> dict[str, int]:
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{label} must be a mapping")
+    result: dict[str, int] = {}
+    for key, count in value.items():
+        if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+            raise ValueError(f"{label}.{key} must be a non-negative integer")
+        result[str(key)] = count
+    if not result and not allow_empty:
+        raise ValueError(f"{label} must not be empty")
+    return result
+
+
+def _non_negative_int(value: Any, label: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"{label} must be a non-negative integer")
+    return value
 
 
 @dataclass(frozen=True)

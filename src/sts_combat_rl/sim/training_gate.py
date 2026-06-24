@@ -297,7 +297,15 @@ def _build_cell(
     outcome_counts = Counter(
         record.structured_battle_outcome_status for record in records
     )
-    unique_sources = {_source_identity(record) for record in records}
+    source_identities: list[tuple[Any, ...]] = []
+    missing_source_identity_count = 0
+    for record in records:
+        source_identity = _source_identity(record)
+        if source_identity is None:
+            missing_source_identity_count += 1
+        else:
+            source_identities.append(source_identity)
+    unique_sources = set(source_identities)
     problems: list[str] = []
     if len(records) < config.min_records_per_ascension_act:
         problems.append(
@@ -308,6 +316,11 @@ def _build_cell(
         problems.append(
             f"unique source count {len(unique_sources)} is below "
             f"{config.min_unique_sources_per_ascension_act}"
+        )
+    if missing_source_identity_count:
+        problems.append(
+            "missing stable source identity for "
+            f"{missing_source_identity_count} records"
         )
     if config.require_public_context:
         non_available = {
@@ -344,22 +357,18 @@ def _build_cell(
     )
 
 
-def _source_identity(record: Any) -> tuple[Any, ...]:
+def _source_identity(record: Any) -> tuple[Any, ...] | None:
     metadata = (
         record.source_metadata if isinstance(record.source_metadata, Mapping) else {}
     )
-    return (
-        metadata.get("source_checkpoint_id"),
-        metadata.get("source_run_id"),
-        metadata.get("source_battle_index"),
-        metadata.get("seed", record.seed),
-        metadata.get("ascension"),
-        metadata.get("act"),
-        metadata.get("floor"),
-        metadata.get("room_type"),
-        metadata.get("encounter_id"),
-        record.segment_index,
-    )
+    checkpoint_id = _non_empty(metadata.get("source_checkpoint_id"))
+    if checkpoint_id is not None:
+        return ("source_checkpoint_id", checkpoint_id)
+    run_id = _non_empty(metadata.get("source_run_id"))
+    battle_index = _optional_int(metadata.get("source_battle_index"))
+    if run_id is not None and battle_index is not None:
+        return ("source_run_battle", run_id, battle_index)
+    return None
 
 
 def _distribution_kind(metadata: Any) -> str:
@@ -377,6 +386,12 @@ def _optional_int(value: Any) -> int | None:
     if isinstance(value, float) and value.is_integer():
         return int(value)
     return None
+
+
+def _non_empty(value: Any) -> str | None:
+    if not isinstance(value, str) or not value:
+        return None
+    return value
 
 
 def _append_counter(lines: list[str], title: str, values: Mapping[Any, int]) -> None:

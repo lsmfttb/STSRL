@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+
 import pytest
 
 from sts_combat_rl.cli import main
@@ -45,6 +47,10 @@ def test_cli_pytorch_search_guidance_train_writes_checkpoint(
     capsys,
 ) -> None:
     pytest.importorskip("torch")
+    from sts_combat_rl.sim.torch_policy_value import (
+        load_torch_policy_value_checkpoint,
+    )
+
     dataset_path = tmp_path / "trainer.jsonl"
     checkpoint_path = tmp_path / "policy_value.pt"
     dataset_path.write_text(
@@ -80,3 +86,24 @@ def test_cli_pytorch_search_guidance_train_writes_checkpoint(
     assert "checkpoint written: yes" in captured.err
     assert "raw policy diagnostic final" in captured.err
     assert "search-guided fixed evaluation: not_run" in captured.err
+
+    loaded = load_torch_policy_value_checkpoint(str(checkpoint_path))
+    provenance = loaded.training_data_provenance
+    trainer_input_sha256 = hashlib.sha256(dataset_path.read_bytes()).hexdigest()
+    assert provenance["trainer_input_sha256"] == trainer_input_sha256
+    assert provenance["trainer_input_artifact_id"] == (
+        f"trainer-input-sha256:{trainer_input_sha256}"
+    )
+    assert (
+        provenance["controller_provenance_summary"][
+            "unique_controller_provenance_count"
+        ]
+        == 1
+    )
+    assert provenance["information_regime_counts"] == {"normal_public_policy": 2}
+    assert provenance["target_source_summary"]["policy_target_kind"] == (
+        "behavior_chosen_action_one_hot"
+    )
+    assert provenance["distribution_counts"] == {"natural_run": 2}
+    assert provenance["source_kind_counts"] == {"natural_run": 2}
+    assert provenance["stable_source_identity_summary"]["unique_source_count"] == 2

@@ -8,8 +8,12 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
+from sts_combat_rl.commands.pytorch_search_guidance import (
+    build_pytorch_search_guidance_training_data_provenance,
+)
 from sts_combat_rl.sim.model_input import build_model_input_batch
 from sts_combat_rl.sim.policy import DecisionContext
+from sts_combat_rl.sim.trainer_input import trainer_input_dataset_to_jsonl_text
 from sts_combat_rl.sim.torch_policy_value import (
     SEARCH_GUIDED_FIXED_EVAL_STATUS_NOT_RUN,
     TorchPolicyValueActionScorer,
@@ -65,14 +69,63 @@ def test_torch_policy_value_trains_and_checkpoint_round_trips(tmp_path) -> None:
     assert "search-guided fixed evaluation: not_run" in text
 
     checkpoint_path = tmp_path / "policy_value.pt"
+    training_data_provenance = _training_data_provenance(
+        dataset,
+        gate,
+        tmp_path / "trainer.jsonl",
+    )
     save_torch_policy_value_checkpoint(
         result,
         str(checkpoint_path),
-        training_data_provenance={"unit_test": True},
+        training_data_provenance=training_data_provenance,
     )
     loaded = load_torch_policy_value_checkpoint(str(checkpoint_path))
 
-    assert loaded.training_data_provenance == {"unit_test": True}
+    assert (
+        loaded.training_data_provenance["trainer_input_sha256"]
+        == (training_data_provenance["trainer_input_sha256"])
+    )
+    assert loaded.training_data_provenance["trainer_input_artifact_id"] == (
+        f"trainer-input-sha256:{training_data_provenance['trainer_input_sha256']}"
+    )
+    assert (
+        loaded.training_data_provenance["controller_provenance_summary"][
+            "unique_controller_provenance_count"
+        ]
+        == 1
+    )
+    assert loaded.training_data_provenance["information_regime_counts"] == {
+        "normal_public_policy": 2
+    }
+    assert (
+        loaded.training_data_provenance["target_source_summary"]["policy_target_source"]
+        == "trainer_input_record.chosen_action_index"
+    )
+    assert loaded.training_data_provenance["distribution_counts"] == {"natural_run": 2}
+    assert (
+        loaded.training_data_provenance["stable_source_identity_summary"][
+            "unique_source_count"
+        ]
+        == 2
+    )
+
+    raw = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+    raw["identity_vocabulary_version"] = "different"
+    bad_schema_path = tmp_path / "bad_identity.pt"
+    torch.save(raw, bad_schema_path)
+    with pytest.raises(ValueError, match="identity_vocabulary_version"):
+        load_torch_policy_value_checkpoint(str(bad_schema_path))
+
+    raw = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+    raw["training_data_provenance"] = {"trainer_input_path": "trainer.jsonl"}
+    bad_provenance_path = tmp_path / "bad_provenance.pt"
+    torch.save(raw, bad_provenance_path)
+    with pytest.raises(
+        ValueError,
+        match="training_data_provenance.trainer_input_sha256",
+    ):
+        load_torch_policy_value_checkpoint(str(bad_provenance_path))
+
     loaded_eval = evaluate_torch_policy_value(loaded.model, dataset, loaded.config)
     assert loaded_eval.example_count == result.report.final_evaluation.example_count
     assert loaded_eval.resource_target_record_count == 2
@@ -167,3 +220,17 @@ def test_torch_policy_value_requires_structured_outcomes() -> None:
 
     assert result.report.training_ok is False
     assert any("structured battle outcome" in item for item in result.report.problems)
+
+
+def _training_data_provenance(
+    dataset,
+    gate,
+    trainer_input_path,
+) -> dict[str, object]:
+    trainer_input_bytes = trainer_input_dataset_to_jsonl_text(dataset).encode("utf-8")
+    return build_pytorch_search_guidance_training_data_provenance(
+        dataset,
+        trainer_input_path,
+        trainer_input_bytes=trainer_input_bytes,
+        gate_report=gate,
+    )
