@@ -381,6 +381,10 @@ from sts_combat_rl.sim.rollout import (
     format_rollout_batch,
 )
 
+# T019 compatibility audit:
+# This package-level export list is intentionally broad for existing tests and
+# callers. Keep it explicit and update the export-surface regression tests when
+# adding or removing names.
 __all__ = [
     "LightSpeedAdapter",
     "CheckpointingSimulatorAdapter",
