@@ -26,9 +26,12 @@ starting work.
 | T016 | DONE | [Public-context artifacts, replay, and audit](T016-public-context-artifacts-replay-and-audit.md) | T003, T004, T005, T011, T014, T015 | migrations, replay, and coverage audit |
 | T017 | DONE | [Stable sts_lightspeed source integration](T017-stable-lightspeed-source-integration.md) | T004, T010, T014, T016 | external source manifest and verifier |
 | T018 | DONE | [Native terminal resource identity surface](T018-native-terminal-resource-identity.md) | T012, T017 | native terminal potion/deck/relic/key identities |
+| T019 | READY | [Codebase mechanical refactor](T019-codebase-mechanical-refactor.md) | T001--T018 except cancelled T007 | CLI decomposition and export cleanup |
+| T020 | READY | [sts_lightspeed fork maintenance line](T020-sts-lightspeed-fork-maintenance.md) | T017 | single active fork integration branch |
 
 The published foundation task set is complete: T001--T006 and T008--T018 are
-`DONE`, and T007 is `CANCELLED`. No currently published task is `READY`.
+`DONE`, and T007 is `CANCELLED`. T019 and T020 are the currently published
+`READY` maintenance tasks.
 
 Only `READY` tasks should receive a new branch. After a prerequisite merges,
 the main maintainer reviews dependent specifications against the new `main`
@@ -41,7 +44,17 @@ document update before acceptance.
 
 ## Published Queue
 
-There is no published `READY` queue. The completed foundation backlog provides:
+The currently published `READY` queue is:
+
+- T019: codebase mechanical refactor. This is a behavior-preserving cleanup
+  task for CLI decomposition, command routing ownership, and public export
+  audit. It should not change simulator, training, search, artifact, or
+  evaluation semantics.
+- T020: `sts_lightspeed` fork maintenance line. This task establishes a single
+  documented active fork integration branch while preserving exact-commit
+  source-manifest reproducibility.
+
+The completed foundation backlog provides:
 
 - fixed structural battle evaluation and Oracle-like search teacher plumbing;
 - stable pinned `sts_lightspeed` source integration;
@@ -52,10 +65,9 @@ There is no published `READY` queue. The completed foundation backlog provides:
 - optional PyTorch policy/value plumbing, fail-closed broad-training gates,
   checkpoint provenance, and diagnostic smoke/narrow-curriculum training.
 
-The next branch should not start until the main maintainer publishes a new
-focused task. Likely next task families are coverage measurement, model-guided
-search integration, normal-information belief-search groundwork, or mechanical
-cleanup/refactor work.
+Other next task families remain coverage measurement, model-guided search
+integration, and normal-information belief-search groundwork. They are not
+ready for implementation until separately published.
 
 ## Standard Local Gates
 
@@ -91,7 +103,9 @@ are mapped as follows:
 - stochastic non-combat behavior and native potion/resource visibility: T010;
 - tactical feature, trainer-input, and model-input expansion: T011;
 - structured persistent resource outcomes and explicit missingness: T012;
-- native terminal resource identity coverage: T018.
+- native terminal resource identity coverage: T018;
+- mechanical code cleanup and CLI/export decomposition: T019;
+- `sts_lightspeed` fork integration-line maintenance: T020.
 
 T013 supplies the shared CommunicationMod adapter and captured-sample
 compatibility gate. Simulator-only training experiments do not depend on it.
@@ -99,10 +113,9 @@ A trained or search controller still needs to use that adapter and earn its own
 captured-sample or interactive evaluation evidence before it is described as
 live-game validated.
 
-CLI decomposition and command modules are not a standalone task. Each task may
-move only its own workflows out of `cli.py`, following the architecture
-contract. A later dedicated CLI cleanup task should be published only if
-duplication remains after these tasks.
+CLI decomposition and command-module cleanup are now published as T019. Feature
+tasks other than T019 may move only their own workflows out of `cli.py`,
+following the architecture contract.
 
 Pure-Python linear scorer, policy-gradient, and policy-comparison experiments
 from the legacy commit are explicitly unscheduled. They are preserved by the

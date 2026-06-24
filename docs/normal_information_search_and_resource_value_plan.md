@@ -277,8 +277,9 @@ Retain only auxiliary targets that improve normal-information evaluation.
 3. Establish an honest public policy/vector-value baseline from sufficient A20
    coverage, keeping raw policy diagnostics separate from search promotion.
 4. Design the authoritative public-consistent hidden-future sampler.
-5. Publish any mechanical CLI/module cleanup as separate no-behavior-change
-   maintenance work before mixing it into search research.
+5. Keep mechanical CLI/module cleanup in
+   [`T019`](tasks/T019-codebase-mechanical-refactor.md) or later dedicated
+   no-behavior-change maintenance tasks before mixing it into search research.
 
 Relevant papers are design references, not algorithm commitments:
 

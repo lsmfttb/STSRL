@@ -13,10 +13,10 @@ primary battle policy, and learned policies or values are expected to guide or
 accelerate search. Non-combat decisions remain outside the trainable agent.
 
 The published foundation backlog is complete: T001--T006 and T008--T018 are
-`DONE`, and T007 is `CANCELLED` because it was superseded by T014--T016. No
-currently published task is `READY` or in review. Future implementation work
-requires the main maintainer to publish a new focused task before a branch is
-started.
+`DONE`, and T007 is `CANCELLED` because it was superseded by T014--T016. The
+current published `READY` maintenance tasks are T019, for behavior-preserving
+codebase refactor, and T020, for `sts_lightspeed` fork integration-line
+maintenance.
 
 ## Implemented On Main
 
@@ -276,11 +276,16 @@ already supports them.
 ## Immediate Work
 
 Executable task specifications live in [`tasks/`](tasks/README.md). The
-current published task set is complete, so there is no task ready for a new
-implementation branch. The next maintainer action is to publish a new focused
-task before asking an implementer to start work.
+currently published `READY` tasks are:
 
-Recommended next task areas:
+1. [`T019`](tasks/T019-codebase-mechanical-refactor.md): behavior-preserving
+   codebase refactor for CLI decomposition, command routing ownership, and
+   public export audit.
+2. [`T020`](tasks/T020-sts-lightspeed-fork-maintenance.md): `sts_lightspeed`
+   fork maintenance-line cleanup, establishing one active fork integration
+   branch while preserving exact source-manifest commit pinning.
+
+Recommended later task areas:
 
 1. Coverage and dataset measurement: collect larger A20 natural pools, quantify
    natural / stratified / constructed mixture coverage by ascension and act,
@@ -292,8 +297,8 @@ Recommended next task areas:
 3. Normal-information search groundwork: specify the authoritative
    public-consistent hidden-future sampling boundary before any belief-search
    branch starts.
-4. Maintenance cleanup: split the oversized CLI routing and largest simulator
-   modules only under a dedicated refactor task with no behavior change.
+4. Additional maintenance cleanup beyond T019, if the first refactor leaves
+   large modules or export surfaces difficult to review.
 
 The adapter and captured-sample compatibility gate in
 [`T013`](tasks/T013-live-communicationmod-runtime-adapter.md) is complete.
@@ -323,15 +328,15 @@ research task. The main maintainability risks are size and routing complexity:
   It is convenient for tests and callers, but future cleanup should reduce
   accidental public API growth.
 
-Recommended cleanup should be published as one or more explicit `READY` tasks,
-not mixed into model/search/data PRs. Suggested boundaries are:
+The first cleanup pass is now published as
+[`T019`](tasks/T019-codebase-mechanical-refactor.md). Remaining cleanup should
+continue to be published as explicit maintenance tasks, not mixed into
+model/search/data PRs. Suggested boundaries after T019 are:
 
-1. CLI parser/routing decomposition into command-specific option builders and
-   validators.
-2. Large-module split for T008/T009/T005 implementation files along schema,
+1. Large-module split for T008/T009/T005 implementation files along schema,
    formatting, validation, and command-adapter boundaries.
-3. Public export audit for `sts_combat_rl.sim.__all__`, preserving documented
-   imports and adding compatibility shims only where needed.
+2. Follow-up public export tightening for `sts_combat_rl.sim.__all__`, if T019
+   keeps broad compatibility shims that should later be narrowed.
 
 ## Legacy Integration Reference
 
