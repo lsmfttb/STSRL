@@ -27,6 +27,9 @@ starting work.
 | T017 | DONE | [Stable sts_lightspeed source integration](T017-stable-lightspeed-source-integration.md) | T004, T010, T014, T016 | external source manifest and verifier |
 | T018 | DONE | [Native terminal resource identity surface](T018-native-terminal-resource-identity.md) | T012, T017 | native terminal potion/deck/relic/key identities |
 
+The published foundation task set is complete: T001--T006 and T008--T018 are
+`DONE`, and T007 is `CANCELLED`. No currently published task is `READY`.
+
 Only `READY` tasks should receive a new branch. After a prerequisite merges,
 the main maintainer reviews dependent specifications against the new `main`
 before changing their state.
@@ -38,29 +41,21 @@ document update before acceptance.
 
 ## Published Queue
 
-- T005 is complete. It establishes the fixed-evaluation boundary without
-  changing public-context schemas.
-- T017 is complete. It replaces the day-to-day local `sts_lightspeed`
-  patch-stack workflow with a pinned external source integration for future
-  native-surface tasks.
-- T006 is complete. It adds an explicitly Oracle-like teacher/evaluation path
-  on immutable T005 cohorts and cannot be reported as normal-information or
-  real-game performance.
-- T007 is `CANCELLED`. Its replacement sequence completed T014 for native
-  capability, T015 for sanitized in-memory context/history, and T016 for
-  artifact propagation/replay/audit. See the
-  [T007 review handoff](../t007_review_handoff_2026-06-22.md).
-- T012 is complete. It establishes the structured outcome schema, artifact
-  propagation, migration, reporting, and explicit native missingness boundary.
-- T018 is complete. It extends the pinned native source and structured outcome
-  audit so terminal potion slots, deck/curses, relic identities/counters, and
-  key flags are available where the game exposes them.
-- T008 is complete. It adds conservative, explicitly tagged constructed A20
-  battle-start supplements through the pinned native source transform surface.
-- T009 is complete. It adds optional PyTorch policy/value plumbing,
-  fail-closed broad-training gates, checkpoint provenance, and diagnostic
-  smoke/narrow-curriculum training without claiming neural strength or
-  model-guided search performance.
+There is no published `READY` queue. The completed foundation backlog provides:
+
+- fixed structural battle evaluation and Oracle-like search teacher plumbing;
+- stable pinned `sts_lightspeed` source integration;
+- raw native public projection, sanitized public context/history, artifact
+  propagation, replay, and audit;
+- structured battle resource outcomes and native terminal resource identities;
+- conservative constructed A20 battle-start supplements;
+- optional PyTorch policy/value plumbing, fail-closed broad-training gates,
+  checkpoint provenance, and diagnostic smoke/narrow-curriculum training.
+
+The next branch should not start until the main maintainer publishes a new
+focused task. Likely next task families are coverage measurement, model-guided
+search integration, normal-information belief-search groundwork, or mechanical
+cleanup/refactor work.
 
 ## Standard Local Gates
 

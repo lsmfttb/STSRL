@@ -26,8 +26,8 @@ Keep these controllers and artifacts separate:
 
 - `normal_public_policy`: policy/value model from public state and history;
 - `normal_belief_search`: search across public-consistent hidden futures;
-- `full_simulator_state_oracle_like`: planned integration of native hidden-state
-  search;
+- `full_simulator_state_oracle_like`: current native hidden-state search and
+  teacher/evaluation workflows;
 - `sl_attempt_budgeted`: restart-enabled agent with a named attempt budget.
 
 Oracle actions are not direct normal-agent labels. An action optimal for one
@@ -209,27 +209,33 @@ targets. Normal-agent promotion uses only normal-information evaluation.
 
 ### N0: Public Contracts And Firewall
 
-Status: pending T006, T012, and the T015--T016 public-context replacement
-sequence. T014's raw native capability boundary is complete; it is not itself
-the sanitized normal-information state contract.
+Status: foundation complete through T006, T012, and T014--T018. Current `main`
+has explicit Oracle-like provenance for native hidden-state search, a
+sanitized public controller boundary, structured terminal resource outcomes,
+public-context artifact propagation/replay/audit, and native terminal resource
+identity coverage where the simulator exposes it. Remaining public-context
+gaps such as complete map/route payloads and richer typed history encoders are
+explicit missingness, not hidden-field fallbacks.
 
-Required work:
+Required follow-up work:
 
-- explicit Oracle-like provenance for native hidden-state search;
-- sanitized public controller boundary;
-- structured terminal resource outcome contract;
-- complete typed player-visible run history;
-- relic-counter visibility audit;
-- end-to-end hidden-field firewall;
-- structured history/map model encoder.
+- improve typed complete player-visible run history and map/route payload
+  coverage where native support permits it;
+- build structured history/map/visible-Boss model encoders;
+- keep hidden-field firewall audits in every normal-information dataset and
+  controller path.
 
 Exit gate: complete public trajectories and terminal resources survive
-collection/export/reload without hidden fields.
+collection/export/reload without hidden fields and with explicit missingness
+where native public projection is still incomplete.
 
 ### N1: Honest Public Policy/Value Baseline
 
-Status: pending [`T009`](tasks/T009-pytorch-search-guidance.md) and sufficient
-data/evaluation coverage.
+Status: T009 completed optional PyTorch policy/value plumbing, checkpoint
+provenance, trainer-input preflight, and fail-closed broad-training gates.
+Sufficient A20 data/evaluation coverage is still pending, so broad training
+must remain blocked unless a named smoke or narrow-curriculum override is
+explicitly reported.
 
 Exit gate: a reproducible normal-information baseline reports per-component
 errors and fixed-cohort performance from sufficient A20 coverage.
@@ -264,12 +270,15 @@ Retain only auxiliary targets that improve normal-information evaluation.
 
 ## Immediate Design Work
 
-1. Define the typed complete public run-history schema.
-2. Extend simulator snapshots and decision records without exposing hidden
-   future state.
-3. Build structured history, map, and visible-Boss encoders.
-4. Establish an honest public policy/vector-value baseline.
-5. Design the authoritative public-consistent hidden-future sampler.
+1. Publish a coverage-measurement task that can decide when the T009
+   broad-training gate passes without override.
+2. Build structured history, map, and visible-Boss encoders on the sanitized
+   public-context artifacts now available on `main`.
+3. Establish an honest public policy/vector-value baseline from sufficient A20
+   coverage, keeping raw policy diagnostics separate from search promotion.
+4. Design the authoritative public-consistent hidden-future sampler.
+5. Publish any mechanical CLI/module cleanup as separate no-behavior-change
+   maintenance work before mixing it into search research.
 
 Relevant papers are design references, not algorithm commitments:
 

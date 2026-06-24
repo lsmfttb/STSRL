@@ -5,6 +5,10 @@ development, and the separately evaluated SL-enabled branch. Repository-wide
 rules come from [`project_architecture.md`](project_architecture.md). Current
 implementation status comes from [`current_status.md`](current_status.md).
 
+The T001--T018 foundation backlog is complete except for cancelled T007, whose
+scope was superseded by T014--T016. New implementation work should start only
+after the main maintainer publishes a new focused task.
+
 ## Goals
 
 The project must answer these questions independently:
@@ -312,6 +316,7 @@ Work:
 - collect a reported natural/balanced/constructed mixture;
 - retain complete public history and context;
 - satisfy broad-training readiness per ascension and act.
+- keep mechanical cleanup separate from coverage/search experiments.
 
 Exit gate: enough unique A20 Boss and later-act starts exist for meaningful
 training and evaluation.

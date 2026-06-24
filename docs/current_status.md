@@ -12,6 +12,12 @@ Build the foundations for an A20 battle agent. Search remains the intended
 primary battle policy, and learned policies or values are expected to guide or
 accelerate search. Non-combat decisions remain outside the trainable agent.
 
+The published foundation backlog is complete: T001--T006 and T008--T018 are
+`DONE`, and T007 is `CANCELLED` because it was superseded by T014--T016. No
+currently published task is `READY` or in review. Future implementation work
+requires the main maintainer to publish a new focused task before a branch is
+started.
+
 ## Implemented On Main
 
 ### Runtime
@@ -247,6 +253,12 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
   gates pass; the fixed-evaluation smoke selected 8 battles from 13 natural
   starts and reported 5 wins, 3 losses, 0 truncations/errors, and evaluation
   successful.
+- A post-backlog repository review on 2026-06-24 found the current `main`
+  quality gates clean: 475 Windows tests, compileall, ruff check,
+  ruff format check, both CommunicationMod fixture smokes, default CLI import
+  without importing PyTorch, WSL `--lightspeed-smoke`, and WSL
+  `--lightspeed-battle-training-readiness` all pass on the pinned T008
+  `sts_lightspeed` source.
 
 ## Not Implemented On Main
 
@@ -263,50 +275,63 @@ already supports them.
 
 ## Immediate Work
 
-Executable task specifications live in [`tasks/`](tasks/README.md). The first
-tasks in dependency order are:
+Executable task specifications live in [`tasks/`](tasks/README.md). The
+current published task set is complete, so there is no task ready for a new
+implementation branch. The next maintainer action is to publish a new focused
+task before asking an implementer to start work.
 
-1. T005, fixed structural battle evaluation, is complete. It provides the
-   comparison surface required before search promotion.
-2. T017, stable `sts_lightspeed` source integration, is complete. It replaces
-   the day-to-day local patch-stack workflow with a pinned external source
-   integration for future native simulator surface.
-3. T006, Oracle search teacher pipeline, is complete. It is confined to the
-   explicitly Oracle-like simulator regime and provides diagnostic teacher data
-   and same-cohort Oracle fixed-evaluation comparison only.
-4. T007 is `CANCELLED`. PR #9 remains closed and is not a branch base. Its
-   former cross-cutting scope is split into T014--T016; see
-   [`t007_review_handoff_2026-06-22.md`](t007_review_handoff_2026-06-22.md).
-5. T014, native public projection capability, is complete. It provides only
-   the reproducible raw native capability matrix, action parity, and checkpoint
-   evidence; it does not provide sanitized controller context.
-6. T015, public run context and controlled history, is complete. It provides
-   the sanitized in-memory public context/history contract that T016 now
-   persists through current artifacts.
-7. T016, public-context artifacts, replay, and audit, is complete. It extends
-   the T015 public-context contract through current persisted artifacts,
-   portable replay comparison, and the WSL context audit.
-8. T012, structured battle resource outcomes, is complete. It provides schema,
-   artifact propagation, migration, reporting, and explicit native missingness
-   for battle-end resources.
-9. T018, native terminal resource identity surface, is complete. It extends the
-   pinned native source and structured outcome audit to cover terminal potion
-   slots, deck/curses, relic identities/counters, and key flags.
-10. T008, A20 constructed battle supplements, is complete. It adds
-    conservative constructed supplements without replacing natural A20 data or
-    natural evaluation.
-11. T009, PyTorch search-guidance model, is complete. It provides optional
-    model plumbing, fail-closed broad-training gates, checkpoint provenance,
-    and diagnostic smoke/narrow-curriculum training only; broad neural
-    training and model-guided search performance remain future promotion work.
+Recommended next task areas:
 
-Later tasks are dependency-ordered in the task index. A task is not ready for a
-new branch until its status is `READY`.
+1. Coverage and dataset measurement: collect larger A20 natural pools, quantify
+   natural / stratified / constructed mixture coverage by ascension and act,
+   and decide when the T009 broad-training gate can pass without override.
+2. Model-guided search integration: connect T009 policy/value checkpoints to a
+   versioned search controller, report compute/model-call telemetry, and
+   compare against fixed cohorts without claiming promotion from raw model
+   diagnostics.
+3. Normal-information search groundwork: specify the authoritative
+   public-consistent hidden-future sampling boundary before any belief-search
+   branch starts.
+4. Maintenance cleanup: split the oversized CLI routing and largest simulator
+   modules only under a dedicated refactor task with no behavior change.
 
 The adapter and captured-sample compatibility gate in
 [`T013`](tasks/T013-live-communicationmod-runtime-adapter.md) is complete.
 Simulator-only RL training does not depend on it. No trained or search
 controller, nor any interactive real-game performance, has yet been validated.
+
+## Code Quality And Maintenance Assessment
+
+The implementation is in a usable post-foundation state: tests are broad,
+artifact migrations are covered, optional PyTorch stays isolated behind the
+`train` dependency group, project-level docs are maintainer-owned, and real
+simulator gates run through WSL against the pinned source manifest.
+
+No urgent correctness-driven cleanup is required before publishing the next
+research task. The main maintainability risks are size and routing complexity:
+
+- `src/sts_combat_rl/cli.py` is about 1,700 lines and still owns many argument
+  definitions, validations, and command branches. Workflows have been moved
+  into `src/sts_combat_rl/commands/`, but CLI routing is now large enough to
+  justify a dedicated mechanical decomposition task.
+- Several simulator modules are intentionally feature-complete but large:
+  `torch_policy_value.py`, `constructed_battle_start.py`,
+  `fixed_battle_evaluation.py`, `features.py`, and `battle_start_pool.py` are
+  each over 1,200 lines. Split only when a task can preserve current schemas
+  and tests without changing behavior.
+- `src/sts_combat_rl/sim/__init__.py` exports a broad compatibility surface.
+  It is convenient for tests and callers, but future cleanup should reduce
+  accidental public API growth.
+
+Recommended cleanup should be published as one or more explicit `READY` tasks,
+not mixed into model/search/data PRs. Suggested boundaries are:
+
+1. CLI parser/routing decomposition into command-specific option builders and
+   validators.
+2. Large-module split for T008/T009/T005 implementation files along schema,
+   formatting, validation, and command-adapter boundaries.
+3. Public export audit for `sts_combat_rl.sim.__all__`, preserving documented
+   imports and adding compatibility shims only where needed.
 
 ## Legacy Integration Reference
 
