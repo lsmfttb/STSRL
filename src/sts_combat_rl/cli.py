@@ -31,6 +31,12 @@ from sts_combat_rl.commands.oracle_search import (
     run_oracle_fixed_evaluation_comparison_from_cohort_path,
     write_oracle_teacher_dataset,
 )
+from sts_combat_rl.commands.pytorch_search_guidance import (
+    build_trainer_input_preflight_from_path,
+    format_pytorch_search_guidance_training_workflow_report,
+    format_trainer_input_preflight_from_path_report,
+    run_pytorch_search_guidance_training_from_path,
+)
 from sts_combat_rl.commands.public_projection import (
     run_public_projection_capability_audit,
 )
@@ -115,6 +121,10 @@ from sts_combat_rl.sim.trainer_input import (
 from sts_combat_rl.sim.training_readiness import (
     build_training_readiness_report,
     format_training_readiness_report,
+)
+from sts_combat_rl.sim.training_gate import (
+    TRAINING_GATE_OVERRIDES,
+    TrainingScaleGateConfig,
 )
 from sts_combat_rl.sim.model_input import (
     build_model_input_batch,
@@ -325,6 +335,26 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Collect battle-agent rollouts and run the full pre-trainer "
             "readiness checklist to stderr without training."
+        ),
+    )
+    input_group.add_argument(
+        "--trainer-input-preflight",
+        type=Path,
+        metavar="TRAINER_JSONL",
+        help=(
+            "Load an exported trainer-input JSONL artifact, validate offline "
+            "model-input/scoring shape, and report the T009 broad-training gate "
+            "without importing PyTorch."
+        ),
+    )
+    input_group.add_argument(
+        "--pytorch-search-guidance-train",
+        type=Path,
+        metavar="TRAINER_JSONL",
+        help=(
+            "Load trainer-input JSONL, run the T009 broad-training gate, and "
+            "train the optional PyTorch policy/value model only if the gate "
+            "passes or a named override is supplied."
         ),
     )
     input_group.add_argument(
@@ -632,6 +662,71 @@ def build_parser() -> argparse.ArgumentParser:
         default="highest_mean",
         help="Oracle root statistic used for teacher/evaluation action selection.",
     )
+    parser.add_argument(
+        "--pytorch-checkpoint-output",
+        type=Path,
+        metavar="PATH",
+        help="Write --pytorch-search-guidance-train checkpoint to this path.",
+    )
+    parser.add_argument(
+        "--pytorch-gate-override",
+        choices=TRAINING_GATE_OVERRIDES,
+        default="none",
+        help=(
+            "Named override for T009 training gate. Overrides allow only smoke "
+            "or narrow-curriculum diagnostics, not broad-training evidence."
+        ),
+    )
+    parser.add_argument(
+        "--pytorch-gate-required-ascensions",
+        type=int,
+        nargs="+",
+        default=[20],
+        help="Ascensions required by the T009 broad-training gate.",
+    )
+    parser.add_argument(
+        "--pytorch-gate-required-acts",
+        type=int,
+        nargs="+",
+        default=[1, 2, 3, 4],
+        help="Acts required by the T009 broad-training gate.",
+    )
+    parser.add_argument(
+        "--pytorch-gate-min-records",
+        type=int,
+        default=100,
+        help="Minimum records required per ascension/act for broad training.",
+    )
+    parser.add_argument(
+        "--pytorch-gate-min-sources",
+        type=int,
+        default=20,
+        help="Minimum unique source starts required per ascension/act.",
+    )
+    parser.add_argument(
+        "--pytorch-epochs",
+        type=int,
+        default=10,
+        help="Epoch count for --pytorch-search-guidance-train.",
+    )
+    parser.add_argument(
+        "--pytorch-learning-rate",
+        type=float,
+        default=0.001,
+        help="Learning rate for --pytorch-search-guidance-train.",
+    )
+    parser.add_argument(
+        "--pytorch-hidden-size",
+        type=int,
+        default=128,
+        help="Hidden size for the optional PyTorch policy/value model.",
+    )
+    parser.add_argument(
+        "--pytorch-batch-size",
+        type=int,
+        default=32,
+        help="Batch size for --pytorch-search-guidance-train.",
+    )
     return parser
 
 
@@ -691,12 +786,48 @@ def main(argv: list[str] | None = None) -> int:
     if args.oracle_search_simulations <= 0:
         print("--oracle-search-simulations must be positive", file=sys.stderr)
         return 2
+    if args.pytorch_gate_min_records <= 0:
+        print("--pytorch-gate-min-records must be positive", file=sys.stderr)
+        return 2
+    if args.pytorch_gate_min_sources <= 0:
+        print("--pytorch-gate-min-sources must be positive", file=sys.stderr)
+        return 2
+    if any(value < 0 for value in args.pytorch_gate_required_ascensions):
+        print(
+            "--pytorch-gate-required-ascensions cannot contain negatives",
+            file=sys.stderr,
+        )
+        return 2
+    if any(value <= 0 for value in args.pytorch_gate_required_acts):
+        print("--pytorch-gate-required-acts must be positive", file=sys.stderr)
+        return 2
+    if args.pytorch_epochs <= 0:
+        print("--pytorch-epochs must be positive", file=sys.stderr)
+        return 2
+    if args.pytorch_learning_rate <= 0.0:
+        print("--pytorch-learning-rate must be positive", file=sys.stderr)
+        return 2
+    if args.pytorch_hidden_size <= 0:
+        print("--pytorch-hidden-size must be positive", file=sys.stderr)
+        return 2
+    if args.pytorch_batch_size <= 0:
+        print("--pytorch-batch-size must be positive", file=sys.stderr)
+        return 2
     if (
         args.lightspeed_oracle_search_teacher is not None
         and args.oracle_teacher_output is None
     ):
         print(
             "--lightspeed-oracle-search-teacher requires --oracle-teacher-output",
+            file=sys.stderr,
+        )
+        return 2
+    if (
+        args.pytorch_search_guidance_train is not None
+        and args.pytorch_checkpoint_output is None
+    ):
+        print(
+            "--pytorch-search-guidance-train requires --pytorch-checkpoint-output",
             file=sys.stderr,
         )
         return 2
@@ -718,6 +849,56 @@ def main(argv: list[str] | None = None) -> int:
 
         print(format_sample_analysis(analysis), file=sys.stderr)
         return 0
+
+    if args.trainer_input_preflight is not None:
+        try:
+            report = build_trainer_input_preflight_from_path(
+                args.trainer_input_preflight,
+                gate_config=_build_pytorch_gate_config(args),
+                gate_override=args.pytorch_gate_override,
+            )
+        except (OSError, ValueError) as exc:
+            print(f"failed to run trainer input preflight: {exc}", file=sys.stderr)
+            return 2
+        print(
+            format_trainer_input_preflight_from_path_report(
+                report,
+                detail_limit=args.reward_detail_limit,
+            ),
+            file=sys.stderr,
+        )
+        return 0 if report.preflight_ok else 2
+
+    if args.pytorch_search_guidance_train is not None:
+        try:
+            from sts_combat_rl.sim.torch_policy_value import (
+                TorchPolicyValueTrainingConfig,
+            )
+
+            report = run_pytorch_search_guidance_training_from_path(
+                args.pytorch_search_guidance_train,
+                args.pytorch_checkpoint_output,
+                training_config=TorchPolicyValueTrainingConfig(
+                    epochs=args.pytorch_epochs,
+                    learning_rate=args.pytorch_learning_rate,
+                    hidden_size=args.pytorch_hidden_size,
+                    batch_size=args.pytorch_batch_size,
+                    seed=args.sim_seed,
+                ),
+                gate_config=_build_pytorch_gate_config(args),
+                gate_override=args.pytorch_gate_override,
+            )
+        except (ImportError, OSError, ValueError) as exc:
+            print(
+                f"failed to run PyTorch search-guidance training: {exc}",
+                file=sys.stderr,
+            )
+            return 2
+        print(
+            format_pytorch_search_guidance_training_workflow_report(report),
+            file=sys.stderr,
+        )
+        return 0 if report.command_ok else 2
 
     if (
         args.lightspeed_smoke
@@ -1456,6 +1637,15 @@ def main(argv: list[str] | None = None) -> int:
     print(format_ready_signal(), flush=True)
     client.run(sys.stdin, sys.stdout)
     return 0
+
+
+def _build_pytorch_gate_config(args: argparse.Namespace) -> TrainingScaleGateConfig:
+    return TrainingScaleGateConfig(
+        required_ascensions=tuple(args.pytorch_gate_required_ascensions),
+        required_acts=tuple(args.pytorch_gate_required_acts),
+        min_records_per_ascension_act=args.pytorch_gate_min_records,
+        min_unique_sources_per_ascension_act=args.pytorch_gate_min_sources,
+    )
 
 
 def _timestamped_path(directory: Path, prefix: str, suffix: str) -> Path:
