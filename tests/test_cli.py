@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from collections import Counter
 import io
+import os
+from pathlib import Path
+import subprocess
 import sys
 
-from sts_combat_rl.cli import main
+from sts_combat_rl.cli import build_parser, main
 from sts_combat_rl.sim.constructed_battle_start import (
     ConstructedBattleStartAuditReport,
 )
@@ -20,6 +23,50 @@ from sts_combat_rl.sim.native_public_projection import (
 from sts_combat_rl.sim.public_context_audit import (
     PublicContextArtifactAuditReport,
 )
+
+
+def test_cli_parser_keeps_lightspeed_training_flags() -> None:
+    args = build_parser().parse_args(
+        [
+            "--lightspeed-battle-model-score-smoke",
+            "--sim-seed",
+            "7",
+            "--sim-ascension",
+            "20",
+            "--sim-episodes",
+            "2",
+            "--reward-detail-limit",
+            "0",
+            "--log-file",
+            "-",
+        ]
+    )
+
+    assert args.lightspeed_battle_model_score_smoke is True
+    assert args.sim_seed == 7
+    assert args.sim_ascension == 20
+    assert args.sim_episodes == 2
+    assert args.reward_detail_limit == 0
+    assert str(args.log_file) == "-"
+
+
+def test_cli_default_import_does_not_import_torch() -> None:
+    repo_src = Path(__file__).resolve().parents[1] / "src"
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(repo_src)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            ("import sys; import sts_combat_rl.cli; print('torch' in sys.modules)"),
+        ],
+        check=True,
+        capture_output=True,
+        env=env,
+        text=True,
+    )
+
+    assert result.stdout == "False\n"
 
 
 class FakeLightSpeedSmokeAdapter:
@@ -247,7 +294,7 @@ def test_cli_lightspeed_smoke_writes_report_to_stderr_only(
     capsys,
 ) -> None:
     monkeypatch.setattr(
-        "sts_combat_rl.cli.LightSpeedAdapter",
+        "sts_combat_rl.commands.lightspeed_cli.LightSpeedAdapter",
         FakeLightSpeedSmokeAdapter,
     )
 
@@ -265,7 +312,7 @@ def test_cli_public_projection_audit_routes_and_writes_stderr_only(
     capsys,
 ) -> None:
     monkeypatch.setattr(
-        "sts_combat_rl.cli.LightSpeedAdapter",
+        "sts_combat_rl.commands.lightspeed_cli.LightSpeedAdapter",
         FakeLightSpeedSmokeAdapter,
     )
     report = NativePublicProjectionCapabilityReport(
@@ -277,7 +324,7 @@ def test_cli_public_projection_audit_routes_and_writes_stderr_only(
         checkpoint_passes=2,
     )
     monkeypatch.setattr(
-        "sts_combat_rl.cli.run_public_projection_capability_audit",
+        "sts_combat_rl.commands.lightspeed_cli.run_public_projection_capability_audit",
         lambda *args, **kwargs: report,
     )
 
@@ -307,7 +354,7 @@ def test_cli_public_context_audit_routes_and_writes_stderr_only(
     capsys,
 ) -> None:
     monkeypatch.setattr(
-        "sts_combat_rl.cli.LightSpeedAdapter",
+        "sts_combat_rl.commands.lightspeed_cli.LightSpeedAdapter",
         FakeLightSpeedSmokeAdapter,
     )
     report = PublicContextArtifactAuditReport(
@@ -322,7 +369,7 @@ def test_cli_public_context_audit_routes_and_writes_stderr_only(
         battle_start_record_count=1,
     )
     monkeypatch.setattr(
-        "sts_combat_rl.cli.run_public_context_audit",
+        "sts_combat_rl.commands.lightspeed_cli.run_public_context_audit",
         lambda *args, **kwargs: report,
     )
 
@@ -353,7 +400,7 @@ def test_cli_checkpoint_commands_write_only_diagnostics_and_restore_pool(
     capsys,
 ) -> None:
     monkeypatch.setattr(
-        "sts_combat_rl.cli.LightSpeedAdapter",
+        "sts_combat_rl.commands.lightspeed_cli.LightSpeedAdapter",
         FakeLightSpeedSmokeAdapter,
     )
     pool_path = tmp_path / "pool.jsonl"
@@ -441,15 +488,15 @@ def test_cli_constructed_battle_start_audit_writes_stderr_and_artifact(
         path.write_text("fake\n", encoding="utf-8")
 
     monkeypatch.setattr(
-        "sts_combat_rl.cli.run_constructed_battle_start_audit",
+        "sts_combat_rl.commands.lightspeed_cli.run_constructed_battle_start_audit",
         fake_audit,
     )
     monkeypatch.setattr(
-        "sts_combat_rl.cli.LightSpeedAdapter",
+        "sts_combat_rl.commands.lightspeed_cli.LightSpeedAdapter",
         FakeLightSpeedSmokeAdapter,
     )
     monkeypatch.setattr(
-        "sts_combat_rl.cli.write_constructed_battle_start_artifact",
+        "sts_combat_rl.commands.lightspeed_cli.write_constructed_battle_start_artifact",
         fake_write,
     )
     output_path = tmp_path / "constructed.jsonl"
@@ -491,7 +538,7 @@ def test_cli_oracle_search_teacher_and_fixed_eval_routes_write_stderr_only(
     capsys,
 ) -> None:
     monkeypatch.setattr(
-        "sts_combat_rl.cli.LightSpeedAdapter",
+        "sts_combat_rl.commands.lightspeed_cli.LightSpeedAdapter",
         FakeLightSpeedSmokeAdapter,
     )
     pool_path = tmp_path / "pool.jsonl"
@@ -601,7 +648,7 @@ def test_cli_lightspeed_rollout_smoke_writes_report_to_stderr_only(
     capsys,
 ) -> None:
     monkeypatch.setattr(
-        "sts_combat_rl.cli.LightSpeedAdapter",
+        "sts_combat_rl.commands.lightspeed_cli.LightSpeedAdapter",
         FakeLightSpeedSmokeAdapter,
     )
 
@@ -620,7 +667,7 @@ def test_cli_lightspeed_batch_smoke_writes_report_to_stderr_only(
     capsys,
 ) -> None:
     monkeypatch.setattr(
-        "sts_combat_rl.cli.LightSpeedAdapter",
+        "sts_combat_rl.commands.lightspeed_cli.LightSpeedAdapter",
         FakeLightSpeedSmokeAdapter,
     )
 
@@ -650,7 +697,7 @@ def test_cli_lightspeed_policy_smoke_writes_report_to_stderr_only(
     capsys,
 ) -> None:
     monkeypatch.setattr(
-        "sts_combat_rl.cli.LightSpeedAdapter",
+        "sts_combat_rl.commands.lightspeed_cli.LightSpeedAdapter",
         FakeLightSpeedSmokeAdapter,
     )
 
@@ -684,7 +731,7 @@ def test_cli_lightspeed_policy_rollout_smoke_writes_report_to_stderr_only(
     capsys,
 ) -> None:
     monkeypatch.setattr(
-        "sts_combat_rl.cli.LightSpeedAdapter",
+        "sts_combat_rl.commands.lightspeed_cli.LightSpeedAdapter",
         FakeLightSpeedSmokeAdapter,
     )
 
@@ -712,7 +759,7 @@ def test_cli_lightspeed_episode_eval_writes_report_to_stderr_only(
     capsys,
 ) -> None:
     monkeypatch.setattr(
-        "sts_combat_rl.cli.LightSpeedAdapter",
+        "sts_combat_rl.commands.lightspeed_cli.LightSpeedAdapter",
         FakeLightSpeedSmokeAdapter,
     )
 
@@ -743,7 +790,7 @@ def test_cli_lightspeed_battle_sweep_writes_report_to_stderr_only(
     capsys,
 ) -> None:
     monkeypatch.setattr(
-        "sts_combat_rl.cli.LightSpeedAdapter",
+        "sts_combat_rl.commands.lightspeed_cli.LightSpeedAdapter",
         FakeLightSpeedSmokeAdapter,
     )
 
@@ -775,7 +822,7 @@ def test_cli_non_combat_calibration_reports_unreached_branches_without_failure(
     capsys,
 ) -> None:
     monkeypatch.setattr(
-        "sts_combat_rl.cli.LightSpeedAdapter",
+        "sts_combat_rl.commands.lightspeed_cli.LightSpeedAdapter",
         FakeLightSpeedSmokeAdapter,
     )
 
@@ -806,7 +853,7 @@ def test_cli_lightspeed_battle_batch_smoke_writes_report_to_stderr_only(
     capsys,
 ) -> None:
     monkeypatch.setattr(
-        "sts_combat_rl.cli.LightSpeedAdapter",
+        "sts_combat_rl.commands.lightspeed_cli.LightSpeedAdapter",
         FakeLightSpeedSmokeAdapter,
     )
 
@@ -837,7 +884,7 @@ def test_cli_lightspeed_battle_segments_smoke_writes_report_to_stderr_only(
     capsys,
 ) -> None:
     monkeypatch.setattr(
-        "sts_combat_rl.cli.LightSpeedAdapter",
+        "sts_combat_rl.commands.lightspeed_cli.LightSpeedAdapter",
         FakeLightSpeedSmokeAdapter,
     )
 
@@ -868,7 +915,7 @@ def test_cli_lightspeed_battle_reward_components_writes_report_to_stderr_only(
     capsys,
 ) -> None:
     monkeypatch.setattr(
-        "sts_combat_rl.cli.LightSpeedAdapter",
+        "sts_combat_rl.commands.lightspeed_cli.LightSpeedAdapter",
         FakeLightSpeedSmokeAdapter,
     )
 
@@ -903,7 +950,7 @@ def test_cli_lightspeed_battle_reward_design_writes_report_to_stderr_only(
     capsys,
 ) -> None:
     monkeypatch.setattr(
-        "sts_combat_rl.cli.LightSpeedAdapter",
+        "sts_combat_rl.commands.lightspeed_cli.LightSpeedAdapter",
         FakeLightSpeedSmokeAdapter,
     )
 
@@ -937,7 +984,7 @@ def test_cli_lightspeed_battle_reward_batch_smoke_writes_report_to_stderr_only(
     capsys,
 ) -> None:
     monkeypatch.setattr(
-        "sts_combat_rl.cli.LightSpeedAdapter",
+        "sts_combat_rl.commands.lightspeed_cli.LightSpeedAdapter",
         FakeLightSpeedSmokeAdapter,
     )
 
@@ -969,7 +1016,7 @@ def test_cli_lightspeed_battle_trainer_input_contract_writes_report_to_stderr_on
     capsys,
 ) -> None:
     monkeypatch.setattr(
-        "sts_combat_rl.cli.LightSpeedAdapter",
+        "sts_combat_rl.commands.lightspeed_cli.LightSpeedAdapter",
         FakeLightSpeedSmokeAdapter,
     )
 
@@ -1001,7 +1048,7 @@ def test_cli_lightspeed_battle_trainer_input_smoke_writes_report_to_stderr_only(
     capsys,
 ) -> None:
     monkeypatch.setattr(
-        "sts_combat_rl.cli.LightSpeedAdapter",
+        "sts_combat_rl.commands.lightspeed_cli.LightSpeedAdapter",
         FakeLightSpeedSmokeAdapter,
     )
 
@@ -1033,7 +1080,7 @@ def test_cli_lightspeed_battle_model_input_smoke_writes_report_to_stderr_only(
     capsys,
 ) -> None:
     monkeypatch.setattr(
-        "sts_combat_rl.cli.LightSpeedAdapter",
+        "sts_combat_rl.commands.lightspeed_cli.LightSpeedAdapter",
         FakeLightSpeedSmokeAdapter,
     )
 
@@ -1065,7 +1112,7 @@ def test_cli_lightspeed_battle_model_score_smoke_writes_report_to_stderr_only(
     capsys,
 ) -> None:
     monkeypatch.setattr(
-        "sts_combat_rl.cli.LightSpeedAdapter",
+        "sts_combat_rl.commands.lightspeed_cli.LightSpeedAdapter",
         FakeLightSpeedSmokeAdapter,
     )
 
@@ -1099,7 +1146,7 @@ def test_cli_lightspeed_battle_training_readiness_writes_report_to_stderr_only(
     capsys,
 ) -> None:
     monkeypatch.setattr(
-        "sts_combat_rl.cli.LightSpeedAdapter",
+        "sts_combat_rl.commands.lightspeed_cli.LightSpeedAdapter",
         FakeLightSpeedSmokeAdapter,
     )
 
@@ -1131,7 +1178,7 @@ def test_cli_rejects_negative_reward_detail_limit(
     capsys,
 ) -> None:
     monkeypatch.setattr(
-        "sts_combat_rl.cli.LightSpeedAdapter",
+        "sts_combat_rl.commands.lightspeed_cli.LightSpeedAdapter",
         FakeLightSpeedSmokeAdapter,
     )
 
@@ -1158,7 +1205,7 @@ def test_cli_lightspeed_battle_sweep_accepts_non_combat_policy(
     capsys,
 ) -> None:
     monkeypatch.setattr(
-        "sts_combat_rl.cli.LightSpeedAdapter",
+        "sts_combat_rl.commands.lightspeed_cli.LightSpeedAdapter",
         FakeLightSpeedSmokeAdapter,
     )
 
@@ -1189,7 +1236,7 @@ def test_cli_lightspeed_battle_sweep_accepts_scorer_policy(
     capsys,
 ) -> None:
     monkeypatch.setattr(
-        "sts_combat_rl.cli.LightSpeedAdapter",
+        "sts_combat_rl.commands.lightspeed_cli.LightSpeedAdapter",
         FakeLightSpeedSmokeAdapter,
     )
 
@@ -1220,7 +1267,7 @@ def test_cli_rejects_replay_policy_for_online_policy_rollout(
     capsys,
 ) -> None:
     monkeypatch.setattr(
-        "sts_combat_rl.cli.LightSpeedAdapter",
+        "sts_combat_rl.commands.lightspeed_cli.LightSpeedAdapter",
         FakeLightSpeedSmokeAdapter,
     )
 
