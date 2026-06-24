@@ -41,6 +41,9 @@ When documents disagree, use this order:
 - [`collaboration_workflow.md`](collaboration_workflow.md): authoritative
   roles, one-task-one-branch workflow, task specification contract, review, and
   merge process.
+- [`sts_lightspeed_maintainer_role.md`](sts_lightspeed_maintainer_role.md):
+  operating contract for the external `sts_lightspeed` fork maintainer role,
+  branch policy, cross-repository handoff, and review evidence.
 
 ### Active Roadmaps
 
