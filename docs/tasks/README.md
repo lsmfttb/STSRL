@@ -27,11 +27,12 @@ starting work.
 | T017 | DONE | [Stable sts_lightspeed source integration](T017-stable-lightspeed-source-integration.md) | T004, T010, T014, T016 | external source manifest and verifier |
 | T018 | DONE | [Native terminal resource identity surface](T018-native-terminal-resource-identity.md) | T012, T017 | native terminal potion/deck/relic/key identities |
 | T019 | DONE | [Codebase mechanical refactor](T019-codebase-mechanical-refactor.md) | T001--T018 except cancelled T007 | CLI decomposition and export cleanup |
-| T020 | READY | [sts_lightspeed fork maintenance line](T020-sts-lightspeed-fork-maintenance.md) | T017 | single active fork integration branch |
+| T020 | DONE | [sts_lightspeed fork maintenance line](T020-sts-lightspeed-fork-maintenance.md) | T017 | single active fork integration branch |
+| T021 | READY | [A20 battle-start coverage measurement](T021-a20-battle-start-coverage-measurement.md) | T004, T005, T008, T009, T010, T012, T016, T017, T018, T020 | A20 natural/constructed coverage and broad-training gate gaps |
 
-The published foundation task set is complete: T001--T006 and T008--T018 are
-`DONE`, T007 is `CANCELLED`, and T019 is `DONE`. T020 is the currently
-published `READY` maintenance task.
+The published foundation and maintenance task set is complete: T001--T006 and
+T008--T020 are `DONE`, and T007 is `CANCELLED`. T021 is the currently
+published `READY` research-measurement task.
 
 Only `READY` tasks should receive a new branch. After a prerequisite merges,
 the main maintainer reviews dependent specifications against the new `main`
@@ -46,9 +47,10 @@ document update before acceptance.
 
 The currently published `READY` queue is:
 
-- T020: `sts_lightspeed` fork maintenance line. This task establishes a single
-  documented active fork integration branch while preserving exact-commit
-  source-manifest reproducibility.
+- T021: A20 battle-start coverage measurement. This task reports natural,
+  sampled, and constructed A20 coverage, restore evidence, structured outcome
+  availability, and the exact T009 broad-training gate gaps before any broad
+  training or model-guided search task starts.
 
 The completed foundation backlog provides:
 
@@ -61,9 +63,10 @@ The completed foundation backlog provides:
 - optional PyTorch policy/value plumbing, fail-closed broad-training gates,
   checkpoint provenance, and diagnostic smoke/narrow-curriculum training.
 
-Other next task families remain coverage measurement, model-guided search
-integration, and normal-information belief-search groundwork. They are not
-ready for implementation until separately published.
+Likely next task families after T021 are teacher dataset scale-up,
+model-guided search integration, a fixed A20 benchmark report, and
+normal-information belief-search groundwork. They are not ready for
+implementation until separately published.
 
 ## Standard Local Gates
 
@@ -101,7 +104,8 @@ are mapped as follows:
 - structured persistent resource outcomes and explicit missingness: T012;
 - native terminal resource identity coverage: T018;
 - mechanical code cleanup and CLI/export decomposition: T019;
-- `sts_lightspeed` fork integration-line maintenance: T020.
+- `sts_lightspeed` fork integration-line maintenance: T020;
+- A20 battle-start coverage measurement and broad-training gap reporting: T021.
 
 T013 supplies the shared CommunicationMod adapter and captured-sample
 compatibility gate. Simulator-only training experiments do not depend on it.

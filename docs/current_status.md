@@ -14,7 +14,8 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
 
 The published foundation and maintenance backlog is complete: T001--T006 and
 T008--T020 are `DONE`, and T007 is `CANCELLED` because it was superseded by
-T014--T016. There is currently no published STSRL repository `READY` task.
+T014--T016. The current published STSRL repository `READY` task is T021, for
+A20 battle-start coverage measurement and broad-training gate gap reporting.
 
 ## Implemented On Main
 
@@ -287,27 +288,38 @@ already supports them.
 
 ## Immediate Work
 
-Executable task specifications live in [`tasks/`](tasks/README.md). There is
-currently no published STSRL repository `READY` task.
+Executable task specifications live in [`tasks/`](tasks/README.md). The
+currently published STSRL repository `READY` task is:
+
+1. [`T021`](tasks/T021-a20-battle-start-coverage-measurement.md): A20
+   battle-start coverage measurement across natural, sampled, and constructed
+   starts, including restore evidence and the exact T009 broad-training gate
+   gaps.
 
 The immediate external-fork follow-up is
 [`lsmfttb/sts_lightspeed#7`](https://github.com/lsmfttb/sts_lightspeed/issues/7):
 archive historical STSRL task branches after creating provenance tags, while
-preserving `stsrl/main` as the sole active integration branch.
+preserving `stsrl/main` as the sole active integration branch. This is
+operational fork maintenance and does not block T021.
 
 Recommended later task areas:
 
-1. Coverage and dataset measurement: collect larger A20 natural pools, quantify
-   natural / stratified / constructed mixture coverage by ascension and act,
-   and decide when the T009 broad-training gate can pass without override.
+1. Teacher dataset scale-up: once T021 reports the measured coverage gaps,
+   collect a small but structurally controlled Oracle-like A20 teacher dataset
+   with fixed search budgets and explicit `full_simulator_state_oracle_like`
+   provenance.
 2. Model-guided search integration: connect T009 policy/value checkpoints to a
    versioned search controller, report compute/model-call telemetry, and
    compare against fixed cohorts without claiming promotion from raw model
    diagnostics.
-3. Normal-information search groundwork: specify the authoritative
+3. Fixed A20 benchmark reporting: compare scripted/preferred, Oracle search,
+   raw model, and model-guided search only after the relevant controllers and
+   datasets exist, keeping natural-weighted, encounter-macro, and
+   room-type-macro results separate.
+4. Normal-information search groundwork: specify the authoritative
    public-consistent hidden-future sampling boundary before any belief-search
    branch starts.
-4. Additional maintenance cleanup beyond T019, if the first refactor leaves
+5. Additional maintenance cleanup beyond T019, if the first refactor leaves
    large modules or export surfaces difficult to review.
 
 The adapter and captured-sample compatibility gate in
