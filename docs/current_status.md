@@ -14,8 +14,8 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
 
 The published foundation, maintenance, and first research-measurement backlog
 is complete: T001--T006 and T008--T024 are `DONE`, and T007 is `CANCELLED`
-because it was superseded by T014--T016. There is currently no published STSRL
-repository `READY` task.
+because it was superseded by T014--T016. The current published milestone is
+M1: model-guided Oracle search sandbox, with T025 and T026 `READY`.
 
 ## Implemented On Main
 
@@ -408,8 +408,30 @@ already supports them.
 
 ## Immediate Work
 
-Executable task specifications live in [`tasks/`](tasks/README.md). There is
-currently no published STSRL repository `READY` task.
+Executable task specifications live in [`tasks/`](tasks/README.md). The
+current published milestone is M1: model-guided Oracle search sandbox. Its
+nearer target is to use T024 teacher-targeted checkpoint provenance in a
+versioned model-guided Oracle-like search controller and fixed-cohort
+comparison, with complete telemetry and no promotion claims.
+
+The currently published `READY` tasks are:
+
+1. [`T025`](tasks/T025-search-telemetry-baseline.md): add shared search
+   telemetry and baseline cost reporting for current Oracle-like search.
+2. [`T026`](tasks/T026-guidance-checkpoint-inference-contract.md): add the
+   checkpoint inference/scoring contract needed before any controller consumes
+   T009/T024 checkpoints.
+
+The rest of M1 is already specified but intentionally blocked:
+
+- [`T027`](tasks/T027-teacher-guidance-calibration-report.md): offline
+  checkpoint-vs-teacher calibration, blocked on T026.
+- [`T028`](tasks/T028-model-guided-oracle-search-controller.md): first
+  model-guided Oracle search controller, blocked on T025--T027.
+- [`T029`](tasks/T029-fixed-cohort-model-guided-search-comparison.md):
+  fixed-cohort comparison, blocked on T025 and T028.
+- [`T030`](tasks/T030-m1-model-guided-search-sandbox-synthesis.md): milestone
+  synthesis and next task batch, blocked on T027 and T029.
 
 The immediate external-fork follow-up is
 [`lsmfttb/sts_lightspeed#7`](https://github.com/lsmfttb/sts_lightspeed/issues/7):
@@ -417,7 +439,7 @@ archive historical STSRL task branches after creating provenance tags, while
 preserving `stsrl/main` as the sole active integration branch. This is
 operational fork maintenance and does not block STSRL repository work.
 
-Recommended later task areas:
+Recommended post-M1 task areas:
 
 1. Model-guided search integration: use T024 teacher-targeted
    trainer/checkpoint provenance to connect T009 policy/value checkpoints to a

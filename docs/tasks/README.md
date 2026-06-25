@@ -32,10 +32,16 @@ starting work.
 | T022 | DONE | [A20 Oracle teacher dataset report](T022-a20-oracle-teacher-dataset-report.md) | T004, T005, T006, T009, T012, T016, T017, T018, T020, T021 | Oracle-like teacher dataset coverage and source linkage |
 | T023 | DONE | [A20 Oracle teacher dataset scale-up](T023-a20-oracle-teacher-dataset-scale-up.md) | T004, T005, T006, T009, T012, T016, T017, T018, T020, T021, T022 | structured Oracle-like teacher scale-up and budget stability |
 | T024 | DONE | [Oracle teacher search-guidance training bridge](T024-oracle-teacher-search-guidance-training-bridge.md) | T003, T004, T006, T009, T011, T012, T016, T017, T018, T020, T021, T022, T023 | teacher-targeted trainer input and diagnostic checkpoint |
+| T025 | READY | [Search telemetry baseline](T025-search-telemetry-baseline.md) | T005, T006, T009, T017, T020, T024 | shared search telemetry and baseline cost reporting |
+| T026 | READY | [Guidance checkpoint inference contract](T026-guidance-checkpoint-inference-contract.md) | T009, T011, T016, T018, T024 | checkpoint scorer contract for search guidance |
+| T027 | BLOCKED | [Teacher guidance calibration report](T027-teacher-guidance-calibration-report.md) | T026 | offline checkpoint-vs-teacher calibration |
+| T028 | BLOCKED | [Model-guided Oracle search controller](T028-model-guided-oracle-search-controller.md) | T025, T026, T027 | first versioned model-guided Oracle-like search controller |
+| T029 | BLOCKED | [Fixed-cohort model-guided search comparison](T029-fixed-cohort-model-guided-search-comparison.md) | T025, T028 | equal-source/equal-budget fixed-cohort comparison |
+| T030 | BLOCKED | [M1 model-guided search sandbox synthesis](T030-m1-model-guided-search-sandbox-synthesis.md) | T027, T029 | milestone synthesis and next task batch |
 
 The published foundation, maintenance, and first research-measurement task set
 is complete: T001--T006 and T008--T024 are `DONE`, and T007 is `CANCELLED`.
-There is currently no published STSRL repository `READY` task.
+The current published milestone is M1: model-guided Oracle search sandbox.
 
 Only `READY` tasks should receive a new branch. After a prerequisite merges,
 the main maintainer reviews dependent specifications against the new `main`
@@ -48,7 +54,31 @@ document update before acceptance.
 
 ## Published Queue
 
-The currently published `READY` queue is empty.
+The currently published `READY` queue is:
+
+- T025: Search telemetry baseline.
+- T026: Guidance checkpoint inference contract.
+
+These two tasks are intentionally parallel-ready. They are the independent
+entry points for M1 and may be implemented in separate worktrees and pull
+requests based on latest `main`.
+
+## M1: Model-Guided Oracle Search Sandbox
+
+M1's farther target is a reviewable fixed-cohort comparison between the current
+Oracle-like native search baseline and a first model-guided Oracle-like search
+controller using T024 teacher-targeted checkpoint provenance. M1 is diagnostic
+search-engineering work only; it must not claim normal-information, live-game,
+broad-training, or promoted controller-strength evidence.
+
+Dependency chain:
+
+```text
+T025 search telemetry baseline --+
+                                 +--> T028 model-guided Oracle search --> T029 fixed comparison --+
+T026 checkpoint inference --> T027 teacher calibration ------------------------------------------+
+                                                                                                  +--> T030 synthesis
+```
 
 The completed foundation backlog provides:
 
@@ -70,10 +100,10 @@ The completed foundation backlog provides:
 - teacher-targeted trainer-input v6 conversion and diagnostic checkpoint
   provenance for selected T023 Oracle teacher budgets.
 
-Likely next task families are model-guided search integration, a fixed A20
-benchmark report, broader A20 coverage/data collection, and
-normal-information belief-search groundwork. They are not ready for
-implementation until separately published.
+Likely task families after M1 are deeper model-guided search, broader A20
+coverage/data collection, public-history/map encoders, and normal-information
+belief-search groundwork. They are not ready for implementation until
+separately published.
 
 ## Standard Local Gates
 
@@ -118,6 +148,7 @@ are mapped as follows:
   reporting: T023.
 - Teacher-targeted search-guidance trainer input and diagnostic checkpoint
   bridge: T024.
+- M1 search telemetry and model-guided Oracle search sandbox: T025--T030.
 
 T013 supplies the shared CommunicationMod adapter and captured-sample
 compatibility gate. Simulator-only training experiments do not depend on it.

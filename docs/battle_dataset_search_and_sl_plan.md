@@ -337,8 +337,10 @@ auditable before teacher scale-up feeds model-guided search. T023 completed a
 small structured A20 Oracle-like teacher scale-up workflow across named search
 budgets and reports teacher-label stability. T024 completed the bridge from
 teacher artifacts to explicit trainer-input v6 teacher targets and diagnostic
-checkpoint provenance. Model-guided search integration and meaningful held-out
-or fixed-cohort improvement remain pending meaningful coverage.
+checkpoint provenance. The M1 task batch T025--T030 is now published to move
+from telemetry and checkpoint inference to a first model-guided Oracle search
+controller, fixed-cohort comparison, and synthesis. Meaningful held-out or
+fixed-cohort improvement remains pending those tasks and broader coverage.
 
 Exit gate: a search change improves fixed evaluation at equal simulation or
 wall-clock budget without natural-weighted regression.

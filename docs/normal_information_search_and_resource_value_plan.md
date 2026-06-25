@@ -244,7 +244,7 @@ errors and fixed-cohort performance from sufficient A20 coverage.
 
 ### N2: Model-Guided Oracle Search Sandbox
 
-Status: planned.
+Status: M1 task batch published as T025--T030.
 
 Use the Oracle regime to validate priors, leaf values, uncertainty, and search
 instrumentation. Exit when model guidance improves the fixed Oracle curve at
@@ -272,12 +272,11 @@ Retain only auxiliary targets that improve normal-information evaluation.
 
 ## Immediate Design Work
 
-1. Publish the next focused model-guided Oracle search sandbox task, using the
-   completed
-   [`T024`](tasks/T024-oracle-teacher-search-guidance-training-bridge.md)
-   teacher-targeted trainer/checkpoint provenance without treating hidden-state
-   teacher data or smoke-scale under-coverage as normal-information or
-   broad-training evidence.
+1. Execute the published M1 task batch T025--T030, starting with
+   [`T025`](tasks/T025-search-telemetry-baseline.md) and
+   [`T026`](tasks/T026-guidance-checkpoint-inference-contract.md), without
+   treating hidden-state teacher data or smoke-scale under-coverage as
+   normal-information or broad-training evidence.
 2. Build structured history, map, and visible-Boss encoders on the sanitized
    public-context artifacts now available on `main`.
 3. Establish an honest public policy/vector-value baseline from sufficient A20
