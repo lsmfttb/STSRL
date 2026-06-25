@@ -30,10 +30,11 @@ starting work.
 | T020 | DONE | [sts_lightspeed fork maintenance line](T020-sts-lightspeed-fork-maintenance.md) | T017 | single active fork integration branch |
 | T021 | DONE | [A20 battle-start coverage measurement](T021-a20-battle-start-coverage-measurement.md) | T004, T005, T008, T009, T010, T012, T016, T017, T018, T020 | A20 natural/constructed coverage and broad-training gate gaps |
 | T022 | DONE | [A20 Oracle teacher dataset report](T022-a20-oracle-teacher-dataset-report.md) | T004, T005, T006, T009, T012, T016, T017, T018, T020, T021 | Oracle-like teacher dataset coverage and source linkage |
+| T023 | READY | [A20 Oracle teacher dataset scale-up](T023-a20-oracle-teacher-dataset-scale-up.md) | T004, T005, T006, T009, T012, T016, T017, T018, T020, T021, T022 | structured Oracle-like teacher scale-up and budget stability |
 
 The published foundation, maintenance, and first research-measurement task set
 is complete: T001--T006 and T008--T022 are `DONE`, and T007 is `CANCELLED`.
-There is no currently published STSRL repository `READY` task.
+The currently published STSRL repository `READY` task is T023.
 
 Only `READY` tasks should receive a new branch. After a prerequisite merges,
 the main maintainer reviews dependent specifications against the new `main`
@@ -46,14 +47,12 @@ document update before acceptance.
 
 ## Published Queue
 
-The currently published `READY` queue is empty. The main maintainer must
-publish a focused task before a new implementation branch starts.
+The currently published `READY` queue is:
 
-The latest completed task is T022: A20 Oracle teacher dataset report. It adds a
-current-schema report for Oracle-like teacher datasets, source-pool linkage,
-optional T021 coverage linkage, search statistics, and explicit
-`full_simulator_state_oracle_like` provenance before teacher scale-up feeds
-model-guided search work.
+- T023: A20 Oracle teacher dataset scale-up. This task freezes a structured
+  A20 source-selection plan, collects Oracle-like teacher datasets at named
+  native search budgets, emits T022 reports for every budget, and reports
+  cross-budget teacher-label stability before model-guided search work.
 
 The completed foundation backlog provides:
 
@@ -71,10 +70,10 @@ The completed foundation backlog provides:
 - current-schema Oracle-like teacher dataset reporting with source-pool and
   optional T021 coverage linkage.
 
-Likely next task families are model-guided search integration, a fixed A20
-benchmark report, broader A20 coverage/data collection, and normal-information
-belief-search groundwork. They are not ready for implementation until
-separately published.
+Likely next task families after T023 are model-guided search integration, a
+fixed A20 benchmark report, broader A20 coverage/data collection, and
+normal-information belief-search groundwork. They are not ready for
+implementation until separately published.
 
 ## Standard Local Gates
 
@@ -115,6 +114,8 @@ are mapped as follows:
 - `sts_lightspeed` fork integration-line maintenance: T020;
 - A20 battle-start coverage measurement and broad-training gap reporting: T021.
 - Oracle-like teacher dataset reporting and source linkage: T022.
+- Structured Oracle-like teacher dataset scale-up and budget-stability
+  reporting: T023.
 
 T013 supplies the shared CommunicationMod adapter and captured-sample
 compatibility gate. Simulator-only training experiments do not depend on it.

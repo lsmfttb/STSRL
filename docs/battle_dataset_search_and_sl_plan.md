@@ -7,8 +7,9 @@ implementation status comes from [`current_status.md`](current_status.md).
 
 The published foundation, maintenance, and first research-measurement backlog
 is complete through T022 except for cancelled T007, whose scope was superseded
-by T014--T016. New implementation work should start only after the main
-maintainer publishes a new focused task.
+by T014--T016. T023 is the currently published focused scale-up task. Other
+new implementation work should start only after the main maintainer publishes
+a new focused task.
 
 ## Goals
 
@@ -333,9 +334,11 @@ training reports. T021 completed the current coverage-measurement report used
 to decide what A20 data and distribution gaps remain before broad training or
 model-guided search work starts. T022 completed the current Oracle-like teacher
 dataset report, making teacher coverage, source linkage, and search statistics
-auditable before teacher scale-up feeds model-guided search. Model-guided
-search integration and meaningful held-out or fixed-cohort improvement remain
-pending meaningful coverage.
+auditable before teacher scale-up feeds model-guided search. T023 is the
+published follow-up to collect a small structured A20 Oracle-like teacher
+dataset across named search budgets and report teacher-label stability.
+Model-guided search integration and meaningful held-out or fixed-cohort
+improvement remain pending meaningful coverage.
 
 Exit gate: a search change improves fixed evaluation at equal simulation or
 wall-clock budget without natural-weighted regression.
