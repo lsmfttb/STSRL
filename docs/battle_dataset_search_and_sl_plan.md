@@ -335,9 +335,10 @@ model-guided search work starts. T022 completed the current Oracle-like teacher
 dataset report, making teacher coverage, source linkage, and search statistics
 auditable before teacher scale-up feeds model-guided search. T023 completed a
 small structured A20 Oracle-like teacher scale-up workflow across named search
-budgets and reports teacher-label stability. Model-guided search integration
-and meaningful held-out or fixed-cohort improvement remain pending meaningful
-coverage.
+budgets and reports teacher-label stability. T024 is the published bridge from
+teacher artifacts to explicit teacher-targeted search-guidance training input
+and a diagnostic checkpoint. Model-guided search integration and meaningful
+held-out or fixed-cohort improvement remain pending meaningful coverage.
 
 Exit gate: a search change improves fixed evaluation at equal simulation or
 wall-clock budget without natural-weighted regression.

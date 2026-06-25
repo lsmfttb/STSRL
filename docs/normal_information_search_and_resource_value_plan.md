@@ -270,10 +270,11 @@ Retain only auxiliary targets that improve normal-information evaluation.
 
 ## Immediate Design Work
 
-1. Use the completed
-   [`T023`](tasks/T023-a20-oracle-teacher-dataset-scale-up.md) teacher-data
-   scale-up evidence when scoping model-guided search, without treating
-   hidden-state teacher data or smoke-scale under-coverage as
+1. Complete
+   [`T024`](tasks/T024-oracle-teacher-search-guidance-training-bridge.md), the
+   published bridge from T023 teacher scale-up artifacts to explicit
+   teacher-targeted search-guidance training input and a diagnostic checkpoint,
+   without treating hidden-state teacher data or smoke-scale under-coverage as
    normal-information or broad-training evidence.
 2. Build structured history, map, and visible-Boss encoders on the sanitized
    public-context artifacts now available on `main`.

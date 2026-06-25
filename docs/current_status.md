@@ -14,8 +14,9 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
 
 The published foundation, maintenance, and first research-measurement backlog
 is complete: T001--T006 and T008--T023 are `DONE`, and T007 is `CANCELLED`
-because it was superseded by T014--T016. There is no currently published STSRL
-repository `READY` task.
+because it was superseded by T014--T016. The current published STSRL
+repository `READY` task is T024, for bridging T023 Oracle teacher data into
+teacher-targeted search-guidance training input and a diagnostic checkpoint.
 
 ## Implemented On Main
 
@@ -371,10 +372,14 @@ already supports them.
 
 ## Immediate Work
 
-Executable task specifications live in [`tasks/`](tasks/README.md). There is
-no currently published STSRL repository `READY` task. The next repository
-implementation branch must wait for the main maintainer to publish a focused
-task.
+Executable task specifications live in [`tasks/`](tasks/README.md). The
+currently published STSRL repository `READY` task is:
+
+1. [`T024`](tasks/T024-oracle-teacher-search-guidance-training-bridge.md):
+   convert a selected T023 teacher budget into explicit teacher-targeted
+   search-guidance training input and a diagnostic T009-style checkpoint,
+   without implementing a model-guided search controller or claiming
+   controller strength.
 
 The immediate external-fork follow-up is
 [`lsmfttb/sts_lightspeed#7`](https://github.com/lsmfttb/sts_lightspeed/issues/7):
@@ -384,8 +389,8 @@ operational fork maintenance and does not block STSRL repository work.
 
 Recommended later task areas:
 
-1. Model-guided search integration: use T023 audited teacher scale-up data and
-   budget-stability evidence to connect T009 policy/value checkpoints to a
+1. Model-guided search integration: after T024 creates teacher-targeted
+   trainer/checkpoint provenance, connect T009 policy/value checkpoints to a
    versioned search controller, report compute/model-call telemetry, and
    compare against fixed cohorts without claiming promotion from raw model
    diagnostics.

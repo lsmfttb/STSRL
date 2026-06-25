@@ -31,10 +31,11 @@ starting work.
 | T021 | DONE | [A20 battle-start coverage measurement](T021-a20-battle-start-coverage-measurement.md) | T004, T005, T008, T009, T010, T012, T016, T017, T018, T020 | A20 natural/constructed coverage and broad-training gate gaps |
 | T022 | DONE | [A20 Oracle teacher dataset report](T022-a20-oracle-teacher-dataset-report.md) | T004, T005, T006, T009, T012, T016, T017, T018, T020, T021 | Oracle-like teacher dataset coverage and source linkage |
 | T023 | DONE | [A20 Oracle teacher dataset scale-up](T023-a20-oracle-teacher-dataset-scale-up.md) | T004, T005, T006, T009, T012, T016, T017, T018, T020, T021, T022 | structured Oracle-like teacher scale-up and budget stability |
+| T024 | READY | [Oracle teacher search-guidance training bridge](T024-oracle-teacher-search-guidance-training-bridge.md) | T003, T004, T006, T009, T011, T012, T016, T017, T018, T020, T021, T022, T023 | teacher-targeted trainer input and diagnostic checkpoint |
 
 The published foundation, maintenance, and first research-measurement task set
 is complete: T001--T006 and T008--T023 are `DONE`, and T007 is `CANCELLED`.
-There is no currently published STSRL repository `READY` task.
+The currently published STSRL repository `READY` task is T024.
 
 Only `READY` tasks should receive a new branch. After a prerequisite merges,
 the main maintainer reviews dependent specifications against the new `main`
@@ -47,14 +48,12 @@ document update before acceptance.
 
 ## Published Queue
 
-The currently published `READY` queue is empty. The main maintainer must
-publish a focused task before a new implementation branch starts.
+The currently published `READY` queue is:
 
-The latest completed task is T023: A20 Oracle teacher dataset scale-up. It
-freezes a structured A20 source-selection plan, collects Oracle-like teacher
-datasets at named native search budgets, emits T022 reports for every budget,
-and reports cross-budget teacher-label stability before model-guided search
-work.
+- T024: Oracle teacher search-guidance training bridge. This task converts a
+  selected T023 teacher budget into an explicit teacher-targeted training
+  artifact and diagnostic T009-style checkpoint, without implementing a
+  model-guided search controller or claiming controller strength.
 
 The completed foundation backlog provides:
 
@@ -74,10 +73,10 @@ The completed foundation backlog provides:
 - structured Oracle-like teacher dataset scale-up with per-budget T022 reports
   and cross-budget teacher-label stability reporting.
 
-Likely next task families are model-guided search integration, a fixed A20
-benchmark report, broader A20 coverage/data collection, and normal-information
-belief-search groundwork. They are not ready for implementation until
-separately published.
+Likely next task families after T024 are model-guided search integration, a
+fixed A20 benchmark report, broader A20 coverage/data collection, and
+normal-information belief-search groundwork. They are not ready for
+implementation until separately published.
 
 ## Standard Local Gates
 
@@ -120,6 +119,8 @@ are mapped as follows:
 - Oracle-like teacher dataset reporting and source linkage: T022.
 - Structured Oracle-like teacher dataset scale-up and budget-stability
   reporting: T023.
+- Teacher-targeted search-guidance trainer input and diagnostic checkpoint
+  bridge: T024.
 
 T013 supplies the shared CommunicationMod adapter and captured-sample
 compatibility gate. Simulator-only training experiments do not depend on it.
