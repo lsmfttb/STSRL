@@ -281,6 +281,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     input_group.add_argument(
+        "--oracle-teacher-dataset-report",
+        type=Path,
+        metavar="TEACHER_JSONL",
+        help=(
+            "Load a saved Oracle teacher JSONL artifact and report teacher "
+            "coverage, source linkage, search statistics, and T021 gate gaps."
+        ),
+    )
+    input_group.add_argument(
         "--lightspeed-non-combat-calibration",
         action="store_true",
         help=(
@@ -515,6 +524,30 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         metavar="PATH",
         help="Write --lightspeed-oracle-search-teacher output to this JSONL path.",
+    )
+    parser.add_argument(
+        "--oracle-teacher-source-pool",
+        type=Path,
+        metavar="POOL_PATH",
+        help=(
+            "Optional natural battle-start source pool for "
+            "--oracle-teacher-dataset-report linkage checks."
+        ),
+    )
+    parser.add_argument(
+        "--oracle-teacher-coverage-report",
+        type=Path,
+        metavar="COVERAGE_JSON",
+        help=(
+            "Optional T021 A20 coverage report for "
+            "--oracle-teacher-dataset-report linkage checks."
+        ),
+    )
+    parser.add_argument(
+        "--oracle-teacher-report-output",
+        type=Path,
+        metavar="PATH",
+        help="Write --oracle-teacher-dataset-report JSON output to PATH.",
     )
     parser.add_argument(
         "--oracle-search-simulations",
