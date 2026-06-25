@@ -13,10 +13,9 @@ primary battle policy, and learned policies or values are expected to guide or
 accelerate search. Non-combat decisions remain outside the trainable agent.
 
 The published foundation, maintenance, and first research-measurement backlog
-is complete: T001--T006 and T008--T022 are `DONE`, and T007 is `CANCELLED`
-because it was superseded by T014--T016. The current published STSRL
-repository `READY` task is T023, for structured A20 Oracle-like teacher
-dataset scale-up and budget-stability reporting.
+is complete: T001--T006 and T008--T023 are `DONE`, and T007 is `CANCELLED`
+because it was superseded by T014--T016. There is no currently published STSRL
+repository `READY` task.
 
 ## Implemented On Main
 
@@ -182,12 +181,24 @@ dataset scale-up and budget-stability reporting.
   source-pool mismatches, and T021 source-identity mismatches fail closed;
   ordinary smoke-scale under-coverage is reported rather than treated as a
   command failure.
+- Versioned A20 Oracle-like teacher dataset scale-up reporting
+  (`oracle-teacher-scaleup-manifest-v1`) through
+  `--lightspeed-a20-oracle-teacher-scaleup`. The workflow loads a current or
+  migrated A20 natural battle-start source pool, optionally verifies a linked
+  T021 coverage report, builds a deterministic source-selection plan from
+  rule-defined metadata, collects Oracle-like teacher JSONL artifacts for
+  multiple native search budgets on the same selected sources, emits a T022
+  report for every budget, and writes a scale-up manifest. It reports selected
+  source coverage, generated artifact identities, root rows/visits, native
+  simulator steps, teacher-action agreement across budgets, and soft-target
+  stability while preserving the `full_simulator_state_oracle_like` evidence
+  boundary.
 - A training-readiness report that validates plumbing only. It does not train a
   model or demonstrate policy strength.
 
 ### Tests And Runtime Evidence
 
-- `498` tests pass on Windows Python as of this review. In an uninstalled
+- `508` tests pass on Windows Python as of this review. In an uninstalled
   checkout, set `PYTHONPATH=src` (or install the package) before invoking the
   CLI directly.
 - The two CommunicationMod fixture smokes pass.
@@ -323,6 +334,27 @@ dataset scale-up and budget-stability reporting.
   training, or controller-strength evidence. The T021-linked broad-training
   gate correctly remained closed because the smoke-scale data was Act 1 only
   and below the required per-act thresholds.
+- T023 validates the A20 Oracle-like teacher scale-up workflow. The accepted
+  local gate passed 508 Windows tests, compileall, ruff check, ruff format
+  check, both CommunicationMod fixture smokes, focused scale-up and CLI tests,
+  and diff whitespace checks. The WSL source verifier rebuilt and validated
+  the pinned `sts_lightspeed` integration commit
+  `242344c57c17c784708a6f072c905febc3f96527`. The accepted WSL smoke-scale
+  chain at A20 produced 41 natural starts from 10 source runs, 41 available
+  structured outcomes, 41/41 restore and public-context matches, 73 T009 gate
+  training rows, and 41 unique natural sources; the broad-training gate
+  remained closed because Act 1 stayed below the record threshold and Acts 2--4
+  had zero records. The T023 scale-up selected 32 of 41 sources with seed 1,
+  all A20 Act 1 (`MONSTER=31`, `ELITE=1`), and generated teacher artifacts and
+  T022 reports at budgets 20, 50, and 100. Each budget produced 32 teacher
+  rows and 331 root rows; root visits/search simulations were 640, 1,600, and
+  3,200; native simulator steps were 9,321, 23,432, and 46,948. Cross-budget
+  teacher-action agreement was 12/32 sources for all budgets and 52/96 pairwise
+  comparisons; soft targets were available for all 32 selected sources with
+  mean pairwise total-variation distance 0.042917 and maximum 0.120000. The
+  evidence boundary remained explicit: `full_simulator_state_oracle_like`, not
+  normal-information, live-game, broad-training, or controller-strength
+  evidence.
 
 ## Not Implemented On Main
 
@@ -339,12 +371,10 @@ already supports them.
 
 ## Immediate Work
 
-Executable task specifications live in [`tasks/`](tasks/README.md). The
-currently published STSRL repository `READY` task is:
-
-1. [`T023`](tasks/T023-a20-oracle-teacher-dataset-scale-up.md): structured
-   A20 Oracle-like teacher dataset scale-up, source-selection planning,
-   per-budget T022 reports, and cross-budget teacher-label stability reporting.
+Executable task specifications live in [`tasks/`](tasks/README.md). There is
+no currently published STSRL repository `READY` task. The next repository
+implementation branch must wait for the main maintainer to publish a focused
+task.
 
 The immediate external-fork follow-up is
 [`lsmfttb/sts_lightspeed#7`](https://github.com/lsmfttb/sts_lightspeed/issues/7):
@@ -354,11 +384,11 @@ operational fork maintenance and does not block STSRL repository work.
 
 Recommended later task areas:
 
-1. Model-guided search integration: after T023 produces audited teacher
-   scale-up data and budget-stability evidence, connect T009 policy/value
-   checkpoints to a versioned search controller, report compute/model-call
-   telemetry, and compare against fixed cohorts without claiming promotion
-   from raw model diagnostics.
+1. Model-guided search integration: use T023 audited teacher scale-up data and
+   budget-stability evidence to connect T009 policy/value checkpoints to a
+   versioned search controller, report compute/model-call telemetry, and
+   compare against fixed cohorts without claiming promotion from raw model
+   diagnostics.
 2. Fixed A20 benchmark reporting: compare scripted/preferred, Oracle search,
    raw model, and model-guided search only after the relevant controllers and
    datasets exist, keeping natural-weighted, encounter-macro, and

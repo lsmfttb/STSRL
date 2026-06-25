@@ -1,6 +1,6 @@
 # T023: A20 Oracle Teacher Dataset Scale-Up
 
-Status: `READY`.
+Status: `DONE` via PR #23, merged 2026-06-25.
 
 ## Objective
 

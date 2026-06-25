@@ -271,11 +271,10 @@ Retain only auxiliary targets that improve normal-information evaluation.
 ## Immediate Design Work
 
 1. Use the completed
-   [`T022`](tasks/T022-a20-oracle-teacher-dataset-report.md) Oracle-like
-   teacher dataset report in
-   [`T023`](tasks/T023-a20-oracle-teacher-dataset-scale-up.md), the published
-   teacher-data scale-up task, without treating hidden-state teacher data or
-   smoke-scale under-coverage as normal-information or broad-training evidence.
+   [`T023`](tasks/T023-a20-oracle-teacher-dataset-scale-up.md) teacher-data
+   scale-up evidence when scoping model-guided search, without treating
+   hidden-state teacher data or smoke-scale under-coverage as
+   normal-information or broad-training evidence.
 2. Build structured history, map, and visible-Boss encoders on the sanitized
    public-context artifacts now available on `main`.
 3. Establish an honest public policy/vector-value baseline from sufficient A20
