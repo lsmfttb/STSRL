@@ -50,6 +50,36 @@ def test_cli_parser_keeps_lightspeed_training_flags() -> None:
     assert str(args.log_file) == "-"
 
 
+def test_cli_parser_accepts_a20_coverage_flags(tmp_path) -> None:
+    pool_path = tmp_path / "pool.jsonl"
+    constructed_path = tmp_path / "constructed.jsonl"
+    output_path = tmp_path / "coverage.json"
+
+    args = build_parser().parse_args(
+        [
+            "--lightspeed-a20-battle-start-coverage",
+            str(pool_path),
+            "--a20-coverage-constructed-artifact",
+            str(constructed_path),
+            "--a20-coverage-output",
+            str(output_path),
+            "--battle-start-restore-limit",
+            "2",
+            "--battle-start-sample-count",
+            "3",
+            "--pytorch-gate-min-records",
+            "4",
+        ]
+    )
+
+    assert args.lightspeed_a20_battle_start_coverage == pool_path
+    assert args.a20_coverage_constructed_artifact == constructed_path
+    assert args.a20_coverage_output == output_path
+    assert args.battle_start_restore_limit == 2
+    assert args.battle_start_sample_count == 3
+    assert args.pytorch_gate_min_records == 4
+
+
 def test_cli_default_import_does_not_import_torch() -> None:
     repo_src = Path(__file__).resolve().parents[1] / "src"
     env = os.environ.copy()
@@ -530,6 +560,113 @@ def test_cli_constructed_battle_start_audit_writes_stderr_and_artifact(
     assert "written_artifact" in calls
     assert "Constructed battle-start supplement audit" in captured.err
     assert "source natural battle starts: 1" in captured.err
+
+
+def test_cli_a20_coverage_writes_stderr_and_optional_json(
+    monkeypatch,
+    tmp_path,
+    capsys,
+) -> None:
+    calls: dict[str, object] = {}
+
+    class FakeCoverageReport:
+        command_passed = True
+
+    def fake_coverage(**kwargs):
+        calls.update(kwargs)
+        output_path = kwargs["output_path"]
+        if output_path is not None:
+            output_path.write_text('{"schema_id":"fixture"}\n', encoding="utf-8")
+        return FakeCoverageReport()
+
+    monkeypatch.setattr(
+        "sts_combat_rl.commands.lightspeed_cli.LightSpeedAdapter",
+        FakeLightSpeedSmokeAdapter,
+    )
+    monkeypatch.setattr(
+        "sts_combat_rl.commands.lightspeed_cli.run_a20_battle_start_coverage_from_paths",
+        fake_coverage,
+    )
+    monkeypatch.setattr(
+        "sts_combat_rl.commands.lightspeed_cli.format_a20_battle_start_coverage_report",
+        lambda report: "A20 battle-start coverage report\ncommand passed: yes",
+    )
+    pool_path = tmp_path / "pool.jsonl"
+    constructed_path = tmp_path / "constructed.jsonl"
+    output_path = tmp_path / "coverage.json"
+
+    assert (
+        main(
+            [
+                "--lightspeed-a20-battle-start-coverage",
+                str(pool_path),
+                "--a20-coverage-constructed-artifact",
+                str(constructed_path),
+                "--a20-coverage-output",
+                str(output_path),
+                "--battle-start-restore-limit",
+                "2",
+                "--battle-start-sample-count",
+                "3",
+                "--pytorch-gate-required-acts",
+                "1",
+                "2",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 0
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert output_path.exists()
+    assert calls["pool_path"] == pool_path
+    assert calls["constructed_artifact_path"] == constructed_path
+    assert calls["output_path"] == output_path
+    assert calls["restore_limit"] == 2
+    assert calls["sample_count"] == 3
+    assert calls["gate_config"].required_acts == (1, 2)
+    assert calls["adapter_factory"]().ascension == 20
+    assert "A20 battle-start coverage report" in captured.err
+
+
+def test_cli_a20_coverage_returns_nonzero_for_command_problem(
+    monkeypatch,
+    tmp_path,
+    capsys,
+) -> None:
+    class FakeCoverageReport:
+        command_passed = False
+
+    monkeypatch.setattr(
+        "sts_combat_rl.commands.lightspeed_cli.LightSpeedAdapter",
+        FakeLightSpeedSmokeAdapter,
+    )
+    monkeypatch.setattr(
+        "sts_combat_rl.commands.lightspeed_cli.run_a20_battle_start_coverage_from_paths",
+        lambda **kwargs: FakeCoverageReport(),
+    )
+    monkeypatch.setattr(
+        "sts_combat_rl.commands.lightspeed_cli.format_a20_battle_start_coverage_report",
+        lambda report: "A20 battle-start coverage report\ncommand passed: no",
+    )
+
+    assert (
+        main(
+            [
+                "--lightspeed-a20-battle-start-coverage",
+                str(tmp_path / "pool.jsonl"),
+                "--log-file",
+                "-",
+            ]
+        )
+        == 1
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "command passed: no" in captured.err
 
 
 def test_cli_oracle_search_teacher_and_fixed_eval_routes_write_stderr_only(
