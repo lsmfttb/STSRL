@@ -1,6 +1,6 @@
 # T020: sts_lightspeed Fork Maintenance Line
 
-Status: `READY`.
+Status: `DONE`.
 
 ## Objective
 

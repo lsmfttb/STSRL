@@ -1,6 +1,6 @@
 # Current Status
 
-Last reviewed: 2026-06-24.
+Last reviewed: 2026-06-25.
 
 This document describes the latest `main` branch only. Results from local
 artifacts, old branches, or unmerged pull requests do not count as implemented
@@ -12,10 +12,9 @@ Build the foundations for an A20 battle agent. Search remains the intended
 primary battle policy, and learned policies or values are expected to guide or
 accelerate search. Non-combat decisions remain outside the trainable agent.
 
-The published foundation backlog is complete: T001--T006 and T008--T018 are
-`DONE`, T007 is `CANCELLED` because it was superseded by T014--T016, and T019
-is `DONE`. The current published `READY` maintenance task is T020, for
-`sts_lightspeed` fork integration-line maintenance.
+The published foundation and maintenance backlog is complete: T001--T006 and
+T008--T020 are `DONE`, and T007 is `CANCELLED` because it was superseded by
+T014--T016. There is currently no published STSRL repository `READY` task.
 
 ## Implemented On Main
 
@@ -288,12 +287,13 @@ already supports them.
 
 ## Immediate Work
 
-Executable task specifications live in [`tasks/`](tasks/README.md). The
-currently published `READY` task is:
+Executable task specifications live in [`tasks/`](tasks/README.md). There is
+currently no published STSRL repository `READY` task.
 
-1. [`T020`](tasks/T020-sts-lightspeed-fork-maintenance.md): `sts_lightspeed`
-   fork maintenance-line cleanup, establishing one active fork integration
-   branch while preserving exact source-manifest commit pinning.
+The immediate external-fork follow-up is
+[`lsmfttb/sts_lightspeed#7`](https://github.com/lsmfttb/sts_lightspeed/issues/7):
+archive historical STSRL task branches after creating provenance tags, while
+preserving `stsrl/main` as the sole active integration branch.
 
 Recommended later task areas:
 
