@@ -1,6 +1,6 @@
 # T022: A20 Oracle Teacher Dataset Report
 
-Status: `READY`.
+Status: `DONE` via PR #22, merged 2026-06-25.
 
 ## Objective
 

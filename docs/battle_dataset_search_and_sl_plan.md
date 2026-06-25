@@ -5,8 +5,8 @@ development, and the separately evaluated SL-enabled branch. Repository-wide
 rules come from [`project_architecture.md`](project_architecture.md). Current
 implementation status comes from [`current_status.md`](current_status.md).
 
-The published foundation, maintenance, and first coverage-measurement backlog
-is complete through T021 except for cancelled T007, whose scope was superseded
+The published foundation, maintenance, and first research-measurement backlog
+is complete through T022 except for cancelled T007, whose scope was superseded
 by T014--T016. New implementation work should start only after the main
 maintainer publishes a new focused task.
 
@@ -331,8 +331,8 @@ training and evaluation.
 Status: T009 completed optional PyTorch policy/value plumbing and diagnostic
 training reports. T021 completed the current coverage-measurement report used
 to decide what A20 data and distribution gaps remain before broad training or
-model-guided search work starts. T022 is the published follow-up to make
-Oracle-like teacher dataset coverage, source linkage, and search statistics
+model-guided search work starts. T022 completed the current Oracle-like teacher
+dataset report, making teacher coverage, source linkage, and search statistics
 auditable before teacher scale-up feeds model-guided search. Model-guided
 search integration and meaningful held-out or fixed-cohort improvement remain
 pending meaningful coverage.

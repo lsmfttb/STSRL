@@ -12,11 +12,10 @@ Build the foundations for an A20 battle agent. Search remains the intended
 primary battle policy, and learned policies or values are expected to guide or
 accelerate search. Non-combat decisions remain outside the trainable agent.
 
-The published foundation, maintenance, and first coverage-measurement backlog
-is complete: T001--T006 and T008--T021 are `DONE`, and T007 is `CANCELLED`
-because it was superseded by T014--T016. The current published STSRL
-repository `READY` task is T022, for A20 Oracle-like teacher dataset reporting
-and source-coverage linkage.
+The published foundation, maintenance, and first research-measurement backlog
+is complete: T001--T006 and T008--T022 are `DONE`, and T007 is `CANCELLED`
+because it was superseded by T014--T016. There is no currently published STSRL
+repository `READY` task.
 
 ## Implemented On Main
 
@@ -169,12 +168,25 @@ and source-coverage linkage.
   separate from repeated sampled rows and constructed supplements; restore
   failures and constructed-source provenance mismatches fail closed while
   ordinary under-coverage remains reportable.
+- Versioned Oracle-like teacher dataset reporting
+  (`oracle-teacher-dataset-report-v1`) through
+  `--oracle-teacher-dataset-report`. The report loads current or migrated
+  Oracle teacher JSONL artifacts, optionally links them to a natural
+  battle-start source pool and T021 coverage report, records artifact/source
+  identities, search statistics, root visit targets, public-context and
+  structured-outcome availability, and explicit
+  `full_simulator_state_oracle_like` provenance. Unique natural source
+  coverage stays separate from repeated teacher rows and root rows. Invalid
+  artifacts, missing or mixed information regimes, malformed source identities,
+  source-pool mismatches, and T021 source-identity mismatches fail closed;
+  ordinary smoke-scale under-coverage is reported rather than treated as a
+  command failure.
 - A training-readiness report that validates plumbing only. It does not train a
   model or demonstrate policy strength.
 
 ### Tests And Runtime Evidence
 
-- `489` tests pass on Windows Python as of this review. In an uninstalled
+- `498` tests pass on Windows Python as of this review. In an uninstalled
   checkout, set `PYTHONPATH=src` (or install the package) before invoking the
   CLI directly.
 - The two CommunicationMod fixture smokes pass.
@@ -296,6 +308,20 @@ and source-coverage linkage.
   training gate correctly remained closed: A20 Act 1 was below the record and
   unique-source thresholds and constructed rows lacked constructed-context and
   terminal-outcome labels; A20 Acts 2--4 had zero rows.
+- T022 validates the Oracle-like teacher dataset report. The accepted local
+  gate passed 498 Windows tests, compileall, ruff check, ruff format check,
+  both CommunicationMod fixture smokes, focused teacher-report, teacher
+  artifact, source-pool linkage, T021 coverage linkage, schema-failure, and
+  CLI tests. The accepted WSL smoke-scale report chain at A20 produced 41
+  natural starts, 41 teacher rows, 41 unique natural teacher sources, 400 root
+  rows, 820 root visits/search simulations, and 11,985 native simulator steps.
+  The report loaded schema `oracle-teacher-dataset-report-v1` version 1,
+  matched the supplied source pool and T021 natural-pool identity, reported no
+  metadata mismatches, and kept the evidence boundary explicit:
+  `full_simulator_state_oracle_like`, not normal-information, live-game, broad
+  training, or controller-strength evidence. The T021-linked broad-training
+  gate correctly remained closed because the smoke-scale data was Act 1 only
+  and below the required per-act thresholds.
 
 ## Not Implemented On Main
 
@@ -312,13 +338,10 @@ already supports them.
 
 ## Immediate Work
 
-Executable task specifications live in [`tasks/`](tasks/README.md). The
-currently published STSRL repository `READY` task is:
-
-1. [`T022`](tasks/T022-a20-oracle-teacher-dataset-report.md): A20
-   Oracle-like teacher dataset reporting, source-pool linkage, optional T021
-   coverage linkage, search statistics, and explicit
-   `full_simulator_state_oracle_like` provenance.
+Executable task specifications live in [`tasks/`](tasks/README.md). There is
+no currently published STSRL repository `READY` task. The next repository
+implementation branch must wait for the main maintainer to publish a focused
+task.
 
 The immediate external-fork follow-up is
 [`lsmfttb/sts_lightspeed#7`](https://github.com/lsmfttb/sts_lightspeed/issues/7):
@@ -328,11 +351,10 @@ operational fork maintenance and does not block STSRL repository work.
 
 Recommended later task areas:
 
-1. Model-guided search integration: after T022 gives teacher-dataset reporting
-   and source linkage, connect T009 policy/value checkpoints to a
-   versioned search controller, report compute/model-call telemetry, and
-   compare against fixed cohorts without claiming promotion from raw model
-   diagnostics.
+1. Model-guided search integration: use T022 teacher-dataset reporting and
+   source linkage to connect T009 policy/value checkpoints to a versioned
+   search controller, report compute/model-call telemetry, and compare against
+   fixed cohorts without claiming promotion from raw model diagnostics.
 2. Fixed A20 benchmark reporting: compare scripted/preferred, Oracle search,
    raw model, and model-guided search only after the relevant controllers and
    datasets exist, keeping natural-weighted, encounter-macro, and
