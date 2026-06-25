@@ -5,6 +5,9 @@ from __future__ import annotations
 import argparse
 import sys
 
+from sts_combat_rl.commands.a20_coverage import (
+    run_a20_battle_start_coverage_from_paths,
+)
 from sts_combat_rl.commands.checkpoint_pool import (
     collect_checkpoint_pool,
     run_checkpoint_verification,
@@ -12,6 +15,7 @@ from sts_combat_rl.commands.checkpoint_pool import (
     write_checkpoint_pool,
 )
 from sts_combat_rl.commands.cli_policies import (
+    build_pytorch_gate_config,
     build_non_combat_driver_policy,
     build_online_sim_policy,
     build_sim_policy,
@@ -43,6 +47,9 @@ from sts_combat_rl.commands.resource_outcome import (
 from sts_combat_rl.sim.action_space import (
     ActionSpaceConfig,
     choose_deterministic_action,
+)
+from sts_combat_rl.sim.a20_battle_start_coverage import (
+    format_a20_battle_start_coverage_report,
 )
 from sts_combat_rl.sim.batching import (
     build_decision_batch,
@@ -166,6 +173,7 @@ _LIGHTSPEED_BOOL_FLAGS = (
 _LIGHTSPEED_PATH_FLAGS = (
     "lightspeed_battle_start_pool",
     "lightspeed_battle_start_pool_restore",
+    "lightspeed_a20_battle_start_coverage",
     "lightspeed_fixed_battle_evaluation",
     "lightspeed_oracle_search_teacher",
     "lightspeed_oracle_fixed_evaluation",
@@ -335,6 +343,25 @@ def run_lightspeed_command(args: argparse.Namespace) -> int:
             print(format_battle_start_pool_restore_report(report), file=sys.stderr)
             if not report.restore_ok:
                 return 1
+        elif args.lightspeed_a20_battle_start_coverage is not None:
+            report = run_a20_battle_start_coverage_from_paths(
+                adapter_factory=lambda: LightSpeedAdapter(
+                    seed=args.sim_seed,
+                    ascension=20,
+                ),
+                pool_path=args.lightspeed_a20_battle_start_coverage,
+                constructed_artifact_path=args.a20_coverage_constructed_artifact,
+                output_path=args.a20_coverage_output,
+                restore_limit=args.battle_start_restore_limit,
+                sample_count=args.battle_start_sample_count,
+                sampling_seed=args.sim_seed,
+                structural_fraction=args.battle_start_structural_fraction,
+                gate_config=build_pytorch_gate_config(args),
+                gate_override=args.pytorch_gate_override,
+            )
+            print(format_a20_battle_start_coverage_report(report), file=sys.stderr)
+            if not report.command_passed:
+                return 1
         elif args.lightspeed_fixed_battle_evaluation is not None:
             battle_policy = build_online_sim_policy(
                 args.sim_policy,
@@ -427,7 +454,7 @@ def run_lightspeed_command(args: argparse.Namespace) -> int:
                 return 1
         else:
             return _run_lightspeed_smoke_command(args, adapter, action_space)
-    except (RuntimeError, ValueError) as exc:
+    except (OSError, RuntimeError, ValueError) as exc:
         print(f"failed to run lightspeed simulator smoke: {exc}", file=sys.stderr)
         return 2
     return 0

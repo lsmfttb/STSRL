@@ -242,6 +242,16 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     input_group.add_argument(
+        "--lightspeed-a20-battle-start-coverage",
+        type=Path,
+        metavar="POOL_PATH",
+        help=(
+            "Load a portable A20 natural battle-start pool, optionally combine "
+            "constructed supplements and sampled training weight, verify restores, "
+            "and report T009 broad-training gate gaps."
+        ),
+    )
+    input_group.add_argument(
         "--lightspeed-fixed-battle-evaluation",
         type=Path,
         metavar="POOL_PATH",
@@ -466,6 +476,21 @@ def build_parser() -> argparse.ArgumentParser:
             "--lightspeed-constructed-battle-start-audit instead of collecting "
             "a fresh bounded pool."
         ),
+    )
+    parser.add_argument(
+        "--a20-coverage-constructed-artifact",
+        type=Path,
+        metavar="PATH",
+        help=(
+            "Load a constructed battle-start supplement artifact for "
+            "--lightspeed-a20-battle-start-coverage."
+        ),
+    )
+    parser.add_argument(
+        "--a20-coverage-output",
+        type=Path,
+        metavar="PATH",
+        help=("Write the --lightspeed-a20-battle-start-coverage JSON report to PATH."),
     )
     parser.add_argument(
         "--fixed-evaluation-cohort",
