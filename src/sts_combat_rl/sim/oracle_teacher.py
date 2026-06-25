@@ -524,7 +524,7 @@ def build_oracle_teacher_dataset_report(
         )
         model_calls = _sum_optional_int(
             model_calls,
-            _optional_int_value(report.get("model_calls")),
+            _model_calls_from_search_report(report),
         )
         wall_clock = _sum_optional_float(
             wall_clock,
@@ -760,6 +760,15 @@ def _optional_float_value(value: Any) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
     return float(value)
+
+
+def _model_calls_from_search_report(report: Mapping[str, Any]) -> int | None:
+    telemetry = report.get("decision_telemetry")
+    if isinstance(telemetry, Mapping):
+        value = _optional_int_value(telemetry.get("model_calls"))
+        if value is not None:
+            return value
+    return _optional_int_value(report.get("model_calls"))
 
 
 def _sum_optional_int(current: int | None, value: int | None) -> int | None:

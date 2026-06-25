@@ -67,6 +67,10 @@ from sts_combat_rl.sim.resource_outcome import (
     legacy_unavailable_battle_resource_outcome,
     unavailable_battle_resource_outcome,
 )
+from sts_combat_rl.sim.search_telemetry import (
+    iter_search_decision_telemetry_dicts,
+    summarize_search_decision_telemetry_dicts,
+)
 
 
 FIXED_EVALUATION_REPORT_FORMAT_VERSION = 3
@@ -641,6 +645,21 @@ def _evaluate_one_battle(
         structured_outcome_status, structured_outcome = (
             unavailable_battle_resource_outcome(structured_outcome_unavailable_reason)
         )
+
+    if controller_telemetry:
+        telemetry_records = iter_search_decision_telemetry_dicts(controller_telemetry)
+        if telemetry_records:
+            try:
+                controller_telemetry["search_telemetry_summary"] = (
+                    summarize_search_decision_telemetry_dicts(
+                        telemetry_records
+                    ).to_dict()
+                )
+            except ValueError as exc:
+                controller_telemetry.setdefault(
+                    "search_telemetry_problems",
+                    [],
+                ).append(str(exc))
 
     return SingleBattleEvaluationResult(
         cohort_index=cohort_record.cohort_index,

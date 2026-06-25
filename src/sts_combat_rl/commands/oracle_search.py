@@ -26,6 +26,11 @@ from sts_combat_rl.sim.oracle_teacher import (
     dump_oracle_teacher_dataset_jsonl,
     format_oracle_teacher_dataset_report,
 )
+from sts_combat_rl.sim.search_telemetry import (
+    format_search_telemetry_summary,
+    iter_search_decision_telemetry_dicts,
+    summarize_search_decision_telemetry_dicts,
+)
 
 
 @dataclass(frozen=True)
@@ -216,6 +221,33 @@ def format_oracle_fixed_evaluation_comparison(
 
 
 def _format_oracle_evaluation_telemetry(report: FixedEvaluationReport) -> str:
+    telemetry_records: list[dict[str, Any]] = []
+    for result in report.battle_results:
+        telemetry_records.extend(
+            iter_search_decision_telemetry_dicts(
+                result.controller_compute_telemetry or {}
+            )
+        )
+    if telemetry_records:
+        try:
+            return format_search_telemetry_summary(
+                summarize_search_decision_telemetry_dicts(telemetry_records),
+                title="Oracle search compute telemetry",
+            )
+        except ValueError as exc:
+            return "\n".join(
+                [
+                    "Oracle search compute telemetry",
+                    f"versioned telemetry summary error: {exc}",
+                    _format_legacy_oracle_evaluation_telemetry(report),
+                ]
+            )
+    return _format_legacy_oracle_evaluation_telemetry(report)
+
+
+def _format_legacy_oracle_evaluation_telemetry(
+    report: FixedEvaluationReport,
+) -> str:
     decision_reports = list(_iter_oracle_decision_reports(report))
     mean_values: list[float] = []
     best_values: list[float] = []

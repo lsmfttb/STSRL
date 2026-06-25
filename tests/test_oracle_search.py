@@ -10,6 +10,7 @@ from sts_combat_rl.sim.oracle_search import (
     ORACLE_SEARCH_SCHEMA_ID,
     OracleSearchController,
     build_oracle_search_report,
+    oracle_search_decision_telemetry,
     select_oracle_root_action,
 )
 from sts_combat_rl.sim.policy import DecisionContext
@@ -105,6 +106,13 @@ def test_oracle_root_mapping_selects_mean_and_visit_targets() -> None:
     assert report.soft_visit_target == pytest.approx((0.7, 0.3))
     assert report.native_simulator_steps == 123
     assert report.model_calls is None
+    telemetry = oracle_search_decision_telemetry(report)
+    assert telemetry.schema_id == "search-decision-telemetry-v1"
+    assert telemetry.model_calls == 0
+    assert telemetry.root_value_spread == pytest.approx(0.1)
+    assert telemetry.root_decision_gap == pytest.approx(0.1)
+    assert telemetry.unavailable_fields["tree_depth"].startswith("native")
+    assert report.to_dict()["decision_telemetry"]["model_calls"] == 0
     assert (
         select_oracle_root_action(
             report, selection_rule="highest_mean"
@@ -213,7 +221,11 @@ def test_oracle_controller_publishes_contract_and_telemetry() -> None:
     assert decision.metadata["oracle_search_decision_count"] == 1
     assert decision.metadata["oracle_search_root_visits"] == 10
     assert decision.metadata["oracle_search_native_simulator_steps"] == 123
-    assert decision.metadata["oracle_search_model_calls"] is None
+    assert decision.metadata["oracle_search_model_calls"] == 0
+    telemetry_records = decision.metadata["search_decision_telemetry"]
+    assert telemetry_records[0]["schema_id"] == "search-decision-telemetry-v1"
+    assert telemetry_records[0]["selection_rule"] == "highest_mean"
+    assert telemetry_records[0]["selected_legal_action_index"] == 1
 
 
 def test_oracle_controller_raises_on_invalid_root_mapping() -> None:

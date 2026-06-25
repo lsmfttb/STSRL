@@ -502,7 +502,7 @@ def _search_statistics_summary(records: Sequence[OracleTeacherRow]) -> dict[str,
         )
         model_calls = _sum_optional_int(
             model_calls,
-            _optional_int(report.get("model_calls")),
+            _model_calls_from_search_report(report),
         )
         wall_clock = _sum_optional_float(
             wall_clock,
@@ -919,6 +919,15 @@ def _format_model_calls(value: Any) -> str:
     if value is None:
         return "none (native search)"
     return _format_optional(value)
+
+
+def _model_calls_from_search_report(report: Mapping[str, Any]) -> int | None:
+    telemetry = report.get("decision_telemetry")
+    if isinstance(telemetry, Mapping):
+        value = _optional_int(telemetry.get("model_calls"))
+        if value is not None:
+            return value
+    return _optional_int(report.get("model_calls"))
 
 
 def _append_counter(
