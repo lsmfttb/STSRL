@@ -15,7 +15,8 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
 The published foundation, maintenance, and first research-measurement backlog
 is complete: T001--T006 and T008--T024 are `DONE`, and T007 is `CANCELLED`
 because it was superseded by T014--T016. The current published milestone is
-M1: model-guided Oracle search sandbox, with T025 and T026 `READY`.
+M1: model-guided Oracle search sandbox. T025 is `DONE`, and T026 is the
+current `READY` task.
 
 ## Implemented On Main
 
@@ -210,12 +211,23 @@ M1: model-guided Oracle search sandbox, with T025 and T026 `READY`.
   `record.policy_target`, rejects mixed policy target kinds, and stores policy
   target kind/source counts in checkpoint provenance. This is diagnostic
   search-guidance supervision only, not a controller or model-strength result.
+- Versioned search-decision telemetry (`search-decision-telemetry-v1`) and
+  aggregate summaries (`search-telemetry-summary-v1`) for current Oracle-like
+  native search and fixed restored-battle evaluation. Current Oracle baseline
+  decisions now report requested native playout budget, root visits, legal and
+  root action counts, native simulator steps, wall-clock time, root value
+  spread/gap where available, unsearched/unmapped counts, model calls as zero,
+  and explicit unavailable native fields such as tree depth and value
+  uncertainty. The telemetry is attached to Oracle controller metadata,
+  fixed-evaluation per-battle compute telemetry, Oracle teacher artifacts, and
+  formatted fixed-evaluation summaries without changing action selection or
+  adding model-guided search.
 - A training-readiness report that validates plumbing only. It does not train a
   model or demonstrate policy strength.
 
 ### Tests And Runtime Evidence
 
-- `517` tests pass on Windows Python as of this review. In an uninstalled
+- `521` tests pass on Windows Python as of this review. In an uninstalled
   checkout, set `PYTHONPATH=src` (or install the package) before invoking the
   CLI directly.
 - The two CommunicationMod fixture smokes pass.
@@ -392,6 +404,22 @@ M1: model-guided Oracle search sandbox, with T025 and T026 `READY`.
   `oracle_teacher_row.teacher_action` provenance; this remains diagnostic
   Oracle-like supervision, not normal-information or controller-strength
   evidence.
+- T025 validates the search telemetry baseline. The accepted local gate passed
+  521 Windows tests, compileall, ruff check, ruff format check, both
+  CommunicationMod fixture smokes, focused telemetry/Oracle/fixed-evaluation
+  and CLI tests, and diff whitespace checks. The maintainer review reran the
+  WSL source verifier against pinned integration commit
+  `242344c57c17c784708a6f072c905febc3f96527`, then ran a smoke WSL chain that
+  generated 4 A20 Act 1 natural battle starts, selected a 4-battle fixed
+  cohort, and evaluated Oracle search at 5 native simulations. The
+  highest-mean telemetry summary reported `search-decision-telemetry-v1`,
+  67 decisions, 335 requested simulations/root visits, 3,307 native simulator
+  steps, model calls total 0, 0 root mapping failures, and explicit unavailable
+  `tree_depth` and `value_uncertainty`. The most-visits diagnostic reported
+  the same schema with 60 decisions, 300 requested simulations/root visits,
+  2,984 native simulator steps, model calls total 0, and 0 root mapping
+  failures. The run is telemetry plumbing evidence only, not controller
+  promotion or A20 strength evidence.
 
 ## Not Implemented On Main
 
@@ -414,11 +442,9 @@ nearer target is to use T024 teacher-targeted checkpoint provenance in a
 versioned model-guided Oracle-like search controller and fixed-cohort
 comparison, with complete telemetry and no promotion claims.
 
-The currently published `READY` tasks are:
+The currently published `READY` task is:
 
-1. [`T025`](tasks/T025-search-telemetry-baseline.md): add shared search
-   telemetry and baseline cost reporting for current Oracle-like search.
-2. [`T026`](tasks/T026-guidance-checkpoint-inference-contract.md): add the
+1. [`T026`](tasks/T026-guidance-checkpoint-inference-contract.md): add the
    checkpoint inference/scoring contract needed before any controller consumes
    T009/T024 checkpoints.
 
@@ -427,9 +453,9 @@ The rest of M1 is already specified but intentionally blocked:
 - [`T027`](tasks/T027-teacher-guidance-calibration-report.md): offline
   checkpoint-vs-teacher calibration, blocked on T026.
 - [`T028`](tasks/T028-model-guided-oracle-search-controller.md): first
-  model-guided Oracle search controller, blocked on T025--T027.
+  model-guided Oracle search controller, blocked on T026 and T027.
 - [`T029`](tasks/T029-fixed-cohort-model-guided-search-comparison.md):
-  fixed-cohort comparison, blocked on T025 and T028.
+  fixed-cohort comparison, blocked on T028.
 - [`T030`](tasks/T030-m1-model-guided-search-sandbox-synthesis.md): milestone
   synthesis and next task batch, blocked on T027 and T029.
 

@@ -244,7 +244,8 @@ errors and fixed-cohort performance from sufficient A20 coverage.
 
 ### N2: Model-Guided Oracle Search Sandbox
 
-Status: M1 task batch published as T025--T030.
+Status: M1 task batch published as T025--T030. T025 search telemetry is
+complete; T026 checkpoint inference is the current READY task.
 
 Use the Oracle regime to validate priors, leaf values, uncertainty, and search
 instrumentation. Exit when model guidance improves the fixed Oracle curve at
@@ -272,8 +273,7 @@ Retain only auxiliary targets that improve normal-information evaluation.
 
 ## Immediate Design Work
 
-1. Execute the published M1 task batch T025--T030, starting with
-   [`T025`](tasks/T025-search-telemetry-baseline.md) and
+1. Continue the published M1 task batch with
    [`T026`](tasks/T026-guidance-checkpoint-inference-contract.md), without
    treating hidden-state teacher data or smoke-scale under-coverage as
    normal-information or broad-training evidence.

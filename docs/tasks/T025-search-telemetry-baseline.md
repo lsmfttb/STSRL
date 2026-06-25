@@ -1,6 +1,6 @@
 # T025: Search Telemetry Baseline
 
-Status: `READY`.
+Status: `DONE` via PR #25, merged 2026-06-25.
 
 ## Objective
 

@@ -32,7 +32,7 @@ starting work.
 | T022 | DONE | [A20 Oracle teacher dataset report](T022-a20-oracle-teacher-dataset-report.md) | T004, T005, T006, T009, T012, T016, T017, T018, T020, T021 | Oracle-like teacher dataset coverage and source linkage |
 | T023 | DONE | [A20 Oracle teacher dataset scale-up](T023-a20-oracle-teacher-dataset-scale-up.md) | T004, T005, T006, T009, T012, T016, T017, T018, T020, T021, T022 | structured Oracle-like teacher scale-up and budget stability |
 | T024 | DONE | [Oracle teacher search-guidance training bridge](T024-oracle-teacher-search-guidance-training-bridge.md) | T003, T004, T006, T009, T011, T012, T016, T017, T018, T020, T021, T022, T023 | teacher-targeted trainer input and diagnostic checkpoint |
-| T025 | READY | [Search telemetry baseline](T025-search-telemetry-baseline.md) | T005, T006, T009, T017, T020, T024 | shared search telemetry and baseline cost reporting |
+| T025 | DONE | [Search telemetry baseline](T025-search-telemetry-baseline.md) | T005, T006, T009, T017, T020, T024 | shared search telemetry and baseline cost reporting |
 | T026 | READY | [Guidance checkpoint inference contract](T026-guidance-checkpoint-inference-contract.md) | T009, T011, T016, T018, T024 | checkpoint scorer contract for search guidance |
 | T027 | BLOCKED | [Teacher guidance calibration report](T027-teacher-guidance-calibration-report.md) | T026 | offline checkpoint-vs-teacher calibration |
 | T028 | BLOCKED | [Model-guided Oracle search controller](T028-model-guided-oracle-search-controller.md) | T025, T026, T027 | first versioned model-guided Oracle-like search controller |
@@ -56,12 +56,11 @@ document update before acceptance.
 
 The currently published `READY` queue is:
 
-- T025: Search telemetry baseline.
 - T026: Guidance checkpoint inference contract.
 
-These two tasks are intentionally parallel-ready. They are the independent
-entry points for M1 and may be implemented in separate worktrees and pull
-requests based on latest `main`.
+T025 is complete. T026 remains the independent checkpoint-inference entry point
+for M1 and can proceed in its own worktree and pull request based on latest
+`main`.
 
 ## M1: Model-Guided Oracle Search Sandbox
 
@@ -74,8 +73,8 @@ broad-training, or promoted controller-strength evidence.
 Dependency chain:
 
 ```text
-T025 search telemetry baseline --+
-                                 +--> T028 model-guided Oracle search --> T029 fixed comparison --+
+T025 search telemetry baseline (done) --+
+                                        +--> T028 model-guided Oracle search --> T029 fixed comparison --+
 T026 checkpoint inference --> T027 teacher calibration ------------------------------------------+
                                                                                                   +--> T030 synthesis
 ```
