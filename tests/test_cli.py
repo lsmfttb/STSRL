@@ -80,6 +80,40 @@ def test_cli_parser_accepts_a20_coverage_flags(tmp_path) -> None:
     assert args.pytorch_gate_min_records == 4
 
 
+def test_cli_parser_accepts_oracle_teacher_scaleup_flags(tmp_path) -> None:
+    pool_path = tmp_path / "pool.jsonl"
+    output_dir = tmp_path / "scaleup"
+    coverage_path = tmp_path / "coverage.json"
+
+    args = build_parser().parse_args(
+        [
+            "--lightspeed-a20-oracle-teacher-scaleup",
+            str(pool_path),
+            "--oracle-teacher-scaleup-output-dir",
+            str(output_dir),
+            "--oracle-teacher-scaleup-budgets",
+            "20",
+            "50",
+            "--oracle-teacher-scaleup-source-limit",
+            "8",
+            "--oracle-teacher-scaleup-seed",
+            "3",
+            "--oracle-teacher-scaleup-coverage-report",
+            str(coverage_path),
+            "--oracle-teacher-scaleup-root-selection",
+            "most_visits",
+        ]
+    )
+
+    assert args.lightspeed_a20_oracle_teacher_scaleup == pool_path
+    assert args.oracle_teacher_scaleup_output_dir == output_dir
+    assert args.oracle_teacher_scaleup_budgets == [20, 50]
+    assert args.oracle_teacher_scaleup_source_limit == 8
+    assert args.oracle_teacher_scaleup_seed == 3
+    assert args.oracle_teacher_scaleup_coverage_report == coverage_path
+    assert args.oracle_teacher_scaleup_root_selection == "most_visits"
+
+
 def test_cli_parser_accepts_oracle_teacher_report_flags(tmp_path) -> None:
     teacher_path = tmp_path / "teacher.jsonl"
     pool_path = tmp_path / "pool.jsonl"
@@ -692,6 +726,92 @@ def test_cli_a20_coverage_returns_nonzero_for_command_problem(
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "command passed: no" in captured.err
+
+
+def test_cli_oracle_teacher_scaleup_routes_to_lightspeed_command(
+    monkeypatch,
+    tmp_path,
+    capsys,
+) -> None:
+    calls: dict[str, object] = {}
+
+    class FakeScaleupManifest:
+        command_passed = True
+
+    def fake_scaleup(**kwargs):
+        calls.update(kwargs)
+        return FakeScaleupManifest()
+
+    monkeypatch.setattr(
+        "sts_combat_rl.commands.lightspeed_cli.LightSpeedAdapter",
+        FakeLightSpeedSmokeAdapter,
+    )
+    monkeypatch.setattr(
+        "sts_combat_rl.commands.lightspeed_cli.run_oracle_teacher_scaleup_from_paths",
+        fake_scaleup,
+    )
+    monkeypatch.setattr(
+        "sts_combat_rl.commands.lightspeed_cli.format_oracle_teacher_scaleup_command",
+        lambda manifest: "A20 Oracle teacher scale-up\ncommand passed: yes",
+    )
+    pool_path = tmp_path / "pool.jsonl"
+    output_dir = tmp_path / "scaleup"
+    coverage_path = tmp_path / "coverage.json"
+
+    assert (
+        main(
+            [
+                "--lightspeed-a20-oracle-teacher-scaleup",
+                str(pool_path),
+                "--oracle-teacher-scaleup-output-dir",
+                str(output_dir),
+                "--oracle-teacher-scaleup-budgets",
+                "20",
+                "50",
+                "--oracle-teacher-scaleup-source-limit",
+                "4",
+                "--oracle-teacher-scaleup-seed",
+                "9",
+                "--oracle-teacher-scaleup-coverage-report",
+                str(coverage_path),
+                "--oracle-teacher-scaleup-root-selection",
+                "most_visits",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 0
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert calls["adapter_factory"]().ascension == 20
+    assert calls["pool_path"] == pool_path
+    assert calls["output_dir"] == output_dir
+    assert calls["budgets"] == [20, 50]
+    assert calls["source_limit"] == 4
+    assert calls["selection_seed"] == 9
+    assert calls["coverage_report_path"] == coverage_path
+    assert calls["root_selection_rule"] == "most_visits"
+    assert "A20 Oracle teacher scale-up" in captured.err
+
+
+def test_cli_oracle_teacher_scaleup_requires_output_dir(capsys) -> None:
+    assert (
+        main(
+            [
+                "--lightspeed-a20-oracle-teacher-scaleup",
+                "pool.jsonl",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 2
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "requires --oracle-teacher-scaleup-output-dir" in captured.err
 
 
 def test_cli_oracle_search_teacher_and_fixed_eval_routes_write_stderr_only(

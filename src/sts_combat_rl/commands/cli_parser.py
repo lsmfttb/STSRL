@@ -252,6 +252,16 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     input_group.add_argument(
+        "--lightspeed-a20-oracle-teacher-scaleup",
+        type=Path,
+        metavar="POOL_PATH",
+        help=(
+            "Load one A20 natural battle-start pool, select a fixed source set, "
+            "collect Oracle-like teacher datasets for multiple native-search "
+            "budgets, write T022 reports, and emit a scale-up manifest."
+        ),
+    )
+    input_group.add_argument(
         "--lightspeed-fixed-battle-evaluation",
         type=Path,
         metavar="POOL_PATH",
@@ -548,6 +558,50 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         metavar="PATH",
         help="Write --oracle-teacher-dataset-report JSON output to PATH.",
+    )
+    parser.add_argument(
+        "--oracle-teacher-scaleup-output-dir",
+        type=Path,
+        metavar="DIR",
+        help=(
+            "Write --lightspeed-a20-oracle-teacher-scaleup teacher JSONL, "
+            "T022 reports, and manifest artifacts under DIR."
+        ),
+    )
+    parser.add_argument(
+        "--oracle-teacher-scaleup-budgets",
+        type=int,
+        nargs="+",
+        default=[20, 50, 100],
+        metavar="N",
+        help="Native search budgets for A20 Oracle teacher scale-up.",
+    )
+    parser.add_argument(
+        "--oracle-teacher-scaleup-source-limit",
+        type=int,
+        metavar="N",
+        help="Seeded maximum number of natural source starts selected for scale-up.",
+    )
+    parser.add_argument(
+        "--oracle-teacher-scaleup-seed",
+        type=int,
+        default=1,
+        help="Seed used for deterministic source limiting in teacher scale-up.",
+    )
+    parser.add_argument(
+        "--oracle-teacher-scaleup-coverage-report",
+        type=Path,
+        metavar="COVERAGE_JSON",
+        help=(
+            "Optional T021 A20 coverage report linked to every generated T022 "
+            "teacher report."
+        ),
+    )
+    parser.add_argument(
+        "--oracle-teacher-scaleup-root-selection",
+        choices=ORACLE_ROOT_SELECTION_RULES,
+        default="highest_mean",
+        help="Oracle root statistic used for scale-up teacher labels.",
     )
     parser.add_argument(
         "--oracle-search-simulations",
