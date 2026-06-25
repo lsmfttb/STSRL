@@ -41,7 +41,7 @@ base commit:  7476a81954020087da31d41d16fddf475746ec2d
 integration:  https://github.com/lsmfttb/sts_lightspeed.git
 branch:       stsrl/main
 ref:          refs/heads/stsrl/main
-commit:       e9f0e7f104ea2bd908ba5b8f6528c240e6c92ad9
+commit:       242344c57c17c784708a6f072c905febc3f96527
 module:       slaythespire.StepSimulator
 ```
 
@@ -58,6 +58,10 @@ Future native STSRL tasks should develop on temporary fork branches, pass
 review in the fork, and then advance `stsrl/main` through a reviewed STSRL
 manifest update that records the new exact commit. Do not rely on local
 unrecorded branch state for repository gates.
+
+The current pinned `stsrl/main` commit advances beyond the old T008 task branch
+only with fork-side maintenance documentation, native-change templates, and an
+API smoke script. It does not change native game or pybind behavior.
 
 Verify the pinned source in a disposable worktree:
 
@@ -85,11 +89,11 @@ cleanup() {
 }
 trap cleanup EXIT
 git -C "$source" fetch https://github.com/lsmfttb/sts_lightspeed.git refs/heads/stsrl/main
-git -C "$source" worktree add --detach "$worktree" e9f0e7f104ea2bd908ba5b8f6528c240e6c92ad9 >/dev/null
+git -C "$source" worktree add --detach "$worktree" 242344c57c17c784708a6f072c905febc3f96527 >/dev/null
 cd "$worktree"
 git submodule update --init json pybind11
 if [ -d "$source/build-py" ]; then
-  mv "$source/build-py" "$source/build-py.pre-t008-$(date +%Y%m%d%H%M%S)"
+  mv "$source/build-py" "$source/build-py.pre-stsrl-main-$(date +%Y%m%d%H%M%S)"
 fi
 cmake -S "$worktree" -B "$source/build-py" -DCMAKE_POLICY_VERSION_MINIMUM=3.5
 cmake --build "$source/build-py" --target slaythespire -j 2

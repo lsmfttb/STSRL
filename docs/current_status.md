@@ -44,7 +44,7 @@ is `DONE`. The current published `READY` maintenance task is T020, for
   `gamerpuppy/sts_lightspeed` base commit
   `7476a81954020087da31d41d16fddf475746ec2d` and the active fork integration
   branch `refs/heads/stsrl/main` at commit
-  `e9f0e7f104ea2bd908ba5b8f6528c240e6c92ad9`. Historical task-shaped fork
+  `242344c57c17c784708a6f072c905febc3f96527`. Historical task-shaped fork
   branches are retained only as provenance, and the old ordered patch stack is
   retained only as retired provenance.
 
@@ -209,7 +209,7 @@ is `DONE`. The current published `READY` maintenance task is T020, for
 - The T017/T018/T008-managed pinned external source integration currently
   validates from manifest `sts-lightspeed-source-manifest-v1` version 1. The
   canonical source verifier builds integration commit
-  `e9f0e7f104ea2bd908ba5b8f6528c240e6c92ad9`,
+  `242344c57c17c784708a6f072c905febc3f96527`,
   initializes `json` and `pybind11`, imports `slaythespire.StepSimulator`, and
   asserts the current native capability inventory including
   `native_battle_search_root`, `native_terminal_resource_identity`, and
