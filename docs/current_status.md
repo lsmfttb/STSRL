@@ -42,9 +42,10 @@ is `DONE`. The current published `READY` maintenance task is T020, for
   (`docs/sts_lightspeed_source_manifest.json`) and canonical source verifier
   (`scripts/verify_lightspeed_source.sh`). The manifest pins upstream
   `gamerpuppy/sts_lightspeed` base commit
-  `7476a81954020087da31d41d16fddf475746ec2d` and integration ref
-  `refs/heads/stsrl/t008-constructed-battle-start-v1` at commit
-  `e9f0e7f104ea2bd908ba5b8f6528c240e6c92ad9`. The old ordered patch stack is
+  `7476a81954020087da31d41d16fddf475746ec2d` and the active fork integration
+  branch `refs/heads/stsrl/main` at commit
+  `242344c57c17c784708a6f072c905febc3f96527`. Historical task-shaped fork
+  branches are retained only as provenance, and the old ordered patch stack is
   retained only as retired provenance.
 
 ### Battle-Agent Data Spike
@@ -208,7 +209,7 @@ is `DONE`. The current published `READY` maintenance task is T020, for
 - The T017/T018/T008-managed pinned external source integration currently
   validates from manifest `sts-lightspeed-source-manifest-v1` version 1. The
   canonical source verifier builds integration commit
-  `e9f0e7f104ea2bd908ba5b8f6528c240e6c92ad9`,
+  `242344c57c17c784708a6f072c905febc3f96527`,
   initializes `json` and `pybind11`, imports `slaythespire.StepSimulator`, and
   asserts the current native capability inventory including
   `native_battle_search_root`, `native_terminal_resource_identity`, and
@@ -376,7 +377,7 @@ repository:    /mnt/d/DeadlycatCoding/STSRL
 
 See [`sts_lightspeed_wsl_spike.md`](sts_lightspeed_wsl_spike.md) for commands
 that are currently available on `main`. The canonical day-to-day source path is
-the pinned integration recorded in
+the active `stsrl/main` fork integration branch pinned in
 [`sts_lightspeed_source_manifest.json`](sts_lightspeed_source_manifest.json)
 and verified by `scripts/verify_lightspeed_source.sh`. Runtime gates use
 `/home/lsmft/stsrl-spikes/sts_lightspeed/build-py` rebuilt from that pinned

@@ -7,9 +7,9 @@
   },
   "integration": {
     "repository_url": "https://github.com/lsmfttb/sts_lightspeed.git",
-    "branch": "stsrl/t008-constructed-battle-start-v1",
-    "ref": "refs/heads/stsrl/t008-constructed-battle-start-v1",
-    "commit": "e9f0e7f104ea2bd908ba5b8f6528c240e6c92ad9"
+    "branch": "stsrl/main",
+    "ref": "refs/heads/stsrl/main",
+    "commit": "242344c57c17c784708a6f072c905febc3f96527"
   },
   "python_module": {
     "name": "slaythespire",

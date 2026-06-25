@@ -39,10 +39,29 @@ The canonical day-to-day source integration is recorded in
 upstream:     https://github.com/gamerpuppy/sts_lightspeed.git
 base commit:  7476a81954020087da31d41d16fddf475746ec2d
 integration:  https://github.com/lsmfttb/sts_lightspeed.git
-ref:          refs/heads/stsrl/t008-constructed-battle-start-v1
-commit:       e9f0e7f104ea2bd908ba5b8f6528c240e6c92ad9
+branch:       stsrl/main
+ref:          refs/heads/stsrl/main
+commit:       242344c57c17c784708a6f072c905febc3f96527
 module:       slaythespire.StepSimulator
 ```
+
+`stsrl/main` is the single active STSRL fork integration branch. It is a
+human-friendly maintenance line for fetches and rebuilds; reproducibility still
+comes from the exact integration commit recorded in the manifest. Historical
+task-shaped fork branches, including `stsrl/t006-oracle-search-teacher-v1`,
+`stsrl/t017-current-native-surface-v1`,
+`stsrl/t018-terminal-resource-identity-v1`, and
+`stsrl/t008-constructed-battle-start-v1`, are retained only as provenance and
+are not normal build inputs.
+
+Future native STSRL tasks should develop on temporary fork branches, pass
+review in the fork, and then advance `stsrl/main` through a reviewed STSRL
+manifest update that records the new exact commit. Do not rely on local
+unrecorded branch state for repository gates.
+
+The current pinned `stsrl/main` commit advances beyond the old T008 task branch
+only with fork-side maintenance documentation, native-change templates, and an
+API smoke script. It does not change native game or pybind behavior.
 
 Verify the pinned source in a disposable worktree:
 
@@ -69,12 +88,12 @@ cleanup() {
   git -C "$source" worktree prune >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
-git -C "$source" fetch https://github.com/lsmfttb/sts_lightspeed.git refs/heads/stsrl/t008-constructed-battle-start-v1
-git -C "$source" worktree add --detach "$worktree" e9f0e7f104ea2bd908ba5b8f6528c240e6c92ad9 >/dev/null
+git -C "$source" fetch https://github.com/lsmfttb/sts_lightspeed.git refs/heads/stsrl/main
+git -C "$source" worktree add --detach "$worktree" 242344c57c17c784708a6f072c905febc3f96527 >/dev/null
 cd "$worktree"
 git submodule update --init json pybind11
 if [ -d "$source/build-py" ]; then
-  mv "$source/build-py" "$source/build-py.pre-t008-$(date +%Y%m%d%H%M%S)"
+  mv "$source/build-py" "$source/build-py.pre-stsrl-main-$(date +%Y%m%d%H%M%S)"
 fi
 cmake -S "$worktree" -B "$source/build-py" -DCMAKE_POLICY_VERSION_MINIMUM=3.5
 cmake --build "$source/build-py" --target slaythespire -j 2
