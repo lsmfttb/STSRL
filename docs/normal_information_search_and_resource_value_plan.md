@@ -233,9 +233,11 @@ where native public projection is still incomplete.
 
 Status: T009 completed optional PyTorch policy/value plumbing, checkpoint
 provenance, trainer-input preflight, and fail-closed broad-training gates.
-Sufficient A20 data/evaluation coverage is still pending, so broad training
-must remain blocked unless a named smoke or narrow-curriculum override is
-explicitly reported.
+T024 added explicit teacher-targeted trainer-input v6 policy targets and
+diagnostic checkpoint provenance for Oracle-like supervision. Sufficient A20
+data/evaluation coverage is still pending, so broad training must remain
+blocked unless a named smoke or narrow-curriculum override is explicitly
+reported.
 
 Exit gate: a reproducible normal-information baseline reports per-component
 errors and fixed-cohort performance from sufficient A20 coverage.
@@ -270,12 +272,12 @@ Retain only auxiliary targets that improve normal-information evaluation.
 
 ## Immediate Design Work
 
-1. Complete
-   [`T024`](tasks/T024-oracle-teacher-search-guidance-training-bridge.md), the
-   published bridge from T023 teacher scale-up artifacts to explicit
-   teacher-targeted search-guidance training input and a diagnostic checkpoint,
-   without treating hidden-state teacher data or smoke-scale under-coverage as
-   normal-information or broad-training evidence.
+1. Publish the next focused model-guided Oracle search sandbox task, using the
+   completed
+   [`T024`](tasks/T024-oracle-teacher-search-guidance-training-bridge.md)
+   teacher-targeted trainer/checkpoint provenance without treating hidden-state
+   teacher data or smoke-scale under-coverage as normal-information or
+   broad-training evidence.
 2. Build structured history, map, and visible-Boss encoders on the sanitized
    public-context artifacts now available on `main`.
 3. Establish an honest public policy/vector-value baseline from sufficient A20

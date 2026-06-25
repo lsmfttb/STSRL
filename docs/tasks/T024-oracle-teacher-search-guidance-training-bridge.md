@@ -1,6 +1,6 @@
 # T024: Oracle Teacher Search-Guidance Training Bridge
 
-Status: `READY`.
+Status: `DONE` via PR #24, merged 2026-06-25.
 
 ## Objective
 

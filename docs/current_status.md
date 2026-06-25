@@ -13,10 +13,9 @@ primary battle policy, and learned policies or values are expected to guide or
 accelerate search. Non-combat decisions remain outside the trainable agent.
 
 The published foundation, maintenance, and first research-measurement backlog
-is complete: T001--T006 and T008--T023 are `DONE`, and T007 is `CANCELLED`
-because it was superseded by T014--T016. The current published STSRL
-repository `READY` task is T024, for bridging T023 Oracle teacher data into
-teacher-targeted search-guidance training input and a diagnostic checkpoint.
+is complete: T001--T006 and T008--T024 are `DONE`, and T007 is `CANCELLED`
+because it was superseded by T014--T016. There is currently no published STSRL
+repository `READY` task.
 
 ## Implemented On Main
 
@@ -194,12 +193,29 @@ teacher-targeted search-guidance training input and a diagnostic checkpoint.
   simulator steps, teacher-action agreement across budgets, and soft-target
   stability while preserving the `full_simulator_state_oracle_like` evidence
   boundary.
+- Versioned Oracle teacher search-guidance bridge reporting
+  (`oracle-teacher-search-guidance-bridge-report-v1`) through
+  `--oracle-teacher-search-guidance-input`. The workflow loads one selected
+  T023 scale-up budget, verifies the manifest, teacher artifact, T022 report,
+  and source-pool SHA-256 identities, restores source starts through the
+  simulator adapter, rebuilds public tactical/model-input features, and emits
+  current trainer-input v6 records with explicit `trainer-policy-target-v1`
+  policy targets. Supported policy target kinds are
+  `behavior_chosen_action_one_hot`, `oracle_teacher_action_one_hot`, and
+  `oracle_soft_visit_distribution`. Teacher action, soft visit target,
+  behavior action availability, selected model policy target, structured
+  battle outcomes, public-context status, stable source identity, sampling
+  component, and `full_simulator_state_oracle_like` evidence boundary remain
+  separately serialized and reported. Optional PyTorch training now consumes
+  `record.policy_target`, rejects mixed policy target kinds, and stores policy
+  target kind/source counts in checkpoint provenance. This is diagnostic
+  search-guidance supervision only, not a controller or model-strength result.
 - A training-readiness report that validates plumbing only. It does not train a
   model or demonstrate policy strength.
 
 ### Tests And Runtime Evidence
 
-- `508` tests pass on Windows Python as of this review. In an uninstalled
+- `517` tests pass on Windows Python as of this review. In an uninstalled
   checkout, set `PYTHONPATH=src` (or install the package) before invoking the
   CLI directly.
 - The two CommunicationMod fixture smokes pass.
@@ -356,6 +372,26 @@ teacher-targeted search-guidance training input and a diagnostic checkpoint.
   evidence boundary remained explicit: `full_simulator_state_oracle_like`, not
   normal-information, live-game, broad-training, or controller-strength
   evidence.
+- T024 validates the Oracle teacher search-guidance bridge. The accepted local
+  gate passed 517 Windows tests, compileall, ruff check, ruff format check,
+  both CommunicationMod fixture smokes, focused bridge/schema/trainer/PyTorch
+  and CLI tests, and diff whitespace checks. The maintainer review reran the
+  WSL source verifier against pinned integration commit
+  `242344c57c17c784708a6f072c905febc3f96527`, then reran the T024 bridge over
+  the accepted T023 smoke artifacts at budget 100. The WSL bridge consumed 32
+  teacher rows, emitted 32 trainer-input v6 rows, skipped none, restored all
+  rows with `seed_action_trace`, reported 32 available public contexts and 32
+  available structured outcomes, and wrote trainer artifact SHA-256
+  `cca1960ecf1684470245f9bafc2afde3a0d5a77f5901981fef556d1ebf15797c`.
+  Preflight over the generated trainer artifact passed model-input packing,
+  context rebuild, and scoring-shape checks with 32 records, 4,634 snapshot
+  features, 92 action features, and 331 action rows. The T009 broad-training
+  gate remained closed as expected for smoke-scale Act 1 data. Windows PyTorch
+  also wrote and loaded a one-epoch diagnostic checkpoint under the named
+  `smoke` override, preserving `oracle_teacher_action_one_hot` and
+  `oracle_teacher_row.teacher_action` provenance; this remains diagnostic
+  Oracle-like supervision, not normal-information or controller-strength
+  evidence.
 
 ## Not Implemented On Main
 
@@ -372,14 +408,8 @@ already supports them.
 
 ## Immediate Work
 
-Executable task specifications live in [`tasks/`](tasks/README.md). The
-currently published STSRL repository `READY` task is:
-
-1. [`T024`](tasks/T024-oracle-teacher-search-guidance-training-bridge.md):
-   convert a selected T023 teacher budget into explicit teacher-targeted
-   search-guidance training input and a diagnostic T009-style checkpoint,
-   without implementing a model-guided search controller or claiming
-   controller strength.
+Executable task specifications live in [`tasks/`](tasks/README.md). There is
+currently no published STSRL repository `READY` task.
 
 The immediate external-fork follow-up is
 [`lsmfttb/sts_lightspeed#7`](https://github.com/lsmfttb/sts_lightspeed/issues/7):
@@ -389,8 +419,8 @@ operational fork maintenance and does not block STSRL repository work.
 
 Recommended later task areas:
 
-1. Model-guided search integration: after T024 creates teacher-targeted
-   trainer/checkpoint provenance, connect T009 policy/value checkpoints to a
+1. Model-guided search integration: use T024 teacher-targeted
+   trainer/checkpoint provenance to connect T009 policy/value checkpoints to a
    versioned search controller, report compute/model-call telemetry, and
    compare against fixed cohorts without claiming promotion from raw model
    diagnostics.
@@ -422,7 +452,7 @@ simulator gates run through WSL against the pinned source manifest.
 No urgent correctness-driven cleanup is required before publishing the next
 research task. T019 removed the largest CLI routing hotspot:
 
-- `src/sts_combat_rl/cli.py` is about 190 lines and now delegates parser
+- `src/sts_combat_rl/cli.py` is about 230 lines and now delegates parser
   construction, validation, path helpers, simulator policy construction, and
   lightspeed command routing to focused command/helper modules. The largest
   new routing modules are `commands/cli_parser.py` and
