@@ -23,6 +23,8 @@ from sts_combat_rl.sim.features import (
     encode_simulator_actions,
 )
 from sts_combat_rl.sim.trainer_input import (
+    POLICY_TARGET_KIND_BEHAVIOR,
+    POLICY_TARGET_SOURCE_BEHAVIOR,
     TRAINER_INPUT_DATASET_FORMAT_VERSION,
     TrainerInputDataset,
     TrainerInputRecord,
@@ -47,7 +49,7 @@ def test_trainer_input_v1_fixture_migrates_to_current_schema() -> None:
     assert (
         dataset.migration_report.target_version == TRAINER_INPUT_DATASET_FORMAT_VERSION
     )
-    assert dataset.migration_report.applied_versions == (2, 3, 4, 5)
+    assert dataset.migration_report.applied_versions == (2, 3, 4, 5, 6)
     assert "v1 omitted per-decision controller provenance" in (
         dataset.migration_report.losses
     )
@@ -67,6 +69,13 @@ def test_trainer_input_v1_fixture_migrates_to_current_schema() -> None:
     assert record.public_run_context == {}
     assert record.structured_battle_outcome_status == "legacy_unavailable"
     assert record.structured_battle_outcome == {}
+    assert record.policy_target_kind == POLICY_TARGET_KIND_BEHAVIOR
+    assert record.policy_target_source == POLICY_TARGET_SOURCE_BEHAVIOR
+    assert record.policy_target == [0.0, 1.0]
+    assert record.policy_target_action_index == 1
+    assert record.policy_target_action_identity == record.chosen_action_identity
+    assert record.behavior_action_status == "available"
+    assert record.behavior_action["legal_action_index"] == 1
     assert any("public run context" in item for item in dataset.migration_report.losses)
     assert any(
         "structured battle resource outcome" in item
@@ -90,6 +99,21 @@ def test_trainer_input_writer_rejects_non_current_record_schema() -> None:
 
     with pytest.raises(ValueError, match="record 0 schema 99"):
         dump_trainer_input_dataset_jsonl(corrupted, StringIO())
+
+
+def test_trainer_input_round_trip_preserves_explicit_policy_target() -> None:
+    current = _current_dataset()
+
+    loaded = load_trainer_input_dataset_jsonl_text(
+        trainer_input_dataset_to_jsonl_text(current)
+    )
+    record = loaded.records[0]
+
+    assert loaded.format_version == TRAINER_INPUT_DATASET_FORMAT_VERSION
+    assert record.policy_target_kind == POLICY_TARGET_KIND_BEHAVIOR
+    assert record.policy_target_source == POLICY_TARGET_SOURCE_BEHAVIOR
+    assert record.policy_target[record.chosen_action_index] == 1.0
+    assert record.behavior_action["action_identity"] == record.chosen_action_identity
 
 
 def test_trainer_input_loader_reports_malformed_action_identity() -> None:

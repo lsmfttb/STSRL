@@ -7,6 +7,10 @@ from pathlib import Path
 
 from sts_combat_rl.logging_utils import DEFAULT_LOG_FILE
 from sts_combat_rl.sim.oracle_search import ORACLE_ROOT_SELECTION_RULES
+from sts_combat_rl.sim.oracle_teacher_search_guidance import (
+    ORACLE_TEACHER_SEARCH_GUIDANCE_STABILITY_FILTERS,
+    ORACLE_TEACHER_SEARCH_GUIDANCE_TARGETS,
+)
 from sts_combat_rl.sim.reward_design import BATTLE_REWARD_PRESETS
 from sts_combat_rl.sim.training_gate import TRAINING_GATE_OVERRIDES
 
@@ -297,6 +301,15 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Load a saved Oracle teacher JSONL artifact and report teacher "
             "coverage, source linkage, search statistics, and T021 gate gaps."
+        ),
+    )
+    input_group.add_argument(
+        "--oracle-teacher-search-guidance-input",
+        type=Path,
+        metavar="SCALEUP_MANIFEST_JSON",
+        help=(
+            "Load a T023 Oracle teacher scale-up manifest, select one budget, "
+            "and convert it to explicit teacher-targeted trainer input."
         ),
     )
     input_group.add_argument(
@@ -602,6 +615,54 @@ def build_parser() -> argparse.ArgumentParser:
         choices=ORACLE_ROOT_SELECTION_RULES,
         default="highest_mean",
         help="Oracle root statistic used for scale-up teacher labels.",
+    )
+    parser.add_argument(
+        "--oracle-teacher-search-guidance-budget",
+        type=int,
+        default=100,
+        metavar="N",
+        help="T023 generated teacher budget to convert for search guidance.",
+    )
+    parser.add_argument(
+        "--oracle-teacher-search-guidance-output",
+        type=Path,
+        metavar="TRAINER_JSONL",
+        help="Write the T024 teacher-targeted trainer JSONL artifact to PATH.",
+    )
+    parser.add_argument(
+        "--oracle-teacher-search-guidance-target",
+        choices=ORACLE_TEACHER_SEARCH_GUIDANCE_TARGETS,
+        default="teacher_action_one_hot",
+        help="Teacher-derived policy target to write into the trainer artifact.",
+    )
+    parser.add_argument(
+        "--oracle-teacher-search-guidance-stability-filter",
+        choices=ORACLE_TEACHER_SEARCH_GUIDANCE_STABILITY_FILTERS,
+        default="none",
+        help="Optional T023 stability filter for selected teacher rows.",
+    )
+    parser.add_argument(
+        "--oracle-teacher-search-guidance-report-output",
+        type=Path,
+        metavar="REPORT_JSON",
+        help="Write the T024 bridge report JSON to PATH.",
+    )
+    parser.add_argument(
+        "--oracle-teacher-search-guidance-checkpoint-output",
+        type=Path,
+        metavar="CHECKPOINT_PATH",
+        help=(
+            "Optionally train and write one diagnostic T009-style PyTorch "
+            "checkpoint from the generated teacher-targeted trainer artifact."
+        ),
+    )
+    parser.add_argument(
+        "--oracle-teacher-search-guidance-epochs",
+        type=int,
+        help=(
+            "Epoch count for the optional T024 diagnostic checkpoint. Defaults "
+            "to --pytorch-epochs when omitted."
+        ),
     )
     parser.add_argument(
         "--oracle-search-simulations",

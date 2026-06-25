@@ -139,6 +139,43 @@ def test_cli_parser_accepts_oracle_teacher_report_flags(tmp_path) -> None:
     assert args.oracle_teacher_report_output == output_path
 
 
+def test_cli_parser_accepts_oracle_teacher_search_guidance_flags(tmp_path) -> None:
+    manifest_path = tmp_path / "manifest.json"
+    output_path = tmp_path / "trainer.jsonl"
+    report_path = tmp_path / "bridge-report.json"
+    checkpoint_path = tmp_path / "checkpoint.pt"
+
+    args = build_parser().parse_args(
+        [
+            "--oracle-teacher-search-guidance-input",
+            str(manifest_path),
+            "--oracle-teacher-search-guidance-budget",
+            "100",
+            "--oracle-teacher-search-guidance-output",
+            str(output_path),
+            "--oracle-teacher-search-guidance-target",
+            "teacher_action_one_hot",
+            "--oracle-teacher-search-guidance-stability-filter",
+            "none",
+            "--oracle-teacher-search-guidance-report-output",
+            str(report_path),
+            "--oracle-teacher-search-guidance-checkpoint-output",
+            str(checkpoint_path),
+            "--oracle-teacher-search-guidance-epochs",
+            "1",
+        ]
+    )
+
+    assert args.oracle_teacher_search_guidance_input == manifest_path
+    assert args.oracle_teacher_search_guidance_budget == 100
+    assert args.oracle_teacher_search_guidance_output == output_path
+    assert args.oracle_teacher_search_guidance_target == "teacher_action_one_hot"
+    assert args.oracle_teacher_search_guidance_stability_filter == "none"
+    assert args.oracle_teacher_search_guidance_report_output == report_path
+    assert args.oracle_teacher_search_guidance_checkpoint_output == checkpoint_path
+    assert args.oracle_teacher_search_guidance_epochs == 1
+
+
 def test_cli_default_import_does_not_import_torch() -> None:
     repo_src = Path(__file__).resolve().parents[1] / "src"
     env = os.environ.copy()
@@ -812,6 +849,90 @@ def test_cli_oracle_teacher_scaleup_requires_output_dir(capsys) -> None:
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "requires --oracle-teacher-scaleup-output-dir" in captured.err
+
+
+def test_cli_oracle_teacher_search_guidance_routes_to_command(
+    monkeypatch,
+    tmp_path,
+    capsys,
+) -> None:
+    calls: dict[str, object] = {}
+
+    class FakeBridgeReport:
+        command_passed = True
+
+    def fake_bridge(**kwargs):
+        calls.update(kwargs)
+        return FakeBridgeReport()
+
+    monkeypatch.setattr(
+        "sts_combat_rl.sim.lightspeed.LightSpeedAdapter",
+        FakeLightSpeedSmokeAdapter,
+    )
+    monkeypatch.setattr(
+        "sts_combat_rl.cli.run_oracle_teacher_search_guidance_from_paths",
+        fake_bridge,
+    )
+    monkeypatch.setattr(
+        "sts_combat_rl.cli.format_oracle_teacher_search_guidance_command",
+        lambda report: "Oracle teacher search-guidance bridge\ncommand passed: yes",
+    )
+    manifest_path = tmp_path / "manifest.json"
+    output_path = tmp_path / "trainer.jsonl"
+    report_path = tmp_path / "bridge-report.json"
+
+    assert (
+        main(
+            [
+                "--oracle-teacher-search-guidance-input",
+                str(manifest_path),
+                "--oracle-teacher-search-guidance-budget",
+                "50",
+                "--oracle-teacher-search-guidance-output",
+                str(output_path),
+                "--oracle-teacher-search-guidance-target",
+                "teacher_action_one_hot",
+                "--oracle-teacher-search-guidance-stability-filter",
+                "none",
+                "--oracle-teacher-search-guidance-report-output",
+                str(report_path),
+                "--log-file",
+                "-",
+            ]
+        )
+        == 0
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert calls["adapter_factory"]().ascension == 20
+    assert calls["manifest_path"] == manifest_path
+    assert calls["selected_budget"] == 50
+    assert calls["output_path"] == output_path
+    assert calls["target"] == "teacher_action_one_hot"
+    assert calls["stability_filter"] == "none"
+    assert calls["report_output_path"] == report_path
+    assert calls["checkpoint_output_path"] is None
+    assert calls["training_config"] is None
+    assert "Oracle teacher search-guidance bridge" in captured.err
+
+
+def test_cli_oracle_teacher_search_guidance_requires_outputs(capsys) -> None:
+    assert (
+        main(
+            [
+                "--oracle-teacher-search-guidance-input",
+                "manifest.json",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 2
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "requires --oracle-teacher-search-guidance-output" in captured.err
 
 
 def test_cli_oracle_search_teacher_and_fixed_eval_routes_write_stderr_only(

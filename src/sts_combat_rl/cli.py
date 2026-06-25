@@ -17,6 +17,10 @@ from sts_combat_rl.commands.oracle_teacher_report import (
     format_oracle_teacher_dataset_report_command,
     run_oracle_teacher_dataset_report_from_paths,
 )
+from sts_combat_rl.commands.oracle_teacher_search_guidance import (
+    format_oracle_teacher_search_guidance_command,
+    run_oracle_teacher_search_guidance_from_paths,
+)
 from sts_combat_rl.commands.pytorch_search_guidance import (
     build_trainer_input_preflight_from_path,
     format_pytorch_search_guidance_training_workflow_report,
@@ -135,6 +139,55 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 0 if report.command_ok else 2
+
+    if args.oracle_teacher_search_guidance_input is not None:
+        try:
+            from sts_combat_rl.sim.lightspeed import LightSpeedAdapter
+
+            training_config = None
+            if args.oracle_teacher_search_guidance_checkpoint_output is not None:
+                from sts_combat_rl.sim.torch_policy_value import (
+                    TorchPolicyValueTrainingConfig,
+                )
+
+                training_config = TorchPolicyValueTrainingConfig(
+                    epochs=(
+                        args.oracle_teacher_search_guidance_epochs
+                        if args.oracle_teacher_search_guidance_epochs is not None
+                        else args.pytorch_epochs
+                    ),
+                    learning_rate=args.pytorch_learning_rate,
+                    hidden_size=args.pytorch_hidden_size,
+                    batch_size=args.pytorch_batch_size,
+                    seed=args.sim_seed,
+                )
+
+            report = run_oracle_teacher_search_guidance_from_paths(
+                adapter_factory=lambda: LightSpeedAdapter(
+                    seed=args.sim_seed,
+                    ascension=20,
+                ),
+                manifest_path=args.oracle_teacher_search_guidance_input,
+                selected_budget=args.oracle_teacher_search_guidance_budget,
+                output_path=args.oracle_teacher_search_guidance_output,
+                target=args.oracle_teacher_search_guidance_target,
+                stability_filter=args.oracle_teacher_search_guidance_stability_filter,
+                report_output_path=args.oracle_teacher_search_guidance_report_output,
+                checkpoint_output_path=(
+                    args.oracle_teacher_search_guidance_checkpoint_output
+                ),
+                training_config=training_config,
+                gate_config=build_pytorch_gate_config(args),
+                gate_override=args.pytorch_gate_override,
+            )
+        except (ImportError, OSError, ValueError) as exc:
+            print(
+                f"failed to run Oracle teacher search-guidance bridge: {exc}",
+                file=sys.stderr,
+            )
+            return 2
+        print(format_oracle_teacher_search_guidance_command(report), file=sys.stderr)
+        return 0 if report.command_passed else 1
 
     if args.oracle_teacher_dataset_report is not None:
         try:

@@ -56,7 +56,24 @@ from sts_combat_rl.sim.trainer_input_contract import (
 )
 
 
-TRAINER_INPUT_DATASET_FORMAT_VERSION = 5
+TRAINER_INPUT_DATASET_FORMAT_VERSION = 6
+TRAINER_POLICY_TARGET_SCHEMA_ID = "trainer-policy-target-v1"
+TRAINER_POLICY_TARGET_SCHEMA_VERSION = 1
+POLICY_TARGET_KIND_BEHAVIOR = "behavior_chosen_action_one_hot"
+POLICY_TARGET_KIND_ORACLE_TEACHER_ACTION = "oracle_teacher_action_one_hot"
+POLICY_TARGET_KIND_ORACLE_SOFT_VISIT = "oracle_soft_visit_distribution"
+POLICY_TARGET_KINDS = (
+    POLICY_TARGET_KIND_BEHAVIOR,
+    POLICY_TARGET_KIND_ORACLE_TEACHER_ACTION,
+    POLICY_TARGET_KIND_ORACLE_SOFT_VISIT,
+)
+POLICY_TARGET_SOURCE_BEHAVIOR = "trainer_input_record.chosen_action_index"
+BEHAVIOR_ACTION_AVAILABLE = "available"
+BEHAVIOR_ACTION_UNAVAILABLE = "unavailable"
+BEHAVIOR_ACTION_STATUSES = (
+    BEHAVIOR_ACTION_AVAILABLE,
+    BEHAVIOR_ACTION_UNAVAILABLE,
+)
 TRAINER_INPUT_DATASET_MIGRATIONS = (
     ArtifactMigration(
         source_version=1,
@@ -89,6 +106,12 @@ TRAINER_INPUT_DATASET_MIGRATIONS = (
         migrate=lambda document: _migrate_trainer_input_v4_to_v5(document),
         losses=(BATTLE_RESOURCE_OUTCOME_LEGACY_LOSS,),
     ),
+    ArtifactMigration(
+        source_version=5,
+        target_version=TRAINER_INPUT_DATASET_FORMAT_VERSION,
+        migrate=lambda document: _migrate_trainer_input_v5_to_v6(document),
+        losses=(),
+    ),
 )
 
 
@@ -110,6 +133,35 @@ class TrainerInputRecord(DecisionRecord):
     raw_reward_components: dict[str, float | None] = field(default_factory=dict)
     structured_battle_outcome_status: str = "legacy_unavailable"
     structured_battle_outcome: dict[str, Any] = field(default_factory=dict)
+    policy_target_kind: str = POLICY_TARGET_KIND_BEHAVIOR
+    policy_target: list[float] = field(default_factory=list)
+    policy_target_source: str = POLICY_TARGET_SOURCE_BEHAVIOR
+    policy_target_action_index: int | None = None
+    policy_target_action_identity: dict[str, Any] = field(default_factory=dict)
+    behavior_action_status: str = BEHAVIOR_ACTION_AVAILABLE
+    behavior_action: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        """Fill explicit v6 target fields for in-memory legacy constructors."""
+
+        if not self.policy_target:
+            object.__setattr__(self, "policy_target", _behavior_policy_target(self))
+        if self.policy_target_action_index is None:
+            object.__setattr__(
+                self,
+                "policy_target_action_index",
+                _default_policy_target_action_index(self),
+            )
+        if not self.policy_target_action_identity:
+            object.__setattr__(
+                self,
+                "policy_target_action_identity",
+                _default_policy_target_action_identity(self),
+            )
+        if not self.behavior_action and (
+            self.behavior_action_status == BEHAVIOR_ACTION_AVAILABLE
+        ):
+            object.__setattr__(self, "behavior_action", _behavior_action_dict(self))
 
 
 @dataclass(frozen=True)
@@ -126,6 +178,8 @@ class TrainerInputDataset:
     tactical_feature_schema_id: str = TACTICAL_FEATURE_SCHEMA_ID
     tactical_feature_schema_version: int = TACTICAL_FEATURE_SCHEMA_VERSION
     identity_vocabulary_version: str = IDENTITY_VOCABULARY_VERSION
+    policy_target_schema_id: str = TRAINER_POLICY_TARGET_SCHEMA_ID
+    policy_target_schema_version: int = TRAINER_POLICY_TARGET_SCHEMA_VERSION
     structured_battle_outcome_schema_id: str = BATTLE_RESOURCE_OUTCOME_SCHEMA_ID
     structured_battle_outcome_schema_version: int = (
         BATTLE_RESOURCE_OUTCOME_SCHEMA_VERSION
@@ -193,6 +247,8 @@ def build_trainer_input_dataset(
         tactical_feature_schema_id=TACTICAL_FEATURE_SCHEMA_ID,
         tactical_feature_schema_version=TACTICAL_FEATURE_SCHEMA_VERSION,
         identity_vocabulary_version=IDENTITY_VOCABULARY_VERSION,
+        policy_target_schema_id=TRAINER_POLICY_TARGET_SCHEMA_ID,
+        policy_target_schema_version=TRAINER_POLICY_TARGET_SCHEMA_VERSION,
         structured_battle_outcome_schema_id=BATTLE_RESOURCE_OUTCOME_SCHEMA_ID,
         structured_battle_outcome_schema_version=BATTLE_RESOURCE_OUTCOME_SCHEMA_VERSION,
         generation_metadata=_json_safe_dict(generation_metadata or {}),
@@ -414,6 +470,15 @@ def load_trainer_input_dataset_jsonl(stream: TextIO) -> TrainerInputDataset:
         identity_vocabulary_version=str(
             metadata.get("identity_vocabulary_version", "")
         ),
+        policy_target_schema_id=str(
+            metadata.get("policy_target_schema_id", TRAINER_POLICY_TARGET_SCHEMA_ID)
+        ),
+        policy_target_schema_version=_int(
+            metadata.get(
+                "policy_target_schema_version",
+                TRAINER_POLICY_TARGET_SCHEMA_VERSION,
+            )
+        ),
         structured_battle_outcome_schema_id=str(
             metadata.get(
                 "structured_battle_outcome_schema_id",
@@ -506,6 +571,8 @@ def _metadata_row(dataset: TrainerInputDataset) -> dict[str, Any]:
             "tactical_feature_schema_id": dataset.tactical_feature_schema_id,
             "tactical_feature_schema_version": dataset.tactical_feature_schema_version,
             "identity_vocabulary_version": dataset.identity_vocabulary_version,
+            "policy_target_schema_id": dataset.policy_target_schema_id,
+            "policy_target_schema_version": dataset.policy_target_schema_version,
             "structured_battle_outcome_schema_id": (
                 dataset.structured_battle_outcome_schema_id
             ),
@@ -549,6 +616,18 @@ def _require_current_dataset_schema(dataset: TrainerInputDataset) -> None:
             "trainer input writer only emits identity vocabulary version "
             f"{IDENTITY_VOCABULARY_VERSION!r}, got "
             f"{dataset.identity_vocabulary_version!r}"
+        )
+    if dataset.policy_target_schema_id != TRAINER_POLICY_TARGET_SCHEMA_ID:
+        raise ValueError(
+            "trainer input writer only emits policy target schema "
+            f"{TRAINER_POLICY_TARGET_SCHEMA_ID!r}, got "
+            f"{dataset.policy_target_schema_id!r}"
+        )
+    if dataset.policy_target_schema_version != TRAINER_POLICY_TARGET_SCHEMA_VERSION:
+        raise ValueError(
+            "trainer input writer only emits policy target schema version "
+            f"{TRAINER_POLICY_TARGET_SCHEMA_VERSION}, got "
+            f"{dataset.policy_target_schema_version}"
         )
     if dataset.structured_battle_outcome_schema_id != BATTLE_RESOURCE_OUTCOME_SCHEMA_ID:
         raise ValueError(
@@ -617,6 +696,12 @@ def _require_current_dataset_schema(dataset: TrainerInputDataset) -> None:
             raise ValueError(
                 "trainer input writer requires valid structured battle outcomes: "
                 + "; ".join(outcome_problems)
+            )
+        target_problems = _policy_target_problems(record)
+        if target_problems:
+            raise ValueError(
+                "trainer input writer requires valid policy targets: "
+                + "; ".join(target_problems)
             )
 
 
@@ -695,7 +780,7 @@ def _migrate_trainer_input_v4_to_v5(
     """Add explicit structured battle outcome legacy-loss markers."""
 
     metadata = dict(document.metadata)
-    metadata["format_version"] = TRAINER_INPUT_DATASET_FORMAT_VERSION
+    metadata["format_version"] = 5
     metadata["structured_battle_outcome_schema_id"] = BATTLE_RESOURCE_OUTCOME_SCHEMA_ID
     metadata["structured_battle_outcome_schema_version"] = (
         BATTLE_RESOURCE_OUTCOME_SCHEMA_VERSION
@@ -706,6 +791,36 @@ def _migrate_trainer_input_v4_to_v5(
         record = dict(raw_record)
         record["structured_battle_outcome_status"] = status
         record["structured_battle_outcome"] = payload
+        migrated_records.append(record)
+    return ArtifactDocument(metadata=metadata, records=migrated_records)
+
+
+def _migrate_trainer_input_v5_to_v6(
+    document: ArtifactDocument,
+) -> ArtifactDocument:
+    """Make legacy behavior-action policy targets explicit."""
+
+    metadata = dict(document.metadata)
+    metadata["format_version"] = TRAINER_INPUT_DATASET_FORMAT_VERSION
+    metadata["policy_target_schema_id"] = TRAINER_POLICY_TARGET_SCHEMA_ID
+    metadata["policy_target_schema_version"] = TRAINER_POLICY_TARGET_SCHEMA_VERSION
+    migrated_records: list[dict[str, Any]] = []
+    for raw_record in document.records:
+        record = dict(raw_record)
+        target, action_index, action_identity = _behavior_policy_target_from_raw(record)
+        record["policy_target_kind"] = POLICY_TARGET_KIND_BEHAVIOR
+        record["policy_target"] = target
+        record["policy_target_source"] = POLICY_TARGET_SOURCE_BEHAVIOR
+        record["policy_target_action_index"] = action_index
+        record["policy_target_action_identity"] = action_identity
+        record["behavior_action_status"] = BEHAVIOR_ACTION_AVAILABLE
+        record["behavior_action"] = {
+            "source": POLICY_TARGET_SOURCE_BEHAVIOR,
+            "legal_action_index": action_index,
+            "action_identity": action_identity,
+            "action_kind": str(record.get("chosen_action_kind", "")),
+            "action_id": record.get("chosen_action_id"),
+        }
         migrated_records.append(record)
     return ArtifactDocument(metadata=metadata, records=migrated_records)
 
@@ -760,6 +875,13 @@ def _record_to_dict(record: TrainerInputRecord) -> dict[str, Any]:
         "raw_reward_components": record.raw_reward_components,
         "structured_battle_outcome_status": record.structured_battle_outcome_status,
         "structured_battle_outcome": record.structured_battle_outcome,
+        "policy_target_kind": record.policy_target_kind,
+        "policy_target": record.policy_target,
+        "policy_target_source": record.policy_target_source,
+        "policy_target_action_index": record.policy_target_action_index,
+        "policy_target_action_identity": record.policy_target_action_identity,
+        "behavior_action_status": record.behavior_action_status,
+        "behavior_action": record.behavior_action,
     }
 
 
@@ -823,6 +945,21 @@ def _record_from_dict(raw: dict[str, Any]) -> TrainerInputRecord:
             )
         ),
         structured_battle_outcome=_dict(raw.get("structured_battle_outcome")),
+        policy_target_kind=str(
+            raw.get("policy_target_kind", POLICY_TARGET_KIND_BEHAVIOR)
+        ),
+        policy_target=_float_list(raw.get("policy_target")),
+        policy_target_source=str(
+            raw.get("policy_target_source", POLICY_TARGET_SOURCE_BEHAVIOR)
+        ),
+        policy_target_action_index=_optional_int_value(
+            raw.get("policy_target_action_index")
+        ),
+        policy_target_action_identity=_dict(raw.get("policy_target_action_identity")),
+        behavior_action_status=str(
+            raw.get("behavior_action_status", BEHAVIOR_ACTION_AVAILABLE)
+        ),
+        behavior_action=_dict(raw.get("behavior_action")),
     )
 
 
@@ -851,6 +988,15 @@ def _dataset_shape_problems(dataset: TrainerInputDataset) -> list[str]:
         problems.append(
             "unsupported identity vocabulary version: "
             f"{dataset.identity_vocabulary_version!r}"
+        )
+    if dataset.policy_target_schema_id != TRAINER_POLICY_TARGET_SCHEMA_ID:
+        problems.append(
+            f"unsupported policy target schema: {dataset.policy_target_schema_id!r}"
+        )
+    if dataset.policy_target_schema_version != TRAINER_POLICY_TARGET_SCHEMA_VERSION:
+        problems.append(
+            "unsupported policy target schema version: "
+            f"{dataset.policy_target_schema_version}"
         )
     if dataset.structured_battle_outcome_schema_id != BATTLE_RESOURCE_OUTCOME_SCHEMA_ID:
         problems.append(
@@ -928,7 +1074,156 @@ def _dataset_shape_problems(dataset: TrainerInputDataset) -> list[str]:
                 ),
             )
         )
+        problems.extend(_policy_target_problems(record))
     return problems
+
+
+def _behavior_policy_target(record: TrainerInputRecord) -> list[float]:
+    target = [0.0 for _ in record.legal_action_features]
+    if 0 <= record.chosen_action_index < len(target):
+        target[record.chosen_action_index] = 1.0
+    return target
+
+
+def _behavior_policy_target_from_raw(
+    record: Mapping[str, Any],
+) -> tuple[list[float], int | None, dict[str, Any]]:
+    legal_count = len(_list(record.get("legal_action_features")))
+    target = [0.0 for _ in range(legal_count)]
+    action_index = _optional_int_value(record.get("chosen_action_index"))
+    if action_index is not None and 0 <= action_index < legal_count:
+        target[action_index] = 1.0
+    identities = [
+        _dict(identity) for identity in _list(record.get("legal_action_identities"))
+    ]
+    action_identity = (
+        identities[action_index]
+        if action_index is not None and 0 <= action_index < len(identities)
+        else {}
+    )
+    return target, action_index, action_identity
+
+
+def _default_policy_target_action_index(record: TrainerInputRecord) -> int | None:
+    if record.policy_target_kind == POLICY_TARGET_KIND_BEHAVIOR:
+        return record.chosen_action_index
+    if not record.policy_target:
+        return None
+    return max(range(len(record.policy_target)), key=record.policy_target.__getitem__)
+
+
+def _default_policy_target_action_identity(
+    record: TrainerInputRecord,
+) -> dict[str, Any]:
+    action_index = (
+        record.chosen_action_index
+        if record.policy_target_action_index is None
+        else record.policy_target_action_index
+    )
+    if 0 <= action_index < len(record.legal_action_identities):
+        return dict(record.legal_action_identities[action_index])
+    return {}
+
+
+def _behavior_action_dict(record: TrainerInputRecord) -> dict[str, Any]:
+    return {
+        "source": POLICY_TARGET_SOURCE_BEHAVIOR,
+        "legal_action_index": record.chosen_action_index,
+        "action_identity": dict(record.chosen_action_identity),
+        "action_kind": record.chosen_action_kind,
+        "action_id": record.chosen_action_id,
+    }
+
+
+def _policy_target_problems(record: TrainerInputRecord) -> list[str]:
+    problems: list[str] = []
+    label = f"record {record.example_index}"
+    legal_count = len(record.legal_action_features)
+    if record.policy_target_kind not in POLICY_TARGET_KINDS:
+        problems.append(
+            f"{label}: unsupported policy target kind {record.policy_target_kind!r}"
+        )
+    if len(record.policy_target) != legal_count:
+        problems.append(
+            f"{label}: policy target length {len(record.policy_target)} does not "
+            f"match {legal_count} legal actions"
+        )
+        return problems
+    for index, value in enumerate(record.policy_target):
+        if not math.isfinite(value):
+            problems.append(f"{label}: policy target {index} is not finite")
+        elif value < 0.0:
+            problems.append(f"{label}: policy target {index} is negative")
+    eligible_sum = sum(
+        record.policy_target[index]
+        for index in record.eligible_action_indices
+        if 0 <= index < len(record.policy_target)
+    )
+    if legal_count and eligible_sum <= 0.0:
+        problems.append(f"{label}: policy target has no positive eligible weight")
+    if not record.policy_target_source:
+        problems.append(f"{label}: policy target source is missing")
+    if record.behavior_action_status not in BEHAVIOR_ACTION_STATUSES:
+        problems.append(
+            f"{label}: unsupported behavior action status "
+            f"{record.behavior_action_status!r}"
+        )
+    if (
+        record.behavior_action_status == BEHAVIOR_ACTION_AVAILABLE
+        and not record.behavior_action
+    ):
+        problems.append(f"{label}: behavior action is marked available but missing")
+    if record.policy_target_kind in {
+        POLICY_TARGET_KIND_BEHAVIOR,
+        POLICY_TARGET_KIND_ORACLE_TEACHER_ACTION,
+    }:
+        positive_indices = [
+            index for index, value in enumerate(record.policy_target) if value > 0.0
+        ]
+        if len(positive_indices) != 1:
+            problems.append(
+                f"{label}: one-hot policy target has {len(positive_indices)} "
+                "positive entries"
+            )
+        elif not math.isclose(record.policy_target[positive_indices[0]], 1.0):
+            problems.append(f"{label}: one-hot policy target value is not 1.0")
+        if record.policy_target_action_index != (
+            positive_indices[0] if len(positive_indices) == 1 else None
+        ):
+            problems.append(
+                f"{label}: policy target action index does not match target"
+            )
+    _append_policy_target_identity_problems(record, label, problems)
+    return problems
+
+
+def _append_policy_target_identity_problems(
+    record: TrainerInputRecord,
+    label: str,
+    problems: list[str],
+) -> None:
+    action_index = record.policy_target_action_index
+    if action_index is None:
+        if record.policy_target_kind != POLICY_TARGET_KIND_ORACLE_SOFT_VISIT:
+            problems.append(f"{label}: policy target action index is missing")
+        return
+    if action_index < 0 or action_index >= len(record.legal_action_identities):
+        problems.append(f"{label}: policy target action index outside legal actions")
+        return
+    if not record.policy_target_action_identity:
+        problems.append(f"{label}: policy target action identity is missing")
+        return
+    try:
+        expected = record.legal_action_identities[action_index]
+        from sts_combat_rl.sim.decision_record import action_identity_from_dict
+
+        observed = action_identity_from_dict(record.policy_target_action_identity)
+        expected_parsed = action_identity_from_dict(expected)
+    except ValueError as exc:
+        problems.append(f"{label}: policy target action identity is invalid: {exc}")
+        return
+    if observed.stable_id != expected_parsed.stable_id:
+        problems.append(f"{label}: policy target action identity does not match index")
 
 
 def _unique_problems(problems: list[str]) -> list[str]:

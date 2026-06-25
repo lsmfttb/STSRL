@@ -195,7 +195,6 @@ def build_pytorch_search_guidance_training_data_provenance(
     from sts_combat_rl.sim.torch_policy_value import (
         HP_TARGET_KIND,
         OUTCOME_TARGET_KIND,
-        POLICY_TARGET_KIND_BEHAVIOR,
         RESOURCE_TARGET_NAMES,
         STRUCTURED_RESOURCE_TARGET_KIND,
     )
@@ -223,8 +222,7 @@ def build_pytorch_search_guidance_training_data_provenance(
             _source_information_regime(record) for record in dataset.records
         ),
         "target_source_summary": {
-            "policy_target_kind": POLICY_TARGET_KIND_BEHAVIOR,
-            "policy_target_source": "trainer_input_record.chosen_action_index",
+            **_policy_target_source_summary(dataset.records),
             "outcome_target_kind": OUTCOME_TARGET_KIND,
             "outcome_target_source": (
                 "trainer_input_record.structured_battle_outcome.battle_survived"
@@ -309,6 +307,21 @@ def _stable_source_identity(record: Any) -> tuple[Any, ...] | None:
     return None
 
 
+def _policy_target_source_summary(records: Sequence[Any]) -> dict[str, Any]:
+    kind_counts = _counter_dict(
+        _metadata_attr(record, "policy_target_kind", "missing") for record in records
+    )
+    source_counts = _counter_dict(
+        _metadata_attr(record, "policy_target_source", "missing") for record in records
+    )
+    return {
+        "policy_target_kind": _single_count_key(kind_counts),
+        "policy_target_source": _single_count_key(source_counts),
+        "policy_target_kind_counts": kind_counts,
+        "policy_target_source_counts": source_counts,
+    }
+
+
 def _controller_information_regime(record: Any) -> str:
     provenance = _mapping(getattr(record, "controller_provenance", {}))
     config = _mapping(provenance.get("config"))
@@ -331,9 +344,21 @@ def _metadata_string(record: Any, key: str) -> str:
     return _non_empty_string(metadata.get(key)) or "missing"
 
 
+def _metadata_attr(record: Any, key: str, fallback: str) -> str:
+    return _non_empty_string(getattr(record, key, None)) or fallback
+
+
 def _counter_dict(values: Iterable[str]) -> dict[str, int]:
     counter = Counter(str(value) for value in values)
     return dict(sorted(counter.items()))
+
+
+def _single_count_key(counts: Mapping[str, int]) -> str:
+    if len(counts) == 1:
+        return next(iter(counts))
+    if not counts:
+        return "missing"
+    return "mixed"
 
 
 def _canonical_json(value: Any) -> str:

@@ -14,6 +14,10 @@ from sts_combat_rl.commands.pytorch_search_guidance import (
 from sts_combat_rl.sim.model_input import build_model_input_batch
 from sts_combat_rl.sim.policy import DecisionContext
 from sts_combat_rl.sim.trainer_input import trainer_input_dataset_to_jsonl_text
+from sts_combat_rl.sim.trainer_input import (
+    POLICY_TARGET_KIND_ORACLE_TEACHER_ACTION,
+    POLICY_TARGET_SOURCE_BEHAVIOR,
+)
 from sts_combat_rl.sim.torch_policy_value import (
     SEARCH_GUIDED_FIXED_EVAL_STATUS_NOT_RUN,
     TorchPolicyValueActionScorer,
@@ -220,6 +224,64 @@ def test_torch_policy_value_requires_structured_outcomes() -> None:
 
     assert result.report.training_ok is False
     assert any("structured battle outcome" in item for item in result.report.problems)
+
+
+def test_torch_policy_value_uses_explicit_teacher_policy_target(tmp_path) -> None:
+    dataset = make_trainer_dataset([(20, 1), (20, 1)])
+    teacher_records = []
+    for record in dataset.records:
+        target_index = 1 - record.chosen_action_index
+        target = [0.0 for _ in record.legal_action_features]
+        target[target_index] = 1.0
+        teacher_records.append(
+            replace(
+                record,
+                policy_target_kind=POLICY_TARGET_KIND_ORACLE_TEACHER_ACTION,
+                policy_target=target,
+                policy_target_source="oracle_teacher_row.teacher_action",
+                policy_target_action_index=target_index,
+                policy_target_action_identity=record.legal_action_identities[
+                    target_index
+                ],
+                behavior_action={
+                    "source": POLICY_TARGET_SOURCE_BEHAVIOR,
+                    "legal_action_index": record.chosen_action_index,
+                    "action_identity": record.chosen_action_identity,
+                    "action_kind": record.chosen_action_kind,
+                    "action_id": record.chosen_action_id,
+                },
+            )
+        )
+    teacher_dataset = replace(dataset, records=teacher_records)
+    gate = build_training_gate_report(
+        teacher_dataset,
+        TrainingScaleGateConfig(
+            required_ascensions=(20,),
+            required_acts=(1,),
+            min_records_per_ascension_act=2,
+            min_unique_sources_per_ascension_act=2,
+        ),
+    )
+
+    result = train_torch_policy_value(
+        teacher_dataset,
+        TorchPolicyValueTrainingConfig(epochs=1, hidden_size=8, batch_size=1),
+        gate_report=gate,
+    )
+    provenance = _training_data_provenance(
+        teacher_dataset,
+        gate,
+        tmp_path / "teacher-trainer.jsonl",
+    )
+
+    assert result.report.training_ok is True
+    assert result.report.policy_target_kind == POLICY_TARGET_KIND_ORACLE_TEACHER_ACTION
+    assert provenance["target_source_summary"]["policy_target_kind"] == (
+        POLICY_TARGET_KIND_ORACLE_TEACHER_ACTION
+    )
+    assert provenance["target_source_summary"]["policy_target_source"] == (
+        "oracle_teacher_row.teacher_action"
+    )
 
 
 def _training_data_provenance(

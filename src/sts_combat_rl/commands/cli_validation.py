@@ -39,6 +39,13 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
         args.oracle_teacher_scaleup_budgets
     ):
         return "--oracle-teacher-scaleup-budgets must be unique"
+    if args.oracle_teacher_search_guidance_budget <= 0:
+        return "--oracle-teacher-search-guidance-budget must be positive"
+    if (
+        args.oracle_teacher_search_guidance_epochs is not None
+        and args.oracle_teacher_search_guidance_epochs <= 0
+    ):
+        return "--oracle-teacher-search-guidance-epochs must be positive"
     if args.pytorch_gate_min_records <= 0:
         return "--pytorch-gate-min-records must be positive"
     if args.pytorch_gate_min_sources <= 0:
@@ -93,6 +100,28 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
             "--oracle-teacher-source-pool, --oracle-teacher-coverage-report, "
             "and --oracle-teacher-report-output require "
             "--oracle-teacher-dataset-report"
+        )
+    if args.oracle_teacher_search_guidance_input is not None and (
+        args.oracle_teacher_search_guidance_output is None
+        or args.oracle_teacher_search_guidance_report_output is None
+    ):
+        return (
+            "--oracle-teacher-search-guidance-input requires "
+            "--oracle-teacher-search-guidance-output and "
+            "--oracle-teacher-search-guidance-report-output"
+        )
+    if args.oracle_teacher_search_guidance_input is None and (
+        args.oracle_teacher_search_guidance_output is not None
+        or args.oracle_teacher_search_guidance_report_output is not None
+        or args.oracle_teacher_search_guidance_checkpoint_output is not None
+        or args.oracle_teacher_search_guidance_epochs is not None
+    ):
+        return (
+            "--oracle-teacher-search-guidance-output, "
+            "--oracle-teacher-search-guidance-report-output, "
+            "--oracle-teacher-search-guidance-checkpoint-output, and "
+            "--oracle-teacher-search-guidance-epochs require "
+            "--oracle-teacher-search-guidance-input"
         )
     if (
         args.pytorch_search_guidance_train is not None
