@@ -29,6 +29,8 @@ from sts_combat_rl.sim.model_scoring import DEFAULT_ACTION_KIND_SCORE_PRIOR
 from sts_combat_rl.sim.policy import DecisionContext
 from sts_combat_rl.sim.resource_outcome import BATTLE_RESOURCE_OUTCOME_AVAILABLE
 from sts_combat_rl.sim.trainer_input import (
+    POLICY_TARGET_KIND_BEHAVIOR,
+    POLICY_TARGET_KINDS,
     TRAINER_INPUT_DATASET_FORMAT_VERSION,
     TrainerInputDataset,
     TrainerInputRecord,
@@ -45,7 +47,6 @@ TORCH_POLICY_VALUE_CHECKPOINT_SCHEMA_ID = "torch-policy-value-checkpoint-v1"
 TORCH_POLICY_VALUE_CHECKPOINT_FORMAT_VERSION = 1
 TORCH_POLICY_VALUE_MODEL_CLASS = "PublicBattlePolicyValueNetwork"
 PUBLIC_CONTEXT_FEATURE_SCHEMA_ID = "public-run-context-summary-v1"
-POLICY_TARGET_KIND_BEHAVIOR = "behavior_chosen_action_one_hot"
 OUTCOME_TARGET_KIND = "terminal_battle_survival_probability"
 HP_TARGET_KIND = "terminal_absolute_current_hp"
 STRUCTURED_RESOURCE_TARGET_KIND = "structured_terminal_resource_components_v1"
@@ -500,6 +501,7 @@ def train_torch_policy_value(
         override=gate_override,
     )
     problems = _training_input_problems(dataset, active_config, active_gate)
+    policy_target_kind = _dataset_policy_target_kind(dataset)
     torch.manual_seed(active_config.seed)
     random.seed(active_config.seed)
 
@@ -540,6 +542,7 @@ def train_torch_policy_value(
                 initial_evaluation=empty,
                 final_evaluation=empty,
                 gate_report=active_gate,
+                policy_target_kind=policy_target_kind,
                 problems=tuple(problems),
             ),
         )
@@ -600,6 +603,7 @@ def train_torch_policy_value(
             initial_evaluation=initial,
             final_evaluation=final,
             gate_report=active_gate,
+            policy_target_kind=policy_target_kind,
             epochs=tuple(epoch_stats),
             problems=tuple(problems),
         ),
@@ -633,7 +637,9 @@ def evaluate_torch_policy_value(
         selected_global = _selected_eligible_index(
             logits, record.eligible_action_indices
         )
-        policy_agreement += int(selected_global == record.chosen_action_index)
+        policy_agreement += int(
+            selected_global == _policy_target_top_index(record, target)
+        )
         outcome_prediction = float(torch.sigmoid(outcome_logit).squeeze())
         outcome_absolute_error += abs(outcome_prediction - target.outcome_survived)
         hp_absolute_error += abs(float(hp_value.squeeze()) - target.terminal_current_hp)
@@ -934,11 +940,14 @@ def _validate_checkpoint_semantic_contract(raw: Mapping[str, Any]) -> None:
         list(RESOURCE_TARGET_SCALES),
         "resource_target_scales",
     )
-    _require_exact(
-        raw.get("policy_target_kind"),
-        POLICY_TARGET_KIND_BEHAVIOR,
-        "policy_target_kind",
+    policy_target_kind = _required_string(
+        raw.get("policy_target_kind"), "policy_target_kind"
     )
+    if policy_target_kind not in POLICY_TARGET_KINDS:
+        raise ValueError(
+            "checkpoint policy_target_kind "
+            f"{policy_target_kind!r} is not a current supported target kind"
+        )
     _require_exact(
         raw.get("outcome_target_kind"),
         OUTCOME_TARGET_KIND,
@@ -1073,7 +1082,6 @@ def _validate_controller_provenance_summary(value: Any) -> None:
 def _validate_target_source_summary(value: Any) -> None:
     summary = _required_mapping(value, "training_data_provenance.target_source_summary")
     expected = {
-        "policy_target_kind": POLICY_TARGET_KIND_BEHAVIOR,
         "outcome_target_kind": OUTCOME_TARGET_KIND,
         "hp_target_kind": HP_TARGET_KIND,
         "structured_resource_target_kind": STRUCTURED_RESOURCE_TARGET_KIND,
@@ -1084,6 +1092,15 @@ def _validate_target_source_summary(value: Any) -> None:
             summary.get(key),
             expected_value,
             f"training_data_provenance.target_source_summary.{key}",
+        )
+    policy_target_kind = _required_string(
+        summary.get("policy_target_kind"),
+        "training_data_provenance.target_source_summary.policy_target_kind",
+    )
+    if policy_target_kind not in POLICY_TARGET_KINDS:
+        raise ValueError(
+            "training_data_provenance.target_source_summary.policy_target_kind "
+            f"{policy_target_kind!r} is not supported"
         )
     for key in (
         "policy_target_source",
@@ -1302,8 +1319,22 @@ def _record_tensors(record: TrainerInputRecord) -> tuple[Tensor, Tensor]:
 
 def _record_targets(record: TrainerInputRecord) -> _RecordTargets:
     outcome = _available_outcome(record)
-    policy_target = [0.0 for _ in record.legal_action_features]
-    policy_target[record.chosen_action_index] = 1.0
+    policy_target = list(record.policy_target)
+    if len(policy_target) != len(record.legal_action_features):
+        raise ValueError(
+            f"record {record.example_index}: policy target length "
+            f"{len(policy_target)} does not match legal action count "
+            f"{len(record.legal_action_features)}"
+        )
+    eligible_target_sum = sum(
+        policy_target[index]
+        for index in record.eligible_action_indices
+        if 0 <= index < len(policy_target)
+    )
+    if eligible_target_sum <= 0.0:
+        raise ValueError(
+            f"record {record.example_index}: policy target has no eligible weight"
+        )
     survived_field = _field(outcome.get("battle_survived"))
     hp_field = _field(outcome.get("terminal_absolute_current_hp"))
     if survived_field.get("status") != "available":
@@ -1322,6 +1353,29 @@ def _record_targets(record: TrainerInputRecord) -> _RecordTargets:
         resource_values=resource_values,
         resource_mask=resource_mask,
     )
+
+
+def _dataset_policy_target_kind(dataset: TrainerInputDataset) -> str:
+    kinds = sorted({record.policy_target_kind for record in dataset.records})
+    if len(kinds) == 1:
+        return kinds[0]
+    if not kinds:
+        return POLICY_TARGET_KIND_BEHAVIOR
+    return "mixed"
+
+
+def _policy_target_top_index(
+    record: TrainerInputRecord,
+    target: _RecordTargets,
+) -> int:
+    eligible = [
+        index
+        for index in record.eligible_action_indices
+        if 0 <= index < len(target.policy_target)
+    ]
+    if not eligible:
+        return -1
+    return max(eligible, key=lambda index: target.policy_target[index])
 
 
 def _resource_targets(outcome: Mapping[str, Any]) -> tuple[list[float], list[float]]:
@@ -1474,6 +1528,12 @@ def _training_input_problems(
         problems.append("trainer input dataset is missing snapshot feature size")
     if not dataset.action_feature_size:
         problems.append("trainer input dataset is missing action feature size")
+    target_kinds = {record.policy_target_kind for record in dataset.records}
+    if len(target_kinds) > 1:
+        problems.append(
+            "trainer input dataset mixes policy target kinds: "
+            + ", ".join(sorted(target_kinds))
+        )
     for record in dataset.records:
         problems.extend(_record_training_problems(record))
     if config.epochs <= 0:
