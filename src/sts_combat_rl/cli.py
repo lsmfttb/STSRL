@@ -13,6 +13,10 @@ from sts_combat_rl.commands.lightspeed_cli import (
     is_lightspeed_command,
     run_lightspeed_command,
 )
+from sts_combat_rl.commands.oracle_teacher_report import (
+    format_oracle_teacher_dataset_report_command,
+    run_oracle_teacher_dataset_report_from_paths,
+)
 from sts_combat_rl.commands.pytorch_search_guidance import (
     build_trainer_input_preflight_from_path,
     format_pytorch_search_guidance_training_workflow_report,
@@ -131,6 +135,23 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 0 if report.command_ok else 2
+
+    if args.oracle_teacher_dataset_report is not None:
+        try:
+            report = run_oracle_teacher_dataset_report_from_paths(
+                teacher_path=args.oracle_teacher_dataset_report,
+                source_pool_path=args.oracle_teacher_source_pool,
+                coverage_report_path=args.oracle_teacher_coverage_report,
+                output_path=args.oracle_teacher_report_output,
+            )
+        except (OSError, ValueError) as exc:
+            print(
+                f"failed to build Oracle teacher dataset report: {exc}",
+                file=sys.stderr,
+            )
+            return 2
+        print(format_oracle_teacher_dataset_report_command(report), file=sys.stderr)
+        return 0 if report.command_passed else 1
 
     if is_lightspeed_command(args):
         return run_lightspeed_command(args)

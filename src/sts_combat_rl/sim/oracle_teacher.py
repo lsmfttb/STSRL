@@ -296,7 +296,11 @@ def dump_oracle_teacher_dataset_jsonl(
         _write_row(stream, {"type": "record", "record": record.to_dict()})
 
 
-def load_oracle_teacher_dataset_jsonl(stream: TextIO) -> OracleTeacherDataset:
+def load_oracle_teacher_dataset_jsonl(
+    stream: TextIO,
+    *,
+    validate: bool = True,
+) -> OracleTeacherDataset:
     """Load and migrate an Oracle teacher JSONL artifact."""
 
     metadata: dict[str, Any] | None = None
@@ -369,9 +373,10 @@ def load_oracle_teacher_dataset_jsonl(stream: TextIO) -> OracleTeacherDataset:
             artifact_name="oracle teacher dataset",
         ),
     )
-    problems = oracle_teacher_dataset_problems(dataset)
-    if problems:
-        raise ValueError("invalid oracle teacher dataset: " + "; ".join(problems))
+    if validate:
+        problems = oracle_teacher_dataset_problems(dataset)
+        if problems:
+            raise ValueError("invalid oracle teacher dataset: " + "; ".join(problems))
     return dataset
 
 

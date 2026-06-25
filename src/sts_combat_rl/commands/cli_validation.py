@@ -48,6 +48,21 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
     ):
         return "--lightspeed-oracle-search-teacher requires --oracle-teacher-output"
     if (
+        args.oracle_teacher_coverage_report is not None
+        and args.oracle_teacher_source_pool is None
+    ):
+        return "--oracle-teacher-coverage-report requires --oracle-teacher-source-pool"
+    if args.oracle_teacher_dataset_report is None and (
+        args.oracle_teacher_source_pool is not None
+        or args.oracle_teacher_coverage_report is not None
+        or args.oracle_teacher_report_output is not None
+    ):
+        return (
+            "--oracle-teacher-source-pool, --oracle-teacher-coverage-report, "
+            "and --oracle-teacher-report-output require "
+            "--oracle-teacher-dataset-report"
+        )
+    if (
         args.pytorch_search_guidance_train is not None
         and args.pytorch_checkpoint_output is None
     ):

@@ -80,6 +80,31 @@ def test_cli_parser_accepts_a20_coverage_flags(tmp_path) -> None:
     assert args.pytorch_gate_min_records == 4
 
 
+def test_cli_parser_accepts_oracle_teacher_report_flags(tmp_path) -> None:
+    teacher_path = tmp_path / "teacher.jsonl"
+    pool_path = tmp_path / "pool.jsonl"
+    coverage_path = tmp_path / "coverage.json"
+    output_path = tmp_path / "teacher-report.json"
+
+    args = build_parser().parse_args(
+        [
+            "--oracle-teacher-dataset-report",
+            str(teacher_path),
+            "--oracle-teacher-source-pool",
+            str(pool_path),
+            "--oracle-teacher-coverage-report",
+            str(coverage_path),
+            "--oracle-teacher-report-output",
+            str(output_path),
+        ]
+    )
+
+    assert args.oracle_teacher_dataset_report == teacher_path
+    assert args.oracle_teacher_source_pool == pool_path
+    assert args.oracle_teacher_coverage_report == coverage_path
+    assert args.oracle_teacher_report_output == output_path
+
+
 def test_cli_default_import_does_not_import_torch() -> None:
     repo_src = Path(__file__).resolve().parents[1] / "src"
     env = os.environ.copy()
@@ -762,6 +787,80 @@ def test_cli_oracle_search_teacher_and_fixed_eval_routes_write_stderr_only(
     assert "controller: oracle_search_v1_most_visits_s3" in fixed_output.err
 
 
+def test_cli_oracle_teacher_dataset_report_writes_stderr_and_json(
+    monkeypatch,
+    tmp_path,
+    capsys,
+) -> None:
+    monkeypatch.setattr(
+        "sts_combat_rl.commands.lightspeed_cli.LightSpeedAdapter",
+        FakeLightSpeedSmokeAdapter,
+    )
+    pool_path = tmp_path / "pool.jsonl"
+    teacher_path = tmp_path / "teacher.jsonl"
+    report_path = tmp_path / "teacher-report.json"
+
+    assert (
+        main(
+            [
+                "--lightspeed-battle-start-pool",
+                str(pool_path),
+                "--sim-episodes",
+                "1",
+                "--sim-steps",
+                "1",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
+
+    assert (
+        main(
+            [
+                "--lightspeed-oracle-search-teacher",
+                str(pool_path),
+                "--oracle-teacher-output",
+                str(teacher_path),
+                "--oracle-search-simulations",
+                "3",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
+
+    assert (
+        main(
+            [
+                "--oracle-teacher-dataset-report",
+                str(teacher_path),
+                "--oracle-teacher-source-pool",
+                str(pool_path),
+                "--oracle-teacher-report-output",
+                str(report_path),
+                "--log-file",
+                "-",
+            ]
+        )
+        == 0
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert report_path.exists()
+    assert "Oracle teacher dataset report" in captured.err
+    assert "command passed: yes" in captured.err
+    assert "not normal-information" in captured.err
+    assert '"schema_id": "oracle-teacher-dataset-report-v1"' in (
+        report_path.read_text(encoding="utf-8")
+    )
+
+
 def test_cli_oracle_teacher_requires_output_path(capsys) -> None:
     assert (
         main(
@@ -778,6 +877,26 @@ def test_cli_oracle_teacher_requires_output_path(capsys) -> None:
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "requires --oracle-teacher-output" in captured.err
+
+
+def test_cli_oracle_teacher_report_coverage_requires_source_pool(capsys) -> None:
+    assert (
+        main(
+            [
+                "--oracle-teacher-dataset-report",
+                "teacher.jsonl",
+                "--oracle-teacher-coverage-report",
+                "coverage.json",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 2
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "requires --oracle-teacher-source-pool" in captured.err
 
 
 def test_cli_lightspeed_rollout_smoke_writes_report_to_stderr_only(
