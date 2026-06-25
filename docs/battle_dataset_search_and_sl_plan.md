@@ -331,9 +331,11 @@ training and evaluation.
 Status: T009 completed optional PyTorch policy/value plumbing and diagnostic
 training reports. T021 completed the current coverage-measurement report used
 to decide what A20 data and distribution gaps remain before broad training or
-model-guided search work starts. Model-guided search integration and
-meaningful held-out or fixed-cohort improvement remain pending meaningful
-coverage.
+model-guided search work starts. T022 is the published follow-up to make
+Oracle-like teacher dataset coverage, source linkage, and search statistics
+auditable before teacher scale-up feeds model-guided search. Model-guided
+search integration and meaningful held-out or fixed-cohort improvement remain
+pending meaningful coverage.
 
 Exit gate: a search change improves fixed evaluation at equal simulation or
 wall-clock budget without natural-weighted regression.

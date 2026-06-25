@@ -14,8 +14,9 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
 
 The published foundation, maintenance, and first coverage-measurement backlog
 is complete: T001--T006 and T008--T021 are `DONE`, and T007 is `CANCELLED`
-because it was superseded by T014--T016. No STSRL repository task is currently
-published as `READY`.
+because it was superseded by T014--T016. The current published STSRL
+repository `READY` task is T022, for A20 Oracle-like teacher dataset reporting
+and source-coverage linkage.
 
 ## Implemented On Main
 
@@ -311,9 +312,13 @@ already supports them.
 
 ## Immediate Work
 
-Executable task specifications live in [`tasks/`](tasks/README.md). No
-repository task is currently published as `READY`; the next implementation
-branch must wait for a newly published focused task.
+Executable task specifications live in [`tasks/`](tasks/README.md). The
+currently published STSRL repository `READY` task is:
+
+1. [`T022`](tasks/T022-a20-oracle-teacher-dataset-report.md): A20
+   Oracle-like teacher dataset reporting, source-pool linkage, optional T021
+   coverage linkage, search statistics, and explicit
+   `full_simulator_state_oracle_like` provenance.
 
 The immediate external-fork follow-up is
 [`lsmfttb/sts_lightspeed#7`](https://github.com/lsmfttb/sts_lightspeed/issues/7):
@@ -323,17 +328,18 @@ operational fork maintenance and does not block STSRL repository work.
 
 Recommended later task areas:
 
-1. Teacher dataset scale-up: use the T021 coverage report to choose a small
-   but structurally controlled Oracle-like A20 teacher dataset with fixed
-   search budgets and explicit `full_simulator_state_oracle_like` provenance.
-2. Model-guided search integration: connect T009 policy/value checkpoints to a
+1. Model-guided search integration: after T022 gives teacher-dataset reporting
+   and source linkage, connect T009 policy/value checkpoints to a
    versioned search controller, report compute/model-call telemetry, and
    compare against fixed cohorts without claiming promotion from raw model
    diagnostics.
-3. Fixed A20 benchmark reporting: compare scripted/preferred, Oracle search,
+2. Fixed A20 benchmark reporting: compare scripted/preferred, Oracle search,
    raw model, and model-guided search only after the relevant controllers and
    datasets exist, keeping natural-weighted, encounter-macro, and
    room-type-macro results separate.
+3. Broader A20 coverage and data collection: use T021/T022 reports to decide
+   which natural, sampled, constructed, and teacher-data strata need more
+   source coverage before broad training.
 4. Normal-information search groundwork: specify the authoritative
    public-consistent hidden-future sampling boundary before any belief-search
    branch starts.
