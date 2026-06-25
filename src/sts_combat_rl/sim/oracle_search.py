@@ -25,6 +25,11 @@ from sts_combat_rl.sim.decision_record import (
 from sts_combat_rl.sim.lightspeed_source import lightspeed_source_identity_dict
 from sts_combat_rl.sim.online_controller import NATIVE_SEARCH_INFORMATION_REGIME
 from sts_combat_rl.sim.policy import DecisionContext
+from sts_combat_rl.sim.search_telemetry import (
+    SEARCH_DECISION_TELEMETRY_SCHEMA_ID,
+    SEARCH_DECISION_TELEMETRY_SCHEMA_VERSION,
+    SearchDecisionTelemetry,
+)
 
 
 ORACLE_SEARCH_SCHEMA_ID = "native-battle-search-root-v1"
@@ -106,6 +111,8 @@ class OracleSearchReport:
     best_action_value: float | None
     min_action_value: float | None
     outcome_player_hp: int | None
+    legal_action_count: int
+    eligible_action_count: int
     root_actions: tuple[OracleRootActionStatistics, ...]
     soft_visit_target: tuple[float, ...]
     soft_visit_denominator: int
@@ -140,6 +147,8 @@ class OracleSearchReport:
             "best_action_value": self.best_action_value,
             "min_action_value": self.min_action_value,
             "outcome_player_hp": self.outcome_player_hp,
+            "legal_action_count": self.legal_action_count,
+            "eligible_action_count": self.eligible_action_count,
             "root_actions": [action.to_dict() for action in self.root_actions],
             "soft_visit_target": list(self.soft_visit_target),
             "soft_visit_denominator": self.soft_visit_denominator,
@@ -148,6 +157,7 @@ class OracleSearchReport:
             "unsearched_legal_action_count": self.unsearched_legal_action_count,
             "unmapped_search_edge_count": self.unmapped_search_edge_count,
             "wall_clock_time_s": self.wall_clock_time_s,
+            "decision_telemetry": oracle_search_decision_telemetry(self).to_dict(),
             "problems": list(self.problems),
         }
 
@@ -193,7 +203,18 @@ class OracleSearchController:
                     "rollout_configuration": {
                         "rollout_policy": "BattleScumSearcher2::playoutRandom",
                         "leaf_value": "BattleScumSearcher2::evaluateEndState",
-                        "model_calls": None,
+                        "model_calls": 0,
+                    },
+                    "search_telemetry": {
+                        "schema_id": SEARCH_DECISION_TELEMETRY_SCHEMA_ID,
+                        "schema_version": SEARCH_DECISION_TELEMETRY_SCHEMA_VERSION,
+                        "model_calls_for_native_baseline": 0,
+                        "unavailable_native_fields": {
+                            "tree_depth": "native battle_search does not expose tree depth",
+                            "value_uncertainty": (
+                                "native battle_search does not expose uncertainty"
+                            ),
+                        },
                     },
                     "root_selection_rule": self.root_selection_rule,
                     "action_space": self.action_space.to_dict(),
@@ -455,6 +476,8 @@ def build_oracle_search_report(
             raw.get("min_action_value"), "min_action_value"
         ),
         outcome_player_hp=_optional_int(raw.get("outcome_player_hp")),
+        legal_action_count=len(actions),
+        eligible_action_count=len(context.eligible_action_indices),
         root_actions=tuple(stats),
         soft_visit_target=soft_visit_target,
         soft_visit_denominator=eligible_visit_sum,
@@ -530,13 +553,14 @@ def oracle_search_controller_metadata(
 ) -> dict[str, Any]:
     """Return JSON-safe per-decision telemetry for evaluation aggregation."""
 
+    telemetry = oracle_search_decision_telemetry(report, target=target)
     return json_safe_mapping(
         {
             "oracle_search_decision_count": 1,
             "oracle_search_simulations": report.simulations_requested,
             "oracle_search_root_visits": report.root_visits,
             "oracle_search_native_simulator_steps": report.native_simulator_steps,
-            "oracle_search_model_calls": report.model_calls,
+            "oracle_search_model_calls": telemetry.model_calls,
             "oracle_search_wall_clock_time_s": report.wall_clock_time_s,
             "oracle_search_root_row_count": report.root_row_count,
             "oracle_search_unmapped_root_rows": report.unmapped_root_row_count,
@@ -549,8 +573,110 @@ def oracle_search_controller_metadata(
             "oracle_search_selected_index": target.legal_action_index,
             "oracle_search_selected_visits": target.visits,
             "oracle_search_selected_mean_value": target.mean_value,
+            "search_decision_telemetry_schema_id": (
+                SEARCH_DECISION_TELEMETRY_SCHEMA_ID
+            ),
+            "search_decision_telemetry": [telemetry.to_dict()],
             "oracle_search_decision_reports": [report.to_dict()],
         }
+    )
+
+
+def oracle_search_decision_telemetry(
+    report: OracleSearchReport,
+    *,
+    target: OracleSearchTarget | None = None,
+) -> SearchDecisionTelemetry:
+    """Build current-schema telemetry for one Oracle-like native search."""
+
+    eligible_values = [
+        action.mean_value
+        for action in report.root_actions
+        if action.eligible and action.visits > 0 and action.mean_value is not None
+    ]
+    sorted_values = sorted((float(value) for value in eligible_values), reverse=True)
+    root_value_max = sorted_values[0] if sorted_values else None
+    root_value_min = sorted_values[-1] if sorted_values else None
+    root_value_spread = (
+        root_value_max - root_value_min
+        if root_value_max is not None and root_value_min is not None
+        else None
+    )
+    root_decision_gap = (
+        sorted_values[0] - sorted_values[1] if len(sorted_values) >= 2 else None
+    )
+    unavailable = {
+        "tree_depth": "native battle_search does not expose tree depth",
+        "value_uncertainty": "native battle_search does not expose uncertainty",
+    }
+    if report.native_simulator_steps is None:
+        unavailable["native_simulator_steps"] = (
+            "native search result did not expose native_simulator_steps"
+        )
+    if report.search_edge_count is None:
+        unavailable["search_edge_count"] = (
+            "native search result did not expose search_edge_count"
+        )
+    if report.unsearched_legal_action_count is None:
+        unavailable["unsearched_legal_action_count"] = (
+            "native search result did not expose unsearched_legal_action_count"
+        )
+    if report.unmapped_search_edge_count is None:
+        unavailable["unmapped_search_edge_count"] = (
+            "native search result did not expose unmapped_search_edge_count"
+        )
+    if root_value_spread is None:
+        unavailable["root_value_spread"] = (
+            "no visited eligible root action mean values were available"
+        )
+    if root_decision_gap is None:
+        unavailable["root_decision_gap"] = (
+            "fewer than two visited eligible root actions had mean values"
+        )
+
+    return SearchDecisionTelemetry(
+        information_regime=report.information_regime,
+        controller_kind="oracle_battle_search",
+        search_kind="native_random_terminal_playout",
+        search_backend={
+            "native_api": report.native_api,
+            "patch_identity": report.patch_identity,
+            "schema_id": report.schema_id,
+        },
+        requested_budget={
+            "unit": "native_random_terminal_playouts",
+            "amount": report.simulations_requested,
+        },
+        simulations_requested=report.simulations_requested,
+        root_visits=report.root_visits,
+        root_action_count=len(report.root_actions),
+        legal_action_count=report.legal_action_count,
+        eligible_action_count=report.eligible_action_count,
+        visited_action_count=sum(
+            1 for action in report.root_actions if action.visits > 0
+        ),
+        visited_eligible_action_count=sum(
+            1 for action in report.root_actions if action.eligible and action.visits > 0
+        ),
+        native_simulator_steps=report.native_simulator_steps,
+        model_calls=0 if report.model_calls is None else report.model_calls,
+        wall_clock_time_s=report.wall_clock_time_s,
+        root_value_min=root_value_min,
+        root_value_max=root_value_max,
+        root_value_spread=root_value_spread,
+        root_decision_gap=root_decision_gap,
+        unsearched_legal_action_count=report.unsearched_legal_action_count,
+        unmapped_search_edge_count=report.unmapped_search_edge_count,
+        unmapped_root_row_count=report.unmapped_root_row_count,
+        root_mapping_failure_count=len(report.problems),
+        selection_rule=None if target is None else target.selection_rule,
+        selected_legal_action_index=(
+            None if target is None else target.legal_action_index
+        ),
+        selected_visits=None if target is None else target.visits,
+        selected_mean_value=None if target is None else target.mean_value,
+        unavailable_fields=unavailable,
+        problems=report.problems,
     )
 
 

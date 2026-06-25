@@ -27,8 +27,10 @@ from sts_combat_rl.sim.fixed_evaluation_set import (
 from sts_combat_rl.sim.online_controller import NATIVE_SEARCH_INFORMATION_REGIME
 from sts_combat_rl.sim.oracle_search import OracleSearchController
 from sts_combat_rl.sim.oracle_teacher import (
+    build_oracle_teacher_dataset_report,
     collect_oracle_teacher_dataset_from_pool,
     dump_oracle_teacher_dataset_jsonl,
+    format_oracle_teacher_dataset_report,
     load_oracle_teacher_dataset_jsonl,
     oracle_teacher_dataset_problems,
 )
@@ -272,6 +274,11 @@ def test_oracle_teacher_dataset_preserves_teacher_targets_and_round_trips() -> N
     assert row.teacher_action["legal_action_index"] == 1
     assert row.soft_visit_target["target_kind"] == "root_visit_distribution"
     assert row.native_search_report["native_simulator_steps"] == 17
+    assert row.native_search_report["decision_telemetry"]["model_calls"] == 0
+
+    collection_report = build_oracle_teacher_dataset_report(dataset)
+    assert collection_report.model_calls == 0
+    assert "model calls: 0" in format_oracle_teacher_dataset_report(collection_report)
 
     stream = StringIO()
     dump_oracle_teacher_dataset_jsonl(dataset, stream)
@@ -330,7 +337,15 @@ def test_oracle_fixed_evaluation_uses_supplied_cohort_unchanged(tmp_path) -> Non
     assert telemetry is not None
     assert telemetry["oracle_search_decision_count"] == 1.0
     assert telemetry["oracle_search_native_simulator_steps"] == 17.0
+    assert telemetry["oracle_search_model_calls"] == 0.0
+    assert telemetry["search_decision_telemetry"][0][0]["schema_id"] == (
+        "search-decision-telemetry-v1"
+    )
+    assert telemetry["search_telemetry_summary"]["decision_count"] == 1
+    assert telemetry["search_telemetry_summary"]["model_calls"]["total"] == 0.0
 
     text = format_oracle_fixed_evaluation_report(report)
     assert "sts_lightspeed source identity" in text
     assert "Fixed battle evaluation report" in text
+    assert "schema: search-decision-telemetry-v1 v1" in text
+    assert "model calls: total=0" in text
