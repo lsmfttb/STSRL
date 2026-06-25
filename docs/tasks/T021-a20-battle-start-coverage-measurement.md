@@ -1,6 +1,6 @@
 # T021: A20 Battle-Start Coverage Measurement
 
-Status: `READY`.
+Status: `DONE` via PR #21, merged 2026-06-25.
 
 ## Objective
 

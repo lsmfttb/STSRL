@@ -5,9 +5,10 @@ development, and the separately evaluated SL-enabled branch. Repository-wide
 rules come from [`project_architecture.md`](project_architecture.md). Current
 implementation status comes from [`current_status.md`](current_status.md).
 
-The T001--T018 foundation backlog is complete except for cancelled T007, whose
-scope was superseded by T014--T016. New implementation work should start only
-after the main maintainer publishes a new focused task.
+The published foundation, maintenance, and first coverage-measurement backlog
+is complete through T021 except for cancelled T007, whose scope was superseded
+by T014--T016. New implementation work should start only after the main
+maintainer publishes a new focused task.
 
 ## Goals
 
@@ -307,8 +308,11 @@ evaluation rather than being inferred from natural-run floor statistics. T008
 completed conservative constructed A20 battle-start supplements, but the
 accepted audit remains smoke-scale evidence for the transform workflow rather
 than a broad coverage gate. T009 completed the optional PyTorch training
-plumbing and broad-training gate, but not the coverage requirement itself. T021
-is the published task to measure that remaining A20 coverage gap.
+plumbing and broad-training gate. T021 completed the first current-schema A20
+coverage report across natural starts, sampled optimization weight,
+constructed supplements, restore evidence, structured outcomes, public-context
+availability, and broad-training gate gaps. The accepted smoke-scale result is
+Act 1 only and keeps the broad-training gate closed.
 
 Work:
 
@@ -325,10 +329,11 @@ training and evaluation.
 ### Phase E: Search Improvement
 
 Status: T009 completed optional PyTorch policy/value plumbing and diagnostic
-training reports. T021 is the published coverage-measurement task for deciding
-what A20 data and distribution gaps remain before broad training or
-model-guided search work starts. Model-guided search integration and meaningful
-held-out or fixed-cohort improvement remain pending meaningful coverage.
+training reports. T021 completed the current coverage-measurement report used
+to decide what A20 data and distribution gaps remain before broad training or
+model-guided search work starts. Model-guided search integration and
+meaningful held-out or fixed-cohort improvement remain pending meaningful
+coverage.
 
 Exit gate: a search change improves fixed evaluation at equal simulation or
 wall-clock budget without natural-weighted regression.

@@ -12,10 +12,10 @@ Build the foundations for an A20 battle agent. Search remains the intended
 primary battle policy, and learned policies or values are expected to guide or
 accelerate search. Non-combat decisions remain outside the trainable agent.
 
-The published foundation and maintenance backlog is complete: T001--T006 and
-T008--T020 are `DONE`, and T007 is `CANCELLED` because it was superseded by
-T014--T016. The current published STSRL repository `READY` task is T021, for
-A20 battle-start coverage measurement and broad-training gate gap reporting.
+The published foundation, maintenance, and first coverage-measurement backlog
+is complete: T001--T006 and T008--T021 are `DONE`, and T007 is `CANCELLED`
+because it was superseded by T014--T016. No STSRL repository task is currently
+published as `READY`.
 
 ## Implemented On Main
 
@@ -158,12 +158,22 @@ A20 battle-start coverage measurement and broad-training gate gap reporting.
   stable source identity summaries, and semantic contract validation on load.
   Raw policy/value diagnostics are reported separately; model-guided fixed
   search evaluation is currently `not_run`.
+- Versioned A20 battle-start coverage reporting
+  (`a20-battle-start-coverage-report-v1`) through
+  `--lightspeed-a20-battle-start-coverage`. The report combines a migrated
+  portable natural battle-start pool, optional constructed supplement artifact,
+  seeded sampled optimization-weight draws, fresh-adapter restore evidence,
+  public-context and structured-outcome availability, source identity, and the
+  T009 broad-training gate cells. Natural unique-source coverage remains
+  separate from repeated sampled rows and constructed supplements; restore
+  failures and constructed-source provenance mismatches fail closed while
+  ordinary under-coverage remains reportable.
 - A training-readiness report that validates plumbing only. It does not train a
   model or demonstrate policy strength.
 
 ### Tests And Runtime Evidence
 
-- `479` tests pass on Windows Python as of this review. In an uninstalled
+- `489` tests pass on Windows Python as of this review. In an uninstalled
   checkout, set `PYTHONPATH=src` (or install the package) before invoking the
   CLI directly.
 - The two CommunicationMod fixture smokes pass.
@@ -272,6 +282,19 @@ A20 battle-start coverage measurement and broad-training gate gap reporting.
   check, both CommunicationMod fixture smokes, default CLI import without
   importing PyTorch, and diff whitespace check. `ruff format --check` emitted
   non-fatal cache-write warnings but exited successfully.
+- T021 validates the A20 battle-start coverage report. The accepted local gate
+  passed 489 Windows tests, compileall, ruff check, ruff format check, both
+  CommunicationMod fixture smokes, and focused coverage/CLI tests. The WSL
+  smoke-scale coverage chain over seeds `1..3` at A20 reported 13 natural
+  starts from 3 source runs, 13 unique natural sources, 13 completed battles,
+  13 available structured outcomes, 13/13 fresh-adapter restores, 16 sampled
+  optimization-weight draws, and 11 accepted constructed rows from 39 audit
+  rows. The combined gate input had 40 training rows
+  (`natural_run=20`, `stratified_training=9`,
+  `constructed_supplement=11`) and 13 unique natural sources. The T009 broad
+  training gate correctly remained closed: A20 Act 1 was below the record and
+  unique-source thresholds and constructed rows lacked constructed-context and
+  terminal-outcome labels; A20 Acts 2--4 had zero rows.
 
 ## Not Implemented On Main
 
@@ -288,26 +311,21 @@ already supports them.
 
 ## Immediate Work
 
-Executable task specifications live in [`tasks/`](tasks/README.md). The
-currently published STSRL repository `READY` task is:
-
-1. [`T021`](tasks/T021-a20-battle-start-coverage-measurement.md): A20
-   battle-start coverage measurement across natural, sampled, and constructed
-   starts, including restore evidence and the exact T009 broad-training gate
-   gaps.
+Executable task specifications live in [`tasks/`](tasks/README.md). No
+repository task is currently published as `READY`; the next implementation
+branch must wait for a newly published focused task.
 
 The immediate external-fork follow-up is
 [`lsmfttb/sts_lightspeed#7`](https://github.com/lsmfttb/sts_lightspeed/issues/7):
 archive historical STSRL task branches after creating provenance tags, while
 preserving `stsrl/main` as the sole active integration branch. This is
-operational fork maintenance and does not block T021.
+operational fork maintenance and does not block STSRL repository work.
 
 Recommended later task areas:
 
-1. Teacher dataset scale-up: once T021 reports the measured coverage gaps,
-   collect a small but structurally controlled Oracle-like A20 teacher dataset
-   with fixed search budgets and explicit `full_simulator_state_oracle_like`
-   provenance.
+1. Teacher dataset scale-up: use the T021 coverage report to choose a small
+   but structurally controlled Oracle-like A20 teacher dataset with fixed
+   search budgets and explicit `full_simulator_state_oracle_like` provenance.
 2. Model-guided search integration: connect T009 policy/value checkpoints to a
    versioned search controller, report compute/model-call telemetry, and
    compare against fixed cohorts without claiming promotion from raw model

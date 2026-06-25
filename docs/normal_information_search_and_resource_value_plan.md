@@ -270,9 +270,10 @@ Retain only auxiliary targets that improve normal-information evaluation.
 
 ## Immediate Design Work
 
-1. Complete [`T021`](tasks/T021-a20-battle-start-coverage-measurement.md), the
-   published coverage-measurement task that reports when the T009
-   broad-training gate can pass without override and why it currently cannot.
+1. Use the completed
+   [`T021`](tasks/T021-a20-battle-start-coverage-measurement.md) coverage
+   report to publish the next focused data-collection or teacher-scale-up task
+   without treating smoke-scale under-coverage as broad-training evidence.
 2. Build structured history, map, and visible-Boss encoders on the sanitized
    public-context artifacts now available on `main`.
 3. Establish an honest public policy/vector-value baseline from sufficient A20
