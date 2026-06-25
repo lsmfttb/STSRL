@@ -26,6 +26,19 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
         return "--battle-start-structural-fraction must be between zero and one"
     if args.oracle_search_simulations <= 0:
         return "--oracle-search-simulations must be positive"
+    if args.oracle_teacher_scaleup_seed < 0:
+        return "--oracle-teacher-scaleup-seed must be non-negative"
+    if (
+        args.oracle_teacher_scaleup_source_limit is not None
+        and args.oracle_teacher_scaleup_source_limit <= 0
+    ):
+        return "--oracle-teacher-scaleup-source-limit must be positive"
+    if any(value <= 0 for value in args.oracle_teacher_scaleup_budgets):
+        return "--oracle-teacher-scaleup-budgets must be positive"
+    if len(set(args.oracle_teacher_scaleup_budgets)) != len(
+        args.oracle_teacher_scaleup_budgets
+    ):
+        return "--oracle-teacher-scaleup-budgets must be unique"
     if args.pytorch_gate_min_records <= 0:
         return "--pytorch-gate-min-records must be positive"
     if args.pytorch_gate_min_sources <= 0:
@@ -47,6 +60,25 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
         and args.oracle_teacher_output is None
     ):
         return "--lightspeed-oracle-search-teacher requires --oracle-teacher-output"
+    if (
+        args.lightspeed_a20_oracle_teacher_scaleup is not None
+        and args.oracle_teacher_scaleup_output_dir is None
+    ):
+        return (
+            "--lightspeed-a20-oracle-teacher-scaleup requires "
+            "--oracle-teacher-scaleup-output-dir"
+        )
+    if args.lightspeed_a20_oracle_teacher_scaleup is None and (
+        args.oracle_teacher_scaleup_output_dir is not None
+        or args.oracle_teacher_scaleup_source_limit is not None
+        or args.oracle_teacher_scaleup_coverage_report is not None
+    ):
+        return (
+            "--oracle-teacher-scaleup-output-dir, "
+            "--oracle-teacher-scaleup-source-limit, and "
+            "--oracle-teacher-scaleup-coverage-report require "
+            "--lightspeed-a20-oracle-teacher-scaleup"
+        )
     if (
         args.oracle_teacher_coverage_report is not None
         and args.oracle_teacher_source_pool is None

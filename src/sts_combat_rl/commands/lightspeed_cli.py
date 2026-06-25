@@ -36,6 +36,10 @@ from sts_combat_rl.commands.oracle_search import (
     run_oracle_fixed_evaluation_comparison_from_cohort_path,
     write_oracle_teacher_dataset,
 )
+from sts_combat_rl.commands.oracle_teacher_scaleup import (
+    format_oracle_teacher_scaleup_command,
+    run_oracle_teacher_scaleup_from_paths,
+)
 from sts_combat_rl.commands.public_context import run_public_context_audit
 from sts_combat_rl.commands.public_projection import (
     run_public_projection_capability_audit,
@@ -174,6 +178,7 @@ _LIGHTSPEED_PATH_FLAGS = (
     "lightspeed_battle_start_pool",
     "lightspeed_battle_start_pool_restore",
     "lightspeed_a20_battle_start_coverage",
+    "lightspeed_a20_oracle_teacher_scaleup",
     "lightspeed_fixed_battle_evaluation",
     "lightspeed_oracle_search_teacher",
     "lightspeed_oracle_fixed_evaluation",
@@ -361,6 +366,24 @@ def run_lightspeed_command(args: argparse.Namespace) -> int:
             )
             print(format_a20_battle_start_coverage_report(report), file=sys.stderr)
             if not report.command_passed:
+                return 1
+        elif args.lightspeed_a20_oracle_teacher_scaleup is not None:
+            manifest = run_oracle_teacher_scaleup_from_paths(
+                adapter_factory=lambda: LightSpeedAdapter(
+                    seed=args.sim_seed,
+                    ascension=20,
+                ),
+                pool_path=args.lightspeed_a20_oracle_teacher_scaleup,
+                output_dir=args.oracle_teacher_scaleup_output_dir,
+                budgets=args.oracle_teacher_scaleup_budgets,
+                source_limit=args.oracle_teacher_scaleup_source_limit,
+                selection_seed=args.oracle_teacher_scaleup_seed,
+                coverage_report_path=args.oracle_teacher_scaleup_coverage_report,
+                root_selection_rule=args.oracle_teacher_scaleup_root_selection,
+                action_space=action_space,
+            )
+            print(format_oracle_teacher_scaleup_command(manifest), file=sys.stderr)
+            if not manifest.command_passed:
                 return 1
         elif args.lightspeed_fixed_battle_evaluation is not None:
             battle_policy = build_online_sim_policy(
