@@ -17,8 +17,8 @@ The M1 model-guided Oracle search sandbox is complete through synthesis. It
 validated Oracle-like search plumbing but did not demonstrate controller
 improvement. The first post-M1 coverage refresh, T031, is also complete and
 showed that the current A20 source distribution is still Act-1-only; T032
-therefore remains blocked pending a later-act/Boss coverage follow-up or an
-explicitly narrow teacher/checkpoint refresh boundary.
+therefore remains blocked pending the T036 search-controlled reachability probe
+or an explicitly narrow teacher/checkpoint refresh boundary.
 
 ## Implemented On Main
 
@@ -591,11 +591,14 @@ controller improvement: the accepted T029 smoke comparison tied baseline
 Oracle search at five wins and three losses on eight restored A20 battles
 while adding 120 checkpoint model calls for the model-guided controller.
 
-T031 is complete. The remaining post-M1 task batch is drafted in the task
-index as T032--T035, but T032 is not automatically ready: T031 found healthy
-artifacts and restore evidence but no Boss or later-act starts. Use the task
-index to determine which exact task rows are `READY`, `BLOCKED`, or `DRAFT`;
-future rows must not start merely because they are mentioned here.
+T031 is complete. The original remaining post-M1 task batch is drafted in the
+task index as T032--T035, but T032 is not automatically ready: T031 found
+healthy artifacts and restore evidence but no Boss or later-act starts. T036 is
+now the published `READY` follow-up, focused on rebuilding the historical
+pure-search Boss/Act2 reachability experiment on current schemas while
+preserving the battle/non-combat split. Use the task index to determine which
+exact task rows are `READY`, `BLOCKED`, or `DRAFT`; future rows must not start
+merely because they are mentioned here.
 
 The immediate external-fork follow-up is
 [`lsmfttb/sts_lightspeed#7`](https://github.com/lsmfttb/sts_lightspeed/issues/7):
@@ -605,8 +608,9 @@ operational fork maintenance and does not block STSRL repository work.
 
 The post-M1 task-batch recommendation is:
 
-1. Publish or revise a later-act/Boss coverage follow-up before broad
-   teacher/checkpoint refresh work.
+1. Run T036 before broad teacher/checkpoint refresh work: test whether a
+   stronger search-controlled battle child with the existing stochastic
+   non-combat driver recovers Boss/later-act source reachability.
 2. Regenerate teacher, trainer-input, checkpoint, and calibration evidence only
    after an accepted coverage contract or explicitly narrow diagnostic boundary
    exists (T032).

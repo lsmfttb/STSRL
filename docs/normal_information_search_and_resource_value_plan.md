@@ -251,7 +251,10 @@ available on `main`. T030 records that M1 succeeded as Oracle-like plumbing but
 did not demonstrate controller improvement or normal-information evidence.
 T031 completed the first post-M1 coverage refresh and found the current source
 distribution still Act-1-only. Task lifecycle state remains canonical in the
-task index.
+task index. T036 is the immediate reachability probe before changing direction:
+it tests whether a stronger Oracle-like battle search controller with the
+separate stochastic non-combat driver can recover the historical Boss/Act2
+source path on current schemas.
 
 Use the Oracle regime to validate priors, leaf values, uncertainty, and search
 instrumentation. Exit when model guidance improves the fixed Oracle curve at
@@ -279,9 +282,9 @@ Retain only auxiliary targets that improve normal-information evaluation.
 
 ## Immediate Design Work
 
-1. Use the T031 distribution diagnosis before publishing the next data task:
-   later-act/Boss source coverage needs a follow-up before broad
-   teacher/checkpoint refresh evidence.
+1. Use T036 to resolve the T031 distribution diagnosis before broad
+   teacher/checkpoint refresh evidence: first test search-controlled
+   reachability with the existing battle/non-combat split.
 2. Build structured history, map, and visible-Boss encoders on the sanitized
    public-context artifacts now available on `main`.
 3. Establish an honest public policy/vector-value baseline from sufficient A20

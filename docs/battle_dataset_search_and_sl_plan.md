@@ -9,9 +9,9 @@ The published foundation, maintenance, and first research-measurement backlog
 is complete through the M1 synthesis and T031 coverage refresh, except for
 cancelled T007, whose scope was superseded by T014--T016. T031 found the
 current A20 source distribution still Act-1-only, so teacher/checkpoint refresh
-work remains blocked on a later-act/Boss coverage follow-up or an explicitly
-narrow diagnostic boundary. New implementation work should start only from
-rows marked `READY` in the task index.
+work remains blocked on T036's search-controlled reachability probe or an
+explicitly narrow diagnostic boundary. New implementation work should start
+only from rows marked `READY` in the task index.
 
 ## Goals
 
@@ -318,7 +318,10 @@ availability, and broad-training gate gaps. The accepted smoke-scale result is
 Act 1 only and keeps the broad-training gate closed. T031 later repeated the
 coverage measurement at 50 source episodes; artifacts and restores were
 healthy, but the distribution still produced only Act 1 starts with no Boss or
-later-act starts.
+later-act starts. T036 is the next executable source-generation task: rebuild
+the historical pure-search reachability experiment on current schemas before
+deciding whether the gap belongs to battle search strength, non-combat driver
+calibration, constructed supplements, or a larger direction change.
 
 Work:
 
@@ -353,8 +356,10 @@ controller improvement, because the T029 comparison tied baseline Oracle search
 while adding checkpoint model calls. T031 completed the next coverage refresh
 and diagnosed a distribution gap rather than unlocking broader
 teacher/checkpoint work: the current run distribution still did not reach Boss
-or later-act battle starts. Meaningful held-out improvement or controller
-promotion remains pending broader coverage and later search work.
+or later-act battle starts. T036 follows up by testing search-controlled
+complete-run source collection against that gap. Meaningful held-out
+improvement or controller promotion remains pending broader coverage and later
+search work.
 
 Exit gate: a search change improves fixed evaluation at equal simulation or
 wall-clock budget without natural-weighted regression.
