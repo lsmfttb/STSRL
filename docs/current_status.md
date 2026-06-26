@@ -15,8 +15,10 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
 The task index lists the canonical lifecycle state for the published backlog.
 The M1 model-guided Oracle search sandbox is complete through synthesis. It
 validated Oracle-like search plumbing but did not demonstrate controller
-improvement, so the active post-M1 implementation task is T031: broader A20
-coverage refresh and data-gap reporting.
+improvement. The first post-M1 coverage refresh, T031, is also complete and
+showed that the current A20 source distribution is still Act-1-only; T032
+therefore remains blocked pending a later-act/Boss coverage follow-up or an
+explicitly narrow teacher/checkpoint refresh boundary.
 
 ## Implemented On Main
 
@@ -542,6 +544,24 @@ coverage refresh and data-gap reporting.
   succeeded as Oracle-like search plumbing but did not show controller
   improvement, and it keeps follow-up implementation gated behind explicit
   task states.
+- T031 validates the first post-M1 A20 coverage refresh and distribution-gap
+  diagnosis. The accepted PR updated `docs/experiment_log.md` only and kept
+  generated artifacts under ignored `artifacts/t031-a20-coverage-refresh/`.
+  The WSL chain used pinned `sts_lightspeed` integration commit
+  `242344c57c17c784708a6f072c905febc3f96527`, 50 A20 source episodes, and a
+  500-step cap. It produced 218 natural battle starts from 50 terminal source
+  runs, 173 accepted constructed rows from 654 audit rows, 256 sampled
+  optimization-weight draws, 218/218 successful restore/public-context
+  comparisons in the reported coverage artifact, and no artifact command
+  problems. All natural starts were Act 1; no Act 1 Boss or later-act battle
+  starts were reached. The T009 gate remained closed: A20 Act 1 failed because
+  constructed rows lacked current public-context and structured-outcome labels,
+  while A20 Acts 2--4 had zero records and zero unique sources. Maintainer
+  review reran the pinned-source verifier, verified artifact SHA-256 values,
+  parsed the coverage report, and ran a lightweight WSL coverage read/restore
+  smoke on the reported artifacts. This is healthy artifact and distribution
+  evidence, not broad training, teacher-refresh, fixed-comparison,
+  controller-strength, live-game, or normal-information evidence.
 
 ## Not Implemented On Main
 
@@ -571,12 +591,11 @@ controller improvement: the accepted T029 smoke comparison tied baseline
 Oracle search at five wins and three losses on eight restored A20 battles
 while adding 120 checkpoint model calls for the model-guided controller.
 
-The current `READY` task is T031: broader A20 coverage measurement and
-distribution-gap diagnosis before deeper model-guided search or
-normal-information belief search. The remaining post-M1 task batch is drafted
-in the task index as T032--T035. Use the task index to determine which exact
-task rows are `READY`, `BLOCKED`, or `DRAFT`; future rows must not start merely
-because they are mentioned here.
+T031 is complete. The remaining post-M1 task batch is drafted in the task
+index as T032--T035, but T032 is not automatically ready: T031 found healthy
+artifacts and restore evidence but no Boss or later-act starts. Use the task
+index to determine which exact task rows are `READY`, `BLOCKED`, or `DRAFT`;
+future rows must not start merely because they are mentioned here.
 
 The immediate external-fork follow-up is
 [`lsmfttb/sts_lightspeed#7`](https://github.com/lsmfttb/sts_lightspeed/issues/7):
@@ -586,10 +605,11 @@ operational fork maintenance and does not block STSRL repository work.
 
 The post-M1 task-batch recommendation is:
 
-1. Refresh broader A20 coverage and diagnose distribution/gate gaps first
-   (T031).
+1. Publish or revise a later-act/Boss coverage follow-up before broad
+   teacher/checkpoint refresh work.
 2. Regenerate teacher, trainer-input, checkpoint, and calibration evidence only
-   after that accepted coverage contract exists (T032).
+   after an accepted coverage contract or explicitly narrow diagnostic boundary
+   exists (T032).
 3. Draft public-context/history/map/visible-Boss encoders before using those
    fields as ordinary model inputs (T033).
 4. Keep public-consistent hidden-future sampling blocked on an explicit native

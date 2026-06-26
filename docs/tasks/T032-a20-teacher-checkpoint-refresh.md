@@ -15,9 +15,17 @@ Current `main` has T023 scale-up, T024 teacher-to-trainer bridge, T026
 checkpoint inference, and T027 calibration. Existing accepted artifacts are
 smoke-scale and should not be treated as a durable input to later tasks.
 
+T031 completed a broader coverage refresh, but its accepted distribution
+diagnosis remained Act 1 only: no Act 1 Boss starts and no later-act starts
+were reached. That result is useful data evidence, but it is not sufficient for
+a broad A20 teacher/checkpoint refresh.
+
 ## Dependencies
 
 - T031 is complete.
+- A maintainer has accepted a later-act/Boss coverage follow-up, or this task
+  has been deliberately revised into an explicitly narrow Act-1 diagnostic
+  refresh before it becomes `READY`.
 
 ## Inputs And Artifacts
 
@@ -55,6 +63,7 @@ teacher dataset, trainer JSONL, checkpoint, or report is committed.
 - New model architecture work beyond what is required to run the current
   checkpoint contract.
 - Treating repeated teacher rows or budget tiers as new source coverage.
+- Treating the T031 Act-1-only distribution as broad A20 evidence.
 
 ## Design Constraints
 

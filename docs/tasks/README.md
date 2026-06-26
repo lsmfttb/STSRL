@@ -44,8 +44,8 @@ the current milestone, but they do not override this table.
 | T028 | DONE | [Model-guided Oracle search controller](T028-model-guided-oracle-search-controller.md) | T025, T026, T027 | first versioned model-guided Oracle-like search controller |
 | T029 | DONE | [Fixed-cohort model-guided search comparison](T029-fixed-cohort-model-guided-search-comparison.md) | T025, T028 | equal-source/equal-budget fixed-cohort comparison |
 | T030 | DONE | [M1 model-guided search sandbox synthesis](T030-m1-model-guided-search-sandbox-synthesis.md) | T027, T029 | milestone synthesis and next task batch |
-| T031 | READY | [A20 coverage refresh and data gap report](T031-a20-coverage-refresh-data-gap-report.md) | T030 | post-M1 A20 coverage refresh before broader teacher/checkpoint work |
-| T032 | BLOCKED | [A20 teacher and checkpoint refresh](T032-a20-teacher-checkpoint-refresh.md) | T031 | refreshed teacher, trainer-input, checkpoint, and calibration evidence |
+| T031 | DONE | [A20 coverage refresh and data gap report](T031-a20-coverage-refresh-data-gap-report.md) | T030 | post-M1 A20 coverage refresh before broader teacher/checkpoint work |
+| T032 | BLOCKED | [A20 teacher and checkpoint refresh](T032-a20-teacher-checkpoint-refresh.md) | T031 plus accepted later-act/Boss coverage follow-up or explicit narrow-refresh boundary | refreshed teacher, trainer-input, checkpoint, and calibration evidence |
 | T033 | DRAFT | [Public context encoder contract](T033-public-context-encoder-contract.md) | T016, T030 | structured public history, map/route, visible-Boss encoder boundary |
 | T034 | BLOCKED | [Public-consistent hidden-future sampler boundary](T034-public-consistent-hidden-future-sampler.md) | T033, native sampler support | normal-information hidden-future sampling substrate |
 | T035 | BLOCKED | [Model-guided Oracle search v2](T035-model-guided-oracle-search-v2.md) | T032, T025, T028, T029 | deeper Oracle-like guidance after refreshed data/checkpoint evidence |
@@ -89,8 +89,9 @@ M1's comparison target is now available: a reviewable fixed-cohort comparison
 between the current Oracle-like native search baseline and the first
 model-guided Oracle-like search controller using T024 teacher-targeted
 checkpoint provenance. T030 completed the synthesis and next-task publication
-work; T031 is the active post-M1 coverage refresh task. M1 is diagnostic
-search-engineering work only; it must not claim
+work; T031 completed the post-M1 coverage refresh and found the current
+distribution still Act-1-only. M1 is diagnostic search-engineering work only;
+it must not claim
 normal-information, live-game, broad-training, or promoted controller-strength
 evidence.
 
@@ -131,13 +132,16 @@ The completed foundation backlog provides:
   search and model-guided Oracle-like search on identical restored starts with
   separate outcome aggregates, budget checks, and observed cost telemetry.
 
-The T030 synthesis recommends the post-M1 batch as T031--T035. T031 refreshes
-A20 coverage first and is now the only `READY` post-M1 implementation task;
-T032 depends on that accepted coverage before refreshing teacher/checkpoint
-evidence; T033 drafts the public-context encoder boundary; T034 remains blocked
-on native public-consistent hidden-future sampler support; and T035 keeps
-deeper model-guided Oracle-like search blocked until refreshed data/checkpoint
-evidence exists. Only rows marked `READY` may receive a task branch.
+The T030 synthesis recommends the post-M1 batch as T031--T035. T031 refreshed
+A20 coverage and diagnosed the current distribution gap: the artifacts and
+restore path are healthy, but the current controller distribution produced no
+Boss or later-act battle starts. T032 therefore remains blocked until the
+maintainer accepts a later-act/Boss coverage follow-up or explicitly narrows
+the teacher/checkpoint refresh boundary; T033 drafts the public-context encoder
+boundary; T034 remains blocked on native public-consistent hidden-future sampler
+support; and T035 keeps deeper model-guided Oracle-like search blocked until
+refreshed data/checkpoint evidence exists. Only rows marked `READY` may receive
+a task branch.
 
 ## Standard Local Gates
 

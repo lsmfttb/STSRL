@@ -249,8 +249,9 @@ inference, teacher guidance calibration, the first model-guided Oracle-like
 controller, the first fixed-cohort comparison report, and the M1 synthesis are
 available on `main`. T030 records that M1 succeeded as Oracle-like plumbing but
 did not demonstrate controller improvement or normal-information evidence.
-Task lifecycle state remains canonical in the task index, where T031 is the
-current `READY` post-M1 coverage refresh task.
+T031 completed the first post-M1 coverage refresh and found the current source
+distribution still Act-1-only. Task lifecycle state remains canonical in the
+task index.
 
 Use the Oracle regime to validate priors, leaf values, uncertainty, and search
 instrumentation. Exit when model guidance improves the fixed Oracle curve at
@@ -278,10 +279,9 @@ Retain only auxiliary targets that improve normal-information evaluation.
 
 ## Immediate Design Work
 
-1. Execute T031 from the post-M1 task batch in
-   [`tasks/README.md`](tasks/README.md): refresh broader A20 coverage first,
-   then refresh teacher/checkpoint evidence before deeper model-guided
-   Oracle-like search.
+1. Use the T031 distribution diagnosis before publishing the next data task:
+   later-act/Boss source coverage needs a follow-up before broad
+   teacher/checkpoint refresh evidence.
 2. Build structured history, map, and visible-Boss encoders on the sanitized
    public-context artifacts now available on `main`.
 3. Establish an honest public policy/vector-value baseline from sufficient A20
