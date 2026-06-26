@@ -67,6 +67,8 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
         and args.pytorch_search_guidance_infer_example_index < 0
     ):
         return "--pytorch-search-guidance-infer-example-index must be non-negative"
+    if args.teacher_guidance_calibration_top_k <= 0:
+        return "--teacher-guidance-calibration-top-k must be positive"
     if (
         args.lightspeed_oracle_search_teacher is not None
         and args.oracle_teacher_output is None
@@ -149,5 +151,22 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
             "--pytorch-search-guidance-infer-trainer-input and "
             "--pytorch-search-guidance-infer-example-index require "
             "--pytorch-search-guidance-infer"
+        )
+    if (
+        args.teacher_guidance_calibration_report is not None
+        and not args.teacher_guidance_calibration_checkpoint
+    ):
+        return (
+            "--teacher-guidance-calibration-report requires "
+            "--teacher-guidance-calibration-checkpoint"
+        )
+    if args.teacher_guidance_calibration_report is None and (
+        args.teacher_guidance_calibration_checkpoint
+        or args.teacher_guidance_calibration_output is not None
+    ):
+        return (
+            "--teacher-guidance-calibration-checkpoint and "
+            "--teacher-guidance-calibration-output require "
+            "--teacher-guidance-calibration-report"
         )
     return None

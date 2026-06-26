@@ -202,6 +202,16 @@ def build_parser() -> argparse.ArgumentParser:
             "an action."
         ),
     )
+    input_group.add_argument(
+        "--teacher-guidance-calibration-report",
+        type=Path,
+        metavar="TRAINER_JSONL",
+        help=(
+            "Load a T024 teacher-targeted trainer-input artifact and compare "
+            "one or more compatible checkpoints against its explicit teacher "
+            "policy targets without running a simulator or controller."
+        ),
+    )
     parser.add_argument(
         "--pytorch-search-guidance-infer-trainer-input",
         type=Path,
@@ -218,6 +228,29 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Example index from --pytorch-search-guidance-infer-trainer-input to score."
         ),
+    )
+    parser.add_argument(
+        "--teacher-guidance-calibration-checkpoint",
+        type=Path,
+        action="append",
+        default=[],
+        metavar="CHECKPOINT",
+        help=(
+            "Checkpoint to include in --teacher-guidance-calibration-report. "
+            "Repeat for multiple compatible checkpoints."
+        ),
+    )
+    parser.add_argument(
+        "--teacher-guidance-calibration-output",
+        type=Path,
+        metavar="REPORT_JSON",
+        help="Write the T027 teacher-guidance calibration report JSON.",
+    )
+    parser.add_argument(
+        "--teacher-guidance-calibration-top-k",
+        type=int,
+        default=3,
+        help="Top-k agreement cutoff for --teacher-guidance-calibration-report.",
     )
     input_group.add_argument(
         "--pytorch-search-guidance-train",
