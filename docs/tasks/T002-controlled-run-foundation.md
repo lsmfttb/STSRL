@@ -1,7 +1,5 @@
 # T002: Controlled-Run Foundation
 
-Status: `DONE` in PR #2.
-
 Merged into `main` at merge commit `a361555`.
 
 Accepted behavior:

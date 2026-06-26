@@ -1,7 +1,5 @@
 # T025: Search Telemetry Baseline
 
-Status: `DONE` via PR #25, merged 2026-06-25.
-
 ## Objective
 
 Add a versioned, reusable telemetry surface for current Oracle-like search and

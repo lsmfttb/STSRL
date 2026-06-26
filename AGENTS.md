@@ -114,7 +114,8 @@ current contracts.
 
 ## Parallel Development
 
-- Implement only a published `READY` task.
+- Implement only a published `READY` task. Task lifecycle state is
+  authoritative only in `docs/tasks/README.md`.
 - One task uses one fresh branch and one pull request based on latest `main`.
 - `main` is the only integration line.
 - Use isolated worktrees for parallel tasks; never switch branches in a shared

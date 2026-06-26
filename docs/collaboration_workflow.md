@@ -39,7 +39,12 @@ create or switch to those branches during implementation.
   project truth.
 - A branch or local artifact is not an implemented capability until its pull
   request is reviewed and merged into `main`.
-- Every task is defined by one document under `docs/tasks/`.
+- Every task's scope and acceptance contract are defined by one document under
+  `docs/tasks/`.
+- Task lifecycle state is authoritative only in the Active Backlog table in
+  `docs/tasks/README.md`. Individual task documents must not carry mutable
+  `Status:` fields. If another document disagrees with the table, the table
+  wins and the disagreement is a documentation bug.
 - Acceptance is based on the task document. Chat summaries are explanatory,
   not substitutes for the specification.
 - If scope or acceptance criteria change, the main maintainer updates the task
@@ -80,7 +85,7 @@ stable identity.
 - `DONE`: accepted pull request is merged into `main`.
 - `CANCELLED`: task will not be implemented; the task document records why.
 
-Only the main maintainer changes task state in authoritative documentation.
+Only the main maintainer changes task state in the task index.
 
 ## Required Task Specification
 
@@ -156,7 +161,7 @@ Review findings are resolved before merge. The maintainer merges only into
 `main`, then:
 
 1. verifies the resulting `main`;
-2. marks the task `DONE`;
+2. marks the task `DONE` in the task index;
 3. updates `current_status.md`;
 4. unblocks or revises dependent tasks;
 5. updates architecture or roadmap documents when the accepted behavior changes

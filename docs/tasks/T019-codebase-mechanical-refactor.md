@@ -1,7 +1,5 @@
 # T019: Codebase Mechanical Refactor
 
-Status: `DONE`.
-
 ## Objective
 
 Reduce the post-foundation maintenance burden without changing behavior,

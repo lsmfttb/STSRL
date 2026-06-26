@@ -1,7 +1,5 @@
 # T022: A20 Oracle Teacher Dataset Report
 
-Status: `DONE` via PR #22, merged 2026-06-25.
-
 ## Objective
 
 Add a versioned report for A20 Oracle-like teacher datasets that ties a teacher

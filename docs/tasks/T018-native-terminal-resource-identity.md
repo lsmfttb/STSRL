@@ -1,7 +1,5 @@
 # T018: Native Terminal Resource Identity Surface
 
-Status: `DONE`.
-
 ## Objective
 
 Extend the pinned `sts_lightspeed` source integration so structured battle

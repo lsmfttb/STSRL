@@ -1,7 +1,5 @@
 # T029: Fixed-Cohort Model-Guided Search Comparison
 
-Status: `READY`.
-
 ## Objective
 
 Add a fixed-cohort comparison report for baseline Oracle search versus the

@@ -1,7 +1,5 @@
 # T016: Public-Context Artifacts, Replay, And Audit
 
-Status: `DONE`.
-
 ## Objective
 
 Persist the settled T015 sanitized public context through current artifacts,

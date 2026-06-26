@@ -1,7 +1,5 @@
 # T017: Stable sts_lightspeed Source Integration
 
-Status: `DONE`.
-
 ## Objective
 
 Replace the current day-to-day ordered `sts_lightspeed` patch-stack workflow

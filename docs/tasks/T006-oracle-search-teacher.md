@@ -1,7 +1,5 @@
 # T006: Oracle Search Teacher Pipeline
 
-Status: `DONE`.
-
 ## Objective
 
 Expose the simulator-native hidden-state battle search as an explicitly

@@ -1,7 +1,5 @@
 # T010: Stochastic Non-Combat Driver
 
-Status: `DONE`.
-
 ## Objective
 
 Provide a seeded, versioned, stochastic non-combat driver that produces a broad

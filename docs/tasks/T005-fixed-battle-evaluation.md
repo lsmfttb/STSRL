@@ -1,7 +1,5 @@
 # T005: Fixed Structural Battle Evaluation
 
-Status: `DONE`.
-
 ## Objective
 
 Create immutable, portable fixed battle cohorts and a controller evaluation

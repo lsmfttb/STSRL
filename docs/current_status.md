@@ -12,10 +12,8 @@ Build the foundations for an A20 battle agent. Search remains the intended
 primary battle policy, and learned policies or values are expected to guide or
 accelerate search. Non-combat decisions remain outside the trainable agent.
 
-The published foundation, maintenance, and first research-measurement backlog
-is complete: T001--T006 and T008--T028 are `DONE`, and T007 is `CANCELLED`
-because it was superseded by T014--T016. The current published milestone is
-M1: model-guided Oracle search sandbox. T029 is the current `READY` task.
+The task index lists the canonical lifecycle state for the published backlog.
+The current published milestone is M1: model-guided Oracle search sandbox.
 
 ## Implemented On Main
 
@@ -265,7 +263,7 @@ M1: model-guided Oracle search sandbox. T029 is the current `READY` task.
 
 ### Tests And Runtime Evidence
 
-- `535` tests pass on Windows Python as of this review. In an uninstalled
+- `545` tests pass on Windows Python as of this review. In an uninstalled
   checkout, set `PYTHONPATH=src` (or install the package) before invoking the
   CLI directly.
 - The two CommunicationMod fixture smokes pass.
@@ -498,6 +496,10 @@ M1: model-guided Oracle search sandbox. T029 is the current `READY` task.
   `full_simulator_state_oracle_like` smoke evidence only, not
   normal-information, live-game, broad-training, fixed-comparison, or
   controller-strength evidence.
+- Documentation lifecycle hygiene now has a local regression guard:
+  `tests/test_task_docs.py` fails if individual task documents reintroduce
+  mutable `Status:` lines, or if current contract docs recreate a line-level
+  `Status:` field outside the canonical task index.
 
 ## Not Implemented On Main
 
@@ -514,23 +516,19 @@ already supports them.
 
 ## Immediate Work
 
-Executable task specifications live in [`tasks/`](tasks/README.md). The
-current published milestone is M1: model-guided Oracle search sandbox. Its
+Executable task specifications live in [`tasks/`](tasks/README.md). The task
+index is the canonical source for task lifecycle state; this section is a
+snapshot of the current milestone and next work on the latest reviewed `main`.
+The current published milestone is M1: model-guided Oracle search sandbox. Its
 nearer target is to compare the current Oracle-like native search baseline
 against the first versioned model-guided Oracle-like search controller on the
 same fixed restored starts, with complete telemetry and no promotion claims.
 
-The currently published `READY` task is:
-
-1. [`T029`](tasks/T029-fixed-cohort-model-guided-search-comparison.md):
-   compare baseline Oracle search and the merged T028 model-guided
-   Oracle-like controller on identical restored starts with separate outcome
-   aggregates and cost telemetry.
-
-The rest of M1 is already specified but intentionally blocked:
-
-- [`T030`](tasks/T030-m1-model-guided-search-sandbox-synthesis.md): milestone
-  synthesis and next task batch, blocked on T029.
+The next M1 work is the fixed-cohort comparison between baseline Oracle search
+and the merged T028 model-guided Oracle-like controller on identical restored
+starts with separate outcome aggregates and cost telemetry. The milestone then
+continues to synthesis and the next task batch. Use the task index to determine
+which exact task rows are `READY` or blocked.
 
 The immediate external-fork follow-up is
 [`lsmfttb/sts_lightspeed#7`](https://github.com/lsmfttb/sts_lightspeed/issues/7):

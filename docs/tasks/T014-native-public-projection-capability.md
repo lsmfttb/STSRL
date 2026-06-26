@@ -1,7 +1,5 @@
 # T014: Native Public Projection Capability
 
-Status: `DONE`.
-
 ## Objective
 
 Establish a minimal, reproducible native `sts_lightspeed` projection capability

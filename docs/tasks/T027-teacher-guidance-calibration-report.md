@@ -1,7 +1,5 @@
 # T027: Teacher Guidance Calibration Report
 
-Status: `DONE` via PR #27, merged 2026-06-26.
-
 ## Objective
 
 Add an offline calibration report that compares checkpoint guidance against

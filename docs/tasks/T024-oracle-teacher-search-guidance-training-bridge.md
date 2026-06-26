@@ -1,7 +1,5 @@
 # T024: Oracle Teacher Search-Guidance Training Bridge
 
-Status: `DONE` via PR #24, merged 2026-06-25.
-
 ## Objective
 
 Add a narrow, auditable bridge from T023 Oracle-like teacher scale-up artifacts

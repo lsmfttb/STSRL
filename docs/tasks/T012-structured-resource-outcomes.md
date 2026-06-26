@@ -1,7 +1,5 @@
 # T012: Structured Battle Resource Outcomes
 
-Status: `DONE`.
-
 ## Objective
 
 Preserve battle result, terminal absolute HP, and persistent battle-end

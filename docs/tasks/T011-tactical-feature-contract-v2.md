@@ -1,7 +1,5 @@
 # T011: Tactical Feature Contract V2
 
-Status: `DONE`.
-
 ## Objective
 
 Upgrade the public tactical battle representation and state-action input

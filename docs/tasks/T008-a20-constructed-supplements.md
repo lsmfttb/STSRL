@@ -1,7 +1,5 @@
 # T008: A20 Constructed Battle Supplements
 
-Status: `DONE`.
-
 ## Objective
 
 Create conservative, seeded, explicitly tagged A20 constructed battle starts

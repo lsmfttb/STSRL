@@ -1,7 +1,5 @@
 # T030: M1 Model-Guided Search Sandbox Synthesis
 
-Status: `BLOCKED`.
-
 ## Objective
 
 Close the M1 model-guided Oracle search sandbox by producing a synthesis report

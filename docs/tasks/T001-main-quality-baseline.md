@@ -1,7 +1,5 @@
 # T001: Main Quality Baseline
 
-Status: `DONE` via PR #1, merged 2026-06-15.
-
 ## Objective
 
 Make the existing `main` branch pass its declared local quality gates without

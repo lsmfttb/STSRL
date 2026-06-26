@@ -1,7 +1,5 @@
 # T015: Public Run Context And Controlled History
 
-Status: `DONE`.
-
 ## Objective
 
 Define one typed, versioned, sanitized Python public run-context contract and

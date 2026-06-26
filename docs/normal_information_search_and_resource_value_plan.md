@@ -209,7 +209,7 @@ targets. Normal-agent promotion uses only normal-information evaluation.
 
 ### N0: Public Contracts And Firewall
 
-Status: foundation complete through T006, T012, and T014--T018. Current `main`
+Progress: foundation complete through T006, T012, and T014--T018. Current `main`
 has explicit Oracle-like provenance for native hidden-state search, a
 sanitized public controller boundary, structured terminal resource outcomes,
 public-context artifact propagation/replay/audit, and native terminal resource
@@ -231,7 +231,7 @@ where native public projection is still incomplete.
 
 ### N1: Honest Public Policy/Value Baseline
 
-Status: T009 completed optional PyTorch policy/value plumbing, checkpoint
+Progress: T009 completed optional PyTorch policy/value plumbing, checkpoint
 provenance, trainer-input preflight, and fail-closed broad-training gates.
 T024 added explicit teacher-targeted trainer-input v6 policy targets and
 diagnostic checkpoint provenance for Oracle-like supervision. Sufficient A20
@@ -244,10 +244,10 @@ errors and fixed-cohort performance from sufficient A20 coverage.
 
 ### N2: Model-Guided Oracle Search Sandbox
 
-Status: M1 task batch published as T025--T030. T025 search telemetry, T026
-checkpoint inference, T027 teacher guidance calibration, and T028
-model-guided Oracle search controller are complete; T029 fixed-cohort
-model-guided search comparison is the current READY task.
+Progress: M1 task batch published as T025--T030. Search telemetry, checkpoint
+inference, teacher guidance calibration, and the first model-guided Oracle-like
+controller are available on `main`; fixed-cohort comparison is the next M1
+work. Task lifecycle state remains canonical in the task index.
 
 Use the Oracle regime to validate priors, leaf values, uncertainty, and search
 instrumentation. Exit when model guidance improves the fixed Oracle curve at
@@ -255,21 +255,21 @@ equal wall-clock budget.
 
 ### N3: Public-Consistent Hidden-Future Sampling
 
-Status: planned.
+Progress: planned.
 
 Exit when repeated authoritative particles share identical public observations
 while retaining diverse legal hidden futures.
 
 ### N4: Normal Belief Search
 
-Status: planned.
+Progress: planned.
 
 Exit when belief search improves normal-information fixed evaluation at equal
 compute without leakage.
 
 ### N5: Oracle-To-Normal Auxiliary Transfer
 
-Status: planned.
+Progress: planned.
 
 Retain only auxiliary targets that improve normal-information evaluation.
 

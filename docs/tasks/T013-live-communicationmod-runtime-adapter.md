@@ -1,7 +1,5 @@
 # T013: Live CommunicationMod Runtime Adapter
 
-Status: `DONE`.
-
 ## Objective
 
 Build the live-game runtime bridge that lets a trained, search, or scripted

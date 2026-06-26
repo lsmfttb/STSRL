@@ -1,7 +1,5 @@
 # TXXX: Task Name
 
-Status: `DRAFT`.
-
 ## Objective
 
 State one concrete result and why it matters.

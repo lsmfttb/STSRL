@@ -1,7 +1,5 @@
 # T009: PyTorch Search-Guidance Model
 
-Status: `DONE`.
-
 ## Current Main Baseline
 
 T009 is complete on `main`. The current implementation provides optional

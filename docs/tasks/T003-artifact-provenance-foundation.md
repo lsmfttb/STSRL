@@ -1,7 +1,5 @@
 # T003: Artifact Provenance Foundation
 
-Status: `DONE`.
-
 ## Objective
 
 Establish versioned artifact reading and complete decision provenance before

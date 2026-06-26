@@ -1,7 +1,5 @@
 # T020: sts_lightspeed Fork Maintenance Line
 
-Status: `DONE`.
-
 ## Objective
 
 Turn the STSRL `sts_lightspeed` fork from a set of task-shaped useful branches

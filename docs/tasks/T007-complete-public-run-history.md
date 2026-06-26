@@ -1,7 +1,5 @@
 # T007: Complete Public Run History (superseded)
 
-Status: `CANCELLED`.
-
 ## Disposition
 
 PR #9 attempted this task and was closed without merge on 2026-06-22. Its
@@ -19,17 +17,17 @@ pull request. Do not resume the closed branch or cherry-pick its commits.
 The desired capability is deliberately partitioned as follows:
 
 1. [T014: Native public projection capability](T014-native-public-projection-capability.md)
-   is `READY` and owns the focused native capability matrix, raw public
-   projection, legal-action source parity, and checkpoint fidelity.
+   owns the focused native capability matrix, raw public projection,
+   legal-action source parity, and checkpoint fidelity.
 2. [T015: Public run context and controlled history](T015-public-run-context-and-controlled-history.md)
-   is blocked by T014 and owns the typed Python contract plus append-only
-   history in `execute_controlled_run`.
+   owns the typed Python contract plus append-only history in
+   `execute_controlled_run`.
 3. [T016: Public-context artifacts, replay, and audit](T016-public-context-artifacts-replay-and-audit.md)
-   is blocked by T015 and owns migrations, persisted propagation, portable
-   replay comparison, and coverage auditing.
+   owns migrations, persisted propagation, portable replay comparison, and
+   coverage auditing.
 
-T008, T009, and T012 remain blocked until the applicable replacement work is
-merged. See [`../t007_review_handoff_2026-06-22.md`](../t007_review_handoff_2026-06-22.md)
+See [`README.md`](README.md) for current task lifecycle states and
+[`../t007_review_handoff_2026-06-22.md`](../t007_review_handoff_2026-06-22.md)
 for the full review evidence and closed-PR reference.
 
 ## Historical Objective

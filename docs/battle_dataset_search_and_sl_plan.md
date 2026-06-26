@@ -272,14 +272,14 @@ only on normal-information evaluation.
 
 ### Phase A: Checkpoint And Replay
 
-Status: complete through [`T004`](tasks/T004-battle-start-checkpoint-pool.md).
+Progress: complete through [`T004`](tasks/T004-battle-start-checkpoint-pool.md).
 
 Exit gate: repeated restores reproduce snapshots, legal actions, transitions,
 and terminal results without local mechanics reconstruction.
 
 ### Phase B: Natural Pools And Provenance
 
-Status: complete through T004 for natural pool capture, portable restore, and
+Progress: complete through T004 for natural pool capture, portable restore, and
 structural coverage reporting. Broader A20 coverage remains a measurement gap,
 not an unimplemented pool feature.
 
@@ -288,14 +288,14 @@ provenance, and report structural coverage and migration loss honestly.
 
 ### Phase C: Fixed Structural Evaluation
 
-Status: complete through [`T005`](tasks/T005-fixed-battle-evaluation.md).
+Progress: complete through [`T005`](tasks/T005-fixed-battle-evaluation.md).
 
 Exit gate: search changes can be compared on deterministic structural cohorts
 without relying on full-run average floor.
 
 ### Phase D: Coverage And Stratified Search Data
 
-Status: T007 is cancelled. T014 completed the native capability boundary, T015
+Progress: T007 is cancelled. T014 completed the native capability boundary, T015
 completed sanitized context/history, and T016 completed persisted
 context/replay/audit. See the
 [T007 review handoff](t007_review_handoff_2026-06-22.md). T017 completed the
@@ -328,7 +328,7 @@ training and evaluation.
 
 ### Phase E: Search Improvement
 
-Status: T009 completed optional PyTorch policy/value plumbing and diagnostic
+Progress: T009 completed optional PyTorch policy/value plumbing and diagnostic
 training reports. T021 completed the current coverage-measurement report used
 to decide what A20 data and distribution gaps remain before broad training or
 model-guided search work starts. T022 completed the current Oracle-like teacher
@@ -349,14 +349,14 @@ wall-clock budget without natural-weighted regression.
 
 ### Phase F: Normal Belief Search
 
-Status: pending simulator hidden-future sampling.
+Progress: pending simulator hidden-future sampling.
 
 Exit gate: public-information belief search improves normal-information fixed
 evaluation without leakage.
 
 ### Phase F2: Live Runtime Deployment Gate
 
-Status: runtime adapter contract complete; interactive controller validation
+Progress: runtime adapter contract complete; interactive controller validation
 pending.
 
 Exit gate: a controller can consume captured CommunicationMod combat snapshots,
@@ -365,7 +365,7 @@ commands, and record runtime provenance without simulator-only inputs.
 
 ### Phase G: SL Branch
 
-Status: planned.
+Progress: planned.
 
 Exit gate: restart value is quantified separately by encounter and attempt
 budget.

@@ -1,7 +1,5 @@
 # T023: A20 Oracle Teacher Dataset Scale-Up
 
-Status: `DONE` via PR #23, merged 2026-06-25.
-
 ## Objective
 
 Add a repeatable, auditable A20 Oracle-like teacher dataset scale-up workflow

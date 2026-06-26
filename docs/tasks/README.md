@@ -4,6 +4,12 @@ Tasks are the executable specification for feature branches and pull requests.
 Read [`../collaboration_workflow.md`](../collaboration_workflow.md) before
 starting work.
 
+The Active Backlog table below is the only authoritative source for task
+lifecycle state. Individual task documents intentionally omit mutable
+`Status:` lines; they define scope, acceptance criteria, and historical
+disposition where needed. `current_status.md` and roadmap files may summarize
+the current milestone, but they do not override this table.
+
 ## Active Backlog
 
 | ID | Status | Task | Depends On | Legacy Reference Areas |
@@ -14,7 +20,7 @@ starting work.
 | T004 | DONE | [Battle-start checkpoint pool](T004-battle-start-checkpoint-pool.md) | T002, T003, T010 | checkpoint restore, battle-start pool |
 | T005 | DONE | [Fixed structural battle evaluation](T005-fixed-battle-evaluation.md) | T004 | fixed evaluation set and runner |
 | T006 | DONE | [Oracle search teacher pipeline](T006-oracle-search-teacher.md) | T003, T004, T005, T017 | search policy, teacher, search dataset |
-| T007 | CANCELLED | [Complete public run history (superseded)](T007-complete-public-run-history.md) | — | replaced by T014--T016 |
+| T007 | CANCELLED | [Complete public run history (superseded)](T007-complete-public-run-history.md) | none | replaced by T014--T016 |
 | T008 | DONE | [A20 constructed battle supplements](T008-a20-constructed-supplements.md) | T003, T004, T016, T017 | battle-start transforms and approximate HP policy |
 | T009 | DONE | [PyTorch search-guidance model](T009-pytorch-search-guidance.md) | T003, T006, T011, T012, T016, T018 | optional train dependency and policy/value model |
 | T010 | DONE | [Stochastic non-combat driver](T010-stochastic-non-combat-driver.md) | T002 | non-combat policy and native visible action/resource support |
@@ -39,13 +45,10 @@ starting work.
 | T029 | READY | [Fixed-cohort model-guided search comparison](T029-fixed-cohort-model-guided-search-comparison.md) | T025, T028 | equal-source/equal-budget fixed-cohort comparison |
 | T030 | BLOCKED | [M1 model-guided search sandbox synthesis](T030-m1-model-guided-search-sandbox-synthesis.md) | T027, T029 | milestone synthesis and next task batch |
 
-The published foundation, maintenance, and first research-measurement task set
-is complete: T001--T006 and T008--T028 are `DONE`, and T007 is `CANCELLED`.
-The current published milestone is M1: model-guided Oracle search sandbox.
-
-Only `READY` tasks should receive a new branch. After a prerequisite merges,
-the main maintainer reviews dependent specifications against the new `main`
-before changing their state.
+Use the table, not per-task files or roadmap prose, when deciding whether a
+task may receive a branch. Only `READY` rows should receive a new branch. After
+a prerequisite merges, the main maintainer reviews dependent specifications
+against the new `main` before changing their state.
 
 `BLOCKED` task specifications define intended boundaries but may be refined by
 the main maintainer before becoming `READY`. Once a task is `READY`, its
@@ -71,12 +74,8 @@ and review evidence.
 
 ## Published Queue
 
-The currently published `READY` queue is:
-
-- T029: Fixed-cohort model-guided search comparison.
-
-T025--T028 are complete. T029 is now the equal-source/equal-budget comparison
-step for M1 and can proceed in its own worktree and pull request based on
+The executable queue is the set of rows marked `READY` in the Active Backlog
+table. A `READY` row may proceed in its own worktree and pull request based on
 latest `main`.
 
 ## M1: Model-Guided Oracle Search Sandbox
@@ -90,10 +89,10 @@ broad-training, or promoted controller-strength evidence.
 Dependency chain:
 
 ```text
-T025 search telemetry baseline (done) --+
-                                        +--> T028 model-guided Oracle search (done) --> T029 fixed comparison --+
-T026 checkpoint inference (done) --> T027 teacher calibration (done) ------------------------------------+
-                                                                                                          +--> T030 synthesis
+T025 search telemetry baseline --+
+                                 +--> T028 model-guided Oracle search --> T029 fixed comparison --+
+T026 checkpoint inference --> T027 teacher calibration -------------------------------------+
+                                                                                              +--> T030 synthesis
 ```
 
 The completed foundation backlog provides:

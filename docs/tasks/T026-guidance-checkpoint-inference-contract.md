@@ -1,7 +1,5 @@
 # T026: Guidance Checkpoint Inference Contract
 
-Status: `DONE` via PR #26, merged 2026-06-26.
-
 ## Objective
 
 Add a narrow inference contract for using T009/T024 PyTorch policy/value
