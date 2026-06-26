@@ -166,6 +166,31 @@ class _FakeWinController:
         )
 
 
+class _FakeMixedTelemetryController:
+    """Controller that emits optional and mixed telemetry over multiple steps."""
+
+    provenance = ControllerProvenance(
+        kind="test",
+        name="fake_mixed_telemetry",
+        config={"information_regime": "normal_public_policy"},
+    )
+
+    def select_action(self, adapter, snapshot, actions, context, step_index):
+        eligible = context.eligible_action_indices
+        idx = eligible[0] if eligible else 0
+        return ControllerDecision(
+            selected_index=idx,
+            provenance=self.provenance,
+            reason="telemetry",
+            metadata={
+                "numeric_calls": 1,
+                "optional_gap": 0.25 if step_index == 0 else None,
+                "mixed_value": 1.0 if step_index == 0 else "later",
+                "nested": {"count": 2},
+            },
+        )
+
+
 class _FakeIllegalController:
     """Controller that selects outside legal bounds."""
 
@@ -457,6 +482,24 @@ class TestEvaluateFixedCohort:
             report.battle_results[0].structured_battle_outcome["schema_id"]
             == "structured-battle-outcome-v1"
         )
+
+    def test_controller_telemetry_handles_optional_and_mixed_values(self):
+        report = evaluate_fixed_cohort(
+            adapter_factory=lambda: _FakeEvalAdapter(),
+            cohort_records=[_make_cohort_record(0)],
+            controller=_FakeMixedTelemetryController(),
+            cohort_identity="test-identity",
+            source_pool_format_version=2,
+            selection_config={"selection_seed": 1},
+            max_battle_steps=200,
+        )
+
+        telemetry = report.battle_results[0].controller_compute_telemetry
+        assert telemetry is not None
+        assert telemetry["numeric_calls"] == 3.0
+        assert telemetry["optional_gap"] == 0.25
+        assert telemetry["mixed_value"] == [1.0, "later", "later"]
+        assert telemetry["nested"] == {"count": 6.0}
 
     def test_truncation_reported(self):
         cohort_records = [_make_cohort_record(0)]

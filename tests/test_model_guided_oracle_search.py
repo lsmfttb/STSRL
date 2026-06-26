@@ -72,6 +72,39 @@ def _context(action_count: int = 2) -> DecisionContext:
     )
 
 
+def _public_action_identity(kind: str, index: int) -> dict[str, object]:
+    return {
+        "scope": "battle",
+        "kind": kind,
+        "parameters": {},
+        "selected_card_identity": {},
+        "selected_target_identity": {},
+        "occurrence": index,
+        "stable_id": f"public-action-{index}",
+        "vocabulary_version": "unit-test",
+        "status": "known",
+    }
+
+
+def _context_with_tactical_identities() -> DecisionContext:
+    action_kinds = ["card", "card"]
+    return DecisionContext(
+        screen_state="BATTLE",
+        snapshot_features=[],
+        legal_action_features=[[] for _ in action_kinds],
+        legal_action_kinds=list(action_kinds),
+        eligible_action_indices=list(range(len(action_kinds))),
+        tactical_legal_actions=[
+            {
+                "scope": "battle",
+                "kind": kind,
+                "identity": _public_action_identity(kind, index),
+            }
+            for index, kind in enumerate(action_kinds)
+        ],
+    )
+
+
 def _row(
     bits: int,
     *,
@@ -143,6 +176,8 @@ class _FakeGuidanceScorer:
         default_factory=_checkpoint
     )
     result_checkpoint_provenance: SearchGuidanceCheckpointProvenance | None = None
+    action_kinds: tuple[str, ...] | None = None
+    action_identities: tuple[dict[str, object], ...] | None = None
     name: str = "fake_guidance"
 
     def score_decision_context(
@@ -150,6 +185,10 @@ class _FakeGuidanceScorer:
         context: DecisionContext,
     ) -> SearchGuidanceInferenceResult:
         checkpoint = self.result_checkpoint_provenance or self.checkpoint_provenance
+        action_kinds = self.action_kinds or tuple(context.legal_action_kinds)
+        action_identities = self.action_identities or tuple(
+            _score_identity(context, index) for index in range(len(self.probabilities))
+        )
         return SearchGuidanceInferenceResult(
             scorer_name=self.name,
             checkpoint_provenance=checkpoint,
@@ -158,16 +197,24 @@ class _FakeGuidanceScorer:
             action_scores=[
                 SearchGuidanceActionScore(
                     legal_action_index=index,
-                    action_kind=context.legal_action_kinds[index],
+                    action_kind=action_kinds[index],
                     eligible=index in context.eligible_action_indices,
                     policy_logit=float(index),
                     policy_probability=probability,
-                    action_identity={"stable_id": f"action-{index}"},
+                    action_identity=dict(action_identities[index]),
                 )
                 for index, probability in enumerate(self.probabilities)
             ],
             duration_ms=1.25,
         )
+
+
+def _score_identity(context: DecisionContext, index: int) -> dict[str, object]:
+    if index < len(context.tactical_legal_actions):
+        identity = context.tactical_legal_actions[index].get("identity", {})
+        if isinstance(identity, dict):
+            return dict(identity)
+    return {"stable_id": f"action-{index}"}
 
 
 class _RaisingGuidanceScorer:
@@ -224,6 +271,7 @@ def test_model_guided_controller_combines_native_mean_and_policy_probability() -
     root_scores = decision.metadata["model_guided_oracle_root_scores"]
     assert root_scores[0]["combined_score"] == pytest.approx(0.51)
     assert root_scores[1]["combined_score"] == pytest.approx(0.54)
+    assert decision.metadata["oracle_search_model_calls"] == 0
 
     telemetry = decision.metadata["search_decision_telemetry"][0]
     assert telemetry["schema_id"] == "search-decision-telemetry-v1"
@@ -256,6 +304,47 @@ def test_model_guided_controller_fails_closed_on_checkpoint_change() -> None:
             SimulatorSnapshot(observation=[], raw={"screen_state": "BATTLE"}),
             _actions(),
             _context(),
+            step_index=0,
+        )
+
+
+def test_model_guided_controller_fails_closed_on_action_kind_mismatch() -> None:
+    controller = ModelGuidedOracleSearchController(
+        simulations=10,
+        scorer=_FakeGuidanceScorer((0.5, 0.5), action_kinds=("end_turn", "card")),
+        native_source_identity={"integration_commit": "abc"},
+    )
+
+    with pytest.raises(ValueError, match="action kind"):
+        controller.select_action(
+            _Adapter(),
+            SimulatorSnapshot(observation=[], raw={"screen_state": "BATTLE"}),
+            _actions(),
+            _context(),
+            step_index=0,
+        )
+
+
+def test_model_guided_controller_fails_closed_on_action_identity_mismatch() -> None:
+    context = _context_with_tactical_identities()
+    controller = ModelGuidedOracleSearchController(
+        simulations=10,
+        scorer=_FakeGuidanceScorer(
+            (0.5, 0.5),
+            action_identities=(
+                _public_action_identity("card", 1),
+                _public_action_identity("card", 0),
+            ),
+        ),
+        native_source_identity={"integration_commit": "abc"},
+    )
+
+    with pytest.raises(ValueError, match="action identity"):
+        controller.select_action(
+            _Adapter(),
+            SimulatorSnapshot(observation=[], raw={"screen_state": "BATTLE"}),
+            _actions(),
+            context,
             step_index=0,
         )
 

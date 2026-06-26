@@ -442,12 +442,20 @@ class _FakeCliGuidanceScorer:
                     eligible=index in context.eligible_action_indices,
                     policy_logit=0.0,
                     policy_probability=1.0,
-                    action_identity={"stable_id": f"cli-action-{index}"},
+                    action_identity=_context_action_identity(context, index),
                 )
                 for index in range(len(context.legal_action_features))
             ],
             duration_ms=0.5,
         )
+
+
+def _context_action_identity(context, index: int) -> dict:
+    if index < len(context.tactical_legal_actions):
+        identity = context.tactical_legal_actions[index].get("identity", {})
+        if isinstance(identity, dict):
+            return dict(identity)
+    return {}
 
 
 def test_cli_stdin_mode_sends_ready_signal_then_commands(monkeypatch) -> None:

@@ -417,6 +417,10 @@ def model_guided_oracle_search_controller_metadata(
     guidance = decision_report.guidance_result
     target = decision_report.target
     telemetry = model_guided_oracle_search_decision_telemetry(decision_report)
+    native_telemetry = oracle_search_decision_telemetry(
+        oracle_report,
+        target=target.to_oracle_target(),
+    )
     combined_gap = _combined_decision_gap(decision_report.root_scores)
     return json_safe_mapping(
         {
@@ -426,7 +430,7 @@ def model_guided_oracle_search_controller_metadata(
             "oracle_search_native_simulator_steps": (
                 oracle_report.native_simulator_steps
             ),
-            "oracle_search_model_calls": telemetry.model_calls,
+            "oracle_search_model_calls": native_telemetry.model_calls,
             "oracle_search_wall_clock_time_s": (
                 decision_report.total_wall_clock_time_s
             ),
@@ -629,6 +633,25 @@ def _validate_guidance_result(
             problems.append(
                 f"guidance action score index {index} outside {legal_count} actions"
             )
+            _append_finite_score_problems(score, problems)
+            continue
+        expected_kind = context.legal_action_kinds[index]
+        if score.action_kind != expected_kind:
+            problems.append(
+                "guidance action kind for index "
+                f"{index} does not match context: "
+                f"{score.action_kind!r} != {expected_kind!r}"
+            )
+        expected_identity = _context_action_identity(context, index)
+        if expected_identity:
+            if not score.action_identity:
+                problems.append(
+                    f"guidance action identity for index {index} is missing"
+                )
+            elif dict(score.action_identity) != expected_identity:
+                problems.append(
+                    f"guidance action identity for index {index} does not match context"
+                )
         if score.eligible != (index in eligible):
             problems.append(
                 f"guidance eligibility for index {index} does not match context"
@@ -639,6 +662,21 @@ def _validate_guidance_result(
         problems.append(f"missing guidance action score for index {missing[0]}")
     if problems:
         raise ValueError("; ".join(dict.fromkeys(problems)))
+
+
+def _context_action_identity(
+    context: DecisionContext,
+    index: int,
+) -> dict[str, Any]:
+    if index < 0 or index >= len(context.tactical_legal_actions):
+        return {}
+    action = context.tactical_legal_actions[index]
+    if not isinstance(action, Mapping):
+        return {}
+    identity = action.get("identity")
+    if not isinstance(identity, Mapping):
+        return {}
+    return dict(identity)
 
 
 def _append_finite_score_problems(
