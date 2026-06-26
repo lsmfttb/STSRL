@@ -1,6 +1,6 @@
 # T028: Model-Guided Oracle Search Controller
 
-Status: `BLOCKED`.
+Status: `READY`.
 
 ## Objective
 
@@ -13,9 +13,10 @@ while preserving complete telemetry and evidence boundaries.
 ## Current Main Baseline
 
 Current `main` has Oracle-like native search, fixed evaluation, T024
-teacher-targeted checkpoints, and planned T025/T026 telemetry and inference
-contracts. It does not yet have a controller that combines native Oracle search
-statistics with learned guidance.
+teacher-targeted checkpoints, T025 search telemetry, T026 checkpoint
+inference, and T027 teacher-guidance calibration. It does not yet have a
+controller that combines native Oracle search statistics with learned
+guidance.
 
 ## Dependencies
 

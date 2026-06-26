@@ -244,9 +244,9 @@ errors and fixed-cohort performance from sufficient A20 coverage.
 
 ### N2: Model-Guided Oracle Search Sandbox
 
-Status: M1 task batch published as T025--T030. T025 search telemetry and T026
-checkpoint inference are complete; T027 teacher guidance calibration is the
-current READY task.
+Status: M1 task batch published as T025--T030. T025 search telemetry, T026
+checkpoint inference, and T027 teacher guidance calibration are complete; T028
+model-guided Oracle search controller is the current READY task.
 
 Use the Oracle regime to validate priors, leaf values, uncertainty, and search
 instrumentation. Exit when model guidance improves the fixed Oracle curve at
@@ -275,7 +275,7 @@ Retain only auxiliary targets that improve normal-information evaluation.
 ## Immediate Design Work
 
 1. Continue the published M1 task batch with
-   [`T027`](tasks/T027-teacher-guidance-calibration-report.md), without
+   [`T028`](tasks/T028-model-guided-oracle-search-controller.md), without
    treating hidden-state teacher data or smoke-scale under-coverage as
    normal-information or broad-training evidence.
 2. Build structured history, map, and visible-Boss encoders on the sanitized

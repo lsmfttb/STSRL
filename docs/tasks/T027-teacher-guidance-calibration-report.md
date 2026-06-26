@@ -1,6 +1,6 @@
 # T027: Teacher Guidance Calibration Report
 
-Status: `READY`.
+Status: `DONE` via PR #27, merged 2026-06-26.
 
 ## Objective
 

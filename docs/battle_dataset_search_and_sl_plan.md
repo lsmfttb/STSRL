@@ -6,7 +6,7 @@ rules come from [`project_architecture.md`](project_architecture.md). Current
 implementation status comes from [`current_status.md`](current_status.md).
 
 The published foundation, maintenance, and first research-measurement backlog
-is complete through T024 except for cancelled T007, whose scope was superseded
+is complete through T027 except for cancelled T007, whose scope was superseded
 by T014--T016. New implementation work should start only after the main
 maintainer publishes a new focused task.
 
@@ -338,10 +338,11 @@ small structured A20 Oracle-like teacher scale-up workflow across named search
 budgets and reports teacher-label stability. T024 completed the bridge from
 teacher artifacts to explicit trainer-input v6 teacher targets and diagnostic
 checkpoint provenance. T025 completed the current search telemetry baseline,
-and T026 completed the checkpoint inference/scoring contract. The remaining M1
-tasks move from teacher calibration to a first model-guided Oracle search
-controller, fixed-cohort comparison, and synthesis. Meaningful held-out or
-fixed-cohort improvement remains pending those tasks and broader coverage.
+T026 completed the checkpoint inference/scoring contract, and T027 completed
+offline checkpoint-vs-teacher calibration reporting. The remaining M1 tasks
+move to a first model-guided Oracle search controller, fixed-cohort comparison,
+and synthesis. Meaningful held-out or fixed-cohort improvement remains pending
+those tasks and broader coverage.
 
 Exit gate: a search change improves fixed evaluation at equal simulation or
 wall-clock budget without natural-weighted regression.

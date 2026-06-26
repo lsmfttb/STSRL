@@ -13,9 +13,9 @@ primary battle policy, and learned policies or values are expected to guide or
 accelerate search. Non-combat decisions remain outside the trainable agent.
 
 The published foundation, maintenance, and first research-measurement backlog
-is complete: T001--T006 and T008--T026 are `DONE`, and T007 is `CANCELLED`
+is complete: T001--T006 and T008--T027 are `DONE`, and T007 is `CANCELLED`
 because it was superseded by T014--T016. The current published milestone is
-M1: model-guided Oracle search sandbox. T027 is the current `READY` task.
+M1: model-guided Oracle search sandbox. T028 is the current `READY` task.
 
 ## Implemented On Main
 
@@ -233,12 +233,24 @@ M1: model-guided Oracle search sandbox. T027 is the current `READY` task.
   feature sizes, and checkpoint semantic contracts before scoring. This is a
   scorer/inference contract only; it does not run the simulator, choose game
   actions, implement a controller, or provide model-strength evidence.
+- Versioned teacher-guidance calibration reporting
+  (`teacher-guidance-calibration-report-v1`) for offline comparison between
+  T026 checkpoint scores and T024 Oracle teacher policy targets. The report
+  loads current trainer-input v6 artifacts and compatible checkpoints, rejects
+  mixed target kinds or incompatible checkpoint/trainer provenance, preserves
+  trainer/checkpoint artifact identities, separates teacher-target agreement
+  from behavior-action agreement, reports cross-entropy/KL/Brier/ranking/top-k
+  diagnostics, action-row calibration bins, source coverage, skipped rows, and
+  information-regime summaries. This is checkpoint-vs-teacher diagnostic
+  evidence only; it does not train, run `sts_lightspeed`, choose actions,
+  implement search, benchmark a controller, or make normal-information,
+  live-game, broad-training, or controller-strength claims.
 - A training-readiness report that validates plumbing only. It does not train a
   model or demonstrate policy strength.
 
 ### Tests And Runtime Evidence
 
-- `527` tests pass on Windows Python as of this review. In an uninstalled
+- `535` tests pass on Windows Python as of this review. In an uninstalled
   checkout, set `PYTHONPATH=src` (or install the package) before invoking the
   CLI directly.
 - The two CommunicationMod fixture smokes pass.
@@ -440,6 +452,15 @@ M1: model-guided Oracle search sandbox. T027 is the current `READY` task.
   required for T026 because it is an offline checkpoint scorer contract and
   does not run `sts_lightspeed`, advance a simulator, choose actions, or claim
   controller strength.
+- T027 validates the offline teacher-guidance calibration report. The accepted
+  local gate passed 535 Windows tests, compileall, ruff check, ruff format
+  check, both CommunicationMod fixture smokes, focused calibration/CLI tests,
+  and diff whitespace checks. The maintainer review found no compatible
+  external T024 `.pt` smoke checkpoint under the checked local/WSL artifact
+  locations, so no optional artifact-level smoke metrics were added. This
+  remains checkpoint-vs-Oracle-teacher diagnostic evidence only, not
+  normal-information, live-game, broad-training, search-controller, or
+  controller-strength evidence.
 
 ## Not Implemented On Main
 
@@ -464,18 +485,16 @@ comparison, with complete telemetry and no promotion claims.
 
 The currently published `READY` task is:
 
-1. [`T027`](tasks/T027-teacher-guidance-calibration-report.md): add the
-   offline checkpoint-vs-teacher calibration report needed before model-guided
-   Oracle search consumes checkpoint guidance.
+1. [`T028`](tasks/T028-model-guided-oracle-search-controller.md): add the first
+   versioned model-guided Oracle-like search controller using the merged T025
+   telemetry, T026 inference, and T027 calibration contracts.
 
 The rest of M1 is already specified but intentionally blocked:
 
-- [`T028`](tasks/T028-model-guided-oracle-search-controller.md): first
-  model-guided Oracle search controller, blocked on T027.
 - [`T029`](tasks/T029-fixed-cohort-model-guided-search-comparison.md):
   fixed-cohort comparison, blocked on T028.
 - [`T030`](tasks/T030-m1-model-guided-search-sandbox-synthesis.md): milestone
-  synthesis and next task batch, blocked on T027 and T029.
+  synthesis and next task batch, blocked on T029.
 
 The immediate external-fork follow-up is
 [`lsmfttb/sts_lightspeed#7`](https://github.com/lsmfttb/sts_lightspeed/issues/7):
