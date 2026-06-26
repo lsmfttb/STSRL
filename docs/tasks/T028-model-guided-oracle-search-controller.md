@@ -1,6 +1,8 @@
 # T028: Model-Guided Oracle Search Controller
 
-Status: `READY`.
+Status: `DONE`.
+
+Accepted in PR #28 and merged on 2026-06-26.
 
 ## Objective
 

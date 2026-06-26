@@ -338,11 +338,11 @@ small structured A20 Oracle-like teacher scale-up workflow across named search
 budgets and reports teacher-label stability. T024 completed the bridge from
 teacher artifacts to explicit trainer-input v6 teacher targets and diagnostic
 checkpoint provenance. T025 completed the current search telemetry baseline,
-T026 completed the checkpoint inference/scoring contract, and T027 completed
-offline checkpoint-vs-teacher calibration reporting. The remaining M1 tasks
-move to a first model-guided Oracle search controller, fixed-cohort comparison,
-and synthesis. Meaningful held-out or fixed-cohort improvement remains pending
-those tasks and broader coverage.
+T026 completed the checkpoint inference/scoring contract, T027 completed
+offline checkpoint-vs-teacher calibration reporting, and T028 completed the
+first model-guided Oracle-like root-selection controller. The remaining M1
+tasks move to fixed-cohort comparison and synthesis. Meaningful held-out or
+fixed-cohort improvement remains pending those tasks and broader coverage.
 
 Exit gate: a search change improves fixed evaluation at equal simulation or
 wall-clock budget without natural-weighted regression.

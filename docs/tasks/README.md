@@ -35,12 +35,12 @@ starting work.
 | T025 | DONE | [Search telemetry baseline](T025-search-telemetry-baseline.md) | T005, T006, T009, T017, T020, T024 | shared search telemetry and baseline cost reporting |
 | T026 | DONE | [Guidance checkpoint inference contract](T026-guidance-checkpoint-inference-contract.md) | T009, T011, T016, T018, T024 | checkpoint scorer contract for search guidance |
 | T027 | DONE | [Teacher guidance calibration report](T027-teacher-guidance-calibration-report.md) | T026 | offline checkpoint-vs-teacher calibration |
-| T028 | READY | [Model-guided Oracle search controller](T028-model-guided-oracle-search-controller.md) | T025, T026, T027 | first versioned model-guided Oracle-like search controller |
-| T029 | BLOCKED | [Fixed-cohort model-guided search comparison](T029-fixed-cohort-model-guided-search-comparison.md) | T025, T028 | equal-source/equal-budget fixed-cohort comparison |
+| T028 | DONE | [Model-guided Oracle search controller](T028-model-guided-oracle-search-controller.md) | T025, T026, T027 | first versioned model-guided Oracle-like search controller |
+| T029 | READY | [Fixed-cohort model-guided search comparison](T029-fixed-cohort-model-guided-search-comparison.md) | T025, T028 | equal-source/equal-budget fixed-cohort comparison |
 | T030 | BLOCKED | [M1 model-guided search sandbox synthesis](T030-m1-model-guided-search-sandbox-synthesis.md) | T027, T029 | milestone synthesis and next task batch |
 
 The published foundation, maintenance, and first research-measurement task set
-is complete: T001--T006 and T008--T027 are `DONE`, and T007 is `CANCELLED`.
+is complete: T001--T006 and T008--T028 are `DONE`, and T007 is `CANCELLED`.
 The current published milestone is M1: model-guided Oracle search sandbox.
 
 Only `READY` tasks should receive a new branch. After a prerequisite merges,
@@ -73,11 +73,11 @@ and review evidence.
 
 The currently published `READY` queue is:
 
-- T028: Model-guided Oracle search controller.
+- T029: Fixed-cohort model-guided search comparison.
 
-T025--T027 are complete. T028 is now the first model-guided Oracle search
-controller entry point for M1 and can proceed in its own worktree and pull
-request based on latest `main`.
+T025--T028 are complete. T029 is now the equal-source/equal-budget comparison
+step for M1 and can proceed in its own worktree and pull request based on
+latest `main`.
 
 ## M1: Model-Guided Oracle Search Sandbox
 
@@ -91,9 +91,9 @@ Dependency chain:
 
 ```text
 T025 search telemetry baseline (done) --+
-                                        +--> T028 model-guided Oracle search --> T029 fixed comparison --+
-T026 checkpoint inference (done) --> T027 teacher calibration (done) ----------------------------+
-                                                                                                  +--> T030 synthesis
+                                        +--> T028 model-guided Oracle search (done) --> T029 fixed comparison --+
+T026 checkpoint inference (done) --> T027 teacher calibration (done) ------------------------------------+
+                                                                                                          +--> T030 synthesis
 ```
 
 The completed foundation backlog provides:
@@ -115,6 +115,10 @@ The completed foundation backlog provides:
   and cross-budget teacher-label stability reporting;
 - teacher-targeted trainer-input v6 conversion and diagnostic checkpoint
   provenance for selected T023 Oracle teacher budgets.
+- first versioned model-guided Oracle-like search controller
+  (`model_guided_oracle_search_v1`) that combines native root statistics with
+  public checkpoint policy probabilities at root selection while preserving
+  separate native-search and model-guidance telemetry.
 
 Likely task families after M1 are deeper model-guided search, broader A20
 coverage/data collection, public-history/map encoders, and normal-information

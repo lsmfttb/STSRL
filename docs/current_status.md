@@ -13,9 +13,9 @@ primary battle policy, and learned policies or values are expected to guide or
 accelerate search. Non-combat decisions remain outside the trainable agent.
 
 The published foundation, maintenance, and first research-measurement backlog
-is complete: T001--T006 and T008--T027 are `DONE`, and T007 is `CANCELLED`
+is complete: T001--T006 and T008--T028 are `DONE`, and T007 is `CANCELLED`
 because it was superseded by T014--T016. The current published milestone is
-M1: model-guided Oracle search sandbox. T028 is the current `READY` task.
+M1: model-guided Oracle search sandbox. T029 is the current `READY` task.
 
 ## Implemented On Main
 
@@ -245,6 +245,21 @@ M1: model-guided Oracle search sandbox. T028 is the current `READY` task.
   evidence only; it does not train, run `sts_lightspeed`, choose actions,
   implement search, benchmark a controller, or make normal-information,
   live-game, broad-training, or controller-strength claims.
+- Versioned model-guided Oracle-like search controller
+  (`model_guided_oracle_search_v1`) for restored simulator battles. The
+  controller runs the current hidden-state native `battle_search` once for the
+  requested budget, scores the same public `DecisionContext` through the T026
+  checkpoint inference contract, and selects the root action with
+  `native_mean_value + weight * model_policy_probability`. Because the native
+  search copies hidden simulator state, the controller is explicitly
+  `full_simulator_state_oracle_like`. It fails closed on checkpoint,
+  action-count, eligibility, action-kind, and available public action-identity
+  mismatches; reports native search budget/cost separately from checkpoint
+  model calls; preserves checkpoint provenance and model scores in telemetry;
+  and states that current native APIs do not accept model allocation hints or
+  leaf values. This is a controller smoke entry point only, not a fixed-cohort
+  comparison, normal-information result, live-game validation, broad-training
+  result, or controller-strength claim.
 - A training-readiness report that validates plumbing only. It does not train a
   model or demonstrate policy strength.
 
@@ -461,6 +476,28 @@ M1: model-guided Oracle search sandbox. T028 is the current `READY` task.
   remains checkpoint-vs-Oracle-teacher diagnostic evidence only, not
   normal-information, live-game, broad-training, search-controller, or
   controller-strength evidence.
+- T028 validates the first model-guided Oracle-like search controller. The
+  accepted local gate passed 543 Windows tests, compileall, ruff check, ruff
+  format check, both CommunicationMod fixture smokes, focused controller,
+  fixed-evaluation, CLI, export, Oracle-search, and telemetry tests, and diff
+  whitespace checks. Regression coverage confirms native
+  `oracle_search_model_calls` stays separate from checkpoint inference calls,
+  guidance rows fail closed on action-kind and available public-action-identity
+  mismatches, and fixed-evaluation telemetry handles optional scalar `None`
+  values without losing versioned search telemetry. The accepted WSL evidence
+  included the canonical pinned-source verifier, standard simulator smoke, and
+  battle-training-readiness gates. A WSL model-guided fixed-evaluation smoke
+  using ignored artifacts under `artifacts/t028-wsl-smoke/` exercised 8 A20
+  restored battles, 123 model-guided Oracle decisions, 123 checkpoint model
+  calls, 3 requested native playouts per decision, 0 root mapping failures,
+  0 truncations, and 0 errors. A maintainer audit also rebuilt a Python 3.13
+  shim directly from pinned integration commit
+  `242344c57c17c784708a6f072c905febc3f96527`, regenerated a small A20
+  pool/cohort, and reran the T028 controller path successfully over 4 restored
+  battles with 61 decisions and 61 model calls. This remains
+  `full_simulator_state_oracle_like` smoke evidence only, not
+  normal-information, live-game, broad-training, fixed-comparison, or
+  controller-strength evidence.
 
 ## Not Implemented On Main
 
@@ -469,7 +506,7 @@ unmerged legacy work:
 
 - interactive live-game or A20 performance validation for any controller;
 - broad neural training on a scale/distribution-approved A20 dataset;
-- model-guided native search or fixed-evaluation performance improvement;
+- fixed-cohort model-guided search comparison or performance improvement;
 - normal-information belief search.
 
 Do not use documentation or results from these areas as evidence that `main`
@@ -479,20 +516,19 @@ already supports them.
 
 Executable task specifications live in [`tasks/`](tasks/README.md). The
 current published milestone is M1: model-guided Oracle search sandbox. Its
-nearer target is to use T024 teacher-targeted checkpoint provenance in a
-versioned model-guided Oracle-like search controller and fixed-cohort
-comparison, with complete telemetry and no promotion claims.
+nearer target is to compare the current Oracle-like native search baseline
+against the first versioned model-guided Oracle-like search controller on the
+same fixed restored starts, with complete telemetry and no promotion claims.
 
 The currently published `READY` task is:
 
-1. [`T028`](tasks/T028-model-guided-oracle-search-controller.md): add the first
-   versioned model-guided Oracle-like search controller using the merged T025
-   telemetry, T026 inference, and T027 calibration contracts.
+1. [`T029`](tasks/T029-fixed-cohort-model-guided-search-comparison.md):
+   compare baseline Oracle search and the merged T028 model-guided
+   Oracle-like controller on identical restored starts with separate outcome
+   aggregates and cost telemetry.
 
 The rest of M1 is already specified but intentionally blocked:
 
-- [`T029`](tasks/T029-fixed-cohort-model-guided-search-comparison.md):
-  fixed-cohort comparison, blocked on T028.
 - [`T030`](tasks/T030-m1-model-guided-search-sandbox-synthesis.md): milestone
   synthesis and next task batch, blocked on T029.
 
