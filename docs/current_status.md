@@ -13,10 +13,10 @@ primary battle policy, and learned policies or values are expected to guide or
 accelerate search. Non-combat decisions remain outside the trainable agent.
 
 The task index lists the canonical lifecycle state for the published backlog.
-The current published milestone is M1: model-guided Oracle search sandbox.
-Its implementation tasks are complete through the first fixed comparison, and
-the active synthesis task publishes the post-M1 backlog proposal without
-promoting smoke-scale Oracle-like diagnostics.
+The M1 model-guided Oracle search sandbox is complete through synthesis. It
+validated Oracle-like search plumbing but did not demonstrate controller
+improvement, so the active post-M1 implementation task is T031: broader A20
+coverage refresh and data-gap reporting.
 
 ## Implemented On Main
 
@@ -533,6 +533,15 @@ promoting smoke-scale Oracle-like diagnostics.
   This is `full_simulator_state_oracle_like` smoke-scale comparison evidence
   only, not normal-information, live-game, broad-training, fixed-cohort
   improvement, or controller-promotion evidence.
+- T030 validates the documentation-only M1 synthesis and post-M1 task-batch
+  publication. The accepted maintainer review found no actionable findings and
+  passed `pytest tests/test_task_docs.py -q`, diff whitespace checks, a local
+  Markdown reference scan, a task-index lifecycle/link scan with 35 rows and
+  only T030 `READY` at review time, and the stale `Status:` scan. No code,
+  artifact, or WSL simulator gate was required. The synthesis records that M1
+  succeeded as Oracle-like search plumbing but did not show controller
+  improvement, and it keeps follow-up implementation gated behind explicit
+  task states.
 
 ## Not Implemented On Main
 
@@ -553,7 +562,7 @@ Executable task specifications live in [`tasks/`](tasks/README.md). The task
 index is the canonical source for task lifecycle state; this section is a
 snapshot of the current milestone and next work on the latest reviewed `main`.
 
-The M1 synthesis is recorded in
+The completed M1 synthesis is recorded in
 [`m1_model_guided_search_sandbox_synthesis.md`](m1_model_guided_search_sandbox_synthesis.md).
 It summarizes the merged telemetry, checkpoint inference, calibration,
 controller, and fixed-comparison evidence from T025--T029. The synthesis
@@ -562,11 +571,11 @@ controller improvement: the accepted T029 smoke comparison tied baseline
 Oracle search at five wins and three losses on eight restored A20 battles
 while adding 120 checkpoint model calls for the model-guided controller.
 
-The proposed post-M1 priority is broader A20 coverage measurement before
-deeper model-guided search or normal-information belief search. The next task
-batch is drafted in the task index as T031--T035. Use the task index to
-determine which exact task rows are `READY`, `BLOCKED`, or `DRAFT`; future rows
-must not start merely because they are mentioned here.
+The current `READY` task is T031: broader A20 coverage measurement before
+deeper model-guided search or normal-information belief search. The remaining
+post-M1 task batch is drafted in the task index as T032--T035. Use the task
+index to determine which exact task rows are `READY`, `BLOCKED`, or `DRAFT`;
+future rows must not start merely because they are mentioned here.
 
 The immediate external-fork follow-up is
 [`lsmfttb/sts_lightspeed#7`](https://github.com/lsmfttb/sts_lightspeed/issues/7):

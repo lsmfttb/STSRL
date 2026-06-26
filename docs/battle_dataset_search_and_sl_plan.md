@@ -6,10 +6,10 @@ rules come from [`project_architecture.md`](project_architecture.md). Current
 implementation status comes from [`current_status.md`](current_status.md).
 
 The published foundation, maintenance, and first research-measurement backlog
-is complete through the M1 implementation tasks, except for cancelled T007,
-whose scope was superseded by T014--T016. T030 records the M1 synthesis and
-post-M1 task-batch recommendation. New implementation work should start only
-from rows marked `READY` in the task index.
+is complete through the M1 synthesis, except for cancelled T007, whose scope
+was superseded by T014--T016. T031 is the current `READY` post-M1 coverage
+refresh task. New implementation work should start only from rows marked
+`READY` in the task index.
 
 ## Goals
 
@@ -345,8 +345,8 @@ model-guided Oracle-like root-selection controller, and T029 completed the
 first equal-source/equal-budget fixed-cohort comparison. T030 records the M1
 synthesis: the sandbox validated plumbing but did not show smoke-scale
 controller improvement, because the T029 comparison tied baseline Oracle search
-while adding checkpoint model calls. The next recommended implementation
-priority is a broader A20 coverage refresh before further teacher/checkpoint or
+while adding checkpoint model calls. T031 is the current implementation
+priority: a broader A20 coverage refresh before further teacher/checkpoint or
 search-controller work. Meaningful held-out improvement or controller
 promotion remains pending broader coverage and later search work.
 
