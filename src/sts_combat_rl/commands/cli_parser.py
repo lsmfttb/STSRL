@@ -6,6 +6,9 @@ import argparse
 from pathlib import Path
 
 from sts_combat_rl.logging_utils import DEFAULT_LOG_FILE
+from sts_combat_rl.sim.model_guided_oracle_search import (
+    MODEL_GUIDED_ORACLE_DEFAULT_POLICY_PROBABILITY_WEIGHT,
+)
 from sts_combat_rl.sim.oracle_search import ORACLE_ROOT_SELECTION_RULES
 from sts_combat_rl.sim.oracle_teacher_search_guidance import (
     ORACLE_TEACHER_SEARCH_GUIDANCE_STABILITY_FILTERS,
@@ -352,6 +355,15 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Load an immutable fixed battle cohort unchanged and evaluate the "
             "Oracle search controller on the same restored starts."
+        ),
+    )
+    input_group.add_argument(
+        "--lightspeed-model-guided-oracle-fixed-evaluation",
+        type=Path,
+        metavar="COHORT_PATH",
+        help=(
+            "Load an immutable fixed battle cohort unchanged and run a T028 "
+            "model-guided Oracle-like search smoke evaluation using a checkpoint."
         ),
     )
     input_group.add_argument(
@@ -735,6 +747,25 @@ def build_parser() -> argparse.ArgumentParser:
         choices=ORACLE_ROOT_SELECTION_RULES,
         default="highest_mean",
         help="Oracle root statistic used for teacher/evaluation action selection.",
+    )
+    parser.add_argument(
+        "--model-guided-oracle-checkpoint",
+        type=Path,
+        metavar="CHECKPOINT_PATH",
+        help=(
+            "T026-compatible PyTorch policy/value checkpoint used by "
+            "--lightspeed-model-guided-oracle-fixed-evaluation."
+        ),
+    )
+    parser.add_argument(
+        "--model-guided-oracle-policy-probability-weight",
+        type=float,
+        default=MODEL_GUIDED_ORACLE_DEFAULT_POLICY_PROBABILITY_WEIGHT,
+        metavar="WEIGHT",
+        help=(
+            "Weight for T028 root selection: native_mean_value + WEIGHT * "
+            "model_policy_probability."
+        ),
     )
     parser.add_argument(
         "--pytorch-checkpoint-output",

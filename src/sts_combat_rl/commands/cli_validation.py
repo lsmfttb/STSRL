@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 
 
 def validate_cli_args(args: argparse.Namespace) -> str | None:
@@ -26,6 +27,14 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
         return "--battle-start-structural-fraction must be between zero and one"
     if args.oracle_search_simulations <= 0:
         return "--oracle-search-simulations must be positive"
+    if (
+        not math.isfinite(args.model_guided_oracle_policy_probability_weight)
+        or args.model_guided_oracle_policy_probability_weight < 0.0
+    ):
+        return (
+            "--model-guided-oracle-policy-probability-weight must be finite "
+            "and non-negative"
+        )
     if args.oracle_teacher_scaleup_seed < 0:
         return "--oracle-teacher-scaleup-seed must be non-negative"
     if (
@@ -74,6 +83,22 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
         and args.oracle_teacher_output is None
     ):
         return "--lightspeed-oracle-search-teacher requires --oracle-teacher-output"
+    if (
+        args.lightspeed_model_guided_oracle_fixed_evaluation is not None
+        and args.model_guided_oracle_checkpoint is None
+    ):
+        return (
+            "--lightspeed-model-guided-oracle-fixed-evaluation requires "
+            "--model-guided-oracle-checkpoint"
+        )
+    if (
+        args.lightspeed_model_guided_oracle_fixed_evaluation is None
+        and args.model_guided_oracle_checkpoint is not None
+    ):
+        return (
+            "--model-guided-oracle-checkpoint requires "
+            "--lightspeed-model-guided-oracle-fixed-evaluation"
+        )
     if (
         args.lightspeed_a20_oracle_teacher_scaleup is not None
         and args.oracle_teacher_scaleup_output_dir is None
