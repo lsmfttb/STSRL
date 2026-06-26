@@ -14,6 +14,9 @@ accelerate search. Non-combat decisions remain outside the trainable agent.
 
 The task index lists the canonical lifecycle state for the published backlog.
 The current published milestone is M1: model-guided Oracle search sandbox.
+Its implementation tasks are complete through the first fixed comparison, and
+the active synthesis task publishes the post-M1 backlog proposal without
+promoting smoke-scale Oracle-like diagnostics.
 
 ## Implemented On Main
 
@@ -549,13 +552,21 @@ already supports them.
 Executable task specifications live in [`tasks/`](tasks/README.md). The task
 index is the canonical source for task lifecycle state; this section is a
 snapshot of the current milestone and next work on the latest reviewed `main`.
-The current published milestone is M1: model-guided Oracle search sandbox. Its
-remaining target is maintainer synthesis: summarize the merged telemetry,
-checkpoint inference, calibration, controller, and fixed-comparison evidence;
-then publish the next task batch without promoting smoke-scale Oracle-like
-diagnostics to normal-information, live-game, broad-training, or
-controller-strength claims. Use the task index to determine which exact task
-rows are `READY` or blocked.
+
+The M1 synthesis is recorded in
+[`m1_model_guided_search_sandbox_synthesis.md`](m1_model_guided_search_sandbox_synthesis.md).
+It summarizes the merged telemetry, checkpoint inference, calibration,
+controller, and fixed-comparison evidence from T025--T029. The synthesis
+concludes that M1 succeeded as Oracle-like search plumbing but did not show
+controller improvement: the accepted T029 smoke comparison tied baseline
+Oracle search at five wins and three losses on eight restored A20 battles
+while adding 120 checkpoint model calls for the model-guided controller.
+
+The proposed post-M1 priority is broader A20 coverage measurement before
+deeper model-guided search or normal-information belief search. The next task
+batch is drafted in the task index as T031--T035. Use the task index to
+determine which exact task rows are `READY`, `BLOCKED`, or `DRAFT`; future rows
+must not start merely because they are mentioned here.
 
 The immediate external-fork follow-up is
 [`lsmfttb/sts_lightspeed#7`](https://github.com/lsmfttb/sts_lightspeed/issues/7):
@@ -563,25 +574,18 @@ archive historical STSRL task branches after creating provenance tags, while
 preserving `stsrl/main` as the sole active integration branch. This is
 operational fork maintenance and does not block STSRL repository work.
 
-Recommended post-M1 task areas:
+The post-M1 task-batch recommendation is:
 
-1. Model-guided search integration: use T024 teacher-targeted
-   trainer/checkpoint provenance to connect T009 policy/value checkpoints to a
-   versioned search controller, report compute/model-call telemetry, and
-   compare against fixed cohorts without claiming promotion from raw model
-   diagnostics.
-2. Fixed A20 benchmark reporting: compare scripted/preferred, Oracle search,
-   raw model, and model-guided search only after the relevant controllers and
-   datasets exist, keeping natural-weighted, encounter-macro, and
-   room-type-macro results separate.
-3. Broader A20 coverage and data collection: use T021/T022/T023 reports to
-   decide which natural, sampled, constructed, and teacher-data strata need
-   more source coverage before broad training.
-4. Normal-information search groundwork: specify the authoritative
-   public-consistent hidden-future sampling boundary before any belief-search
-   branch starts.
-5. Additional maintenance cleanup beyond T019, if the first refactor leaves
-   large modules or export surfaces difficult to review.
+1. Refresh broader A20 coverage and broad-training gate gaps first (T031).
+2. Regenerate teacher, trainer-input, checkpoint, and calibration evidence only
+   after that accepted coverage contract exists (T032).
+3. Draft public-context/history/map/visible-Boss encoders before using those
+   fields as ordinary model inputs (T033).
+4. Keep public-consistent hidden-future sampling blocked on an explicit native
+   simulator boundary (T034).
+5. Attempt deeper model-guided Oracle-like search only after refreshed
+   checkpoint evidence exists and the guidance role or native API boundary is
+   explicit (T035).
 
 The adapter and captured-sample compatibility gate in
 [`T013`](tasks/T013-live-communicationmod-runtime-adapter.md) is complete.

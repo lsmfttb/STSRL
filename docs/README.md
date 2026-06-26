@@ -33,6 +33,8 @@ When documents disagree, use this order:
   immediate work.
 - [`tasks/README.md`](tasks/README.md): executable task backlog, dependencies,
   and readiness.
+- [`m1_model_guided_search_sandbox_synthesis.md`](m1_model_guided_search_sandbox_synthesis.md):
+  M1 evidence synthesis and post-M1 task-batch recommendation.
 - [`experiment_log.md`](experiment_log.md): curated dated results. Results
   explain evidence; they do not create architectural rules.
 

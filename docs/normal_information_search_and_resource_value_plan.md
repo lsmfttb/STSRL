@@ -247,8 +247,9 @@ errors and fixed-cohort performance from sufficient A20 coverage.
 Progress: M1 task batch published as T025--T030. Search telemetry, checkpoint
 inference, teacher guidance calibration, the first model-guided Oracle-like
 controller, and the first fixed-cohort comparison report are available on
-`main`; synthesis is the next M1 work. Task lifecycle state remains canonical
-in the task index.
+`main`. T030 records the synthesis: M1 succeeded as Oracle-like plumbing but
+did not demonstrate controller improvement or normal-information evidence.
+Task lifecycle state remains canonical in the task index.
 
 Use the Oracle regime to validate priors, leaf values, uncertainty, and search
 instrumentation. Exit when model guidance improves the fixed Oracle curve at
@@ -276,10 +277,9 @@ Retain only auxiliary targets that improve normal-information evaluation.
 
 ## Immediate Design Work
 
-1. Continue the published M1 task batch with
-   [`T030`](tasks/T030-m1-model-guided-search-sandbox-synthesis.md), without
-   treating hidden-state teacher data or smoke-scale controller comparisons as
-   normal-information, broad-training, or promotion evidence.
+1. Use the post-M1 task batch in [`tasks/README.md`](tasks/README.md). The
+   synthesis recommends refreshing broader A20 coverage first, then refreshing
+   teacher/checkpoint evidence before deeper model-guided Oracle-like search.
 2. Build structured history, map, and visible-Boss encoders on the sanitized
    public-context artifacts now available on `main`.
 3. Establish an honest public policy/vector-value baseline from sufficient A20
