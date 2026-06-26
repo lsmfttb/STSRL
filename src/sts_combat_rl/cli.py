@@ -29,6 +29,10 @@ from sts_combat_rl.commands.pytorch_search_guidance import (
     run_pytorch_search_guidance_inference_from_paths,
     run_pytorch_search_guidance_training_from_path,
 )
+from sts_combat_rl.commands.teacher_guidance_calibration import (
+    format_teacher_guidance_calibration_command,
+    run_teacher_guidance_calibration_from_paths,
+)
 from sts_combat_rl.comm.protocol import format_command, format_ready_signal
 from sts_combat_rl.comm.stdio_client import StdioClient
 from sts_combat_rl.logging_utils import DEFAULT_LOG_FILE, configure_logging
@@ -136,6 +140,29 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 0 if report.command_ok else 2
+
+    if args.teacher_guidance_calibration_report is not None:
+        try:
+            report = run_teacher_guidance_calibration_from_paths(
+                trainer_input_path=args.teacher_guidance_calibration_report,
+                checkpoint_paths=args.teacher_guidance_calibration_checkpoint,
+                output_path=args.teacher_guidance_calibration_output,
+                top_k=args.teacher_guidance_calibration_top_k,
+            )
+        except (ImportError, OSError, UnicodeDecodeError, ValueError) as exc:
+            print(
+                f"failed to run teacher guidance calibration: {exc}",
+                file=sys.stderr,
+            )
+            return 2
+        print(
+            format_teacher_guidance_calibration_command(
+                report,
+                detail_limit=args.reward_detail_limit,
+            ),
+            file=sys.stderr,
+        )
+        return 0 if report.command_passed else 1
 
     if args.pytorch_search_guidance_train is not None:
         try:

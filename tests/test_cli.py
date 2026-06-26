@@ -973,6 +973,84 @@ def test_cli_oracle_teacher_search_guidance_requires_outputs(capsys) -> None:
     assert "requires --oracle-teacher-search-guidance-output" in captured.err
 
 
+def test_cli_teacher_guidance_calibration_routes_to_command(
+    monkeypatch,
+    tmp_path,
+    capsys,
+) -> None:
+    calls: dict[str, object] = {}
+
+    class FakeCalibrationReport:
+        command_passed = True
+
+    def fake_calibration(**kwargs):
+        calls.update(kwargs)
+        return FakeCalibrationReport()
+
+    monkeypatch.setattr(
+        "sts_combat_rl.cli.run_teacher_guidance_calibration_from_paths",
+        fake_calibration,
+    )
+    monkeypatch.setattr(
+        "sts_combat_rl.cli.format_teacher_guidance_calibration_command",
+        lambda report, *, detail_limit: (
+            "Teacher guidance calibration report\ncommand passed: yes"
+        ),
+    )
+    trainer_path = tmp_path / "teacher-guidance-trainer.jsonl"
+    checkpoint_a = tmp_path / "checkpoint-a.pt"
+    checkpoint_b = tmp_path / "checkpoint-b.pt"
+    report_path = tmp_path / "calibration-report.json"
+
+    assert (
+        main(
+            [
+                "--teacher-guidance-calibration-report",
+                str(trainer_path),
+                "--teacher-guidance-calibration-checkpoint",
+                str(checkpoint_a),
+                "--teacher-guidance-calibration-checkpoint",
+                str(checkpoint_b),
+                "--teacher-guidance-calibration-output",
+                str(report_path),
+                "--teacher-guidance-calibration-top-k",
+                "2",
+                "--reward-detail-limit",
+                "1",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 0
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert calls["trainer_input_path"] == trainer_path
+    assert calls["checkpoint_paths"] == [checkpoint_a, checkpoint_b]
+    assert calls["output_path"] == report_path
+    assert calls["top_k"] == 2
+    assert "Teacher guidance calibration report" in captured.err
+
+
+def test_cli_teacher_guidance_calibration_requires_checkpoint(capsys) -> None:
+    assert (
+        main(
+            [
+                "--teacher-guidance-calibration-report",
+                "trainer.jsonl",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 2
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "requires --teacher-guidance-calibration-checkpoint" in captured.err
+
+
 def test_cli_oracle_search_teacher_and_fixed_eval_routes_write_stderr_only(
     monkeypatch,
     tmp_path,
