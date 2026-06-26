@@ -9,6 +9,56 @@ commit `d56e10e` and local artifacts. They are research evidence, not proof that
 the corresponding command or capability exists on the latest `main`. Current
 implementation truth is recorded only in [`current_status.md`](current_status.md).
 
+## 2026-06-26: T031 A20 Coverage Refresh
+
+WSL coverage refresh on the pinned `sts_lightspeed` integration commit
+`242344c57c17c784708a6f072c905febc3f96527` used seed `1`, ascension `20`,
+50 source episodes, and a 500-step cap. Generated artifacts stayed under the
+ignored `artifacts/t031-a20-coverage-refresh/` directory:
+
+```text
+a20-pool.jsonl      sha256 172bcc6eb937632fa9a88e2554237287339623e0900316a11d9b76b502165ef3
+constructed.jsonl   sha256 d9399a9647e2a8dabeb5da321c4b77f4849c7df07b117f1b5c571615efb79ad5
+coverage.json       sha256 8209d66a1d73487362bb7b6dd0fe6c8ac7993553707c379c122a01747a69fc3e
+```
+
+- Natural collection produced 218 battle starts from 50 terminal source runs,
+  with 0 truncated source runs, 169 reported battle wins, 49 reported battle
+  losses, and 218/218 structured resource outcomes available.
+- All 218 natural starts were A20 Act 1. Room types were 187 `MONSTER`, 30
+  `ELITE`, and 1 `EVENT`; no Act 1 Boss or later-act battle starts were
+  reached.
+- Source-run progression remained early: final recorded battle floors ranged
+  from 2 to 14, battles per source run ranged from 2 to 9, and 49 of 50 final
+  recorded battles were losses.
+- The reported optimization-weight sample had 256 draws over 137 unique
+  natural sources, split into 110 `natural` and 146 `structural_uniform`
+  draws. These draws changed training weight only, not unique natural
+  coverage.
+- Constructed supplement audit loaded the same 218 natural starts, emitted 654
+  audit rows, and accepted 173 constructed rows: 45 current-HP additions, 120
+  encounter replacements, and 8 potion additions. Unsupported native
+  operations, cap violations, Boss replacement violations, and ascension
+  violations were all 0.
+- Coverage restore verification replay-restored 218/218 checkpoint records,
+  with 218 public-context comparisons, 218 matches, 0 legacy losses, and 0
+  mismatches.
+- The T009 broad-training gate stayed closed. The combined gate input had 647
+  rows (`natural_run=328`, `stratified_training=146`,
+  `constructed_supplement=173`) and 218 unique natural sources, all in Act 1.
+  A20 Act 1 failed because constructed rows lacked current public-context and
+  structured-outcome labels; A20 Acts 2, 3, and 4 each had 0 records and 0
+  unique sources.
+
+Conclusion: the artifact contracts and restore path are healthy, but this
+distribution is still not sufficient for broad training, teacher refreshes, or
+fixed A20 comparison claims. More disjoint natural A20 runs may add Act 1
+coverage, but the observed gap is primarily current-controller reachability:
+the run distribution did not produce Boss or later-act starts. Follow-up work
+should prioritize better later-act/Boss source coverage through controller or
+driver calibration and explicitly tagged constructed or paired supplements
+before treating T032-style teacher/checkpoint refreshes as broad A20 evidence.
+
 ## 2026-06-15: Public Run Context
 
 - A rebuilt WSL A20 collection produced a current pool with 18
