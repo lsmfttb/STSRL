@@ -1,6 +1,6 @@
 # Current Status
 
-Last reviewed: 2026-06-25.
+Last reviewed: 2026-06-26.
 
 This document describes the latest `main` branch only. Results from local
 artifacts, old branches, or unmerged pull requests do not count as implemented
@@ -13,10 +13,9 @@ primary battle policy, and learned policies or values are expected to guide or
 accelerate search. Non-combat decisions remain outside the trainable agent.
 
 The published foundation, maintenance, and first research-measurement backlog
-is complete: T001--T006 and T008--T024 are `DONE`, and T007 is `CANCELLED`
+is complete: T001--T006 and T008--T026 are `DONE`, and T007 is `CANCELLED`
 because it was superseded by T014--T016. The current published milestone is
-M1: model-guided Oracle search sandbox. T025 is `DONE`, and T026 is the
-current `READY` task.
+M1: model-guided Oracle search sandbox. T027 is the current `READY` task.
 
 ## Implemented On Main
 
@@ -222,12 +221,24 @@ current `READY` task.
   fixed-evaluation per-battle compute telemetry, Oracle teacher artifacts, and
   formatted fixed-evaluation summaries without changing action selection or
   adding model-guided search.
+- Versioned search-guidance checkpoint inference
+  (`search-guidance-inference-v1`) for scoring one public `DecisionContext`
+  with current `torch-policy-value-checkpoint-v1` checkpoints. The
+  framework-neutral result reports per-legal-action logits and eligible-masked
+  probabilities, battle survival, terminal absolute current HP, structured
+  resource predictions, checkpoint artifact identity, trainer-input
+  provenance, target kind/source summaries, information-regime counts, an
+  Oracle-like supervision flag, and timing. The optional PyTorch scorer and
+  offline CLI smoke path validate current public tactical/context schemas,
+  feature sizes, and checkpoint semantic contracts before scoring. This is a
+  scorer/inference contract only; it does not run the simulator, choose game
+  actions, implement a controller, or provide model-strength evidence.
 - A training-readiness report that validates plumbing only. It does not train a
   model or demonstrate policy strength.
 
 ### Tests And Runtime Evidence
 
-- `521` tests pass on Windows Python as of this review. In an uninstalled
+- `527` tests pass on Windows Python as of this review. In an uninstalled
   checkout, set `PYTHONPATH=src` (or install the package) before invoking the
   CLI directly.
 - The two CommunicationMod fixture smokes pass.
@@ -420,6 +431,15 @@ current `READY` task.
   2,984 native simulator steps, model calls total 0, and 0 root mapping
   failures. The run is telemetry plumbing evidence only, not controller
   promotion or A20 strength evidence.
+- T026 validates the checkpoint inference/scoring contract. The accepted local
+  gate passed 527 Windows tests, compileall, ruff check, ruff format check,
+  both CommunicationMod fixture smokes, focused inference/checkpoint/CLI tests
+  with a smoke checkpoint, and diff whitespace checks. The maintainer review
+  confirmed the WSL Python environment still lacks PyTorch
+  (`ModuleNotFoundError: No module named 'torch'`). WSL simulator gates are not
+  required for T026 because it is an offline checkpoint scorer contract and
+  does not run `sts_lightspeed`, advance a simulator, choose actions, or claim
+  controller strength.
 
 ## Not Implemented On Main
 
@@ -444,16 +464,14 @@ comparison, with complete telemetry and no promotion claims.
 
 The currently published `READY` task is:
 
-1. [`T026`](tasks/T026-guidance-checkpoint-inference-contract.md): add the
-   checkpoint inference/scoring contract needed before any controller consumes
-   T009/T024 checkpoints.
+1. [`T027`](tasks/T027-teacher-guidance-calibration-report.md): add the
+   offline checkpoint-vs-teacher calibration report needed before model-guided
+   Oracle search consumes checkpoint guidance.
 
 The rest of M1 is already specified but intentionally blocked:
 
-- [`T027`](tasks/T027-teacher-guidance-calibration-report.md): offline
-  checkpoint-vs-teacher calibration, blocked on T026.
 - [`T028`](tasks/T028-model-guided-oracle-search-controller.md): first
-  model-guided Oracle search controller, blocked on T026 and T027.
+  model-guided Oracle search controller, blocked on T027.
 - [`T029`](tasks/T029-fixed-cohort-model-guided-search-comparison.md):
   fixed-cohort comparison, blocked on T028.
 - [`T030`](tasks/T030-m1-model-guided-search-sandbox-synthesis.md): milestone

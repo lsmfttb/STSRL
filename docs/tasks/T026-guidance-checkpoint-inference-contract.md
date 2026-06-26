@@ -1,6 +1,6 @@
 # T026: Guidance Checkpoint Inference Contract
 
-Status: `READY`.
+Status: `DONE` via PR #26, merged 2026-06-26.
 
 ## Objective
 

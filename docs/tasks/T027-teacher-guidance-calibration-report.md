@@ -1,6 +1,6 @@
 # T027: Teacher Guidance Calibration Report
 
-Status: `BLOCKED`.
+Status: `READY`.
 
 ## Objective
 
@@ -14,10 +14,10 @@ implementing a controller or claiming game strength.
 ## Current Main Baseline
 
 Current `main` has T023 teacher artifacts, T024 teacher-targeted trainer input,
-and optional PyTorch checkpoints. After T026, the project will have a reusable
-checkpoint inference contract. The remaining gap is an artifact-level report
-that measures agreement, ranking, cross-entropy, calibration, and coverage
-against Oracle-like teacher targets.
+optional PyTorch checkpoints, and the T026 reusable checkpoint inference
+contract. The remaining gap is an artifact-level report that measures
+agreement, ranking, cross-entropy, calibration, and coverage against
+Oracle-like teacher targets.
 
 ## Dependencies
 
