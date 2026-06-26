@@ -18,8 +18,11 @@ current contracts.
   under a separately named driver.
 - Treat A20 Heart victory as the final target. A0 is only a separately reported
   debugging or curriculum distribution.
-- `sts_lightspeed` is the authoritative game implementation. Do not implement
-  Slay the Spire mechanics locally.
+- The real Slay the Spire game is the final mechanics and live-runtime
+  authority. The pinned `sts_lightspeed` integration is the current
+  authoritative simulator for large-scale training, native search, restored
+  evaluation, and simulator gates. Do not implement Slay the Spire mechanics
+  locally.
 - Real `sts_lightspeed` gates run through WSL, not Windows Python.
 - Simulator-only training is allowed, but any trained or search controller
   claimed live-game runnable must pass the CommunicationMod runtime adapter and
@@ -101,6 +104,9 @@ current contracts.
 - Reserve stdout for protocol commands; use stderr or log files for debugging.
 - Writers emit only current artifact schemas. Readers migrate legacy artifacts
   sequentially before business logic runs; never guess missing provenance.
+- Required task artifacts must be explicit and reproducible. Do not use another
+  task's temporary smoke output, local worktree file, or leftover checkpoint as
+  an implicit input to a later task.
 - Portable replay traces must disambiguate duplicate legal action ids.
 - Keep legacy fixtures and migration regression tests. Do not scatter permanent
   legacy-version branches through current business logic.

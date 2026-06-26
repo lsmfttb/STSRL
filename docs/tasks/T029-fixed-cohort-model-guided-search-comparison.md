@@ -21,6 +21,24 @@ restored starts with shared telemetry.
 
 - T025 and T028 are complete.
 
+## Inputs And Artifacts
+
+- Required cohort input: one fixed cohort or smoke cohort with explicit schema,
+  identity, source-pool provenance, and regeneration command or external/ignored
+  path.
+- Required checkpoint input: one T028-compatible model-guided controller
+  checkpoint with checkpoint identity and trainer-input provenance.
+- Required baseline input: the same restored battle starts must be used for
+  baseline Oracle search and model-guided Oracle search.
+- Generated comparison reports may be written under ignored or external
+  artifact paths, but the PR must report schema, provenance, and enough
+  identities for reviewers to reproduce or audit them.
+
+This task must not consume an unreported T028 smoke checkpoint, one-off fixed
+cohort, or local worktree artifact as an implicit input. If it reuses artifacts
+from a previous workflow, it must name the merged artifact contract and provide
+regeneration or acquisition commands.
+
 ## Scope
 
 - Add a versioned comparison report, for example
@@ -67,7 +85,9 @@ restored starts with shared telemetry.
 Run the standard local gates from `docs/tasks/README.md`.
 
 Run focused comparison tests and a WSL smoke comparison against pinned
-`sts_lightspeed`, using artifacts outside the repository or ignored paths.
+`sts_lightspeed`, using explicitly documented artifacts outside the repository
+or ignored paths. The WSL smoke must exercise both compared controller paths on
+the same source starts.
 
 ## Legacy Reference
 
@@ -78,4 +98,5 @@ controller code. Do not port legacy policy-comparison experiments wholesale.
 
 The PR must report schema id/version, cohort identity, controller configs,
 checkpoint identity, aggregate outcomes, telemetry, failures, local/WSL
-verification, and explicit non-promotion evidence boundary.
+verification, consumed/generated artifact identities and reproduction commands,
+and explicit non-promotion evidence boundary.

@@ -19,7 +19,15 @@ strength remains a diagnostic.
 
 ## Simulator Boundary
 
-`sts_lightspeed` is the authoritative game implementation. This repository may:
+The actual Slay the Spire game is the final authority for game mechanics and
+live runtime behavior. The pinned external `sts_lightspeed` integration is the
+current authoritative simulator implementation for this repository's
+large-scale training, native search, restored-battle evaluation, and simulator
+gates. If the simulator and the real game disagree, the disagreement is a
+simulator fidelity issue to document, test, and resolve; repository Python code
+must not patch around it by inventing local game mechanics.
+
+Within that simulator boundary, this repository may:
 
 - select legal actions;
 - search copied simulator states;
@@ -28,9 +36,11 @@ strength remains a diagnostic.
 - train models;
 - evaluate controllers.
 
-It must not reimplement Slay the Spire mechanics. Authoritative state mutation,
+It must not reimplement Slay the Spire mechanics. Simulator state mutation,
 legal-action enumeration, battle-start restore, encounter selection, and hidden
-future sampling must come from the simulator.
+future sampling must come from `sts_lightspeed` or a future explicitly adopted
+simulator integration, then remain subject to real-game compatibility checks
+before any live-game claim.
 
 Real `sts_lightspeed` gates run through WSL. Game files, simulator binaries,
 save files, and large artifacts do not belong in this repository.
@@ -342,3 +352,9 @@ boundary.
 
 Phase gates verify the actual generating controller and provenance, not only
 the shape of an output artifact.
+
+Task dependencies are contracts, not local filesystem accidents. A later task
+may depend on a predecessor's merged schema, command surface, fixture, or
+documented artifact-generation procedure. It must not depend on an uncommitted
+worktree file, a one-off smoke output, or a temporary checkpoint that only
+happened to exist on one machine.

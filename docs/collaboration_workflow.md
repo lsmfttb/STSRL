@@ -44,6 +44,10 @@ create or switch to those branches during implementation.
   not substitutes for the specification.
 - If scope or acceptance criteria change, the main maintainer updates the task
   document before the changed work is accepted.
+- Project policy decisions made during maintainer discussion become durable
+  only when the main maintainer writes them into the authoritative documents.
+  A spoken or chat-only reminder is not enough to change future review
+  standards.
 
 ## One Task, One Branch, One Pull Request
 
@@ -85,15 +89,38 @@ Every task document must define:
 1. objective and motivation;
 2. current `main` baseline;
 3. dependencies;
-4. in-scope behavior and files or ownership boundaries;
-5. explicitly out-of-scope work;
-6. design constraints and compatibility requirements;
-7. required deliverables;
-8. acceptance criteria;
-9. required verification commands and real-simulator gates;
-10. required pull-request report.
+4. explicit required inputs, generated outputs, artifact contracts, and
+   reproduction commands;
+5. in-scope behavior and files or ownership boundaries;
+6. explicitly out-of-scope work;
+7. design constraints and compatibility requirements;
+8. required deliverables;
+9. acceptance criteria;
+10. required verification commands and real-simulator gates;
+11. required pull-request report.
 
 A task that cannot be objectively accepted is not ready.
+
+## Task Artifact Boundaries
+
+Tasks may depend on merged contracts from prerequisite tasks, but not on
+temporary local artifacts. A required task input must be one of:
+
+- a committed fixture or current artifact schema;
+- a command in the task or pull-request report that regenerates the artifact;
+- an explicitly external or ignored artifact path with schema, provenance,
+  compatibility requirements, and regeneration instructions.
+
+A task must not use another task's one-off smoke output, uncommitted worktree
+file, local checkpoint, or temporary report as an implicit input. If a later
+task needs an artifact produced by an earlier task, the later task must name the
+artifact contract and explain how reviewers can reproduce or provide a
+compatible artifact. Missing required artifacts block acceptance unless the task
+document marks the smoke as optional before review.
+
+Generated large artifacts still stay out of the repository. The durable project
+state is the schema, command surface, manifest/provenance, and review evidence,
+not the local file that happened to be left behind after a smoke run.
 
 ## Pull-Request Contract
 
@@ -102,6 +129,8 @@ The pull-request description must include:
 - task ID and link to its task document;
 - concise implementation summary;
 - changed behavior and compatibility impact;
+- required input artifacts, generated output artifacts, and reproduction
+  commands or external/ignored artifact locations;
 - exact verification commands and results;
 - any acceptance criterion not satisfied;
 - known risks or follow-up work;

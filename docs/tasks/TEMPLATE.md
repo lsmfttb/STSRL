@@ -15,6 +15,16 @@ gap this task closes.
 
 List prerequisite task IDs or `none`.
 
+## Inputs And Artifacts
+
+List every required input artifact, external/ignored artifact path, schema,
+provenance requirement, and command needed to regenerate or provide it. State
+which outputs this task writes and which are committed fixtures versus ignored
+or external artifacts.
+
+Do not rely on another task's temporary smoke output or local worktree file as
+an implicit input.
+
 ## Scope
 
 Define required behavior, ownership boundaries, and public interfaces.
@@ -41,7 +51,8 @@ judgment or chat context.
 ## Required Verification
 
 List exact local commands, WSL commands, datasets, seeds, budgets, and expected
-invariants. Reference the standard local gates when applicable.
+invariants. Include artifact generation or acquisition commands for every
+required input. Reference the standard local gates when applicable.
 
 ## Legacy Reference
 
@@ -51,4 +62,4 @@ whether selective porting is allowed.
 ## PR Report
 
 List the evidence, compatibility notes, risks, and deviations required in the
-pull-request description.
+pull-request description, including consumed and generated artifact identities.

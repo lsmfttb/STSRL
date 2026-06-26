@@ -52,6 +52,23 @@ the main maintainer before becoming `READY`. Once a task is `READY`, its
 published acceptance criteria are the review contract; scope changes require a
 document update before acceptance.
 
+## Task Boundary And Artifact Rules
+
+Each task must have explicit, reviewable inputs and outputs. A prerequisite task
+may provide a merged schema, command, fixture, or artifact-generation contract.
+It does not provide an implicit local file dependency merely because a smoke run
+left a checkpoint, trainer JSONL, report, or cohort in one worktree.
+
+Required artifacts must be reproducible by documented commands, committed as
+small fixtures, or supplied through an explicit external/ignored artifact path
+with schema, provenance, compatibility requirements, and identity checks. A
+task that needs an artifact from an earlier workflow must name that contract and
+explain how a reviewer can regenerate or provide a compatible artifact.
+
+Large generated artifacts remain outside the repository. The durable contract
+is the schema, manifest/provenance, command surface, hashes where applicable,
+and review evidence.
+
 ## Published Queue
 
 The currently published `READY` queue is:
