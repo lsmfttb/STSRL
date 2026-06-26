@@ -166,6 +166,9 @@ Review findings are resolved before merge. The maintainer merges only into
 4. unblocks or revises dependent tasks;
 5. updates architecture or roadmap documents when the accepted behavior changes
    them.
+6. cleans obsolete local and remote task branches and review worktrees when
+   they are no longer needed, while preserving active worktrees, unmerged
+   branches, and explicitly retained historical references.
 
 ## Documentation Ownership
 

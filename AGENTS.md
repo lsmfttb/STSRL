@@ -125,6 +125,9 @@ current contracts.
 - Do not revert or overwrite changes from other branches or agents.
 - Before merging, review behavior, provenance, artifact compatibility, tests,
   and documentation impact.
+- After merging, prune obsolete review worktrees and delete local/remote task
+  branches that are merged and no longer needed. Preserve active worktrees,
+  unmerged branches, and explicitly retained historical references.
 - Keep current contracts and current status in their authoritative documents;
   put superseded plans and experiment narratives under `docs/history/`.
 
