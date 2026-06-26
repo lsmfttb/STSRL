@@ -29,6 +29,11 @@ from sts_combat_rl.commands.fixed_evaluation import (
     write_fixed_cohort,
     write_fixed_evaluation_report,
 )
+from sts_combat_rl.commands.model_guided_oracle_search import (
+    build_torch_guidance_scorer_from_checkpoint,
+    format_model_guided_oracle_fixed_evaluation_report,
+    run_model_guided_oracle_fixed_evaluation_from_cohort_path,
+)
 from sts_combat_rl.commands.oracle_search import (
     collect_oracle_teacher_from_pool_path,
     format_oracle_fixed_evaluation_comparison,
@@ -111,6 +116,9 @@ from sts_combat_rl.sim.non_combat_calibration import (
     run_non_combat_driver_calibration,
 )
 from sts_combat_rl.sim.online_controller import PolicyController
+from sts_combat_rl.sim.model_guided_oracle_search import (
+    ModelGuidedOracleSearchController,
+)
 from sts_combat_rl.sim.oracle_search import OracleSearchController
 from sts_combat_rl.sim.policy import (
     evaluate_decision_policy,
@@ -182,6 +190,7 @@ _LIGHTSPEED_PATH_FLAGS = (
     "lightspeed_fixed_battle_evaluation",
     "lightspeed_oracle_search_teacher",
     "lightspeed_oracle_fixed_evaluation",
+    "lightspeed_model_guided_oracle_fixed_evaluation",
 )
 
 
@@ -455,6 +464,36 @@ def run_lightspeed_command(args: argparse.Namespace) -> int:
             )
             if not comparison.evaluation_successful:
                 return 1
+        elif args.lightspeed_model_guided_oracle_fixed_evaluation is not None:
+            scorer = build_torch_guidance_scorer_from_checkpoint(
+                args.model_guided_oracle_checkpoint
+            )
+            controller = ModelGuidedOracleSearchController(
+                simulations=args.oracle_search_simulations,
+                scorer=scorer,
+                policy_probability_weight=(
+                    args.model_guided_oracle_policy_probability_weight
+                ),
+                action_space=action_space,
+            )
+            report = run_model_guided_oracle_fixed_evaluation_from_cohort_path(
+                adapter_factory=lambda: LightSpeedAdapter(
+                    seed=args.sim_seed,
+                    ascension=args.sim_ascension,
+                ),
+                cohort_path=args.lightspeed_model_guided_oracle_fixed_evaluation,
+                controller=controller,
+                action_space=action_space,
+                max_battle_steps=args.sim_steps,
+            )
+            if args.fixed_evaluation_report is not None:
+                write_fixed_evaluation_report(args.fixed_evaluation_report, report)
+            print(
+                format_model_guided_oracle_fixed_evaluation_report(report),
+                file=sys.stderr,
+            )
+            if not report.evaluation_successful:
+                return 1
         elif args.lightspeed_non_combat_calibration:
             battle_policy = build_online_sim_policy(
                 args.sim_policy,
@@ -477,7 +516,7 @@ def run_lightspeed_command(args: argparse.Namespace) -> int:
                 return 1
         else:
             return _run_lightspeed_smoke_command(args, adapter, action_space)
-    except (OSError, RuntimeError, ValueError) as exc:
+    except (ImportError, OSError, RuntimeError, ValueError) as exc:
         print(f"failed to run lightspeed simulator smoke: {exc}", file=sys.stderr)
         return 2
     return 0

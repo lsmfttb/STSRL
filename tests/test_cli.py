@@ -23,6 +23,11 @@ from sts_combat_rl.sim.native_public_projection import (
 from sts_combat_rl.sim.public_context_audit import (
     PublicContextArtifactAuditReport,
 )
+from sts_combat_rl.sim.search_guidance_inference import (
+    SearchGuidanceActionScore,
+    SearchGuidanceCheckpointProvenance,
+    SearchGuidanceInferenceResult,
+)
 
 
 def test_cli_parser_keeps_lightspeed_training_flags() -> None:
@@ -196,6 +201,26 @@ def test_cli_parser_accepts_pytorch_inference_flags(tmp_path) -> None:
     assert args.pytorch_search_guidance_infer_example_index == 2
 
 
+def test_cli_parser_accepts_model_guided_oracle_flags(tmp_path) -> None:
+    cohort_path = tmp_path / "cohort.jsonl"
+    checkpoint_path = tmp_path / "checkpoint.pt"
+
+    args = build_parser().parse_args(
+        [
+            "--lightspeed-model-guided-oracle-fixed-evaluation",
+            str(cohort_path),
+            "--model-guided-oracle-checkpoint",
+            str(checkpoint_path),
+            "--model-guided-oracle-policy-probability-weight",
+            "0.25",
+        ]
+    )
+
+    assert args.lightspeed_model_guided_oracle_fixed_evaluation == cohort_path
+    assert args.model_guided_oracle_checkpoint == checkpoint_path
+    assert args.model_guided_oracle_policy_probability_weight == 0.25
+
+
 def test_cli_default_import_does_not_import_torch() -> None:
     repo_src = Path(__file__).resolve().parents[1] / "src"
     env = os.environ.copy()
@@ -231,6 +256,29 @@ def test_cli_rejects_pytorch_inference_without_trainer_input(capsys) -> None:
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "requires --pytorch-search-guidance-infer-trainer-input" in captured.err
+
+
+def test_cli_rejects_model_guided_oracle_without_checkpoint(
+    tmp_path,
+    capsys,
+) -> None:
+    cohort_path = tmp_path / "cohort.jsonl"
+
+    assert (
+        main(
+            [
+                "--lightspeed-model-guided-oracle-fixed-evaluation",
+                str(cohort_path),
+                "--log-file",
+                "-",
+            ]
+        )
+        == 2
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "requires --model-guided-oracle-checkpoint" in captured.err
 
 
 class FakeLightSpeedSmokeAdapter:
@@ -354,6 +402,60 @@ class FakeLightSpeedSmokeAdapter:
                 }
             ],
         }
+
+
+def _cli_checkpoint() -> SearchGuidanceCheckpointProvenance:
+    return SearchGuidanceCheckpointProvenance(
+        checkpoint_schema_id="torch-policy-value-checkpoint-v1",
+        checkpoint_format_version=1,
+        checkpoint_artifact_id="cli-checkpoint",
+        checkpoint_path="/tmp/cli-checkpoint.pt",
+        model_class="TinyPolicyValueNet",
+        model_config={"hidden_size": 8},
+        trainer_input_artifact_id="trainer-input-sha256:cli",
+        trainer_input_sha256="cli",
+        policy_target_kind="oracle_teacher_action_one_hot",
+        policy_target_source="oracle_teacher_row.teacher_action",
+        policy_target_kind_counts={"oracle_teacher_action_one_hot": 1},
+        policy_target_source_counts={"oracle_teacher_row.teacher_action": 1},
+        information_regime_counts={"normal_public_policy": 1},
+        source_information_regime_counts={"full_simulator_state_oracle_like": 1},
+        oracle_like_supervision=True,
+        training_data_provenance={"artifact": "cli-test"},
+    )
+
+
+class _FakeCliGuidanceScorer:
+    name = "fake_cli_guidance"
+    checkpoint_provenance = _cli_checkpoint()
+
+    def score_decision_context(self, context):
+        return SearchGuidanceInferenceResult(
+            scorer_name=self.name,
+            checkpoint_provenance=self.checkpoint_provenance,
+            legal_action_count=len(context.legal_action_features),
+            eligible_action_count=len(context.eligible_action_indices),
+            action_scores=[
+                SearchGuidanceActionScore(
+                    legal_action_index=index,
+                    action_kind=context.legal_action_kinds[index],
+                    eligible=index in context.eligible_action_indices,
+                    policy_logit=0.0,
+                    policy_probability=1.0,
+                    action_identity=_context_action_identity(context, index),
+                )
+                for index in range(len(context.legal_action_features))
+            ],
+            duration_ms=0.5,
+        )
+
+
+def _context_action_identity(context, index: int) -> dict:
+    if index < len(context.tactical_legal_actions):
+        identity = context.tactical_legal_actions[index].get("identity", {})
+        if isinstance(identity, dict):
+            return dict(identity)
+    return {}
 
 
 def test_cli_stdin_mode_sends_ready_signal_then_commands(monkeypatch) -> None:
@@ -1063,6 +1165,7 @@ def test_cli_oracle_search_teacher_and_fixed_eval_routes_write_stderr_only(
     pool_path = tmp_path / "pool.jsonl"
     teacher_path = tmp_path / "teacher.jsonl"
     cohort_path = tmp_path / "cohort.jsonl"
+    checkpoint_path = tmp_path / "checkpoint.pt"
 
     assert (
         main(
@@ -1142,6 +1245,41 @@ def test_cli_oracle_search_teacher_and_fixed_eval_routes_write_stderr_only(
     assert "sts_lightspeed source identity" in fixed_output.err
     assert "Fixed battle evaluation report" in fixed_output.err
     assert "controller: oracle_search_v1_most_visits_s3" in fixed_output.err
+
+    monkeypatch.setattr(
+        (
+            "sts_combat_rl.commands.lightspeed_cli."
+            "build_torch_guidance_scorer_from_checkpoint"
+        ),
+        lambda path: _FakeCliGuidanceScorer(),
+    )
+    assert (
+        main(
+            [
+                "--lightspeed-model-guided-oracle-fixed-evaluation",
+                str(cohort_path),
+                "--model-guided-oracle-checkpoint",
+                str(checkpoint_path),
+                "--oracle-search-simulations",
+                "3",
+                "--sim-steps",
+                "1",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 0
+    )
+    model_guided_output = capsys.readouterr()
+    assert model_guided_output.out == ""
+    assert "Model-guided Oracle fixed evaluation smoke" in model_guided_output.err
+    assert "full_simulator_state_oracle_like diagnostics only" in (
+        model_guided_output.err
+    )
+    assert "controller: model_guided_oracle_search_v1_s3_pw0.05" in (
+        model_guided_output.err
+    )
+    assert "model calls: total=1" in model_guided_output.err
 
 
 def test_cli_oracle_teacher_dataset_report_writes_stderr_and_json(

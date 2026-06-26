@@ -581,21 +581,18 @@ def _evaluate_one_battle(
         for key, value in decision.metadata.items():
             if key == "controller_role":
                 continue
+            if value is None:
+                continue
             if isinstance(value, (int, float)) and not isinstance(value, bool):
-                controller_telemetry.setdefault(key, 0.0)
-                controller_telemetry[key] += float(value)
+                _add_numeric_controller_telemetry(
+                    controller_telemetry,
+                    key,
+                    float(value),
+                )
             elif isinstance(value, dict):
-                controller_telemetry.setdefault(key, {})
-                # Shallow merge integer/float leaves.
-                if isinstance(controller_telemetry[key], dict):
-                    for sub_key, sub_val in value.items():
-                        if isinstance(sub_val, (int, float)) and not isinstance(
-                            sub_val, bool
-                        ):
-                            controller_telemetry[key].setdefault(sub_key, 0.0)
-                            controller_telemetry[key][sub_key] += float(sub_val)
+                _merge_mapping_controller_telemetry(controller_telemetry, key, value)
             else:
-                controller_telemetry.setdefault(key, []).append(value)
+                _append_controller_telemetry_value(controller_telemetry, key, value)
 
         if transition.terminal or not _is_battle_state(current):
             outcome = _battle_outcome(current.raw)
@@ -694,6 +691,54 @@ def _evaluate_one_battle(
         structured_battle_outcome=structured_outcome,
         problems=problems,
     )
+
+
+def _add_numeric_controller_telemetry(
+    controller_telemetry: dict[str, Any],
+    key: str,
+    value: float,
+) -> None:
+    current = controller_telemetry.get(key)
+    if current is None:
+        controller_telemetry[key] = value
+    elif isinstance(current, (int, float)) and not isinstance(current, bool):
+        controller_telemetry[key] = float(current) + value
+    elif isinstance(current, list):
+        current.append(value)
+    else:
+        controller_telemetry[key] = [current, value]
+
+
+def _merge_mapping_controller_telemetry(
+    controller_telemetry: dict[str, Any],
+    key: str,
+    value: Mapping[str, Any],
+) -> None:
+    current = controller_telemetry.get(key)
+    if current is None:
+        current = {}
+        controller_telemetry[key] = current
+    if not isinstance(current, dict):
+        _append_controller_telemetry_value(controller_telemetry, key, dict(value))
+        return
+    for sub_key, sub_val in value.items():
+        if isinstance(sub_val, (int, float)) and not isinstance(sub_val, bool):
+            current.setdefault(sub_key, 0.0)
+            current[sub_key] += float(sub_val)
+
+
+def _append_controller_telemetry_value(
+    controller_telemetry: dict[str, Any],
+    key: str,
+    value: Any,
+) -> None:
+    current = controller_telemetry.get(key)
+    if current is None:
+        controller_telemetry[key] = [value]
+    elif isinstance(current, list):
+        current.append(value)
+    else:
+        controller_telemetry[key] = [current, value]
 
 
 def build_evaluation_aggregates(
