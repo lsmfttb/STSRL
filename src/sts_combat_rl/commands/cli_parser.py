@@ -367,6 +367,16 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     input_group.add_argument(
+        "--lightspeed-model-guided-search-fixed-comparison",
+        type=Path,
+        metavar="COHORT_PATH",
+        help=(
+            "Load an immutable fixed battle cohort unchanged and compare baseline "
+            "Oracle search against the T028 model-guided Oracle-like controller "
+            "using the same restored starts."
+        ),
+    )
+    input_group.add_argument(
         "--oracle-teacher-dataset-report",
         type=Path,
         metavar="TEACHER_JSONL",
@@ -754,7 +764,23 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="CHECKPOINT_PATH",
         help=(
             "T026-compatible PyTorch policy/value checkpoint used by "
-            "--lightspeed-model-guided-oracle-fixed-evaluation."
+            "--lightspeed-model-guided-oracle-fixed-evaluation or "
+            "--lightspeed-model-guided-search-fixed-comparison."
+        ),
+    )
+    parser.add_argument(
+        "--model-guided-search-comparison-report",
+        type=Path,
+        metavar="PATH",
+        help="Write the T029 model-guided search comparison JSONL report to PATH.",
+    )
+    parser.add_argument(
+        "--model-guided-search-comparison-scale",
+        choices=("smoke", "fixed"),
+        default="smoke",
+        help=(
+            "Scale label recorded in the T029 comparison report. The default "
+            "marks the run as smoke-scale evidence."
         ),
     )
     parser.add_argument(

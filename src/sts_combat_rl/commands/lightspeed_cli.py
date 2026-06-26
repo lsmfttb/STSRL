@@ -34,6 +34,10 @@ from sts_combat_rl.commands.model_guided_oracle_search import (
     format_model_guided_oracle_fixed_evaluation_report,
     run_model_guided_oracle_fixed_evaluation_from_cohort_path,
 )
+from sts_combat_rl.commands.model_guided_search_comparison import (
+    run_model_guided_search_fixed_comparison_from_cohort_path,
+    write_model_guided_search_fixed_comparison_report,
+)
 from sts_combat_rl.commands.oracle_search import (
     collect_oracle_teacher_from_pool_path,
     format_oracle_fixed_evaluation_comparison,
@@ -119,6 +123,9 @@ from sts_combat_rl.sim.online_controller import PolicyController
 from sts_combat_rl.sim.model_guided_oracle_search import (
     ModelGuidedOracleSearchController,
 )
+from sts_combat_rl.sim.model_guided_search_comparison import (
+    format_model_guided_search_fixed_comparison_report,
+)
 from sts_combat_rl.sim.oracle_search import OracleSearchController
 from sts_combat_rl.sim.policy import (
     evaluate_decision_policy,
@@ -191,6 +198,7 @@ _LIGHTSPEED_PATH_FLAGS = (
     "lightspeed_oracle_search_teacher",
     "lightspeed_oracle_fixed_evaluation",
     "lightspeed_model_guided_oracle_fixed_evaluation",
+    "lightspeed_model_guided_search_fixed_comparison",
 )
 
 
@@ -490,6 +498,46 @@ def run_lightspeed_command(args: argparse.Namespace) -> int:
                 write_fixed_evaluation_report(args.fixed_evaluation_report, report)
             print(
                 format_model_guided_oracle_fixed_evaluation_report(report),
+                file=sys.stderr,
+            )
+            if not report.evaluation_successful:
+                return 1
+        elif args.lightspeed_model_guided_search_fixed_comparison is not None:
+            scorer = build_torch_guidance_scorer_from_checkpoint(
+                args.model_guided_oracle_checkpoint
+            )
+            baseline_controller = OracleSearchController(
+                simulations=args.oracle_search_simulations,
+                root_selection_rule=args.oracle_root_selection,
+                action_space=action_space,
+            )
+            model_guided_controller = ModelGuidedOracleSearchController(
+                simulations=args.oracle_search_simulations,
+                scorer=scorer,
+                policy_probability_weight=(
+                    args.model_guided_oracle_policy_probability_weight
+                ),
+                action_space=action_space,
+            )
+            report = run_model_guided_search_fixed_comparison_from_cohort_path(
+                adapter_factory=lambda: LightSpeedAdapter(
+                    seed=args.sim_seed,
+                    ascension=args.sim_ascension,
+                ),
+                cohort_path=args.lightspeed_model_guided_search_fixed_comparison,
+                baseline_controller=baseline_controller,
+                model_guided_controller=model_guided_controller,
+                action_space=action_space,
+                max_battle_steps=args.sim_steps,
+                run_scale=args.model_guided_search_comparison_scale,
+            )
+            if args.model_guided_search_comparison_report is not None:
+                write_model_guided_search_fixed_comparison_report(
+                    args.model_guided_search_comparison_report,
+                    report,
+                )
+            print(
+                format_model_guided_search_fixed_comparison_report(report),
                 file=sys.stderr,
             )
             if not report.evaluation_successful:
