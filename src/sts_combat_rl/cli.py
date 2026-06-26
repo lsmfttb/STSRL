@@ -23,8 +23,10 @@ from sts_combat_rl.commands.oracle_teacher_search_guidance import (
 )
 from sts_combat_rl.commands.pytorch_search_guidance import (
     build_trainer_input_preflight_from_path,
+    format_pytorch_search_guidance_inference_workflow_report,
     format_pytorch_search_guidance_training_workflow_report,
     format_trainer_input_preflight_from_path_report,
+    run_pytorch_search_guidance_inference_from_paths,
     run_pytorch_search_guidance_training_from_path,
 )
 from sts_combat_rl.comm.protocol import format_command, format_ready_signal
@@ -108,6 +110,32 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 0 if report.preflight_ok else 2
+
+    if args.pytorch_search_guidance_infer is not None:
+        try:
+            report = run_pytorch_search_guidance_inference_from_paths(
+                args.pytorch_search_guidance_infer,
+                args.pytorch_search_guidance_infer_trainer_input,
+                example_index=(
+                    args.pytorch_search_guidance_infer_example_index
+                    if args.pytorch_search_guidance_infer_example_index is not None
+                    else 0
+                ),
+            )
+        except (ImportError, IndexError, OSError, ValueError) as exc:
+            print(
+                f"failed to run PyTorch search-guidance inference: {exc}",
+                file=sys.stderr,
+            )
+            return 2
+        print(
+            format_pytorch_search_guidance_inference_workflow_report(
+                report,
+                detail_limit=args.reward_detail_limit,
+            ),
+            file=sys.stderr,
+        )
+        return 0 if report.command_ok else 2
 
     if args.pytorch_search_guidance_train is not None:
         try:

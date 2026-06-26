@@ -10,8 +10,11 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, field
+import hashlib
 import math
+from pathlib import Path
 import random
+from time import perf_counter
 from typing import Any
 
 import torch
@@ -28,6 +31,13 @@ from sts_combat_rl.sim.model_input import ModelInputBatch
 from sts_combat_rl.sim.model_scoring import DEFAULT_ACTION_KIND_SCORE_PRIOR
 from sts_combat_rl.sim.policy import DecisionContext
 from sts_combat_rl.sim.resource_outcome import BATTLE_RESOURCE_OUTCOME_AVAILABLE
+from sts_combat_rl.sim.search_guidance_inference import (
+    SearchGuidanceActionScore,
+    SearchGuidanceCheckpointProvenance,
+    SearchGuidanceInferenceResult,
+    SearchGuidanceValuePrediction,
+    validate_search_guidance_context,
+)
 from sts_combat_rl.sim.trainer_input import (
     POLICY_TARGET_KIND_BEHAVIOR,
     POLICY_TARGET_KINDS,
@@ -378,6 +388,101 @@ class TorchPolicyValueActionScorer:
             logits = self.model(state_features, action_features)[0]
             scores.extend(float(value) for value in logits)
         return scores
+
+
+class TorchPolicyValueGuidanceScorer:
+    """Inference-only scorer for current policy/value checkpoints."""
+
+    name = "torch_policy_value_guidance"
+
+    def __init__(
+        self,
+        loaded: LoadedTorchPolicyValueCheckpoint,
+        *,
+        checkpoint_artifact_id: str,
+        checkpoint_path: str | None = None,
+    ) -> None:
+        self.loaded = loaded
+        self.model = loaded.model
+        self.model.eval()
+        self.checkpoint_provenance = _guidance_checkpoint_provenance(
+            loaded,
+            checkpoint_artifact_id=checkpoint_artifact_id,
+            checkpoint_path=checkpoint_path,
+        )
+
+    @classmethod
+    def from_checkpoint_path(cls, path: str | Path) -> "TorchPolicyValueGuidanceScorer":
+        checkpoint_path = Path(path)
+        checkpoint_bytes = checkpoint_path.read_bytes()
+        loaded = load_torch_policy_value_checkpoint(str(checkpoint_path))
+        checkpoint_sha256 = hashlib.sha256(checkpoint_bytes).hexdigest()
+        return cls(
+            loaded,
+            checkpoint_artifact_id=(
+                f"{TORCH_POLICY_VALUE_CHECKPOINT_SCHEMA_ID}-sha256:{checkpoint_sha256}"
+            ),
+            checkpoint_path=str(checkpoint_path),
+        )
+
+    @property
+    def provenance_config(self) -> Mapping[str, Any]:
+        return self.checkpoint_provenance.to_dict()
+
+    @torch.no_grad()
+    def score_decision_context(
+        self,
+        context: DecisionContext,
+    ) -> SearchGuidanceInferenceResult:
+        started = perf_counter()
+        validate_search_guidance_context(context)
+        _validate_context_schema(self.model, context)
+
+        state_features = torch.tensor(
+            _state_features(context.snapshot_features, context.public_run_context),
+            dtype=torch.float32,
+        )
+        action_features = torch.tensor(
+            context.legal_action_features,
+            dtype=torch.float32,
+        )
+        logits, outcome_logit, hp_value, resource_values = self.model(
+            state_features,
+            action_features,
+        )
+        probabilities = _eligible_policy_probabilities(
+            logits,
+            context.eligible_action_indices,
+        )
+        eligible_indices = set(context.eligible_action_indices)
+        action_scores = [
+            SearchGuidanceActionScore(
+                legal_action_index=index,
+                action_kind=context.legal_action_kinds[index],
+                eligible=index in eligible_indices,
+                policy_logit=float(logits[index]),
+                policy_probability=probabilities[index],
+                action_identity=_context_action_identity(context, index),
+            )
+            for index in range(len(context.legal_action_features))
+        ]
+        value_prediction = SearchGuidanceValuePrediction(
+            battle_survival_probability=float(torch.sigmoid(outcome_logit).squeeze()),
+            terminal_absolute_current_hp=float(hp_value.squeeze()),
+            structured_resource_values={
+                name: float(resource_values[index])
+                for index, name in enumerate(self.model.resource_target_names)
+            },
+        )
+        return SearchGuidanceInferenceResult(
+            scorer_name=self.name,
+            checkpoint_provenance=self.checkpoint_provenance,
+            legal_action_count=len(context.legal_action_features),
+            eligible_action_count=len(context.eligible_action_indices),
+            action_scores=action_scores,
+            value_prediction=value_prediction,
+            duration_ms=(perf_counter() - started) * 1000.0,
+        )
 
 
 class TorchPolicyValueEnsembleActionScorer:
@@ -1642,6 +1747,120 @@ def _validate_batch_schema(model: PolicyValueNetwork, batch: ModelInputBatch) ->
         raise ValueError("model input snapshot feature size does not match model")
     if batch.action_feature_size != model.action_feature_size:
         raise ValueError("model input action feature size does not match model")
+
+
+def _guidance_checkpoint_provenance(
+    loaded: LoadedTorchPolicyValueCheckpoint,
+    *,
+    checkpoint_artifact_id: str,
+    checkpoint_path: str | None,
+) -> SearchGuidanceCheckpointProvenance:
+    training_provenance = dict(loaded.training_data_provenance)
+    target_summary = _mapping(training_provenance.get("target_source_summary"))
+    policy_target_kind = _required_string(
+        target_summary.get("policy_target_kind"),
+        "training_data_provenance.target_source_summary.policy_target_kind",
+    )
+    policy_target_source = _required_string(
+        target_summary.get("policy_target_source"),
+        "training_data_provenance.target_source_summary.policy_target_source",
+    )
+    information_regime_counts = _required_count_mapping(
+        training_provenance.get("information_regime_counts"),
+        "training_data_provenance.information_regime_counts",
+        allow_empty=False,
+    )
+    source_information_regime_counts = _required_count_mapping(
+        training_provenance.get("source_information_regime_counts"),
+        "training_data_provenance.source_information_regime_counts",
+        allow_empty=False,
+    )
+    return SearchGuidanceCheckpointProvenance(
+        checkpoint_schema_id=TORCH_POLICY_VALUE_CHECKPOINT_SCHEMA_ID,
+        checkpoint_format_version=TORCH_POLICY_VALUE_CHECKPOINT_FORMAT_VERSION,
+        checkpoint_artifact_id=checkpoint_artifact_id,
+        checkpoint_path=checkpoint_path,
+        model_class=TORCH_POLICY_VALUE_MODEL_CLASS,
+        model_config=_model_provenance_config(loaded.model),
+        trainer_input_artifact_id=_required_string(
+            training_provenance.get("trainer_input_artifact_id"),
+            "training_data_provenance.trainer_input_artifact_id",
+        ),
+        trainer_input_sha256=_required_string(
+            training_provenance.get("trainer_input_sha256"),
+            "training_data_provenance.trainer_input_sha256",
+        ),
+        policy_target_kind=policy_target_kind,
+        policy_target_source=policy_target_source,
+        policy_target_kind_counts=_optional_count_mapping(
+            target_summary.get("policy_target_kind_counts"),
+        ),
+        policy_target_source_counts=_optional_count_mapping(
+            target_summary.get("policy_target_source_counts"),
+        ),
+        information_regime_counts=information_regime_counts,
+        source_information_regime_counts=source_information_regime_counts,
+        oracle_like_supervision=_oracle_like_supervision(
+            policy_target_kind,
+            policy_target_source,
+            information_regime_counts,
+            source_information_regime_counts,
+        ),
+        training_data_provenance=training_provenance,
+    )
+
+
+def _eligible_policy_probabilities(
+    logits: Tensor,
+    eligible_indices: Sequence[int],
+) -> list[float]:
+    eligible = torch.tensor(list(eligible_indices), dtype=torch.long)
+    eligible_probabilities = torch.softmax(logits[eligible], dim=0)
+    probabilities = [0.0 for _ in range(int(logits.shape[0]))]
+    for local_index, action_index in enumerate(eligible_indices):
+        probabilities[action_index] = float(eligible_probabilities[local_index])
+    return probabilities
+
+
+def _context_action_identity(
+    context: DecisionContext,
+    index: int,
+) -> dict[str, Any]:
+    if index < 0 or index >= len(context.tactical_legal_actions):
+        return {}
+    action = context.tactical_legal_actions[index]
+    if not isinstance(action, Mapping):
+        return {}
+    return _mapping(action.get("identity"))
+
+
+def _optional_count_mapping(value: Any) -> dict[str, int]:
+    if value is None:
+        return {}
+    return _required_count_mapping(
+        value, "policy target count mapping", allow_empty=True
+    )
+
+
+def _oracle_like_supervision(
+    policy_target_kind: str,
+    policy_target_source: str,
+    information_regime_counts: Mapping[str, int],
+    source_information_regime_counts: Mapping[str, int],
+) -> bool:
+    evidence = {
+        str(value).lower()
+        for value in {
+            policy_target_kind,
+            policy_target_source,
+            *information_regime_counts.keys(),
+            *source_information_regime_counts.keys(),
+        }
+    }
+    return any(
+        "oracle" in value or value == "full_simulator_state_oracle_like"
+        for value in evidence
+    )
 
 
 def _selected_eligible_index(logits: Tensor, eligible_indices: Sequence[int]) -> int:

@@ -176,6 +176,26 @@ def test_cli_parser_accepts_oracle_teacher_search_guidance_flags(tmp_path) -> No
     assert args.oracle_teacher_search_guidance_epochs == 1
 
 
+def test_cli_parser_accepts_pytorch_inference_flags(tmp_path) -> None:
+    checkpoint_path = tmp_path / "checkpoint.pt"
+    trainer_path = tmp_path / "trainer.jsonl"
+
+    args = build_parser().parse_args(
+        [
+            "--pytorch-search-guidance-infer",
+            str(checkpoint_path),
+            "--pytorch-search-guidance-infer-trainer-input",
+            str(trainer_path),
+            "--pytorch-search-guidance-infer-example-index",
+            "2",
+        ]
+    )
+
+    assert args.pytorch_search_guidance_infer == checkpoint_path
+    assert args.pytorch_search_guidance_infer_trainer_input == trainer_path
+    assert args.pytorch_search_guidance_infer_example_index == 2
+
+
 def test_cli_default_import_does_not_import_torch() -> None:
     repo_src = Path(__file__).resolve().parents[1] / "src"
     env = os.environ.copy()
@@ -193,6 +213,24 @@ def test_cli_default_import_does_not_import_torch() -> None:
     )
 
     assert result.stdout == "False\n"
+
+
+def test_cli_rejects_pytorch_inference_without_trainer_input(capsys) -> None:
+    assert (
+        main(
+            [
+                "--pytorch-search-guidance-infer",
+                "checkpoint.pt",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 2
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "requires --pytorch-search-guidance-infer-trainer-input" in captured.err
 
 
 class FakeLightSpeedSmokeAdapter:
