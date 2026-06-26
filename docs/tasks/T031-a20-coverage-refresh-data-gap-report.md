@@ -10,6 +10,14 @@ fixed A20 comparisons.
 This is the first post-M1 data task. It measures coverage; it must not train a
 model, collect a new controller benchmark, or claim A20 strength.
 
+The task is a distribution diagnosis, not a simple "more seeds" exercise. The
+report must distinguish source count from the incoming-state distribution
+induced by the current battle controller and stochastic non-combat driver. It
+must explain whether remaining gaps look like natural reachability limits,
+Act/Boss/later-act under-coverage, structural resampling needs, constructed or
+paired-state supplement needs, or a data contract that is already sufficient
+for the next teacher/checkpoint task.
+
 ## Current Main Baseline
 
 Current `main` has current-schema A20 coverage reporting, conservative
@@ -17,6 +25,12 @@ constructed supplements, structured outcomes, public-context propagation,
 fixed restored-battle evaluation, Oracle teacher reporting, and the M1
 model-guided Oracle-like sandbox. The accepted coverage and teacher evidence
 is still smoke-scale and mostly Act 1, so broad training remains closed.
+
+The current roadmap already records the important distribution caveat: more
+natural runs increase sample count, but they converge toward the distribution
+created by the current controllers. A weak controller can continue producing
+mostly early ordinary battles. T031 therefore reports what the broader sample
+reveals; it does not treat the minimum episode count as success by itself.
 
 ## Dependencies
 
@@ -47,10 +61,19 @@ committed.
 - Include natural battle-start counts, unique natural source counts,
   structural coverage, restore evidence, public-context availability,
   structured-outcome availability, and broad-training gate cells.
+- Diagnose the observed incoming-state distribution by act, room type,
+  encounter id, Boss/later-act reachability where available, and source-run
+  progression. Call out whether gaps are caused by low sample count, current
+  controller reachability, missing later-act/Boss states, missing metadata, or
+  artifact/restore problems.
 - Include constructed supplement counts if the constructed audit succeeds for
   the generated source pool.
 - Preserve natural, sampled optimization-weight, and constructed supplement
   distributions separately.
+- State which follow-up data mechanism the evidence supports: more disjoint
+  natural A20 runs, non-combat driver calibration, structural resampling,
+  conservative constructed supplements, paired counterfactual evaluation,
+  teacher/checkpoint refresh, or no immediate data expansion.
 - Add a dated `docs/experiment_log.md` entry summarizing the measurement and
   linking it to the ignored/external artifact identities reported in the PR.
 
@@ -88,9 +111,13 @@ committed.
 ## Acceptance Criteria
 
 - The coverage refresh uses a newly generated A20 source pool with at least 50
-  source episodes.
+  source episodes, but the report does not present that count alone as
+  distribution readiness.
 - The report separates natural unique-source coverage from sampled rows and
   constructed supplements.
+- The report explains whether more natural seeds alone appear sufficient for
+  the observed gaps, or whether stratified weighting, constructed supplements,
+  paired counterfactuals, or controller/driver changes are likely needed.
 - The report states per-ascension/per-act T009 broad-training gate results and
   the exact cells that remain closed.
 - Restore, public-context, and structured-outcome availability are reported.
@@ -134,6 +161,8 @@ standard local gates from `docs/tasks/README.md`.
 ## Legacy Reference
 
 Use current merged T021/T008/T009/T016/T018/T029 commands and reports only.
+The data-family discussion in `docs/battle_dataset_search_and_sl_plan.md` and
+the dated evidence in `docs/experiment_log.md` should guide interpretation.
 Historical files may be cited as past context, not current artifact contracts.
 
 ## PR Report
@@ -142,4 +171,5 @@ The PR must report the task ID, source manifest identity, exact local and WSL
 commands, generated artifact locations and identities, natural source and
 battle-start counts, constructed supplement counts, restore/public-context/
 structured-outcome availability, per-cell broad-training gate results, known
-limitations, and whether legacy reference material was consulted.
+limitations, distribution-gap diagnosis, recommended next data mechanism, and
+whether legacy reference material was consulted.

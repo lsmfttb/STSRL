@@ -571,11 +571,12 @@ controller improvement: the accepted T029 smoke comparison tied baseline
 Oracle search at five wins and three losses on eight restored A20 battles
 while adding 120 checkpoint model calls for the model-guided controller.
 
-The current `READY` task is T031: broader A20 coverage measurement before
-deeper model-guided search or normal-information belief search. The remaining
-post-M1 task batch is drafted in the task index as T032--T035. Use the task
-index to determine which exact task rows are `READY`, `BLOCKED`, or `DRAFT`;
-future rows must not start merely because they are mentioned here.
+The current `READY` task is T031: broader A20 coverage measurement and
+distribution-gap diagnosis before deeper model-guided search or
+normal-information belief search. The remaining post-M1 task batch is drafted
+in the task index as T032--T035. Use the task index to determine which exact
+task rows are `READY`, `BLOCKED`, or `DRAFT`; future rows must not start merely
+because they are mentioned here.
 
 The immediate external-fork follow-up is
 [`lsmfttb/sts_lightspeed#7`](https://github.com/lsmfttb/sts_lightspeed/issues/7):
@@ -585,7 +586,8 @@ operational fork maintenance and does not block STSRL repository work.
 
 The post-M1 task-batch recommendation is:
 
-1. Refresh broader A20 coverage and broad-training gate gaps first (T031).
+1. Refresh broader A20 coverage and diagnose distribution/gate gaps first
+   (T031).
 2. Regenerate teacher, trainer-input, checkpoint, and calibration evidence only
    after that accepted coverage contract exists (T032).
 3. Draft public-context/history/map/visible-Boss encoders before using those
