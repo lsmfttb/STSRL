@@ -11,6 +11,14 @@ import json
 from pathlib import Path
 from typing import Any
 
+from sts_combat_rl.sim.model_input import (
+    build_model_input_batch,
+    decision_context_from_model_input_batch,
+)
+from sts_combat_rl.sim.search_guidance_inference import (
+    SearchGuidanceInferenceResult,
+    format_search_guidance_inference_result,
+)
 from sts_combat_rl.sim.trainer_input import load_trainer_input_dataset_jsonl
 from sts_combat_rl.sim.trainer_input_preflight import (
     TrainerInputPreflightReport,
@@ -47,6 +55,20 @@ class PytorchSearchGuidanceTrainingWorkflowReport:
         )
 
 
+@dataclass(frozen=True)
+class PytorchSearchGuidanceInferenceWorkflowReport:
+    """One offline checkpoint inference smoke over a public decision context."""
+
+    checkpoint_path: Path
+    trainer_input_path: Path
+    example_index: int
+    result: SearchGuidanceInferenceResult
+
+    @property
+    def command_ok(self) -> bool:
+        return self.result.inference_ok
+
+
 def build_trainer_input_preflight_from_path(
     path: Path,
     *,
@@ -73,6 +95,57 @@ def format_trainer_input_preflight_from_path_report(
     """Format an offline trainer-input preflight report."""
 
     return format_trainer_input_preflight_report(report, detail_limit=detail_limit)
+
+
+def run_pytorch_search_guidance_inference_from_paths(
+    checkpoint_path: Path,
+    trainer_input_path: Path,
+    *,
+    example_index: int = 0,
+) -> PytorchSearchGuidanceInferenceWorkflowReport:
+    """Load a checkpoint and score one public trainer-input decision."""
+
+    with trainer_input_path.open("r", encoding="utf-8") as stream:
+        dataset = load_trainer_input_dataset_jsonl(stream)
+    batch = build_model_input_batch(dataset)
+    if batch.problems:
+        raise ValueError(
+            "model input batch has problems: "
+            + "; ".join(dict.fromkeys(batch.problems))
+        )
+    context = decision_context_from_model_input_batch(batch, example_index)
+
+    from sts_combat_rl.sim.torch_policy_value import TorchPolicyValueGuidanceScorer
+
+    scorer = TorchPolicyValueGuidanceScorer.from_checkpoint_path(checkpoint_path)
+    return PytorchSearchGuidanceInferenceWorkflowReport(
+        checkpoint_path=checkpoint_path,
+        trainer_input_path=trainer_input_path,
+        example_index=example_index,
+        result=scorer.score_decision_context(context),
+    )
+
+
+def format_pytorch_search_guidance_inference_workflow_report(
+    report: PytorchSearchGuidanceInferenceWorkflowReport,
+    *,
+    detail_limit: int = 8,
+) -> str:
+    """Format the offline checkpoint-inference workflow for stderr."""
+
+    return "\n\n".join(
+        [
+            "PyTorch search-guidance checkpoint inference workflow",
+            "scope: offline checkpoint compatibility only; no simulator or controller",
+            f"checkpoint path: {report.checkpoint_path}",
+            f"trainer input: {report.trainer_input_path}",
+            f"example index: {report.example_index}",
+            format_search_guidance_inference_result(
+                report.result,
+                detail_limit=detail_limit,
+            ),
+        ]
+    )
 
 
 def run_pytorch_search_guidance_training_from_path(

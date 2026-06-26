@@ -193,6 +193,33 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     input_group.add_argument(
+        "--pytorch-search-guidance-infer",
+        type=Path,
+        metavar="CHECKPOINT",
+        help=(
+            "Load a T009/T024 PyTorch policy/value checkpoint and score one "
+            "public decision context without running a simulator or choosing "
+            "an action."
+        ),
+    )
+    parser.add_argument(
+        "--pytorch-search-guidance-infer-trainer-input",
+        type=Path,
+        metavar="TRAINER_JSONL",
+        help=(
+            "Trainer-input JSONL artifact used to rebuild the public decision "
+            "context for --pytorch-search-guidance-infer."
+        ),
+    )
+    parser.add_argument(
+        "--pytorch-search-guidance-infer-example-index",
+        type=int,
+        default=None,
+        help=(
+            "Example index from --pytorch-search-guidance-infer-trainer-input to score."
+        ),
+    )
+    input_group.add_argument(
         "--pytorch-search-guidance-train",
         type=Path,
         metavar="TRAINER_JSONL",

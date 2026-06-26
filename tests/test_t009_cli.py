@@ -107,3 +107,29 @@ def test_cli_pytorch_search_guidance_train_writes_checkpoint(
     assert provenance["distribution_counts"] == {"natural_run": 2}
     assert provenance["source_kind_counts"] == {"natural_run": 2}
     assert provenance["stable_source_identity_summary"]["unique_source_count"] == 2
+
+    assert (
+        main(
+            [
+                "--pytorch-search-guidance-infer",
+                str(checkpoint_path),
+                "--pytorch-search-guidance-infer-trainer-input",
+                str(dataset_path),
+                "--pytorch-search-guidance-infer-example-index",
+                "0",
+                "--reward-detail-limit",
+                "1",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 0
+    )
+
+    inference = capsys.readouterr()
+    assert inference.out == ""
+    assert "Search-guidance checkpoint inference summary" in inference.err
+    assert "schema: search-guidance-inference-v1 v1" in inference.err
+    assert "policy target kind: behavior_chosen_action_one_hot" in inference.err
+    assert "oracle-like supervision: no" in inference.err
+    assert "action scores (limit 1):" in inference.err

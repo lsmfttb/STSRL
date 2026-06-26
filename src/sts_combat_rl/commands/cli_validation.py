@@ -63,6 +63,11 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
     if args.pytorch_batch_size <= 0:
         return "--pytorch-batch-size must be positive"
     if (
+        args.pytorch_search_guidance_infer_example_index is not None
+        and args.pytorch_search_guidance_infer_example_index < 0
+    ):
+        return "--pytorch-search-guidance-infer-example-index must be non-negative"
+    if (
         args.lightspeed_oracle_search_teacher is not None
         and args.oracle_teacher_output is None
     ):
@@ -128,4 +133,21 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
         and args.pytorch_checkpoint_output is None
     ):
         return "--pytorch-search-guidance-train requires --pytorch-checkpoint-output"
+    if (
+        args.pytorch_search_guidance_infer is not None
+        and args.pytorch_search_guidance_infer_trainer_input is None
+    ):
+        return (
+            "--pytorch-search-guidance-infer requires "
+            "--pytorch-search-guidance-infer-trainer-input"
+        )
+    if args.pytorch_search_guidance_infer is None and (
+        args.pytorch_search_guidance_infer_trainer_input is not None
+        or args.pytorch_search_guidance_infer_example_index is not None
+    ):
+        return (
+            "--pytorch-search-guidance-infer-trainer-input and "
+            "--pytorch-search-guidance-infer-example-index require "
+            "--pytorch-search-guidance-infer"
+        )
     return None
