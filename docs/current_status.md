@@ -154,8 +154,9 @@ The current published milestone is M1: model-guided Oracle search sandbox.
   trainer-input SHA-256 artifact provenance, controller and information-regime
   summaries, target-source summaries, distribution/source/sampling counts,
   stable source identity summaries, and semantic contract validation on load.
-  Raw policy/value diagnostics are reported separately; model-guided fixed
-  search evaluation is currently `not_run`.
+  Raw policy/value diagnostics are reported separately; the merged T029
+  model-guided fixed-cohort comparison remains Oracle-like smoke evidence, not
+  broad model-strength evidence.
 - Versioned A20 battle-start coverage reporting
   (`a20-battle-start-coverage-report-v1`) through
   `--lightspeed-a20-battle-start-coverage`. The report combines a migrated
@@ -258,12 +259,25 @@ The current published milestone is M1: model-guided Oracle search sandbox.
   leaf values. This is a controller smoke entry point only, not a fixed-cohort
   comparison, normal-information result, live-game validation, broad-training
   result, or controller-strength claim.
+- Versioned model-guided search fixed-cohort comparison reporting
+  (`model-guided-search-fixed-comparison-v1`) for the M1 Oracle-like sandbox.
+  The command loads one immutable fixed cohort, evaluates baseline
+  `OracleSearchController` and T028 `ModelGuidedOracleSearchController` on the
+  same restored starts, fails closed on source/order mismatches or sub-report
+  failures, and writes a JSONL report with per-battle comparison rows,
+  separate natural-weighted, encounter-macro, room-type-macro, and per-stratum
+  outcome aggregates, configured native-playout budget checks, observed
+  wall-clock/native-step/model-call telemetry, checkpoint provenance, and an
+  explicit `full_simulator_state_oracle_like` diagnostic evidence boundary.
+  This is fixed-cohort comparison plumbing and smoke evidence only, not
+  normal-information, live-game, broad-training, performance-improvement, or
+  controller-promotion evidence.
 - A training-readiness report that validates plumbing only. It does not train a
   model or demonstrate policy strength.
 
 ### Tests And Runtime Evidence
 
-- `545` tests pass on Windows Python as of this review. In an uninstalled
+- `548` tests pass on Windows Python as of this review. In an uninstalled
   checkout, set `PYTHONPATH=src` (or install the package) before invoking the
   CLI directly.
 - The two CommunicationMod fixture smokes pass.
@@ -500,6 +514,22 @@ The current published milestone is M1: model-guided Oracle search sandbox.
   `tests/test_task_docs.py` fails if individual task documents reintroduce
   mutable `Status:` lines, or if current contract docs recreate a line-level
   `Status:` field outside the canonical task index.
+- T029 validates the first fixed-cohort model-guided search comparison report.
+  The accepted local gate passed 548 Windows tests, compileall, ruff check,
+  ruff format check, both CommunicationMod fixture smokes, focused comparison
+  and CLI tests, and diff whitespace checks. The accepted WSL evidence
+  included the canonical pinned-source verifier, standard simulator smoke, and
+  battle-training-readiness gates. The WSL T029 comparison smoke used an
+  explicitly reported ignored A20 cohort/checkpoint/shim artifact set under
+  `artifacts/t029-wsl-smoke/`, matched source starts across controllers,
+  evaluated 8 restored battles, and reported baseline Oracle search and
+  model-guided Oracle-like search both at 5 wins and 3 losses. The configured
+  native playout budget was equal at 5 per decision; observed native simulator
+  steps were 5,178 for each controller; model calls were 0 for baseline and
+  120 for model-guided; restore failures, truncations, and errors were all 0.
+  This is `full_simulator_state_oracle_like` smoke-scale comparison evidence
+  only, not normal-information, live-game, broad-training, fixed-cohort
+  improvement, or controller-promotion evidence.
 
 ## Not Implemented On Main
 
@@ -508,7 +538,7 @@ unmerged legacy work:
 
 - interactive live-game or A20 performance validation for any controller;
 - broad neural training on a scale/distribution-approved A20 dataset;
-- fixed-cohort model-guided search comparison or performance improvement;
+- model-guided search performance improvement or controller promotion;
 - normal-information belief search.
 
 Do not use documentation or results from these areas as evidence that `main`
@@ -520,15 +550,12 @@ Executable task specifications live in [`tasks/`](tasks/README.md). The task
 index is the canonical source for task lifecycle state; this section is a
 snapshot of the current milestone and next work on the latest reviewed `main`.
 The current published milestone is M1: model-guided Oracle search sandbox. Its
-nearer target is to compare the current Oracle-like native search baseline
-against the first versioned model-guided Oracle-like search controller on the
-same fixed restored starts, with complete telemetry and no promotion claims.
-
-The next M1 work is the fixed-cohort comparison between baseline Oracle search
-and the merged T028 model-guided Oracle-like controller on identical restored
-starts with separate outcome aggregates and cost telemetry. The milestone then
-continues to synthesis and the next task batch. Use the task index to determine
-which exact task rows are `READY` or blocked.
+remaining target is maintainer synthesis: summarize the merged telemetry,
+checkpoint inference, calibration, controller, and fixed-comparison evidence;
+then publish the next task batch without promoting smoke-scale Oracle-like
+diagnostics to normal-information, live-game, broad-training, or
+controller-strength claims. Use the task index to determine which exact task
+rows are `READY` or blocked.
 
 The immediate external-fork follow-up is
 [`lsmfttb/sts_lightspeed#7`](https://github.com/lsmfttb/sts_lightspeed/issues/7):

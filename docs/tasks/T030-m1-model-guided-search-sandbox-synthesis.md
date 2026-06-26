@@ -11,11 +11,11 @@ normal-information belief-search prerequisites.
 
 ## Current Main Baseline
 
-After T029, `main` will have telemetry, checkpoint inference, teacher
-calibration, a model-guided Oracle search controller, and a fixed-cohort
-comparison report. The remaining gap is a maintainer-owned synthesis that
-turns these artifacts into the next batch of task boundaries without treating
-diagnostics as promotion evidence.
+Current `main` has telemetry, checkpoint inference, teacher calibration, a
+model-guided Oracle search controller, and a fixed-cohort comparison report.
+The remaining gap is a maintainer-owned synthesis that turns these artifacts
+into the next batch of task boundaries without treating diagnostics as
+promotion evidence.
 
 ## Dependencies
 

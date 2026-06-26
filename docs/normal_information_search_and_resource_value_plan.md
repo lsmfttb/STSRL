@@ -245,9 +245,10 @@ errors and fixed-cohort performance from sufficient A20 coverage.
 ### N2: Model-Guided Oracle Search Sandbox
 
 Progress: M1 task batch published as T025--T030. Search telemetry, checkpoint
-inference, teacher guidance calibration, and the first model-guided Oracle-like
-controller are available on `main`; fixed-cohort comparison is the next M1
-work. Task lifecycle state remains canonical in the task index.
+inference, teacher guidance calibration, the first model-guided Oracle-like
+controller, and the first fixed-cohort comparison report are available on
+`main`; synthesis is the next M1 work. Task lifecycle state remains canonical
+in the task index.
 
 Use the Oracle regime to validate priors, leaf values, uncertainty, and search
 instrumentation. Exit when model guidance improves the fixed Oracle curve at
@@ -276,8 +277,8 @@ Retain only auxiliary targets that improve normal-information evaluation.
 ## Immediate Design Work
 
 1. Continue the published M1 task batch with
-   [`T029`](tasks/T029-fixed-cohort-model-guided-search-comparison.md), without
-   treating hidden-state teacher data or smoke-scale controller runs as
+   [`T030`](tasks/T030-m1-model-guided-search-sandbox-synthesis.md), without
+   treating hidden-state teacher data or smoke-scale controller comparisons as
    normal-information, broad-training, or promotion evidence.
 2. Build structured history, map, and visible-Boss encoders on the sanitized
    public-context artifacts now available on `main`.

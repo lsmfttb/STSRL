@@ -42,8 +42,8 @@ the current milestone, but they do not override this table.
 | T026 | DONE | [Guidance checkpoint inference contract](T026-guidance-checkpoint-inference-contract.md) | T009, T011, T016, T018, T024 | checkpoint scorer contract for search guidance |
 | T027 | DONE | [Teacher guidance calibration report](T027-teacher-guidance-calibration-report.md) | T026 | offline checkpoint-vs-teacher calibration |
 | T028 | DONE | [Model-guided Oracle search controller](T028-model-guided-oracle-search-controller.md) | T025, T026, T027 | first versioned model-guided Oracle-like search controller |
-| T029 | READY | [Fixed-cohort model-guided search comparison](T029-fixed-cohort-model-guided-search-comparison.md) | T025, T028 | equal-source/equal-budget fixed-cohort comparison |
-| T030 | BLOCKED | [M1 model-guided search sandbox synthesis](T030-m1-model-guided-search-sandbox-synthesis.md) | T027, T029 | milestone synthesis and next task batch |
+| T029 | DONE | [Fixed-cohort model-guided search comparison](T029-fixed-cohort-model-guided-search-comparison.md) | T025, T028 | equal-source/equal-budget fixed-cohort comparison |
+| T030 | READY | [M1 model-guided search sandbox synthesis](T030-m1-model-guided-search-sandbox-synthesis.md) | T027, T029 | milestone synthesis and next task batch |
 
 Use the table, not per-task files or roadmap prose, when deciding whether a
 task may receive a branch. Only `READY` rows should receive a new branch. After
@@ -80,11 +80,13 @@ latest `main`.
 
 ## M1: Model-Guided Oracle Search Sandbox
 
-M1's farther target is a reviewable fixed-cohort comparison between the current
-Oracle-like native search baseline and a first model-guided Oracle-like search
-controller using T024 teacher-targeted checkpoint provenance. M1 is diagnostic
-search-engineering work only; it must not claim normal-information, live-game,
-broad-training, or promoted controller-strength evidence.
+M1's comparison target is now available: a reviewable fixed-cohort comparison
+between the current Oracle-like native search baseline and the first
+model-guided Oracle-like search controller using T024 teacher-targeted
+checkpoint provenance. The remaining M1 work is synthesis and next-task
+publication. M1 is diagnostic search-engineering work only; it must not claim
+normal-information, live-game, broad-training, or promoted controller-strength
+evidence.
 
 Dependency chain:
 
@@ -118,6 +120,10 @@ The completed foundation backlog provides:
   (`model_guided_oracle_search_v1`) that combines native root statistics with
   public checkpoint policy probabilities at root selection while preserving
   separate native-search and model-guidance telemetry.
+- first versioned model-guided search fixed-cohort comparison report
+  (`model-guided-search-fixed-comparison-v1`) that compares baseline Oracle
+  search and model-guided Oracle-like search on identical restored starts with
+  separate outcome aggregates, budget checks, and observed cost telemetry.
 
 Likely task families after M1 are deeper model-guided search, broader A20
 coverage/data collection, public-history/map encoders, and normal-information

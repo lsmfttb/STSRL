@@ -10,10 +10,10 @@ keeping smoke-scale and Oracle-like limitations explicit.
 
 ## Current Main Baseline
 
-Current `main` has fixed structural cohorts, Oracle search, teacher-targeted
-checkpoint plumbing, T025 telemetry, and the T028
-`model_guided_oracle_search_v1` controller. It does not yet have a report that
-compares baseline and model-guided search on the same restored starts with
+At publication time, `main` had fixed structural cohorts, Oracle search,
+teacher-targeted checkpoint plumbing, T025 telemetry, and the T028
+`model_guided_oracle_search_v1` controller. It did not yet have a report that
+compared baseline and model-guided search on the same restored starts with
 shared telemetry.
 
 ## Dependencies

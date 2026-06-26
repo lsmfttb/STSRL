@@ -339,10 +339,11 @@ budgets and reports teacher-label stability. T024 completed the bridge from
 teacher artifacts to explicit trainer-input v6 teacher targets and diagnostic
 checkpoint provenance. T025 completed the current search telemetry baseline,
 T026 completed the checkpoint inference/scoring contract, T027 completed
-offline checkpoint-vs-teacher calibration reporting, and T028 completed the
-first model-guided Oracle-like root-selection controller. The remaining M1
-tasks move to fixed-cohort comparison and synthesis. Meaningful held-out or
-fixed-cohort improvement remains pending those tasks and broader coverage.
+offline checkpoint-vs-teacher calibration reporting, T028 completed the first
+model-guided Oracle-like root-selection controller, and T029 completed the
+first equal-source/equal-budget fixed-cohort comparison. The remaining M1 work
+is synthesis and next-task publication. Meaningful held-out improvement or
+controller promotion remains pending broader coverage and later search work.
 
 Exit gate: a search change improves fixed evaluation at equal simulation or
 wall-clock budget without natural-weighted regression.
