@@ -45,6 +45,13 @@ before any live-game claim.
 Real `sts_lightspeed` gates run through WSL. Game files, simulator binaries,
 save files, and large artifacts do not belong in this repository.
 
+Large WSL simulator workloads are expected to be explicitly sharded and run
+with parallel workers. A single-worker run is a smoke/debug path, not the
+default execution mode for source-generation, restored-evaluation, coverage, or
+training-scale evidence. Reports for such workloads must preserve enough
+runtime provenance to reproduce the parallel execution plan, including shard
+identity, worker count, seed/source-run ranges, and wall-clock cost.
+
 ## Real Game Runtime Boundary
 
 Training and evaluation may run entirely in `sts_lightspeed`, but a controller

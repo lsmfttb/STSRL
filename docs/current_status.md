@@ -703,3 +703,12 @@ the active `stsrl/main` fork integration branch pinned in
 and verified by `scripts/verify_lightspeed_source.sh`. Runtime gates use
 `/home/lsmft/stsrl-spikes/sts_lightspeed/build-py` rebuilt from that pinned
 source.
+
+Scale matters operationally. T037 exposed that a single-worker WSL
+source-generation run is too slow and leaves host resources underused for
+1,000-run evidence. Future large WSL `sts_lightspeed` source-generation,
+coverage, restored-evaluation, or training-scale runs should be sharded and
+executed with explicit parallel workers by default, with shard identity,
+worker count, seed/source-run ranges, and wall-clock cost reported in the PR.
+Single-worker WSL execution is reserved for smoke tests, debugging, or a
+documented resource constraint.

@@ -106,6 +106,13 @@ Every task document must define:
 
 A task that cannot be objectively accepted is not ready.
 
+If a task requires large WSL `sts_lightspeed` source generation, restored
+evaluation, coverage, or training-scale simulation, its specification must
+include an explicit sharding and parallel-worker plan. Single-worker execution
+may be specified only for smoke tests, local debugging, or a documented
+resource limit. The PR report must include shard/worker counts and wall-clock
+cost so reviewers can distinguish scale evidence from a slow smoke run.
+
 ## Task Artifact Boundaries
 
 Tasks may depend on merged contracts from prerequisite tasks, but not on
