@@ -12,6 +12,13 @@ documents before making architectural changes:
 Historical files under `docs/history/` explain past decisions but are not
 current contracts.
 
+## Shell And GitHub CLI
+
+- When composing non-trivial PowerShell, WSL, git, or GitHub CLI commands, use
+  the local `stsrl-powershell` Codex skill (`$stsrl-powershell`) and its command
+  templates. This is required for multi-line commands, nested quoting, `gh pr`
+  review/merge flows, artifact verification, and worktree/branch cleanup.
+
 ## Scope And Simulator Boundary
 
 - The trainable scope is currently battle decisions. Non-combat decisions stay
