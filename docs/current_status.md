@@ -18,12 +18,12 @@ validated Oracle-like search plumbing but did not demonstrate controller
 improvement. The first post-M1 coverage refresh, T031, is also complete and
 showed that the current A20 source distribution is still Act-1-only. T036 is
 complete and added search-controlled reachability tooling, but its accepted
-10-run A20 smoke arms were also Act 1 only; T032 therefore remains blocked
-pending an accepted later-act/Boss source-coverage contract or an explicitly
-narrow teacher/checkpoint refresh boundary. T037 is complete and recovered the
-historical Boss/Act2 source signal at 1,000 terminal runs. T039 is the current
-`READY` task: turn that evidence into the explicit source-coverage contract
-required before T032 can consume artifacts.
+10-run A20 smoke arms were also Act 1 only. T037 is complete and recovered the
+historical Boss/Act2 source signal at 1,000 terminal runs. T039 is complete and
+records the accepted T037 source-coverage contract in
+`docs/a20_later_act_boss_source_coverage_contract.md`. T032 is the current
+`READY` task: a narrow teacher/checkpoint diagnostic refresh over the accepted
+T039 contract, not a broad A20 training refresh.
 
 ## Implemented On Main
 
@@ -596,16 +596,16 @@ controller improvement: the accepted T029 smoke comparison tied baseline
 Oracle search at five wins and three losses on eight restored A20 battles
 while adding 120 checkpoint model calls for the model-guided controller.
 
-T031 and T036 are complete. The original remaining post-M1 task batch is
-drafted in the task index as T032--T035, but T032 is not automatically ready:
-T031 found healthy artifacts and restore evidence but no Boss or later-act
-starts. T036 rebuilt the search-controlled collection path on current schemas
-while preserving the battle/non-combat split, but its accepted 10-run smoke arms
-also reached no Boss or later-act starts. T037 is now the executable scale-up
-task; T037 recovered the historical Boss/Act2 signal on current schemas, so
-T038 is cancelled and T039 is the executable source-coverage contract task. Use
-the task index to determine which exact task rows are `READY`, `BLOCKED`, or
-`DRAFT`; future rows must not start merely because they are mentioned here.
+T031, T036, T037, and T039 are complete. T031 found healthy artifacts and
+restore evidence but no Boss or later-act starts. T036 rebuilt the
+search-controlled collection path on current schemas while preserving the
+battle/non-combat split, but its accepted 10-run smoke arms also reached no
+Boss or later-act starts. T037 recovered the historical Boss/Act2 signal on
+current schemas, and T039 converted that evidence into the durable source
+coverage contract. T032 has therefore been deliberately narrowed into the next
+diagnostic refresh task over the T039 contract. Use the task index to determine
+which exact task rows are `READY`, `BLOCKED`, or `DRAFT`; future rows must not
+start merely because they are mentioned here.
 
 The immediate external-fork follow-up is
 [`lsmfttb/sts_lightspeed#7`](https://github.com/lsmfttb/sts_lightspeed/issues/7):
@@ -615,14 +615,13 @@ operational fork maintenance and does not block STSRL repository work.
 
 The post-M1 task-batch recommendation is:
 
-1. Keep broad teacher/checkpoint refresh work blocked until a later-act/Boss
-   source-coverage contract exists, or deliberately revise T032 into a narrow
-   Act-1 diagnostic refresh.
-2. Run T039 to convert the accepted T037 evidence into an explicit
-   source-coverage contract.
-3. Regenerate teacher, trainer-input, checkpoint, and calibration evidence only
-   after an accepted coverage contract or explicitly narrow diagnostic boundary
-   exists (T032).
+1. Keep broad teacher/checkpoint refresh work blocked; the T039 contract is a
+   narrow Boss/Act2 supplement and does not satisfy broad A20 readiness.
+2. Run T032 as the next narrow diagnostic refresh over the T039 contract: all
+   accepted Act 1 Boss starts, all accepted Act 2 starts, and a deterministic
+   Act 1 non-Boss background set.
+3. Preserve T009 broad-training gate failure separately from any named
+   `narrow_curriculum` checkpoint/trainer diagnostic override.
 4. Draft public-context/history/map/visible-Boss encoders before using those
    fields as ordinary model inputs (T033).
 5. Keep public-consistent hidden-future sampling blocked on an explicit native

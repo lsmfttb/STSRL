@@ -9,11 +9,12 @@ The published foundation, maintenance, and first research-measurement backlog
 is complete through the M1 synthesis and T031 coverage refresh, except for
 cancelled T007, whose scope was superseded by T014--T016. T031 found the
 current A20 source distribution still Act-1-only; T036 added search-controlled
-reachability tooling but its accepted smoke arms were also Act 1 only. Broad
-teacher/checkpoint refresh work remains blocked on a later-act/Boss
-source-coverage contract or an explicitly narrow diagnostic boundary. New
-implementation work should start only from rows marked `READY` in the task
-index; the current executable source-coverage task is T039.
+reachability tooling but its accepted smoke arms were also Act 1 only. T037
+recovered a narrow Boss/Act2 source signal, and T039 records the accepted
+source-coverage contract. Broad teacher/checkpoint refresh work remains
+blocked; the current executable task is the narrow T032 diagnostic refresh over
+the T039 contract. New implementation work should start only from rows marked
+`READY` in the task index.
 
 ## Goals
 
@@ -323,10 +324,11 @@ healthy, but the distribution still produced only Act 1 starts with no Boss or
 later-act starts. T036 added the current-schema search-controlled complete-run
 collection path and reachability report. Its accepted 10-run smoke comparison
 covered default, 20-simulation no-potion Oracle-like search, and
-20-simulation potion-enabled Oracle-like search arms; all stayed in Act 1, so
-the later-act/Boss source gap remains open. T037 is the scaled reproduction
-task; it recovered the Boss/Act2 signal at the historical 1,000-run comparison
-point. T039 is the contract follow-up before T032 can consume artifacts.
+20-simulation potion-enabled Oracle-like search arms; all stayed in Act 1. T037
+then recovered the Boss/Act2 signal at the historical 1,000-run comparison
+point. T039 records the accepted source contract. T032 is now deliberately
+narrowed to a diagnostic teacher/checkpoint refresh over that contract rather
+than a broad A20 refresh.
 
 Work:
 
@@ -363,9 +365,10 @@ and diagnosed a distribution gap rather than unlocking broader
 teacher/checkpoint work: the current run distribution still did not reach Boss
 or later-act battle starts. T036 completed the first current-schema
 search-controlled reachability probe; the smoke evidence validated tooling but
-did not recover Boss or later-act starts. Meaningful held-out improvement or
-controller promotion remains pending a T039 source-coverage contract, broader
-coverage, and later search work.
+did not recover Boss or later-act starts. T037/T039 recovered and contracted a
+narrow Boss/Act2 supplement. Meaningful held-out improvement or controller
+promotion remains pending the T032 narrow diagnostic refresh, broader coverage,
+and later search work.
 
 Exit gate: a search change improves fixed evaluation at equal simulation or
 wall-clock budget without natural-weighted regression.

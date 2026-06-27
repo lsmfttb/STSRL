@@ -254,9 +254,10 @@ distribution still Act-1-only. Task lifecycle state remains canonical in the
 task index. T036 completed the immediate reachability probe before changing
 direction: it added current-schema search-controlled complete-run collection,
 but the accepted 10-run A20 smoke arms did not recover the historical Boss/Act2
-source path. T037 is the scaled reproduction task before a driver/source-drift
-audit or broad teacher/checkpoint refresh decision; it recovered the historical
-Boss/Act2 source signal, so T039 is the next contract task.
+source path. T037 recovered the historical Boss/Act2 source signal, and T039
+records the accepted narrow source-coverage contract. T032 is now the next
+narrow teacher/checkpoint diagnostic refresh over that contract; broad A20
+training remains blocked.
 
 Use the Oracle regime to validate priors, leaf values, uncertainty, and search
 instrumentation. Exit when model guidance improves the fixed Oracle curve at
@@ -284,11 +285,10 @@ Retain only auxiliary targets that improve normal-information evaluation.
 
 ## Immediate Design Work
 
-1. Keep broad teacher/checkpoint refresh evidence blocked until later-act/Boss
-   source coverage exists, or explicitly narrow T032 to an Act-1 diagnostic
-   refresh.
-2. Run T039 to define the artifact/source-coverage contract that T032 may
-   consume.
+1. Keep broad teacher/checkpoint refresh evidence blocked; the T039 contract is
+   a narrow Boss/Act2 supplement, not sufficient A20 coverage.
+2. Run the narrowed T032 diagnostic refresh over the accepted T039 source
+   contract before deeper model-guided Oracle-like search work.
 3. Build structured history, map, and visible-Boss encoders on the sanitized
    public-context artifacts now available on `main`.
 4. Establish an honest public policy/vector-value baseline from sufficient A20
