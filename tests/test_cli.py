@@ -144,6 +144,8 @@ def test_cli_parser_accepts_oracle_teacher_scaleup_flags(tmp_path) -> None:
     assert args.oracle_teacher_scaleup_output_dir == output_dir
     assert args.oracle_teacher_scaleup_budgets == [20, 50]
     assert args.oracle_teacher_scaleup_source_limit == 8
+    assert args.oracle_teacher_scaleup_source_selection == "seeded_uniform"
+    assert args.oracle_teacher_scaleup_background_count == 64
     assert args.oracle_teacher_scaleup_seed == 3
     assert args.oracle_teacher_scaleup_coverage_report == coverage_path
     assert args.oracle_teacher_scaleup_root_selection == "most_visits"
@@ -1092,9 +1094,156 @@ def test_cli_oracle_teacher_scaleup_routes_to_lightspeed_command(
     assert calls["budgets"] == [20, 50]
     assert calls["source_limit"] == 4
     assert calls["selection_seed"] == 9
+    assert calls["source_selection_mode"] == "seeded_uniform"
+    assert calls["background_source_count"] == 64
     assert calls["coverage_report_path"] == coverage_path
     assert calls["root_selection_rule"] == "most_visits"
     assert "A20 Oracle teacher scale-up" in captured.err
+
+
+def test_cli_oracle_teacher_scaleup_routes_t032_selection(
+    monkeypatch,
+    tmp_path,
+    capsys,
+) -> None:
+    calls: dict[str, object] = {}
+
+    class FakeScaleupManifest:
+        command_passed = True
+
+    def fake_scaleup(**kwargs):
+        calls.update(kwargs)
+        return FakeScaleupManifest()
+
+    monkeypatch.setattr(
+        "sts_combat_rl.commands.lightspeed_cli.LightSpeedAdapter",
+        FakeLightSpeedSmokeAdapter,
+    )
+    monkeypatch.setattr(
+        "sts_combat_rl.commands.lightspeed_cli.run_oracle_teacher_scaleup_from_paths",
+        fake_scaleup,
+    )
+    monkeypatch.setattr(
+        "sts_combat_rl.commands.lightspeed_cli.format_oracle_teacher_scaleup_command",
+        lambda manifest: "A20 Oracle teacher scale-up\ncommand passed: yes",
+    )
+
+    assert (
+        main(
+            [
+                "--lightspeed-a20-oracle-teacher-scaleup",
+                str(tmp_path / "pool.jsonl"),
+                "--oracle-teacher-scaleup-output-dir",
+                str(tmp_path / "scaleup"),
+                "--oracle-teacher-scaleup-source-selection",
+                "t032_t039_narrow",
+                "--oracle-teacher-scaleup-background-count",
+                "64",
+                "--oracle-teacher-scaleup-seed",
+                "32039",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 0
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert calls["source_limit"] is None
+    assert calls["selection_seed"] == 32039
+    assert calls["source_selection_mode"] == "t032_t039_narrow"
+    assert calls["background_source_count"] == 64
+
+
+def test_cli_oracle_teacher_scaleup_rejects_t032_source_limit(capsys) -> None:
+    assert (
+        main(
+            [
+                "--lightspeed-a20-oracle-teacher-scaleup",
+                "pool.jsonl",
+                "--oracle-teacher-scaleup-output-dir",
+                "scaleup",
+                "--oracle-teacher-scaleup-source-selection",
+                "t032_t039_narrow",
+                "--oracle-teacher-scaleup-source-limit",
+                "8",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 2
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "not compatible" in captured.err
+
+
+def test_cli_oracle_teacher_scaleup_rejects_nonpositive_background_count(
+    capsys,
+) -> None:
+    assert (
+        main(
+            [
+                "--lightspeed-a20-oracle-teacher-scaleup",
+                "pool.jsonl",
+                "--oracle-teacher-scaleup-output-dir",
+                "scaleup",
+                "--oracle-teacher-scaleup-background-count",
+                "0",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 2
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "--oracle-teacher-scaleup-background-count must be positive" in captured.err
+
+
+def test_cli_oracle_teacher_scaleup_rejects_t032_selection_without_scaleup(
+    capsys,
+) -> None:
+    assert (
+        main(
+            [
+                "--oracle-teacher-scaleup-source-selection",
+                "t032_t039_narrow",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 2
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "--oracle-teacher-scaleup-source-selection" in captured.err
+    assert "--lightspeed-a20-oracle-teacher-scaleup" in captured.err
+
+
+def test_cli_oracle_teacher_scaleup_rejects_background_count_without_scaleup(
+    capsys,
+) -> None:
+    assert (
+        main(
+            [
+                "--oracle-teacher-scaleup-background-count",
+                "32",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 2
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "--oracle-teacher-scaleup-background-count" in captured.err
+    assert "--lightspeed-a20-oracle-teacher-scaleup" in captured.err
 
 
 def test_cli_oracle_teacher_scaleup_requires_output_dir(capsys) -> None:

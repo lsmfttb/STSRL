@@ -24,7 +24,11 @@ from sts_combat_rl.sim.oracle_teacher import (
 )
 from sts_combat_rl.sim.oracle_teacher_report import load_a20_coverage_report_json
 from sts_combat_rl.sim.oracle_teacher_scaleup import (
+    ORACLE_TEACHER_SCALEUP_SOURCE_SELECTION_SEEDED_UNIFORM,
+    ORACLE_TEACHER_SCALEUP_SOURCE_SELECTION_T032_T039_NARROW,
+    T032_T039_BACKGROUND_SOURCE_COUNT,
     OracleTeacherScaleupManifest,
+    build_t032_t039_narrow_source_selection_plan,
     build_oracle_teacher_scaleup_manifest,
     build_oracle_teacher_source_selection_plan,
     dump_oracle_teacher_scaleup_manifest_json,
@@ -45,6 +49,8 @@ def run_oracle_teacher_scaleup_from_paths(
     budgets: Sequence[int],
     source_limit: int | None,
     selection_seed: int,
+    source_selection_mode: str = ORACLE_TEACHER_SCALEUP_SOURCE_SELECTION_SEEDED_UNIFORM,
+    background_source_count: int = T032_T039_BACKGROUND_SOURCE_COUNT,
     coverage_report_path: Path | None = None,
     root_selection_rule: str = "highest_mean",
     action_space: ActionSpaceConfig | None = None,
@@ -72,11 +78,30 @@ def run_oracle_teacher_scaleup_from_paths(
         if coverage_problems:
             raise ValueError("; ".join(coverage_problems))
 
-    source_selection = build_oracle_teacher_source_selection_plan(
-        pool,
-        selection_seed=selection_seed,
-        source_limit=source_limit,
-    )
+    if source_selection_mode == ORACLE_TEACHER_SCALEUP_SOURCE_SELECTION_SEEDED_UNIFORM:
+        source_selection = build_oracle_teacher_source_selection_plan(
+            pool,
+            selection_seed=selection_seed,
+            source_limit=source_limit,
+        )
+    elif (
+        source_selection_mode
+        == ORACLE_TEACHER_SCALEUP_SOURCE_SELECTION_T032_T039_NARROW
+    ):
+        if source_limit is not None:
+            raise ValueError(
+                "--oracle-teacher-scaleup-source-limit is not compatible with "
+                "T032/T039 narrow source selection"
+            )
+        source_selection = build_t032_t039_narrow_source_selection_plan(
+            pool,
+            selection_seed=selection_seed,
+            background_source_count=background_source_count,
+        )
+    else:
+        raise ValueError(
+            f"unsupported Oracle teacher source-selection mode {source_selection_mode!r}"
+        )
     if source_selection.problems:
         raise ValueError(
             "invalid Oracle teacher scale-up source selection: "

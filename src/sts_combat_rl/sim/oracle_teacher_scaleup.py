@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import random
 from typing import Any, TextIO
@@ -25,6 +25,16 @@ from sts_combat_rl.sim.oracle_teacher_report import (
 
 ORACLE_TEACHER_SCALEUP_MANIFEST_SCHEMA_ID = "oracle-teacher-scaleup-manifest-v1"
 ORACLE_TEACHER_SCALEUP_MANIFEST_FORMAT_VERSION = 1
+ORACLE_TEACHER_SCALEUP_SOURCE_SELECTION_SEEDED_UNIFORM = "seeded_uniform"
+ORACLE_TEACHER_SCALEUP_SOURCE_SELECTION_T032_T039_NARROW = "t032_t039_narrow"
+ORACLE_TEACHER_SCALEUP_SOURCE_SELECTION_MODES = (
+    ORACLE_TEACHER_SCALEUP_SOURCE_SELECTION_SEEDED_UNIFORM,
+    ORACLE_TEACHER_SCALEUP_SOURCE_SELECTION_T032_T039_NARROW,
+)
+T032_T039_NARROW_SELECTION_CONTRACT_ID = "t032-t039-narrow-source-selection-v1"
+T032_T039_ACT1_BOSS_SOURCE_COUNT = 31
+T032_T039_ACT2_SOURCE_COUNT = 3
+T032_T039_BACKGROUND_SOURCE_COUNT = 64
 SCALEUP_STRUCTURAL_FIELDS = (
     "ascension",
     "act",
@@ -47,6 +57,7 @@ class OracleTeacherSourceSelectionPlan:
     selected_record_indices: tuple[int, ...]
     selection_method: str
     structural_coverage: dict[str, Any]
+    selection_metadata: dict[str, Any] = field(default_factory=dict)
     problems: tuple[str, ...] = ()
 
     @property
@@ -75,6 +86,7 @@ class OracleTeacherSourceSelectionPlan:
             ],
             "selection_method": self.selection_method,
             "structural_coverage": _json_safe_mapping(self.structural_coverage),
+            "selection_metadata": _json_safe_mapping(self.selection_metadata),
             "problems": list(self.problems),
         }
 
@@ -176,22 +188,7 @@ def build_oracle_teacher_source_selection_plan(
         ):
             raise ValueError("oracle teacher scale-up source limit must be positive")
 
-    descriptors: list[tuple[dict[str, Any], BattleStartCheckpointRecord]] = []
-    problems: list[str] = []
-    checkpoint_counts: Counter[str] = Counter()
-    for record in pool.records:
-        descriptor, record_problems = _record_source_descriptor(record)
-        descriptors.append((descriptor, record))
-        checkpoint = descriptor.get("source_checkpoint_id")
-        if isinstance(checkpoint, str) and checkpoint:
-            checkpoint_counts[checkpoint] += 1
-        problems.extend(record_problems)
-
-    for checkpoint, count in sorted(checkpoint_counts.items()):
-        if count > 1:
-            problems.append(
-                f"source pool contains duplicate source checkpoint id {checkpoint!r}"
-            )
+    descriptors, problems = _source_descriptors_and_problems(pool)
 
     ordered = sorted(descriptors, key=lambda item: _source_sort_key(item[0]))
     if source_limit is None or source_limit >= len(ordered):
@@ -220,6 +217,134 @@ def build_oracle_teacher_source_selection_plan(
         selected_record_indices=selected_record_indices,
         selection_method=method,
         structural_coverage=_source_structural_coverage(selected_descriptors),
+        problems=tuple(_dedupe(problems)),
+    )
+
+
+def build_t032_t039_narrow_source_selection_plan(
+    pool: NaturalBattleStartPool,
+    *,
+    selection_seed: int,
+    background_source_count: int = T032_T039_BACKGROUND_SOURCE_COUNT,
+) -> OracleTeacherSourceSelectionPlan:
+    """Select the narrow T032 set from the T039 source-coverage contract."""
+
+    if isinstance(selection_seed, bool) or not isinstance(selection_seed, int):
+        raise ValueError("T032 source-selection seed must be an integer")
+    if selection_seed < 0:
+        raise ValueError("T032 source-selection seed must be non-negative")
+    if (
+        isinstance(background_source_count, bool)
+        or not isinstance(background_source_count, int)
+        or background_source_count <= 0
+    ):
+        raise ValueError("T032 background source count must be positive")
+
+    descriptors, problems = _source_descriptors_and_problems(pool)
+    ordered = sorted(descriptors, key=lambda item: _source_sort_key(item[0]))
+    act1_boss = [
+        _selection_group(item, "act1_boss")
+        for item in ordered
+        if _is_act1_boss_source(item[0])
+    ]
+    act2 = [
+        _selection_group(item, "act2") for item in ordered if item[0].get("act") == 2
+    ]
+    background_candidates = [
+        item for item in ordered if _is_act1_non_boss_source(item[0])
+    ]
+
+    if len(act1_boss) != T032_T039_ACT1_BOSS_SOURCE_COUNT:
+        problems.append(
+            "T032 selection requires exactly "
+            f"{T032_T039_ACT1_BOSS_SOURCE_COUNT} Act 1 Boss sources from the "
+            f"T039 accepted contract, but {len(act1_boss)} are available"
+        )
+    if len(act2) != T032_T039_ACT2_SOURCE_COUNT:
+        problems.append(
+            "T032 selection requires exactly "
+            f"{T032_T039_ACT2_SOURCE_COUNT} Act 2 sources from the T039 "
+            f"accepted contract, but {len(act2)} are available"
+        )
+    if len(background_candidates) < background_source_count:
+        problems.append(
+            "T032 selection requires "
+            f"{background_source_count} Act 1 non-Boss background sources, "
+            f"but only {len(background_candidates)} are available"
+        )
+        selected_background: list[
+            tuple[dict[str, Any], BattleStartCheckpointRecord]
+        ] = []
+        background_method = "not_enough_act1_non_boss_background_sources"
+    elif len(background_candidates) == background_source_count:
+        selected_background = [
+            _selection_group(item, "act1_non_boss_background")
+            for item in background_candidates
+        ]
+        background_method = "all_available_act1_non_boss_background_sources"
+    else:
+        generator = random.Random(selection_seed)
+        selected_indices = sorted(
+            generator.sample(
+                range(len(background_candidates)),
+                background_source_count,
+            )
+        )
+        selected_background = [
+            _selection_group(background_candidates[index], "act1_non_boss_background")
+            for index in selected_indices
+        ]
+        background_method = "seeded_uniform_act1_non_boss_background_sample"
+
+    selected = [*act1_boss, *act2, *selected_background]
+    selected_descriptors = tuple(_json_safe_mapping(source) for source, _ in selected)
+    selected_record_indices = tuple(record.record_index for _, record in selected)
+    if not selected:
+        problems.append("source pool contains no T032-selectable battle-start records")
+
+    return OracleTeacherSourceSelectionPlan(
+        selection_seed=selection_seed,
+        source_limit=None,
+        input_source_count=len(pool.records),
+        selected_sources=selected_descriptors,
+        selected_record_indices=selected_record_indices,
+        selection_method=ORACLE_TEACHER_SCALEUP_SOURCE_SELECTION_T032_T039_NARROW,
+        structural_coverage=_source_structural_coverage(selected_descriptors),
+        selection_metadata={
+            "selection_contract_id": T032_T039_NARROW_SELECTION_CONTRACT_ID,
+            "rare_source_rule": "all Act 1 Boss starts and all Act 2 starts",
+            "background_source_rule": (
+                "seeded uniform sample from Act 1 non-Boss starts after "
+                "sorting by rule-defined structural metadata"
+            ),
+            "ordering": [
+                "Act 1 Boss sources sorted by structural metadata",
+                "Act 2 sources sorted by structural metadata",
+                "selected Act 1 non-Boss background sources sorted by structural metadata",
+            ],
+            "background_source_count": background_source_count,
+            "background_selection_method": background_method,
+            "groups": {
+                "act1_boss": {
+                    "available": len(act1_boss),
+                    "selected": len(act1_boss),
+                    "required": T032_T039_ACT1_BOSS_SOURCE_COUNT,
+                    "required_all_available": True,
+                },
+                "act2": {
+                    "available": len(act2),
+                    "selected": len(act2),
+                    "required": T032_T039_ACT2_SOURCE_COUNT,
+                    "required_all_available": True,
+                },
+                "act1_non_boss_background": {
+                    "available": len(background_candidates),
+                    "selected": len(selected_background),
+                    "required": background_source_count,
+                    "selection_seed": selection_seed,
+                },
+            },
+        },
         problems=tuple(_dedupe(problems)),
     )
 
@@ -367,6 +492,30 @@ def format_oracle_teacher_scaleup_manifest(
         "  source runs",
         selection.structural_coverage["source_runs"],
     )
+    if selection.selection_metadata:
+        lines.append("")
+        lines.append("selected source contract")
+        contract = selection.selection_metadata.get("selection_contract_id")
+        if contract is not None:
+            lines.append(f"  contract id: {contract}")
+        background_count = selection.selection_metadata.get("background_source_count")
+        if background_count is not None:
+            lines.append(f"  background source count: {background_count}")
+        groups = selection.selection_metadata.get("groups")
+        if isinstance(groups, Mapping):
+            lines.append("  selected versus available groups:")
+            for group_name in sorted(groups):
+                group = groups[group_name]
+                if not isinstance(group, Mapping):
+                    continue
+                available = group.get("available")
+                selected = group.get("selected")
+                required = group.get("required")
+                required_text = f", required {required}" if required is not None else ""
+                lines.append(
+                    f"    {group_name}: selected {selected} of "
+                    f"{available} available{required_text}"
+                )
     lines.extend(
         [
             "",
@@ -487,6 +636,44 @@ def _record_source_descriptor(
             f"{CHECKPOINT_INFORMATION_REGIME!r}"
         )
     return descriptor, problems
+
+
+def _source_descriptors_and_problems(
+    pool: NaturalBattleStartPool,
+) -> tuple[list[tuple[dict[str, Any], BattleStartCheckpointRecord]], list[str]]:
+    descriptors: list[tuple[dict[str, Any], BattleStartCheckpointRecord]] = []
+    problems: list[str] = []
+    checkpoint_counts: Counter[str] = Counter()
+    for record in pool.records:
+        descriptor, record_problems = _record_source_descriptor(record)
+        descriptors.append((descriptor, record))
+        checkpoint = descriptor.get("source_checkpoint_id")
+        if isinstance(checkpoint, str) and checkpoint:
+            checkpoint_counts[checkpoint] += 1
+        problems.extend(record_problems)
+
+    for checkpoint, count in sorted(checkpoint_counts.items()):
+        if count > 1:
+            problems.append(
+                f"source pool contains duplicate source checkpoint id {checkpoint!r}"
+            )
+    return descriptors, problems
+
+
+def _selection_group(
+    item: tuple[dict[str, Any], BattleStartCheckpointRecord],
+    group_name: str,
+) -> tuple[dict[str, Any], BattleStartCheckpointRecord]:
+    descriptor, record = item
+    return {**descriptor, "selection_group": group_name}, record
+
+
+def _is_act1_boss_source(source: Mapping[str, Any]) -> bool:
+    return source.get("act") == 1 and str(source.get("room_type")) == "BOSS"
+
+
+def _is_act1_non_boss_source(source: Mapping[str, Any]) -> bool:
+    return source.get("act") == 1 and str(source.get("room_type")) != "BOSS"
 
 
 def _source_sort_key(source: Mapping[str, Any]) -> tuple[str, ...]:

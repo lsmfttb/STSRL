@@ -421,6 +421,8 @@ def run_lightspeed_command(args: argparse.Namespace) -> int:
                 budgets=args.oracle_teacher_scaleup_budgets,
                 source_limit=args.oracle_teacher_scaleup_source_limit,
                 selection_seed=args.oracle_teacher_scaleup_seed,
+                source_selection_mode=args.oracle_teacher_scaleup_source_selection,
+                background_source_count=(args.oracle_teacher_scaleup_background_count),
                 coverage_report_path=args.oracle_teacher_scaleup_coverage_report,
                 root_selection_rule=args.oracle_teacher_scaleup_root_selection,
                 action_space=action_space,

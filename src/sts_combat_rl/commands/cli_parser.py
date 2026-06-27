@@ -10,6 +10,10 @@ from sts_combat_rl.sim.model_guided_oracle_search import (
     MODEL_GUIDED_ORACLE_DEFAULT_POLICY_PROBABILITY_WEIGHT,
 )
 from sts_combat_rl.sim.oracle_search import ORACLE_ROOT_SELECTION_RULES
+from sts_combat_rl.sim.oracle_teacher_scaleup import (
+    ORACLE_TEACHER_SCALEUP_SOURCE_SELECTION_MODES,
+    T032_T039_BACKGROUND_SOURCE_COUNT,
+)
 from sts_combat_rl.sim.oracle_teacher_search_guidance import (
     ORACLE_TEACHER_SEARCH_GUIDANCE_STABILITY_FILTERS,
     ORACLE_TEACHER_SEARCH_GUIDANCE_TARGETS,
@@ -706,6 +710,25 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         metavar="N",
         help="Seeded maximum number of natural source starts selected for scale-up.",
+    )
+    parser.add_argument(
+        "--oracle-teacher-scaleup-source-selection",
+        choices=ORACLE_TEACHER_SCALEUP_SOURCE_SELECTION_MODES,
+        default="seeded_uniform",
+        help=(
+            "Source-selection contract for A20 Oracle teacher scale-up. "
+            "Use t032_t039_narrow for the T032 rare-source diagnostic set."
+        ),
+    )
+    parser.add_argument(
+        "--oracle-teacher-scaleup-background-count",
+        type=int,
+        default=T032_T039_BACKGROUND_SOURCE_COUNT,
+        metavar="N",
+        help=(
+            "Act 1 non-Boss background source count for "
+            "--oracle-teacher-scaleup-source-selection t032_t039_narrow."
+        ),
     )
     parser.add_argument(
         "--oracle-teacher-scaleup-seed",

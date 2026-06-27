@@ -5,6 +5,11 @@ from __future__ import annotations
 import argparse
 import math
 
+from sts_combat_rl.sim.oracle_teacher_scaleup import (
+    ORACLE_TEACHER_SCALEUP_SOURCE_SELECTION_SEEDED_UNIFORM,
+    T032_T039_BACKGROUND_SOURCE_COUNT,
+)
+
 
 def validate_cli_args(args: argparse.Namespace) -> str | None:
     """Return the first user-facing CLI validation problem, if any."""
@@ -37,6 +42,8 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
         )
     if args.oracle_teacher_scaleup_seed < 0:
         return "--oracle-teacher-scaleup-seed must be non-negative"
+    if args.oracle_teacher_scaleup_background_count <= 0:
+        return "--oracle-teacher-scaleup-background-count must be positive"
     if (
         args.oracle_teacher_scaleup_source_limit is not None
         and args.oracle_teacher_scaleup_source_limit <= 0
@@ -124,12 +131,27 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
         args.oracle_teacher_scaleup_output_dir is not None
         or args.oracle_teacher_scaleup_source_limit is not None
         or args.oracle_teacher_scaleup_coverage_report is not None
+        or args.oracle_teacher_scaleup_source_selection
+        != ORACLE_TEACHER_SCALEUP_SOURCE_SELECTION_SEEDED_UNIFORM
+        or args.oracle_teacher_scaleup_background_count
+        != T032_T039_BACKGROUND_SOURCE_COUNT
     ):
         return (
             "--oracle-teacher-scaleup-output-dir, "
             "--oracle-teacher-scaleup-source-limit, and "
-            "--oracle-teacher-scaleup-coverage-report require "
+            "--oracle-teacher-scaleup-coverage-report, "
+            "--oracle-teacher-scaleup-source-selection, and "
+            "--oracle-teacher-scaleup-background-count require "
             "--lightspeed-a20-oracle-teacher-scaleup"
+        )
+    if (
+        args.lightspeed_a20_oracle_teacher_scaleup is not None
+        and args.oracle_teacher_scaleup_source_selection == "t032_t039_narrow"
+        and args.oracle_teacher_scaleup_source_limit is not None
+    ):
+        return (
+            "--oracle-teacher-scaleup-source-limit is not compatible with "
+            "--oracle-teacher-scaleup-source-selection t032_t039_narrow"
         )
     if args.a20_reachability_report is not None and len(args.reachability_arm) < 2:
         return (

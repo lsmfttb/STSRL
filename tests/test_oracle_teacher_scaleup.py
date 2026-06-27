@@ -4,6 +4,7 @@ from dataclasses import replace
 from io import StringIO
 import hashlib
 import json
+import random
 from pathlib import Path
 
 import pytest
@@ -37,6 +38,11 @@ from sts_combat_rl.sim.online_controller import NATIVE_SEARCH_INFORMATION_REGIME
 from sts_combat_rl.sim.oracle_search import OracleSearchController
 from sts_combat_rl.sim.oracle_teacher import OracleTeacherDataset, OracleTeacherRow
 from sts_combat_rl.sim.oracle_teacher_scaleup import (
+    ORACLE_TEACHER_SCALEUP_SOURCE_SELECTION_T032_T039_NARROW,
+    T032_T039_ACT1_BOSS_SOURCE_COUNT,
+    T032_T039_ACT2_SOURCE_COUNT,
+    T032_T039_NARROW_SELECTION_CONTRACT_ID,
+    build_t032_t039_narrow_source_selection_plan,
     build_oracle_teacher_scaleup_manifest,
     build_oracle_teacher_source_selection_plan,
     dump_oracle_teacher_scaleup_manifest_json,
@@ -140,6 +146,220 @@ def test_source_selection_fails_closed_for_bad_source_identity() -> None:
     assert any("information regime" in problem for problem in plan.problems)
 
 
+def test_t032_t039_narrow_selection_keeps_rare_sources_and_samples_background() -> None:
+    pool = _custom_pool(
+        [
+            *[
+                _custom_record(
+                    index,
+                    act=1,
+                    room_type="BOSS",
+                    encounter_id=f"BOSS_{index:02d}",
+                )
+                for index in range(T032_T039_ACT1_BOSS_SOURCE_COUNT)
+            ],
+            *[
+                _custom_record(
+                    100 + index,
+                    act=2,
+                    room_type="ELITE" if index == 1 else "MONSTER",
+                    encounter_id=f"ACT2_{index}",
+                )
+                for index in range(T032_T039_ACT2_SOURCE_COUNT)
+            ],
+            *[
+                _custom_record(
+                    200 + index,
+                    act=1,
+                    room_type="MONSTER",
+                    encounter_id=f"BACKGROUND_{index}",
+                )
+                for index in range(6)
+            ],
+        ]
+    )
+
+    plan = build_t032_t039_narrow_source_selection_plan(
+        pool,
+        selection_seed=32039,
+        background_source_count=3,
+    )
+    repeated = build_t032_t039_narrow_source_selection_plan(
+        pool,
+        selection_seed=32039,
+        background_source_count=3,
+    )
+
+    assert plan.to_dict() == repeated.to_dict()
+    assert plan.passed
+    assert (
+        plan.selection_method
+        == ORACLE_TEACHER_SCALEUP_SOURCE_SELECTION_T032_T039_NARROW
+    )
+    assert plan.selection_metadata["selection_contract_id"] == (
+        T032_T039_NARROW_SELECTION_CONTRACT_ID
+    )
+    assert plan.selection_metadata["groups"] == {
+        "act1_boss": {
+            "available": T032_T039_ACT1_BOSS_SOURCE_COUNT,
+            "selected": T032_T039_ACT1_BOSS_SOURCE_COUNT,
+            "required": T032_T039_ACT1_BOSS_SOURCE_COUNT,
+            "required_all_available": True,
+        },
+        "act2": {
+            "available": T032_T039_ACT2_SOURCE_COUNT,
+            "selected": T032_T039_ACT2_SOURCE_COUNT,
+            "required": T032_T039_ACT2_SOURCE_COUNT,
+            "required_all_available": True,
+        },
+        "act1_non_boss_background": {
+            "available": 6,
+            "selected": 3,
+            "required": 3,
+            "selection_seed": 32039,
+        },
+    }
+    assert [
+        source["selection_group"]
+        for source in plan.selected_sources[
+            : T032_T039_ACT1_BOSS_SOURCE_COUNT + T032_T039_ACT2_SOURCE_COUNT
+        ]
+    ] == [
+        *(["act1_boss"] * T032_T039_ACT1_BOSS_SOURCE_COUNT),
+        *(["act2"] * T032_T039_ACT2_SOURCE_COUNT),
+    ]
+
+    background_ids = [
+        source["source_checkpoint_id"]
+        for source in plan.selected_sources
+        if source["selection_group"] == "act1_non_boss_background"
+    ]
+    expected_background_indices = sorted(random.Random(32039).sample(range(6), 3))
+    assert background_ids == [
+        f"checkpoint-{200 + index}" for index in expected_background_indices
+    ]
+
+
+def test_t032_t039_narrow_selection_fails_closed_for_missing_act1_boss() -> None:
+    pool = _custom_pool(
+        [
+            *[
+                _custom_record(
+                    index,
+                    act=1,
+                    room_type="BOSS",
+                    encounter_id=f"BOSS_{index:02d}",
+                )
+                for index in range(T032_T039_ACT1_BOSS_SOURCE_COUNT - 1)
+            ],
+            *[
+                _custom_record(
+                    100 + index,
+                    act=2,
+                    room_type="MONSTER",
+                    encounter_id=f"ACT2_{index}",
+                )
+                for index in range(T032_T039_ACT2_SOURCE_COUNT)
+            ],
+            *[
+                _custom_record(
+                    200 + index,
+                    act=1,
+                    room_type="MONSTER",
+                    encounter_id=f"BACKGROUND_{index}",
+                )
+                for index in range(2)
+            ],
+        ]
+    )
+
+    plan = build_t032_t039_narrow_source_selection_plan(
+        pool,
+        selection_seed=32039,
+        background_source_count=2,
+    )
+
+    assert not plan.passed
+    assert any("31 Act 1 Boss sources" in problem for problem in plan.problems)
+    assert plan.selection_metadata["groups"]["act1_boss"] == {
+        "available": T032_T039_ACT1_BOSS_SOURCE_COUNT - 1,
+        "selected": T032_T039_ACT1_BOSS_SOURCE_COUNT - 1,
+        "required": T032_T039_ACT1_BOSS_SOURCE_COUNT,
+        "required_all_available": True,
+    }
+
+
+def test_t032_t039_narrow_selection_fails_closed_for_missing_act2() -> None:
+    pool = _custom_pool(
+        [
+            *[
+                _custom_record(
+                    index,
+                    act=1,
+                    room_type="BOSS",
+                    encounter_id=f"BOSS_{index:02d}",
+                )
+                for index in range(T032_T039_ACT1_BOSS_SOURCE_COUNT)
+            ],
+            *[
+                _custom_record(
+                    100 + index,
+                    act=2,
+                    room_type="MONSTER",
+                    encounter_id=f"ACT2_{index}",
+                )
+                for index in range(T032_T039_ACT2_SOURCE_COUNT - 1)
+            ],
+            *[
+                _custom_record(
+                    200 + index,
+                    act=1,
+                    room_type="MONSTER",
+                    encounter_id=f"BACKGROUND_{index}",
+                )
+                for index in range(2)
+            ],
+        ]
+    )
+
+    plan = build_t032_t039_narrow_source_selection_plan(
+        pool,
+        selection_seed=32039,
+        background_source_count=2,
+    )
+
+    assert not plan.passed
+    assert any("3 Act 2 sources" in problem for problem in plan.problems)
+    assert plan.selection_metadata["groups"]["act2"] == {
+        "available": T032_T039_ACT2_SOURCE_COUNT - 1,
+        "selected": T032_T039_ACT2_SOURCE_COUNT - 1,
+        "required": T032_T039_ACT2_SOURCE_COUNT,
+        "required_all_available": True,
+    }
+
+
+def test_t032_t039_narrow_selection_fails_closed_without_background() -> None:
+    pool = _custom_pool(
+        [
+            _custom_record(0, act=1, room_type="BOSS", encounter_id="BOSS_A"),
+            _custom_record(1, act=2, room_type="MONSTER", encounter_id="ACT2_A"),
+            _custom_record(2, act=1, room_type="MONSTER", encounter_id="ONLY_BG"),
+        ]
+    )
+
+    plan = build_t032_t039_narrow_source_selection_plan(
+        pool,
+        selection_seed=32039,
+        background_source_count=2,
+    )
+
+    assert not plan.passed
+    assert any("Act 1 non-Boss background" in problem for problem in plan.problems)
+    assert (
+        plan.selection_metadata["groups"]["act1_non_boss_background"]["available"] == 1
+    )
+
+
 def test_scaleup_budget_validation_rejects_duplicates_and_nonpositive() -> None:
     assert validate_oracle_teacher_scaleup_budgets([20, 50]) == (20, 50)
     with pytest.raises(ValueError, match="positive"):
@@ -223,6 +443,77 @@ def test_command_workflow_writes_teacher_reports_and_manifest(tmp_path: Path) ->
     assert manifest.teacher_action_stability["all_budget_agreement_count"] == 1
     assert any(
         "broad-training gate remains closed" in warning for warning in manifest.warnings
+    )
+
+
+def test_command_workflow_uses_t032_t039_narrow_selection(tmp_path: Path) -> None:
+    pool = _custom_pool(
+        [
+            *[
+                _custom_record(
+                    index,
+                    act=1,
+                    room_type="BOSS",
+                    encounter_id=f"BOSS_{index:02d}",
+                )
+                for index in range(T032_T039_ACT1_BOSS_SOURCE_COUNT)
+            ],
+            *[
+                _custom_record(
+                    T032_T039_ACT1_BOSS_SOURCE_COUNT + index,
+                    act=2,
+                    room_type="MONSTER",
+                    encounter_id=f"ACT2_{index}",
+                )
+                for index in range(T032_T039_ACT2_SOURCE_COUNT)
+            ],
+            _custom_record(34, act=1, room_type="MONSTER", encounter_id="BG_A"),
+            _custom_record(35, act=1, room_type="ELITE", encounter_id="BG_B"),
+            _custom_record(36, act=1, room_type="EVENT", encounter_id="BG_C"),
+        ]
+    )
+    pool_path = tmp_path / "pool.jsonl"
+    output_dir = tmp_path / "scaleup"
+    _write_pool(pool_path, pool)
+
+    manifest = run_oracle_teacher_scaleup_from_paths(
+        adapter_factory=_ScaleupAdapter,
+        pool_path=pool_path,
+        output_dir=output_dir,
+        budgets=[20],
+        source_limit=None,
+        selection_seed=32039,
+        source_selection_mode=ORACLE_TEACHER_SCALEUP_SOURCE_SELECTION_T032_T039_NARROW,
+        background_source_count=2,
+    )
+
+    assert manifest.command_passed
+    assert manifest.source_selection.selected_source_count == 36
+    assert manifest.source_selection.selection_metadata["groups"]["act1_boss"] == {
+        "available": T032_T039_ACT1_BOSS_SOURCE_COUNT,
+        "selected": T032_T039_ACT1_BOSS_SOURCE_COUNT,
+        "required": T032_T039_ACT1_BOSS_SOURCE_COUNT,
+        "required_all_available": True,
+    }
+    assert manifest.source_selection.selection_metadata["groups"]["act2"] == {
+        "available": T032_T039_ACT2_SOURCE_COUNT,
+        "selected": T032_T039_ACT2_SOURCE_COUNT,
+        "required": T032_T039_ACT2_SOURCE_COUNT,
+        "required_all_available": True,
+    }
+    assert (
+        manifest.source_selection.selection_metadata["groups"][
+            "act1_non_boss_background"
+        ]["selected"]
+        == 2
+    )
+    assert (
+        json.loads(
+            (output_dir / ORACLE_TEACHER_SCALEUP_MANIFEST_FILENAME).read_text(
+                encoding="utf-8"
+            )
+        )["source_selection"]["selection_metadata"]["selection_contract_id"]
+        == T032_T039_NARROW_SELECTION_CONTRACT_ID
     )
 
 
@@ -366,6 +657,16 @@ def _pool(*, record_count: int) -> NaturalBattleStartPool:
     )
 
 
+def _custom_pool(records: list[BattleStartCheckpointRecord]) -> NaturalBattleStartPool:
+    return NaturalBattleStartPool(
+        source_run_count=len(records),
+        terminal_run_count=len(records),
+        truncated_run_count=0,
+        source_controller_provenance=_provenance("routed"),
+        records=records,
+    )
+
+
 def _record(index: int) -> BattleStartCheckpointRecord:
     snapshot = _snapshot(index)
     return BattleStartCheckpointRecord(
@@ -385,6 +686,24 @@ def _record(index: int) -> BattleStartCheckpointRecord:
         checkpoint_information_regime=CHECKPOINT_INFORMATION_REGIME,
         public_context_status="legacy_unavailable",
         public_run_context={},
+    )
+
+
+def _custom_record(
+    index: int,
+    *,
+    act: int,
+    room_type: str,
+    encounter_id: str,
+) -> BattleStartCheckpointRecord:
+    return replace(
+        _record(index),
+        structural_metadata={
+            **_metadata(index),
+            "act": act,
+            "room_type": room_type,
+            "encounter_id": encounter_id,
+        },
     )
 
 
