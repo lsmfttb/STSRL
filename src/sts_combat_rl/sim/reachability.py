@@ -251,7 +251,11 @@ def build_reachability_arm_report(
 
     coverage = build_battle_start_pool_coverage_report(pool)
     source_identity = _mapping(
-        coverage_report.get("source_identity", {}),
+        (
+            coverage_report.get("source_identity")
+            if isinstance(coverage_report.get("source_identity"), Mapping)
+            else {}
+        ),
         f"{label} coverage source_identity",
     )
     problems = _coverage_link_problems(
@@ -414,11 +418,37 @@ def _coverage_link_problems(
         problems.append(
             f"{label}: coverage natural count does not match pool record count"
         )
-    coverage_pool = _nested_get(coverage_report, "input_artifacts", "natural_pool")
-    coverage_pool_map = coverage_pool if isinstance(coverage_pool, Mapping) else {}
+    input_artifacts = coverage_report.get("input_artifacts")
+    if not isinstance(input_artifacts, Mapping):
+        problems.append(f"{label}: coverage report is missing input_artifacts")
+        coverage_pool_map: Mapping[str, Any] = {}
+    else:
+        coverage_pool = input_artifacts.get("natural_pool")
+        if not isinstance(coverage_pool, Mapping):
+            problems.append(
+                f"{label}: coverage report is missing natural_pool artifact linkage"
+            )
+            coverage_pool_map = {}
+        else:
+            coverage_pool_map = coverage_pool
     expected_sha = artifact_identity.get("pool_sha256")
-    if coverage_pool_map.get("sha256") not in (None, expected_sha):
+    if coverage_pool_map.get("sha256") is None:
+        problems.append(f"{label}: coverage natural-pool sha256 is missing")
+    elif coverage_pool_map.get("sha256") != expected_sha:
         problems.append(f"{label}: coverage natural-pool sha256 does not match")
+    pool_path = coverage_pool_map.get("path")
+    if not isinstance(pool_path, str) or not pool_path:
+        problems.append(f"{label}: coverage natural-pool path is missing")
+    record_count = coverage_pool_map.get("record_count")
+    if isinstance(record_count, bool) or not isinstance(record_count, int):
+        problems.append(f"{label}: coverage natural-pool record_count is missing")
+    elif record_count != len(pool.records):
+        problems.append(f"{label}: coverage natural-pool record_count does not match")
+    source_identity = coverage_report.get("source_identity")
+    if not isinstance(source_identity, Mapping) or not source_identity:
+        problems.append(f"{label}: coverage report is missing source_identity")
+    else:
+        problems.extend(_source_identity_problems(label, source_identity))
     restore = _mapping(
         coverage_report.get("restore_verification", {}),
         f"{label} restore verification",
@@ -430,6 +460,47 @@ def _coverage_link_problems(
     if pool.problems:
         problems.extend(
             f"{label}: pool problem: {problem}" for problem in pool.problems
+        )
+    return problems
+
+
+def _source_identity_problems(
+    label: str,
+    source_identity: Mapping[str, Any],
+) -> list[str]:
+    problems: list[str] = []
+    required_strings = (
+        "manifest_schema_id",
+        "manifest_path",
+        "upstream_repository_url",
+        "upstream_base_commit",
+        "integration_repository_url",
+        "integration_branch",
+        "integration_ref",
+        "integration_commit",
+        "python_module",
+        "simulator_class",
+        "legacy_patch_stack_status",
+        "canonical_verifier",
+    )
+    for field_name in required_strings:
+        if (
+            not isinstance(source_identity.get(field_name), str)
+            or not source_identity[field_name]
+        ):
+            problems.append(f"{label}: coverage source_identity missing {field_name}")
+    manifest_version = source_identity.get("manifest_version")
+    if isinstance(manifest_version, bool) or not isinstance(manifest_version, int):
+        problems.append(f"{label}: coverage source_identity missing manifest_version")
+    capabilities = source_identity.get("native_capabilities")
+    if (
+        not isinstance(capabilities, Sequence)
+        or isinstance(capabilities, (str, bytes))
+        or not capabilities
+        or not all(isinstance(item, str) and item for item in capabilities)
+    ):
+        problems.append(
+            f"{label}: coverage source_identity missing native_capabilities"
         )
     return problems
 

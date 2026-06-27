@@ -44,6 +44,7 @@ def test_reachability_cli_compares_default_and_oracle_arms(
                 final_floor=3.0,
                 final_act=1,
                 battle_count=1,
+                max_battle_start_floor=1.0,
             )
         ],
     )
@@ -175,6 +176,52 @@ def test_reachability_report_fails_closed_on_coverage_pool_sha_mismatch(
     )
 
 
+def test_reachability_report_requires_artifact_linkage_and_source_identity(
+    tmp_path: Path,
+) -> None:
+    pool = _pool(
+        label="default",
+        controller=_default_controller(),
+        records=[_record(index=0, run_id="default-run-0", seed=1, act=1, floor=1)],
+        summaries=[
+            _summary(
+                run_id="default-run-0",
+                seed=1,
+                final_floor=1.0,
+                final_act=1,
+                battle_count=1,
+            )
+        ],
+    )
+    pool_path, coverage_path = _write_pool_and_coverage(tmp_path, "default", pool)
+    coverage = json.loads(coverage_path.read_text(encoding="utf-8"))
+    coverage["input_artifacts"]["natural_pool"].pop("sha256")
+    coverage.pop("source_identity")
+    artifact_identity = {
+        "pool_path": str(pool_path),
+        "pool_sha256": _sha256(pool_path),
+        "coverage_report_path": str(coverage_path),
+        "coverage_report_sha256": _sha256(coverage_path),
+        "coverage_record_count": 1,
+    }
+
+    report = build_a20_reachability_comparison_report(
+        [
+            ("a", pool, coverage, artifact_identity),
+            ("b", pool, coverage, artifact_identity),
+        ]
+    )
+
+    assert report.command_passed is False
+    assert any(
+        "natural-pool sha256 is missing" in problem
+        for problem in report.command_problems
+    )
+    assert any(
+        "missing source_identity" in problem for problem in report.command_problems
+    )
+
+
 def _default_controller() -> RoutedRunController:
     return RoutedRunController(
         battle=PolicyController(FirstEligiblePolicy()),
@@ -292,6 +339,8 @@ def _summary(
     final_floor: float,
     final_act: int,
     battle_count: int,
+    max_battle_start_floor: float | None = None,
+    max_battle_start_act: int | None = None,
 ) -> SourceRunSummary:
     return SourceRunSummary(
         source_run_id=run_id,
@@ -304,8 +353,12 @@ def _summary(
         final_battle_active=False,
         captured_battle_start_count=battle_count,
         completed_battle_count=0,
-        max_battle_start_floor=final_floor,
-        max_battle_start_act=final_act,
+        max_battle_start_floor=(
+            final_floor if max_battle_start_floor is None else max_battle_start_floor
+        ),
+        max_battle_start_act=(
+            final_act if max_battle_start_act is None else max_battle_start_act
+        ),
         problem_count=0,
     )
 

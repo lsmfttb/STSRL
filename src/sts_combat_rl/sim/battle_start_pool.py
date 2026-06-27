@@ -949,6 +949,11 @@ def natural_battle_start_pool_problems(pool: NaturalBattleStartPool) -> list[str
     """Return structural failures; optional simulator metadata remains explicit."""
 
     problems: list[str] = []
+    records_by_run: defaultdict[str, list[BattleStartCheckpointRecord]] = defaultdict(
+        list
+    )
+    for record in pool.records:
+        records_by_run[record.source_run_id].append(record)
     if pool.format_version != BATTLE_START_POOL_FORMAT_VERSION:
         problems.append("pool has an unsupported format version")
     if pool.terminal_run_count + pool.truncated_run_count != pool.source_run_count:
@@ -974,9 +979,67 @@ def natural_battle_start_pool_problems(pool: NaturalBattleStartPool) -> list[str
             summary_run_ids.add(summary.source_run_id)
             if summary.terminal:
                 terminal_summary_count += 1
+            if summary.problem_count != len(summary.problems):
+                problems.append(
+                    f"run summary {index} problem_count does not match problems"
+                )
+            run_records = records_by_run.get(summary.source_run_id, [])
+            if summary.captured_battle_start_count != len(run_records):
+                problems.append(
+                    f"run summary {index} captured_battle_start_count does not "
+                    "match records"
+                )
+            completed_count = sum(
+                1 for record in run_records if record.battle_completed
+            )
+            if summary.completed_battle_count != completed_count:
+                problems.append(
+                    f"run summary {index} completed_battle_count does not match records"
+                )
+            if run_records:
+                record_seeds = {record.source_seed for record in run_records}
+                if record_seeds != {summary.source_seed}:
+                    problems.append(
+                        f"run summary {index} source_seed does not match records"
+                    )
+                try:
+                    max_floor = _max_optional_number(
+                        record.structural_metadata.get("floor")
+                        for record in run_records
+                    )
+                    max_act = _max_optional_int(
+                        record.structural_metadata.get("act") for record in run_records
+                    )
+                except ValueError as exc:
+                    problems.append(f"run summary {index}: {exc}")
+                else:
+                    if summary.max_battle_start_floor != max_floor:
+                        problems.append(
+                            f"run summary {index} max_battle_start_floor does not "
+                            "match records"
+                        )
+                    if summary.max_battle_start_act != max_act:
+                        problems.append(
+                            f"run summary {index} max_battle_start_act does not "
+                            "match records"
+                        )
+            elif summary.max_battle_start_floor is not None:
+                problems.append(
+                    f"run summary {index} has max_battle_start_floor without records"
+                )
+            if not run_records and summary.max_battle_start_act is not None:
+                problems.append(
+                    f"run summary {index} has max_battle_start_act without records"
+                )
         if terminal_summary_count != pool.terminal_run_count:
             problems.append(
                 "pool source_run_summaries terminal count does not match metadata"
+            )
+        missing_summary_run_ids = set(records_by_run) - summary_run_ids
+        if missing_summary_run_ids:
+            problems.append(
+                "pool records reference source runs missing from "
+                "source_run_summaries: " + ", ".join(sorted(missing_summary_run_ids))
             )
     try:
         _validated_provenance(pool.source_controller_provenance, "pool controller")

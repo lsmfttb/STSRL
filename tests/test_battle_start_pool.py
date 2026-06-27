@@ -15,6 +15,7 @@ from sts_combat_rl.sim.battle_start_pool import (
     collect_natural_battle_start_pool,
     dump_natural_battle_start_pool_jsonl,
     load_natural_battle_start_pool_jsonl,
+    natural_battle_start_pool_problems,
     restore_battle_start_record,
     sample_battle_start_pool,
     verify_battle_start_pool_restores,
@@ -291,6 +292,42 @@ def test_portable_pool_manifest_replays_duplicate_action_ids_in_fresh_adapters()
     assert verification.restore_ok is True
     assert verification.replay_restored_count == 4
     assert verification.context_matched_count == 4
+
+
+def test_source_run_summaries_are_cross_checked_against_records() -> None:
+    pool = _pool()
+    bad_summary = replace(
+        pool.source_run_summaries[0],  # type: ignore[union-attr]
+        captured_battle_start_count=999,
+        completed_battle_count=999,
+    )
+    bad_pool = replace(
+        pool,
+        source_run_summaries=[
+            bad_summary,
+            *pool.source_run_summaries[1:],  # type: ignore[union-attr]
+        ],
+    )
+    problems = natural_battle_start_pool_problems(bad_pool)  # type: ignore[arg-type]
+
+    assert any(
+        "captured_battle_start_count does not match records" in problem
+        for problem in problems
+    )
+    assert any(
+        "completed_battle_count does not match records" in problem
+        for problem in problems
+    )
+
+    stream = StringIO()
+    dump_natural_battle_start_pool_jsonl(pool, stream)  # type: ignore[arg-type]
+    rows = [json.loads(line) for line in stream.getvalue().splitlines()]
+    rows[0]["metadata"]["source_run_summaries"][0]["captured_battle_start_count"] = 999
+
+    with pytest.raises(ValueError, match="captured_battle_start_count"):
+        load_natural_battle_start_pool_jsonl(
+            StringIO("\n".join(json.dumps(row) for row in rows))
+        )
 
 
 def test_v1_migration_preserves_missing_duplicate_information_and_fails_closed() -> (
