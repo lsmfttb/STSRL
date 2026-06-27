@@ -93,6 +93,7 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
     uses_model_guided_oracle_checkpoint = (
         args.lightspeed_model_guided_oracle_fixed_evaluation is not None
         or args.lightspeed_model_guided_search_fixed_comparison is not None
+        or args.lightspeed_model_guided_search_v2_fixed_comparison is not None
     )
     if (
         uses_model_guided_oracle_checkpoint
@@ -109,15 +110,18 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
         return (
             "--model-guided-oracle-checkpoint requires "
             "--lightspeed-model-guided-oracle-fixed-evaluation or "
-            "--lightspeed-model-guided-search-fixed-comparison"
+            "--lightspeed-model-guided-search-fixed-comparison or "
+            "--lightspeed-model-guided-search-v2-fixed-comparison"
         )
     if (
         args.model_guided_search_comparison_report is not None
         and args.lightspeed_model_guided_search_fixed_comparison is None
+        and args.lightspeed_model_guided_search_v2_fixed_comparison is None
     ):
         return (
             "--model-guided-search-comparison-report requires "
-            "--lightspeed-model-guided-search-fixed-comparison"
+            "--lightspeed-model-guided-search-fixed-comparison or "
+            "--lightspeed-model-guided-search-v2-fixed-comparison"
         )
     if (
         args.lightspeed_a20_oracle_teacher_scaleup is not None

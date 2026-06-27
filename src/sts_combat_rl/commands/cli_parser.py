@@ -400,6 +400,17 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     input_group.add_argument(
+        "--lightspeed-model-guided-search-v2-fixed-comparison",
+        type=Path,
+        metavar="COHORT_PATH",
+        help=(
+            "Load an immutable fixed battle cohort unchanged and compare baseline "
+            "Oracle search, the T028 model-guided Oracle-like controller, and "
+            "the T035 v2 model-guided Oracle-like controller on the same "
+            "restored starts."
+        ),
+    )
+    input_group.add_argument(
         "--oracle-teacher-dataset-report",
         type=Path,
         metavar="TEACHER_JSONL",
@@ -825,7 +836,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--model-guided-search-comparison-report",
         type=Path,
         metavar="PATH",
-        help="Write the T029 model-guided search comparison JSONL report to PATH.",
+        help=(
+            "Write the T029 or T035 model-guided search comparison JSONL report "
+            "to PATH."
+        ),
     )
     parser.add_argument(
         "--model-guided-search-comparison-scale",

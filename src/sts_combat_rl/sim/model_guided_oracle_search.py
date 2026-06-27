@@ -57,6 +57,13 @@ MODEL_GUIDED_ORACLE_SEARCH_CONTROLLER_VERSION = (
 MODEL_GUIDED_ORACLE_CONTROLLER_NAME = "model_guided_oracle_search_v1"
 MODEL_GUIDED_ORACLE_ROOT_SELECTION_RULE = "native_mean_plus_policy_probability"
 MODEL_GUIDED_ORACLE_DEFAULT_POLICY_PROBABILITY_WEIGHT = 0.05
+MODEL_GUIDED_ORACLE_SEARCH_V2_CONTROLLER_VERSION = (
+    "model-guided-oracle-search-controller-v2"
+)
+MODEL_GUIDED_ORACLE_V2_CONTROLLER_NAME = "model_guided_oracle_search_v2"
+MODEL_GUIDED_ORACLE_V2_ROOT_SELECTION_RULE = (
+    "native_mean_plus_visit_adjusted_policy_probability"
+)
 
 
 @dataclass(frozen=True)
@@ -71,6 +78,7 @@ class ModelGuidedOracleRootScore:
     model_policy_logit: float
     model_policy_probability: float
     combined_score: float | None
+    model_guidance_multiplier: float = 1.0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -82,6 +90,7 @@ class ModelGuidedOracleRootScore:
             "model_policy_logit": self.model_policy_logit,
             "model_policy_probability": self.model_policy_probability,
             "combined_score": self.combined_score,
+            "model_guidance_multiplier": self.model_guidance_multiplier,
         }
 
 
@@ -132,13 +141,19 @@ class ModelGuidedOracleSearchDecisionReport:
     target: ModelGuidedOracleSearchTarget
     total_wall_clock_time_s: float | None
     native_search_wall_clock_time_s: float | None
+    controller_version: str = MODEL_GUIDED_ORACLE_SEARCH_CONTROLLER_VERSION
+    root_selection_rule: str = MODEL_GUIDED_ORACLE_ROOT_SELECTION_RULE
+    guidance_formula: str | None = None
+    telemetry_controller_kind: str = "model_guided_oracle_battle_search"
+    search_kind: str = "native_random_terminal_playout_with_public_root_guidance"
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "controller_version": MODEL_GUIDED_ORACLE_SEARCH_CONTROLLER_VERSION,
+            "controller_version": self.controller_version,
             "information_regime": NATIVE_SEARCH_INFORMATION_REGIME,
-            "root_selection_rule": MODEL_GUIDED_ORACLE_ROOT_SELECTION_RULE,
-            "guidance_formula": _guidance_formula(self.policy_probability_weight),
+            "root_selection_rule": self.root_selection_rule,
+            "guidance_formula": self.guidance_formula
+            or _guidance_formula(self.policy_probability_weight),
             "policy_probability_weight": self.policy_probability_weight,
             "total_wall_clock_time_s": self.total_wall_clock_time_s,
             "native_search_wall_clock_time_s": self.native_search_wall_clock_time_s,
@@ -147,6 +162,8 @@ class ModelGuidedOracleSearchDecisionReport:
             "guidance_result": self.guidance_result.to_dict(),
             "root_scores": [score.to_dict() for score in self.root_scores],
             "target": self.target.to_dict(),
+            "telemetry_controller_kind": self.telemetry_controller_kind,
+            "search_kind": self.search_kind,
         }
 
 
@@ -329,6 +346,204 @@ class ModelGuidedOracleSearchController:
         )
 
 
+@dataclass(frozen=True)
+class ModelGuidedOracleSearchV2Controller:
+    """Second root-only model-guided Oracle-like search experiment.
+
+    The v2 experiment still runs the same native hidden-state ``battle_search``
+    once. Since that API cannot consume model priors or leaf values, v2 applies
+    model guidance only at final root selection. It differs from T028/v1 by
+    scaling the public policy probability with a deterministic post-search
+    visit factor, giving model guidance more influence on visited root actions
+    with fewer native playouts.
+    """
+
+    simulations: int
+    scorer: SearchGuidanceScorer
+    policy_probability_weight: float = (
+        MODEL_GUIDED_ORACLE_DEFAULT_POLICY_PROBABILITY_WEIGHT
+    )
+    action_space: ActionSpaceConfig = field(
+        default_factory=ActionSpaceConfig.initial_no_potions
+    )
+    native_source_identity: Mapping[str, Any] | None = None
+    provenance: ControllerProvenance = field(init=False)  # type: ignore[assignment]
+    checkpoint_provenance: SearchGuidanceCheckpointProvenance = field(init=False)
+
+    def __post_init__(self) -> None:
+        if self.simulations <= 0:
+            raise ValueError("model-guided oracle v2 simulations must be positive")
+        _validate_policy_probability_weight(self.policy_probability_weight)
+        checkpoint_provenance = _scorer_checkpoint_provenance(self.scorer)
+        object.__setattr__(self, "checkpoint_provenance", checkpoint_provenance)
+        source_identity = (
+            dict(self.native_source_identity)
+            if self.native_source_identity is not None
+            else lightspeed_source_identity_dict()
+        )
+        object.__setattr__(
+            self,
+            "provenance",
+            ControllerProvenance(
+                kind="model_guided_oracle_battle_search_v2",
+                name=(
+                    f"{MODEL_GUIDED_ORACLE_V2_CONTROLLER_NAME}_"
+                    f"s{self.simulations}_"
+                    f"pw{float(self.policy_probability_weight):g}"
+                ),
+                config={
+                    "controller_version": (
+                        MODEL_GUIDED_ORACLE_SEARCH_V2_CONTROLLER_VERSION
+                    ),
+                    "information_regime": NATIVE_SEARCH_INFORMATION_REGIME,
+                    "native_search_schema_id": ORACLE_SEARCH_SCHEMA_ID,
+                    "native_search_api": ORACLE_SEARCH_NATIVE_API,
+                    "native_search_patch_identity": ORACLE_SEARCH_PATCH_IDENTITY,
+                    "native_source_identity": source_identity,
+                    "search_budget": {
+                        "simulations": self.simulations,
+                        "budget_unit": "native_random_terminal_playouts",
+                    },
+                    "root_selection_rule": (MODEL_GUIDED_ORACLE_V2_ROOT_SELECTION_RULE),
+                    "guidance_formula": _v2_guidance_formula(
+                        float(self.policy_probability_weight)
+                    ),
+                    "guidance_scope": (
+                        "root selection only; visit adjustment is computed after "
+                        "native search and current battle_search does not accept "
+                        "model priors, allocation hints, or leaf values"
+                    ),
+                    "guidance_scorer": {
+                        "name": self.scorer.name,
+                        "inference_schema_id": SEARCH_GUIDANCE_INFERENCE_SCHEMA_ID,
+                        "inference_schema_version": (
+                            SEARCH_GUIDANCE_INFERENCE_SCHEMA_VERSION
+                        ),
+                        "policy_probability_weight": float(
+                            self.policy_probability_weight
+                        ),
+                        "checkpoint_provenance": checkpoint_provenance.to_dict(),
+                    },
+                    "v2_root_guidance": {
+                        "visit_adjustment": (
+                            "sqrt(total_root_visits / native_visits) for visited "
+                            "eligible root actions"
+                        ),
+                        "uses_native_allocation_api": False,
+                        "uses_native_leaf_value_api": False,
+                    },
+                    "search_telemetry": {
+                        "schema_id": SEARCH_DECISION_TELEMETRY_SCHEMA_ID,
+                        "schema_version": SEARCH_DECISION_TELEMETRY_SCHEMA_VERSION,
+                        "model_calls_per_decision": 1,
+                        "unavailable_native_fields": {
+                            "tree_depth": "native battle_search does not expose tree depth",
+                            "value_uncertainty": (
+                                "native battle_search does not expose uncertainty"
+                            ),
+                            "model_guided_allocation": (
+                                "current native battle_search API does not accept "
+                                "model allocation hints"
+                            ),
+                            "model_guided_leaf_values": (
+                                "current native battle_search API does not accept "
+                                "model leaf values"
+                            ),
+                        },
+                    },
+                    "action_space": self.action_space.to_dict(),
+                    "root_mapping": "occurrence_safe_action_identity_v1",
+                    "reproducibility": {
+                        "deterministic_given_restored_checkpoint": True,
+                        "native_rng_seed_source": "BattleContext.seed+floorNum",
+                        "python_rng_seed": None,
+                    },
+                },
+            ),
+        )
+
+    def select_action(
+        self,
+        adapter: SimulatorAdapter,
+        snapshot: SimulatorSnapshot,
+        actions: Sequence[SimulatorAction],
+        context: DecisionContext,
+        step_index: int,
+    ) -> ControllerDecision:
+        del step_index
+        if not hasattr(adapter, "battle_search"):
+            raise ValueError(
+                "model-guided oracle v2 search controller requires battle_search adapter"
+            )
+
+        total_start = time.perf_counter()
+        search_fn = getattr(adapter, "battle_search")
+        search_start = time.perf_counter()
+        raw_search = search_fn(
+            snapshot,
+            simulations=self.simulations,
+            include_potions=_include_potions_for_battle_search(self.action_space),
+        )
+        search_elapsed = time.perf_counter() - search_start
+        report = build_oracle_search_report(
+            raw_search,
+            actions,
+            context,
+            wall_clock_time_s=search_elapsed,
+        )
+        if not report.search_ok:
+            raise ValueError(
+                "model-guided oracle v2 root mapping failed: "
+                + "; ".join(report.problems)
+            )
+
+        try:
+            guidance = self.scorer.score_decision_context(context)
+        except ValueError as exc:
+            raise ValueError(f"model guidance inference failed: {exc}") from exc
+        _validate_guidance_result(
+            guidance,
+            context=context,
+            expected_checkpoint=self.checkpoint_provenance,
+        )
+
+        root_scores = build_model_guided_oracle_v2_root_scores(
+            report,
+            guidance,
+            policy_probability_weight=float(self.policy_probability_weight),
+        )
+        target = select_model_guided_oracle_root_action(
+            root_scores,
+            selection_rule=MODEL_GUIDED_ORACLE_V2_ROOT_SELECTION_RULE,
+        )
+        total_elapsed = time.perf_counter() - total_start
+        decision_report = ModelGuidedOracleSearchDecisionReport(
+            oracle_report=report,
+            guidance_result=guidance,
+            policy_probability_weight=float(self.policy_probability_weight),
+            root_scores=root_scores,
+            target=target,
+            total_wall_clock_time_s=total_elapsed,
+            native_search_wall_clock_time_s=search_elapsed,
+            controller_version=MODEL_GUIDED_ORACLE_SEARCH_V2_CONTROLLER_VERSION,
+            root_selection_rule=MODEL_GUIDED_ORACLE_V2_ROOT_SELECTION_RULE,
+            guidance_formula=_v2_guidance_formula(
+                float(self.policy_probability_weight)
+            ),
+            telemetry_controller_kind="model_guided_oracle_battle_search_v2",
+            search_kind=(
+                "native_random_terminal_playout_with_visit_adjusted_public_root_guidance"
+            ),
+        )
+        return ControllerDecision(
+            selected_index=target.legal_action_index,
+            provenance=self.provenance,
+            reason=f"model_guided_oracle_v2:{MODEL_GUIDED_ORACLE_V2_ROOT_SELECTION_RULE}",
+            score=target.combined_score,
+            metadata=model_guided_oracle_search_controller_metadata(decision_report),
+        )
+
+
 def build_model_guided_oracle_root_scores(
     report: OracleSearchReport,
     guidance: SearchGuidanceInferenceResult,
@@ -368,8 +583,55 @@ def build_model_guided_oracle_root_scores(
     return tuple(rows)
 
 
+def build_model_guided_oracle_v2_root_scores(
+    report: OracleSearchReport,
+    guidance: SearchGuidanceInferenceResult,
+    *,
+    policy_probability_weight: float,
+) -> tuple[ModelGuidedOracleRootScore, ...]:
+    """Combine native root means with visit-adjusted public policy probability."""
+
+    if not report.search_ok:
+        raise ValueError("cannot score invalid oracle search report")
+    _validate_policy_probability_weight(policy_probability_weight)
+    by_index = _guidance_scores_by_index(guidance)
+    rows: list[ModelGuidedOracleRootScore] = []
+    for root_action in report.root_actions:
+        model_score = by_index[root_action.legal_action_index]
+        combined: float | None = None
+        multiplier = 1.0
+        if (
+            root_action.eligible
+            and root_action.visits > 0
+            and root_action.mean_value is not None
+        ):
+            multiplier = _v2_model_guidance_multiplier(
+                root_visits=report.root_visits,
+                native_visits=root_action.visits,
+            )
+            combined = float(root_action.mean_value) + (
+                policy_probability_weight * model_score.policy_probability * multiplier
+            )
+        rows.append(
+            ModelGuidedOracleRootScore(
+                legal_action_index=root_action.legal_action_index,
+                action_identity=dict(root_action.action_identity),
+                eligible=root_action.eligible,
+                native_visits=root_action.visits,
+                native_mean_value=root_action.mean_value,
+                model_policy_logit=model_score.policy_logit,
+                model_policy_probability=model_score.policy_probability,
+                combined_score=combined,
+                model_guidance_multiplier=multiplier,
+            )
+        )
+    return tuple(rows)
+
+
 def select_model_guided_oracle_root_action(
     root_scores: Sequence[ModelGuidedOracleRootScore],
+    *,
+    selection_rule: str = MODEL_GUIDED_ORACLE_ROOT_SELECTION_RULE,
 ) -> ModelGuidedOracleSearchTarget:
     """Select the highest combined root score, with deterministic tie-breaks."""
 
@@ -397,7 +659,7 @@ def select_model_guided_oracle_root_action(
     assert selected.native_mean_value is not None
     assert selected.combined_score is not None
     return ModelGuidedOracleSearchTarget(
-        selection_rule=MODEL_GUIDED_ORACLE_ROOT_SELECTION_RULE,
+        selection_rule=selection_rule,
         legal_action_index=selected.legal_action_index,
         action_identity=dict(selected.action_identity),
         native_visits=selected.native_visits,
@@ -449,11 +711,12 @@ def model_guided_oracle_search_controller_metadata(
             "oracle_search_selected_mean_value": target.native_mean_value,
             "model_guided_oracle_decision_count": 1,
             "model_guided_oracle_controller_version": (
-                MODEL_GUIDED_ORACLE_SEARCH_CONTROLLER_VERSION
+                decision_report.controller_version
             ),
             "model_guided_oracle_selection_rule": target.selection_rule,
-            "model_guided_oracle_guidance_formula": _guidance_formula(
-                decision_report.policy_probability_weight
+            "model_guided_oracle_guidance_formula": (
+                decision_report.guidance_formula
+                or _guidance_formula(decision_report.policy_probability_weight)
             ),
             "model_guided_oracle_policy_probability_weight": (
                 decision_report.policy_probability_weight
@@ -515,15 +778,25 @@ def model_guided_oracle_search_decision_telemetry(
         "current native battle_search API does not accept model priors or "
         "allocation hints; guidance is root selection only"
     )
+    if (
+        decision_report.controller_version
+        == MODEL_GUIDED_ORACLE_SEARCH_V2_CONTROLLER_VERSION
+    ):
+        unavailable["model_guided_leaf_values"] = (
+            "current native battle_search API does not accept model leaf values; "
+            "v2 visit adjustment is applied only after root search completes"
+        )
     checkpoint = decision_report.guidance_result.checkpoint_provenance
     return SearchDecisionTelemetry(
         information_regime=oracle_report.information_regime,
-        controller_kind="model_guided_oracle_battle_search",
-        search_kind="native_random_terminal_playout_with_public_root_guidance",
+        controller_kind=decision_report.telemetry_controller_kind,
+        search_kind=decision_report.search_kind,
         search_backend={
             "native_api": oracle_report.native_api,
             "patch_identity": oracle_report.patch_identity,
             "schema_id": oracle_report.schema_id,
+            "controller_version": decision_report.controller_version,
+            "root_selection_rule": decision_report.root_selection_rule,
             "guidance_schema_id": decision_report.guidance_result.schema_id,
             "guidance_schema_version": decision_report.guidance_result.schema_version,
             "guidance_scorer": decision_report.guidance_result.scorer_name,
@@ -572,6 +845,20 @@ def _guidance_formula(policy_probability_weight: float) -> str:
         "combined_score = native_mean_value + "
         f"{policy_probability_weight:g} * model_policy_probability"
     )
+
+
+def _v2_guidance_formula(policy_probability_weight: float) -> str:
+    return (
+        "combined_score = native_mean_value + "
+        f"{policy_probability_weight:g} * model_policy_probability * "
+        "sqrt(total_root_visits / native_visits)"
+    )
+
+
+def _v2_model_guidance_multiplier(*, root_visits: int, native_visits: int) -> float:
+    if root_visits <= 0 or native_visits <= 0:
+        return 1.0
+    return math.sqrt(root_visits / native_visits)
 
 
 def _scorer_checkpoint_provenance(

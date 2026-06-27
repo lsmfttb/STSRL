@@ -34,8 +34,14 @@ MODEL_GUIDED_SEARCH_FIXED_COMPARISON_SCHEMA_ID = (
     "model-guided-search-fixed-comparison-v1"
 )
 MODEL_GUIDED_SEARCH_FIXED_COMPARISON_FORMAT_VERSION = 1
+MODEL_GUIDED_SEARCH_V2_FIXED_COMPARISON_SCHEMA_ID = (
+    "model-guided-search-fixed-comparison-v2"
+)
+MODEL_GUIDED_SEARCH_V2_FIXED_COMPARISON_FORMAT_VERSION = 1
 BASELINE_ORACLE_LABEL = "baseline_oracle_search"
 MODEL_GUIDED_ORACLE_LABEL = "model_guided_oracle_search"
+MODEL_GUIDED_ORACLE_V1_LABEL = "model_guided_oracle_search_v1"
+MODEL_GUIDED_ORACLE_V2_LABEL = "model_guided_oracle_search_v2"
 MODEL_GUIDED_SEARCH_COMPARISON_EVIDENCE_BOUNDARY = (
     "full_simulator_state_oracle_like diagnostics only; not normal-information, "
     "live-game, broad-training, or controller-strength evidence"
@@ -95,6 +101,63 @@ class ModelGuidedSearchFixedComparisonReport:
         )
 
 
+@dataclass(frozen=True)
+class ModelGuidedSearchV2FixedComparisonReport:
+    """T035 comparison report for baseline, T028/v1, and T035/v2 controllers."""
+
+    baseline_report: FixedEvaluationReport
+    model_guided_v1_report: FixedEvaluationReport
+    model_guided_v2_report: FixedEvaluationReport
+    comparison_config: dict[str, Any]
+    report_problems: list[str] = field(default_factory=list)
+    schema_id: str = MODEL_GUIDED_SEARCH_V2_FIXED_COMPARISON_SCHEMA_ID
+    format_version: int = MODEL_GUIDED_SEARCH_V2_FIXED_COMPARISON_FORMAT_VERSION
+    evidence_boundary: str = MODEL_GUIDED_SEARCH_COMPARISON_EVIDENCE_BOUNDARY
+
+    @property
+    def cohort_identity(self) -> str:
+        identities = {
+            self.baseline_report.cohort_identity,
+            self.model_guided_v1_report.cohort_identity,
+            self.model_guided_v2_report.cohort_identity,
+        }
+        if len(identities) == 1:
+            return self.baseline_report.cohort_identity
+        return "|".join(sorted(identities))
+
+    @property
+    def run_scale(self) -> str:
+        value = self.comparison_config.get("run_scale", "smoke")
+        return str(value) if value else "smoke"
+
+    @property
+    def smoke_scale(self) -> bool:
+        return self.run_scale == "smoke"
+
+    @property
+    def source_match_problems(self) -> list[str]:
+        return fixed_report_sequence_source_match_problems(
+            (
+                (BASELINE_ORACLE_LABEL, self.baseline_report),
+                (MODEL_GUIDED_ORACLE_V1_LABEL, self.model_guided_v1_report),
+                (MODEL_GUIDED_ORACLE_V2_LABEL, self.model_guided_v2_report),
+            )
+        )
+
+    @property
+    def problems(self) -> list[str]:
+        return list(self.report_problems) + self.source_match_problems
+
+    @property
+    def evaluation_successful(self) -> bool:
+        return (
+            self.baseline_report.evaluation_successful
+            and self.model_guided_v1_report.evaluation_successful
+            and self.model_guided_v2_report.evaluation_successful
+            and not self.problems
+        )
+
+
 def build_model_guided_search_fixed_comparison_report(
     *,
     baseline_report: FixedEvaluationReport,
@@ -107,6 +170,25 @@ def build_model_guided_search_fixed_comparison_report(
     return ModelGuidedSearchFixedComparisonReport(
         baseline_report=baseline_report,
         model_guided_report=model_guided_report,
+        comparison_config=_json_safe_mapping(comparison_config),
+        report_problems=list(report_problems),
+    )
+
+
+def build_model_guided_search_v2_fixed_comparison_report(
+    *,
+    baseline_report: FixedEvaluationReport,
+    model_guided_v1_report: FixedEvaluationReport,
+    model_guided_v2_report: FixedEvaluationReport,
+    comparison_config: Mapping[str, Any],
+    report_problems: Sequence[str] = (),
+) -> ModelGuidedSearchV2FixedComparisonReport:
+    """Build the T035 three-controller fixed comparison report."""
+
+    return ModelGuidedSearchV2FixedComparisonReport(
+        baseline_report=baseline_report,
+        model_guided_v1_report=model_guided_v1_report,
+        model_guided_v2_report=model_guided_v2_report,
         comparison_config=_json_safe_mapping(comparison_config),
         report_problems=list(report_problems),
     )
@@ -154,6 +236,26 @@ def fixed_report_source_match_problems(
                 f"cohort index {index}: source battle mismatch "
                 f"{baseline_key!r} != {model_key!r}"
             )
+    return problems
+
+
+def fixed_report_sequence_source_match_problems(
+    reports: Sequence[tuple[str, FixedEvaluationReport]],
+) -> list[str]:
+    """Return source-alignment problems for a same-cohort report sequence."""
+
+    if not reports:
+        return ["no fixed evaluation reports configured"]
+    baseline_label, baseline_report = reports[0]
+    problems: list[str] = []
+    for label, report in reports[1:]:
+        pair_problems = fixed_report_source_match_problems(
+            baseline_report,
+            report,
+        )
+        problems.extend(
+            f"{baseline_label} vs {label}: {problem}" for problem in pair_problems
+        )
     return problems
 
 
@@ -209,6 +311,71 @@ def comparison_budget_summary(
     }
 
 
+def comparison_v2_controller_summaries(
+    report: ModelGuidedSearchV2FixedComparisonReport,
+) -> dict[str, dict[str, Any]]:
+    """Return per-controller summaries for the T035 three-way comparison."""
+
+    return {
+        BASELINE_ORACLE_LABEL: _controller_summary(report.baseline_report),
+        MODEL_GUIDED_ORACLE_V1_LABEL: _controller_summary(
+            report.model_guided_v1_report
+        ),
+        MODEL_GUIDED_ORACLE_V2_LABEL: _controller_summary(
+            report.model_guided_v2_report
+        ),
+    }
+
+
+def comparison_v2_aggregate_outcomes(
+    report: ModelGuidedSearchV2FixedComparisonReport,
+) -> dict[str, dict[str, Any]]:
+    """Return aggregate outcome slices for every T035 compared controller."""
+
+    return {
+        BASELINE_ORACLE_LABEL: _aggregate_outcomes(report.baseline_report),
+        MODEL_GUIDED_ORACLE_V1_LABEL: _aggregate_outcomes(
+            report.model_guided_v1_report
+        ),
+        MODEL_GUIDED_ORACLE_V2_LABEL: _aggregate_outcomes(
+            report.model_guided_v2_report
+        ),
+    }
+
+
+def comparison_v2_budget_summary(
+    report: ModelGuidedSearchV2FixedComparisonReport,
+) -> dict[str, Any]:
+    """Return equal-budget and observed-cost metadata for the T035 comparison."""
+
+    summaries = comparison_v2_controller_summaries(report)
+    configured = {
+        BASELINE_ORACLE_LABEL: _configured_native_playouts(report.baseline_report),
+        MODEL_GUIDED_ORACLE_V1_LABEL: _configured_native_playouts(
+            report.model_guided_v1_report
+        ),
+        MODEL_GUIDED_ORACLE_V2_LABEL: _configured_native_playouts(
+            report.model_guided_v2_report
+        ),
+    }
+    configured_values = list(configured.values())
+    return {
+        "equal_native_playout_budget": (
+            all(value is not None for value in configured_values)
+            and len(set(configured_values)) == 1
+        ),
+        "configured_native_playouts": configured,
+        "wall_clock_control": "observed_only",
+        "wall_clock_note": (
+            "the current command controls native playout budget; wall-clock is "
+            "measured after each run rather than forced equal"
+        ),
+        "observed": {
+            label: _observed_costs(summary) for label, summary in summaries.items()
+        },
+    }
+
+
 def build_battle_comparisons(
     report: ModelGuidedSearchFixedComparisonReport,
 ) -> list[dict[str, Any]]:
@@ -249,6 +416,64 @@ def build_battle_comparisons(
                 "source": source,
                 "baseline": _result_summary(baseline),
                 "model_guided": _result_summary(model_guided),
+                "problems": problems,
+            }
+        )
+    return rows
+
+
+def build_v2_battle_comparisons(
+    report: ModelGuidedSearchV2FixedComparisonReport,
+) -> list[dict[str, Any]]:
+    """Return per-battle source and outcome rows for the T035 comparison."""
+
+    rows: list[dict[str, Any]] = []
+    count = max(
+        report.baseline_report.total_battles,
+        report.model_guided_v1_report.total_battles,
+        report.model_guided_v2_report.total_battles,
+    )
+    reports = {
+        BASELINE_ORACLE_LABEL: report.baseline_report.battle_results,
+        MODEL_GUIDED_ORACLE_V1_LABEL: report.model_guided_v1_report.battle_results,
+        MODEL_GUIDED_ORACLE_V2_LABEL: report.model_guided_v2_report.battle_results,
+    }
+    for index in range(count):
+        results = {
+            label: _optional_result(values, index) for label, values in reports.items()
+        }
+        present_keys = {
+            label: _source_key(result)
+            for label, result in results.items()
+            if result is not None
+        }
+        problems = [
+            f"missing {label} result"
+            for label, result in results.items()
+            if result is None
+        ]
+        source_match = (
+            bool(present_keys)
+            and len(
+                {json.dumps(value, sort_keys=True) for value in present_keys.values()}
+            )
+            == 1
+        )
+        if not source_match:
+            problems.append("source battle mismatch")
+        source = next(iter(present_keys.values()), {})
+        rows.append(
+            {
+                "comparison_index": index,
+                "source_match": source_match,
+                "source": source,
+                "baseline": _result_summary(results[BASELINE_ORACLE_LABEL]),
+                "model_guided_v1": _result_summary(
+                    results[MODEL_GUIDED_ORACLE_V1_LABEL]
+                ),
+                "model_guided_v2": _result_summary(
+                    results[MODEL_GUIDED_ORACLE_V2_LABEL]
+                ),
                 "problems": problems,
             }
         )
@@ -299,6 +524,55 @@ def dump_model_guided_search_fixed_comparison_jsonl(
         _write_row(stream, {"type": "baseline_result", "result": result})
     for result in model_results:
         _write_row(stream, {"type": "model_guided_result", "result": result})
+
+
+def dump_model_guided_search_v2_fixed_comparison_jsonl(
+    report: ModelGuidedSearchV2FixedComparisonReport,
+    stream: TextIO,
+) -> None:
+    """Write a current-schema T035 three-way comparison report to JSONL."""
+
+    baseline_metadata, baseline_results = _fixed_report_manifest_rows(
+        report.baseline_report
+    )
+    v1_metadata, v1_results = _fixed_report_manifest_rows(report.model_guided_v1_report)
+    v2_metadata, v2_results = _fixed_report_manifest_rows(report.model_guided_v2_report)
+    metadata = {
+        "schema_id": report.schema_id,
+        "format_version": report.format_version,
+        "cohort_identity": report.cohort_identity,
+        "run_scale": report.run_scale,
+        "smoke_scale": report.smoke_scale,
+        "evidence_boundary": report.evidence_boundary,
+        "comparison_config": _json_safe_mapping(report.comparison_config),
+        "source_match_status": (
+            "matched" if not report.source_match_problems else "mismatch"
+        ),
+        "source_match_problems": list(report.source_match_problems),
+        "controller_summaries": comparison_v2_controller_summaries(report),
+        "aggregate_outcomes": comparison_v2_aggregate_outcomes(report),
+        "budget_comparison": comparison_v2_budget_summary(report),
+        "baseline_report_metadata": baseline_metadata,
+        "model_guided_v1_report_metadata": v1_metadata,
+        "model_guided_v2_report_metadata": v2_metadata,
+        "battle_comparison_count": max(
+            report.baseline_report.total_battles,
+            report.model_guided_v1_report.total_battles,
+            report.model_guided_v2_report.total_battles,
+        ),
+        "evaluation_successful": report.evaluation_successful,
+        "report_problems": list(report.report_problems),
+        "problems": list(report.problems),
+    }
+    _write_row(stream, {"type": "metadata", "metadata": metadata})
+    for comparison in build_v2_battle_comparisons(report):
+        _write_row(stream, {"type": "battle_comparison", "comparison": comparison})
+    for result in baseline_results:
+        _write_row(stream, {"type": "baseline_result", "result": result})
+    for result in v1_results:
+        _write_row(stream, {"type": "model_guided_v1_result", "result": result})
+    for result in v2_results:
+        _write_row(stream, {"type": "model_guided_v2_result", "result": result})
 
 
 def load_model_guided_search_fixed_comparison_jsonl(
@@ -382,6 +656,98 @@ def load_model_guided_search_fixed_comparison_jsonl(
     )
 
 
+def load_model_guided_search_v2_fixed_comparison_jsonl(
+    stream: TextIO,
+) -> ModelGuidedSearchV2FixedComparisonReport:
+    """Load a current-schema T035 three-way fixed comparison report."""
+
+    metadata: dict[str, Any] | None = None
+    baseline_results: list[dict[str, Any]] = []
+    v1_results: list[dict[str, Any]] = []
+    v2_results: list[dict[str, Any]] = []
+    for line_number, raw_line in enumerate(stream, start=1):
+        if not raw_line.strip():
+            continue
+        try:
+            row = json.loads(raw_line)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"line {line_number}: invalid JSON") from exc
+        if not isinstance(row, dict):
+            raise ValueError(f"line {line_number}: row must be an object")
+        row_type = row.get("type")
+        if row_type == "metadata":
+            if metadata is not None:
+                raise ValueError(f"line {line_number}: duplicate metadata")
+            metadata = _require_mapping(row.get("metadata"), "metadata")
+        elif row_type == "baseline_result":
+            baseline_results.append(_require_mapping(row.get("result"), "result"))
+        elif row_type == "model_guided_v1_result":
+            v1_results.append(_require_mapping(row.get("result"), "result"))
+        elif row_type == "model_guided_v2_result":
+            v2_results.append(_require_mapping(row.get("result"), "result"))
+        elif row_type == "battle_comparison":
+            _require_mapping(row.get("comparison"), "comparison")
+        else:
+            raise ValueError(f"line {line_number}: unknown row type")
+    if metadata is None:
+        raise ValueError("missing fixed comparison metadata")
+
+    schema_id = metadata.get("schema_id")
+    if schema_id != MODEL_GUIDED_SEARCH_V2_FIXED_COMPARISON_SCHEMA_ID:
+        raise ValueError(
+            f"unsupported fixed comparison schema_id {schema_id!r}; expected "
+            f"{MODEL_GUIDED_SEARCH_V2_FIXED_COMPARISON_SCHEMA_ID!r}"
+        )
+    format_version = metadata.get("format_version")
+    if format_version != MODEL_GUIDED_SEARCH_V2_FIXED_COMPARISON_FORMAT_VERSION:
+        raise ValueError(
+            "unsupported fixed comparison format_version "
+            f"{format_version!r}; expected "
+            f"{MODEL_GUIDED_SEARCH_V2_FIXED_COMPARISON_FORMAT_VERSION}"
+        )
+
+    baseline_report = _fixed_report_from_manifest_rows(
+        _require_mapping(
+            metadata.get("baseline_report_metadata"),
+            "baseline_report_metadata",
+        ),
+        baseline_results,
+    )
+    v1_report = _fixed_report_from_manifest_rows(
+        _require_mapping(
+            metadata.get("model_guided_v1_report_metadata"),
+            "model_guided_v1_report_metadata",
+        ),
+        v1_results,
+    )
+    v2_report = _fixed_report_from_manifest_rows(
+        _require_mapping(
+            metadata.get("model_guided_v2_report_metadata"),
+            "model_guided_v2_report_metadata",
+        ),
+        v2_results,
+    )
+    return ModelGuidedSearchV2FixedComparisonReport(
+        baseline_report=baseline_report,
+        model_guided_v1_report=v1_report,
+        model_guided_v2_report=v2_report,
+        comparison_config=_require_mapping(
+            metadata.get("comparison_config"),
+            "comparison_config",
+        ),
+        report_problems=_require_string_list(
+            metadata.get("report_problems", []),
+            "report_problems",
+        ),
+        evidence_boundary=_require_non_empty_string(
+            metadata.get(
+                "evidence_boundary", MODEL_GUIDED_SEARCH_COMPARISON_EVIDENCE_BOUNDARY
+            ),
+            "evidence_boundary",
+        ),
+    )
+
+
 def format_model_guided_search_fixed_comparison_report(
     report: ModelGuidedSearchFixedComparisonReport,
 ) -> str:
@@ -432,6 +798,69 @@ def format_model_guided_search_fixed_comparison_report(
             "",
             "Model-guided Oracle evaluation",
             format_fixed_evaluation_report(report.model_guided_report),
+        ]
+    )
+    return "\n".join(lines)
+
+
+def format_model_guided_search_v2_fixed_comparison_report(
+    report: ModelGuidedSearchV2FixedComparisonReport,
+) -> str:
+    """Format a T035 three-controller fixed-cohort comparison for stderr."""
+
+    lines = [
+        format_lightspeed_source_identity(),
+        "",
+        "Model-guided Oracle search v2 fixed-cohort comparison",
+        f"schema: {report.schema_id} v{report.format_version}",
+        f"cohort identity: {report.cohort_identity}",
+        f"run scale: {_format_v2_run_scale(report)}",
+        f"evidence boundary: {report.evidence_boundary}",
+        (
+            "source starts matched: "
+            f"{'yes' if not report.source_match_problems else 'no'}"
+        ),
+        f"evaluation successful: {'yes' if report.evaluation_successful else 'no'}",
+        "",
+        _format_v2_budget_comparison(report),
+        "",
+        _format_v2_controller_summaries(report),
+        "",
+        _format_v2_aggregate_comparison(report),
+        "",
+        _format_search_telemetry(
+            report.baseline_report,
+            title="Baseline Oracle search compute telemetry",
+        ),
+        "",
+        _format_search_telemetry(
+            report.model_guided_v1_report,
+            title="T028 model-guided Oracle search compute telemetry",
+        ),
+        "",
+        _format_search_telemetry(
+            report.model_guided_v2_report,
+            title="T035 model-guided Oracle search v2 compute telemetry",
+        ),
+        "",
+        "problems:",
+    ]
+    if report.problems:
+        lines.extend(f"  - {problem}" for problem in report.problems)
+    else:
+        lines.append("  (none)")
+
+    lines.extend(
+        [
+            "",
+            "Baseline Oracle evaluation",
+            format_fixed_evaluation_report(report.baseline_report),
+            "",
+            "T028 model-guided Oracle evaluation",
+            format_fixed_evaluation_report(report.model_guided_v1_report),
+            "",
+            "T035 model-guided Oracle v2 evaluation",
+            format_fixed_evaluation_report(report.model_guided_v2_report),
         ]
     )
     return "\n".join(lines)
@@ -732,6 +1161,189 @@ def _format_aggregate_comparison(
     return "\n".join(lines)
 
 
+def _format_v2_budget_comparison(
+    report: ModelGuidedSearchV2FixedComparisonReport,
+) -> str:
+    summary = comparison_v2_budget_summary(report)
+    configured = summary["configured_native_playouts"]
+    observed = summary["observed"]
+    lines = [
+        "Budget and cost comparison",
+        (
+            "equal native playout budget: "
+            f"{'yes' if summary['equal_native_playout_budget'] else 'no'}"
+        ),
+        "configured native playouts:",
+    ]
+    for label in (
+        BASELINE_ORACLE_LABEL,
+        MODEL_GUIDED_ORACLE_V1_LABEL,
+        MODEL_GUIDED_ORACLE_V2_LABEL,
+    ):
+        lines.append(f"  {label}: {_format_optional_number(configured[label])}")
+    lines.extend(
+        [
+            f"wall-clock control: {summary['wall_clock_control']}",
+            "battle wall-clock seconds:",
+        ]
+    )
+    for label in (
+        BASELINE_ORACLE_LABEL,
+        MODEL_GUIDED_ORACLE_V1_LABEL,
+        MODEL_GUIDED_ORACLE_V2_LABEL,
+    ):
+        lines.append(
+            f"  {label}: "
+            f"{_format_optional_number(observed[label]['battle_wall_clock_time_s'], precision=6)}"
+        )
+    lines.append("native search simulator steps:")
+    for label in (
+        BASELINE_ORACLE_LABEL,
+        MODEL_GUIDED_ORACLE_V1_LABEL,
+        MODEL_GUIDED_ORACLE_V2_LABEL,
+    ):
+        lines.append(
+            f"  {label}: "
+            f"{_format_optional_number(observed[label]['native_search_simulator_steps'])}"
+        )
+    lines.append("model calls:")
+    for label in (
+        BASELINE_ORACLE_LABEL,
+        MODEL_GUIDED_ORACLE_V1_LABEL,
+        MODEL_GUIDED_ORACLE_V2_LABEL,
+    ):
+        lines.append(
+            f"  {label}: {_format_optional_number(observed[label]['model_calls'])}"
+        )
+    lines.append("restore/truncation/error counts:")
+    for label in (
+        BASELINE_ORACLE_LABEL,
+        MODEL_GUIDED_ORACLE_V1_LABEL,
+        MODEL_GUIDED_ORACLE_V2_LABEL,
+    ):
+        values = observed[label]
+        lines.append(
+            f"  {label}: {values['restore_failures']}/"
+            f"{values['truncations']}/{values['errors']}"
+        )
+    return "\n".join(lines)
+
+
+def _format_v2_controller_summaries(
+    report: ModelGuidedSearchV2FixedComparisonReport,
+) -> str:
+    summaries = comparison_v2_controller_summaries(report)
+    lines = ["Controller summaries"]
+    for label in (
+        BASELINE_ORACLE_LABEL,
+        MODEL_GUIDED_ORACLE_V1_LABEL,
+        MODEL_GUIDED_ORACLE_V2_LABEL,
+    ):
+        summary = summaries[label]
+        observed = _observed_costs(summary)
+        lines.extend(
+            [
+                f"{label}:",
+                f"  controller: {summary['controller_name']}",
+                f"  information regime: {summary['information_regime']}",
+                (
+                    "  outcomes: "
+                    f"{summary['authoritative_wins']}W/"
+                    f"{summary['losses']}L, "
+                    f"truncations={summary['truncations']}, "
+                    f"errors={summary['errors']}"
+                ),
+                f"  decisions: {summary['decision_count']}",
+                (
+                    "  native search simulator steps: "
+                    f"{_format_optional_number(observed['native_search_simulator_steps'])}"
+                ),
+                (f"  model calls: {_format_optional_number(observed['model_calls'])}"),
+            ]
+        )
+    return "\n".join(lines)
+
+
+def _format_v2_aggregate_comparison(
+    report: ModelGuidedSearchV2FixedComparisonReport,
+) -> str:
+    aggregates = {
+        BASELINE_ORACLE_LABEL: build_evaluation_aggregates(
+            report.baseline_report,
+            per_stratum_source_counts=report.baseline_report.per_stratum_source_counts,
+        ),
+        MODEL_GUIDED_ORACLE_V1_LABEL: build_evaluation_aggregates(
+            report.model_guided_v1_report,
+            per_stratum_source_counts=(
+                report.model_guided_v1_report.per_stratum_source_counts
+            ),
+        ),
+        MODEL_GUIDED_ORACLE_V2_LABEL: build_evaluation_aggregates(
+            report.model_guided_v2_report,
+            per_stratum_source_counts=(
+                report.model_guided_v2_report.per_stratum_source_counts
+            ),
+        ),
+    }
+    labels = (
+        BASELINE_ORACLE_LABEL,
+        MODEL_GUIDED_ORACLE_V1_LABEL,
+        MODEL_GUIDED_ORACLE_V2_LABEL,
+    )
+    lines = [
+        "Aggregate outcome comparison",
+        "natural-weighted win rate:",
+    ]
+    for label in labels:
+        lines.append(
+            f"  {label}: {_format_rate(aggregates[label].natural_weighted.win_rate)}"
+        )
+    lines.append("natural-weighted mean HP loss:")
+    for label in labels:
+        lines.append(
+            f"  {label}: "
+            f"{_format_rate(aggregates[label].natural_weighted.mean_hp_loss)}"
+        )
+    lines.append("encounter-macro win rates:")
+    encounter_keys = sorted(
+        set().union(*(aggregate.encounter_macro for aggregate in aggregates.values()))
+    )
+    for key in encounter_keys:
+        parts = [
+            f"{label}={_format_rate(_slice_win_rate(aggregates[label].encounter_macro, key))}"
+            for label in labels
+        ]
+        lines.append(f"  {key}: " + ", ".join(parts))
+    if not encounter_keys:
+        lines.append("  (none)")
+    lines.append("room-type-macro win rates:")
+    room_keys = sorted(
+        set().union(*(aggregate.room_type_macro for aggregate in aggregates.values()))
+    )
+    for key in room_keys:
+        parts = [
+            f"{label}={_format_rate(_slice_win_rate(aggregates[label].room_type_macro, key))}"
+            for label in labels
+        ]
+        lines.append(f"  {key}: " + ", ".join(parts))
+    if not room_keys:
+        lines.append("  (none)")
+    lines.append("per-stratum win rates:")
+    stratum_keys = sorted(
+        set().union(*(aggregate.per_stratum for aggregate in aggregates.values())),
+        key=repr,
+    )
+    for key in stratum_keys:
+        parts = [
+            f"{label}={_format_rate(_slice_win_rate(aggregates[label].per_stratum, key))}"
+            for label in labels
+        ]
+        lines.append(f"  {_stratum_label(key)}: " + ", ".join(parts))
+    if not stratum_keys:
+        lines.append("  (none)")
+    return "\n".join(lines)
+
+
 def _slice_win_rate(
     values: Mapping[Any, AggregateSlice],
     key: Any,
@@ -816,6 +1428,12 @@ def _stratum_label(value: Sequence[Any]) -> str:
 
 
 def _format_run_scale(report: ModelGuidedSearchFixedComparisonReport) -> str:
+    if report.smoke_scale:
+        return "smoke-scale"
+    return report.run_scale
+
+
+def _format_v2_run_scale(report: ModelGuidedSearchV2FixedComparisonReport) -> str:
     if report.smoke_scale:
         return "smoke-scale"
     return report.run_scale
