@@ -34,11 +34,12 @@ coverage can be recovered by scaled search-controlled collection.
 - Specify minimum restore, public-context, structured-outcome, and T009 gate
   evidence that T032 or its revised successor must report.
 - Specify the required WSL execution contract for regenerated or extended
-  source-coverage artifacts. Large collection/coverage runs must use explicit
-  shards and parallel workers by default, and must report shard identity,
-  worker count, seed/source-run ranges, and wall-clock cost. Single-worker
-  execution is acceptable only for smoke/debug commands or documented resource
-  constraints.
+  source-coverage artifacts. Large collection, restore, coverage, report, or
+  teacher-collection stages must use explicit shards and parallel workers by
+  default, and must report shard identity, worker count, seed/source-run or
+  record ranges, and wall-clock cost for each stage. Single-worker execution is
+  acceptable only for smoke/debug commands, non-simulator artifact aggregation,
+  or documented resource/tooling constraints.
 
 ## Out Of Scope
 
@@ -55,9 +56,9 @@ coverage can be recovered by scaled search-controlled collection.
   reviewers can regenerate or verify it.
 - The contract says explicitly whether T032 remains blocked, becomes `READY`,
   or must be revised into a narrower task before becoming `READY`.
-- Any accepted scale evidence includes a reproducible sharded/parallel WSL
-  execution plan, or explicitly labels single-worker evidence as smoke/debug
-  only.
+- Any accepted scale evidence includes a reproducible stage-by-stage
+  sharded/parallel WSL execution plan, or explicitly labels each single-worker
+  WSL stage as smoke/debug/tooling-limited only.
 - No broad A20 training claim is made without later-act/Boss source coverage and
   gate evidence.
 

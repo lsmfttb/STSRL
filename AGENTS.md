@@ -24,11 +24,15 @@ current contracts.
   evaluation, and simulator gates. Do not implement Slay the Spire mechanics
   locally.
 - Real `sts_lightspeed` gates run through WSL, not Windows Python.
-- Large WSL `sts_lightspeed` source-generation or evaluation runs must be
-  sharded and run with explicit parallel workers by default. Single-worker
-  execution is acceptable only for smoke tests, debugging, or a documented
-  resource constraint, and the PR must report shard/worker counts and
-  wall-clock cost.
+- Large WSL `sts_lightspeed` source-generation, restore, coverage,
+  reachability, teacher-collection, or evaluation runs must be sharded and run
+  with explicit parallel workers by default. This applies per stage:
+  parallelizing source generation does not by itself justify a single-worker
+  downstream coverage/restore gate. Single-worker execution is acceptable only
+  for smoke tests, debugging, non-simulator artifact aggregation, or a
+  documented resource/tooling constraint, and the PR must report the
+  shard/worker count, wall-clock cost, and single-worker reason for every WSL
+  stage.
 - Simulator-only training is allowed, but any trained or search controller
   claimed live-game runnable must pass the CommunicationMod runtime adapter and
   share the same public decision/action contract.

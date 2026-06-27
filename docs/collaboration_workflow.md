@@ -107,11 +107,15 @@ Every task document must define:
 A task that cannot be objectively accepted is not ready.
 
 If a task requires large WSL `sts_lightspeed` source generation, restored
-evaluation, coverage, or training-scale simulation, its specification must
-include an explicit sharding and parallel-worker plan. Single-worker execution
-may be specified only for smoke tests, local debugging, or a documented
-resource limit. The PR report must include shard/worker counts and wall-clock
-cost so reviewers can distinguish scale evidence from a slow smoke run.
+evaluation, coverage, teacher collection, or training-scale simulation, its
+specification must include an explicit stage-by-stage sharding and
+parallel-worker plan. Source collection, restore/coverage gates, report
+rebuilds, teacher collection, and restored evaluation are separate stages for
+this purpose. Single-worker execution may be specified only for smoke tests,
+local debugging, non-simulator artifact aggregation, or a documented resource
+or tooling limit. The PR report must include shard/worker counts and wall-clock
+cost for each WSL stage so reviewers can distinguish scale evidence from a
+slow smoke run.
 
 ## Task Artifact Boundaries
 

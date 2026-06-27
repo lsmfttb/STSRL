@@ -47,10 +47,15 @@ save files, and large artifacts do not belong in this repository.
 
 Large WSL simulator workloads are expected to be explicitly sharded and run
 with parallel workers. A single-worker run is a smoke/debug path, not the
-default execution mode for source-generation, restored-evaluation, coverage, or
-training-scale evidence. Reports for such workloads must preserve enough
-runtime provenance to reproduce the parallel execution plan, including shard
-identity, worker count, seed/source-run ranges, and wall-clock cost.
+default execution mode for source-generation, restore verification, coverage
+gates, reachability reports, teacher collection, restored evaluation, or
+training-scale evidence. The parallelism requirement applies to each expensive
+stage separately; running source generation in parallel does not make a later
+coverage or restore gate acceptable as an undocumented single-worker run.
+Reports for such workloads must preserve enough runtime provenance to
+reproduce every stage of the execution plan, including shard identity, worker
+count, seed/source-run or record ranges, wall-clock cost, and any explicit
+reason a stage used one worker.
 
 ## Real Game Runtime Boundary
 

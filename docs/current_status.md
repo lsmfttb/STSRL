@@ -706,8 +706,12 @@ source.
 Scale matters operationally. T037 exposed that a single-worker WSL
 source-generation run is too slow and leaves host resources underused for
 1,000-run evidence. Future large WSL `sts_lightspeed` source-generation,
-coverage, restored-evaluation, or training-scale runs should be sharded and
-executed with explicit parallel workers by default, with shard identity,
-worker count, seed/source-run ranges, and wall-clock cost reported in the PR.
-Single-worker WSL execution is reserved for smoke tests, debugging, or a
-documented resource constraint.
+coverage, restore verification, teacher collection, restored-evaluation, or
+training-scale runs should be sharded and executed with explicit parallel
+workers by default. This is a per-stage requirement: source collection,
+coverage/restore gates, report rebuilding, and teacher collection each need a
+reported worker/shard plan or an explicit single-worker reason. PRs must report
+shard identity, worker count, seed/source-run or record ranges, wall-clock cost,
+and any single-worker exception. Single-worker WSL execution is reserved for
+smoke tests, debugging, non-simulator artifact aggregation, or a documented
+resource/tooling constraint.

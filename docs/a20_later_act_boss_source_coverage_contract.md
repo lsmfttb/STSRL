@@ -205,10 +205,14 @@ Get-FileHash artifacts\t037-reachability-scaleup\reachability-report.json -Algor
 Get-FileHash artifacts\t037-reachability-scaleup\oracle-s20-no-potion-shard-manifest.json -Algorithm SHA256
 ```
 
-Regeneration or extension runs must be sharded and parallel by default. The
-accepted scale shape is 40 shards of 25 source runs over seeds `1..1000`.
-Single-worker execution is allowed only for smoke/debug commands or a reported
-resource constraint.
+Regeneration or extension runs must be sharded and parallel by default at each
+expensive WSL stage. The accepted source-generation shape is 40 shards of 25
+source runs over seeds `1..1000`. Restore/coverage gates over those generated
+records are a separate expensive stage and must also run shard-level parallel
+or report a smoke/debug/tooling-limited single-worker reason. Non-simulator
+merge and summary aggregation may be single-process when they are deterministic
+artifact operations. Single-worker simulator execution is allowed only for
+smoke/debug commands or a reported resource/tooling constraint.
 
 Each shard uses this command shape, with `SHARD_INDEX` from `0` to `39` and
 `START_SEED = 1 + SHARD_INDEX * 25`:
@@ -220,7 +224,10 @@ wsl.exe -d Ubuntu -e bash -lc 'set -euo pipefail; cd /mnt/d/DeadlycatCoding/STSR
 The PR that regenerates or extends coverage must report the actual worker count,
 shard indices, seed ranges, terminal source-run count, merge procedure,
 wall-clock cost, and SHA-256 identities of the regenerated pool, coverage
-report, reachability report, and shard manifest.
+report, reachability report, and shard manifest. Report these by stage rather
+than only once for the whole workflow: source generation, source merge,
+coverage/restore verification, coverage merge, and reachability/report
+rebuilds.
 
 The merge step must be deterministic and auditable:
 
@@ -238,7 +245,11 @@ The merge step must be deterministic and auditable:
 - dump the merged pool with the current writer and record its SHA-256.
 
 After producing a merged pool, rebuild coverage with full restore verification
-and the explicit A20 per-act gate:
+and the explicit A20 per-act gate. For scale runs this coverage/restore gate
+must be run over shards with explicit parallel workers and then merged or
+summarized deterministically; the single command below is a command shape for a
+smoke run, one shard, or a documented tooling-limited full run, not permission
+to default the full 1,000-run coverage gate to one worker:
 
 ```powershell
 wsl.exe -d Ubuntu -e bash -lc "set -euo pipefail; cd /mnt/d/DeadlycatCoding/STSRL; PYTHONPATH=/home/lsmft/stsrl-spikes/sts_lightspeed/build-py:/mnt/d/DeadlycatCoding/STSRL/src python3 -m sts_combat_rl.cli --lightspeed-a20-battle-start-coverage artifacts/t037-reachability-scaleup/oracle-s20-no-potion-pool.jsonl --a20-coverage-output artifacts/t037-reachability-scaleup/oracle-s20-no-potion-coverage.json --battle-start-restore-limit 0 --pytorch-gate-required-ascensions 20 --pytorch-gate-required-acts 1 2 3 4 --log-file -"

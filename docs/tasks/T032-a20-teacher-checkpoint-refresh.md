@@ -141,6 +141,13 @@ regenerate them using the T039 sharded/parallel contract. Run T023/T024/T027
 commands on the selected T039 source set and report exact commands, artifact
 identities, and summaries.
 
+For every WSL stage, report whether it was parallel or single-worker: source
+regeneration, source merge, coverage/restore gate, selected-source teacher
+scale-up, and teacher-to-trainer restore/bridge. Source regeneration being
+parallel is not enough; coverage/restore and teacher collection need their own
+shard/worker counts, wall-clock cost, or explicit single-worker
+smoke/debug/tooling-limited reason.
+
 ## Legacy Reference
 
 Use current merged T023/T024/T026/T027/T039 workflows as applicable. Do not
@@ -151,6 +158,7 @@ inputs with schema and provenance.
 
 The PR must report task ID, consumed T039 artifact identities, selected-source
 manifest identity and counts, generated teacher/trainer/checkpoint/calibration
-artifact identities, verification commands, calibration summaries, T009
-broad-training gate outcome, `narrow_curriculum` override details, known risks,
-and legacy material consulted.
+artifact identities, per-stage WSL shard/worker runtime evidence, verification
+commands, calibration summaries, T009 broad-training gate outcome,
+`narrow_curriculum` override details, known risks, and legacy material
+consulted.
