@@ -93,6 +93,38 @@ def test_bridge_converts_teacher_action_target_and_writes_report(
     assert report_json["evidence_boundary"]["not_normal_information"] is True
 
 
+def test_bridge_resolves_scaleup_cli_cwd_relative_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest_path, _trainer_path, _report_path = _write_artifact_chain(tmp_path)
+    raw = json.loads(manifest_path.read_text(encoding="utf-8"))
+    raw["input_artifacts"]["natural_pool"]["path"] = "pool.jsonl"
+    raw["generated_artifacts"][0]["teacher_artifact"]["path"] = "teacher.jsonl"
+    raw["generated_artifacts"][0]["t022_report_artifact"]["path"] = (
+        "teacher-report.json"
+    )
+    manifest_path.write_text(
+        json.dumps(raw, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    report = run_oracle_teacher_search_guidance_from_paths(
+        adapter_factory=_BridgeAdapter,
+        manifest_path=Path("oracle-teacher-scaleup-manifest.json"),
+        selected_budget=100,
+        output_path=Path("trainer-relative.jsonl"),
+        target="teacher_action_one_hot",
+        stability_filter="none",
+        report_output_path=Path("bridge-relative.json"),
+    )
+
+    assert report.command_passed
+    assert Path("trainer-relative.jsonl").exists()
+    assert report.source_pool_identity["path"] == "pool.jsonl"
+
+
 def test_bridge_converts_soft_visit_target_by_action_identity(tmp_path: Path) -> None:
     manifest_path, trainer_path, report_path = _write_artifact_chain(tmp_path)
 

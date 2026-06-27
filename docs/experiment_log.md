@@ -9,6 +9,61 @@ commit `d56e10e` and local artifacts. They are research evidence, not proof that
 the corresponding command or capability exists on the latest `main`. Current
 implementation truth is recorded only in [`current_status.md`](current_status.md).
 
+## 2026-06-27: T032 Narrow Teacher And Checkpoint Refresh
+
+T032 consumed the T039 narrow Boss/later-act source contract as a diagnostic
+teacher/checkpoint refresh, not broad A20 training evidence. The source pool
+was regenerated in this branch with the same T039 sharded shape: 40 shards,
+25 terminal source runs per shard, seeds `1..1000`, 8 parallel workers, A20,
+500-step cap, `oracle_search_v1_highest_mean_s20`, `highest_mean`, no battle
+potions, and the separate `stochastic-v1` non-combat driver. The regenerated
+pool reproduced the contracted coverage shape: 4,688 natural starts, 31 Act 1
+Boss starts, 3 Act 2 starts, 3,698 wins, and 990 losses. Coverage restore was
+also run as 40 shard-level coverage jobs with 8 workers, then summarized into a
+merged coverage report with 4,688/4,688 restores, 4,688 public-context matches,
+0 mismatches, and 4,688 available structured outcomes.
+
+Generated artifacts stayed under ignored paths:
+
+```text
+artifacts/t037-reachability-scaleup/oracle-s20-no-potion-pool.jsonl         sha256 3ae1c59cad415974adc8d35f7611888ded0d4c9ea3175f6508f31d5bb0b57ca2
+artifacts/t037-reachability-scaleup/oracle-s20-no-potion-coverage.json      sha256 07f8fce069bbf03fa12394e9a521748781275d0a87a3c851c19bbfe78f13e5a0
+artifacts/t032-teacher-refresh/scaleup/oracle-teacher-scaleup-manifest.json sha256 eaa31037f7e113d8d63a0add0f9bae969867d6274ac8556b1f5562750751983f
+artifacts/t032-teacher-refresh/bridge/t032-budget100-trainer.jsonl          sha256 805cc52f631cfb14c0907dd077d63bd14e06f1c089664f710d6259c3f22cff97
+artifacts/t032-teacher-refresh/checkpoint/t032-narrow-curriculum.pt         sha256 8b87dc203784aaeacc8eeabd14d933e4029eda8adee8e78f2f57006a4032a9c6
+artifacts/t032-teacher-refresh/calibration/t032-calibration-report.json      sha256 57b85505b8809ea13968ea50a5cbad42ee1879ebe3e522c42622db3ddedfc88f
+```
+
+The T032 selected-source contract used all 31 available Act 1 Boss starts, all
+3 available Act 2 starts, and 64 deterministic Act 1 non-Boss background starts
+selected with seed `32039` from 4,654 available candidates. The resulting
+98-source set covered 95 Act 1 rows and 3 Act 2 rows (`BOSS=31`, `ELITE=12`,
+`MONSTER=55`). Oracle-like teacher datasets were generated for budgets 20, 50,
+and 100 on the same selected source set. Each budget produced 98 teacher rows,
+98 unique natural sources, and 1,089 root rows. Native simulator steps were
+27,854, 69,871, and 139,325 respectively. Cross-budget teacher-action
+agreement was 35/98 sources across all budgets and 159/294 pairwise budget
+comparisons; soft targets were available for all 98 sources with mean pairwise
+total-variation distance 0.053912 and maximum 0.67.
+
+The budget-100 bridge emitted 98 trainer-input v6 rows, restored all rows by
+`seed_action_trace`, skipped none, preserved 98 available public contexts and
+98 available structured outcomes, and used
+`oracle_teacher_action_one_hot` targets from
+`oracle_teacher_row.teacher_action`. A one-epoch Windows PyTorch diagnostic
+checkpoint was trained under the named `narrow_curriculum` override; its
+trainer-input SHA-256 provenance matched the generated trainer artifact. T027
+calibration against that checkpoint evaluated 98/98 rows with 0 skipped rows,
+teacher top-1 agreement 20/98, teacher top-3 agreement 65/98, mean cross
+entropy 1.786224, mean KL 1.786224, mean target rank 2.979592, and action-row
+ECE 0.014812.
+
+The T009 broad-training gate stayed closed and separate from the
+`narrow_curriculum` override: Act 1 had 95 selected trainer records, Act 2 had
+3, and Acts 3--4 had 0. This is diagnostic Oracle-like supervision evidence
+only, not normal-information, live-game, broad-training, controller-strength,
+or promotion evidence.
+
 ## 2026-06-27: T037 Search-Controlled Reachability Scale-Up
 
 T037 scaled the current T036 search-controlled complete-run source collection

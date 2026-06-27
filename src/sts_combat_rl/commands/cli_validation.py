@@ -131,6 +131,15 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
             "--oracle-teacher-scaleup-coverage-report require "
             "--lightspeed-a20-oracle-teacher-scaleup"
         )
+    if (
+        args.lightspeed_a20_oracle_teacher_scaleup is not None
+        and args.oracle_teacher_scaleup_source_selection == "t032_t039_narrow"
+        and args.oracle_teacher_scaleup_source_limit is not None
+    ):
+        return (
+            "--oracle-teacher-scaleup-source-limit is not compatible with "
+            "--oracle-teacher-scaleup-source-selection t032_t039_narrow"
+        )
     if args.a20_reachability_report is not None and len(args.reachability_arm) < 2:
         return (
             "--a20-reachability-report requires at least two --reachability-arm values"
