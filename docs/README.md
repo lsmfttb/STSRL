@@ -26,6 +26,9 @@ When documents disagree, use this order:
 - [`project_architecture.md`](project_architecture.md): controller boundaries,
   information regimes, data provenance, objectives, artifact migration, and
   code ownership.
+- [`a20_later_act_boss_source_coverage_contract.md`](a20_later_act_boss_source_coverage_contract.md):
+  accepted T037 source-coverage boundary for narrow Boss/later-act follow-up
+  work.
 
 ### Status
 
