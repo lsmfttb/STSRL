@@ -9,6 +9,63 @@ commit `d56e10e` and local artifacts. They are research evidence, not proof that
 the corresponding command or capability exists on the latest `main`. Current
 implementation truth is recorded only in [`current_status.md`](current_status.md).
 
+## 2026-06-27: T037 Search-Controlled Reachability Scale-Up
+
+T037 scaled the current T036 search-controlled complete-run source collection
+path back to the historical 1,000-run comparison point. The main arm used the
+pinned `sts_lightspeed` integration commit
+`242344c57c17c784708a6f072c905febc3f96527`, A20, a 500-step cap, the
+20-simulation no-potion `oracle_search_v1_highest_mean_s20` battle controller,
+and the separate stochastic non-combat driver. Collection was sharded as
+40 independent 25-run source shards over seeds `1..1000` and then merged into
+one reported no-potion arm. Full restore verification was also run by shard and
+aggregated into the combined coverage report.
+
+Generated artifacts stayed under the ignored
+`artifacts/t037-reachability-scaleup/` directory:
+
+```text
+oracle-s20-no-potion-pool.jsonl            sha256 6aa398838394c74ba258617a43513b6ab1d2752d6016209a780a8df3c16bf01a
+oracle-s20-no-potion-shard-manifest.json   sha256 ba6cbda7b4108f5010e9b700a6061d1e01c17962d3bd504f6504c8e6386ca23c
+oracle-s20-no-potion-coverage.json         sha256 c89aa7797295a5090ad58f1b927b850e99d304d25a7efc9c42d85f031e6be74f
+default-diagnostic-pool.jsonl              sha256 27160e8b2219dbda1589abe6a095341613ce611d699022805c42d44f34185d6e
+default-diagnostic-shard-manifest.json     sha256 55997760757d166838e01c9fe87fbc3de8c4d1edb5143f83ca3c38c16bceeaf7
+default-diagnostic-coverage.json           sha256 001ab4e28b3414138b6b571abbb46c023c401aad52cffdab6400390165201438
+reachability-report.json                   sha256 8c1de10dc3a681e3c605f3c92c700cc19cc6bffcb41c3df81de0e0a9540a3765
+```
+
+- The 1,000-run no-potion Oracle-like search arm produced 4,688 battle starts,
+  1,000 terminal source runs, 0 truncated source runs, 3,698 reported battle
+  wins, and 990 reported battle losses.
+- That arm reached 31 Act 1 Boss starts and 3 Act 2 battle starts. The starts
+  by room type were 3,870 `MONSTER`, 771 `ELITE`, 16 `EVENT`, and 31 `BOSS`;
+  starts by act were 4,685 Act 1 and 3 Act 2.
+- Full sharded restore verification covered 4,688/4,688 starts with
+  4,688 public-context comparisons, 4,688 matches, 0 mismatches, and 0 restore
+  problems. Structured resource outcomes were available for all 4,688 starts.
+- The T009 broad-training gate remained closed. Act 1 now exceeds the default
+  count/source thresholds, but Act 2 has only 3 rows from 3 unique sources and
+  Acts 3--4 have zero rows.
+- A 100-run default-controller diagnostic arm over seeds `3001..3100` produced
+  438 starts, 2 Act 1 Boss starts, 0 later-act starts, and 438/438 successful
+  sharded restores. This arm was included only as a diagnostic comparison, not
+  as a replacement for the no-potion 1,000-run historical comparison.
+- A 100-run potion-enabled diagnostic attempt was started but failed closed
+  before artifact acceptance: shard 0 hit an Oracle root-mapping mismatch
+  (`native root visits do not equal summed root-row visits: 20 != 16`) and the
+  remaining potion shards were stopped. No potion-enabled comparison claim is
+  made from that failed diagnostic.
+
+Conclusion: the scaled current-schema no-potion search-controlled path
+reproduces the historical Boss/later-act reachability signal at the same
+1,000 terminal-run comparison point. The result is close to the 2026-06-14
+evidence (31 Act 1 Boss and 3 Act 2 starts here, versus 35 Act 1 Boss and
+1 Act 2 start historically), so the T036 under-reachability result was scale,
+not a demonstrated source or driver drift. T032 should remain blocked until a
+maintainer accepts an explicit later-act/Boss source-coverage contract; the
+recommended next task is that contract task rather than T038 source-drift
+audit or an Act-1-only T032 refresh.
+
 ## 2026-06-27: T036 Search-Controlled Reachability Probe
 
 PR #32 added a current-schema A20 reachability probe with three source arms:
