@@ -50,9 +50,9 @@ the current milestone, but they do not override this table.
 | T034 | BLOCKED | [Public-consistent hidden-future sampler boundary](T034-public-consistent-hidden-future-sampler.md) | T033, native sampler support | normal-information hidden-future sampling substrate |
 | T035 | BLOCKED | [Model-guided Oracle search v2](T035-model-guided-oracle-search-v2.md) | T032, T025, T028, T029 | deeper Oracle-like guidance after refreshed data/checkpoint evidence |
 | T036 | DONE | [A20 search-controlled reachability probe](T036-a20-search-controlled-reachability-probe.md) | T006, T017, T020, T025, T029, T031 | search-controlled source reachability after T031 Act-1 gap |
-| T037 | READY | [A20 search-controlled reachability scale-up](T037-a20-search-controlled-reachability-scaleup.md) | T017, T020, T036 | scaled reproduction of historical Boss/Act2 reachability evidence |
-| T038 | BLOCKED | [A20 source drift audit](T038-a20-source-drift-audit.md) | T037 under-reachability result | driver/source-drift diagnosis if scaled search remains Act-1-only |
-| T039 | BLOCKED | [Later-act/Boss source coverage contract](T039-later-act-boss-source-coverage-contract.md) | T037 or T038 accepted source decision | explicit artifact contract before T032 can consume source coverage |
+| T037 | DONE | [A20 search-controlled reachability scale-up](T037-a20-search-controlled-reachability-scaleup.md) | T017, T020, T036 | scaled reproduction of historical Boss/Act2 reachability evidence |
+| T038 | CANCELLED | [A20 source drift audit](T038-a20-source-drift-audit.md) | T037 under-reachability result | not needed because T037 recovered Boss/Act2 reachability |
+| T039 | READY | [Later-act/Boss source coverage contract](T039-later-act-boss-source-coverage-contract.md) | T037 accepted source decision | explicit artifact contract before T032 can consume source coverage |
 
 Use the table, not per-task files or roadmap prose, when deciding whether a
 task may receive a branch. Only `READY` rows should receive a new branch. After
@@ -145,15 +145,16 @@ evidence kept all compared A20 arms in Act 1 only, so T032 remains blocked until
 the maintainer accepts a later-act/Boss source-coverage contract or explicitly
 narrows the teacher/checkpoint refresh boundary.
 
-M2 is the A20 source-coverage recovery batch. T037 scales the T036
-search-controlled reachability path toward the historical 1,000-run comparison
-point; T038 is the blocked source-drift audit if scale does not recover
-Boss/later-act starts; T039 is the blocked source-coverage contract that must
-exist before T032 can consume new artifacts. T033 drafts the public-context
-encoder boundary; T034 remains blocked on native public-consistent hidden-future
-sampler support; and T035 keeps deeper model-guided Oracle-like search blocked
-until refreshed data/checkpoint evidence exists. Only rows marked `READY` may
-receive a task branch.
+M2 is the A20 source-coverage recovery batch. T037 scaled the T036
+search-controlled reachability path to the historical 1,000-run comparison
+point and recovered the Boss/Act2 source signal on current schemas. T038 is
+cancelled because the source-drift audit is not needed on that evidence. T039 is
+now the executable source-coverage contract that must exist before T032 can
+consume new artifacts. T033 drafts the public-context encoder boundary; T034
+remains blocked on native public-consistent hidden-future sampler support; and
+T035 keeps deeper model-guided Oracle-like search blocked until refreshed
+data/checkpoint evidence exists. Only rows marked `READY` may receive a task
+branch.
 
 ## Standard Local Gates
 

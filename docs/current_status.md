@@ -20,9 +20,10 @@ showed that the current A20 source distribution is still Act-1-only. T036 is
 complete and added search-controlled reachability tooling, but its accepted
 10-run A20 smoke arms were also Act 1 only; T032 therefore remains blocked
 pending an accepted later-act/Boss source-coverage contract or an explicitly
-narrow teacher/checkpoint refresh boundary. T037 is the current `READY` task:
-scale the search-controlled reachability probe toward the historical 1,000-run
-comparison before changing project direction.
+narrow teacher/checkpoint refresh boundary. T037 is complete and recovered the
+historical Boss/Act2 source signal at 1,000 terminal runs. T039 is the current
+`READY` task: turn that evidence into the explicit source-coverage contract
+required before T032 can consume artifacts.
 
 ## Implemented On Main
 
@@ -601,10 +602,10 @@ T031 found healthy artifacts and restore evidence but no Boss or later-act
 starts. T036 rebuilt the search-controlled collection path on current schemas
 while preserving the battle/non-combat split, but its accepted 10-run smoke arms
 also reached no Boss or later-act starts. T037 is now the executable scale-up
-task; T038 and T039 are blocked follow-ups for source-drift diagnosis and an
-explicit source-coverage contract. Use the task index to determine which exact
-task rows are `READY`, `BLOCKED`, or `DRAFT`; future rows must not start merely
-because they are mentioned here.
+task; T037 recovered the historical Boss/Act2 signal on current schemas, so
+T038 is cancelled and T039 is the executable source-coverage contract task. Use
+the task index to determine which exact task rows are `READY`, `BLOCKED`, or
+`DRAFT`; future rows must not start merely because they are mentioned here.
 
 The immediate external-fork follow-up is
 [`lsmfttb/sts_lightspeed#7`](https://github.com/lsmfttb/sts_lightspeed/issues/7):
@@ -617,18 +618,16 @@ The post-M1 task-batch recommendation is:
 1. Keep broad teacher/checkpoint refresh work blocked until a later-act/Boss
    source-coverage contract exists, or deliberately revise T032 into a narrow
    Act-1 diagnostic refresh.
-2. Run T037 to test whether scaled search-controlled collection recovers the
-   historical Boss/Act2 path on current schemas.
-3. If T037 remains under-reachable, run T038 before changing the battle-first
-   plan.
-4. Regenerate teacher, trainer-input, checkpoint, and calibration evidence only
+2. Run T039 to convert the accepted T037 evidence into an explicit
+   source-coverage contract.
+3. Regenerate teacher, trainer-input, checkpoint, and calibration evidence only
    after an accepted coverage contract or explicitly narrow diagnostic boundary
    exists (T032).
-5. Draft public-context/history/map/visible-Boss encoders before using those
+4. Draft public-context/history/map/visible-Boss encoders before using those
    fields as ordinary model inputs (T033).
-6. Keep public-consistent hidden-future sampling blocked on an explicit native
+5. Keep public-consistent hidden-future sampling blocked on an explicit native
    simulator boundary (T034).
-7. Attempt deeper model-guided Oracle-like search only after refreshed
+6. Attempt deeper model-guided Oracle-like search only after refreshed
    checkpoint evidence exists and the guidance role or native API boundary is
    explicit (T035).
 
