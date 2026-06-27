@@ -29,6 +29,7 @@ from sts_combat_rl.commands.pytorch_search_guidance import (
     run_pytorch_search_guidance_inference_from_paths,
     run_pytorch_search_guidance_training_from_path,
 )
+from sts_combat_rl.commands.reachability import run_a20_reachability_report_from_paths
 from sts_combat_rl.commands.teacher_guidance_calibration import (
     format_teacher_guidance_calibration_command,
     run_teacher_guidance_calibration_from_paths,
@@ -43,6 +44,9 @@ from sts_combat_rl.sim.calibration import (
     format_tactical_feature_coverage_report,
     run_communicationmod_feature_calibration,
     run_communicationmod_tactical_feature_audit,
+)
+from sts_combat_rl.sim.reachability import (
+    format_a20_reachability_comparison_report,
 )
 
 
@@ -259,6 +263,18 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 2
         print(format_oracle_teacher_dataset_report_command(report), file=sys.stderr)
+        return 0 if report.command_passed else 1
+
+    if args.a20_reachability_report is not None:
+        try:
+            report = run_a20_reachability_report_from_paths(
+                output_path=args.a20_reachability_report,
+                arm_specs=args.reachability_arm,
+            )
+        except (OSError, ValueError) as exc:
+            print(f"failed to build A20 reachability report: {exc}", file=sys.stderr)
+            return 2
+        print(format_a20_reachability_comparison_report(report), file=sys.stderr)
         return 0 if report.command_passed else 1
 
     if is_lightspeed_command(args):

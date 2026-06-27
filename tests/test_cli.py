@@ -11,6 +11,7 @@ from sts_combat_rl.cli import build_parser, main
 from sts_combat_rl.sim.constructed_battle_start import (
     ConstructedBattleStartAuditReport,
 )
+from sts_combat_rl.sim.battle_start_pool import load_natural_battle_start_pool_jsonl
 from sts_combat_rl.sim.contract import (
     SimulatorAction,
     SimulatorCheckpoint,
@@ -83,6 +84,35 @@ def test_cli_parser_accepts_a20_coverage_flags(tmp_path) -> None:
     assert args.battle_start_restore_limit == 2
     assert args.battle_start_sample_count == 3
     assert args.pytorch_gate_min_records == 4
+
+
+def test_cli_parser_accepts_t036_reachability_flags(tmp_path) -> None:
+    default_pool = tmp_path / "default-pool.jsonl"
+    default_coverage = tmp_path / "default-coverage.json"
+    search_pool = tmp_path / "search-pool.jsonl"
+    search_coverage = tmp_path / "search-coverage.json"
+    report_path = tmp_path / "reachability.json"
+
+    args = build_parser().parse_args(
+        [
+            "--a20-reachability-report",
+            str(report_path),
+            "--reachability-arm",
+            "default",
+            str(default_pool),
+            str(default_coverage),
+            "--reachability-arm",
+            "oracle-no-potion",
+            str(search_pool),
+            str(search_coverage),
+        ]
+    )
+
+    assert args.a20_reachability_report == report_path
+    assert args.reachability_arm == [
+        ["default", str(default_pool), str(default_coverage)],
+        ["oracle-no-potion", str(search_pool), str(search_coverage)],
+    ]
 
 
 def test_cli_parser_accepts_oracle_teacher_scaleup_flags(tmp_path) -> None:
@@ -767,6 +797,56 @@ def test_cli_checkpoint_commands_write_only_diagnostics_and_restore_pool(
     restore_output = capsys.readouterr()
     assert restore_output.out == ""
     assert "restore ok: yes" in restore_output.err
+
+
+def test_cli_search_battle_start_pool_uses_oracle_battle_child(
+    monkeypatch,
+    tmp_path,
+    capsys,
+) -> None:
+    monkeypatch.setattr(
+        "sts_combat_rl.commands.lightspeed_cli.LightSpeedAdapter",
+        FakeLightSpeedSmokeAdapter,
+    )
+    pool_path = tmp_path / "search-pool.jsonl"
+
+    assert (
+        main(
+            [
+                "--lightspeed-search-battle-start-pool",
+                str(pool_path),
+                "--sim-episodes",
+                "1",
+                "--sim-steps",
+                "1",
+                "--oracle-search-simulations",
+                "7",
+                "--oracle-root-selection",
+                "most_visits",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 0
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Natural battle-start checkpoint pool coverage" in captured.err
+    with pool_path.open("r", encoding="utf-8") as stream:
+        pool = load_natural_battle_start_pool_jsonl(stream)
+    assert len(pool.records) == 1
+    battle_provenance = pool.records[0].source_battle_controller_provenance
+    non_combat_provenance = pool.records[0].source_non_combat_controller_provenance
+    assert battle_provenance["kind"] == "oracle_battle_search"
+    assert battle_provenance["config"]["information_regime"] == (
+        "full_simulator_state_oracle_like"
+    )
+    assert battle_provenance["config"]["search_budget"]["simulations"] == 7
+    assert battle_provenance["config"]["root_selection_rule"] == "most_visits"
+    assert non_combat_provenance["kind"] == "decision_policy"
+    assert non_combat_provenance["name"] == "stochastic_non_combat_v1"
+    assert pool.source_run_summaries[0].final_floor == 1.0
 
 
 def test_cli_constructed_battle_start_audit_writes_stderr_and_artifact(

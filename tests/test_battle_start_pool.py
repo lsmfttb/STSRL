@@ -189,6 +189,20 @@ def test_natural_pool_captures_provenance_coverage_and_seeded_sampling() -> None
     )  # type: ignore[union-attr]
     assert all(record.public_context_status == "available" for record in pool.records)  # type: ignore[union-attr]
     assert all(record.public_run_context for record in pool.records)  # type: ignore[union-attr]
+    assert len(pool.source_run_summaries) == 2  # type: ignore[union-attr]
+    assert all(summary.terminal for summary in pool.source_run_summaries)  # type: ignore[union-attr]
+    assert {
+        summary.captured_battle_start_count
+        for summary in pool.source_run_summaries  # type: ignore[union-attr]
+    } == {2}
+    assert {
+        summary.final_floor
+        for summary in pool.source_run_summaries  # type: ignore[union-attr]
+    } == {5.0}
+    assert {
+        summary.max_battle_start_act
+        for summary in pool.source_run_summaries  # type: ignore[union-attr]
+    } == {2}
     assert report.natural_battle_start_count == 4
     assert report.unique_source_start_count == 4
     assert report.reported_battle_win_count == 2
@@ -271,6 +285,9 @@ def test_portable_pool_manifest_replays_duplicate_action_ids_in_fresh_adapters()
         loaded.records[1].completed_battle_resource_outcome["schema_id"]
         == "structured-battle-outcome-v1"
     )
+    assert len(loaded.source_run_summaries) == 2
+    assert loaded.source_run_summaries[0].final_floor == 5.0
+    assert loaded.source_run_summaries[0].captured_battle_start_count == 2
     assert verification.restore_ok is True
     assert verification.replay_restored_count == 4
     assert verification.context_matched_count == 4
@@ -292,6 +309,7 @@ def test_v1_migration_preserves_missing_duplicate_information_and_fails_closed()
         0
     ].source_battle_controller_provenance["name"]  # type: ignore[union-attr]
     metadata.pop("source_controller_provenance")
+    metadata.pop("source_run_summaries")
     metadata.pop("migration_report")
     for row in rows[1:]:
         record = row["record"]
@@ -325,6 +343,7 @@ def test_v1_migration_preserves_missing_duplicate_information_and_fails_closed()
         loaded.records[1].checkpoint_information_regime
         == LEGACY_UNKNOWN_INFORMATION_REGIME
     )
+    assert loaded.source_run_summaries == []
     assert loaded.records[1].public_context_status == "legacy_unavailable"
     assert loaded.records[1].action_trace[2]["occurrence"] is None
     with pytest.raises(ValueError, match="omitted duplicate occurrence"):

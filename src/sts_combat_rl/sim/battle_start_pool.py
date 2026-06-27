@@ -34,7 +34,11 @@ from sts_combat_rl.sim.contract import (
     SimulatorCheckpoint,
     SimulatorSnapshot,
 )
-from sts_combat_rl.sim.controlled_run import ControlledRunStep, execute_controlled_run
+from sts_combat_rl.sim.controlled_run import (
+    ControlledRun,
+    ControlledRunStep,
+    execute_controlled_run,
+)
 from sts_combat_rl.sim.controller_contract import (
     ControllerProvenance,
     controller_provenance_from_dict,
@@ -84,6 +88,8 @@ STRUCTURAL_SAMPLING_COMPONENT = "structural_uniform"
 CHECKPOINT_INFORMATION_REGIME = "full_simulator_state_oracle_like"
 LEGACY_UNKNOWN_INFORMATION_REGIME = "unknown"
 PUBLIC_CONTEXT_UNAVAILABLE = PUBLIC_CONTEXT_LEGACY_UNAVAILABLE
+SOURCE_RUN_SUMMARY_AVAILABLE = "available"
+SOURCE_RUN_SUMMARY_LEGACY_UNAVAILABLE = "legacy_unavailable"
 
 BATTLE_START_POOL_MIGRATIONS = (
     ArtifactMigration(
@@ -111,6 +117,73 @@ BATTLE_START_POOL_MIGRATIONS = (
         losses=(BATTLE_RESOURCE_OUTCOME_LEGACY_LOSS,),
     ),
 )
+
+
+@dataclass(frozen=True)
+class SourceRunSummary:
+    """Run-level reachability metadata for one source episode."""
+
+    source_run_id: str
+    source_seed: int
+    terminal: bool
+    outcome: str
+    final_floor: float | None
+    final_act: int | None
+    final_screen_state: str
+    final_battle_active: bool
+    captured_battle_start_count: int
+    completed_battle_count: int
+    max_battle_start_floor: float | None
+    max_battle_start_act: int | None
+    problem_count: int
+    problems: tuple[str, ...] = ()
+    status: str = SOURCE_RUN_SUMMARY_AVAILABLE
+
+    @classmethod
+    def legacy_unavailable(
+        cls,
+        *,
+        source_run_id: str,
+        source_seed: int,
+        captured_battle_start_count: int,
+    ) -> SourceRunSummary:
+        """Build an explicit placeholder for migrated legacy pools."""
+
+        return cls(
+            source_run_id=source_run_id,
+            source_seed=source_seed,
+            terminal=False,
+            outcome="UNKNOWN",
+            final_floor=None,
+            final_act=None,
+            final_screen_state="(legacy-unavailable)",
+            final_battle_active=False,
+            captured_battle_start_count=captured_battle_start_count,
+            completed_battle_count=0,
+            max_battle_start_floor=None,
+            max_battle_start_act=None,
+            problem_count=0,
+            status=SOURCE_RUN_SUMMARY_LEGACY_UNAVAILABLE,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "source_run_id": self.source_run_id,
+            "source_seed": self.source_seed,
+            "terminal": self.terminal,
+            "outcome": self.outcome,
+            "final_floor": self.final_floor,
+            "final_act": self.final_act,
+            "final_screen_state": self.final_screen_state,
+            "final_battle_active": self.final_battle_active,
+            "captured_battle_start_count": self.captured_battle_start_count,
+            "completed_battle_count": self.completed_battle_count,
+            "max_battle_start_floor": self.max_battle_start_floor,
+            "max_battle_start_act": self.max_battle_start_act,
+            "problem_count": self.problem_count,
+            "problems": list(self.problems),
+            "status": self.status,
+        }
 
 
 @dataclass(frozen=True)
@@ -163,6 +236,7 @@ class NaturalBattleStartPool:
     source_controller_provenance: dict[str, Any]
     format_version: int = BATTLE_START_POOL_FORMAT_VERSION
     records: list[BattleStartCheckpointRecord] = field(default_factory=list)
+    source_run_summaries: list[SourceRunSummary] = field(default_factory=list)
     problems: list[str] = field(default_factory=list)
     migration_report: ArtifactMigrationReport = field(
         default_factory=lambda: ArtifactMigrationReport(
@@ -254,6 +328,7 @@ def collect_natural_battle_start_pool(
     seed_list = [_require_seed(seed, "collection seed") for seed in seeds]
     active_action_space = action_space or ActionSpaceConfig.initial_no_potions()
     records: list[BattleStartCheckpointRecord] = []
+    source_run_summaries: list[SourceRunSummary] = []
     problems: list[str] = []
     terminal_run_count = 0
 
@@ -262,6 +337,8 @@ def collect_natural_battle_start_pool(
         action_trace: list[dict[str, Any]] = []
         active_record_index: int | None = None
         battle_index = 0
+        run_record_start = len(records)
+        run_problem_start = len(problems)
 
         def before_decision(
             snapshot: SimulatorSnapshot,
@@ -350,6 +427,15 @@ def collect_natural_battle_start_pool(
         )
         if controlled.terminal:
             terminal_run_count += 1
+        source_run_summaries.append(
+            _build_source_run_summary(
+                source_run_id=source_run_id,
+                source_seed=seed,
+                controlled=controlled,
+                records=records[run_record_start:],
+                run_problems=problems[run_problem_start:],
+            )
+        )
 
     return NaturalBattleStartPool(
         source_run_count=len(seed_list),
@@ -357,7 +443,45 @@ def collect_natural_battle_start_pool(
         truncated_run_count=len(seed_list) - terminal_run_count,
         source_controller_provenance=controller.provenance.to_dict(),
         records=records,
+        source_run_summaries=source_run_summaries,
         problems=list(dict.fromkeys(problems)),
+    )
+
+
+def _build_source_run_summary(
+    *,
+    source_run_id: str,
+    source_seed: int,
+    controlled: ControlledRun,
+    records: Sequence[BattleStartCheckpointRecord],
+    run_problems: Sequence[str],
+) -> SourceRunSummary:
+    final_raw = (
+        controlled.final_raw if isinstance(controlled.final_raw, Mapping) else {}
+    )
+    final_floor = _optional_number(final_raw.get("floor_num", final_raw.get("floor")))
+    final_act = _optional_int(final_raw.get("act"))
+    max_floor = _max_optional_number(
+        record.structural_metadata.get("floor") for record in records
+    )
+    max_act = _max_optional_int(
+        record.structural_metadata.get("act") for record in records
+    )
+    return SourceRunSummary(
+        source_run_id=source_run_id,
+        source_seed=source_seed,
+        terminal=controlled.terminal,
+        outcome=controlled.outcome,
+        final_floor=final_floor,
+        final_act=max_act if final_act is None else final_act,
+        final_screen_state=str(final_raw.get("screen_state", "(none)")),
+        final_battle_active=bool(final_raw.get("battle_active")),
+        captured_battle_start_count=len(records),
+        completed_battle_count=sum(1 for record in records if record.battle_completed),
+        max_battle_start_floor=max_floor,
+        max_battle_start_act=max_act,
+        problem_count=len(run_problems),
+        problems=tuple(dict.fromkeys(run_problems)),
     )
 
 
@@ -519,6 +643,9 @@ def dump_natural_battle_start_pool_jsonl(
         "truncated_run_count": pool.truncated_run_count,
         "source_controller_provenance": pool.source_controller_provenance,
         "record_count": len(pool.records),
+        "source_run_summaries": [
+            summary.to_dict() for summary in pool.source_run_summaries
+        ],
         "migration_report": pool.migration_report.to_dict(),
         "problems": list(pool.problems),
     }
@@ -569,6 +696,10 @@ def load_natural_battle_start_pool_jsonl(stream: TextIO) -> NaturalBattleStartPo
     if any(record.record_index != index for index, record in enumerate(records)):
         raise ValueError("battle-start pool record indices must be contiguous")
     problems = _require_string_list(metadata.get("problems", []), "metadata problems")
+    source_run_summaries = _source_run_summaries_from_metadata(
+        metadata.get("source_run_summaries", []),
+        label="source_run_summaries",
+    )
     pool = NaturalBattleStartPool(
         source_run_count=_require_non_negative_int(
             metadata.get("source_run_count"), "source_run_count"
@@ -584,6 +715,7 @@ def load_natural_battle_start_pool_jsonl(stream: TextIO) -> NaturalBattleStartPo
             "source controller provenance",
         ),
         records=records,
+        source_run_summaries=source_run_summaries,
         problems=problems,
         migration_report=preserved_migration_report(
             metadata,
@@ -823,6 +955,29 @@ def natural_battle_start_pool_problems(pool: NaturalBattleStartPool) -> list[str
         problems.append(
             "pool terminal and truncated run counts do not match source runs"
         )
+    if pool.source_run_summaries:
+        if len(pool.source_run_summaries) != pool.source_run_count:
+            problems.append(
+                "pool source_run_summaries count does not match source runs"
+            )
+        summary_run_ids: set[str] = set()
+        terminal_summary_count = 0
+        for index, summary in enumerate(pool.source_run_summaries):
+            try:
+                _validated_source_run_summary(summary.to_dict(), f"run summary {index}")
+            except ValueError as exc:
+                problems.append(str(exc))
+            if summary.source_run_id in summary_run_ids:
+                problems.append(
+                    f"duplicate source_run_summaries id {summary.source_run_id}"
+                )
+            summary_run_ids.add(summary.source_run_id)
+            if summary.terminal:
+                terminal_summary_count += 1
+        if terminal_summary_count != pool.terminal_run_count:
+            problems.append(
+                "pool source_run_summaries terminal count does not match metadata"
+            )
     try:
         _validated_provenance(pool.source_controller_provenance, "pool controller")
     except ValueError as exc:
@@ -1193,6 +1348,72 @@ def _resource_outcome_payload(
     return payload
 
 
+def _source_run_summaries_from_metadata(
+    value: Any,
+    *,
+    label: str,
+) -> list[SourceRunSummary]:
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise ValueError(f"{label} must be a list")
+    return [
+        SourceRunSummary(**_validated_source_run_summary(item, f"{label} {index}"))
+        for index, item in enumerate(value)
+    ]
+
+
+def _validated_source_run_summary(value: Any, label: str) -> dict[str, Any]:
+    summary = _require_mapping(value, label)
+    status = summary.get("status", SOURCE_RUN_SUMMARY_AVAILABLE)
+    if status not in {
+        SOURCE_RUN_SUMMARY_AVAILABLE,
+        SOURCE_RUN_SUMMARY_LEGACY_UNAVAILABLE,
+    }:
+        raise ValueError(f"{label} has invalid source run summary status")
+    problems = summary.get("problems", [])
+    if not isinstance(problems, list) or not all(
+        isinstance(problem, str) for problem in problems
+    ):
+        raise ValueError(f"{label} problems must be a string list")
+    return {
+        "source_run_id": _require_non_empty_string(
+            summary.get("source_run_id"), f"{label} source_run_id"
+        ),
+        "source_seed": _require_seed(
+            summary.get("source_seed"), f"{label} source_seed"
+        ),
+        "terminal": _require_bool(summary.get("terminal"), f"{label} terminal"),
+        "outcome": _require_non_empty_string(
+            summary.get("outcome"), f"{label} outcome"
+        ),
+        "final_floor": _optional_number(summary.get("final_floor")),
+        "final_act": _optional_int(summary.get("final_act")),
+        "final_screen_state": _require_non_empty_string(
+            summary.get("final_screen_state"), f"{label} final_screen_state"
+        ),
+        "final_battle_active": _require_bool(
+            summary.get("final_battle_active"), f"{label} final_battle_active"
+        ),
+        "captured_battle_start_count": _require_non_negative_int(
+            summary.get("captured_battle_start_count"),
+            f"{label} captured_battle_start_count",
+        ),
+        "completed_battle_count": _require_non_negative_int(
+            summary.get("completed_battle_count"), f"{label} completed_battle_count"
+        ),
+        "max_battle_start_floor": _optional_number(
+            summary.get("max_battle_start_floor")
+        ),
+        "max_battle_start_act": _optional_int(summary.get("max_battle_start_act")),
+        "problem_count": _require_non_negative_int(
+            summary.get("problem_count"), f"{label} problem_count"
+        ),
+        "problems": tuple(problems),
+        "status": str(status),
+    }
+
+
 def _public_run_context(
     value: Any,
     *,
@@ -1286,7 +1507,7 @@ def _migrate_pool_v2_to_v3(document: ArtifactDocument) -> ArtifactDocument:
 
 def _migrate_pool_v3_to_v4(document: ArtifactDocument) -> ArtifactDocument:
     metadata = dict(document.metadata)
-    metadata["format_version"] = BATTLE_START_POOL_FORMAT_VERSION
+    metadata["format_version"] = STRUCTURED_RESOURCE_OUTCOME_POOL_FORMAT_VERSION
     status, payload = legacy_unavailable_battle_resource_outcome()
     migrated_records: list[dict[str, Any]] = []
     for source in document.records:
@@ -1356,6 +1577,12 @@ def _require_non_negative_int(value: Any, label: str) -> int:
     return value
 
 
+def _require_bool(value: Any, label: str) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError(f"{label} must be a boolean")
+    return value
+
+
 def _require_seed(value: Any, label: str) -> int:
     return _require_non_negative_int(value, label)
 
@@ -1364,6 +1591,36 @@ def _require_string_list(value: Any, label: str) -> list[str]:
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
         raise ValueError(f"{label} must be a string list")
     return list(value)
+
+
+def _optional_int(value: Any) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    raise ValueError("optional integer field must be an integer or null")
+
+
+def _optional_number(value: Any) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    raise ValueError("optional numeric field must be numeric or null")
+
+
+def _max_optional_number(values: Iterable[Any]) -> float | None:
+    converted = [_optional_number(value) for value in values]
+    present = [value for value in converted if value is not None]
+    return max(present) if present else None
+
+
+def _max_optional_int(values: Iterable[Any]) -> int | None:
+    converted = [_optional_int(value) for value in values]
+    present = [value for value in converted if value is not None]
+    return max(present) if present else None
 
 
 def _append_counter(lines: list[str], counter: Counter[str]) -> None:
