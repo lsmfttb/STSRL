@@ -254,7 +254,8 @@ distribution still Act-1-only. Task lifecycle state remains canonical in the
 task index. T036 completed the immediate reachability probe before changing
 direction: it added current-schema search-controlled complete-run collection,
 but the accepted 10-run A20 smoke arms did not recover the historical Boss/Act2
-source path.
+source path. T037 is the scaled reproduction task before a driver/source-drift
+audit or broad teacher/checkpoint refresh decision.
 
 Use the Oracle regime to validate priors, leaf values, uncertainty, and search
 instrumentation. Exit when model guidance improves the fixed Oracle curve at
@@ -285,12 +286,14 @@ Retain only auxiliary targets that improve normal-information evaluation.
 1. Keep broad teacher/checkpoint refresh evidence blocked until later-act/Boss
    source coverage exists, or explicitly narrow T032 to an Act-1 diagnostic
    refresh.
-2. Build structured history, map, and visible-Boss encoders on the sanitized
+2. Run T037 at meaningful scale before concluding that the battle-first split is
+   the wrong direction.
+3. Build structured history, map, and visible-Boss encoders on the sanitized
    public-context artifacts now available on `main`.
-3. Establish an honest public policy/vector-value baseline from sufficient A20
+4. Establish an honest public policy/vector-value baseline from sufficient A20
    coverage, keeping raw policy diagnostics separate from search promotion.
-4. Design the authoritative public-consistent hidden-future sampler.
-5. Keep further mechanical CLI/module cleanup in later dedicated
+5. Design the authoritative public-consistent hidden-future sampler.
+6. Keep further mechanical CLI/module cleanup in later dedicated
    no-behavior-change maintenance tasks before mixing it into search research;
    the first CLI/export cleanup pass completed in
    [`T019`](tasks/T019-codebase-mechanical-refactor.md).

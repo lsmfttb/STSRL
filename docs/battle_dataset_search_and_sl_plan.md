@@ -13,7 +13,7 @@ reachability tooling but its accepted smoke arms were also Act 1 only. Broad
 teacher/checkpoint refresh work remains blocked on a later-act/Boss
 source-coverage contract or an explicitly narrow diagnostic boundary. New
 implementation work should start only from rows marked `READY` in the task
-index.
+index; the current executable source-coverage task is T037.
 
 ## Goals
 
@@ -324,7 +324,8 @@ later-act starts. T036 added the current-schema search-controlled complete-run
 collection path and reachability report. Its accepted 10-run smoke comparison
 covered default, 20-simulation no-potion Oracle-like search, and
 20-simulation potion-enabled Oracle-like search arms; all stayed in Act 1, so
-the later-act/Boss source gap remains open.
+the later-act/Boss source gap remains open. T037 is the scaled reproduction
+task; T038 and T039 are the blocked diagnosis/contract follow-ups.
 
 Work:
 
@@ -362,7 +363,8 @@ teacher/checkpoint work: the current run distribution still did not reach Boss
 or later-act battle starts. T036 completed the first current-schema
 search-controlled reachability probe; the smoke evidence validated tooling but
 did not recover Boss or later-act starts. Meaningful held-out improvement or
-controller promotion remains pending broader coverage and later search work.
+controller promotion remains pending T037-scale source evidence, broader
+coverage, and later search work.
 
 Exit gate: a search change improves fixed evaluation at equal simulation or
 wall-clock budget without natural-weighted regression.
