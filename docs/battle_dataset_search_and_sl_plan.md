@@ -8,10 +8,12 @@ implementation status comes from [`current_status.md`](current_status.md).
 The published foundation, maintenance, and first research-measurement backlog
 is complete through the M1 synthesis and T031 coverage refresh, except for
 cancelled T007, whose scope was superseded by T014--T016. T031 found the
-current A20 source distribution still Act-1-only, so teacher/checkpoint refresh
-work remains blocked on T036's search-controlled reachability probe or an
-explicitly narrow diagnostic boundary. New implementation work should start
-only from rows marked `READY` in the task index.
+current A20 source distribution still Act-1-only; T036 added search-controlled
+reachability tooling but its accepted smoke arms were also Act 1 only. Broad
+teacher/checkpoint refresh work remains blocked on a later-act/Boss
+source-coverage contract or an explicitly narrow diagnostic boundary. New
+implementation work should start only from rows marked `READY` in the task
+index.
 
 ## Goals
 
@@ -318,10 +320,11 @@ availability, and broad-training gate gaps. The accepted smoke-scale result is
 Act 1 only and keeps the broad-training gate closed. T031 later repeated the
 coverage measurement at 50 source episodes; artifacts and restores were
 healthy, but the distribution still produced only Act 1 starts with no Boss or
-later-act starts. T036 is the next executable source-generation task: rebuild
-the historical pure-search reachability experiment on current schemas before
-deciding whether the gap belongs to battle search strength, non-combat driver
-calibration, constructed supplements, or a larger direction change.
+later-act starts. T036 added the current-schema search-controlled complete-run
+collection path and reachability report. Its accepted 10-run smoke comparison
+covered default, 20-simulation no-potion Oracle-like search, and
+20-simulation potion-enabled Oracle-like search arms; all stayed in Act 1, so
+the later-act/Boss source gap remains open.
 
 Work:
 
@@ -356,10 +359,10 @@ controller improvement, because the T029 comparison tied baseline Oracle search
 while adding checkpoint model calls. T031 completed the next coverage refresh
 and diagnosed a distribution gap rather than unlocking broader
 teacher/checkpoint work: the current run distribution still did not reach Boss
-or later-act battle starts. T036 follows up by testing search-controlled
-complete-run source collection against that gap. Meaningful held-out
-improvement or controller promotion remains pending broader coverage and later
-search work.
+or later-act battle starts. T036 completed the first current-schema
+search-controlled reachability probe; the smoke evidence validated tooling but
+did not recover Boss or later-act starts. Meaningful held-out improvement or
+controller promotion remains pending broader coverage and later search work.
 
 Exit gate: a search change improves fixed evaluation at equal simulation or
 wall-clock budget without natural-weighted regression.

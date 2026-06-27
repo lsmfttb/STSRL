@@ -22,22 +22,24 @@ a broad A20 teacher/checkpoint refresh.
 
 T036 is the published follow-up for deciding whether search-controlled
 complete-run source collection can recover the historical Boss/Act2 path on
-current schemas. This task must not become `READY` merely because T031 is done.
+current schemas. T036 added that command/report path, but its accepted smoke
+evidence also stayed Act 1 only. This task must not become `READY` merely
+because T031 or T036 is done.
 
 ## Dependencies
 
 - T031 is complete.
-- A maintainer has accepted the T036 result as the source-coverage contract, or
-  this task has been deliberately revised into an explicitly narrow Act-1
-  diagnostic refresh before it becomes `READY`.
+- A maintainer has accepted a later-act/Boss source-coverage contract, or this
+  task has been deliberately revised into an explicitly narrow Act-1 diagnostic
+  refresh before it becomes `READY`.
 
 ## Inputs And Artifacts
 
 Inputs must come from the accepted source-coverage contract or be regenerated
 by commands reported in this PR:
 
-- the accepted natural source pool and coverage report from T031 plus T036, or
-  from a documented narrow-refresh revision;
+- the accepted natural source pool and coverage report from a later-act/Boss
+  coverage contract, or from a documented narrow-refresh revision;
 - selected Oracle-like teacher datasets from current T023/T022 workflows;
 - trainer-input v6 artifacts from the T024 bridge;
 - one optional diagnostic PyTorch checkpoint written under an ignored or
@@ -69,8 +71,9 @@ teacher dataset, trainer JSONL, checkpoint, or report is committed.
   checkpoint contract.
 - Treating repeated teacher rows or budget tiers as new source coverage.
 - Treating the T031 Act-1-only distribution as broad A20 evidence.
-- Advancing before the T036 reachability result is accepted, unless the task is
-  explicitly narrowed in this document first.
+- Treating the T036 Act-1-only smoke distribution as broad A20 evidence.
+- Advancing before a later-act/Boss coverage contract exists, unless the task
+  is explicitly narrowed in this document first.
 
 ## Design Constraints
 

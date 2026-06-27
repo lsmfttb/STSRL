@@ -9,6 +9,45 @@ commit `d56e10e` and local artifacts. They are research evidence, not proof that
 the corresponding command or capability exists on the latest `main`. Current
 implementation truth is recorded only in [`current_status.md`](current_status.md).
 
+## 2026-06-27: T036 Search-Controlled Reachability Probe
+
+PR #32 added a current-schema A20 reachability probe with three source arms:
+the existing default battle policy, 20-simulation no-potion Oracle-like search,
+and 20-simulation potion-enabled Oracle-like search. All arms used the separate
+stochastic non-combat driver and pinned `sts_lightspeed` integration commit
+`242344c57c17c784708a6f072c905febc3f96527`.
+
+Generated artifacts stayed under the ignored `artifacts/t036-reachability/`
+directory:
+
+```text
+default-pool.jsonl                    sha256 0aa669d7c4d47381189748cade5abcae46b93393c0252476c49397ec27755707
+default-coverage.json                 sha256 f08912dc845eeac51c5235a70be101c0daf9de495171abf4538ae050012b49fe
+oracle-s20-no-potion-pool.jsonl       sha256 9f88cb5811e4d41e68854c7940e092625f2e6a2e6eb05bbfa92b47e63b49a671
+oracle-s20-no-potion-coverage.json    sha256 786de04ea460aeb8bed1e296726c0ec87099aa460c6c39fea4f0f60e2d026c6e
+oracle-s20-potion-pool.jsonl          sha256 bff007654b5bc912bf6c684c2bc18b30ce328800c8cd81329726a7d0c521569f
+oracle-s20-potion-coverage.json       sha256 1610f5cbb01413411d93f8d585641c87d09f060378029a6daf13e6d6ce03454e
+reachability-report.json              sha256 2e2871b007c90ee80c51edef95268080171ee2026160a4dc3e4f4bd8299ec9a8
+```
+
+- Default source collection produced 41 battle starts from 10 terminal source
+  runs. All starts were Act 1; no Boss or later-act starts were reached.
+- No-potion Oracle-like search produced 46 battle starts from 10 terminal source
+  runs. All starts were Act 1; no Boss or later-act starts were reached.
+- Potion-enabled Oracle-like search produced 49 battle starts from 10 terminal
+  source runs. All starts were Act 1; no Boss or later-act starts were reached.
+- All reported arms had restore verification ok, public context available,
+  structured outcomes available, and `broad_training_allowed=false`.
+- Review added negative checks for missing source identity, missing pool SHA
+  linkage, and corrupted source-run summaries; these now fail closed.
+
+Conclusion: T036 validates the current-schema command/report path for
+search-controlled source reachability and preserves the battle/non-combat split,
+but the accepted smoke scale does not reproduce the historical 1,000-run
+Boss/Act2 result. T032 remains blocked unless it is explicitly narrowed to an
+Act-1 diagnostic refresh or a later task establishes a stronger later-act/Boss
+source-coverage contract.
+
 ## 2026-06-26: T031 A20 Coverage Refresh
 
 WSL coverage refresh on the pinned `sts_lightspeed` integration commit
