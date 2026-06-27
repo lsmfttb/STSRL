@@ -300,6 +300,16 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     input_group.add_argument(
+        "--lightspeed-search-battle-start-pool",
+        type=Path,
+        metavar="PATH",
+        help=(
+            "Collect natural battle-start checkpoints from complete controlled runs "
+            "whose battle child is OracleSearchController and whose non-combat "
+            "child is the separately named stochastic driver."
+        ),
+    )
+    input_group.add_argument(
         "--lightspeed-battle-start-pool-restore",
         type=Path,
         metavar="PATH",
@@ -316,6 +326,15 @@ def build_parser() -> argparse.ArgumentParser:
             "Load a portable A20 natural battle-start pool, optionally combine "
             "constructed supplements and sampled training weight, verify restores, "
             "and report T009 broad-training gate gaps."
+        ),
+    )
+    input_group.add_argument(
+        "--a20-reachability-report",
+        type=Path,
+        metavar="OUTPUT_JSON",
+        help=(
+            "Build an offline T036 reachability comparison report from repeated "
+            "--reachability-arm LABEL POOL_JSONL COVERAGE_JSON inputs."
         ),
     )
     input_group.add_argument(
@@ -605,6 +624,17 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         metavar="PATH",
         help=("Write the --lightspeed-a20-battle-start-coverage JSON report to PATH."),
+    )
+    parser.add_argument(
+        "--reachability-arm",
+        nargs=3,
+        action="append",
+        default=[],
+        metavar=("LABEL", "POOL_JSONL", "COVERAGE_JSON"),
+        help=(
+            "One arm for --a20-reachability-report. Repeat for default, "
+            "Oracle no-potion, potion-enabled, or other explicitly labeled arms."
+        ),
     )
     parser.add_argument(
         "--fixed-evaluation-cohort",

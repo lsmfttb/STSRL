@@ -10,6 +10,7 @@ from sts_combat_rl.commands.a20_coverage import (
 )
 from sts_combat_rl.commands.checkpoint_pool import (
     collect_checkpoint_pool,
+    collect_search_checkpoint_pool,
     run_checkpoint_verification,
     verify_checkpoint_pool_file,
     write_checkpoint_pool,
@@ -191,6 +192,7 @@ _LIGHTSPEED_BOOL_FLAGS = (
 )
 _LIGHTSPEED_PATH_FLAGS = (
     "lightspeed_battle_start_pool",
+    "lightspeed_search_battle_start_pool",
     "lightspeed_battle_start_pool_restore",
     "lightspeed_a20_battle_start_coverage",
     "lightspeed_a20_oracle_teacher_scaleup",
@@ -350,6 +352,30 @@ def run_lightspeed_command(args: argparse.Namespace) -> int:
                 structural_fraction=args.battle_start_structural_fraction,
             )
             write_checkpoint_pool(args.lightspeed_battle_start_pool, pool)
+            print(format_battle_start_pool_coverage_report(coverage), file=sys.stderr)
+            if not coverage.completed_outcomes_complete:
+                return 1
+        elif args.lightspeed_search_battle_start_pool is not None:
+            oracle_controller = OracleSearchController(
+                simulations=args.oracle_search_simulations,
+                root_selection_rule=args.oracle_root_selection,
+                action_space=action_space,
+            )
+            pool, coverage = collect_search_checkpoint_pool(
+                adapter,
+                oracle_controller=oracle_controller,
+                non_combat_policy=build_non_combat_driver_policy(
+                    args.sim_non_combat_policy,
+                    args.sim_seed,
+                ),
+                seeds=[args.sim_seed + offset for offset in range(args.sim_episodes)],
+                max_steps=args.sim_steps,
+                action_space=action_space,
+                sample_count=args.battle_start_sample_count,
+                sampling_seed=args.sim_seed,
+                structural_fraction=args.battle_start_structural_fraction,
+            )
+            write_checkpoint_pool(args.lightspeed_search_battle_start_pool, pool)
             print(format_battle_start_pool_coverage_report(coverage), file=sys.stderr)
             if not coverage.completed_outcomes_complete:
                 return 1

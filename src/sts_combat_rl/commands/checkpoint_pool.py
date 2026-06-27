@@ -23,6 +23,7 @@ from sts_combat_rl.sim.checkpoint_verification import (
 )
 from sts_combat_rl.sim.contract import CheckpointingSimulatorAdapter
 from sts_combat_rl.sim.online_controller import PolicyController, RoutedRunController
+from sts_combat_rl.sim.oracle_search import OracleSearchController
 from sts_combat_rl.sim.policy import DecisionPolicy
 
 
@@ -74,9 +75,63 @@ def collect_checkpoint_pool(
 ) -> tuple[NaturalBattleStartPool, BattleStartPoolCoverageReport]:
     """Collect a natural pool and optionally report sampling weight draws."""
 
+    return collect_checkpoint_pool_with_controller(
+        adapter,
+        controller=build_routed_controller(battle_policy, non_combat_policy),
+        seeds=seeds,
+        max_steps=max_steps,
+        action_space=action_space,
+        sample_count=sample_count,
+        sampling_seed=sampling_seed,
+        structural_fraction=structural_fraction,
+    )
+
+
+def collect_search_checkpoint_pool(
+    adapter: CheckpointingSimulatorAdapter,
+    *,
+    oracle_controller: OracleSearchController,
+    non_combat_policy: DecisionPolicy,
+    seeds: Sequence[int],
+    max_steps: int,
+    action_space: ActionSpaceConfig,
+    sample_count: int = 0,
+    sampling_seed: int = 1,
+    structural_fraction: float = 0.5,
+) -> tuple[NaturalBattleStartPool, BattleStartPoolCoverageReport]:
+    """Collect a natural pool with Oracle search controlling only battles."""
+
+    return collect_checkpoint_pool_with_controller(
+        adapter,
+        controller=RoutedRunController(
+            battle=oracle_controller,
+            non_combat=PolicyController(non_combat_policy),
+        ),
+        seeds=seeds,
+        max_steps=max_steps,
+        action_space=action_space,
+        sample_count=sample_count,
+        sampling_seed=sampling_seed,
+        structural_fraction=structural_fraction,
+    )
+
+
+def collect_checkpoint_pool_with_controller(
+    adapter: CheckpointingSimulatorAdapter,
+    *,
+    controller: RoutedRunController,
+    seeds: Sequence[int],
+    max_steps: int,
+    action_space: ActionSpaceConfig,
+    sample_count: int = 0,
+    sampling_seed: int = 1,
+    structural_fraction: float = 0.5,
+) -> tuple[NaturalBattleStartPool, BattleStartPoolCoverageReport]:
+    """Collect a natural pool from a fully specified routed controller."""
+
     pool = collect_natural_battle_start_pool(
         adapter,
-        build_routed_controller(battle_policy, non_combat_policy),
+        controller,
         seeds=seeds,
         max_steps=max_steps,
         action_space=action_space,

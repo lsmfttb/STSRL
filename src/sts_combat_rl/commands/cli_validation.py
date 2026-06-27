@@ -131,6 +131,12 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
             "--oracle-teacher-scaleup-coverage-report require "
             "--lightspeed-a20-oracle-teacher-scaleup"
         )
+    if args.a20_reachability_report is not None and len(args.reachability_arm) < 2:
+        return (
+            "--a20-reachability-report requires at least two --reachability-arm values"
+        )
+    if args.a20_reachability_report is None and args.reachability_arm:
+        return "--reachability-arm requires --a20-reachability-report"
     if (
         args.oracle_teacher_coverage_report is not None
         and args.oracle_teacher_source_pool is None
