@@ -39,6 +39,8 @@ from sts_combat_rl.sim.oracle_search import OracleSearchController
 from sts_combat_rl.sim.oracle_teacher import OracleTeacherDataset, OracleTeacherRow
 from sts_combat_rl.sim.oracle_teacher_scaleup import (
     ORACLE_TEACHER_SCALEUP_SOURCE_SELECTION_T032_T039_NARROW,
+    T032_T039_ACT1_BOSS_SOURCE_COUNT,
+    T032_T039_ACT2_SOURCE_COUNT,
     T032_T039_NARROW_SELECTION_CONTRACT_ID,
     build_t032_t039_narrow_source_selection_plan,
     build_oracle_teacher_scaleup_manifest,
@@ -147,13 +149,27 @@ def test_source_selection_fails_closed_for_bad_source_identity() -> None:
 def test_t032_t039_narrow_selection_keeps_rare_sources_and_samples_background() -> None:
     pool = _custom_pool(
         [
-            _custom_record(0, act=1, room_type="BOSS", encounter_id="BOSS_A"),
-            _custom_record(1, act=1, room_type="BOSS", encounter_id="BOSS_B"),
-            _custom_record(2, act=2, room_type="MONSTER", encounter_id="ACT2_A"),
-            _custom_record(3, act=2, room_type="ELITE", encounter_id="ACT2_B"),
             *[
                 _custom_record(
-                    10 + index,
+                    index,
+                    act=1,
+                    room_type="BOSS",
+                    encounter_id=f"BOSS_{index:02d}",
+                )
+                for index in range(T032_T039_ACT1_BOSS_SOURCE_COUNT)
+            ],
+            *[
+                _custom_record(
+                    100 + index,
+                    act=2,
+                    room_type="ELITE" if index == 1 else "MONSTER",
+                    encounter_id=f"ACT2_{index}",
+                )
+                for index in range(T032_T039_ACT2_SOURCE_COUNT)
+            ],
+            *[
+                _custom_record(
+                    200 + index,
                     act=1,
                     room_type="MONSTER",
                     encounter_id=f"BACKGROUND_{index}",
@@ -185,13 +201,15 @@ def test_t032_t039_narrow_selection_keeps_rare_sources_and_samples_background() 
     )
     assert plan.selection_metadata["groups"] == {
         "act1_boss": {
-            "available": 2,
-            "selected": 2,
+            "available": T032_T039_ACT1_BOSS_SOURCE_COUNT,
+            "selected": T032_T039_ACT1_BOSS_SOURCE_COUNT,
+            "required": T032_T039_ACT1_BOSS_SOURCE_COUNT,
             "required_all_available": True,
         },
         "act2": {
-            "available": 2,
-            "selected": 2,
+            "available": T032_T039_ACT2_SOURCE_COUNT,
+            "selected": T032_T039_ACT2_SOURCE_COUNT,
+            "required": T032_T039_ACT2_SOURCE_COUNT,
             "required_all_available": True,
         },
         "act1_non_boss_background": {
@@ -201,11 +219,14 @@ def test_t032_t039_narrow_selection_keeps_rare_sources_and_samples_background() 
             "selection_seed": 32039,
         },
     }
-    assert [source["selection_group"] for source in plan.selected_sources[:4]] == [
-        "act1_boss",
-        "act1_boss",
-        "act2",
-        "act2",
+    assert [
+        source["selection_group"]
+        for source in plan.selected_sources[
+            : T032_T039_ACT1_BOSS_SOURCE_COUNT + T032_T039_ACT2_SOURCE_COUNT
+        ]
+    ] == [
+        *(["act1_boss"] * T032_T039_ACT1_BOSS_SOURCE_COUNT),
+        *(["act2"] * T032_T039_ACT2_SOURCE_COUNT),
     ]
 
     background_ids = [
@@ -215,8 +236,106 @@ def test_t032_t039_narrow_selection_keeps_rare_sources_and_samples_background() 
     ]
     expected_background_indices = sorted(random.Random(32039).sample(range(6), 3))
     assert background_ids == [
-        f"checkpoint-{10 + index}" for index in expected_background_indices
+        f"checkpoint-{200 + index}" for index in expected_background_indices
     ]
+
+
+def test_t032_t039_narrow_selection_fails_closed_for_missing_act1_boss() -> None:
+    pool = _custom_pool(
+        [
+            *[
+                _custom_record(
+                    index,
+                    act=1,
+                    room_type="BOSS",
+                    encounter_id=f"BOSS_{index:02d}",
+                )
+                for index in range(T032_T039_ACT1_BOSS_SOURCE_COUNT - 1)
+            ],
+            *[
+                _custom_record(
+                    100 + index,
+                    act=2,
+                    room_type="MONSTER",
+                    encounter_id=f"ACT2_{index}",
+                )
+                for index in range(T032_T039_ACT2_SOURCE_COUNT)
+            ],
+            *[
+                _custom_record(
+                    200 + index,
+                    act=1,
+                    room_type="MONSTER",
+                    encounter_id=f"BACKGROUND_{index}",
+                )
+                for index in range(2)
+            ],
+        ]
+    )
+
+    plan = build_t032_t039_narrow_source_selection_plan(
+        pool,
+        selection_seed=32039,
+        background_source_count=2,
+    )
+
+    assert not plan.passed
+    assert any("31 Act 1 Boss sources" in problem for problem in plan.problems)
+    assert plan.selection_metadata["groups"]["act1_boss"] == {
+        "available": T032_T039_ACT1_BOSS_SOURCE_COUNT - 1,
+        "selected": T032_T039_ACT1_BOSS_SOURCE_COUNT - 1,
+        "required": T032_T039_ACT1_BOSS_SOURCE_COUNT,
+        "required_all_available": True,
+    }
+
+
+def test_t032_t039_narrow_selection_fails_closed_for_missing_act2() -> None:
+    pool = _custom_pool(
+        [
+            *[
+                _custom_record(
+                    index,
+                    act=1,
+                    room_type="BOSS",
+                    encounter_id=f"BOSS_{index:02d}",
+                )
+                for index in range(T032_T039_ACT1_BOSS_SOURCE_COUNT)
+            ],
+            *[
+                _custom_record(
+                    100 + index,
+                    act=2,
+                    room_type="MONSTER",
+                    encounter_id=f"ACT2_{index}",
+                )
+                for index in range(T032_T039_ACT2_SOURCE_COUNT - 1)
+            ],
+            *[
+                _custom_record(
+                    200 + index,
+                    act=1,
+                    room_type="MONSTER",
+                    encounter_id=f"BACKGROUND_{index}",
+                )
+                for index in range(2)
+            ],
+        ]
+    )
+
+    plan = build_t032_t039_narrow_source_selection_plan(
+        pool,
+        selection_seed=32039,
+        background_source_count=2,
+    )
+
+    assert not plan.passed
+    assert any("3 Act 2 sources" in problem for problem in plan.problems)
+    assert plan.selection_metadata["groups"]["act2"] == {
+        "available": T032_T039_ACT2_SOURCE_COUNT - 1,
+        "selected": T032_T039_ACT2_SOURCE_COUNT - 1,
+        "required": T032_T039_ACT2_SOURCE_COUNT,
+        "required_all_available": True,
+    }
 
 
 def test_t032_t039_narrow_selection_fails_closed_without_background() -> None:
@@ -330,11 +449,27 @@ def test_command_workflow_writes_teacher_reports_and_manifest(tmp_path: Path) ->
 def test_command_workflow_uses_t032_t039_narrow_selection(tmp_path: Path) -> None:
     pool = _custom_pool(
         [
-            _custom_record(0, act=1, room_type="BOSS", encounter_id="BOSS_A"),
-            _custom_record(1, act=2, room_type="MONSTER", encounter_id="ACT2_A"),
-            _custom_record(2, act=1, room_type="MONSTER", encounter_id="BG_A"),
-            _custom_record(3, act=1, room_type="ELITE", encounter_id="BG_B"),
-            _custom_record(4, act=1, room_type="EVENT", encounter_id="BG_C"),
+            *[
+                _custom_record(
+                    index,
+                    act=1,
+                    room_type="BOSS",
+                    encounter_id=f"BOSS_{index:02d}",
+                )
+                for index in range(T032_T039_ACT1_BOSS_SOURCE_COUNT)
+            ],
+            *[
+                _custom_record(
+                    T032_T039_ACT1_BOSS_SOURCE_COUNT + index,
+                    act=2,
+                    room_type="MONSTER",
+                    encounter_id=f"ACT2_{index}",
+                )
+                for index in range(T032_T039_ACT2_SOURCE_COUNT)
+            ],
+            _custom_record(34, act=1, room_type="MONSTER", encounter_id="BG_A"),
+            _custom_record(35, act=1, room_type="ELITE", encounter_id="BG_B"),
+            _custom_record(36, act=1, room_type="EVENT", encounter_id="BG_C"),
         ]
     )
     pool_path = tmp_path / "pool.jsonl"
@@ -353,15 +488,17 @@ def test_command_workflow_uses_t032_t039_narrow_selection(tmp_path: Path) -> Non
     )
 
     assert manifest.command_passed
-    assert manifest.source_selection.selected_source_count == 4
+    assert manifest.source_selection.selected_source_count == 36
     assert manifest.source_selection.selection_metadata["groups"]["act1_boss"] == {
-        "available": 1,
-        "selected": 1,
+        "available": T032_T039_ACT1_BOSS_SOURCE_COUNT,
+        "selected": T032_T039_ACT1_BOSS_SOURCE_COUNT,
+        "required": T032_T039_ACT1_BOSS_SOURCE_COUNT,
         "required_all_available": True,
     }
     assert manifest.source_selection.selection_metadata["groups"]["act2"] == {
-        "available": 1,
-        "selected": 1,
+        "available": T032_T039_ACT2_SOURCE_COUNT,
+        "selected": T032_T039_ACT2_SOURCE_COUNT,
+        "required": T032_T039_ACT2_SOURCE_COUNT,
         "required_all_available": True,
     }
     assert (

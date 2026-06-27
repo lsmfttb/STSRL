@@ -32,6 +32,8 @@ ORACLE_TEACHER_SCALEUP_SOURCE_SELECTION_MODES = (
     ORACLE_TEACHER_SCALEUP_SOURCE_SELECTION_T032_T039_NARROW,
 )
 T032_T039_NARROW_SELECTION_CONTRACT_ID = "t032-t039-narrow-source-selection-v1"
+T032_T039_ACT1_BOSS_SOURCE_COUNT = 31
+T032_T039_ACT2_SOURCE_COUNT = 3
 T032_T039_BACKGROUND_SOURCE_COUNT = 64
 SCALEUP_STRUCTURAL_FIELDS = (
     "ascension",
@@ -252,10 +254,18 @@ def build_t032_t039_narrow_source_selection_plan(
         item for item in ordered if _is_act1_non_boss_source(item[0])
     ]
 
-    if not act1_boss:
-        problems.append("T032 selection requires at least one Act 1 Boss source")
-    if not act2:
-        problems.append("T032 selection requires at least one Act 2 source")
+    if len(act1_boss) != T032_T039_ACT1_BOSS_SOURCE_COUNT:
+        problems.append(
+            "T032 selection requires exactly "
+            f"{T032_T039_ACT1_BOSS_SOURCE_COUNT} Act 1 Boss sources from the "
+            f"T039 accepted contract, but {len(act1_boss)} are available"
+        )
+    if len(act2) != T032_T039_ACT2_SOURCE_COUNT:
+        problems.append(
+            "T032 selection requires exactly "
+            f"{T032_T039_ACT2_SOURCE_COUNT} Act 2 sources from the T039 "
+            f"accepted contract, but {len(act2)} are available"
+        )
     if len(background_candidates) < background_source_count:
         problems.append(
             "T032 selection requires "
@@ -318,11 +328,13 @@ def build_t032_t039_narrow_source_selection_plan(
                 "act1_boss": {
                     "available": len(act1_boss),
                     "selected": len(act1_boss),
+                    "required": T032_T039_ACT1_BOSS_SOURCE_COUNT,
                     "required_all_available": True,
                 },
                 "act2": {
                     "available": len(act2),
                     "selected": len(act2),
+                    "required": T032_T039_ACT2_SOURCE_COUNT,
                     "required_all_available": True,
                 },
                 "act1_non_boss_background": {

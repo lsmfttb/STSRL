@@ -1180,6 +1180,72 @@ def test_cli_oracle_teacher_scaleup_rejects_t032_source_limit(capsys) -> None:
     assert "not compatible" in captured.err
 
 
+def test_cli_oracle_teacher_scaleup_rejects_nonpositive_background_count(
+    capsys,
+) -> None:
+    assert (
+        main(
+            [
+                "--lightspeed-a20-oracle-teacher-scaleup",
+                "pool.jsonl",
+                "--oracle-teacher-scaleup-output-dir",
+                "scaleup",
+                "--oracle-teacher-scaleup-background-count",
+                "0",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 2
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "--oracle-teacher-scaleup-background-count must be positive" in captured.err
+
+
+def test_cli_oracle_teacher_scaleup_rejects_t032_selection_without_scaleup(
+    capsys,
+) -> None:
+    assert (
+        main(
+            [
+                "--oracle-teacher-scaleup-source-selection",
+                "t032_t039_narrow",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 2
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "--oracle-teacher-scaleup-source-selection" in captured.err
+    assert "--lightspeed-a20-oracle-teacher-scaleup" in captured.err
+
+
+def test_cli_oracle_teacher_scaleup_rejects_background_count_without_scaleup(
+    capsys,
+) -> None:
+    assert (
+        main(
+            [
+                "--oracle-teacher-scaleup-background-count",
+                "32",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 2
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "--oracle-teacher-scaleup-background-count" in captured.err
+    assert "--lightspeed-a20-oracle-teacher-scaleup" in captured.err
+
+
 def test_cli_oracle_teacher_scaleup_requires_output_dir(capsys) -> None:
     assert (
         main(
