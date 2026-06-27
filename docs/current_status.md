@@ -21,9 +21,12 @@ complete and added search-controlled reachability tooling, but its accepted
 10-run A20 smoke arms were also Act 1 only. T037 is complete and recovered the
 historical Boss/Act2 source signal at 1,000 terminal runs. T039 is complete and
 records the accepted T037 source-coverage contract in
-`docs/a20_later_act_boss_source_coverage_contract.md`. T032 is the current
-`READY` task: a narrow teacher/checkpoint diagnostic refresh over the accepted
-T039 contract, not a broad A20 training refresh.
+`docs/a20_later_act_boss_source_coverage_contract.md`. T032 is complete: it
+ran the narrow teacher/checkpoint diagnostic refresh over the accepted T039
+contract, produced a `narrow_curriculum` checkpoint and calibration evidence,
+and kept broad A20 training readiness closed. T035 is now the next `READY`
+task for a deeper model-guided Oracle-like search experiment using refreshed
+checkpoint provenance.
 
 ## Implemented On Main
 
@@ -287,7 +290,7 @@ T039 contract, not a broad A20 training refresh.
 
 ### Tests And Runtime Evidence
 
-- `548` tests pass on Windows Python as of this review. In an uninstalled
+- `565` tests pass on Windows Python as of this review. In an uninstalled
   checkout, set `PYTHONPATH=src` (or install the package) before invoking the
   CLI directly.
 - The two CommunicationMod fixture smokes pass.
@@ -567,6 +570,30 @@ T039 contract, not a broad A20 training refresh.
   smoke on the reported artifacts. This is healthy artifact and distribution
   evidence, not broad training, teacher-refresh, fixed-comparison,
   controller-strength, live-game, or normal-information evidence.
+- T032 validates the narrow teacher/checkpoint diagnostic refresh over the T039
+  source contract. The accepted PR added an explicit `t032_t039_narrow`
+  source-selection mode for T023 scale-up and kept generated artifacts under
+  ignored paths. The regenerated source pool used 40 shards x 25 terminal runs
+  over seeds `1..1000` with 8 WSL workers, A20, 500 steps,
+  `oracle_search_v1_highest_mean_s20`, no battle potions, and the separate
+  `stochastic-v1` non-combat driver. Coverage restoration was rerun as 40
+  shard-level jobs with 8 workers. The pool had 4,688 natural starts,
+  31 Act 1 Boss starts, 3 Act 2 starts, 4,688/4,688 restore/public-context
+  matches, and 4,688 available structured outcomes. T032 selected all 31
+  Act 1 Boss starts, all 3 Act 2 starts, and 64 deterministic Act 1 non-Boss
+  background starts with seed `32039`. Teacher budgets 20, 50, and 100 used the
+  same 98 source identities, each producing 98 teacher rows. The budget-100
+  bridge emitted 98 trainer-input v6 rows with `oracle_teacher_action_one_hot`
+  targets, a one-epoch Windows PyTorch checkpoint was trained under the named
+  `narrow_curriculum` override, and calibration evaluated 98/98 rows with
+  top-1 20/98, top-3 65/98, mean CE/KL 1.786224, and ECE 0.014812. The T009
+  broad-training gate remained closed because Act 2 had only three selected
+  rows and Acts 3--4 had zero rows. Maintainer review verified artifact hashes,
+  reran the pinned-source verifier, passed 565 Windows tests, compileall,
+  ruff, format check, both CommunicationMod fixture smokes, task-doc checks,
+  and diff whitespace checks. This is diagnostic Oracle-like supervision
+  evidence only, not normal-information, live-game, broad-training,
+  controller-strength, or promotion evidence.
 
 ## Not Implemented On Main
 
@@ -596,16 +623,17 @@ controller improvement: the accepted T029 smoke comparison tied baseline
 Oracle search at five wins and three losses on eight restored A20 battles
 while adding 120 checkpoint model calls for the model-guided controller.
 
-T031, T036, T037, and T039 are complete. T031 found healthy artifacts and
+T031, T036, T037, T039, and T032 are complete. T031 found healthy artifacts and
 restore evidence but no Boss or later-act starts. T036 rebuilt the
 search-controlled collection path on current schemas while preserving the
 battle/non-combat split, but its accepted 10-run smoke arms also reached no
 Boss or later-act starts. T037 recovered the historical Boss/Act2 signal on
 current schemas, and T039 converted that evidence into the durable source
-coverage contract. T032 has therefore been deliberately narrowed into the next
-diagnostic refresh task over the T039 contract. Use the task index to determine
-which exact task rows are `READY`, `BLOCKED`, or `DRAFT`; future rows must not
-start merely because they are mentioned here.
+coverage contract. T032 then ran the deliberately narrow diagnostic teacher,
+trainer, checkpoint, and calibration refresh over that contract. T035 is now
+the next `READY` task. Use the task index to determine which exact task rows
+are `READY`, `BLOCKED`, or `DRAFT`; future rows must not start merely because
+they are mentioned here.
 
 The immediate external-fork follow-up is
 [`lsmfttb/sts_lightspeed#7`](https://github.com/lsmfttb/sts_lightspeed/issues/7):
@@ -617,18 +645,18 @@ The post-M1 task-batch recommendation is:
 
 1. Keep broad teacher/checkpoint refresh work blocked; the T039 contract is a
    narrow Boss/Act2 supplement and does not satisfy broad A20 readiness.
-2. Run T032 as the next narrow diagnostic refresh over the T039 contract: all
-   accepted Act 1 Boss starts, all accepted Act 2 starts, and a deterministic
-   Act 1 non-Boss background set.
+2. Treat T032's selected 98-source refresh and `narrow_curriculum` checkpoint
+   as diagnostic evidence only, not broad A20 training readiness.
 3. Preserve T009 broad-training gate failure separately from any named
    `narrow_curriculum` checkpoint/trainer diagnostic override.
 4. Draft public-context/history/map/visible-Boss encoders before using those
    fields as ordinary model inputs (T033).
 5. Keep public-consistent hidden-future sampling blocked on an explicit native
    simulator boundary (T034).
-6. Attempt deeper model-guided Oracle-like search only after refreshed
-   checkpoint evidence exists and the guidance role or native API boundary is
-   explicit (T035).
+6. Attempt the next deeper model-guided Oracle-like search experiment through
+   T035, comparing against baseline Oracle search and T028 on identical
+   restored starts while preserving the `full_simulator_state_oracle_like`
+   boundary.
 
 The adapter and captured-sample compatibility gate in
 [`T013`](tasks/T013-live-communicationmod-runtime-adapter.md) is complete.
