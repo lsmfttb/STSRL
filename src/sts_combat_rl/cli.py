@@ -9,6 +9,9 @@ from sts_combat_rl.commands.cli_parser import build_parser
 from sts_combat_rl.commands.cli_paths import timestamped_path
 from sts_combat_rl.commands.cli_policies import build_pytorch_gate_config
 from sts_combat_rl.commands.cli_validation import validate_cli_args
+from sts_combat_rl.commands.expert_source_coverage import (
+    run_expert_source_coverage_report_from_paths,
+)
 from sts_combat_rl.commands.lightspeed_cli import (
     is_lightspeed_command,
     run_lightspeed_command,
@@ -47,6 +50,9 @@ from sts_combat_rl.sim.calibration import (
 )
 from sts_combat_rl.sim.reachability import (
     format_a20_reachability_comparison_report,
+)
+from sts_combat_rl.sim.expert_source_coverage import (
+    format_expert_source_coverage_comparison_report,
 )
 
 
@@ -275,6 +281,24 @@ def main(argv: list[str] | None = None) -> int:
             print(f"failed to build A20 reachability report: {exc}", file=sys.stderr)
             return 2
         print(format_a20_reachability_comparison_report(report), file=sys.stderr)
+        return 0 if report.command_passed else 1
+
+    if args.expert_source_coverage_report is not None:
+        try:
+            report = run_expert_source_coverage_report_from_paths(
+                output_path=args.expert_source_coverage_report,
+                arm_specs=args.expert_source_arm,
+            )
+        except (OSError, ValueError) as exc:
+            print(
+                f"failed to build expert source-coverage report: {exc}",
+                file=sys.stderr,
+            )
+            return 2
+        print(
+            format_expert_source_coverage_comparison_report(report),
+            file=sys.stderr,
+        )
         return 0 if report.command_passed else 1
 
     if is_lightspeed_command(args):
