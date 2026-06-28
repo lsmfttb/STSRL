@@ -8,7 +8,10 @@ from sts_combat_rl.sim.contract import SimulatorAction, SimulatorSnapshot
 from sts_combat_rl.sim.model_guided_oracle_search import (
     MODEL_GUIDED_ORACLE_ROOT_SELECTION_RULE,
     MODEL_GUIDED_ORACLE_SEARCH_CONTROLLER_VERSION,
+    MODEL_GUIDED_ORACLE_SEARCH_V2_CONTROLLER_VERSION,
+    MODEL_GUIDED_ORACLE_V2_ROOT_SELECTION_RULE,
     ModelGuidedOracleSearchController,
+    ModelGuidedOracleSearchV2Controller,
 )
 from sts_combat_rl.sim.online_controller import NATIVE_SEARCH_INFORMATION_REGIME
 from sts_combat_rl.sim.oracle_search import (
@@ -287,6 +290,54 @@ def test_model_guided_controller_combines_native_mean_and_policy_probability() -
     assert native_report["decision_telemetry"]["model_calls"] == 0
 
 
+def test_model_guided_v2_controller_uses_visit_adjusted_policy_probability() -> None:
+    controller = ModelGuidedOracleSearchV2Controller(
+        simulations=10,
+        scorer=_FakeGuidanceScorer((0.10, 0.90)),
+        policy_probability_weight=0.1,
+        native_source_identity={"integration_commit": "abc"},
+    )
+
+    decision = controller.select_action(
+        _Adapter(),
+        SimulatorSnapshot(observation=[], raw={"screen_state": "BATTLE"}),
+        _actions(),
+        _context(),
+        step_index=0,
+    )
+
+    assert decision.selected_index == 1
+    assert decision.provenance.kind == "model_guided_oracle_battle_search_v2"
+    assert decision.provenance.name == "model_guided_oracle_search_v2_s10_pw0.1"
+    assert decision.provenance.config["controller_version"] == (
+        MODEL_GUIDED_ORACLE_SEARCH_V2_CONTROLLER_VERSION
+    )
+    assert decision.provenance.config["root_selection_rule"] == (
+        MODEL_GUIDED_ORACLE_V2_ROOT_SELECTION_RULE
+    )
+    assert decision.metadata["model_guided_oracle_controller_version"] == (
+        MODEL_GUIDED_ORACLE_SEARCH_V2_CONTROLLER_VERSION
+    )
+    assert decision.metadata["model_guided_oracle_selection_rule"] == (
+        MODEL_GUIDED_ORACLE_V2_ROOT_SELECTION_RULE
+    )
+    root_scores = decision.metadata["model_guided_oracle_root_scores"]
+    assert root_scores[0]["model_guidance_multiplier"] == pytest.approx((10 / 6) ** 0.5)
+    assert root_scores[1]["model_guidance_multiplier"] == pytest.approx((10 / 4) ** 0.5)
+    assert root_scores[1]["combined_score"] == pytest.approx(
+        0.45 + 0.1 * 0.90 * ((10 / 4) ** 0.5)
+    )
+
+    telemetry = decision.metadata["search_decision_telemetry"][0]
+    assert telemetry["controller_kind"] == "model_guided_oracle_battle_search_v2"
+    assert (
+        telemetry["search_backend"]["controller_version"]
+        == MODEL_GUIDED_ORACLE_SEARCH_V2_CONTROLLER_VERSION
+    )
+    assert telemetry["model_calls"] == 1
+    assert "model_guided_leaf_values" in telemetry["unavailable_fields"]
+
+
 def test_model_guided_controller_fails_closed_on_checkpoint_change() -> None:
     scorer = _FakeGuidanceScorer(
         (0.5, 0.5),
@@ -328,6 +379,30 @@ def test_model_guided_controller_fails_closed_on_action_kind_mismatch() -> None:
 def test_model_guided_controller_fails_closed_on_action_identity_mismatch() -> None:
     context = _context_with_tactical_identities()
     controller = ModelGuidedOracleSearchController(
+        simulations=10,
+        scorer=_FakeGuidanceScorer(
+            (0.5, 0.5),
+            action_identities=(
+                _public_action_identity("card", 1),
+                _public_action_identity("card", 0),
+            ),
+        ),
+        native_source_identity={"integration_commit": "abc"},
+    )
+
+    with pytest.raises(ValueError, match="action identity"):
+        controller.select_action(
+            _Adapter(),
+            SimulatorSnapshot(observation=[], raw={"screen_state": "BATTLE"}),
+            _actions(),
+            context,
+            step_index=0,
+        )
+
+
+def test_model_guided_v2_controller_fails_closed_on_action_identity_mismatch() -> None:
+    context = _context_with_tactical_identities()
+    controller = ModelGuidedOracleSearchV2Controller(
         simulations=10,
         scorer=_FakeGuidanceScorer(
             (0.5, 0.5),

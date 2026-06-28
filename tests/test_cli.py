@@ -273,6 +273,27 @@ def test_cli_parser_accepts_model_guided_oracle_flags(tmp_path) -> None:
     assert comparison_args.model_guided_search_comparison_report == comparison_path
     assert comparison_args.model_guided_search_comparison_scale == "fixed"
 
+    v2_comparison_args = build_parser().parse_args(
+        [
+            "--lightspeed-model-guided-search-v2-fixed-comparison",
+            str(cohort_path),
+            "--model-guided-oracle-checkpoint",
+            str(checkpoint_path),
+            "--model-guided-search-comparison-report",
+            str(comparison_path),
+            "--model-guided-search-comparison-scale",
+            "fixed",
+        ]
+    )
+
+    assert (
+        v2_comparison_args.lightspeed_model_guided_search_v2_fixed_comparison
+        == cohort_path
+    )
+    assert v2_comparison_args.model_guided_oracle_checkpoint == checkpoint_path
+    assert v2_comparison_args.model_guided_search_comparison_report == comparison_path
+    assert v2_comparison_args.model_guided_search_comparison_scale == "fixed"
+
 
 def test_cli_default_import_does_not_import_torch() -> None:
     repo_src = Path(__file__).resolve().parents[1] / "src"
@@ -344,6 +365,29 @@ def test_cli_rejects_model_guided_comparison_without_checkpoint(
         main(
             [
                 "--lightspeed-model-guided-search-fixed-comparison",
+                str(cohort_path),
+                "--log-file",
+                "-",
+            ]
+        )
+        == 2
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "requires --model-guided-oracle-checkpoint" in captured.err
+
+
+def test_cli_rejects_model_guided_v2_comparison_without_checkpoint(
+    tmp_path,
+    capsys,
+) -> None:
+    cohort_path = tmp_path / "cohort.jsonl"
+
+    assert (
+        main(
+            [
+                "--lightspeed-model-guided-search-v2-fixed-comparison",
                 str(cohort_path),
                 "--log-file",
                 "-",
@@ -1583,6 +1627,38 @@ def test_cli_oracle_search_teacher_and_fixed_eval_routes_write_stderr_only(
     assert "model calls: total=1" in comparison_output.err
     assert '"schema_id": "model-guided-search-fixed-comparison-v1"' in (
         comparison_path.read_text(encoding="utf-8")
+    )
+
+    v2_comparison_path = tmp_path / "model-guided-v2-comparison.jsonl"
+    assert (
+        main(
+            [
+                "--lightspeed-model-guided-search-v2-fixed-comparison",
+                str(cohort_path),
+                "--model-guided-oracle-checkpoint",
+                str(checkpoint_path),
+                "--oracle-search-simulations",
+                "3",
+                "--sim-steps",
+                "1",
+                "--model-guided-search-comparison-report",
+                str(v2_comparison_path),
+                "--log-file",
+                "-",
+            ]
+        )
+        == 0
+    )
+    v2_comparison_output = capsys.readouterr()
+    assert v2_comparison_output.out == ""
+    assert v2_comparison_path.exists()
+    assert "Model-guided Oracle search v2 fixed-cohort comparison" in (
+        v2_comparison_output.err
+    )
+    assert "source starts matched: yes" in v2_comparison_output.err
+    assert "model_guided_oracle_search_v2:" in v2_comparison_output.err
+    assert '"schema_id": "model-guided-search-fixed-comparison-v2"' in (
+        v2_comparison_path.read_text(encoding="utf-8")
     )
 
 

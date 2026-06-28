@@ -5,6 +5,7 @@ from io import StringIO
 
 from sts_combat_rl.commands.model_guided_search_comparison import (
     run_model_guided_search_fixed_comparison_from_cohort_path,
+    run_model_guided_search_v2_fixed_comparison_from_cohort_path,
 )
 from sts_combat_rl.sim.action_space import ActionSpaceConfig
 from sts_combat_rl.sim.contract import (
@@ -25,17 +26,26 @@ from sts_combat_rl.sim.fixed_evaluation_set import (
 )
 from sts_combat_rl.sim.model_guided_oracle_search import (
     ModelGuidedOracleSearchController,
+    ModelGuidedOracleSearchV2Controller,
 )
 from sts_combat_rl.sim.model_guided_search_comparison import (
     BASELINE_ORACLE_LABEL,
     MODEL_GUIDED_ORACLE_LABEL,
+    MODEL_GUIDED_ORACLE_V1_LABEL,
+    MODEL_GUIDED_ORACLE_V2_LABEL,
     build_model_guided_search_fixed_comparison_report,
     comparison_aggregate_outcomes,
     comparison_budget_summary,
+    comparison_v2_aggregate_outcomes,
+    comparison_v2_budget_summary,
+    comparison_v2_controller_summaries,
     comparison_controller_summaries,
     dump_model_guided_search_fixed_comparison_jsonl,
+    dump_model_guided_search_v2_fixed_comparison_jsonl,
     format_model_guided_search_fixed_comparison_report,
+    format_model_guided_search_v2_fixed_comparison_report,
     load_model_guided_search_fixed_comparison_jsonl,
+    load_model_guided_search_v2_fixed_comparison_jsonl,
 )
 from sts_combat_rl.sim.online_controller import NATIVE_SEARCH_INFORMATION_REGIME
 from sts_combat_rl.sim.oracle_search import (
@@ -378,6 +388,112 @@ def test_comparison_runs_both_controllers_on_identical_sources(tmp_path) -> None
     )
     assert loaded.evaluation_successful
     assert loaded.model_guided_report.authoritative_wins == 1
+    assert loaded.baseline_report.losses == 1
+
+
+def test_v2_comparison_runs_three_controllers_on_identical_sources(tmp_path) -> None:
+    cohort_path = tmp_path / "cohort.jsonl"
+    with cohort_path.open("w", encoding="utf-8", newline="\n") as stream:
+        dump_fixed_cohort_jsonl(_cohort(), stream)
+    action_space = ActionSpaceConfig.initial_no_potions()
+    baseline = OracleSearchController(
+        simulations=10,
+        root_selection_rule="highest_mean",
+        action_space=action_space,
+        native_source_identity={"integration_commit": "abc"},
+    )
+    model_guided_v1 = ModelGuidedOracleSearchController(
+        simulations=10,
+        scorer=_FakeGuidanceScorer(),
+        policy_probability_weight=0.10,
+        action_space=action_space,
+        native_source_identity={"integration_commit": "abc"},
+    )
+    model_guided_v2 = ModelGuidedOracleSearchV2Controller(
+        simulations=10,
+        scorer=_FakeGuidanceScorer(),
+        policy_probability_weight=0.10,
+        action_space=action_space,
+        native_source_identity={"integration_commit": "abc"},
+    )
+
+    report = run_model_guided_search_v2_fixed_comparison_from_cohort_path(
+        adapter_factory=_ComparisonAdapter,
+        cohort_path=cohort_path,
+        baseline_controller=baseline,
+        model_guided_v1_controller=model_guided_v1,
+        model_guided_v2_controller=model_guided_v2,
+        action_space=action_space,
+        max_battle_steps=3,
+        run_scale="smoke",
+    )
+
+    assert report.evaluation_successful
+    assert not report.source_match_problems
+    assert report.baseline_report.losses == 1
+    assert report.model_guided_v1_report.authoritative_wins == 1
+    assert report.model_guided_v2_report.authoritative_wins == 1
+
+    summaries = comparison_v2_controller_summaries(report)
+    assert (
+        summaries[MODEL_GUIDED_ORACLE_V1_LABEL]["controller_name"]
+        == "model_guided_oracle_search_v1_s10_pw0.1"
+    )
+    assert (
+        summaries[MODEL_GUIDED_ORACLE_V2_LABEL]["controller_name"]
+        == "model_guided_oracle_search_v2_s10_pw0.1"
+    )
+    assert (
+        summaries[BASELINE_ORACLE_LABEL]["search_telemetry_summary"]["model_calls"][
+            "total"
+        ]
+        == 0.0
+    )
+    assert (
+        summaries[MODEL_GUIDED_ORACLE_V1_LABEL]["search_telemetry_summary"][
+            "model_calls"
+        ]["total"]
+        == 1.0
+    )
+    assert (
+        summaries[MODEL_GUIDED_ORACLE_V2_LABEL]["search_telemetry_summary"][
+            "model_calls"
+        ]["total"]
+        == 1.0
+    )
+
+    aggregates = comparison_v2_aggregate_outcomes(report)
+    assert aggregates[BASELINE_ORACLE_LABEL]["natural_weighted"]["win_rate"] == 0.0
+    assert (
+        aggregates[MODEL_GUIDED_ORACLE_V1_LABEL]["natural_weighted"]["win_rate"] == 1.0
+    )
+    assert (
+        aggregates[MODEL_GUIDED_ORACLE_V2_LABEL]["natural_weighted"]["win_rate"] == 1.0
+    )
+
+    budget = comparison_v2_budget_summary(report)
+    assert budget["equal_native_playout_budget"] is True
+    assert budget["observed"][BASELINE_ORACLE_LABEL]["model_calls"] == 0.0
+    assert budget["observed"][MODEL_GUIDED_ORACLE_V1_LABEL]["model_calls"] == 1.0
+    assert budget["observed"][MODEL_GUIDED_ORACLE_V2_LABEL]["model_calls"] == 1.0
+
+    text = format_model_guided_search_v2_fixed_comparison_report(report)
+    assert "Model-guided Oracle search v2 fixed-cohort comparison" in text
+    assert "run scale: smoke-scale" in text
+    assert "source starts matched: yes" in text
+    assert "model_guided_oracle_search_v2:" in text
+
+    buffer = StringIO()
+    dump_model_guided_search_v2_fixed_comparison_jsonl(report, buffer)
+    assert '"schema_id": "model-guided-search-fixed-comparison-v2"' in (
+        buffer.getvalue()
+    )
+    loaded = load_model_guided_search_v2_fixed_comparison_jsonl(
+        StringIO(buffer.getvalue())
+    )
+    assert loaded.evaluation_successful
+    assert loaded.model_guided_v1_report.authoritative_wins == 1
+    assert loaded.model_guided_v2_report.authoritative_wins == 1
     assert loaded.baseline_report.losses == 1
 
 
