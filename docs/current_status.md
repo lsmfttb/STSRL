@@ -29,9 +29,9 @@ versioned deeper model-guided Oracle-like search comparison using refreshed
 diagnostic checkpoint provenance, but the accepted smoke evidence tied the
 baseline and T028 outcomes rather than demonstrating improvement. The current
 published batch follows the upstream assisted source-generation guidance:
-T040 and T041 are `READY`; T042, T043, and T044 define the blocked follow-up
-sequence toward assisted complete-run source generation, assisted teacher/value
-training, and de-assisted fixed-cohort evaluation.
+T040 is `READY`, T041 is `IN_REVIEW`, and T042, T043, and T044 define the
+blocked follow-up sequence toward assisted complete-run source generation,
+assisted teacher/value training, and de-assisted fixed-cohort evaluation.
 
 ## Implemented On Main
 
@@ -670,8 +670,8 @@ comparison tied the baseline and T028 outcomes.
 The next published batch follows the upstream assisted source-generation
 guidance supplied after T035. The maintainer role here is to publish and review
 bounded tasks from that guidance, not to invent an alternate long-term plan.
-T040 (`Expert Non-Combat Driver v1`) and T041 (`Potion-enabled Oracle search
-repair`) are `READY` and may proceed in separate branches from latest `main`.
+T040 (`Expert Non-Combat Driver v1`) is `READY` and may proceed from latest
+`main`. T041 (`Potion-enabled Oracle search repair`) is `IN_REVIEW` in PR #37.
 T042 (`Assisted complete-run source generation`) is blocked on T040/T041.
 T043 (`Assisted teacher dataset and value/policy training`) is blocked on T042
 and the required public-context model-input contract. T044
