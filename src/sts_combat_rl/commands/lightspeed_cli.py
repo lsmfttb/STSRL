@@ -48,6 +48,10 @@ from sts_combat_rl.commands.oracle_search import (
     run_oracle_fixed_evaluation_comparison_from_cohort_path,
     write_oracle_teacher_dataset,
 )
+from sts_combat_rl.commands.oracle_potion_comparison import (
+    run_oracle_potion_fixed_comparison_from_cohort_path,
+    write_oracle_potion_fixed_comparison_report,
+)
 from sts_combat_rl.commands.oracle_teacher_scaleup import (
     format_oracle_teacher_scaleup_command,
     run_oracle_teacher_scaleup_from_paths,
@@ -132,6 +136,9 @@ from sts_combat_rl.sim.model_guided_search_comparison import (
     format_model_guided_search_v2_fixed_comparison_report,
 )
 from sts_combat_rl.sim.oracle_search import OracleSearchController
+from sts_combat_rl.sim.oracle_potion_comparison import (
+    format_oracle_potion_fixed_comparison_report,
+)
 from sts_combat_rl.sim.policy import (
     evaluate_decision_policy,
     format_policy_evaluation_report,
@@ -203,6 +210,7 @@ _LIGHTSPEED_PATH_FLAGS = (
     "lightspeed_fixed_battle_evaluation",
     "lightspeed_oracle_search_teacher",
     "lightspeed_oracle_fixed_evaluation",
+    "lightspeed_oracle_potion_fixed_comparison",
     "lightspeed_model_guided_oracle_fixed_evaluation",
     "lightspeed_model_guided_search_fixed_comparison",
     "lightspeed_model_guided_search_v2_fixed_comparison",
@@ -504,6 +512,26 @@ def run_lightspeed_command(args: argparse.Namespace) -> int:
                 format_oracle_fixed_evaluation_comparison(comparison), file=sys.stderr
             )
             if not comparison.evaluation_successful:
+                return 1
+        elif args.lightspeed_oracle_potion_fixed_comparison is not None:
+            report = run_oracle_potion_fixed_comparison_from_cohort_path(
+                adapter_factory=lambda: LightSpeedAdapter(
+                    seed=args.sim_seed,
+                    ascension=args.sim_ascension,
+                ),
+                cohort_path=args.lightspeed_oracle_potion_fixed_comparison,
+                simulations=args.oracle_search_simulations,
+                root_selection_rule=args.oracle_root_selection,
+                max_battle_steps=args.sim_steps,
+                run_scale=args.oracle_potion_comparison_scale,
+            )
+            if args.oracle_potion_comparison_report is not None:
+                write_oracle_potion_fixed_comparison_report(
+                    args.oracle_potion_comparison_report,
+                    report,
+                )
+            print(format_oracle_potion_fixed_comparison_report(report), file=sys.stderr)
+            if not report.evaluation_successful:
                 return 1
         elif args.lightspeed_model_guided_oracle_fixed_evaluation is not None:
             scorer = build_torch_guidance_scorer_from_checkpoint(

@@ -33,12 +33,17 @@ def _actions() -> list[SimulatorAction]:
     ]
 
 
-def _context(action_count: int = 2) -> DecisionContext:
+def _context(
+    action_count: int = 2,
+    *,
+    kinds: list[str] | None = None,
+) -> DecisionContext:
+    legal_kinds = kinds if kinds is not None else ["card" for _ in range(action_count)]
     return DecisionContext(
         screen_state="BATTLE",
         snapshot_features=[],
         legal_action_features=[[] for _ in range(action_count)],
-        legal_action_kinds=["card" for _ in range(action_count)],
+        legal_action_kinds=legal_kinds,
         eligible_action_indices=list(range(action_count)),
     )
 
@@ -50,15 +55,19 @@ def _row(
     evaluation_sum: float | None,
     mean_value: float | None,
     label: str,
+    kind: str = "card",
+    idx1: int = 0,
+    idx2: int = 0,
+    idx3: int = 0,
 ) -> dict[str, object]:
     return {
         "scope": "battle",
         "bits": bits,
-        "kind": "card",
+        "kind": kind,
         "label": label,
-        "idx1": 0,
-        "idx2": 0,
-        "idx3": 0,
+        "idx1": idx1,
+        "idx2": idx2,
+        "idx3": idx3,
         "search_tree_present": True,
         "search_edge_index": 0,
         "visits": visits,
@@ -67,15 +76,24 @@ def _row(
     }
 
 
-def _raw_search(rows: list[dict[str, object]]) -> dict[str, object]:
+def _raw_search(
+    rows: list[dict[str, object]],
+    *,
+    root_visits: int | None = None,
+    include_potions: bool = False,
+    unmapped_search_edge_count: int = 0,
+) -> dict[str, object]:
+    row_visit_sum = sum(int(row["visits"]) for row in rows)
     return {
         "schema_id": ORACLE_SEARCH_SCHEMA_ID,
         "native_api": ORACLE_SEARCH_NATIVE_API,
         "patch_identity": ORACLE_SEARCH_PATCH_IDENTITY,
         "information_regime": NATIVE_SEARCH_INFORMATION_REGIME,
-        "simulations_requested": sum(int(row["visits"]) for row in rows),
-        "root_visits": sum(int(row["visits"]) for row in rows),
-        "include_potions": False,
+        "simulations_requested": root_visits
+        if root_visits is not None
+        else row_visit_sum,
+        "root_visits": root_visits if root_visits is not None else row_visit_sum,
+        "include_potions": include_potions,
         "native_simulator_steps": 123,
         "model_calls": None,
         "best_action_value": 0.5,
@@ -84,7 +102,7 @@ def _raw_search(rows: list[dict[str, object]]) -> dict[str, object]:
         "root_row_count": len(rows),
         "search_edge_count": len(rows),
         "unsearched_legal_action_count": 0,
-        "unmapped_search_edge_count": 0,
+        "unmapped_search_edge_count": unmapped_search_edge_count,
         "root_rows": rows,
     }
 
@@ -146,6 +164,168 @@ def test_oracle_root_mapping_uses_occurrence_safe_identities() -> None:
     assert report.search_ok
     assert [row.action_identity["occurrence"] for row in report.root_actions] == [0, 1]
     assert report.soft_visit_target == pytest.approx((1 / 3, 2 / 3))
+
+
+def test_oracle_root_mapping_preserves_potion_identities() -> None:
+    actions = [
+        SimulatorAction(
+            action_id="battle:0",
+            label="End Turn",
+            kind="end_turn",
+            raw={"scope": "battle", "bits": 0, "idx1": 0, "idx2": 0, "idx3": 0},
+        ),
+        SimulatorAction(
+            action_id="battle:536870912",
+            label="Fire Potion -> Cultist",
+            kind="potion",
+            raw={
+                "scope": "battle",
+                "bits": 536870912,
+                "idx1": 0,
+                "idx2": 0,
+                "idx3": 0,
+            },
+        ),
+        SimulatorAction(
+            action_id="battle:537264128",
+            label="Fire Potion -> Jaw Worm",
+            kind="potion",
+            raw={
+                "scope": "battle",
+                "bits": 537264128,
+                "idx1": 0,
+                "idx2": 1,
+                "idx3": 0,
+            },
+        ),
+        SimulatorAction(
+            action_id="battle:537264128",
+            label="duplicate native potion occurrence",
+            kind="potion",
+            raw={
+                "scope": "battle",
+                "bits": 537264128,
+                "idx1": 0,
+                "idx2": 1,
+                "idx3": 0,
+            },
+        ),
+    ]
+    report = build_oracle_search_report(
+        _raw_search(
+            [
+                _row(
+                    0,
+                    visits=1,
+                    evaluation_sum=0.1,
+                    mean_value=0.1,
+                    label="End Turn",
+                    kind="end_turn",
+                ),
+                _row(
+                    536870912,
+                    visits=3,
+                    evaluation_sum=1.2,
+                    mean_value=0.4,
+                    label="Fire Potion -> Cultist",
+                    kind="potion",
+                    idx1=0,
+                    idx2=0,
+                ),
+                _row(
+                    537264128,
+                    visits=4,
+                    evaluation_sum=2.4,
+                    mean_value=0.6,
+                    label="Fire Potion -> Jaw Worm",
+                    kind="potion",
+                    idx1=0,
+                    idx2=1,
+                ),
+                _row(
+                    537264128,
+                    visits=2,
+                    evaluation_sum=1.0,
+                    mean_value=0.5,
+                    label="duplicate native potion occurrence",
+                    kind="potion",
+                    idx1=0,
+                    idx2=1,
+                ),
+            ],
+            include_potions=True,
+        ),
+        actions,
+        _context(
+            action_count=len(actions),
+            kinds=["end_turn", "potion", "potion", "potion"],
+        ),
+    )
+
+    assert report.search_ok
+    assert [row.kind for row in report.root_actions] == [
+        "end_turn",
+        "potion",
+        "potion",
+        "potion",
+    ]
+    assert [row.action_identity["occurrence"] for row in report.root_actions] == [
+        0,
+        0,
+        0,
+        1,
+    ]
+    assert (
+        select_oracle_root_action(
+            report,
+            selection_rule="highest_mean",
+        ).legal_action_index
+        == 2
+    )
+
+
+def test_oracle_root_mapping_allows_reported_unmapped_search_edge_visits() -> None:
+    report = build_oracle_search_report(
+        _raw_search(
+            [
+                _row(11, visits=12, evaluation_sum=6.0, mean_value=0.5, label="Strike"),
+                _row(22, visits=4, evaluation_sum=1.2, mean_value=0.3, label="Defend"),
+            ],
+            root_visits=20,
+            include_potions=True,
+            unmapped_search_edge_count=1,
+        ),
+        _actions(),
+        _context(),
+    )
+
+    assert report.search_ok
+    assert report.root_visits == 20
+    assert report.soft_visit_denominator == 16
+    assert report.unmapped_search_edge_count == 1
+    telemetry = oracle_search_decision_telemetry(report)
+    assert telemetry.root_mapping_failure_count == 0
+    assert telemetry.unmapped_search_edge_count == 1
+
+
+def test_oracle_root_mapping_still_fails_on_unexplained_visit_mismatch() -> None:
+    report = build_oracle_search_report(
+        _raw_search(
+            [
+                _row(11, visits=12, evaluation_sum=6.0, mean_value=0.5, label="Strike"),
+                _row(22, visits=4, evaluation_sum=1.2, mean_value=0.3, label="Defend"),
+            ],
+            root_visits=20,
+        ),
+        _actions(),
+        _context(),
+    )
+
+    assert not report.search_ok
+    assert any(
+        "native root visits do not equal summed root-row visits" in problem
+        for problem in report.problems
+    )
 
 
 def test_oracle_root_mapping_fails_closed_on_missing_or_unexpected_rows() -> None:
