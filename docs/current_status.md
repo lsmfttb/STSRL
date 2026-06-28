@@ -29,9 +29,9 @@ versioned deeper model-guided Oracle-like search comparison using refreshed
 diagnostic checkpoint provenance, but the accepted smoke evidence tied the
 baseline and T028 outcomes rather than demonstrating improvement. The current
 published batch follows the upstream assisted source-generation guidance:
-T040 is `READY`, T041 is `IN_REVIEW`, and T042, T043, and T044 define the
-blocked follow-up sequence toward assisted complete-run source generation,
-assisted teacher/value training, and de-assisted fixed-cohort evaluation.
+T040 is `READY`, T041 is complete, and T042, T043, and T044 define the blocked
+follow-up sequence toward assisted complete-run source generation, assisted
+teacher/value training, and de-assisted fixed-cohort evaluation.
 
 ## Implemented On Main
 
@@ -302,12 +302,23 @@ assisted teacher/value training, and de-assisted fixed-cohort evaluation.
   native APIs still do not accept model allocation hints or leaf values. This
   is diagnostic comparison evidence only, not normal-information, live-game,
   broad-training, performance-improvement, or controller-promotion evidence.
+- Potion-enabled Oracle-like search root mapping repair and comparison
+  reporting. Native search results with positive
+  `unmapped_search_edge_count` may now preserve mapped legal root rows as
+  valid telemetry instead of failing only because total native root visits
+  exceed mapped root-row visits. Overcounted rows and unexplained visit
+  mismatches still fail closed. The `oracle-potion-fixed-comparison-v1` report
+  compares no-potion and potion-enabled Oracle search on identical restored
+  starts with equal native playout budgets, action-space provenance, root
+  mapping failure counts, unmapped edge telemetry, potion inventory deltas,
+  terminal HP, native simulator steps, model calls, and the explicit
+  `full_simulator_state_oracle_like` engineering-evidence boundary.
 - A training-readiness report that validates plumbing only. It does not train a
   model or demonstrate policy strength.
 
 ### Tests And Runtime Evidence
 
-- `569` tests pass on Windows Python as of this review. In an uninstalled
+- `573` tests pass on Windows Python as of this review. In an uninstalled
   checkout, set `PYTHONPATH=src` (or install the package) before invoking the
   CLI directly.
 - The two CommunicationMod fixture smokes pass.
@@ -625,6 +636,22 @@ assisted teacher/value training, and de-assisted fixed-cohort evaluation.
   model calls as 0/116/116, and reported no restore failures, truncations,
   controller errors, or root-mapping failures. This is diagnostic smoke
   evidence only and does not promote the controller.
+- T041 repairs potion-enabled Oracle-like root mapping and adds the
+  `oracle-potion-fixed-comparison-v1` fixed-cohort comparison. Maintainer
+  review verified artifact hashes, passed 573 Windows tests, compileall, ruff,
+  format check, both CommunicationMod fixture smokes, focused Oracle/potion
+  comparison tests, task-doc checks, diff whitespace checks, the WSL
+  pinned-source verifier, and a WSL no-potion vs potion-enabled restored
+  fixed-cohort comparison. The accepted smoke artifact used one Hexaghost Act 1
+  Boss start from seed `122`, cohort id `67bd71731b750f87`, and comparison
+  artifact sha256
+  `8224d43885f1cbccbdf65debe195ef581f0bbe2141b53e4a1feb7a4b33ba5fc5`.
+  Both arms used 20 native playouts per decision, reported zero root mapping
+  failures and zero unmapped search edges on the smoke cohort, finished 0W/1L,
+  and preserved restore, public-context replay, and structured outcomes. The
+  potion-enabled arm recorded one potion slot item added and one removed. This
+  is engineering smoke evidence only, not performance-improvement or promotion
+  evidence.
 
 ## Not Implemented On Main
 
@@ -671,8 +698,8 @@ The next published batch follows the upstream assisted source-generation
 guidance supplied after T035. The maintainer role here is to publish and review
 bounded tasks from that guidance, not to invent an alternate long-term plan.
 T040 (`Expert Non-Combat Driver v1`) is `READY` and may proceed from latest
-`main`. T041 (`Potion-enabled Oracle search repair`) is `IN_REVIEW` in PR #37.
-T042 (`Assisted complete-run source generation`) is blocked on T040/T041.
+`main`. T041 (`Potion-enabled Oracle search repair`) is complete. T042
+(`Assisted complete-run source generation`) is blocked until T040 also merges.
 T043 (`Assisted teacher dataset and value/policy training`) is blocked on T042
 and the required public-context model-input contract. T044
 (`De-assisted fixed-cohort evaluation`) is blocked on T043.

@@ -331,10 +331,10 @@ narrowed to a diagnostic teacher/checkpoint refresh over that contract rather
 than a broad A20 refresh. T035 later confirmed that deeper root-only
 model-guided Oracle-like search over the narrow diagnostic checkpoint does not
 yet improve the smoke fixed cohort. The next published source-generation batch
-is therefore T040--T044: add a versioned expert non-combat source driver, repair
-potion-enabled Oracle search, extend assistance into complete-run source
-generation, train assisted teacher/value-policy diagnostics, and evaluate
-de-assisted fixed cohorts.
+is therefore T040--T044: add a versioned expert non-combat source driver, use
+the now-complete T041 potion-enabled Oracle search repair, extend assistance
+into complete-run source generation, train assisted teacher/value-policy
+diagnostics, and evaluate de-assisted fixed cohorts.
 
 Work:
 

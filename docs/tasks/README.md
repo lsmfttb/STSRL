@@ -54,7 +54,7 @@ the current milestone, but they do not override this table.
 | T038 | CANCELLED | [A20 source drift audit](T038-a20-source-drift-audit.md) | T037 under-reachability result | not needed because T037 recovered Boss/Act2 reachability |
 | T039 | DONE | [Later-act/Boss source coverage contract](T039-later-act-boss-source-coverage-contract.md) | T037 accepted source decision | explicit artifact contract before T032 can consume source coverage |
 | T040 | READY | [Expert Non-Combat Driver v1](T040-expert-non-combat-driver-v1.md) | T010, T016, T017, T025, T036, T037, T039, T035 | A20 heuristic source-generation driver and coverage comparison |
-| T041 | IN_REVIEW | [Potion-enabled Oracle search repair](T041-potion-enabled-oracle-search-repair.md) | T006, T017, T020, T025, T036, T037, T039 | repair potion root mapping and no-potion/potion cohort comparison |
+| T041 | DONE | [Potion-enabled Oracle search repair](T041-potion-enabled-oracle-search-repair.md) | T006, T017, T020, T025, T036, T037, T039 | repair potion root mapping and no-potion/potion cohort comparison |
 | T042 | BLOCKED | [Assisted complete-run source generation](T042-assisted-complete-run-source-generation.md) | T040, T041 | assisted-run distribution, schedules, and coverage report |
 | T043 | BLOCKED | [Assisted teacher dataset and value/policy training](T043-assisted-teacher-value-policy-training.md) | T042, T033 or finalized public-context model-input contract | assisted teacher data and public student diagnostics |
 | T044 | BLOCKED | [De-assisted fixed-cohort evaluation](T044-de-assisted-fixed-cohort-evaluation.md) | T043 | low/no-assistance fixed-cohort model/search evaluation |
@@ -162,12 +162,11 @@ M3 follows the upstream assisted source-generation guidance supplied after
 T035. The milestone target is to generate broader, higher-quality A20
 battle-state distributions before continuing broad neural training. T040 adds
 a versioned A20 heuristic non-combat source-generation driver and remains
-`READY`. T041 repairs the potion-enabled Oracle-like search failure and is
-currently `IN_REVIEW`. T042 extends assistance into complete-run continuation
-after those foundations merge. T043 turns assisted source pools into teacher
-and public student diagnostics, and T044 evaluates de-assisted fixed cohorts.
-T033 remains a public-context encoder draft, and T034 remains blocked on native
-public-consistent hidden-future sampler support.
+`READY`. T041 repaired the potion-enabled Oracle-like search failure and is
+complete. T042 remains blocked until T040 also merges. T043 turns assisted
+source pools into teacher and public student diagnostics, and T044 evaluates
+de-assisted fixed cohorts. T033 remains a public-context encoder draft, and
+T034 remains blocked on native public-consistent hidden-future sampler support.
 
 ## Standard Local Gates
 
