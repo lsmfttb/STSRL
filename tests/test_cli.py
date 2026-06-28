@@ -237,6 +237,7 @@ def test_cli_parser_accepts_model_guided_oracle_flags(tmp_path) -> None:
     cohort_path = tmp_path / "cohort.jsonl"
     checkpoint_path = tmp_path / "checkpoint.pt"
     comparison_path = tmp_path / "comparison.jsonl"
+    potion_comparison_path = tmp_path / "potion-comparison.jsonl"
 
     args = build_parser().parse_args(
         [
@@ -293,6 +294,28 @@ def test_cli_parser_accepts_model_guided_oracle_flags(tmp_path) -> None:
     assert v2_comparison_args.model_guided_oracle_checkpoint == checkpoint_path
     assert v2_comparison_args.model_guided_search_comparison_report == comparison_path
     assert v2_comparison_args.model_guided_search_comparison_scale == "fixed"
+
+    potion_comparison_args = build_parser().parse_args(
+        [
+            "--lightspeed-oracle-potion-fixed-comparison",
+            str(cohort_path),
+            "--oracle-potion-comparison-report",
+            str(potion_comparison_path),
+            "--oracle-potion-comparison-scale",
+            "fixed",
+            "--oracle-search-simulations",
+            "20",
+        ]
+    )
+
+    assert (
+        potion_comparison_args.lightspeed_oracle_potion_fixed_comparison == cohort_path
+    )
+    assert potion_comparison_args.oracle_potion_comparison_report == (
+        potion_comparison_path
+    )
+    assert potion_comparison_args.oracle_potion_comparison_scale == "fixed"
+    assert potion_comparison_args.oracle_search_simulations == 20
 
 
 def test_cli_default_import_does_not_import_torch() -> None:
@@ -1562,6 +1585,35 @@ def test_cli_oracle_search_teacher_and_fixed_eval_routes_write_stderr_only(
     assert "sts_lightspeed source identity" in fixed_output.err
     assert "Fixed battle evaluation report" in fixed_output.err
     assert "controller: oracle_search_v1_most_visits_s3" in fixed_output.err
+
+    potion_comparison_path = tmp_path / "oracle-potion-comparison.jsonl"
+    assert (
+        main(
+            [
+                "--lightspeed-oracle-potion-fixed-comparison",
+                str(cohort_path),
+                "--oracle-root-selection",
+                "most_visits",
+                "--oracle-search-simulations",
+                "3",
+                "--sim-steps",
+                "1",
+                "--oracle-potion-comparison-report",
+                str(potion_comparison_path),
+                "--log-file",
+                "-",
+            ]
+        )
+        == 0
+    )
+    potion_comparison_output = capsys.readouterr()
+    assert potion_comparison_output.out == ""
+    assert potion_comparison_path.exists()
+    assert "Oracle potion fixed-cohort comparison" in potion_comparison_output.err
+    assert "source starts matched: yes" in potion_comparison_output.err
+    assert '"schema_id": "oracle-potion-fixed-comparison-v1"' in (
+        potion_comparison_path.read_text(encoding="utf-8")
+    )
 
     monkeypatch.setattr(
         (

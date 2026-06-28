@@ -379,6 +379,10 @@ def build_oracle_search_report(
     if root_visits <= 0:
         problems.append("oracle search root_visits must be positive")
 
+    unmapped_search_edge_count = _optional_non_negative_int(
+        raw.get("unmapped_search_edge_count"), "unmapped_search_edge_count"
+    )
+
     stats: list[OracleRootActionStatistics] = []
     total_row_visits = 0
     for stable_id, legal_index in legal_by_stable.items():
@@ -425,7 +429,16 @@ def build_oracle_search_report(
             )
         )
 
-    if stats and total_row_visits != root_visits:
+    if stats and total_row_visits > root_visits:
+        problems.append(
+            "native root visits are less than summed root-row visits: "
+            f"{root_visits} < {total_row_visits}"
+        )
+    elif (
+        stats
+        and total_row_visits != root_visits
+        and (unmapped_search_edge_count is None or unmapped_search_edge_count <= 0)
+    ):
         problems.append(
             "native root visits do not equal summed root-row visits: "
             f"{root_visits} != {total_row_visits}"
@@ -489,9 +502,7 @@ def build_oracle_search_report(
             raw.get("unsearched_legal_action_count"),
             "unsearched_legal_action_count",
         ),
-        unmapped_search_edge_count=_optional_non_negative_int(
-            raw.get("unmapped_search_edge_count"), "unmapped_search_edge_count"
-        ),
+        unmapped_search_edge_count=unmapped_search_edge_count,
         wall_clock_time_s=wall_clock_time_s,
         problems=tuple(dict.fromkeys(problems)),
     )
