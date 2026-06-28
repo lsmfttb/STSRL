@@ -48,7 +48,7 @@ the current milestone, but they do not override this table.
 | T032 | DONE | [A20 narrow teacher and checkpoint diagnostic refresh](T032-a20-teacher-checkpoint-refresh.md) | T039 | narrow T039 source-contract teacher, trainer-input, checkpoint, and calibration diagnostic |
 | T033 | DRAFT | [Public context encoder contract](T033-public-context-encoder-contract.md) | T016, T030 | structured public history, map/route, visible-Boss encoder boundary |
 | T034 | BLOCKED | [Public-consistent hidden-future sampler boundary](T034-public-consistent-hidden-future-sampler.md) | T033, native sampler support | normal-information hidden-future sampling substrate |
-| T035 | READY | [Model-guided Oracle search v2](T035-model-guided-oracle-search-v2.md) | T032, T025, T028, T029 | deeper Oracle-like guidance after refreshed data/checkpoint evidence |
+| T035 | DONE | [Model-guided Oracle search v2](T035-model-guided-oracle-search-v2.md) | T032, T025, T028, T029 | deeper Oracle-like guidance after refreshed data/checkpoint evidence |
 | T036 | DONE | [A20 search-controlled reachability probe](T036-a20-search-controlled-reachability-probe.md) | T006, T017, T020, T025, T029, T031 | search-controlled source reachability after T031 Act-1 gap |
 | T037 | DONE | [A20 search-controlled reachability scale-up](T037-a20-search-controlled-reachability-scaleup.md) | T017, T020, T036 | scaled reproduction of historical Boss/Act2 reachability evidence |
 | T038 | CANCELLED | [A20 source drift audit](T038-a20-source-drift-audit.md) | T037 under-reachability result | not needed because T037 recovered Boss/Act2 reachability |
@@ -148,11 +148,14 @@ search-controlled reachability path to the historical 1,000-run comparison
 point and recovered the Boss/Act2 source signal on current schemas. T038 is
 cancelled because the source-drift audit is not needed on that evidence. T039
 accepted the durable T037 source-coverage contract. T032 completed the narrow
-diagnostic refresh over that contract, not a broad A20 refresh. T033 drafts the
-public-context encoder boundary, T034 remains blocked on native
-public-consistent hidden-future sampler support, and T035 is now the next
-READY model-guided Oracle-like search task. Only rows marked `READY` may
-receive a task branch.
+diagnostic refresh over that contract, not a broad A20 refresh. T035 completed
+the next model-guided Oracle-like search experiment on refreshed diagnostic
+checkpoint provenance; its accepted smoke comparison tied the baseline and T028
+outcomes, so it is not promotion evidence. T033 drafts the public-context
+encoder boundary, and T034 remains blocked on native public-consistent
+hidden-future sampler support. No row is currently `READY`; the maintainer must
+publish or revise the next executable task in this index before another task
+branch may start.
 
 ## Standard Local Gates
 

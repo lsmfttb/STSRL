@@ -1,6 +1,6 @@
 # Current Status
 
-Last reviewed: 2026-06-27.
+Last reviewed: 2026-06-28.
 
 This document describes the latest `main` branch only. Results from local
 artifacts, old branches, or unmerged pull requests do not count as implemented
@@ -24,9 +24,12 @@ records the accepted T037 source-coverage contract in
 `docs/a20_later_act_boss_source_coverage_contract.md`. T032 is complete: it
 ran the narrow teacher/checkpoint diagnostic refresh over the accepted T039
 contract, produced a `narrow_curriculum` checkpoint and calibration evidence,
-and kept broad A20 training readiness closed. T035 is now the next `READY`
-task for a deeper model-guided Oracle-like search experiment using refreshed
-checkpoint provenance.
+and kept broad A20 training readiness closed. T035 is complete: it added a
+versioned deeper model-guided Oracle-like search comparison using refreshed
+diagnostic checkpoint provenance, but the accepted smoke evidence tied the
+baseline and T028 outcomes rather than demonstrating improvement. No task is
+currently `READY`; the maintainer must revise or publish the next executable
+row in `docs/tasks/README.md`.
 
 ## Implemented On Main
 
@@ -285,12 +288,24 @@ checkpoint provenance.
   This is fixed-cohort comparison plumbing and smoke evidence only, not
   normal-information, live-game, broad-training, performance-improvement, or
   controller-promotion evidence.
+- Versioned model-guided Oracle-like search v2 comparison
+  (`model-guided-search-fixed-comparison-v2`) for refreshed diagnostic
+  checkpoint provenance. The v2 controller remains
+  `full_simulator_state_oracle_like`, uses root-selection-only guidance with
+  score `native_mean_value + weight * model_policy_probability * multiplier`,
+  where `multiplier = sqrt(total_root_visits / native_visits)`, compares
+  baseline Oracle search, T028 v1, and T035 v2 on identical restored starts,
+  and reports separate telemetry for native playouts, model calls, native
+  simulator steps, root mapping, truncation, and restore failures. Current
+  native APIs still do not accept model allocation hints or leaf values. This
+  is diagnostic comparison evidence only, not normal-information, live-game,
+  broad-training, performance-improvement, or controller-promotion evidence.
 - A training-readiness report that validates plumbing only. It does not train a
   model or demonstrate policy strength.
 
 ### Tests And Runtime Evidence
 
-- `565` tests pass on Windows Python as of this review. In an uninstalled
+- `569` tests pass on Windows Python as of this review. In an uninstalled
   checkout, set `PYTHONPATH=src` (or install the package) before invoking the
   CLI directly.
 - The two CommunicationMod fixture smokes pass.
@@ -594,6 +609,20 @@ checkpoint provenance.
   and diff whitespace checks. This is diagnostic Oracle-like supervision
   evidence only, not normal-information, live-game, broad-training,
   controller-strength, or promotion evidence.
+- T035 adds the v2 model-guided Oracle-like search controller and fixed-cohort
+  comparison report. Maintainer review passed 569 Windows tests, compileall,
+  ruff, format check, both CommunicationMod fixture smokes, task-doc checks,
+  diff whitespace checks, the WSL pinned-source verifier, and WSL smoke and
+  readiness gates. The accepted smoke artifact used 13 natural A20 Act 1 starts
+  from three source runs, fixed cohort id `3957b3c5c346bbc7`, and a two-row
+  diagnostic checkpoint `t035-smoke.pt` with sha256
+  `4d9c2ff8776e87fc6884821c9745c3033084739c4f6b22f1d550280c2f11864a`.
+  The comparison schema was `model-guided-search-fixed-comparison-v2`; baseline,
+  T028 v1, and T035 v2 all finished 5W/3L across eight restored battles, made
+  116 decisions each, used equal three-playout native search budgets, recorded
+  model calls as 0/116/116, and reported no restore failures, truncations,
+  controller errors, or root-mapping failures. This is diagnostic smoke
+  evidence only and does not promote the controller.
 
 ## Not Implemented On Main
 
@@ -623,17 +652,19 @@ controller improvement: the accepted T029 smoke comparison tied baseline
 Oracle search at five wins and three losses on eight restored A20 battles
 while adding 120 checkpoint model calls for the model-guided controller.
 
-T031, T036, T037, T039, and T032 are complete. T031 found healthy artifacts and
-restore evidence but no Boss or later-act starts. T036 rebuilt the
-search-controlled collection path on current schemas while preserving the
+T031, T036, T037, T039, T032, and T035 are complete. T031 found healthy
+artifacts and restore evidence but no Boss or later-act starts. T036 rebuilt
+the search-controlled collection path on current schemas while preserving the
 battle/non-combat split, but its accepted 10-run smoke arms also reached no
 Boss or later-act starts. T037 recovered the historical Boss/Act2 signal on
 current schemas, and T039 converted that evidence into the durable source
 coverage contract. T032 then ran the deliberately narrow diagnostic teacher,
-trainer, checkpoint, and calibration refresh over that contract. T035 is now
-the next `READY` task. Use the task index to determine which exact task rows
-are `READY`, `BLOCKED`, or `DRAFT`; future rows must not start merely because
-they are mentioned here.
+trainer, checkpoint, and calibration refresh over that contract. T035 attempted
+the deeper model-guided Oracle-like search experiment, but the accepted smoke
+comparison tied the baseline and T028 outcomes. Use the task index to determine
+which exact task rows are `READY`, `BLOCKED`, or `DRAFT`; future rows must not
+start merely because they are mentioned here. As of this review, no row is
+`READY`.
 
 The immediate external-fork follow-up is
 [`lsmfttb/sts_lightspeed#7`](https://github.com/lsmfttb/sts_lightspeed/issues/7):
@@ -649,14 +680,13 @@ The post-M1 task-batch recommendation is:
    as diagnostic evidence only, not broad A20 training readiness.
 3. Preserve T009 broad-training gate failure separately from any named
    `narrow_curriculum` checkpoint/trainer diagnostic override.
-4. Draft public-context/history/map/visible-Boss encoders before using those
-   fields as ordinary model inputs (T033).
-5. Keep public-consistent hidden-future sampling blocked on an explicit native
+4. T035 has now exhausted the immediate deeper Oracle-like root-guidance check
+   without showing improvement.
+5. Draft public-context/history/map/visible-Boss encoders before using those
+   fields as ordinary model inputs (T033), or revise the search/data plan if
+   the maintainer chooses a different next milestone.
+6. Keep public-consistent hidden-future sampling blocked on an explicit native
    simulator boundary (T034).
-6. Attempt the next deeper model-guided Oracle-like search experiment through
-   T035, comparing against baseline Oracle search and T028 on identical
-   restored starts while preserving the `full_simulator_state_oracle_like`
-   boundary.
 
 The adapter and captured-sample compatibility gate in
 [`T013`](tasks/T013-live-communicationmod-runtime-adapter.md) is complete.
