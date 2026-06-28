@@ -53,6 +53,11 @@ the current milestone, but they do not override this table.
 | T037 | DONE | [A20 search-controlled reachability scale-up](T037-a20-search-controlled-reachability-scaleup.md) | T017, T020, T036 | scaled reproduction of historical Boss/Act2 reachability evidence |
 | T038 | CANCELLED | [A20 source drift audit](T038-a20-source-drift-audit.md) | T037 under-reachability result | not needed because T037 recovered Boss/Act2 reachability |
 | T039 | DONE | [Later-act/Boss source coverage contract](T039-later-act-boss-source-coverage-contract.md) | T037 accepted source decision | explicit artifact contract before T032 can consume source coverage |
+| T040 | READY | [Expert Non-Combat Driver v1](T040-expert-non-combat-driver-v1.md) | T010, T016, T017, T025, T036, T037, T039, T035 | A20 heuristic source-generation driver and coverage comparison |
+| T041 | READY | [Potion-enabled Oracle search repair](T041-potion-enabled-oracle-search-repair.md) | T006, T017, T020, T025, T036, T037, T039 | repair potion root mapping and no-potion/potion cohort comparison |
+| T042 | BLOCKED | [Assisted complete-run source generation](T042-assisted-complete-run-source-generation.md) | T040, T041 | assisted-run distribution, schedules, and coverage report |
+| T043 | BLOCKED | [Assisted teacher dataset and value/policy training](T043-assisted-teacher-value-policy-training.md) | T042, T033 or finalized public-context model-input contract | assisted teacher data and public student diagnostics |
+| T044 | BLOCKED | [De-assisted fixed-cohort evaluation](T044-de-assisted-fixed-cohort-evaluation.md) | T043 | low/no-assistance fixed-cohort model/search evaluation |
 
 Use the table, not per-task files or roadmap prose, when deciding whether a
 task may receive a branch. Only `READY` rows should receive a new branch. After
@@ -151,11 +156,18 @@ accepted the durable T037 source-coverage contract. T032 completed the narrow
 diagnostic refresh over that contract, not a broad A20 refresh. T035 completed
 the next model-guided Oracle-like search experiment on refreshed diagnostic
 checkpoint provenance; its accepted smoke comparison tied the baseline and T028
-outcomes, so it is not promotion evidence. T033 drafts the public-context
-encoder boundary, and T034 remains blocked on native public-consistent
-hidden-future sampler support. No row is currently `READY`; the maintainer must
-publish or revise the next executable task in this index before another task
-branch may start.
+outcomes, so it is not promotion evidence.
+
+M3 follows the upstream assisted source-generation guidance supplied after
+T035. The milestone target is to generate broader, higher-quality A20
+battle-state distributions before continuing broad neural training. T040 adds
+a versioned A20 heuristic non-combat source-generation driver, and T041 repairs
+the potion-enabled Oracle-like search failure; both are `READY` and may proceed
+in separate branches. T042 extends assistance into complete-run continuation
+after those foundations merge. T043 turns assisted source pools into teacher
+and public student diagnostics, and T044 evaluates de-assisted fixed cohorts.
+T033 remains a public-context encoder draft, and T034 remains blocked on native
+public-consistent hidden-future sampler support.
 
 ## Standard Local Gates
 
@@ -203,6 +215,7 @@ are mapped as follows:
 - M1 search telemetry and model-guided Oracle search sandbox: T025--T030.
 - Post-M1 coverage, data, public-context, sampler, model-guided-search, and
   reachability follow-up proposals: T031--T039.
+- Assisted source-generation curriculum: T040--T044.
 
 T013 supplies the shared CommunicationMod adapter and captured-sample
 compatibility gate. Simulator-only training experiments do not depend on it.

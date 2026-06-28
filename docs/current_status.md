@@ -27,9 +27,11 @@ contract, produced a `narrow_curriculum` checkpoint and calibration evidence,
 and kept broad A20 training readiness closed. T035 is complete: it added a
 versioned deeper model-guided Oracle-like search comparison using refreshed
 diagnostic checkpoint provenance, but the accepted smoke evidence tied the
-baseline and T028 outcomes rather than demonstrating improvement. No task is
-currently `READY`; the maintainer must revise or publish the next executable
-row in `docs/tasks/README.md`.
+baseline and T028 outcomes rather than demonstrating improvement. The current
+published batch follows the upstream assisted source-generation guidance:
+T040 and T041 are `READY`; T042, T043, and T044 define the blocked follow-up
+sequence toward assisted complete-run source generation, assisted teacher/value
+training, and de-assisted fixed-cohort evaluation.
 
 ## Implemented On Main
 
@@ -630,6 +632,8 @@ The following capabilities exist only as plans, experiment evidence, or
 unmerged legacy work:
 
 - interactive live-game or A20 performance validation for any controller;
+- `expert_non_combat_v1` or any assisted complete-run source-generation
+  pipeline;
 - broad neural training on a scale/distribution-approved A20 dataset;
 - model-guided search performance improvement or controller promotion;
 - normal-information belief search.
@@ -661,10 +665,17 @@ current schemas, and T039 converted that evidence into the durable source
 coverage contract. T032 then ran the deliberately narrow diagnostic teacher,
 trainer, checkpoint, and calibration refresh over that contract. T035 attempted
 the deeper model-guided Oracle-like search experiment, but the accepted smoke
-comparison tied the baseline and T028 outcomes. Use the task index to determine
-which exact task rows are `READY`, `BLOCKED`, or `DRAFT`; future rows must not
-start merely because they are mentioned here. As of this review, no row is
-`READY`.
+comparison tied the baseline and T028 outcomes.
+
+The next published batch follows the upstream assisted source-generation
+guidance supplied after T035. The maintainer role here is to publish and review
+bounded tasks from that guidance, not to invent an alternate long-term plan.
+T040 (`Expert Non-Combat Driver v1`) and T041 (`Potion-enabled Oracle search
+repair`) are `READY` and may proceed in separate branches from latest `main`.
+T042 (`Assisted complete-run source generation`) is blocked on T040/T041.
+T043 (`Assisted teacher dataset and value/policy training`) is blocked on T042
+and the required public-context model-input contract. T044
+(`De-assisted fixed-cohort evaluation`) is blocked on T043.
 
 The immediate external-fork follow-up is
 [`lsmfttb/sts_lightspeed#7`](https://github.com/lsmfttb/sts_lightspeed/issues/7):
@@ -672,21 +683,24 @@ archive historical STSRL task branches after creating provenance tags, while
 preserving `stsrl/main` as the sole active integration branch. This is
 operational fork maintenance and does not block STSRL repository work.
 
-The post-M1 task-batch recommendation is:
+The assisted source-generation batch is:
 
-1. Keep broad teacher/checkpoint refresh work blocked; the T039 contract is a
-   narrow Boss/Act2 supplement and does not satisfy broad A20 readiness.
-2. Treat T032's selected 98-source refresh and `narrow_curriculum` checkpoint
-   as diagnostic evidence only, not broad A20 training readiness.
-3. Preserve T009 broad-training gate failure separately from any named
-   `narrow_curriculum` checkpoint/trainer diagnostic override.
-4. T035 has now exhausted the immediate deeper Oracle-like root-guidance check
-   without showing improvement.
-5. Draft public-context/history/map/visible-Boss encoders before using those
-   fields as ordinary model inputs (T033), or revise the search/data plan if
-   the maintainer chooses a different next milestone.
-6. Keep public-consistent hidden-future sampling blocked on an explicit native
-   simulator boundary (T034).
+1. T040 implements `expert_non_combat_v1` as a seeded, stochastic A20
+   heuristic source-generation driver and compares source coverage against
+   `stochastic-v1` under the same Oracle-like battle controller.
+2. T041 repairs the potion-enabled Oracle-like search root-mapping failure and
+   reruns a no-potion vs potion-enabled fixed-cohort comparison.
+3. T042 extends HP/potion/encounter assistance into complete-run continuation
+   with explicit `assisted_run` distribution tags and assistance schedules.
+4. T043 uses assisted source pools for high-budget Oracle teacher data and
+   public student policy/value/resource diagnostics.
+5. T044 evaluates whether assisted-data models help, or at least do not harm,
+   search on low-assistance or unassisted fixed cohorts.
+
+T033 remains important for richer public-context model inputs, but it is not
+the sole next step because it does not by itself solve the lack of later-act
+source data. T034 remains blocked on an explicit native simulator boundary for
+public-consistent hidden-future sampling.
 
 The adapter and captured-sample compatibility gate in
 [`T013`](tasks/T013-live-communicationmod-runtime-adapter.md) is complete.

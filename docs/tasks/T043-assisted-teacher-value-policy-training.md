@@ -1,0 +1,135 @@
+# T043: Assisted Teacher Dataset And Value/Policy Training
+
+## Objective
+
+Generate high-budget Oracle-like teacher data from assisted source pools and
+train a public-information student model with policy, value, and structured
+resource heads.
+
+This task turns assisted source coverage into diagnostic supervised learning
+data. It does not promote a controller.
+
+## Current Main Baseline
+
+T024 can bridge Oracle teacher artifacts into trainer-input rows and train
+diagnostic checkpoints. T032 ran a narrow 98-source refresh over the T039
+contract and kept broad A20 training readiness closed. T035 showed that current
+root-only model-guided search over narrow data does not improve the fixed
+smoke cohort. T042 is expected to provide broader assisted source pools with
+explicit assistance provenance and distribution tags.
+
+## Dependencies
+
+- T042 is complete.
+- T033 or an equivalent finalized public-context model-input contract is
+  complete if this task uses richer public run context beyond the current
+  compact summary.
+- T006, T009, T011, T012, T016, T017, T018, T023, T024, and T032 remain
+  current teacher/training contracts.
+
+## Inputs And Artifacts
+
+Required inputs are explicit assisted source pools from T042, with schema,
+source identity, assistance schedule, distribution tags, restore/public-context
+status, structured outcomes, regeneration commands, and SHA-256 identities.
+
+Teacher, trainer-input, checkpoint, calibration, and report artifacts remain
+under ignored `artifacts/` paths or explicit external paths unless they are
+small fixtures.
+
+## Scope
+
+- Collect high-budget Oracle-like teacher labels on assisted source pools.
+- Prefer soft teacher targets such as `oracle_soft_visit_distribution` or
+  normalized root-value distributions where available; one-hot targets may be
+  reported but must not silently replace soft-target evidence.
+- Preserve DAgger behavior actions separately from search teacher actions.
+- Build trainer-input rows that preserve assistance level, act, room type,
+  encounter id where available, source identity, distribution kind, teacher
+  target kind, outcome labels, terminal absolute current HP, and structured
+  terminal resources.
+- Train diagnostic public-information student checkpoints with policy, value,
+  survival, terminal HP, and structured-resource heads where supported by the
+  current model contract.
+- Report teacher agreement, value calibration, survival calibration, terminal
+  HP/resource prediction, source coverage, skipped rows, and gate results by
+  assistance level, act, and room type.
+
+## Out Of Scope
+
+- Controller promotion or live-game validation.
+- Raw neural policy replacing search.
+- Treating assisted data as natural A20 performance.
+- Assisted complete-run generation changes; those belong to T042.
+- De-assisted fixed-cohort evaluation; that belongs to T044.
+
+## Design Constraints
+
+- The model receives only public tactical state and the current approved
+  public-context encoding. Assistance level may be used for sampling/reporting
+  but must not be a normal controller input.
+- Preserve natural, assisted, constructed, stratified, Oracle-like, and
+  normal-information distribution boundaries.
+- Preserve battle outcome, terminal absolute HP, and structured resources as
+  separate labels. Do not permanently scalarize resources with fixed reward
+  weights.
+- Broad training remains closed unless the explicit scale/distribution gate
+  passes per ascension and act. Narrow or assisted curricula must use named
+  overrides and report the gate failure separately.
+- Large WSL teacher collection and restored evaluation stages must be sharded
+  and run with explicit parallel workers by default.
+
+## Deliverables
+
+- Assisted teacher collection workflow and reports.
+- Trainer-input conversion preserving assistance/source provenance and soft
+  teacher targets.
+- Diagnostic checkpoint training artifacts and checkpoint provenance.
+- Calibration/evaluation reports by assistance level, act, and room type.
+- Tests for artifact compatibility, target-kind preservation, public-input
+  firewall, assistance non-leakage, label separation, and checkpoint semantic
+  validation.
+
+## Acceptance Criteria
+
+- Teacher and trainer-input artifacts preserve source identity, assistance
+  schedule, distribution tag, target kind, outcome labels, and artifact SHA
+  linkage.
+- Soft teacher targets are generated and evaluated when supported by the
+  teacher artifact; any one-hot fallback is explicit.
+- Assistance level is not consumed as a normal controller/model-input feature.
+- Reports separate teacher agreement, value calibration, resource prediction,
+  skipped rows, and gate status by assistance level, act, and room type.
+- No controller promotion, normal-information performance, live-game, or broad
+  A20 training claim is made unless a future task defines and passes such a
+  gate.
+
+## Required Verification
+
+Run the standard local gates from `docs/tasks/README.md`, focused
+teacher/trainer/checkpoint/calibration tests, task-doc checks, and
+`git diff --check`.
+
+Before WSL evidence, run the pinned source verifier:
+
+```powershell
+wsl.exe -d Ubuntu -e bash -lc "cd /mnt/d/DeadlycatCoding/STSRL && bash scripts/verify_lightspeed_source.sh /home/lsmft/stsrl-spikes/sts_lightspeed"
+```
+
+Run WSL teacher collection and any restored evaluation with explicit shards and
+parallel workers. The PR must report commands, shard/worker counts,
+source-record ranges, wall-clock costs, artifact hashes, and any
+single-worker smoke/debug/tooling-limited reason per stage.
+
+## Legacy Reference
+
+Consult T006, T009, T011, T012, T016, T023, T024, T032, T033, and T042. Do not
+reuse narrow T032 smoke checkpoints as implicit training inputs.
+
+## PR Report
+
+The PR must report task ID, source pool identities, assistance levels,
+teacher budgets, target kinds, trainer-input schema, checkpoint identity,
+calibration summaries, value/resource metrics, gate results, shard/worker/
+runtime evidence, verification commands, known limitations, and documentation
+impact.

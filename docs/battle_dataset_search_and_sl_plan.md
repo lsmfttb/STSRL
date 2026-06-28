@@ -328,7 +328,13 @@ covered default, 20-simulation no-potion Oracle-like search, and
 then recovered the Boss/Act2 signal at the historical 1,000-run comparison
 point. T039 records the accepted source contract. T032 is now deliberately
 narrowed to a diagnostic teacher/checkpoint refresh over that contract rather
-than a broad A20 refresh.
+than a broad A20 refresh. T035 later confirmed that deeper root-only
+model-guided Oracle-like search over the narrow diagnostic checkpoint does not
+yet improve the smoke fixed cohort. The next published source-generation batch
+is therefore T040--T044: add a versioned expert non-combat source driver, repair
+potion-enabled Oracle search, extend assistance into complete-run source
+generation, train assisted teacher/value-policy diagnostics, and evaluate
+de-assisted fixed cohorts.
 
 Work:
 
@@ -367,8 +373,12 @@ or later-act battle starts. T036 completed the first current-schema
 search-controlled reachability probe; the smoke evidence validated tooling but
 did not recover Boss or later-act starts. T037/T039 recovered and contracted a
 narrow Boss/Act2 supplement. Meaningful held-out improvement or controller
-promotion remains pending the T032 narrow diagnostic refresh, broader coverage,
-and later search work.
+promotion remains pending broader source-generation coverage. T035 completed a
+deeper root-only model-guided Oracle-like search comparison over refreshed
+diagnostic provenance and again tied the baseline smoke outcome. Current
+follow-up work is the T040--T044 assisted source-generation batch, which treats
+Oracle search and learned models as teacher/search/value diagnostics until
+low-assistance or unassisted fixed-cohort evidence improves.
 
 Exit gate: a search change improves fixed evaluation at equal simulation or
 wall-clock budget without natural-weighted regression.
