@@ -6,6 +6,7 @@ import argparse
 from pathlib import Path
 
 from sts_combat_rl.logging_utils import DEFAULT_LOG_FILE
+from sts_combat_rl.sim.assisted_source_generation import ASSISTANCE_LEVELS
 from sts_combat_rl.sim.model_guided_oracle_search import (
     MODEL_GUIDED_ORACLE_DEFAULT_POLICY_PROBABILITY_WEIGHT,
 )
@@ -314,6 +315,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     input_group.add_argument(
+        "--lightspeed-assisted-battle-start-pool",
+        type=Path,
+        metavar="PATH",
+        help=(
+            "Collect T042 assisted complete-run battle-start checkpoints for "
+            "one --assistance-level and write an assisted-run JSONL artifact."
+        ),
+    )
+    input_group.add_argument(
         "--lightspeed-battle-start-pool-restore",
         type=Path,
         metavar="PATH",
@@ -333,6 +343,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     input_group.add_argument(
+        "--lightspeed-assisted-a20-battle-start-coverage",
+        type=Path,
+        metavar="ASSISTED_POOL_PATH",
+        help=(
+            "Load a T042 assisted source pool, verify assisted replay restores, "
+            "and report A20 coverage plus T009 broad-training gate status."
+        ),
+    )
+    input_group.add_argument(
         "--a20-reachability-report",
         type=Path,
         metavar="OUTPUT_JSON",
@@ -349,6 +368,15 @@ def build_parser() -> argparse.ArgumentParser:
             "Build an offline T040 expert non-combat source-coverage comparison "
             "from repeated --expert-source-arm ROLE POOL_JSONL COVERAGE_JSON "
             "inputs."
+        ),
+    )
+    input_group.add_argument(
+        "--assisted-source-coverage-report",
+        type=Path,
+        metavar="OUTPUT_JSON",
+        help=(
+            "Build an offline T042 assisted source-coverage comparison from "
+            "repeated --assisted-source-arm LEVEL POOL_JSONL COVERAGE_JSON inputs."
         ),
     )
     input_group.add_argument(
@@ -663,6 +691,20 @@ def build_parser() -> argparse.ArgumentParser:
         help=("Write the --lightspeed-a20-battle-start-coverage JSON report to PATH."),
     )
     parser.add_argument(
+        "--assistance-level",
+        choices=ASSISTANCE_LEVELS,
+        default="assist_0",
+        help=(
+            "T042 assistance schedule used by --lightspeed-assisted-battle-start-pool."
+        ),
+    )
+    parser.add_argument(
+        "--assistance-policy-seed",
+        type=int,
+        default=None,
+        help="Seed recorded in T042 assistance provenance. Defaults to --sim-seed.",
+    )
+    parser.add_argument(
         "--reachability-arm",
         nargs=3,
         action="append",
@@ -682,6 +724,18 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "One T040 source-coverage arm. Required roles are stochastic_s20, "
             "expert_s20, and expert_s100."
+        ),
+    )
+    parser.add_argument(
+        "--assisted-source-arm",
+        nargs=3,
+        action="append",
+        default=[],
+        metavar=("LEVEL", "POOL_JSONL", "COVERAGE_JSON"),
+        help=(
+            "One T042 source-coverage arm. Required levels are assist_0, "
+            "assist_hp25, assist_hp50, assist_hp50_potion_elite_boss, and "
+            "assist_hp75_potion."
         ),
     )
     parser.add_argument(

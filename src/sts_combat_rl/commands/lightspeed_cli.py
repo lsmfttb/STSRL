@@ -8,6 +8,10 @@ import sys
 from sts_combat_rl.commands.a20_coverage import (
     run_a20_battle_start_coverage_from_paths,
 )
+from sts_combat_rl.commands.assisted_source_generation import (
+    format_assisted_coverage_report,
+    run_assisted_a20_coverage_from_paths,
+)
 from sts_combat_rl.commands.checkpoint_pool import (
     collect_checkpoint_pool,
     collect_search_checkpoint_pool,
@@ -71,6 +75,10 @@ from sts_combat_rl.sim.action_space import (
 from sts_combat_rl.sim.a20_battle_start_coverage import (
     format_a20_battle_start_coverage_report,
 )
+from sts_combat_rl.sim.assisted_source_generation import (
+    collect_assisted_battle_start_pool,
+    write_assisted_source_pool,
+)
 from sts_combat_rl.sim.batching import (
     build_decision_batch,
     format_decision_batch_report,
@@ -126,7 +134,7 @@ from sts_combat_rl.sim.non_combat_calibration import (
     format_non_combat_driver_calibration_report,
     run_non_combat_driver_calibration,
 )
-from sts_combat_rl.sim.online_controller import PolicyController
+from sts_combat_rl.sim.online_controller import PolicyController, RoutedRunController
 from sts_combat_rl.sim.model_guided_oracle_search import (
     ModelGuidedOracleSearchController,
     ModelGuidedOracleSearchV2Controller,
@@ -204,8 +212,10 @@ _LIGHTSPEED_BOOL_FLAGS = (
 _LIGHTSPEED_PATH_FLAGS = (
     "lightspeed_battle_start_pool",
     "lightspeed_search_battle_start_pool",
+    "lightspeed_assisted_battle_start_pool",
     "lightspeed_battle_start_pool_restore",
     "lightspeed_a20_battle_start_coverage",
+    "lightspeed_assisted_a20_battle_start_coverage",
     "lightspeed_a20_oracle_teacher_scaleup",
     "lightspeed_fixed_battle_evaluation",
     "lightspeed_oracle_search_teacher",
@@ -392,6 +402,40 @@ def run_lightspeed_command(args: argparse.Namespace) -> int:
             print(format_battle_start_pool_coverage_report(coverage), file=sys.stderr)
             if not coverage.completed_outcomes_complete:
                 return 1
+        elif args.lightspeed_assisted_battle_start_pool is not None:
+            oracle_controller = OracleSearchController(
+                simulations=args.oracle_search_simulations,
+                root_selection_rule=args.oracle_root_selection,
+                action_space=action_space,
+            )
+            artifact, coverage = collect_assisted_battle_start_pool(
+                adapter,
+                controller=RoutedRunController(
+                    battle=oracle_controller,
+                    non_combat=PolicyController(
+                        build_non_combat_driver_policy(
+                            args.sim_non_combat_policy,
+                            args.sim_seed,
+                        )
+                    ),
+                ),
+                seeds=[args.sim_seed + offset for offset in range(args.sim_episodes)],
+                max_steps=args.sim_steps,
+                action_space=action_space,
+                assistance_level=args.assistance_level,
+                policy_seed=(
+                    args.sim_seed
+                    if args.assistance_policy_seed is None
+                    else args.assistance_policy_seed
+                ),
+            )
+            write_assisted_source_pool(
+                args.lightspeed_assisted_battle_start_pool,
+                artifact,
+            )
+            print(format_battle_start_pool_coverage_report(coverage), file=sys.stderr)
+            if not coverage.completed_outcomes_complete:
+                return 1
         elif args.lightspeed_battle_start_pool_restore is not None:
             report = verify_checkpoint_pool_file(
                 args.lightspeed_battle_start_pool_restore,
@@ -421,6 +465,21 @@ def run_lightspeed_command(args: argparse.Namespace) -> int:
                 gate_override=args.pytorch_gate_override,
             )
             print(format_a20_battle_start_coverage_report(report), file=sys.stderr)
+            if not report.command_passed:
+                return 1
+        elif args.lightspeed_assisted_a20_battle_start_coverage is not None:
+            report = run_assisted_a20_coverage_from_paths(
+                pool_path=args.lightspeed_assisted_a20_battle_start_coverage,
+                output_path=args.a20_coverage_output,
+                adapter_factory=lambda: LightSpeedAdapter(
+                    seed=args.sim_seed,
+                    ascension=20,
+                ),
+                restore_limit=args.battle_start_restore_limit,
+                gate_config=build_pytorch_gate_config(args),
+                gate_override=args.pytorch_gate_override,
+            )
+            print(format_assisted_coverage_report(report), file=sys.stderr)
             if not report.command_passed:
                 return 1
         elif args.lightspeed_a20_oracle_teacher_scaleup is not None:

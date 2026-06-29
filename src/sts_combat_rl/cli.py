@@ -9,6 +9,9 @@ from sts_combat_rl.commands.cli_parser import build_parser
 from sts_combat_rl.commands.cli_paths import timestamped_path
 from sts_combat_rl.commands.cli_policies import build_pytorch_gate_config
 from sts_combat_rl.commands.cli_validation import validate_cli_args
+from sts_combat_rl.commands.assisted_source_generation import (
+    run_assisted_source_coverage_report_from_paths,
+)
 from sts_combat_rl.commands.expert_source_coverage import (
     run_expert_source_coverage_report_from_paths,
 )
@@ -53,6 +56,9 @@ from sts_combat_rl.sim.reachability import (
 )
 from sts_combat_rl.sim.expert_source_coverage import (
     format_expert_source_coverage_comparison_report,
+)
+from sts_combat_rl.sim.assisted_source_generation import (
+    format_assisted_source_coverage_comparison_report,
 )
 
 
@@ -297,6 +303,24 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         print(
             format_expert_source_coverage_comparison_report(report),
+            file=sys.stderr,
+        )
+        return 0 if report.command_passed else 1
+
+    if args.assisted_source_coverage_report is not None:
+        try:
+            report = run_assisted_source_coverage_report_from_paths(
+                output_path=args.assisted_source_coverage_report,
+                arm_specs=args.assisted_source_arm,
+            )
+        except (OSError, ValueError) as exc:
+            print(
+                f"failed to build assisted source-coverage report: {exc}",
+                file=sys.stderr,
+            )
+            return 2
+        print(
+            format_assisted_source_coverage_comparison_report(report),
             file=sys.stderr,
         )
         return 0 if report.command_passed else 1
