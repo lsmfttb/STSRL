@@ -113,9 +113,13 @@ parallel-worker plan. Source collection, restore/coverage gates, report
 rebuilds, teacher collection, and restored evaluation are separate stages for
 this purpose. Single-worker execution may be specified only for smoke tests,
 local debugging, non-simulator artifact aggregation, or a documented resource
-or tooling limit. The PR report must include shard/worker counts and wall-clock
-cost for each WSL stage so reviewers can distinguish scale evidence from a
-slow smoke run.
+or tooling limit. The default worker target for scale evidence is the host
+logical CPU count, capped by shard count and documented memory or simulator
+limits. On the current 16-logical-core maintainer machine, large WSL stages
+should use 16 workers by default; using fewer workers requires a reported
+resource or tooling reason. The PR report must include shard/worker counts and
+wall-clock cost for each WSL stage so reviewers can distinguish scale evidence
+from a slow smoke run.
 
 ## Task Artifact Boundaries
 
@@ -138,6 +142,15 @@ Generated large artifacts still stay out of the repository. The durable project
 state is the schema, command surface, manifest/provenance, and review evidence,
 not the local file that happened to be left behind after a smoke run.
 
+If raw GB-scale artifacts are expected to be useful after merge, the producing
+task must provide an explicit retention contract. That contract must name a
+stable ignored/local path outside disposable review worktrees, list schema and
+provenance, SHA-256 hashes and approximate sizes, regeneration commands,
+compatibility requirements, retention owner/reason, downstream tasks that may
+consume it, and deletion conditions. Raw retained artifacts are still not
+authoritative project state; later tasks may consume them only through the
+documented contract or by regenerating compatible artifacts.
+
 ## Pull-Request Contract
 
 The pull-request description must include:
@@ -147,6 +160,8 @@ The pull-request description must include:
 - changed behavior and compatibility impact;
 - required input artifacts, generated output artifacts, and reproduction
   commands or external/ignored artifact locations;
+- for any retained GB-scale local artifacts, the retention contract or a clear
+  statement that only reports/manifests should be kept;
 - exact verification commands and results;
 - any acceptance criterion not satisfied;
 - known risks or follow-up work;

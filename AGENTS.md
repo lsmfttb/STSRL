@@ -39,7 +39,12 @@ current contracts.
   for smoke tests, debugging, non-simulator artifact aggregation, or a
   documented resource/tooling constraint, and the PR must report the
   shard/worker count, wall-clock cost, and single-worker reason for every WSL
-  stage.
+  stage. For scale evidence, choose the worker target from the available host
+  logical CPU count by default, capped by shard count and documented memory or
+  simulator limits. On the current 16-logical-core maintainer machine, use 16
+  workers by default for source-generation, restore, coverage,
+  teacher-collection, and restored-evaluation stages unless the PR documents
+  why a lower number was required.
 - Simulator-only training is allowed, but any trained or search controller
   claimed live-game runnable must pass the CommunicationMod runtime adapter and
   share the same public decision/action contract.
@@ -123,6 +128,11 @@ current contracts.
 - Required task artifacts must be explicit and reproducible. Do not use another
   task's temporary smoke output, local worktree file, or leftover checkpoint as
   an implicit input to a later task.
+- GB-scale generated artifacts stay out of Git. If a later task may need them,
+  the producing PR must name a stable ignored/local retention path outside
+  disposable review worktrees, write or report a lightweight manifest with
+  schema, provenance, hashes, size, regeneration command, and retention reason,
+  and state when the raw files may be deleted.
 - Portable replay traces must disambiguate duplicate legal action ids.
 - Keep legacy fixtures and migration regression tests. Do not scatter permanent
   legacy-version branches through current business logic.

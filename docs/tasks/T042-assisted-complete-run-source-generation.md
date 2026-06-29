@@ -15,10 +15,11 @@ data, not natural A20 performance evidence.
 T008 can construct conservative HP, potion, and encounter supplements for
 existing battle starts. T037/T039 provide a durable no-potion source-coverage
 contract, but the accepted distribution still has very sparse Act 1 Boss and
-Act 2 coverage and no Act 3/4 coverage. T040 is expected to improve source
-quality through an expert non-combat driver, and T041 is expected to repair
-the potion-enabled search/action mapping needed for reliable potion-aware
-source generation.
+Act 2 coverage and no Act 3/4 coverage. T040 added `expert_non_combat_v1`,
+which improved Act 1 Boss and later-act source reachability at 1,000 terminal
+A20 source runs per arm but still left the broad-training gate closed. T041
+repaired the potion-enabled search/action mapping needed for reliable
+potion-aware source generation.
 
 ## Dependencies
 
@@ -37,6 +38,16 @@ implicit inputs.
 Generated assisted source pools, shards, coverage reports, assistance logs,
 restore reports, and reachability reports remain outside the repository unless
 they are intentionally small fixtures.
+
+If the generated raw pools or shards are intended as inputs to T043, they must
+be written under a stable ignored/local retention path outside any disposable
+review worktree, such as `artifacts/t042-assisted-source/` in the main
+workspace or a separately documented local artifact root. The PR must include a
+lightweight retention manifest or equivalent report with schema, provenance,
+SHA-256 hashes, approximate sizes, regeneration commands, compatibility
+requirements, downstream consumer, retention reason, and deletion conditions.
+If T043 should regenerate rather than consume the raw T042 files, the PR must
+say that explicitly and keep only the small report/manifest evidence.
 
 ## Scope
 
@@ -85,7 +96,11 @@ they are intentionally small fixtures.
 - The simulator remains authoritative for state mutation and legality.
 - The battle/non-combat controller split remains explicit.
 - Large WSL source-generation, restore, coverage, and report stages must be
-  sharded and run with explicit parallel workers by default.
+  sharded and run with explicit parallel workers by default. Choose worker
+  counts from the host logical CPU count, capped by shard count and documented
+  memory or simulator limits. On the current 16-logical-core maintainer
+  machine, use 16 workers by default for each large WSL stage unless the PR
+  documents why fewer workers were required.
 
 ## Deliverables
 
@@ -127,8 +142,11 @@ wsl.exe -d Ubuntu -e bash -lc "cd /mnt/d/DeadlycatCoding/STSRL && bash scripts/v
 ```
 
 Run WSL source generation, restore/coverage, and report rebuilds with explicit
-shards and parallel workers. The PR must report commands, shard/worker counts,
-seed/source-run or record ranges, wall-clock cost, and any single-worker
+shards and parallel workers. Scale stages should use the host logical CPU count
+as the worker target by default; on the current maintainer machine that means
+16 workers, capped only by shard count or documented memory/simulator limits.
+The PR must report commands, shard/worker counts, seed/source-run or record
+ranges, wall-clock cost, and any lower-worker or single-worker
 smoke/debug/tooling-limited reason per stage.
 
 ## Legacy Reference
@@ -143,4 +161,7 @@ The PR must report task ID, assistance schedules, source controllers, artifact
 paths and hashes, source-run scale, shard/worker/runtime evidence, coverage by
 assistance level, restore/public-context/structured-outcome status, T009 gate
 results, non-leakage checks, verification commands, known limitations, and
-documentation impact.
+documentation impact. It must also state whether raw GB-scale artifacts are
+retained for T043, and if so provide the retention manifest/path; otherwise it
+must state that downstream tasks should regenerate compatible artifacts from
+the documented commands.

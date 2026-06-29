@@ -52,7 +52,12 @@ gates, reachability reports, teacher collection, restored evaluation, or
 training-scale evidence. The parallelism requirement applies to each expensive
 stage separately; running source generation in parallel does not make a later
 coverage or restore gate acceptable as an undocumented single-worker run.
-Reports for such workloads must preserve enough runtime provenance to
+Scale runs should choose their worker target from the host logical CPU count by
+default, capped by shard count and documented memory or simulator limits. The
+current maintainer workstation has 16 logical cores, so 16 workers is the
+default target for scale evidence unless the report documents a lower-worker
+resource or tooling constraint. Reports for such workloads must preserve enough
+runtime provenance to
 reproduce every stage of the execution plan, including shard identity, worker
 count, seed/source-run or record ranges, wall-clock cost, and any explicit
 reason a stage used one worker.
@@ -370,3 +375,10 @@ may depend on a predecessor's merged schema, command surface, fixture, or
 documented artifact-generation procedure. It must not depend on an uncommitted
 worktree file, a one-off smoke output, or a temporary checkpoint that only
 happened to exist on one machine.
+
+GB-scale pools, teacher datasets, checkpoints, and coverage shards remain
+outside Git. When raw files are intentionally kept for follow-up work, they must
+live under a stable ignored/local retention path rather than a disposable review
+worktree, and the durable contract must be a lightweight manifest or report
+with schema, provenance, hashes, sizes, regeneration commands, compatibility
+requirements, retention owner/reason, and deletion conditions.

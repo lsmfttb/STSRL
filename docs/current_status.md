@@ -649,7 +649,12 @@ fixed-cohort evaluation.
   and 7 later-act starts; `expert_s100` produced 5,519 starts, 113 Act 1 Boss
   starts, and 28 later-act starts. The T040 scale and reachability gates passed,
   but the T009 broad-training gate remained closed for all arms. This is
-  source-distribution evidence only, not controller promotion evidence.
+  source-distribution evidence only, not controller promotion evidence. The
+  raw GB-scale T040 pools are not a required downstream input; durable evidence
+  is the merged command/report surface, PR-reported hashes, and this status
+  summary. Future assisted or teacher scale artifacts that are expected to feed
+  later tasks must use an explicit ignored/local retention manifest instead of
+  relying on review-worktree leftovers.
 - T041 repairs potion-enabled Oracle-like root mapping and adds the
   `oracle-potion-fixed-comparison-v1` fixed-cohort comparison. Maintainer
   review verified artifact hashes, passed 573 Windows tests, compileall, ruff,
@@ -820,10 +825,14 @@ source-generation run is too slow and leaves host resources underused for
 1,000-run evidence. Future large WSL `sts_lightspeed` source-generation,
 coverage, restore verification, teacher collection, restored-evaluation, or
 training-scale runs should be sharded and executed with explicit parallel
-workers by default. This is a per-stage requirement: source collection,
-coverage/restore gates, report rebuilding, and teacher collection each need a
-reported worker/shard plan or an explicit single-worker reason. PRs must report
-shard identity, worker count, seed/source-run or record ranges, wall-clock cost,
-and any single-worker exception. Single-worker WSL execution is reserved for
-smoke tests, debugging, non-simulator artifact aggregation, or a documented
-resource/tooling constraint.
+workers by default. The default scale-worker target is the host logical CPU
+count, capped by shard count and documented memory or simulator limits; on the
+current 16-logical-core maintainer machine, use 16 workers for large WSL stages
+unless a lower-worker resource or tooling reason is reported. This is a
+per-stage requirement: source collection, coverage/restore gates, report
+rebuilding, and teacher collection each need a reported worker/shard plan or an
+explicit single-worker reason. PRs must report shard identity, worker count,
+seed/source-run or record ranges, wall-clock cost, and any single-worker
+exception. Single-worker WSL execution is reserved for smoke tests, debugging,
+non-simulator artifact aggregation, or a documented resource/tooling
+constraint.

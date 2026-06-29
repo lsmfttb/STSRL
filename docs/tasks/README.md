@@ -86,6 +86,15 @@ Large generated artifacts remain outside the repository. The durable contract
 is the schema, manifest/provenance, command surface, hashes where applicable,
 and review evidence.
 
+If a large artifact should survive review cleanup for downstream use, the task
+must define a retention contract. The retained raw files must live under a
+stable ignored/local path outside disposable review worktrees, and the PR must
+report a lightweight manifest with schema, provenance, hashes, approximate
+sizes, regeneration commands, compatibility requirements, retention reason,
+possible downstream consumers, and deletion conditions. If no downstream task
+needs the raw files, keep only the report/manifest evidence and regenerate raw
+data when needed.
+
 ## Published Queue
 
 The executable queue is the set of rows marked `READY` in the Active Backlog
