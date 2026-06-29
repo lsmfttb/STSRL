@@ -29,9 +29,9 @@ versioned deeper model-guided Oracle-like search comparison using refreshed
 diagnostic checkpoint provenance, but the accepted smoke evidence tied the
 baseline and T028 outcomes rather than demonstrating improvement. The current
 published batch follows the upstream assisted source-generation guidance:
-T040 is `IN_REVIEW`, T041 is complete, and T042, T043, and T044 define the blocked
-follow-up sequence toward assisted complete-run source generation, assisted
-teacher/value training, and de-assisted fixed-cohort evaluation.
+T040 and T041 are complete, T042 is `READY`, and T043 and T044 remain blocked
+follow-up tasks toward assisted teacher/value training and de-assisted
+fixed-cohort evaluation.
 
 ## Implemented On Main
 
@@ -636,6 +636,20 @@ teacher/value training, and de-assisted fixed-cohort evaluation.
   model calls as 0/116/116, and reported no restore failures, truncations,
   controller errors, or root-mapping failures. This is diagnostic smoke
   evidence only and does not promote the controller.
+- T040 adds `expert_non_combat_v1`, a seeded, stochastic, public-input A20
+  heuristic non-combat driver for source generation, and the offline
+  `expert-non-combat-source-coverage-comparison-v1` report. Maintainer review
+  verified the ignored `artifacts/t040-scale/` hashes and shard statuses,
+  passed 582 Windows tests, compileall, ruff, format check, both
+  CommunicationMod fixture smokes, focused T040 tests, task-doc checks, diff
+  whitespace checks, and the WSL pinned-source verifier. The accepted
+  three-arm A20 source comparison used 1,000 terminal source runs per arm:
+  `stochastic_s20` produced 4,688 starts, 31 Act 1 Boss starts, and 3
+  later-act starts; `expert_s20` produced 4,848 starts, 49 Act 1 Boss starts,
+  and 7 later-act starts; `expert_s100` produced 5,519 starts, 113 Act 1 Boss
+  starts, and 28 later-act starts. The T040 scale and reachability gates passed,
+  but the T009 broad-training gate remained closed for all arms. This is
+  source-distribution evidence only, not controller promotion evidence.
 - T041 repairs potion-enabled Oracle-like root mapping and adds the
   `oracle-potion-fixed-comparison-v1` fixed-cohort comparison. Maintainer
   review verified artifact hashes, passed 573 Windows tests, compileall, ruff,
@@ -659,8 +673,7 @@ The following capabilities exist only as plans, experiment evidence, or
 unmerged legacy work:
 
 - interactive live-game or A20 performance validation for any controller;
-- `expert_non_combat_v1` or any assisted complete-run source-generation
-  pipeline;
+- assisted complete-run source-generation pipeline;
 - broad neural training on a scale/distribution-approved A20 dataset;
 - model-guided search performance improvement or controller promotion;
 - normal-information belief search.
@@ -697,9 +710,9 @@ comparison tied the baseline and T028 outcomes.
 The next published batch follows the upstream assisted source-generation
 guidance supplied after T035. The maintainer role here is to publish and review
 bounded tasks from that guidance, not to invent an alternate long-term plan.
-T040 (`Expert Non-Combat Driver v1`) is `IN_REVIEW` on PR #38. T041
-(`Potion-enabled Oracle search repair`) is complete. T042
-(`Assisted complete-run source generation`) is blocked until T040 also merges.
+T040 (`Expert Non-Combat Driver v1`) and T041
+(`Potion-enabled Oracle search repair`) are complete. T042
+(`Assisted complete-run source generation`) is `READY`.
 T043 (`Assisted teacher dataset and value/policy training`) is blocked on T042
 and the required public-context model-input contract. T044
 (`De-assisted fixed-cohort evaluation`) is blocked on T043.
