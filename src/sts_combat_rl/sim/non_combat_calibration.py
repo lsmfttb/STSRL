@@ -24,6 +24,7 @@ from sts_combat_rl.sim.online_controller import (
 from sts_combat_rl.sim.policy import (
     DecisionContext,
     DecisionPolicy,
+    ExpertNonCombatDriver,
     StochasticNonCombatDriver,
     non_combat_action_category,
 )
@@ -110,6 +111,7 @@ def run_non_combat_driver_calibration(
     *,
     seeds: Iterable[int],
     driver_seed: int,
+    driver_policy: DecisionPolicy | None = None,
     max_steps: int,
     action_space: ActionSpaceConfig | None = None,
     simulator_config: Mapping[str, Any] | None = None,
@@ -130,7 +132,7 @@ def run_non_combat_driver_calibration(
     if seed_values != list(range(min(seed_values), max(seed_values) + 1)):
         raise ValueError("non-combat driver calibration seeds must be contiguous")
 
-    driver = StochasticNonCombatDriver(seed=driver_seed)
+    driver = driver_policy or StochasticNonCombatDriver(seed=driver_seed)
     active_action_space = action_space or ActionSpaceConfig.initial_no_potions()
     reached_screen_counts: Counter[str] = Counter()
     category_opportunity_counts: Counter[str] = Counter()
@@ -244,8 +246,14 @@ def format_non_combat_driver_calibration_report(
     if report.seed_start is not None and report.seed_end is not None:
         seed_range = f"{report.seed_start}..{report.seed_end}"
 
+    driver_name = str(report.driver_provenance.get("name", ""))
+    title = (
+        "Stochastic non-combat driver calibration summary"
+        if driver_name == "stochastic_non_combat_v1"
+        else "Non-combat driver calibration summary"
+    )
     lines = [
-        "Stochastic non-combat driver calibration summary",
+        title,
         f"driver: {report.driver_provenance.get('name', 'stochastic_non_combat_v1')}",
         f"driver version: {report.driver_provenance.get('config', {}).get('version', 1)}",
         f"seed range: {seed_range}",
@@ -321,7 +329,7 @@ def _simulator_config_problems(config: Mapping[str, Any]) -> list[str]:
 
 def _category_from_selection_reason(
     reason: str,
-    driver: StochasticNonCombatDriver,
+    driver: DecisionPolicy | StochasticNonCombatDriver | ExpertNonCombatDriver,
 ) -> str | None:
     prefix = f"{driver.name}:"
     if not reason.startswith(prefix):

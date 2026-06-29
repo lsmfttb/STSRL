@@ -6,6 +6,7 @@ import argparse
 
 from sts_combat_rl.sim.model_scoring import ActionKindPriorScorer
 from sts_combat_rl.sim.policy import (
+    ExpertNonCombatDriver,
     FirstEligiblePolicy,
     PreferredKindPolicy,
     RandomEligiblePolicy,
@@ -84,12 +85,15 @@ def build_non_combat_driver_policy(
     FirstEligiblePolicy
     | PreferredKindPolicy
     | RandomEligiblePolicy
+    | ExpertNonCombatDriver
     | StochasticNonCombatDriver
 ):
     """Build the separately named non-combat driver selected by CLI name."""
 
     if policy_name == "stochastic-v1":
         return StochasticNonCombatDriver(seed=seed)
+    if policy_name in {"expert-v1", "expert_non_combat_v1"}:
+        return ExpertNonCombatDriver(seed=seed)
     if policy_name == "preferred-kind":
         return PreferredKindPolicy()
     if policy_name == "first-eligible":

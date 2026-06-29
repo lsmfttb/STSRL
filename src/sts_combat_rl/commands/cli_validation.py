@@ -164,6 +164,16 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
     if args.a20_reachability_report is None and args.reachability_arm:
         return "--reachability-arm requires --a20-reachability-report"
     if (
+        args.expert_source_coverage_report is not None
+        and len(args.expert_source_arm) != 3
+    ):
+        return (
+            "--expert-source-coverage-report requires exactly three "
+            "--expert-source-arm values"
+        )
+    if args.expert_source_coverage_report is None and args.expert_source_arm:
+        return "--expert-source-arm requires --expert-source-coverage-report"
+    if (
         args.oracle_teacher_coverage_report is not None
         and args.oracle_teacher_source_pool is None
     ):

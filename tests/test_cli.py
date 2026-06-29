@@ -115,6 +115,42 @@ def test_cli_parser_accepts_t036_reachability_flags(tmp_path) -> None:
     ]
 
 
+def test_cli_parser_accepts_t040_expert_source_coverage_flags(tmp_path) -> None:
+    report_path = tmp_path / "expert-source-coverage.json"
+    stochastic_pool = tmp_path / "stochastic-pool.jsonl"
+    stochastic_coverage = tmp_path / "stochastic-coverage.json"
+    expert_s20_pool = tmp_path / "expert-s20-pool.jsonl"
+    expert_s20_coverage = tmp_path / "expert-s20-coverage.json"
+    expert_s100_pool = tmp_path / "expert-s100-pool.jsonl"
+    expert_s100_coverage = tmp_path / "expert-s100-coverage.json"
+
+    args = build_parser().parse_args(
+        [
+            "--expert-source-coverage-report",
+            str(report_path),
+            "--expert-source-arm",
+            "stochastic_s20",
+            str(stochastic_pool),
+            str(stochastic_coverage),
+            "--expert-source-arm",
+            "expert_s20",
+            str(expert_s20_pool),
+            str(expert_s20_coverage),
+            "--expert-source-arm",
+            "expert_s100",
+            str(expert_s100_pool),
+            str(expert_s100_coverage),
+        ]
+    )
+
+    assert args.expert_source_coverage_report == report_path
+    assert args.expert_source_arm == [
+        ["stochastic_s20", str(stochastic_pool), str(stochastic_coverage)],
+        ["expert_s20", str(expert_s20_pool), str(expert_s20_coverage)],
+        ["expert_s100", str(expert_s100_pool), str(expert_s100_coverage)],
+    ]
+
+
 def test_cli_parser_accepts_oracle_teacher_scaleup_flags(tmp_path) -> None:
     pool_path = tmp_path / "pool.jsonl"
     output_dir = tmp_path / "scaleup"
@@ -2412,6 +2448,37 @@ def test_cli_lightspeed_battle_sweep_accepts_non_combat_policy(
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "non-combat driver policy: preferred_kind" in captured.err
+
+
+def test_cli_lightspeed_battle_sweep_accepts_expert_non_combat_policy(
+    monkeypatch,
+    capsys,
+) -> None:
+    monkeypatch.setattr(
+        "sts_combat_rl.commands.lightspeed_cli.LightSpeedAdapter",
+        FakeLightSpeedSmokeAdapter,
+    )
+
+    assert (
+        main(
+            [
+                "--lightspeed-battle-sweep",
+                "--sim-non-combat-policy",
+                "expert-v1",
+                "--sim-episodes",
+                "1",
+                "--sim-steps",
+                "1",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 0
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "non-combat driver policy: expert_non_combat_v1" in captured.err
 
 
 def test_cli_lightspeed_battle_sweep_accepts_scorer_policy(

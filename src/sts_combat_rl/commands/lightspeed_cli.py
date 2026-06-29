@@ -662,6 +662,10 @@ def run_lightspeed_command(args: argparse.Namespace) -> int:
                 battle_policy,
                 seeds=[args.sim_seed + offset for offset in range(args.sim_episodes)],
                 driver_seed=args.sim_seed,
+                driver_policy=build_non_combat_driver_policy(
+                    args.sim_non_combat_policy,
+                    args.sim_seed,
+                ),
                 max_steps=args.sim_steps,
                 action_space=action_space,
                 simulator_config={

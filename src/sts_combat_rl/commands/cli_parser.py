@@ -342,6 +342,16 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     input_group.add_argument(
+        "--expert-source-coverage-report",
+        type=Path,
+        metavar="OUTPUT_JSON",
+        help=(
+            "Build an offline T040 expert non-combat source-coverage comparison "
+            "from repeated --expert-source-arm ROLE POOL_JSONL COVERAGE_JSON "
+            "inputs."
+        ),
+    )
+    input_group.add_argument(
         "--lightspeed-a20-oracle-teacher-scaleup",
         type=Path,
         metavar="POOL_PATH",
@@ -568,6 +578,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--sim-non-combat-policy",
         choices=(
             "stochastic-v1",
+            "expert-v1",
+            "expert_non_combat_v1",
             "preferred-kind",
             "first-eligible",
             "random-eligible",
@@ -659,6 +671,17 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "One arm for --a20-reachability-report. Repeat for default, "
             "Oracle no-potion, potion-enabled, or other explicitly labeled arms."
+        ),
+    )
+    parser.add_argument(
+        "--expert-source-arm",
+        nargs=3,
+        action="append",
+        default=[],
+        metavar=("ROLE", "POOL_JSONL", "COVERAGE_JSON"),
+        help=(
+            "One T040 source-coverage arm. Required roles are stochastic_s20, "
+            "expert_s20, and expert_s100."
         ),
     )
     parser.add_argument(

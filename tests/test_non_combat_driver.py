@@ -22,6 +22,7 @@ from sts_combat_rl.sim.non_combat_calibration import (
 from sts_combat_rl.sim.online_controller import PolicyController, RoutedRunController
 from sts_combat_rl.sim.policy import (
     DecisionContext,
+    ExpertNonCombatDriver,
     FirstEligiblePolicy,
     StochasticNonCombatDriver,
     non_combat_action_category,
@@ -35,6 +36,10 @@ def _context(
     idx1: Sequence[int | None] | None = None,
     potion_count: int | None = None,
     potion_capacity: int | None = None,
+    labels: Sequence[str] | None = None,
+    selected_cards: Sequence[dict[str, object] | None] | None = None,
+    tactical_state: dict[str, object] | None = None,
+    public_run_context: dict[str, object] | None = None,
 ) -> DecisionContext:
     metadata = [
         {} if value is None else {"idx1": value}
@@ -45,6 +50,15 @@ def _context(
         snapshot_metadata["potion_count"] = potion_count
     if potion_capacity is not None:
         snapshot_metadata["potion_capacity"] = potion_capacity
+    tactical_actions = []
+    for index, kind in enumerate(kinds):
+        action: dict[str, object] = {
+            "kind": kind,
+            "label": labels[index] if labels is not None else kind,
+        }
+        if selected_cards is not None and selected_cards[index] is not None:
+            action["selected_card"] = selected_cards[index] or {}
+        tactical_actions.append(action)
     return DecisionContext(
         screen_state=screen_state,
         snapshot_features=[],
@@ -53,6 +67,9 @@ def _context(
         eligible_action_indices=list(range(len(kinds))),
         snapshot_metadata=snapshot_metadata,
         legal_action_metadata=metadata,
+        tactical_state=tactical_state or {},
+        tactical_legal_actions=tactical_actions,
+        public_run_context=public_run_context or {},
     )
 
 
@@ -64,6 +81,41 @@ def _selected_categories(context: DecisionContext, *, limit: int = 500) -> set[s
         decision = driver.select_action(context)
         selected.add(decision.reason.removeprefix(f"{driver.name}:"))
     return selected
+
+
+def _selected_expert_categories(
+    context: DecisionContext,
+    *,
+    limit: int = 1000,
+) -> set[str]:
+    selected: set[str] = set()
+    for seed in range(limit):
+        driver = ExpertNonCombatDriver(seed=11)
+        driver.reset_for_run(seed)
+        decision = driver.select_action(context)
+        selected.add(decision.reason.removeprefix(f"{driver.name}:"))
+    return selected
+
+
+def _card(
+    name: str,
+    *,
+    card_type: str = "ATTACK",
+    rarity: str = "COMMON",
+    damage: int | None = None,
+    block: int | None = None,
+    cost: int | None = 1,
+) -> dict[str, object]:
+    return {
+        "identity": {"value": name, "status": "known"},
+        "type": card_type,
+        "rarity": rarity,
+        "scalars": {
+            "damage": damage,
+            "block": block,
+            "cost": cost,
+        },
+    }
 
 
 def test_stochastic_non_combat_driver_repeats_for_same_driver_and_simulator_seed() -> (
@@ -85,6 +137,50 @@ def test_stochastic_non_combat_driver_repeats_for_same_driver_and_simulator_seed
     assert first_decisions == second_decisions
     assert first.provenance_config["reproducible"] is True
     assert first.provenance_config["version"] == 1
+
+
+def test_expert_non_combat_driver_repeats_and_publishes_rule_provenance() -> None:
+    contexts = [
+        _context(
+            "REWARDS",
+            ["reward_card", "reward_card", "skip"],
+            labels=["Pommel Strike", "Clash", "skip"],
+            selected_cards=[
+                _card("Pommel Strike", damage=9),
+                _card("Clash", damage=14),
+                None,
+            ],
+            tactical_state={
+                "scalars": {
+                    "floor_num": 3,
+                    "current_hp": 68,
+                    "max_hp": 80,
+                    "gold": 99,
+                }
+            },
+        ),
+        _context(
+            "REST_ROOM",
+            ["rest", "rest", "rest"],
+            idx1=[0, 1, 2],
+            tactical_state={"scalars": {"current_hp": 20, "max_hp": 80}},
+        ),
+    ]
+    first = ExpertNonCombatDriver(seed=17)
+    second = ExpertNonCombatDriver(seed=17)
+    first.reset_for_run(101)
+    second.reset_for_run(101)
+
+    assert [first.select_action(context) for context in contexts] == [
+        second.select_action(context) for context in contexts
+    ]
+    assert first.provenance_config["reproducible"] is True
+    assert first.provenance_config["version"] == 1
+    assert "card_rewards" in first.provenance_config["rule_groups"]
+    assert (
+        "DecisionContext.public_run_context.history"
+        in (first.provenance_config["visible_state_inputs"])
+    )
 
 
 def test_driver_categories_preserve_ordinary_and_boss_relic_branches() -> None:
@@ -127,6 +223,89 @@ def test_conditional_contexts_make_all_required_rare_categories_reachable() -> N
     selected = set().union(*(_selected_categories(context) for context in contexts))
 
     assert REQUIRED_NON_COMBAT_DRIVER_V1_CATEGORIES.issubset(selected)
+
+
+def test_expert_driver_keeps_required_low_probability_categories_reachable() -> None:
+    contexts = [
+        _context("REWARDS", ["reward_relic", "skip", "reward_key"]),
+        _context("BOSS_RELIC_REWARDS", ["boss_relic", "boss_relic"], idx1=[0, 3]),
+        _context("TREASURE_ROOM", ["treasure_open", "treasure_leave"]),
+        _context("REST_ROOM", ["rest", "rest", "rest"], idx1=[0, 1, 2]),
+        _context(
+            "SHOP_ROOM",
+            [
+                "shop_card_remove",
+                "shop_reward_card",
+                "shop_reward_potion",
+                "shop_reward_relic",
+                "shop_skip",
+                "game_potion_use",
+            ],
+            potion_count=1,
+            potion_capacity=3,
+        ),
+        _context(
+            "REWARDS",
+            ["reward_potion", "game_potion_discard"],
+            potion_count=3,
+            potion_capacity=3,
+        ),
+    ]
+
+    selected = set().union(
+        *(_selected_expert_categories(context, limit=3000) for context in contexts)
+    )
+
+    assert REQUIRED_NON_COMBAT_DRIVER_V1_CATEGORIES.issubset(selected)
+
+
+def test_expert_driver_prefers_early_damage_over_obvious_pollution() -> None:
+    context = _context(
+        "REWARDS",
+        ["reward_card", "reward_card", "skip"],
+        labels=["Pommel Strike", "Wound", "skip"],
+        selected_cards=[
+            _card("Pommel Strike", damage=9),
+            _card("Wound", card_type="STATUS", rarity="STATUS", cost=None),
+            None,
+        ],
+        tactical_state={
+            "scalars": {
+                "floor_num": 3,
+                "current_hp": 75,
+                "max_hp": 80,
+            }
+        },
+    )
+    counts: dict[int, int] = {0: 0, 1: 0, 2: 0}
+    for seed in range(500):
+        driver = ExpertNonCombatDriver(seed=3)
+        driver.reset_for_run(seed)
+        counts[driver.select_action(context).legal_action_index] += 1
+
+    assert counts[0] > counts[1] * 10
+    assert counts[0] > counts[2]
+
+
+def test_expert_driver_fails_closed_on_forbidden_public_input_keys() -> None:
+    context = _context(
+        "REWARDS",
+        ["reward_card", "skip"],
+        tactical_state={"hidden_rng_state": 123},
+    )
+
+    with pytest.raises(ValueError, match="forbidden field"):
+        ExpertNonCombatDriver(seed=1).select_action(context)
+
+
+def test_expert_driver_unknown_screen_uses_positive_fallback_weight() -> None:
+    context = _context("CUSTOM_SCREEN", ["custom_choice", "skip"])
+    driver = ExpertNonCombatDriver(seed=1)
+
+    decision = driver.select_action(context)
+
+    assert decision.legal_action_index in {0, 1}
+    assert decision.reason.startswith("expert_non_combat_v1:")
 
 
 def test_default_battle_potion_exclusion_keeps_non_combat_potion_actions() -> None:
