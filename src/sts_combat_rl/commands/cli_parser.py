@@ -380,6 +380,25 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     input_group.add_argument(
+        "--merge-assisted-source-pool",
+        type=Path,
+        metavar="OUTPUT_JSONL",
+        help=(
+            "Merge repeated --assisted-source-shard JSONL artifacts for one T042 "
+            "assistance level into a single assisted source-pool artifact."
+        ),
+    )
+    input_group.add_argument(
+        "--merge-assisted-a20-coverage",
+        type=Path,
+        metavar="OUTPUT_JSON",
+        help=(
+            "Build a merged T042 assisted A20 coverage report from one "
+            "--merged-assisted-source-pool and repeated --assisted-coverage-shard "
+            "JSON reports."
+        ),
+    )
+    input_group.add_argument(
         "--lightspeed-a20-oracle-teacher-scaleup",
         type=Path,
         metavar="POOL_PATH",
@@ -619,6 +638,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--sim-non-combat-seed",
+        type=int,
+        default=None,
+        help=(
+            "Seed for seeded non-combat drivers. Defaults to --sim-seed; set this "
+            "for sharded source-generation when source seed ranges differ."
+        ),
+    )
+    parser.add_argument(
         "--reward-detail-limit",
         type=int,
         default=8,
@@ -736,6 +764,36 @@ def build_parser() -> argparse.ArgumentParser:
             "One T042 source-coverage arm. Required levels are assist_0, "
             "assist_hp25, assist_hp50, assist_hp50_potion_elite_boss, and "
             "assist_hp75_potion."
+        ),
+    )
+    parser.add_argument(
+        "--assisted-source-shard",
+        type=Path,
+        action="append",
+        default=[],
+        metavar="POOL_JSONL",
+        help=(
+            "One T042 assisted source-pool shard for --merge-assisted-source-pool. "
+            "Repeat for every generated shard."
+        ),
+    )
+    parser.add_argument(
+        "--merged-assisted-source-pool",
+        type=Path,
+        metavar="POOL_JSONL",
+        help=(
+            "Merged T042 assisted source pool used by --merge-assisted-a20-coverage."
+        ),
+    )
+    parser.add_argument(
+        "--assisted-coverage-shard",
+        type=Path,
+        action="append",
+        default=[],
+        metavar="COVERAGE_JSON",
+        help=(
+            "One shard-level assisted A20 coverage report for "
+            "--merge-assisted-a20-coverage. Repeat for every shard."
         ),
     )
     parser.add_argument(

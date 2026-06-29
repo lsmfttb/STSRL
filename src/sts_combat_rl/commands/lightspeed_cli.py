@@ -300,7 +300,7 @@ def run_lightspeed_command(args: argparse.Namespace) -> int:
                 ),
                 non_combat_policy=build_non_combat_driver_policy(
                     args.sim_non_combat_policy,
-                    args.sim_seed,
+                    _non_combat_seed(args),
                 ),
                 seeds=[args.sim_seed + offset for offset in range(args.sim_episodes)],
                 max_steps=args.sim_steps,
@@ -321,7 +321,7 @@ def run_lightspeed_command(args: argparse.Namespace) -> int:
                 ),
                 non_combat_policy=build_non_combat_driver_policy(
                     args.sim_non_combat_policy,
-                    args.sim_seed,
+                    _non_combat_seed(args),
                 ),
                 seeds=[args.sim_seed + offset for offset in range(args.sim_episodes)],
                 max_steps=args.sim_steps,
@@ -346,7 +346,7 @@ def run_lightspeed_command(args: argparse.Namespace) -> int:
                 ),
                 non_combat_policy=build_non_combat_driver_policy(
                     args.sim_non_combat_policy,
-                    args.sim_seed,
+                    _non_combat_seed(args),
                 ),
                 seed=args.sim_seed,
                 max_steps=args.sim_steps,
@@ -365,7 +365,7 @@ def run_lightspeed_command(args: argparse.Namespace) -> int:
                 ),
                 non_combat_policy=build_non_combat_driver_policy(
                     args.sim_non_combat_policy,
-                    args.sim_seed,
+                    _non_combat_seed(args),
                 ),
                 seeds=[args.sim_seed + offset for offset in range(args.sim_episodes)],
                 max_steps=args.sim_steps,
@@ -389,7 +389,7 @@ def run_lightspeed_command(args: argparse.Namespace) -> int:
                 oracle_controller=oracle_controller,
                 non_combat_policy=build_non_combat_driver_policy(
                     args.sim_non_combat_policy,
-                    args.sim_seed,
+                    _non_combat_seed(args),
                 ),
                 seeds=[args.sim_seed + offset for offset in range(args.sim_episodes)],
                 max_steps=args.sim_steps,
@@ -415,7 +415,7 @@ def run_lightspeed_command(args: argparse.Namespace) -> int:
                     non_combat=PolicyController(
                         build_non_combat_driver_policy(
                             args.sim_non_combat_policy,
-                            args.sim_seed,
+                            _non_combat_seed(args),
                         )
                     ),
                 ),
@@ -720,10 +720,10 @@ def run_lightspeed_command(args: argparse.Namespace) -> int:
                 adapter,
                 battle_policy,
                 seeds=[args.sim_seed + offset for offset in range(args.sim_episodes)],
-                driver_seed=args.sim_seed,
+                driver_seed=_non_combat_seed(args),
                 driver_policy=build_non_combat_driver_policy(
                     args.sim_non_combat_policy,
-                    args.sim_seed,
+                    _non_combat_seed(args),
                 ),
                 max_steps=args.sim_steps,
                 action_space=action_space,
@@ -778,7 +778,7 @@ def _run_lightspeed_smoke_command(
     elif args.lightspeed_battle_sweep:
         non_combat_policy = build_non_combat_driver_policy(
             args.sim_non_combat_policy,
-            args.sim_seed,
+            _non_combat_seed(args),
         )
         battle_report = run_battle_agent_sweep(
             adapter,
@@ -886,6 +886,12 @@ def _run_lightspeed_smoke_command(
     return 0
 
 
+def _non_combat_seed(args: argparse.Namespace) -> int:
+    return (
+        args.sim_seed if args.sim_non_combat_seed is None else args.sim_non_combat_seed
+    )
+
+
 def _collect_battle_rollouts(
     args: argparse.Namespace,
     adapter: LightSpeedAdapter,
@@ -897,7 +903,7 @@ def _collect_battle_rollouts(
     )
     non_combat_policy = build_non_combat_driver_policy(
         args.sim_non_combat_policy,
-        args.sim_seed,
+        _non_combat_seed(args),
     )
     return [
         collect_battle_agent_rollout(

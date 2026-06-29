@@ -13,10 +13,12 @@ from sts_combat_rl.sim.assisted_source_generation import (
     dump_assisted_source_coverage_comparison_report_json,
     dump_assisted_source_pool_jsonl,
     load_assisted_source_pool_jsonl,
+    merge_assisted_source_pool_shards,
     verify_assisted_source_pool_restores,
     write_assisted_a20_coverage_report,
 )
 from sts_combat_rl.commands.assisted_source_generation import (
+    merge_assisted_a20_coverage_from_paths,
     run_assisted_source_coverage_report_from_paths,
 )
 from sts_combat_rl.sim.contract import (
@@ -28,6 +30,7 @@ from sts_combat_rl.sim.contract import (
 from sts_combat_rl.sim.lightspeed_source import lightspeed_source_identity_dict
 from sts_combat_rl.sim.online_controller import PolicyController, RoutedRunController
 from sts_combat_rl.sim.policy import FirstEligiblePolicy
+from sts_combat_rl.sim.training_gate import TrainingScaleGateConfig
 
 
 @dataclass(frozen=True)
@@ -256,6 +259,119 @@ def test_assisted_source_coverage_report_loads_required_schedule_arms(tmp_path) 
     assert report.command_passed
     assert set(report.to_dict()["required_schedules"]) == set(ASSISTANCE_LEVELS)
     assert report.to_dict()["comparison"]["required_levels_present"] is True
+
+
+def test_assisted_source_pool_shard_merge_preserves_replay_identity() -> None:
+    first, _ = collect_assisted_battle_start_pool(
+        _AssistedAdapter(),
+        _controller(),
+        seeds=[5],
+        max_steps=5,
+        assistance_level=ASSIST_LEVEL_HP50,
+        policy_seed=11,
+    )
+    second, _ = collect_assisted_battle_start_pool(
+        _AssistedAdapter(),
+        _controller(),
+        seeds=[6],
+        max_steps=5,
+        assistance_level=ASSIST_LEVEL_HP50,
+        policy_seed=11,
+    )
+
+    merged = merge_assisted_source_pool_shards(
+        [first, second],
+        shard_identities=[
+            {"path": "first.jsonl", "sha256": "a" * 64},
+            {"path": "second.jsonl", "sha256": "b" * 64},
+        ],
+    )
+
+    assert merged.pool.source_run_count == 2
+    assert merged.pool.terminal_run_count == 2
+    assert [record.record_index for record in merged.records] == list(
+        range(len(merged.records))
+    )
+    assert len({record.source_checkpoint_id for record in merged.records}) == len(
+        merged.records
+    )
+    assert all(
+        decision["source_record_index"] == record.record_index
+        for record in merged.records
+        for decision in record.assistance_history[-1:]
+    )
+    assert [shard["path"] for shard in merged.source_shards] == [
+        "first.jsonl",
+        "second.jsonl",
+    ]
+
+    stream = StringIO()
+    dump_assisted_source_pool_jsonl(merged, stream)
+    loaded = load_assisted_source_pool_jsonl(StringIO(stream.getvalue()))
+    restore = verify_assisted_source_pool_restores(lambda: _AssistedAdapter(), loaded)
+
+    assert restore.restore_ok
+    assert loaded.source_shards == merged.source_shards
+
+
+def test_assisted_coverage_merge_uses_shard_restore_reports(tmp_path) -> None:
+    shard_paths = []
+    coverage_paths = []
+    artifacts = []
+    for seed in (5, 6):
+        artifact, _ = collect_assisted_battle_start_pool(
+            _AssistedAdapter(),
+            _controller(),
+            seeds=[seed],
+            max_steps=5,
+            assistance_level=ASSIST_LEVEL_HP50,
+            policy_seed=11,
+        )
+        artifacts.append(artifact)
+        shard_path = tmp_path / f"shard-{seed}.jsonl"
+        coverage_path = tmp_path / f"coverage-{seed}.json"
+        with shard_path.open("w", encoding="utf-8", newline="\n") as stream:
+            dump_assisted_source_pool_jsonl(artifact, stream)
+        restore = verify_assisted_source_pool_restores(
+            lambda: _AssistedAdapter(),
+            artifact,
+        )
+        coverage = build_assisted_a20_coverage_report(
+            artifact,
+            restore_report=restore,
+            input_artifacts={"natural_pool": {"path": str(shard_path)}},
+            source_identity=lightspeed_source_identity_dict(),
+        )
+        write_assisted_a20_coverage_report(coverage_path, coverage)
+        shard_paths.append(shard_path)
+        coverage_paths.append(coverage_path)
+
+    merged = merge_assisted_source_pool_shards(
+        artifacts,
+        shard_identities=[
+            {"path": str(path), "sha256": _sha256(path)} for path in shard_paths
+        ],
+    )
+    merged_path = tmp_path / "merged.jsonl"
+    with merged_path.open("w", encoding="utf-8", newline="\n") as stream:
+        dump_assisted_source_pool_jsonl(merged, stream)
+
+    report = merge_assisted_a20_coverage_from_paths(
+        output_path=tmp_path / "merged-coverage.json",
+        pool_path=merged_path,
+        coverage_shard_paths=coverage_paths,
+        restore_limit=0,
+        gate_config=TrainingScaleGateConfig(),
+        gate_override="none",
+    )
+
+    payload = report.to_dict()
+    assert payload["natural_coverage"]["natural_battle_start_count"] == len(
+        merged.records
+    )
+    assert payload["restore_verification"]["checkpoint_count"] == len(merged.records)
+    assert payload["restore_verification"]["restore_ok"] is True
+    assert len(payload["input_artifacts"]["coverage_shards"]) == 2
 
 
 def _sha256(path) -> str:

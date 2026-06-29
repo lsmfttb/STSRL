@@ -151,6 +151,53 @@ def test_cli_parser_accepts_t040_expert_source_coverage_flags(tmp_path) -> None:
     ]
 
 
+def test_cli_parser_accepts_t042_assisted_merge_and_driver_seed(tmp_path) -> None:
+    output_path = tmp_path / "merged.jsonl"
+    first_shard = tmp_path / "shard-0.jsonl"
+    second_shard = tmp_path / "shard-1.jsonl"
+
+    args = build_parser().parse_args(
+        [
+            "--merge-assisted-source-pool",
+            str(output_path),
+            "--assisted-source-shard",
+            str(first_shard),
+            "--assisted-source-shard",
+            str(second_shard),
+            "--sim-non-combat-seed",
+            "42042",
+        ]
+    )
+
+    assert args.merge_assisted_source_pool == output_path
+    assert args.assisted_source_shard == [first_shard, second_shard]
+    assert args.sim_non_combat_seed == 42042
+
+
+def test_cli_parser_accepts_t042_assisted_coverage_merge(tmp_path) -> None:
+    output_path = tmp_path / "merged-coverage.json"
+    pool_path = tmp_path / "merged.jsonl"
+    first_coverage = tmp_path / "coverage-0.json"
+    second_coverage = tmp_path / "coverage-1.json"
+
+    args = build_parser().parse_args(
+        [
+            "--merge-assisted-a20-coverage",
+            str(output_path),
+            "--merged-assisted-source-pool",
+            str(pool_path),
+            "--assisted-coverage-shard",
+            str(first_coverage),
+            "--assisted-coverage-shard",
+            str(second_coverage),
+        ]
+    )
+
+    assert args.merge_assisted_a20_coverage == output_path
+    assert args.merged_assisted_source_pool == pool_path
+    assert args.assisted_coverage_shard == [first_coverage, second_coverage]
+
+
 def test_cli_parser_accepts_oracle_teacher_scaleup_flags(tmp_path) -> None:
     pool_path = tmp_path / "pool.jsonl"
     output_dir = tmp_path / "scaleup"

@@ -10,6 +10,10 @@ from sts_combat_rl.commands.cli_paths import timestamped_path
 from sts_combat_rl.commands.cli_policies import build_pytorch_gate_config
 from sts_combat_rl.commands.cli_validation import validate_cli_args
 from sts_combat_rl.commands.assisted_source_generation import (
+    format_assisted_coverage_report,
+    format_assisted_source_pool_merge_report,
+    merge_assisted_a20_coverage_from_paths,
+    merge_assisted_source_pool_from_paths,
     run_assisted_source_coverage_report_from_paths,
 )
 from sts_combat_rl.commands.expert_source_coverage import (
@@ -324,6 +328,40 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 0 if report.command_passed else 1
+
+    if args.merge_assisted_source_pool is not None:
+        try:
+            artifact = merge_assisted_source_pool_from_paths(
+                output_path=args.merge_assisted_source_pool,
+                shard_paths=args.assisted_source_shard,
+            )
+        except (OSError, ValueError) as exc:
+            print(
+                f"failed to merge assisted source-pool shards: {exc}",
+                file=sys.stderr,
+            )
+            return 2
+        print(format_assisted_source_pool_merge_report(artifact), file=sys.stderr)
+        return 0
+
+    if args.merge_assisted_a20_coverage is not None:
+        try:
+            report = merge_assisted_a20_coverage_from_paths(
+                output_path=args.merge_assisted_a20_coverage,
+                pool_path=args.merged_assisted_source_pool,
+                coverage_shard_paths=args.assisted_coverage_shard,
+                restore_limit=args.battle_start_restore_limit,
+                gate_config=build_pytorch_gate_config(args),
+                gate_override=args.pytorch_gate_override,
+            )
+        except (OSError, ValueError) as exc:
+            print(
+                f"failed to merge assisted A20 coverage shards: {exc}",
+                file=sys.stderr,
+            )
+            return 2
+        print(format_assisted_coverage_report(report), file=sys.stderr)
+        return 0
 
     if is_lightspeed_command(args):
         return run_lightspeed_command(args)

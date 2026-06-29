@@ -48,6 +48,10 @@ from sts_combat_rl.sim.contract import (
     SimulatorCheckpoint,
     SimulatorSnapshot,
 )
+from sts_combat_rl.sim.controller_contract import (
+    ControllerProvenance,
+    controller_provenance_from_dict,
+)
 from sts_combat_rl.sim.controlled_run import ControlledRunStep, execute_controlled_run
 from sts_combat_rl.sim.decision_record import (
     find_action_index_by_identity,
@@ -81,6 +85,7 @@ ASSISTED_SOURCE_POOL_FORMAT_VERSION = 1
 ASSISTED_COVERAGE_COMPARISON_SCHEMA_ID = "assisted-run-source-coverage-comparison-v1"
 ASSISTED_COVERAGE_COMPARISON_FORMAT_VERSION = 1
 ASSISTED_SOURCE_REQUIRED_TERMINAL_RUNS = 1000
+ASSISTED_SOURCE_POOL_MERGE_VERSION = "assisted-source-pool-shard-merge-v1"
 
 ASSIST_LEVEL_0 = "assist_0"
 ASSIST_LEVEL_HP25 = "assist_hp25"
@@ -157,6 +162,7 @@ class AssistedSourcePoolArtifact:
     assistance_schedule: AssistanceSchedule
     policy_seed: int
     assistance_decisions: tuple[dict[str, Any], ...] = ()
+    source_shards: tuple[dict[str, Any], ...] = ()
     schema_id: str = ASSISTED_SOURCE_POOL_SCHEMA_ID
     format_version: int = ASSISTED_SOURCE_POOL_FORMAT_VERSION
     source_pool_format_version: int = BATTLE_START_POOL_FORMAT_VERSION
@@ -422,6 +428,155 @@ def collect_assisted_battle_start_pool(
     return artifact, build_battle_start_pool_coverage_report(pool)
 
 
+def merge_assisted_source_pool_shards(
+    artifacts: Sequence[AssistedSourcePoolArtifact],
+    *,
+    shard_identities: Sequence[Mapping[str, Any]] = (),
+) -> AssistedSourcePoolArtifact:
+    """Merge same-arm assisted source shards into one current-schema artifact."""
+
+    if not artifacts:
+        raise ValueError("at least one assisted source shard is required")
+    if shard_identities and len(shard_identities) != len(artifacts):
+        raise ValueError("assisted source shard identity count mismatch")
+
+    first = artifacts[0]
+    level = first.assistance_level
+    schedule = first.assistance_schedule
+    policy_seed = first.policy_seed
+    source_controller_provenance = first.pool.source_controller_provenance
+    records: list[BattleStartCheckpointRecord] = []
+    source_run_summaries: list[SourceRunSummary] = []
+    assistance_decisions: list[dict[str, Any]] = []
+    problems: list[str] = []
+    source_run_ids: set[str] = set()
+    source_shards: list[dict[str, Any]] = []
+    terminal_run_count = 0
+    truncated_run_count = 0
+    source_run_count = 0
+
+    for shard_index, artifact in enumerate(artifacts):
+        if artifact.assistance_level != level:
+            raise ValueError("assisted source shards must use one assistance level")
+        if artifact.assistance_schedule.to_dict() != schedule.to_dict():
+            raise ValueError("assisted source shards must use one assistance schedule")
+        if artifact.policy_seed != policy_seed:
+            raise ValueError("assisted source shards must use one policy seed")
+        if artifact.source_pool_format_version != first.source_pool_format_version:
+            raise ValueError(
+                "assisted source shards must use one source format version"
+            )
+        if artifact.pool.source_controller_provenance != source_controller_provenance:
+            raise ValueError(
+                "assisted source shard controller provenance mismatch; "
+                "use a fixed --sim-non-combat-seed when generating shards"
+            )
+
+        record_offset = len(records)
+        old_to_new_record_index: dict[int, int] = {}
+        old_to_new_checkpoint_id: dict[str, str] = {}
+        for shard_record_offset, record in enumerate(artifact.records):
+            new_record_index = record_offset + shard_record_offset
+            old_to_new_record_index[record.record_index] = new_record_index
+            old_to_new_checkpoint_id[record.source_checkpoint_id] = (
+                f"shard-{shard_index}:{record.source_checkpoint_id}"
+            )
+
+        for record in artifact.records:
+            new_record_index = old_to_new_record_index[record.record_index]
+            new_checkpoint_id = old_to_new_checkpoint_id[record.source_checkpoint_id]
+            remapped_history = tuple(
+                _remap_merged_assistance_decision(
+                    decision,
+                    shard_index=shard_index,
+                    old_to_new_record_index=old_to_new_record_index,
+                    old_to_new_checkpoint_id=old_to_new_checkpoint_id,
+                )
+                for decision in record.assistance_history
+            )
+            records.append(
+                replace(
+                    record,
+                    record_index=new_record_index,
+                    source_checkpoint_id=new_checkpoint_id,
+                    assistance_history=remapped_history,
+                    native_checkpoint=None,
+                )
+            )
+
+        for decision in artifact.assistance_decisions:
+            assistance_decisions.append(
+                _remap_merged_assistance_decision(
+                    decision,
+                    shard_index=shard_index,
+                    old_to_new_record_index=old_to_new_record_index,
+                    old_to_new_checkpoint_id=old_to_new_checkpoint_id,
+                )
+            )
+
+        for summary in artifact.pool.source_run_summaries:
+            if summary.source_run_id in source_run_ids:
+                raise ValueError(
+                    f"duplicate assisted source_run_id across shards: "
+                    f"{summary.source_run_id}"
+                )
+            source_run_ids.add(summary.source_run_id)
+            source_run_summaries.append(summary)
+
+        source_run_count += artifact.pool.source_run_count
+        terminal_run_count += artifact.pool.terminal_run_count
+        truncated_run_count += artifact.pool.truncated_run_count
+        problems.extend(artifact.pool.problems)
+        shard_identity = (
+            dict(shard_identities[shard_index])
+            if shard_identities
+            else {"shard_index": shard_index}
+        )
+        source_shards.append(
+            {
+                **_json_safe_mapping(shard_identity),
+                "merge_version": ASSISTED_SOURCE_POOL_MERGE_VERSION,
+                "shard_index": shard_index,
+                "schema_id": artifact.schema_id,
+                "format_version": artifact.format_version,
+                "assistance_level": artifact.assistance_level,
+                "record_count": len(artifact.records),
+                "assistance_decision_count": len(artifact.assistance_decisions),
+                "source_run_count": artifact.pool.source_run_count,
+                "terminal_run_count": artifact.pool.terminal_run_count,
+                "truncated_run_count": artifact.pool.truncated_run_count,
+                "source_seed_range": _source_seed_range(artifact),
+            }
+        )
+
+    pool = NaturalBattleStartPool(
+        source_run_count=source_run_count,
+        terminal_run_count=terminal_run_count,
+        truncated_run_count=truncated_run_count,
+        source_controller_provenance=_merged_source_controller_provenance(
+            source_controller_provenance,
+            source_shards,
+        ),
+        records=records,
+        source_run_summaries=source_run_summaries,
+        problems=list(dict.fromkeys(problems)),
+    )
+    artifact = AssistedSourcePoolArtifact(
+        pool=pool,
+        assistance_level=level,
+        assistance_schedule=schedule,
+        policy_seed=policy_seed,
+        assistance_decisions=tuple(assistance_decisions),
+        source_shards=tuple(source_shards),
+    )
+    artifact_problems = assisted_source_pool_problems(artifact)
+    if artifact_problems:
+        raise ValueError(
+            "invalid merged assisted source pool: " + "; ".join(artifact_problems)
+        )
+    return artifact
+
+
 def assistance_schedule_by_level(level: str) -> AssistanceSchedule:
     """Return the current T042 schedule for ``level``."""
 
@@ -456,6 +611,9 @@ def dump_assisted_source_pool_jsonl(
         "assistance_decision_count": len(artifact.assistance_decisions),
         "assistance_decisions": [
             _json_safe_mapping(decision) for decision in artifact.assistance_decisions
+        ],
+        "source_shards": [
+            _json_safe_mapping(shard) for shard in artifact.source_shards
         ],
         "source_run_summaries": [
             summary.to_dict() for summary in artifact.pool.source_run_summaries
@@ -526,6 +684,12 @@ def load_assisted_source_pool_jsonl(stream: TextIO) -> AssistedSourcePoolArtifac
             )
         )
     )
+    source_shards = tuple(
+        _require_mapping(item, f"source shard {index}")
+        for index, item in enumerate(
+            _require_list(metadata.get("source_shards", []), "source_shards")
+        )
+    )
     pool = NaturalBattleStartPool(
         source_run_count=_require_non_negative_int(
             metadata.get("source_run_count"),
@@ -553,6 +717,7 @@ def load_assisted_source_pool_jsonl(stream: TextIO) -> AssistedSourcePoolArtifac
         assistance_schedule=schedule,
         policy_seed=_require_seed(metadata.get("policy_seed"), "policy_seed"),
         assistance_decisions=assistance_decisions,
+        source_shards=source_shards,
     )
     problems = assisted_source_pool_problems(artifact)
     if problems:
@@ -581,8 +746,17 @@ def assisted_source_pool_problems(
         != artifact.pool.source_run_count
     ):
         problems.append("terminal and truncated run counts do not match source runs")
+    try:
+        controller_provenance_from_dict(artifact.pool.source_controller_provenance)
+    except ValueError as exc:
+        problems.append(f"source controller provenance: {exc}")
     if len(artifact.assistance_decisions) < len(artifact.pool.records):
         problems.append("assistance decision count is smaller than record count")
+    for index, shard in enumerate(artifact.source_shards):
+        if shard.get("merge_version") != ASSISTED_SOURCE_POOL_MERGE_VERSION:
+            problems.append(f"source shard {index} has unsupported merge version")
+        if shard.get("assistance_level") != artifact.assistance_level:
+            problems.append(f"source shard {index} assistance level mismatch")
     for index, record in enumerate(artifact.pool.records):
         if record.record_index != index:
             problems.append(f"record {index} index is not contiguous")
@@ -1172,6 +1346,93 @@ def _assistance_by_battle_index(
         if isinstance(battle_index, int) and not isinstance(battle_index, bool):
             result[battle_index] = decision
     return result
+
+
+def _remap_merged_assistance_decision(
+    decision: Mapping[str, Any],
+    *,
+    shard_index: int,
+    old_to_new_record_index: Mapping[int, int],
+    old_to_new_checkpoint_id: Mapping[str, str],
+) -> dict[str, Any]:
+    remapped = dict(decision)
+    remapped["merge_shard_index"] = shard_index
+    checkpoint_id = remapped.get("source_checkpoint_id")
+    if isinstance(checkpoint_id, str):
+        remapped["source_checkpoint_id"] = old_to_new_checkpoint_id.get(
+            checkpoint_id,
+            f"shard-{shard_index}:{checkpoint_id}",
+        )
+    record_index = remapped.get("source_record_index")
+    if isinstance(record_index, int) and not isinstance(record_index, bool):
+        try:
+            remapped["source_record_index"] = old_to_new_record_index[record_index]
+        except KeyError as exc:
+            raise ValueError(
+                f"assisted shard {shard_index} references missing record {record_index}"
+            ) from exc
+    return remapped
+
+
+def _source_seed_range(artifact: AssistedSourcePoolArtifact) -> dict[str, Any]:
+    seeds = [
+        summary.source_seed
+        for summary in artifact.pool.source_run_summaries
+        if isinstance(summary.source_seed, int)
+        and not isinstance(summary.source_seed, bool)
+    ]
+    if not seeds:
+        return {"min": None, "max": None, "count": 0}
+    return {"min": min(seeds), "max": max(seeds), "count": len(seeds)}
+
+
+def _merged_source_controller_provenance(
+    source_controller_provenance: Mapping[str, Any],
+    source_shards: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    config = _require_mapping(
+        source_controller_provenance.get("config"),
+        "source controller config",
+    )
+    merged_config = {
+        **config,
+        "assisted_source_pool_merge": {
+            "merge_version": ASSISTED_SOURCE_POOL_MERGE_VERSION,
+            "shard_count": len(source_shards),
+            "source_run_count": sum(
+                _require_non_negative_int(
+                    shard.get("source_run_count"), "source_run_count"
+                )
+                for shard in source_shards
+            ),
+            "terminal_run_count": sum(
+                _require_non_negative_int(
+                    shard.get("terminal_run_count"),
+                    "terminal_run_count",
+                )
+                for shard in source_shards
+            ),
+            "truncated_run_count": sum(
+                _require_non_negative_int(
+                    shard.get("truncated_run_count"),
+                    "truncated_run_count",
+                )
+                for shard in source_shards
+            ),
+            "shards": list(source_shards),
+        },
+    }
+    return ControllerProvenance(
+        kind=_require_non_empty_string(
+            source_controller_provenance.get("kind"),
+            "source controller kind",
+        ),
+        name=_require_non_empty_string(
+            source_controller_provenance.get("name"),
+            "source controller name",
+        ),
+        config=merged_config,
+    ).to_dict()
 
 
 def _assistance_decision_counts(
