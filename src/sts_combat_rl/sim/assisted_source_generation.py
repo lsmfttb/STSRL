@@ -1092,7 +1092,7 @@ def verify_assisted_source_pool_restores(
         else:
             context_legacy_unavailable_count += 1
         try:
-            restored, replayed_context = _restore_assisted_by_seed_action_trace(
+            restored, replayed_context = restore_assisted_by_seed_action_trace(
                 adapter_factory(),
                 record,
             )
@@ -1486,10 +1486,12 @@ def _build_assisted_record(
     )
 
 
-def _restore_assisted_by_seed_action_trace(
+def restore_assisted_by_seed_action_trace(
     adapter: CheckpointingSimulatorAdapter,
     record: BattleStartCheckpointRecord,
 ) -> tuple[SimulatorSnapshot, dict[str, Any]]:
+    """Replay a T042 assisted source record from seed, trace, and assistance."""
+
     snapshot = adapter.reset(seed=record.source_seed)
     public_history: list[dict[str, Any]] = []
     active_battle_started = False

@@ -97,6 +97,7 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
         args.lightspeed_model_guided_oracle_fixed_evaluation is not None
         or args.lightspeed_model_guided_search_fixed_comparison is not None
         or args.lightspeed_model_guided_search_v2_fixed_comparison is not None
+        or args.lightspeed_de_assisted_fixed_cohort_comparison is not None
     )
     if (
         uses_model_guided_oracle_checkpoint
@@ -114,7 +115,8 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
             "--model-guided-oracle-checkpoint requires "
             "--lightspeed-model-guided-oracle-fixed-evaluation or "
             "--lightspeed-model-guided-search-fixed-comparison or "
-            "--lightspeed-model-guided-search-v2-fixed-comparison"
+            "--lightspeed-model-guided-search-v2-fixed-comparison or "
+            "--lightspeed-de-assisted-fixed-cohort-comparison"
         )
     if (
         args.model_guided_search_comparison_report is not None
@@ -125,6 +127,14 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
             "--model-guided-search-comparison-report requires "
             "--lightspeed-model-guided-search-fixed-comparison or "
             "--lightspeed-model-guided-search-v2-fixed-comparison"
+        )
+    if (
+        args.de_assisted_fixed_cohort_comparison_report is not None
+        and args.lightspeed_de_assisted_fixed_cohort_comparison is None
+    ):
+        return (
+            "--de-assisted-fixed-cohort-comparison-report requires "
+            "--lightspeed-de-assisted-fixed-cohort-comparison"
         )
     teacher_scaleup_requested = (
         args.lightspeed_a20_oracle_teacher_scaleup is not None

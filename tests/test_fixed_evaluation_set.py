@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import json
 from io import StringIO
 
 import pytest
 
 from sts_combat_rl.sim.battle_start_pool import (
+    ASSISTED_RUN_DISTRIBUTION_KIND,
     BATTLE_START_POOL_FORMAT_VERSION,
     BattleStartCheckpointRecord,
     NaturalBattleStartPool,
@@ -312,6 +314,41 @@ class TestSelectFixedCohort:
         for record in cohort.records:
             assert record.source_distribution_kind == "natural_run"
 
+    def test_cohort_records_can_retain_assisted_source_distribution_kind(self):
+        """T044 fixed cohorts may preserve explicitly assisted source starts."""
+        base = _make_record(0)
+        assisted = replace(
+            base,
+            distribution_kind=ASSISTED_RUN_DISTRIBUTION_KIND,
+            structural_metadata={
+                **base.structural_metadata,
+                "source_kind": ASSISTED_RUN_DISTRIBUTION_KIND,
+                "distribution_kind": ASSISTED_RUN_DISTRIBUTION_KIND,
+                "assistance_level": "assist_hp50",
+            },
+        )
+        pool = _make_pool([assisted])
+
+        cohort, coverage = select_fixed_cohort(pool, selection_seed=1)
+
+        assert not coverage.problems
+        assert cohort.records[0].source_distribution_kind == (
+            ASSISTED_RUN_DISTRIBUTION_KIND
+        )
+        assert cohort.records[0].structural_metadata["assistance_level"] == (
+            "assist_hp50"
+        )
+
+        buf = StringIO()
+        dump_fixed_cohort_jsonl(cohort, buf)
+        loaded = load_fixed_cohort_jsonl(StringIO(buf.getvalue()))
+        assert loaded.records[0].source_distribution_kind == (
+            ASSISTED_RUN_DISTRIBUTION_KIND
+        )
+        assert loaded.records[0].structural_metadata["assistance_level"] == (
+            "assist_hp50"
+        )
+
     def test_config_to_dict_and_back(self):
         """Selection config round-trips through dict."""
         config = FixedCohortSelectionConfig(
@@ -429,10 +466,11 @@ class TestFixedCohortSerialization:
 
         loaded = load_fixed_cohort_jsonl(StringIO(legacy_text))
 
-        assert loaded.migration_report.applied_versions == (2,)
+        assert loaded.migration_report.applied_versions == (2, 3)
         assert PUBLIC_CONTEXT_LEGACY_LOSS in loaded.migration_report.losses
         assert loaded.records[0].public_context_status == "legacy_unavailable"
         assert loaded.records[0].public_run_context == {}
+        assert loaded.records[0].assistance_history == ()
 
 
 class TestCohortCoverageReport:

@@ -11,6 +11,7 @@ from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 import json
+from types import SimpleNamespace
 import time
 from typing import Any, TextIO
 
@@ -1208,6 +1209,22 @@ def _restore_cohort_record(
     cohort record.  The caller is responsible for verifying the restored snapshot
     matches the cohort fingerprint after this returns.
     """
+
+    if cohort_record.assistance_history:
+        from sts_combat_rl.sim.assisted_source_generation import (
+            restore_assisted_by_seed_action_trace,
+        )
+
+        restored, final_context = restore_assisted_by_seed_action_trace(
+            adapter,
+            SimpleNamespace(
+                record_index=cohort_record.cohort_index,
+                source_seed=cohort_record.source_seed,
+                action_trace=cohort_record.action_trace,
+                assistance_history=cohort_record.assistance_history,
+            ),
+        )
+        return restored, "assisted_seed_action_trace", final_context
 
     snapshot = adapter.reset(seed=cohort_record.source_seed)
     public_history: list[dict[str, Any]] = []

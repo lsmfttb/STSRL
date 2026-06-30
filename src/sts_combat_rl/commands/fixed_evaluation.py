@@ -3,9 +3,15 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+import json
 from pathlib import Path
+from typing import TextIO
 
 from sts_combat_rl.sim.action_space import ActionSpaceConfig
+from sts_combat_rl.sim.assisted_source_generation import (
+    ASSISTED_SOURCE_POOL_SCHEMA_ID,
+    load_assisted_source_pool_jsonl,
+)
 from sts_combat_rl.sim.battle_start_pool import (
     NaturalBattleStartPool,
     load_natural_battle_start_pool_jsonl,
@@ -98,7 +104,7 @@ def run_fixed_evaluation_from_pool_path(
     """Load a portable pool, select a cohort, and evaluate."""
 
     with pool_path.open("r", encoding="utf-8") as stream:
-        pool = load_natural_battle_start_pool_jsonl(stream)
+        pool = _load_source_pool_jsonl(stream)
 
     return run_fixed_evaluation(
         adapter_factory=adapter_factory,
@@ -109,6 +115,34 @@ def run_fixed_evaluation_from_pool_path(
         action_space=action_space,
         max_battle_steps=max_battle_steps,
     )
+
+
+def _load_source_pool_jsonl(stream: TextIO) -> NaturalBattleStartPool:
+    schema_id = _peek_metadata_schema_id(stream)
+    stream.seek(0)
+    if schema_id == ASSISTED_SOURCE_POOL_SCHEMA_ID:
+        return load_assisted_source_pool_jsonl(stream).pool
+    return load_natural_battle_start_pool_jsonl(stream)
+
+
+def _peek_metadata_schema_id(stream: TextIO) -> str | None:
+    for line_number, raw_line in enumerate(stream, start=1):
+        if not raw_line.strip():
+            continue
+        try:
+            row = json.loads(raw_line)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"line {line_number}: invalid JSON") from exc
+        if not isinstance(row, dict):
+            raise ValueError(f"line {line_number}: row must be an object")
+        if row.get("type") != "metadata":
+            return None
+        metadata = row.get("metadata")
+        if not isinstance(metadata, dict):
+            raise ValueError("metadata must be an object")
+        schema_id = metadata.get("schema_id")
+        return str(schema_id) if isinstance(schema_id, str) else None
+    return None
 
 
 def write_fixed_cohort(path: Path, cohort: FixedCohort) -> None:

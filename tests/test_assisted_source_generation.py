@@ -22,6 +22,9 @@ from sts_combat_rl.commands.assisted_source_generation import (
     merge_assisted_source_pool_from_paths,
     run_assisted_source_coverage_report_from_paths,
 )
+from sts_combat_rl.commands.fixed_evaluation import (
+    run_fixed_evaluation_from_pool_path,
+)
 from sts_combat_rl.sim.contract import (
     SimulatorAction,
     SimulatorCheckpoint,
@@ -195,6 +198,41 @@ def test_assisted_pool_records_hp_potion_provenance_and_restores() -> None:
     assert restore.restore_ok
     assert restore.replay_restored_count == 2
     assert restore.context_matched_count == 2
+
+
+def test_fixed_evaluation_workflow_loads_assisted_source_pool(tmp_path) -> None:
+    artifact, _ = collect_assisted_battle_start_pool(
+        _AssistedAdapter(),
+        _controller(),
+        seeds=[7],
+        max_steps=10,
+        assistance_level=ASSIST_LEVEL_HP50,
+        policy_seed=42,
+    )
+    pool_path = tmp_path / "assisted-pool.jsonl"
+    with pool_path.open("w", encoding="utf-8", newline="\n") as stream:
+        dump_assisted_source_pool_jsonl(artifact, stream)
+
+    cohort, coverage, report = run_fixed_evaluation_from_pool_path(
+        adapter_factory=_AssistedAdapter,
+        pool_path=pool_path,
+        controller=PolicyController(FirstEligiblePolicy()),
+        selection_seed=44,
+        max_battle_steps=10,
+    )
+
+    assert coverage.coverage_ok
+    assert report.evaluation_successful
+    assert {result.restoration_method for result in report.battle_results} == {
+        "assisted_seed_action_trace"
+    }
+    assert cohort.records[0].source_distribution_kind == (
+        ASSISTED_RUN_DISTRIBUTION_KIND
+    )
+    assert cohort.records[0].assistance_history
+    assert cohort.records[0].structural_metadata["assistance_level"] == (
+        ASSIST_LEVEL_HP50
+    )
 
 
 def test_assisted_pool_records_unsupported_native_rebuild_as_noop() -> None:

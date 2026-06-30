@@ -34,6 +34,10 @@ from sts_combat_rl.commands.fixed_evaluation import (
     write_fixed_cohort,
     write_fixed_evaluation_report,
 )
+from sts_combat_rl.commands.de_assisted_fixed_cohort_comparison import (
+    run_de_assisted_fixed_cohort_comparison_from_cohort_path,
+    write_de_assisted_fixed_cohort_comparison_report,
+)
 from sts_combat_rl.commands.model_guided_oracle_search import (
     build_torch_guidance_scorer_from_checkpoint,
     format_model_guided_oracle_fixed_evaluation_report,
@@ -119,12 +123,20 @@ from sts_combat_rl.sim.fixed_battle_evaluation import (
 )
 from sts_combat_rl.sim.fixed_evaluation_set import format_cohort_coverage_report
 from sts_combat_rl.sim.lightspeed import LightSpeedAdapter
+from sts_combat_rl.sim.de_assisted_fixed_cohort_comparison import (
+    BASELINE_ORACLE_LABEL,
+    MODEL_GUIDED_ORACLE_V2_LABEL,
+    RAW_CHECKPOINT_POLICY_LABEL,
+    SCRIPTED_POLICY_LABEL,
+    format_de_assisted_fixed_cohort_comparison_report,
+)
 from sts_combat_rl.sim.model_input import (
     build_model_input_batch,
     build_model_input_batch_smoke_report,
     format_model_input_batch_smoke_report,
 )
 from sts_combat_rl.sim.model_scoring import (
+    ActionKindPriorScorer,
     format_model_score_smoke_report,
     score_model_input_batch,
 )
@@ -149,6 +161,7 @@ from sts_combat_rl.sim.oracle_potion_comparison import (
     format_oracle_potion_fixed_comparison_report,
 )
 from sts_combat_rl.sim.policy import (
+    ScoredActionPolicy,
     evaluate_decision_policy,
     format_policy_evaluation_report,
 )
@@ -170,6 +183,7 @@ from sts_combat_rl.sim.reward_labeling import (
     format_reward_labeled_battle_decision_batch_report,
 )
 from sts_combat_rl.sim.rollout import collect_simulator_rollout, format_rollout_batch
+from sts_combat_rl.sim.search_guidance_policy import SearchGuidancePolicyController
 from sts_combat_rl.sim.trainer_input import (
     build_trainer_input_dataset,
     build_trainer_input_dataset_smoke_report,
@@ -226,6 +240,7 @@ _LIGHTSPEED_PATH_FLAGS = (
     "lightspeed_model_guided_oracle_fixed_evaluation",
     "lightspeed_model_guided_search_fixed_comparison",
     "lightspeed_model_guided_search_v2_fixed_comparison",
+    "lightspeed_de_assisted_fixed_cohort_comparison",
 )
 
 
@@ -727,6 +742,73 @@ def run_lightspeed_command(args: argparse.Namespace) -> int:
                 )
             print(
                 format_model_guided_search_v2_fixed_comparison_report(report),
+                file=sys.stderr,
+            )
+            if not report.evaluation_successful:
+                return 1
+        elif args.lightspeed_de_assisted_fixed_cohort_comparison is not None:
+            scorer = build_torch_guidance_scorer_from_checkpoint(
+                args.model_guided_oracle_checkpoint
+            )
+            baseline_controller = OracleSearchController(
+                simulations=args.oracle_search_simulations,
+                root_selection_rule=args.oracle_root_selection,
+                action_space=action_space,
+            )
+            model_guided_v2_controller = ModelGuidedOracleSearchV2Controller(
+                simulations=args.oracle_search_simulations,
+                scorer=scorer,
+                policy_probability_weight=(
+                    args.model_guided_oracle_policy_probability_weight
+                ),
+                action_space=action_space,
+            )
+            raw_checkpoint_policy = SearchGuidancePolicyController(scorer)
+            scripted_policy = PolicyController(
+                ScoredActionPolicy(
+                    ActionKindPriorScorer(),
+                    name=SCRIPTED_POLICY_LABEL,
+                )
+            )
+            report = run_de_assisted_fixed_cohort_comparison_from_cohort_path(
+                adapter_factory=lambda: LightSpeedAdapter(
+                    seed=args.sim_seed,
+                    ascension=args.sim_ascension,
+                ),
+                cohort_path=args.lightspeed_de_assisted_fixed_cohort_comparison,
+                controller_arms=(
+                    (
+                        BASELINE_ORACLE_LABEL,
+                        "baseline_oracle_search",
+                        baseline_controller,
+                    ),
+                    (
+                        MODEL_GUIDED_ORACLE_V2_LABEL,
+                        "model_guided_search_t043_checkpoint",
+                        model_guided_v2_controller,
+                    ),
+                    (
+                        RAW_CHECKPOINT_POLICY_LABEL,
+                        "raw_checkpoint_public_policy",
+                        raw_checkpoint_policy,
+                    ),
+                    (
+                        SCRIPTED_POLICY_LABEL,
+                        "scripted_public_policy_baseline",
+                        scripted_policy,
+                    ),
+                ),
+                action_space=action_space,
+                max_battle_steps=args.sim_steps,
+                run_scale=args.de_assisted_fixed_cohort_comparison_scale,
+            )
+            if args.de_assisted_fixed_cohort_comparison_report is not None:
+                write_de_assisted_fixed_cohort_comparison_report(
+                    args.de_assisted_fixed_cohort_comparison_report,
+                    report,
+                )
+            print(
+                format_de_assisted_fixed_cohort_comparison_report(report),
                 file=sys.stderr,
             )
             if not report.evaluation_successful:

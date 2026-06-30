@@ -489,6 +489,17 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     input_group.add_argument(
+        "--lightspeed-de-assisted-fixed-cohort-comparison",
+        type=Path,
+        metavar="COHORT_PATH",
+        help=(
+            "Load an immutable fixed battle cohort from unassisted or assisted "
+            "source starts and run the T044 de-assisted comparison across "
+            "baseline Oracle search, T043 v2 guided search, raw checkpoint "
+            "policy, and scripted policy arms."
+        ),
+    )
+    input_group.add_argument(
         "--oracle-teacher-dataset-report",
         type=Path,
         metavar="TEACHER_JSONL",
@@ -985,7 +996,8 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "T026-compatible PyTorch policy/value checkpoint used by "
             "--lightspeed-model-guided-oracle-fixed-evaluation or "
-            "--lightspeed-model-guided-search-fixed-comparison."
+            "--lightspeed-model-guided-search-fixed-comparison or "
+            "--lightspeed-de-assisted-fixed-cohort-comparison."
         ),
     )
     parser.add_argument(
@@ -1003,6 +1015,21 @@ def build_parser() -> argparse.ArgumentParser:
         default="smoke",
         help=(
             "Scale label recorded in the T029 comparison report. The default "
+            "marks the run as smoke-scale evidence."
+        ),
+    )
+    parser.add_argument(
+        "--de-assisted-fixed-cohort-comparison-report",
+        type=Path,
+        metavar="PATH",
+        help="Write the T044 de-assisted fixed-cohort comparison JSONL report.",
+    )
+    parser.add_argument(
+        "--de-assisted-fixed-cohort-comparison-scale",
+        choices=("smoke", "fixed"),
+        default="smoke",
+        help=(
+            "Scale label recorded in the T044 comparison report. The default "
             "marks the run as smoke-scale evidence."
         ),
     )
