@@ -1,6 +1,6 @@
 # Current Status
 
-Last reviewed: 2026-06-28.
+Last reviewed: 2026-07-01.
 
 This document describes the latest `main` branch only. Results from local
 artifacts, old branches, or unmerged pull requests do not count as implemented
@@ -29,9 +29,9 @@ versioned deeper model-guided Oracle-like search comparison using refreshed
 diagnostic checkpoint provenance, but the accepted smoke evidence tied the
 baseline and T028 outcomes rather than demonstrating improvement. The current
 published batch follows the upstream assisted source-generation guidance:
-T040 and T041 are complete, T042 is `IN_REVIEW`, and T043 and T044 remain blocked
-follow-up tasks toward assisted teacher/value training and de-assisted
-fixed-cohort evaluation.
+T040, T041, and T042 are complete, and T043 and T044 remain blocked follow-up
+tasks toward assisted teacher/value training and de-assisted fixed-cohort
+evaluation.
 
 ## Implemented On Main
 
@@ -671,6 +671,30 @@ fixed-cohort evaluation.
   potion-enabled arm recorded one potion slot item added and one removed. This
   is engineering smoke evidence only, not performance-improvement or promotion
   evidence.
+- T042 adds the `assisted_run` complete-run source-generation distribution,
+  versioned assistance schedules, assisted source-pool schema, assisted replay
+  restore verification, and WSL-facing source/coverage/report commands. The
+  accepted schedules are `assist_0`, `assist_hp25`, `assist_hp50`,
+  `assist_hp50_potion_elite_boss`, and `assist_hp75_potion`. Assistance uses
+  the simulator-owned `rebuild_battle_start` surface before battle decisions
+  and records requested/actual resource changes, source identity, schedule
+  version, policy seed, information regime, distribution tag, and screen/battle
+  provenance. Natural pool loading remains strict, and assistance provenance is
+  kept out of normal controller/model inputs. The accepted scale evidence used
+  1,000 A20 terminal source runs per arm, 16 source/coverage workers, and
+  stable ignored artifacts under
+  `artifacts/t042-assisted-source-scale-pr39/runs1000_s20_workers16/`.
+  `assist_0` reached 0 later-act starts, while assisted arms reached 26, 34,
+  and 183 later-act starts for `assist_hp50`,
+  `assist_hp50_potion_elite_boss`, and `assist_hp75_potion` respectively; all
+  arms had 0 truncated runs and successful restore evidence. The T009
+  broad-training gate remains closed, and this is assisted source-distribution
+  evidence only, not natural A20, normal-information, live-game, broad-training,
+  controller-strength, or final-agent performance evidence. The T042 PR also
+  established the bounded-memory GB-scale finalization pattern now recorded in
+  `docs/project_architecture.md` and `docs/tasks/README.md`: stream JSONL
+  source merges and aggregate coverage/comparison reports from shard summaries
+  and artifact identities instead of loading every shard record into memory.
 
 ## Not Implemented On Main
 
@@ -678,7 +702,6 @@ The following capabilities exist only as plans, experiment evidence, or
 unmerged legacy work:
 
 - interactive live-game or A20 performance validation for any controller;
-- assisted complete-run source-generation pipeline;
 - broad neural training on a scale/distribution-approved A20 dataset;
 - model-guided search performance improvement or controller promotion;
 - normal-information belief search.
@@ -717,10 +740,10 @@ guidance supplied after T035. The maintainer role here is to publish and review
 bounded tasks from that guidance, not to invent an alternate long-term plan.
 T040 (`Expert Non-Combat Driver v1`) and T041
 (`Potion-enabled Oracle search repair`) are complete. T042
-(`Assisted complete-run source generation`) is `IN_REVIEW` on PR #39.
-T043 (`Assisted teacher dataset and value/policy training`) is blocked on T042
-and the required public-context model-input contract. T044
-(`De-assisted fixed-cohort evaluation`) is blocked on T043.
+(`Assisted complete-run source generation`) is complete. T043
+(`Assisted teacher dataset and value/policy training`) remains blocked on the
+required public-context model-input contract. T044 (`De-assisted fixed-cohort
+evaluation`) is blocked on T043.
 
 The immediate external-fork follow-up is
 [`lsmfttb/sts_lightspeed#7`](https://github.com/lsmfttb/sts_lightspeed/issues/7):
