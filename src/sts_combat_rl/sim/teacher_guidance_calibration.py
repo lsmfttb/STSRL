@@ -270,6 +270,19 @@ def format_teacher_guidance_calibration_report(
             ),
         ]
     )
+    source_groups = _mapping(dataset.get("source_group_summary"))
+    _append_mapping(
+        lines,
+        "assistance levels",
+        source_groups.get("assistance_level_counts"),
+    )
+    _append_mapping(
+        lines,
+        "source distribution kinds",
+        source_groups.get("distribution_kind_counts"),
+    )
+    _append_mapping(lines, "source acts", source_groups.get("act_counts"))
+    _append_mapping(lines, "source room types", source_groups.get("room_type_counts"))
     for checkpoint in report.checkpoint_reports:
         provenance = checkpoint.checkpoint_provenance
         metrics = checkpoint.teacher_target_metrics
@@ -766,8 +779,41 @@ def _dataset_summary(
             Counter(_teacher_information_regime(record) for record in records)
         ),
         "source_coverage": _source_coverage(records),
+        "source_group_summary": _source_group_summary(records),
         "generation_metadata": _json_safe_value(dataset.generation_metadata),
         "migration_report": dataset.migration_report.to_dict(),
+    }
+
+
+def _source_group_summary(records: Sequence[TrainerInputRecord]) -> dict[str, Any]:
+    assistance_levels = Counter()
+    distribution_kinds = Counter()
+    acts = Counter()
+    room_types = Counter()
+    encounters = Counter()
+    assistance_act_room = Counter()
+    for record in records:
+        metadata = _mapping(record.source_metadata)
+        assistance = _non_empty_string(metadata.get("assistance_level"))
+        assistance_label = assistance or "unassisted_or_missing"
+        distribution = _non_empty_string(metadata.get("distribution_kind")) or "missing"
+        act = str(metadata.get("act") or "missing")
+        room_type = _non_empty_string(metadata.get("room_type")) or "missing"
+        encounter = _non_empty_string(metadata.get("encounter_id")) or "missing"
+        assistance_levels[assistance_label] += 1
+        distribution_kinds[distribution] += 1
+        acts[act] += 1
+        room_types[room_type] += 1
+        encounters[encounter] += 1
+        assistance_act_room[f"{assistance_label}/act{act}/{room_type}"] += 1
+    return {
+        "record_count": len(records),
+        "assistance_level_counts": _counter_dict(assistance_levels),
+        "distribution_kind_counts": _counter_dict(distribution_kinds),
+        "act_counts": _counter_dict(acts),
+        "room_type_counts": _counter_dict(room_types),
+        "encounter_id_counts": _counter_dict(encounters),
+        "assistance_act_room_counts": _counter_dict(assistance_act_room),
     }
 
 

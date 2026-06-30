@@ -409,6 +409,17 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     input_group.add_argument(
+        "--lightspeed-a20-assisted-oracle-teacher-scaleup",
+        type=Path,
+        metavar="ASSISTED_POOL_PATH",
+        help=(
+            "Load one T042 A20 assisted battle-start pool, select a fixed "
+            "source set, collect Oracle-like teacher datasets for multiple "
+            "native-search budgets, write T022 reports, and emit a T043 "
+            "assisted scale-up manifest."
+        ),
+    )
+    input_group.add_argument(
         "--lightspeed-fixed-battle-evaluation",
         type=Path,
         metavar="POOL_PATH",
@@ -849,8 +860,8 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         metavar="DIR",
         help=(
-            "Write --lightspeed-a20-oracle-teacher-scaleup teacher JSONL, "
-            "T022 reports, and manifest artifacts under DIR."
+            "Write Oracle teacher scale-up teacher JSONL, T022 reports, and "
+            "manifest artifacts under DIR."
         ),
     )
     parser.add_argument(
@@ -865,7 +876,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--oracle-teacher-scaleup-source-limit",
         type=int,
         metavar="N",
-        help="Seeded maximum number of natural source starts selected for scale-up.",
+        help="Seeded maximum number of source starts selected for scale-up.",
     )
     parser.add_argument(
         "--oracle-teacher-scaleup-source-selection",

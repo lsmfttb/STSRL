@@ -234,6 +234,27 @@ def test_cli_parser_accepts_oracle_teacher_scaleup_flags(tmp_path) -> None:
     assert args.oracle_teacher_scaleup_root_selection == "most_visits"
 
 
+def test_cli_parser_accepts_assisted_oracle_teacher_scaleup_flags(tmp_path) -> None:
+    pool_path = tmp_path / "assisted-pool.jsonl"
+    output_dir = tmp_path / "scaleup"
+
+    args = build_parser().parse_args(
+        [
+            "--lightspeed-a20-assisted-oracle-teacher-scaleup",
+            str(pool_path),
+            "--oracle-teacher-scaleup-output-dir",
+            str(output_dir),
+            "--oracle-teacher-scaleup-source-selection",
+            "assisted_seeded_uniform",
+        ]
+    )
+
+    assert args.lightspeed_a20_assisted_oracle_teacher_scaleup == pool_path
+    assert args.lightspeed_a20_oracle_teacher_scaleup is None
+    assert args.oracle_teacher_scaleup_output_dir == output_dir
+    assert args.oracle_teacher_scaleup_source_selection == "assisted_seeded_uniform"
+
+
 def test_cli_parser_accepts_oracle_teacher_report_flags(tmp_path) -> None:
     teacher_path = tmp_path / "teacher.jsonl"
     pool_path = tmp_path / "pool.jsonl"
@@ -1249,6 +1270,66 @@ def test_cli_oracle_teacher_scaleup_routes_to_lightspeed_command(
     assert calls["coverage_report_path"] == coverage_path
     assert calls["root_selection_rule"] == "most_visits"
     assert "A20 Oracle teacher scale-up" in captured.err
+
+
+def test_cli_assisted_oracle_teacher_scaleup_routes_to_lightspeed_command(
+    monkeypatch,
+    tmp_path,
+    capsys,
+) -> None:
+    calls: dict[str, object] = {}
+
+    class FakeScaleupManifest:
+        command_passed = True
+
+    def fake_scaleup(**kwargs):
+        calls.update(kwargs)
+        return FakeScaleupManifest()
+
+    monkeypatch.setattr(
+        "sts_combat_rl.commands.lightspeed_cli.LightSpeedAdapter",
+        FakeLightSpeedSmokeAdapter,
+    )
+    monkeypatch.setattr(
+        "sts_combat_rl.commands.lightspeed_cli.run_assisted_oracle_teacher_scaleup_from_paths",
+        fake_scaleup,
+    )
+    monkeypatch.setattr(
+        "sts_combat_rl.commands.lightspeed_cli.format_oracle_teacher_scaleup_command",
+        lambda manifest: "T043 assisted Oracle teacher scale-up\ncommand passed: yes",
+    )
+    pool_path = tmp_path / "assisted-pool.jsonl"
+    output_dir = tmp_path / "scaleup"
+
+    assert (
+        main(
+            [
+                "--lightspeed-a20-assisted-oracle-teacher-scaleup",
+                str(pool_path),
+                "--oracle-teacher-scaleup-output-dir",
+                str(output_dir),
+                "--oracle-teacher-scaleup-budgets",
+                "100",
+                "--oracle-teacher-scaleup-source-limit",
+                "4",
+                "--oracle-teacher-scaleup-seed",
+                "9",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 0
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert calls["adapter_factory"]().ascension == 20
+    assert calls["pool_path"] == pool_path
+    assert calls["output_dir"] == output_dir
+    assert calls["budgets"] == [100]
+    assert calls["source_limit"] == 4
+    assert calls["selection_seed"] == 9
+    assert "T043 assisted Oracle teacher scale-up" in captured.err
 
 
 def test_cli_oracle_teacher_scaleup_routes_t032_selection(

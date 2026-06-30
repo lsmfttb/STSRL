@@ -16,6 +16,7 @@ from sts_combat_rl.sim.artifact_versioning import (
     preserved_migration_report,
 )
 from sts_combat_rl.sim.battle_start_pool import (
+    NATURAL_DISTRIBUTION_KIND,
     NATURAL_SAMPLING_COMPONENT,
     NaturalBattleStartPool,
     restore_battle_start_record,
@@ -227,7 +228,7 @@ def collect_oracle_teacher_dataset_from_pool(
                 source_seed=record.source_seed,
                 source_battle_index=record.source_battle_index,
                 source_distribution_kind=record.distribution_kind,
-                sampling_component=NATURAL_SAMPLING_COMPONENT,
+                sampling_component=_sampling_component_for_record(record),
                 restoration_method=restoration_method,
                 structural_metadata=dict(record.structural_metadata),
                 checkpoint_information_regime=record.checkpoint_information_regime,
@@ -378,6 +379,12 @@ def load_oracle_teacher_dataset_jsonl(
         if problems:
             raise ValueError("invalid oracle teacher dataset: " + "; ".join(problems))
     return dataset
+
+
+def _sampling_component_for_record(record: Any) -> str:
+    if record.distribution_kind == NATURAL_DISTRIBUTION_KIND:
+        return NATURAL_SAMPLING_COMPONENT
+    return str(record.distribution_kind)
 
 
 def oracle_teacher_row_from_dict(
