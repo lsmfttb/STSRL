@@ -30,6 +30,15 @@ from sts_combat_rl.sim.features import (
 from sts_combat_rl.sim.model_input import ModelInputBatch
 from sts_combat_rl.sim.model_scoring import DEFAULT_ACTION_KIND_SCORE_PRIOR
 from sts_combat_rl.sim.policy import DecisionContext
+from sts_combat_rl.sim.public_context_artifacts import PUBLIC_CONTEXT_AVAILABLE
+from sts_combat_rl.sim.public_context_model_input import (
+    PUBLIC_CONTEXT_MODEL_INPUT_FEATURE_NAMES,
+    PUBLIC_CONTEXT_MODEL_INPUT_FEATURE_SIZE,
+    PUBLIC_CONTEXT_MODEL_INPUT_SCHEMA_ID,
+    PUBLIC_CONTEXT_MODEL_INPUT_SCHEMA_VERSION,
+    encode_public_context_model_input,
+    public_context_features as shared_public_context_features,
+)
 from sts_combat_rl.sim.resource_outcome import BATTLE_RESOURCE_OUTCOME_AVAILABLE
 from sts_combat_rl.sim.search_guidance_inference import (
     SearchGuidanceActionScore,
@@ -56,7 +65,10 @@ from sts_combat_rl.sim.training_gate import (
 TORCH_POLICY_VALUE_CHECKPOINT_SCHEMA_ID = "torch-policy-value-checkpoint-v1"
 TORCH_POLICY_VALUE_CHECKPOINT_FORMAT_VERSION = 1
 TORCH_POLICY_VALUE_MODEL_CLASS = "PublicBattlePolicyValueNetwork"
-PUBLIC_CONTEXT_FEATURE_SCHEMA_ID = "public-run-context-summary-v1"
+PUBLIC_CONTEXT_FEATURE_SCHEMA_ID = PUBLIC_CONTEXT_MODEL_INPUT_SCHEMA_ID
+PUBLIC_CONTEXT_FEATURE_SCHEMA_VERSION = PUBLIC_CONTEXT_MODEL_INPUT_SCHEMA_VERSION
+PUBLIC_CONTEXT_FEATURE_NAMES = PUBLIC_CONTEXT_MODEL_INPUT_FEATURE_NAMES
+PUBLIC_CONTEXT_FEATURE_SIZE = PUBLIC_CONTEXT_MODEL_INPUT_FEATURE_SIZE
 OUTCOME_TARGET_KIND = "terminal_battle_survival_probability"
 HP_TARGET_KIND = "terminal_absolute_current_hp"
 STRUCTURED_RESOURCE_TARGET_KIND = "structured_terminal_resource_components_v1"
@@ -66,18 +78,6 @@ SEARCH_GUIDED_FIXED_EVAL_REASON = (
     "raw policy diagnostics are reported separately and are not promotion evidence"
 )
 
-PUBLIC_CONTEXT_FEATURE_NAMES = (
-    "schema_current",
-    "projection_available",
-    "current_act",
-    "current_floor",
-    "candidate_action_count",
-    "history_entry_count",
-    "missing_field_count",
-    "persistent_resource_available_count",
-    "visible_act_boss_available",
-    "route_payload_available",
-)
 RESOURCE_TARGET_NAMES = (
     "terminal_max_hp",
     "terminal_gold",
@@ -171,6 +171,8 @@ class TorchPolicyValueTrainingReport:
     tactical_feature_schema_version: int = TACTICAL_FEATURE_SCHEMA_VERSION
     identity_vocabulary_version: str = IDENTITY_VOCABULARY_VERSION
     public_context_feature_schema_id: str = PUBLIC_CONTEXT_FEATURE_SCHEMA_ID
+    public_context_feature_schema_version: int = PUBLIC_CONTEXT_FEATURE_SCHEMA_VERSION
+    public_context_feature_names: tuple[str, ...] = PUBLIC_CONTEXT_FEATURE_NAMES
     search_guided_fixed_evaluation_status: str = SEARCH_GUIDED_FIXED_EVAL_STATUS_NOT_RUN
     search_guided_fixed_evaluation_reason: str = SEARCH_GUIDED_FIXED_EVAL_REASON
     epochs: tuple[TorchPolicyValueEpochStats, ...] = ()
@@ -206,10 +208,14 @@ class PolicyValueNetwork(nn.Module):
         action_feature_size: int,
         *,
         snapshot_feature_size: int,
-        public_context_feature_size: int = len(PUBLIC_CONTEXT_FEATURE_NAMES),
+        public_context_feature_size: int = PUBLIC_CONTEXT_FEATURE_SIZE,
         hidden_size: int = 128,
         tactical_feature_schema_id: str = TACTICAL_FEATURE_SCHEMA_ID,
         public_context_feature_schema_id: str = PUBLIC_CONTEXT_FEATURE_SCHEMA_ID,
+        public_context_feature_schema_version: int = (
+            PUBLIC_CONTEXT_FEATURE_SCHEMA_VERSION
+        ),
+        public_context_feature_names: tuple[str, ...] = PUBLIC_CONTEXT_FEATURE_NAMES,
         resource_target_names: tuple[str, ...] = RESOURCE_TARGET_NAMES,
         state_mean: Tensor | None = None,
         state_std: Tensor | None = None,
@@ -231,6 +237,12 @@ class PolicyValueNetwork(nn.Module):
             raise ValueError("tactical feature schema id must be non-empty")
         if not public_context_feature_schema_id:
             raise ValueError("public context feature schema id must be non-empty")
+        if public_context_feature_schema_version <= 0:
+            raise ValueError("public context feature schema version must be positive")
+        if len(public_context_feature_names) != public_context_feature_size:
+            raise ValueError(
+                "public context feature names must match public-context feature size"
+            )
         if not resource_target_names:
             raise ValueError("resource target names must be non-empty")
 
@@ -241,6 +253,10 @@ class PolicyValueNetwork(nn.Module):
         self.hidden_size = int(hidden_size)
         self.tactical_feature_schema_id = tactical_feature_schema_id
         self.public_context_feature_schema_id = public_context_feature_schema_id
+        self.public_context_feature_schema_version = int(
+            public_context_feature_schema_version
+        )
+        self.public_context_feature_names = tuple(public_context_feature_names)
         self.resource_target_names = tuple(resource_target_names)
 
         self.state_encoder = nn.Sequential(
@@ -357,7 +373,10 @@ class TorchPolicyValueActionScorer:
     def score_actions(self, context: DecisionContext) -> list[float]:
         _validate_context_schema(self.model, context)
         state_features = torch.tensor(
-            _state_features(context.snapshot_features, context.public_run_context),
+            _state_features(
+                context.snapshot_features,
+                encode_public_context_features(context.public_run_context),
+            ),
             dtype=torch.float32,
         )
         action_features = torch.tensor(
@@ -375,7 +394,7 @@ class TorchPolicyValueActionScorer:
             state_features = torch.tensor(
                 _state_features(
                     snapshot_features,
-                    batch.public_run_contexts[example_index],
+                    batch.public_context_features[example_index],
                 ),
                 dtype=torch.float32,
             )
@@ -439,7 +458,10 @@ class TorchPolicyValueGuidanceScorer:
         _validate_context_schema(self.model, context)
 
         state_features = torch.tensor(
-            _state_features(context.snapshot_features, context.public_run_context),
+            _state_features(
+                context.snapshot_features,
+                encode_public_context_features(context.public_run_context),
+            ),
             dtype=torch.float32,
         )
         action_features = torch.tensor(
@@ -501,6 +523,8 @@ class TorchPolicyValueEnsembleActionScorer:
                 model.action_feature_size,
                 model.tactical_feature_schema_id,
                 model.public_context_feature_schema_id,
+                model.public_context_feature_schema_version,
+                model.public_context_feature_names,
                 model.resource_target_names,
             )
             for model in models
@@ -525,7 +549,10 @@ class TorchPolicyValueEnsembleActionScorer:
         for model in self.models:
             _validate_context_schema(model, context)
             state_features = torch.tensor(
-                _state_features(context.snapshot_features, context.public_run_context),
+                _state_features(
+                    context.snapshot_features,
+                    encode_public_context_features(context.public_run_context),
+                ),
                 dtype=torch.float32,
             )
             action_features = torch.tensor(
@@ -571,7 +598,10 @@ class TorchPolicyWithKindPriorActionScorer:
     def score_actions(self, context: DecisionContext) -> list[float]:
         _validate_context_schema(self.model, context)
         state_features = torch.tensor(
-            _state_features(context.snapshot_features, context.public_run_context),
+            _state_features(
+                context.snapshot_features,
+                encode_public_context_features(context.public_run_context),
+            ),
             dtype=torch.float32,
         )
         action_features = torch.tensor(
@@ -612,7 +642,7 @@ def train_torch_policy_value(
 
     snapshot_size = int(dataset.snapshot_feature_size or 1)
     action_size = int(dataset.action_feature_size or 1)
-    state_size = snapshot_size + len(PUBLIC_CONTEXT_FEATURE_NAMES)
+    state_size = snapshot_size + PUBLIC_CONTEXT_FEATURE_SIZE
     normalizers = (
         _feature_normalizers(dataset, snapshot_size, action_size)
         if not problems
@@ -622,7 +652,9 @@ def train_torch_policy_value(
         state_size,
         action_size,
         snapshot_feature_size=snapshot_size,
-        public_context_feature_size=len(PUBLIC_CONTEXT_FEATURE_NAMES),
+        public_context_feature_size=PUBLIC_CONTEXT_FEATURE_SIZE,
+        public_context_feature_schema_version=PUBLIC_CONTEXT_FEATURE_SCHEMA_VERSION,
+        public_context_feature_names=PUBLIC_CONTEXT_FEATURE_NAMES,
         hidden_size=active_config.hidden_size,
         state_mean=normalizers[0],
         state_std=normalizers[1],
@@ -639,7 +671,11 @@ def train_torch_policy_value(
                 state_feature_size=state_size,
                 snapshot_feature_size=snapshot_size,
                 action_feature_size=action_size,
-                public_context_feature_size=len(PUBLIC_CONTEXT_FEATURE_NAMES),
+                public_context_feature_size=PUBLIC_CONTEXT_FEATURE_SIZE,
+                public_context_feature_schema_version=(
+                    PUBLIC_CONTEXT_FEATURE_SCHEMA_VERSION
+                ),
+                public_context_feature_names=PUBLIC_CONTEXT_FEATURE_NAMES,
                 parameter_count=sum(
                     parameter.numel() for parameter in model.parameters()
                 ),
@@ -702,7 +738,11 @@ def train_torch_policy_value(
             state_feature_size=state_size,
             snapshot_feature_size=snapshot_size,
             action_feature_size=action_size,
-            public_context_feature_size=len(PUBLIC_CONTEXT_FEATURE_NAMES),
+            public_context_feature_size=PUBLIC_CONTEXT_FEATURE_SIZE,
+            public_context_feature_schema_version=(
+                PUBLIC_CONTEXT_FEATURE_SCHEMA_VERSION
+            ),
+            public_context_feature_names=PUBLIC_CONTEXT_FEATURE_NAMES,
             parameter_count=sum(parameter.numel() for parameter in model.parameters()),
             config=active_config,
             initial_evaluation=initial,
@@ -794,6 +834,11 @@ def format_torch_policy_value_training_report(
         f"examples: {report.example_count}",
         f"state feature size: {report.state_feature_size}",
         f"snapshot feature size: {report.snapshot_feature_size}",
+        (
+            "public context feature schema: "
+            f"{report.public_context_feature_schema_id} "
+            f"v{report.public_context_feature_schema_version}"
+        ),
         f"public context feature size: {report.public_context_feature_size}",
         f"action feature size: {report.action_feature_size}",
         f"parameters: {report.parameter_count}",
@@ -915,7 +960,12 @@ def save_torch_policy_value_checkpoint(
             "public_context_feature_schema_id": (
                 result.model.public_context_feature_schema_id
             ),
-            "public_context_feature_names": list(PUBLIC_CONTEXT_FEATURE_NAMES),
+            "public_context_feature_schema_version": (
+                result.model.public_context_feature_schema_version
+            ),
+            "public_context_feature_names": list(
+                result.model.public_context_feature_names
+            ),
             "resource_target_names": list(result.model.resource_target_names),
             "resource_target_scales": list(RESOURCE_TARGET_SCALES),
             "policy_target_kind": result.report.policy_target_kind,
@@ -989,6 +1039,13 @@ def load_torch_policy_value_checkpoint(
             raw.get("public_context_feature_schema_id"),
             "public_context_feature_schema_id",
         ),
+        public_context_feature_schema_version=_positive_int(
+            raw.get("public_context_feature_schema_version"),
+            "public_context_feature_schema_version",
+        ),
+        public_context_feature_names=tuple(
+            str(name) for name in _list(raw.get("public_context_feature_names"))
+        ),
         resource_target_names=RESOURCE_TARGET_NAMES,
     )
     try:
@@ -1026,8 +1083,13 @@ def _validate_checkpoint_semantic_contract(raw: Mapping[str, Any]) -> None:
         "public_context_feature_schema_id",
     )
     _require_exact(
+        raw.get("public_context_feature_schema_version"),
+        PUBLIC_CONTEXT_FEATURE_SCHEMA_VERSION,
+        "public_context_feature_schema_version",
+    )
+    _require_exact(
         raw.get("public_context_feature_size"),
-        len(PUBLIC_CONTEXT_FEATURE_NAMES),
+        PUBLIC_CONTEXT_FEATURE_SIZE,
         "public_context_feature_size",
     )
     _require_exact(
@@ -1332,7 +1394,10 @@ def _batch_losses(
 ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
     states = torch.tensor(
         [
-            _state_features(record.snapshot_features, record.public_run_context)
+            _state_features(
+                record.snapshot_features,
+                _record_public_context_features(record),
+            )
             for record in records
         ],
         dtype=torch.float32,
@@ -1415,7 +1480,10 @@ def _resource_loss(
 def _record_tensors(record: TrainerInputRecord) -> tuple[Tensor, Tensor]:
     return (
         torch.tensor(
-            _state_features(record.snapshot_features, record.public_run_context),
+            _state_features(
+                record.snapshot_features,
+                _record_public_context_features(record),
+            ),
             dtype=torch.float32,
         ),
         torch.tensor(record.legal_action_features, dtype=torch.float32),
@@ -1531,51 +1599,28 @@ def _resource_targets(outcome: Mapping[str, Any]) -> tuple[list[float], list[flo
 
 
 def encode_public_context_features(public_context: Mapping[str, Any]) -> list[float]:
-    """Encode a sanitized public context summary without hidden fields."""
+    """Compatibility wrapper for the shared public-context encoder."""
 
-    current = _mapping(public_context.get("current"))
-    location = _mapping(current.get("location"))
-    candidates = _mapping(public_context.get("candidate_actions"))
-    history = public_context.get("history")
-    missing_fields = public_context.get("missing_fields")
-    resources = _mapping(
-        _mapping(public_context.get("persistent_resources")).get("fields")
+    return shared_public_context_features(
+        public_context,
+        PUBLIC_CONTEXT_AVAILABLE,
     )
-    visible_boss = _mapping(public_context.get("visible_act_boss"))
-    routes = _mapping(
-        _mapping(public_context.get("map")).get("immediately_legal_routes")
+
+
+def _record_public_context_features(record: TrainerInputRecord) -> list[float]:
+    return shared_public_context_features(
+        record.public_run_context,
+        record.public_context_status,
     )
-    return [
-        1.0
-        if public_context.get("schema_id") == "public-run-context-v1"
-        and public_context.get("schema_version") == 1
-        else 0.0,
-        1.0 if public_context.get("projection_status") == "available" else 0.0,
-        _available_number(location.get("act")),
-        _available_number(location.get("floor")),
-        float(len(_items_if_available(candidates))),
-        float(len(history)) if isinstance(history, list) else 0.0,
-        float(len(missing_fields)) if isinstance(missing_fields, list) else 0.0,
-        float(
-            sum(
-                1
-                for value in resources.values()
-                if isinstance(value, Mapping)
-                and value.get("availability") == "available"
-            )
-        ),
-        1.0 if visible_boss.get("availability") == "available" else 0.0,
-        1.0 if routes.get("availability") == "available" else 0.0,
-    ]
 
 
 def _state_features(
     snapshot_features: Sequence[float],
-    public_context: Mapping[str, Any],
+    public_context_features: Sequence[float],
 ) -> list[float]:
     return [
         *(float(value) for value in snapshot_features),
-        *encode_public_context_features(public_context),
+        *(float(value) for value in public_context_features),
     ]
 
 
@@ -1586,7 +1631,10 @@ def _feature_normalizers(
 ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
     states = torch.tensor(
         [
-            _state_features(record.snapshot_features, record.public_run_context)
+            _state_features(
+                record.snapshot_features,
+                _record_public_context_features(record),
+            )
             for record in dataset.records
         ],
         dtype=torch.float32,
@@ -1599,7 +1647,7 @@ def _feature_normalizers(
         ],
         dtype=torch.float32,
     )
-    if states.shape[1] != snapshot_size + len(PUBLIC_CONTEXT_FEATURE_NAMES):
+    if states.shape[1] != snapshot_size + PUBLIC_CONTEXT_FEATURE_SIZE:
         raise ValueError("state feature normalizer shape mismatch")
     if actions.shape[1] != action_size:
         raise ValueError("action feature normalizer shape mismatch")
@@ -1633,6 +1681,17 @@ def _training_input_problems(
         problems.append("trainer input dataset is missing snapshot feature size")
     if not dataset.action_feature_size:
         problems.append("trainer input dataset is missing action feature size")
+    if dataset.records:
+        encoded_context = encode_public_context_model_input(
+            public_context_status=dataset.records[0].public_context_status,
+            public_run_context=dataset.records[0].public_run_context,
+        )
+        context_size = len(encoded_context.public_context_features)
+        if context_size != PUBLIC_CONTEXT_FEATURE_SIZE:
+            problems.append(
+                "trainer input public context feature size "
+                f"{context_size} does not match {PUBLIC_CONTEXT_FEATURE_SIZE}"
+            )
     target_kinds = {record.policy_target_kind for record in dataset.records}
     if len(target_kinds) > 1:
         problems.append(
@@ -1674,6 +1733,14 @@ def _training_input_problems(
 
 def _record_training_problems(record: TrainerInputRecord) -> list[str]:
     problems: list[str] = []
+    encoded_context = encode_public_context_model_input(
+        public_context_status=record.public_context_status,
+        public_run_context=record.public_run_context,
+    )
+    problems.extend(
+        f"record {record.example_index}: public context model input: {problem}"
+        for problem in encoded_context.problems
+    )
     if record.structured_battle_outcome_status != BATTLE_RESOURCE_OUTCOME_AVAILABLE:
         problems.append(
             f"record {record.example_index}: structured battle outcome is "
@@ -1738,6 +1805,13 @@ def _validate_context_schema(
             f"action feature size {bad_action_size} does not match "
             f"model {model.action_feature_size}"
         )
+    context_features = encode_public_context_features(context.public_run_context)
+    if len(context_features) != model.public_context_feature_size:
+        raise ValueError(
+            "public context feature size "
+            f"{len(context_features)} does not match model "
+            f"{model.public_context_feature_size}"
+        )
 
 
 def _validate_batch_schema(model: PolicyValueNetwork, batch: ModelInputBatch) -> None:
@@ -1747,6 +1821,21 @@ def _validate_batch_schema(model: PolicyValueNetwork, batch: ModelInputBatch) ->
         raise ValueError("model input snapshot feature size does not match model")
     if batch.action_feature_size != model.action_feature_size:
         raise ValueError("model input action feature size does not match model")
+    if batch.public_context_feature_schema_id != model.public_context_feature_schema_id:
+        raise ValueError(
+            "model input public context feature schema does not match model"
+        )
+    if (
+        batch.public_context_feature_schema_version
+        != model.public_context_feature_schema_version
+    ):
+        raise ValueError(
+            "model input public context feature schema version does not match model"
+        )
+    if batch.public_context_feature_size != model.public_context_feature_size:
+        raise ValueError("model input public context feature size does not match model")
+    if tuple(batch.public_context_feature_names) != model.public_context_feature_names:
+        raise ValueError("model input public context feature names do not match model")
 
 
 def _guidance_checkpoint_provenance(
@@ -1937,7 +2026,11 @@ def _model_provenance_config(model: PolicyValueNetwork) -> dict[str, Any]:
         "state_feature_size": model.state_feature_size,
         "snapshot_feature_size": model.snapshot_feature_size,
         "public_context_feature_schema_id": model.public_context_feature_schema_id,
-        "public_context_feature_names": list(PUBLIC_CONTEXT_FEATURE_NAMES),
+        "public_context_feature_schema_version": (
+            model.public_context_feature_schema_version
+        ),
+        "public_context_feature_size": model.public_context_feature_size,
+        "public_context_feature_names": list(model.public_context_feature_names),
         "action_feature_size": model.action_feature_size,
         "tactical_feature_schema_id": model.tactical_feature_schema_id,
         "resource_target_names": list(model.resource_target_names),
@@ -1954,6 +2047,11 @@ def _training_report_metadata(
         "snapshot_feature_size": report.snapshot_feature_size,
         "action_feature_size": report.action_feature_size,
         "public_context_feature_size": report.public_context_feature_size,
+        "public_context_feature_schema_id": report.public_context_feature_schema_id,
+        "public_context_feature_schema_version": (
+            report.public_context_feature_schema_version
+        ),
+        "public_context_feature_names": list(report.public_context_feature_names),
         "parameter_count": report.parameter_count,
         "policy_target_kind": report.policy_target_kind,
         "outcome_target_kind": report.outcome_target_kind,

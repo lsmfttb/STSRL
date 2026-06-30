@@ -183,6 +183,17 @@ def _append_model_input_section(
             f"  snapshot rows: {report.snapshot_rows}",
             f"  action rows: {report.action_rows}",
             f"  action offsets: {report.action_offset_count}",
+            (
+                "  public context feature schema: "
+                f"{report.public_context_feature_schema_id} "
+                f"v{report.public_context_feature_schema_version}"
+            ),
+            (f"  public context feature size: {report.public_context_feature_size}"),
+            (
+                "  public context encoded examples: "
+                f"{report.public_context_missingness_summary.get('encoded_count', 0)}/"
+                f"{report.public_context_missingness_summary.get('example_count', 0)}"
+            ),
             f"  max legal actions: {report.max_legal_actions}",
             f"  max eligible actions: {report.max_eligible_actions}",
             f"  terminal_after_step records: {report.terminal_after_step_count}",

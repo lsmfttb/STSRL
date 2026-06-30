@@ -31,6 +31,11 @@ from sts_combat_rl.sim.policy import (
     PreferredKindPolicy,
     choose_highest_scored_eligible_index,
 )
+from sts_combat_rl.sim.public_context_model_input import (
+    PUBLIC_CONTEXT_MODEL_INPUT_FEATURE_SIZE,
+    PUBLIC_CONTEXT_MODEL_INPUT_SCHEMA_ID,
+    PUBLIC_CONTEXT_MODEL_INPUT_SCHEMA_VERSION,
+)
 from sts_combat_rl.sim.reward_components import (
     build_battle_reward_component_report,
     format_battle_reward_component_report,
@@ -755,6 +760,21 @@ def test_model_input_batch_packs_variable_action_rows_for_scorer_context() -> No
     assert batch.public_run_contexts[0]["candidate_actions"]["availability"] == (
         "available"
     )
+    assert batch.public_context_feature_schema_id == (
+        PUBLIC_CONTEXT_MODEL_INPUT_SCHEMA_ID
+    )
+    assert batch.public_context_feature_schema_version == (
+        PUBLIC_CONTEXT_MODEL_INPUT_SCHEMA_VERSION
+    )
+    assert batch.public_context_feature_size == PUBLIC_CONTEXT_MODEL_INPUT_FEATURE_SIZE
+    assert len(batch.public_context_feature_names) == (
+        PUBLIC_CONTEXT_MODEL_INPUT_FEATURE_SIZE
+    )
+    assert len(batch.public_context_features) == 2
+    assert len(batch.public_context_features[0]) == (
+        PUBLIC_CONTEXT_MODEL_INPUT_FEATURE_SIZE
+    )
+    assert batch.public_context_missingness_summary[0]["encoded"] is True
     assert batch.action_kinds == [["end_turn", "card"], ["end_turn", "card"]]
     assert batch.eligible_action_indices == [[0, 1], [0, 1]]
     assert batch.eligible_action_rows == [[0, 1], [2, 3]]
@@ -892,6 +912,10 @@ def test_model_input_v1_migration_marks_missing_structured_tactical_inputs() -> 
     assert migrated.tactical_feature_schema_id == "legacy-unversioned"
     assert migrated.public_context_statuses == ["legacy_unavailable"]
     assert migrated.public_run_contexts == [{}]
+    assert migrated.public_context_missingness_summary[0]["encoded"] is False
+    assert len(migrated.public_context_features[0]) == (
+        PUBLIC_CONTEXT_MODEL_INPUT_FEATURE_SIZE
+    )
     assert any("public run context/history" in problem for problem in migrated.problems)
     assert "v1 model input has no structured tactical state/action inputs" in (
         migrated.problems

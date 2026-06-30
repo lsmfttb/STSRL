@@ -69,6 +69,7 @@ def test_torch_policy_value_trains_and_checkpoint_round_trips(tmp_path) -> None:
         SEARCH_GUIDED_FIXED_EVAL_STATUS_NOT_RUN
     )
     assert "raw policy diagnostic final" in text
+    assert "public context feature schema: public-context-model-input-v1 v1" in text
     assert "not max-HP normalization" in text
     assert "search-guided fixed evaluation: not_run" in text
 
@@ -119,6 +120,23 @@ def test_torch_policy_value_trains_and_checkpoint_round_trips(tmp_path) -> None:
     torch.save(raw, bad_schema_path)
     with pytest.raises(ValueError, match="identity_vocabulary_version"):
         load_torch_policy_value_checkpoint(str(bad_schema_path))
+
+    raw = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+    raw["public_context_feature_schema_version"] = 999
+    bad_context_version_path = tmp_path / "bad_context_version.pt"
+    torch.save(raw, bad_context_version_path)
+    with pytest.raises(ValueError, match="public_context_feature_schema_version"):
+        load_torch_policy_value_checkpoint(str(bad_context_version_path))
+
+    raw = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
+    raw["public_context_feature_names"] = [
+        "different",
+        *raw["public_context_feature_names"][1:],
+    ]
+    bad_context_names_path = tmp_path / "bad_context_names.pt"
+    torch.save(raw, bad_context_names_path)
+    with pytest.raises(ValueError, match="public_context_feature_names"):
+        load_torch_policy_value_checkpoint(str(bad_context_names_path))
 
     raw = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
     raw["training_data_provenance"] = {"trainer_input_path": "trainer.jsonl"}
