@@ -14,9 +14,10 @@ criteria.
 ## Current Main Baseline
 
 T029 and T035 compared model-guided Oracle-like search against baseline search
-on small fixed cohorts and found no outcome improvement. T043 is expected to
-produce diagnostic public-information checkpoints trained from assisted source
-coverage with policy, value, and structured-resource targets.
+on small fixed cohorts and found no outcome improvement. T043 added the
+assisted Oracle teacher scale-up path, assisted trainer-input bridge, public
+student diagnostic checkpoint metadata, and calibration grouping by assistance
+level, act, room type, encounter, and distribution kind.
 
 ## Dependencies
 

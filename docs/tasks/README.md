@@ -56,8 +56,8 @@ the current milestone, but they do not override this table.
 | T040 | DONE | [Expert Non-Combat Driver v1](T040-expert-non-combat-driver-v1.md) | T010, T016, T017, T025, T036, T037, T039, T035 | A20 heuristic source-generation driver and coverage comparison |
 | T041 | DONE | [Potion-enabled Oracle search repair](T041-potion-enabled-oracle-search-repair.md) | T006, T017, T020, T025, T036, T037, T039 | repair potion root mapping and no-potion/potion cohort comparison |
 | T042 | DONE | [Assisted complete-run source generation](T042-assisted-complete-run-source-generation.md) | T040, T041 | assisted-run distribution, schedules, and coverage report |
-| T043 | READY | [Assisted teacher dataset and value/policy training](T043-assisted-teacher-value-policy-training.md) | T042, T033 | assisted teacher data and public student diagnostics |
-| T044 | BLOCKED | [De-assisted fixed-cohort evaluation](T044-de-assisted-fixed-cohort-evaluation.md) | T043 | low/no-assistance fixed-cohort model/search evaluation |
+| T043 | DONE | [Assisted teacher dataset and value/policy training](T043-assisted-teacher-value-policy-training.md) | T042, T033 | assisted teacher data and public student diagnostics |
+| T044 | READY | [De-assisted fixed-cohort evaluation](T044-de-assisted-fixed-cohort-evaluation.md) | T043 | low/no-assistance fixed-cohort model/search evaluation |
 
 Use the table, not per-task files or roadmap prose, when deciding whether a
 task may receive a branch. Only `READY` rows should receive a new branch. After
@@ -182,11 +182,10 @@ a versioned A20 heuristic non-combat source-generation driver and is complete.
 T041 repaired the potion-enabled Oracle-like search failure and is complete.
 T042 added the assisted-run source-generation distribution and is complete.
 T033 finalized `public-context-model-input-v1`, the public-context feature
-contract needed before assisted teacher/value training. T043 is now the next
-executable task: it turns assisted source pools into decision-level teacher
-data and public student diagnostics. T044 evaluates de-assisted fixed cohorts
-after T043. T034 remains blocked on native public-consistent hidden-future
-sampler support.
+contract needed before assisted teacher/value training. T043 added assisted
+source-pool teacher scale-up and public student diagnostic wiring. T044 is now
+the next executable task: it evaluates de-assisted fixed cohorts after T043.
+T034 remains blocked on native public-consistent hidden-future sampler support.
 
 ## Standard Local Gates
 

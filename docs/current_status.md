@@ -29,8 +29,8 @@ versioned deeper model-guided Oracle-like search comparison using refreshed
 diagnostic checkpoint provenance, but the accepted smoke evidence tied the
 baseline and T028 outcomes rather than demonstrating improvement. The current
 published batch follows the upstream assisted source-generation guidance:
-T040, T041, T042, and T033 are complete. T043 is now `READY` for assisted
-teacher data and public student diagnostics; T044 remains blocked on T043.
+T040, T041, T042, T033, and T043 are complete. T044 is now `READY` for
+de-assisted fixed-cohort evaluation.
 
 ## Implemented On Main
 
@@ -214,17 +214,18 @@ teacher data and public student diagnostics; T044 remains blocked on T043.
 - Versioned Oracle teacher search-guidance bridge reporting
   (`oracle-teacher-search-guidance-bridge-report-v1`) through
   `--oracle-teacher-search-guidance-input`. The workflow loads one selected
-  T023 scale-up budget, verifies the manifest, teacher artifact, T022 report,
-  and source-pool SHA-256 identities, restores source starts through the
-  simulator adapter, rebuilds public tactical/model-input features, and emits
-  current trainer-input v6 records with explicit `trainer-policy-target-v1`
-  policy targets. Supported policy target kinds are
+  T023 or T043 scale-up budget, verifies the manifest, teacher artifact, T022
+  report, and source-pool SHA-256 identities, restores source starts through
+  the simulator adapter, rebuilds public tactical/model-input features, and
+  emits current trainer-input v6 records with explicit
+  `trainer-policy-target-v1` policy targets. Supported policy target kinds are
   `behavior_chosen_action_one_hot`, `oracle_teacher_action_one_hot`, and
   `oracle_soft_visit_distribution`. Teacher action, soft visit target,
   behavior action availability, selected model policy target, structured
   battle outcomes, public-context status, stable source identity, sampling
-  component, and `full_simulator_state_oracle_like` evidence boundary remain
-  separately serialized and reported. Optional PyTorch training now consumes
+  component, assisted source-pool kind where applicable, and
+  `full_simulator_state_oracle_like` evidence boundary remain separately
+  serialized and reported. Optional PyTorch training now consumes
   `record.policy_target`, rejects mixed policy target kinds, and stores policy
   target kind/source counts in checkpoint provenance. This is diagnostic
   search-guidance supervision only, not a controller or model-strength result.
@@ -708,6 +709,22 @@ teacher data and public student diagnostics; T044 remains blocked on T043.
   compileall, ruff, format check, both CommunicationMod fixture smokes,
   focused model-input/PyTorch/preflight tests, task-doc checks, and diff
   whitespace checks.
+- T043 adds the assisted Oracle teacher scale-up path
+  (`--lightspeed-a20-assisted-oracle-teacher-scaleup`) and extends the teacher
+  bridge/calibration reports for assisted source pools. Assisted scale-up emits
+  `input_artifacts.assisted_pool`, uses the
+  `seeded_uniform_assisted_run_source_sample` selection contract, preserves
+  assistance level, distribution kind, act, room type, encounter, and source
+  identity summaries through trainer generation metadata and calibration
+  reports, and keeps `assisted_run` sampling separate from natural sampling.
+  Assisted bridge artifacts are stamped as T043 while the older natural bridge
+  path remains T024-compatible. The accepted smoke evidence is wiring-scale
+  and `full_simulator_state_oracle_like`; it is not broad A20 training,
+  natural A20 performance, normal-information performance, controller
+  promotion, or live-game validation. Maintainer review passed 601 Windows
+  tests, compileall, ruff, format check, both CommunicationMod fixture smokes,
+  focused teacher scale-up/search-guidance/calibration tests, task-doc checks,
+  and diff whitespace checks.
 
 ## Not Implemented On Main
 
@@ -755,10 +772,10 @@ T040 (`Expert Non-Combat Driver v1`), T041
 (`Potion-enabled Oracle search repair`), T042
 (`Assisted complete-run source generation`), and T033
 (`Public context model-input encoder contract`) are complete. T043
-(`Assisted teacher dataset and value/policy training`) is now `READY`; it
-should start with decision-level assisted teacher data and diagnostic
-checkpoint evidence rather than controller promotion. T044 (`De-assisted
-fixed-cohort evaluation`) remains blocked on T043.
+(`Assisted teacher dataset and value/policy training`) is complete. T044
+(`De-assisted fixed-cohort evaluation`) is now `READY`; it evaluates whether
+assisted-data models help, or at least do not harm, search on low-assistance or
+unassisted fixed cohorts without making controller-promotion claims.
 
 The immediate external-fork follow-up is
 [`lsmfttb/sts_lightspeed#7`](https://github.com/lsmfttb/sts_lightspeed/issues/7):
@@ -778,8 +795,8 @@ The assisted source-generation batch is:
 4. T033 finalizes `public-context-model-input-v1`, a versioned public-context
    feature contract with explicit missingness, hidden-field firewall,
    assistance non-leakage, and checkpoint semantic validation.
-5. T043 uses assisted source pools for high-budget decision-level Oracle
-   teacher data and public student policy/value/resource diagnostics.
+5. T043 uses assisted source pools for decision-level Oracle teacher data and
+   public student policy/value/resource diagnostics.
 6. T044 evaluates whether assisted-data models help, or at least do not harm,
    search on low-assistance or unassisted fixed cohorts.
 
