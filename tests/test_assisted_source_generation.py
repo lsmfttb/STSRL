@@ -19,6 +19,7 @@ from sts_combat_rl.sim.assisted_source_generation import (
 )
 from sts_combat_rl.commands.assisted_source_generation import (
     merge_assisted_a20_coverage_from_paths,
+    merge_assisted_source_pool_from_paths,
     run_assisted_source_coverage_report_from_paths,
 )
 from sts_combat_rl.sim.contract import (
@@ -312,6 +313,40 @@ def test_assisted_source_pool_shard_merge_preserves_replay_identity() -> None:
 
     assert restore.restore_ok
     assert loaded.source_shards == merged.source_shards
+
+
+def test_assisted_source_pool_path_merge_streams_loadable_artifact(tmp_path) -> None:
+    shard_paths = []
+    for seed in (5, 6):
+        artifact, _ = collect_assisted_battle_start_pool(
+            _AssistedAdapter(),
+            _controller(),
+            seeds=[seed],
+            max_steps=5,
+            assistance_level=ASSIST_LEVEL_HP50,
+            policy_seed=11,
+        )
+        shard_path = tmp_path / f"shard-{seed}.jsonl"
+        with shard_path.open("w", encoding="utf-8", newline="\n") as stream:
+            dump_assisted_source_pool_jsonl(artifact, stream)
+        shard_paths.append(shard_path)
+
+    merged_path = tmp_path / "merged.jsonl"
+    summary = merge_assisted_source_pool_from_paths(
+        output_path=merged_path,
+        shard_paths=shard_paths,
+    )
+
+    with merged_path.open("r", encoding="utf-8") as stream:
+        loaded = load_assisted_source_pool_jsonl(stream)
+    restore = verify_assisted_source_pool_restores(lambda: _AssistedAdapter(), loaded)
+
+    assert summary.record_count == len(loaded.records)
+    assert summary.assistance_decision_count == len(loaded.assistance_decisions)
+    assert [shard["path"] for shard in loaded.source_shards] == [
+        str(path) for path in shard_paths
+    ]
+    assert restore.restore_ok
 
 
 def test_assisted_coverage_merge_uses_shard_restore_reports(tmp_path) -> None:

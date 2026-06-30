@@ -173,6 +173,19 @@ class AssistedSourcePoolArtifact:
 
 
 @dataclass(frozen=True)
+class AssistedSourcePoolMergeSummary:
+    """Lightweight summary for a streamed assisted source-pool merge."""
+
+    assistance_level: str
+    source_shards: tuple[dict[str, Any], ...]
+    source_run_count: int
+    terminal_run_count: int
+    truncated_run_count: int
+    record_count: int
+    assistance_decision_count: int
+
+
+@dataclass(frozen=True)
 class AssistedCoverageArmReport:
     """One schedule arm in the T042 source-coverage comparison."""
 
@@ -575,6 +588,271 @@ def merge_assisted_source_pool_shards(
             "invalid merged assisted source pool: " + "; ".join(artifact_problems)
         )
     return artifact
+
+
+def dump_merged_assisted_source_pool_shards_jsonl(
+    shard_paths: Sequence[Path],
+    stream: TextIO,
+) -> AssistedSourcePoolMergeSummary:
+    """Stream-merge assisted source-pool shards into current JSONL schema."""
+
+    if not shard_paths:
+        raise ValueError("at least one assisted source shard is required")
+
+    first_metadata: dict[str, Any] | None = None
+    source_controller_provenance: dict[str, Any] | None = None
+    level = ""
+    schedule: AssistanceSchedule | None = None
+    policy_seed = 0
+    source_pool_format_version = 0
+    source_run_count = 0
+    terminal_run_count = 0
+    truncated_run_count = 0
+    record_count = 0
+    assistance_decisions: list[dict[str, Any]] = []
+    source_run_summaries: list[dict[str, Any]] = []
+    source_run_ids: set[str] = set()
+    problems: list[str] = []
+    source_shards: list[dict[str, Any]] = []
+    record_offsets: list[int] = []
+    record_counts: list[int] = []
+
+    for shard_index, shard_path in enumerate(shard_paths):
+        metadata = _load_assisted_source_pool_metadata_jsonl(shard_path)
+        if metadata.get("schema_id") != ASSISTED_SOURCE_POOL_SCHEMA_ID:
+            raise ValueError(f"{shard_path}: assisted source schema_id unsupported")
+        if metadata.get("format_version") != ASSISTED_SOURCE_POOL_FORMAT_VERSION:
+            raise ValueError(
+                f"{shard_path}: assisted source format_version unsupported"
+            )
+        shard_level = _require_non_empty_string(
+            metadata.get("assistance_level"),
+            f"{shard_path} assistance_level",
+        )
+        shard_schedule = assistance_schedule_by_level(shard_level)
+        if metadata.get("assistance_schedule") != shard_schedule.to_dict():
+            raise ValueError(f"{shard_path}: assistance schedule mismatch")
+        shard_policy_seed = _require_seed(
+            metadata.get("policy_seed"),
+            f"{shard_path} policy_seed",
+        )
+        shard_source_pool_format_version = _require_non_negative_int(
+            metadata.get("source_pool_format_version"),
+            f"{shard_path} source_pool_format_version",
+        )
+        shard_controller_provenance = _require_mapping(
+            metadata.get("source_controller_provenance"),
+            f"{shard_path} source_controller_provenance",
+        )
+        if first_metadata is None:
+            first_metadata = metadata
+            level = shard_level
+            schedule = shard_schedule
+            policy_seed = shard_policy_seed
+            source_pool_format_version = shard_source_pool_format_version
+            source_controller_provenance = shard_controller_provenance
+        elif shard_level != level:
+            raise ValueError("assisted source shards must use one assistance level")
+        elif shard_schedule.to_dict() != schedule.to_dict():
+            raise ValueError("assisted source shards must use one assistance schedule")
+        elif shard_policy_seed != policy_seed:
+            raise ValueError("assisted source shards must use one policy seed")
+        elif shard_source_pool_format_version != source_pool_format_version:
+            raise ValueError(
+                "assisted source shards must use one source format version"
+            )
+        elif shard_controller_provenance != source_controller_provenance:
+            raise ValueError(
+                "assisted source shard controller provenance mismatch; "
+                "use a fixed --sim-non-combat-seed when generating shards"
+            )
+
+        shard_record_count = _require_non_negative_int(
+            metadata.get("record_count"),
+            f"{shard_path} record_count",
+        )
+        shard_source_run_count = _require_non_negative_int(
+            metadata.get("source_run_count"),
+            f"{shard_path} source_run_count",
+        )
+        shard_terminal_run_count = _require_non_negative_int(
+            metadata.get("terminal_run_count"),
+            f"{shard_path} terminal_run_count",
+        )
+        shard_truncated_run_count = _require_non_negative_int(
+            metadata.get("truncated_run_count"),
+            f"{shard_path} truncated_run_count",
+        )
+        if (
+            shard_terminal_run_count + shard_truncated_run_count
+            != shard_source_run_count
+        ):
+            raise ValueError(f"{shard_path}: terminal/truncated source counts mismatch")
+
+        old_to_new_record_index = {
+            old_index: record_count + old_index
+            for old_index in range(shard_record_count)
+        }
+        shard_decisions = _require_list(
+            metadata.get("assistance_decisions", []),
+            f"{shard_path} assistance_decisions",
+        )
+        for decision_index, raw_decision in enumerate(shard_decisions):
+            decision = _require_mapping(
+                raw_decision,
+                f"{shard_path} assistance_decision {decision_index}",
+            )
+            assistance_decisions.append(
+                _remap_merged_assistance_decision(
+                    decision,
+                    shard_index=shard_index,
+                    old_to_new_record_index=old_to_new_record_index,
+                    old_to_new_checkpoint_id={},
+                )
+            )
+
+        shard_summaries = _source_run_summaries_from_metadata(
+            metadata.get("source_run_summaries", []),
+            label=f"{shard_path} source_run_summaries",
+        )
+        for summary in shard_summaries:
+            if summary.source_run_id in source_run_ids:
+                raise ValueError(
+                    f"duplicate assisted source_run_id across shards: "
+                    f"{summary.source_run_id}"
+                )
+            source_run_ids.add(summary.source_run_id)
+            source_run_summaries.append(summary.to_dict())
+
+        record_offsets.append(record_count)
+        record_counts.append(shard_record_count)
+        record_count += shard_record_count
+        source_run_count += shard_source_run_count
+        terminal_run_count += shard_terminal_run_count
+        truncated_run_count += shard_truncated_run_count
+        problems.extend(
+            _require_string_list(metadata.get("problems", []), f"{shard_path} problems")
+        )
+        source_shards.append(
+            {
+                "path": str(shard_path),
+                "sha256": sha256_file(shard_path),
+                "merge_version": ASSISTED_SOURCE_POOL_MERGE_VERSION,
+                "shard_index": shard_index,
+                "schema_id": ASSISTED_SOURCE_POOL_SCHEMA_ID,
+                "format_version": ASSISTED_SOURCE_POOL_FORMAT_VERSION,
+                "assistance_level": shard_level,
+                "record_count": shard_record_count,
+                "assistance_decision_count": len(shard_decisions),
+                "source_run_count": shard_source_run_count,
+                "terminal_run_count": shard_terminal_run_count,
+                "truncated_run_count": shard_truncated_run_count,
+                "source_seed_range": _source_seed_range_from_summaries(shard_summaries),
+            }
+        )
+
+    if (
+        first_metadata is None
+        or schedule is None
+        or source_controller_provenance is None
+    ):
+        raise ValueError("at least one assisted source shard is required")
+    if len(assistance_decisions) < record_count:
+        raise ValueError("assistance decision count is smaller than record count")
+
+    metadata = {
+        "schema_id": ASSISTED_SOURCE_POOL_SCHEMA_ID,
+        "format_version": ASSISTED_SOURCE_POOL_FORMAT_VERSION,
+        "source_pool_format_version": source_pool_format_version,
+        "distribution_kind": ASSISTED_RUN_DISTRIBUTION_KIND,
+        "assistance_level": level,
+        "assistance_schedule": schedule.to_dict(),
+        "policy_seed": policy_seed,
+        "source_run_count": source_run_count,
+        "terminal_run_count": terminal_run_count,
+        "truncated_run_count": truncated_run_count,
+        "source_controller_provenance": _merged_source_controller_provenance(
+            source_controller_provenance,
+            source_shards,
+        ),
+        "record_count": record_count,
+        "assistance_decision_count": len(assistance_decisions),
+        "assistance_decisions": [
+            _json_safe_mapping(decision) for decision in assistance_decisions
+        ],
+        "source_shards": [_json_safe_mapping(shard) for shard in source_shards],
+        "source_run_summaries": source_run_summaries,
+        "migration_report": {
+            "source_version": BATTLE_START_POOL_FORMAT_VERSION,
+            "target_version": BATTLE_START_POOL_FORMAT_VERSION,
+            "applied_versions": [],
+            "losses": [],
+        },
+        "problems": list(dict.fromkeys(problems)),
+    }
+    _write_row(stream, {"type": "metadata", "metadata": metadata})
+
+    written_records = 0
+    for shard_index, shard_path in enumerate(shard_paths):
+        record_offset = record_offsets[shard_index]
+        shard_record_count = record_counts[shard_index]
+        old_to_new_record_index = {
+            old_index: record_offset + old_index
+            for old_index in range(shard_record_count)
+        }
+        shard_written = 0
+        for raw_record in _iter_assisted_source_pool_record_rows(shard_path):
+            record = record_from_manifest(
+                raw_record,
+                label=f"{shard_path} record {shard_written}",
+                allowed_distribution_kinds=frozenset({ASSISTED_RUN_DISTRIBUTION_KIND}),
+                allow_assistance_history=True,
+            )
+            if record.record_index != shard_written:
+                raise ValueError(f"{shard_path}: record indices must be contiguous")
+            new_checkpoint_id = f"shard-{shard_index}:{record.source_checkpoint_id}"
+            remapped_history = tuple(
+                _remap_merged_assistance_decision(
+                    decision,
+                    shard_index=shard_index,
+                    old_to_new_record_index=old_to_new_record_index,
+                    old_to_new_checkpoint_id={},
+                )
+                for decision in record.assistance_history
+            )
+            merged_record = replace(
+                record,
+                record_index=record_offset + record.record_index,
+                source_checkpoint_id=new_checkpoint_id,
+                assistance_history=remapped_history,
+                native_checkpoint=None,
+            )
+            _write_row(
+                stream,
+                {"type": "record", "record": record_to_manifest(merged_record)},
+            )
+            shard_written += 1
+            written_records += 1
+        if shard_written != shard_record_count:
+            raise ValueError(
+                f"{shard_path}: metadata record_count mismatch "
+                f"({shard_record_count} != {shard_written})"
+            )
+    if written_records != record_count:
+        raise ValueError(
+            f"merged assisted source record_count mismatch ({record_count} != "
+            f"{written_records})"
+        )
+
+    return AssistedSourcePoolMergeSummary(
+        assistance_level=level,
+        source_shards=tuple(source_shards),
+        source_run_count=source_run_count,
+        terminal_run_count=terminal_run_count,
+        truncated_run_count=truncated_run_count,
+        record_count=record_count,
+        assistance_decision_count=len(assistance_decisions),
+    )
 
 
 def assistance_schedule_by_level(level: str) -> AssistanceSchedule:
@@ -1375,9 +1653,15 @@ def _remap_merged_assistance_decision(
 
 
 def _source_seed_range(artifact: AssistedSourcePoolArtifact) -> dict[str, Any]:
+    return _source_seed_range_from_summaries(artifact.pool.source_run_summaries)
+
+
+def _source_seed_range_from_summaries(
+    summaries: Sequence[SourceRunSummary],
+) -> dict[str, Any]:
     seeds = [
         summary.source_seed
-        for summary in artifact.pool.source_run_summaries
+        for summary in summaries
         if isinstance(summary.source_seed, int)
         and not isinstance(summary.source_seed, bool)
     ]
@@ -1738,6 +2022,51 @@ def _yes_no(value: bool) -> str:
 def _write_row(stream: TextIO, row: Mapping[str, Any]) -> None:
     json.dump(row, stream, sort_keys=True)
     stream.write("\n")
+
+
+def _load_assisted_source_pool_metadata_jsonl(path: Path) -> dict[str, Any]:
+    with path.open("r", encoding="utf-8") as stream:
+        for line_number, raw_line in enumerate(stream, start=1):
+            if not raw_line.strip():
+                continue
+            try:
+                row = json.loads(raw_line)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"{path}:{line_number}: invalid JSON") from exc
+            if not isinstance(row, dict):
+                raise ValueError(f"{path}:{line_number}: row must be an object")
+            row_type = row.get("type")
+            if row_type == "metadata":
+                return _require_mapping(row.get("metadata"), "metadata")
+            if row_type != "record":
+                raise ValueError(f"{path}:{line_number}: unknown row type")
+    raise ValueError(f"{path}: missing assisted source-pool metadata")
+
+
+def _iter_assisted_source_pool_record_rows(path: Path) -> Iterable[dict[str, Any]]:
+    with path.open("r", encoding="utf-8") as stream:
+        metadata_seen = False
+        for line_number, raw_line in enumerate(stream, start=1):
+            if not raw_line.strip():
+                continue
+            try:
+                row = json.loads(raw_line)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"{path}:{line_number}: invalid JSON") from exc
+            if not isinstance(row, dict):
+                raise ValueError(f"{path}:{line_number}: row must be an object")
+            row_type = row.get("type")
+            if row_type == "metadata":
+                if metadata_seen:
+                    raise ValueError(f"{path}:{line_number}: duplicate metadata")
+                metadata_seen = True
+                continue
+            if row_type == "record":
+                yield _require_mapping(row.get("record"), "record")
+                continue
+            raise ValueError(f"{path}:{line_number}: unknown row type")
+        if not metadata_seen:
+            raise ValueError(f"{path}: missing assisted source-pool metadata")
 
 
 def sha256_file(path: Path) -> str:
