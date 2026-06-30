@@ -29,10 +29,8 @@ versioned deeper model-guided Oracle-like search comparison using refreshed
 diagnostic checkpoint provenance, but the accepted smoke evidence tied the
 baseline and T028 outcomes rather than demonstrating improvement. The current
 published batch follows the upstream assisted source-generation guidance:
-T040, T041, and T042 are complete. T033 is now `READY` as the public-context
-model-input contract needed before assisted teacher/value training, and T043
-and T044 remain blocked follow-up tasks toward assisted teacher/value training
-and de-assisted fixed-cohort evaluation.
+T040, T041, T042, and T033 are complete. T043 is now `READY` for assisted
+teacher data and public student diagnostics; T044 remains blocked on T043.
 
 ## Implemented On Main
 
@@ -162,9 +160,10 @@ and de-assisted fixed-cohort evaluation.
   those paths as explicit missing fields.
 - Optional PyTorch policy/value plumbing behind the `train` dependency group.
   The T009 model consumes public tactical features, legal action features, and
-  a compact sanitized public-run-context summary; scores state-action policy
-  rows; predicts battle survival and terminal absolute current HP; and keeps
-  structured terminal resource heads separate. Broad training is guarded by a
+  the separate `public-context-model-input-v1` encoder introduced by T033;
+  scores state-action policy rows; predicts battle survival and terminal
+  absolute current HP; and keeps structured terminal resource heads separate.
+  Broad training is guarded by a
   fail-closed per-ascension/per-act scale and distribution gate that counts
   stable source identities rather than repeated sampled rows and cannot use A0
   coverage to satisfy A20 requirements. Named `smoke` and `narrow_curriculum`
@@ -172,7 +171,8 @@ and de-assisted fixed-cohort evaluation.
   Checkpoints use `torch-policy-value-checkpoint-v1`, include exact
   trainer-input SHA-256 artifact provenance, controller and information-regime
   summaries, target-source summaries, distribution/source/sampling counts,
-  stable source identity summaries, and semantic contract validation on load.
+  stable source identity summaries, and semantic contract validation on load,
+  including public-context schema id, version, feature size, and feature names.
   Raw policy/value diagnostics are reported separately; the merged T029
   model-guided fixed-cohort comparison remains Oracle-like smoke evidence, not
   broad model-strength evidence.
@@ -696,6 +696,18 @@ and de-assisted fixed-cohort evaluation.
   `docs/project_architecture.md` and `docs/tasks/README.md`: stream JSONL
   source merges and aggregate coverage/comparison reports from shard summaries
   and artifact identities instead of loading every shard record into memory.
+- T033 adds `public-context-model-input-v1`, a separate 103-feature public
+  context encoder for sanitized `public_run_context` plus
+  `public_context_status`. `ModelInputBatch` now carries explicit public
+  context feature schema id/version/size/names, feature rows, and missingness
+  summaries. PyTorch training, reports, checkpoint save/load, and scorer
+  validation thread that schema separately from public tactical features.
+  Hidden-field firewall and T042 assistance non-leakage tests fail closed, and
+  legacy or unavailable context remains explicit missingness rather than
+  ordinary zero context. Maintainer review passed 594 Windows tests,
+  compileall, ruff, format check, both CommunicationMod fixture smokes,
+  focused model-input/PyTorch/preflight tests, task-doc checks, and diff
+  whitespace checks.
 
 ## Not Implemented On Main
 
@@ -739,14 +751,14 @@ comparison tied the baseline and T028 outcomes.
 The next published batch follows the upstream assisted source-generation
 guidance supplied after T035. The maintainer role here is to publish and review
 bounded tasks from that guidance, not to invent an alternate long-term plan.
-T040 (`Expert Non-Combat Driver v1`) and T041
-(`Potion-enabled Oracle search repair`) are complete. T042
-(`Assisted complete-run source generation`) is complete. T033
-(`Public context model-input encoder contract`) is now `READY` and is the next
-executable task. T043 (`Assisted teacher dataset and value/policy training`)
-remains blocked on T033, and should start with decision-level assisted teacher
-data and diagnostic checkpoint evidence rather than controller promotion. T044
-(`De-assisted fixed-cohort evaluation`) remains blocked on T043.
+T040 (`Expert Non-Combat Driver v1`), T041
+(`Potion-enabled Oracle search repair`), T042
+(`Assisted complete-run source generation`), and T033
+(`Public context model-input encoder contract`) are complete. T043
+(`Assisted teacher dataset and value/policy training`) is now `READY`; it
+should start with decision-level assisted teacher data and diagnostic
+checkpoint evidence rather than controller promotion. T044 (`De-assisted
+fixed-cohort evaluation`) remains blocked on T043.
 
 The immediate external-fork follow-up is
 [`lsmfttb/sts_lightspeed#7`](https://github.com/lsmfttb/sts_lightspeed/issues/7):

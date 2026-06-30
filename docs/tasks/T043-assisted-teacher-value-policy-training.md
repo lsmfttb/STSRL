@@ -15,15 +15,15 @@ T024 can bridge Oracle teacher artifacts into trainer-input rows and train
 diagnostic checkpoints. T032 ran a narrow 98-source refresh over the T039
 contract and kept broad A20 training readiness closed. T035 showed that current
 root-only model-guided search over narrow data does not improve the fixed
-smoke cohort. T042 is expected to provide broader assisted source pools with
-explicit assistance provenance and distribution tags.
+smoke cohort. T042 provides broader assisted source pools with explicit
+assistance provenance and distribution tags, and T033 finalized
+`public-context-model-input-v1` for public long-horizon context features.
 
 ## Dependencies
 
 - T042 is complete.
-- T033 or an equivalent finalized public-context model-input contract is
-  complete if this task uses richer public run context beyond the current
-  compact summary.
+- T033 finalized `public-context-model-input-v1`; use that contract for richer
+  public run context beyond tactical battle features.
 - T006, T009, T011, T012, T016, T017, T018, T023, T024, and T032 remain
   current teacher/training contracts.
 
