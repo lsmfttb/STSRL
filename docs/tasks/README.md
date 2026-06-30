@@ -86,6 +86,14 @@ Large generated artifacts remain outside the repository. The durable contract
 is the schema, manifest/provenance, command surface, hashes where applicable,
 and review evidence.
 
+Tasks that finalize GB-scale shard outputs should design the finalization path
+for bounded memory. Source-pool merges should stream JSONL records after
+metadata/schema validation, and coverage/report comparison steps should
+aggregate from shard-level summaries, restore reports, hashes, and counts
+whenever those summaries preserve the needed contract. Loading every source
+record from every shard is acceptable only for small fixtures, smoke/debug
+work, or an explicitly documented schema requirement.
+
 If a large artifact should survive review cleanup for downstream use, the task
 must define a retention contract. The retained raw files must live under a
 stable ignored/local path outside disposable review worktrees, and the PR must

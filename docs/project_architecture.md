@@ -382,3 +382,12 @@ live under a stable ignored/local retention path rather than a disposable review
 worktree, and the durable contract must be a lightweight manifest or report
 with schema, provenance, hashes, sizes, regeneration commands, compatibility
 requirements, retention owner/reason, and deletion conditions.
+
+GB-scale finalization paths must avoid loading all shard records into memory
+when a streaming or summary-preserving contract can express the same result.
+For JSONL source pools, prefer metadata-first validation plus streaming record
+copy/remap into the merged artifact. For coverage, restore, reachability, and
+comparison reports, prefer aggregation from shard-level summaries and artifact
+identities instead of reopening multi-GB source pools. Full record loads are
+reserved for small fixtures, smoke/debug work, or a documented schema need that
+cannot be satisfied by streaming validation.
