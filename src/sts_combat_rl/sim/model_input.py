@@ -27,9 +27,18 @@ from sts_combat_rl.sim.public_context_artifacts import (
     PUBLIC_CONTEXT_LEGACY_UNAVAILABLE,
     public_context_artifact_problems,
 )
+from sts_combat_rl.sim.public_context_model_input import (
+    PUBLIC_CONTEXT_MODEL_INPUT_FEATURE_NAMES,
+    PUBLIC_CONTEXT_MODEL_INPUT_FEATURE_SIZE,
+    PUBLIC_CONTEXT_MODEL_INPUT_SCHEMA_ID,
+    PUBLIC_CONTEXT_MODEL_INPUT_SCHEMA_VERSION,
+    encode_public_context_model_input,
+    public_context_model_input_problems,
+    summarize_public_context_missingness,
+)
 
 
-MODEL_INPUT_BATCH_FORMAT_VERSION = 3
+MODEL_INPUT_BATCH_FORMAT_VERSION = 4
 
 
 @dataclass(frozen=True)
@@ -75,6 +84,18 @@ class ModelInputBatch:
     tactical_actions: list[dict[str, Any]] = field(default_factory=list)
     public_context_statuses: list[str] = field(default_factory=list)
     public_run_contexts: list[dict[str, Any]] = field(default_factory=list)
+    public_context_feature_schema_id: str = PUBLIC_CONTEXT_MODEL_INPUT_SCHEMA_ID
+    public_context_feature_schema_version: int = (
+        PUBLIC_CONTEXT_MODEL_INPUT_SCHEMA_VERSION
+    )
+    public_context_feature_size: int = PUBLIC_CONTEXT_MODEL_INPUT_FEATURE_SIZE
+    public_context_feature_names: tuple[str, ...] = (
+        PUBLIC_CONTEXT_MODEL_INPUT_FEATURE_NAMES
+    )
+    public_context_features: list[list[float]] = field(default_factory=list)
+    public_context_missingness_summary: list[dict[str, Any]] = field(
+        default_factory=list
+    )
     problems: list[str] = field(default_factory=list)
 
 
@@ -94,6 +115,11 @@ class ModelInputBatchSmokeReport:
     action_feature_size: int | None
     tactical_feature_schema_id: str
     tactical_feature_schema_version: int
+    public_context_feature_schema_id: str
+    public_context_feature_schema_version: int
+    public_context_feature_size: int
+    public_context_feature_names: tuple[str, ...]
+    public_context_missingness_summary: dict[str, Any]
     max_legal_actions: int
     max_eligible_actions: int
     terminal_after_step_count: int
@@ -125,6 +151,9 @@ def build_model_input_batch(dataset: TrainerInputDataset) -> ModelInputBatch:
     tactical_actions: list[dict[str, Any]] = []
     public_context_statuses: list[str] = []
     public_run_contexts: list[dict[str, Any]] = []
+    public_context_features: list[list[float]] = []
+    public_context_missingness: list[dict[str, Any]] = []
+    context_feature_problems: list[str] = []
 
     for record in dataset.records:
         action_start = len(action_features)
@@ -164,6 +193,18 @@ def build_model_input_batch(dataset: TrainerInputDataset) -> ModelInputBatch:
         )
         public_context_statuses.append(record.public_context_status)
         public_run_contexts.append(dict(record.public_run_context))
+        encoded_context = encode_public_context_model_input(
+            public_context_status=record.public_context_status,
+            public_run_context=record.public_run_context,
+        )
+        public_context_features.append(list(encoded_context.public_context_features))
+        public_context_missingness.append(
+            dict(encoded_context.public_context_missingness_summary)
+        )
+        context_feature_problems.extend(
+            f"record {record.example_index}: public context model input: {problem}"
+            for problem in encoded_context.problems
+        )
 
     batch = ModelInputBatch(
         format_version=MODEL_INPUT_BATCH_FORMAT_VERSION,
@@ -191,7 +232,13 @@ def build_model_input_batch(dataset: TrainerInputDataset) -> ModelInputBatch:
         tactical_actions=tactical_actions,
         public_context_statuses=public_context_statuses,
         public_run_contexts=public_run_contexts,
-        problems=list(dataset.problems),
+        public_context_feature_schema_id=PUBLIC_CONTEXT_MODEL_INPUT_SCHEMA_ID,
+        public_context_feature_schema_version=PUBLIC_CONTEXT_MODEL_INPUT_SCHEMA_VERSION,
+        public_context_feature_size=PUBLIC_CONTEXT_MODEL_INPUT_FEATURE_SIZE,
+        public_context_feature_names=PUBLIC_CONTEXT_MODEL_INPUT_FEATURE_NAMES,
+        public_context_features=public_context_features,
+        public_context_missingness_summary=public_context_missingness,
+        problems=list(dataset.problems) + context_feature_problems,
     )
     return replace(
         batch,
@@ -225,6 +272,13 @@ def build_model_input_batch_smoke_report(
         action_feature_size=batch.action_feature_size,
         tactical_feature_schema_id=batch.tactical_feature_schema_id,
         tactical_feature_schema_version=batch.tactical_feature_schema_version,
+        public_context_feature_schema_id=batch.public_context_feature_schema_id,
+        public_context_feature_schema_version=batch.public_context_feature_schema_version,
+        public_context_feature_size=batch.public_context_feature_size,
+        public_context_feature_names=tuple(batch.public_context_feature_names),
+        public_context_missingness_summary=summarize_public_context_missingness(
+            batch.public_context_missingness_summary
+        ),
         max_legal_actions=max(legal_action_counts, default=0),
         max_eligible_actions=max(
             (len(indices) for indices in batch.eligible_action_indices),
@@ -260,6 +314,21 @@ def format_model_input_batch_smoke_report(
         f"snapshot feature size: {_optional_int(report.snapshot_feature_size)}",
         f"action feature size: {_optional_int(report.action_feature_size)}",
         f"tactical feature schema: {report.tactical_feature_schema_id} v{report.tactical_feature_schema_version}",
+        (
+            "public context feature schema: "
+            f"{report.public_context_feature_schema_id} "
+            f"v{report.public_context_feature_schema_version}"
+        ),
+        f"public context feature size: {report.public_context_feature_size}",
+        (
+            "public context encoded examples: "
+            f"{report.public_context_missingness_summary.get('encoded_count', 0)}/"
+            f"{report.public_context_missingness_summary.get('example_count', 0)}"
+        ),
+        (
+            "public context missing fields: "
+            f"{report.public_context_missingness_summary.get('unique_missing_field_count', 0)}"
+        ),
         f"max legal actions: {report.max_legal_actions}",
         f"max eligible actions: {report.max_eligible_actions}",
         f"terminal_after_step records: {report.terminal_after_step_count}",
@@ -314,7 +383,7 @@ def decision_context_from_model_input_batch(
 
 
 def migrate_model_input_batch(batch: ModelInputBatch) -> ModelInputBatch:
-    """Explicitly migrate an in-memory v1 numeric batch to v2 placeholders.
+    """Explicitly migrate an in-memory legacy batch to current placeholders.
 
     Model-input batches are not persisted artifacts today.  The conversion is
     nevertheless explicit so callers cannot mistake old numeric-only inputs for
@@ -323,14 +392,32 @@ def migrate_model_input_batch(batch: ModelInputBatch) -> ModelInputBatch:
 
     if batch.format_version == MODEL_INPUT_BATCH_FORMAT_VERSION:
         return batch
-    if batch.format_version not in {1, 2}:
+    if batch.format_version not in {1, 2, 3}:
         raise ValueError(
             f"unsupported model input format version {batch.format_version}; "
             f"current version is {MODEL_INPUT_BATCH_FORMAT_VERSION}"
         )
+    statuses = list(batch.public_context_statuses)
+    contexts = [dict(context) for context in batch.public_run_contexts]
+    if batch.format_version in {1, 2} or not statuses or not contexts:
+        statuses = [PUBLIC_CONTEXT_LEGACY_UNAVAILABLE for _ in batch.snapshot_features]
+        contexts = [{} for _ in batch.snapshot_features]
+    encoded_contexts = [
+        encode_public_context_model_input(
+            public_context_status=status,
+            public_run_context=context,
+        )
+        for status, context in zip(statuses, contexts)
+    ]
+    context_feature_problems = [
+        f"example {index}: public context model input: {problem}"
+        for index, encoded in enumerate(encoded_contexts)
+        for problem in encoded.problems
+    ]
     problems = [
         *batch.problems,
         PUBLIC_CONTEXT_LEGACY_LOSS,
+        *context_feature_problems,
     ]
     if batch.format_version == 1:
         problems.append("v1 model input has no structured tactical state/action inputs")
@@ -348,10 +435,19 @@ def migrate_model_input_batch(batch: ModelInputBatch) -> ModelInputBatch:
         identity_vocabulary_version=(
             "" if batch.format_version == 1 else batch.identity_vocabulary_version
         ),
-        public_context_statuses=[
-            PUBLIC_CONTEXT_LEGACY_UNAVAILABLE for _ in batch.snapshot_features
+        public_context_statuses=statuses,
+        public_run_contexts=contexts,
+        public_context_feature_schema_id=PUBLIC_CONTEXT_MODEL_INPUT_SCHEMA_ID,
+        public_context_feature_schema_version=PUBLIC_CONTEXT_MODEL_INPUT_SCHEMA_VERSION,
+        public_context_feature_size=PUBLIC_CONTEXT_MODEL_INPUT_FEATURE_SIZE,
+        public_context_feature_names=PUBLIC_CONTEXT_MODEL_INPUT_FEATURE_NAMES,
+        public_context_features=[
+            list(encoded.public_context_features) for encoded in encoded_contexts
         ],
-        public_run_contexts=[{} for _ in batch.snapshot_features],
+        public_context_missingness_summary=[
+            dict(encoded.public_context_missingness_summary)
+            for encoded in encoded_contexts
+        ],
         problems=problems,
     )
 
@@ -450,6 +546,24 @@ def _model_input_shape_problems(batch: ModelInputBatch) -> list[str]:
                     require_candidate_actions=True,
                 )
             )
+    problems.extend(
+        public_context_model_input_problems(
+            public_context_feature_schema_id=batch.public_context_feature_schema_id,
+            public_context_feature_schema_version=(
+                batch.public_context_feature_schema_version
+            ),
+            public_context_feature_size=batch.public_context_feature_size,
+            public_context_feature_names=batch.public_context_feature_names,
+            public_context_features=batch.public_context_features,
+            public_context_missingness_summary=(
+                batch.public_context_missingness_summary
+            ),
+            expected_rows=example_count,
+        )
+    )
+    for index, summary in enumerate(batch.public_context_missingness_summary):
+        for problem in summary.get("problems", []):
+            problems.append(f"example {index}: public context model input: {problem}")
 
     for index, snapshot_features in enumerate(batch.snapshot_features):
         _validate_feature_row(

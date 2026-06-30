@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import sts_combat_rl.sim as sim
 
-EXPECTED_SIM_EXPORT_COUNT = 323
+EXPECTED_SIM_EXPORT_COUNT = 336
 KEY_COMPATIBILITY_EXPORTS = {
     "ActionSpaceConfig",
     "BattleStartCheckpointRecord",

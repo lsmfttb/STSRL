@@ -268,6 +268,10 @@ def build_pytorch_search_guidance_training_data_provenance(
     from sts_combat_rl.sim.torch_policy_value import (
         HP_TARGET_KIND,
         OUTCOME_TARGET_KIND,
+        PUBLIC_CONTEXT_FEATURE_NAMES,
+        PUBLIC_CONTEXT_FEATURE_SCHEMA_ID,
+        PUBLIC_CONTEXT_FEATURE_SCHEMA_VERSION,
+        PUBLIC_CONTEXT_FEATURE_SIZE,
         RESOURCE_TARGET_NAMES,
         STRUCTURED_RESOURCE_TARGET_KIND,
     )
@@ -296,6 +300,12 @@ def build_pytorch_search_guidance_training_data_provenance(
         ),
         "target_source_summary": {
             **_policy_target_source_summary(dataset.records),
+            "public_context_feature_schema_id": PUBLIC_CONTEXT_FEATURE_SCHEMA_ID,
+            "public_context_feature_schema_version": (
+                PUBLIC_CONTEXT_FEATURE_SCHEMA_VERSION
+            ),
+            "public_context_feature_size": PUBLIC_CONTEXT_FEATURE_SIZE,
+            "public_context_feature_names": list(PUBLIC_CONTEXT_FEATURE_NAMES),
             "outcome_target_kind": OUTCOME_TARGET_KIND,
             "outcome_target_source": (
                 "trainer_input_record.structured_battle_outcome.battle_survived"
