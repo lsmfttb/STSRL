@@ -72,6 +72,8 @@ ORACLE_TEACHER_SEARCH_GUIDANCE_STABILITY_FILTERS = ("none",)
 POLICY_TARGET_SOURCE_ORACLE_TEACHER_ACTION = "oracle_teacher_row.teacher_action"
 POLICY_TARGET_SOURCE_ORACLE_SOFT_VISIT = "oracle_teacher_row.soft_visit_target"
 TERMINAL_STEP_REWARD_ALLOCATION = "terminal_step"
+ORACLE_TEACHER_SEARCH_GUIDANCE_NATURAL_TASK_ID = "T024"
+ORACLE_TEACHER_SEARCH_GUIDANCE_ASSISTED_TASK_ID = "T043"
 EVIDENCE_BOUNDARY = {
     "information_regime": "full_simulator_state_oracle_like",
     "not_normal_information": True,
@@ -83,7 +85,7 @@ EVIDENCE_BOUNDARY = {
 
 @dataclass(frozen=True)
 class OracleTeacherSearchGuidanceBridgeReport:
-    """Machine-readable report for one T024 bridge conversion."""
+    """Machine-readable report for one teacher search-guidance bridge conversion."""
 
     selected_budget: int
     requested_target: str
@@ -307,7 +309,7 @@ def build_oracle_teacher_search_guidance_dataset(
         structured_battle_outcome_schema_id=BATTLE_RESOURCE_OUTCOME_SCHEMA_ID,
         structured_battle_outcome_schema_version=BATTLE_RESOURCE_OUTCOME_SCHEMA_VERSION,
         generation_metadata={
-            "task_id": "T024",
+            "task_id": oracle_teacher_search_guidance_task_id_for_manifest(manifest),
             "workflow": "oracle_teacher_search_guidance_bridge",
             "source_pool_kind": _source_pool_artifact_key(manifest),
             "selected_budget": selected_budget,
@@ -735,6 +737,17 @@ def _manifest_source_pool_artifact(
 def _source_pool_artifact_key(manifest: Mapping[str, Any]) -> str:
     key, _ = _manifest_source_pool_artifact(manifest)
     return key
+
+
+def oracle_teacher_search_guidance_task_id_for_manifest(
+    manifest: Mapping[str, Any],
+) -> str:
+    """Return the task provenance for the bridge output described by manifest."""
+
+    source_pool_kind = _source_pool_artifact_key(manifest)
+    if source_pool_kind == "assisted_pool":
+        return ORACLE_TEACHER_SEARCH_GUIDANCE_ASSISTED_TASK_ID
+    return ORACLE_TEACHER_SEARCH_GUIDANCE_NATURAL_TASK_ID
 
 
 def _append_identity_match_problem(

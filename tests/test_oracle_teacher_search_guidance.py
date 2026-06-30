@@ -36,6 +36,10 @@ from sts_combat_rl.sim.oracle_teacher_scaleup import (
     ORACLE_TEACHER_SCALEUP_MANIFEST_FORMAT_VERSION,
     ORACLE_TEACHER_SCALEUP_MANIFEST_SCHEMA_ID,
 )
+from sts_combat_rl.sim.oracle_teacher_search_guidance import (
+    ORACLE_TEACHER_SEARCH_GUIDANCE_ASSISTED_TASK_ID,
+    ORACLE_TEACHER_SEARCH_GUIDANCE_NATURAL_TASK_ID,
+)
 from sts_combat_rl.sim.public_run_context import build_public_run_context
 from sts_combat_rl.sim.resource_outcome import (
     available_battle_resource_outcome,
@@ -92,6 +96,9 @@ def test_bridge_converts_teacher_action_target_and_writes_report(
     assert record.behavior_action_status == "unavailable"
     assert record.controller_provenance["config"]["information_regime"] == (
         "full_simulator_state_oracle_like"
+    )
+    assert dataset.generation_metadata["task_id"] == (
+        ORACLE_TEACHER_SEARCH_GUIDANCE_NATURAL_TASK_ID
     )
     assert record.source_metadata["teacher_budget"] == 100
     assert report_json["trainer_artifact_identity"]["sha256"] == _sha256_file(
@@ -187,6 +194,9 @@ def test_bridge_loads_assisted_pool_and_preserves_assistance_metadata(
     assert (
         record.source_metadata["sampling_component"] == ASSISTED_RUN_DISTRIBUTION_KIND
     )
+    assert dataset.generation_metadata["task_id"] == (
+        ORACLE_TEACHER_SEARCH_GUIDANCE_ASSISTED_TASK_ID
+    )
     assert dataset.generation_metadata["source_pool_kind"] == "assisted_pool"
     assert dataset.generation_metadata["source_group_summary"][
         "assistance_level_counts"
@@ -223,8 +233,18 @@ def test_bridge_fails_closed_for_manifest_teacher_sha_mismatch(
     )
 
 
+@pytest.mark.parametrize(
+    ("assisted", "expected_task_id", "expected_source_pool_kind"),
+    [
+        (False, ORACLE_TEACHER_SEARCH_GUIDANCE_NATURAL_TASK_ID, "natural_pool"),
+        (True, ORACLE_TEACHER_SEARCH_GUIDANCE_ASSISTED_TASK_ID, "assisted_pool"),
+    ],
+)
 def test_bridge_optional_checkpoint_records_teacher_target_provenance(
     tmp_path: Path,
+    assisted: bool,
+    expected_task_id: str,
+    expected_source_pool_kind: str,
 ) -> None:
     pytest.importorskip("torch")
     from sts_combat_rl.sim.torch_policy_value import (
@@ -232,7 +252,10 @@ def test_bridge_optional_checkpoint_records_teacher_target_provenance(
         load_torch_policy_value_checkpoint,
     )
 
-    manifest_path, trainer_path, report_path = _write_artifact_chain(tmp_path)
+    manifest_path, trainer_path, report_path = _write_artifact_chain(
+        tmp_path,
+        assisted=assisted,
+    )
     checkpoint_path = tmp_path / "teacher-guidance.pt"
 
     report = run_oracle_teacher_search_guidance_from_paths(
@@ -255,6 +278,8 @@ def test_bridge_optional_checkpoint_records_teacher_target_provenance(
 
     assert report.command_passed
     assert checkpoint_path.exists()
+    assert loaded.metadata["task_id"] == expected_task_id
+    assert loaded.metadata["source_pool_kind"] == expected_source_pool_kind
     assert (
         loaded.training_data_provenance["target_source_summary"]["policy_target_kind"]
         == POLICY_TARGET_KIND_ORACLE_TEACHER_ACTION

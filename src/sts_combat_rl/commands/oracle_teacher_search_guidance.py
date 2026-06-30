@@ -1,4 +1,4 @@
-"""Focused T024 workflow for Oracle teacher search-guidance training input."""
+"""Oracle teacher search-guidance trainer/checkpoint artifact workflow."""
 
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ def run_oracle_teacher_search_guidance_from_paths(
     gate_config: TrainingScaleGateConfig | None = None,
     gate_override: str = "none",
 ) -> OracleTeacherSearchGuidanceBridgeReport:
-    """Convert one T023 budget artifact and optionally train a checkpoint."""
+    """Convert one teacher budget artifact and optionally train a checkpoint."""
 
     manifest_bytes = manifest_path.read_bytes()
     with manifest_path.open("r", encoding="utf-8") as stream:
@@ -224,7 +224,9 @@ def _train_optional_checkpoint(
                 )
             ),
             metadata={
-                "task_id": "T024",
+                "task_id": dataset.generation_metadata.get("task_id"),
+                "workflow": dataset.generation_metadata.get("workflow"),
+                "source_pool_kind": dataset.generation_metadata.get("source_pool_kind"),
                 "checkpoint_role": "oracle_teacher_search_guidance_diagnostic",
                 "evidence_boundary": {
                     "information_regime": "full_simulator_state_oracle_like",
