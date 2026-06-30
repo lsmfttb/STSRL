@@ -11,7 +11,15 @@ import pytest
 
 from sts_combat_rl.commands.oracle_teacher_scaleup import (
     ORACLE_TEACHER_SCALEUP_MANIFEST_FILENAME,
+    run_assisted_oracle_teacher_scaleup_from_paths,
     run_oracle_teacher_scaleup_from_paths,
+)
+from sts_combat_rl.sim.assisted_source_generation import (
+    ASSISTED_RUN_DISTRIBUTION_KIND,
+    ASSIST_LEVEL_0,
+    AssistedSourcePoolArtifact,
+    assistance_schedule_by_level,
+    dump_assisted_source_pool_jsonl,
 )
 from sts_combat_rl.sim.a20_battle_start_coverage import (
     build_a20_battle_start_coverage_report,
@@ -43,6 +51,7 @@ from sts_combat_rl.sim.oracle_teacher_scaleup import (
     T032_T039_ACT2_SOURCE_COUNT,
     T032_T039_NARROW_SELECTION_CONTRACT_ID,
     build_t032_t039_narrow_source_selection_plan,
+    build_assisted_oracle_teacher_source_selection_plan,
     build_oracle_teacher_scaleup_manifest,
     build_oracle_teacher_source_selection_plan,
     dump_oracle_teacher_scaleup_manifest_json,
@@ -144,6 +153,25 @@ def test_source_selection_fails_closed_for_bad_source_identity() -> None:
     )
     assert any("source is not A20" in problem for problem in plan.problems)
     assert any("information regime" in problem for problem in plan.problems)
+
+
+def test_assisted_source_selection_preserves_assistance_groups() -> None:
+    artifact = _assisted_artifact(record_count=3)
+
+    plan = build_assisted_oracle_teacher_source_selection_plan(
+        artifact.pool,
+        selection_seed=11,
+        source_limit=2,
+    )
+
+    assert plan.passed
+    assert plan.selection_method == "seeded_uniform_assisted_run_source_sample"
+    assert plan.structural_coverage["distribution_kinds"] == {"assisted_run": 2}
+    assert plan.structural_coverage["assistance_levels"] == {ASSIST_LEVEL_0: 2}
+    assert all(
+        source["distribution_kind"] == ASSISTED_RUN_DISTRIBUTION_KIND
+        for source in plan.selected_sources
+    )
 
 
 def test_t032_t039_narrow_selection_keeps_rare_sources_and_samples_background() -> None:
@@ -538,6 +566,47 @@ def test_command_workflow_loads_migrated_v3_pool(tmp_path: Path) -> None:
     assert manifest.source_selection.selected_checkpoint_ids == ("checkpoint-0",)
 
 
+def test_assisted_command_workflow_writes_teacher_reports_and_manifest(
+    tmp_path: Path,
+) -> None:
+    artifact = _assisted_artifact(record_count=1)
+    pool_path = tmp_path / "assisted-pool.jsonl"
+    coverage_path = tmp_path / "assisted-coverage.json"
+    output_dir = tmp_path / "assisted-scaleup"
+    _write_assisted_pool(pool_path, artifact)
+    _write_coverage(coverage_path, pool_path, artifact.pool)
+
+    manifest = run_assisted_oracle_teacher_scaleup_from_paths(
+        adapter_factory=_ScaleupAdapter,
+        pool_path=pool_path,
+        output_dir=output_dir,
+        budgets=[20],
+        source_limit=1,
+        selection_seed=1,
+        coverage_report_path=coverage_path,
+        root_selection_rule="highest_mean",
+    )
+    manifest_json = json.loads(
+        (output_dir / ORACLE_TEACHER_SCALEUP_MANIFEST_FILENAME).read_text(
+            encoding="utf-8"
+        )
+    )
+
+    assert manifest.command_passed
+    assert "assisted_pool" in manifest.input_artifacts
+    assert manifest.input_artifacts["assisted_pool"]["assistance_level"] == (
+        ASSIST_LEVEL_0
+    )
+    assert manifest.source_selection.selection_method == (
+        "all_assisted_run_sources_sorted_limit_exceeds_count"
+    )
+    assert manifest_json["input_artifacts"]["assisted_pool"]["distribution_kind"] == (
+        "assisted_run"
+    )
+    assert (output_dir / "oracle-teacher-budget-20.jsonl").exists()
+    assert (output_dir / "oracle-teacher-report-budget-20.json").exists()
+
+
 def test_command_workflow_rejects_t021_source_pool_mismatch(
     tmp_path: Path,
 ) -> None:
@@ -667,6 +736,25 @@ def _custom_pool(records: list[BattleStartCheckpointRecord]) -> NaturalBattleSta
     )
 
 
+def _assisted_artifact(*, record_count: int) -> AssistedSourcePoolArtifact:
+    schedule = assistance_schedule_by_level(ASSIST_LEVEL_0)
+    records = [_assisted_record(index) for index in range(record_count)]
+    decisions = tuple(record.assistance_history[-1] for record in records)
+    return AssistedSourcePoolArtifact(
+        pool=NaturalBattleStartPool(
+            source_run_count=record_count,
+            terminal_run_count=record_count,
+            truncated_run_count=0,
+            source_controller_provenance=_provenance("routed"),
+            records=records,
+        ),
+        assistance_level=ASSIST_LEVEL_0,
+        assistance_schedule=schedule,
+        policy_seed=1,
+        assistance_decisions=decisions,
+    )
+
+
 def _record(index: int) -> BattleStartCheckpointRecord:
     snapshot = _snapshot(index)
     return BattleStartCheckpointRecord(
@@ -687,6 +775,68 @@ def _record(index: int) -> BattleStartCheckpointRecord:
         public_context_status="legacy_unavailable",
         public_run_context={},
     )
+
+
+def _assisted_record(index: int) -> BattleStartCheckpointRecord:
+    record = _record(index)
+    schedule = assistance_schedule_by_level(ASSIST_LEVEL_0)
+    decision = _assistance_decision(record, schedule=schedule)
+    metadata = {
+        **record.structural_metadata,
+        "source_kind": ASSISTED_RUN_DISTRIBUTION_KIND,
+        "distribution_kind": ASSISTED_RUN_DISTRIBUTION_KIND,
+        "assistance_level": schedule.level,
+        "assistance_version": schedule.version,
+        "distribution_tag": schedule.distribution_tag,
+        "source_checkpoint_id": record.source_checkpoint_id,
+    }
+    return replace(
+        record,
+        structural_metadata=metadata,
+        distribution_kind=ASSISTED_RUN_DISTRIBUTION_KIND,
+        assistance_history=(decision,),
+    )
+
+
+def _assistance_decision(
+    record: BattleStartCheckpointRecord,
+    *,
+    schedule: object,
+) -> dict[str, object]:
+    resources = {
+        "current_hp": record.snapshot_raw.get("cur_hp"),
+        "max_hp": record.snapshot_raw.get("max_hp"),
+        "potion_count": 0,
+        "potion_capacity": 0,
+    }
+    return {
+        "assistance_version": schedule.version,
+        "assistance_level": schedule.level,
+        "policy_seed": 1,
+        "distribution_kind": ASSISTED_RUN_DISTRIBUTION_KIND,
+        "information_regime": CHECKPOINT_INFORMATION_REGIME,
+        "source_run_id": record.source_run_id,
+        "source_seed": record.source_seed,
+        "source_battle_index": record.source_battle_index,
+        "source_checkpoint_id": record.source_checkpoint_id,
+        "source_record_index": record.record_index,
+        "before_resources": resources,
+        "requested_change": {
+            "reason": "assist_0_no_assistance",
+            "hp_bonus": 0,
+            "add_random_potion": False,
+            "native_rebuild_requested": False,
+        },
+        "actual_change": {
+            "applied": False,
+            "reason": "native_rebuild_no_visible_change",
+            "current_hp_delta": 0,
+            "potion_count_delta": 0,
+            "native_rebuild_called": False,
+        },
+        "after_resources": resources,
+        "native_support_status": "supported",
+    }
 
 
 def _custom_record(
@@ -811,6 +961,11 @@ def _raw_search(simulations: int) -> dict[str, object]:
 def _write_pool(path: Path, pool: NaturalBattleStartPool) -> None:
     with path.open("w", encoding="utf-8", newline="\n") as stream:
         dump_natural_battle_start_pool_jsonl(pool, stream)
+
+
+def _write_assisted_pool(path: Path, artifact: AssistedSourcePoolArtifact) -> None:
+    with path.open("w", encoding="utf-8", newline="\n") as stream:
+        dump_assisted_source_pool_jsonl(artifact, stream)
 
 
 def _write_v3_pool(path: Path) -> None:

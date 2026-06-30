@@ -72,6 +72,8 @@ ORACLE_TEACHER_SEARCH_GUIDANCE_STABILITY_FILTERS = ("none",)
 POLICY_TARGET_SOURCE_ORACLE_TEACHER_ACTION = "oracle_teacher_row.teacher_action"
 POLICY_TARGET_SOURCE_ORACLE_SOFT_VISIT = "oracle_teacher_row.soft_visit_target"
 TERMINAL_STEP_REWARD_ALLOCATION = "terminal_step"
+ORACLE_TEACHER_SEARCH_GUIDANCE_NATURAL_TASK_ID = "T024"
+ORACLE_TEACHER_SEARCH_GUIDANCE_ASSISTED_TASK_ID = "T043"
 EVIDENCE_BOUNDARY = {
     "information_regime": "full_simulator_state_oracle_like",
     "not_normal_information": True,
@@ -83,7 +85,7 @@ EVIDENCE_BOUNDARY = {
 
 @dataclass(frozen=True)
 class OracleTeacherSearchGuidanceBridgeReport:
-    """Machine-readable report for one T024 bridge conversion."""
+    """Machine-readable report for one teacher search-guidance bridge conversion."""
 
     selected_budget: int
     requested_target: str
@@ -104,6 +106,7 @@ class OracleTeacherSearchGuidanceBridgeReport:
     behavior_action_availability: dict[str, int] = field(default_factory=dict)
     structured_outcome_availability: dict[str, int] = field(default_factory=dict)
     public_context_availability: dict[str, int] = field(default_factory=dict)
+    source_group_summary: dict[str, Any] = field(default_factory=dict)
     information_regime_summary: dict[str, Any] = field(default_factory=dict)
     training_gate_override: str = "none"
     broad_training_gate_status: dict[str, Any] = field(default_factory=dict)
@@ -153,6 +156,7 @@ class OracleTeacherSearchGuidanceBridgeReport:
             "public_context_availability": _counter_dict(
                 self.public_context_availability
             ),
+            "source_group_summary": _json_safe_mapping(self.source_group_summary),
             "information_regime_summary": _json_safe_mapping(
                 self.information_regime_summary
             ),
@@ -305,8 +309,9 @@ def build_oracle_teacher_search_guidance_dataset(
         structured_battle_outcome_schema_id=BATTLE_RESOURCE_OUTCOME_SCHEMA_ID,
         structured_battle_outcome_schema_version=BATTLE_RESOURCE_OUTCOME_SCHEMA_VERSION,
         generation_metadata={
-            "task_id": "T024",
+            "task_id": oracle_teacher_search_guidance_task_id_for_manifest(manifest),
             "workflow": "oracle_teacher_search_guidance_bridge",
+            "source_pool_kind": _source_pool_artifact_key(manifest),
             "selected_budget": selected_budget,
             "requested_target": target,
             "policy_target_kind": policy_target_kind,
@@ -317,6 +322,7 @@ def build_oracle_teacher_search_guidance_dataset(
             "teacher_artifact_identity": _json_safe_mapping(teacher_artifact_identity),
             "t022_report_identity": _json_safe_mapping(t022_report_identity),
             "source_pool_identity": _json_safe_mapping(source_pool_identity),
+            "source_group_summary": _source_group_summary(records),
         },
         records=records,
         problems=[],
@@ -344,6 +350,7 @@ def build_oracle_teacher_search_guidance_dataset(
         behavior_action_availability=dict(sorted(behavior_counts.items())),
         structured_outcome_availability=dict(sorted(outcome_counts.items())),
         public_context_availability=dict(sorted(public_context_counts.items())),
+        source_group_summary=_source_group_summary(records),
         information_regime_summary=_information_regime_summary(
             teacher_dataset,
             records,
@@ -437,6 +444,15 @@ def format_oracle_teacher_search_guidance_bridge_report(
         "public-context statuses",
         report.public_context_availability,
     )
+    lines.append("source groups:")
+    for key in sorted(report.source_group_summary):
+        value = report.source_group_summary[key]
+        if isinstance(value, Mapping):
+            lines.append(f"  {key}:")
+            for nested_key in sorted(value, key=str):
+                lines.append(f"    {nested_key}: {value[nested_key]}")
+        else:
+            lines.append(f"  {key}: {value}")
     lines.extend(
         [
             "policy target coverage:",
@@ -678,9 +694,7 @@ def _manifest_identity_problems(
         return problems
     teacher = _mapping(artifact.get("teacher_artifact"))
     report = _mapping(artifact.get("t022_report_artifact"))
-    natural_pool = _mapping(
-        _mapping(manifest.get("input_artifacts")).get("natural_pool")
-    )
+    pool_key, pool_artifact = _manifest_source_pool_artifact(manifest)
     _append_identity_match_problem(
         problems,
         "teacher artifact",
@@ -693,16 +707,47 @@ def _manifest_identity_problems(
         report.get("sha256"),
         t022_report_identity.get("sha256"),
     )
-    if not natural_pool:
-        problems.append("T023 manifest is missing natural_pool source identity")
+    if not pool_artifact:
+        problems.append("T023/T043 manifest is missing source pool identity")
     else:
         _append_identity_match_problem(
             problems,
-            "source pool artifact",
-            natural_pool.get("sha256"),
+            f"{pool_key} artifact",
+            pool_artifact.get("sha256"),
             source_pool_identity.get("sha256"),
         )
     return problems
+
+
+def _manifest_source_pool_artifact(
+    manifest: Mapping[str, Any],
+) -> tuple[str, dict[str, Any]]:
+    input_artifacts = _mapping(manifest.get("input_artifacts"))
+    natural_pool = _mapping(input_artifacts.get("natural_pool"))
+    assisted_pool = _mapping(input_artifacts.get("assisted_pool"))
+    if natural_pool and assisted_pool:
+        return "multiple_source_pools", {}
+    if assisted_pool:
+        return "assisted_pool", assisted_pool
+    if natural_pool:
+        return "natural_pool", natural_pool
+    return "missing_source_pool", {}
+
+
+def _source_pool_artifact_key(manifest: Mapping[str, Any]) -> str:
+    key, _ = _manifest_source_pool_artifact(manifest)
+    return key
+
+
+def oracle_teacher_search_guidance_task_id_for_manifest(
+    manifest: Mapping[str, Any],
+) -> str:
+    """Return the task provenance for the bridge output described by manifest."""
+
+    source_pool_kind = _source_pool_artifact_key(manifest)
+    if source_pool_kind == "assisted_pool":
+        return ORACLE_TEACHER_SEARCH_GUIDANCE_ASSISTED_TASK_ID
+    return ORACLE_TEACHER_SEARCH_GUIDANCE_NATURAL_TASK_ID
 
 
 def _append_identity_match_problem(
@@ -863,6 +908,37 @@ def _information_regime_summary(
                 for record in records
             )
         ),
+    }
+
+
+def _source_group_summary(records: Sequence[TrainerInputRecord]) -> dict[str, Any]:
+    assistance_levels = Counter()
+    distribution_kinds = Counter()
+    acts = Counter()
+    room_types = Counter()
+    encounters = Counter()
+    assistance_act_room = Counter()
+    for record in records:
+        metadata = _mapping(record.source_metadata)
+        assistance = str(metadata.get("assistance_level") or "unassisted_or_missing")
+        distribution = str(metadata.get("distribution_kind") or "missing")
+        act = str(metadata.get("act") or "missing")
+        room_type = str(metadata.get("room_type") or "missing")
+        encounter = str(metadata.get("encounter_id") or "missing")
+        assistance_levels[assistance] += 1
+        distribution_kinds[distribution] += 1
+        acts[act] += 1
+        room_types[room_type] += 1
+        encounters[encounter] += 1
+        assistance_act_room[f"{assistance}/act{act}/{room_type}"] += 1
+    return {
+        "record_count": len(records),
+        "assistance_level_counts": _counter_dict(assistance_levels),
+        "distribution_kind_counts": _counter_dict(distribution_kinds),
+        "act_counts": _counter_dict(acts),
+        "room_type_counts": _counter_dict(room_types),
+        "encounter_id_counts": _counter_dict(encounters),
+        "assistance_act_room_counts": _counter_dict(assistance_act_room),
     }
 
 

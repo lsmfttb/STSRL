@@ -240,11 +240,11 @@ def format_oracle_teacher_dataset_audit_report(
     lines.extend(
         [
             "",
-            "teacher natural source coverage",
+            "teacher source coverage",
             f"  teacher rows: {coverage.get('teacher_row_count')}",
-            f"  unique natural sources: {coverage.get('unique_source_start_count')}",
+            f"  unique sources: {coverage.get('unique_source_start_count')}",
             "  root rows and visits are search statistics only; they do not add "
-            "natural source coverage",
+            "source coverage",
         ]
     )
     _append_counter(lines, "  ascensions", coverage["ascension_counts"])
@@ -256,6 +256,16 @@ def format_oracle_teacher_dataset_audit_report(
         lines,
         "  source checkpoints",
         coverage["source_checkpoint_id_counts"],
+    )
+    _append_counter(
+        lines,
+        "  source distribution kinds",
+        coverage["source_distribution_kind_counts"],
+    )
+    _append_counter(
+        lines,
+        "  assistance levels",
+        coverage["assistance_level_counts"],
     )
     _append_counter(
         lines,
@@ -429,6 +439,8 @@ def _teacher_coverage_summary(
     counters: dict[str, Counter[str]] = {
         field_name: Counter() for field_name in _STRUCTURAL_FIELDS
     }
+    distribution_kinds = Counter()
+    assistance_levels = Counter()
     missing = Counter()
     strata = Counter()
     problems: list[str] = []
@@ -448,6 +460,13 @@ def _teacher_coverage_summary(
                 text = str(value)
                 counters[field_name][text] += 1
                 stratum_values.append(text)
+        distribution_kinds[str(row.source_distribution_kind or _MISSING)] += 1
+        assistance_levels[
+            str(
+                row.structural_metadata.get("assistance_level")
+                or "unassisted_or_missing"
+            )
+        ] += 1
         strata["/".join(stratum_values)] += 1
     return (
         {
@@ -464,6 +483,8 @@ def _teacher_coverage_summary(
             "source_checkpoint_id_counts": _counter_dict(
                 counters["source_checkpoint_id"]
             ),
+            "source_distribution_kind_counts": _counter_dict(distribution_kinds),
+            "assistance_level_counts": _counter_dict(assistance_levels),
             "per_stratum_counts": _counter_dict(strata),
             "missing_metadata_counts": _counter_dict(missing),
         },

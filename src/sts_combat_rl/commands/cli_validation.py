@@ -6,6 +6,7 @@ import argparse
 import math
 
 from sts_combat_rl.sim.oracle_teacher_scaleup import (
+    ORACLE_TEACHER_SCALEUP_SOURCE_SELECTION_ASSISTED_SEEDED_UNIFORM,
     ORACLE_TEACHER_SCALEUP_SOURCE_SELECTION_SEEDED_UNIFORM,
     T032_T039_BACKGROUND_SOURCE_COUNT,
 )
@@ -125,15 +126,13 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
             "--lightspeed-model-guided-search-fixed-comparison or "
             "--lightspeed-model-guided-search-v2-fixed-comparison"
         )
-    if (
+    teacher_scaleup_requested = (
         args.lightspeed_a20_oracle_teacher_scaleup is not None
-        and args.oracle_teacher_scaleup_output_dir is None
-    ):
-        return (
-            "--lightspeed-a20-oracle-teacher-scaleup requires "
-            "--oracle-teacher-scaleup-output-dir"
-        )
-    if args.lightspeed_a20_oracle_teacher_scaleup is None and (
+        or args.lightspeed_a20_assisted_oracle_teacher_scaleup is not None
+    )
+    if teacher_scaleup_requested and args.oracle_teacher_scaleup_output_dir is None:
+        return "Oracle teacher scale-up requires --oracle-teacher-scaleup-output-dir"
+    if not teacher_scaleup_requested and (
         args.oracle_teacher_scaleup_output_dir is not None
         or args.oracle_teacher_scaleup_source_limit is not None
         or args.oracle_teacher_scaleup_coverage_report is not None
@@ -148,7 +147,29 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
             "--oracle-teacher-scaleup-coverage-report, "
             "--oracle-teacher-scaleup-source-selection, and "
             "--oracle-teacher-scaleup-background-count require "
-            "--lightspeed-a20-oracle-teacher-scaleup"
+            "--lightspeed-a20-oracle-teacher-scaleup or "
+            "--lightspeed-a20-assisted-oracle-teacher-scaleup"
+        )
+    if (
+        args.lightspeed_a20_oracle_teacher_scaleup is not None
+        and args.oracle_teacher_scaleup_source_selection
+        == ORACLE_TEACHER_SCALEUP_SOURCE_SELECTION_ASSISTED_SEEDED_UNIFORM
+    ):
+        return (
+            "--oracle-teacher-scaleup-source-selection assisted_seeded_uniform "
+            "requires --lightspeed-a20-assisted-oracle-teacher-scaleup"
+        )
+    if (
+        args.lightspeed_a20_assisted_oracle_teacher_scaleup is not None
+        and args.oracle_teacher_scaleup_source_selection
+        not in {
+            ORACLE_TEACHER_SCALEUP_SOURCE_SELECTION_SEEDED_UNIFORM,
+            ORACLE_TEACHER_SCALEUP_SOURCE_SELECTION_ASSISTED_SEEDED_UNIFORM,
+        }
+    ):
+        return (
+            "--lightspeed-a20-assisted-oracle-teacher-scaleup supports only "
+            "seeded_uniform or assisted_seeded_uniform source selection"
         )
     if (
         args.lightspeed_a20_oracle_teacher_scaleup is not None

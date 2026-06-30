@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 import hashlib
 from pathlib import Path
 from typing import Any
 
-from sts_combat_rl.commands.oracle_teacher_report import (
-    run_oracle_teacher_dataset_report_from_paths,
+from sts_combat_rl.sim.assisted_source_generation import (
+    ASSISTED_SOURCE_POOL_SCHEMA_ID,
+    ASSISTED_SOURCE_POOL_FORMAT_VERSION,
+    load_assisted_source_pool_jsonl,
 )
 from sts_combat_rl.sim.action_space import ActionSpaceConfig
 from sts_combat_rl.sim.battle_start_pool import (
@@ -23,11 +25,17 @@ from sts_combat_rl.sim.oracle_teacher import (
     dump_oracle_teacher_dataset_jsonl,
 )
 from sts_combat_rl.sim.oracle_teacher_report import load_a20_coverage_report_json
+from sts_combat_rl.sim.oracle_teacher_report import (
+    build_oracle_teacher_dataset_audit_report,
+    dump_oracle_teacher_dataset_audit_report_json,
+)
 from sts_combat_rl.sim.oracle_teacher_scaleup import (
+    ORACLE_TEACHER_SCALEUP_SOURCE_SELECTION_ASSISTED_SEEDED_UNIFORM,
     ORACLE_TEACHER_SCALEUP_SOURCE_SELECTION_SEEDED_UNIFORM,
     ORACLE_TEACHER_SCALEUP_SOURCE_SELECTION_T032_T039_NARROW,
     T032_T039_BACKGROUND_SOURCE_COUNT,
     OracleTeacherScaleupManifest,
+    build_assisted_oracle_teacher_source_selection_plan,
     build_t032_t039_narrow_source_selection_plan,
     build_oracle_teacher_scaleup_manifest,
     build_oracle_teacher_source_selection_plan,
@@ -57,13 +65,82 @@ def run_oracle_teacher_scaleup_from_paths(
 ) -> OracleTeacherScaleupManifest:
     """Collect teacher datasets and T022 reports for one fixed selected source set."""
 
-    requested_budgets = validate_oracle_teacher_scaleup_budgets(budgets)
-    output_dir.mkdir(parents=True, exist_ok=True)
     with pool_path.open("r", encoding="utf-8") as stream:
         pool = load_natural_battle_start_pool_jsonl(stream)
     pool_identity = _source_pool_identity(pool_path, pool)
+    return _run_oracle_teacher_scaleup_for_pool(
+        adapter_factory=adapter_factory,
+        pool=pool,
+        pool_identity=pool_identity,
+        pool_artifact_key="natural_pool",
+        output_dir=output_dir,
+        budgets=budgets,
+        source_limit=source_limit,
+        selection_seed=selection_seed,
+        source_selection_mode=source_selection_mode,
+        background_source_count=background_source_count,
+        coverage_report_path=coverage_report_path,
+        root_selection_rule=root_selection_rule,
+        action_space=action_space,
+    )
+
+
+def run_assisted_oracle_teacher_scaleup_from_paths(
+    *,
+    adapter_factory: Callable[[], CheckpointingSimulatorAdapter],
+    pool_path: Path,
+    output_dir: Path,
+    budgets: Sequence[int],
+    source_limit: int | None,
+    selection_seed: int,
+    coverage_report_path: Path | None = None,
+    root_selection_rule: str = "highest_mean",
+    action_space: ActionSpaceConfig | None = None,
+) -> OracleTeacherScaleupManifest:
+    """Collect T043 teacher datasets from one explicit T042 assisted source pool."""
+
+    with pool_path.open("r", encoding="utf-8") as stream:
+        artifact = load_assisted_source_pool_jsonl(stream)
+    pool = artifact.pool
+    pool_identity = _assisted_source_pool_identity(pool_path, artifact)
+    return _run_oracle_teacher_scaleup_for_pool(
+        adapter_factory=adapter_factory,
+        pool=pool,
+        pool_identity=pool_identity,
+        pool_artifact_key="assisted_pool",
+        output_dir=output_dir,
+        budgets=budgets,
+        source_limit=source_limit,
+        selection_seed=selection_seed,
+        source_selection_mode=ORACLE_TEACHER_SCALEUP_SOURCE_SELECTION_ASSISTED_SEEDED_UNIFORM,
+        background_source_count=T032_T039_BACKGROUND_SOURCE_COUNT,
+        coverage_report_path=coverage_report_path,
+        root_selection_rule=root_selection_rule,
+        action_space=action_space,
+    )
+
+
+def _run_oracle_teacher_scaleup_for_pool(
+    *,
+    adapter_factory: Callable[[], CheckpointingSimulatorAdapter],
+    pool: NaturalBattleStartPool,
+    pool_identity: dict[str, Any],
+    pool_artifact_key: str,
+    output_dir: Path,
+    budgets: Sequence[int],
+    source_limit: int | None,
+    selection_seed: int,
+    source_selection_mode: str,
+    background_source_count: int,
+    coverage_report_path: Path | None,
+    root_selection_rule: str,
+    action_space: ActionSpaceConfig | None,
+) -> OracleTeacherScaleupManifest:
+    requested_budgets = validate_oracle_teacher_scaleup_budgets(budgets)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     coverage_identity: dict[str, Any] | None = None
+    coverage_report: dict[str, Any] | None = None
     if coverage_report_path is not None:
         with coverage_report_path.open("r", encoding="utf-8") as stream:
             coverage_report = load_a20_coverage_report_json(stream)
@@ -97,6 +174,15 @@ def run_oracle_teacher_scaleup_from_paths(
             pool,
             selection_seed=selection_seed,
             background_source_count=background_source_count,
+        )
+    elif (
+        source_selection_mode
+        == ORACLE_TEACHER_SCALEUP_SOURCE_SELECTION_ASSISTED_SEEDED_UNIFORM
+    ):
+        source_selection = build_assisted_oracle_teacher_source_selection_plan(
+            pool,
+            selection_seed=selection_seed,
+            source_limit=source_limit,
         )
     else:
         raise ValueError(
@@ -140,11 +226,15 @@ def run_oracle_teacher_scaleup_from_paths(
             dump_oracle_teacher_dataset_jsonl(dataset, stream)
 
         report_path = output_dir / f"oracle-teacher-report-budget-{budget}.json"
-        report = run_oracle_teacher_dataset_report_from_paths(
+        report = _run_loaded_oracle_teacher_dataset_report(
             teacher_path=teacher_path,
-            source_pool_path=pool_path,
-            coverage_report_path=coverage_report_path,
+            dataset=dataset,
+            source_pool=pool,
+            source_pool_identity=pool_identity,
+            coverage_report=coverage_report,
+            coverage_identity=coverage_identity,
             output_path=report_path,
+            source_pool_kind=pool_artifact_key,
         )
         datasets_by_budget[budget] = dataset
         reports_by_budget[budget] = report
@@ -163,7 +253,7 @@ def run_oracle_teacher_scaleup_from_paths(
         if datasets_by_budget
         else lightspeed_source_identity_dict()
     )
-    input_artifacts: dict[str, Any] = {"natural_pool": pool_identity}
+    input_artifacts: dict[str, Any] = {pool_artifact_key: pool_identity}
     if coverage_identity is not None:
         input_artifacts["t021_coverage_report"] = coverage_identity
 
@@ -276,6 +366,73 @@ def _source_pool_identity(
     }
 
 
+def _assisted_source_pool_identity(
+    path: Path,
+    artifact: Any,
+) -> dict[str, Any]:
+    return {
+        "path": str(path),
+        "sha256": _sha256_file(path),
+        "schema_id": ASSISTED_SOURCE_POOL_SCHEMA_ID,
+        "format_version": ASSISTED_SOURCE_POOL_FORMAT_VERSION,
+        "source_pool_format_version": artifact.pool.format_version,
+        "record_count": len(artifact.records),
+        "source_run_count": artifact.pool.source_run_count,
+        "terminal_run_count": artifact.pool.terminal_run_count,
+        "truncated_run_count": artifact.pool.truncated_run_count,
+        "distribution_kind": "assisted_run",
+        "assistance_level": artifact.assistance_level,
+        "assistance_schedule": artifact.assistance_schedule.to_dict(),
+        "source_shard_count": len(artifact.source_shards),
+    }
+
+
+def _run_loaded_oracle_teacher_dataset_report(
+    *,
+    teacher_path: Path,
+    dataset: Any,
+    source_pool: NaturalBattleStartPool,
+    source_pool_identity: Mapping[str, Any],
+    coverage_report: Mapping[str, Any] | None,
+    coverage_identity: Mapping[str, Any] | None,
+    output_path: Path,
+    source_pool_kind: str,
+) -> Any:
+    report = build_oracle_teacher_dataset_audit_report(
+        dataset,
+        teacher_artifact_identity={
+            "path": str(teacher_path),
+            "sha256": _sha256_file(teacher_path),
+            "artifact_schema_id": getattr(dataset, "artifact_schema_id", None),
+            "format_version": getattr(dataset, "format_version", None),
+            "record_count": len(getattr(dataset, "records", [])),
+        },
+        source_pool=source_pool,
+        source_pool_artifact_identity=source_pool_identity,
+        coverage_report=coverage_report,
+        coverage_report_identity=coverage_identity,
+        current_source_manifest_identity=lightspeed_source_identity_dict(),
+        command_config={
+            "source_pool_provided": True,
+            "source_pool_kind": source_pool_kind,
+            "coverage_report_provided": coverage_report is not None,
+            "report_output_requested": True,
+        },
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8", newline="\n") as stream:
+        dump_oracle_teacher_dataset_audit_report_json(report, stream)
+    return report
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _coverage_report_identity(
     path: Path,
     report: dict[str, Any],
@@ -319,11 +476,3 @@ def _coverage_gap_warnings(reports: Sequence[object]) -> list[str]:
                 "T021 broad-training gate remains closed for smoke-scale data"
             )
     return list(dict.fromkeys(warnings))
-
-
-def _sha256_file(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()

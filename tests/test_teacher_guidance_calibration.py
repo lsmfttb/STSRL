@@ -103,6 +103,50 @@ def test_calibration_reports_soft_visit_targets() -> None:
     assert decision["action_score_rows"][1]["target_probability"] == pytest.approx(0.75)
 
 
+def test_calibration_dataset_summary_preserves_assisted_groups() -> None:
+    dataset = _teacher_dataset(POLICY_TARGET_KIND_ORACLE_SOFT_VISIT, count=1)
+    dataset = replace(
+        dataset,
+        records=[
+            replace(
+                dataset.records[0],
+                source_metadata={
+                    **dataset.records[0].source_metadata,
+                    "distribution_kind": "assisted_run",
+                    "assistance_level": "assist_0",
+                    "act": 2,
+                    "room_type": "ELITE",
+                    "encounter_id": "Gremlin Nob",
+                },
+            )
+        ],
+    )
+    identity = _trainer_identity(dataset)
+    scorer = _FixedScorer(
+        _checkpoint_provenance(
+            identity["sha256"],
+            kind=POLICY_TARGET_KIND_ORACLE_SOFT_VISIT,
+            source="oracle_teacher_row.soft_visit_target",
+            count=1,
+        ),
+        probabilities_by_record=[[0.4, 0.6]],
+    )
+
+    report = build_teacher_guidance_calibration_report(
+        dataset,
+        [scorer],
+        trainer_input_artifact_identity=identity,
+    )
+    text = format_teacher_guidance_calibration_report(report, detail_limit=0)
+    groups = report.dataset_summary["source_group_summary"]
+
+    assert groups["assistance_level_counts"] == {"assist_0": 1}
+    assert groups["distribution_kind_counts"] == {"assisted_run": 1}
+    assert groups["assistance_act_room_counts"] == {"assist_0/act2/ELITE": 1}
+    assert "assist_0" in text
+    assert "assisted_run" in text
+
+
 def test_mixed_teacher_target_kinds_fail_closed() -> None:
     teacher = _teacher_dataset(POLICY_TARGET_KIND_ORACLE_TEACHER_ACTION, count=1)
     soft = _teacher_dataset(POLICY_TARGET_KIND_ORACLE_SOFT_VISIT, count=1)

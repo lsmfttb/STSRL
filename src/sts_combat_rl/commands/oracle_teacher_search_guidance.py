@@ -1,4 +1,4 @@
-"""Focused T024 workflow for Oracle teacher search-guidance training input."""
+"""Oracle teacher search-guidance trainer/checkpoint artifact workflow."""
 
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ from typing import Any
 from sts_combat_rl.commands.pytorch_search_guidance import (
     build_pytorch_search_guidance_training_data_provenance,
 )
+from sts_combat_rl.sim.assisted_source_generation import load_assisted_source_pool_jsonl
 from sts_combat_rl.sim.battle_start_pool import load_natural_battle_start_pool_jsonl
 from sts_combat_rl.sim.contract import CheckpointingSimulatorAdapter
 from sts_combat_rl.sim.oracle_teacher import load_oracle_teacher_dataset_jsonl
@@ -44,7 +45,7 @@ def run_oracle_teacher_search_guidance_from_paths(
     gate_config: TrainingScaleGateConfig | None = None,
     gate_override: str = "none",
 ) -> OracleTeacherSearchGuidanceBridgeReport:
-    """Convert one T023 budget artifact and optionally train a checkpoint."""
+    """Convert one teacher budget artifact and optionally train a checkpoint."""
 
     manifest_bytes = manifest_path.read_bytes()
     with manifest_path.open("r", encoding="utf-8") as stream:
@@ -64,14 +65,10 @@ def run_oracle_teacher_search_guidance_from_paths(
             "T022 report path",
         ),
     )
+    source_pool_key, source_pool_artifact = _source_pool_artifact(manifest)
     source_pool_path = _resolve_manifest_path(
         manifest_path,
-        _required_path_string(
-            _mapping(_mapping(manifest.get("input_artifacts")).get("natural_pool")).get(
-                "path"
-            ),
-            "source pool path",
-        ),
+        _required_path_string(source_pool_artifact.get("path"), "source pool path"),
     )
 
     teacher_bytes = teacher_path.read_bytes()
@@ -82,7 +79,25 @@ def run_oracle_teacher_search_guidance_from_paths(
         t022_report = _load_json_object(stream, "T022 report")
     source_pool_bytes = source_pool_path.read_bytes()
     with source_pool_path.open("r", encoding="utf-8") as stream:
-        source_pool = load_natural_battle_start_pool_jsonl(stream)
+        if source_pool_key == "assisted_pool":
+            assisted_artifact = load_assisted_source_pool_jsonl(stream)
+            source_pool = assisted_artifact.pool
+            source_pool_extra_identity = {
+                "schema_id": assisted_artifact.schema_id,
+                "format_version": assisted_artifact.format_version,
+                "source_pool_format_version": assisted_artifact.pool.format_version,
+                "assistance_level": assisted_artifact.assistance_level,
+                "assistance_schedule": (
+                    assisted_artifact.assistance_schedule.to_dict()
+                ),
+                "distribution_kind": "assisted_run",
+                "source_shard_count": len(assisted_artifact.source_shards),
+            }
+        else:
+            source_pool = load_natural_battle_start_pool_jsonl(stream)
+            source_pool_extra_identity = {
+                "format_version": source_pool.format_version,
+            }
 
     dataset, report = build_oracle_teacher_search_guidance_dataset(
         adapter_factory=adapter_factory,
@@ -114,8 +129,9 @@ def run_oracle_teacher_search_guidance_from_paths(
         source_pool_identity=_artifact_identity(
             source_pool_path,
             source_pool_bytes,
-            format_version=source_pool.format_version,
+            source_pool_kind=source_pool_key,
             record_count=len(source_pool.records),
+            **source_pool_extra_identity,
         ),
     )
     if report.problems:
@@ -208,7 +224,9 @@ def _train_optional_checkpoint(
                 )
             ),
             metadata={
-                "task_id": "T024",
+                "task_id": dataset.generation_metadata.get("task_id"),
+                "workflow": dataset.generation_metadata.get("workflow"),
+                "source_pool_kind": dataset.generation_metadata.get("source_pool_kind"),
                 "checkpoint_role": "oracle_teacher_search_guidance_diagnostic",
                 "evidence_boundary": {
                     "information_regime": "full_simulator_state_oracle_like",
@@ -242,6 +260,21 @@ def _train_optional_checkpoint(
             "final_policy_loss": result.report.final_evaluation.average_policy_loss,
             "final_policy_top1_agreement": (
                 result.report.final_evaluation.policy_top1_agreement
+            ),
+            "final_survival_mean_absolute_error": (
+                result.report.final_evaluation.outcome_mean_absolute_error
+            ),
+            "final_terminal_absolute_hp_mean_absolute_error": (
+                result.report.final_evaluation.hp_mean_absolute_error
+            ),
+            "final_structured_resource_loss": (
+                result.report.final_evaluation.average_resource_loss
+            ),
+            "final_structured_resource_target_record_count": (
+                result.report.final_evaluation.resource_target_record_count
+            ),
+            "final_structured_resource_mean_absolute_errors": dict(
+                result.report.final_evaluation.resource_mean_absolute_errors
             ),
             "example_count": result.report.example_count,
         },
@@ -302,3 +335,16 @@ def _mapping_list(value: Any) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
     return [dict(item) for item in value if isinstance(item, Mapping)]
+
+
+def _source_pool_artifact(manifest: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
+    input_artifacts = _mapping(manifest.get("input_artifacts"))
+    natural_pool = _mapping(input_artifacts.get("natural_pool"))
+    assisted_pool = _mapping(input_artifacts.get("assisted_pool"))
+    if natural_pool and assisted_pool:
+        raise ValueError("T023/T043 manifest must not contain two source pools")
+    if assisted_pool:
+        return "assisted_pool", assisted_pool
+    if natural_pool:
+        return "natural_pool", natural_pool
+    raise ValueError("T023/T043 manifest is missing source pool identity")

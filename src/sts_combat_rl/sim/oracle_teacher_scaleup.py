@@ -10,6 +10,7 @@ import random
 from typing import Any, TextIO
 
 from sts_combat_rl.sim.battle_start_pool import (
+    ASSISTED_RUN_DISTRIBUTION_KIND,
     CHECKPOINT_INFORMATION_REGIME,
     NATURAL_DISTRIBUTION_KIND,
     BattleStartCheckpointRecord,
@@ -26,9 +27,13 @@ from sts_combat_rl.sim.oracle_teacher_report import (
 ORACLE_TEACHER_SCALEUP_MANIFEST_SCHEMA_ID = "oracle-teacher-scaleup-manifest-v1"
 ORACLE_TEACHER_SCALEUP_MANIFEST_FORMAT_VERSION = 1
 ORACLE_TEACHER_SCALEUP_SOURCE_SELECTION_SEEDED_UNIFORM = "seeded_uniform"
+ORACLE_TEACHER_SCALEUP_SOURCE_SELECTION_ASSISTED_SEEDED_UNIFORM = (
+    "assisted_seeded_uniform"
+)
 ORACLE_TEACHER_SCALEUP_SOURCE_SELECTION_T032_T039_NARROW = "t032_t039_narrow"
 ORACLE_TEACHER_SCALEUP_SOURCE_SELECTION_MODES = (
     ORACLE_TEACHER_SCALEUP_SOURCE_SELECTION_SEEDED_UNIFORM,
+    ORACLE_TEACHER_SCALEUP_SOURCE_SELECTION_ASSISTED_SEEDED_UNIFORM,
     ORACLE_TEACHER_SCALEUP_SOURCE_SELECTION_T032_T039_NARROW,
 )
 T032_T039_NARROW_SELECTION_CONTRACT_ID = "t032-t039-narrow-source-selection-v1"
@@ -44,6 +49,7 @@ SCALEUP_STRUCTURAL_FIELDS = (
     "source_checkpoint_id",
 )
 _STRATUM_FIELDS = ("ascension", "act", "room_type", "encounter_id")
+_MISSING_VALUE = "(missing)"
 
 
 @dataclass(frozen=True)
@@ -176,6 +182,39 @@ def build_oracle_teacher_source_selection_plan(
 ) -> OracleTeacherSourceSelectionPlan:
     """Build a seeded source-selection plan without quality filters."""
 
+    return _build_seeded_source_selection_plan(
+        pool,
+        selection_seed=selection_seed,
+        source_limit=source_limit,
+        expected_distribution_kind=NATURAL_DISTRIBUTION_KIND,
+    )
+
+
+def build_assisted_oracle_teacher_source_selection_plan(
+    pool: NaturalBattleStartPool,
+    *,
+    selection_seed: int,
+    source_limit: int | None = None,
+) -> OracleTeacherSourceSelectionPlan:
+    """Build a seeded source-selection plan for explicit T042 assisted sources."""
+
+    return _build_seeded_source_selection_plan(
+        pool,
+        selection_seed=selection_seed,
+        source_limit=source_limit,
+        expected_distribution_kind=ASSISTED_RUN_DISTRIBUTION_KIND,
+    )
+
+
+def _build_seeded_source_selection_plan(
+    pool: NaturalBattleStartPool,
+    *,
+    selection_seed: int,
+    source_limit: int | None = None,
+    expected_distribution_kind: str,
+) -> OracleTeacherSourceSelectionPlan:
+    """Build a seeded source-selection plan for one explicit distribution."""
+
     if isinstance(selection_seed, bool) or not isinstance(selection_seed, int):
         raise ValueError("oracle teacher scale-up seed must be an integer")
     if selection_seed < 0:
@@ -188,26 +227,33 @@ def build_oracle_teacher_source_selection_plan(
         ):
             raise ValueError("oracle teacher scale-up source limit must be positive")
 
-    descriptors, problems = _source_descriptors_and_problems(pool)
+    descriptors, problems = _source_descriptors_and_problems(
+        pool,
+        expected_distribution_kind=expected_distribution_kind,
+    )
 
     ordered = sorted(descriptors, key=lambda item: _source_sort_key(item[0]))
     if source_limit is None or source_limit >= len(ordered):
         selected = ordered
         method = (
-            "all_sources_sorted"
+            f"all_{expected_distribution_kind}_sources_sorted"
             if source_limit is None
-            else "all_sources_sorted_limit_exceeds_count"
+            else f"all_{expected_distribution_kind}_sources_sorted_limit_exceeds_count"
         )
     else:
         generator = random.Random(selection_seed)
         selected_indices = sorted(generator.sample(range(len(ordered)), source_limit))
         selected = [ordered[index] for index in selected_indices]
-        method = "seeded_uniform_source_sample"
+        method = f"seeded_uniform_{expected_distribution_kind}_source_sample"
+    if expected_distribution_kind == NATURAL_DISTRIBUTION_KIND:
+        method = method.replace(f"_{NATURAL_DISTRIBUTION_KIND}", "")
 
     selected_descriptors = tuple(_json_safe_mapping(source) for source, _ in selected)
     selected_record_indices = tuple(record.record_index for _, record in selected)
     if not selected:
-        problems.append("source pool contains no battle-start records")
+        problems.append(
+            f"{expected_distribution_kind} source pool contains no battle-start records"
+        )
 
     return OracleTeacherSourceSelectionPlan(
         selection_seed=selection_seed,
@@ -240,7 +286,10 @@ def build_t032_t039_narrow_source_selection_plan(
     ):
         raise ValueError("T032 background source count must be positive")
 
-    descriptors, problems = _source_descriptors_and_problems(pool)
+    descriptors, problems = _source_descriptors_and_problems(
+        pool,
+        expected_distribution_kind=NATURAL_DISTRIBUTION_KIND,
+    )
     ordered = sorted(descriptors, key=lambda item: _source_sort_key(item[0]))
     act1_boss = [
         _selection_group(item, "act1_boss")
@@ -536,7 +585,7 @@ def format_oracle_teacher_scaleup_manifest(
                     f"    T022 report path: {report.get('path')}",
                     f"    T022 report sha256: {report.get('sha256')}",
                     f"    teacher rows: {stats.get('teacher_row_count')}",
-                    f"    unique natural sources: {stats.get('unique_source_start_count')}",
+                    f"    unique sources: {stats.get('unique_source_start_count')}",
                     f"    root rows: {stats.get('root_row_count')}",
                     f"    root visits: {stats.get('root_visit_count')}",
                     f"    search simulations: {stats.get('search_simulations')}",
@@ -580,6 +629,8 @@ def format_oracle_teacher_scaleup_manifest(
 
 def _record_source_descriptor(
     record: BattleStartCheckpointRecord,
+    *,
+    expected_distribution_kind: str = NATURAL_DISTRIBUTION_KIND,
 ) -> tuple[dict[str, Any], list[str]]:
     metadata = record.structural_metadata
     descriptor = {
@@ -599,6 +650,15 @@ def _record_source_descriptor(
             record.completed_battle_resource_outcome_status
         ),
     }
+    if expected_distribution_kind == ASSISTED_RUN_DISTRIBUTION_KIND:
+        descriptor.update(
+            {
+                "assistance_level": metadata.get("assistance_level"),
+                "assistance_version": metadata.get("assistance_version"),
+                "distribution_tag": metadata.get("distribution_tag"),
+                "assistance_history_count": len(record.assistance_history),
+            }
+        )
     problems: list[str] = []
     label = f"source pool record {record.record_index}"
     if not _non_empty_string(record.source_checkpoint_id):
@@ -627,8 +687,22 @@ def _record_source_descriptor(
         problems.append(
             f"{label}: source_checkpoint_id does not match structural metadata"
         )
-    if record.distribution_kind != NATURAL_DISTRIBUTION_KIND:
-        problems.append(f"{label}: source distribution is not natural_run")
+    if record.distribution_kind != expected_distribution_kind:
+        problems.append(
+            f"{label}: source distribution is {record.distribution_kind!r}, "
+            f"expected {expected_distribution_kind!r}"
+        )
+    if metadata.get("source_kind") != expected_distribution_kind:
+        problems.append(f"{label}: source_kind does not match source distribution")
+    if metadata.get("distribution_kind") != expected_distribution_kind:
+        problems.append(
+            f"{label}: structural distribution_kind does not match source distribution"
+        )
+    if expected_distribution_kind == ASSISTED_RUN_DISTRIBUTION_KIND:
+        if not _non_empty_string(metadata.get("assistance_level")):
+            problems.append(f"{label}: assistance_level metadata is missing")
+        if not record.assistance_history:
+            problems.append(f"{label}: assistance history is missing")
     if record.checkpoint_information_regime != CHECKPOINT_INFORMATION_REGIME:
         problems.append(
             f"{label}: source checkpoint information regime is "
@@ -640,12 +714,17 @@ def _record_source_descriptor(
 
 def _source_descriptors_and_problems(
     pool: NaturalBattleStartPool,
+    *,
+    expected_distribution_kind: str = NATURAL_DISTRIBUTION_KIND,
 ) -> tuple[list[tuple[dict[str, Any], BattleStartCheckpointRecord]], list[str]]:
     descriptors: list[tuple[dict[str, Any], BattleStartCheckpointRecord]] = []
     problems: list[str] = []
     checkpoint_counts: Counter[str] = Counter()
     for record in pool.records:
-        descriptor, record_problems = _record_source_descriptor(record)
+        descriptor, record_problems = _record_source_descriptor(
+            record,
+            expected_distribution_kind=expected_distribution_kind,
+        )
         descriptors.append((descriptor, record))
         checkpoint = descriptor.get("source_checkpoint_id")
         if isinstance(checkpoint, str) and checkpoint:
@@ -686,6 +765,9 @@ def _source_structural_coverage(
     sources: Sequence[Mapping[str, Any]],
 ) -> dict[str, Any]:
     counters = {field_name: Counter() for field_name in SCALEUP_STRUCTURAL_FIELDS}
+    distribution_kinds = Counter()
+    assistance_levels = Counter()
+    distribution_tags = Counter()
     strata = Counter()
     for source in sources:
         stratum_values: list[str] = []
@@ -695,6 +777,9 @@ def _source_structural_coverage(
             counters[field_name][text] += 1
             if field_name in _STRATUM_FIELDS:
                 stratum_values.append(text)
+        distribution_kinds[str(source.get("distribution_kind") or _MISSING_VALUE)] += 1
+        assistance_levels[str(source.get("assistance_level") or _MISSING_VALUE)] += 1
+        distribution_tags[str(source.get("distribution_tag") or _MISSING_VALUE)] += 1
         strata["/".join(stratum_values)] += 1
     return {
         "selected_source_count": len(sources),
@@ -711,6 +796,9 @@ def _source_structural_coverage(
         "encounters": _counter_dict(counters["encounter_id"]),
         "source_runs": _counter_dict(counters["source_run_id"]),
         "source_checkpoints": _counter_dict(counters["source_checkpoint_id"]),
+        "distribution_kinds": _counter_dict(distribution_kinds),
+        "assistance_levels": _counter_dict(assistance_levels),
+        "distribution_tags": _counter_dict(distribution_tags),
         "per_stratum_counts": _counter_dict(strata),
     }
 
@@ -975,10 +1063,14 @@ def _source_stratum(source: Mapping[str, Any]) -> str:
 
 
 def _source_structural_metadata(source: Mapping[str, Any]) -> dict[str, Any]:
-    return {
+    metadata = {
         field_name: _json_safe_value(source.get(field_name))
         for field_name in SCALEUP_STRUCTURAL_FIELDS
     }
+    for field_name in ("distribution_kind", "assistance_level", "distribution_tag"):
+        if field_name in source:
+            metadata[field_name] = _json_safe_value(source.get(field_name))
+    return metadata
 
 
 def _safe_ratio(numerator: int, denominator: int) -> float | None:

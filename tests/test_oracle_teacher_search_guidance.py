@@ -9,6 +9,13 @@ import pytest
 from sts_combat_rl.commands.oracle_teacher_search_guidance import (
     run_oracle_teacher_search_guidance_from_paths,
 )
+from sts_combat_rl.sim.assisted_source_generation import (
+    ASSISTED_RUN_DISTRIBUTION_KIND,
+    ASSIST_LEVEL_0,
+    AssistedSourcePoolArtifact,
+    assistance_schedule_by_level,
+    dump_assisted_source_pool_jsonl,
+)
 from sts_combat_rl.sim.battle_start_pool import (
     CHECKPOINT_INFORMATION_REGIME,
     NATURAL_DISTRIBUTION_KIND,
@@ -28,6 +35,10 @@ from sts_combat_rl.sim.oracle_teacher import (
 from sts_combat_rl.sim.oracle_teacher_scaleup import (
     ORACLE_TEACHER_SCALEUP_MANIFEST_FORMAT_VERSION,
     ORACLE_TEACHER_SCALEUP_MANIFEST_SCHEMA_ID,
+)
+from sts_combat_rl.sim.oracle_teacher_search_guidance import (
+    ORACLE_TEACHER_SEARCH_GUIDANCE_ASSISTED_TASK_ID,
+    ORACLE_TEACHER_SEARCH_GUIDANCE_NATURAL_TASK_ID,
 )
 from sts_combat_rl.sim.public_run_context import build_public_run_context
 from sts_combat_rl.sim.resource_outcome import (
@@ -85,6 +96,9 @@ def test_bridge_converts_teacher_action_target_and_writes_report(
     assert record.behavior_action_status == "unavailable"
     assert record.controller_provenance["config"]["information_regime"] == (
         "full_simulator_state_oracle_like"
+    )
+    assert dataset.generation_metadata["task_id"] == (
+        ORACLE_TEACHER_SEARCH_GUIDANCE_NATURAL_TASK_ID
     )
     assert record.source_metadata["teacher_budget"] == 100
     assert report_json["trainer_artifact_identity"]["sha256"] == _sha256_file(
@@ -150,6 +164,49 @@ def test_bridge_converts_soft_visit_target_by_action_identity(tmp_path: Path) ->
     assert record.policy_target_action_index == 1
 
 
+def test_bridge_loads_assisted_pool_and_preserves_assistance_metadata(
+    tmp_path: Path,
+) -> None:
+    manifest_path, trainer_path, report_path = _write_artifact_chain(
+        tmp_path,
+        assisted=True,
+    )
+
+    report = run_oracle_teacher_search_guidance_from_paths(
+        adapter_factory=_BridgeAdapter,
+        manifest_path=manifest_path,
+        selected_budget=100,
+        output_path=trainer_path,
+        target="soft_visit_distribution",
+        stability_filter="none",
+        report_output_path=report_path,
+    )
+
+    dataset = load_trainer_input_dataset_jsonl_text(
+        trainer_path.read_text(encoding="utf-8")
+    )
+    record = dataset.records[0]
+    report_json = json.loads(report_path.read_text(encoding="utf-8"))
+
+    assert report.command_passed
+    assert record.source_metadata["distribution_kind"] == ASSISTED_RUN_DISTRIBUTION_KIND
+    assert record.source_metadata["assistance_level"] == ASSIST_LEVEL_0
+    assert (
+        record.source_metadata["sampling_component"] == ASSISTED_RUN_DISTRIBUTION_KIND
+    )
+    assert dataset.generation_metadata["task_id"] == (
+        ORACLE_TEACHER_SEARCH_GUIDANCE_ASSISTED_TASK_ID
+    )
+    assert dataset.generation_metadata["source_pool_kind"] == "assisted_pool"
+    assert dataset.generation_metadata["source_group_summary"][
+        "assistance_level_counts"
+    ] == {ASSIST_LEVEL_0: 1}
+    assert report_json["source_pool_identity"]["source_pool_kind"] == "assisted_pool"
+    assert report_json["source_group_summary"]["assistance_act_room_counts"] == {
+        f"{ASSIST_LEVEL_0}/act1/MONSTER": 1
+    }
+
+
 def test_bridge_fails_closed_for_manifest_teacher_sha_mismatch(
     tmp_path: Path,
 ) -> None:
@@ -176,8 +233,18 @@ def test_bridge_fails_closed_for_manifest_teacher_sha_mismatch(
     )
 
 
+@pytest.mark.parametrize(
+    ("assisted", "expected_task_id", "expected_source_pool_kind"),
+    [
+        (False, ORACLE_TEACHER_SEARCH_GUIDANCE_NATURAL_TASK_ID, "natural_pool"),
+        (True, ORACLE_TEACHER_SEARCH_GUIDANCE_ASSISTED_TASK_ID, "assisted_pool"),
+    ],
+)
 def test_bridge_optional_checkpoint_records_teacher_target_provenance(
     tmp_path: Path,
+    assisted: bool,
+    expected_task_id: str,
+    expected_source_pool_kind: str,
 ) -> None:
     pytest.importorskip("torch")
     from sts_combat_rl.sim.torch_policy_value import (
@@ -185,7 +252,10 @@ def test_bridge_optional_checkpoint_records_teacher_target_provenance(
         load_torch_policy_value_checkpoint,
     )
 
-    manifest_path, trainer_path, report_path = _write_artifact_chain(tmp_path)
+    manifest_path, trainer_path, report_path = _write_artifact_chain(
+        tmp_path,
+        assisted=assisted,
+    )
     checkpoint_path = tmp_path / "teacher-guidance.pt"
 
     report = run_oracle_teacher_search_guidance_from_paths(
@@ -208,6 +278,8 @@ def test_bridge_optional_checkpoint_records_teacher_target_provenance(
 
     assert report.command_passed
     assert checkpoint_path.exists()
+    assert loaded.metadata["task_id"] == expected_task_id
+    assert loaded.metadata["source_pool_kind"] == expected_source_pool_kind
     assert (
         loaded.training_data_provenance["target_source_summary"]["policy_target_kind"]
         == POLICY_TARGET_KIND_ORACLE_TEACHER_ACTION
@@ -221,9 +293,13 @@ def test_bridge_optional_checkpoint_records_teacher_target_provenance(
     }
 
 
-def _write_artifact_chain(tmp_path: Path) -> tuple[Path, Path, Path]:
-    pool = _pool()
-    teacher_dataset = _teacher_dataset()
+def _write_artifact_chain(
+    tmp_path: Path,
+    *,
+    assisted: bool = False,
+) -> tuple[Path, Path, Path]:
+    pool = _pool(assisted=assisted)
+    teacher_dataset = _teacher_dataset(assisted=assisted)
     pool_path = tmp_path / "pool.jsonl"
     teacher_path = tmp_path / "teacher.jsonl"
     t022_report_path = tmp_path / "teacher-report.json"
@@ -231,7 +307,10 @@ def _write_artifact_chain(tmp_path: Path) -> tuple[Path, Path, Path]:
     trainer_path = tmp_path / "teacher-guidance-trainer.jsonl"
     bridge_report_path = tmp_path / "teacher-guidance-report.json"
     with pool_path.open("w", encoding="utf-8", newline="\n") as stream:
-        dump_natural_battle_start_pool_jsonl(pool, stream)
+        if assisted:
+            dump_assisted_source_pool_jsonl(_assisted_artifact(pool), stream)
+        else:
+            dump_natural_battle_start_pool_jsonl(pool, stream)
     with teacher_path.open("w", encoding="utf-8", newline="\n") as stream:
         dump_oracle_teacher_dataset_jsonl(teacher_dataset, stream)
     t022_report_path.write_text(
@@ -249,10 +328,18 @@ def _write_artifact_chain(tmp_path: Path) -> tuple[Path, Path, Path]:
         "schema_id": ORACLE_TEACHER_SCALEUP_MANIFEST_SCHEMA_ID,
         "format_version": ORACLE_TEACHER_SCALEUP_MANIFEST_FORMAT_VERSION,
         "input_artifacts": {
-            "natural_pool": {
+            "assisted_pool" if assisted else "natural_pool": {
                 "path": str(pool_path),
                 "sha256": _sha256_file(pool_path),
                 "record_count": 1,
+                **(
+                    {
+                        "distribution_kind": ASSISTED_RUN_DISTRIBUTION_KIND,
+                        "assistance_level": ASSIST_LEVEL_0,
+                    }
+                    if assisted
+                    else {}
+                ),
             }
         },
         "requested_budgets": [100],
@@ -280,7 +367,7 @@ def _write_artifact_chain(tmp_path: Path) -> tuple[Path, Path, Path]:
     return manifest_path, trainer_path, bridge_report_path
 
 
-def _teacher_dataset() -> OracleTeacherDataset:
+def _teacher_dataset(*, assisted: bool = False) -> OracleTeacherDataset:
     controller = OracleSearchController(simulations=100)
     return OracleTeacherDataset(
         native_source_identity={},
@@ -288,12 +375,13 @@ def _teacher_dataset() -> OracleTeacherDataset:
         action_space_config=controller.action_space.to_dict(),
         source_pool_format_version=4,
         source_pool_controller_provenance=_provenance("source"),
-        records=[_teacher_row()],
+        records=[_teacher_row(assisted=assisted)],
     )
 
 
-def _teacher_row() -> OracleTeacherRow:
+def _teacher_row(*, assisted: bool = False) -> OracleTeacherRow:
     identities = action_identity_dicts_for_actions(_actions())
+    metadata = _metadata(assisted=assisted)
     return OracleTeacherRow(
         row_index=0,
         source_checkpoint_id="checkpoint-0",
@@ -301,10 +389,12 @@ def _teacher_row() -> OracleTeacherRow:
         source_run_id="run-0",
         source_seed=1,
         source_battle_index=0,
-        source_distribution_kind=NATURAL_DISTRIBUTION_KIND,
-        sampling_component="natural",
+        source_distribution_kind=(
+            ASSISTED_RUN_DISTRIBUTION_KIND if assisted else NATURAL_DISTRIBUTION_KIND
+        ),
+        sampling_component=ASSISTED_RUN_DISTRIBUTION_KIND if assisted else "natural",
         restoration_method="seed_action_trace",
-        structural_metadata=_metadata(),
+        structural_metadata=metadata,
         checkpoint_information_regime=CHECKPOINT_INFORMATION_REGIME,
         legal_action_identities=identities,
         legal_action_kinds=["card", "end_turn"],
@@ -347,13 +437,18 @@ def _teacher_row() -> OracleTeacherRow:
     )
 
 
-def _pool() -> NaturalBattleStartPool:
+def _pool(*, assisted: bool = False) -> NaturalBattleStartPool:
     status, outcome = available_battle_resource_outcome(
         build_battle_resource_outcome(
             _raw(battle_active=True), _raw(battle_active=False)
         )
     )
     snapshot = _snapshot()
+    metadata = _metadata(assisted=assisted)
+    distribution_kind = (
+        ASSISTED_RUN_DISTRIBUTION_KIND if assisted else NATURAL_DISTRIBUTION_KIND
+    )
+    assistance_history = (_assistance_decision(),) if assisted else ()
     return NaturalBattleStartPool(
         source_run_count=1,
         terminal_run_count=1,
@@ -366,7 +461,7 @@ def _pool() -> NaturalBattleStartPool:
                 source_run_id="run-0",
                 source_seed=1,
                 source_battle_index=0,
-                structural_metadata=_metadata(),
+                structural_metadata=metadata,
                 source_controller_provenance=_provenance("source"),
                 source_battle_controller_provenance=_provenance("battle"),
                 source_non_combat_controller_provenance=_provenance("non-combat"),
@@ -377,12 +472,26 @@ def _pool() -> NaturalBattleStartPool:
                 battle_completed=True,
                 completed_battle_resource_outcome_status=status,
                 completed_battle_resource_outcome=outcome,
-                distribution_kind=NATURAL_DISTRIBUTION_KIND,
+                distribution_kind=distribution_kind,
                 checkpoint_information_regime=CHECKPOINT_INFORMATION_REGIME,
                 public_context_status="available",
                 public_run_context=_public_context(),
+                assistance_history=assistance_history,
             )
         ],
+    )
+
+
+def _assisted_artifact(pool: NaturalBattleStartPool) -> AssistedSourcePoolArtifact:
+    schedule = assistance_schedule_by_level(ASSIST_LEVEL_0)
+    return AssistedSourcePoolArtifact(
+        pool=pool,
+        assistance_level=ASSIST_LEVEL_0,
+        assistance_schedule=schedule,
+        policy_seed=1,
+        assistance_decisions=tuple(
+            record.assistance_history[-1] for record in pool.records
+        ),
     )
 
 
@@ -472,19 +581,69 @@ def _public_context() -> dict[str, object]:
     )
 
 
-def _metadata() -> dict[str, object]:
-    return {
+def _metadata(*, assisted: bool = False) -> dict[str, object]:
+    distribution_kind = (
+        ASSISTED_RUN_DISTRIBUTION_KIND if assisted else NATURAL_DISTRIBUTION_KIND
+    )
+    metadata = {
         "ascension": 20,
         "act": 1,
         "floor": 5,
         "room_type": "MONSTER",
         "encounter_id": "Cultist",
         "seed": 1,
-        "source_kind": NATURAL_DISTRIBUTION_KIND,
-        "distribution_kind": NATURAL_DISTRIBUTION_KIND,
+        "source_kind": distribution_kind,
+        "distribution_kind": distribution_kind,
         "source_run_id": "run-0",
         "source_checkpoint_id": "checkpoint-0",
         "source_battle_index": 0,
+    }
+    if assisted:
+        schedule = assistance_schedule_by_level(ASSIST_LEVEL_0)
+        metadata.update(
+            {
+                "assistance_level": schedule.level,
+                "assistance_version": schedule.version,
+                "distribution_tag": schedule.distribution_tag,
+            }
+        )
+    return metadata
+
+
+def _assistance_decision() -> dict[str, object]:
+    resources = {
+        "current_hp": 70,
+        "max_hp": 80,
+        "potion_count": 0,
+        "potion_capacity": 2,
+    }
+    return {
+        "assistance_version": assistance_schedule_by_level(ASSIST_LEVEL_0).version,
+        "assistance_level": ASSIST_LEVEL_0,
+        "policy_seed": 1,
+        "distribution_kind": ASSISTED_RUN_DISTRIBUTION_KIND,
+        "information_regime": CHECKPOINT_INFORMATION_REGIME,
+        "source_run_id": "run-0",
+        "source_seed": 1,
+        "source_battle_index": 0,
+        "source_checkpoint_id": "checkpoint-0",
+        "source_record_index": 0,
+        "before_resources": resources,
+        "requested_change": {
+            "reason": "assist_0_no_assistance",
+            "hp_bonus": 0,
+            "add_random_potion": False,
+            "native_rebuild_requested": False,
+        },
+        "actual_change": {
+            "applied": False,
+            "reason": "native_rebuild_no_visible_change",
+            "current_hp_delta": 0,
+            "potion_count_delta": 0,
+            "native_rebuild_called": False,
+        },
+        "after_resources": resources,
+        "native_support_status": "supported",
     }
 
 
