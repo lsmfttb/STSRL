@@ -46,7 +46,7 @@ the current milestone, but they do not override this table.
 | T030 | DONE | [M1 model-guided search sandbox synthesis](T030-m1-model-guided-search-sandbox-synthesis.md) | T027, T029 | milestone synthesis and next task batch |
 | T031 | DONE | [A20 coverage refresh and data gap report](T031-a20-coverage-refresh-data-gap-report.md) | T030 | post-M1 A20 coverage refresh before broader teacher/checkpoint work |
 | T032 | DONE | [A20 narrow teacher and checkpoint diagnostic refresh](T032-a20-teacher-checkpoint-refresh.md) | T039 | narrow T039 source-contract teacher, trainer-input, checkpoint, and calibration diagnostic |
-| T033 | DRAFT | [Public context encoder contract](T033-public-context-encoder-contract.md) | T016, T030 | structured public history, map/route, visible-Boss encoder boundary |
+| T033 | READY | [Public context model-input encoder contract](T033-public-context-encoder-contract.md) | T016, T030, T042 | structured public history, map/route, visible-Boss encoder boundary |
 | T034 | BLOCKED | [Public-consistent hidden-future sampler boundary](T034-public-consistent-hidden-future-sampler.md) | T033, native sampler support | normal-information hidden-future sampling substrate |
 | T035 | DONE | [Model-guided Oracle search v2](T035-model-guided-oracle-search-v2.md) | T032, T025, T028, T029 | deeper Oracle-like guidance after refreshed data/checkpoint evidence |
 | T036 | DONE | [A20 search-controlled reachability probe](T036-a20-search-controlled-reachability-probe.md) | T006, T017, T020, T025, T029, T031 | search-controlled source reachability after T031 Act-1 gap |
@@ -181,10 +181,12 @@ battle-state distributions before continuing broad neural training. T040 added
 a versioned A20 heuristic non-combat source-generation driver and is complete.
 T041 repaired the potion-enabled Oracle-like search failure and is complete.
 T042 added the assisted-run source-generation distribution and is complete.
-T043 turns assisted source pools into teacher and public student diagnostics,
-and T044 evaluates de-assisted fixed cohorts. T033 remains a public-context
-encoder draft, and T034 remains blocked on native public-consistent
-hidden-future sampler support.
+T033 is now the next executable task: it finalizes
+`public-context-model-input-v1`, the public-context feature contract needed
+before assisted teacher/value training. T043 turns assisted source pools into
+teacher and public student diagnostics after T033, and T044 evaluates
+de-assisted fixed cohorts after T043. T034 remains blocked on native
+public-consistent hidden-future sampler support.
 
 ## Standard Local Gates
 

@@ -29,9 +29,10 @@ versioned deeper model-guided Oracle-like search comparison using refreshed
 diagnostic checkpoint provenance, but the accepted smoke evidence tied the
 baseline and T028 outcomes rather than demonstrating improvement. The current
 published batch follows the upstream assisted source-generation guidance:
-T040, T041, and T042 are complete, and T043 and T044 remain blocked follow-up
-tasks toward assisted teacher/value training and de-assisted fixed-cohort
-evaluation.
+T040, T041, and T042 are complete. T033 is now `READY` as the public-context
+model-input contract needed before assisted teacher/value training, and T043
+and T044 remain blocked follow-up tasks toward assisted teacher/value training
+and de-assisted fixed-cohort evaluation.
 
 ## Implemented On Main
 
@@ -740,10 +741,12 @@ guidance supplied after T035. The maintainer role here is to publish and review
 bounded tasks from that guidance, not to invent an alternate long-term plan.
 T040 (`Expert Non-Combat Driver v1`) and T041
 (`Potion-enabled Oracle search repair`) are complete. T042
-(`Assisted complete-run source generation`) is complete. T043
-(`Assisted teacher dataset and value/policy training`) remains blocked on the
-required public-context model-input contract. T044 (`De-assisted fixed-cohort
-evaluation`) is blocked on T043.
+(`Assisted complete-run source generation`) is complete. T033
+(`Public context model-input encoder contract`) is now `READY` and is the next
+executable task. T043 (`Assisted teacher dataset and value/policy training`)
+remains blocked on T033, and should start with decision-level assisted teacher
+data and diagnostic checkpoint evidence rather than controller promotion. T044
+(`De-assisted fixed-cohort evaluation`) remains blocked on T043.
 
 The immediate external-fork follow-up is
 [`lsmfttb/sts_lightspeed#7`](https://github.com/lsmfttb/sts_lightspeed/issues/7):
@@ -760,14 +763,15 @@ The assisted source-generation batch is:
    reruns a no-potion vs potion-enabled fixed-cohort comparison.
 3. T042 extends HP/potion/encounter assistance into complete-run continuation
    with explicit `assisted_run` distribution tags and assistance schedules.
-4. T043 uses assisted source pools for high-budget Oracle teacher data and
-   public student policy/value/resource diagnostics.
-5. T044 evaluates whether assisted-data models help, or at least do not harm,
+4. T033 finalizes `public-context-model-input-v1`, a versioned public-context
+   feature contract with explicit missingness, hidden-field firewall,
+   assistance non-leakage, and checkpoint semantic validation.
+5. T043 uses assisted source pools for high-budget decision-level Oracle
+   teacher data and public student policy/value/resource diagnostics.
+6. T044 evaluates whether assisted-data models help, or at least do not harm,
    search on low-assistance or unassisted fixed cohorts.
 
-T033 remains important for richer public-context model inputs, but it is not
-the sole next step because it does not by itself solve the lack of later-act
-source data. T034 remains blocked on an explicit native simulator boundary for
+T034 remains blocked on an explicit native simulator boundary for
 public-consistent hidden-future sampling.
 
 The adapter and captured-sample compatibility gate in
