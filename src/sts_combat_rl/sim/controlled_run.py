@@ -78,6 +78,17 @@ Receives the fully populated step record. Exceptions are recorded as problems
 and terminate the run.
 """
 
+BeforeDecisionTransform = Callable[
+    [SimulatorAdapter, SimulatorSnapshot, int],
+    SimulatorSnapshot,
+]
+"""Optionally transform the live simulator state before action selection.
+
+The hook is called before legal actions and the public decision context are
+constructed, so transformed state is what the controller sees. It is intended
+for authoritative simulator-owned state transforms such as T042 assistance.
+"""
+
 
 # ---------------------------------------------------------------------------
 # Result types
@@ -170,6 +181,7 @@ def execute_controlled_run(
     seed: int | None,
     max_steps: int,
     action_space: ActionSpaceConfig | None = None,
+    before_decision_transform: BeforeDecisionTransform | None = None,
     before_decision: BeforeDecisionObserver | None = None,
     after_transition: AfterTransitionObserver | None = None,
 ) -> ControlledRun:
@@ -193,6 +205,9 @@ def execute_controlled_run(
             no-potions config.
         before_decision: optional observer called before each controller
             invocation. Exceptions terminate the run.
+        before_decision_transform: optional authoritative simulator transform
+            called before legal actions and context are built. Exceptions
+            terminate the run.
         after_transition: optional observer called after each successful
             transition. Exceptions terminate the run.
 
@@ -214,6 +229,13 @@ def execute_controlled_run(
     terminal = False
 
     for step_index in range(max_steps):
+        if before_decision_transform is not None:
+            try:
+                snapshot = before_decision_transform(adapter, snapshot, step_index)
+            except (RuntimeError, ValueError) as exc:
+                problems.extend(_exception_problems(exc))
+                break
+
         actions = list(adapter.legal_actions(snapshot))
         if not actions:
             problems.append("no legal actions before terminal state")

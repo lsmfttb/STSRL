@@ -6,6 +6,7 @@ import argparse
 from pathlib import Path
 
 from sts_combat_rl.logging_utils import DEFAULT_LOG_FILE
+from sts_combat_rl.sim.assisted_source_generation import ASSISTANCE_LEVELS
 from sts_combat_rl.sim.model_guided_oracle_search import (
     MODEL_GUIDED_ORACLE_DEFAULT_POLICY_PROBABILITY_WEIGHT,
 )
@@ -314,6 +315,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     input_group.add_argument(
+        "--lightspeed-assisted-battle-start-pool",
+        type=Path,
+        metavar="PATH",
+        help=(
+            "Collect T042 assisted complete-run battle-start checkpoints for "
+            "one --assistance-level and write an assisted-run JSONL artifact."
+        ),
+    )
+    input_group.add_argument(
         "--lightspeed-battle-start-pool-restore",
         type=Path,
         metavar="PATH",
@@ -333,6 +343,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     input_group.add_argument(
+        "--lightspeed-assisted-a20-battle-start-coverage",
+        type=Path,
+        metavar="ASSISTED_POOL_PATH",
+        help=(
+            "Load a T042 assisted source pool, verify assisted replay restores, "
+            "and report A20 coverage plus T009 broad-training gate status."
+        ),
+    )
+    input_group.add_argument(
         "--a20-reachability-report",
         type=Path,
         metavar="OUTPUT_JSON",
@@ -349,6 +368,34 @@ def build_parser() -> argparse.ArgumentParser:
             "Build an offline T040 expert non-combat source-coverage comparison "
             "from repeated --expert-source-arm ROLE POOL_JSONL COVERAGE_JSON "
             "inputs."
+        ),
+    )
+    input_group.add_argument(
+        "--assisted-source-coverage-report",
+        type=Path,
+        metavar="OUTPUT_JSON",
+        help=(
+            "Build an offline T042 assisted source-coverage comparison from "
+            "repeated --assisted-source-arm LEVEL POOL_JSONL COVERAGE_JSON inputs."
+        ),
+    )
+    input_group.add_argument(
+        "--merge-assisted-source-pool",
+        type=Path,
+        metavar="OUTPUT_JSONL",
+        help=(
+            "Merge repeated --assisted-source-shard JSONL artifacts for one T042 "
+            "assistance level into a single assisted source-pool artifact."
+        ),
+    )
+    input_group.add_argument(
+        "--merge-assisted-a20-coverage",
+        type=Path,
+        metavar="OUTPUT_JSON",
+        help=(
+            "Build a merged T042 assisted A20 coverage report from one "
+            "--merged-assisted-source-pool and repeated --assisted-coverage-shard "
+            "JSON reports."
         ),
     )
     input_group.add_argument(
@@ -591,6 +638,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--sim-non-combat-seed",
+        type=int,
+        default=None,
+        help=(
+            "Seed for seeded non-combat drivers. Defaults to --sim-seed; set this "
+            "for sharded source-generation when source seed ranges differ."
+        ),
+    )
+    parser.add_argument(
         "--reward-detail-limit",
         type=int,
         default=8,
@@ -663,6 +719,20 @@ def build_parser() -> argparse.ArgumentParser:
         help=("Write the --lightspeed-a20-battle-start-coverage JSON report to PATH."),
     )
     parser.add_argument(
+        "--assistance-level",
+        choices=ASSISTANCE_LEVELS,
+        default="assist_0",
+        help=(
+            "T042 assistance schedule used by --lightspeed-assisted-battle-start-pool."
+        ),
+    )
+    parser.add_argument(
+        "--assistance-policy-seed",
+        type=int,
+        default=None,
+        help="Seed recorded in T042 assistance provenance. Defaults to --sim-seed.",
+    )
+    parser.add_argument(
         "--reachability-arm",
         nargs=3,
         action="append",
@@ -682,6 +752,48 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "One T040 source-coverage arm. Required roles are stochastic_s20, "
             "expert_s20, and expert_s100."
+        ),
+    )
+    parser.add_argument(
+        "--assisted-source-arm",
+        nargs=3,
+        action="append",
+        default=[],
+        metavar=("LEVEL", "POOL_JSONL", "COVERAGE_JSON"),
+        help=(
+            "One T042 source-coverage arm. Required levels are assist_0, "
+            "assist_hp25, assist_hp50, assist_hp50_potion_elite_boss, and "
+            "assist_hp75_potion."
+        ),
+    )
+    parser.add_argument(
+        "--assisted-source-shard",
+        type=Path,
+        action="append",
+        default=[],
+        metavar="POOL_JSONL",
+        help=(
+            "One T042 assisted source-pool shard for --merge-assisted-source-pool. "
+            "Repeat for every generated shard."
+        ),
+    )
+    parser.add_argument(
+        "--merged-assisted-source-pool",
+        type=Path,
+        metavar="POOL_JSONL",
+        help=(
+            "Merged T042 assisted source pool used by --merge-assisted-a20-coverage."
+        ),
+    )
+    parser.add_argument(
+        "--assisted-coverage-shard",
+        type=Path,
+        action="append",
+        default=[],
+        metavar="COVERAGE_JSON",
+        help=(
+            "One shard-level assisted A20 coverage report for "
+            "--merge-assisted-a20-coverage. Repeat for every shard."
         ),
     )
     parser.add_argument(

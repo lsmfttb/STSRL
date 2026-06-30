@@ -83,6 +83,7 @@ LEGACY_BATTLE_START_POOL_FORMAT_VERSION = 1
 PUBLIC_CONTEXT_POOL_FORMAT_VERSION = 3
 STRUCTURED_RESOURCE_OUTCOME_POOL_FORMAT_VERSION = 4
 NATURAL_DISTRIBUTION_KIND = "natural_run"
+ASSISTED_RUN_DISTRIBUTION_KIND = "assisted_run"
 NATURAL_SAMPLING_COMPONENT = "natural"
 STRUCTURAL_SAMPLING_COMPONENT = "structural_uniform"
 CHECKPOINT_INFORMATION_REGIME = "full_simulator_state_oracle_like"
@@ -210,6 +211,7 @@ class BattleStartCheckpointRecord:
     checkpoint_information_regime: str = CHECKPOINT_INFORMATION_REGIME
     public_context_status: str = PUBLIC_CONTEXT_LEGACY_UNAVAILABLE
     public_run_context: dict[str, Any] = field(default_factory=dict)
+    assistance_history: tuple[dict[str, Any], ...] = ()
     native_checkpoint: SimulatorCheckpoint | None = field(
         default=None,
         repr=False,
@@ -850,6 +852,9 @@ def record_to_manifest(record: BattleStartCheckpointRecord) -> dict[str, Any]:
         "checkpoint_information_regime": record.checkpoint_information_regime,
         "public_context_status": record.public_context_status,
         "public_run_context": _json_safe_mapping(record.public_run_context),
+        "assistance_history": [
+            _json_safe_mapping(item) for item in record.assistance_history
+        ],
     }
 
 
@@ -857,6 +862,8 @@ def record_from_manifest(
     raw: Mapping[str, Any],
     *,
     label: str,
+    allowed_distribution_kinds: frozenset[str] = frozenset({NATURAL_DISTRIBUTION_KIND}),
+    allow_assistance_history: bool = False,
 ) -> BattleStartCheckpointRecord:
     """Strictly load one current-schema record without guessing missing fields."""
 
@@ -888,8 +895,15 @@ def record_from_manifest(
         label=f"{label} completed battle resource outcome",
     )
     distribution_kind = raw.get("distribution_kind")
-    if distribution_kind != NATURAL_DISTRIBUTION_KIND:
-        raise ValueError(f"{label} must retain natural_run distribution_kind")
+    if distribution_kind not in allowed_distribution_kinds:
+        expected = ", ".join(sorted(allowed_distribution_kinds))
+        raise ValueError(f"{label} must retain one of: {expected}")
+    assistance_history = _assistance_history(
+        raw.get("assistance_history", []),
+        label=f"{label} assistance history",
+    )
+    if assistance_history and not allow_assistance_history:
+        raise ValueError(f"{label} assistance history is not allowed")
     checkpoint_information_regime = _information_regime(
         raw.get("checkpoint_information_regime"),
         f"{label} checkpoint information regime",
@@ -918,7 +932,9 @@ def record_from_manifest(
             raw.get("source_battle_index"), f"{label} source battle index"
         ),
         structural_metadata=_validated_structural_metadata(
-            raw.get("structural_metadata"), label
+            raw.get("structural_metadata"),
+            label,
+            allowed_distribution_kinds=allowed_distribution_kinds,
         ),
         source_controller_provenance=_validated_provenance(
             raw.get("source_controller_provenance"), f"{label} controller provenance"
@@ -942,6 +958,7 @@ def record_from_manifest(
         checkpoint_information_regime=checkpoint_information_regime,
         public_context_status=public_context_status,
         public_run_context=public_run_context,
+        assistance_history=assistance_history,
     )
 
 
@@ -1056,6 +1073,8 @@ def natural_battle_start_pool_problems(pool: NaturalBattleStartPool) -> list[str
         checkpoint_ids.add(record.source_checkpoint_id)
         if record.distribution_kind != NATURAL_DISTRIBUTION_KIND:
             problems.append(f"record {index} is not tagged as a natural source")
+        if record.assistance_history:
+            problems.append(f"record {index} has assisted-run provenance")
         if record.checkpoint_information_regime not in {
             CHECKPOINT_INFORMATION_REGIME,
             LEGACY_UNKNOWN_INFORMATION_REGIME,
@@ -1317,7 +1336,12 @@ def _snapshot_matches_record(
     return snapshot_fingerprint(snapshot) == expected
 
 
-def _validated_structural_metadata(value: Any, label: str) -> dict[str, Any]:
+def _validated_structural_metadata(
+    value: Any,
+    label: str,
+    *,
+    allowed_distribution_kinds: frozenset[str] = frozenset({NATURAL_DISTRIBUTION_KIND}),
+) -> dict[str, Any]:
     metadata = _require_mapping(value, f"{label} structural metadata")
     required = (
         "ascension",
@@ -1334,13 +1358,25 @@ def _validated_structural_metadata(value: Any, label: str) -> dict[str, Any]:
     missing = [field_name for field_name in required if field_name not in metadata]
     if missing:
         raise ValueError(f"{label} structural metadata missing: {', '.join(missing)}")
-    if metadata["source_kind"] != NATURAL_DISTRIBUTION_KIND:
-        raise ValueError(f"{label} structural metadata source_kind must be natural_run")
-    if metadata["distribution_kind"] != NATURAL_DISTRIBUTION_KIND:
+    if metadata["source_kind"] not in allowed_distribution_kinds:
+        expected = ", ".join(sorted(allowed_distribution_kinds))
         raise ValueError(
-            f"{label} structural metadata distribution_kind must be natural_run"
+            f"{label} structural metadata source_kind must be one of: {expected}"
+        )
+    if metadata["distribution_kind"] not in allowed_distribution_kinds:
+        expected = ", ".join(sorted(allowed_distribution_kinds))
+        raise ValueError(
+            f"{label} structural metadata distribution_kind must be one of: {expected}"
         )
     return metadata
+
+
+def _assistance_history(value: Any, label: str) -> tuple[dict[str, Any], ...]:
+    if not isinstance(value, list):
+        raise ValueError(f"{label} must be a list")
+    return tuple(
+        _require_mapping(item, f"{label} {index}") for index, item in enumerate(value)
+    )
 
 
 def _validated_provenance(value: Any, label: str) -> dict[str, Any]:

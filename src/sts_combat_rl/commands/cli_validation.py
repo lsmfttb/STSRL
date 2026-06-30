@@ -32,6 +32,8 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
         return "--battle-start-structural-fraction must be between zero and one"
     if args.oracle_search_simulations <= 0:
         return "--oracle-search-simulations must be positive"
+    if args.assistance_policy_seed is not None and args.assistance_policy_seed < 0:
+        return "--assistance-policy-seed must be non-negative"
     if (
         not math.isfinite(args.model_guided_oracle_policy_probability_weight)
         or args.model_guided_oracle_policy_probability_weight < 0.0
@@ -173,6 +175,34 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
         )
     if args.expert_source_coverage_report is None and args.expert_source_arm:
         return "--expert-source-arm requires --expert-source-coverage-report"
+    if (
+        args.assisted_source_coverage_report is not None
+        and len(args.assisted_source_arm) != 5
+    ):
+        return (
+            "--assisted-source-coverage-report requires exactly five "
+            "--assisted-source-arm values"
+        )
+    if args.assisted_source_coverage_report is None and args.assisted_source_arm:
+        return "--assisted-source-arm requires --assisted-source-coverage-report"
+    if args.merge_assisted_source_pool is not None and not args.assisted_source_shard:
+        return "--merge-assisted-source-pool requires --assisted-source-shard"
+    if args.merge_assisted_source_pool is None and args.assisted_source_shard:
+        return "--assisted-source-shard requires --merge-assisted-source-pool"
+    if args.merge_assisted_a20_coverage is not None and (
+        args.merged_assisted_source_pool is None or not args.assisted_coverage_shard
+    ):
+        return (
+            "--merge-assisted-a20-coverage requires --merged-assisted-source-pool "
+            "and --assisted-coverage-shard"
+        )
+    if args.merge_assisted_a20_coverage is None and (
+        args.merged_assisted_source_pool is not None or args.assisted_coverage_shard
+    ):
+        return (
+            "--merged-assisted-source-pool and --assisted-coverage-shard require "
+            "--merge-assisted-a20-coverage"
+        )
     if (
         args.oracle_teacher_coverage_report is not None
         and args.oracle_teacher_source_pool is None

@@ -13,6 +13,7 @@ from sts_combat_rl.sim.contract import SimulatorAction
 DECISION_RECORD_SCHEMA_VERSION = 3
 DECISION_SOURCE_KINDS = (
     "natural_run",
+    "assisted_run",
     "stratified_training",
     "constructed_supplement",
     "paired_counterfactual",
