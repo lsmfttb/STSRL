@@ -310,4 +310,19 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
             "--teacher-guidance-calibration-output require "
             "--teacher-guidance-calibration-report"
         )
+    if (
+        args.post_t044_failure_analysis_report is not None
+        and not args.post_t044_comparison
+    ):
+        return (
+            "--post-t044-failure-analysis-report requires at least one "
+            "--post-t044-comparison"
+        )
+    if args.post_t044_failure_analysis_report is None and (
+        args.post_t044_comparison or args.post_t044_linked_artifact
+    ):
+        return (
+            "--post-t044-comparison and --post-t044-linked-artifact require "
+            "--post-t044-failure-analysis-report"
+        )
     return None
