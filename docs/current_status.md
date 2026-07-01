@@ -27,10 +27,10 @@ contract, produced a `narrow_curriculum` checkpoint and calibration evidence,
 and kept broad A20 training readiness closed. T035 is complete: it added a
 versioned deeper model-guided Oracle-like search comparison using refreshed
 diagnostic checkpoint provenance, but the accepted smoke evidence tied the
-baseline and T028 outcomes rather than demonstrating improvement. The current
-published batch follows the upstream assisted source-generation guidance:
-T040, T041, T042, T033, and T043 are complete. T044 is now `READY` for
-de-assisted fixed-cohort evaluation.
+baseline and T028 outcomes rather than demonstrating improvement. The upstream
+assisted source-generation batch is now complete: T040, T041, T042, T033,
+T043, and T044 are all merged. No task is currently `READY`; T034 remains
+blocked on native public-consistent hidden-future sampler support.
 
 ## Implemented On Main
 
@@ -725,6 +725,31 @@ de-assisted fixed-cohort evaluation.
   tests, compileall, ruff, format check, both CommunicationMod fixture smokes,
   focused teacher scale-up/search-guidance/calibration tests, task-doc checks,
   and diff whitespace checks.
+- T044 adds the `de-assisted-fixed-cohort-comparison-v1` report and
+  `--lightspeed-de-assisted-fixed-cohort-comparison` workflow. It compares
+  identical restored starts across baseline Oracle-like search,
+  `model_guided_oracle_search_v2` using regenerated T043 checkpoint
+  provenance, a raw public checkpoint-policy diagnostic controller, and a
+  scripted public baseline. Fixed cohorts now preserve T042
+  `assistance_history`; `assisted_run` cohorts fail closed when that
+  provenance is missing, and assisted fixed starts restore by replaying the
+  T042 transforms. Maintainer review verified the retained T042 runs1000 input
+  hashes, regenerated T043 manifest/teacher/trainer/bridge/checkpoint hashes,
+  fixed cohort hashes, and both T044 comparison hashes. The accepted smoke
+  evidence used cohort `a336ffb1fda9ed7e` for `assist_0` and
+  `e99a0938307c0e7a` for `assist_hp50`; both reports had matched sources,
+  equal one-playout search-arm budgets, no restore/truncation/controller
+  errors, and no model-guided outcome improvement over baseline. The
+  `assist_hp50` comparison was sharded into 16 WSL workers, all shard reports
+  passed, and the merged comparison recorded 23W/15L for both baseline and
+  model-guided search, 11W/27L for raw checkpoint policy, and 19W/19L for the
+  scripted baseline. Maintainer review passed 611 Windows tests, compileall,
+  ruff, format check, both CommunicationMod fixture smokes, focused T044
+  comparison/search-guidance/fixed-evaluation tests, task-doc checks, and diff
+  whitespace checks. This is diagnostic smoke-scale evidence only, not
+  controller promotion, broad-training evidence, normal-information
+  performance, natural A20 performance, live-game validation, or final-agent
+  evidence.
 
 ## Not Implemented On Main
 
@@ -765,17 +790,18 @@ trainer, checkpoint, and calibration refresh over that contract. T035 attempted
 the deeper model-guided Oracle-like search experiment, but the accepted smoke
 comparison tied the baseline and T028 outcomes.
 
-The next published batch follows the upstream assisted source-generation
-guidance supplied after T035. The maintainer role here is to publish and review
-bounded tasks from that guidance, not to invent an alternate long-term plan.
+The completed assisted source-generation batch follows the upstream guidance
+supplied after T035. The maintainer role here was to publish and review bounded
+tasks from that guidance, not to invent an alternate long-term plan.
 T040 (`Expert Non-Combat Driver v1`), T041
 (`Potion-enabled Oracle search repair`), T042
 (`Assisted complete-run source generation`), and T033
 (`Public context model-input encoder contract`) are complete. T043
-(`Assisted teacher dataset and value/policy training`) is complete. T044
-(`De-assisted fixed-cohort evaluation`) is now `READY`; it evaluates whether
-assisted-data models help, or at least do not harm, search on low-assistance or
-unassisted fixed cohorts without making controller-promotion claims.
+(`Assisted teacher dataset and value/policy training`) and T044
+(`De-assisted fixed-cohort evaluation`) are complete. The T044 result did not
+show model-guided search improvement over baseline on the accepted smoke fixed
+cohorts, so it closes the assisted batch as diagnostic evidence rather than a
+promotion path. No task is currently `READY`.
 
 The immediate external-fork follow-up is
 [`lsmfttb/sts_lightspeed#7`](https://github.com/lsmfttb/sts_lightspeed/issues/7):
@@ -797,8 +823,10 @@ The assisted source-generation batch is:
    assistance non-leakage, and checkpoint semantic validation.
 5. T043 uses assisted source pools for decision-level Oracle teacher data and
    public student policy/value/resource diagnostics.
-6. T044 evaluates whether assisted-data models help, or at least do not harm,
-   search on low-assistance or unassisted fixed cohorts.
+6. T044 evaluated whether assisted-data models help, or at least do not harm,
+   search on low-assistance or unassisted fixed cohorts; the accepted smoke
+   evidence tied the baseline for model-guided search and did not promote a
+   controller.
 
 T034 remains blocked on an explicit native simulator boundary for
 public-consistent hidden-future sampling.
@@ -878,17 +906,21 @@ source.
 
 Scale matters operationally. T037 exposed that a single-worker WSL
 source-generation run is too slow and leaves host resources underused for
-1,000-run evidence. Future large WSL `sts_lightspeed` source-generation,
-coverage, restore verification, teacher collection, restored-evaluation, or
-training-scale runs should be sharded and executed with explicit parallel
-workers by default. The default scale-worker target is the host logical CPU
-count, capped by shard count and documented memory or simulator limits; on the
-current 16-logical-core maintainer machine, use 16 workers for large WSL stages
-unless a lower-worker resource or tooling reason is reported. This is a
-per-stage requirement: source collection, coverage/restore gates, report
-rebuilding, and teacher collection each need a reported worker/shard plan or an
-explicit single-worker reason. PRs must report shard identity, worker count,
-seed/source-run or record ranges, wall-clock cost, and any single-worker
-exception. Single-worker WSL execution is reserved for smoke tests, debugging,
+1,000-run evidence; T044 exposed the same risk for restored fixed-cohort
+comparison runs. Future large or long-running WSL `sts_lightspeed`
+source-generation, coverage, restore verification, teacher collection,
+restored-evaluation, fixed-cohort comparison, or training-scale runs should be
+sharded and executed with explicit parallel workers by default. The default
+scale-worker target is the host logical CPU count, capped by shard count and
+documented memory or simulator limits; on the current 16-logical-core
+maintainer machine, use 16 workers for large WSL stages unless a lower-worker
+resource or tooling reason is reported. This is a per-stage requirement:
+source collection, coverage/restore gates, report rebuilding, teacher
+collection, restored evaluation, and comparison stages each need a reported
+worker/shard plan or an explicit single-worker reason. A `smoke` label does
+not exempt a stage whose cohort size or expected wall-clock cost is already
+substantial; the PR must report shard identity, worker count, seed/source-run
+or cohort-record ranges, wall-clock cost, and any single-worker exception.
+Single-worker WSL execution is reserved for small smoke tests, debugging,
 non-simulator artifact aggregation, or a documented resource/tooling
 constraint.

@@ -45,21 +45,23 @@ before any live-game claim.
 Real `sts_lightspeed` gates run through WSL. Game files, simulator binaries,
 save files, and large artifacts do not belong in this repository.
 
-Large WSL simulator workloads are expected to be explicitly sharded and run
-with parallel workers. A single-worker run is a smoke/debug path, not the
-default execution mode for source-generation, restore verification, coverage
-gates, reachability reports, teacher collection, restored evaluation, or
-training-scale evidence. The parallelism requirement applies to each expensive
-stage separately; running source generation in parallel does not make a later
-coverage or restore gate acceptable as an undocumented single-worker run.
-Scale runs should choose their worker target from the host logical CPU count by
-default, capped by shard count and documented memory or simulator limits. The
-current maintainer workstation has 16 logical cores, so 16 workers is the
-default target for scale evidence unless the report documents a lower-worker
-resource or tooling constraint. Reports for such workloads must preserve enough
-runtime provenance to
-reproduce every stage of the execution plan, including shard identity, worker
-count, seed/source-run or record ranges, wall-clock cost, and any explicit
+Large or long-running WSL simulator workloads are expected to be explicitly
+sharded and run with parallel workers. A single-worker run is a small
+smoke/debug path, not the default execution mode for source-generation, restore
+verification, coverage gates, reachability reports, teacher collection,
+restored evaluation, fixed-cohort comparison, or training-scale evidence. The
+parallelism requirement applies to each expensive stage separately; running
+source generation in parallel does not make a later coverage, restore,
+teacher, evaluation, or comparison gate acceptable as an undocumented
+single-worker run. A `smoke` label does not override the actual expected or
+observed cost of a stage. Scale and long-running diagnostic runs should choose
+their worker target from the host logical CPU count by default, capped by shard
+count and documented memory or simulator limits. The current maintainer
+workstation has 16 logical cores, so 16 workers is the default target unless
+the report documents a lower-worker resource or tooling constraint. Reports for
+such workloads must preserve enough runtime provenance to reproduce every
+stage of the execution plan, including shard identity, worker count,
+seed/source-run or cohort-record ranges, wall-clock cost, and any explicit
 reason a stage used one worker.
 
 ## Real Game Runtime Boundary

@@ -28,6 +28,10 @@ A task implementer:
 - starts from the latest `main`;
 - implements only the task's documented scope;
 - reports verification results, known limitations, and deviations;
+- opens a ready-for-review pull request only after the documented deliverables,
+  required artifacts, and required verification have been completed;
+- keeps incomplete work in draft status or explicitly labels it incomplete,
+  with each missing acceptance criterion named in the pull-request body;
 - responds to review findings on the same pull request.
 
 The user creates task branches and pull requests. The main maintainer does not
@@ -106,20 +110,23 @@ Every task document must define:
 
 A task that cannot be objectively accepted is not ready.
 
-If a task requires large WSL `sts_lightspeed` source generation, restored
-evaluation, coverage, teacher collection, or training-scale simulation, its
-specification must include an explicit stage-by-stage sharding and
-parallel-worker plan. Source collection, restore/coverage gates, report
-rebuilds, teacher collection, and restored evaluation are separate stages for
-this purpose. Single-worker execution may be specified only for smoke tests,
-local debugging, non-simulator artifact aggregation, or a documented resource
-or tooling limit. The default worker target for scale evidence is the host
-logical CPU count, capped by shard count and documented memory or simulator
-limits. On the current 16-logical-core maintainer machine, large WSL stages
-should use 16 workers by default; using fewer workers requires a reported
-resource or tooling reason. The PR report must include shard/worker counts and
-wall-clock cost for each WSL stage so reviewers can distinguish scale evidence
-from a slow smoke run.
+If a task requires large or long-running WSL `sts_lightspeed` source
+generation, restored evaluation, fixed-cohort comparison, coverage, teacher
+collection, or training-scale simulation, its specification must include an
+explicit stage-by-stage sharding and parallel-worker plan. Source collection,
+restore/coverage gates, report rebuilds, teacher collection, restored
+evaluation, and comparison runs are separate stages for this purpose.
+Single-worker execution may be specified only for small smoke tests, local
+debugging, non-simulator artifact aggregation, or a documented resource or
+tooling limit. A `smoke` label does not exempt a stage whose cohort size or
+expected wall-clock cost is substantial. The default worker target for scale
+evidence is the host logical CPU count, capped by shard count and documented
+memory or simulator limits. On the current 16-logical-core maintainer machine,
+large WSL stages should use 16 workers by default; using fewer workers requires
+a reported resource or tooling reason. The PR report must include shard/worker
+counts, seed/source-run or cohort-record ranges, and wall-clock cost for each
+WSL stage so reviewers can distinguish scale evidence from a slow
+single-worker run.
 
 ## Task Artifact Boundaries
 
@@ -170,6 +177,19 @@ The pull-request description must include:
 Using legacy code is allowed, but wholesale cherry-picking of `d56e10e` is not.
 The pull request must contain only the focused task and remain independently
 reviewable.
+
+A ready-for-review pull request is an implementation-complete claim. If any
+required deliverable, artifact, WSL gate, or acceptance criterion is still
+missing, the PR must be draft or must say it is incomplete before maintainer
+review starts. Incomplete ready PRs are reviewed as blocked, not partially
+accepted; follow-up fixes stay on the same PR until the published task contract
+is satisfied or the main maintainer revises the task document.
+
+For any WSL stage that can reasonably use multiple workers, especially restored
+evaluation and comparison stages, the PR must report the actual command shape,
+worker count, shard count, record ranges, wall-clock time, and reason for any
+single-worker execution. Reviewers treat missing worker evidence as a
+verification gap even when the output artifact schema is otherwise valid.
 
 ## Review And Merge
 

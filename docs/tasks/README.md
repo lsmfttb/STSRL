@@ -57,7 +57,7 @@ the current milestone, but they do not override this table.
 | T041 | DONE | [Potion-enabled Oracle search repair](T041-potion-enabled-oracle-search-repair.md) | T006, T017, T020, T025, T036, T037, T039 | repair potion root mapping and no-potion/potion cohort comparison |
 | T042 | DONE | [Assisted complete-run source generation](T042-assisted-complete-run-source-generation.md) | T040, T041 | assisted-run distribution, schedules, and coverage report |
 | T043 | DONE | [Assisted teacher dataset and value/policy training](T043-assisted-teacher-value-policy-training.md) | T042, T033 | assisted teacher data and public student diagnostics |
-| T044 | READY | [De-assisted fixed-cohort evaluation](T044-de-assisted-fixed-cohort-evaluation.md) | T043 | low/no-assistance fixed-cohort model/search evaluation |
+| T044 | DONE | [De-assisted fixed-cohort evaluation](T044-de-assisted-fixed-cohort-evaluation.md) | T043 | low/no-assistance fixed-cohort model/search evaluation |
 
 Use the table, not per-task files or roadmap prose, when deciding whether a
 task may receive a branch. Only `READY` rows should receive a new branch. After
@@ -102,6 +102,20 @@ sizes, regeneration commands, compatibility requirements, retention reason,
 possible downstream consumers, and deletion conditions. If no downstream task
 needs the raw files, keep only the report/manifest evidence and regenerate raw
 data when needed.
+
+A pull request submitted as ready for maintainer review must satisfy the
+published task's required deliverables and acceptance criteria. If any
+acceptance criterion, required artifact, or required verification remains
+missing, the PR must stay draft or explicitly report itself as incomplete with
+the missing criteria named; it is not a ready-for-merge task submission.
+
+Long-running WSL restored-evaluation and comparison stages must follow the
+same per-stage worker rule as source generation and coverage. A `smoke` or
+diagnostic label does not by itself justify single-worker execution once the
+stage processes a non-trivial cohort or is expected to take many minutes.
+Shard the cohort and use the host logical CPU worker target by default, capped
+by shard count and documented resource limits, or report a concrete
+single-worker reason and the measured wall-clock cost.
 
 ## Published Queue
 
@@ -183,9 +197,10 @@ T041 repaired the potion-enabled Oracle-like search failure and is complete.
 T042 added the assisted-run source-generation distribution and is complete.
 T033 finalized `public-context-model-input-v1`, the public-context feature
 contract needed before assisted teacher/value training. T043 added assisted
-source-pool teacher scale-up and public student diagnostic wiring. T044 is now
-the next executable task: it evaluates de-assisted fixed cohorts after T043.
-T034 remains blocked on native public-consistent hidden-future sampler support.
+source-pool teacher scale-up and public student diagnostic wiring. T044
+completed the de-assisted fixed-cohort evaluation gate after T043. T034 remains
+blocked on native public-consistent hidden-future sampler support, and no new
+task is currently `READY`.
 
 ## Standard Local Gates
 

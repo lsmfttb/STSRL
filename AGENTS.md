@@ -31,20 +31,23 @@ current contracts.
   evaluation, and simulator gates. Do not implement Slay the Spire mechanics
   locally.
 - Real `sts_lightspeed` gates run through WSL, not Windows Python.
-- Large WSL `sts_lightspeed` source-generation, restore, coverage,
-  reachability, teacher-collection, or evaluation runs must be sharded and run
-  with explicit parallel workers by default. This applies per stage:
-  parallelizing source generation does not by itself justify a single-worker
-  downstream coverage/restore gate. Single-worker execution is acceptable only
-  for smoke tests, debugging, non-simulator artifact aggregation, or a
-  documented resource/tooling constraint, and the PR must report the
-  shard/worker count, wall-clock cost, and single-worker reason for every WSL
-  stage. For scale evidence, choose the worker target from the available host
-  logical CPU count by default, capped by shard count and documented memory or
-  simulator limits. On the current 16-logical-core maintainer machine, use 16
-  workers by default for source-generation, restore, coverage,
-  teacher-collection, and restored-evaluation stages unless the PR documents
-  why a lower number was required.
+- Large or long-running WSL `sts_lightspeed` source-generation, restore,
+  coverage, reachability, teacher-collection, restored-evaluation, or
+  fixed-cohort comparison runs must be sharded and run with explicit parallel
+  workers by default. This applies per stage: parallelizing source generation
+  does not by itself justify a single-worker downstream coverage/restore,
+  teacher, evaluation, or comparison gate. Single-worker execution is
+  acceptable only for small smoke tests, debugging, non-simulator artifact
+  aggregation, or a documented resource/tooling constraint, and the PR must
+  report the shard/worker count, record ranges, wall-clock cost, and
+  single-worker reason for every WSL stage. A `smoke` label does not exempt a
+  stage whose cohort size or expected wall-clock cost is substantial. For scale
+  evidence, choose the worker target from the available host logical CPU count
+  by default, capped by shard count and documented memory or simulator limits.
+  On the current 16-logical-core maintainer machine, use 16 workers by default
+  for source-generation, restore, coverage, teacher-collection,
+  restored-evaluation, and comparison stages unless the PR documents why a
+  lower number was required.
 - Simulator-only training is allowed, but any trained or search controller
   claimed live-game runnable must pass the CommunicationMod runtime adapter and
   share the same public decision/action contract.
@@ -143,6 +146,10 @@ current contracts.
 - Implement only a published `READY` task. Task lifecycle state is
   authoritative only in `docs/tasks/README.md`.
 - One task uses one fresh branch and one pull request based on latest `main`.
+- A ready-for-review pull request must satisfy the task's published
+  deliverables, required artifacts, verification, and acceptance criteria.
+  Incomplete work must stay draft or be explicitly marked incomplete with the
+  missing criteria named; do not submit an incomplete task as ready for merge.
 - `main` is the only integration line.
 - Use isolated worktrees for parallel tasks; never switch branches in a shared
   worktree.
