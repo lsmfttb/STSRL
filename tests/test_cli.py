@@ -468,6 +468,8 @@ def test_cli_parser_accepts_model_guided_oracle_flags(tmp_path) -> None:
             str(root_prior_path),
             "--root-prior-guided-search-comparison-scale",
             "fixed",
+            "--root-prior-guided-search-comparison-task-id",
+            "T048",
         ]
     )
 
@@ -481,6 +483,7 @@ def test_cli_parser_accepts_model_guided_oracle_flags(tmp_path) -> None:
         root_prior_path
     )
     assert root_prior_args.root_prior_guided_search_comparison_scale == "fixed"
+    assert root_prior_args.root_prior_guided_search_comparison_task_id == "T048"
 
     potion_comparison_args = build_parser().parse_args(
         [
