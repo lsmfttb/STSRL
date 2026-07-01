@@ -220,6 +220,15 @@ def build_parser() -> argparse.ArgumentParser:
             "policy targets without running a simulator or controller."
         ),
     )
+    input_group.add_argument(
+        "--post-t044-failure-analysis-report",
+        type=Path,
+        metavar="OUTPUT_JSON",
+        help=(
+            "Build the offline T045 post-T044 failure analysis JSON report from "
+            "one or more explicit --post-t044-comparison T044 artifacts."
+        ),
+    )
     parser.add_argument(
         "--pytorch-search-guidance-infer-trainer-input",
         type=Path,
@@ -259,6 +268,28 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=3,
         help="Top-k agreement cutoff for --teacher-guidance-calibration-report.",
+    )
+    parser.add_argument(
+        "--post-t044-comparison",
+        type=Path,
+        action="append",
+        default=[],
+        metavar="T044_JSONL",
+        help=(
+            "One T044 de-assisted fixed-cohort comparison JSONL artifact for "
+            "--post-t044-failure-analysis-report. Repeat for multiple cohorts."
+        ),
+    )
+    parser.add_argument(
+        "--post-t044-linked-artifact",
+        nargs=2,
+        action="append",
+        default=[],
+        metavar=("ROLE", "PATH"),
+        help=(
+            "Optional linked T043/T044 artifact identity for the T045 report, "
+            "for example calibration REPORT_JSON. Repeat as needed."
+        ),
     )
     input_group.add_argument(
         "--pytorch-search-guidance-train",

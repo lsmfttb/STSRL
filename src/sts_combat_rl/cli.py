@@ -39,6 +39,10 @@ from sts_combat_rl.commands.pytorch_search_guidance import (
     run_pytorch_search_guidance_inference_from_paths,
     run_pytorch_search_guidance_training_from_path,
 )
+from sts_combat_rl.commands.post_t044_failure_analysis import (
+    format_post_t044_failure_analysis_command,
+    run_post_t044_failure_analysis_from_paths,
+)
 from sts_combat_rl.commands.reachability import run_a20_reachability_report_from_paths
 from sts_combat_rl.commands.teacher_guidance_calibration import (
     format_teacher_guidance_calibration_command,
@@ -182,6 +186,22 @@ def main(argv: list[str] | None = None) -> int:
             ),
             file=sys.stderr,
         )
+        return 0 if report.command_passed else 1
+
+    if args.post_t044_failure_analysis_report is not None:
+        try:
+            report = run_post_t044_failure_analysis_from_paths(
+                comparison_paths=args.post_t044_comparison,
+                output_path=args.post_t044_failure_analysis_report,
+                linked_artifact_specs=args.post_t044_linked_artifact,
+            )
+        except (OSError, UnicodeDecodeError, ValueError) as exc:
+            print(
+                f"failed to build post-T044 failure analysis report: {exc}",
+                file=sys.stderr,
+            )
+            return 2
+        print(format_post_t044_failure_analysis_command(report), file=sys.stderr)
         return 0 if report.command_passed else 1
 
     if args.pytorch_search_guidance_train is not None:
