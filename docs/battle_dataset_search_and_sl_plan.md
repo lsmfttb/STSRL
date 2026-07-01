@@ -5,16 +5,20 @@ development, and the separately evaluated SL-enabled branch. Repository-wide
 rules come from [`project_architecture.md`](project_architecture.md). Current
 implementation status comes from [`current_status.md`](current_status.md).
 
-The published foundation, maintenance, and first research-measurement backlog
-is complete through the M1 synthesis and T031 coverage refresh, except for
-cancelled T007, whose scope was superseded by T014--T016. T031 found the
-current A20 source distribution still Act-1-only; T036 added search-controlled
-reachability tooling but its accepted smoke arms were also Act 1 only. T037
-recovered a narrow Boss/Act2 source signal, and T039 records the accepted
-source-coverage contract. Broad teacher/checkpoint refresh work remains
-blocked; the current executable task is the narrow T032 diagnostic refresh over
-the T039 contract. New implementation work should start only from rows marked
-`READY` in the task index.
+The published foundation, maintenance, M1 model-guided Oracle-search sandbox,
+M2 source-coverage recovery, and M3 assisted source-generation batch are
+complete except for cancelled tasks whose scope was superseded or rejected.
+T031 and T036 showed the current A20 source distribution was still Act-1-only
+at smoke scale; T037 recovered a narrow Boss/Act2 source signal, and T039
+records the accepted source-coverage contract. T032 and T035 converted that
+contract into narrow diagnostic teacher/checkpoint and model-guided-search
+evidence, without broad-training or controller-promotion claims. T040--T044
+completed the assisted source-generation, assisted teacher/training, and
+de-assisted fixed-cohort evaluation batch. T045 is the current `READY` task:
+it diagnoses why T044 did not improve outcomes before the project chooses a
+larger training, native-search, or non-combat branch. New implementation work
+should start only from rows marked `READY` in the task index; T034 remains
+blocked on native sampler support.
 
 ## Goals
 
@@ -326,15 +330,16 @@ collection path and reachability report. Its accepted 10-run smoke comparison
 covered default, 20-simulation no-potion Oracle-like search, and
 20-simulation potion-enabled Oracle-like search arms; all stayed in Act 1. T037
 then recovered the Boss/Act2 signal at the historical 1,000-run comparison
-point. T039 records the accepted source contract. T032 is now deliberately
-narrowed to a diagnostic teacher/checkpoint refresh over that contract rather
-than a broad A20 refresh. T035 later confirmed that deeper root-only
-model-guided Oracle-like search over the narrow diagnostic checkpoint does not
-yet improve the smoke fixed cohort. The next published source-generation batch
-is therefore T040--T044: add a versioned expert non-combat source driver, use
-the now-complete T041 potion-enabled Oracle search repair, extend assistance
-into complete-run source generation, train assisted teacher/value-policy
-diagnostics, and evaluate de-assisted fixed cohorts.
+point. T039 records the accepted source contract. T032 completed a diagnostic
+teacher/checkpoint refresh over that contract rather than a broad A20 refresh.
+T035 confirmed that deeper root-only model-guided Oracle-like search over the
+narrow diagnostic checkpoint does not improve the smoke fixed cohort. T040
+added a versioned expert non-combat source driver, T041 repaired
+potion-enabled Oracle search, T042 extended assistance into complete-run
+source generation, T043 trained assisted teacher/value-policy diagnostics, and
+T044 evaluated de-assisted fixed cohorts. The assisted batch improved
+diagnostic source and evaluation coverage, but it did not produce controller
+promotion evidence.
 
 Work:
 
@@ -342,8 +347,10 @@ Work:
 - measure natural, stratified, and constructed mixture coverage;
 - collect a reported natural/balanced/constructed mixture;
 - retain complete public history and context;
-- satisfy broad-training readiness per ascension and act.
-- keep mechanical cleanup separate from coverage/search experiments.
+- satisfy broad-training readiness per ascension and act;
+- keep mechanical cleanup separate from coverage/search experiments;
+- use T045 to classify the post-T044 failure mode before publishing a larger
+  training, native-search, or non-combat branch.
 
 Exit gate: enough unique A20 Boss and later-act starts exist for meaningful
 training and evaluation.
@@ -372,13 +379,17 @@ teacher/checkpoint work: the current run distribution still did not reach Boss
 or later-act battle starts. T036 completed the first current-schema
 search-controlled reachability probe; the smoke evidence validated tooling but
 did not recover Boss or later-act starts. T037/T039 recovered and contracted a
-narrow Boss/Act2 supplement. Meaningful held-out improvement or controller
-promotion remains pending broader source-generation coverage. T035 completed a
-deeper root-only model-guided Oracle-like search comparison over refreshed
-diagnostic provenance and again tied the baseline smoke outcome. Current
-follow-up work is the T040--T044 assisted source-generation batch, which treats
-Oracle search and learned models as teacher/search/value diagnostics until
-low-assistance or unassisted fixed-cohort evidence improves.
+narrow Boss/Act2 supplement. T035 completed a deeper root-only model-guided
+Oracle-like search comparison over refreshed diagnostic provenance and again
+tied the baseline smoke outcome. T040--T044 completed the assisted
+source-generation, assisted teacher/training, and de-assisted fixed-cohort
+evaluation batch. The accepted T044 comparisons did not show model-guided
+search outcome improvement over baseline, so meaningful held-out improvement
+and controller promotion remain pending broader source-generation coverage and
+a future explicit promotion gate. T045 is the next diagnostic step: it should
+separate weak-model, late-integration, noisy-teacher, distribution-mismatch,
+and action-space/fallback explanations before selecting the next search or
+training task.
 
 Exit gate: a search change improves fixed evaluation at equal simulation or
 wall-clock budget without natural-weighted regression.

@@ -255,9 +255,15 @@ task index. T036 completed the immediate reachability probe before changing
 direction: it added current-schema search-controlled complete-run collection,
 but the accepted 10-run A20 smoke arms did not recover the historical Boss/Act2
 source path. T037 recovered the historical Boss/Act2 source signal, and T039
-records the accepted narrow source-coverage contract. T032 is now the next
-narrow teacher/checkpoint diagnostic refresh over that contract; broad A20
-training remains blocked.
+records the accepted narrow source-coverage contract. T032 completed the
+narrow teacher/checkpoint diagnostic refresh over that contract, and T035
+completed the follow-up root-only model-guided Oracle-like search comparison;
+neither produced broad A20 training readiness or controller-promotion
+evidence. T040--T044 completed the assisted source-generation and de-assisted
+evaluation batch, again as diagnostic evidence rather than promotion. T045 is
+the next diagnostic task to classify whether the lack of gain is caused by
+weak model learning, root-only search integration, noisy teacher targets,
+distribution mismatch, or action-space/fallback issues.
 
 Use the Oracle regime to validate priors, leaf values, uncertainty, and search
 instrumentation. Exit when model guidance improves the fixed Oracle curve at
@@ -285,15 +291,18 @@ Retain only auxiliary targets that improve normal-information evaluation.
 
 ## Immediate Design Work
 
-1. Keep broad teacher/checkpoint refresh evidence blocked; the T039 contract is
-   a narrow Boss/Act2 supplement, not sufficient A20 coverage.
-2. Run the narrowed T032 diagnostic refresh over the accepted T039 source
-   contract before deeper model-guided Oracle-like search work.
-3. Build structured history, map, and visible-Boss encoders on the sanitized
-   public-context artifacts now available on `main`.
-4. Establish an honest public policy/vector-value baseline from sufficient A20
+1. Keep broad teacher/checkpoint refresh evidence blocked until sufficient A20
+   per-act coverage exists; the T039 contract and assisted batches remain
+   diagnostic supplements, not broad-training coverage.
+2. Extend sanitized public context only through explicit native/public
+   contracts, keeping missing map, route, and history payloads explicit.
+3. Establish an honest public policy/vector-value baseline from sufficient A20
    coverage, keeping raw policy diagnostics separate from search promotion.
-5. Design the authoritative public-consistent hidden-future sampler.
+4. Design and pin the authoritative public-consistent hidden-future sampler;
+   T034 remains blocked until that native boundary exists.
+5. Use T045's failure taxonomy before publishing the next training,
+   native-search, or non-combat branch; publish implementation work only
+   through `READY` task rows in the task index.
 6. Keep further mechanical CLI/module cleanup in later dedicated
    no-behavior-change maintenance tasks before mixing it into search research;
    the first CLI/export cleanup pass completed in

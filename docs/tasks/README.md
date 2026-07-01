@@ -58,6 +58,7 @@ the current milestone, but they do not override this table.
 | T042 | DONE | [Assisted complete-run source generation](T042-assisted-complete-run-source-generation.md) | T040, T041 | assisted-run distribution, schedules, and coverage report |
 | T043 | DONE | [Assisted teacher dataset and value/policy training](T043-assisted-teacher-value-policy-training.md) | T042, T033 | assisted teacher data and public student diagnostics |
 | T044 | DONE | [De-assisted fixed-cohort evaluation](T044-de-assisted-fixed-cohort-evaluation.md) | T043 | low/no-assistance fixed-cohort model/search evaluation |
+| T045 | READY | [Post-T044 failure analysis and guidance path selection](T045-post-t044-failure-analysis.md) | T043, T044 | failure taxonomy after assisted model/search did not improve T044 outcomes |
 
 Use the table, not per-task files or roadmap prose, when deciding whether a
 task may receive a branch. Only `READY` rows should receive a new branch. After
@@ -190,7 +191,7 @@ checkpoint provenance; its accepted smoke comparison tied the baseline and T028
 outcomes, so it is not promotion evidence.
 
 M3 follows the upstream assisted source-generation guidance supplied after
-T035. The milestone target is to generate broader, higher-quality A20
+T035. The milestone target was to generate broader, higher-quality A20
 battle-state distributions before continuing broad neural training. T040 added
 a versioned A20 heuristic non-combat source-generation driver and is complete.
 T041 repaired the potion-enabled Oracle-like search failure and is complete.
@@ -198,9 +199,10 @@ T042 added the assisted-run source-generation distribution and is complete.
 T033 finalized `public-context-model-input-v1`, the public-context feature
 contract needed before assisted teacher/value training. T043 added assisted
 source-pool teacher scale-up and public student diagnostic wiring. T044
-completed the de-assisted fixed-cohort evaluation gate after T043. T034 remains
-blocked on native public-consistent hidden-future sampler support, and no new
-task is currently `READY`.
+completed the de-assisted fixed-cohort evaluation gate after T043, but did not
+show model-guided search improvement over baseline. T045 is now `READY` to
+diagnose that failure and select the next guidance path. T034 remains blocked
+on native public-consistent hidden-future sampler support.
 
 ## Standard Local Gates
 
@@ -249,6 +251,7 @@ are mapped as follows:
 - Post-M1 coverage, data, public-context, sampler, model-guided-search, and
   reachability follow-up proposals: T031--T039.
 - Assisted source-generation curriculum: T040--T044.
+- Post-T044 failure analysis and guidance path selection: T045.
 
 T013 supplies the shared CommunicationMod adapter and captured-sample
 compatibility gate. Simulator-only training experiments do not depend on it.

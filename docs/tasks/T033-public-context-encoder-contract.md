@@ -12,21 +12,21 @@ the current ad hoc compact summary.
 
 ## Current Main Baseline
 
-Current `main` preserves sanitized `public-run-context-v1` and ordered public
-history through decisions and current artifacts. `ModelInputBatch` carries raw
-`public_run_context` dictionaries, and `torch_policy_value.py` currently
-derives a small inline context feature vector through
-`encode_public_context_features`.
+At the time this task was published, `main` preserved sanitized
+`public-run-context-v1` and ordered public history through decisions and
+current artifacts. `ModelInputBatch` carried raw `public_run_context`
+dictionaries, and `torch_policy_value.py` derived a small inline context
+feature vector through `encode_public_context_features`.
 
-That inline vector is not yet an independent model-input contract. It is not
-serialized as a separate `ModelInputBatch` field, it does not carry a
-missingness summary, and it is not reusable by trainer-input preflight,
-checkpoint semantic validation, assisted-data non-leakage tests, and future
-T043 trainer/report workflows as one named public-context schema.
+That inline vector was not yet an independent model-input contract. It was not
+serialized as a separate `ModelInputBatch` field, it did not carry a
+missingness summary, and it was not reusable by trainer-input preflight,
+checkpoint semantic validation, assisted-data non-leakage tests, and
+downstream T043 trainer/report workflows as one named public-context schema.
 
-T040--T042 broadened A20 source distributions, but T043 remains blocked until
-the model-input boundary can represent public long-horizon context without
-leaking assistance provenance or simulator-only hidden state.
+T040--T042 broadened A20 source distributions. T043 depended on this task's
+model-input boundary to represent public long-horizon context without leaking
+assistance provenance or simulator-only hidden state.
 
 ## Dependencies
 

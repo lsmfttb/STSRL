@@ -21,28 +21,35 @@ separate seeded driver.
 
 ## Current Main
 
-`main` currently contains a communication probe and first battle-agent data
-spike:
+`main` contains the current battle-agent research foundation through the
+assisted source-generation and de-assisted evaluation batch. The high-level
+shape is:
 
 ```text
 external sts_lightspeed simulator
         |
         v
-framework-neutral simulator adapter
+framework-neutral simulator adapter + CommunicationMod adapter
         |
         v
-battle policy + separate non-combat driver
+online battle controllers + separately versioned non-combat drivers
         |
         v
-bounded rollouts and battle-only decision batches
+controlled runs, source pools, fixed cohorts, and restored evaluation
         |
         v
-reward/trainer/model-input plumbing checks
+teacher data, trainer/model-input contracts, checkpoints, and search reports
 ```
 
-It does not yet contain checkpoint pools, search integration, PyTorch training,
-complete public run history, or normal-information belief search. Those are
-published as dependency-ordered tasks, not reported as implemented features.
+The implemented surface includes checkpoint pools, Oracle-like native search
+and teacher plumbing, optional PyTorch search-guidance training/inference,
+public-context artifact propagation, assisted source-pool workflows, and
+diagnostic fixed-cohort comparisons. The current gaps are still important:
+`main` does not contain broad A20 neural training, promoted model-guided search
+improvement, normal-information belief search, or interactive live-game A20
+performance validation. See [`docs/current_status.md`](docs/current_status.md)
+for the full implemented-capability list and [`docs/tasks/README.md`](docs/tasks/README.md)
+for the authoritative task queue.
 
 ## Boundaries
 
@@ -79,8 +86,8 @@ python -m sts_combat_rl.cli --mock tests/fixtures/combat_basic.json
 python -m sts_combat_rl.cli --mock tests/fixtures/non_combat.json
 ```
 
-The current quality-gate gap is tracked by
-[`T001`](docs/tasks/T001-main-quality-baseline.md).
+Task-specific WSL simulator gates and artifact checks are listed in the
+relevant task document.
 
 ## WSL Simulator
 

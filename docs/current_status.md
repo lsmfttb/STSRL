@@ -29,8 +29,10 @@ versioned deeper model-guided Oracle-like search comparison using refreshed
 diagnostic checkpoint provenance, but the accepted smoke evidence tied the
 baseline and T028 outcomes rather than demonstrating improvement. The upstream
 assisted source-generation batch is now complete: T040, T041, T042, T033,
-T043, and T044 are all merged. No task is currently `READY`; T034 remains
-blocked on native public-consistent hidden-future sampler support.
+T043, and T044 are all merged. T044 did not show model-guided search
+improvement over baseline, so T045 is now `READY` to diagnose the failure mode
+and select the next guidance path. T034 remains blocked on native
+public-consistent hidden-future sampler support.
 
 ## Implemented On Main
 
@@ -801,7 +803,10 @@ T040 (`Expert Non-Combat Driver v1`), T041
 (`De-assisted fixed-cohort evaluation`) are complete. The T044 result did not
 show model-guided search improvement over baseline on the accepted smoke fixed
 cohorts, so it closes the assisted batch as diagnostic evidence rather than a
-promotion path. No task is currently `READY`.
+promotion path. T045
+(`Post-T044 failure analysis and guidance path selection`) is now `READY` as
+an offline/reporting task to classify the failure before publishing another
+training, native-search, or non-combat branch.
 
 The immediate external-fork follow-up is
 [`lsmfttb/sts_lightspeed#7`](https://github.com/lsmfttb/sts_lightspeed/issues/7):
@@ -827,6 +832,9 @@ The assisted source-generation batch is:
    search on low-assistance or unassisted fixed cohorts; the accepted smoke
    evidence tied the baseline for model-guided search and did not promote a
    controller.
+7. T045 diagnoses why T044 did not improve outcomes and recommends the next
+   guidance path before any larger training or native-search task is
+   published.
 
 T034 remains blocked on an explicit native simulator boundary for
 public-consistent hidden-future sampling.
