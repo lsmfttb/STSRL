@@ -39,6 +39,10 @@ from sts_combat_rl.sim.controller_contract import (
 )
 from sts_combat_rl.sim.controlled_run import build_decision_context
 from sts_combat_rl.sim.decision_record import find_action_index_by_identity
+from sts_combat_rl.sim.battle_start_pool import (
+    ASSISTED_RUN_DISTRIBUTION_KIND,
+    NATURAL_DISTRIBUTION_KIND,
+)
 from sts_combat_rl.sim.fixed_evaluation_set import (
     FixedCohortRecord,
 )
@@ -1210,7 +1214,11 @@ def _restore_cohort_record(
     matches the cohort fingerprint after this returns.
     """
 
-    if cohort_record.assistance_history:
+    if cohort_record.source_distribution_kind == ASSISTED_RUN_DISTRIBUTION_KIND:
+        if not cohort_record.assistance_history:
+            raise ValueError(
+                "assisted_run cohort record requires non-empty assistance_history"
+            )
         from sts_combat_rl.sim.assisted_source_generation import (
             restore_assisted_by_seed_action_trace,
         )
@@ -1225,6 +1233,17 @@ def _restore_cohort_record(
             ),
         )
         return restored, "assisted_seed_action_trace", final_context
+
+    if cohort_record.assistance_history:
+        raise ValueError(
+            f"{cohort_record.source_distribution_kind} cohort record must not carry "
+            "assistance_history"
+        )
+    if cohort_record.source_distribution_kind != NATURAL_DISTRIBUTION_KIND:
+        raise ValueError(
+            "unsupported fixed cohort source_distribution_kind: "
+            f"{cohort_record.source_distribution_kind}"
+        )
 
     snapshot = adapter.reset(seed=cohort_record.source_seed)
     public_history: list[dict[str, Any]] = []

@@ -113,6 +113,21 @@ def _make_record(
     )
 
 
+def _make_assistance_history(
+    *,
+    battle_index: int = 0,
+    assistance_level: str = "assist_hp50",
+) -> tuple[dict[str, object], ...]:
+    return (
+        {
+            "source_battle_index": battle_index,
+            "assistance_level": assistance_level,
+            "distribution_kind": ASSISTED_RUN_DISTRIBUTION_KIND,
+            "actual_change": {"native_rebuild_called": False},
+        },
+    )
+
+
 def _make_pool(
     records: list[BattleStartCheckpointRecord], **overrides
 ) -> NaturalBattleStartPool:
@@ -320,6 +335,7 @@ class TestSelectFixedCohort:
         assisted = replace(
             base,
             distribution_kind=ASSISTED_RUN_DISTRIBUTION_KIND,
+            assistance_history=_make_assistance_history(),
             structural_metadata={
                 **base.structural_metadata,
                 "source_kind": ASSISTED_RUN_DISTRIBUTION_KIND,
@@ -348,6 +364,35 @@ class TestSelectFixedCohort:
         assert loaded.records[0].structural_metadata["assistance_level"] == (
             "assist_hp50"
         )
+
+    def test_assisted_source_distribution_requires_assistance_history(self):
+        """An assisted fixed cohort must not drop T042 assistance provenance."""
+        base = _make_record(0)
+        assisted = replace(
+            base,
+            distribution_kind=ASSISTED_RUN_DISTRIBUTION_KIND,
+            structural_metadata={
+                **base.structural_metadata,
+                "source_kind": ASSISTED_RUN_DISTRIBUTION_KIND,
+                "distribution_kind": ASSISTED_RUN_DISTRIBUTION_KIND,
+                "assistance_level": "assist_hp50",
+            },
+        )
+        pool = _make_pool([assisted])
+
+        cohort, coverage = select_fixed_cohort(pool, selection_seed=1)
+
+        assert not coverage.coverage_ok
+        assert any(
+            "assisted_run requires non-empty assistance_history" in problem
+            for problem in coverage.problems
+        )
+        buf = StringIO()
+        with pytest.raises(
+            ValueError,
+            match="assisted_run requires non-empty assistance_history",
+        ):
+            dump_fixed_cohort_jsonl(cohort, buf)
 
     def test_config_to_dict_and_back(self):
         """Selection config round-trips through dict."""
@@ -471,6 +516,32 @@ class TestFixedCohortSerialization:
         assert loaded.records[0].public_context_status == "legacy_unavailable"
         assert loaded.records[0].public_run_context == {}
         assert loaded.records[0].assistance_history == ()
+
+    def test_load_assisted_run_without_assistance_history_raises(self):
+        base = _make_record(0)
+        assisted = replace(
+            base,
+            distribution_kind=ASSISTED_RUN_DISTRIBUTION_KIND,
+            assistance_history=_make_assistance_history(),
+            structural_metadata={
+                **base.structural_metadata,
+                "source_kind": ASSISTED_RUN_DISTRIBUTION_KIND,
+                "distribution_kind": ASSISTED_RUN_DISTRIBUTION_KIND,
+                "assistance_level": "assist_hp50",
+            },
+        )
+        cohort, _ = select_fixed_cohort(_make_pool([assisted]), selection_seed=1)
+        buf = StringIO()
+        dump_fixed_cohort_jsonl(cohort, buf)
+        rows = [json.loads(line) for line in buf.getvalue().splitlines()]
+        rows[1]["record"]["assistance_history"] = []
+        bad_text = "\n".join(json.dumps(row, sort_keys=True) for row in rows)
+
+        with pytest.raises(
+            ValueError,
+            match="assisted_run requires non-empty assistance_history",
+        ):
+            load_fixed_cohort_jsonl(StringIO(bad_text))
 
 
 class TestCohortCoverageReport:

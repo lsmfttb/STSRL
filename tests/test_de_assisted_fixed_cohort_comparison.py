@@ -299,6 +299,17 @@ def _natural_record() -> FixedCohortRecord:
     )
 
 
+def _assistance_history() -> tuple[dict[str, object], ...]:
+    return (
+        {
+            "source_battle_index": 0,
+            "assistance_level": "assist_hp50",
+            "distribution_kind": ASSISTED_RUN_DISTRIBUTION_KIND,
+            "actual_change": {"native_rebuild_called": False},
+        },
+    )
+
+
 def _cohort() -> FixedCohort:
     natural = _natural_record()
     assisted = replace(
@@ -317,6 +328,7 @@ def _cohort() -> FixedCohort:
             "source_run_id": "seed-2-assisted-run-0",
         },
         source_distribution_kind=ASSISTED_RUN_DISTRIBUTION_KIND,
+        assistance_history=_assistance_history(),
     )
     return FixedCohort(
         source_pool_format_version=3,

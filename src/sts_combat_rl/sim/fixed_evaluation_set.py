@@ -393,6 +393,15 @@ def select_fixed_cohort(
     checkpoint_ids = [r.source_checkpoint_id for r in selected_records]
     if len(checkpoint_ids) != len(set(checkpoint_ids)):
         problems.append("selected cohort contains duplicate source checkpoints")
+    for record in selected_records:
+        if (
+            record.source_distribution_kind == ASSISTED_RUN_DISTRIBUTION_KIND
+            and not record.assistance_history
+        ):
+            problems.append(
+                f"selected cohort record {record.cohort_index} assisted_run "
+                "requires non-empty assistance_history"
+            )
 
     coverage = CohortCoverageReport(
         pool_record_count=len(pool.records),
@@ -756,6 +765,13 @@ def _fixed_cohort_problems(cohort: FixedCohort) -> list[str]:
                 f"record {index} source_distribution_kind must be one of "
                 f"{expected}: "
                 f"{record.source_distribution_kind}"
+            )
+        if (
+            record.source_distribution_kind == ASSISTED_RUN_DISTRIBUTION_KIND
+            and not record.assistance_history
+        ):
+            problems.append(
+                f"record {index} assisted_run requires non-empty assistance_history"
             )
         problems.extend(
             public_context_artifact_problems(
