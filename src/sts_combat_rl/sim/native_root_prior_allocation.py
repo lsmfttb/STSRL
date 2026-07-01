@@ -362,6 +362,18 @@ def write_native_root_prior_allocation_report(
     )
 
 
+def root_prior_allocation_metadata(raw: Mapping[str, Any]) -> dict[str, Any]:
+    """Return validated T046 allocation metadata from a native search result."""
+
+    return dict(_allocation_metadata(raw))
+
+
+def root_prior_allocation_rows(raw: Mapping[str, Any]) -> tuple[dict[str, Any], ...]:
+    """Return JSON-safe allocation rows from a native root-prior search result."""
+
+    return tuple(dict(row) for row in _allocation_rows(raw))
+
+
 def format_native_root_prior_allocation_report(
     report: NativeRootPriorAllocationReport,
 ) -> str:

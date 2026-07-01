@@ -49,6 +49,10 @@ from sts_combat_rl.commands.model_guided_search_comparison import (
     write_model_guided_search_fixed_comparison_report,
     write_model_guided_search_v2_fixed_comparison_report,
 )
+from sts_combat_rl.commands.root_prior_guided_search_comparison import (
+    run_root_prior_guided_search_comparison_from_cohort_path,
+    write_root_prior_guided_search_comparison_report,
+)
 from sts_combat_rl.commands.oracle_search import (
     collect_oracle_teacher_from_pool_path,
     format_oracle_fixed_evaluation_comparison,
@@ -165,6 +169,13 @@ from sts_combat_rl.sim.oracle_search import OracleSearchController
 from sts_combat_rl.sim.oracle_potion_comparison import (
     format_oracle_potion_fixed_comparison_report,
 )
+from sts_combat_rl.sim.root_prior_guided_search import (
+    RootPriorGuidedSearchController,
+)
+from sts_combat_rl.sim.root_prior_guided_search_comparison import (
+    ROOT_PRIOR_GUIDED_LABEL,
+    format_root_prior_guided_search_comparison_report,
+)
 from sts_combat_rl.sim.policy import (
     ScoredActionPolicy,
     evaluate_decision_policy,
@@ -247,6 +258,7 @@ _LIGHTSPEED_PATH_FLAGS = (
     "lightspeed_model_guided_search_fixed_comparison",
     "lightspeed_model_guided_search_v2_fixed_comparison",
     "lightspeed_de_assisted_fixed_cohort_comparison",
+    "lightspeed_root_prior_guided_search_comparison",
 )
 
 
@@ -840,6 +852,78 @@ def run_lightspeed_command(args: argparse.Namespace) -> int:
                 )
             print(
                 format_de_assisted_fixed_cohort_comparison_report(report),
+                file=sys.stderr,
+            )
+            if not report.evaluation_successful:
+                return 1
+        elif args.lightspeed_root_prior_guided_search_comparison is not None:
+            budget = (
+                args.oracle_search_simulations
+                if args.search_budget is None
+                else args.search_budget
+            )
+            scorer = build_torch_guidance_scorer_from_checkpoint(
+                args.model_guided_oracle_checkpoint
+            )
+            baseline_controller = OracleSearchController(
+                simulations=budget,
+                root_selection_rule=args.oracle_root_selection,
+                action_space=action_space,
+            )
+            model_guided_v2_controller = ModelGuidedOracleSearchV2Controller(
+                simulations=budget,
+                scorer=scorer,
+                policy_probability_weight=(
+                    args.model_guided_oracle_policy_probability_weight
+                ),
+                action_space=action_space,
+            )
+            root_prior_controller = RootPriorGuidedSearchController(
+                simulations=budget,
+                scorer=scorer,
+                root_selection_rule=args.oracle_root_selection,
+                prior_temperature=args.root_prior_temperature,
+                min_visits_per_legal_action=args.root_prior_min_visits,
+                prior_allocation_weight=args.root_prior_allocation_weight,
+                action_space=action_space,
+            )
+            report = run_root_prior_guided_search_comparison_from_cohort_path(
+                adapter_factory=lambda: LightSpeedAdapter(
+                    seed=args.sim_seed,
+                    ascension=args.sim_ascension,
+                ),
+                cohort_path=args.lightspeed_root_prior_guided_search_comparison,
+                controller_arms=(
+                    (
+                        BASELINE_ORACLE_LABEL,
+                        "baseline_oracle_search",
+                        baseline_controller,
+                    ),
+                    (
+                        MODEL_GUIDED_ORACLE_V2_LABEL,
+                        "post_search_model_guided_oracle_search_v2",
+                        model_guided_v2_controller,
+                    ),
+                    (
+                        ROOT_PRIOR_GUIDED_LABEL,
+                        "native_root_prior_allocation_from_checkpoint_priors",
+                        root_prior_controller,
+                    ),
+                ),
+                action_space=action_space,
+                max_battle_steps=args.sim_steps,
+                run_scale=args.root_prior_guided_search_comparison_scale,
+                worker_count=args.workers,
+                shard_count=args.shards,
+                record_range=args.record_range,
+            )
+            if args.root_prior_guided_search_comparison_report is not None:
+                write_root_prior_guided_search_comparison_report(
+                    args.root_prior_guided_search_comparison_report,
+                    report,
+                )
+            print(
+                format_root_prior_guided_search_comparison_report(report),
                 file=sys.stderr,
             )
             if not report.evaluation_successful:

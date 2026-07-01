@@ -369,6 +369,7 @@ def test_cli_parser_accepts_model_guided_oracle_flags(tmp_path) -> None:
     checkpoint_path = tmp_path / "checkpoint.pt"
     comparison_path = tmp_path / "comparison.jsonl"
     de_assisted_path = tmp_path / "de-assisted-comparison.jsonl"
+    root_prior_path = tmp_path / "root-prior-comparison.jsonl"
     potion_comparison_path = tmp_path / "potion-comparison.jsonl"
 
     args = build_parser().parse_args(
@@ -448,6 +449,38 @@ def test_cli_parser_accepts_model_guided_oracle_flags(tmp_path) -> None:
         de_assisted_args.de_assisted_fixed_cohort_comparison_report == de_assisted_path
     )
     assert de_assisted_args.de_assisted_fixed_cohort_comparison_scale == "fixed"
+
+    root_prior_args = build_parser().parse_args(
+        [
+            "--lightspeed-root-prior-guided-search-comparison",
+            str(cohort_path),
+            "--model-guided-oracle-checkpoint",
+            str(checkpoint_path),
+            "--search-budget",
+            "20",
+            "--workers",
+            "4",
+            "--shards",
+            "4",
+            "--record-range",
+            "0:8",
+            "--root-prior-guided-search-comparison-report",
+            str(root_prior_path),
+            "--root-prior-guided-search-comparison-scale",
+            "fixed",
+        ]
+    )
+
+    assert root_prior_args.lightspeed_root_prior_guided_search_comparison == cohort_path
+    assert root_prior_args.model_guided_oracle_checkpoint == checkpoint_path
+    assert root_prior_args.search_budget == 20
+    assert root_prior_args.workers == 4
+    assert root_prior_args.shards == 4
+    assert root_prior_args.record_range == "0:8"
+    assert root_prior_args.root_prior_guided_search_comparison_report == (
+        root_prior_path
+    )
+    assert root_prior_args.root_prior_guided_search_comparison_scale == "fixed"
 
     potion_comparison_args = build_parser().parse_args(
         [
@@ -599,6 +632,51 @@ def test_cli_rejects_de_assisted_comparison_without_checkpoint(
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "requires --model-guided-oracle-checkpoint" in captured.err
+
+
+def test_cli_rejects_root_prior_guided_comparison_without_checkpoint(
+    tmp_path,
+    capsys,
+) -> None:
+    cohort_path = tmp_path / "cohort.jsonl"
+
+    assert (
+        main(
+            [
+                "--lightspeed-root-prior-guided-search-comparison",
+                str(cohort_path),
+                "--log-file",
+                "-",
+            ]
+        )
+        == 2
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "requires --model-guided-oracle-checkpoint" in captured.err
+
+
+def test_cli_rejects_bad_root_prior_guided_record_range(capsys) -> None:
+    assert (
+        main(
+            [
+                "--lightspeed-root-prior-guided-search-comparison",
+                "cohort.jsonl",
+                "--model-guided-oracle-checkpoint",
+                "checkpoint.pt",
+                "--record-range",
+                "4-8",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 2
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "--record-range must use START:END" in captured.err
 
 
 class FakeLightSpeedSmokeAdapter:
@@ -2015,6 +2093,40 @@ def test_cli_oracle_search_teacher_and_fixed_eval_routes_write_stderr_only(
     assert "checkpoint_raw_policy:" in de_assisted_output.err
     assert '"schema_id": "de-assisted-fixed-cohort-comparison-v1"' in (
         de_assisted_path.read_text(encoding="utf-8")
+    )
+
+    root_prior_path = tmp_path / "root-prior-guided-comparison.jsonl"
+    assert (
+        main(
+            [
+                "--lightspeed-root-prior-guided-search-comparison",
+                str(cohort_path),
+                "--model-guided-oracle-checkpoint",
+                str(checkpoint_path),
+                "--search-budget",
+                "3",
+                "--sim-steps",
+                "1",
+                "--workers",
+                "1",
+                "--shards",
+                "1",
+                "--root-prior-guided-search-comparison-report",
+                str(root_prior_path),
+                "--log-file",
+                "-",
+            ]
+        )
+        == 0
+    )
+    root_prior_output = capsys.readouterr()
+    assert root_prior_output.out == ""
+    assert root_prior_path.exists()
+    assert "Root-prior guided search comparison" in root_prior_output.err
+    assert "source starts matched: yes" in root_prior_output.err
+    assert "root_prior_guided_oracle_search:" in root_prior_output.err
+    assert '"schema_id": "root-prior-guided-search-comparison-v1"' in (
+        root_prior_path.read_text(encoding="utf-8")
     )
 
 

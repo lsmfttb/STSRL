@@ -539,6 +539,16 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     input_group.add_argument(
+        "--lightspeed-root-prior-guided-search-comparison",
+        type=Path,
+        metavar="COHORT_PATH",
+        help=(
+            "Load an immutable fixed battle cohort unchanged and run the T047 "
+            "comparison across baseline Oracle search, post-search v2 "
+            "model-guided search, and native root-prior guided search."
+        ),
+    )
+    input_group.add_argument(
         "--oracle-teacher-dataset-report",
         type=Path,
         metavar="TEACHER_JSONL",
@@ -1062,6 +1072,34 @@ def build_parser() -> argparse.ArgumentParser:
         help="Write the T046 native-root-prior-allocation-report-v1 JSON artifact.",
     )
     parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help=(
+            "Worker count for T047 root-prior guided fixed-cohort comparison. "
+            "Use 1 for smoke/debug runs; scale evidence should report the "
+            "chosen host-worker count."
+        ),
+    )
+    parser.add_argument(
+        "--shards",
+        type=int,
+        default=1,
+        help=(
+            "Cohort shard count for T047 root-prior guided fixed-cohort "
+            "comparison. Defaults to a single shard for smoke/debug runs."
+        ),
+    )
+    parser.add_argument(
+        "--record-range",
+        default=None,
+        metavar="START:END",
+        help=(
+            "Optional zero-based end-exclusive cohort record range for a T047 "
+            "comparison shard, for example 0:64. Omit to evaluate all records."
+        ),
+    )
+    parser.add_argument(
         "--oracle-root-selection",
         choices=ORACLE_ROOT_SELECTION_RULES,
         default="highest_mean",
@@ -1075,7 +1113,8 @@ def build_parser() -> argparse.ArgumentParser:
             "T026-compatible PyTorch policy/value checkpoint used by "
             "--lightspeed-model-guided-oracle-fixed-evaluation or "
             "--lightspeed-model-guided-search-fixed-comparison or "
-            "--lightspeed-de-assisted-fixed-cohort-comparison."
+            "--lightspeed-de-assisted-fixed-cohort-comparison or "
+            "--lightspeed-root-prior-guided-search-comparison."
         ),
     )
     parser.add_argument(
@@ -1108,6 +1147,21 @@ def build_parser() -> argparse.ArgumentParser:
         default="smoke",
         help=(
             "Scale label recorded in the T044 comparison report. The default "
+            "marks the run as smoke-scale evidence."
+        ),
+    )
+    parser.add_argument(
+        "--root-prior-guided-search-comparison-report",
+        type=Path,
+        metavar="PATH",
+        help="Write the T047 root-prior guided search comparison JSONL report.",
+    )
+    parser.add_argument(
+        "--root-prior-guided-search-comparison-scale",
+        choices=("smoke", "fixed"),
+        default="smoke",
+        help=(
+            "Scale label recorded in the T047 comparison report. The default "
             "marks the run as smoke-scale evidence."
         ),
     )

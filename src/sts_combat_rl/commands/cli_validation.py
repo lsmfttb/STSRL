@@ -35,6 +35,14 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
         return "--oracle-search-simulations must be positive"
     if args.search_budget is not None and args.search_budget <= 0:
         return "--search-budget must be positive"
+    if args.workers <= 0:
+        return "--workers must be positive"
+    if args.shards <= 0:
+        return "--shards must be positive"
+    if args.record_range is not None:
+        range_problem = _validate_record_range(args.record_range)
+        if range_problem is not None:
+            return range_problem
     if (
         not math.isfinite(args.root_prior_temperature)
         or args.root_prior_temperature <= 0.0
@@ -113,6 +121,7 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
         or args.lightspeed_model_guided_search_fixed_comparison is not None
         or args.lightspeed_model_guided_search_v2_fixed_comparison is not None
         or args.lightspeed_de_assisted_fixed_cohort_comparison is not None
+        or args.lightspeed_root_prior_guided_search_comparison is not None
     )
     if (
         uses_model_guided_oracle_checkpoint
@@ -131,7 +140,8 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
             "--lightspeed-model-guided-oracle-fixed-evaluation or "
             "--lightspeed-model-guided-search-fixed-comparison or "
             "--lightspeed-model-guided-search-v2-fixed-comparison or "
-            "--lightspeed-de-assisted-fixed-cohort-comparison"
+            "--lightspeed-de-assisted-fixed-cohort-comparison or "
+            "--lightspeed-root-prior-guided-search-comparison"
         )
     if (
         args.model_guided_search_comparison_report is not None
@@ -150,6 +160,14 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
         return (
             "--de-assisted-fixed-cohort-comparison-report requires "
             "--lightspeed-de-assisted-fixed-cohort-comparison"
+        )
+    if (
+        args.root_prior_guided_search_comparison_report is not None
+        and args.lightspeed_root_prior_guided_search_comparison is None
+    ):
+        return (
+            "--root-prior-guided-search-comparison-report requires "
+            "--lightspeed-root-prior-guided-search-comparison"
         )
     teacher_scaleup_requested = (
         args.lightspeed_a20_oracle_teacher_scaleup is not None
@@ -348,4 +366,18 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
             "--root-prior-allocation-report requires "
             "--lightspeed-native-root-prior-allocation-smoke"
         )
+    return None
+
+
+def _validate_record_range(value: str) -> str | None:
+    parts = value.split(":", 1)
+    if len(parts) != 2:
+        return "--record-range must use START:END"
+    try:
+        start = int(parts[0])
+        end = int(parts[1])
+    except ValueError:
+        return "--record-range endpoints must be integers"
+    if start < 0 or end < start:
+        return "--record-range must be a non-negative end-exclusive range"
     return None
