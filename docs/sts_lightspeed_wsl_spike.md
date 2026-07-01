@@ -4,8 +4,9 @@ This guide lists simulator operations available on the latest `main`.
 Checkpoint verification, portable battle-start pools, fixed structural
 evaluation, Oracle-like native search teacher collection, Oracle fixed-cohort
 comparison, structured battle resource outcome auditing with native terminal
-resource identities, conservative constructed battle-start supplements, and
-the pinned external source integration are current capabilities.
+resource identities, conservative constructed battle-start supplements, native
+root-prior allocation, and the pinned external source integration are current
+capabilities.
 
 ## Boundary
 
@@ -41,7 +42,7 @@ base commit:  7476a81954020087da31d41d16fddf475746ec2d
 integration:  https://github.com/lsmfttb/sts_lightspeed.git
 branch:       stsrl/main
 ref:          refs/heads/stsrl/main
-commit:       242344c57c17c784708a6f072c905febc3f96527
+commit:       9dd8f75bd5d2b1aa8a8b5cf1db18f899825f326a
 module:       slaythespire.StepSimulator
 ```
 
@@ -59,9 +60,10 @@ review in the fork, and then advance `stsrl/main` through a reviewed STSRL
 manifest update that records the new exact commit. Do not rely on local
 unrecorded branch state for repository gates.
 
-The current pinned `stsrl/main` commit advances beyond the old T008 task branch
-only with fork-side maintenance documentation, native-change templates, and an
-API smoke script. It does not change native game or pybind behavior.
+The current pinned `stsrl/main` commit advances beyond the old T020
+maintenance-line commit with the T046 root-prior allocation native API. It
+preserves existing native `battle_search` behavior and adds
+`StepSimulator.battle_search_with_root_priors` plus root allocation metadata.
 
 Verify the pinned source in a disposable worktree:
 
@@ -69,10 +71,12 @@ Verify the pinned source in a disposable worktree:
 wsl.exe -d Ubuntu -e bash -lc "cd /mnt/d/DeadlycatCoding/STSRL && bash scripts/verify_lightspeed_source.sh /home/lsmft/stsrl-spikes/sts_lightspeed"
 ```
 
-The verifier reads the manifest, fetches the pinned ref, checks that it resolves
-to the recorded commit, initializes `json` and `pybind11`, builds the Python
-module in the disposable worktree, and asserts the native API capabilities
-required by current `main`.
+The verifier reads the manifest, fetches the pinned ref, checks that it
+resolves to the recorded commit, materializes `json` and `pybind11` from exact
+submodule commits when a local object cache is available, falls back to
+`git submodule update --init` otherwise, builds the Python module in the
+disposable worktree, and asserts the native API capabilities required by
+current `main`.
 
 Rebuild the system `build-py` used by runtime gates only after the verifier
 passes. This WSL bash command leaves tracked local changes in the external
@@ -89,7 +93,7 @@ cleanup() {
 }
 trap cleanup EXIT
 git -C "$source" fetch https://github.com/lsmfttb/sts_lightspeed.git refs/heads/stsrl/main
-git -C "$source" worktree add --detach "$worktree" 242344c57c17c784708a6f072c905febc3f96527 >/dev/null
+git -C "$source" worktree add --detach "$worktree" 9dd8f75bd5d2b1aa8a8b5cf1db18f899825f326a >/dev/null
 cd "$worktree"
 git submodule update --init json pybind11
 if [ -d "$source/build-py" ]; then
@@ -97,7 +101,7 @@ if [ -d "$source/build-py" ]; then
 fi
 cmake -S "$worktree" -B "$source/build-py" -DCMAKE_POLICY_VERSION_MINIMUM=3.5
 cmake --build "$source/build-py" --target slaythespire -j 2
-PYTHONPATH="$source/build-py" python3 -c "import slaythespire; sim=slaythespire.StepSimulator(slaythespire.CharacterClass.IRONCLAD, 1, 20); snap=sim.snapshot(); assert hasattr(sim, 'battle_search'); assert hasattr(sim, 'legal_battle_start_encounters'); assert hasattr(sim, 'rebuild_battle_start'); assert all(k in snap for k in ('potions', 'deck', 'relics', 'blue_key', 'green_key', 'red_key')); print(slaythespire.__file__)"
+PYTHONPATH="$source/build-py" python3 -c "import slaythespire; sim=slaythespire.StepSimulator(slaythespire.CharacterClass.IRONCLAD, 1, 20); snap=sim.snapshot(); assert hasattr(sim, 'battle_search'); assert hasattr(sim, 'battle_search_with_root_priors'); assert hasattr(sim, 'legal_battle_start_encounters'); assert hasattr(sim, 'rebuild_battle_start'); assert all(k in snap for k in ('potions', 'deck', 'relics', 'blue_key', 'green_key', 'red_key')); print(slaythespire.__file__)"
 ```
 
 Current WSL-facing reports for the required runtime gates print the manifest

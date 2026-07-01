@@ -59,7 +59,8 @@ the current milestone, but they do not override this table.
 | T043 | DONE | [Assisted teacher dataset and value/policy training](T043-assisted-teacher-value-policy-training.md) | T042, T033 | assisted teacher data and public student diagnostics |
 | T044 | DONE | [De-assisted fixed-cohort evaluation](T044-de-assisted-fixed-cohort-evaluation.md) | T043 | low/no-assistance fixed-cohort model/search evaluation |
 | T045 | DONE | [Post-T044 failure analysis and guidance path selection](T045-post-t044-failure-analysis.md) | T043, T044 | failure taxonomy after assisted model/search did not improve T044 outcomes |
-| T046 | READY | [Native root-prior allocation search surface](T046-native-root-prior-allocation.md) | T045, T017, T020 | native search surface for root playout allocation by explicit priors |
+| T046 | DONE | [Native root-prior allocation search surface](T046-native-root-prior-allocation.md) | T045, T017, T020 | native search surface for root playout allocation by explicit priors |
+| T047 | READY | [Root-prior guided search comparison](T047-root-prior-guided-search-comparison.md) | T046, T043, T044 | equal-source comparison of baseline, post-search guidance, and native root-prior allocation |
 
 Use the table, not per-task files or roadmap prose, when deciding whether a
 task may receive a branch. Only `READY` rows should receive a new branch. After
@@ -203,9 +204,10 @@ source-pool teacher scale-up and public student diagnostic wiring. T044
 completed the de-assisted fixed-cohort evaluation gate after T043, but did not
 show model-guided search improvement over baseline. T045 completed the
 post-T044 failure analysis and selected native root-prior allocation as the
-primary next path. T046 is now `READY` to add the minimal native root-prior
-allocation surface before any root-prior fixed-cohort comparison, training
-repair, or non-combat ranker branch. T034 remains blocked on native
+primary next path. T046 added the minimal native root-prior allocation surface.
+T047 is now `READY` to compare baseline search, post-search model-guided
+search, and native root-prior allocation on matched restored starts before any
+training repair or non-combat ranker branch. T034 remains blocked on native
 public-consistent hidden-future sampler support.
 
 ## Standard Local Gates
@@ -257,6 +259,7 @@ are mapped as follows:
 - Assisted source-generation curriculum: T040--T044.
 - Post-T044 failure analysis and guidance path selection: T045.
 - Native root-prior allocation search surface: T046.
+- Root-prior guided search comparison: T047.
 
 T013 supplies the shared CommunicationMod adapter and captured-sample
 compatibility gate. Simulator-only training experiments do not depend on it.

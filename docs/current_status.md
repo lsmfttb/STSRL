@@ -33,9 +33,10 @@ T043, and T044 are all merged. T044 did not show model-guided search
 improvement over baseline. T045 is complete: it added the offline
 `post-t044-failure-analysis-report-v1` workflow, classified the accepted T044
 failure evidence, and recommended native root-prior allocation as the primary
-next search path. T046 is now `READY` to add a minimal native root-prior
-allocation surface before any root-prior fixed-cohort comparison, training
-repair, or non-combat ranker branch. T034 remains blocked on native
+next search path. T046 is complete: it added the minimal native root-prior
+allocation surface and smoke report workflow. T047 is now `READY` to compare
+baseline search, post-search model-guided search, and native root-prior
+allocation on matched restored starts. T034 remains blocked on native
 public-consistent hidden-future sampler support.
 
 ## Implemented On Main
@@ -65,7 +66,7 @@ public-consistent hidden-future sampler support.
   `gamerpuppy/sts_lightspeed` base commit
   `7476a81954020087da31d41d16fddf475746ec2d` and the active fork integration
   branch `refs/heads/stsrl/main` at commit
-  `242344c57c17c784708a6f072c905febc3f96527`. Historical task-shaped fork
+  `9dd8f75bd5d2b1aa8a8b5cf1db18f899825f326a`. Historical task-shaped fork
   branches are retained only as provenance, and the old ordered patch stack is
   retained only as retired provenance.
 
@@ -777,6 +778,26 @@ public-consistent hidden-future sampler support.
   not new training, native API work, controller promotion, broad-training
   evidence, normal-information performance, natural A20 performance, or
   live-game validation.
+- T046 adds the native `StepSimulator.battle_search_with_root_priors` surface,
+  STSRL adapter validation for occurrence-safe root-prior stable ids, and the
+  `native-root-prior-allocation-report-v1` smoke workflow. The source manifest
+  now pins `lsmfttb/sts_lightspeed` `refs/heads/stsrl/main` at
+  `9dd8f75bd5d2b1aa8a8b5cf1db18f899825f326a` with native capability
+  `native_root_prior_allocation`. The verifier materializes cached submodules
+  from exact commit objects, builds a clean disposable pinned-source worktree,
+  and asserts the root-prior API plus allocation metadata/root-row fields.
+  Maintainer review passed 623 Windows tests, compileall, ruff, format check,
+  both CommunicationMod fixture smokes, focused T046/task/CLI tests, diff
+  whitespace checks, the WSL pinned source verifier, and a WSL root-prior
+  allocation smoke. The accepted smoke used seed `1`, A20, a 20-playout
+  budget on a Cultist battle, and reported baseline visits `20`, uniform
+  allocation `[4, 4, 4, 4, 4]`, one-hot allocation `[16, 1, 1, 1, 1]`, zero
+  root mapping failures, and the
+  `full_simulator_state_oracle_like` information regime. This is native
+  search-surface smoke evidence only, not a root-prior fixed-cohort
+  comparison, controller promotion, broad-training evidence,
+  normal-information performance, natural A20 performance, live-game
+  validation, or final-agent evidence.
 
 ## Not Implemented On Main
 
@@ -786,7 +807,8 @@ unmerged legacy work:
 - interactive live-game or A20 performance validation for any controller;
 - broad neural training on a scale/distribution-approved A20 dataset;
 - model-guided search performance improvement or controller promotion;
-- native root-prior allocation or root-prior guided search comparison;
+- root-prior guided fixed-cohort comparison or root-prior controller
+  promotion;
 - normal-information belief search.
 
 Do not use documentation or results from these areas as evidence that `main`
@@ -833,10 +855,10 @@ promotion path. T045
 (`Post-T044 failure analysis and guidance path selection`) is complete and
 classified the immediate failure signals before another training,
 native-search, or non-combat branch is published. T046
-(`Native root-prior allocation search surface`) is now `READY` as the next
-published task. It should add the minimal `sts_lightspeed` native API and STSRL
-adapter/reporting surface for explicit root priors to influence root playout
-allocation while preserving the `full_simulator_state_oracle_like` boundary.
+(`Native root-prior allocation search surface`) is complete. T047
+(`Root-prior guided search comparison`) is now `READY` to evaluate whether the
+T046 allocation surface lets T043 checkpoint priors improve matched fixed
+cohort outcomes or compute efficiency at equal native root budget.
 
 The immediate external-fork follow-up is
 [`lsmfttb/sts_lightspeed#7`](https://github.com/lsmfttb/sts_lightspeed/issues/7):
@@ -868,9 +890,10 @@ The completed assisted source-generation batch is:
    as the primary next search path, while preserving assisted training and
    de-assisted distribution repair as secondary diagnostic follow-ups.
 
-The published follow-up is T046, which will add the native root-prior
-allocation search surface needed before a root-prior guided fixed-cohort
-comparison can evaluate whether priors improve sample efficiency.
+The published follow-up is T047, which will compare baseline search,
+post-search model-guided search, and native root-prior allocation on matched
+restored starts before any assisted training repair or non-combat ranker
+branch.
 
 T034 remains blocked on an explicit native simulator boundary for
 public-consistent hidden-future sampling.
