@@ -1,6 +1,6 @@
 # Current Status
 
-Last reviewed: 2026-07-01.
+Last reviewed: 2026-07-02.
 
 This document describes the latest `main` branch only. Results from local
 artifacts, old branches, or unmerged pull requests do not count as implemented
@@ -970,6 +970,17 @@ the active `stsrl/main` fork integration branch pinned in
 and verified by `scripts/verify_lightspeed_source.sh`. Runtime gates use
 `/home/lsmft/stsrl-spikes/sts_lightspeed/build-py` rebuilt from that pinned
 source.
+
+Checkpoint-guided WSL gates have an additional runtime alignment requirement:
+the exact WSL Python used for the gate must import both PyTorch and the active
+`slaythespire` native extension, and that extension must expose the task's
+required native APIs. See
+[`sts_lightspeed_wsl_spike.md`](sts_lightspeed_wsl_spike.md) for the
+same-runtime probe. As of 2026-07-02, the maintainer machine still has split
+runtimes: system `python3` is Python 3.14.4 without `torch`, while the separate
+`/home/lsmft/stsrl-spikes/py313-torch/bin/python` has `torch` but cannot
+import the active CPython 3.14 `build-py` extension. Source-verifier success
+does not by itself satisfy checkpoint-guided runtime evidence.
 
 Scale matters operationally. T037 exposed that a single-worker WSL
 source-generation run is too slow and leaves host resources underused for

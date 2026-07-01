@@ -169,6 +169,15 @@ Before WSL comparison evidence, run the pinned source verifier:
 wsl.exe -d Ubuntu -e bash -lc "cd /mnt/d/DeadlycatCoding/STSRL && bash scripts/verify_lightspeed_source.sh /home/lsmft/stsrl-spikes/sts_lightspeed"
 ```
 
+Also run and report the PyTorch/native runtime alignment probe from
+[`../sts_lightspeed_wsl_spike.md`](../sts_lightspeed_wsl_spike.md) with the
+same WSL Python interpreter and `build-py` path used by the comparison. The
+probe must show one runtime that imports `torch`, imports `slaythespire`, and
+exposes both `StepSimulator.battle_search` and
+`StepSimulator.battle_search_with_root_priors`. A pinned source verifier pass
+alone is not sufficient T047 evidence because it does not prove the active WSL
+runtime is torch-capable.
+
 Run a WSL root-prior guided fixed-cohort comparison on explicitly reported
 checkpoint, cohort, budget, output path, shard count, worker count, and record
 ranges. If the PR adds a named CLI command, the PR must report the exact

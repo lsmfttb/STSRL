@@ -31,6 +31,86 @@ repository in WSL: /mnt/d/DeadlycatCoding/STSRL
 source manifest:   docs/sts_lightspeed_source_manifest.json
 ```
 
+## PyTorch And Native Runtime Alignment
+
+Most WSL simulator gates do not import PyTorch. Gates that load a
+`torch-policy-value-checkpoint-v1` checkpoint are different: the same WSL
+Python interpreter must be able to import both PyTorch and the active
+`slaythespire` native extension used by `sts_lightspeed` gates. The native
+extension is CPython-ABI-specific, so a torch-capable Python cannot consume an
+arbitrary `build-py` directory built by another Python version.
+
+This does not mean PyTorch must be installed into the WSL system Python. A
+dedicated WSL virtual environment is acceptable, and is usually preferable,
+provided the `slaythespire` build used by the gate is built for that exact
+interpreter. The acceptance target is a torch-capable simulator runtime, not a
+system-wide package installation.
+
+This has been a recurring operational blocker rather than a T047-specific code
+issue:
+
+- T026 accepted only offline/local checkpoint-inference evidence because the
+  reviewed WSL Python environment lacked PyTorch.
+- M1/T028 WSL model-guided smoke evidence required a separate Python 3.13
+  shim, showing that checkpoint inference and the default WSL simulator
+  runtime were not yet one stable environment.
+- T047 review on 2026-07-02 found the split still active: WSL system
+  `python3` was Python 3.14.4 with no `torch`; active
+  `/home/lsmft/stsrl-spikes/sts_lightspeed/build-py` imported as
+  `slaythespire.cpython-314-x86_64-linux-gnu.so` and exposed
+  `battle_search` but not `battle_search_with_root_priors`; the separate
+  `/home/lsmft/stsrl-spikes/py313-torch/bin/python` was Python 3.13.13 with
+  `torch` installed but could not import that active CPython 3.14
+  `slaythespire` build.
+
+A pinned source verifier pass proves that the recorded source can build and
+that the disposable build exposes required native capabilities. It does not
+install PyTorch, and it does not prove that the active runtime path used by a
+later command is torch-capable.
+
+Before accepting any WSL gate that loads a checkpoint or performs
+checkpoint-guided search, run and report a same-runtime probe with the exact
+Python interpreter and `build-py` path that the gate will use:
+
+```powershell
+$script = @'
+set -euo pipefail
+PY="${STSRL_WSL_PYTHON:-python3}"
+BUILD="${STSRL_LIGHTSPEED_BUILD:-/home/lsmft/stsrl-spikes/sts_lightspeed/build-py}"
+REPO="/mnt/d/DeadlycatCoding/STSRL"
+printf 'python: '
+"$PY" --version
+PYTHONPATH="$BUILD:$REPO/src" "$PY" - <<'PY'
+import importlib.util
+import slaythespire
+
+missing = []
+if importlib.util.find_spec("torch") is None:
+    missing.append("torch")
+step_simulator = getattr(slaythespire, "StepSimulator", None)
+for capability in ("battle_search", "battle_search_with_root_priors"):
+    if step_simulator is None or not hasattr(step_simulator, capability):
+        missing.append(f"StepSimulator.{capability}")
+
+print("torch_spec:", importlib.util.find_spec("torch"))
+print("slaythespire_file:", getattr(slaythespire, "__file__", None))
+print("has_battle_search:", hasattr(step_simulator, "battle_search"))
+print(
+    "has_battle_search_with_root_priors:",
+    hasattr(step_simulator, "battle_search_with_root_priors"),
+)
+if missing:
+    raise SystemExit("missing runtime capability: " + ", ".join(missing))
+PY
+'@
+wsl.exe -d Ubuntu -e bash -lc $script
+```
+
+For non-root-prior checkpoint-guided gates, replace the capability list with
+the native APIs required by that task. The invariant remains the same: do not
+mix a torch-capable interpreter with a `build-py` compiled for another Python
+ABI, and do not treat source-verifier success as active-runtime evidence.
+
 ## Pinned Source Integration
 
 The canonical day-to-day source integration is recorded in
