@@ -265,7 +265,8 @@ completed the post-T044 failure analysis: its accepted smoke evidence favored
 root-only search integration as the primary bottleneck, with weak-model and
 distribution-mismatch signals also active, no action-space/fallback issue
 observed, and teacher-label noise unavailable without a linked calibration
-report.
+report. T046 is now the published `READY` task to add the minimal native
+root-prior allocation surface before evaluating root-prior guided search.
 
 Use the Oracle regime to validate priors, leaf values, uncertainty, and search
 instrumentation. Exit when model guidance improves the fixed Oracle curve at
@@ -302,9 +303,10 @@ Retain only auxiliary targets that improve normal-information evaluation.
    coverage, keeping raw policy diagnostics separate from search promotion.
 4. Design and pin the authoritative public-consistent hidden-future sampler;
    T034 remains blocked until that native boundary exists.
-5. Use the completed T045 failure taxonomy before publishing the next training,
-   native-search, or non-combat branch; publish implementation work only
-   through `READY` task rows in the task index.
+5. Complete T046's native root-prior allocation surface before publishing a
+   root-prior guided fixed-cohort comparison, assisted training repair, or
+   non-combat ranker branch; publish implementation work only through `READY`
+   task rows in the task index.
 6. Keep further mechanical CLI/module cleanup in later dedicated
    no-behavior-change maintenance tasks before mixing it into search research;
    the first CLI/export cleanup pass completed in

@@ -33,9 +33,10 @@ T043, and T044 are all merged. T044 did not show model-guided search
 improvement over baseline. T045 is complete: it added the offline
 `post-t044-failure-analysis-report-v1` workflow, classified the accepted T044
 failure evidence, and recommended native root-prior allocation as the primary
-next search path if a follow-up task is published. No task is currently
-`READY`; T034 remains blocked on native public-consistent hidden-future
-sampler support.
+next search path. T046 is now `READY` to add a minimal native root-prior
+allocation surface before any root-prior fixed-cohort comparison, training
+repair, or non-combat ranker branch. T034 remains blocked on native
+public-consistent hidden-future sampler support.
 
 ## Implemented On Main
 
@@ -785,6 +786,7 @@ unmerged legacy work:
 - interactive live-game or A20 performance validation for any controller;
 - broad neural training on a scale/distribution-approved A20 dataset;
 - model-guided search performance improvement or controller promotion;
+- native root-prior allocation or root-prior guided search comparison;
 - normal-information belief search.
 
 Do not use documentation or results from these areas as evidence that `main`
@@ -830,8 +832,11 @@ cohorts, so it closes the assisted batch as diagnostic evidence rather than a
 promotion path. T045
 (`Post-T044 failure analysis and guidance path selection`) is complete and
 classified the immediate failure signals before another training,
-native-search, or non-combat branch is published. No new task is currently
-`READY`.
+native-search, or non-combat branch is published. T046
+(`Native root-prior allocation search surface`) is now `READY` as the next
+published task. It should add the minimal `sts_lightspeed` native API and STSRL
+adapter/reporting surface for explicit root priors to influence root playout
+allocation while preserving the `full_simulator_state_oracle_like` boundary.
 
 The immediate external-fork follow-up is
 [`lsmfttb/sts_lightspeed#7`](https://github.com/lsmfttb/sts_lightspeed/issues/7):
@@ -839,7 +844,7 @@ archive historical STSRL task branches after creating provenance tags, while
 preserving `stsrl/main` as the sole active integration branch. This is
 operational fork maintenance and does not block STSRL repository work.
 
-The assisted source-generation batch is:
+The completed assisted source-generation batch is:
 
 1. T040 implements `expert_non_combat_v1` as a seeded, stochastic A20
    heuristic source-generation driver and compares source coverage against
@@ -862,6 +867,10 @@ The assisted source-generation batch is:
    published. Its accepted smoke evidence favored native root-prior allocation
    as the primary next search path, while preserving assisted training and
    de-assisted distribution repair as secondary diagnostic follow-ups.
+
+The published follow-up is T046, which will add the native root-prior
+allocation search surface needed before a root-prior guided fixed-cohort
+comparison can evaluate whether priors improve sample efficiency.
 
 T034 remains blocked on an explicit native simulator boundary for
 public-consistent hidden-future sampling.
