@@ -35,9 +35,10 @@ def test_default_lightspeed_source_manifest_names_pinned_integration() -> None:
     )
     assert manifest.integration.branch == "stsrl/main"
     assert manifest.integration.ref == "refs/heads/stsrl/main"
-    assert manifest.integration.commit == ("242344c57c17c784708a6f072c905febc3f96527")
+    assert manifest.integration.commit == ("9dd8f75bd5d2b1aa8a8b5cf1db18f899825f326a")
     assert set(REQUIRED_NATIVE_CAPABILITY_IDS).issubset(manifest.capability_ids)
     assert "native_battle_search_root" in manifest.capability_ids
+    assert "native_root_prior_allocation" in manifest.capability_ids
     assert "native_terminal_resource_identity" in manifest.capability_ids
     assert "constructed_battle_start_transforms" in manifest.capability_ids
     assert manifest.legacy_patch_stack.status == "retired_provenance"
@@ -96,10 +97,8 @@ def test_lightspeed_source_manifest_requires_current_capability_inventory() -> N
     payload = _default_manifest_payload()
     capabilities = list(payload["supported_native_capabilities"])  # type: ignore[index]
     payload["supported_native_capabilities"] = [
-        item
-        for item in capabilities
-        if item["id"] != "constructed_battle_start_transforms"
+        item for item in capabilities if item["id"] != "native_root_prior_allocation"
     ]
 
-    with pytest.raises(ValueError, match="constructed_battle_start_transforms"):
+    with pytest.raises(ValueError, match="native_root_prior_allocation"):
         parse_lightspeed_source_manifest(payload)

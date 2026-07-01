@@ -143,6 +143,11 @@ from sts_combat_rl.sim.model_scoring import (
 from sts_combat_rl.sim.native_public_projection import (
     format_native_public_projection_capability_report,
 )
+from sts_combat_rl.sim.native_root_prior_allocation import (
+    format_native_root_prior_allocation_report,
+    run_native_root_prior_allocation_smoke,
+    write_native_root_prior_allocation_report,
+)
 from sts_combat_rl.sim.non_combat_calibration import (
     format_non_combat_driver_calibration_report,
     run_non_combat_driver_calibration,
@@ -223,6 +228,7 @@ _LIGHTSPEED_BOOL_FLAGS = (
     "lightspeed_public_projection_capability_audit",
     "lightspeed_public_context_audit",
     "lightspeed_battle_checkpoint_verify",
+    "lightspeed_native_root_prior_allocation_smoke",
 )
 _LIGHTSPEED_PATH_FLAGS = (
     "lightspeed_battle_start_pool",
@@ -372,6 +378,31 @@ def run_lightspeed_command(args: argparse.Namespace) -> int:
             )
             print(format_battle_checkpoint_verification_report(report), file=sys.stderr)
             if not report.determinism_ok:
+                return 1
+        elif args.lightspeed_native_root_prior_allocation_smoke:
+            budget = (
+                args.oracle_search_simulations
+                if args.search_budget is None
+                else args.search_budget
+            )
+            report = run_native_root_prior_allocation_smoke(
+                adapter,
+                seed=args.sim_seed,
+                max_steps=args.sim_steps,
+                simulations=budget,
+                action_space=action_space,
+                include_potions=args.include_potions,
+                prior_temperature=args.root_prior_temperature,
+                min_visits_per_legal_action=args.root_prior_min_visits,
+                prior_allocation_weight=args.root_prior_allocation_weight,
+            )
+            if args.root_prior_allocation_report is not None:
+                write_native_root_prior_allocation_report(
+                    args.root_prior_allocation_report,
+                    report,
+                )
+            print(format_native_root_prior_allocation_report(report), file=sys.stderr)
+            if not report.passed:
                 return 1
         elif args.lightspeed_battle_start_pool is not None:
             pool, coverage = collect_checkpoint_pool(

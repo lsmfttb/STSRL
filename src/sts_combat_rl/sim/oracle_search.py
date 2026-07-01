@@ -286,6 +286,8 @@ def build_oracle_search_report(
     actions: Sequence[SimulatorAction],
     context: DecisionContext,
     *,
+    expected_native_api: str = ORACLE_SEARCH_NATIVE_API,
+    expected_patch_identity: str = ORACLE_SEARCH_PATCH_IDENTITY,
     wall_clock_time_s: float | None = None,
 ) -> OracleSearchReport:
     """Validate native root rows and align them to current legal actions."""
@@ -296,10 +298,10 @@ def build_oracle_search_report(
     if schema_id != ORACLE_SEARCH_SCHEMA_ID:
         problems.append(f"unsupported native search schema_id {schema_id!r}")
     native_api = str(raw.get("native_api", ""))
-    if native_api != ORACLE_SEARCH_NATIVE_API:
+    if native_api != expected_native_api:
         problems.append(f"unsupported native search api {native_api!r}")
     patch_identity = str(raw.get("patch_identity", ""))
-    if patch_identity != ORACLE_SEARCH_PATCH_IDENTITY:
+    if patch_identity != expected_patch_identity:
         problems.append(f"unsupported native search patch identity {patch_identity!r}")
     information_regime = str(raw.get("information_regime", ""))
     if information_regime != NATIVE_SEARCH_INFORMATION_REGIME:

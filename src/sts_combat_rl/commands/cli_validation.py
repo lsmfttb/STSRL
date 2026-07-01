@@ -33,6 +33,21 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
         return "--battle-start-structural-fraction must be between zero and one"
     if args.oracle_search_simulations <= 0:
         return "--oracle-search-simulations must be positive"
+    if args.search_budget is not None and args.search_budget <= 0:
+        return "--search-budget must be positive"
+    if (
+        not math.isfinite(args.root_prior_temperature)
+        or args.root_prior_temperature <= 0.0
+    ):
+        return "--root-prior-temperature must be finite and positive"
+    if args.root_prior_min_visits < 0:
+        return "--root-prior-min-visits must be non-negative"
+    if (
+        not math.isfinite(args.root_prior_allocation_weight)
+        or args.root_prior_allocation_weight < 0.0
+        or args.root_prior_allocation_weight > 1.0
+    ):
+        return "--root-prior-allocation-weight must be between zero and one"
     if args.assistance_policy_seed is not None and args.assistance_policy_seed < 0:
         return "--assistance-policy-seed must be non-negative"
     if (
@@ -324,5 +339,13 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
         return (
             "--post-t044-comparison and --post-t044-linked-artifact require "
             "--post-t044-failure-analysis-report"
+        )
+    if (
+        args.root_prior_allocation_report is not None
+        and not args.lightspeed_native_root_prior_allocation_smoke
+    ):
+        return (
+            "--root-prior-allocation-report requires "
+            "--lightspeed-native-root-prior-allocation-smoke"
         )
     return None

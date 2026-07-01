@@ -327,6 +327,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     input_group.add_argument(
+        "--lightspeed-native-root-prior-allocation-smoke",
+        action="store_true",
+        help=(
+            "Run a T046 diagnostic smoke comparing baseline native battle_search "
+            "with uniform and one-hot root-prior allocation searches."
+        ),
+    )
+    input_group.add_argument(
         "--lightspeed-battle-start-pool",
         type=Path,
         metavar="PATH",
@@ -1013,6 +1021,45 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=100,
         help="Native BattleScumSearcher2 root playout count for Oracle search.",
+    )
+    parser.add_argument(
+        "--search-budget",
+        type=int,
+        default=None,
+        help=(
+            "Native root playout budget for T046 root-prior allocation smoke. "
+            "Defaults to --oracle-search-simulations when omitted."
+        ),
+    )
+    parser.add_argument(
+        "--root-prior-temperature",
+        type=float,
+        default=1.0,
+        help="Prior temperature for --lightspeed-native-root-prior-allocation-smoke.",
+    )
+    parser.add_argument(
+        "--root-prior-min-visits",
+        type=int,
+        default=1,
+        help=(
+            "Minimum root visits per eligible action for "
+            "--lightspeed-native-root-prior-allocation-smoke."
+        ),
+    )
+    parser.add_argument(
+        "--root-prior-allocation-weight",
+        type=float,
+        default=1.0,
+        help=(
+            "Mixture weight for supplied priors in T046 root-prior allocation; "
+            "0 is uniform and 1 is pure supplied-prior allocation after min visits."
+        ),
+    )
+    parser.add_argument(
+        "--root-prior-allocation-report",
+        type=Path,
+        metavar="PATH",
+        help="Write the T046 native-root-prior-allocation-report-v1 JSON artifact.",
     )
     parser.add_argument(
         "--oracle-root-selection",

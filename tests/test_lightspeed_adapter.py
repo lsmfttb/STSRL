@@ -4,6 +4,8 @@ from dataclasses import dataclass
 
 import pytest
 
+from sts_combat_rl.sim.action_space import ActionSpaceConfig
+from sts_combat_rl.sim.controlled_run import build_decision_context
 from sts_combat_rl.sim.lightspeed import LightSpeedAdapter
 from sts_combat_rl.sim.contract import SimulatorSnapshot
 
@@ -30,6 +32,7 @@ class FakeStepSimulator:
         self.ascension = ascension
         self.steps = 0
         self.outcome = "UNDECIDED"
+        self.root_prior_calls = 0
 
     def reset(self, character_class: str, seed: int, ascension: int) -> None:
         self.character_class = character_class
@@ -96,6 +99,20 @@ class FakeStepSimulator:
         self.seed, self.outcome, self.steps = checkpoint
         return self.snapshot()
 
+    def battle_search_with_root_priors(
+        self,
+        simulations: int,
+        include_potions: bool,
+        root_action_priors: list[float],
+        prior_temperature: float,
+        min_visits_per_legal_action: int,
+        prior_allocation_weight: float,
+    ) -> dict[str, object]:
+        del simulations, include_potions, root_action_priors, prior_temperature
+        del min_visits_per_legal_action, prior_allocation_weight
+        self.root_prior_calls += 1
+        return {}
+
 
 class FakeModule:
     CharacterClass = FakeCharacterClass
@@ -144,6 +161,28 @@ def test_lightspeed_adapter_wraps_native_checkpoint_restore() -> None:
     assert checkpoint.metadata["seed"] == 11
     assert restored.observation == initial.observation
     assert restored.raw == initial.raw
+
+
+def test_lightspeed_adapter_rejects_bad_root_prior_before_native_call() -> None:
+    adapter = LightSpeedAdapter(seed=7, ascension=20, module=FakeModule)
+    snapshot = adapter.reset(seed=11)
+    actions = adapter.legal_actions(snapshot)
+    context = build_decision_context(
+        snapshot.raw,
+        actions,
+        ActionSpaceConfig.include_all(),
+    )
+
+    with pytest.raises(ValueError, match="malformed root prior"):
+        adapter.battle_search_with_root_priors(
+            snapshot,
+            actions=actions,
+            context=context,
+            simulations=5,
+            root_action_priors={"not-json": 1.0},
+        )
+
+    assert adapter._sim.root_prior_calls == 0
 
 
 def test_lightspeed_snapshot_fingerprint_ignores_transition_only_battle_outcome() -> (
