@@ -34,10 +34,12 @@ improvement over baseline. T045 is complete: it added the offline
 `post-t044-failure-analysis-report-v1` workflow, classified the accepted T044
 failure evidence, and recommended native root-prior allocation as the primary
 next search path. T046 is complete: it added the minimal native root-prior
-allocation surface and smoke report workflow. T047 is now `READY` to compare
-baseline search, post-search model-guided search, and native root-prior
-allocation on matched restored starts. T034 remains blocked on native
-public-consistent hidden-future sampler support.
+allocation surface and smoke report workflow. T047 is complete: it added the
+root-prior guided Oracle-like comparison workflow and produced the first
+matched smoke showing root-prior guided search beating both baseline and
+post-search guidance on one current pinned T046-compatible restored start.
+T048 is now `READY` to scale that comparison beyond the one-record smoke.
+T034 remains blocked on native public-consistent hidden-future sampler support.
 
 ## Implemented On Main
 
@@ -798,6 +800,31 @@ public-consistent hidden-future sampler support.
   comparison, controller promotion, broad-training evidence,
   normal-information performance, natural A20 performance, live-game
   validation, or final-agent evidence.
+- T047 adds `RootPriorGuidedSearchController`, the
+  `root-prior-guided-search-comparison-v1` report, and
+  `--lightspeed-root-prior-guided-search-comparison`. The controller scores the
+  public decision context with a T043-compatible checkpoint, maps checkpoint
+  policy probabilities through occurrence-safe stable action identities into
+  the T046 native root-prior allocation surface, and selects final actions only
+  from native root statistics. Maintainer review passed 629 Windows tests,
+  compileall, ruff, format check, both CommunicationMod fixture smokes,
+  focused T047/CLI/task tests, diff whitespace checks, the WSL pinned source
+  verifier, and a same-runtime WSL probe showing Python 3.14.4 can import both
+  torch `2.9.1+debian` and the active CPython 3.14 `slaythespire` build with
+  `battle_search_with_root_priors`. The accepted smoke comparison used fixed
+  cohort `875ea52e3df4cb93`, checkpoint sha256
+  `a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4`, and
+  comparison artifact sha256
+  `fb237dd2067d3f715613ded74db97231a216db204f78e59d265cb47e22ef6a43`.
+  On record range `0:1`, all required arms used 20 native root playouts,
+  restored the same Blue Slaver A20 Act-1 start, had no restore,
+  truncation, controller, allocation metadata, or root-mapping failures, and
+  reported baseline Oracle search `0W/1L`, post-search
+  `model_guided_oracle_search_v2` `0W/1L`, and root-prior guided search
+  `1W/0L`. This is one-record smoke-scale, full-simulator-state Oracle-like
+  evidence only, not controller promotion, broad-training evidence,
+  normal-information performance, natural A20 performance, live-game
+  validation, or final-agent evidence.
 
 ## Not Implemented On Main
 
@@ -807,8 +834,7 @@ unmerged legacy work:
 - interactive live-game or A20 performance validation for any controller;
 - broad neural training on a scale/distribution-approved A20 dataset;
 - model-guided search performance improvement or controller promotion;
-- root-prior guided fixed-cohort comparison or root-prior controller
-  promotion;
+- root-prior guided scale-up evidence or root-prior controller promotion;
 - normal-information belief search.
 
 Do not use documentation or results from these areas as evidence that `main`
@@ -856,9 +882,12 @@ promotion path. T045
 classified the immediate failure signals before another training,
 native-search, or non-combat branch is published. T046
 (`Native root-prior allocation search surface`) is complete. T047
-(`Root-prior guided search comparison`) is now `READY` to evaluate whether the
-T046 allocation surface lets T043 checkpoint priors improve matched fixed
-cohort outcomes or compute efficiency at equal native root budget.
+(`Root-prior guided search comparison`) is complete. Its accepted one-record
+smoke showed root-prior allocation can change a matched restored battle outcome
+at equal native root budget, but it is not enough for promotion or broad
+claims. T048 (`Root-prior guided search scale-up`) is now `READY` to test that
+signal on a non-trivial matched fixed cohort before any assisted training
+repair or non-combat ranker branch.
 
 The immediate external-fork follow-up is
 [`lsmfttb/sts_lightspeed#7`](https://github.com/lsmfttb/sts_lightspeed/issues/7):
@@ -890,9 +919,8 @@ The completed assisted source-generation batch is:
    as the primary next search path, while preserving assisted training and
    de-assisted distribution repair as secondary diagnostic follow-ups.
 
-The published follow-up is T047, which will compare baseline search,
-post-search model-guided search, and native root-prior allocation on matched
-restored starts before any assisted training repair or non-combat ranker
+The published follow-up is T048, which will scale the T047 comparison beyond a
+single selected record before any assisted training repair or non-combat ranker
 branch.
 
 T034 remains blocked on an explicit native simulator boundary for

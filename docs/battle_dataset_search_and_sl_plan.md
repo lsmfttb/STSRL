@@ -16,9 +16,10 @@ evidence, without broad-training or controller-promotion claims. T040--T044
 completed the assisted source-generation, assisted teacher/training, and
 de-assisted fixed-cohort evaluation batch. T045 completed the post-T044
 failure analysis and selected native root-prior allocation as the primary next
-search path. T046 completed the native root-prior allocation surface. T047 is
-now the `READY` task for the matched root-prior guided search comparison. New
-implementation work should start only from rows marked `READY` in the task
+search path. T046 completed the native root-prior allocation surface. T047
+completed the first matched root-prior guided search smoke comparison. T048 is
+now the `READY` task for scaling that comparison beyond one restored record.
+New implementation work should start only from rows marked `READY` in the task
 index; T034 remains blocked on native sampler support.
 
 ## Goals
@@ -350,7 +351,7 @@ Work:
 - retain complete public history and context;
 - satisfy broad-training readiness per ascension and act;
 - keep mechanical cleanup separate from coverage/search experiments;
-- complete T047 before publishing an assisted training repair or non-combat
+- complete T048 before publishing an assisted training repair or non-combat
   ranker branch.
 
 Exit gate: enough unique A20 Boss and later-act starts exist for meaningful
@@ -392,8 +393,9 @@ late-integration, noisy-teacher, distribution-mismatch, and
 action-space/fallback explanations, and its smoke evidence favored native
 root-prior allocation over another immediate T043/T044 training loop. T046 is
 complete as the native search-surface task for that recommendation. T047 is
-the published fixed-cohort comparison task to evaluate whether priors improve
-sample efficiency at equal native root budget.
+complete as the first fixed-cohort smoke comparison, and T048 is the published
+scale-up task to evaluate whether priors improve sample efficiency at equal
+native root budget beyond one selected record.
 
 Exit gate: a search change improves fixed evaluation at equal simulation or
 wall-clock budget without natural-weighted regression.
