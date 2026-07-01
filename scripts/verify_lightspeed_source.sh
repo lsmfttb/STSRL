@@ -115,16 +115,13 @@ for submodule in "${submodules[@]}"; do
     )
     if [[ -n "$expected_submodule_commit" ]] \
         && git -C "$source_checkout/$submodule" rev-parse --is-inside-work-tree \
-            >/dev/null 2>&1; then
-        source_submodule_commit=$(
-            git -C "$source_checkout/$submodule" rev-parse HEAD
-        )
-        if [[ "$source_submodule_commit" == "$expected_submodule_commit" ]]; then
-            mkdir -p "$worktree/$submodule"
-            cp -a "$source_checkout/$submodule/." "$worktree/$submodule/"
-            rm -rf "$worktree/$submodule/.git"
-            continue
-        fi
+            >/dev/null 2>&1 \
+        && git -C "$source_checkout/$submodule" cat-file \
+            -e "$expected_submodule_commit^{commit}" 2>/dev/null; then
+        mkdir -p "$worktree/$submodule"
+        git -C "$source_checkout/$submodule" archive "$expected_submodule_commit" \
+            | tar -x -C "$worktree/$submodule"
+        continue
     fi
     git submodule update --init "$submodule"
 done
