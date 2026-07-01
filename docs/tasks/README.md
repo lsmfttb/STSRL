@@ -58,7 +58,7 @@ the current milestone, but they do not override this table.
 | T042 | DONE | [Assisted complete-run source generation](T042-assisted-complete-run-source-generation.md) | T040, T041 | assisted-run distribution, schedules, and coverage report |
 | T043 | DONE | [Assisted teacher dataset and value/policy training](T043-assisted-teacher-value-policy-training.md) | T042, T033 | assisted teacher data and public student diagnostics |
 | T044 | DONE | [De-assisted fixed-cohort evaluation](T044-de-assisted-fixed-cohort-evaluation.md) | T043 | low/no-assistance fixed-cohort model/search evaluation |
-| T045 | READY | [Post-T044 failure analysis and guidance path selection](T045-post-t044-failure-analysis.md) | T043, T044 | failure taxonomy after assisted model/search did not improve T044 outcomes |
+| T045 | DONE | [Post-T044 failure analysis and guidance path selection](T045-post-t044-failure-analysis.md) | T043, T044 | failure taxonomy after assisted model/search did not improve T044 outcomes |
 
 Use the table, not per-task files or roadmap prose, when deciding whether a
 task may receive a branch. Only `READY` rows should receive a new branch. After
@@ -200,9 +200,11 @@ T033 finalized `public-context-model-input-v1`, the public-context feature
 contract needed before assisted teacher/value training. T043 added assisted
 source-pool teacher scale-up and public student diagnostic wiring. T044
 completed the de-assisted fixed-cohort evaluation gate after T043, but did not
-show model-guided search improvement over baseline. T045 is now `READY` to
-diagnose that failure and select the next guidance path. T034 remains blocked
-on native public-consistent hidden-future sampler support.
+show model-guided search improvement over baseline. T045 completed the
+post-T044 failure analysis and selected native root-prior allocation as the
+primary next path to publish if the maintainer proceeds with another search
+task. T034 remains blocked on native public-consistent hidden-future sampler
+support, and no new task is currently `READY`.
 
 ## Standard Local Gates
 

@@ -30,9 +30,12 @@ diagnostic checkpoint provenance, but the accepted smoke evidence tied the
 baseline and T028 outcomes rather than demonstrating improvement. The upstream
 assisted source-generation batch is now complete: T040, T041, T042, T033,
 T043, and T044 are all merged. T044 did not show model-guided search
-improvement over baseline, so T045 is now `READY` to diagnose the failure mode
-and select the next guidance path. T034 remains blocked on native
-public-consistent hidden-future sampler support.
+improvement over baseline. T045 is complete: it added the offline
+`post-t044-failure-analysis-report-v1` workflow, classified the accepted T044
+failure evidence, and recommended native root-prior allocation as the primary
+next search path if a follow-up task is published. No task is currently
+`READY`; T034 remains blocked on native public-consistent hidden-future
+sampler support.
 
 ## Implemented On Main
 
@@ -752,6 +755,27 @@ public-consistent hidden-future sampler support.
   controller promotion, broad-training evidence, normal-information
   performance, natural A20 performance, live-game validation, or final-agent
   evidence.
+- T045 adds the offline `post-t044-failure-analysis-report-v1` report and
+  `--post-t044-failure-analysis-report` workflow. It consumes explicit T044
+  `de-assisted-fixed-cohort-comparison-v1` artifacts plus linked T043 artifact
+  identities, preserves source/cohort/checkpoint provenance, rejects schema,
+  source, required-arm, provenance, and information-regime mismatches, and
+  reports unavailable diagnostics rather than inferring missing fields. The
+  accepted smoke analysis used the retained T044 `assist_0` and `assist_hp50`
+  comparison artifacts, found 35 unique source starts and 446 decision rows,
+  recorded model-guided search overrides at 0/446, kept model-guided outcomes
+  tied with baseline on all 35 battles, found raw checkpoint policy worse than
+  the scripted baseline on 9/35 battles, and reported model top action in the
+  native top 1/top 3 on 160/446 decisions. The failure taxonomy marked
+  `integration-too-late`, `distribution-mismatch`, and `model-too-weak` as
+  active signals, left `teacher-label-noisy` unavailable because no linked
+  calibration report was supplied, and found no action-space/fallback issue in
+  the smoke inputs. The recommended next paths are native root-prior
+  allocation, root-prior guided comparison, assisted training repair, and
+  de-assisted distribution repair. This is offline diagnostic evidence only,
+  not new training, native API work, controller promotion, broad-training
+  evidence, normal-information performance, natural A20 performance, or
+  live-game validation.
 
 ## Not Implemented On Main
 
@@ -804,9 +828,10 @@ T040 (`Expert Non-Combat Driver v1`), T041
 show model-guided search improvement over baseline on the accepted smoke fixed
 cohorts, so it closes the assisted batch as diagnostic evidence rather than a
 promotion path. T045
-(`Post-T044 failure analysis and guidance path selection`) is now `READY` as
-an offline/reporting task to classify the failure before publishing another
-training, native-search, or non-combat branch.
+(`Post-T044 failure analysis and guidance path selection`) is complete and
+classified the immediate failure signals before another training,
+native-search, or non-combat branch is published. No new task is currently
+`READY`.
 
 The immediate external-fork follow-up is
 [`lsmfttb/sts_lightspeed#7`](https://github.com/lsmfttb/sts_lightspeed/issues/7):
@@ -834,7 +859,9 @@ The assisted source-generation batch is:
    controller.
 7. T045 diagnoses why T044 did not improve outcomes and recommends the next
    guidance path before any larger training or native-search task is
-   published.
+   published. Its accepted smoke evidence favored native root-prior allocation
+   as the primary next search path, while preserving assisted training and
+   de-assisted distribution repair as secondary diagnostic follow-ups.
 
 T034 remains blocked on an explicit native simulator boundary for
 public-consistent hidden-future sampling.

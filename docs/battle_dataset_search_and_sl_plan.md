@@ -14,11 +14,11 @@ records the accepted source-coverage contract. T032 and T035 converted that
 contract into narrow diagnostic teacher/checkpoint and model-guided-search
 evidence, without broad-training or controller-promotion claims. T040--T044
 completed the assisted source-generation, assisted teacher/training, and
-de-assisted fixed-cohort evaluation batch. T045 is the current `READY` task:
-it diagnoses why T044 did not improve outcomes before the project chooses a
-larger training, native-search, or non-combat branch. New implementation work
-should start only from rows marked `READY` in the task index; T034 remains
-blocked on native sampler support.
+de-assisted fixed-cohort evaluation batch. T045 completed the post-T044
+failure analysis and selected native root-prior allocation as the primary next
+search path if the maintainer publishes a follow-up task. New implementation
+work should start only from rows marked `READY` in the task index; currently
+there are no `READY` rows, and T034 remains blocked on native sampler support.
 
 ## Goals
 
@@ -349,8 +349,8 @@ Work:
 - retain complete public history and context;
 - satisfy broad-training readiness per ascension and act;
 - keep mechanical cleanup separate from coverage/search experiments;
-- use T045 to classify the post-T044 failure mode before publishing a larger
-  training, native-search, or non-combat branch.
+- use the completed T045 failure taxonomy before publishing a larger training,
+  native-search, or non-combat branch.
 
 Exit gate: enough unique A20 Boss and later-act starts exist for meaningful
 training and evaluation.
@@ -386,10 +386,10 @@ source-generation, assisted teacher/training, and de-assisted fixed-cohort
 evaluation batch. The accepted T044 comparisons did not show model-guided
 search outcome improvement over baseline, so meaningful held-out improvement
 and controller promotion remain pending broader source-generation coverage and
-a future explicit promotion gate. T045 is the next diagnostic step: it should
-separate weak-model, late-integration, noisy-teacher, distribution-mismatch,
-and action-space/fallback explanations before selecting the next search or
-training task.
+a future explicit promotion gate. T045 separated weak-model,
+late-integration, noisy-teacher, distribution-mismatch, and
+action-space/fallback explanations, and its smoke evidence favored native
+root-prior allocation over another immediate T043/T044 training loop.
 
 Exit gate: a search change improves fixed evaluation at equal simulation or
 wall-clock budget without natural-weighted regression.

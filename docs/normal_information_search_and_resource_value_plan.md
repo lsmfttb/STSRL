@@ -260,10 +260,12 @@ narrow teacher/checkpoint diagnostic refresh over that contract, and T035
 completed the follow-up root-only model-guided Oracle-like search comparison;
 neither produced broad A20 training readiness or controller-promotion
 evidence. T040--T044 completed the assisted source-generation and de-assisted
-evaluation batch, again as diagnostic evidence rather than promotion. T045 is
-the next diagnostic task to classify whether the lack of gain is caused by
-weak model learning, root-only search integration, noisy teacher targets,
-distribution mismatch, or action-space/fallback issues.
+evaluation batch, again as diagnostic evidence rather than promotion. T045
+completed the post-T044 failure analysis: its accepted smoke evidence favored
+root-only search integration as the primary bottleneck, with weak-model and
+distribution-mismatch signals also active, no action-space/fallback issue
+observed, and teacher-label noise unavailable without a linked calibration
+report.
 
 Use the Oracle regime to validate priors, leaf values, uncertainty, and search
 instrumentation. Exit when model guidance improves the fixed Oracle curve at
@@ -300,7 +302,7 @@ Retain only auxiliary targets that improve normal-information evaluation.
    coverage, keeping raw policy diagnostics separate from search promotion.
 4. Design and pin the authoritative public-consistent hidden-future sampler;
    T034 remains blocked until that native boundary exists.
-5. Use T045's failure taxonomy before publishing the next training,
+5. Use the completed T045 failure taxonomy before publishing the next training,
    native-search, or non-combat branch; publish implementation work only
    through `READY` task rows in the task index.
 6. Keep further mechanical CLI/module cleanup in later dedicated
