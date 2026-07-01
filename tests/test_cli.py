@@ -341,6 +341,7 @@ def test_cli_parser_accepts_model_guided_oracle_flags(tmp_path) -> None:
     cohort_path = tmp_path / "cohort.jsonl"
     checkpoint_path = tmp_path / "checkpoint.pt"
     comparison_path = tmp_path / "comparison.jsonl"
+    de_assisted_path = tmp_path / "de-assisted-comparison.jsonl"
     potion_comparison_path = tmp_path / "potion-comparison.jsonl"
 
     args = build_parser().parse_args(
@@ -398,6 +399,28 @@ def test_cli_parser_accepts_model_guided_oracle_flags(tmp_path) -> None:
     assert v2_comparison_args.model_guided_oracle_checkpoint == checkpoint_path
     assert v2_comparison_args.model_guided_search_comparison_report == comparison_path
     assert v2_comparison_args.model_guided_search_comparison_scale == "fixed"
+
+    de_assisted_args = build_parser().parse_args(
+        [
+            "--lightspeed-de-assisted-fixed-cohort-comparison",
+            str(cohort_path),
+            "--model-guided-oracle-checkpoint",
+            str(checkpoint_path),
+            "--de-assisted-fixed-cohort-comparison-report",
+            str(de_assisted_path),
+            "--de-assisted-fixed-cohort-comparison-scale",
+            "fixed",
+        ]
+    )
+
+    assert de_assisted_args.lightspeed_de_assisted_fixed_cohort_comparison == (
+        cohort_path
+    )
+    assert de_assisted_args.model_guided_oracle_checkpoint == checkpoint_path
+    assert (
+        de_assisted_args.de_assisted_fixed_cohort_comparison_report == de_assisted_path
+    )
+    assert de_assisted_args.de_assisted_fixed_cohort_comparison_scale == "fixed"
 
     potion_comparison_args = build_parser().parse_args(
         [
@@ -515,6 +538,29 @@ def test_cli_rejects_model_guided_v2_comparison_without_checkpoint(
         main(
             [
                 "--lightspeed-model-guided-search-v2-fixed-comparison",
+                str(cohort_path),
+                "--log-file",
+                "-",
+            ]
+        )
+        == 2
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "requires --model-guided-oracle-checkpoint" in captured.err
+
+
+def test_cli_rejects_de_assisted_comparison_without_checkpoint(
+    tmp_path,
+    capsys,
+) -> None:
+    cohort_path = tmp_path / "cohort.jsonl"
+
+    assert (
+        main(
+            [
+                "--lightspeed-de-assisted-fixed-cohort-comparison",
                 str(cohort_path),
                 "--log-file",
                 "-",
@@ -1875,6 +1921,36 @@ def test_cli_oracle_search_teacher_and_fixed_eval_routes_write_stderr_only(
     assert "model_guided_oracle_search_v2:" in v2_comparison_output.err
     assert '"schema_id": "model-guided-search-fixed-comparison-v2"' in (
         v2_comparison_path.read_text(encoding="utf-8")
+    )
+
+    de_assisted_path = tmp_path / "de-assisted-comparison.jsonl"
+    assert (
+        main(
+            [
+                "--lightspeed-de-assisted-fixed-cohort-comparison",
+                str(cohort_path),
+                "--model-guided-oracle-checkpoint",
+                str(checkpoint_path),
+                "--oracle-search-simulations",
+                "3",
+                "--sim-steps",
+                "1",
+                "--de-assisted-fixed-cohort-comparison-report",
+                str(de_assisted_path),
+                "--log-file",
+                "-",
+            ]
+        )
+        == 0
+    )
+    de_assisted_output = capsys.readouterr()
+    assert de_assisted_output.out == ""
+    assert de_assisted_path.exists()
+    assert "De-assisted fixed-cohort comparison" in de_assisted_output.err
+    assert "source starts matched: yes" in de_assisted_output.err
+    assert "checkpoint_raw_policy:" in de_assisted_output.err
+    assert '"schema_id": "de-assisted-fixed-cohort-comparison-v1"' in (
+        de_assisted_path.read_text(encoding="utf-8")
     )
 
 

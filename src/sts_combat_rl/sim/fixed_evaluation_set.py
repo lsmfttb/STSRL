@@ -22,6 +22,8 @@ from sts_combat_rl.sim.artifact_versioning import (
     preserved_migration_report,
 )
 from sts_combat_rl.sim.battle_start_pool import (
+    ASSISTED_RUN_DISTRIBUTION_KIND,
+    NATURAL_DISTRIBUTION_KIND,
     NaturalBattleStartPool,
 )
 from sts_combat_rl.sim.public_context_artifacts import (
@@ -33,7 +35,7 @@ from sts_combat_rl.sim.public_context_artifacts import (
 )
 
 
-FIXED_COHORT_FORMAT_VERSION = 2
+FIXED_COHORT_FORMAT_VERSION = 3
 """Current schema version for the portable fixed-cohort artifact."""
 
 FIXED_COHORT_MIGRATIONS: tuple[ArtifactMigration, ...] = (
@@ -42,6 +44,11 @@ FIXED_COHORT_MIGRATIONS: tuple[ArtifactMigration, ...] = (
         target_version=2,
         migrate=lambda document: _migrate_fixed_cohort_v1_to_v2(document),
         losses=(PUBLIC_CONTEXT_LEGACY_LOSS,),
+    ),
+    ArtifactMigration(
+        source_version=2,
+        target_version=3,
+        migrate=lambda document: _migrate_fixed_cohort_v2_to_v3(document),
     ),
 )
 """Sequential migrations for portable fixed-cohort artifacts."""
@@ -56,6 +63,11 @@ DEFAULT_STRUCTURAL_STRATUM_FIELDS = (
 
 FIXED_EVALUATION_SET_DISTRIBUTION_KIND = "fixed_evaluation_set"
 """Persistent distribution kind for all cohort records."""
+
+FIXED_COHORT_ALLOWED_SOURCE_DISTRIBUTION_KINDS = frozenset(
+    {NATURAL_DISTRIBUTION_KIND, ASSISTED_RUN_DISTRIBUTION_KIND}
+)
+"""Source distributions that current fixed cohorts may preserve."""
 
 
 def _stratum_key(metadata: Mapping[str, Any]) -> tuple[Any, ...]:
@@ -102,9 +114,10 @@ class FixedCohortRecord:
     source_battle_controller_provenance: dict[str, Any]
     source_non_combat_controller_provenance: dict[str, Any]
     action_trace: tuple[dict[str, Any], ...]
+    assistance_history: tuple[dict[str, Any], ...] = ()
     snapshot_observation: tuple[Any, ...] = ()
     snapshot_raw: dict[str, Any] = field(default_factory=dict)
-    source_distribution_kind: str = "natural_run"
+    source_distribution_kind: str = NATURAL_DISTRIBUTION_KIND
     checkpoint_information_regime: str = "full_simulator_state_oracle_like"
     public_context_status: str = PUBLIC_CONTEXT_LEGACY_UNAVAILABLE
     public_run_context: dict[str, Any] = field(default_factory=dict)
@@ -158,6 +171,19 @@ class FixedCohort:
                     hashlib.sha256(
                         json.dumps(
                             [dict(sorted(i.items())) for i in r.action_trace],
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        ).encode("utf-8")
+                    ).hexdigest()[:12]
+                    for r in self.records
+                ],
+                "record_assistance_history_fingerprints": [
+                    hashlib.sha256(
+                        json.dumps(
+                            [
+                                dict(sorted(item.items()))
+                                for item in r.assistance_history
+                            ],
                             sort_keys=True,
                             separators=(",", ":"),
                         ).encode("utf-8")
@@ -305,6 +331,7 @@ def select_fixed_cohort(
                         source_battle_controller_provenance=record.source_battle_controller_provenance,
                         source_non_combat_controller_provenance=record.source_non_combat_controller_provenance,
                         action_trace=record.action_trace,
+                        assistance_history=record.assistance_history,
                         snapshot_observation=record.snapshot_observation,
                         snapshot_raw=dict(record.snapshot_raw),
                         source_distribution_kind=record.distribution_kind,
@@ -366,6 +393,15 @@ def select_fixed_cohort(
     checkpoint_ids = [r.source_checkpoint_id for r in selected_records]
     if len(checkpoint_ids) != len(set(checkpoint_ids)):
         problems.append("selected cohort contains duplicate source checkpoints")
+    for record in selected_records:
+        if (
+            record.source_distribution_kind == ASSISTED_RUN_DISTRIBUTION_KIND
+            and not record.assistance_history
+        ):
+            problems.append(
+                f"selected cohort record {record.cohort_index} assisted_run "
+                "requires non-empty assistance_history"
+            )
 
     coverage = CohortCoverageReport(
         pool_record_count=len(pool.records),
@@ -590,6 +626,9 @@ def _cohort_record_to_manifest(record: FixedCohortRecord) -> dict[str, Any]:
         "action_trace": [
             _json_safe_mapping(identity) for identity in record.action_trace
         ],
+        "assistance_history": [
+            _json_safe_mapping(item) for item in record.assistance_history
+        ],
         "snapshot_observation": list(record.snapshot_observation),
         "snapshot_raw": _json_safe_mapping(record.snapshot_raw),
         "source_distribution_kind": record.source_distribution_kind,
@@ -615,6 +654,13 @@ def _cohort_record_from_manifest(
     action_trace = tuple(
         _require_mapping(entry, f"{label} action trace {i}")
         for i, entry in enumerate(action_trace_raw)
+    )
+    assistance_history_raw = raw.get("assistance_history", [])
+    if not isinstance(assistance_history_raw, list):
+        raise ValueError(f"{label} assistance_history must be a list")
+    assistance_history = tuple(
+        _require_mapping(entry, f"{label} assistance history {i}")
+        for i, entry in enumerate(assistance_history_raw)
     )
 
     observation_raw = raw.get("snapshot_observation")
@@ -687,6 +733,7 @@ def _cohort_record_from_manifest(
             f"{label} source_non_combat_controller_provenance",
         ),
         action_trace=action_trace,
+        assistance_history=assistance_history,
         snapshot_observation=snapshot_observation,
         snapshot_raw=snapshot_raw,
         source_distribution_kind=source_distribution_kind,
@@ -709,10 +756,22 @@ def _fixed_cohort_problems(cohort: FixedCohort) -> list[str]:
                 f"duplicate source checkpoint id {record.source_checkpoint_id}"
             )
         checkpoint_ids.add(record.source_checkpoint_id)
-        if record.source_distribution_kind != "natural_run":
+        if (
+            record.source_distribution_kind
+            not in FIXED_COHORT_ALLOWED_SOURCE_DISTRIBUTION_KINDS
+        ):
+            expected = ", ".join(sorted(FIXED_COHORT_ALLOWED_SOURCE_DISTRIBUTION_KINDS))
             problems.append(
-                f"record {index} source_distribution_kind must be natural_run: "
+                f"record {index} source_distribution_kind must be one of "
+                f"{expected}: "
                 f"{record.source_distribution_kind}"
+            )
+        if (
+            record.source_distribution_kind == ASSISTED_RUN_DISTRIBUTION_KIND
+            and not record.assistance_history
+        ):
+            problems.append(
+                f"record {index} assisted_run requires non-empty assistance_history"
             )
         problems.extend(
             public_context_artifact_problems(
@@ -766,12 +825,23 @@ def _public_run_context(
 
 def _migrate_fixed_cohort_v1_to_v2(document: Any) -> Any:
     metadata = dict(document.metadata)
-    metadata["format_version"] = FIXED_COHORT_FORMAT_VERSION
+    metadata["format_version"] = 2
     migrated_records: list[dict[str, Any]] = []
     for source in document.records:
         raw = dict(source)
         raw["public_context_status"] = PUBLIC_CONTEXT_LEGACY_UNAVAILABLE
         raw["public_run_context"] = {}
+        migrated_records.append(raw)
+    return type(document)(metadata=metadata, records=migrated_records)
+
+
+def _migrate_fixed_cohort_v2_to_v3(document: Any) -> Any:
+    metadata = dict(document.metadata)
+    metadata["format_version"] = FIXED_COHORT_FORMAT_VERSION
+    migrated_records: list[dict[str, Any]] = []
+    for source in document.records:
+        raw = dict(source)
+        raw["assistance_history"] = []
         migrated_records.append(raw)
     return type(document)(metadata=metadata, records=migrated_records)
 

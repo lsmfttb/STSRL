@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import json
 from io import StringIO
 
 import pytest
 
+from sts_combat_rl.sim.battle_start_pool import ASSISTED_RUN_DISTRIBUTION_KIND
 from sts_combat_rl.sim.contract import (
     SimulatorAction,
     SimulatorCheckpoint,
@@ -542,6 +544,37 @@ class TestEvaluateFixedCohort:
         )
         assert report.battle_results[0].restoration_method == "failed"
         assert len(report.battle_results[0].problems) >= 1
+
+    def test_assisted_distribution_without_history_is_restore_error(self):
+        base = _make_cohort_record(0)
+        assisted_without_history = replace(
+            base,
+            source_distribution_kind=ASSISTED_RUN_DISTRIBUTION_KIND,
+            structural_metadata={
+                **base.structural_metadata,
+                "source_kind": ASSISTED_RUN_DISTRIBUTION_KIND,
+                "distribution_kind": ASSISTED_RUN_DISTRIBUTION_KIND,
+                "assistance_level": "assist_hp50",
+            },
+        )
+
+        report = evaluate_fixed_cohort(
+            adapter_factory=lambda: _FakeEvalAdapter(),
+            cohort_records=[assisted_without_history],
+            controller=_FakeWinController(),
+            cohort_identity="test",
+            source_pool_format_version=2,
+            selection_config={"selection_seed": 1},
+            max_battle_steps=200,
+        )
+
+        assert report.errors == 1
+        assert report.battle_results[0].restoration_method == "failed"
+        assert any(
+            "assisted_run cohort record requires non-empty assistance_history"
+            in problem
+            for problem in report.battle_results[0].problems
+        )
 
     def test_illegal_selection_is_error(self):
         cohort_records = [_make_cohort_record(0)]

@@ -37,6 +37,22 @@ class SearchGuidanceScorer(Protocol):
         """Return checkpoint guidance for all current legal actions."""
 
 
+def search_guidance_scorer_checkpoint_provenance(
+    scorer: SearchGuidanceScorer,
+    *,
+    label: str = "search guidance scorer",
+) -> "SearchGuidanceCheckpointProvenance":
+    """Return the current checkpoint provenance exposed by a scorer."""
+
+    value = getattr(scorer, "checkpoint_provenance", None)
+    if not isinstance(value, SearchGuidanceCheckpointProvenance):
+        raise ValueError(
+            f"{label} must expose current SearchGuidanceCheckpointProvenance "
+            "as checkpoint_provenance"
+        )
+    return value
+
+
 @dataclass(frozen=True)
 class SearchGuidanceCheckpointProvenance:
     """Auditable checkpoint identity and training target provenance."""
@@ -238,6 +254,103 @@ def validate_search_guidance_context(context: DecisionContext) -> None:
         raise ValueError("; ".join(dict.fromkeys(problems)))
 
 
+def validate_search_guidance_result(
+    result: SearchGuidanceInferenceResult,
+    *,
+    context: DecisionContext,
+    expected_checkpoint: SearchGuidanceCheckpointProvenance,
+) -> None:
+    """Fail closed unless a scorer result matches the current decision context."""
+
+    problems: list[str] = []
+    if result.schema_id != SEARCH_GUIDANCE_INFERENCE_SCHEMA_ID:
+        problems.append(f"unsupported guidance schema_id {result.schema_id!r}")
+    if result.schema_version != SEARCH_GUIDANCE_INFERENCE_SCHEMA_VERSION:
+        problems.append(
+            f"unsupported guidance schema_version {result.schema_version!r}"
+        )
+    if not result.inference_ok:
+        problems.extend(result.problems or ("guidance inference was not ok",))
+    legal_count = len(context.legal_action_features)
+    if result.legal_action_count != legal_count:
+        problems.append(
+            "guidance legal action count "
+            f"{result.legal_action_count} does not match context {legal_count}"
+        )
+    if len(result.action_scores) != legal_count:
+        problems.append(
+            "guidance action score count "
+            f"{len(result.action_scores)} does not match context {legal_count}"
+        )
+    if result.eligible_action_count != len(context.eligible_action_indices):
+        problems.append(
+            "guidance eligible action count "
+            f"{result.eligible_action_count} does not match context "
+            f"{len(context.eligible_action_indices)}"
+        )
+    if result.checkpoint_provenance.to_dict() != expected_checkpoint.to_dict():
+        problems.append("guidance scorer returned changing checkpoint provenance")
+
+    seen: set[int] = set()
+    eligible = set(context.eligible_action_indices)
+    for score in result.action_scores:
+        index = score.legal_action_index
+        if index in seen:
+            problems.append(f"duplicate guidance action score for index {index}")
+            continue
+        seen.add(index)
+        if index < 0 or index >= legal_count:
+            problems.append(
+                f"guidance action score index {index} outside {legal_count} actions"
+            )
+            _append_guidance_score_problems(score, problems)
+            continue
+        expected_kind = context.legal_action_kinds[index]
+        if score.action_kind != expected_kind:
+            problems.append(
+                "guidance action kind for index "
+                f"{index} does not match context: "
+                f"{score.action_kind!r} != {expected_kind!r}"
+            )
+        expected_identity = search_guidance_context_action_identity(context, index)
+        if expected_identity:
+            if not score.action_identity:
+                problems.append(
+                    f"guidance action identity for index {index} is missing"
+                )
+            elif dict(score.action_identity) != expected_identity:
+                problems.append(
+                    f"guidance action identity for index {index} does not match context"
+                )
+        if score.eligible != (index in eligible):
+            problems.append(
+                f"guidance eligibility for index {index} does not match context"
+            )
+        _append_guidance_score_problems(score, problems)
+    missing = sorted(set(range(legal_count)) - seen)
+    if missing:
+        problems.append(f"missing guidance action score for index {missing[0]}")
+    if problems:
+        raise ValueError("; ".join(dict.fromkeys(problems)))
+
+
+def search_guidance_context_action_identity(
+    context: DecisionContext,
+    index: int,
+) -> dict[str, Any]:
+    """Return the public action identity for one current legal action if present."""
+
+    if index < 0 or index >= len(context.tactical_legal_actions):
+        return {}
+    action = context.tactical_legal_actions[index]
+    if not isinstance(action, Mapping):
+        return {}
+    identity = action.get("identity")
+    if not isinstance(identity, Mapping):
+        return {}
+    return dict(identity)
+
+
 def format_search_guidance_inference_result(
     result: SearchGuidanceInferenceResult,
     *,
@@ -321,6 +434,25 @@ def _append_finite_sequence_problems(
         if not math.isfinite(float(value)):
             problems.append(f"{label}[{index}] must be finite")
             return
+
+
+def _append_guidance_score_problems(
+    score: SearchGuidanceActionScore,
+    problems: list[str],
+) -> None:
+    if not math.isfinite(score.policy_logit):
+        problems.append(
+            f"guidance policy logit for index {score.legal_action_index} is not finite"
+        )
+    if (
+        not math.isfinite(score.policy_probability)
+        or score.policy_probability < 0.0
+        or score.policy_probability > 1.0
+    ):
+        problems.append(
+            "guidance policy probability for index "
+            f"{score.legal_action_index} must be finite and in [0, 1]"
+        )
 
 
 def _append_mapping(lines: list[str], title: str, values: Mapping[str, Any]) -> None:
