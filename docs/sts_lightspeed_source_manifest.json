@@ -9,7 +9,7 @@
     "repository_url": "https://github.com/lsmfttb/sts_lightspeed.git",
     "branch": "stsrl/main",
     "ref": "refs/heads/stsrl/main",
-    "commit": "242344c57c17c784708a6f072c905febc3f96527"
+    "commit": "9dd8f75bd5d2b1aa8a8b5cf1db18f899825f326a"
   },
   "python_module": {
     "name": "slaythespire",
@@ -135,6 +135,19 @@
         "StepSimulator.battle_search.schema_id",
         "StepSimulator.battle_search.root_rows",
         "StepSimulator.battle_search.native_simulator_steps"
+      ]
+    },
+    {
+      "id": "native_root_prior_allocation",
+      "description": "Oracle-like root-only playout allocation surface exposed through StepSimulator.battle_search_with_root_priors for T046 diagnostic root-prior search smokes.",
+      "task_provenance": [
+        "T046"
+      ],
+      "required_python_api": [
+        "StepSimulator.battle_search_with_root_priors",
+        "StepSimulator.battle_search_with_root_priors.root_action_priors",
+        "StepSimulator.battle_search_with_root_priors.allocation_metadata",
+        "StepSimulator.battle_search_with_root_priors.root_rows"
       ]
     },
     {

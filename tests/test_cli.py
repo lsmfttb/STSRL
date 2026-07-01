@@ -56,6 +56,33 @@ def test_cli_parser_keeps_lightspeed_training_flags() -> None:
     assert str(args.log_file) == "-"
 
 
+def test_cli_parser_accepts_native_root_prior_allocation_flags(tmp_path) -> None:
+    report_path = tmp_path / "root-prior.json"
+
+    args = build_parser().parse_args(
+        [
+            "--lightspeed-native-root-prior-allocation-smoke",
+            "--search-budget",
+            "20",
+            "--root-prior-temperature",
+            "0.75",
+            "--root-prior-min-visits",
+            "2",
+            "--root-prior-allocation-weight",
+            "0.8",
+            "--root-prior-allocation-report",
+            str(report_path),
+        ]
+    )
+
+    assert args.lightspeed_native_root_prior_allocation_smoke is True
+    assert args.search_budget == 20
+    assert args.root_prior_temperature == 0.75
+    assert args.root_prior_min_visits == 2
+    assert args.root_prior_allocation_weight == 0.8
+    assert args.root_prior_allocation_report == report_path
+
+
 def test_cli_parser_accepts_a20_coverage_flags(tmp_path) -> None:
     pool_path = tmp_path / "pool.jsonl"
     constructed_path = tmp_path / "constructed.jsonl"
@@ -695,6 +722,43 @@ class FakeLightSpeedSmokeAdapter:
                 }
             ],
         }
+
+    def battle_search_with_root_priors(
+        self,
+        snapshot: SimulatorSnapshot,
+        *,
+        actions: list[SimulatorAction],
+        context,
+        simulations: int,
+        include_potions: bool = False,
+        root_action_priors=None,
+        prior_temperature: float = 1.0,
+        min_visits_per_legal_action: int = 1,
+        prior_allocation_weight: float = 1.0,
+    ) -> dict[str, object]:
+        del actions, context, root_action_priors, prior_temperature
+        del min_visits_per_legal_action, prior_allocation_weight
+        raw = self.battle_search(
+            snapshot,
+            simulations=simulations,
+            include_potions=include_potions,
+        )
+        raw["native_api"] = "StepSimulator.battle_search_with_root_priors.v1"
+        raw["patch_identity"] = "sts_lightspeed_root_prior_allocation_v1"
+        raw["allocation_metadata"] = {
+            "schema_id": "native-root-prior-allocation-metadata-v1",
+            "allocation_strategy": "root_prior_mixture_v1",
+            "prior_temperature": 1.0,
+            "min_visits_per_legal_action": 1,
+            "prior_allocation_weight": 1.0,
+            "legal_action_prior_count": 1,
+            "eligible_root_action_count": 1,
+            "allocated_root_visits": simulations,
+            "allocation_plan": [],
+        }
+        raw["root_rows"][0]["root_prior"] = 1.0
+        raw["root_rows"][0]["allocated_root_visits"] = simulations
+        return raw
 
 
 def _cli_checkpoint() -> SearchGuidanceCheckpointProvenance:
@@ -2269,6 +2333,39 @@ def test_cli_non_combat_calibration_reports_unreached_branches_without_failure(
     assert "Stochastic non-combat driver calibration summary" in captured.err
     assert "driver/provenance validation passed: yes" in captured.err
     assert "unavailable structural categories:" in captured.err
+
+
+def test_cli_lightspeed_native_root_prior_allocation_smoke_writes_report(
+    monkeypatch,
+    tmp_path,
+    capsys,
+) -> None:
+    monkeypatch.setattr(
+        "sts_combat_rl.commands.lightspeed_cli.LightSpeedAdapter",
+        FakeLightSpeedSmokeAdapter,
+    )
+    report_path = tmp_path / "root-prior.json"
+
+    assert (
+        main(
+            [
+                "--lightspeed-native-root-prior-allocation-smoke",
+                "--search-budget",
+                "5",
+                "--root-prior-allocation-report",
+                str(report_path),
+                "--log-file",
+                "-",
+            ]
+        )
+        == 0
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Native root-prior allocation smoke" in captured.err
+    assert "one-hot preferred strictly more: yes" in captured.err
+    assert "controller-promotion" in report_path.read_text(encoding="utf-8")
 
 
 def test_cli_lightspeed_battle_batch_smoke_writes_report_to_stderr_only(

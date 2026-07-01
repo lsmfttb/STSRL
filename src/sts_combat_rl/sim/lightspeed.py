@@ -179,6 +179,48 @@ class LightSpeedAdapter:
             )
         )
 
+    def battle_search_with_root_priors(
+        self,
+        snapshot: SimulatorSnapshot,
+        *,
+        actions: list[SimulatorAction],
+        context: Any,
+        simulations: int,
+        include_potions: bool = False,
+        root_action_priors: Any = None,
+        prior_temperature: float = 1.0,
+        min_visits_per_legal_action: int = 1,
+        prior_allocation_weight: float = 1.0,
+    ) -> dict[str, Any]:
+        """Run native battle search with validated root allocation priors."""
+
+        if not hasattr(self._sim, "battle_search_with_root_priors"):
+            raise RuntimeError(
+                "slaythespire.StepSimulator does not expose "
+                "battle_search_with_root_priors; build the T046 root-prior "
+                "native source integration"
+            )
+        from sts_combat_rl.sim.native_root_prior_allocation import (
+            build_root_action_prior_vector,
+        )
+
+        prior_vector = build_root_action_prior_vector(
+            actions,
+            context,
+            root_action_priors,
+        )
+        self._assert_snapshot_is_current(snapshot)
+        return dict(
+            self._sim.battle_search_with_root_priors(
+                int(simulations),
+                bool(include_potions),
+                prior_vector,
+                float(prior_temperature),
+                int(min_visits_per_legal_action),
+                float(prior_allocation_weight),
+            )
+        )
+
     def legal_battle_start_encounters(
         self,
         snapshot: SimulatorSnapshot,

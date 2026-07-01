@@ -22,6 +22,7 @@ REQUIRED_NATIVE_CAPABILITY_IDS = (
     "gcc15_build_compatibility",
     "native_public_projection",
     "native_battle_search_root",
+    "native_root_prior_allocation",
     "native_terminal_resource_identity",
     "constructed_battle_start_transforms",
 )

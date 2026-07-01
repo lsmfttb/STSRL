@@ -109,7 +109,25 @@ trap cleanup EXIT
 git -C "$source_checkout" worktree add --detach "$worktree" "$integration_commit" >/dev/null
 
 cd "$worktree"
-git submodule update --init "${submodules[@]}"
+for submodule in "${submodules[@]}"; do
+    expected_submodule_commit=$(
+        git -C "$worktree" ls-tree HEAD "$submodule" | awk '{print $3}'
+    )
+    if [[ -n "$expected_submodule_commit" ]] \
+        && git -C "$source_checkout/$submodule" rev-parse --is-inside-work-tree \
+            >/dev/null 2>&1; then
+        source_submodule_commit=$(
+            git -C "$source_checkout/$submodule" rev-parse HEAD
+        )
+        if [[ "$source_submodule_commit" == "$expected_submodule_commit" ]]; then
+            mkdir -p "$worktree/$submodule"
+            cp -a "$source_checkout/$submodule/." "$worktree/$submodule/"
+            rm -rf "$worktree/$submodule/.git"
+            continue
+        fi
+    fi
+    git submodule update --init "$submodule"
+done
 cmake -S . -B "$build_dir" -DCMAKE_POLICY_VERSION_MINIMUM="$cmake_policy_version_minimum"
 cmake --build "$build_dir" --target "$cmake_target" -j "${STSRL_LIGHTSPEED_BUILD_JOBS:-2}"
 
@@ -160,6 +178,7 @@ for method_name in (
     "restore_checkpoint",
     "public_projection",
     "battle_search",
+    "battle_search_with_root_priors",
     "legal_battle_start_encounters",
     "rebuild_battle_start",
 ):
@@ -356,6 +375,49 @@ if not required_root_fields.issubset(root_rows[0]):
     missing_fields = sorted(required_root_fields.difference(root_rows[0]))
     fail("native battle search root row missing fields: " + ", ".join(missing_fields))
 
+battle_actions = sim.legal_actions()
+if not isinstance(battle_actions, list) or not battle_actions:
+    fail("StepSimulator.legal_actions() must return battle actions before root-prior search")
+root_priors = [1.0 for _ in battle_actions]
+root_prior_search = sim.battle_search_with_root_priors(
+    6,
+    False,
+    root_priors,
+    1.0,
+    1,
+    1.0,
+)
+if not isinstance(root_prior_search, dict):
+    fail("StepSimulator.battle_search_with_root_priors() must return a dict")
+if root_prior_search.get("schema_id") != "native-battle-search-root-v1":
+    fail("native root-prior search schema id mismatch")
+if (
+    root_prior_search.get("native_api")
+    != "StepSimulator.battle_search_with_root_priors.v1"
+):
+    fail("native root-prior search api id mismatch")
+if (
+    root_prior_search.get("patch_identity")
+    != "sts_lightspeed_root_prior_allocation_v1"
+):
+    fail("native root-prior search patch identity mismatch")
+metadata = root_prior_search.get("allocation_metadata")
+if not isinstance(metadata, dict):
+    fail("native root-prior search allocation_metadata is missing")
+if metadata.get("schema_id") != "native-root-prior-allocation-metadata-v1":
+    fail("native root-prior allocation metadata schema mismatch")
+if metadata.get("allocation_strategy") != "root_prior_mixture_v1":
+    fail("native root-prior allocation strategy mismatch")
+if metadata.get("allocated_root_visits") != 6:
+    fail("native root-prior allocated_root_visits mismatch")
+root_prior_rows = root_prior_search.get("root_rows")
+if not isinstance(root_prior_rows, list) or not root_prior_rows:
+    fail("native root-prior search root_rows must be a non-empty list")
+if "allocated_root_visits" not in root_prior_rows[0]:
+    fail("native root-prior root row missing allocated_root_visits")
+if "root_prior" not in root_prior_rows[0]:
+    fail("native root-prior root row missing root_prior")
+
 expected_capabilities = set(manifest.capability_ids)
 observed_capabilities = {
     "step_simulation",
@@ -366,6 +428,7 @@ observed_capabilities = {
     "gcc15_build_compatibility",
     "native_public_projection",
     "native_battle_search_root",
+    "native_root_prior_allocation",
     "native_terminal_resource_identity",
     "constructed_battle_start_transforms",
 }
