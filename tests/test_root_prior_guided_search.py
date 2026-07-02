@@ -494,11 +494,13 @@ def test_root_prior_guided_comparison_runs_required_arms(tmp_path) -> None:
         action_space=action_space,
         max_battle_steps=3,
         run_scale="smoke",
+        comparison_task_id="T048",
         worker_count=1,
         shard_count=1,
     )
 
     assert report.evaluation_successful
+    assert report.comparison_config["task_id"] == "T048"
     assert not report.source_match_problems
     summaries = root_prior_guided_controller_summaries(report)
     assert summaries[BASELINE_ORACLE_LABEL]["losses"] == 2

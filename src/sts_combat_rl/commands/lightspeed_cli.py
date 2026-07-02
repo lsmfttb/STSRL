@@ -913,6 +913,7 @@ def run_lightspeed_command(args: argparse.Namespace) -> int:
                 action_space=action_space,
                 max_battle_steps=args.sim_steps,
                 run_scale=args.root_prior_guided_search_comparison_scale,
+                comparison_task_id=args.root_prior_guided_search_comparison_task_id,
                 worker_count=args.workers,
                 shard_count=args.shards,
                 record_range=args.record_range,

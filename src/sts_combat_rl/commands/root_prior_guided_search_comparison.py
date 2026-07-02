@@ -38,6 +38,7 @@ def run_root_prior_guided_search_comparison_from_cohort_path(
     action_space: ActionSpaceConfig,
     max_battle_steps: int,
     run_scale: str,
+    comparison_task_id: str = "T047",
     worker_count: int | None = None,
     shard_count: int | None = None,
     record_range: str | None = None,
@@ -70,7 +71,7 @@ def run_root_prior_guided_search_comparison_from_cohort_path(
     return build_root_prior_guided_search_comparison_report(
         arms=evaluated,
         comparison_config={
-            "task_id": "T047",
+            "task_id": comparison_task_id,
             "run_scale": run_scale,
             "cohort_path": str(cohort_path),
             "cohort_identity": cohort.identity,

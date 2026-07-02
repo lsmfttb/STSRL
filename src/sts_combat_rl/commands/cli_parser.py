@@ -1166,6 +1166,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--root-prior-guided-search-comparison-task-id",
+        default="T047",
+        help=(
+            "Task id recorded in the root-prior guided comparison config. "
+            "Defaults to T047, which introduced the artifact schema."
+        ),
+    )
+    parser.add_argument(
         "--oracle-potion-comparison-report",
         type=Path,
         metavar="PATH",
