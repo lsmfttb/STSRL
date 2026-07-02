@@ -271,9 +271,12 @@ fixed-cohort root-prior guided scale-up. T049 completed the bounded
 complete-run reachability plumbing/probe and did not recover Boss or later-act
 reachability at smoke scale. T050 completed source-pool shard
 merge/finalization and a 50-terminal-run-per-arm root-prior complete-run
-reachability scale pass, but no arm reached Act 2 or later. T051 is now the
-published `READY` task for broader matched search-controlled A20 source
-collection before larger training or non-combat branches.
+reachability scale pass, but no arm reached Act 2 or later. T051 completed the
+broader 1,000-terminal-run-per-arm matched source collection and recovered a
+small Act-2+ signal in the guided arms while keeping broad training closed.
+T052 is now the published `READY` task for a restored-battle fixed-cohort
+diagnostic on those T051 Boss and later-act starts before larger training or
+non-combat branches.
 
 Use the Oracle regime to validate priors, leaf values, uncertainty, and search
 instrumentation. Exit when model guidance improves the fixed Oracle curve at
@@ -310,10 +313,10 @@ Retain only auxiliary targets that improve normal-information evaluation.
    coverage, keeping raw policy diagnostics separate from search promotion.
 4. Design and pin the authoritative public-consistent hidden-future sampler;
    T034 remains blocked until that native boundary exists.
-5. Complete T051's broader search-controlled later-act source collection before
-   publishing an assisted training repair, broad teacher/checkpoint refresh, or
-   non-combat ranker branch; publish implementation work only through `READY`
-   task rows in the task index.
+5. Complete T052's T051 Boss/later-act fixed-cohort diagnostic before
+   publishing an assisted training repair, broad teacher/checkpoint refresh,
+   non-combat ranker branch, or controller promotion; publish implementation
+   work only through `READY` task rows in the task index.
 6. Keep further mechanical CLI/module cleanup in later dedicated
    no-behavior-change maintenance tasks before mixing it into search research;
    the first CLI/export cleanup pass completed in

@@ -46,10 +46,12 @@ search arms and accepted a bounded A20 smoke that found no Boss or later-act
 reachability. T050 is complete: it added source-pool shard merge/finalization,
 ran the 50-terminal-run-per-arm complete-run scale pass, reached an Act-1 Boss
 only in the baseline and post-search arms, and reached no later-act starts in
-any arm. T051 is now `READY` for broader matched search-controlled A20 source
-collection before any broad teacher/checkpoint refresh, assisted training
-repair, non-combat ranker branch, or controller promotion. T034 remains
-blocked on native public-consistent hidden-future sampler support.
+any arm. T051 is complete: it ran the 1,000-terminal-run-per-arm matched
+source collection, recovered a small Act-2+ signal in the post-search and
+root-prior guided arms, and kept broad training closed. T052 is now `READY`
+for a restored-battle fixed-cohort diagnostic on those T051 Boss and later-act
+natural starts. T034 remains blocked on native public-consistent hidden-future
+sampler support.
 
 ## Implemented On Main
 
@@ -913,6 +915,33 @@ blocked on native public-consistent hidden-future sampler support.
   reachability scale evidence only; it is not controller promotion,
   broad-training evidence, normal-information performance, natural A20
   performance, live-game validation, or final-agent evidence.
+- T051 adds the broader matched A20 search-controlled source-collection
+  evidence using the T050 merge/reporting path. Maintainer review passed 641
+  Windows tests, compileall, ruff, format check, task-doc checks, diff
+  whitespace checks, both CommunicationMod fixture smokes, focused
+  reachability/CLI tests including a corrupted source-run-summary fail-closed
+  regression, the WSL pinned source verifier, a py313 torch/native
+  same-runtime probe, retained artifact hash checks, and a full retained
+  reachability report rebuild attempt that completed with no command problems.
+  The retained artifact root is
+  `artifacts/t051-search-controlled-later-act-source-collection-pr/`, with
+  retention manifest sha256
+  `e2c83ef4892ff74129c3649dc4b1dd52493777b74339f094c5c804e2bbb3d0b9` and
+  reachability report sha256
+  `0e001e38b3a7587dd7f1845a6d3fcfc6541f2056dffd8e4aaa5206053adc3877`. The
+  accepted scale run used matched seeds `1..1000`, A20, step cap 500,
+  `stochastic-v1` with non-combat seed 42050, native root budget 20,
+  `highest_mean` root selection, and 16 source shards/workers plus 16
+  coverage/restore workers per arm. Baseline Oracle search produced 4,774
+  battle starts, 32 Act-1 Boss starts, and no later-act starts; post-search
+  `model_guided_oracle_search_v2` produced 4,771 battle starts, 34 Act-1 Boss
+  starts, and 3 Act-2+ starts from 1 source run; root-prior guided search
+  produced 4,548 battle starts, 22 Act-1 Boss starts, and 2 Act-2+ starts from
+  1 source run. Restore and coverage command status passed for all arms, but
+  the T009 broad-training gate remained closed. This is source-generation and
+  reachability evidence only; it is not controller promotion, broad-training
+  evidence, normal-information performance, natural A20 performance,
+  live-game validation, or final-agent evidence.
 
 ## Not Implemented On Main
 
@@ -986,9 +1015,14 @@ Boss or later-act starts in any arm, so it is not scale reachability evidence.
 T050 (`Root-prior reachability scale-up and shard merge`) is complete. It added
 deterministic source-pool shard merge/finalization support and ran the
 50-terminal-run-per-arm scale pass, but no arm reached Act 2 or later.
-T051 (`A20 search-controlled later-act source collection`) is now `READY` to
-run a broader matched source-collection pass before any assisted training
-repair, broad teacher/checkpoint refresh, or non-combat ranker branch.
+T051 (`A20 search-controlled later-act source collection`) is complete. It ran
+the 1,000-terminal-run-per-arm matched source collection and found scarce
+later-act starts only in the post-search and root-prior guided arms, with
+broad training still closed. T052
+(`T051 Boss/later-act fixed-cohort diagnostic`) is now `READY` to evaluate the
+T051 Boss and later-act natural starts as an immutable restored-battle
+diagnostic cohort before any assisted training repair, broad
+teacher/checkpoint refresh, non-combat ranker branch, or controller promotion.
 
 The immediate external-fork follow-up is
 [`lsmfttb/sts_lightspeed#7`](https://github.com/lsmfttb/sts_lightspeed/issues/7):
@@ -1020,9 +1054,9 @@ The completed assisted source-generation batch is:
    as the primary next search path, while preserving assisted training and
    de-assisted distribution repair as secondary diagnostic follow-ups.
 
-The published follow-up is T051, which will reuse the T050 merge/reporting path
-for broader matched search-controlled A20 source collection before any assisted
-training repair, broad teacher/checkpoint refresh, or non-combat ranker branch.
+The published follow-up is T052, which will consume the retained T051 source
+artifacts as explicit inputs and compare the current search arms on the same
+naturally reached Boss and later-act starts.
 
 T034 remains blocked on an explicit native simulator boundary for
 public-consistent hidden-future sampling.
