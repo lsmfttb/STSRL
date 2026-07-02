@@ -250,6 +250,34 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
     if args.a20_reachability_report is None and args.reachability_arm:
         return "--reachability-arm requires --a20-reachability-report"
     if (
+        args.merge_battle_start_pool_shards is not None
+        and not args.battle_start_pool_shard
+    ):
+        return "--merge-battle-start-pool-shards requires --battle-start-pool-shard"
+    if args.merge_battle_start_pool_shards is None and (
+        args.battle_start_pool_shard
+        or args.battle_start_pool_shard_merge_manifest is not None
+    ):
+        return (
+            "--battle-start-pool-shard and "
+            "--battle-start-pool-shard-merge-manifest require "
+            "--merge-battle-start-pool-shards"
+        )
+    if args.merge_a20_battle_start_coverage is not None and (
+        args.merged_battle_start_pool is None or not args.battle_start_coverage_shard
+    ):
+        return (
+            "--merge-a20-battle-start-coverage requires "
+            "--merged-battle-start-pool and --battle-start-coverage-shard"
+        )
+    if args.merge_a20_battle_start_coverage is None and (
+        args.merged_battle_start_pool is not None or args.battle_start_coverage_shard
+    ):
+        return (
+            "--merged-battle-start-pool and --battle-start-coverage-shard require "
+            "--merge-a20-battle-start-coverage"
+        )
+    if (
         args.expert_source_coverage_report is not None
         and len(args.expert_source_arm) != 3
     ):
