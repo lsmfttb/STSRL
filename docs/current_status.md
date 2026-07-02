@@ -43,10 +43,13 @@ cohorts and again found root-prior guided search ahead of both baseline Oracle
 search and post-search guidance at equal native root budget. T049 is complete:
 it added checkpoint-guided complete-run source collection for the same three
 search arms and accepted a bounded A20 smoke that found no Boss or later-act
-reachability. T050 is now `READY` to add source-pool shard
-merge/finalization support and run the 50-terminal-run-per-arm complete-run
-reachability scale pass. T034 remains blocked on native public-consistent
-hidden-future sampler support.
+reachability. T050 is complete: it added source-pool shard merge/finalization,
+ran the 50-terminal-run-per-arm complete-run scale pass, reached an Act-1 Boss
+only in the baseline and post-search arms, and reached no later-act starts in
+any arm. T051 is now `READY` for broader matched search-controlled A20 source
+collection before any broad teacher/checkpoint refresh, assisted training
+repair, non-combat ranker branch, or controller promotion. T034 remains
+blocked on native public-consistent hidden-future sampler support.
 
 ## Implemented On Main
 
@@ -883,6 +886,33 @@ hidden-future sampler support.
   controller promotion, broad-training evidence, normal-information
   performance, natural A20 performance, live-game validation, or final-agent
   evidence.
+- T050 adds deterministic current-schema natural battle-start source-pool shard
+  merge/finalization through `--merge-battle-start-pool-shards` and merged A20
+  coverage reporting through `--merge-a20-battle-start-coverage`. Maintainer
+  review passed 640 Windows tests, compileall, ruff, format check, task-doc
+  checks, diff whitespace checks, focused merge/CLI/coverage tests, both
+  CommunicationMod fixture smokes, the WSL pinned source verifier, a
+  same-runtime WSL PyTorch/native probe, retained artifact hash checks, and
+  deterministic regeneration of the baseline source merge, baseline coverage
+  merge, and full reachability report hashes from retained shards. The
+  retained artifact root is
+  `artifacts/t050-root-prior-reachability-scaleup-pr/`, with retention
+  manifest sha256
+  `74a7390d40e6ffa5c993ed23a9ac782b9267403cef7de92dda31719683b6ea49`; the
+  retained regeneration script now defaults to the stable post-merge repo path
+  and records the review worktree only as provenance/override evidence. The
+  accepted scale run used matched seeds `1..50`, A20, step cap 500,
+  `stochastic-v1` with non-combat seed 42050, native root budget 20, 16
+  source shards/workers and 16 coverage/restore workers per arm. Baseline
+  Oracle search produced 248 Act-1 starts, 198W/50L, and one Act-1 Boss start;
+  post-search `model_guided_oracle_search_v2` produced 247 Act-1 starts,
+  197W/50L, and one Act-1 Boss start; root-prior guided search produced 236
+  Act-1 starts, 186W/50L, and zero Boss starts. No arm reached Act 2 or later,
+  restore/context checks matched all records, and the T009 gate remained open
+  only for Act 1 while closed for Acts 2--4. This is source-generation and
+  reachability scale evidence only; it is not controller promotion,
+  broad-training evidence, normal-information performance, natural A20
+  performance, live-game validation, or final-agent evidence.
 
 ## Not Implemented On Main
 
@@ -892,8 +922,10 @@ unmerged legacy work:
 - interactive live-game or A20 performance validation for any controller;
 - broad neural training on a scale/distribution-approved A20 dataset;
 - model-guided search performance improvement or controller promotion;
-- scale-quality root-prior guided complete-run reachability improvement
-  evidence or root-prior controller promotion;
+- sufficient Boss/later-act A20 source coverage for broad teacher/checkpoint
+  refresh or broad training;
+- root-prior guided complete-run reachability improvement evidence or
+  root-prior controller promotion;
 - normal-information belief search.
 
 Do not use documentation or results from these areas as evidence that `main`
@@ -951,10 +983,12 @@ restored-battle evidence rather than complete-run or promotion evidence. T049
 (`Root-prior complete-run reachability probe`) is complete. Its bounded smoke
 verified the checkpoint-guided complete-run collection path but did not reach
 Boss or later-act starts in any arm, so it is not scale reachability evidence.
-T050 (`Root-prior reachability scale-up and shard merge`) is now `READY` to
-add deterministic source-pool shard merge/finalization support and run the
-50-terminal-run-per-arm scale pass before any assisted training repair or
-non-combat ranker branch.
+T050 (`Root-prior reachability scale-up and shard merge`) is complete. It added
+deterministic source-pool shard merge/finalization support and ran the
+50-terminal-run-per-arm scale pass, but no arm reached Act 2 or later.
+T051 (`A20 search-controlled later-act source collection`) is now `READY` to
+run a broader matched source-collection pass before any assisted training
+repair, broad teacher/checkpoint refresh, or non-combat ranker branch.
 
 The immediate external-fork follow-up is
 [`lsmfttb/sts_lightspeed#7`](https://github.com/lsmfttb/sts_lightspeed/issues/7):
@@ -986,10 +1020,9 @@ The completed assisted source-generation batch is:
    as the primary next search path, while preserving assisted training and
    de-assisted distribution repair as secondary diagnostic follow-ups.
 
-The published follow-up is T050, which will add source-pool shard
-merge/finalization support and run the 50-terminal-run-per-arm root-prior
-complete-run reachability scale pass before any assisted training repair or
-non-combat ranker branch.
+The published follow-up is T051, which will reuse the T050 merge/reporting path
+for broader matched search-controlled A20 source collection before any assisted
+training repair, broad teacher/checkpoint refresh, or non-combat ranker branch.
 
 T034 remains blocked on an explicit native simulator boundary for
 public-consistent hidden-future sampling.
