@@ -5,6 +5,10 @@ from __future__ import annotations
 import argparse
 import math
 
+from sts_combat_rl.commands.search_battle_controller import (
+    SEARCH_BATTLE_CONTROLLER_ORACLE,
+    SEARCH_BATTLE_CONTROLLERS_REQUIRING_CHECKPOINT,
+)
 from sts_combat_rl.sim.oracle_teacher_scaleup import (
     ORACLE_TEACHER_SCALEUP_SOURCE_SELECTION_ASSISTED_SEEDED_UNIFORM,
     ORACLE_TEACHER_SCALEUP_SOURCE_SELECTION_SEEDED_UNIFORM,
@@ -116,19 +120,33 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
         and args.oracle_teacher_output is None
     ):
         return "--lightspeed-oracle-search-teacher requires --oracle-teacher-output"
+    if (
+        args.search_battle_controller != SEARCH_BATTLE_CONTROLLER_ORACLE
+        and args.lightspeed_search_battle_start_pool is None
+    ):
+        return (
+            "--search-battle-controller requires --lightspeed-search-battle-start-pool"
+        )
+    search_pool_uses_checkpoint = (
+        args.lightspeed_search_battle_start_pool is not None
+        and args.search_battle_controller
+        in SEARCH_BATTLE_CONTROLLERS_REQUIRING_CHECKPOINT
+    )
     uses_model_guided_oracle_checkpoint = (
         args.lightspeed_model_guided_oracle_fixed_evaluation is not None
         or args.lightspeed_model_guided_search_fixed_comparison is not None
         or args.lightspeed_model_guided_search_v2_fixed_comparison is not None
         or args.lightspeed_de_assisted_fixed_cohort_comparison is not None
         or args.lightspeed_root_prior_guided_search_comparison is not None
+        or search_pool_uses_checkpoint
     )
     if (
         uses_model_guided_oracle_checkpoint
         and args.model_guided_oracle_checkpoint is None
     ):
         return (
-            "--lightspeed model-guided Oracle evaluation/comparison requires "
+            "--lightspeed model-guided Oracle evaluation/comparison or "
+            "checkpoint-guided source collection requires "
             "--model-guided-oracle-checkpoint"
         )
     if (
@@ -141,7 +159,9 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
             "--lightspeed-model-guided-search-fixed-comparison or "
             "--lightspeed-model-guided-search-v2-fixed-comparison or "
             "--lightspeed-de-assisted-fixed-cohort-comparison or "
-            "--lightspeed-root-prior-guided-search-comparison"
+            "--lightspeed-root-prior-guided-search-comparison or "
+            "--lightspeed-search-battle-start-pool with a checkpoint-guided "
+            "--search-battle-controller"
         )
     if (
         args.model_guided_search_comparison_report is not None

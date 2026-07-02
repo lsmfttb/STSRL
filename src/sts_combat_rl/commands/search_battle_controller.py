@@ -1,0 +1,21 @@
+"""Shared CLI constants for search-controlled complete-run battle children."""
+
+from __future__ import annotations
+
+
+SEARCH_BATTLE_CONTROLLER_ORACLE = "oracle_search_v1"
+SEARCH_BATTLE_CONTROLLER_MODEL_GUIDED_V2 = "model_guided_oracle_search_v2"
+SEARCH_BATTLE_CONTROLLER_ROOT_PRIOR = "root_prior_guided_oracle_search_v1"
+
+SEARCH_BATTLE_CONTROLLER_CHOICES = (
+    SEARCH_BATTLE_CONTROLLER_ORACLE,
+    SEARCH_BATTLE_CONTROLLER_MODEL_GUIDED_V2,
+    SEARCH_BATTLE_CONTROLLER_ROOT_PRIOR,
+)
+
+SEARCH_BATTLE_CONTROLLERS_REQUIRING_CHECKPOINT = frozenset(
+    {
+        SEARCH_BATTLE_CONTROLLER_MODEL_GUIDED_V2,
+        SEARCH_BATTLE_CONTROLLER_ROOT_PRIOR,
+    }
+)

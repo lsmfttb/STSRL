@@ -53,6 +53,11 @@ from sts_combat_rl.commands.root_prior_guided_search_comparison import (
     run_root_prior_guided_search_comparison_from_cohort_path,
     write_root_prior_guided_search_comparison_report,
 )
+from sts_combat_rl.commands.search_battle_controller import (
+    SEARCH_BATTLE_CONTROLLER_MODEL_GUIDED_V2,
+    SEARCH_BATTLE_CONTROLLER_ORACLE,
+    SEARCH_BATTLE_CONTROLLER_ROOT_PRIOR,
+)
 from sts_combat_rl.commands.oracle_search import (
     collect_oracle_teacher_from_pool_path,
     format_oracle_fixed_evaluation_comparison,
@@ -439,14 +444,10 @@ def run_lightspeed_command(args: argparse.Namespace) -> int:
             if not coverage.completed_outcomes_complete:
                 return 1
         elif args.lightspeed_search_battle_start_pool is not None:
-            oracle_controller = OracleSearchController(
-                simulations=args.oracle_search_simulations,
-                root_selection_rule=args.oracle_root_selection,
-                action_space=action_space,
-            )
+            battle_controller = _build_search_battle_controller(args, action_space)
             pool, coverage = collect_search_checkpoint_pool(
                 adapter,
-                oracle_controller=oracle_controller,
+                battle_controller=battle_controller,
                 non_combat_policy=build_non_combat_driver_policy(
                     args.sim_non_combat_policy,
                     _non_combat_seed(args),
@@ -1102,6 +1103,47 @@ def _run_lightspeed_smoke_command(
             print(file=sys.stderr)
             print(format_policy_evaluation_report(policy_evaluation), file=sys.stderr)
     return 0
+
+
+def _build_search_battle_controller(
+    args: argparse.Namespace,
+    action_space: ActionSpaceConfig,
+) -> object:
+    budget = (
+        args.oracle_search_simulations
+        if args.search_budget is None
+        else args.search_budget
+    )
+    if args.search_battle_controller == SEARCH_BATTLE_CONTROLLER_ORACLE:
+        return OracleSearchController(
+            simulations=budget,
+            root_selection_rule=args.oracle_root_selection,
+            action_space=action_space,
+        )
+
+    scorer = build_torch_guidance_scorer_from_checkpoint(
+        args.model_guided_oracle_checkpoint
+    )
+    if args.search_battle_controller == SEARCH_BATTLE_CONTROLLER_MODEL_GUIDED_V2:
+        return ModelGuidedOracleSearchV2Controller(
+            simulations=budget,
+            scorer=scorer,
+            policy_probability_weight=args.model_guided_oracle_policy_probability_weight,
+            action_space=action_space,
+        )
+    if args.search_battle_controller == SEARCH_BATTLE_CONTROLLER_ROOT_PRIOR:
+        return RootPriorGuidedSearchController(
+            simulations=budget,
+            scorer=scorer,
+            root_selection_rule=args.oracle_root_selection,
+            prior_temperature=args.root_prior_temperature,
+            min_visits_per_legal_action=args.root_prior_min_visits,
+            prior_allocation_weight=args.root_prior_allocation_weight,
+            action_space=action_space,
+        )
+    raise ValueError(
+        f"unknown search battle controller: {args.search_battle_controller}"
+    )
 
 
 def _non_combat_seed(args: argparse.Namespace) -> int:
