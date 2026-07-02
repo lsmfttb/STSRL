@@ -316,6 +316,7 @@ def main(argv: list[str] | None = None) -> int:
             report = run_a20_reachability_report_from_paths(
                 output_path=args.a20_reachability_report,
                 arm_specs=args.reachability_arm,
+                stream_pools=args.stream_reachability_pools,
             )
         except (OSError, ValueError) as exc:
             print(f"failed to build A20 reachability report: {exc}", file=sys.stderr)

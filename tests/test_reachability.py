@@ -90,6 +90,7 @@ def test_reachability_cli_compares_default_and_oracle_arms(
             [
                 "--a20-reachability-report",
                 str(report_path),
+                "--stream-reachability-pools",
                 "--reachability-arm",
                 "default",
                 str(default_paths[0]),

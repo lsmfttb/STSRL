@@ -249,6 +249,8 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
         )
     if args.a20_reachability_report is None and args.reachability_arm:
         return "--reachability-arm requires --a20-reachability-report"
+    if args.a20_reachability_report is None and args.stream_reachability_pools:
+        return "--stream-reachability-pools requires --a20-reachability-report"
     if (
         args.merge_battle_start_pool_shards is not None
         and not args.battle_start_pool_shard
