@@ -90,6 +90,7 @@ def test_reachability_cli_compares_default_and_oracle_arms(
             [
                 "--a20-reachability-report",
                 str(report_path),
+                "--stream-reachability-pools",
                 "--reachability-arm",
                 "default",
                 str(default_paths[0]),
@@ -119,6 +120,75 @@ def test_reachability_cli_compares_default_and_oracle_arms(
     assert oracle_arm["controller"]["information_regime"] == (
         "full_simulator_state_oracle_like"
     )
+
+
+def test_streamed_reachability_fails_closed_on_corrupted_source_run_summary(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    pool = _pool(
+        label="default",
+        controller=_default_controller(),
+        records=[_record(index=0, run_id="default-run-0", seed=1, act=1, floor=1)],
+        summaries=[
+            _summary(
+                run_id="default-run-0",
+                seed=1,
+                final_floor=1.0,
+                final_act=1,
+                battle_count=1,
+            )
+        ],
+    )
+    good_pool_path, good_coverage_path = _write_pool_and_coverage(
+        tmp_path,
+        "good",
+        pool,
+    )
+    bad_pool_path, bad_coverage_path = _write_pool_and_coverage(
+        tmp_path,
+        "bad",
+        pool,
+    )
+    rows = [
+        json.loads(line)
+        for line in bad_pool_path.read_text(encoding="utf-8").splitlines()
+    ]
+    rows[0]["metadata"]["source_run_summaries"][0]["captured_battle_start_count"] = 999
+    bad_pool_path.write_text(
+        "\n".join(json.dumps(row, sort_keys=True) for row in rows) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+    coverage = json.loads(bad_coverage_path.read_text(encoding="utf-8"))
+    coverage["input_artifacts"]["natural_pool"]["sha256"] = _sha256(bad_pool_path)
+    bad_coverage_path.write_text(
+        json.dumps(coverage, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
+
+    result = main(
+        [
+            "--a20-reachability-report",
+            str(tmp_path / "reachability.json"),
+            "--stream-reachability-pools",
+            "--reachability-arm",
+            "bad",
+            str(bad_pool_path),
+            str(bad_coverage_path),
+            "--reachability-arm",
+            "good",
+            str(good_pool_path),
+            str(good_coverage_path),
+            "--log-file",
+            "-",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert result == 2
+    assert "captured_battle_start_count does not match records" in captured.err
 
 
 def test_reachability_report_fails_closed_on_coverage_pool_sha_mismatch(

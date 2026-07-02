@@ -124,6 +124,7 @@ def test_cli_parser_accepts_t036_reachability_flags(tmp_path) -> None:
         [
             "--a20-reachability-report",
             str(report_path),
+            "--stream-reachability-pools",
             "--reachability-arm",
             "default",
             str(default_pool),
@@ -136,6 +137,7 @@ def test_cli_parser_accepts_t036_reachability_flags(tmp_path) -> None:
     )
 
     assert args.a20_reachability_report == report_path
+    assert args.stream_reachability_pools is True
     assert args.reachability_arm == [
         ["default", str(default_pool), str(default_coverage)],
         ["oracle-no-potion", str(search_pool), str(search_coverage)],

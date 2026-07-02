@@ -8,7 +8,7 @@ simulator, train models, or reinterpret Oracle-like search as normal play.
 from __future__ import annotations
 
 from collections import Counter, defaultdict
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 import json
 from typing import Any, TextIO
@@ -18,15 +18,31 @@ from sts_combat_rl.sim.a20_battle_start_coverage import (
     A20_BATTLE_START_COVERAGE_SCHEMA_ID,
 )
 from sts_combat_rl.sim.battle_start_pool import (
+    BATTLE_START_POOL_FORMAT_VERSION,
     SOURCE_RUN_SUMMARY_AVAILABLE,
+    SOURCE_RUN_SUMMARY_LEGACY_UNAVAILABLE,
     NaturalBattleStartPool,
     build_battle_start_pool_coverage_report,
+    record_from_manifest,
 )
+from sts_combat_rl.sim.controller_contract import controller_provenance_from_dict
 from sts_combat_rl.sim.lightspeed_source import format_lightspeed_source_identity
 
 
 A20_REACHABILITY_REPORT_SCHEMA_ID = "a20-search-controlled-reachability-report-v1"
 A20_REACHABILITY_REPORT_FORMAT_VERSION = 1
+
+
+@dataclass
+class _StreamedRunRecordStats:
+    """Per-source-run record facts needed for bounded pool validation."""
+
+    count: int = 0
+    completed_count: int = 0
+    source_seed: int | None = None
+    source_seed_mismatch: bool = False
+    max_floor: float | None = None
+    max_act: int | None = None
 
 
 @dataclass(frozen=True)
@@ -240,6 +256,26 @@ def build_a20_reachability_comparison_report(
     )
 
 
+def build_a20_reachability_comparison_report_from_arm_reports(
+    arms: Sequence[ReachabilityArmReport],
+) -> A20ReachabilityComparisonReport:
+    """Build the T036 comparison report from pre-summarized arm reports."""
+
+    if len(arms) < 2:
+        raise ValueError("reachability comparison requires at least two arms")
+    labels = [arm.label for arm in arms]
+    if len(set(labels)) != len(labels):
+        raise ValueError("reachability arm labels must be unique")
+    arm_tuple = tuple(arms)
+    return A20ReachabilityComparisonReport(
+        arms=arm_tuple,
+        source_identity=_common_source_identity(arm_tuple),
+        historical_reference=_historical_reference(),
+        followup_hint=_followup_hint(arm_tuple),
+        command_problems=tuple(dict.fromkeys(_comparison_problems(arm_tuple))),
+    )
+
+
 def build_reachability_arm_report(
     *,
     label: str,
@@ -300,6 +336,267 @@ def build_reachability_arm_report(
             record.public_context_status for record in pool.records
         ),
         structured_outcome_status_counts=coverage.resource_outcome_status_counts,
+        run_summary_status_counts=run_summary_counts,
+        sampled_distribution=_mapping(
+            coverage_report.get("sampled_optimization_weight", {}),
+            f"{label} sampled optimization weight",
+        ),
+        constructed_distribution=_mapping(
+            coverage_report.get("constructed_coverage", {}),
+            f"{label} constructed coverage",
+        ),
+        paired_distribution={
+            "present": False,
+            "reason": "T036 reachability report has no paired-counterfactual input",
+        },
+        restore_verification=_mapping(
+            coverage_report.get("restore_verification", {}),
+            f"{label} restore verification",
+        ),
+        training_gate_report=_mapping(
+            coverage_report.get("training_gate_report", {}),
+            f"{label} training gate report",
+        ),
+        coverage_command_passed=_optional_bool(coverage_report.get("command_passed")),
+        problems=tuple(dict.fromkeys(problems)),
+    )
+
+
+def build_streamed_reachability_arm_report(
+    *,
+    label: str,
+    pool_metadata: Mapping[str, Any],
+    pool_records: Iterable[Mapping[str, Any]],
+    coverage_report: Mapping[str, Any],
+    artifact_identity: Mapping[str, Any],
+) -> ReachabilityArmReport:
+    """Summarize one current-schema source pool without retaining all records.
+
+    This intentionally supports only the current pool schema. Legacy artifacts
+    should use the ordinary loader so migrations run before business logic.
+    """
+
+    format_version = pool_metadata.get("format_version")
+    if format_version != BATTLE_START_POOL_FORMAT_VERSION:
+        raise ValueError(
+            "streamed reachability supports only current battle-start pool "
+            f"format_version {BATTLE_START_POOL_FORMAT_VERSION}"
+        )
+    source_run_count = _required_int(
+        pool_metadata.get("source_run_count"),
+        f"{label} source_run_count",
+    )
+    terminal_run_count = _required_int(
+        pool_metadata.get("terminal_run_count"),
+        f"{label} terminal_run_count",
+    )
+    truncated_run_count = _required_int(
+        pool_metadata.get("truncated_run_count"),
+        f"{label} truncated_run_count",
+    )
+    expected_record_count = _required_int(
+        pool_metadata.get("record_count"),
+        f"{label} record_count",
+    )
+    summaries = _source_run_summary_dicts(
+        pool_metadata.get("source_run_summaries"),
+        label=f"{label} source_run_summaries",
+    )
+    provenance = _validated_controller_provenance(
+        pool_metadata.get("source_controller_provenance"),
+        f"{label} source_controller_provenance",
+    )
+    routed_children = _routed_child_provenances(provenance, label=label)
+    pool_problems = _string_list(
+        pool_metadata.get("problems", ()),
+        f"{label} pool problems",
+    )
+    source_identity = _mapping(
+        (
+            coverage_report.get("source_identity")
+            if isinstance(coverage_report.get("source_identity"), Mapping)
+            else {}
+        ),
+        f"{label} coverage source_identity",
+    )
+    natural = _mapping(
+        coverage_report.get("natural_coverage", {}),
+        f"{label} natural coverage",
+    )
+
+    public_context_status_counts: Counter[str] = Counter()
+    boss_count = 0
+    act1_boss_count = 0
+    boss_runs: set[str] = set()
+    later_count = 0
+    later_runs: set[str] = set()
+    run_stats: defaultdict[str, _StreamedRunRecordStats] = defaultdict(
+        _StreamedRunRecordStats
+    )
+    seen_checkpoint_ids: set[str] = set()
+    actual_record_count = 0
+    for actual_record_count, raw_record in enumerate(pool_records, start=1):
+        record = record_from_manifest(
+            raw_record,
+            label=f"{label} record {actual_record_count - 1}",
+        )
+        expected_index = actual_record_count - 1
+        if record.record_index != expected_index:
+            raise ValueError(
+                f"{label}: record indices must be contiguous "
+                f"({record.record_index} != {expected_index})"
+            )
+        if record.source_checkpoint_id in seen_checkpoint_ids:
+            raise ValueError(
+                f"{label}: duplicate source checkpoint id {record.source_checkpoint_id}"
+            )
+        seen_checkpoint_ids.add(record.source_checkpoint_id)
+        public_context_status_counts[record.public_context_status] += 1
+        _validate_streamed_record_provenance(
+            label=f"{label} record {actual_record_count - 1}",
+            record=record,
+            source_controller=provenance,
+            routed_children=routed_children,
+        )
+        stats = run_stats[record.source_run_id]
+        stats.count += 1
+        if record.battle_completed:
+            stats.completed_count += 1
+        if stats.source_seed is None:
+            stats.source_seed = record.source_seed
+        elif stats.source_seed != record.source_seed:
+            stats.source_seed_mismatch = True
+        stats.max_floor = _max_optional_pair(
+            stats.max_floor,
+            _strict_optional_number(
+                record.structural_metadata.get("floor"),
+                f"{label} record {actual_record_count - 1} structural floor",
+            ),
+        )
+        stats.max_act = _max_optional_pair(
+            stats.max_act,
+            _strict_optional_int(
+                record.structural_metadata.get("act"),
+                f"{label} record {actual_record_count - 1} structural act",
+            ),
+        )
+
+        room_type = str(record.structural_metadata.get("room_type", "")).lower()
+        act = _optional_int(record.structural_metadata.get("act"))
+        if "boss" in room_type:
+            boss_count += 1
+            boss_runs.add(record.source_run_id)
+            if act == 1:
+                act1_boss_count += 1
+        if act is not None and act > 1:
+            later_count += 1
+            later_runs.add(record.source_run_id)
+
+    if actual_record_count != expected_record_count:
+        raise ValueError(
+            f"{label}: metadata record_count mismatch "
+            f"({expected_record_count} != {actual_record_count})"
+        )
+    pool_validation_problems = _streamed_pool_validation_problems(
+        label=label,
+        source_run_count=source_run_count,
+        terminal_run_count=terminal_run_count,
+        truncated_run_count=truncated_run_count,
+        summaries=summaries,
+        pool_problems=pool_problems,
+        run_stats=run_stats,
+    )
+    if pool_validation_problems:
+        raise ValueError(
+            "invalid natural battle-start pool: "
+            + "; ".join(dict.fromkeys(pool_validation_problems))
+        )
+
+    run_summary_counts = Counter(str(summary["status"]) for summary in summaries)
+    if not summaries:
+        run_summary_counts["legacy_unavailable"] = source_run_count
+    battle_counts = (
+        [
+            _required_int(summary["captured_battle_start_count"], "battle count")
+            for summary in summaries
+        ]
+        if summaries
+        else [stats.count for stats in run_stats.values()]
+    )
+    terminal_floor_counts, terminal_act_counts = _terminal_counters_from_summaries(
+        summaries,
+        source_run_count=source_run_count,
+    )
+    max_floor_counts = _max_battle_start_floor_counts_from_summaries(
+        summaries,
+        run_stats=run_stats,
+    )
+    problems = _streamed_coverage_link_problems(
+        label=label,
+        pool_metadata=pool_metadata,
+        pool_record_count=actual_record_count,
+        pool_problems=pool_problems,
+        coverage_report=coverage_report,
+        artifact_identity=artifact_identity,
+    )
+    return ReachabilityArmReport(
+        label=label,
+        artifact=ReachabilityArmArtifact(
+            label=label,
+            pool_path=str(artifact_identity.get("pool_path", "")),
+            pool_sha256=str(artifact_identity.get("pool_sha256", "")),
+            coverage_report_path=str(artifact_identity.get("coverage_report_path", "")),
+            coverage_report_sha256=str(
+                artifact_identity.get("coverage_report_sha256", "")
+            ),
+            pool_record_count=actual_record_count,
+            coverage_record_count=_optional_int(
+                artifact_identity.get("coverage_record_count")
+            ),
+        ),
+        source_identity=dict(source_identity),
+        controller=_controller_summary_from_provenance(provenance),
+        source_run_count=source_run_count,
+        terminal_run_count=terminal_run_count,
+        truncated_run_count=truncated_run_count,
+        natural_battle_start_count=_with_default_int(
+            natural.get("natural_battle_start_count"),
+            actual_record_count,
+        ),
+        unique_source_start_count=_with_default_int(
+            natural.get("unique_source_start_count"),
+            len(seen_checkpoint_ids),
+        ),
+        boss_battle_start_count=boss_count,
+        act1_boss_battle_start_count=act1_boss_count,
+        later_act_battle_start_count=later_count,
+        boss_source_run_count=len(boss_runs),
+        later_act_source_run_count=len(later_runs),
+        terminal_floor_counts=terminal_floor_counts,
+        terminal_act_counts=terminal_act_counts,
+        battles_per_source_run_counts=Counter(str(value) for value in battle_counts),
+        max_battle_start_floor_counts=max_floor_counts,
+        act_counts=_counter_from_mapping(
+            natural.get("act_counts", {}),
+            f"{label} act counts",
+        ),
+        room_type_counts=_counter_from_mapping(
+            natural.get("room_type_counts", {}),
+            f"{label} room type counts",
+        ),
+        encounter_id_counts=_counter_from_mapping(
+            natural.get("encounter_id_counts", {}),
+            f"{label} encounter id counts",
+        ),
+        battle_outcome_counts=_counter_from_mapping(
+            natural.get("reported_battle_outcome_counts", {}),
+            f"{label} battle outcome counts",
+        ),
+        public_context_status_counts=public_context_status_counts,
+        structured_outcome_status_counts=_counter_from_mapping(
+            natural.get("structured_resource_outcome_status_counts", {}),
+            f"{label} structured outcome counts",
+        ),
         run_summary_status_counts=run_summary_counts,
         sampled_distribution=_mapping(
             coverage_report.get("sampled_optimization_weight", {}),
@@ -464,6 +761,74 @@ def _coverage_link_problems(
     return problems
 
 
+def _streamed_coverage_link_problems(
+    *,
+    label: str,
+    pool_metadata: Mapping[str, Any],
+    pool_record_count: int,
+    pool_problems: Sequence[str],
+    coverage_report: Mapping[str, Any],
+    artifact_identity: Mapping[str, Any],
+) -> list[str]:
+    problems: list[str] = []
+    if coverage_report.get("schema_id") != A20_BATTLE_START_COVERAGE_SCHEMA_ID:
+        problems.append(f"{label}: coverage report schema_id is not T021")
+    if (
+        coverage_report.get("format_version")
+        != A20_BATTLE_START_COVERAGE_FORMAT_VERSION
+    ):
+        problems.append(f"{label}: coverage report format_version is unsupported")
+    natural = _mapping(coverage_report.get("natural_coverage", {}), "natural coverage")
+    if natural.get("natural_battle_start_count") != pool_record_count:
+        problems.append(
+            f"{label}: coverage natural count does not match pool record count"
+        )
+    input_artifacts = coverage_report.get("input_artifacts")
+    if not isinstance(input_artifacts, Mapping):
+        problems.append(f"{label}: coverage report is missing input_artifacts")
+        coverage_pool_map: Mapping[str, Any] = {}
+    else:
+        coverage_pool = input_artifacts.get("natural_pool")
+        if not isinstance(coverage_pool, Mapping):
+            problems.append(
+                f"{label}: coverage report is missing natural_pool artifact linkage"
+            )
+            coverage_pool_map = {}
+        else:
+            coverage_pool_map = coverage_pool
+    expected_sha = artifact_identity.get("pool_sha256")
+    if coverage_pool_map.get("sha256") is None:
+        problems.append(f"{label}: coverage natural-pool sha256 is missing")
+    elif coverage_pool_map.get("sha256") != expected_sha:
+        problems.append(f"{label}: coverage natural-pool sha256 does not match")
+    pool_path = coverage_pool_map.get("path")
+    if not isinstance(pool_path, str) or not pool_path:
+        problems.append(f"{label}: coverage natural-pool path is missing")
+    record_count = coverage_pool_map.get("record_count")
+    if isinstance(record_count, bool) or not isinstance(record_count, int):
+        problems.append(f"{label}: coverage natural-pool record_count is missing")
+    elif record_count != pool_record_count:
+        problems.append(f"{label}: coverage natural-pool record_count does not match")
+    metadata_count = pool_metadata.get("record_count")
+    if metadata_count != pool_record_count:
+        problems.append(f"{label}: pool metadata record_count does not match records")
+    source_identity = coverage_report.get("source_identity")
+    if not isinstance(source_identity, Mapping) or not source_identity:
+        problems.append(f"{label}: coverage report is missing source_identity")
+    else:
+        problems.extend(_source_identity_problems(label, source_identity))
+    restore = _mapping(
+        coverage_report.get("restore_verification", {}),
+        f"{label} restore verification",
+    )
+    if restore.get("restore_ok") is False:
+        problems.append(f"{label}: restore verification failed")
+    if coverage_report.get("command_passed") is False:
+        problems.append(f"{label}: coverage command did not pass")
+    problems.extend(f"{label}: pool problem: {problem}" for problem in pool_problems)
+    return problems
+
+
 def _source_identity_problems(
     label: str,
     source_identity: Mapping[str, Any],
@@ -524,7 +889,13 @@ def _artifact_from_identity(
 
 
 def _controller_summary(pool: NaturalBattleStartPool) -> ReachabilityControllerSummary:
-    routed = dict(pool.source_controller_provenance)
+    return _controller_summary_from_provenance(pool.source_controller_provenance)
+
+
+def _controller_summary_from_provenance(
+    provenance: Mapping[str, Any],
+) -> ReachabilityControllerSummary:
+    routed = dict(provenance)
     config = _mapping(routed.get("config", {}), "routed controller config")
     battle = _mapping(config.get("battle", {}), "battle controller provenance")
     non_combat = _mapping(
@@ -546,6 +917,326 @@ def _controller_summary(pool: NaturalBattleStartPool) -> ReachabilityControllerS
         action_space=_mapping(battle_config.get("action_space", {}), "action space"),
         include_potions=_optional_bool(battle_config.get("include_potions")),
     )
+
+
+def _source_run_summary_dicts(value: Any, *, label: str) -> list[dict[str, Any]]:
+    if value is None:
+        return []
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        raise ValueError(f"{label} must be a list of objects")
+    summaries = []
+    for index, raw_summary in enumerate(value):
+        if not isinstance(raw_summary, Mapping):
+            raise ValueError(f"{label} {index} must be an object")
+        summary_label = f"{label} {index}"
+        status = raw_summary.get("status", SOURCE_RUN_SUMMARY_AVAILABLE)
+        if status not in {
+            SOURCE_RUN_SUMMARY_AVAILABLE,
+            SOURCE_RUN_SUMMARY_LEGACY_UNAVAILABLE,
+        }:
+            raise ValueError(f"{summary_label} has invalid source run summary status")
+        problems = _string_list(
+            raw_summary.get("problems", []),
+            f"{summary_label} problems",
+        )
+        summaries.append(
+            {
+                "source_run_id": _required_string(
+                    raw_summary.get("source_run_id"),
+                    f"{summary_label} source_run_id",
+                ),
+                "source_seed": _required_int(
+                    raw_summary.get("source_seed"),
+                    f"{summary_label} source_seed",
+                ),
+                "terminal": _required_bool(
+                    raw_summary.get("terminal"),
+                    f"{summary_label} terminal",
+                ),
+                "outcome": _required_string(
+                    raw_summary.get("outcome"),
+                    f"{summary_label} outcome",
+                ),
+                "final_floor": _strict_optional_number(
+                    raw_summary.get("final_floor"),
+                    f"{summary_label} final_floor",
+                ),
+                "final_act": _strict_optional_int(
+                    raw_summary.get("final_act"),
+                    f"{summary_label} final_act",
+                ),
+                "final_screen_state": _required_string(
+                    raw_summary.get("final_screen_state"),
+                    f"{summary_label} final_screen_state",
+                ),
+                "final_battle_active": _required_bool(
+                    raw_summary.get("final_battle_active"),
+                    f"{summary_label} final_battle_active",
+                ),
+                "captured_battle_start_count": _required_int(
+                    raw_summary.get("captured_battle_start_count"),
+                    f"{summary_label} captured_battle_start_count",
+                ),
+                "completed_battle_count": _required_int(
+                    raw_summary.get("completed_battle_count"),
+                    f"{summary_label} completed_battle_count",
+                ),
+                "max_battle_start_floor": _strict_optional_number(
+                    raw_summary.get("max_battle_start_floor"),
+                    f"{summary_label} max_battle_start_floor",
+                ),
+                "max_battle_start_act": _strict_optional_int(
+                    raw_summary.get("max_battle_start_act"),
+                    f"{summary_label} max_battle_start_act",
+                ),
+                "problem_count": _required_int(
+                    raw_summary.get("problem_count"),
+                    f"{summary_label} problem_count",
+                ),
+                "problems": tuple(problems),
+                "status": str(status),
+            }
+        )
+    for index, summary in enumerate(summaries):
+        if summary["problem_count"] != len(summary["problems"]):
+            raise ValueError(f"{label} {index} problem_count does not match problems")
+    return summaries
+
+
+def _terminal_counters_from_summaries(
+    summaries: Sequence[Mapping[str, Any]],
+    *,
+    source_run_count: int,
+) -> tuple[Counter[str], Counter[str]]:
+    floor_counts: Counter[str] = Counter()
+    act_counts: Counter[str] = Counter()
+    if not summaries:
+        floor_counts["(legacy-unavailable)"] = source_run_count
+        act_counts["(legacy-unavailable)"] = source_run_count
+        return floor_counts, act_counts
+    for summary in summaries:
+        if summary.get("status") != SOURCE_RUN_SUMMARY_AVAILABLE:
+            floor_counts["(legacy-unavailable)"] += 1
+            act_counts["(legacy-unavailable)"] += 1
+            continue
+        floor_counts[_value_key(summary.get("final_floor"))] += 1
+        act_counts[_value_key(summary.get("final_act"))] += 1
+    return floor_counts, act_counts
+
+
+def _max_battle_start_floor_counts_from_summaries(
+    summaries: Sequence[Mapping[str, Any]],
+    *,
+    run_stats: Mapping[str, _StreamedRunRecordStats],
+) -> Counter[str]:
+    if summaries:
+        return Counter(
+            _value_key(summary.get("max_battle_start_floor")) for summary in summaries
+        )
+    return Counter(_value_key(stats.max_floor) for stats in run_stats.values())
+
+
+def _streamed_pool_validation_problems(
+    *,
+    label: str,
+    source_run_count: int,
+    terminal_run_count: int,
+    truncated_run_count: int,
+    summaries: Sequence[Mapping[str, Any]],
+    pool_problems: Sequence[str],
+    run_stats: Mapping[str, _StreamedRunRecordStats],
+) -> list[str]:
+    problems = [f"{label}: pool problem: {problem}" for problem in pool_problems]
+    if terminal_run_count + truncated_run_count != source_run_count:
+        problems.append(
+            f"{label}: pool terminal and truncated run counts do not match source runs"
+        )
+    if not summaries:
+        if source_run_count:
+            problems.append(
+                f"{label}: pool source_run_summaries are required for streaming"
+            )
+        return problems
+    if len(summaries) != source_run_count:
+        problems.append(
+            f"{label}: pool source_run_summaries count does not match source runs"
+        )
+    summary_run_ids: set[str] = set()
+    terminal_summary_count = 0
+    for index, summary in enumerate(summaries):
+        source_run_id = str(summary["source_run_id"])
+        if source_run_id in summary_run_ids:
+            problems.append(
+                f"{label}: duplicate source_run_summaries id {source_run_id}"
+            )
+        summary_run_ids.add(source_run_id)
+        if summary["terminal"]:
+            terminal_summary_count += 1
+        stats = run_stats.get(source_run_id)
+        captured_count = stats.count if stats is not None else 0
+        if summary["captured_battle_start_count"] != captured_count:
+            problems.append(
+                f"{label}: run summary {index} captured_battle_start_count does not "
+                "match records"
+            )
+        completed_count = stats.completed_count if stats is not None else 0
+        if summary["completed_battle_count"] != completed_count:
+            problems.append(
+                f"{label}: run summary {index} completed_battle_count does not "
+                "match records"
+            )
+        if stats is not None:
+            if (
+                stats.source_seed_mismatch
+                or stats.source_seed != summary["source_seed"]
+            ):
+                problems.append(
+                    f"{label}: run summary {index} source_seed does not match records"
+                )
+            if summary["max_battle_start_floor"] != stats.max_floor:
+                problems.append(
+                    f"{label}: run summary {index} max_battle_start_floor does not "
+                    "match records"
+                )
+            if summary["max_battle_start_act"] != stats.max_act:
+                problems.append(
+                    f"{label}: run summary {index} max_battle_start_act does not "
+                    "match records"
+                )
+        elif summary["max_battle_start_floor"] is not None:
+            problems.append(
+                f"{label}: run summary {index} has max_battle_start_floor without "
+                "records"
+            )
+        if stats is None and summary["max_battle_start_act"] is not None:
+            problems.append(
+                f"{label}: run summary {index} has max_battle_start_act without records"
+            )
+    if terminal_summary_count != terminal_run_count:
+        problems.append(
+            f"{label}: pool source_run_summaries terminal count does not match metadata"
+        )
+    missing_summary_run_ids = set(run_stats) - summary_run_ids
+    if missing_summary_run_ids:
+        problems.append(
+            f"{label}: pool records reference source runs missing from "
+            "source_run_summaries: " + ", ".join(sorted(missing_summary_run_ids))
+        )
+    return problems
+
+
+def _validated_controller_provenance(value: Any, label: str) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{label} must be an object")
+    try:
+        return controller_provenance_from_dict(value).to_dict()
+    except ValueError as exc:
+        raise ValueError(f"{label}: {exc}") from exc
+
+
+def _routed_child_provenances(
+    provenance: Mapping[str, Any],
+    *,
+    label: str,
+) -> dict[str, dict[str, Any]]:
+    config = _mapping(provenance.get("config"), f"{label} routed controller config")
+    return {
+        "battle": _validated_controller_provenance(
+            config.get("battle"),
+            f"{label} routed battle controller provenance",
+        ),
+        "non_combat": _validated_controller_provenance(
+            config.get("non_combat"),
+            f"{label} routed non-combat controller provenance",
+        ),
+    }
+
+
+def _validate_streamed_record_provenance(
+    *,
+    label: str,
+    record: Any,
+    source_controller: Mapping[str, Any],
+    routed_children: Mapping[str, Mapping[str, Any]],
+) -> None:
+    if record.source_controller_provenance != source_controller:
+        raise ValueError(f"{label}: source controller provenance mismatch")
+    if record.source_battle_controller_provenance != routed_children["battle"]:
+        raise ValueError(f"{label}: battle controller provenance mismatch")
+    if record.source_non_combat_controller_provenance != routed_children["non_combat"]:
+        raise ValueError(f"{label}: non-combat controller provenance mismatch")
+    structural = record.structural_metadata
+    if structural.get("source_run_id") != record.source_run_id:
+        raise ValueError(f"{label}: structural source_run_id mismatch")
+    if structural.get("source_battle_index") != record.source_battle_index:
+        raise ValueError(f"{label}: structural source_battle_index mismatch")
+    if structural.get("seed") != record.source_seed:
+        raise ValueError(f"{label}: structural source seed mismatch")
+
+
+def _with_default_int(value: Any, default: int) -> int:
+    result = _optional_int(value)
+    return default if result is None else result
+
+
+def _counter_from_mapping(value: Any, label: str) -> Counter[str]:
+    raw = _mapping(value, label)
+    counter: Counter[str] = Counter()
+    for key, count in raw.items():
+        parsed_count = _required_int(count, f"{label} {key}")
+        counter[str(key)] = parsed_count
+    return counter
+
+
+def _required_int(value: Any, label: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValueError(f"{label} must be a non-negative integer")
+    return value
+
+
+def _required_bool(value: Any, label: str) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError(f"{label} must be a boolean")
+    return value
+
+
+def _required_string(value: Any, label: str) -> str:
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{label} must be a non-empty string")
+    return value
+
+
+def _strict_optional_int(value: Any, label: str) -> int | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    raise ValueError(f"{label} must be an integer or null")
+
+
+def _strict_optional_number(value: Any, label: str) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    raise ValueError(f"{label} must be numeric or null")
+
+
+def _max_optional_pair(left: Any, right: Any) -> Any:
+    values = [value for value in (left, right) if value is not None]
+    return max(values) if values else None
+
+
+def _string_list(value: Any, label: str) -> list[str]:
+    if (
+        not isinstance(value, Sequence)
+        or isinstance(value, (str, bytes))
+        or not all(isinstance(item, str) for item in value)
+    ):
+        raise ValueError(f"{label} must be a list of strings")
+    return list(value)
 
 
 def _battle_counts_by_run(pool: NaturalBattleStartPool) -> list[int]:

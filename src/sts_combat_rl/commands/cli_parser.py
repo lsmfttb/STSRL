@@ -837,6 +837,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--stream-reachability-pools",
+        action="store_true",
+        help=(
+            "Stream current-schema --a20-reachability-report pool records instead "
+            "of loading all arm pools into memory."
+        ),
+    )
+    parser.add_argument(
         "--battle-start-pool-shard",
         type=Path,
         action="append",
