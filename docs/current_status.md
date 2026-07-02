@@ -38,8 +38,12 @@ allocation surface and smoke report workflow. T047 is complete: it added the
 root-prior guided Oracle-like comparison workflow and produced the first
 matched smoke showing root-prior guided search beating both baseline and
 post-search guidance on one current pinned T046-compatible restored start.
-T048 is now `READY` to scale that comparison beyond the one-record smoke.
-T034 remains blocked on native public-consistent hidden-future sampler support.
+T048 is complete: it scaled that comparison to two non-trivial matched fixed
+cohorts and again found root-prior guided search ahead of both baseline Oracle
+search and post-search guidance at equal native root budget. T049 is now
+`READY` to test whether that fixed-cohort signal changes complete-run source
+reachability under the existing non-combat driver. T034 remains blocked on
+native public-consistent hidden-future sampler support.
 
 ## Implemented On Main
 
@@ -825,6 +829,33 @@ T034 remains blocked on native public-consistent hidden-future sampler support.
   evidence only, not controller promotion, broad-training evidence,
   normal-information performance, natural A20 performance, live-game
   validation, or final-agent evidence.
+- T048 scales the T047 root-prior guided comparison and adds
+  `--root-prior-guided-search-comparison-task-id` so scale-up artifacts can
+  record `comparison_config.task_id` as `T048` while preserving the T047 schema.
+  Maintainer review verified retained artifact hashes, parsed both retained
+  `root-prior-guided-search-comparison-v1` reports with the current loader,
+  passed 629 Windows tests, compileall, ruff, format check, both
+  CommunicationMod fixture smokes, focused root-prior/CLI tests, task-doc
+  checks, diff whitespace checks, the WSL pinned source verifier, and a
+  same-runtime WSL probe using
+  `/home/lsmft/stsrl-spikes/py313-torch/bin/python` with
+  `/home/lsmft/stsrl-spikes/sts_lightspeed/build-py313-torch`. The current
+  T046-compatible cohort `875ea52e3df4cb93` used 8 workers over record range
+  `0:8`, report sha256
+  `d9d441f75d21a43aea8884f234f06de819060a2f6f1c421ba84ab23a719efb98`, and
+  produced baseline Oracle search `5W/3L`, post-search
+  `model_guided_oracle_search_v2` `5W/3L`, and root-prior guided search
+  `6W/2L`. The assisted `assist_0` runs1000 cohort `a336ffb1fda9ed7e` used
+  16 workers over record range `0:21`, report sha256
+  `5807c4255c97a5018e189198180435e077b4d2698b66f6227e9580cb845cb398`, and
+  produced baseline `11W/10L`, post-search `11W/10L`, and root-prior
+  `13W/8L`. Both reports had matched sources, equal configured 20-playout
+  native budgets across required search arms, no restore/truncation/controller
+  errors, no root-mapping failures, and no malformed allocation metadata. This
+  is fixed-cohort, full-simulator-state Oracle-like evidence only; it is not
+  controller promotion, broad-training evidence, complete-run reachability
+  evidence, normal-information performance, natural A20 performance,
+  live-game validation, or final-agent evidence.
 
 ## Not Implemented On Main
 
@@ -834,7 +865,8 @@ unmerged legacy work:
 - interactive live-game or A20 performance validation for any controller;
 - broad neural training on a scale/distribution-approved A20 dataset;
 - model-guided search performance improvement or controller promotion;
-- root-prior guided scale-up evidence or root-prior controller promotion;
+- root-prior guided complete-run reachability evidence or root-prior
+  controller promotion;
 - normal-information belief search.
 
 Do not use documentation or results from these areas as evidence that `main`
@@ -885,9 +917,13 @@ native-search, or non-combat branch is published. T046
 (`Root-prior guided search comparison`) is complete. Its accepted one-record
 smoke showed root-prior allocation can change a matched restored battle outcome
 at equal native root budget, but it is not enough for promotion or broad
-claims. T048 (`Root-prior guided search scale-up`) is now `READY` to test that
-signal on a non-trivial matched fixed cohort before any assisted training
-repair or non-combat ranker branch.
+claims. T048 (`Root-prior guided search scale-up`) is complete. Its accepted
+fixed-cohort scale-up improved over both baseline Oracle search and
+post-search guidance on two matched cohorts, but it remains Oracle-like
+restored-battle evidence rather than complete-run or promotion evidence. T049
+(`Root-prior complete-run reachability probe`) is now `READY` to test whether
+the T048 signal improves complete-run source reachability before any assisted
+training repair or non-combat ranker branch.
 
 The immediate external-fork follow-up is
 [`lsmfttb/sts_lightspeed#7`](https://github.com/lsmfttb/sts_lightspeed/issues/7):
@@ -919,9 +955,9 @@ The completed assisted source-generation batch is:
    as the primary next search path, while preserving assisted training and
    de-assisted distribution repair as secondary diagnostic follow-ups.
 
-The published follow-up is T048, which will scale the T047 comparison beyond a
-single selected record before any assisted training repair or non-combat ranker
-branch.
+The published follow-up is T049, which will test whether the accepted T048
+fixed-cohort signal changes complete-run source reachability before any
+assisted training repair or non-combat ranker branch.
 
 T034 remains blocked on an explicit native simulator boundary for
 public-consistent hidden-future sampling.
@@ -1004,11 +1040,14 @@ the exact WSL Python used for the gate must import both PyTorch and the active
 `slaythespire` native extension, and that extension must expose the task's
 required native APIs. See
 [`sts_lightspeed_wsl_spike.md`](sts_lightspeed_wsl_spike.md) for the
-same-runtime probe. As of 2026-07-02, the maintainer machine still has split
-runtimes: system `python3` is Python 3.14.4 without `torch`, while the separate
-`/home/lsmft/stsrl-spikes/py313-torch/bin/python` has `torch` but cannot
-import the active CPython 3.14 `build-py` extension. Source-verifier success
-does not by itself satisfy checkpoint-guided runtime evidence.
+same-runtime probe. As of the T048 review on 2026-07-02, the maintainer
+machine has two relevant runtimes: system `python3` is Python 3.14.4 for the
+ordinary `build-py` simulator gates, while checkpoint-guided T048 evidence used
+`/home/lsmft/stsrl-spikes/py313-torch/bin/python` with the matching
+`/home/lsmft/stsrl-spikes/sts_lightspeed/build-py313-torch` native build.
+Do not mix a torch-capable interpreter with a `slaythespire` build compiled for
+another CPython ABI. Source-verifier success does not by itself satisfy
+checkpoint-guided runtime evidence.
 
 Scale matters operationally. T037 exposed that a single-worker WSL
 source-generation run is too slow and leaves host resources underused for

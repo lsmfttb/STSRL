@@ -17,10 +17,11 @@ completed the assisted source-generation, assisted teacher/training, and
 de-assisted fixed-cohort evaluation batch. T045 completed the post-T044
 failure analysis and selected native root-prior allocation as the primary next
 search path. T046 completed the native root-prior allocation surface. T047
-completed the first matched root-prior guided search smoke comparison. T048 is
-now the `READY` task for scaling that comparison beyond one restored record.
-New implementation work should start only from rows marked `READY` in the task
-index; T034 remains blocked on native sampler support.
+completed the first matched root-prior guided search smoke comparison. T048
+completed the matched fixed-cohort scale-up. T049 is now the `READY` task for
+testing whether that fixed-cohort signal changes complete-run source
+reachability. New implementation work should start only from rows marked
+`READY` in the task index; T034 remains blocked on native sampler support.
 
 ## Goals
 
@@ -351,7 +352,7 @@ Work:
 - retain complete public history and context;
 - satisfy broad-training readiness per ascension and act;
 - keep mechanical cleanup separate from coverage/search experiments;
-- complete T048 before publishing an assisted training repair or non-combat
+- complete T049 before publishing an assisted training repair or non-combat
   ranker branch.
 
 Exit gate: enough unique A20 Boss and later-act starts exist for meaningful
@@ -393,9 +394,11 @@ late-integration, noisy-teacher, distribution-mismatch, and
 action-space/fallback explanations, and its smoke evidence favored native
 root-prior allocation over another immediate T043/T044 training loop. T046 is
 complete as the native search-surface task for that recommendation. T047 is
-complete as the first fixed-cohort smoke comparison, and T048 is the published
-scale-up task to evaluate whether priors improve sample efficiency at equal
-native root budget beyond one selected record.
+complete as the first fixed-cohort smoke comparison, and T048 completed the
+fixed-cohort scale-up showing root-prior guided search ahead at equal native
+root budget on two matched cohorts. T049 is the published complete-run
+reachability probe to test whether that signal changes source coverage before
+controller promotion or another training branch.
 
 Exit gate: a search change improves fixed evaluation at equal simulation or
 wall-clock budget without natural-weighted regression.

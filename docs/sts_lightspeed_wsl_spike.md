@@ -46,7 +46,7 @@ provided the `slaythespire` build used by the gate is built for that exact
 interpreter. The acceptance target is a torch-capable simulator runtime, not a
 system-wide package installation.
 
-This has been a recurring operational blocker rather than a T047-specific code
+This has been a recurring operational blocker rather than a task-specific code
 issue:
 
 - T026 accepted only offline/local checkpoint-inference evidence because the
@@ -54,14 +54,20 @@ issue:
 - M1/T028 WSL model-guided smoke evidence required a separate Python 3.13
   shim, showing that checkpoint inference and the default WSL simulator
   runtime were not yet one stable environment.
-- T047 review on 2026-07-02 found the split still active: WSL system
-  `python3` was Python 3.14.4 with no `torch`; active
+- T047 preparation on 2026-07-02 exposed the split-runtime failure mode: WSL
+  system `python3` was Python 3.14.4 with no `torch`; the then-active
   `/home/lsmft/stsrl-spikes/sts_lightspeed/build-py` imported as
   `slaythespire.cpython-314-x86_64-linux-gnu.so` and exposed
   `battle_search` but not `battle_search_with_root_priors`; the separate
   `/home/lsmft/stsrl-spikes/py313-torch/bin/python` was Python 3.13.13 with
   `torch` installed but could not import that active CPython 3.14
   `slaythespire` build.
+- T048 review on 2026-07-02 used a matched torch-capable runtime instead:
+  `/home/lsmft/stsrl-spikes/py313-torch/bin/python` imported `torch`, and
+  `/home/lsmft/stsrl-spikes/sts_lightspeed/build-py313-torch` imported as
+  `slaythespire.cpython-313-x86_64-linux-gnu.so` with
+  `StepSimulator.battle_search`, `StepSimulator.battle_search_with_root_priors`,
+  and checkpoint restore available.
 
 A pinned source verifier pass proves that the recorded source can build and
 that the disposable build exposes required native capabilities. It does not
@@ -110,6 +116,13 @@ For non-root-prior checkpoint-guided gates, replace the capability list with
 the native APIs required by that task. The invariant remains the same: do not
 mix a torch-capable interpreter with a `build-py` compiled for another Python
 ABI, and do not treat source-verifier success as active-runtime evidence.
+
+On the current maintainer machine, the known torch-capable root-prior runtime
+is:
+
+```powershell
+wsl.exe -d Ubuntu -e env PYTHONPATH=/home/lsmft/stsrl-spikes/sts_lightspeed/build-py313-torch:/mnt/d/DeadlycatCoding/STSRL/src /home/lsmft/stsrl-spikes/py313-torch/bin/python -c "import torch, slaythespire; sim=slaythespire.StepSimulator(slaythespire.CharacterClass.IRONCLAD, 1, 20); print(torch.__file__); print(slaythespire.__file__); assert hasattr(sim, 'battle_search'); assert hasattr(sim, 'battle_search_with_root_priors'); assert hasattr(sim, 'capture_checkpoint') and hasattr(sim, 'restore_checkpoint')"
+```
 
 ## Pinned Source Integration
 

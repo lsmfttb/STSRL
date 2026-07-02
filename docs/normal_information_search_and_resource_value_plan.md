@@ -266,9 +266,10 @@ root-only search integration as the primary bottleneck, with weak-model and
 distribution-mismatch signals also active, no action-space/fallback issue
 observed, and teacher-label noise unavailable without a linked calibration
 report. T046 completed the minimal native root-prior allocation surface. T047
-completed the first root-prior guided smoke comparison. T048 is now the
-published `READY` task to scale that comparison before larger training or
-non-combat branches.
+completed the first root-prior guided smoke comparison. T048 completed the
+fixed-cohort root-prior guided scale-up. T049 is now the published `READY`
+task to test whether that fixed-cohort signal changes complete-run source
+reachability before larger training or non-combat branches.
 
 Use the Oracle regime to validate priors, leaf values, uncertainty, and search
 instrumentation. Exit when model guidance improves the fixed Oracle curve at
@@ -305,8 +306,8 @@ Retain only auxiliary targets that improve normal-information evaluation.
    coverage, keeping raw policy diagnostics separate from search promotion.
 4. Design and pin the authoritative public-consistent hidden-future sampler;
    T034 remains blocked until that native boundary exists.
-5. Complete T048's root-prior guided scale-up before publishing an assisted
-   training repair or non-combat ranker branch; publish
+5. Complete T049's root-prior complete-run reachability probe before
+   publishing an assisted training repair or non-combat ranker branch; publish
    implementation work only through `READY` task rows in the task index.
 6. Keep further mechanical CLI/module cleanup in later dedicated
    no-behavior-change maintenance tasks before mixing it into search research;

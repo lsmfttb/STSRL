@@ -61,7 +61,8 @@ the current milestone, but they do not override this table.
 | T045 | DONE | [Post-T044 failure analysis and guidance path selection](T045-post-t044-failure-analysis.md) | T043, T044 | failure taxonomy after assisted model/search did not improve T044 outcomes |
 | T046 | DONE | [Native root-prior allocation search surface](T046-native-root-prior-allocation.md) | T045, T017, T020 | native search surface for root playout allocation by explicit priors |
 | T047 | DONE | [Root-prior guided search comparison](T047-root-prior-guided-search-comparison.md) | T046, T043, T044 | equal-source comparison of baseline, post-search guidance, and native root-prior allocation |
-| T048 | READY | [Root-prior guided search scale-up](T048-root-prior-guided-scale-up.md) | T047 | non-trivial matched-cohort scale-up of root-prior guided search evidence |
+| T048 | DONE | [Root-prior guided search scale-up](T048-root-prior-guided-scale-up.md) | T047 | non-trivial matched-cohort scale-up of root-prior guided search evidence |
+| T049 | READY | [Root-prior complete-run reachability probe](T049-root-prior-complete-run-reachability-probe.md) | T048, T036, T037 | complete-run source reachability impact of root-prior guided battle control |
 
 Use the table, not per-task files or roadmap prose, when deciding whether a
 task may receive a branch. Only `READY` rows should receive a new branch. After
@@ -207,10 +208,11 @@ show model-guided search improvement over baseline. T045 completed the
 post-T044 failure analysis and selected native root-prior allocation as the
 primary next path. T046 added the minimal native root-prior allocation surface.
 T047 completed the first matched root-prior guided search smoke comparison.
-T048 is now `READY` to scale that comparison beyond a one-record smoke before
-any controller promotion, assisted training repair, or non-combat ranker
-branch. T034 remains blocked on native public-consistent hidden-future sampler
-support.
+T048 completed the matched fixed-cohort scale-up and kept the evidence inside
+the Oracle-like restored-battle boundary. T049 is now `READY` to test whether
+that fixed-cohort signal changes complete-run source reachability before any
+controller promotion, assisted training repair, or non-combat ranker branch.
+T034 remains blocked on native public-consistent hidden-future sampler support.
 
 ## Standard Local Gates
 
@@ -263,6 +265,7 @@ are mapped as follows:
 - Native root-prior allocation search surface: T046.
 - Root-prior guided search comparison: T047.
 - Root-prior guided search scale-up: T048.
+- Root-prior complete-run reachability probe: T049.
 
 T013 supplies the shared CommunicationMod adapter and captured-sample
 compatibility gate. Simulator-only training experiments do not depend on it.
