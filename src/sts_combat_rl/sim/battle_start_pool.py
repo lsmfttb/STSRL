@@ -10,7 +10,9 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
+import hashlib
 import json
+from pathlib import Path
 import random
 from typing import Any, TextIO
 
@@ -78,6 +80,9 @@ from sts_combat_rl.sim.resource_outcome import (
 
 BATTLE_START_POOL_FORMAT_VERSION = 4
 """Current portable JSONL schema version for natural battle-start pools."""
+
+BATTLE_START_POOL_SHARD_MERGE_SCHEMA_ID = "natural-battle-start-pool-shard-merge-v1"
+BATTLE_START_POOL_SHARD_MERGE_VERSION = 1
 
 LEGACY_BATTLE_START_POOL_FORMAT_VERSION = 1
 PUBLIC_CONTEXT_POOL_FORMAT_VERSION = 3
@@ -247,6 +252,48 @@ class NaturalBattleStartPool:
         ),
         compare=False,
     )
+
+
+@dataclass(frozen=True)
+class BattleStartPoolShardMergeSummary:
+    """Bounded metadata for one deterministic natural source-pool shard merge."""
+
+    source_shards: tuple[dict[str, Any], ...]
+    source_run_count: int
+    terminal_run_count: int
+    truncated_run_count: int
+    record_count: int
+    output_path: str | None = None
+    output_sha256: str | None = None
+    schema_id: str = BATTLE_START_POOL_SHARD_MERGE_SCHEMA_ID
+    merge_version: int = BATTLE_START_POOL_SHARD_MERGE_VERSION
+
+    def with_output_identity(
+        self,
+        *,
+        output_path: Path,
+        output_sha256: str,
+    ) -> BattleStartPoolShardMergeSummary:
+        return replace(
+            self,
+            output_path=str(output_path),
+            output_sha256=output_sha256,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_id": self.schema_id,
+            "merge_version": self.merge_version,
+            "output_path": self.output_path,
+            "output_sha256": self.output_sha256,
+            "source_run_count": self.source_run_count,
+            "terminal_run_count": self.terminal_run_count,
+            "truncated_run_count": self.truncated_run_count,
+            "record_count": self.record_count,
+            "source_shards": [
+                _json_safe_mapping(shard) for shard in self.source_shards
+            ],
+        }
 
 
 @dataclass(frozen=True)
@@ -731,6 +778,255 @@ def load_natural_battle_start_pool_jsonl(stream: TextIO) -> NaturalBattleStartPo
             "invalid natural battle-start pool: " + "; ".join(pool_problems)
         )
     return pool
+
+
+def load_natural_battle_start_pool_metadata_jsonl(
+    path: Path,
+) -> tuple[dict[str, Any], int]:
+    """Load only a natural pool metadata row and count records without retaining them."""
+
+    metadata: dict[str, Any] | None = None
+    record_count = 0
+    with path.open("r", encoding="utf-8") as stream:
+        for line_number, raw_line in enumerate(stream, start=1):
+            if not raw_line.strip():
+                continue
+            try:
+                row = json.loads(raw_line)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"{path} line {line_number}: invalid JSON") from exc
+            if not isinstance(row, dict):
+                raise ValueError(f"{path} line {line_number}: row must be an object")
+            if row.get("type") == "metadata":
+                if metadata is not None:
+                    raise ValueError(f"{path} line {line_number}: duplicate metadata")
+                metadata = _require_mapping(row.get("metadata"), f"{path} metadata")
+            elif row.get("type") == "record":
+                record_count += 1
+            else:
+                raise ValueError(f"{path} line {line_number}: unknown row type")
+    if metadata is None:
+        raise ValueError(f"{path}: missing battle-start pool metadata")
+    return metadata, record_count
+
+
+def dump_merged_natural_battle_start_pool_shards_jsonl(
+    shard_paths: Sequence[Path],
+    stream: TextIO,
+) -> BattleStartPoolShardMergeSummary:
+    """Stream-merge current natural source-pool shards into one JSONL pool."""
+
+    if not shard_paths:
+        raise ValueError("at least one natural battle-start pool shard is required")
+
+    first_controller: dict[str, Any] | None = None
+    expected_ascension: Any = None
+    source_run_count = 0
+    terminal_run_count = 0
+    truncated_run_count = 0
+    record_count = 0
+    source_run_summaries: list[dict[str, Any]] = []
+    source_run_ids: set[str] = set()
+    summary_seeds_by_run: dict[str, int] = {}
+    problems: list[str] = []
+    source_shards: list[dict[str, Any]] = []
+    record_offsets: list[int] = []
+    record_counts: list[int] = []
+
+    for shard_index, shard_path in enumerate(shard_paths):
+        metadata, actual_record_count = load_natural_battle_start_pool_metadata_jsonl(
+            shard_path
+        )
+        if metadata.get("format_version") != BATTLE_START_POOL_FORMAT_VERSION:
+            raise ValueError(
+                f"{shard_path}: battle-start pool format_version unsupported"
+            )
+        shard_record_count = _require_non_negative_int(
+            metadata.get("record_count"),
+            f"{shard_path} record_count",
+        )
+        if actual_record_count != shard_record_count:
+            raise ValueError(
+                f"{shard_path}: metadata record_count mismatch "
+                f"({shard_record_count} != {actual_record_count})"
+            )
+        shard_source_run_count = _require_non_negative_int(
+            metadata.get("source_run_count"),
+            f"{shard_path} source_run_count",
+        )
+        shard_terminal_run_count = _require_non_negative_int(
+            metadata.get("terminal_run_count"),
+            f"{shard_path} terminal_run_count",
+        )
+        shard_truncated_run_count = _require_non_negative_int(
+            metadata.get("truncated_run_count"),
+            f"{shard_path} truncated_run_count",
+        )
+        if (
+            shard_terminal_run_count + shard_truncated_run_count
+            != shard_source_run_count
+        ):
+            raise ValueError(f"{shard_path}: terminal/truncated source counts mismatch")
+        shard_controller = _validated_provenance(
+            metadata.get("source_controller_provenance"),
+            f"{shard_path} source controller provenance",
+        )
+        if first_controller is None:
+            first_controller = shard_controller
+        elif shard_controller != first_controller:
+            raise ValueError(
+                "natural source shard controller provenance mismatch; use fixed "
+                "--sim-non-combat-seed and identical battle-controller settings"
+            )
+
+        shard_summaries = _source_run_summaries_from_metadata(
+            metadata.get("source_run_summaries", []),
+            label=f"{shard_path} source_run_summaries",
+        )
+        if not shard_summaries:
+            raise ValueError(f"{shard_path}: source_run_summaries are required")
+        if len(shard_summaries) != shard_source_run_count:
+            raise ValueError(
+                f"{shard_path}: source_run_summaries count does not match source runs"
+            )
+        if sum(1 for summary in shard_summaries if summary.terminal) != (
+            shard_terminal_run_count
+        ):
+            raise ValueError(
+                f"{shard_path}: source_run_summaries terminal count mismatch"
+            )
+        for summary in shard_summaries:
+            if summary.source_run_id in source_run_ids:
+                raise ValueError(
+                    f"duplicate source_run_id across natural shards: "
+                    f"{summary.source_run_id}"
+                )
+            source_run_ids.add(summary.source_run_id)
+            summary_seeds_by_run[summary.source_run_id] = summary.source_seed
+            source_run_summaries.append(summary.to_dict())
+
+        record_offsets.append(record_count)
+        record_counts.append(shard_record_count)
+        record_count += shard_record_count
+        source_run_count += shard_source_run_count
+        terminal_run_count += shard_terminal_run_count
+        truncated_run_count += shard_truncated_run_count
+        problems.extend(
+            _require_string_list(metadata.get("problems", []), f"{shard_path} problems")
+        )
+        source_shards.append(
+            {
+                "path": str(shard_path),
+                "sha256": sha256_file(shard_path),
+                "merge_version": BATTLE_START_POOL_SHARD_MERGE_VERSION,
+                "shard_index": shard_index,
+                "format_version": BATTLE_START_POOL_FORMAT_VERSION,
+                "record_count": shard_record_count,
+                "source_run_count": shard_source_run_count,
+                "terminal_run_count": shard_terminal_run_count,
+                "truncated_run_count": shard_truncated_run_count,
+                "source_seed_range": _source_seed_range_from_summaries(shard_summaries),
+            }
+        )
+
+    if first_controller is None:
+        raise ValueError("at least one natural battle-start pool shard is required")
+
+    metadata = {
+        "format_version": BATTLE_START_POOL_FORMAT_VERSION,
+        "source_run_count": source_run_count,
+        "terminal_run_count": terminal_run_count,
+        "truncated_run_count": truncated_run_count,
+        "source_controller_provenance": first_controller,
+        "record_count": record_count,
+        "source_run_summaries": source_run_summaries,
+        "source_pool_merge": {
+            "schema_id": BATTLE_START_POOL_SHARD_MERGE_SCHEMA_ID,
+            "merge_version": BATTLE_START_POOL_SHARD_MERGE_VERSION,
+            "shard_count": len(source_shards),
+            "source_shards": [_json_safe_mapping(shard) for shard in source_shards],
+        },
+        "migration_report": {
+            "source_version": BATTLE_START_POOL_FORMAT_VERSION,
+            "target_version": BATTLE_START_POOL_FORMAT_VERSION,
+            "applied_versions": [],
+            "losses": [],
+        },
+        "problems": list(dict.fromkeys(problems)),
+    }
+    _write_row(stream, {"type": "metadata", "metadata": metadata})
+
+    checkpoint_ids: set[str] = set()
+    run_battle_ids: set[tuple[str, int]] = set()
+    written_records = 0
+    routed_children = _routed_child_provenances(first_controller)
+    for shard_index, shard_path in enumerate(shard_paths):
+        record_offset = record_offsets[shard_index]
+        shard_record_count = record_counts[shard_index]
+        shard_written = 0
+        for raw_record in _iter_natural_battle_start_pool_record_rows(shard_path):
+            record = record_from_manifest(
+                raw_record,
+                label=f"{shard_path} record {shard_written}",
+            )
+            if record.record_index != shard_written:
+                raise ValueError(f"{shard_path}: record indices must be contiguous")
+            expected_seed = summary_seeds_by_run.get(record.source_run_id)
+            _validate_natural_merge_record(
+                record,
+                source_controller=first_controller,
+                routed_children=routed_children,
+                expected_source_seed=expected_seed,
+                label=f"{shard_path} record {shard_written}",
+            )
+            if expected_ascension is None:
+                expected_ascension = record.structural_metadata.get("ascension")
+            elif record.structural_metadata.get("ascension") != expected_ascension:
+                raise ValueError(
+                    f"{shard_path}: mixed ascension in natural source shards"
+                )
+            if record.source_checkpoint_id in checkpoint_ids:
+                raise ValueError(
+                    f"duplicate source checkpoint id across natural shards: "
+                    f"{record.source_checkpoint_id}"
+                )
+            checkpoint_ids.add(record.source_checkpoint_id)
+            run_battle_id = (record.source_run_id, record.source_battle_index)
+            if run_battle_id in run_battle_ids:
+                raise ValueError(
+                    "duplicate source run/battle identity across natural shards: "
+                    f"{record.source_run_id}:{record.source_battle_index}"
+                )
+            run_battle_ids.add(run_battle_id)
+            merged_record = replace(
+                record,
+                record_index=record_offset + record.record_index,
+                native_checkpoint=None,
+            )
+            _write_row(
+                stream,
+                {"type": "record", "record": record_to_manifest(merged_record)},
+            )
+            shard_written += 1
+            written_records += 1
+        if shard_written != shard_record_count:
+            raise ValueError(
+                f"{shard_path}: metadata record_count mismatch "
+                f"({shard_record_count} != {shard_written})"
+            )
+    if written_records != record_count:
+        raise ValueError(
+            f"merged natural source record_count mismatch ({record_count} != "
+            f"{written_records})"
+        )
+
+    return BattleStartPoolShardMergeSummary(
+        source_shards=tuple(source_shards),
+        source_run_count=source_run_count,
+        terminal_run_count=terminal_run_count,
+        truncated_run_count=truncated_run_count,
+        record_count=record_count,
+    )
 
 
 def restore_battle_start_record(
@@ -1617,6 +1913,98 @@ def _migrate_pool_v3_to_v4(document: ArtifactDocument) -> ArtifactDocument:
     return ArtifactDocument(metadata=metadata, records=migrated_records)
 
 
+def _iter_natural_battle_start_pool_record_rows(
+    path: Path,
+) -> Iterable[dict[str, Any]]:
+    metadata_seen = False
+    with path.open("r", encoding="utf-8") as stream:
+        for line_number, raw_line in enumerate(stream, start=1):
+            if not raw_line.strip():
+                continue
+            try:
+                row = json.loads(raw_line)
+            except json.JSONDecodeError as exc:
+                raise ValueError(f"{path} line {line_number}: invalid JSON") from exc
+            if not isinstance(row, dict):
+                raise ValueError(f"{path} line {line_number}: row must be an object")
+            if row.get("type") == "metadata":
+                if metadata_seen:
+                    raise ValueError(f"{path} line {line_number}: duplicate metadata")
+                metadata_seen = True
+                continue
+            if row.get("type") == "record":
+                yield _require_mapping(
+                    row.get("record"),
+                    f"{path} line {line_number} record",
+                )
+                continue
+            raise ValueError(f"{path} line {line_number}: unknown row type")
+    if not metadata_seen:
+        raise ValueError(f"{path}: missing battle-start pool metadata")
+
+
+def _source_seed_range_from_summaries(
+    summaries: Sequence[SourceRunSummary],
+) -> dict[str, Any]:
+    seeds = [
+        summary.source_seed
+        for summary in summaries
+        if isinstance(summary.source_seed, int)
+        and not isinstance(summary.source_seed, bool)
+    ]
+    if not seeds:
+        return {"min": None, "max": None, "count": 0}
+    return {"min": min(seeds), "max": max(seeds), "count": len(seeds)}
+
+
+def _routed_child_provenances(
+    source_controller_provenance: Mapping[str, Any],
+) -> dict[str, dict[str, Any]]:
+    config = _require_mapping(
+        source_controller_provenance.get("config"),
+        "source controller config",
+    )
+    return {
+        "battle": _validated_provenance(
+            config.get("battle"),
+            "source controller battle child provenance",
+        ),
+        "non_combat": _validated_provenance(
+            config.get("non_combat"),
+            "source controller non-combat child provenance",
+        ),
+    }
+
+
+def _validate_natural_merge_record(
+    record: BattleStartCheckpointRecord,
+    *,
+    source_controller: Mapping[str, Any],
+    routed_children: Mapping[str, Mapping[str, Any]],
+    expected_source_seed: int | None,
+    label: str,
+) -> None:
+    if expected_source_seed is None:
+        raise ValueError(f"{label}: source_run_id missing from source_run_summaries")
+    if record.source_seed != expected_source_seed:
+        raise ValueError(f"{label}: source_seed does not match source_run_summaries")
+    if record.source_controller_provenance != source_controller:
+        raise ValueError(f"{label}: source controller provenance mismatch")
+    if record.source_battle_controller_provenance != routed_children["battle"]:
+        raise ValueError(f"{label}: battle controller provenance mismatch")
+    if record.source_non_combat_controller_provenance != routed_children["non_combat"]:
+        raise ValueError(f"{label}: non-combat controller provenance mismatch")
+    if record.checkpoint_information_regime != CHECKPOINT_INFORMATION_REGIME:
+        raise ValueError(f"{label}: unsupported checkpoint information regime")
+    structural = record.structural_metadata
+    if structural.get("source_run_id") != record.source_run_id:
+        raise ValueError(f"{label}: structural source_run_id mismatch")
+    if structural.get("source_battle_index") != record.source_battle_index:
+        raise ValueError(f"{label}: structural source_battle_index mismatch")
+    if structural.get("seed") != record.source_seed:
+        raise ValueError(f"{label}: structural source seed mismatch")
+
+
 def _legacy_provenance(value: Any, label: str) -> dict[str, Any]:
     if not isinstance(value, str) or not value:
         raise ValueError(f"v1 {label} policy name is missing")
@@ -1642,6 +2030,14 @@ def _legacy_routed_provenance(
 def _write_row(stream: TextIO, row: Mapping[str, Any]) -> None:
     stream.write(json.dumps(row, sort_keys=True, allow_nan=False))
     stream.write("\n")
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def _json_safe_mapping(value: Mapping[str, Any]) -> dict[str, Any]:

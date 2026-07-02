@@ -404,6 +404,24 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     input_group.add_argument(
+        "--merge-battle-start-pool-shards",
+        type=Path,
+        metavar="OUTPUT_JSONL",
+        help=(
+            "Merge repeated --battle-start-pool-shard natural source-pool JSONL "
+            "artifacts into one current-schema natural battle-start pool."
+        ),
+    )
+    input_group.add_argument(
+        "--merge-a20-battle-start-coverage",
+        type=Path,
+        metavar="OUTPUT_JSON",
+        help=(
+            "Build one merged A20 coverage report from --merged-battle-start-pool "
+            "and repeated shard-level --battle-start-coverage-shard reports."
+        ),
+    )
+    input_group.add_argument(
         "--expert-source-coverage-report",
         type=Path,
         metavar="OUTPUT_JSON",
@@ -816,6 +834,45 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "One arm for --a20-reachability-report. Repeat for default, "
             "Oracle no-potion, potion-enabled, or other explicitly labeled arms."
+        ),
+    )
+    parser.add_argument(
+        "--battle-start-pool-shard",
+        type=Path,
+        action="append",
+        default=[],
+        metavar="POOL_JSONL",
+        help=(
+            "One natural battle-start source-pool shard for "
+            "--merge-battle-start-pool-shards. Repeat for every generated shard."
+        ),
+    )
+    parser.add_argument(
+        "--battle-start-pool-shard-merge-manifest",
+        type=Path,
+        metavar="MANIFEST_JSON",
+        help=(
+            "Optional T050 manifest written by --merge-battle-start-pool-shards "
+            "with shard paths, hashes, counts, and merged output identity."
+        ),
+    )
+    parser.add_argument(
+        "--merged-battle-start-pool",
+        type=Path,
+        metavar="POOL_JSONL",
+        help=(
+            "Merged natural battle-start pool used by "
+            "--merge-a20-battle-start-coverage."
+        ),
+    )
+    parser.add_argument(
+        "--battle-start-coverage-shard",
+        type=Path,
+        action="append",
+        default=[],
+        metavar="COVERAGE_JSON",
+        help=(
+            "One shard-level A20 coverage report for --merge-a20-battle-start-coverage."
         ),
     )
     parser.add_argument(

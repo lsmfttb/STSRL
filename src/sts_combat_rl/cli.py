@@ -9,12 +9,19 @@ from sts_combat_rl.commands.cli_parser import build_parser
 from sts_combat_rl.commands.cli_paths import timestamped_path
 from sts_combat_rl.commands.cli_policies import build_pytorch_gate_config
 from sts_combat_rl.commands.cli_validation import validate_cli_args
+from sts_combat_rl.commands.a20_coverage import (
+    merge_a20_battle_start_coverage_from_paths,
+)
 from sts_combat_rl.commands.assisted_source_generation import (
     format_assisted_coverage_report,
     format_assisted_source_pool_merge_report,
     merge_assisted_a20_coverage_from_paths,
     merge_assisted_source_pool_from_paths,
     run_assisted_source_coverage_report_from_paths,
+)
+from sts_combat_rl.commands.checkpoint_pool import (
+    format_battle_start_pool_shard_merge_report,
+    merge_checkpoint_pool_shards_from_paths,
 )
 from sts_combat_rl.commands.expert_source_coverage import (
     run_expert_source_coverage_report_from_paths,
@@ -53,6 +60,9 @@ from sts_combat_rl.comm.stdio_client import StdioClient
 from sts_combat_rl.logging_utils import DEFAULT_LOG_FILE, configure_logging
 from sts_combat_rl.policy.scripted import ScriptedCombatPolicy
 from sts_combat_rl.samples import analyze_sample_paths, format_sample_analysis
+from sts_combat_rl.sim.a20_battle_start_coverage import (
+    format_a20_battle_start_coverage_report,
+)
 from sts_combat_rl.sim.calibration import (
     format_communicationmod_feature_calibration_report,
     format_tactical_feature_coverage_report,
@@ -311,6 +321,41 @@ def main(argv: list[str] | None = None) -> int:
             print(f"failed to build A20 reachability report: {exc}", file=sys.stderr)
             return 2
         print(format_a20_reachability_comparison_report(report), file=sys.stderr)
+        return 0 if report.command_passed else 1
+
+    if args.merge_battle_start_pool_shards is not None:
+        try:
+            summary = merge_checkpoint_pool_shards_from_paths(
+                output_path=args.merge_battle_start_pool_shards,
+                shard_paths=args.battle_start_pool_shard,
+                manifest_path=args.battle_start_pool_shard_merge_manifest,
+            )
+        except (OSError, ValueError) as exc:
+            print(
+                f"failed to merge natural battle-start pool shards: {exc}",
+                file=sys.stderr,
+            )
+            return 2
+        print(format_battle_start_pool_shard_merge_report(summary), file=sys.stderr)
+        return 0
+
+    if args.merge_a20_battle_start_coverage is not None:
+        try:
+            report = merge_a20_battle_start_coverage_from_paths(
+                output_path=args.merge_a20_battle_start_coverage,
+                pool_path=args.merged_battle_start_pool,
+                coverage_shard_paths=args.battle_start_coverage_shard,
+                restore_limit=args.battle_start_restore_limit,
+                gate_config=build_pytorch_gate_config(args),
+                gate_override=args.pytorch_gate_override,
+            )
+        except (OSError, ValueError) as exc:
+            print(
+                f"failed to merge A20 battle-start coverage shards: {exc}",
+                file=sys.stderr,
+            )
+            return 2
+        print(format_a20_battle_start_coverage_report(report), file=sys.stderr)
         return 0 if report.command_passed else 1
 
     if args.expert_source_coverage_report is not None:

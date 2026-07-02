@@ -6,6 +6,14 @@ import json
 
 import pytest
 
+from sts_combat_rl.cli import main
+from sts_combat_rl.commands.a20_coverage import (
+    merge_a20_battle_start_coverage_from_paths,
+)
+from sts_combat_rl.sim.a20_battle_start_coverage import (
+    build_a20_battle_start_coverage_report,
+    dump_a20_battle_start_coverage_report_json,
+)
 from sts_combat_rl.sim.battle_start_pool import (
     CHECKPOINT_INFORMATION_REGIME,
     LEGACY_UNKNOWN_INFORMATION_REGIME,
@@ -13,11 +21,14 @@ from sts_combat_rl.sim.battle_start_pool import (
     STRUCTURAL_SAMPLING_COMPONENT,
     build_battle_start_pool_coverage_report,
     collect_natural_battle_start_pool,
+    dump_merged_natural_battle_start_pool_shards_jsonl,
     dump_natural_battle_start_pool_jsonl,
+    load_natural_battle_start_pool_metadata_jsonl,
     load_natural_battle_start_pool_jsonl,
     natural_battle_start_pool_problems,
     restore_battle_start_record,
     sample_battle_start_pool,
+    sha256_file,
     verify_battle_start_pool_restores,
 )
 from sts_combat_rl.sim.contract import (
@@ -28,6 +39,7 @@ from sts_combat_rl.sim.contract import (
 )
 from sts_combat_rl.sim.online_controller import PolicyController, RoutedRunController
 from sts_combat_rl.sim.policy import FirstEligiblePolicy
+from sts_combat_rl.sim.lightspeed_source import lightspeed_source_identity_dict
 
 
 @dataclass
@@ -398,3 +410,229 @@ def test_incomplete_manifest_fails_instead_of_guessing_source_seed() -> None:
         load_natural_battle_start_pool_jsonl(
             StringIO("\n".join(json.dumps(row) for row in rows))
         )
+
+
+def test_natural_source_pool_shard_merge_streams_loadable_artifact(
+    tmp_path,
+    capsys,
+) -> None:
+    first_pool = collect_natural_battle_start_pool(
+        FakePoolAdapter("shard-a"),
+        _controller(),
+        seeds=[7],
+        max_steps=10,
+    )
+    second_pool = collect_natural_battle_start_pool(
+        FakePoolAdapter("shard-b"),
+        _controller(),
+        seeds=[8],
+        max_steps=10,
+    )
+    first_path = _write_pool(tmp_path / "shard-a.jsonl", first_pool)
+    second_path = _write_pool(tmp_path / "shard-b.jsonl", second_pool)
+    merged_path = tmp_path / "merged.jsonl"
+    manifest_path = tmp_path / "merge-manifest.json"
+
+    assert (
+        main(
+            [
+                "--merge-battle-start-pool-shards",
+                str(merged_path),
+                "--battle-start-pool-shard",
+                str(first_path),
+                "--battle-start-pool-shard",
+                str(second_path),
+                "--battle-start-pool-shard-merge-manifest",
+                str(manifest_path),
+                "--log-file",
+                "-",
+            ]
+        )
+        == 0
+    )
+
+    output = capsys.readouterr()
+    metadata, record_count = load_natural_battle_start_pool_metadata_jsonl(merged_path)
+    with merged_path.open("r", encoding="utf-8") as stream:
+        merged = load_natural_battle_start_pool_jsonl(stream)
+    restore = verify_battle_start_pool_restores(
+        lambda: FakePoolAdapter("fresh"), merged
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    assert output.out == ""
+    assert "Natural battle-start source-pool shard merge" in output.err
+    assert record_count == len(first_pool.records) + len(second_pool.records)
+    assert [record.record_index for record in merged.records] == list(
+        range(len(merged.records))
+    )
+    assert {record.source_checkpoint_id for record in merged.records} == {
+        record.source_checkpoint_id
+        for record in [*first_pool.records, *second_pool.records]
+    }
+    assert metadata["source_pool_merge"]["schema_id"] == (
+        "natural-battle-start-pool-shard-merge-v1"
+    )
+    assert manifest["output_sha256"] == sha256_file(merged_path)
+    assert [shard["path"] for shard in manifest["source_shards"]] == [
+        str(first_path),
+        str(second_path),
+    ]
+    assert restore.restore_ok is True
+
+
+def test_natural_source_pool_shard_merge_is_deterministic(tmp_path) -> None:
+    first_path = _write_pool(
+        tmp_path / "shard-a.jsonl",
+        collect_natural_battle_start_pool(
+            FakePoolAdapter("shard-a"),
+            _controller(),
+            seeds=[7],
+            max_steps=10,
+        ),
+    )
+    second_path = _write_pool(
+        tmp_path / "shard-b.jsonl",
+        collect_natural_battle_start_pool(
+            FakePoolAdapter("shard-b"),
+            _controller(),
+            seeds=[8],
+            max_steps=10,
+        ),
+    )
+    first_output = StringIO()
+    second_output = StringIO()
+
+    dump_merged_natural_battle_start_pool_shards_jsonl(
+        [first_path, second_path],
+        first_output,
+    )
+    dump_merged_natural_battle_start_pool_shards_jsonl(
+        [first_path, second_path],
+        second_output,
+    )
+
+    assert first_output.getvalue() == second_output.getvalue()
+
+
+def test_natural_source_pool_shard_merge_rejects_duplicate_source_identity(
+    tmp_path,
+) -> None:
+    first_path = _write_pool(
+        tmp_path / "shard-a.jsonl",
+        collect_natural_battle_start_pool(
+            FakePoolAdapter("same"),
+            _controller(),
+            seeds=[7],
+            max_steps=10,
+        ),
+    )
+    second_path = _write_pool(
+        tmp_path / "shard-b.jsonl",
+        collect_natural_battle_start_pool(
+            FakePoolAdapter("same"),
+            _controller(),
+            seeds=[8],
+            max_steps=10,
+        ),
+    )
+
+    with pytest.raises(ValueError, match="duplicate source checkpoint id"):
+        dump_merged_natural_battle_start_pool_shards_jsonl(
+            [first_path, second_path],
+            StringIO(),
+        )
+
+
+def test_natural_source_pool_shard_merge_rejects_mixed_controller(
+    tmp_path,
+) -> None:
+    first_path = _write_pool(
+        tmp_path / "shard-a.jsonl",
+        collect_natural_battle_start_pool(
+            FakePoolAdapter("shard-a"),
+            _controller(),
+            seeds=[7],
+            max_steps=10,
+        ),
+    )
+    second_path = _write_pool(
+        tmp_path / "shard-b.jsonl",
+        collect_natural_battle_start_pool(
+            FakePoolAdapter("shard-b"),
+            _controller(),
+            seeds=[8],
+            max_steps=10,
+        ),
+    )
+    rows = [
+        json.loads(line)
+        for line in second_path.read_text(encoding="utf-8").splitlines()
+    ]
+    rows[0]["metadata"]["source_controller_provenance"]["name"] = "other"
+    second_path.write_text(
+        "\n".join(json.dumps(row, sort_keys=True) for row in rows) + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="controller provenance mismatch"):
+        dump_merged_natural_battle_start_pool_shards_jsonl(
+            [first_path, second_path],
+            StringIO(),
+        )
+
+
+def test_natural_a20_coverage_merge_uses_shard_restore_reports(tmp_path) -> None:
+    shard_paths = []
+    coverage_paths = []
+    for seed, adapter_id in ((7, "shard-a"), (8, "shard-b")):
+        pool = collect_natural_battle_start_pool(
+            FakePoolAdapter(adapter_id),
+            _controller(),
+            seeds=[seed],
+            max_steps=10,
+        )
+        shard_path = _write_pool(tmp_path / f"{adapter_id}.jsonl", pool)
+        restore = verify_battle_start_pool_restores(
+            lambda: FakePoolAdapter("fresh"),
+            pool,
+        )
+        report = build_a20_battle_start_coverage_report(
+            pool,
+            restore_report=restore,
+            input_artifacts={
+                "natural_pool": {
+                    "path": str(shard_path),
+                    "sha256": sha256_file(shard_path),
+                    "record_count": len(pool.records),
+                }
+            },
+            source_identity=lightspeed_source_identity_dict(),
+        )
+        coverage_path = tmp_path / f"{adapter_id}-coverage.json"
+        with coverage_path.open("w", encoding="utf-8", newline="\n") as stream:
+            dump_a20_battle_start_coverage_report_json(report, stream)
+        shard_paths.append(shard_path)
+        coverage_paths.append(coverage_path)
+
+    merged_path = tmp_path / "merged.jsonl"
+    with merged_path.open("w", encoding="utf-8", newline="\n") as stream:
+        dump_merged_natural_battle_start_pool_shards_jsonl(shard_paths, stream)
+
+    merged_report = merge_a20_battle_start_coverage_from_paths(
+        output_path=tmp_path / "merged-coverage.json",
+        pool_path=merged_path,
+        coverage_shard_paths=coverage_paths,
+    )
+
+    assert merged_report.command_passed is True
+    assert merged_report.natural_coverage.natural_battle_start_count == 4
+    assert merged_report.restore_verification.checkpoint_count == 4
+    assert merged_report.restore_verification.restore_ok is True
+    assert len(merged_report.input_artifacts["coverage_shards"]) == 2
+
+
+def _write_pool(path, pool):
+    with path.open("w", encoding="utf-8", newline="\n") as stream:
+        dump_natural_battle_start_pool_jsonl(pool, stream)
+    return path

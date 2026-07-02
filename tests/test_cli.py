@@ -233,6 +233,51 @@ def test_cli_parser_accepts_t042_assisted_merge_and_driver_seed(tmp_path) -> Non
     assert args.sim_non_combat_seed == 42042
 
 
+def test_cli_parser_accepts_t050_natural_merge_flags(tmp_path) -> None:
+    output_path = tmp_path / "merged.jsonl"
+    manifest_path = tmp_path / "merge-manifest.json"
+    first_shard = tmp_path / "shard-0.jsonl"
+    second_shard = tmp_path / "shard-1.jsonl"
+    coverage_output = tmp_path / "merged-coverage.json"
+    first_coverage = tmp_path / "coverage-0.json"
+    second_coverage = tmp_path / "coverage-1.json"
+
+    merge_args = build_parser().parse_args(
+        [
+            "--merge-battle-start-pool-shards",
+            str(output_path),
+            "--battle-start-pool-shard",
+            str(first_shard),
+            "--battle-start-pool-shard",
+            str(second_shard),
+            "--battle-start-pool-shard-merge-manifest",
+            str(manifest_path),
+        ]
+    )
+    coverage_args = build_parser().parse_args(
+        [
+            "--merge-a20-battle-start-coverage",
+            str(coverage_output),
+            "--merged-battle-start-pool",
+            str(output_path),
+            "--battle-start-coverage-shard",
+            str(first_coverage),
+            "--battle-start-coverage-shard",
+            str(second_coverage),
+        ]
+    )
+
+    assert merge_args.merge_battle_start_pool_shards == output_path
+    assert merge_args.battle_start_pool_shard == [first_shard, second_shard]
+    assert merge_args.battle_start_pool_shard_merge_manifest == manifest_path
+    assert coverage_args.merge_a20_battle_start_coverage == coverage_output
+    assert coverage_args.merged_battle_start_pool == output_path
+    assert coverage_args.battle_start_coverage_shard == [
+        first_coverage,
+        second_coverage,
+    ]
+
+
 def test_cli_parser_accepts_t042_assisted_coverage_merge(tmp_path) -> None:
     output_path = tmp_path / "merged-coverage.json"
     pool_path = tmp_path / "merged.jsonl"

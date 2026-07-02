@@ -8,14 +8,17 @@ from typing import Any
 
 from sts_combat_rl.sim.action_space import ActionSpaceConfig
 from sts_combat_rl.sim.battle_start_pool import (
+    BattleStartPoolShardMergeSummary,
     BattleStartPoolCoverageReport,
     BattleStartPoolRestoreReport,
     NaturalBattleStartPool,
     build_battle_start_pool_coverage_report,
     dump_natural_battle_start_pool_jsonl,
+    dump_merged_natural_battle_start_pool_shards_jsonl,
     load_natural_battle_start_pool_jsonl,
     collect_natural_battle_start_pool,
     sample_battle_start_pool,
+    sha256_file,
     verify_battle_start_pool_restores,
 )
 from sts_combat_rl.sim.checkpoint_verification import (
@@ -25,6 +28,7 @@ from sts_combat_rl.sim.checkpoint_verification import (
 from sts_combat_rl.sim.contract import CheckpointingSimulatorAdapter
 from sts_combat_rl.sim.online_controller import PolicyController, RoutedRunController
 from sts_combat_rl.sim.policy import DecisionPolicy
+import json
 
 
 def build_routed_controller(
@@ -150,6 +154,51 @@ def write_checkpoint_pool(path: Path, pool: NaturalBattleStartPool) -> None:
 
     with path.open("w", encoding="utf-8", newline="\n") as stream:
         dump_natural_battle_start_pool_jsonl(pool, stream)
+
+
+def merge_checkpoint_pool_shards_from_paths(
+    *,
+    output_path: Path,
+    shard_paths: Sequence[Path],
+    manifest_path: Path | None = None,
+) -> BattleStartPoolShardMergeSummary:
+    """Merge current-schema natural source-pool shards and optionally write a manifest."""
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8", newline="\n") as stream:
+        summary = dump_merged_natural_battle_start_pool_shards_jsonl(
+            shard_paths,
+            stream,
+        )
+    summary = summary.with_output_identity(
+        output_path=output_path,
+        output_sha256=sha256_file(output_path),
+    )
+    if manifest_path is not None:
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        with manifest_path.open("w", encoding="utf-8", newline="\n") as stream:
+            json.dump(summary.to_dict(), stream, indent=2, sort_keys=True)
+            stream.write("\n")
+    return summary
+
+
+def format_battle_start_pool_shard_merge_report(
+    summary: BattleStartPoolShardMergeSummary,
+) -> str:
+    """Format a compact natural source-pool shard merge summary for stderr."""
+
+    return "\n".join(
+        [
+            "Natural battle-start source-pool shard merge",
+            f"schema: {summary.schema_id} v{summary.merge_version}",
+            f"shards: {len(summary.source_shards)}",
+            f"source runs: {summary.source_run_count}",
+            f"terminal source runs: {summary.terminal_run_count}",
+            f"truncated source runs: {summary.truncated_run_count}",
+            f"records: {summary.record_count}",
+            f"output sha256: {summary.output_sha256 or '(not written)'}",
+        ]
+    )
 
 
 def verify_checkpoint_pool_file(
