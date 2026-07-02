@@ -142,6 +142,38 @@ def test_cli_parser_accepts_t036_reachability_flags(tmp_path) -> None:
     ]
 
 
+def test_cli_parser_accepts_t049_search_battle_controller_flags(tmp_path) -> None:
+    pool_path = tmp_path / "root-prior-pool.jsonl"
+    checkpoint_path = tmp_path / "checkpoint.pt"
+
+    args = build_parser().parse_args(
+        [
+            "--lightspeed-search-battle-start-pool",
+            str(pool_path),
+            "--search-battle-controller",
+            "root_prior_guided_oracle_search_v1",
+            "--model-guided-oracle-checkpoint",
+            str(checkpoint_path),
+            "--search-budget",
+            "20",
+            "--root-prior-temperature",
+            "0.75",
+            "--root-prior-min-visits",
+            "2",
+            "--root-prior-allocation-weight",
+            "0.8",
+        ]
+    )
+
+    assert args.lightspeed_search_battle_start_pool == pool_path
+    assert args.search_battle_controller == "root_prior_guided_oracle_search_v1"
+    assert args.model_guided_oracle_checkpoint == checkpoint_path
+    assert args.search_budget == 20
+    assert args.root_prior_temperature == 0.75
+    assert args.root_prior_min_visits == 2
+    assert args.root_prior_allocation_weight == 0.8
+
+
 def test_cli_parser_accepts_t040_expert_source_coverage_flags(tmp_path) -> None:
     report_path = tmp_path / "expert-source-coverage.json"
     stochastic_pool = tmp_path / "stochastic-pool.jsonl"
@@ -566,6 +598,52 @@ def test_cli_rejects_model_guided_oracle_without_checkpoint(
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "requires --model-guided-oracle-checkpoint" in captured.err
+
+
+def test_cli_rejects_checkpoint_guided_search_pool_without_checkpoint(
+    tmp_path,
+    capsys,
+) -> None:
+    pool_path = tmp_path / "pool.jsonl"
+
+    assert (
+        main(
+            [
+                "--lightspeed-search-battle-start-pool",
+                str(pool_path),
+                "--search-battle-controller",
+                "root_prior_guided_oracle_search_v1",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 2
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "requires --model-guided-oracle-checkpoint" in captured.err
+
+
+def test_cli_rejects_search_battle_controller_without_search_pool(capsys) -> None:
+    assert (
+        main(
+            [
+                "--lightspeed-smoke",
+                "--search-battle-controller",
+                "model_guided_oracle_search_v2",
+                "--model-guided-oracle-checkpoint",
+                "checkpoint.pt",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 2
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "requires --lightspeed-search-battle-start-pool" in captured.err
 
 
 def test_cli_rejects_model_guided_comparison_without_checkpoint(
@@ -1211,6 +1289,150 @@ def test_cli_search_battle_start_pool_uses_oracle_battle_child(
     assert non_combat_provenance["kind"] == "decision_policy"
     assert non_combat_provenance["name"] == "stochastic_non_combat_v1"
     assert pool.source_run_summaries[0].final_floor == 1.0
+
+
+def test_cli_search_battle_start_pool_uses_root_prior_battle_child(
+    monkeypatch,
+    tmp_path,
+    capsys,
+) -> None:
+    monkeypatch.setattr(
+        "sts_combat_rl.commands.lightspeed_cli.LightSpeedAdapter",
+        FakeLightSpeedSmokeAdapter,
+    )
+    monkeypatch.setattr(
+        (
+            "sts_combat_rl.commands.lightspeed_cli."
+            "build_torch_guidance_scorer_from_checkpoint"
+        ),
+        lambda path: _FakeCliGuidanceScorer(),
+    )
+    pool_path = tmp_path / "root-prior-search-pool.jsonl"
+    checkpoint_path = tmp_path / "checkpoint.pt"
+
+    assert (
+        main(
+            [
+                "--lightspeed-search-battle-start-pool",
+                str(pool_path),
+                "--search-battle-controller",
+                "root_prior_guided_oracle_search_v1",
+                "--model-guided-oracle-checkpoint",
+                str(checkpoint_path),
+                "--search-budget",
+                "5",
+                "--oracle-root-selection",
+                "most_visits",
+                "--root-prior-temperature",
+                "0.9",
+                "--root-prior-min-visits",
+                "2",
+                "--root-prior-allocation-weight",
+                "0.75",
+                "--sim-episodes",
+                "1",
+                "--sim-steps",
+                "1",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 0
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "Natural battle-start checkpoint pool coverage" in captured.err
+    with pool_path.open("r", encoding="utf-8") as stream:
+        pool = load_natural_battle_start_pool_jsonl(stream)
+    assert len(pool.records) == 1
+    battle_provenance = pool.records[0].source_battle_controller_provenance
+    non_combat_provenance = pool.records[0].source_non_combat_controller_provenance
+    assert battle_provenance["kind"] == "root_prior_guided_oracle_battle_search"
+    assert battle_provenance["config"]["information_regime"] == (
+        "full_simulator_state_oracle_like"
+    )
+    assert battle_provenance["config"]["search_budget"]["simulations"] == 5
+    assert battle_provenance["config"]["root_selection_rule"] == "most_visits"
+    assert battle_provenance["config"]["guidance_scope"].startswith(
+        "public checkpoint policy probabilities"
+    )
+    scorer = battle_provenance["config"]["guidance_scorer"]
+    assert scorer["checkpoint_provenance"]["checkpoint_artifact_id"] == (
+        "cli-checkpoint"
+    )
+    allocation = battle_provenance["config"]["root_prior_allocation"]
+    assert allocation["prior_temperature"] == 0.9
+    assert allocation["min_visits_per_legal_action"] == 2
+    assert allocation["prior_allocation_weight"] == 0.75
+    assert allocation["final_root_selection_uses_model_probability"] is False
+    assert non_combat_provenance["kind"] == "decision_policy"
+    assert non_combat_provenance["name"] == "stochastic_non_combat_v1"
+    assert pool.records[0].checkpoint_information_regime == (
+        "full_simulator_state_oracle_like"
+    )
+
+
+def test_cli_search_battle_start_pool_uses_model_guided_v2_battle_child(
+    monkeypatch,
+    tmp_path,
+    capsys,
+) -> None:
+    monkeypatch.setattr(
+        "sts_combat_rl.commands.lightspeed_cli.LightSpeedAdapter",
+        FakeLightSpeedSmokeAdapter,
+    )
+    monkeypatch.setattr(
+        (
+            "sts_combat_rl.commands.lightspeed_cli."
+            "build_torch_guidance_scorer_from_checkpoint"
+        ),
+        lambda path: _FakeCliGuidanceScorer(),
+    )
+    pool_path = tmp_path / "model-guided-v2-search-pool.jsonl"
+    checkpoint_path = tmp_path / "checkpoint.pt"
+
+    assert (
+        main(
+            [
+                "--lightspeed-search-battle-start-pool",
+                str(pool_path),
+                "--search-battle-controller",
+                "model_guided_oracle_search_v2",
+                "--model-guided-oracle-checkpoint",
+                str(checkpoint_path),
+                "--search-budget",
+                "5",
+                "--sim-episodes",
+                "1",
+                "--sim-steps",
+                "1",
+                "--log-file",
+                "-",
+            ]
+        )
+        == 0
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    with pool_path.open("r", encoding="utf-8") as stream:
+        pool = load_natural_battle_start_pool_jsonl(stream)
+    assert len(pool.records) == 1
+    battle_provenance = pool.records[0].source_battle_controller_provenance
+    assert battle_provenance["kind"] == "model_guided_oracle_battle_search_v2"
+    assert battle_provenance["config"]["information_regime"] == (
+        "full_simulator_state_oracle_like"
+    )
+    assert battle_provenance["config"]["search_budget"]["simulations"] == 5
+    scorer = battle_provenance["config"]["guidance_scorer"]
+    assert scorer["checkpoint_provenance"]["checkpoint_artifact_id"] == (
+        "cli-checkpoint"
+    )
+    assert (
+        battle_provenance["config"]["v2_root_guidance"]["uses_native_allocation_api"]
+        is False
+    )
 
 
 def test_cli_constructed_battle_start_audit_writes_stderr_and_artifact(

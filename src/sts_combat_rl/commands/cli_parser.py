@@ -21,6 +21,10 @@ from sts_combat_rl.sim.oracle_teacher_search_guidance import (
 )
 from sts_combat_rl.sim.reward_design import BATTLE_REWARD_PRESETS
 from sts_combat_rl.sim.training_gate import TRAINING_GATE_OVERRIDES
+from sts_combat_rl.commands.search_battle_controller import (
+    SEARCH_BATTLE_CONTROLLER_CHOICES,
+    SEARCH_BATTLE_CONTROLLER_ORACLE,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -349,8 +353,8 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="PATH",
         help=(
             "Collect natural battle-start checkpoints from complete controlled runs "
-            "whose battle child is OracleSearchController and whose non-combat "
-            "child is the separately named stochastic driver."
+            "whose battle child is a search controller and whose non-combat child "
+            "is the separately named stochastic driver."
         ),
     )
     input_group.add_argument(
@@ -815,6 +819,16 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--search-battle-controller",
+        choices=SEARCH_BATTLE_CONTROLLER_CHOICES,
+        default=SEARCH_BATTLE_CONTROLLER_ORACLE,
+        help=(
+            "Battle child used by --lightspeed-search-battle-start-pool. "
+            "The default preserves the T036/T037 Oracle-search source path; "
+            "T049 may select post-search model-guided or root-prior guided search."
+        ),
+    )
+    parser.add_argument(
         "--expert-source-arm",
         nargs=3,
         action="append",
@@ -1113,8 +1127,11 @@ def build_parser() -> argparse.ArgumentParser:
             "T026-compatible PyTorch policy/value checkpoint used by "
             "--lightspeed-model-guided-oracle-fixed-evaluation or "
             "--lightspeed-model-guided-search-fixed-comparison or "
+            "--lightspeed-model-guided-search-v2-fixed-comparison or "
             "--lightspeed-de-assisted-fixed-cohort-comparison or "
-            "--lightspeed-root-prior-guided-search-comparison."
+            "--lightspeed-root-prior-guided-search-comparison, or by "
+            "--lightspeed-search-battle-start-pool when --search-battle-controller "
+            "selects a checkpoint-guided controller."
         ),
     )
     parser.add_argument(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from pathlib import Path
+from typing import Any
 
 from sts_combat_rl.sim.action_space import ActionSpaceConfig
 from sts_combat_rl.sim.battle_start_pool import (
@@ -23,7 +24,6 @@ from sts_combat_rl.sim.checkpoint_verification import (
 )
 from sts_combat_rl.sim.contract import CheckpointingSimulatorAdapter
 from sts_combat_rl.sim.online_controller import PolicyController, RoutedRunController
-from sts_combat_rl.sim.oracle_search import OracleSearchController
 from sts_combat_rl.sim.policy import DecisionPolicy
 
 
@@ -90,7 +90,7 @@ def collect_checkpoint_pool(
 def collect_search_checkpoint_pool(
     adapter: CheckpointingSimulatorAdapter,
     *,
-    oracle_controller: OracleSearchController,
+    battle_controller: Any,
     non_combat_policy: DecisionPolicy,
     seeds: Sequence[int],
     max_steps: int,
@@ -99,12 +99,12 @@ def collect_search_checkpoint_pool(
     sampling_seed: int = 1,
     structural_fraction: float = 0.5,
 ) -> tuple[NaturalBattleStartPool, BattleStartPoolCoverageReport]:
-    """Collect a natural pool with Oracle search controlling only battles."""
+    """Collect a natural pool with a search controller controlling only battles."""
 
     return collect_checkpoint_pool_with_controller(
         adapter,
         controller=RoutedRunController(
-            battle=oracle_controller,
+            battle=battle_controller,
             non_combat=PolicyController(non_combat_policy),
         ),
         seeds=seeds,
