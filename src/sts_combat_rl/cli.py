@@ -51,6 +51,15 @@ from sts_combat_rl.commands.post_t044_failure_analysis import (
     run_post_t044_failure_analysis_from_paths,
 )
 from sts_combat_rl.commands.reachability import run_a20_reachability_report_from_paths
+from sts_combat_rl.commands.root_prior_guided_search_comparison import (
+    merge_root_prior_guided_search_comparison_reports_from_paths,
+)
+from sts_combat_rl.commands.t052_fixed_cohort_diagnostic import (
+    format_t052_fixed_cohort_extraction_command,
+    format_t052_retention_manifest_command,
+    run_t052_fixed_cohort_extraction_from_paths,
+    run_t052_retention_manifest_from_paths,
+)
 from sts_combat_rl.commands.teacher_guidance_calibration import (
     format_teacher_guidance_calibration_command,
     run_teacher_guidance_calibration_from_paths,
@@ -71,6 +80,9 @@ from sts_combat_rl.sim.calibration import (
 )
 from sts_combat_rl.sim.reachability import (
     format_a20_reachability_comparison_report,
+)
+from sts_combat_rl.sim.root_prior_guided_search_comparison import (
+    format_root_prior_guided_search_comparison_report,
 )
 from sts_combat_rl.sim.expert_source_coverage import (
     format_expert_source_coverage_comparison_report,
@@ -213,6 +225,60 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         print(format_post_t044_failure_analysis_command(report), file=sys.stderr)
         return 0 if report.command_passed else 1
+
+    if args.t052_t051_boss_later_act_fixed_cohort is not None:
+        try:
+            report = run_t052_fixed_cohort_extraction_from_paths(
+                output_path=args.t052_t051_boss_later_act_fixed_cohort,
+                source_arm_specs=args.t052_source_arm,
+                verify_artifact_specs=args.t052_verify_artifact,
+                summary_path=args.t052_cohort_summary,
+            )
+        except (OSError, UnicodeDecodeError, ValueError) as exc:
+            print(
+                f"failed to build T052 fixed diagnostic cohort: {exc}",
+                file=sys.stderr,
+            )
+            return 2
+        print(format_t052_fixed_cohort_extraction_command(report), file=sys.stderr)
+        return 0 if report.get("command_passed") else 1
+
+    if args.t052_retention_manifest is not None:
+        try:
+            manifest = run_t052_retention_manifest_from_paths(
+                output_path=args.t052_retention_manifest,
+                artifact_specs=args.t052_retained_artifact,
+                command_specs=args.t052_retention_command,
+                stage_specs=args.t052_retention_stage,
+                note_specs=args.t052_retention_note,
+            )
+        except (OSError, UnicodeDecodeError, ValueError) as exc:
+            print(
+                f"failed to build T052 retention manifest: {exc}",
+                file=sys.stderr,
+            )
+            return 2
+        print(format_t052_retention_manifest_command(manifest), file=sys.stderr)
+        return 0
+
+    if args.merge_root_prior_guided_search_comparison is not None:
+        try:
+            report = merge_root_prior_guided_search_comparison_reports_from_paths(
+                shard_paths=args.root_prior_guided_search_comparison_shard,
+                output_path=args.merge_root_prior_guided_search_comparison,
+                worker_count=args.workers,
+                shard_count=args.shards,
+            )
+        except (OSError, UnicodeDecodeError, ValueError) as exc:
+            print(
+                f"failed to merge root-prior guided comparison shards: {exc}",
+                file=sys.stderr,
+            )
+            return 2
+        print(
+            format_root_prior_guided_search_comparison_report(report), file=sys.stderr
+        )
+        return 0 if report.evaluation_successful else 1
 
     if args.pytorch_search_guidance_train is not None:
         try:

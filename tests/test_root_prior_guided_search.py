@@ -6,6 +6,7 @@ from io import StringIO
 import pytest
 
 from sts_combat_rl.commands.root_prior_guided_search_comparison import (
+    merge_root_prior_guided_search_comparison_reports,
     run_root_prior_guided_search_comparison_from_cohort_path,
 )
 from sts_combat_rl.sim.action_space import ActionSpaceConfig
@@ -544,6 +545,54 @@ def test_root_prior_guided_comparison_runs_required_arms(tmp_path) -> None:
     assert loaded.evaluation_successful
     assert loaded.arms[2].label == ROOT_PRIOR_GUIDED_LABEL
     assert loaded.arms[2].report.authoritative_wins == 2
+
+    shard_zero = run_root_prior_guided_search_comparison_from_cohort_path(
+        adapter_factory=_ComparisonAdapter,
+        cohort_path=cohort_path,
+        controller_arms=(
+            (BASELINE_ORACLE_LABEL, "baseline_oracle_search", baseline),
+            (POST_SEARCH_MODEL_GUIDED_LABEL, "post_search_v2", guided),
+            (ROOT_PRIOR_GUIDED_LABEL, "root_prior_allocation", root_prior),
+        ),
+        action_space=action_space,
+        max_battle_steps=3,
+        run_scale="smoke",
+        comparison_task_id="T048",
+        worker_count=1,
+        shard_count=1,
+        record_range="0:1",
+    )
+    shard_one = run_root_prior_guided_search_comparison_from_cohort_path(
+        adapter_factory=_ComparisonAdapter,
+        cohort_path=cohort_path,
+        controller_arms=(
+            (BASELINE_ORACLE_LABEL, "baseline_oracle_search", baseline),
+            (POST_SEARCH_MODEL_GUIDED_LABEL, "post_search_v2", guided),
+            (ROOT_PRIOR_GUIDED_LABEL, "root_prior_allocation", root_prior),
+        ),
+        action_space=action_space,
+        max_battle_steps=3,
+        run_scale="smoke",
+        comparison_task_id="T048",
+        worker_count=1,
+        shard_count=1,
+        record_range="1:2",
+    )
+    merged = merge_root_prior_guided_search_comparison_reports(
+        [shard_zero, shard_one],
+        worker_count=2,
+        shard_count=2,
+    )
+
+    assert merged.evaluation_successful
+    assert merged.comparison_config["record_range"] == "merged:0:1,1:2"
+    assert merged.comparison_config["worker_count"] == 2
+    assert merged.comparison_config["shard_count"] == 2
+    assert merged.arms[0].report.total_battles == 2
+    assert [result.cohort_index for result in merged.arms[0].report.battle_results] == [
+        0,
+        1,
+    ]
 
 
 def test_root_prior_guided_comparison_validates_required_contract(tmp_path) -> None:

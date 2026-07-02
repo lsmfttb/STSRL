@@ -189,6 +189,22 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
             "--root-prior-guided-search-comparison-report requires "
             "--lightspeed-root-prior-guided-search-comparison"
         )
+    if (
+        args.merge_root_prior_guided_search_comparison is not None
+        and not args.root_prior_guided_search_comparison_shard
+    ):
+        return (
+            "--merge-root-prior-guided-search-comparison requires "
+            "--root-prior-guided-search-comparison-shard"
+        )
+    if (
+        args.merge_root_prior_guided_search_comparison is None
+        and args.root_prior_guided_search_comparison_shard
+    ):
+        return (
+            "--root-prior-guided-search-comparison-shard requires "
+            "--merge-root-prior-guided-search-comparison"
+        )
     teacher_scaleup_requested = (
         args.lightspeed_a20_oracle_teacher_scaleup is not None
         or args.lightspeed_a20_assisted_oracle_teacher_scaleup is not None
@@ -407,6 +423,45 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
         return (
             "--post-t044-comparison and --post-t044-linked-artifact require "
             "--post-t044-failure-analysis-report"
+        )
+    if args.t052_t051_boss_later_act_fixed_cohort is not None:
+        if len(args.t052_source_arm) != 3:
+            return (
+                "--t052-t051-boss-later-act-fixed-cohort requires exactly "
+                "three --t052-source-arm values"
+            )
+        roles = [values[0] for values in args.t052_source_arm]
+        if sorted(roles) != ["baseline", "post_search", "root_prior"]:
+            return (
+                "--t052-source-arm roles must be baseline, post_search, and root_prior"
+            )
+        if args.t052_cohort_summary is None:
+            return (
+                "--t052-t051-boss-later-act-fixed-cohort requires --t052-cohort-summary"
+            )
+    elif (
+        args.t052_source_arm
+        or args.t052_verify_artifact
+        or args.t052_cohort_summary is not None
+    ):
+        return (
+            "--t052-source-arm, --t052-verify-artifact, and "
+            "--t052-cohort-summary require "
+            "--t052-t051-boss-later-act-fixed-cohort"
+        )
+    if args.t052_retention_manifest is not None:
+        if not args.t052_retained_artifact:
+            return "--t052-retention-manifest requires --t052-retained-artifact"
+    elif (
+        args.t052_retained_artifact
+        or args.t052_retention_command
+        or args.t052_retention_stage
+        or args.t052_retention_note
+    ):
+        return (
+            "--t052-retained-artifact, --t052-retention-command, "
+            "--t052-retention-stage, and --t052-retention-note require "
+            "--t052-retention-manifest"
         )
     if (
         args.root_prior_allocation_report is not None

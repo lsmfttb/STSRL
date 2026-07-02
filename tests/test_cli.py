@@ -564,6 +564,30 @@ def test_cli_parser_accepts_model_guided_oracle_flags(tmp_path) -> None:
     assert root_prior_args.root_prior_guided_search_comparison_scale == "fixed"
     assert root_prior_args.root_prior_guided_search_comparison_task_id == "T048"
 
+    root_prior_merge_path = tmp_path / "root-prior-merged.jsonl"
+    root_prior_shard_path = tmp_path / "root-prior-shard-0.jsonl"
+    root_prior_merge_args = build_parser().parse_args(
+        [
+            "--merge-root-prior-guided-search-comparison",
+            str(root_prior_merge_path),
+            "--root-prior-guided-search-comparison-shard",
+            str(root_prior_shard_path),
+            "--workers",
+            "16",
+            "--shards",
+            "16",
+        ]
+    )
+
+    assert root_prior_merge_args.merge_root_prior_guided_search_comparison == (
+        root_prior_merge_path
+    )
+    assert root_prior_merge_args.root_prior_guided_search_comparison_shard == [
+        root_prior_shard_path
+    ]
+    assert root_prior_merge_args.workers == 16
+    assert root_prior_merge_args.shards == 16
+
     potion_comparison_args = build_parser().parse_args(
         [
             "--lightspeed-oracle-potion-fixed-comparison",
