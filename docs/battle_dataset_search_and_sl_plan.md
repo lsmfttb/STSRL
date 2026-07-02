@@ -18,10 +18,12 @@ de-assisted fixed-cohort evaluation batch. T045 completed the post-T044
 failure analysis and selected native root-prior allocation as the primary next
 search path. T046 completed the native root-prior allocation surface. T047
 completed the first matched root-prior guided search smoke comparison. T048
-completed the matched fixed-cohort scale-up. T049 is now the `READY` task for
-testing whether that fixed-cohort signal changes complete-run source
-reachability. New implementation work should start only from rows marked
-`READY` in the task index; T034 remains blocked on native sampler support.
+completed the matched fixed-cohort scale-up. T049 completed the bounded
+complete-run reachability plumbing/probe and did not show Boss or later-act
+reachability at smoke scale. T050 is now the `READY` task for source-pool
+shard merge/finalization plus a 50-terminal-run-per-arm reachability scale
+pass. New implementation work should start only from rows marked `READY` in
+the task index; T034 remains blocked on native sampler support.
 
 ## Goals
 
@@ -352,7 +354,7 @@ Work:
 - retain complete public history and context;
 - satisfy broad-training readiness per ascension and act;
 - keep mechanical cleanup separate from coverage/search experiments;
-- complete T049 before publishing an assisted training repair or non-combat
+- complete T050 before publishing an assisted training repair or non-combat
   ranker branch.
 
 Exit gate: enough unique A20 Boss and later-act starts exist for meaningful
@@ -396,8 +398,10 @@ root-prior allocation over another immediate T043/T044 training loop. T046 is
 complete as the native search-surface task for that recommendation. T047 is
 complete as the first fixed-cohort smoke comparison, and T048 completed the
 fixed-cohort scale-up showing root-prior guided search ahead at equal native
-root budget on two matched cohorts. T049 is the published complete-run
-reachability probe to test whether that signal changes source coverage before
+root budget on two matched cohorts. T049 completed the bounded complete-run
+reachability probe and verified the new collection path, but no arm reached
+Boss or later-act starts at smoke scale. T050 is the published scale-up and
+shard-merge task to test whether that signal changes source coverage before
 controller promotion or another training branch.
 
 Exit gate: a search change improves fixed evaluation at equal simulation or

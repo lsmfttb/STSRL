@@ -62,7 +62,8 @@ the current milestone, but they do not override this table.
 | T046 | DONE | [Native root-prior allocation search surface](T046-native-root-prior-allocation.md) | T045, T017, T020 | native search surface for root playout allocation by explicit priors |
 | T047 | DONE | [Root-prior guided search comparison](T047-root-prior-guided-search-comparison.md) | T046, T043, T044 | equal-source comparison of baseline, post-search guidance, and native root-prior allocation |
 | T048 | DONE | [Root-prior guided search scale-up](T048-root-prior-guided-scale-up.md) | T047 | non-trivial matched-cohort scale-up of root-prior guided search evidence |
-| T049 | READY | [Root-prior complete-run reachability probe](T049-root-prior-complete-run-reachability-probe.md) | T048, T036, T037 | complete-run source reachability impact of root-prior guided battle control |
+| T049 | DONE | [Root-prior complete-run reachability probe](T049-root-prior-complete-run-reachability-probe.md) | T048, T036, T037 | complete-run source reachability plumbing and bounded root-prior probe |
+| T050 | READY | [Root-prior reachability scale-up and shard merge](T050-root-prior-reachability-scaleup-and-shard-merge.md) | T049, T048, T036, T037 | sharded 50-run/arm complete-run reachability scale pass |
 
 Use the table, not per-task files or roadmap prose, when deciding whether a
 task may receive a branch. Only `READY` rows should receive a new branch. After
@@ -209,9 +210,12 @@ post-T044 failure analysis and selected native root-prior allocation as the
 primary next path. T046 added the minimal native root-prior allocation surface.
 T047 completed the first matched root-prior guided search smoke comparison.
 T048 completed the matched fixed-cohort scale-up and kept the evidence inside
-the Oracle-like restored-battle boundary. T049 is now `READY` to test whether
-that fixed-cohort signal changes complete-run source reachability before any
-controller promotion, assisted training repair, or non-combat ranker branch.
+the Oracle-like restored-battle boundary. T049 completed the bounded
+complete-run source reachability plumbing/probe and found no Boss or later-act
+reachability at smoke scale. T050 is now `READY` to add source-pool shard
+merge/finalization support and run the 50-terminal-run-per-arm complete-run
+reachability scale pass before any controller promotion, assisted training
+repair, or non-combat ranker branch.
 T034 remains blocked on native public-consistent hidden-future sampler support.
 
 ## Standard Local Gates
@@ -266,6 +270,7 @@ are mapped as follows:
 - Root-prior guided search comparison: T047.
 - Root-prior guided search scale-up: T048.
 - Root-prior complete-run reachability probe: T049.
+- Root-prior reachability scale-up and shard merge: T050.
 
 T013 supplies the shared CommunicationMod adapter and captured-sample
 compatibility gate. Simulator-only training experiments do not depend on it.

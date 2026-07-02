@@ -40,10 +40,13 @@ matched smoke showing root-prior guided search beating both baseline and
 post-search guidance on one current pinned T046-compatible restored start.
 T048 is complete: it scaled that comparison to two non-trivial matched fixed
 cohorts and again found root-prior guided search ahead of both baseline Oracle
-search and post-search guidance at equal native root budget. T049 is now
-`READY` to test whether that fixed-cohort signal changes complete-run source
-reachability under the existing non-combat driver. T034 remains blocked on
-native public-consistent hidden-future sampler support.
+search and post-search guidance at equal native root budget. T049 is complete:
+it added checkpoint-guided complete-run source collection for the same three
+search arms and accepted a bounded A20 smoke that found no Boss or later-act
+reachability. T050 is now `READY` to add source-pool shard
+merge/finalization support and run the 50-terminal-run-per-arm complete-run
+reachability scale pass. T034 remains blocked on native public-consistent
+hidden-future sampler support.
 
 ## Implemented On Main
 
@@ -856,6 +859,30 @@ native public-consistent hidden-future sampler support.
   controller promotion, broad-training evidence, complete-run reachability
   evidence, normal-information performance, natural A20 performance,
   live-game validation, or final-agent evidence.
+- T049 extends the T036/T037 complete-run source collection path with
+  `--search-battle-controller` choices for baseline `oracle_search_v1`,
+  checkpoint-guided `model_guided_oracle_search_v2`, and
+  `root_prior_guided_oracle_search_v1`, while keeping the separately named
+  stochastic non-combat driver and routed provenance. Maintainer review passed
+  634 Windows tests, compileall, ruff, format check, task-doc checks, diff
+  whitespace checks, both CommunicationMod fixture smokes, the WSL pinned
+  source verifier, and same-runtime WSL probes using
+  `/home/lsmft/stsrl-spikes/py313-torch/bin/python` with
+  `/home/lsmft/stsrl-spikes/sts_lightspeed/build-py313-torch`. The accepted
+  bounded smoke used matched seeds `1..2`, A20, step cap 500,
+  `initial_no_potions`, `stochastic-v1`, native root budget 20, checkpoint
+  sha256 `a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4`,
+  source manifest sha256
+  `956234d3221738654ab35a8f1279f9411c62ba86447a65b4aca64dcf00bf287b`, and
+  reachability report sha256
+  `bac0a5cc8b0c719c9d902f8147793529ae12b79d0011d025276ae572504095e2`.
+  Baseline and post-search model-guided arms produced 10 Act-1 starts and
+  8W/2L; root-prior produced 11 Act-1 starts and 9W/2L. Boss and later-act
+  reachability were zero in all arms. This is bounded command/provenance/
+  artifact plumbing evidence only; it is not 50-run scale evidence,
+  controller promotion, broad-training evidence, normal-information
+  performance, natural A20 performance, live-game validation, or final-agent
+  evidence.
 
 ## Not Implemented On Main
 
@@ -865,8 +892,8 @@ unmerged legacy work:
 - interactive live-game or A20 performance validation for any controller;
 - broad neural training on a scale/distribution-approved A20 dataset;
 - model-guided search performance improvement or controller promotion;
-- root-prior guided complete-run reachability evidence or root-prior
-  controller promotion;
+- scale-quality root-prior guided complete-run reachability improvement
+  evidence or root-prior controller promotion;
 - normal-information belief search.
 
 Do not use documentation or results from these areas as evidence that `main`
@@ -921,9 +948,13 @@ claims. T048 (`Root-prior guided search scale-up`) is complete. Its accepted
 fixed-cohort scale-up improved over both baseline Oracle search and
 post-search guidance on two matched cohorts, but it remains Oracle-like
 restored-battle evidence rather than complete-run or promotion evidence. T049
-(`Root-prior complete-run reachability probe`) is now `READY` to test whether
-the T048 signal improves complete-run source reachability before any assisted
-training repair or non-combat ranker branch.
+(`Root-prior complete-run reachability probe`) is complete. Its bounded smoke
+verified the checkpoint-guided complete-run collection path but did not reach
+Boss or later-act starts in any arm, so it is not scale reachability evidence.
+T050 (`Root-prior reachability scale-up and shard merge`) is now `READY` to
+add deterministic source-pool shard merge/finalization support and run the
+50-terminal-run-per-arm scale pass before any assisted training repair or
+non-combat ranker branch.
 
 The immediate external-fork follow-up is
 [`lsmfttb/sts_lightspeed#7`](https://github.com/lsmfttb/sts_lightspeed/issues/7):
@@ -955,9 +986,10 @@ The completed assisted source-generation batch is:
    as the primary next search path, while preserving assisted training and
    de-assisted distribution repair as secondary diagnostic follow-ups.
 
-The published follow-up is T049, which will test whether the accepted T048
-fixed-cohort signal changes complete-run source reachability before any
-assisted training repair or non-combat ranker branch.
+The published follow-up is T050, which will add source-pool shard
+merge/finalization support and run the 50-terminal-run-per-arm root-prior
+complete-run reachability scale pass before any assisted training repair or
+non-combat ranker branch.
 
 T034 remains blocked on an explicit native simulator boundary for
 public-consistent hidden-future sampling.
