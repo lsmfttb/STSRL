@@ -234,6 +234,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     input_group.add_argument(
+        "--t053-root-prior-allocation-failure-analysis-report",
+        type=Path,
+        metavar="OUTPUT_JSON",
+        help=(
+            "Build the offline T053 root-prior allocation failure analysis "
+            "JSON report from explicit retained T052 artifacts."
+        ),
+    )
+    input_group.add_argument(
         "--t052-t051-boss-later-act-fixed-cohort",
         type=Path,
         metavar="OUTPUT_JSONL",
@@ -311,6 +320,19 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Optional linked T043/T044 artifact identity for the T045 report, "
             "for example calibration REPORT_JSON. Repeat as needed."
+        ),
+    )
+    parser.add_argument(
+        "--t053-t052-artifact",
+        nargs=3,
+        action="append",
+        default=[],
+        metavar=("ROLE", "PATH", "SHA256"),
+        help=(
+            "One retained T052 artifact for "
+            "--t053-root-prior-allocation-failure-analysis-report. Required "
+            "roles are retention_manifest, fixed_cohort, "
+            "root_prior_guided_comparison, and result_summary."
         ),
     )
     parser.add_argument(

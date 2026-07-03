@@ -424,6 +424,29 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
             "--post-t044-comparison and --post-t044-linked-artifact require "
             "--post-t044-failure-analysis-report"
         )
+    if args.t053_root_prior_allocation_failure_analysis_report is not None:
+        if len(args.t053_t052_artifact) != 4:
+            return (
+                "--t053-root-prior-allocation-failure-analysis-report requires "
+                "exactly four --t053-t052-artifact values"
+            )
+        roles = [values[0] for values in args.t053_t052_artifact]
+        if sorted(roles) != [
+            "fixed_cohort",
+            "result_summary",
+            "retention_manifest",
+            "root_prior_guided_comparison",
+        ]:
+            return (
+                "--t053-t052-artifact roles must be fixed_cohort, "
+                "result_summary, retention_manifest, and "
+                "root_prior_guided_comparison"
+            )
+    elif args.t053_t052_artifact:
+        return (
+            "--t053-t052-artifact requires "
+            "--t053-root-prior-allocation-failure-analysis-report"
+        )
     if args.t052_t051_boss_later_act_fixed_cohort is not None:
         if len(args.t052_source_arm) != 3:
             return (

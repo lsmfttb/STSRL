@@ -60,6 +60,10 @@ from sts_combat_rl.commands.t052_fixed_cohort_diagnostic import (
     run_t052_fixed_cohort_extraction_from_paths,
     run_t052_retention_manifest_from_paths,
 )
+from sts_combat_rl.commands.t053_root_prior_failure_analysis import (
+    format_t053_root_prior_failure_analysis_command,
+    run_t053_root_prior_failure_analysis_from_paths,
+)
 from sts_combat_rl.commands.teacher_guidance_calibration import (
     format_teacher_guidance_calibration_command,
     run_teacher_guidance_calibration_from_paths,
@@ -224,6 +228,22 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 2
         print(format_post_t044_failure_analysis_command(report), file=sys.stderr)
+        return 0 if report.command_passed else 1
+
+    if args.t053_root_prior_allocation_failure_analysis_report is not None:
+        try:
+            report = run_t053_root_prior_failure_analysis_from_paths(
+                artifact_specs=args.t053_t052_artifact,
+                output_path=args.t053_root_prior_allocation_failure_analysis_report,
+            )
+        except (OSError, UnicodeDecodeError, ValueError) as exc:
+            print(
+                "failed to build T053 root-prior allocation failure analysis "
+                f"report: {exc}",
+                file=sys.stderr,
+            )
+            return 2
+        print(format_t053_root_prior_failure_analysis_command(report), file=sys.stderr)
         return 0 if report.command_passed else 1
 
     if args.t052_t051_boss_later_act_fixed_cohort is not None:
