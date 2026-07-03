@@ -70,6 +70,12 @@ from sts_combat_rl.commands.t054_guardrailed_root_prior_repair import (
     run_t054_guardrailed_root_prior_repair_from_paths,
     run_t054_retention_manifest_from_paths,
 )
+from sts_combat_rl.commands.t055_guardrailed_root_prior_scale_validation import (
+    format_t055_guardrailed_root_prior_scale_validation_command,
+    format_t055_retention_manifest_command,
+    run_t055_guardrailed_root_prior_scale_validation_from_paths,
+    run_t055_retention_manifest_from_paths,
+)
 from sts_combat_rl.commands.teacher_guidance_calibration import (
     format_teacher_guidance_calibration_command,
     run_teacher_guidance_calibration_from_paths,
@@ -270,6 +276,25 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0 if report.command_passed else 1
 
+    if args.t055_guardrailed_root_prior_scale_validation_report is not None:
+        try:
+            report = run_t055_guardrailed_root_prior_scale_validation_from_paths(
+                artifact_specs=args.t055_input_artifact,
+                output_path=(args.t055_guardrailed_root_prior_scale_validation_report),
+            )
+        except (OSError, UnicodeDecodeError, ValueError) as exc:
+            print(
+                "failed to build T055 guardrailed root-prior scale validation "
+                f"report: {exc}",
+                file=sys.stderr,
+            )
+            return 2
+        print(
+            format_t055_guardrailed_root_prior_scale_validation_command(report),
+            file=sys.stderr,
+        )
+        return 0 if report.command_passed else 1
+
     if args.t052_t051_boss_later_act_fixed_cohort is not None:
         try:
             report = run_t052_fixed_cohort_extraction_from_paths(
@@ -321,6 +346,24 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 2
         print(format_t054_retention_manifest_command(manifest), file=sys.stderr)
+        return 0
+
+    if args.t055_retention_manifest is not None:
+        try:
+            manifest = run_t055_retention_manifest_from_paths(
+                output_path=args.t055_retention_manifest,
+                artifact_specs=args.t055_retained_artifact,
+                command_specs=args.t055_retention_command,
+                stage_specs=args.t055_retention_stage,
+                note_specs=args.t055_retention_note,
+            )
+        except (OSError, UnicodeDecodeError, ValueError) as exc:
+            print(
+                f"failed to build T055 retention manifest: {exc}",
+                file=sys.stderr,
+            )
+            return 2
+        print(format_t055_retention_manifest_command(manifest), file=sys.stderr)
         return 0
 
     if args.merge_root_prior_guided_search_comparison is not None:

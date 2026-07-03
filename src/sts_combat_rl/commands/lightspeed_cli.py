@@ -268,6 +268,7 @@ _LIGHTSPEED_PATH_FLAGS = (
     "lightspeed_de_assisted_fixed_cohort_comparison",
     "lightspeed_root_prior_guided_search_comparison",
     "lightspeed_t054_guardrailed_root_prior_repair_comparison",
+    "lightspeed_t055_guardrailed_root_prior_scale_comparison",
 )
 
 
@@ -1023,6 +1024,101 @@ def run_lightspeed_command(args: argparse.Namespace) -> int:
             if args.t054_guardrailed_root_prior_comparison_report is not None:
                 write_root_prior_guided_search_comparison_report(
                     args.t054_guardrailed_root_prior_comparison_report,
+                    report,
+                )
+            print(
+                format_root_prior_guided_search_comparison_report(report),
+                file=sys.stderr,
+            )
+            if not report.evaluation_successful:
+                return 1
+        elif args.lightspeed_t055_guardrailed_root_prior_scale_comparison is not None:
+            budget = (
+                args.oracle_search_simulations
+                if args.search_budget is None
+                else args.search_budget
+            )
+            scorer = build_torch_guidance_scorer_from_checkpoint(
+                args.model_guided_oracle_checkpoint
+            )
+            baseline_controller = OracleSearchController(
+                simulations=budget,
+                root_selection_rule=args.oracle_root_selection,
+                action_space=action_space,
+            )
+            model_guided_v2_controller = ModelGuidedOracleSearchV2Controller(
+                simulations=budget,
+                scorer=scorer,
+                policy_probability_weight=(
+                    args.model_guided_oracle_policy_probability_weight
+                ),
+                action_space=action_space,
+            )
+            root_prior_controller = RootPriorGuidedSearchController(
+                simulations=budget,
+                scorer=scorer,
+                root_selection_rule=args.oracle_root_selection,
+                prior_temperature=args.root_prior_temperature,
+                min_visits_per_legal_action=args.root_prior_min_visits,
+                prior_allocation_weight=args.root_prior_allocation_weight,
+                action_space=action_space,
+            )
+            guardrailed_controller = GuardrailedRootPriorGuidedSearchController(
+                simulations=budget,
+                scorer=scorer,
+                root_selection_rule=args.oracle_root_selection,
+                prior_temperature=args.root_prior_temperature,
+                min_visits_per_legal_action=args.root_prior_min_visits,
+                prior_allocation_weight=args.root_prior_allocation_weight,
+                guardrail_config=RootPriorAllocationGuardrailConfig(
+                    uniform_blend_weight=(
+                        args.root_prior_guardrail_uniform_blend_weight
+                    ),
+                    max_prior_probability=(
+                        args.root_prior_guardrail_max_prior_probability
+                    ),
+                ),
+                action_space=action_space,
+            )
+            report = run_root_prior_guided_search_comparison_from_cohort_path(
+                adapter_factory=lambda: LightSpeedAdapter(
+                    seed=args.sim_seed,
+                    ascension=args.sim_ascension,
+                ),
+                cohort_path=args.lightspeed_t055_guardrailed_root_prior_scale_comparison,
+                controller_arms=(
+                    (
+                        BASELINE_ORACLE_LABEL,
+                        "baseline_oracle_search",
+                        baseline_controller,
+                    ),
+                    (
+                        MODEL_GUIDED_ORACLE_V2_LABEL,
+                        "post_search_model_guided_oracle_search_v2",
+                        model_guided_v2_controller,
+                    ),
+                    (
+                        ROOT_PRIOR_GUIDED_LABEL,
+                        "native_root_prior_allocation_from_checkpoint_priors",
+                        root_prior_controller,
+                    ),
+                    (
+                        GUARDRAILED_ROOT_PRIOR_GUIDED_LABEL,
+                        "guardrailed_native_root_prior_allocation_from_checkpoint_priors",
+                        guardrailed_controller,
+                    ),
+                ),
+                action_space=action_space,
+                max_battle_steps=args.sim_steps,
+                run_scale=args.t055_guardrailed_root_prior_scale,
+                comparison_task_id="T055",
+                worker_count=args.workers,
+                shard_count=args.shards,
+                record_range=args.record_range,
+            )
+            if args.t055_guardrailed_root_prior_comparison_report is not None:
+                write_root_prior_guided_search_comparison_report(
+                    args.t055_guardrailed_root_prior_comparison_report,
                     report,
                 )
             print(
