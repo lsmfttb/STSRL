@@ -51,9 +51,12 @@ source collection, recovered a small Act-2+ signal in the post-search and
 root-prior guided arms, and kept broad training closed. T052 is complete: it
 built the 93-record T051 Boss/later-act fixed diagnostic cohort and found
 root-prior guided search regressed by one win overall and on the five-record
-Act-2+ subset while tying the Boss-only subset. T053 is now `READY` for an
+Act-2+ subset while tying the Boss-only subset. T053 is complete: it added the
 offline root-prior allocation failure analysis over the T052 disagreement
-records before any repair, training, non-combat, or promotion branch. T034
+records, found four root-prior disagreement records, and recommended a
+guardrailed root-prior allocation repair experiment. T054 is now `READY` for
+that bounded repaired-allocation experiment before any larger root-prior
+scale-up, repair-adjacent training, non-combat, or promotion branch. T034
 remains blocked on native public-consistent hidden-future sampler support.
 
 ## Implemented On Main
@@ -945,6 +948,33 @@ remains blocked on native public-consistent hidden-future sampler support.
   reachability evidence only; it is not controller promotion, broad-training
   evidence, normal-information performance, natural A20 performance,
   live-game validation, or final-agent evidence.
+- T052 adds the retained 93-record T051 Boss/later-act fixed diagnostic cohort
+  and restored-battle comparison evidence under
+  `artifacts/t052-t051-boss-later-act-fixed-cohort-diagnostic-pr/`. Maintainer
+  review accepted the fixed cohort sha256
+  `b7f8e9b85b53bbf8e37adfe6cc90d0579937661309b26bce2a8f2921604a8608`, the
+  root-prior comparison sha256
+  `0cc496e6bddff0e5cecaee5e804d9ff4c89b2498093cb59d3feffbd245bb4a64`, and
+  result summary sha256
+  `1207ae0e93fa6f857add7dbaa553c3d92c86391772e842ce1e6bd08b55d97fe5`. The
+  comparison used equal native root budget 20 and 16 workers/shards. Baseline
+  Oracle search and post-search `model_guided_oracle_search_v2` both produced
+  4W/89L overall; root-prior guided search produced 3W/90L. Boss-only tied at
+  1W/87L for all arms, while the Act-2+ subset was 3W/2L for baseline and
+  post-search versus 2W/3L for root-prior. This is restored-battle diagnostic
+  evidence only, not controller promotion or broad-training evidence.
+- T053 adds the offline
+  `t053-root-prior-allocation-failure-analysis-v1` workflow and report over
+  the retained T052 artifacts. Maintainer review accepted report sha256
+  `73a1d153adce9782cafaf1caddb3fa0ddad2fafe33e653d88808875397832a73`. The
+  analysis found four disagreement records out of 93: indices `53`, `54`,
+  `55`, and `87`. Records `53` and `55` were harmful root-prior losses,
+  record `54` was terminal-HP-only/no-op, and record `87` was beneficial for
+  root-prior. Exact step-level selected-action comparison remains unavailable
+  because T052 telemetry lacks compatible selected action identities for all
+  arms. The recommended next task is a guardrailed root-prior allocation repair
+  experiment; T053 itself does not implement repair, promotion, live-game
+  validation, broad training, or normal-information search.
 
 ## Not Implemented On Main
 
@@ -1031,10 +1061,21 @@ and 3W/90L for root-prior guided search overall; Boss-only tied at 1W/87L for
 all arms, while the five-record Act-2+ subset was 3W/2L for baseline and
 post-search versus 2W/3L for root-prior. There were no restore failures,
 truncations, controller errors, or malformed root-prior allocation metadata.
-T053 (`T052 root-prior allocation failure analysis`) is now `READY` to analyze
-the T052 disagreement records and root-prior allocation telemetry before any
-root-prior repair, assisted training repair, broad teacher/checkpoint refresh,
-non-combat ranker branch, or controller promotion.
+T053 (`T052 root-prior allocation failure analysis`) is complete. It consumed
+the retained T052 manifest, fixed cohort, root-prior comparison, and result
+summary with accepted SHA-256 checks, wrote
+`t053-root-prior-allocation-failure-analysis-v1` under
+`artifacts/t053-t052-root-prior-allocation-failure-analysis-pr/`, and produced
+report sha256
+`73a1d153adce9782cafaf1caddb3fa0ddad2fafe33e653d88808875397832a73`.
+It found four disagreement records out of 93: indices `53`, `54`, `55`, and
+`87`. Records `53` and `55` were harmful root-prior losses where baseline and
+post-search won; record `54` was terminal-HP-only with root-prior winning at
+higher HP; record `87` was beneficial for root-prior where baseline and
+post-search lost. T053 reported exact step-level selected-action comparison as
+unavailable because T052 telemetry lacks compatible selected action identities
+for all arms. The single recommended next task is T054, a guardrailed
+root-prior allocation repair experiment on the retained T052 fixed cohort.
 
 The immediate external-fork follow-up is
 [`lsmfttb/sts_lightspeed#7`](https://github.com/lsmfttb/sts_lightspeed/issues/7):
@@ -1066,10 +1107,13 @@ The completed assisted source-generation batch is:
    as the primary next search path, while preserving assisted training and
    de-assisted distribution repair as secondary diagnostic follow-ups.
 
-The published follow-up is T053, which will consume the retained T052 cohort,
-comparison, result summary, and manifest as explicit inputs and diagnose the
-root-prior allocation failure signal before another implementation branch is
-published.
+The published follow-up is T054, which will version one guardrailed root-prior
+allocation repair variant and compare it on the retained T052 fixed diagnostic
+cohort against baseline Oracle search, post-search model-guided v2, and the
+existing root-prior guided search at equal native root budget. It must report
+the T053 disagreement indices, Boss-only and Act-2+ subsets, allocation
+telemetry, unavailable diagnostics, and exactly one next task without making
+controller-promotion or broad-training claims.
 
 T034 remains blocked on an explicit native simulator boundary for
 public-consistent hidden-future sampling.

@@ -27,11 +27,12 @@ no arm reached Act 2 or later. T051 completed the broader
 Act-2+ signal in the post-search and root-prior guided arms while keeping
 broad training closed. T052 completed the restored-battle fixed-cohort
 diagnostic and found root-prior guided search regressed by one win overall and
-on the five-record Act-2+ subset while tying Boss-only. T053 is now the
-`READY` task for an offline root-prior allocation failure analysis over the
-T052 disagreement records. New implementation work should start only from rows
-marked `READY` in the task index; T034 remains blocked on native sampler
-support.
+on the five-record Act-2+ subset while tying Boss-only. T053 completed the
+offline root-prior allocation failure analysis and found four disagreement
+records in the T052 evidence. T054 is now the `READY` task for one guardrailed
+root-prior allocation repair experiment on the retained T052 fixed cohort. New
+implementation work should start only from rows marked `READY` in the task
+index; T034 remains blocked on native sampler support.
 
 ## Goals
 
@@ -362,9 +363,9 @@ Work:
 - retain complete public history and context;
 - satisfy broad-training readiness per ascension and act;
 - keep mechanical cleanup separate from coverage/search experiments;
-- complete T053 before publishing a root-prior repair, assisted training
-  repair, broad teacher/checkpoint refresh, non-combat ranker branch, or
-  controller promotion.
+- complete T054 before publishing a larger root-prior scale-up, assisted
+  training repair, broad teacher/checkpoint refresh, non-combat ranker branch,
+  or controller promotion.
 
 Exit gate: enough unique A20 Boss and later-act starts exist for meaningful
 training and evaluation.
@@ -415,9 +416,10 @@ completed the broader source-collection task and produced scarce Act-2+
 starts in the guided arms. T052 completed the fixed-cohort diagnostic over
 those naturally reached Boss and later-act starts; root-prior guided search
 regressed by one win overall and on the Act-2+ subset while tying Boss-only.
-T053 is the published offline failure-analysis task to explain the T052
-root-prior allocation signal before controller promotion, another training
-branch, or a root-prior repair task.
+T053 completed the offline failure analysis: it found four root-prior
+disagreement records and recommended a guardrailed allocation repair
+experiment. T054 is the published repair experiment before controller
+promotion, another training branch, or larger root-prior scale-up.
 
 Exit gate: a search change improves fixed evaluation at equal simulation or
 wall-clock budget without natural-weighted regression.

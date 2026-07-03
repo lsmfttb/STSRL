@@ -276,9 +276,11 @@ broader 1,000-terminal-run-per-arm matched source collection and recovered a
 small Act-2+ signal in the guided arms while keeping broad training closed.
 T052 completed the restored-battle fixed-cohort diagnostic on those T051 Boss
 and later-act starts. It found root-prior guided search regressed by one win
-overall and on the five-record Act-2+ subset while tying Boss-only. T053 is now
-the published `READY` task for offline root-prior allocation failure analysis
-before larger training, root-prior repair, or non-combat branches.
+overall and on the five-record Act-2+ subset while tying Boss-only. T053
+completed the offline root-prior allocation failure analysis and found four
+T052 disagreement records. T054 is now the published `READY` task for one
+guardrailed root-prior allocation repair experiment before larger training,
+larger root-prior scale-up, or non-combat branches.
 
 Use the Oracle regime to validate priors, leaf values, uncertainty, and search
 instrumentation. Exit when model guidance improves the fixed Oracle curve at
@@ -315,8 +317,8 @@ Retain only auxiliary targets that improve normal-information evaluation.
    coverage, keeping raw policy diagnostics separate from search promotion.
 4. Design and pin the authoritative public-consistent hidden-future sampler;
    T034 remains blocked until that native boundary exists.
-5. Complete T053's T052 root-prior allocation failure analysis before
-   publishing a root-prior repair, assisted training repair, broad
+5. Complete T054's guardrailed root-prior allocation repair experiment before
+   publishing a larger root-prior scale-up, assisted training repair, broad
    teacher/checkpoint refresh, non-combat ranker branch, or controller
    promotion; publish implementation work only through `READY` task rows in the
    task index.
