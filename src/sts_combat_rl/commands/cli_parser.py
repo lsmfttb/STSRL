@@ -263,6 +263,16 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     input_group.add_argument(
+        "--t056-post-t055-root-prior-path-selection-report",
+        type=Path,
+        metavar="OUTPUT_JSON",
+        help=(
+            "Build the offline T056 post-T055 root-prior path-selection JSON "
+            "report from explicit retained T048/T050/T051/T052/T053/T054/T055 "
+            "artifacts."
+        ),
+    )
+    input_group.add_argument(
         "--t052-t051-boss-later-act-fixed-cohort",
         type=Path,
         metavar="OUTPUT_JSONL",
@@ -399,6 +409,20 @@ def build_parser() -> argparse.ArgumentParser:
             "roles include T054 report/comparison/manifest, two T048 reference "
             "comparisons, two retained cohorts, two checkpoints, and two T055 "
             "guardrailed comparisons."
+        ),
+    )
+    parser.add_argument(
+        "--t056-input-artifact",
+        nargs=3,
+        action="append",
+        default=[],
+        metavar=("ROLE", "PATH", "SHA256"),
+        help=(
+            "One retained artifact for "
+            "--t056-post-t055-root-prior-path-selection-report. Required "
+            "roles cover T048 comparisons, T050/T051 reachability reports and "
+            "retention manifests, T052/T053/T054 reports, and T055 report, "
+            "manifest, and comparisons."
         ),
     )
     parser.add_argument(
