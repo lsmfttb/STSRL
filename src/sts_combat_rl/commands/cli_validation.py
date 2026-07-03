@@ -60,6 +60,22 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
         or args.root_prior_allocation_weight > 1.0
     ):
         return "--root-prior-allocation-weight must be between zero and one"
+    if (
+        not math.isfinite(args.root_prior_guardrail_uniform_blend_weight)
+        or args.root_prior_guardrail_uniform_blend_weight < 0.0
+        or args.root_prior_guardrail_uniform_blend_weight > 1.0
+    ):
+        return (
+            "--root-prior-guardrail-uniform-blend-weight must be between zero and one"
+        )
+    if (
+        not math.isfinite(args.root_prior_guardrail_max_prior_probability)
+        or args.root_prior_guardrail_max_prior_probability <= 0.0
+        or args.root_prior_guardrail_max_prior_probability > 1.0
+    ):
+        return (
+            "--root-prior-guardrail-max-prior-probability must be in the range (0, 1]"
+        )
     if args.assistance_policy_seed is not None and args.assistance_policy_seed < 0:
         return "--assistance-policy-seed must be non-negative"
     if (
@@ -138,6 +154,7 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
         or args.lightspeed_model_guided_search_v2_fixed_comparison is not None
         or args.lightspeed_de_assisted_fixed_cohort_comparison is not None
         or args.lightspeed_root_prior_guided_search_comparison is not None
+        or args.lightspeed_t054_guardrailed_root_prior_repair_comparison is not None
         or search_pool_uses_checkpoint
     )
     if (
@@ -160,6 +177,7 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
             "--lightspeed-model-guided-search-v2-fixed-comparison or "
             "--lightspeed-de-assisted-fixed-cohort-comparison or "
             "--lightspeed-root-prior-guided-search-comparison or "
+            "--lightspeed-t054-guardrailed-root-prior-repair-comparison or "
             "--lightspeed-search-battle-start-pool with a checkpoint-guided "
             "--search-battle-controller"
         )
@@ -188,6 +206,14 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
         return (
             "--root-prior-guided-search-comparison-report requires "
             "--lightspeed-root-prior-guided-search-comparison"
+        )
+    if (
+        args.t054_guardrailed_root_prior_comparison_report is not None
+        and args.lightspeed_t054_guardrailed_root_prior_repair_comparison is None
+    ):
+        return (
+            "--t054-guardrailed-root-prior-comparison-report requires "
+            "--lightspeed-t054-guardrailed-root-prior-repair-comparison"
         )
     if (
         args.merge_root_prior_guided_search_comparison is not None
@@ -447,6 +473,31 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
             "--t053-t052-artifact requires "
             "--t053-root-prior-allocation-failure-analysis-report"
         )
+    if args.t054_guardrailed_root_prior_repair_report is not None:
+        if len(args.t054_input_artifact) != 6:
+            return (
+                "--t054-guardrailed-root-prior-repair-report requires exactly "
+                "six --t054-input-artifact values"
+            )
+        roles = [values[0] for values in args.t054_input_artifact]
+        if sorted(roles) != [
+            "t052_fixed_cohort",
+            "t052_result_summary",
+            "t052_retention_manifest",
+            "t052_root_prior_guided_comparison",
+            "t053_failure_analysis",
+            "t054_guardrailed_comparison",
+        ]:
+            return (
+                "--t054-input-artifact roles must be t052_fixed_cohort, "
+                "t052_result_summary, t052_retention_manifest, "
+                "t052_root_prior_guided_comparison, t053_failure_analysis, "
+                "and t054_guardrailed_comparison"
+            )
+    elif args.t054_input_artifact:
+        return (
+            "--t054-input-artifact requires --t054-guardrailed-root-prior-repair-report"
+        )
     if args.t052_t051_boss_later_act_fixed_cohort is not None:
         if len(args.t052_source_arm) != 3:
             return (
@@ -485,6 +536,20 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
             "--t052-retained-artifact, --t052-retention-command, "
             "--t052-retention-stage, and --t052-retention-note require "
             "--t052-retention-manifest"
+        )
+    if args.t054_retention_manifest is not None:
+        if not args.t054_retained_artifact:
+            return "--t054-retention-manifest requires --t054-retained-artifact"
+    elif (
+        args.t054_retained_artifact
+        or args.t054_retention_command
+        or args.t054_retention_stage
+        or args.t054_retention_note
+    ):
+        return (
+            "--t054-retained-artifact, --t054-retention-command, "
+            "--t054-retention-stage, and --t054-retention-note require "
+            "--t054-retention-manifest"
         )
     if (
         args.root_prior_allocation_report is not None
