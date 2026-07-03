@@ -67,7 +67,8 @@ the current milestone, but they do not override this table.
 | T051 | DONE | [A20 search-controlled later-act source collection](T051-a20-search-controlled-later-act-source-collection.md) | T050, T049, T048, T036, T037 | broader matched source collection for Boss and later-act A20 starts |
 | T052 | DONE | [T051 Boss/later-act fixed-cohort diagnostic](T052-t051-boss-later-act-fixed-cohort-diagnostic.md) | T051, T050, T048, T047, T005 | restored-battle diagnostic on T051 naturally reached Boss and later-act starts |
 | T053 | DONE | [T052 root-prior allocation failure analysis](T053-t052-root-prior-allocation-failure-analysis.md) | T052, T047, T048, T051 | offline decision-level analysis of T052 root-prior regression and tied Boss starts |
-| T054 | READY | [Guardrailed root-prior allocation repair experiment](T054-guardrailed-root-prior-allocation-repair-experiment.md) | T053, T052, T048, T047, T046, T043 | versioned guardrailed root-prior repair experiment on the retained T052 fixed cohort |
+| T054 | DONE | [Guardrailed root-prior allocation repair experiment](T054-guardrailed-root-prior-allocation-repair-experiment.md) | T053, T052, T048, T047, T046, T043 | versioned guardrailed root-prior repair experiment on the retained T052 fixed cohort |
+| T055 | READY | [Guardrailed root-prior fixed-cohort scale validation](T055-guardrailed-root-prior-fixed-cohort-scale-validation.md) | T054, T048, T047, T046, T044, T043 | repaired guardrail scale validation on the retained T048 fixed cohorts |
 
 Use the table, not per-task files or roadmap prose, when deciding whether a
 task may receive a branch. Only `READY` rows should receive a new branch. After
@@ -228,11 +229,14 @@ the Act-2+ subset while tying the Boss-only subset. T053 completed the offline
 allocation failure analysis and found four T052 disagreement records: two
 harmful root-prior records, one terminal-HP-only/no-op record, and one
 beneficial root-prior record, with exact step-level selected-action comparison
-unavailable in T052 telemetry. T054 is now `READY` to run one guardrailed
-root-prior allocation repair experiment on the retained T052 fixed cohort
-before any controller promotion, assisted training repair, broad
-teacher/checkpoint refresh, non-combat ranker branch, or larger root-prior
-scale-up.
+unavailable in T052 telemetry. T054 completed the bounded guardrailed
+root-prior allocation repair experiment on the retained T052 fixed cohort: the
+guardrailed variant repaired the overall and Boss-only regression against the
+existing root-prior arm, tied baseline and post-search overall, but still tied
+the existing root-prior arm and trailed baseline/post-search on the five-record
+Act-2+ subset. T055 is now `READY` to scale-validate that repaired variant on
+the retained T048 fixed cohorts before any controller promotion, assisted
+training repair, broad teacher/checkpoint refresh, or non-combat ranker branch.
 T034 remains blocked on native public-consistent hidden-future sampler support.
 
 ## Standard Local Gates
@@ -292,6 +296,7 @@ are mapped as follows:
 - T051 Boss/later-act fixed-cohort diagnostic: T052.
 - T052 root-prior allocation failure analysis: T053.
 - Guardrailed root-prior allocation repair experiment: T054.
+- Guardrailed root-prior fixed-cohort scale validation: T055.
 
 T013 supplies the shared CommunicationMod adapter and captured-sample
 compatibility gate. Simulator-only training experiments do not depend on it.

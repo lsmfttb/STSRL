@@ -29,10 +29,13 @@ broad training closed. T052 completed the restored-battle fixed-cohort
 diagnostic and found root-prior guided search regressed by one win overall and
 on the five-record Act-2+ subset while tying Boss-only. T053 completed the
 offline root-prior allocation failure analysis and found four disagreement
-records in the T052 evidence. T054 is now the `READY` task for one guardrailed
-root-prior allocation repair experiment on the retained T052 fixed cohort. New
-implementation work should start only from rows marked `READY` in the task
-index; T034 remains blocked on native sampler support.
+records in the T052 evidence. T054 completed the guardrailed root-prior
+allocation repair experiment on the retained T052 fixed cohort: it repaired
+the overall and Boss-only regression against existing root-prior, tied
+baseline/post-search overall, and left the Act-2+ limitation unresolved. T055
+is now the `READY` task for fixed-cohort scale validation on the retained T048
+cohorts. New implementation work should start only from rows marked `READY` in
+the task index; T034 remains blocked on native sampler support.
 
 ## Goals
 
@@ -363,9 +366,9 @@ Work:
 - retain complete public history and context;
 - satisfy broad-training readiness per ascension and act;
 - keep mechanical cleanup separate from coverage/search experiments;
-- complete T054 before publishing a larger root-prior scale-up, assisted
-  training repair, broad teacher/checkpoint refresh, non-combat ranker branch,
-  or controller promotion.
+- complete T055 before publishing repaired root-prior complete-run
+  reachability, assisted training repair, broad teacher/checkpoint refresh,
+  non-combat ranker branch, or controller promotion.
 
 Exit gate: enough unique A20 Boss and later-act starts exist for meaningful
 training and evaluation.
@@ -418,8 +421,11 @@ those naturally reached Boss and later-act starts; root-prior guided search
 regressed by one win overall and on the Act-2+ subset while tying Boss-only.
 T053 completed the offline failure analysis: it found four root-prior
 disagreement records and recommended a guardrailed allocation repair
-experiment. T054 is the published repair experiment before controller
-promotion, another training branch, or larger root-prior scale-up.
+experiment. T054 completed that repair experiment; the guardrailed variant
+improved over existing root-prior overall and on Boss-only T052 records, tied
+baseline/post-search overall, and did not repair the Act-2+ gap. T055 is the
+published fixed-cohort scale validation before controller promotion, another
+training branch, or complete-run reachability for the repaired variant.
 
 Exit gate: a search change improves fixed evaluation at equal simulation or
 wall-clock budget without natural-weighted regression.

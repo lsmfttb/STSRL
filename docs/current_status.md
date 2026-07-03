@@ -54,10 +54,14 @@ root-prior guided search regressed by one win overall and on the five-record
 Act-2+ subset while tying the Boss-only subset. T053 is complete: it added the
 offline root-prior allocation failure analysis over the T052 disagreement
 records, found four root-prior disagreement records, and recommended a
-guardrailed root-prior allocation repair experiment. T054 is now `READY` for
-that bounded repaired-allocation experiment before any larger root-prior
-scale-up, repair-adjacent training, non-combat, or promotion branch. T034
-remains blocked on native public-consistent hidden-future sampler support.
+guardrailed root-prior allocation repair experiment. T054 is complete: it
+added the versioned guardrailed root-prior variant, repaired the T052 overall
+and Boss-only regression against the existing root-prior arm, tied baseline
+and post-search overall, and left the five-record Act-2+ limitation unresolved.
+T055 is now `READY` to scale-validate the repaired variant on the retained T048
+fixed cohorts before any complete-run reachability, repair-adjacent training,
+non-combat, or promotion branch. T034 remains blocked on native
+public-consistent hidden-future sampler support.
 
 ## Implemented On Main
 
@@ -975,6 +979,30 @@ remains blocked on native public-consistent hidden-future sampler support.
   arms. The recommended next task is a guardrailed root-prior allocation repair
   experiment; T053 itself does not implement repair, promotion, live-game
   validation, broad training, or normal-information search.
+- T054 adds `guardrailed_root_prior_guided_oracle_search_v1` and the
+  `t054-guardrailed-root-prior-repair-report-v1` workflow over the retained
+  T052 Boss/later-act fixed diagnostic cohort. Maintainer review accepted
+  report sha256
+  `91f9e9b63b2f104a092a2a48dc1a3c4cc279f63300b0e097ba116fd80e601fec`,
+  comparison sha256
+  `b588d1d0f648c07d2fbcb1067a9fdea385ce90676e6c3ecd0eda6f61dbc7627d`,
+  and retention manifest sha256
+  `61ea735d6c1a31be14ecdc9daad433b18e2c0445ee42f474a2e55dcca957e5d3`
+  under
+  `artifacts/t054-guardrailed-root-prior-allocation-repair-experiment-pr/`.
+  The comparison used all 93 T052 records, equal native root budget 20,
+  `highest_mean` root selection, and 16 WSL workers/shards. Baseline Oracle
+  search, post-search `model_guided_oracle_search_v2`, and the guardrailed
+  variant each produced 4W/89L overall; existing root-prior produced 3W/90L.
+  On the four T053 disagreement records, the guardrailed variant produced
+  3W/1L versus 2W/2L for existing root-prior. Boss-only improved to 2W/86L for
+  the guardrailed arm versus 1W/87L for the other arms. Act-2+ remained 2W/3L
+  for both existing and guardrailed root-prior, behind baseline/post-search at
+  3W/2L. T054 recommended exactly one next task: scale the repaired variant.
+  This remains restored-battle Oracle-like diagnostic evidence only, not
+  controller promotion, complete-run reachability evidence, natural A20
+  performance, broad-training readiness, live-game validation, or
+  normal-information strength.
 
 ## Not Implemented On Main
 
@@ -986,7 +1014,8 @@ unmerged legacy work:
 - model-guided search performance improvement or controller promotion;
 - sufficient Boss/later-act A20 source coverage for broad teacher/checkpoint
   refresh or broad training;
-- root-prior guided complete-run reachability improvement evidence or
+- guardrailed root-prior fixed-cohort scale validation beyond the T052 repair
+  cohort, root-prior guided complete-run reachability improvement evidence, or
   root-prior controller promotion;
 - normal-information belief search.
 
@@ -1074,8 +1103,20 @@ post-search won; record `54` was terminal-HP-only with root-prior winning at
 higher HP; record `87` was beneficial for root-prior where baseline and
 post-search lost. T053 reported exact step-level selected-action comparison as
 unavailable because T052 telemetry lacks compatible selected action identities
-for all arms. The single recommended next task is T054, a guardrailed
-root-prior allocation repair experiment on the retained T052 fixed cohort.
+for all arms. T054
+(`Guardrailed root-prior allocation repair experiment`) is complete. It
+preserved the existing root-prior controller, added the versioned guardrailed
+root-prior variant, ran the four-arm restored-battle comparison over the full
+93-record T052 cohort, and wrote accepted artifacts under
+`artifacts/t054-guardrailed-root-prior-allocation-repair-experiment-pr/`. The
+accepted result was 4W/89L for baseline Oracle search, 4W/89L for post-search
+model-guided v2, 3W/90L for existing root-prior, and 4W/89L for guardrailed
+root-prior overall. On the T053 disagreement records, guardrailed root-prior
+was 3W/1L versus 2W/2L for existing root-prior. Boss-only improved to 2W/86L
+for guardrailed root-prior, but Act-2+ remained 2W/3L for both existing and
+guardrailed root-prior versus 3W/2L for baseline/post-search. The single
+recommended next task is T055, a fixed-cohort scale validation of the repaired
+variant on the retained T048 cohorts.
 
 The immediate external-fork follow-up is
 [`lsmfttb/sts_lightspeed#7`](https://github.com/lsmfttb/sts_lightspeed/issues/7):
@@ -1107,13 +1148,16 @@ The completed assisted source-generation batch is:
    as the primary next search path, while preserving assisted training and
    de-assisted distribution repair as secondary diagnostic follow-ups.
 
-The published follow-up is T054, which will version one guardrailed root-prior
-allocation repair variant and compare it on the retained T052 fixed diagnostic
-cohort against baseline Oracle search, post-search model-guided v2, and the
-existing root-prior guided search at equal native root budget. It must report
-the T053 disagreement indices, Boss-only and Act-2+ subsets, allocation
-telemetry, unavailable diagnostics, and exactly one next task without making
-controller-promotion or broad-training claims.
+The published follow-up is T055, which will scale-validate the repaired
+T054 guardrailed root-prior variant on the retained T048 current
+T046-compatible 8-record cohort and assist_0 runs1000 21-record cohort. It
+must compare baseline Oracle search, post-search model-guided v2, existing
+root-prior, and guardrailed root-prior at equal native root budget 20, preserve
+separate cohort/distribution reporting, verify all T048/T054 input hashes,
+report guardrail allocation telemetry and unavailable diagnostics, and
+recommend exactly one next task without making controller-promotion,
+complete-run, natural A20, broad-training, live-game, or normal-information
+claims.
 
 T034 remains blocked on an explicit native simulator boundary for
 public-consistent hidden-future sampling.
