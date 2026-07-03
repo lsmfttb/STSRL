@@ -25,10 +25,13 @@ merge/finalization plus a 50-terminal-run-per-arm reachability scale pass, but
 no arm reached Act 2 or later. T051 completed the broader
 1,000-terminal-run-per-arm matched source collection and recovered a small
 Act-2+ signal in the post-search and root-prior guided arms while keeping
-broad training closed. T052 is now the `READY` task for a restored-battle
-fixed-cohort diagnostic on those T051 Boss and later-act starts. New
-implementation work should start only from rows marked `READY` in the task
-index; T034 remains blocked on native sampler support.
+broad training closed. T052 completed the restored-battle fixed-cohort
+diagnostic and found root-prior guided search regressed by one win overall and
+on the five-record Act-2+ subset while tying Boss-only. T053 is now the
+`READY` task for an offline root-prior allocation failure analysis over the
+T052 disagreement records. New implementation work should start only from rows
+marked `READY` in the task index; T034 remains blocked on native sampler
+support.
 
 ## Goals
 
@@ -359,9 +362,9 @@ Work:
 - retain complete public history and context;
 - satisfy broad-training readiness per ascension and act;
 - keep mechanical cleanup separate from coverage/search experiments;
-- complete T052 before publishing an assisted training repair, broad
-  teacher/checkpoint refresh, non-combat ranker branch, or controller
-  promotion.
+- complete T053 before publishing a root-prior repair, assisted training
+  repair, broad teacher/checkpoint refresh, non-combat ranker branch, or
+  controller promotion.
 
 Exit gate: enough unique A20 Boss and later-act starts exist for meaningful
 training and evaluation.
@@ -409,9 +412,12 @@ reachability probe and verified the new collection path, but no arm reached
 Boss or later-act starts at smoke scale. T050 completed the 50-run/arm
 scale-up and shard-merge task, but it still produced no Act-2+ starts. T051
 completed the broader source-collection task and produced scarce Act-2+
-starts in the guided arms. T052 is the published fixed-cohort diagnostic to
-test those naturally reached Boss and later-act starts before controller
-promotion or another training branch.
+starts in the guided arms. T052 completed the fixed-cohort diagnostic over
+those naturally reached Boss and later-act starts; root-prior guided search
+regressed by one win overall and on the Act-2+ subset while tying Boss-only.
+T053 is the published offline failure-analysis task to explain the T052
+root-prior allocation signal before controller promotion, another training
+branch, or a root-prior repair task.
 
 Exit gate: a search change improves fixed evaluation at equal simulation or
 wall-clock budget without natural-weighted regression.

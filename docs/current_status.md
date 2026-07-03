@@ -1,6 +1,6 @@
 # Current Status
 
-Last reviewed: 2026-07-02.
+Last reviewed: 2026-07-03.
 
 This document describes the latest `main` branch only. Results from local
 artifacts, old branches, or unmerged pull requests do not count as implemented
@@ -48,10 +48,13 @@ ran the 50-terminal-run-per-arm complete-run scale pass, reached an Act-1 Boss
 only in the baseline and post-search arms, and reached no later-act starts in
 any arm. T051 is complete: it ran the 1,000-terminal-run-per-arm matched
 source collection, recovered a small Act-2+ signal in the post-search and
-root-prior guided arms, and kept broad training closed. T052 is now `READY`
-for a restored-battle fixed-cohort diagnostic on those T051 Boss and later-act
-natural starts. T034 remains blocked on native public-consistent hidden-future
-sampler support.
+root-prior guided arms, and kept broad training closed. T052 is complete: it
+built the 93-record T051 Boss/later-act fixed diagnostic cohort and found
+root-prior guided search regressed by one win overall and on the five-record
+Act-2+ subset while tying the Boss-only subset. T053 is now `READY` for an
+offline root-prior allocation failure analysis over the T052 disagreement
+records before any repair, training, non-combat, or promotion branch. T034
+remains blocked on native public-consistent hidden-future sampler support.
 
 ## Implemented On Main
 
@@ -1019,10 +1022,19 @@ T051 (`A20 search-controlled later-act source collection`) is complete. It ran
 the 1,000-terminal-run-per-arm matched source collection and found scarce
 later-act starts only in the post-search and root-prior guided arms, with
 broad training still closed. T052
-(`T051 Boss/later-act fixed-cohort diagnostic`) is now `READY` to evaluate the
-T051 Boss and later-act natural starts as an immutable restored-battle
-diagnostic cohort before any assisted training repair, broad
-teacher/checkpoint refresh, non-combat ranker branch, or controller promotion.
+(`T051 Boss/later-act fixed-cohort diagnostic`) is complete. It consumed the
+retained T051 natural Boss and Act-2+ starts, built a 93-record fixed
+diagnostic cohort, and ran a 16-shard restored-battle comparison at equal
+native root budget 20 and `highest_mean` root selection. The accepted result
+was 4W/89L for baseline Oracle search, 4W/89L for post-search model-guided v2,
+and 3W/90L for root-prior guided search overall; Boss-only tied at 1W/87L for
+all arms, while the five-record Act-2+ subset was 3W/2L for baseline and
+post-search versus 2W/3L for root-prior. There were no restore failures,
+truncations, controller errors, or malformed root-prior allocation metadata.
+T053 (`T052 root-prior allocation failure analysis`) is now `READY` to analyze
+the T052 disagreement records and root-prior allocation telemetry before any
+root-prior repair, assisted training repair, broad teacher/checkpoint refresh,
+non-combat ranker branch, or controller promotion.
 
 The immediate external-fork follow-up is
 [`lsmfttb/sts_lightspeed#7`](https://github.com/lsmfttb/sts_lightspeed/issues/7):
@@ -1054,9 +1066,10 @@ The completed assisted source-generation batch is:
    as the primary next search path, while preserving assisted training and
    de-assisted distribution repair as secondary diagnostic follow-ups.
 
-The published follow-up is T052, which will consume the retained T051 source
-artifacts as explicit inputs and compare the current search arms on the same
-naturally reached Boss and later-act starts.
+The published follow-up is T053, which will consume the retained T052 cohort,
+comparison, result summary, and manifest as explicit inputs and diagnose the
+root-prior allocation failure signal before another implementation branch is
+published.
 
 T034 remains blocked on an explicit native simulator boundary for
 public-consistent hidden-future sampling.

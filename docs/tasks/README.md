@@ -65,7 +65,8 @@ the current milestone, but they do not override this table.
 | T049 | DONE | [Root-prior complete-run reachability probe](T049-root-prior-complete-run-reachability-probe.md) | T048, T036, T037 | complete-run source reachability plumbing and bounded root-prior probe |
 | T050 | DONE | [Root-prior reachability scale-up and shard merge](T050-root-prior-reachability-scaleup-and-shard-merge.md) | T049, T048, T036, T037 | sharded 50-run/arm complete-run reachability scale pass |
 | T051 | DONE | [A20 search-controlled later-act source collection](T051-a20-search-controlled-later-act-source-collection.md) | T050, T049, T048, T036, T037 | broader matched source collection for Boss and later-act A20 starts |
-| T052 | READY | [T051 Boss/later-act fixed-cohort diagnostic](T052-t051-boss-later-act-fixed-cohort-diagnostic.md) | T051, T050, T048, T047, T005 | restored-battle diagnostic on T051 naturally reached Boss and later-act starts |
+| T052 | DONE | [T051 Boss/later-act fixed-cohort diagnostic](T052-t051-boss-later-act-fixed-cohort-diagnostic.md) | T051, T050, T048, T047, T005 | restored-battle diagnostic on T051 naturally reached Boss and later-act starts |
+| T053 | READY | [T052 root-prior allocation failure analysis](T053-t052-root-prior-allocation-failure-analysis.md) | T052, T047, T048, T051 | offline decision-level analysis of T052 root-prior regression and tied Boss starts |
 
 Use the table, not per-task files or roadmap prose, when deciding whether a
 task may receive a branch. Only `READY` rows should receive a new branch. After
@@ -219,10 +220,13 @@ complete-run reachability scale pass and source-pool shard merge/finalization
 support; no arm reached Act 2 or later. T051 completed the broader
 1,000-terminal-run-per-arm search-controlled source collection and recovered a
 small later-act signal in the post-search and root-prior guided arms, while
-keeping broad training closed. T052 is now `READY` to turn those naturally
-reached Boss and later-act starts into an immutable restored-battle diagnostic
-cohort before any controller promotion, assisted training repair, broad
-teacher/checkpoint refresh, or non-combat ranker branch.
+keeping broad training closed. T052 completed the restored-battle fixed-cohort
+diagnostic on those naturally reached Boss and later-act starts. It found no
+root-prior gain: root-prior guided search regressed by one win overall and on
+the Act-2+ subset while tying the Boss-only subset. T053 is now `READY` to
+analyze T052's root-prior allocation and disagreement records before any
+controller promotion, assisted training repair, broad teacher/checkpoint
+refresh, non-combat ranker branch, or root-prior repair task.
 T034 remains blocked on native public-consistent hidden-future sampler support.
 
 ## Standard Local Gates
@@ -280,6 +284,7 @@ are mapped as follows:
 - Root-prior reachability scale-up and shard merge: T050.
 - A20 search-controlled later-act source collection: T051.
 - T051 Boss/later-act fixed-cohort diagnostic: T052.
+- T052 root-prior allocation failure analysis: T053.
 
 T013 supplies the shared CommunicationMod adapter and captured-sample
 compatibility gate. Simulator-only training experiments do not depend on it.
