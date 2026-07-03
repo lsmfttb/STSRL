@@ -233,6 +233,24 @@ def build_parser() -> argparse.ArgumentParser:
             "one or more explicit --post-t044-comparison T044 artifacts."
         ),
     )
+    input_group.add_argument(
+        "--t052-t051-boss-later-act-fixed-cohort",
+        type=Path,
+        metavar="OUTPUT_JSONL",
+        help=(
+            "Build the T052 fixed diagnostic cohort from retained T051 Boss and "
+            "later-act natural source-pool starts."
+        ),
+    )
+    input_group.add_argument(
+        "--t052-retention-manifest",
+        type=Path,
+        metavar="OUTPUT_JSON",
+        help=(
+            "Build the T052 retention manifest from already generated cohort, "
+            "comparison, log, and summary artifacts."
+        ),
+    )
     parser.add_argument(
         "--pytorch-search-guidance-infer-trainer-input",
         type=Path,
@@ -294,6 +312,73 @@ def build_parser() -> argparse.ArgumentParser:
             "Optional linked T043/T044 artifact identity for the T045 report, "
             "for example calibration REPORT_JSON. Repeat as needed."
         ),
+    )
+    parser.add_argument(
+        "--t052-source-arm",
+        nargs=4,
+        action="append",
+        default=[],
+        metavar=("ROLE", "LABEL", "POOL_JSONL", "SHA256"),
+        help=(
+            "One T052 source arm for cohort extraction. Required roles are "
+            "baseline, post_search, and root_prior. Repeat exactly three times."
+        ),
+    )
+    parser.add_argument(
+        "--t052-verify-artifact",
+        nargs=3,
+        action="append",
+        default=[],
+        metavar=("ROLE", "PATH", "SHA256"),
+        help=(
+            "Additional T052 input artifact to hash-check before cohort "
+            "extraction, such as the T051 manifest, reachability report, or "
+            "checkpoint."
+        ),
+    )
+    parser.add_argument(
+        "--t052-cohort-summary",
+        type=Path,
+        metavar="OUTPUT_JSON",
+        help="Write the T052 cohort extraction summary JSON artifact.",
+    )
+    parser.add_argument(
+        "--t052-retained-artifact",
+        nargs=3,
+        action="append",
+        default=[],
+        metavar=("ROLE", "PATH", "SCHEMA_ID"),
+        help=(
+            "One generated artifact to include in --t052-retention-manifest. "
+            "Repeat for cohort, summary, comparison, logs, and reports."
+        ),
+    )
+    parser.add_argument(
+        "--t052-retention-command",
+        nargs=2,
+        action="append",
+        default=[],
+        metavar=("ROLE", "COMMAND"),
+        help="One reproduction command recorded in the T052 retention manifest.",
+    )
+    parser.add_argument(
+        "--t052-retention-stage",
+        nargs=5,
+        action="append",
+        default=[],
+        metavar=("ROLE", "WORKERS", "SHARDS", "RECORD_RANGE", "SECONDS"),
+        help=(
+            "One runtime stage recorded in the T052 retention manifest, including "
+            "worker count, shard count, cohort record range, and wall-clock seconds."
+        ),
+    )
+    parser.add_argument(
+        "--t052-retention-note",
+        nargs=2,
+        action="append",
+        default=[],
+        metavar=("KEY", "VALUE"),
+        help="Free-form key/value note recorded in the T052 retention manifest.",
     )
     input_group.add_argument(
         "--pytorch-search-guidance-train",
@@ -568,6 +653,15 @@ def build_parser() -> argparse.ArgumentParser:
             "Load an immutable fixed battle cohort unchanged and run the T047 "
             "comparison across baseline Oracle search, post-search v2 "
             "model-guided search, and native root-prior guided search."
+        ),
+    )
+    input_group.add_argument(
+        "--merge-root-prior-guided-search-comparison",
+        type=Path,
+        metavar="OUTPUT_JSONL",
+        help=(
+            "Merge current-schema root-prior guided comparison shard reports "
+            "written with --record-range into one comparison JSONL artifact."
         ),
     )
     input_group.add_argument(
@@ -1253,6 +1347,17 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Task id recorded in the root-prior guided comparison config. "
             "Defaults to T047, which introduced the artifact schema."
+        ),
+    )
+    parser.add_argument(
+        "--root-prior-guided-search-comparison-shard",
+        type=Path,
+        action="append",
+        default=[],
+        metavar="JSONL",
+        help=(
+            "Input shard report for --merge-root-prior-guided-search-comparison. "
+            "Repeat once per record-range shard."
         ),
     )
     parser.add_argument(
