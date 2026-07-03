@@ -600,6 +600,34 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
             "--t057-input-artifact requires "
             "--t057-existing-root-prior-telemetry-diagnostic-report"
         )
+    if args.t058_root_prior_selected_action_telemetry_report is not None:
+        if len(args.t058_input_artifact) != 9:
+            return (
+                "--t058-root-prior-selected-action-telemetry-report "
+                "requires exactly nine --t058-input-artifact values"
+            )
+        roles = [values[0] for values in args.t058_input_artifact]
+        if sorted(roles) != [
+            "t043_assist0_smoke_checkpoint",
+            "t043_runs1000_assist0_checkpoint",
+            "t048_assist0_fixed_cohort",
+            "t048_assist0_replay_comparison",
+            "t048_current_fixed_cohort",
+            "t048_current_replay_comparison",
+            "t052_boss_later_act_fixed_cohort",
+            "t052_replay_comparison",
+            "t057_telemetry_diagnostic_report",
+        ]:
+            return (
+                "--t058-input-artifact roles must include the T057 report, "
+                "three retained fixed cohorts, two T043 checkpoints, and "
+                "three instrumented T058 replay comparisons"
+            )
+    elif args.t058_input_artifact:
+        return (
+            "--t058-input-artifact requires "
+            "--t058-root-prior-selected-action-telemetry-report"
+        )
     if args.t052_t051_boss_later_act_fixed_cohort is not None:
         if len(args.t052_source_arm) != 3:
             return (

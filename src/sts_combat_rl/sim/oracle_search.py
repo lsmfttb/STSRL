@@ -37,6 +37,8 @@ ORACLE_SEARCH_NATIVE_API = "StepSimulator.battle_search.v1"
 ORACLE_SEARCH_PATCH_IDENTITY = "sts_lightspeed_battle_search_root_v1"
 ORACLE_SEARCH_CONTROLLER_VERSION = "oracle-search-controller-v1"
 ORACLE_ROOT_SELECTION_RULES = ("highest_mean", "most_visits")
+SELECTED_ACTION_IDENTITY_TELEMETRY_SCHEMA_ID = "selected-action-identity-telemetry-v1"
+SELECTED_ACTION_IDENTITY_TELEMETRY_SCHEMA_VERSION = 1
 
 
 @dataclass(frozen=True)
@@ -590,9 +592,57 @@ def oracle_search_controller_metadata(
                 SEARCH_DECISION_TELEMETRY_SCHEMA_ID
             ),
             "search_decision_telemetry": [telemetry.to_dict()],
-            "oracle_search_decision_reports": [report.to_dict()],
+            "oracle_search_decision_reports": [
+                oracle_search_report_with_selected_action(report, target)
+            ],
         }
     )
+
+
+def selected_action_identity_telemetry(
+    target: OracleSearchTarget,
+) -> dict[str, Any]:
+    """Return occurrence-safe selected-action identity telemetry."""
+
+    identity = dict(target.action_identity)
+    return json_safe_mapping(
+        {
+            "schema_id": SELECTED_ACTION_IDENTITY_TELEMETRY_SCHEMA_ID,
+            "schema_version": SELECTED_ACTION_IDENTITY_TELEMETRY_SCHEMA_VERSION,
+            "identity_contract": "occurrence_safe_action_identity_v1",
+            "selection_rule": target.selection_rule,
+            "selected_legal_action_index": target.legal_action_index,
+            "selected_action_identity": identity,
+            "selected_action_kind": identity.get("kind"),
+            "selected_action_label": identity.get("label"),
+            "selected_visits": target.visits,
+            "selected_mean_value": target.mean_value,
+            "score": target.score,
+        }
+    )
+
+
+def oracle_search_report_with_selected_action(
+    report: OracleSearchReport,
+    target: OracleSearchTarget,
+) -> dict[str, Any]:
+    """Return an Oracle search report augmented with selected-action identity."""
+
+    selected = selected_action_identity_telemetry(target)
+    payload = report.to_dict()
+    payload.update(
+        {
+            "selected_action_telemetry": selected,
+            "selected_legal_action_index": target.legal_action_index,
+            "selected_action_identity": dict(target.action_identity),
+            "selected_action_kind": selected.get("selected_action_kind"),
+            "selected_action_label": selected.get("selected_action_label"),
+            "selected_visits": target.visits,
+            "selected_mean_value": target.mean_value,
+            "selection_rule": target.selection_rule,
+        }
+    )
+    return json_safe_mapping(payload)
 
 
 def oracle_search_decision_telemetry(

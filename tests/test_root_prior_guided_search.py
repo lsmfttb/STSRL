@@ -429,6 +429,10 @@ def test_root_prior_guided_controller_uses_model_priors_for_allocation_only() ->
     assert report["root_action_priors"][str(identities[0]["stable_id"])] == 0.10
     assert report["root_action_priors"][str(identities[1]["stable_id"])] == 0.90
     assert report["target"]["selection_rule"] == "highest_mean"
+    assert report["selected_action_identity"] == report["target"]["action_identity"]
+    assert report["selected_action_telemetry"]["identity_contract"] == (
+        "occurrence_safe_action_identity_v1"
+    )
     assert report["allocation_metadata"]["schema_id"] == (
         NATIVE_ROOT_PRIOR_ALLOCATION_METADATA_SCHEMA_ID
     )

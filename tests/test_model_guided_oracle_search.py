@@ -288,6 +288,12 @@ def test_model_guided_controller_combines_native_mean_and_policy_probability() -
 
     native_report = decision.metadata["oracle_search_decision_reports"][0]
     assert native_report["decision_telemetry"]["model_calls"] == 0
+    assert native_report["selected_action_identity"]["label"] == "Defend"
+    guided_report = decision.metadata["model_guided_oracle_decision_reports"][0]
+    assert (
+        guided_report["selected_action_identity"]
+        == (guided_report["target"]["action_identity"])
+    )
 
 
 def test_model_guided_v2_controller_uses_visit_adjusted_policy_probability() -> None:

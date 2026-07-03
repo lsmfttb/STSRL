@@ -34,6 +34,8 @@ from sts_combat_rl.sim.oracle_search import (
     OracleSearchTarget,
     build_oracle_search_report,
     oracle_search_decision_telemetry,
+    oracle_search_report_with_selected_action,
+    selected_action_identity_telemetry,
 )
 from sts_combat_rl.sim.policy import DecisionContext
 from sts_combat_rl.sim.search_guidance_inference import (
@@ -148,6 +150,7 @@ class ModelGuidedOracleSearchDecisionReport:
     search_kind: str = "native_random_terminal_playout_with_public_root_guidance"
 
     def to_dict(self) -> dict[str, Any]:
+        selected = selected_action_identity_telemetry(self.target.to_oracle_target())
         return {
             "controller_version": self.controller_version,
             "information_regime": NATIVE_SEARCH_INFORMATION_REGIME,
@@ -162,6 +165,11 @@ class ModelGuidedOracleSearchDecisionReport:
             "guidance_result": self.guidance_result.to_dict(),
             "root_scores": [score.to_dict() for score in self.root_scores],
             "target": self.target.to_dict(),
+            "selected_action_telemetry": selected,
+            "selected_legal_action_index": self.target.legal_action_index,
+            "selected_action_identity": dict(self.target.action_identity),
+            "selected_action_kind": selected.get("selected_action_kind"),
+            "selected_action_label": selected.get("selected_action_label"),
             "telemetry_controller_kind": self.telemetry_controller_kind,
             "search_kind": self.search_kind,
         }
@@ -753,7 +761,12 @@ def model_guided_oracle_search_controller_metadata(
             ),
             "model_guidance_inference": [guidance.to_dict()],
             "model_guided_oracle_decision_reports": [decision_report.to_dict()],
-            "oracle_search_decision_reports": [oracle_report.to_dict()],
+            "oracle_search_decision_reports": [
+                oracle_search_report_with_selected_action(
+                    oracle_report,
+                    target.to_oracle_target(),
+                )
+            ],
             "search_decision_telemetry_schema_id": (
                 SEARCH_DECISION_TELEMETRY_SCHEMA_ID
             ),
