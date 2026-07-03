@@ -273,6 +273,16 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     input_group.add_argument(
+        "--t057-existing-root-prior-telemetry-diagnostic-report",
+        type=Path,
+        metavar="OUTPUT_JSON",
+        help=(
+            "Build the offline T057 existing-root-prior allocation telemetry "
+            "diagnostic JSON report from explicit retained T048/T052/T053/"
+            "T055/T056 artifacts."
+        ),
+    )
+    input_group.add_argument(
         "--t052-t051-boss-later-act-fixed-cohort",
         type=Path,
         metavar="OUTPUT_JSONL",
@@ -423,6 +433,20 @@ def build_parser() -> argparse.ArgumentParser:
             "roles cover T048 comparisons, T050/T051 reachability reports and "
             "retention manifests, T052/T053/T054 reports, and T055 report, "
             "manifest, and comparisons."
+        ),
+    )
+    parser.add_argument(
+        "--t057-input-artifact",
+        nargs=3,
+        action="append",
+        default=[],
+        metavar=("ROLE", "PATH", "SHA256"),
+        help=(
+            "One retained artifact for "
+            "--t057-existing-root-prior-telemetry-diagnostic-report. Required "
+            "roles cover the T056 path-selection report, T048/T052/T055 "
+            "comparison artifacts, the T052 result summary, T053 failure "
+            "analysis report, and T055 scale-validation report."
         ),
     )
     parser.add_argument(
