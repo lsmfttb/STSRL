@@ -155,6 +155,7 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
         or args.lightspeed_de_assisted_fixed_cohort_comparison is not None
         or args.lightspeed_root_prior_guided_search_comparison is not None
         or args.lightspeed_t054_guardrailed_root_prior_repair_comparison is not None
+        or args.lightspeed_t055_guardrailed_root_prior_scale_comparison is not None
         or search_pool_uses_checkpoint
     )
     if (
@@ -178,6 +179,7 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
             "--lightspeed-de-assisted-fixed-cohort-comparison or "
             "--lightspeed-root-prior-guided-search-comparison or "
             "--lightspeed-t054-guardrailed-root-prior-repair-comparison or "
+            "--lightspeed-t055-guardrailed-root-prior-scale-comparison or "
             "--lightspeed-search-battle-start-pool with a checkpoint-guided "
             "--search-battle-controller"
         )
@@ -214,6 +216,14 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
         return (
             "--t054-guardrailed-root-prior-comparison-report requires "
             "--lightspeed-t054-guardrailed-root-prior-repair-comparison"
+        )
+    if (
+        args.t055_guardrailed_root_prior_comparison_report is not None
+        and args.lightspeed_t055_guardrailed_root_prior_scale_comparison is None
+    ):
+        return (
+            "--t055-guardrailed-root-prior-comparison-report requires "
+            "--lightspeed-t055-guardrailed-root-prior-scale-comparison"
         )
     if (
         args.merge_root_prior_guided_search_comparison is not None
@@ -498,6 +508,37 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
         return (
             "--t054-input-artifact requires --t054-guardrailed-root-prior-repair-report"
         )
+    if args.t055_guardrailed_root_prior_scale_validation_report is not None:
+        if len(args.t055_input_artifact) != 11:
+            return (
+                "--t055-guardrailed-root-prior-scale-validation-report requires "
+                "exactly eleven --t055-input-artifact values"
+            )
+        roles = [values[0] for values in args.t055_input_artifact]
+        if sorted(roles) != [
+            "t043_assist0_smoke_checkpoint",
+            "t043_main_runs1000_assist0_checkpoint",
+            "t048_assist0_fixed_cohort",
+            "t048_assist0_reference_comparison",
+            "t048_current_fixed_cohort",
+            "t048_current_reference_comparison",
+            "t054_guardrailed_comparison",
+            "t054_guardrailed_repair_report",
+            "t054_retention_manifest",
+            "t055_assist0_guardrailed_comparison",
+            "t055_current_guardrailed_comparison",
+        ]:
+            return (
+                "--t055-input-artifact roles must include T054 "
+                "report/comparison/manifest, both T048 reference comparisons, "
+                "both retained cohorts, both checkpoints, and both generated "
+                "T055 guardrailed comparisons"
+            )
+    elif args.t055_input_artifact:
+        return (
+            "--t055-input-artifact requires "
+            "--t055-guardrailed-root-prior-scale-validation-report"
+        )
     if args.t052_t051_boss_later_act_fixed_cohort is not None:
         if len(args.t052_source_arm) != 3:
             return (
@@ -550,6 +591,20 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
             "--t054-retained-artifact, --t054-retention-command, "
             "--t054-retention-stage, and --t054-retention-note require "
             "--t054-retention-manifest"
+        )
+    if args.t055_retention_manifest is not None:
+        if not args.t055_retained_artifact:
+            return "--t055-retention-manifest requires --t055-retained-artifact"
+    elif (
+        args.t055_retained_artifact
+        or args.t055_retention_command
+        or args.t055_retention_stage
+        or args.t055_retention_note
+    ):
+        return (
+            "--t055-retained-artifact, --t055-retention-command, "
+            "--t055-retention-stage, and --t055-retention-note require "
+            "--t055-retention-manifest"
         )
     if (
         args.root_prior_allocation_report is not None
