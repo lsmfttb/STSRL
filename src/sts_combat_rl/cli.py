@@ -64,6 +64,12 @@ from sts_combat_rl.commands.t053_root_prior_failure_analysis import (
     format_t053_root_prior_failure_analysis_command,
     run_t053_root_prior_failure_analysis_from_paths,
 )
+from sts_combat_rl.commands.t054_guardrailed_root_prior_repair import (
+    format_t054_guardrailed_root_prior_repair_command,
+    format_t054_retention_manifest_command,
+    run_t054_guardrailed_root_prior_repair_from_paths,
+    run_t054_retention_manifest_from_paths,
+)
 from sts_combat_rl.commands.teacher_guidance_calibration import (
     format_teacher_guidance_calibration_command,
     run_teacher_guidance_calibration_from_paths,
@@ -246,6 +252,24 @@ def main(argv: list[str] | None = None) -> int:
         print(format_t053_root_prior_failure_analysis_command(report), file=sys.stderr)
         return 0 if report.command_passed else 1
 
+    if args.t054_guardrailed_root_prior_repair_report is not None:
+        try:
+            report = run_t054_guardrailed_root_prior_repair_from_paths(
+                artifact_specs=args.t054_input_artifact,
+                output_path=args.t054_guardrailed_root_prior_repair_report,
+            )
+        except (OSError, UnicodeDecodeError, ValueError) as exc:
+            print(
+                f"failed to build T054 guardrailed root-prior repair report: {exc}",
+                file=sys.stderr,
+            )
+            return 2
+        print(
+            format_t054_guardrailed_root_prior_repair_command(report),
+            file=sys.stderr,
+        )
+        return 0 if report.command_passed else 1
+
     if args.t052_t051_boss_later_act_fixed_cohort is not None:
         try:
             report = run_t052_fixed_cohort_extraction_from_paths(
@@ -279,6 +303,24 @@ def main(argv: list[str] | None = None) -> int:
             )
             return 2
         print(format_t052_retention_manifest_command(manifest), file=sys.stderr)
+        return 0
+
+    if args.t054_retention_manifest is not None:
+        try:
+            manifest = run_t054_retention_manifest_from_paths(
+                output_path=args.t054_retention_manifest,
+                artifact_specs=args.t054_retained_artifact,
+                command_specs=args.t054_retention_command,
+                stage_specs=args.t054_retention_stage,
+                note_specs=args.t054_retention_note,
+            )
+        except (OSError, UnicodeDecodeError, ValueError) as exc:
+            print(
+                f"failed to build T054 retention manifest: {exc}",
+                file=sys.stderr,
+            )
+            return 2
+        print(format_t054_retention_manifest_command(manifest), file=sys.stderr)
         return 0
 
     if args.merge_root_prior_guided_search_comparison is not None:

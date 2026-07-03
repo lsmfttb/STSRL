@@ -243,6 +243,16 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     input_group.add_argument(
+        "--t054-guardrailed-root-prior-repair-report",
+        type=Path,
+        metavar="OUTPUT_JSON",
+        help=(
+            "Build the offline T054 guardrailed root-prior repair JSON report "
+            "from explicit retained T052/T053 artifacts and a generated T054 "
+            "four-arm comparison."
+        ),
+    )
+    input_group.add_argument(
         "--t052-t051-boss-later-act-fixed-cohort",
         type=Path,
         metavar="OUTPUT_JSONL",
@@ -258,6 +268,15 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Build the T052 retention manifest from already generated cohort, "
             "comparison, log, and summary artifacts."
+        ),
+    )
+    input_group.add_argument(
+        "--t054-retention-manifest",
+        type=Path,
+        metavar="OUTPUT_JSON",
+        help=(
+            "Build the T054 retention manifest from already generated "
+            "comparison, report, log, and summary artifacts."
         ),
     )
     parser.add_argument(
@@ -336,6 +355,20 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--t054-input-artifact",
+        nargs=3,
+        action="append",
+        default=[],
+        metavar=("ROLE", "PATH", "SHA256"),
+        help=(
+            "One retained or generated artifact for "
+            "--t054-guardrailed-root-prior-repair-report. Required roles are "
+            "t052_retention_manifest, t052_fixed_cohort, "
+            "t052_root_prior_guided_comparison, t052_result_summary, "
+            "t053_failure_analysis, and t054_guardrailed_comparison."
+        ),
+    )
+    parser.add_argument(
         "--t052-source-arm",
         nargs=4,
         action="append",
@@ -401,6 +434,44 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         metavar=("KEY", "VALUE"),
         help="Free-form key/value note recorded in the T052 retention manifest.",
+    )
+    parser.add_argument(
+        "--t054-retained-artifact",
+        nargs=3,
+        action="append",
+        default=[],
+        metavar=("ROLE", "PATH", "SCHEMA_ID"),
+        help=(
+            "One generated artifact to include in --t054-retention-manifest. "
+            "Repeat for comparison, report, logs, and manifests."
+        ),
+    )
+    parser.add_argument(
+        "--t054-retention-command",
+        nargs=2,
+        action="append",
+        default=[],
+        metavar=("ROLE", "COMMAND"),
+        help="One reproduction command recorded in the T054 retention manifest.",
+    )
+    parser.add_argument(
+        "--t054-retention-stage",
+        nargs=5,
+        action="append",
+        default=[],
+        metavar=("ROLE", "WORKERS", "SHARDS", "RECORD_RANGE", "SECONDS"),
+        help=(
+            "One runtime stage recorded in the T054 retention manifest, including "
+            "worker count, shard count, cohort record range, and wall-clock seconds."
+        ),
+    )
+    parser.add_argument(
+        "--t054-retention-note",
+        nargs=2,
+        action="append",
+        default=[],
+        metavar=("KEY", "VALUE"),
+        help="Free-form key/value note recorded in the T054 retention manifest.",
     )
     input_group.add_argument(
         "--pytorch-search-guidance-train",
@@ -675,6 +746,17 @@ def build_parser() -> argparse.ArgumentParser:
             "Load an immutable fixed battle cohort unchanged and run the T047 "
             "comparison across baseline Oracle search, post-search v2 "
             "model-guided search, and native root-prior guided search."
+        ),
+    )
+    input_group.add_argument(
+        "--lightspeed-t054-guardrailed-root-prior-repair-comparison",
+        type=Path,
+        metavar="COHORT_PATH",
+        help=(
+            "Load the retained T052 fixed cohort unchanged and run the T054 "
+            "four-arm comparison across baseline Oracle search, post-search v2 "
+            "model-guided search, existing root-prior guided search, and the "
+            "new guardrailed root-prior variant."
         ),
     )
     input_group.add_argument(
@@ -1261,6 +1343,24 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--root-prior-guardrail-uniform-blend-weight",
+        type=float,
+        default=0.35,
+        help=(
+            "T054 guardrail weight for mixing checkpoint priors with a uniform "
+            "eligible-action prior before native root allocation."
+        ),
+    )
+    parser.add_argument(
+        "--root-prior-guardrail-max-prior-probability",
+        type=float,
+        default=0.65,
+        help=(
+            "T054 guardrail cap for any one eligible action's supplied root "
+            "prior probability before native allocation."
+        ),
+    )
+    parser.add_argument(
         "--root-prior-allocation-report",
         type=Path,
         metavar="PATH",
@@ -1353,6 +1453,21 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         metavar="PATH",
         help="Write the T047 root-prior guided search comparison JSONL report.",
+    )
+    parser.add_argument(
+        "--t054-guardrailed-root-prior-comparison-report",
+        type=Path,
+        metavar="PATH",
+        help="Write the T054 four-arm root-prior repair comparison JSONL report.",
+    )
+    parser.add_argument(
+        "--t054-guardrailed-root-prior-repair-scale",
+        choices=("smoke", "fixed"),
+        default="smoke",
+        help=(
+            "Scale label recorded in the T054 guardrailed repair comparison. "
+            "The default marks the run as smoke-scale evidence."
+        ),
     )
     parser.add_argument(
         "--root-prior-guided-search-comparison-scale",
