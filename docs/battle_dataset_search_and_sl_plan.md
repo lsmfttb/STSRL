@@ -36,10 +36,11 @@ baseline/post-search overall, and left the Act-2+ limitation unresolved. T055
 completed the retained T048 fixed-cohort scale validation and found the
 guardrailed variant tied existing root-prior on the current cohort but
 regressed by one win on the assist_0 cohort and aggregate, so the guardrail
-path is abandoned for now. T056 is now the `READY` task for post-T055
-non-guardrail path selection. New implementation work should start only from
-rows marked `READY` in the task index; T034 remains blocked on native sampler
-support.
+path is abandoned for now. T056 completed the post-T055 non-guardrail path
+selection and chose an existing-root-prior allocation/telemetry diagnostic.
+T057 is now the `READY` task for that offline diagnostic. New implementation
+work should start only from rows marked `READY` in the task index; T034 remains
+blocked on native sampler support.
 
 ## Goals
 
@@ -370,9 +371,9 @@ Work:
 - retain complete public history and context;
 - satisfy broad-training readiness per ascension and act;
 - keep mechanical cleanup separate from coverage/search experiments;
-- complete T056's post-T055 path selection before publishing root-prior
-  complete-run reachability, assisted training repair, broad
-  teacher/checkpoint refresh, non-combat ranker branch, or controller
+- complete T057's existing-root-prior allocation/telemetry diagnostic before
+  publishing root-prior complete-run reachability, assisted training repair,
+  broad teacher/checkpoint refresh, non-combat ranker branch, or controller
   promotion.
 
 Exit gate: enough unique A20 Boss and later-act starts exist for meaningful
@@ -432,9 +433,11 @@ baseline/post-search overall, and did not repair the Act-2+ gap. T055
 completed the fixed-cohort scale validation for the repaired variant, tying
 existing root-prior on the current T048 cohort but regressing by one win on
 the assist_0 cohort and labeled aggregate. The repaired guardrail is therefore
-not advancing to complete-run reachability or promotion. T056 is the published
-post-T055 path-selection task before controller promotion, another training
-branch, or complete-run reachability.
+not advancing to complete-run reachability or promotion. T056 completed the
+post-T055 path-selection synthesis and selected exactly one non-guardrail next
+path: existing-root-prior allocation/telemetry diagnostic. T057 is the
+published diagnostic task before controller promotion, another training branch,
+or complete-run reachability.
 
 Exit gate: a search change improves fixed evaluation at equal simulation or
 wall-clock budget without natural-weighted regression.

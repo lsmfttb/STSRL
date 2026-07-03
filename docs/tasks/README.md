@@ -69,7 +69,8 @@ the current milestone, but they do not override this table.
 | T053 | DONE | [T052 root-prior allocation failure analysis](T053-t052-root-prior-allocation-failure-analysis.md) | T052, T047, T048, T051 | offline decision-level analysis of T052 root-prior regression and tied Boss starts |
 | T054 | DONE | [Guardrailed root-prior allocation repair experiment](T054-guardrailed-root-prior-allocation-repair-experiment.md) | T053, T052, T048, T047, T046, T043 | versioned guardrailed root-prior repair experiment on the retained T052 fixed cohort |
 | T055 | DONE | [Guardrailed root-prior fixed-cohort scale validation](T055-guardrailed-root-prior-fixed-cohort-scale-validation.md) | T054, T048, T047, T046, T044, T043 | repaired guardrail scale validation on the retained T048 fixed cohorts |
-| T056 | READY | [Post-T055 root-prior path selection](T056-post-t055-root-prior-path-selection.md) | T055, T054, T053, T052, T051, T050, T048 | guardrail-path closure and non-guardrail next-path selection |
+| T056 | DONE | [Post-T055 root-prior path selection](T056-post-t055-root-prior-path-selection.md) | T055, T054, T053, T052, T051, T050, T048 | guardrail-path closure and non-guardrail next-path selection |
+| T057 | READY | [Existing root-prior allocation telemetry diagnostic](T057-existing-root-prior-allocation-telemetry-diagnostic.md) | T056, T055, T053, T052, T048, T046, T043 | offline existing-root-prior allocation and selected-action telemetry diagnostic |
 
 Use the table, not per-task files or roadmap prose, when deciding whether a
 task may receive a branch. Only `READY` rows should receive a new branch. After
@@ -239,9 +240,12 @@ Act-2+ subset. T055 completed the retained T048 fixed-cohort scale validation:
 the guardrailed variant tied existing root-prior on the current 8-record cohort
 but regressed by one win on the assist_0 21-record cohort and on the labeled
 29-record aggregate, so its single recommendation is to abandon the guardrail
-path. T056 is now `READY` to close that path in a current-schema synthesis and
-select one non-guardrail next branch before any controller promotion, assisted
-training repair, broad teacher/checkpoint refresh, non-combat ranker branch, or
+path. T056 completed the post-T055 path-selection synthesis, closed the
+T054/T055 guardrail branch, preserved the conflicting T048/T052/T053/T054/T055
+evidence families separately, and selected exactly one non-guardrail next path:
+an existing-root-prior allocation/telemetry diagnostic. T057 is now `READY` for
+that offline diagnostic before any controller promotion, assisted training
+repair, broad teacher/checkpoint refresh, non-combat ranker branch, or
 root-prior complete-run follow-up.
 T034 remains blocked on native public-consistent hidden-future sampler support.
 
@@ -304,6 +308,7 @@ are mapped as follows:
 - Guardrailed root-prior allocation repair experiment: T054.
 - Guardrailed root-prior fixed-cohort scale validation: T055.
 - Post-T055 root-prior path selection: T056.
+- Existing root-prior allocation telemetry diagnostic: T057.
 
 T013 supplies the shared CommunicationMod adapter and captured-sample
 compatibility gate. Simulator-only training experiments do not depend on it.

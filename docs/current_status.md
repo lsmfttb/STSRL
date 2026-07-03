@@ -62,8 +62,10 @@ T055 is complete: it scale-validated the repaired variant on the retained T048
 fixed cohorts, found the guardrail tied existing root-prior on the current
 8-record cohort but regressed by one win on the assist_0 21-record cohort and
 on the labeled aggregate, and recommended abandoning the guardrail path. T056
-is now `READY` to synthesize the T048/T050/T051/T052/T053/T054/T055 evidence,
-close the guardrail branch, and select one non-guardrail next path before any
+is complete: it synthesized the retained T048/T050/T051/T052/T053/T054/T055
+evidence, closed the T054/T055 guardrail branch, and selected exactly one
+non-guardrail next path: an existing-root-prior allocation/telemetry
+diagnostic. T057 is now `READY` for that offline diagnostic before any
 complete-run reachability, repair-adjacent training, non-combat, or promotion
 branch. T034 remains blocked on native public-consistent hidden-future sampler
 support.
@@ -1034,6 +1036,24 @@ support.
   promotion, complete-run reachability evidence, natural A20 performance,
   broad-training readiness, live-game validation, normal-information strength,
   or final-agent evidence.
+- T056 adds `t056-post-t055-root-prior-path-selection-report-v1` and an
+  offline report workflow over retained T048/T050/T051/T052/T053/T054/T055
+  artifacts. Maintainer review accepted regenerated stable-path report sha256
+  `f5db1a5f6bcdd99f78051f7b99ad970c76099add59d9655c6cd2abdd2ad6e26e`
+  with byte count `1411522` under
+  `artifacts/t056-post-t055-root-prior-path-selection-pr/`. The command
+  verified 13 explicit input artifacts, including the T055 retention manifest,
+  and failed closed on a pretty-printed wrong-schema T055 manifest regression.
+  The report keeps T048 positive fixed-cohort evidence, T052/T053 later-act/
+  Boss evidence, T054 repair evidence, T055 guardrail scale evidence, and
+  T050/T051 complete-run reachability evidence separate. It closes the
+  T054/T055 guardrail branch, rejects guardrailed root-prior complete-run
+  reachability, and recommends exactly one non-guardrail next path:
+  `existing-root-prior allocation/telemetry diagnostic`. This remains offline
+  synthesis over Oracle-like restored-battle and source-reachability evidence,
+  not controller promotion, complete-run reachability improvement evidence,
+  natural A20 performance, broad-training readiness, live-game validation,
+  normal-information strength, or final-agent evidence.
 
 ## Not Implemented On Main
 
@@ -1045,7 +1065,7 @@ unmerged legacy work:
 - model-guided search performance improvement or controller promotion;
 - sufficient Boss/later-act A20 source coverage for broad teacher/checkpoint
   refresh or broad training;
-- any post-T055 non-guardrail root-prior path selection result,
+- existing-root-prior allocation/telemetry diagnostic result after T056,
   root-prior guided complete-run reachability improvement evidence, or
   root-prior controller promotion;
 - normal-information belief search.
@@ -1162,6 +1182,16 @@ root-prior, and 18W/11L for guardrailed root-prior. T055's single
 recommendation is to abandon the guardrail path; it does not authorize
 guardrailed complete-run reachability, controller promotion, broad training,
 live-game validation, natural A20 claims, or normal-information claims.
+T056 (`Post-T055 root-prior path selection`) is complete. It consumed the
+accepted retained evidence from T048, T050, T051, T052, T053, T054, and T055,
+wrote `t056-post-t055-root-prior-path-selection-report-v1` under
+`artifacts/t056-post-t055-root-prior-path-selection-pr/`, and produced report
+sha256 `f5db1a5f6bcdd99f78051f7b99ad970c76099add59d9655c6cd2abdd2ad6e26e`.
+The report command passed with no validation problems, closed the T054/T055
+guardrail path, rejected guardrailed root-prior complete-run reachability, and
+selected exactly one next path: `existing-root-prior allocation/telemetry
+diagnostic`. The key unresolved diagnostic remains exact all-arm step-level
+selected-action comparison in the T052/T053 telemetry.
 
 The immediate external-fork follow-up is
 [`lsmfttb/sts_lightspeed#7`](https://github.com/lsmfttb/sts_lightspeed/issues/7):
@@ -1193,13 +1223,13 @@ The completed assisted source-generation batch is:
    as the primary next search path, while preserving assisted training and
    de-assisted distribution repair as secondary diagnostic follow-ups.
 
-The published follow-up is T056, which will consume the accepted
-T048/T050/T051/T052/T053/T054/T055 artifact evidence, close the guardrail
-branch in a current-schema synthesis, and recommend exactly one non-guardrail
-next path. It must not run new simulator comparisons, tune or rerun the
-guardrail, publish guardrailed root-prior complete-run reachability, or make
-controller-promotion, complete-run, natural A20, broad-training, live-game, or
-normal-information claims.
+The published follow-up is T057, which will consume the accepted T056 report
+and retained T048/T052/T053/T055 comparison evidence to diagnose existing
+root-prior allocation and selected-action telemetry. It must not run new
+simulator comparisons, tune root-prior allocation, revive the guardrail,
+publish root-prior complete-run reachability, or make controller-promotion,
+complete-run, natural A20, broad-training, live-game, or normal-information
+claims.
 
 T034 remains blocked on an explicit native simulator boundary for
 public-consistent hidden-future sampling.
