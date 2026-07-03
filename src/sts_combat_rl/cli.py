@@ -76,6 +76,10 @@ from sts_combat_rl.commands.t055_guardrailed_root_prior_scale_validation import 
     run_t055_guardrailed_root_prior_scale_validation_from_paths,
     run_t055_retention_manifest_from_paths,
 )
+from sts_combat_rl.commands.t056_post_t055_root_prior_path_selection import (
+    format_t056_post_t055_root_prior_path_selection_command,
+    run_t056_post_t055_root_prior_path_selection_from_paths,
+)
 from sts_combat_rl.commands.teacher_guidance_calibration import (
     format_teacher_guidance_calibration_command,
     run_teacher_guidance_calibration_from_paths,
@@ -291,6 +295,25 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         print(
             format_t055_guardrailed_root_prior_scale_validation_command(report),
+            file=sys.stderr,
+        )
+        return 0 if report.command_passed else 1
+
+    if args.t056_post_t055_root_prior_path_selection_report is not None:
+        try:
+            report = run_t056_post_t055_root_prior_path_selection_from_paths(
+                artifact_specs=args.t056_input_artifact,
+                output_path=args.t056_post_t055_root_prior_path_selection_report,
+            )
+        except (OSError, UnicodeDecodeError, ValueError) as exc:
+            print(
+                "failed to build T056 post-T055 root-prior path-selection "
+                f"report: {exc}",
+                file=sys.stderr,
+            )
+            return 2
+        print(
+            format_t056_post_t055_root_prior_path_selection_command(report),
             file=sys.stderr,
         )
         return 0 if report.command_passed else 1

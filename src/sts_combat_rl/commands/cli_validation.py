@@ -539,6 +539,38 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
             "--t055-input-artifact requires "
             "--t055-guardrailed-root-prior-scale-validation-report"
         )
+    if args.t056_post_t055_root_prior_path_selection_report is not None:
+        if len(args.t056_input_artifact) != 13:
+            return (
+                "--t056-post-t055-root-prior-path-selection-report requires "
+                "exactly thirteen --t056-input-artifact values"
+            )
+        roles = [values[0] for values in args.t056_input_artifact]
+        if sorted(roles) != [
+            "t048_assist0_reference_comparison",
+            "t048_current_reference_comparison",
+            "t050_reachability_report",
+            "t050_retention_manifest",
+            "t051_reachability_report",
+            "t051_retention_manifest",
+            "t052_result_summary",
+            "t053_failure_analysis_report",
+            "t054_guardrailed_repair_report",
+            "t055_assist0_guardrailed_comparison",
+            "t055_current_guardrailed_comparison",
+            "t055_retention_manifest",
+            "t055_scale_validation_report",
+        ]:
+            return (
+                "--t056-input-artifact roles must include T048 comparisons, "
+                "T050/T051 reachability reports and manifests, T052/T053/T054 "
+                "reports, and T055 report/manifest/comparisons"
+            )
+    elif args.t056_input_artifact:
+        return (
+            "--t056-input-artifact requires "
+            "--t056-post-t055-root-prior-path-selection-report"
+        )
     if args.t052_t051_boss_later_act_fixed_cohort is not None:
         if len(args.t052_source_arm) != 3:
             return (
