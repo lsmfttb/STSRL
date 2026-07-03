@@ -131,6 +131,25 @@ def test_t056_command_rejects_hash_mismatch(tmp_path: Path) -> None:
         )
 
 
+def test_t056_command_rejects_pretty_printed_wrong_t055_manifest_schema(
+    tmp_path: Path,
+) -> None:
+    paths = _write_t056_inputs(tmp_path)
+    _write_json(
+        paths["t055_retention_manifest"],
+        {
+            **_retention_manifest("t055"),
+            "schema_id": "wrong-schema",
+        },
+    )
+
+    with pytest.raises(ValueError, match="t055_retention_manifest.*schema"):
+        run_t056_post_t055_root_prior_path_selection_from_paths(
+            artifact_specs=_artifact_specs(paths),
+            output_path=tmp_path / "t056-report.json",
+        )
+
+
 def test_cli_t056_routes_to_report_command(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -484,6 +503,16 @@ def _retention_manifest(task_id: str) -> dict[str, object]:
         "t050": "t050-root-prior-reachability-retention-manifest-v1",
         "t051": "t051-search-controlled-later-act-retention-manifest-v1",
     }
+    if task_id == "t055":
+        return {
+            "schema_id": schemas[task_id],
+            "format_version": 1,
+            "task_id": "T055",
+            "retention_reason": "unit-test",
+            "artifacts": [{"role": "scale_validation_report"}],
+            "commands": [{"role": "scale_validation_report", "command": "unit"}],
+            "runtime_stages": [{"role": "current", "workers": 1, "shards": 1}],
+        }
     return {
         "schema_id": schemas[task_id],
         "format_version": 1,

@@ -80,6 +80,10 @@ def run_t056_post_t055_root_prior_path_selection_from_paths(
         Path(by_role["t052_result_summary"]["path"]),
         "T052 result summary",
     )
+    t055_retention_manifest = _load_json_object(
+        Path(by_role["t055_retention_manifest"]["path"]),
+        "T055 retention manifest",
+    )
     t050_reachability_report = _load_json_object(
         Path(by_role["t050_reachability_report"]["path"]),
         "T050 reachability report",
@@ -105,6 +109,7 @@ def run_t056_post_t055_root_prior_path_selection_from_paths(
         t053_report=t053_report,
         t054_report=t054_report,
         t055_report=t055_report,
+        t055_retention_manifest=t055_retention_manifest,
         t050_reachability_report=t050_reachability_report,
         t050_retention_manifest=t050_retention_manifest,
         t051_reachability_report=t051_reachability_report,

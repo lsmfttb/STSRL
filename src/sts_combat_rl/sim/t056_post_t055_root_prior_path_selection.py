@@ -187,6 +187,7 @@ def build_t056_post_t055_root_prior_path_selection_report(
     t053_report: T053RootPriorFailureAnalysisReport,
     t054_report: T054GuardrailedRootPriorRepairReport,
     t055_report: T055GuardrailedRootPriorScaleValidationReport,
+    t055_retention_manifest: Mapping[str, Any],
     t050_reachability_report: Mapping[str, Any],
     t050_retention_manifest: Mapping[str, Any],
     t051_reachability_report: Mapping[str, Any],
@@ -197,6 +198,7 @@ def build_t056_post_t055_root_prior_path_selection_report(
     artifacts = [_json_safe_mapping(item) for item in input_artifacts]
     json_inputs = {
         "t052_result_summary": _json_safe_mapping(t052_result_summary),
+        "t055_retention_manifest": _json_safe_mapping(t055_retention_manifest),
         "t050_reachability_report": _json_safe_mapping(t050_reachability_report),
         "t050_retention_manifest": _json_safe_mapping(t050_retention_manifest),
         "t051_reachability_report": _json_safe_mapping(t051_reachability_report),
@@ -210,6 +212,7 @@ def build_t056_post_t055_root_prior_path_selection_report(
         t053_report=t053_report,
         t054_report=t054_report,
         t055_report=t055_report,
+        t055_retention_manifest=json_inputs["t055_retention_manifest"],
         t050_reachability_report=json_inputs["t050_reachability_report"],
         t050_retention_manifest=json_inputs["t050_retention_manifest"],
         t051_reachability_report=json_inputs["t051_reachability_report"],
@@ -225,6 +228,7 @@ def build_t056_post_t055_root_prior_path_selection_report(
         t053_report=t053_report,
         t054_report=t054_report,
         t055_report=t055_report,
+        t055_retention_manifest=json_inputs["t055_retention_manifest"],
         t050_reachability_report=json_inputs["t050_reachability_report"],
         t050_retention_manifest=json_inputs["t050_retention_manifest"],
         t051_reachability_report=json_inputs["t051_reachability_report"],
@@ -408,6 +412,7 @@ def _validation_problems(
     t053_report: T053RootPriorFailureAnalysisReport,
     t054_report: T054GuardrailedRootPriorRepairReport,
     t055_report: T055GuardrailedRootPriorScaleValidationReport,
+    t055_retention_manifest: Mapping[str, Any],
     t050_reachability_report: Mapping[str, Any],
     t050_retention_manifest: Mapping[str, Any],
     t051_reachability_report: Mapping[str, Any],
@@ -469,6 +474,10 @@ def _validation_problems(
         command_passed=t055_report.command_passed,
         recommendation=t055_report.recommendation,
         expected_recommendation="abandon the guardrail path",
+    )
+    _extend_t055_retention_manifest_problems(
+        problems,
+        manifest=t055_retention_manifest,
     )
 
     _extend_reachability_problems(
@@ -618,6 +627,31 @@ def _extend_retention_manifest_problems(
         problems.append(f"{role}: missing regeneration contract")
 
 
+def _extend_t055_retention_manifest_problems(
+    problems: list[str],
+    *,
+    manifest: Mapping[str, Any],
+) -> None:
+    if manifest.get("schema_id") != "t055-retention-manifest-v1":
+        problems.append(
+            "t055_retention_manifest: unsupported retention manifest schema"
+        )
+    if manifest.get("format_version") != 1:
+        problems.append("t055_retention_manifest: unsupported format version")
+    if manifest.get("task_id") != "T055":
+        problems.append("t055_retention_manifest: task_id is not T055")
+    if not isinstance(manifest.get("artifacts"), list) or not manifest.get("artifacts"):
+        problems.append("t055_retention_manifest: missing retained artifact list")
+    if not isinstance(manifest.get("commands"), list) or not manifest.get("commands"):
+        problems.append("t055_retention_manifest: missing command list")
+    if not isinstance(manifest.get("runtime_stages"), list) or not manifest.get(
+        "runtime_stages"
+    ):
+        problems.append("t055_retention_manifest: missing runtime stage list")
+    if not manifest.get("retention_reason"):
+        problems.append("t055_retention_manifest: missing retention_reason")
+
+
 def _evidence_ledger(
     *,
     t048_comparisons: Mapping[str, RootPriorGuidedSearchComparisonReport],
@@ -626,6 +660,7 @@ def _evidence_ledger(
     t053_report: T053RootPriorFailureAnalysisReport,
     t054_report: T054GuardrailedRootPriorRepairReport,
     t055_report: T055GuardrailedRootPriorScaleValidationReport,
+    t055_retention_manifest: Mapping[str, Any],
     t050_reachability_report: Mapping[str, Any],
     t050_retention_manifest: Mapping[str, Any],
     t051_reachability_report: Mapping[str, Any],
@@ -723,6 +758,21 @@ def _evidence_ledger(
                 t055_report.recommendation.get("recommended_next_task")
             ),
             "recommendation": _json_safe_mapping(t055_report.recommendation),
+            "retention_manifest": {
+                "schema_id": t055_retention_manifest.get("schema_id"),
+                "format_version": t055_retention_manifest.get("format_version"),
+                "task_id": t055_retention_manifest.get("task_id"),
+                "artifact_count": len(
+                    _sequence(t055_retention_manifest.get("artifacts"))
+                ),
+                "command_count": len(
+                    _sequence(t055_retention_manifest.get("commands"))
+                ),
+                "runtime_stage_count": len(
+                    _sequence(t055_retention_manifest.get("runtime_stages"))
+                ),
+                "retention_reason": t055_retention_manifest.get("retention_reason"),
+            },
             "interpretation": (
                 "T055's exactly one recommendation is to abandon the guardrail "
                 "path after a one-win aggregate regression versus existing "
