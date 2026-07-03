@@ -571,6 +571,35 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
             "--t056-input-artifact requires "
             "--t056-post-t055-root-prior-path-selection-report"
         )
+    if args.t057_existing_root_prior_telemetry_diagnostic_report is not None:
+        if len(args.t057_input_artifact) != 9:
+            return (
+                "--t057-existing-root-prior-telemetry-diagnostic-report "
+                "requires exactly nine --t057-input-artifact values"
+            )
+        roles = [values[0] for values in args.t057_input_artifact]
+        if sorted(roles) != [
+            "t048_assist0_reference_comparison",
+            "t048_current_reference_comparison",
+            "t052_result_summary",
+            "t052_root_prior_guided_comparison",
+            "t053_failure_analysis_report",
+            "t055_assist0_guardrailed_comparison",
+            "t055_current_guardrailed_comparison",
+            "t055_scale_validation_report",
+            "t056_path_selection_report",
+        ]:
+            return (
+                "--t057-input-artifact roles must include the T056 "
+                "path-selection report, T048/T052/T055 comparisons, T052 "
+                "result summary, T053 failure-analysis report, and T055 "
+                "scale-validation report"
+            )
+    elif args.t057_input_artifact:
+        return (
+            "--t057-input-artifact requires "
+            "--t057-existing-root-prior-telemetry-diagnostic-report"
+        )
     if args.t052_t051_boss_later_act_fixed_cohort is not None:
         if len(args.t052_source_arm) != 3:
             return (

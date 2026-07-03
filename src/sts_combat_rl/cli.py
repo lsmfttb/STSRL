@@ -80,6 +80,10 @@ from sts_combat_rl.commands.t056_post_t055_root_prior_path_selection import (
     format_t056_post_t055_root_prior_path_selection_command,
     run_t056_post_t055_root_prior_path_selection_from_paths,
 )
+from sts_combat_rl.commands.t057_existing_root_prior_telemetry_diagnostic import (
+    format_t057_existing_root_prior_telemetry_diagnostic_command,
+    run_t057_existing_root_prior_telemetry_diagnostic_from_paths,
+)
 from sts_combat_rl.commands.teacher_guidance_calibration import (
     format_teacher_guidance_calibration_command,
     run_teacher_guidance_calibration_from_paths,
@@ -314,6 +318,25 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         print(
             format_t056_post_t055_root_prior_path_selection_command(report),
+            file=sys.stderr,
+        )
+        return 0 if report.command_passed else 1
+
+    if args.t057_existing_root_prior_telemetry_diagnostic_report is not None:
+        try:
+            report = run_t057_existing_root_prior_telemetry_diagnostic_from_paths(
+                artifact_specs=args.t057_input_artifact,
+                output_path=(args.t057_existing_root_prior_telemetry_diagnostic_report),
+            )
+        except (OSError, UnicodeDecodeError, ValueError) as exc:
+            print(
+                "failed to build T057 existing-root-prior telemetry diagnostic "
+                f"report: {exc}",
+                file=sys.stderr,
+            )
+            return 2
+        print(
+            format_t057_existing_root_prior_telemetry_diagnostic_command(report),
             file=sys.stderr,
         )
         return 0 if report.command_passed else 1
