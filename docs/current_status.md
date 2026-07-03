@@ -1,6 +1,6 @@
 # Current Status
 
-Last reviewed: 2026-07-03.
+Last reviewed: 2026-07-04.
 
 This document describes the latest `main` branch only. Results from local
 artifacts, old branches, or unmerged pull requests do not count as implemented
@@ -58,10 +58,15 @@ guardrailed root-prior allocation repair experiment. T054 is complete: it
 added the versioned guardrailed root-prior variant, repaired the T052 overall
 and Boss-only regression against the existing root-prior arm, tied baseline
 and post-search overall, and left the five-record Act-2+ limitation unresolved.
-T055 is now `READY` to scale-validate the repaired variant on the retained T048
-fixed cohorts before any complete-run reachability, repair-adjacent training,
-non-combat, or promotion branch. T034 remains blocked on native
-public-consistent hidden-future sampler support.
+T055 is complete: it scale-validated the repaired variant on the retained T048
+fixed cohorts, found the guardrail tied existing root-prior on the current
+8-record cohort but regressed by one win on the assist_0 21-record cohort and
+on the labeled aggregate, and recommended abandoning the guardrail path. T056
+is now `READY` to synthesize the T048/T050/T051/T052/T053/T054/T055 evidence,
+close the guardrail branch, and select one non-guardrail next path before any
+complete-run reachability, repair-adjacent training, non-combat, or promotion
+branch. T034 remains blocked on native public-consistent hidden-future sampler
+support.
 
 ## Implemented On Main
 
@@ -1003,6 +1008,32 @@ public-consistent hidden-future sampler support.
   controller promotion, complete-run reachability evidence, natural A20
   performance, broad-training readiness, live-game validation, or
   normal-information strength.
+- T055 adds the
+  `t055-guardrailed-root-prior-scale-validation-report-v1` workflow and
+  retained four-arm scale-validation artifacts under
+  `artifacts/t055-guardrailed-root-prior-fixed-cohort-scale-validation-pr/`.
+  Maintainer review accepted regenerated stable-path report sha256
+  `0e365f76fcde88d81917b587ae162843488527dd7b422a43998ab24a069cae04`,
+  retention manifest sha256
+  `f1f7692fdc9baca2218dcc68e954e0e0ebdc322bf27dc2654387b52fb8cde787`,
+  current T046-compatible comparison sha256
+  `1580968ffd592433d838c3dde780148e43a33c145079f8a332dfcb1a2a9b0246`,
+  and assist_0 runs1000 comparison sha256
+  `7a96015ad103cb6c06d092fd2bf03d7b194cef12d3053808bc444b649ae994da`.
+  The current 8-record cohort used 8 WSL workers/shards over record range
+  `0:8` and produced baseline 5W/3L, post-search 5W/3L, existing root-prior
+  6W/2L, and guardrailed root-prior 6W/2L. The assist_0 21-record cohort used
+  16 WSL workers/shards over record range `0:21` and produced baseline
+  11W/10L, post-search 11W/10L, existing root-prior 13W/8L, and guardrailed
+  root-prior 12W/9L. The labeled aggregate was baseline 16W/13L, post-search
+  16W/13L, existing root-prior 19W/10L, and guardrailed root-prior 18W/11L.
+  T055 therefore marks the guardrailed variant as regressed by one win versus
+  existing root-prior on the assist_0 cohort and aggregate, and its exactly
+  one recommendation is to abandon the guardrail path. This remains
+  restored-battle Oracle-like diagnostic evidence only, not controller
+  promotion, complete-run reachability evidence, natural A20 performance,
+  broad-training readiness, live-game validation, normal-information strength,
+  or final-agent evidence.
 
 ## Not Implemented On Main
 
@@ -1014,8 +1045,8 @@ unmerged legacy work:
 - model-guided search performance improvement or controller promotion;
 - sufficient Boss/later-act A20 source coverage for broad teacher/checkpoint
   refresh or broad training;
-- guardrailed root-prior fixed-cohort scale validation beyond the T052 repair
-  cohort, root-prior guided complete-run reachability improvement evidence, or
+- any post-T055 non-guardrail root-prior path selection result,
+  root-prior guided complete-run reachability improvement evidence, or
   root-prior controller promotion;
 - normal-information belief search.
 
@@ -1115,8 +1146,22 @@ root-prior overall. On the T053 disagreement records, guardrailed root-prior
 was 3W/1L versus 2W/2L for existing root-prior. Boss-only improved to 2W/86L
 for guardrailed root-prior, but Act-2+ remained 2W/3L for both existing and
 guardrailed root-prior versus 3W/2L for baseline/post-search. The single
-recommended next task is T055, a fixed-cohort scale validation of the repaired
-variant on the retained T048 cohorts.
+recommended next task was T055, a fixed-cohort scale validation of the
+repaired variant on the retained T048 cohorts. T055
+(`Guardrailed root-prior fixed-cohort scale validation`) is complete. It ran
+the four-arm comparison on the retained T048 current T046-compatible 8-record
+cohort and assist_0 runs1000 21-record cohort, preserving equal native root
+budget 20, root selection `highest_mean`, T048 cohort/checkpoint pairing, and
+separate cohort reporting. The current cohort produced 5W/3L for baseline
+Oracle search, 5W/3L for post-search model-guided v2, 6W/2L for existing
+root-prior, and 6W/2L for guardrailed root-prior. The assist_0 cohort
+produced 11W/10L for baseline, 11W/10L for post-search, 13W/8L for existing
+root-prior, and 12W/9L for guardrailed root-prior. The 29-record aggregate was
+16W/13L for baseline, 16W/13L for post-search, 19W/10L for existing
+root-prior, and 18W/11L for guardrailed root-prior. T055's single
+recommendation is to abandon the guardrail path; it does not authorize
+guardrailed complete-run reachability, controller promotion, broad training,
+live-game validation, natural A20 claims, or normal-information claims.
 
 The immediate external-fork follow-up is
 [`lsmfttb/sts_lightspeed#7`](https://github.com/lsmfttb/sts_lightspeed/issues/7):
@@ -1148,16 +1193,13 @@ The completed assisted source-generation batch is:
    as the primary next search path, while preserving assisted training and
    de-assisted distribution repair as secondary diagnostic follow-ups.
 
-The published follow-up is T055, which will scale-validate the repaired
-T054 guardrailed root-prior variant on the retained T048 current
-T046-compatible 8-record cohort and assist_0 runs1000 21-record cohort. It
-must compare baseline Oracle search, post-search model-guided v2, existing
-root-prior, and guardrailed root-prior at equal native root budget 20, preserve
-separate cohort/distribution reporting, verify all T048/T054 input hashes,
-report guardrail allocation telemetry and unavailable diagnostics, and
-recommend exactly one next task without making controller-promotion,
-complete-run, natural A20, broad-training, live-game, or normal-information
-claims.
+The published follow-up is T056, which will consume the accepted
+T048/T050/T051/T052/T053/T054/T055 artifact evidence, close the guardrail
+branch in a current-schema synthesis, and recommend exactly one non-guardrail
+next path. It must not run new simulator comparisons, tune or rerun the
+guardrail, publish guardrailed root-prior complete-run reachability, or make
+controller-promotion, complete-run, natural A20, broad-training, live-game, or
+normal-information claims.
 
 T034 remains blocked on an explicit native simulator boundary for
 public-consistent hidden-future sampling.

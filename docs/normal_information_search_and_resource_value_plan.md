@@ -281,9 +281,12 @@ completed the offline root-prior allocation failure analysis and found four
 T052 disagreement records. T054 completed the guardrailed root-prior
 allocation repair experiment: the repaired variant improved over existing
 root-prior overall and on Boss-only T052 records, tied baseline/post-search
-overall, and left the Act-2+ gap unresolved. T055 is now the published `READY`
-task for fixed-cohort scale validation before larger training, complete-run
-reachability, or non-combat branches.
+overall, and left the Act-2+ gap unresolved. T055 completed the retained T048
+fixed-cohort scale validation and found the guardrailed variant tied existing
+root-prior on the current cohort but regressed by one win on the assist_0
+cohort and aggregate, so the guardrail path is abandoned for now. T056 is now
+the published `READY` task for non-guardrail path selection before larger
+training, complete-run reachability, or non-combat branches.
 
 Use the Oracle regime to validate priors, leaf values, uncertainty, and search
 instrumentation. Exit when model guidance improves the fixed Oracle curve at
@@ -320,11 +323,11 @@ Retain only auxiliary targets that improve normal-information evaluation.
    coverage, keeping raw policy diagnostics separate from search promotion.
 4. Design and pin the authoritative public-consistent hidden-future sampler;
    T034 remains blocked until that native boundary exists.
-5. Complete T055's guardrailed root-prior fixed-cohort scale validation before
-   publishing repaired root-prior complete-run reachability, assisted training
-   repair, broad teacher/checkpoint refresh, non-combat ranker branch, or
-   controller promotion; publish implementation work only through `READY` task
-   rows in the task index.
+5. Complete T056's post-T055 path selection before publishing root-prior
+   complete-run reachability, assisted training repair, broad
+   teacher/checkpoint refresh, non-combat ranker branch, or controller
+   promotion; publish implementation work only through `READY` task rows in
+   the task index.
 6. Keep further mechanical CLI/module cleanup in later dedicated
    no-behavior-change maintenance tasks before mixing it into search research;
    the first CLI/export cleanup pass completed in

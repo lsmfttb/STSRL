@@ -33,9 +33,13 @@ records in the T052 evidence. T054 completed the guardrailed root-prior
 allocation repair experiment on the retained T052 fixed cohort: it repaired
 the overall and Boss-only regression against existing root-prior, tied
 baseline/post-search overall, and left the Act-2+ limitation unresolved. T055
-is now the `READY` task for fixed-cohort scale validation on the retained T048
-cohorts. New implementation work should start only from rows marked `READY` in
-the task index; T034 remains blocked on native sampler support.
+completed the retained T048 fixed-cohort scale validation and found the
+guardrailed variant tied existing root-prior on the current cohort but
+regressed by one win on the assist_0 cohort and aggregate, so the guardrail
+path is abandoned for now. T056 is now the `READY` task for post-T055
+non-guardrail path selection. New implementation work should start only from
+rows marked `READY` in the task index; T034 remains blocked on native sampler
+support.
 
 ## Goals
 
@@ -366,9 +370,10 @@ Work:
 - retain complete public history and context;
 - satisfy broad-training readiness per ascension and act;
 - keep mechanical cleanup separate from coverage/search experiments;
-- complete T055 before publishing repaired root-prior complete-run
-  reachability, assisted training repair, broad teacher/checkpoint refresh,
-  non-combat ranker branch, or controller promotion.
+- complete T056's post-T055 path selection before publishing root-prior
+  complete-run reachability, assisted training repair, broad
+  teacher/checkpoint refresh, non-combat ranker branch, or controller
+  promotion.
 
 Exit gate: enough unique A20 Boss and later-act starts exist for meaningful
 training and evaluation.
@@ -423,9 +428,13 @@ T053 completed the offline failure analysis: it found four root-prior
 disagreement records and recommended a guardrailed allocation repair
 experiment. T054 completed that repair experiment; the guardrailed variant
 improved over existing root-prior overall and on Boss-only T052 records, tied
-baseline/post-search overall, and did not repair the Act-2+ gap. T055 is the
-published fixed-cohort scale validation before controller promotion, another
-training branch, or complete-run reachability for the repaired variant.
+baseline/post-search overall, and did not repair the Act-2+ gap. T055
+completed the fixed-cohort scale validation for the repaired variant, tying
+existing root-prior on the current T048 cohort but regressing by one win on
+the assist_0 cohort and labeled aggregate. The repaired guardrail is therefore
+not advancing to complete-run reachability or promotion. T056 is the published
+post-T055 path-selection task before controller promotion, another training
+branch, or complete-run reachability.
 
 Exit gate: a search change improves fixed evaluation at equal simulation or
 wall-clock budget without natural-weighted regression.
