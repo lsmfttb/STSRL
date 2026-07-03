@@ -38,9 +38,12 @@ guardrailed variant tied existing root-prior on the current cohort but
 regressed by one win on the assist_0 cohort and aggregate, so the guardrail
 path is abandoned for now. T056 completed the post-T055 non-guardrail path
 selection and chose an existing-root-prior allocation/telemetry diagnostic.
-T057 is now the `READY` task for that offline diagnostic. New implementation
-work should start only from rows marked `READY` in the task index; T034 remains
-blocked on native sampler support.
+T057 completed that offline diagnostic, found exact all-arm selected-action
+comparison unavailable for every retained T048/T052 record, and selected a
+root-prior selected-action telemetry instrumentation or replay diagnostic as
+the next path. T058 is now the `READY` task for that diagnostic. New
+implementation work should start only from rows marked `READY` in the task
+index; T034 remains blocked on native sampler support.
 
 ## Goals
 
@@ -371,7 +374,7 @@ Work:
 - retain complete public history and context;
 - satisfy broad-training readiness per ascension and act;
 - keep mechanical cleanup separate from coverage/search experiments;
-- complete T057's existing-root-prior allocation/telemetry diagnostic before
+- complete T058's root-prior selected-action telemetry replay diagnostic before
   publishing root-prior complete-run reachability, assisted training repair,
   broad teacher/checkpoint refresh, non-combat ranker branch, or controller
   promotion.
@@ -436,8 +439,10 @@ the assist_0 cohort and labeled aggregate. The repaired guardrail is therefore
 not advancing to complete-run reachability or promotion. T056 completed the
 post-T055 path-selection synthesis and selected exactly one non-guardrail next
 path: existing-root-prior allocation/telemetry diagnostic. T057 is the
-published diagnostic task before controller promotion, another training branch,
-or complete-run reachability.
+completed diagnostic task; it found the retained artifacts still lack exact
+all-arm step-level selected-action comparison. T058 is the published
+telemetry/replay diagnostic before controller promotion, another training
+branch, or complete-run reachability.
 
 Exit gate: a search change improves fixed evaluation at equal simulation or
 wall-clock budget without natural-weighted regression.

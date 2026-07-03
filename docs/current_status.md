@@ -65,10 +65,14 @@ on the labeled aggregate, and recommended abandoning the guardrail path. T056
 is complete: it synthesized the retained T048/T050/T051/T052/T053/T054/T055
 evidence, closed the T054/T055 guardrail branch, and selected exactly one
 non-guardrail next path: an existing-root-prior allocation/telemetry
-diagnostic. T057 is now `READY` for that offline diagnostic before any
-complete-run reachability, repair-adjacent training, non-combat, or promotion
-branch. T034 remains blocked on native public-consistent hidden-future sampler
-support.
+diagnostic. T057 is complete: it added that offline diagnostic, summarized 122
+retained existing-root-prior records and 2087 existing-root-prior decisions,
+found exact all-arm step-level selected-action comparison unavailable for every
+retained record, and selected exactly one next path: a root-prior
+selected-action telemetry instrumentation or replay diagnostic. T058 is now
+`READY` for that telemetry/replay diagnostic before any complete-run
+reachability, repair-adjacent training, non-combat, or promotion branch. T034
+remains blocked on native public-consistent hidden-future sampler support.
 
 ## Implemented On Main
 
@@ -1054,6 +1058,28 @@ support.
   not controller promotion, complete-run reachability improvement evidence,
   natural A20 performance, broad-training readiness, live-game validation,
   normal-information strength, or final-agent evidence.
+- T057 adds
+  `t057-existing-root-prior-allocation-telemetry-diagnostic-report-v1` and an
+  offline report workflow over the accepted T056 report plus retained
+  T048/T052/T053/T055 artifacts. Maintainer review accepted regenerated report
+  sha256
+  `52c6742e9a578381e38cd66babe86363c97fc46e7fee374770427de17edf3c88`
+  with byte count `3739962` under
+  `artifacts/t057-existing-root-prior-allocation-telemetry-diagnostic-pr/`.
+  The command verified nine explicit input artifacts, summarized 122 retained
+  existing-root-prior records and 2087 existing-root-prior decisions, and kept
+  T048 positive fixed-cohort evidence, T052/T053 later-act/Boss evidence, and
+  T055 guardrail-closure context separate. It found selected-action exact
+  comparison infeasible for all retained records, with 0 available and 122
+  unavailable records. The taxonomy counted 4 beneficial allocation signals, 2
+  harmful allocation signals, 101 no-outcome-change records, 15
+  terminal-HP-only changes, 1 distribution-specific conflict, and 122
+  telemetry-insufficient records. T057 selected exactly one next path:
+  `root-prior selected-action telemetry instrumentation or replay diagnostic`.
+  This remains offline diagnostic evidence only, not controller promotion,
+  root-prior complete-run reachability evidence, natural A20 performance,
+  broad-training readiness, live-game validation, normal-information strength,
+  or final-agent evidence.
 
 ## Not Implemented On Main
 
@@ -1065,9 +1091,9 @@ unmerged legacy work:
 - model-guided search performance improvement or controller promotion;
 - sufficient Boss/later-act A20 source coverage for broad teacher/checkpoint
   refresh or broad training;
-- existing-root-prior allocation/telemetry diagnostic result after T056,
-  root-prior guided complete-run reachability improvement evidence, or
-  root-prior controller promotion;
+- root-prior selected-action telemetry instrumentation or replay diagnostic
+  result after T057, root-prior guided complete-run reachability improvement
+  evidence, or root-prior controller promotion;
 - normal-information belief search.
 
 Do not use documentation or results from these areas as evidence that `main`
@@ -1223,11 +1249,11 @@ The completed assisted source-generation batch is:
    as the primary next search path, while preserving assisted training and
    de-assisted distribution repair as secondary diagnostic follow-ups.
 
-The published follow-up is T057, which will consume the accepted T056 report
-and retained T048/T052/T053/T055 comparison evidence to diagnose existing
-root-prior allocation and selected-action telemetry. It must not run new
-simulator comparisons, tune root-prior allocation, revive the guardrail,
-publish root-prior complete-run reachability, or make controller-promotion,
+The published follow-up is T058, which will consume the accepted T057 report
+and stable retained T048/T052 fixed cohorts/checkpoints to instrument or replay
+selected-action telemetry for the existing root-prior line. It must not tune
+root-prior allocation, revive the guardrail, publish root-prior complete-run
+reachability, train or calibrate checkpoints, or make controller-promotion,
 complete-run, natural A20, broad-training, live-game, or normal-information
 claims.
 
