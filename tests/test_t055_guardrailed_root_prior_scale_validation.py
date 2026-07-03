@@ -50,6 +50,10 @@ from sts_combat_rl.sim.t055_guardrailed_root_prior_scale_validation import (
 )
 
 
+_CHECKPOINT_SHA256 = hashlib.sha256(b"checkpoint").hexdigest()
+_OTHER_CHECKPOINT_SHA256 = hashlib.sha256(b"other checkpoint").hexdigest()
+
+
 def test_t055_report_validates_two_cohorts_and_roundtrips() -> None:
     t054_report = _t054_report()
     t054_comparison = _comparison(
@@ -199,6 +203,53 @@ def test_t055_report_rejects_missing_guardrailed_arm() -> None:
                     "assist0_runs1000_full21"
                 ],
             },
+        )
+
+
+@pytest.mark.parametrize(
+    ("side", "expected_prefix"),
+    [
+        ("reference", "T048 reference"),
+        ("generated", "T055 comparison"),
+    ],
+)
+def test_t055_report_rejects_checkpoint_sha_mismatch(
+    side: str,
+    expected_prefix: str,
+) -> None:
+    references = _reference_comparisons()
+    generated = _generated_comparisons()
+    replacement = _comparison(
+        include_guardrail=side == "generated",
+        task_id="T055" if side == "generated" else "T048",
+        cohort_identity="875ea52e3df4cb93",
+        count=8,
+        record_range="0:8",
+        workers=8,
+        shards=8,
+        wins={
+            BASELINE_ORACLE_LABEL: 5,
+            POST_SEARCH_MODEL_GUIDED_LABEL: 5,
+            ROOT_PRIOR_GUIDED_LABEL: 6,
+            GUARDRAILED_ROOT_PRIOR_GUIDED_LABEL: 6,
+        },
+        checkpoint_sha256=_OTHER_CHECKPOINT_SHA256,
+    )
+    if side == "reference":
+        references["current_t046_full8"] = replacement
+    else:
+        generated["current_t046_full8"] = replacement
+
+    with pytest.raises(
+        ValueError,
+        match=f"current_t046_full8 {expected_prefix}: .*checkpoint sha256 mismatch",
+    ):
+        build_t055_guardrailed_root_prior_scale_validation_report(
+            input_artifacts=_verified_artifacts(),
+            t054_report=_t054_report(),
+            t054_comparison=_t054_comparison(),
+            t048_reference_comparisons=references,
+            t055_comparisons=generated,
         )
 
 
@@ -429,12 +480,19 @@ def _comparison(
     workers: int,
     shards: int,
     wins: dict[str, int],
+    checkpoint_sha256: str = _CHECKPOINT_SHA256,
 ) -> RootPriorGuidedSearchComparisonReport:
     arms = [
         (
             BASELINE_ORACLE_LABEL,
             "baseline_oracle_search",
-            _fixed_report(BASELINE_ORACLE_LABEL, cohort_identity, count, wins),
+            _fixed_report(
+                BASELINE_ORACLE_LABEL,
+                cohort_identity,
+                count,
+                wins,
+                checkpoint_sha256,
+            ),
         ),
         (
             POST_SEARCH_MODEL_GUIDED_LABEL,
@@ -444,12 +502,19 @@ def _comparison(
                 cohort_identity,
                 count,
                 wins,
+                checkpoint_sha256,
             ),
         ),
         (
             ROOT_PRIOR_GUIDED_LABEL,
             "native_root_prior_allocation_from_checkpoint_priors",
-            _fixed_report(ROOT_PRIOR_GUIDED_LABEL, cohort_identity, count, wins),
+            _fixed_report(
+                ROOT_PRIOR_GUIDED_LABEL,
+                cohort_identity,
+                count,
+                wins,
+                checkpoint_sha256,
+            ),
         ),
     ]
     if include_guardrail:
@@ -462,6 +527,7 @@ def _comparison(
                     cohort_identity,
                     count,
                     wins,
+                    checkpoint_sha256,
                 ),
             )
         )
@@ -490,10 +556,11 @@ def _fixed_report(
     cohort_identity: str,
     count: int,
     wins: dict[str, int],
+    checkpoint_sha256: str,
 ) -> FixedEvaluationReport:
     return FixedEvaluationReport(
         cohort_identity=cohort_identity,
-        controller_provenance=_controller_provenance(label),
+        controller_provenance=_controller_provenance(label, checkpoint_sha256),
         information_regime=NATIVE_SEARCH_INFORMATION_REGIME,
         action_space_config={"excluded_kinds": ["potion"]},
         max_battle_steps=200,
@@ -501,13 +568,22 @@ def _fixed_report(
         selection_config={"selection_seed": 55},
         per_stratum_source_counts={"20/1/MONSTER/CULTIST": count},
         battle_results=[
-            _result(index, label, index < wins.get(label, 0)) for index in range(count)
+            _result(
+                index,
+                label,
+                index < wins.get(label, 0),
+                checkpoint_sha256,
+            )
+            for index in range(count)
         ],
         problems=[],
     )
 
 
-def _controller_provenance(label: str) -> dict[str, object]:
+def _controller_provenance(
+    label: str,
+    checkpoint_sha256: str = _CHECKPOINT_SHA256,
+) -> dict[str, object]:
     config: dict[str, object] = {
         "information_regime": NATIVE_SEARCH_INFORMATION_REGIME,
         "search_budget": {
@@ -520,7 +596,9 @@ def _controller_provenance(label: str) -> dict[str, object]:
         ROOT_PRIOR_GUIDED_LABEL,
         GUARDRAILED_ROOT_PRIOR_GUIDED_LABEL,
     }:
-        config["guidance_scorer"] = {"checkpoint_provenance": _checkpoint()}
+        config["guidance_scorer"] = {
+            "checkpoint_provenance": _checkpoint(checkpoint_sha256)
+        }
     if label == GUARDRAILED_ROOT_PRIOR_GUIDED_LABEL:
         config.update(
             {
@@ -540,7 +618,12 @@ def _controller_provenance(label: str) -> dict[str, object]:
     return {"kind": label, "name": label, "config": config}
 
 
-def _result(index: int, label: str, won: bool) -> SingleBattleEvaluationResult:
+def _result(
+    index: int,
+    label: str,
+    won: bool,
+    checkpoint_sha256: str = _CHECKPOINT_SHA256,
+) -> SingleBattleEvaluationResult:
     hp = 20 if won else 0
     return SingleBattleEvaluationResult(
         cohort_index=index,
@@ -557,7 +640,7 @@ def _result(index: int, label: str, won: bool) -> SingleBattleEvaluationResult:
             "distribution_kind": "natural_run",
         },
         restoration_method="portable_replay",
-        controller_provenance=_controller_provenance(label),
+        controller_provenance=_controller_provenance(label, checkpoint_sha256),
         information_regime=NATIVE_SEARCH_INFORMATION_REGIME,
         action_space_config={"excluded_kinds": ["potion"]},
         termination_status="win" if won else "loss",
@@ -611,10 +694,12 @@ def _telemetry(index: int, label: str) -> dict[str, object]:
     return telemetry
 
 
-def _checkpoint() -> dict[str, object]:
+def _checkpoint(checkpoint_sha256: str = _CHECKPOINT_SHA256) -> dict[str, object]:
     return {
         "checkpoint_schema_id": "torch-policy-value-checkpoint-v1",
-        "checkpoint_artifact_id": "checkpoint-sha256:unit",
+        "checkpoint_artifact_id": (
+            f"torch-policy-value-checkpoint-v1-sha256:{checkpoint_sha256}"
+        ),
         "trainer_input_sha256": "trainer",
     }
 
@@ -630,9 +715,23 @@ def _guardrail_config() -> dict[str, object]:
 
 def _verified_artifacts() -> list[dict[str, object]]:
     return [
-        {"role": role, "path": f"{role}.json", "sha256_verified": True}
+        {
+            "role": role,
+            "path": f"{role}.json",
+            "sha256": _artifact_sha256(role),
+            "sha256_verified": True,
+        }
         for role in T055_REQUIRED_INPUT_ROLES
     ]
+
+
+def _artifact_sha256(role: str) -> str:
+    if role in {
+        "t043_assist0_smoke_checkpoint",
+        "t043_main_runs1000_assist0_checkpoint",
+    }:
+        return _CHECKPOINT_SHA256
+    return hashlib.sha256(role.encode("utf-8")).hexdigest()
 
 
 def _write_t055_inputs(tmp_path: Path) -> dict[str, Path]:

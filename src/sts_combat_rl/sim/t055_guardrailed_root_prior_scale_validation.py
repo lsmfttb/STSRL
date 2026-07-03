@@ -445,6 +445,10 @@ def _validation_problems(
     for artifact in input_artifacts:
         if artifact.get("sha256_verified") is not True:
             problems.append(f"{artifact.get('role', 'artifact')}: sha256 not verified")
+    input_artifact_sha256_by_role = _input_artifact_sha256_by_role(
+        input_artifacts,
+        problems,
+    )
 
     if not t054_report.command_passed:
         problems.append("T054 repair report did not pass")
@@ -494,6 +498,12 @@ def _validation_problems(
             require_guardrail=False,
         )
         _validate_accepted_t048_wins(problems, contract, reference)
+        checkpoint_role = str(contract["checkpoint_role"])
+        expected_checkpoint_sha256 = input_artifact_sha256_by_role.get(checkpoint_role)
+        if expected_checkpoint_sha256 is None:
+            problems.append(
+                f"{key}: {checkpoint_role} missing verified checkpoint sha256"
+            )
         _extend_comparison_problems(
             problems,
             prefix=f"{key} T055 comparison",
@@ -507,7 +517,28 @@ def _validation_problems(
             required_labels=T055_REQUIRED_COMPARISON_LABELS,
             require_guardrail=True,
         )
-        _validate_checkpoint_provenance(problems, key, generated)
+        if expected_checkpoint_sha256 is not None:
+            _validate_checkpoint_provenance(
+                problems,
+                prefix=f"{key} T048 reference",
+                report=reference,
+                expected_checkpoint_sha256=expected_checkpoint_sha256,
+                labels=(
+                    POST_SEARCH_MODEL_GUIDED_LABEL,
+                    ROOT_PRIOR_GUIDED_LABEL,
+                ),
+            )
+            _validate_checkpoint_provenance(
+                problems,
+                prefix=f"{key} T055 comparison",
+                report=generated,
+                expected_checkpoint_sha256=expected_checkpoint_sha256,
+                labels=(
+                    POST_SEARCH_MODEL_GUIDED_LABEL,
+                    ROOT_PRIOR_GUIDED_LABEL,
+                    GUARDRAILED_ROOT_PRIOR_GUIDED_LABEL,
+                ),
+            )
     return list(dict.fromkeys(problems))
 
 
@@ -626,27 +657,82 @@ def _validate_accepted_t048_wins(
             )
 
 
+def _input_artifact_sha256_by_role(
+    input_artifacts: Sequence[Mapping[str, Any]],
+    problems: list[str],
+) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for artifact in input_artifacts:
+        role = str(artifact.get("role") or "")
+        values = {
+            value
+            for value in (
+                _normalized_sha256(artifact.get("sha256")),
+                _normalized_sha256(artifact.get("actual_sha256")),
+                _normalized_sha256(artifact.get("expected_sha256")),
+            )
+            if value is not None
+        }
+        if len(values) > 1:
+            problems.append(f"{role or 'artifact'}: sha256 fields disagree")
+        if len(values) == 1 and role:
+            result[role] = next(iter(values))
+    return result
+
+
 def _validate_checkpoint_provenance(
     problems: list[str],
-    key: str,
+    *,
+    prefix: str,
     report: RootPriorGuidedSearchComparisonReport,
+    expected_checkpoint_sha256: str,
+    labels: Sequence[str],
 ) -> None:
     arms = _arms_by_label(report)
     checkpoints = {
         label: _checkpoint_provenance(arms[label].report)
-        for label in (
-            POST_SEARCH_MODEL_GUIDED_LABEL,
-            ROOT_PRIOR_GUIDED_LABEL,
-            GUARDRAILED_ROOT_PRIOR_GUIDED_LABEL,
-        )
+        for label in labels
         if label in arms
     }
     for label, checkpoint in checkpoints.items():
         if not checkpoint:
-            problems.append(f"{key}: {label} missing checkpoint provenance")
+            problems.append(f"{prefix}: {label} missing checkpoint provenance")
+            continue
+        checkpoint_sha256 = _checkpoint_provenance_sha256(checkpoint)
+        if checkpoint_sha256 is None:
+            problems.append(f"{prefix}: {label} missing checkpoint artifact sha256")
+        elif checkpoint_sha256 != expected_checkpoint_sha256:
+            problems.append(
+                f"{prefix}: {label} checkpoint sha256 mismatch: expected "
+                f"{expected_checkpoint_sha256}, got {checkpoint_sha256}"
+            )
     values = {json.dumps(value, sort_keys=True) for value in checkpoints.values()}
     if len(values) > 1:
-        problems.append(f"{key}: checkpoint provenance mismatch across guided arms")
+        problems.append(f"{prefix}: checkpoint provenance mismatch across guided arms")
+
+
+def _checkpoint_provenance_sha256(checkpoint: Mapping[str, Any]) -> str | None:
+    for key in ("sha256", "checkpoint_sha256"):
+        value = _normalized_sha256(checkpoint.get(key))
+        if value is not None:
+            return value
+    artifact_id = checkpoint.get("checkpoint_artifact_id")
+    if isinstance(artifact_id, str):
+        marker = "sha256:"
+        if marker in artifact_id:
+            return _normalized_sha256(artifact_id.rsplit(marker, 1)[1])
+    return None
+
+
+def _normalized_sha256(value: Any) -> str | None:
+    if not isinstance(value, str):
+        return None
+    candidate = value.strip().lower()
+    if len(candidate) != 64:
+        return None
+    if any(char not in "0123456789abcdef" for char in candidate):
+        return None
+    return candidate
 
 
 def _t054_reference_summary(
