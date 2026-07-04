@@ -10,6 +10,7 @@ from sts_combat_rl.sim.oracle_search import (
     ORACLE_SEARCH_SCHEMA_ID,
     OracleSearchController,
     build_oracle_search_report,
+    oracle_search_controller_metadata,
     oracle_search_decision_telemetry,
     select_oracle_root_action,
 )
@@ -164,6 +165,13 @@ def test_oracle_root_mapping_uses_occurrence_safe_identities() -> None:
     assert report.search_ok
     assert [row.action_identity["occurrence"] for row in report.root_actions] == [0, 1]
     assert report.soft_visit_target == pytest.approx((1 / 3, 2 / 3))
+    target = select_oracle_root_action(report, selection_rule="highest_mean")
+    metadata = oracle_search_controller_metadata(report, target)
+    selected_report = metadata["oracle_search_decision_reports"][0]
+    assert selected_report["selected_action_identity"]["occurrence"] == 1
+    assert selected_report["selected_action_telemetry"]["identity_contract"] == (
+        "occurrence_safe_action_identity_v1"
+    )
 
 
 def test_oracle_root_mapping_preserves_potion_identities() -> None:
@@ -406,6 +414,9 @@ def test_oracle_controller_publishes_contract_and_telemetry() -> None:
     assert telemetry_records[0]["schema_id"] == "search-decision-telemetry-v1"
     assert telemetry_records[0]["selection_rule"] == "highest_mean"
     assert telemetry_records[0]["selected_legal_action_index"] == 1
+    selected_report = decision.metadata["oracle_search_decision_reports"][0]
+    assert selected_report["selected_legal_action_index"] == 1
+    assert selected_report["selected_action_identity"]["label"] == "Defend"
 
 
 def test_oracle_controller_raises_on_invalid_root_mapping() -> None:

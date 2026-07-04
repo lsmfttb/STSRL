@@ -44,7 +44,9 @@ from sts_combat_rl.sim.oracle_search import (
     OracleSearchTarget,
     build_oracle_search_report,
     oracle_search_decision_telemetry,
+    oracle_search_report_with_selected_action,
     select_oracle_root_action,
+    selected_action_identity_telemetry,
     validate_oracle_root_selection_rule,
 )
 from sts_combat_rl.sim.policy import DecisionContext
@@ -165,6 +167,7 @@ class RootPriorGuidedSearchDecisionReport:
     guardrail_summary: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
+        selected = selected_action_identity_telemetry(self.target)
         payload = {
             "controller_version": self.controller_version,
             "information_regime": NATIVE_SEARCH_INFORMATION_REGIME,
@@ -181,6 +184,11 @@ class RootPriorGuidedSearchDecisionReport:
             "allocation_metadata": dict(self.allocation_metadata),
             "allocation_rows": [dict(row) for row in self.allocation_rows],
             "target": self.target.to_dict(),
+            "selected_action_telemetry": selected,
+            "selected_legal_action_index": self.target.legal_action_index,
+            "selected_action_identity": dict(self.target.action_identity),
+            "selected_action_kind": selected.get("selected_action_kind"),
+            "selected_action_label": selected.get("selected_action_label"),
         }
         if self.guardrail_config is not None:
             payload["guardrail_config"] = dict(self.guardrail_config)
@@ -831,7 +839,9 @@ def root_prior_guided_search_controller_metadata(
         ),
         "model_guidance_inference": [decision_report.guidance_result.to_dict()],
         "root_prior_guided_decision_reports": [decision_report.to_dict()],
-        "oracle_search_decision_reports": [report.to_dict()],
+        "oracle_search_decision_reports": [
+            oracle_search_report_with_selected_action(report, target)
+        ],
         "search_decision_telemetry_schema_id": (SEARCH_DECISION_TELEMETRY_SCHEMA_ID),
         "search_decision_telemetry": [telemetry.to_dict()],
     }
