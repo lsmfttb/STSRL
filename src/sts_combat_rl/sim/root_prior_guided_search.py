@@ -74,8 +74,16 @@ GUARDRAILED_ROOT_PRIOR_GUIDED_SEARCH_CONTROLLER_VERSION = (
 GUARDRAILED_ROOT_PRIOR_GUIDED_SEARCH_CONTROLLER_NAME = (
     "guardrailed_root_prior_guided_oracle_search_v1"
 )
+T059_REPAIRED_ROOT_PRIOR_GUIDED_SEARCH_CONTROLLER_VERSION = (
+    "t059-root-prior-allocation-repair-controller-v1"
+)
+T059_REPAIRED_ROOT_PRIOR_GUIDED_SEARCH_CONTROLLER_NAME = (
+    "t059_root_prior_allocation_repair_oracle_search_v1"
+)
 ROOT_PRIOR_ALLOCATION_GUARDRAIL_VERSION = "root-prior-allocation-guardrail-v1"
 ROOT_PRIOR_ALLOCATION_GUARDRAIL_STRATEGY = "uniform-blend-capped-prior-v1"
+ROOT_PRIOR_ALLOCATION_REPAIR_VERSION = "root-prior-allocation-repair-v1"
+ROOT_PRIOR_ALLOCATION_REPAIR_STRATEGY = "entropy-tempered-prior-v1"
 ROOT_PRIOR_GUIDED_SELECTION_SCOPE = (
     "public checkpoint policy probabilities influence native root playout "
     "allocation only; final root selection uses native root statistics"
@@ -83,6 +91,10 @@ ROOT_PRIOR_GUIDED_SELECTION_SCOPE = (
 GUARDRAILED_ROOT_PRIOR_SELECTION_SCOPE = (
     "public checkpoint policy probabilities are guardrailed before native root "
     "playout allocation; final root selection uses native root statistics"
+)
+T059_REPAIRED_ROOT_PRIOR_SELECTION_SCOPE = (
+    "public checkpoint policy probabilities are entropy-tempered before native "
+    "root playout allocation; final root selection uses native root statistics"
 )
 
 
@@ -115,6 +127,41 @@ class RootPriorAllocationGuardrailConfig:
                 "hidden future outcomes",
                 "unrevealed encounter information",
                 "T053 disagreement labels",
+                "cohort indices",
+            ],
+        }
+
+
+@dataclass(frozen=True)
+class RootPriorAllocationRepairConfig:
+    """Versioned T059 prior transformation applied before native allocation."""
+
+    prior_entropy_temperature: float = 2.0
+    strategy: str = ROOT_PRIOR_ALLOCATION_REPAIR_STRATEGY
+    version: str = ROOT_PRIOR_ALLOCATION_REPAIR_VERSION
+
+    def __post_init__(self) -> None:
+        _validate_root_prior_repair_config(
+            prior_entropy_temperature=self.prior_entropy_temperature,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "version": self.version,
+            "strategy": self.strategy,
+            "prior_entropy_temperature": float(self.prior_entropy_temperature),
+            "preserves_prior_rank_order": True,
+            "uses_uniform_blend": False,
+            "uses_prior_cap": False,
+            "online_inputs": [
+                "public checkpoint legal-action policy probabilities",
+                "current public legal-action identities",
+            ],
+            "forbidden_online_inputs": [
+                "hidden future outcomes",
+                "unrevealed encounter information",
+                "T053 disagreement labels",
+                "T058 outcome labels",
                 "cohort indices",
             ],
         }
@@ -165,6 +212,10 @@ class RootPriorGuidedSearchDecisionReport:
     pre_guardrail_prior_rows: tuple[RootPriorGuidancePriorRow, ...] = ()
     pre_guardrail_prior_summary: dict[str, Any] | None = None
     guardrail_summary: dict[str, Any] | None = None
+    repair_config: dict[str, Any] | None = None
+    pre_repair_prior_rows: tuple[RootPriorGuidancePriorRow, ...] = ()
+    pre_repair_prior_summary: dict[str, Any] | None = None
+    repair_summary: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         selected = selected_action_identity_telemetry(self.target)
@@ -199,6 +250,15 @@ class RootPriorGuidedSearchDecisionReport:
                 self.pre_guardrail_prior_summary or {}
             )
             payload["guardrail_summary"] = dict(self.guardrail_summary or {})
+        if self.repair_config is not None:
+            payload["repair_config"] = dict(self.repair_config)
+            payload["pre_repair_prior_rows"] = [
+                row.to_dict() for row in self.pre_repair_prior_rows
+            ]
+            payload["pre_repair_prior_summary"] = dict(
+                self.pre_repair_prior_summary or {}
+            )
+            payload["repair_summary"] = dict(self.repair_summary or {})
         return payload
 
 
@@ -626,6 +686,236 @@ class GuardrailedRootPriorGuidedSearchController:
         )
 
 
+@dataclass(frozen=True)
+class T059RootPriorAllocationRepairSearchController:
+    """T059 entropy-tempered allocation repair variant."""
+
+    simulations: int
+    scorer: SearchGuidanceScorer
+    root_selection_rule: str = "highest_mean"
+    prior_temperature: float = 1.0
+    min_visits_per_legal_action: int = 1
+    prior_allocation_weight: float = 1.0
+    repair_config: RootPriorAllocationRepairConfig = field(
+        default_factory=RootPriorAllocationRepairConfig
+    )
+    action_space: ActionSpaceConfig = field(
+        default_factory=ActionSpaceConfig.initial_no_potions
+    )
+    native_source_identity: Mapping[str, Any] | None = None
+    provenance: ControllerProvenance = field(init=False)  # type: ignore[assignment]
+    checkpoint_provenance: SearchGuidanceCheckpointProvenance = field(init=False)
+
+    def __post_init__(self) -> None:
+        _validate_root_prior_guided_config(
+            simulations=self.simulations,
+            root_selection_rule=self.root_selection_rule,
+            prior_temperature=self.prior_temperature,
+            min_visits_per_legal_action=self.min_visits_per_legal_action,
+            prior_allocation_weight=self.prior_allocation_weight,
+        )
+        checkpoint_provenance = search_guidance_scorer_checkpoint_provenance(
+            self.scorer,
+            label="T059 root-prior allocation repair scorer",
+        )
+        object.__setattr__(self, "checkpoint_provenance", checkpoint_provenance)
+        source_identity = (
+            dict(self.native_source_identity)
+            if self.native_source_identity is not None
+            else lightspeed_source_identity_dict()
+        )
+        object.__setattr__(
+            self,
+            "provenance",
+            ControllerProvenance(
+                kind="t059_root_prior_allocation_repair_oracle_battle_search",
+                name=(
+                    f"{T059_REPAIRED_ROOT_PRIOR_GUIDED_SEARCH_CONTROLLER_NAME}_"
+                    f"{self.root_selection_rule}_s{self.simulations}"
+                ),
+                config={
+                    "controller_version": (
+                        T059_REPAIRED_ROOT_PRIOR_GUIDED_SEARCH_CONTROLLER_VERSION
+                    ),
+                    "task_id": "T059",
+                    "information_regime": NATIVE_SEARCH_INFORMATION_REGIME,
+                    "native_search_schema_id": ORACLE_SEARCH_SCHEMA_ID,
+                    "native_search_api": NATIVE_ROOT_PRIOR_SEARCH_NATIVE_API,
+                    "native_search_patch_identity": (
+                        NATIVE_ROOT_PRIOR_SEARCH_PATCH_IDENTITY
+                    ),
+                    "native_source_identity": source_identity,
+                    "search_budget": {
+                        "simulations": self.simulations,
+                        "budget_unit": "native_random_terminal_playouts",
+                    },
+                    "root_selection_rule": self.root_selection_rule,
+                    "guidance_scope": T059_REPAIRED_ROOT_PRIOR_SELECTION_SCOPE,
+                    "guidance_scorer": {
+                        "name": self.scorer.name,
+                        "inference_schema_id": SEARCH_GUIDANCE_INFERENCE_SCHEMA_ID,
+                        "inference_schema_version": (
+                            SEARCH_GUIDANCE_INFERENCE_SCHEMA_VERSION
+                        ),
+                        "checkpoint_provenance": checkpoint_provenance.to_dict(),
+                    },
+                    "root_prior_allocation": {
+                        "metadata_schema_id": (
+                            NATIVE_ROOT_PRIOR_ALLOCATION_METADATA_SCHEMA_ID
+                        ),
+                        "allocation_strategy": NATIVE_ROOT_PRIOR_ALLOCATION_STRATEGY,
+                        "prior_source": (
+                            "entropy_tempered_search_guidance_policy_probability"
+                        ),
+                        "prior_temperature": float(self.prior_temperature),
+                        "min_visits_per_legal_action": int(
+                            self.min_visits_per_legal_action
+                        ),
+                        "prior_allocation_weight": float(self.prior_allocation_weight),
+                        "repair": self.repair_config.to_dict(),
+                        "guardrail_revived": False,
+                        "final_root_selection_uses_model_probability": False,
+                    },
+                    "search_telemetry": {
+                        "schema_id": SEARCH_DECISION_TELEMETRY_SCHEMA_ID,
+                        "schema_version": SEARCH_DECISION_TELEMETRY_SCHEMA_VERSION,
+                        "model_calls_per_decision": 1,
+                        "unavailable_native_fields": {
+                            "tree_depth": "native search does not expose tree depth",
+                            "value_uncertainty": (
+                                "native search does not expose uncertainty"
+                            ),
+                            "learned_leaf_values": (
+                                "T046 native surface consumes root priors only"
+                            ),
+                            "allocation_repair_causal_effect": (
+                                "native search exposes allocation rows but not a "
+                                "paired within-decision counterfactual search"
+                            ),
+                        },
+                    },
+                    "action_space": self.action_space.to_dict(),
+                    "include_potions": _include_potions_for_battle_search(
+                        self.action_space
+                    ),
+                    "root_mapping": "occurrence_safe_action_identity_v1",
+                    "reproducibility": {
+                        "deterministic_given_restored_checkpoint": True,
+                        "native_rng_seed_source": "BattleContext.seed+floorNum",
+                        "python_rng_seed": None,
+                    },
+                },
+            ),
+        )
+
+    def select_action(
+        self,
+        adapter: SimulatorAdapter,
+        snapshot: SimulatorSnapshot,
+        actions: Sequence[SimulatorAction],
+        context: DecisionContext,
+        step_index: int,
+    ) -> ControllerDecision:
+        del step_index
+        if not hasattr(adapter, "battle_search_with_root_priors"):
+            raise ValueError(
+                "T059 root-prior allocation repair controller requires "
+                "battle_search_with_root_priors adapter"
+            )
+
+        total_start = time.perf_counter()
+        try:
+            guidance = self.scorer.score_decision_context(context)
+        except ValueError as exc:
+            raise ValueError(f"root-prior guidance inference failed: {exc}") from exc
+        validate_search_guidance_result(
+            guidance,
+            context=context,
+            expected_checkpoint=self.checkpoint_provenance,
+        )
+        raw_priors, raw_prior_rows, raw_prior_summary = (
+            build_guidance_root_action_priors(
+                actions,
+                context,
+                guidance,
+            )
+        )
+        priors, prior_rows, prior_summary, repair_summary = (
+            apply_t059_root_prior_allocation_repair(
+                actions,
+                context,
+                raw_priors,
+                raw_prior_rows,
+                raw_prior_summary,
+                config=self.repair_config,
+            )
+        )
+
+        search_fn = getattr(adapter, "battle_search_with_root_priors")
+        search_start = time.perf_counter()
+        raw_search = search_fn(
+            snapshot,
+            actions=actions,
+            context=context,
+            simulations=self.simulations,
+            include_potions=_include_potions_for_battle_search(self.action_space),
+            root_action_priors=priors,
+            prior_temperature=self.prior_temperature,
+            min_visits_per_legal_action=self.min_visits_per_legal_action,
+            prior_allocation_weight=self.prior_allocation_weight,
+        )
+        search_elapsed = time.perf_counter() - search_start
+        allocation_metadata = root_prior_allocation_metadata(raw_search)
+        allocation_rows = root_prior_allocation_rows(raw_search)
+        report = build_oracle_search_report(
+            raw_search,
+            actions,
+            context,
+            expected_native_api=NATIVE_ROOT_PRIOR_SEARCH_NATIVE_API,
+            expected_patch_identity=NATIVE_ROOT_PRIOR_SEARCH_PATCH_IDENTITY,
+            wall_clock_time_s=search_elapsed,
+        )
+        if not report.search_ok:
+            raise ValueError(
+                "T059 root-prior allocation repair root mapping failed: "
+                + "; ".join(report.problems)
+            )
+        target = select_oracle_root_action(
+            report,
+            selection_rule=self.root_selection_rule,
+        )
+        total_elapsed = time.perf_counter() - total_start
+        decision_report = RootPriorGuidedSearchDecisionReport(
+            oracle_report=report,
+            guidance_result=guidance,
+            root_action_priors=priors,
+            prior_rows=prior_rows,
+            prior_summary=prior_summary,
+            allocation_metadata=allocation_metadata,
+            allocation_rows=allocation_rows,
+            target=target,
+            total_wall_clock_time_s=total_elapsed,
+            native_search_wall_clock_time_s=search_elapsed,
+            controller_version=T059_REPAIRED_ROOT_PRIOR_GUIDED_SEARCH_CONTROLLER_VERSION,
+            root_selection_rule=self.root_selection_rule,
+            guidance_scope=T059_REPAIRED_ROOT_PRIOR_SELECTION_SCOPE,
+            repair_config=self.repair_config.to_dict(),
+            pre_repair_prior_rows=raw_prior_rows,
+            pre_repair_prior_summary=raw_prior_summary,
+            repair_summary=repair_summary,
+        )
+        return ControllerDecision(
+            selected_index=target.legal_action_index,
+            provenance=self.provenance,
+            reason=(
+                "t059_root_prior_allocation_repair_oracle_search:"
+                f"{self.root_selection_rule}"
+            ),
+            score=target.score,
+            metadata=root_prior_guided_search_controller_metadata(decision_report),
+        )
+
+
 def build_guidance_root_action_priors(
     actions: Sequence[SimulatorAction],
     context: DecisionContext,
@@ -782,6 +1072,96 @@ def apply_root_prior_allocation_guardrail(
     return priors, tuple(adjusted_rows), summary, guardrail_summary
 
 
+def apply_t059_root_prior_allocation_repair(
+    actions: Sequence[SimulatorAction],
+    context: DecisionContext,
+    raw_priors: Mapping[str, float],
+    raw_prior_rows: Sequence[RootPriorGuidancePriorRow],
+    raw_prior_summary: Mapping[str, Any],
+    *,
+    config: RootPriorAllocationRepairConfig,
+) -> tuple[
+    dict[str, float],
+    tuple[RootPriorGuidancePriorRow, ...],
+    dict[str, Any],
+    dict[str, Any],
+]:
+    """Entropy-temper public priors before native root allocation."""
+
+    del raw_priors
+    if not raw_prior_rows:
+        raise ValueError("T059 root-prior repair received no prior rows")
+    raw_probabilities = [float(row.policy_probability) for row in raw_prior_rows]
+    normalized = _normalize_probability_distribution(raw_probabilities)
+    if len(normalized) == 1:
+        adjusted = [1.0]
+    else:
+        exponent = 1.0 / config.prior_entropy_temperature
+        adjusted = _normalize_probability_distribution(
+            [value**exponent for value in normalized]
+        )
+
+    priors: dict[str, float] = {}
+    adjusted_rows: list[RootPriorGuidancePriorRow] = []
+    changed_count = 0
+    l1_delta = 0.0
+    for row, pre, post in zip(raw_prior_rows, normalized, adjusted, strict=True):
+        stable_id = row.stable_action_identity
+        priors[stable_id] = post
+        l1_delta += abs(post - pre)
+        if not math.isclose(post, pre, rel_tol=0.0, abs_tol=1e-12):
+            changed_count += 1
+        adjusted_rows.append(
+            RootPriorGuidancePriorRow(
+                legal_action_index=row.legal_action_index,
+                action_identity=dict(row.action_identity),
+                stable_action_identity=stable_id,
+                action_kind=row.action_kind,
+                eligible=row.eligible,
+                policy_logit=row.policy_logit,
+                policy_probability=post,
+            )
+        )
+
+    vector = build_root_action_prior_vector(actions, context, priors)
+    max_probability = max(adjusted)
+    max_probability_index = adjusted_rows[
+        adjusted.index(max_probability)
+    ].legal_action_index
+    positive_count = sum(1 for value in adjusted if value > 0.0)
+    summary = {
+        "prior_source": "entropy_tempered_search_guidance_policy_probability",
+        "legal_action_count": raw_prior_summary.get("legal_action_count"),
+        "eligible_action_count": len(adjusted_rows),
+        "provided_prior_count": len(priors),
+        "positive_prior_count": positive_count,
+        "prior_probability_sum": sum(adjusted),
+        "max_prior_probability": max_probability,
+        "max_prior_legal_action_index": max_probability_index,
+        "native_prior_vector": list(vector),
+        "repair_version": config.version,
+        "repair_strategy": config.strategy,
+    }
+    repair_summary = {
+        "repair_applied": True,
+        "repair_config": config.to_dict(),
+        "pre_repair_prior_source": raw_prior_summary.get("prior_source"),
+        "pre_repair_prior_probability_sum": sum(normalized),
+        "post_repair_prior_probability_sum": sum(adjusted),
+        "pre_repair_max_prior_probability": max(normalized),
+        "post_repair_max_prior_probability": max(adjusted),
+        "changed_prior_count": changed_count,
+        "l1_prior_delta": l1_delta,
+        "eligible_action_count": len(adjusted_rows),
+        "single_action_noop": len(adjusted_rows) == 1,
+        "rank_order_preserved": _probability_rank_order(normalized)
+        == _probability_rank_order(adjusted),
+        "guardrail_revived": False,
+        "native_prior_vector": list(vector),
+    }
+    return priors, tuple(adjusted_rows), summary, repair_summary
+
+
 def root_prior_guided_search_controller_metadata(
     decision_report: RootPriorGuidedSearchDecisionReport,
 ) -> dict[str, Any]:
@@ -859,6 +1239,18 @@ def root_prior_guided_search_controller_metadata(
                 ),
             }
         )
+    if decision_report.repair_config is not None:
+        payload.update(
+            {
+                "root_prior_guided_repair_config": dict(decision_report.repair_config),
+                "root_prior_guided_pre_repair_prior_summary": dict(
+                    decision_report.pre_repair_prior_summary or {}
+                ),
+                "root_prior_guided_repair_summary": dict(
+                    decision_report.repair_summary or {}
+                ),
+            }
+        )
     return json_safe_mapping(payload)
 
 
@@ -876,8 +1268,14 @@ def root_prior_guided_search_decision_telemetry(
     )
     checkpoint = decision_report.guidance_result.checkpoint_provenance
     guarded = decision_report.guardrail_config is not None
+    repaired = decision_report.repair_config is not None
     if guarded:
         unavailable["guardrail_causal_effect"] = (
+            "native search exposes allocation rows but not a paired "
+            "within-decision counterfactual search"
+        )
+    if repaired:
+        unavailable["allocation_repair_causal_effect"] = (
             "native search exposes allocation rows but not a paired "
             "within-decision counterfactual search"
         )
@@ -886,11 +1284,15 @@ def root_prior_guided_search_decision_telemetry(
         controller_kind=(
             "guardrailed_root_prior_guided_oracle_battle_search"
             if guarded
+            else "t059_root_prior_allocation_repair_oracle_battle_search"
+            if repaired
             else "root_prior_guided_oracle_battle_search"
         ),
         search_kind=(
             "native_random_terminal_playout_with_guardrailed_public_root_priors"
             if guarded
+            else "native_random_terminal_playout_with_entropy_tempered_public_root_priors"
+            if repaired
             else "native_random_terminal_playout_with_public_root_priors"
         ),
         search_backend={
@@ -917,6 +1319,15 @@ def root_prior_guided_search_decision_telemetry(
                     ),
                 }
                 if guarded
+                else {}
+            ),
+            **(
+                {
+                    "root_prior_allocation_repair": dict(
+                        decision_report.repair_config or {}
+                    ),
+                }
+                if repaired
                 else {}
             ),
         },
@@ -999,6 +1410,16 @@ def _validate_root_prior_guardrail_config(
         raise ValueError("root-prior guardrail max prior probability must be in (0, 1]")
 
 
+def _validate_root_prior_repair_config(
+    *,
+    prior_entropy_temperature: float,
+) -> None:
+    if not math.isfinite(prior_entropy_temperature) or prior_entropy_temperature < 1.0:
+        raise ValueError(
+            "T059 root-prior repair entropy temperature must be finite and at least 1"
+        )
+
+
 def _normalize_probability_distribution(values: Sequence[float]) -> list[float]:
     if not values:
         raise ValueError("probability distribution must not be empty")
@@ -1041,6 +1462,10 @@ def _cap_probability_distribution(
     if total <= 0.0:
         raise ValueError("capped probability distribution lost all mass")
     return [value / total for value in adjusted]
+
+
+def _probability_rank_order(values: Sequence[float]) -> tuple[int, ...]:
+    return tuple(sorted(range(len(values)), key=lambda index: (-values[index], index)))
 
 
 def _include_potions_for_battle_search(action_space: ActionSpaceConfig) -> bool:

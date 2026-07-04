@@ -293,6 +293,16 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     input_group.add_argument(
+        "--t059-root-prior-allocation-repair-report",
+        type=Path,
+        metavar="OUTPUT_JSON",
+        help=(
+            "Build the offline T059 root-prior allocation repair JSON report "
+            "from T058 evidence, retained cohorts/checkpoints, retained T058 "
+            "comparison artifacts, and generated T059 repair comparisons."
+        ),
+    )
+    input_group.add_argument(
         "--t052-t051-boss-later-act-fixed-cohort",
         type=Path,
         metavar="OUTPUT_JSONL",
@@ -325,6 +335,15 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="OUTPUT_JSON",
         help=(
             "Build the T055 retention manifest from already generated "
+            "comparison, report, log, wrapper, and summary artifacts."
+        ),
+    )
+    input_group.add_argument(
+        "--t059-retention-manifest",
+        type=Path,
+        metavar="OUTPUT_JSON",
+        help=(
+            "Build the T059 retention manifest from already generated "
             "comparison, report, log, wrapper, and summary artifacts."
         ),
     )
@@ -473,6 +492,20 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--t059-input-artifact",
+        nargs=3,
+        action="append",
+        default=[],
+        metavar=("ROLE", "PATH", "SHA256"),
+        help=(
+            "One retained or generated artifact for "
+            "--t059-root-prior-allocation-repair-report. Required roles cover "
+            "the T058 report/manifest, retained T058 comparisons, three fixed "
+            "cohorts, two T043 checkpoints, and three generated T059 repair "
+            "comparisons."
+        ),
+    )
+    parser.add_argument(
         "--t052-source-arm",
         nargs=4,
         action="append",
@@ -614,6 +647,44 @@ def build_parser() -> argparse.ArgumentParser:
         default=[],
         metavar=("KEY", "VALUE"),
         help="Free-form key/value note recorded in the T055 retention manifest.",
+    )
+    parser.add_argument(
+        "--t059-retained-artifact",
+        nargs=3,
+        action="append",
+        default=[],
+        metavar=("ROLE", "PATH", "SCHEMA_ID"),
+        help=(
+            "One generated artifact to include in --t059-retention-manifest. "
+            "Repeat for comparisons, report, logs, wrappers, and manifests."
+        ),
+    )
+    parser.add_argument(
+        "--t059-retention-command",
+        nargs=2,
+        action="append",
+        default=[],
+        metavar=("ROLE", "COMMAND"),
+        help="One reproduction command recorded in the T059 retention manifest.",
+    )
+    parser.add_argument(
+        "--t059-retention-stage",
+        nargs=5,
+        action="append",
+        default=[],
+        metavar=("ROLE", "WORKERS", "SHARDS", "RECORD_RANGE", "SECONDS"),
+        help=(
+            "One runtime stage recorded in the T059 retention manifest, including "
+            "worker count, shard count, cohort record range, and wall-clock seconds."
+        ),
+    )
+    parser.add_argument(
+        "--t059-retention-note",
+        nargs=2,
+        action="append",
+        default=[],
+        metavar=("KEY", "VALUE"),
+        help="Free-form key/value note recorded in the T059 retention manifest.",
     )
     input_group.add_argument(
         "--pytorch-search-guidance-train",
@@ -910,6 +981,17 @@ def build_parser() -> argparse.ArgumentParser:
             "four-arm scale-validation comparison across baseline Oracle search, "
             "post-search v2 model-guided search, existing root-prior guided "
             "search, and the T054 guardrailed root-prior variant."
+        ),
+    )
+    input_group.add_argument(
+        "--lightspeed-t059-root-prior-allocation-repair-comparison",
+        type=Path,
+        metavar="COHORT_PATH",
+        help=(
+            "Load one retained T048/T052 fixed cohort unchanged and run the "
+            "T059 four-arm comparison across baseline Oracle search, post-search "
+            "v2 model-guided search, existing root-prior guided search, and the "
+            "T059 allocation repair variant."
         ),
     )
     input_group.add_argument(
@@ -1564,7 +1646,8 @@ def build_parser() -> argparse.ArgumentParser:
             "--lightspeed-model-guided-search-v2-fixed-comparison or "
             "--lightspeed-de-assisted-fixed-cohort-comparison or "
             "--lightspeed-root-prior-guided-search-comparison or "
-            "--lightspeed-t055-guardrailed-root-prior-scale-comparison, or by "
+            "--lightspeed-t055-guardrailed-root-prior-scale-comparison or "
+            "--lightspeed-t059-root-prior-allocation-repair-comparison, or by "
             "--lightspeed-search-battle-start-pool when --search-battle-controller "
             "selects a checkpoint-guided controller."
         ),
@@ -1621,6 +1704,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Write one T055 four-arm root-prior scale comparison JSONL report.",
     )
     parser.add_argument(
+        "--t059-root-prior-allocation-repair-comparison-report",
+        type=Path,
+        metavar="PATH",
+        help="Write one T059 four-arm root-prior repair comparison JSONL report.",
+    )
+    parser.add_argument(
         "--t054-guardrailed-root-prior-repair-scale",
         choices=("smoke", "fixed"),
         default="smoke",
@@ -1636,6 +1725,24 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Scale label recorded in a T055 guardrailed scale comparison. "
             "The default marks the run as smoke-scale evidence."
+        ),
+    )
+    parser.add_argument(
+        "--t059-root-prior-allocation-repair-scale",
+        choices=("smoke", "fixed"),
+        default="fixed",
+        help=(
+            "Scale label recorded in a T059 repair comparison. The default "
+            "marks retained-cohort T059 evidence as fixed-scale."
+        ),
+    )
+    parser.add_argument(
+        "--t059-root-prior-repair-entropy-temperature",
+        type=float,
+        default=2.0,
+        help=(
+            "Fixed entropy temperature used by the T059 allocation repair prior "
+            "transform before native root allocation."
         ),
     )
     parser.add_argument(
