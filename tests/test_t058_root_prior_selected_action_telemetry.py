@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from io import StringIO
 import hashlib
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -129,6 +131,64 @@ def test_t058_rejects_hash_mismatch(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="sha256 mismatch"):
         run_t058_root_prior_selected_action_telemetry_from_paths(
             artifact_specs=specs,
+            output_path=tmp_path / "t058-report.json",
+        )
+
+
+def test_t058_rejects_unclean_comparison_metadata(tmp_path: Path) -> None:
+    paths = _write_t058_inputs(tmp_path)
+
+    def corrupt_metadata(metadata: dict[str, Any]) -> None:
+        metadata["source_match_status"] = "mismatch"
+        metadata["source_match_problems"] = ["source battle mismatch"]
+        metadata["evaluation_successful"] = False
+        metadata["report_problems"] = ["report-level failure"]
+        metadata["validation_problems"] = ["validation-level failure"]
+        metadata["problems"] = ["aggregate failure"]
+
+    def corrupt_battle_row(row: dict[str, Any]) -> None:
+        row["source_match"] = False
+        row["problems"] = ["source battle mismatch"]
+
+    _mutate_comparison_jsonl(
+        paths["t048_current_replay_comparison"],
+        metadata_mutator=corrupt_metadata,
+        first_battle_mutator=corrupt_battle_row,
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        run_t058_root_prior_selected_action_telemetry_from_paths(
+            artifact_specs=_artifact_specs(paths),
+            output_path=tmp_path / "t058-report.json",
+        )
+
+    message = str(exc_info.value)
+    assert "source_match_status must be matched" in message
+    assert "metadata source_match_problems must be empty" in message
+    assert "evaluation_successful must be true" in message
+    assert "metadata report_problems must be empty" in message
+    assert "metadata validation_problems must be empty" in message
+    assert "metadata problems must be empty" in message
+    assert "battle_comparison[0]: source_match must be true" in message
+    assert "battle_comparison[0]: problems must be empty" in message
+
+
+def test_t058_rejects_non_native_comparison_arm(tmp_path: Path) -> None:
+    paths = _write_t058_inputs(tmp_path)
+
+    def corrupt_metadata(metadata: dict[str, Any]) -> None:
+        for arm in metadata["controller_arms"]:
+            if arm["label"] == BASELINE_ORACLE_LABEL:
+                arm["report_metadata"]["information_regime"] = "normal_public_policy"
+
+    _mutate_comparison_jsonl(
+        paths["t048_current_replay_comparison"],
+        metadata_mutator=corrupt_metadata,
+    )
+
+    with pytest.raises(ValueError, match="information regime 'normal_public_policy'"):
+        run_t058_root_prior_selected_action_telemetry_from_paths(
+            artifact_specs=_artifact_specs(paths),
             output_path=tmp_path / "t058-report.json",
         )
 
@@ -521,6 +581,34 @@ def _write_jsonl_metadata(path: Path, schema_id: str) -> None:
             json.dumps({"type": "metadata", "metadata": {"schema_id": schema_id}})
         )
         stream.write("\n")
+
+
+def _mutate_comparison_jsonl(
+    path: Path,
+    *,
+    metadata_mutator: Callable[[dict[str, Any]], None] | None = None,
+    first_battle_mutator: Callable[[dict[str, Any]], None] | None = None,
+) -> None:
+    rows = [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    mutated_battle = False
+    for row in rows:
+        if row.get("type") == "metadata" and metadata_mutator is not None:
+            metadata_mutator(row["metadata"])
+        if (
+            row.get("type") == "battle_comparison"
+            and first_battle_mutator is not None
+            and not mutated_battle
+        ):
+            first_battle_mutator(row["comparison"])
+            mutated_battle = True
+    with path.open("w", encoding="utf-8", newline="\n") as stream:
+        for row in rows:
+            stream.write(json.dumps(row, sort_keys=True))
+            stream.write("\n")
 
 
 def _artifact_specs(paths: dict[str, Path]) -> list[list[str]]:

@@ -432,6 +432,25 @@ def _comparison_validation_problems(
         problems.append(f"{role}: comparison task_id must be 'T058'")
     if metadata.get("cohort_identity") != contract["cohort_identity"]:
         problems.append(f"{role}: cohort identity mismatch")
+    if _as_int(metadata.get("battle_comparison_count")) != int(
+        contract["record_count"]
+    ):
+        problems.append(f"{role}: battle_comparison_count mismatch")
+    if metadata.get("source_match_status") != "matched":
+        problems.append(f"{role}: source_match_status must be matched")
+    if metadata.get("evaluation_successful") is not True:
+        problems.append(f"{role}: evaluation_successful must be true")
+    for key in (
+        "source_match_problems",
+        "report_problems",
+        "validation_problems",
+        "problems",
+    ):
+        values = metadata.get(key)
+        if not isinstance(values, list):
+            problems.append(f"{role}: metadata {key} must be a list")
+        elif values:
+            problems.append(f"{role}: metadata {key} must be empty")
     if not _record_range_matches(config, str(contract["record_range"])):
         problems.append(f"{role}: record_range mismatch")
     if _as_int(config.get("worker_count")) != contract["required_worker_count"]:
@@ -446,6 +465,12 @@ def _comparison_validation_problems(
     if missing_labels:
         problems.append(f"{role}: missing required arms {', '.join(missing_labels)}")
     for label in REQUIRED_ROOT_PRIOR_COMPARISON_LABELS:
+        regime = _arm_information_regime(metadata, label)
+        if regime != NATIVE_SEARCH_INFORMATION_REGIME:
+            problems.append(
+                f"{role}:{label}: information regime {regime!r} is not "
+                f"{NATIVE_SEARCH_INFORMATION_REGIME!r}"
+            )
         rows = comparison.results_by_label.get(label, {})
         missing_indices = [index for index in range(expected) if index not in rows]
         if missing_indices:
@@ -453,6 +478,16 @@ def _comparison_validation_problems(
                 f"{role}:{label}: missing controller_result indices "
                 + ", ".join(str(index) for index in missing_indices[:10])
             )
+    for row in comparison.battle_comparisons:
+        index = _optional_int(row.get("comparison_index"))
+        label = f"{role}:battle_comparison[{index if index is not None else '?'}]"
+        if row.get("source_match") is not True:
+            problems.append(f"{label}: source_match must be true")
+        row_problems = row.get("problems")
+        if not isinstance(row_problems, list):
+            problems.append(f"{label}: problems must be a list")
+        elif row_problems:
+            problems.append(f"{label}: problems must be empty")
     return problems
 
 
@@ -1257,6 +1292,17 @@ def _controller_labels(metadata: Mapping[str, Any]) -> list[str]:
         for arm in _sequence(metadata.get("controller_arms"))
         if isinstance(arm, Mapping)
     ]
+
+
+def _arm_information_regime(metadata: Mapping[str, Any], label: str) -> str | None:
+    for arm in _sequence(metadata.get("controller_arms")):
+        mapping = _mapping(arm)
+        if mapping.get("label") != label:
+            continue
+        report = _mapping(mapping.get("report_metadata"))
+        value = report.get("information_regime")
+        return str(value) if value else None
+    return None
 
 
 def _counter_dict(counter: Counter[str]) -> dict[str, int]:
