@@ -41,8 +41,10 @@ selection and chose an existing-root-prior allocation/telemetry diagnostic.
 T057 completed that offline diagnostic, found exact all-arm selected-action
 comparison unavailable for every retained T048/T052 record, and selected a
 root-prior selected-action telemetry instrumentation or replay diagnostic as
-the next path. T058 is now the `READY` task for that diagnostic. New
-implementation work should start only from rows marked `READY` in the task
+the next path. T058 completed that diagnostic, made selected-action comparison
+available for all 122 retained records, and selected a bounded root-prior
+allocation repair experiment. T059 is now the `READY` task for that experiment.
+New implementation work should start only from rows marked `READY` in the task
 index; T034 remains blocked on native sampler support.
 
 ## Goals
@@ -374,7 +376,7 @@ Work:
 - retain complete public history and context;
 - satisfy broad-training readiness per ascension and act;
 - keep mechanical cleanup separate from coverage/search experiments;
-- complete T058's root-prior selected-action telemetry replay diagnostic before
+- complete T059's bounded root-prior allocation repair experiment before
   publishing root-prior complete-run reachability, assisted training repair,
   broad teacher/checkpoint refresh, non-combat ranker branch, or controller
   promotion.
@@ -440,9 +442,11 @@ not advancing to complete-run reachability or promotion. T056 completed the
 post-T055 path-selection synthesis and selected exactly one non-guardrail next
 path: existing-root-prior allocation/telemetry diagnostic. T057 is the
 completed diagnostic task; it found the retained artifacts still lack exact
-all-arm step-level selected-action comparison. T058 is the published
-telemetry/replay diagnostic before controller promotion, another training
-branch, or complete-run reachability.
+all-arm step-level selected-action comparison. T058 completed the
+telemetry/replay diagnostic, made all retained records selected-action
+auditable, found 2 harmful selected-action divergence records, and selected the
+T059 bounded root-prior allocation repair experiment before controller
+promotion, another training branch, or complete-run reachability.
 
 Exit gate: a search change improves fixed evaluation at equal simulation or
 wall-clock budget without natural-weighted regression.

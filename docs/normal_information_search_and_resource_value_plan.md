@@ -289,8 +289,10 @@ completed non-guardrail path selection and chose an existing-root-prior
 allocation/telemetry diagnostic. T057 completed that diagnostic, found exact
 all-arm selected-action comparison unavailable for every retained record, and
 selected a root-prior selected-action telemetry instrumentation or replay
-diagnostic. T058 is now the published `READY` task before larger training,
-complete-run reachability, or non-combat branches.
+diagnostic. T058 completed that diagnostic, made selected-action comparison
+available for all 122 retained T048/T052 records, and selected a bounded
+root-prior allocation repair experiment. T059 is now the published `READY` task
+before larger training, complete-run reachability, or non-combat branches.
 
 Use the Oracle regime to validate priors, leaf values, uncertainty, and search
 instrumentation. Exit when model guidance improves the fixed Oracle curve at
@@ -327,7 +329,7 @@ Retain only auxiliary targets that improve normal-information evaluation.
    coverage, keeping raw policy diagnostics separate from search promotion.
 4. Design and pin the authoritative public-consistent hidden-future sampler;
    T034 remains blocked until that native boundary exists.
-5. Complete T058's root-prior selected-action telemetry replay diagnostic before
+5. Complete T059's bounded root-prior allocation repair experiment before
    publishing root-prior complete-run reachability, assisted training repair,
    broad teacher/checkpoint refresh, non-combat ranker branch, or controller
    promotion; publish implementation work only through `READY` task rows in

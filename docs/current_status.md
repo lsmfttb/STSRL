@@ -69,10 +69,15 @@ diagnostic. T057 is complete: it added that offline diagnostic, summarized 122
 retained existing-root-prior records and 2087 existing-root-prior decisions,
 found exact all-arm step-level selected-action comparison unavailable for every
 retained record, and selected exactly one next path: a root-prior
-selected-action telemetry instrumentation or replay diagnostic. T058 is now
-`READY` for that telemetry/replay diagnostic before any complete-run
-reachability, repair-adjacent training, non-combat, or promotion branch. T034
-remains blocked on native public-consistent hidden-future sampler support.
+selected-action telemetry instrumentation or replay diagnostic. T058 is
+complete: it made selected-action comparison available for all 122 retained
+T048/T052 records, found first selected-action divergence against baseline and
+post-search on all 122 records, identified 2 harmful selected-action divergence
+records, and selected exactly one next path: a bounded root-prior allocation
+repair experiment. T059 is now `READY` for that experiment before any
+complete-run reachability, repair-adjacent training, non-combat, or promotion
+branch. T034 remains blocked on native public-consistent hidden-future sampler
+support.
 
 ## Implemented On Main
 
@@ -1080,6 +1085,33 @@ remains blocked on native public-consistent hidden-future sampler support.
   root-prior complete-run reachability evidence, natural A20 performance,
   broad-training readiness, live-game validation, normal-information strength,
   or final-agent evidence.
+- T058 adds
+  `t058-root-prior-selected-action-telemetry-diagnostic-report-v1` and
+  selected-action identity telemetry for restored-battle search comparisons.
+  Maintainer review accepted the main-retained report sha256
+  `ffadf375902321888f25b6883c474f0060e6aa0e82c2102fb3e3afd29ae78a04`
+  with byte count `8672745` and retention manifest sha256
+  `faf3dacc6c7d887aae3ab8f6878aa67ec1f47edabd071178e70b03f29584172f`
+  with byte count `18891` under
+  `artifacts/t058-root-prior-selected-action-telemetry-replay-pr/`. The
+  retained comparison artifacts are T048 current sha256
+  `f6c316e50121a118fdddf6921b38cb05f81cbc3e3024cf543eab3f9dfb091255`,
+  T048 assist_0 sha256
+  `abcf6ae352e690e4ef1131485ae71d06f1be987a2680cd15ba1bd0f9215b2965`,
+  and T052 Boss/later-act sha256
+  `c6c27c1e554eb6b5211d2d4591ee5b9a7998fc0b7968c02df459a0d009513bbe`.
+  The report verified nine explicit input artifacts, found selected-action
+  identity available for all 122 retained T048/T052 records, kept exact
+  all-arm step-level selected-action comparison feasible for every retained
+  record, and reported exact full-battle path comparison for 11 records. It
+  found first selected-action divergence between existing root-prior and both
+  baseline and post-search arms on all 122 records, counted 2 harmful
+  selected-action divergence records, and selected exactly one next path:
+  `root-prior allocation repair experiment`. This remains Oracle-like
+  restored-battle diagnostic evidence only, not allocation repair evidence,
+  controller promotion, root-prior complete-run reachability evidence, natural
+  A20 performance, broad-training readiness, live-game validation,
+  normal-information strength, or final-agent evidence.
 
 ## Not Implemented On Main
 
@@ -1091,9 +1123,9 @@ unmerged legacy work:
 - model-guided search performance improvement or controller promotion;
 - sufficient Boss/later-act A20 source coverage for broad teacher/checkpoint
   refresh or broad training;
-- root-prior selected-action telemetry instrumentation or replay diagnostic
-  result after T057, root-prior guided complete-run reachability improvement
-  evidence, or root-prior controller promotion;
+- root-prior allocation repair evidence after T058, root-prior guided
+  complete-run reachability improvement evidence, or root-prior controller
+  promotion;
 - normal-information belief search.
 
 Do not use documentation or results from these areas as evidence that `main`
@@ -1249,11 +1281,23 @@ The completed assisted source-generation batch is:
    as the primary next search path, while preserving assisted training and
    de-assisted distribution repair as secondary diagnostic follow-ups.
 
-The published follow-up is T058, which will consume the accepted T057 report
-and stable retained T048/T052 fixed cohorts/checkpoints to instrument or replay
-selected-action telemetry for the existing root-prior line. It must not tune
-root-prior allocation, revive the guardrail, publish root-prior complete-run
-reachability, train or calibrate checkpoints, or make controller-promotion,
+T058 (`Root-prior selected-action telemetry replay diagnostic`) is complete. It
+consumed the accepted T057 report and stable retained T048/T052 fixed
+cohorts/checkpoints, regenerated selected-action comparison artifacts under
+`artifacts/t058-root-prior-selected-action-telemetry-replay-pr/`, and produced
+main-retained report sha256
+`ffadf375902321888f25b6883c474f0060e6aa0e82c2102fb3e3afd29ae78a04`. It made
+selected-action identity comparison available for all 122 retained records,
+found exact full-battle path comparison for 11 records, preserved the T048
+positive fixed-cohort signal and T052 Act-2+ regression as separate evidence,
+and selected exactly one next path:
+`root-prior allocation repair experiment`.
+
+The published follow-up is T059, which will test one bounded versioned
+allocation repair variant over the retained T048/T052 fixed cohorts. It must
+preserve the existing root-prior and abandoned guardrailed variants for
+diagnostics, avoid tuning sweeps, run restored-battle comparison through WSL
+with explicit worker/shard evidence, and make no controller-promotion,
 complete-run, natural A20, broad-training, live-game, or normal-information
 claims.
 
