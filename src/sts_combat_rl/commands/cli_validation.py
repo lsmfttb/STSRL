@@ -318,6 +318,38 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
         return "--reachability-arm requires --a20-reachability-report"
     if args.a20_reachability_report is None and args.stream_reachability_pools:
         return "--stream-reachability-pools requires --a20-reachability-report"
+    t061_outputs = (
+        args.t061_bottleneck_report,
+        args.t061_budget_curve_report,
+        args.t061_factorial_report,
+    )
+    if args.t061_bottleneck_report is not None and (
+        args.t061_budget_curve_report is None or args.t061_factorial_report is None
+    ):
+        return (
+            "--t061-bottleneck-report requires --t061-budget-curve-report and "
+            "--t061-factorial-report"
+        )
+    if args.t061_bottleneck_report is None and any(
+        path is not None for path in t061_outputs[1:]
+    ):
+        return "--t061-budget-curve-report and --t061-factorial-report require --t061-bottleneck-report"
+    if args.t061_bottleneck_report is None and (
+        args.t061_budget_arm or args.t061_factorial_arm
+    ):
+        return "--t061 arm inputs require --t061-bottleneck-report"
+    if args.t061_bottleneck_report is not None and len(args.t061_budget_arm) != 3:
+        return (
+            "--t061-bottleneck-report requires exactly three --t061-budget-arm values"
+        )
+    if args.t061_bottleneck_report is not None and len(args.t061_factorial_arm) != 6:
+        return (
+            "--t061-bottleneck-report requires exactly six --t061-factorial-arm values"
+        )
+    if args.t061_expected_run_count < 1:
+        return "--t061-expected-run-count must be positive"
+    if args.t061_bootstrap_resamples < 100:
+        return "--t061-bootstrap-resamples must be at least 100"
     if (
         args.merge_battle_start_pool_shards is not None
         and not args.battle_start_pool_shard
