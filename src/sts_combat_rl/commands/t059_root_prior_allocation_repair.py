@@ -9,8 +9,11 @@ from pathlib import Path
 from typing import Any
 
 from sts_combat_rl.sim.t058_root_prior_selected_action_telemetry import (
+    T058_SELECTED_ACTION_TELEMETRY_FORMAT_VERSION,
+    T058_SELECTED_ACTION_TELEMETRY_SCHEMA_ID,
     load_t058_root_prior_selected_action_telemetry_report_json,
 )
+from sts_combat_rl.sim.fixed_evaluation_set import FIXED_COHORT_FORMAT_VERSION
 from sts_combat_rl.sim.t059_root_prior_allocation_repair import (
     T059RootPriorAllocationRepairReport,
     T059_COMPARISON_ROLES,
@@ -22,6 +25,17 @@ from sts_combat_rl.sim.t059_root_prior_allocation_repair import (
     format_t059_retention_manifest,
     format_t059_root_prior_allocation_repair_report,
     load_t059_root_prior_comparison_inputs,
+)
+
+
+T058_RETENTION_MANIFEST_SCHEMA_ID = "t058-retention-manifest-v1"
+_T059_JSONL_COMPARISON_ROLES = frozenset(T059_COMPARISON_ROLES)
+_T059_FIXED_COHORT_ROLES = frozenset(
+    {
+        "t048_current_fixed_cohort",
+        "t048_assist0_fixed_cohort",
+        "t052_boss_later_act_fixed_cohort",
+    }
 )
 
 
@@ -138,6 +152,9 @@ def _verified_artifacts(
             raise ValueError(f"missing required T059 input artifact role {role}")
     if len(set(roles)) != len(roles):
         raise ValueError("duplicate T059 input artifact roles")
+    schema_problems = _schema_problems(artifacts)
+    if schema_problems:
+        raise ValueError("; ".join(schema_problems))
     return artifacts
 
 
@@ -222,7 +239,11 @@ def _schema_hint(path: Path) -> dict[str, Any]:
             first = stream.readline()
             if not first:
                 return {"detected_schema_id": "unavailable"}
-            raw = json.loads(first)
+            try:
+                raw = json.loads(first)
+            except json.JSONDecodeError:
+                stream.seek(0)
+                raw = json.load(stream)
     except (OSError, UnicodeDecodeError, json.JSONDecodeError):
         return {"detected_schema_id": "unavailable"}
     if not isinstance(raw, dict):
@@ -237,3 +258,36 @@ def _schema_hint(path: Path) -> dict[str, Any]:
         "detected_schema_id": raw.get("schema_id", "missing"),
         "detected_format_version": raw.get("format_version"),
     }
+
+
+def _schema_problems(artifacts: Sequence[dict[str, Any]]) -> list[str]:
+    problems: list[str] = []
+    by_role = {str(item.get("role")): item for item in artifacts}
+    for role in _T059_JSONL_COMPARISON_ROLES:
+        artifact = by_role.get(role, {})
+        if artifact.get("detected_schema_id") != (
+            "root-prior-guided-search-comparison-v1"
+        ):
+            problems.append(f"{role}: unsupported detected schema")
+        if artifact.get("detected_format_version") != 1:
+            problems.append(f"{role}: unsupported detected format version")
+    report = by_role.get("t058_selected_action_telemetry_report", {})
+    if report.get("detected_schema_id") != T058_SELECTED_ACTION_TELEMETRY_SCHEMA_ID:
+        problems.append("t058 selected-action report: unsupported detected schema")
+    if (
+        report.get("detected_format_version")
+        != T058_SELECTED_ACTION_TELEMETRY_FORMAT_VERSION
+    ):
+        problems.append(
+            "t058 selected-action report: unsupported detected format version"
+        )
+    manifest = by_role.get("t058_retention_manifest", {})
+    if manifest.get("detected_schema_id") != T058_RETENTION_MANIFEST_SCHEMA_ID:
+        problems.append("t058 retention manifest: unsupported detected schema")
+    for role in _T059_FIXED_COHORT_ROLES:
+        artifact = by_role.get(role, {})
+        if artifact.get("detected_schema_id") not in {"missing", None}:
+            problems.append(f"{role}: unsupported detected schema")
+        if artifact.get("detected_format_version") != FIXED_COHORT_FORMAT_VERSION:
+            problems.append(f"{role}: unsupported fixed cohort format version")
+    return problems

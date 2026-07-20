@@ -226,6 +226,26 @@ def test_t059_command_hash_checks_and_writes_report(tmp_path: Path) -> None:
     )
 
 
+def test_t059_command_rejects_input_schema_mismatch(tmp_path: Path) -> None:
+    paths = _write_t059_inputs(tmp_path)
+    comparison = paths["t059_current_repair_comparison"]
+    text = comparison.read_text(encoding="utf-8")
+    comparison.write_text(
+        text.replace(
+            "root-prior-guided-search-comparison-v1",
+            "unsupported-comparison-v1",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="unsupported detected schema"):
+        run_t059_root_prior_allocation_repair_from_paths(
+            artifact_specs=_artifact_specs(paths),
+            output_path=tmp_path / "t059-report.json",
+        )
+
+
 def test_t059_command_rejects_hash_mismatch(tmp_path: Path) -> None:
     paths = _write_t059_inputs(tmp_path)
     specs = _artifact_specs(paths)
@@ -325,7 +345,7 @@ def _write_t059_inputs(tmp_path: Path) -> dict[str, Path]:
             stream,
         )
     paths["t058_retention_manifest"].write_text(
-        '{"schema_id":"t058-retention-manifest-v1"}\n',
+        '{\n  "schema_id": "t058-retention-manifest-v1",\n  "format_version": 1\n}\n',
         encoding="utf-8",
     )
     for role in (
@@ -336,7 +356,10 @@ def _write_t059_inputs(tmp_path: Path) -> dict[str, Path]:
         "t048_assist0_fixed_cohort",
         "t052_boss_later_act_fixed_cohort",
     ):
-        _write_jsonl_metadata(paths[role], "root-prior-guided-search-comparison-v1")
+        if role.endswith("fixed_cohort"):
+            _write_fixed_cohort_metadata(paths[role])
+        else:
+            _write_jsonl_metadata(paths[role], "root-prior-guided-search-comparison-v1")
     paths["t043_assist0_smoke_checkpoint"].write_bytes(b"checkpoint-smoke")
     paths["t043_runs1000_assist0_checkpoint"].write_bytes(b"checkpoint-runs1000")
     for role, comparison in _comparisons().items():
@@ -717,6 +740,22 @@ def _write_jsonl_metadata(path: Path, schema_id: str) -> None:
     with path.open("w", encoding="utf-8", newline="\n") as stream:
         stream.write(
             json.dumps({"type": "metadata", "metadata": {"schema_id": schema_id}})
+        )
+        stream.write("\n")
+
+
+def _write_fixed_cohort_metadata(path: Path) -> None:
+    with path.open("w", encoding="utf-8", newline="\n") as stream:
+        stream.write(
+            json.dumps(
+                {
+                    "type": "metadata",
+                    "metadata": {
+                        "format_version": 3,
+                        "record_count": 0,
+                    },
+                }
+            )
         )
         stream.write("\n")
 
