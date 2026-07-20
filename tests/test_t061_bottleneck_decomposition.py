@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+
 import pytest
 
 from sts_combat_rl.sim.t061_bottleneck_decomposition import (
@@ -7,21 +9,63 @@ from sts_combat_rl.sim.t061_bottleneck_decomposition import (
     build_t061_bottleneck_report,
     build_t061_factorial_report,
 )
+from sts_combat_rl.commands.oracle_search import _select_record_range
 
 
-def _budget_arm(budget: int, *, provenance=None):
+def _provenance(distribution: str):
     return {
-        "provenance": provenance
-        or {
-            "simulator": "pinned",
+        "simulator": "sts_lightspeed",
+        "source_manifest": "docs/sts_lightspeed_source_manifest.json",
+        "integration_commit": "commit",
+        "action_space": "initial_no_potions",
+        "root_selection_rule": "highest_mean",
+        "information_regime": "full_simulator_state_oracle_like",
+        "search_api": "StepSimulator.battle_search.v1",
+        "distribution_kind": distribution,
+        "controller_name": "oracle_search_v1",
+    }
+
+
+def _artifact(name: str):
+    return {"path": f"artifacts/{name}.json", "sha256": f"hash-{name}"}
+
+
+def _budget_arm(budget: int):
+    return {
+        "provenance": _provenance("fixed_cohort"),
+        "arm_provenance": {
+            "budget": budget,
+            "controller_name": "oracle_search_v1",
+            "search_budget": budget,
+            "root_selection_rule": "highest_mean",
+            "action_space": "initial_no_potions",
             "information_regime": "full_simulator_state_oracle_like",
+            "distribution_kind": "fixed_cohort",
+            "workers": 16,
+            "shards": 16,
+            "cohort_record_ids_sha256": hashlib.sha256(
+                "r0\nr1\nr2".encode()
+            ).hexdigest(),
         },
+        "artifact_identity": _artifact(f"budget-{budget}"),
         "records": [
             {
                 "record_id": f"r{i}",
                 "won": i == 0,
                 "terminal_absolute_hp": 10 + budget,
-                "selected_root_action": "a",
+                "status": "win" if i == 0 else "loss",
+                "selected_root_action": {"action": "a"},
+                "simulator_steps": budget,
+                "wall_clock_seconds": 1.0,
+                "potion_outcome": {"status": "available", "value": []},
+                "structured_terminal_resource_outcome": {
+                    "schema_id": "structured-battle-outcome-v1"
+                },
+                "act": 1,
+                "room_type": "BOSS",
+                "encounter_id": "HEXAGHOST",
+                "boss": "BOSS",
+                "problems": [],
             }
             for i in range(3)
         ],
@@ -30,24 +74,73 @@ def _budget_arm(budget: int, *, provenance=None):
 
 def _factorial_arm(driver: str, budget: int, *, later_act: bool = False):
     return {
-        "provenance": {
-            "simulator": "pinned",
+        "provenance": _provenance("natural_run"),
+        "arm_provenance": {
+            "driver": driver,
+            "budget": budget,
+            "controller_name": "oracle_search_v1",
+            "search_budget": budget,
+            "root_selection_rule": "highest_mean",
+            "action_space": "initial_no_potions",
             "information_regime": "full_simulator_state_oracle_like",
+            "distribution_kind": "natural_run",
+            "workers": 16,
+            "shards": 16,
+            "seed_start": 0,
+            "seed_end": 3,
+            "sim_steps": 500,
         },
+        "artifact_identity": _artifact(f"{driver}-{budget}"),
         "runs": [
             {
                 "seed": str(i),
+                "source_run_id": f"run-{i}",
                 "won": budget == 300 and driver == "expert_non_combat_v1",
+                "status": "completed",
+                "terminal_floor": 10,
+                "terminal_status": "PLAYER_LOSS",
+                "act1_boss_start": False,
+                "act1_boss_victory": False,
+                "act2_boss_start": False,
+                "act2_boss_victory": False,
+                "act3_boss_start": False,
+                "act3_boss_victory": False,
                 "act2_entry": later_act,
                 "act3_entry": False,
+                "act4_entry": False,
+                "heart_start": False,
                 "heart_victory": False,
-                "status": "completed",
+                "shield_spear_start": False,
+                "shield_spear_outcome": False,
+                "death_encounter": "JAW_WORM",
+                "pre_death_public_resource_snapshot": None,
                 "natural_battle_starts": 2,
                 "unique_source_starts": 2,
+                "act_counts": {"1": 2},
+                "room_type_counts": {"MONSTER": 2},
+                "encounter_id_counts": {"JAW_WORM": 2},
+                "unique_act_counts": {"1": 2},
+                "unique_room_type_counts": {"MONSTER": 2},
+                "unique_encounter_id_counts": {"JAW_WORM": 2},
+                "simulator_steps": budget * 2,
+                "wall_clock_seconds": 1.0,
+                "truncation": False,
+                "controller_error": False,
+                "unsupported_state": False,
+                "problems": [],
             }
             for i in range(4)
         ],
     }
+
+
+def _factorial_arms():
+    drivers = ("stochastic_non_combat_v1", "expert_non_combat_v1")
+    return [
+        (driver, str(budget), _factorial_arm(driver, budget))
+        for driver in drivers
+        for budget in (20, 100, 300)
+    ]
 
 
 def test_budget_curve_requires_identical_cohort_and_reports_pairwise():
@@ -56,6 +149,7 @@ def test_budget_curve_requires_identical_cohort_and_reports_pairwise():
     )
     assert report["command_passed"] is True
     assert report["cohort"]["record_count"] == 3
+    assert len(report["arms"]["20"]["records"]) == 3
     assert report["pairwise"]["300_vs_20"]["first_action_disagreement_count"] == 0
 
     bad = _budget_arm(300)
@@ -67,32 +161,27 @@ def test_budget_curve_requires_identical_cohort_and_reports_pairwise():
 
 
 def test_factorial_requires_same_seed_set_and_keeps_zero_cells():
-    drivers = ("stochastic_non_combat_v1", "expert_non_combat_v1")
-    arms = [
-        (driver, str(budget), _factorial_arm(driver, budget))
-        for driver in drivers
-        for budget in (20, 100, 300)
-    ]
     report = build_t061_factorial_report(
-        arms, expected_run_count=4, bootstrap_resamples=100
+        _factorial_arms(), expected_run_count=4, bootstrap_resamples=100
     )
     assert report["total_run_count"] == 24
     assert (
         report["arms"]["stochastic_non_combat_v1@20"]["reachability"]["act3_entry"] == 0
     )
     assert report["effects"]["driver_effects"]["300"]["won"]["mean"] == 1.0
+    assert "interaction_effects" in report["effects"]
 
-    changed = _factorial_arm(drivers[0], 20)
+    changed = _factorial_arm("stochastic_non_combat_v1", 20)
     changed["runs"][0]["seed"] = "other"
     changed_arms = [
         (
             driver,
             str(budget),
             changed
-            if (driver, budget) == (drivers[0], 20)
+            if (driver, budget) == ("stochastic_non_combat_v1", 20)
             else _factorial_arm(driver, budget),
         )
-        for driver in drivers
+        for driver in ("stochastic_non_combat_v1", "expert_non_combat_v1")
         for budget in (20, 100, 300)
     ]
     with pytest.raises(ValueError, match="same seeds"):
@@ -101,20 +190,53 @@ def test_factorial_requires_same_seed_set_and_keeps_zero_cells():
         )
 
 
-def test_decision_recommends_one_next_task_using_published_order():
+def test_swapped_arm_provenance_fails_closed():
+    arms = _factorial_arms()
+    arms[0][2]["arm_provenance"]["driver"] = "expert_non_combat_v1"
+    with pytest.raises(ValueError, match="driver does not match"):
+        build_t061_factorial_report(arms, expected_run_count=4, bootstrap_resamples=100)
+
+    arms = _factorial_arms()
+    arms[0][2]["arm_provenance"]["budget"] = 300
+    with pytest.raises(ValueError, match="budget does not match"):
+        build_t061_factorial_report(arms, expected_run_count=4, bootstrap_resamples=100)
+
+
+def test_missing_evidence_fails_closed_instead_of_becoming_zero():
+    arms = _factorial_arms()
+    del arms[0][2]["runs"][0]["act3_entry"]
+    with pytest.raises(ValueError, match="missing fields"):
+        build_t061_factorial_report(arms, expected_run_count=4, bootstrap_resamples=100)
+
+
+def test_decision_includes_complete_run_budget_effect_and_recommends_t062():
     budget = build_t061_budget_curve_report(
         [(str(budget), _budget_arm(budget)) for budget in (20, 100, 300)]
     )
-    drivers = ("stochastic_non_combat_v1", "expert_non_combat_v1")
     factorial = build_t061_factorial_report(
-        [
-            (driver, str(budget), _factorial_arm(driver, budget))
-            for driver in drivers
-            for budget in (20, 100, 300)
-        ],
-        expected_run_count=4,
-        bootstrap_resamples=100,
+        _factorial_arms(), expected_run_count=4, bootstrap_resamples=100
     )
     decision = build_t061_bottleneck_report(budget, factorial)
-    assert decision["decision"]["recommended_next_task"] == "T065"
-    assert isinstance(decision["decision"]["recommended_next_task"], str)
+    assert decision["decision"]["recommended_next_task"] == "T062"
+    assert (
+        "complete_run_factorial_budget_effect"
+        in decision["decision"]["battle_budget_signal_sources"]
+    )
+
+
+def test_truncation_remains_visible_and_fails_command():
+    arms = _factorial_arms()
+    arms[0][2]["runs"][0]["status"] = "truncated"
+    arms[0][2]["runs"][0]["truncation"] = True
+    report = build_t061_factorial_report(
+        arms, expected_run_count=4, bootstrap_resamples=100
+    )
+    assert report["command_passed"] is False
+    assert report["arms"]["stochastic_non_combat_v1@20"]["truncation_count"] == 1
+
+
+def test_oracle_record_range_selects_explicit_half_open_slice():
+    records = list(range(6))
+    assert list(_select_record_range(records, "1:4")) == [1, 2, 3]
+    with pytest.raises(ValueError, match="outside the cohort"):
+        _select_record_range(records, "4:7")

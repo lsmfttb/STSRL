@@ -28,6 +28,11 @@ _REQUIRED_BUDGETS = (20, 100, 300)
 _REQUIRED_DRIVERS = ("stochastic_non_combat_v1", "expert_non_combat_v1")
 _REQUIRED_REACHABILITY_FIELDS = (
     "act1_boss_start",
+    "act1_boss_victory",
+    "act2_boss_start",
+    "act2_boss_victory",
+    "act3_boss_start",
+    "act3_boss_victory",
     "act2_entry",
     "act3_entry",
     "act4_entry",
@@ -35,6 +40,58 @@ _REQUIRED_REACHABILITY_FIELDS = (
     "heart_victory",
     "shield_spear_start",
     "shield_spear_outcome",
+)
+_REQUIRED_PROVENANCE_FIELDS = (
+    "simulator",
+    "source_manifest",
+    "integration_commit",
+    "action_space",
+    "root_selection_rule",
+    "information_regime",
+    "search_api",
+    "distribution_kind",
+    "controller_name",
+)
+_REQUIRED_FACTORIAL_ROW_FIELDS = (
+    "seed",
+    "source_run_id",
+    "status",
+    "terminal_floor",
+    "terminal_status",
+    "won",
+    *_REQUIRED_REACHABILITY_FIELDS,
+    "death_encounter",
+    "pre_death_public_resource_snapshot",
+    "natural_battle_starts",
+    "unique_source_starts",
+    "act_counts",
+    "room_type_counts",
+    "encounter_id_counts",
+    "unique_act_counts",
+    "unique_room_type_counts",
+    "unique_encounter_id_counts",
+    "simulator_steps",
+    "wall_clock_seconds",
+    "truncation",
+    "controller_error",
+    "unsupported_state",
+    "problems",
+)
+_REQUIRED_BUDGET_ROW_FIELDS = (
+    "record_id",
+    "won",
+    "terminal_absolute_hp",
+    "status",
+    "selected_root_action",
+    "simulator_steps",
+    "wall_clock_seconds",
+    "potion_outcome",
+    "structured_terminal_resource_outcome",
+    "act",
+    "room_type",
+    "encounter_id",
+    "boss",
+    "problems",
 )
 
 
@@ -56,6 +113,10 @@ def build_t061_budget_curve_report(
     ):
         raise ValueError("T061 budget curve requires exactly budgets 20, 100, and 300")
     by_budget = {int(label): _mapping(payload) for label, payload in arms}
+    for label, payload in arms:
+        budget = _required_label(label, "budget")
+        _validate_common_provenance(payload, f"budget {budget}")
+        _validate_budget_arm(payload, budget)
     ids_by_budget = {
         budget: _unique_ids(_records(payload, "records"), f"budget {budget}")
         for budget, payload in by_budget.items()
@@ -63,12 +124,21 @@ def build_t061_budget_curve_report(
     reference_ids = ids_by_budget[20]
     if any(ids != reference_ids for ids in ids_by_budget.values()):
         raise ValueError("T061 budget arms must contain the same cohort identities")
+    for budget, payload in by_budget.items():
+        arm = _mapping(payload["arm_provenance"])
+        if arm.get("cohort_record_ids_sha256") != _ids_hash(reference_ids):
+            raise ValueError(
+                f"budget {budget}: cohort identity hash does not match records"
+            )
     provenance = _common_provenance(by_budget.values())
     reports: dict[str, Any] = {}
     for budget in _REQUIRED_BUDGETS:
         rows = _records(by_budget[budget], "records")
         reports[str(budget)] = {
             "record_count": len(rows),
+            "arm_provenance": _mapping(by_budget[budget]["arm_provenance"]),
+            "input_artifact": _artifact_identity(by_budget[budget]),
+            "records": rows,
             "win_count": sum(_truth(row.get("won")) for row in rows),
             "loss_count": sum(not _truth(row.get("won")) for row in rows),
             "mean_terminal_absolute_hp": _mean(
@@ -99,6 +169,24 @@ def build_t061_budget_curve_report(
             str(row["record_id"]): row for row in _records(by_budget[right], "records")
         }
         pairwise[f"{right}_vs_{left}"] = {
+            "input_artifacts": {
+                "left": _artifact_identity(by_budget[left]),
+                "right": _artifact_identity(by_budget[right]),
+            },
+            "records": [
+                {
+                    "record_id": key,
+                    "left_won": _truth(left_rows[key]["won"]),
+                    "right_won": _truth(right_rows[key]["won"]),
+                    "left_terminal_absolute_hp": left_rows[key]["terminal_absolute_hp"],
+                    "right_terminal_absolute_hp": right_rows[key][
+                        "terminal_absolute_hp"
+                    ],
+                    "first_action_disagreement": _action_key(left_rows[key])
+                    != _action_key(right_rows[key]),
+                }
+                for key in reference_ids
+            ],
             "win_delta": sum(
                 _truth(right_rows[key].get("won")) - _truth(left_rows[key].get("won"))
                 for key in reference_ids
@@ -173,6 +261,9 @@ def build_t061_factorial_report(
     by_key = {
         (driver, int(budget)): _mapping(payload) for driver, budget, payload in arms
     }
+    for driver, budget, payload in arms:
+        _validate_common_provenance(payload, f"{driver}@{budget}")
+        _validate_factorial_arm(payload, driver, int(budget), expected_run_count)
     seed_lists = {
         key: _unique_seed_rows(payload, key) for key, payload in by_key.items()
     }
@@ -188,6 +279,8 @@ def build_t061_factorial_report(
         arm_summary[f"{key[0]}@{key[1]}"] = {
             **_run_summary(rows),
             "arm_provenance": _mapping(payload.get("arm_provenance")),
+            "input_artifact": _artifact_identity(payload),
+            "run_results": rows,
         }
     effects = _factorial_effects(
         by_key, reference_seeds, bootstrap_resamples, bootstrap_seed
@@ -216,7 +309,7 @@ def build_t061_bottleneck_report(
 ) -> dict[str, Any]:
     """Apply the published decision table and return exactly one next task."""
 
-    battle_signal = _meaningful_budget_signal(budget_report)
+    battle_signal = _meaningful_budget_signal(budget_report, factorial_report)
     driver_signal = _meaningful_driver_signal(factorial_report)
     if battle_signal:
         recommendation = "T062"
@@ -241,6 +334,9 @@ def build_t061_bottleneck_report(
             "recommended_next_task": recommendation,
             "rationale": rationale,
             "battle_budget_signal": battle_signal,
+            "battle_budget_signal_sources": _budget_signal_sources(
+                budget_report, factorial_report
+            ),
             "non_combat_driver_signal": driver_signal,
             "decision_table": "battle_effect_then_driver_effect_then_curriculum_then_followup",
         },
@@ -332,6 +428,13 @@ def _run_summary(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         "reachability": {
             field: counts.get(field, 0) for field in _REQUIRED_REACHABILITY_FIELDS
         },
+        "act_boss_reachability": {
+            f"act{act}": {
+                "entry_count": counts[f"act{act}_boss_start"],
+                "victory_count": counts[f"act{act}_boss_victory"],
+            }
+            for act in (1, 2, 3)
+        },
         "terminal_status_counts": dict(Counter(_status(row) for row in rows)),
         "terminal_floor_counts": dict(
             Counter(str(row.get("terminal_floor", "unavailable")) for row in rows)
@@ -363,10 +466,15 @@ def _run_summary(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         ),
         "compute": {
             "simulator_steps": sum(
-                _number(row.get("simulator_steps")) or 0 for row in rows
+                _number(row["simulator_steps"]) or 0 for row in rows
             ),
             "wall_clock_seconds": sum(
-                _number(row.get("wall_clock_seconds")) or 0.0 for row in rows
+                _number(row["wall_clock_seconds"]) or 0.0 for row in rows
+            ),
+            "simulator_steps_observed": False,
+            "simulator_steps_basis": (
+                "native search budget times retained natural battle starts; "
+                "per-decision native step telemetry was not retained by the source pool"
             ),
         },
     }
@@ -386,6 +494,173 @@ def _common_provenance(payloads: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             "T061 arms must preserve identical simulator/action/information provenance"
         )
     return values[0]
+
+
+def _validate_common_provenance(payload: Mapping[str, Any], label: str) -> None:
+    provenance = payload.get("provenance")
+    if not isinstance(provenance, Mapping):
+        raise ValueError(f"{label}: provenance must be an object")
+    missing = [
+        field for field in _REQUIRED_PROVENANCE_FIELDS if field not in provenance
+    ]
+    if missing:
+        raise ValueError(f"{label}: provenance missing fields {missing}")
+    if provenance["simulator"] != "sts_lightspeed":
+        raise ValueError(f"{label}: unsupported simulator provenance")
+    if provenance["information_regime"] != "full_simulator_state_oracle_like":
+        raise ValueError(f"{label}: unsupported information regime")
+    if provenance["root_selection_rule"] != "highest_mean":
+        raise ValueError(f"{label}: unsupported root selection rule")
+    if provenance["distribution_kind"] not in {"natural_run", "fixed_cohort"}:
+        raise ValueError(f"{label}: unsupported distribution kind")
+
+
+def _validate_arm_common(
+    payload: Mapping[str, Any], label: str, budget: int, expected_distribution: str
+) -> dict[str, Any]:
+    arm = payload.get("arm_provenance")
+    if not isinstance(arm, Mapping):
+        raise ValueError(f"{label}: arm_provenance must be an object")
+    required = (
+        "budget",
+        "controller_name",
+        "search_budget",
+        "root_selection_rule",
+        "action_space",
+        "information_regime",
+        "workers",
+        "shards",
+        "distribution_kind",
+    )
+    missing = [field for field in required if field not in arm]
+    if missing:
+        raise ValueError(f"{label}: arm_provenance missing fields {missing}")
+    expected = {
+        "budget": budget,
+        "controller_name": "oracle_search_v1",
+        "search_budget": budget,
+        "root_selection_rule": "highest_mean",
+        "action_space": "initial_no_potions",
+        "information_regime": "full_simulator_state_oracle_like",
+        "distribution_kind": expected_distribution,
+    }
+    for field, value in expected.items():
+        if arm[field] != value:
+            raise ValueError(f"{label}: arm_provenance {field} does not match arm")
+    if not isinstance(arm["workers"], int) or not isinstance(arm["shards"], int):
+        raise ValueError(f"{label}: arm_provenance workers/shards must be integers")
+    if arm["workers"] != 16 or arm["shards"] != 16:
+        raise ValueError(f"{label}: T061 evidence requires 16 workers and 16 shards")
+    return {str(key): value for key, value in arm.items()}
+
+
+def _validate_budget_arm(payload: Mapping[str, Any], budget: int) -> None:
+    arm = _validate_arm_common(payload, f"budget {budget}", budget, "fixed_cohort")
+    if "cohort_record_ids_sha256" not in arm:
+        raise ValueError(f"budget {budget}: cohort identity provenance is missing")
+    for row in _records(payload, "records"):
+        _validate_row_fields(row, _REQUIRED_BUDGET_ROW_FIELDS, f"budget {budget}")
+        if not isinstance(row["won"], bool):
+            raise ValueError("T061 budget rows require boolean won values")
+        if _number(row["terminal_absolute_hp"]) is None:
+            raise ValueError("T061 budget rows require numeric terminal HP")
+        if not isinstance(row["selected_root_action"], Mapping):
+            raise ValueError("T061 budget rows require selected_root_action objects")
+        if not isinstance(row["problems"], list):
+            raise ValueError("T061 budget rows require a problems list")
+    if _artifact_identity(payload) is None:
+        raise ValueError(f"budget {budget}: input artifact identity is missing")
+
+
+def _validate_factorial_arm(
+    payload: Mapping[str, Any], driver: str, budget: int, expected_run_count: int
+) -> None:
+    label = f"{driver}@{budget}"
+    arm = _validate_arm_common(payload, label, budget, "natural_run")
+    if arm.get("driver") != driver:
+        raise ValueError(f"{label}: arm_provenance driver does not match arm")
+    for field in ("seed_start", "seed_end", "sim_steps"):
+        if not isinstance(arm.get(field), int):
+            raise ValueError(f"{label}: arm_provenance {field} must be an integer")
+    if arm["sim_steps"] != 500:
+        raise ValueError(f"{label}: T061 factorial evidence requires sim_steps=500")
+    rows = _records(payload, "runs")
+    if len(rows) != expected_run_count:
+        raise ValueError(f"{label}: expected {expected_run_count} runs")
+    _validate_row_fields(rows[0] if rows else {}, _REQUIRED_FACTORIAL_ROW_FIELDS, label)
+    for row in rows:
+        _validate_row_fields(row, _REQUIRED_FACTORIAL_ROW_FIELDS, label)
+        if not isinstance(row["won"], bool):
+            raise ValueError(f"{label}: won must be boolean")
+        if not isinstance(row["status"], str) or not row["status"]:
+            raise ValueError(f"{label}: status must be a non-empty string")
+        if not isinstance(row["terminal_status"], str):
+            raise ValueError(f"{label}: terminal_status must be a string")
+        if _number(row["terminal_floor"]) is None:
+            raise ValueError(f"{label}: terminal_floor must be numeric")
+        for field in _REQUIRED_REACHABILITY_FIELDS:
+            if not isinstance(row[field], bool):
+                raise ValueError(f"{label}: {field} must be boolean")
+        for field in ("natural_battle_starts", "unique_source_starts"):
+            if not isinstance(row[field], int) or row[field] < 0:
+                raise ValueError(f"{label}: {field} must be a non-negative integer")
+        for field in (
+            "act_counts",
+            "room_type_counts",
+            "encounter_id_counts",
+            "unique_act_counts",
+            "unique_room_type_counts",
+            "unique_encounter_id_counts",
+        ):
+            if not isinstance(row[field], Mapping):
+                raise ValueError(f"{label}: {field} must be an object")
+        if (
+            _number(row["simulator_steps"]) is None
+            or _number(row["wall_clock_seconds"]) is None
+        ):
+            raise ValueError(f"{label}: compute fields must be numeric")
+        if (
+            not isinstance(row["truncation"], bool)
+            or not isinstance(row["controller_error"], bool)
+            or not isinstance(row["unsupported_state"], bool)
+        ):
+            raise ValueError(f"{label}: failure flags must be boolean")
+        if not isinstance(row["problems"], list):
+            raise ValueError(f"{label}: problems must be a list")
+    numeric_seeds = []
+    for row in rows:
+        try:
+            numeric_seeds.append(int(str(row["seed"])))
+        except (TypeError, ValueError):
+            continue
+    if len(numeric_seeds) == len(rows):
+        expected_seeds = set(range(arm["seed_start"], arm["seed_end"] + 1))
+        if (
+            set(numeric_seeds) != expected_seeds
+            or len(expected_seeds) != expected_run_count
+        ):
+            raise ValueError(f"{label}: seed range does not match arm provenance")
+    if _artifact_identity(payload) is None:
+        raise ValueError(f"{label}: input artifact identity is missing")
+
+
+def _validate_row_fields(
+    row: Mapping[str, Any], required: Sequence[str], label: str
+) -> None:
+    missing = [field for field in required if field not in row]
+    if missing:
+        raise ValueError(f"{label}: row missing fields {missing}")
+
+
+def _artifact_identity(payload: Mapping[str, Any]) -> dict[str, Any] | None:
+    value = payload.get("artifact_identity")
+    if not isinstance(value, Mapping):
+        return None
+    if not isinstance(value.get("sha256"), str) or not value["sha256"]:
+        return None
+    if not isinstance(value.get("path"), str) or not value["path"]:
+        return None
+    return {str(key): item for key, item in value.items()}
 
 
 def _unique_ids(rows: Sequence[Mapping[str, Any]], label: str) -> list[str]:
@@ -468,10 +743,38 @@ def _bootstrap_ci(values: Sequence[float], resamples: int, seed: int) -> list[fl
     return [means[int(0.025 * (len(means) - 1))], means[int(0.975 * (len(means) - 1))]]
 
 
-def _meaningful_budget_signal(report: Mapping[str, Any]) -> bool:
+def _meaningful_budget_signal(
+    report: Mapping[str, Any], factorial_report: Mapping[str, Any] | None = None
+) -> bool:
     effects = _mapping(report.get("pairwise")).get("300_vs_20", {})
     win_effect = _mapping(effects).get("win_effect", {})
-    return _positive_ci(win_effect)
+    if _positive_ci(win_effect):
+        return True
+    if factorial_report is None:
+        return False
+    budget_effects = _mapping(factorial_report.get("effects")).get("budget_effects", {})
+    return any(
+        _positive_ci(_mapping(budget_effects.get(driver)).get(metric))
+        for driver in _REQUIRED_DRIVERS
+        for metric in ("won", "act2_entry", "act3_entry", "heart_victory")
+    )
+
+
+def _budget_signal_sources(
+    report: Mapping[str, Any], factorial_report: Mapping[str, Any]
+) -> list[str]:
+    sources: list[str] = []
+    effects = _mapping(report.get("pairwise")).get("300_vs_20", {})
+    if _positive_ci(_mapping(effects).get("win_effect")):
+        sources.append("restored_battle_300_vs_20")
+    budget_effects = _mapping(factorial_report.get("effects")).get("budget_effects", {})
+    if any(
+        _positive_ci(_mapping(budget_effects.get(driver)).get(metric))
+        for driver in _REQUIRED_DRIVERS
+        for metric in ("won", "act2_entry", "act3_entry", "heart_victory")
+    ):
+        sources.append("complete_run_factorial_budget_effect")
+    return sources
 
 
 def _meaningful_driver_signal(report: Mapping[str, Any]) -> bool:
@@ -508,11 +811,16 @@ def _action_key(row: Mapping[str, Any]) -> str:
 
 
 def _status(row: Mapping[str, Any]) -> str:
-    return str(row.get("status", row.get("termination_status", "completed")))
+    value = row.get("status")
+    if not isinstance(value, str) or not value:
+        raise ValueError("T061 rows require an explicit non-empty status")
+    return value
 
 
 def _truth(value: Any) -> int:
-    return int(value is True or value == 1 or value == "true" or value == "win")
+    if not isinstance(value, bool):
+        raise ValueError("T061 boolean evidence must be an explicit boolean")
+    return int(value)
 
 
 def _number(value: Any) -> float | None:
@@ -526,7 +834,10 @@ def _number(value: Any) -> float | None:
 def _metric_number(value: Any) -> float:
     if isinstance(value, bool):
         return float(value)
-    return _number(value) or 0.0
+    number = _number(value)
+    if number is None:
+        raise ValueError("T061 effect metric is missing or non-numeric")
+    return number
 
 
 def _mean(values: Sequence[float | None]) -> float | None:
