@@ -47,15 +47,21 @@ from sts_combat_rl.sim.oracle_search import (
 )
 from sts_combat_rl.sim.root_prior_guided_search import (
     GUARDRAILED_ROOT_PRIOR_GUIDED_SEARCH_CONTROLLER_VERSION,
+    ROOT_PRIOR_ALLOCATION_REPAIR_STRATEGY,
+    ROOT_PRIOR_ALLOCATION_REPAIR_VERSION,
     GuardrailedRootPriorGuidedSearchController,
+    RootPriorAllocationRepairConfig,
     RootPriorAllocationGuardrailConfig,
     RootPriorGuidedSearchController,
+    T059_REPAIRED_ROOT_PRIOR_GUIDED_SEARCH_CONTROLLER_VERSION,
+    T059RootPriorAllocationRepairSearchController,
 )
 from sts_combat_rl.sim.root_prior_guided_search_comparison import (
     BASELINE_ORACLE_LABEL,
     GUARDRAILED_ROOT_PRIOR_GUIDED_LABEL,
     POST_SEARCH_MODEL_GUIDED_LABEL,
     ROOT_PRIOR_GUIDED_LABEL,
+    T059_REPAIRED_ROOT_PRIOR_GUIDED_LABEL,
     build_root_prior_guided_search_comparison_report,
     dump_root_prior_guided_search_comparison_jsonl,
     format_root_prior_guided_search_comparison_report,
@@ -512,6 +518,54 @@ def test_guardrailed_root_prior_controller_caps_public_prior_telemetry() -> None
     )
 
 
+def test_t059_repair_controller_entropy_tempers_public_prior_without_guardrail() -> (
+    None
+):
+    action_space = ActionSpaceConfig.initial_no_potions()
+    snapshot = _battle_snapshot()
+    actions = _actions()
+    context = build_decision_context(snapshot.raw, actions, action_space)
+    controller = T059RootPriorAllocationRepairSearchController(
+        simulations=10,
+        scorer=_FakeGuidanceScorer(probabilities=(0.99, 0.01)),
+        root_selection_rule="highest_mean",
+        repair_config=RootPriorAllocationRepairConfig(prior_entropy_temperature=2.0),
+        action_space=action_space,
+    )
+
+    decision = controller.select_action(
+        _ComparisonAdapter(),
+        snapshot,
+        actions,
+        context,
+        step_index=0,
+    )
+
+    assert decision.provenance.config["task_id"] == "T059"
+    assert decision.provenance.config["controller_version"] == (
+        T059_REPAIRED_ROOT_PRIOR_GUIDED_SEARCH_CONTROLLER_VERSION
+    )
+    allocation = decision.provenance.config["root_prior_allocation"]
+    assert allocation["repair"]["version"] == ROOT_PRIOR_ALLOCATION_REPAIR_VERSION
+    assert allocation["repair"]["strategy"] == ROOT_PRIOR_ALLOCATION_REPAIR_STRATEGY
+    assert allocation["guardrail_revived"] is False
+    assert "guardrail" not in allocation
+
+    report = decision.metadata["root_prior_guided_decision_reports"][0]
+    assert report["repair_config"]["strategy"] == ROOT_PRIOR_ALLOCATION_REPAIR_STRATEGY
+    assert report["pre_repair_prior_summary"]["max_prior_probability"] == 0.99
+    assert report["prior_summary"]["max_prior_probability"] < 0.99
+    assert report["repair_summary"]["rank_order_preserved"] is True
+    assert report["repair_summary"]["guardrail_revived"] is False
+    telemetry = decision.metadata["search_decision_telemetry"][0]
+    assert telemetry["controller_kind"] == (
+        "t059_root_prior_allocation_repair_oracle_battle_search"
+    )
+    assert telemetry["search_backend"]["root_prior_allocation_repair"]["version"] == (
+        ROOT_PRIOR_ALLOCATION_REPAIR_VERSION
+    )
+
+
 def test_root_prior_guided_comparison_runs_required_arms(tmp_path) -> None:
     cohort_path = tmp_path / "cohort.jsonl"
     with cohort_path.open("w", encoding="utf-8", newline="\n") as stream:
@@ -714,6 +768,71 @@ def test_root_prior_guided_comparison_accepts_guardrailed_t054_arm(
     assert [arm.label for arm in report.arms][-1] == GUARDRAILED_ROOT_PRIOR_GUIDED_LABEL
     guardrail_summary = root_prior_allocation_summary(report.arms[3].report)
     assert guardrail_summary["decision_count"] == 2
+
+
+def test_root_prior_guided_comparison_accepts_t059_repair_arm(tmp_path) -> None:
+    cohort_path = tmp_path / "cohort.jsonl"
+    with cohort_path.open("w", encoding="utf-8", newline="\n") as stream:
+        dump_fixed_cohort_jsonl(_cohort(), stream)
+
+    action_space = ActionSpaceConfig.initial_no_potions()
+    scorer = _FakeGuidanceScorer()
+    baseline = OracleSearchController(
+        simulations=10,
+        root_selection_rule="highest_mean",
+        action_space=action_space,
+        native_source_identity={"integration_commit": "abc"},
+    )
+    guided = ModelGuidedOracleSearchV2Controller(
+        simulations=10,
+        scorer=scorer,
+        policy_probability_weight=0.10,
+        action_space=action_space,
+        native_source_identity={"integration_commit": "abc"},
+    )
+    root_prior = RootPriorGuidedSearchController(
+        simulations=10,
+        scorer=scorer,
+        root_selection_rule="highest_mean",
+        action_space=action_space,
+        native_source_identity={"integration_commit": "abc"},
+    )
+    repair = T059RootPriorAllocationRepairSearchController(
+        simulations=10,
+        scorer=scorer,
+        root_selection_rule="highest_mean",
+        action_space=action_space,
+        native_source_identity={"integration_commit": "abc"},
+    )
+
+    report = run_root_prior_guided_search_comparison_from_cohort_path(
+        adapter_factory=_ComparisonAdapter,
+        cohort_path=cohort_path,
+        controller_arms=(
+            (BASELINE_ORACLE_LABEL, "baseline_oracle_search", baseline),
+            (POST_SEARCH_MODEL_GUIDED_LABEL, "post_search_v2", guided),
+            (ROOT_PRIOR_GUIDED_LABEL, "root_prior_allocation", root_prior),
+            (
+                T059_REPAIRED_ROOT_PRIOR_GUIDED_LABEL,
+                "t059_root_prior_allocation_repair",
+                repair,
+            ),
+        ),
+        action_space=action_space,
+        max_battle_steps=3,
+        run_scale="smoke",
+        comparison_task_id="T059",
+        worker_count=1,
+        shard_count=1,
+    )
+
+    assert report.evaluation_successful
+    assert report.comparison_config["task_id"] == "T059"
+    assert [arm.label for arm in report.arms][
+        -1
+    ] == T059_REPAIRED_ROOT_PRIOR_GUIDED_LABEL
+    repair_summary = root_prior_allocation_summary(report.arms[3].report)
+    assert repair_summary["decision_count"] == 2
 
 
 def test_root_prior_guided_comparison_validates_required_contract(tmp_path) -> None:

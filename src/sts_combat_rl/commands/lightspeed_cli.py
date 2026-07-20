@@ -176,12 +176,15 @@ from sts_combat_rl.sim.oracle_potion_comparison import (
 )
 from sts_combat_rl.sim.root_prior_guided_search import (
     GuardrailedRootPriorGuidedSearchController,
+    RootPriorAllocationRepairConfig,
     RootPriorAllocationGuardrailConfig,
     RootPriorGuidedSearchController,
+    T059RootPriorAllocationRepairSearchController,
 )
 from sts_combat_rl.sim.root_prior_guided_search_comparison import (
     GUARDRAILED_ROOT_PRIOR_GUIDED_LABEL,
     ROOT_PRIOR_GUIDED_LABEL,
+    T059_REPAIRED_ROOT_PRIOR_GUIDED_LABEL,
     format_root_prior_guided_search_comparison_report,
 )
 from sts_combat_rl.sim.policy import (
@@ -269,6 +272,7 @@ _LIGHTSPEED_PATH_FLAGS = (
     "lightspeed_root_prior_guided_search_comparison",
     "lightspeed_t054_guardrailed_root_prior_repair_comparison",
     "lightspeed_t055_guardrailed_root_prior_scale_comparison",
+    "lightspeed_t059_root_prior_allocation_repair_comparison",
 )
 
 
@@ -1119,6 +1123,98 @@ def run_lightspeed_command(args: argparse.Namespace) -> int:
             if args.t055_guardrailed_root_prior_comparison_report is not None:
                 write_root_prior_guided_search_comparison_report(
                     args.t055_guardrailed_root_prior_comparison_report,
+                    report,
+                )
+            print(
+                format_root_prior_guided_search_comparison_report(report),
+                file=sys.stderr,
+            )
+            if not report.evaluation_successful:
+                return 1
+        elif args.lightspeed_t059_root_prior_allocation_repair_comparison is not None:
+            budget = (
+                args.oracle_search_simulations
+                if args.search_budget is None
+                else args.search_budget
+            )
+            scorer = build_torch_guidance_scorer_from_checkpoint(
+                args.model_guided_oracle_checkpoint
+            )
+            baseline_controller = OracleSearchController(
+                simulations=budget,
+                root_selection_rule=args.oracle_root_selection,
+                action_space=action_space,
+            )
+            model_guided_v2_controller = ModelGuidedOracleSearchV2Controller(
+                simulations=budget,
+                scorer=scorer,
+                policy_probability_weight=(
+                    args.model_guided_oracle_policy_probability_weight
+                ),
+                action_space=action_space,
+            )
+            root_prior_controller = RootPriorGuidedSearchController(
+                simulations=budget,
+                scorer=scorer,
+                root_selection_rule=args.oracle_root_selection,
+                prior_temperature=args.root_prior_temperature,
+                min_visits_per_legal_action=args.root_prior_min_visits,
+                prior_allocation_weight=args.root_prior_allocation_weight,
+                action_space=action_space,
+            )
+            repair_controller = T059RootPriorAllocationRepairSearchController(
+                simulations=budget,
+                scorer=scorer,
+                root_selection_rule=args.oracle_root_selection,
+                prior_temperature=args.root_prior_temperature,
+                min_visits_per_legal_action=args.root_prior_min_visits,
+                prior_allocation_weight=args.root_prior_allocation_weight,
+                repair_config=RootPriorAllocationRepairConfig(
+                    prior_entropy_temperature=(
+                        args.t059_root_prior_repair_entropy_temperature
+                    ),
+                ),
+                action_space=action_space,
+            )
+            report = run_root_prior_guided_search_comparison_from_cohort_path(
+                adapter_factory=lambda: LightSpeedAdapter(
+                    seed=args.sim_seed,
+                    ascension=args.sim_ascension,
+                ),
+                cohort_path=args.lightspeed_t059_root_prior_allocation_repair_comparison,
+                controller_arms=(
+                    (
+                        BASELINE_ORACLE_LABEL,
+                        "baseline_oracle_search",
+                        baseline_controller,
+                    ),
+                    (
+                        MODEL_GUIDED_ORACLE_V2_LABEL,
+                        "post_search_model_guided_oracle_search_v2",
+                        model_guided_v2_controller,
+                    ),
+                    (
+                        ROOT_PRIOR_GUIDED_LABEL,
+                        "native_root_prior_allocation_from_checkpoint_priors",
+                        root_prior_controller,
+                    ),
+                    (
+                        T059_REPAIRED_ROOT_PRIOR_GUIDED_LABEL,
+                        "t059_entropy_tempered_root_prior_allocation",
+                        repair_controller,
+                    ),
+                ),
+                action_space=action_space,
+                max_battle_steps=args.sim_steps,
+                run_scale=args.t059_root_prior_allocation_repair_scale,
+                comparison_task_id="T059",
+                worker_count=args.workers,
+                shard_count=args.shards,
+                record_range=args.record_range,
+            )
+            if args.t059_root_prior_allocation_repair_comparison_report is not None:
+                write_root_prior_guided_search_comparison_report(
+                    args.t059_root_prior_allocation_repair_comparison_report,
                     report,
                 )
             print(

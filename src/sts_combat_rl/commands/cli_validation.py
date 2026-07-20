@@ -76,6 +76,11 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
         return (
             "--root-prior-guardrail-max-prior-probability must be in the range (0, 1]"
         )
+    if (
+        not math.isfinite(args.t059_root_prior_repair_entropy_temperature)
+        or args.t059_root_prior_repair_entropy_temperature < 1.0
+    ):
+        return "--t059-root-prior-repair-entropy-temperature must be at least 1"
     if args.assistance_policy_seed is not None and args.assistance_policy_seed < 0:
         return "--assistance-policy-seed must be non-negative"
     if (
@@ -156,6 +161,7 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
         or args.lightspeed_root_prior_guided_search_comparison is not None
         or args.lightspeed_t054_guardrailed_root_prior_repair_comparison is not None
         or args.lightspeed_t055_guardrailed_root_prior_scale_comparison is not None
+        or args.lightspeed_t059_root_prior_allocation_repair_comparison is not None
         or search_pool_uses_checkpoint
     )
     if (
@@ -180,6 +186,7 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
             "--lightspeed-root-prior-guided-search-comparison or "
             "--lightspeed-t054-guardrailed-root-prior-repair-comparison or "
             "--lightspeed-t055-guardrailed-root-prior-scale-comparison or "
+            "--lightspeed-t059-root-prior-allocation-repair-comparison or "
             "--lightspeed-search-battle-start-pool with a checkpoint-guided "
             "--search-battle-controller"
         )
@@ -224,6 +231,14 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
         return (
             "--t055-guardrailed-root-prior-comparison-report requires "
             "--lightspeed-t055-guardrailed-root-prior-scale-comparison"
+        )
+    if (
+        args.t059_root_prior_allocation_repair_comparison_report is not None
+        and args.lightspeed_t059_root_prior_allocation_repair_comparison is None
+    ):
+        return (
+            "--t059-root-prior-allocation-repair-comparison-report requires "
+            "--lightspeed-t059-root-prior-allocation-repair-comparison"
         )
     if (
         args.merge_root_prior_guided_search_comparison is not None
@@ -628,6 +643,38 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
             "--t058-input-artifact requires "
             "--t058-root-prior-selected-action-telemetry-report"
         )
+    if args.t059_root_prior_allocation_repair_report is not None:
+        if len(args.t059_input_artifact) != 13:
+            return (
+                "--t059-root-prior-allocation-repair-report "
+                "requires exactly thirteen --t059-input-artifact values"
+            )
+        roles = [values[0] for values in args.t059_input_artifact]
+        if sorted(roles) != [
+            "t043_assist0_smoke_checkpoint",
+            "t043_runs1000_assist0_checkpoint",
+            "t048_assist0_fixed_cohort",
+            "t048_assist0_t058_comparison",
+            "t048_current_fixed_cohort",
+            "t048_current_t058_comparison",
+            "t052_boss_later_act_fixed_cohort",
+            "t052_t058_comparison",
+            "t058_retention_manifest",
+            "t058_selected_action_telemetry_report",
+            "t059_assist0_repair_comparison",
+            "t059_current_repair_comparison",
+            "t059_t052_repair_comparison",
+        ]:
+            return (
+                "--t059-input-artifact roles must include the T058 report/"
+                "manifest, retained T058 comparison artifacts, three fixed "
+                "cohorts, two T043 checkpoints, and three generated T059 "
+                "repair comparisons"
+            )
+    elif args.t059_input_artifact:
+        return (
+            "--t059-input-artifact requires --t059-root-prior-allocation-repair-report"
+        )
     if args.t052_t051_boss_later_act_fixed_cohort is not None:
         if len(args.t052_source_arm) != 3:
             return (
@@ -694,6 +741,20 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
             "--t055-retained-artifact, --t055-retention-command, "
             "--t055-retention-stage, and --t055-retention-note require "
             "--t055-retention-manifest"
+        )
+    if args.t059_retention_manifest is not None:
+        if not args.t059_retained_artifact:
+            return "--t059-retention-manifest requires --t059-retained-artifact"
+    elif (
+        args.t059_retained_artifact
+        or args.t059_retention_command
+        or args.t059_retention_stage
+        or args.t059_retention_note
+    ):
+        return (
+            "--t059-retained-artifact, --t059-retention-command, "
+            "--t059-retention-stage, and --t059-retention-note require "
+            "--t059-retention-manifest"
         )
     if (
         args.root_prior_allocation_report is not None
