@@ -644,6 +644,22 @@ def _comparison_validation_problems(
         problems.append(f"{role}: worker_count mismatch")
     if _as_int(config.get("shard_count")) != contract["required_shard_count"]:
         problems.append(f"{role}: shard_count mismatch")
+    expected = int(contract["record_count"])
+    if len(comparison.battle_comparisons) != expected:
+        problems.append(f"{role}: battle comparison count mismatch")
+    comparison_indices = {
+        index
+        for row in comparison.battle_comparisons
+        if (index := _optional_int(row.get("comparison_index"))) is not None
+    }
+    missing_comparison_indices = [
+        index for index in range(expected) if index not in comparison_indices
+    ]
+    if missing_comparison_indices:
+        problems.append(
+            f"{role}: missing battle_comparison indices "
+            + ", ".join(str(index) for index in missing_comparison_indices[:10])
+        )
     labels = set(_controller_labels(metadata))
     missing_labels = sorted(set(T059_REQUIRED_COMPARISON_LABELS) - labels)
     if missing_labels:
@@ -681,6 +697,16 @@ def _comparison_validation_problems(
         result_count = len(comparison.results_by_label.get(label, {}))
         if result_count != int(contract["record_count"]):
             problems.append(f"{role}:{label}: controller result count mismatch")
+    for row in comparison.battle_comparisons:
+        index = _optional_int(row.get("comparison_index"))
+        row_label = f"{role}:battle_comparison[{index if index is not None else '?'}]"
+        if row.get("source_match") is not True:
+            problems.append(f"{row_label}: source_match must be true")
+        row_problems = row.get("problems")
+        if not isinstance(row_problems, list):
+            problems.append(f"{row_label}: problems must be a list")
+        elif row_problems:
+            problems.append(f"{row_label}: problems must be empty")
     return problems
 
 
@@ -1458,7 +1484,6 @@ def _preserved_t048_signal(summary: Mapping[str, Any]) -> bool:
     return _t048_signal_status(summary) in {
         "improved_vs_existing_root_prior",
         "preserved",
-        "weakened_vs_existing_root_prior",
     }
 
 

@@ -41,6 +41,7 @@ from sts_combat_rl.sim.t058_root_prior_selected_action_telemetry import (
 )
 from sts_combat_rl.sim.t059_root_prior_allocation_repair import (
     T059_REPAIR_REPORT_SCHEMA_ID,
+    T059ComparisonInput,
     build_t059_root_prior_allocation_repair_report,
     dump_t059_root_prior_allocation_repair_report_json,
     format_t059_root_prior_allocation_repair_report,
@@ -102,6 +103,41 @@ def test_t059_report_rejects_missing_repair_arm() -> None:
         )
 
 
+@pytest.mark.parametrize("mutation", ["missing_row", "source_mismatch"])
+def test_t059_report_rejects_unclean_battle_comparisons(mutation: str) -> None:
+    comparisons = _comparison_inputs()
+    role = "t059_current_repair_comparison"
+    original = comparisons[role]
+    assert isinstance(original, T059ComparisonInput)
+    rows = [dict(row) for row in original.battle_comparisons]
+    if mutation == "missing_row":
+        rows.pop()
+    else:
+        rows[0]["source_match"] = False
+        rows[0]["problems"] = ["source battle mismatch"]
+    comparisons[role] = T059ComparisonInput(
+        role=original.role,
+        metadata=original.metadata,
+        battle_comparisons=rows,
+        results_by_label=original.results_by_label,
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        build_t059_root_prior_allocation_repair_report(
+            input_artifacts=_verified_artifacts(),
+            t058_report=_t058_report(),
+            comparisons=comparisons,
+        )
+
+    message = str(exc_info.value)
+    if mutation == "missing_row":
+        assert "battle comparison count mismatch" in message
+        assert "missing battle_comparison indices 7" in message
+    else:
+        assert "battle_comparison[0]: source_match must be true" in message
+        assert "battle_comparison[0]: problems must be empty" in message
+
+
 def test_t059_report_accepts_merged_t052_shard_record_ranges() -> None:
     report = build_t059_root_prior_allocation_repair_report(
         input_artifacts=_verified_artifacts(),
@@ -144,6 +180,34 @@ def test_t059_report_abandons_when_repair_only_ties_harmful_subsets() -> None:
     )
     assert report.aggregate_summary["improved_t052_act2_plus"] is False
     assert report.aggregate_summary["improved_t053_disagreement"] is False
+
+
+def test_t059_report_does_not_preserve_t048_signal_after_root_prior_regression() -> (
+    None
+):
+    comparisons = _comparisons()
+    comparisons["t059_current_repair_comparison"] = _comparison(
+        cohort_identity="875ea52e3df4cb93",
+        count=8,
+        record_range="0:8",
+        workers=8,
+        shards=8,
+        win_indices={
+            BASELINE_ORACLE_LABEL: set(range(5)),
+            POST_SEARCH_MODEL_GUIDED_LABEL: set(range(5)),
+            ROOT_PRIOR_GUIDED_LABEL: set(range(6)),
+            T059_REPAIRED_ROOT_PRIOR_GUIDED_LABEL: set(range(5)),
+        },
+        include_repair=True,
+    )
+
+    report = build_t059_root_prior_allocation_repair_report(
+        input_artifacts=_verified_artifacts(),
+        t058_report=_t058_report(),
+        comparisons=_comparison_inputs_from_reports(comparisons),
+    )
+
+    assert report.aggregate_summary["preserved_t048_positive_signal"] is False
 
 
 def test_t059_command_hash_checks_and_writes_report(tmp_path: Path) -> None:
