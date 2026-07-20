@@ -73,197 +73,86 @@ the current milestone, but they do not override this table.
 | T057 | DONE | [Existing root-prior allocation telemetry diagnostic](T057-existing-root-prior-allocation-telemetry-diagnostic.md) | T056, T055, T053, T052, T048, T046, T043 | offline existing-root-prior allocation and selected-action telemetry diagnostic |
 | T058 | DONE | [Root-prior selected-action telemetry replay diagnostic](T058-root-prior-selected-action-telemetry-replay-diagnostic.md) | T057, T052, T048, T046, T043 | instrumented or replayed selected-action identity comparison before any root-prior reachability or promotion branch |
 | T059 | DONE | [Root-prior allocation repair experiment](T059-root-prior-allocation-repair-experiment.md) | T058, T052, T048, T046, T043 | bounded allocation repair experiment; closes the allocation-repair route after no T052/T053 improvement |
-| T060 | READY | [Expert non-combat natural source coverage scale-up](T060-expert-non-combat-natural-source-coverage-scaleup.md) | T059, T040, T050, T039 | fresh large-scale natural A20 per-act coverage gate using the accepted expert-driver source profile |
+| T060 | CANCELLED | [Expert non-combat natural source coverage scale-up](T060-expert-non-combat-natural-source-coverage-scaleup.md) | T059, T040, T050, T039 | cancelled before execution; fixed-policy 10,000-run scale-up does not address the reachability-policy bottleneck |
+| T061 | READY | [A20 self-generated reachability bottleneck decomposition](T061-a20-self-generated-reachability-bottleneck-decomposition.md) | T059, T040, T050, T052 | matched battle-budget and complete-run intervention study before further scale-up |
+| T062 | DRAFT | [Battle Search v2 minimal surface](T062-battle-search-v2-minimal-surface.md) | T061 | tree-internal policy prior, learned leaf value, and compute-normalized search comparison |
+| T063 | DRAFT | [Oracle-guided public battle learning](T063-oracle-guided-public-battle-learning.md) | T061, T062, T033 | simulator-only Oracle assistance with explicit public-policy transfer and no human trajectories |
+| T064 | DRAFT | [Simulator-generated later-act curriculum](T064-simulator-generated-later-act-curriculum.md) | T061, T062 | natural, Oracle-reached, assisted, and simulator-validated transformed later-act distributions |
+| T065 | DRAFT | [Learned non-combat policy v1](T065-learned-non-combat-policy-v1.md) | T061, T033 | simulator-return and counterfactual continuation targets without heuristic imitation |
+| T066 | DRAFT | [Alternating joint policy improvement and natural scale gate](T066-alternating-joint-policy-improvement-and-natural-scale-gate.md) | T062, T063, T064, T065 | separate battle/non-combat policies with shared run value, followed by conditional natural scale-up |
 
-Use the table, not per-task files or roadmap prose, when deciding whether a
-task may receive a branch. Only `READY` rows should receive a new branch. After
-a prerequisite merges, the main maintainer reviews dependent specifications
-against the new `main` before changing their state.
+Use the table, not per-task files or roadmap prose, when deciding whether a task
+may receive a branch. Only `READY` rows should receive a new implementation
+branch. `DRAFT` rows describe intended direction and must be reviewed against
+latest `main` before publication. `BLOCKED` rows require their named external or
+upstream capability. `CANCELLED` rows remain as historical planning records and
+must not receive implementation branches.
 
-`BLOCKED` task specifications define intended boundaries but may be refined by
-the main maintainer before becoming `READY`. Once a task is `READY`, its
-published acceptance criteria are the review contract; scope changes require a
-document update before acceptance.
+Once a task is `READY`, its published acceptance criteria are the review
+contract. A material scope change requires a documentation PR before an
+implementation PR can be accepted.
+
+## Current Planning Direction
+
+The current planning contract is simulator-only self-generated policy
+improvement with training-time Oracle assistance and separate battle/non-combat
+decision modules. Human game trajectories, human action labels, and imitation of
+human experts are outside the intended training path. See
+[`../training_paradigm.md`](../training_paradigm.md).
+
+T040's `expert_non_combat_v1` is retained only as a bootstrap exploration and
+source-distribution policy. Its actions are not ground-truth labels and must not
+be used as imitation targets for the final non-combat policy.
+
+T060 was cancelled before execution because scaling the unchanged
+`expert_non_combat_v1` plus 100-simulation battle profile from 1,000 to 10,000
+runs would primarily estimate the same weak policy-induced occupancy
+distribution more precisely. T061 is the sole executable task. It first measures
+whether battle compute, non-combat behavior, or their interaction limits natural
+A20 reachability. T062--T066 remain draft until the evidence required by their
+dependencies is merged.
 
 ## Task Boundary And Artifact Rules
 
-Each task must have explicit, reviewable inputs and outputs. A prerequisite task
-may provide a merged schema, command, fixture, or artifact-generation contract.
-It does not provide an implicit local file dependency merely because a smoke run
-left a checkpoint, trainer JSONL, report, or cohort in one worktree.
+Each task must have explicit, reviewable inputs and outputs. A prerequisite may
+provide a merged schema, command, fixture, or artifact-generation contract. It
+does not provide an implicit local file dependency merely because one worktree
+contains a checkpoint, JSONL file, report, or cohort.
 
 Required artifacts must be reproducible by documented commands, committed as
 small fixtures, or supplied through an explicit external/ignored artifact path
-with schema, provenance, compatibility requirements, and identity checks. A
-task that needs an artifact from an earlier workflow must name that contract and
-explain how a reviewer can regenerate or provide a compatible artifact.
+with schema, provenance, compatibility requirements, and identity checks. Large
+generated artifacts remain outside Git. The durable contract is the schema,
+manifest/provenance, command surface, hashes where applicable, and review
+evidence.
 
-Large generated artifacts remain outside the repository. The durable contract
-is the schema, manifest/provenance, command surface, hashes where applicable,
-and review evidence.
+GB-scale finalization must use bounded-memory paths when streaming or
+summary-preserving aggregation can express the same result. Retained raw files
+must live under a stable ignored path outside disposable review worktrees and
+must have a lightweight retention manifest containing schema, provenance,
+hashes, sizes, regeneration commands, compatibility requirements, retention
+reason, possible downstream consumers, and deletion conditions.
 
-Tasks that finalize GB-scale shard outputs should design the finalization path
-for bounded memory. Source-pool merges should stream JSONL records after
-metadata/schema validation, and coverage/report comparison steps should
-aggregate from shard-level summaries, restore reports, hashes, and counts
-whenever those summaries preserve the needed contract. Loading every source
-record from every shard is acceptable only for small fixtures, smoke/debug
-work, or an explicitly documented schema requirement.
+A pull request submitted as ready for review must satisfy all published
+acceptance criteria and required verification. Otherwise it remains draft and
+names the missing criteria explicitly.
 
-If a large artifact should survive review cleanup for downstream use, the task
-must define a retention contract. The retained raw files must live under a
-stable ignored/local path outside disposable review worktrees, and the PR must
-report a lightweight manifest with schema, provenance, hashes, approximate
-sizes, regeneration commands, compatibility requirements, retention reason,
-possible downstream consumers, and deletion conditions. If no downstream task
-needs the raw files, keep only the report/manifest evidence and regenerate raw
-data when needed.
-
-A pull request submitted as ready for maintainer review must satisfy the
-published task's required deliverables and acceptance criteria. If any
-acceptance criterion, required artifact, or required verification remains
-missing, the PR must stay draft or explicitly report itself as incomplete with
-the missing criteria named; it is not a ready-for-merge task submission.
-
-Long-running WSL restored-evaluation and comparison stages must follow the
-same per-stage worker rule as source generation and coverage. A `smoke` or
-diagnostic label does not by itself justify single-worker execution once the
-stage processes a non-trivial cohort or is expected to take many minutes.
-Shard the cohort and use the host logical CPU worker target by default, capped
-by shard count and documented resource limits, or report a concrete
-single-worker reason and the measured wall-clock cost.
+Long-running WSL stages must be explicitly sharded and parallelized. The default
+target on the maintainer workstation is 16 effective workers, capped by shard
+count and documented simulator or memory limits. Every expensive stage reports
+commands, worker and shard counts, seed or cohort ranges, artifact identities,
+and wall-clock cost. A `smoke` label does not justify undocumented single-worker
+execution for a substantial workload.
 
 ## Published Queue
 
-The executable queue is the set of rows marked `READY` in the Active Backlog
-table. A `READY` row may proceed in its own worktree and pull request based on
-latest `main`.
-
-## M1: Model-Guided Oracle Search Sandbox
-
-M1's comparison target is now available: a reviewable fixed-cohort comparison
-between the current Oracle-like native search baseline and the first
-model-guided Oracle-like search controller using T024 teacher-targeted
-checkpoint provenance. T030 completed the synthesis and next-task publication
-work; T031 completed the post-M1 coverage refresh and found the current
-distribution still Act-1-only. M1 is diagnostic search-engineering work only;
-it must not claim
-normal-information, live-game, broad-training, or promoted controller-strength
-evidence.
-
-Dependency chain:
-
-```text
-T025 search telemetry baseline --+
-                                 +--> T028 model-guided Oracle search --> T029 fixed comparison --+
-T026 checkpoint inference --> T027 teacher calibration -------------------------------------+
-                                                                                              +--> T030 synthesis
-```
-
-The completed foundation backlog provides:
-
-- fixed structural battle evaluation and Oracle-like search teacher plumbing;
-- stable pinned `sts_lightspeed` source integration;
-- raw native public projection, sanitized public context/history, artifact
-  propagation, replay, and audit;
-- structured battle resource outcomes and native terminal resource identities;
-- conservative constructed A20 battle-start supplements;
-- optional PyTorch policy/value plumbing, fail-closed broad-training gates,
-  checkpoint provenance, and diagnostic smoke/narrow-curriculum training;
-- current-schema A20 battle-start coverage reporting across natural, sampled,
-  and constructed starts, including restore evidence and broad-training gate
-  gaps;
-- current-schema Oracle-like teacher dataset reporting with source-pool and
-  optional T021 coverage linkage;
-- structured Oracle-like teacher dataset scale-up with per-budget T022 reports
-  and cross-budget teacher-label stability reporting;
-- teacher-targeted trainer-input v6 conversion and diagnostic checkpoint
-  provenance for selected T023 Oracle teacher budgets.
-- first versioned model-guided Oracle-like search controller
-  (`model_guided_oracle_search_v1`) that combines native root statistics with
-  public checkpoint policy probabilities at root selection while preserving
-  separate native-search and model-guidance telemetry.
-- first versioned model-guided search fixed-cohort comparison report
-  (`model-guided-search-fixed-comparison-v1`) that compares baseline Oracle
-  search and model-guided Oracle-like search on identical restored starts with
-  separate outcome aggregates, budget checks, and observed cost telemetry.
-
-The T030 synthesis recommended the post-M1 batch as T031--T035. T031 refreshed
-A20 coverage and diagnosed the current distribution gap: the artifacts and
-restore path are healthy, but the current controller distribution produced no
-Boss or later-act battle starts. T036 added current-schema search-controlled
-complete-run source collection and a reachability report. Its accepted smoke
-evidence kept all compared A20 arms in Act 1 only.
-
-M2 is the A20 source-coverage recovery batch. T037 scaled the T036
-search-controlled reachability path to the historical 1,000-run comparison
-point and recovered the Boss/Act2 source signal on current schemas. T038 is
-cancelled because the source-drift audit is not needed on that evidence. T039
-accepted the durable T037 source-coverage contract. T032 completed the narrow
-diagnostic refresh over that contract, not a broad A20 refresh. T035 completed
-the next model-guided Oracle-like search experiment on refreshed diagnostic
-checkpoint provenance; its accepted smoke comparison tied the baseline and T028
-outcomes, so it is not promotion evidence.
-
-M3 follows the upstream assisted source-generation guidance supplied after
-T035. The milestone target was to generate broader, higher-quality A20
-battle-state distributions before continuing broad neural training. T040 added
-a versioned A20 heuristic non-combat source-generation driver and is complete.
-T041 repaired the potion-enabled Oracle-like search failure and is complete.
-T042 added the assisted-run source-generation distribution and is complete.
-T033 finalized `public-context-model-input-v1`, the public-context feature
-contract needed before assisted teacher/value training. T043 added assisted
-source-pool teacher scale-up and public student diagnostic wiring. T044
-completed the de-assisted fixed-cohort evaluation gate after T043, but did not
-show model-guided search improvement over baseline. T045 completed the
-post-T044 failure analysis and selected native root-prior allocation as the
-primary next path. T046 added the minimal native root-prior allocation surface.
-T047 completed the first matched root-prior guided search smoke comparison.
-T048 completed the matched fixed-cohort scale-up and kept the evidence inside
-the Oracle-like restored-battle boundary. T049 completed the bounded
-complete-run source reachability plumbing/probe and found no Boss or later-act
-reachability at smoke scale. T050 completed the 50-terminal-run-per-arm
-complete-run reachability scale pass and source-pool shard merge/finalization
-support; no arm reached Act 2 or later. T051 completed the broader
-1,000-terminal-run-per-arm search-controlled source collection and recovered a
-small later-act signal in the post-search and root-prior guided arms, while
-keeping broad training closed. T052 completed the restored-battle fixed-cohort
-diagnostic on those naturally reached Boss and later-act starts. It found no
-root-prior gain: root-prior guided search regressed by one win overall and on
-the Act-2+ subset while tying the Boss-only subset. T053 completed the offline
-allocation failure analysis and found four T052 disagreement records: two
-harmful root-prior records, one terminal-HP-only/no-op record, and one
-beneficial root-prior record, with exact step-level selected-action comparison
-unavailable in T052 telemetry. T054 completed the bounded guardrailed
-root-prior allocation repair experiment on the retained T052 fixed cohort: the
-guardrailed variant repaired the overall and Boss-only regression against the
-existing root-prior arm, tied baseline and post-search overall, but still tied
-the existing root-prior arm and trailed baseline/post-search on the five-record
-Act-2+ subset. T055 completed the retained T048 fixed-cohort scale validation:
-the guardrailed variant tied existing root-prior on the current 8-record cohort
-but regressed by one win on the assist_0 21-record cohort and on the labeled
-29-record aggregate, so its single recommendation is to abandon the guardrail
-path. T056 completed the post-T055 path-selection synthesis, closed the
-T054/T055 guardrail branch, preserved the conflicting T048/T052/T053/T054/T055
-evidence families separately, and selected exactly one non-guardrail next path:
-an existing-root-prior allocation/telemetry diagnostic. T057 completed that
-offline diagnostic, confirmed that retained artifacts can summarize allocation
-and outcome deltas, and found exact all-arm step-level selected-action
-comparison unavailable for every retained record. T058 completed the
-telemetry/replay diagnostic: selected-action comparison is now available for
-all 122 retained T048/T052 records, exact full-battle path comparison is
-available for 11 records, and the selected next path was a bounded root-prior
-allocation repair experiment. T059 completed that experiment: entropy-tempered
-root-prior allocation preserved the T048 result but tied the existing
-root-prior arm on T052 and T053 harmful subsets, so allocation repair is
-closed. T060 is now `READY` to return to the unresolved data bottleneck with a
-fresh scale-up of T040's accepted expert non-combat natural-source profile.
-T034 remains blocked on native public-consistent hidden-future sampler support.
+The executable queue is exactly the set of `READY` rows in the Active Backlog.
+At publication time, T061 is the only executable task. T034 remains blocked on
+native public-consistent hidden-future sampling support.
 
 ## Standard Local Gates
 
-Unless a task explicitly says otherwise, every task must pass. Run these after
-an editable install or with `PYTHONPATH=src` in an uninstalled checkout:
+Unless a task explicitly says otherwise, every task must pass:
 
 ```bash
 pytest
@@ -274,70 +163,14 @@ python -m sts_combat_rl.cli --mock tests/fixtures/combat_basic.json
 python -m sts_combat_rl.cli --mock tests/fixtures/non_combat.json
 ```
 
-Task-specific WSL and artifact gates are additional requirements.
+Task-specific WSL, simulator, artifact, and documentation gates are additional
+requirements.
 
-## Legacy Mapping
+## Historical Mapping
 
-Commit `d56e10e` is intentionally not mergeable as one unit. Its major areas
-are mapped as follows:
-
-- controller and execution modules: T002;
-- artifact migrations, decision provenance, and schema readers: T003;
-- checkpoint patches, restore verification, and battle-start pools: T004;
-- deterministic structural cohorts and restored-battle evaluation: T005;
-- native search interfaces and search-training collection: T006;
-- native public projection, public context/history, and propagation/audit:
-  T014, T015, and T016;
-- external simulator source integration and patch-stack retirement: T017;
-- battle-start transforms and practical A20 supplements: T008;
-- PyTorch policy/value model and training gates: T009;
-- stochastic non-combat behavior and native potion/resource visibility: T010;
-- tactical feature, trainer-input, and model-input expansion: T011;
-- structured persistent resource outcomes and explicit missingness: T012;
-- native terminal resource identity coverage: T018;
-- mechanical code cleanup and CLI/export decomposition: T019;
-- `sts_lightspeed` fork integration-line maintenance: T020;
-- A20 battle-start coverage measurement and broad-training gap reporting: T021.
-- Oracle-like teacher dataset reporting and source linkage: T022.
-- Structured Oracle-like teacher dataset scale-up and budget-stability
-  reporting: T023.
-- Teacher-targeted search-guidance trainer input and diagnostic checkpoint
-  bridge: T024.
-- M1 search telemetry and model-guided Oracle search sandbox: T025--T030.
-- Post-M1 coverage, data, public-context, sampler, model-guided-search, and
-  reachability follow-up proposals: T031--T039.
-- Assisted source-generation curriculum: T040--T044.
-- Post-T044 failure analysis and guidance path selection: T045.
-- Native root-prior allocation search surface: T046.
-- Root-prior guided search comparison: T047.
-- Root-prior guided search scale-up: T048.
-- Root-prior complete-run reachability probe: T049.
-- Root-prior reachability scale-up and shard merge: T050.
-- A20 search-controlled later-act source collection: T051.
-- T051 Boss/later-act fixed-cohort diagnostic: T052.
-- T052 root-prior allocation failure analysis: T053.
-- Guardrailed root-prior allocation repair experiment: T054.
-- Guardrailed root-prior fixed-cohort scale validation: T055.
-- Post-T055 root-prior path selection: T056.
-- Existing root-prior allocation telemetry diagnostic: T057.
-- Root-prior selected-action telemetry replay diagnostic: T058.
-- Root-prior allocation repair experiment: T059.
-- Expert non-combat natural source coverage scale-up: T060.
-
-T013 supplies the shared CommunicationMod adapter and captured-sample
-compatibility gate. Simulator-only training experiments do not depend on it.
-A trained or search controller still needs to use that adapter and earn its own
-captured-sample or interactive evaluation evidence before it is described as
-live-game validated.
-
-CLI decomposition and command-module cleanup completed in T019. Feature tasks
-may move only their own workflows out of CLI routing, following the
-architecture contract, unless a later dedicated cleanup task explicitly
-authorizes broader mechanical refactor.
-
-Pure-Python linear scorer, policy-gradient, and policy-comparison experiments
-from the legacy commit are explicitly unscheduled. They are preserved by the
-legacy reference and may be published later only if they answer a concrete
-research question.
+Completed and cancelled task documents remain the durable historical record for
+T001--T060. Accepted experiment details and artifact identities remain in their
+individual task documents, reports, and `current_status.md`; this index only
+owns lifecycle state and the current executable queue.
 
 New task documents should start from [`TEMPLATE.md`](TEMPLATE.md).
