@@ -185,7 +185,10 @@ def build_t061_factorial_report(
     arm_summary = {}
     for key, payload in by_key.items():
         rows = _records(payload, "runs")
-        arm_summary[f"{key[0]}@{key[1]}"] = _run_summary(rows)
+        arm_summary[f"{key[0]}@{key[1]}"] = {
+            **_run_summary(rows),
+            "arm_provenance": _mapping(payload.get("arm_provenance")),
+        }
     effects = _factorial_effects(
         by_key, reference_seeds, bootstrap_resamples, bootstrap_seed
     )
@@ -344,6 +347,13 @@ def _run_summary(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         "error_count": sum(_status(row) in {"error", "unsupported"} for row in rows),
         "natural_battle_start_counts": _count_field(rows, "natural_battle_starts"),
         "unique_source_counts": _count_field(rows, "unique_source_starts"),
+        "natural_battle_start_counts_by_act": _nested_count_field(rows, "act_counts"),
+        "natural_battle_start_counts_by_room_type": _nested_count_field(
+            rows, "room_type_counts"
+        ),
+        "natural_battle_start_counts_by_encounter": _nested_count_field(
+            rows, "encounter_id_counts"
+        ),
         "compute": {
             "simulator_steps": sum(
                 _number(row.get("simulator_steps")) or 0 for row in rows
@@ -409,6 +419,19 @@ def _outcome_counts(rows: Sequence[Mapping[str, Any]], field: str) -> dict[str, 
     return dict(Counter(_json_value_key(row.get(field)) for row in rows))
 
 
+def _nested_count_field(
+    rows: Sequence[Mapping[str, Any]], field: str
+) -> dict[str, int]:
+    counts: Counter[str] = Counter()
+    for row in rows:
+        value = row.get(field)
+        if isinstance(value, Mapping):
+            for key, amount in value.items():
+                if isinstance(amount, (int, float)) and not isinstance(amount, bool):
+                    counts[str(key)] += int(amount)
+    return dict(counts)
+
+
 def _json_value_key(value: Any) -> str:
     if isinstance(value, (Mapping, list)):
         return json.dumps(value, sort_keys=True)
@@ -440,11 +463,8 @@ def _bootstrap_ci(values: Sequence[float], resamples: int, seed: int) -> list[fl
 
 def _meaningful_budget_signal(report: Mapping[str, Any]) -> bool:
     effects = _mapping(report.get("pairwise")).get("300_vs_20", {})
-    return (
-        isinstance(effects, Mapping)
-        and _number(effects.get("win_delta")) is not None
-        and float(effects["win_delta"]) > 0
-    )
+    win_effect = _mapping(effects).get("win_effect", {})
+    return _positive_ci(win_effect)
 
 
 def _meaningful_driver_signal(report: Mapping[str, Any]) -> bool:
@@ -465,7 +485,10 @@ def _positive_ci(value: Any) -> bool:
 def _any_later_act(report: Mapping[str, Any]) -> bool:
     arms = _mapping(report.get("arms"))
     return any(
-        _mapping(value).get("reachability", {}).get("act2_entry", 0) > 0
+        any(
+            _mapping(value).get("reachability", {}).get(field, 0) > 0
+            for field in ("act3_entry", "act4_entry", "heart_start", "heart_victory")
+        )
         for value in arms.values()
         if isinstance(value, Mapping)
     )

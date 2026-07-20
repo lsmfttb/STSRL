@@ -649,6 +649,7 @@ def run_lightspeed_command(args: argparse.Namespace) -> int:
                 primary_selection_rule=args.oracle_root_selection,
                 action_space=action_space,
                 max_battle_steps=args.sim_steps,
+                record_range=args.record_range,
             )
             if args.fixed_evaluation_report is not None:
                 write_fixed_evaluation_report(
