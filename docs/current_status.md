@@ -80,9 +80,9 @@ arm on the T052 and T053 harmful subsets. Allocation repair is closed; it does
 not authorize root-prior reachability, promotion, or further allocation
 variants. T060 was cancelled before execution because a 10,000-run scale-up of
 the unchanged profile would not diagnose the reachability-policy bottleneck.
-T061 is `READY` to decompose that bottleneck with matched battle-budget and
-complete-run interventions. T034 remains blocked on native public-consistent
-hidden-future sampler support.
+T061 is `IN_REVIEW` in PR #59 with matched battle-budget and complete-run
+interventions. T034 remains blocked on native public-consistent hidden-future
+sampler support.
 
 ## Implemented On Main
 

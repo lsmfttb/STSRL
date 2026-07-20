@@ -74,7 +74,7 @@ the current milestone, but they do not override this table.
 | T058 | DONE | [Root-prior selected-action telemetry replay diagnostic](T058-root-prior-selected-action-telemetry-replay-diagnostic.md) | T057, T052, T048, T046, T043 | instrumented or replayed selected-action identity comparison before any root-prior reachability or promotion branch |
 | T059 | DONE | [Root-prior allocation repair experiment](T059-root-prior-allocation-repair-experiment.md) | T058, T052, T048, T046, T043 | bounded allocation repair experiment; closes the allocation-repair route after no T052/T053 improvement |
 | T060 | CANCELLED | [Expert non-combat natural source coverage scale-up](T060-expert-non-combat-natural-source-coverage-scaleup.md) | T059, T040, T050, T039 | cancelled before execution; fixed-policy 10,000-run scale-up does not address the reachability-policy bottleneck |
-| T061 | READY | [A20 self-generated reachability bottleneck decomposition](T061-a20-self-generated-reachability-bottleneck-decomposition.md) | T059, T040, T050, T052 | matched battle-budget and complete-run intervention study before further scale-up |
+| T061 | IN_REVIEW | [A20 self-generated reachability bottleneck decomposition](T061-a20-self-generated-reachability-bottleneck-decomposition.md) | T059, T040, T050, T052 | matched battle-budget and complete-run intervention study before further scale-up |
 | T062 | DRAFT | [Battle Search v2 minimal surface](T062-battle-search-v2-minimal-surface.md) | T061 | tree-internal policy prior, learned leaf value, and compute-normalized search comparison |
 | T063 | DRAFT | [Oracle-guided public battle learning](T063-oracle-guided-public-battle-learning.md) | T061, T062, T033 | simulator-only Oracle assistance with explicit public-policy transfer and no human trajectories |
 | T064 | DRAFT | [Simulator-generated later-act curriculum](T064-simulator-generated-later-act-curriculum.md) | T061, T062 | natural, Oracle-reached, assisted, and simulator-validated transformed later-act distributions |
@@ -107,10 +107,10 @@ be used as imitation targets for the final non-combat policy.
 T060 was cancelled before execution because scaling the unchanged
 `expert_non_combat_v1` plus 100-simulation battle profile from 1,000 to 10,000
 runs would primarily estimate the same weak policy-induced occupancy
-distribution more precisely. T061 is the sole executable task. It first measures
-whether battle compute, non-combat behavior, or their interaction limits natural
-A20 reachability. T062--T066 remain draft until the evidence required by their
-dependencies is merged.
+distribution more precisely. T061 is under review in PR #59. It measures whether
+battle compute, non-combat behavior, or their interaction limits natural A20
+reachability. No task is currently `READY`; T062--T066 remain draft until the
+evidence required by their dependencies is merged.
 
 ## Task Boundary And Artifact Rules
 
@@ -147,8 +147,8 @@ execution for a substantial workload.
 ## Published Queue
 
 The executable queue is exactly the set of `READY` rows in the Active Backlog.
-At publication time, T061 is the only executable task. T034 remains blocked on
-native public-consistent hidden-future sampling support.
+There are currently no `READY` tasks while T061 is under review in PR #59. T034
+remains blocked on native public-consistent hidden-future sampling support.
 
 ## Standard Local Gates
 
