@@ -354,6 +354,13 @@ def _run_summary(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         "natural_battle_start_counts_by_encounter": _nested_count_field(
             rows, "encounter_id_counts"
         ),
+        "unique_source_counts_by_act": _nested_count_field(rows, "unique_act_counts"),
+        "unique_source_counts_by_room_type": _nested_count_field(
+            rows, "unique_room_type_counts"
+        ),
+        "unique_source_counts_by_encounter": _nested_count_field(
+            rows, "unique_encounter_id_counts"
+        ),
         "compute": {
             "simulator_steps": sum(
                 _number(row.get("simulator_steps")) or 0 for row in rows
