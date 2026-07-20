@@ -78,9 +78,11 @@ repair experiment. T059 completed that experiment: entropy-tempered root-prior
 allocation preserved the T048 positive result but tied the existing root-prior
 arm on the T052 and T053 harmful subsets. Allocation repair is closed; it does
 not authorize root-prior reachability, promotion, or further allocation
-variants. T060 is `READY` to test the unresolved source-distribution bottleneck
-by scaling T040's accepted expert non-combat natural-source profile. T034
-remains blocked on native public-consistent hidden-future sampler support.
+variants. T060 was cancelled before execution because a 10,000-run scale-up of
+the unchanged profile would not diagnose the reachability-policy bottleneck.
+T061 is `READY` to decompose that bottleneck with matched battle-budget and
+complete-run interventions. T034 remains blocked on native public-consistent
+hidden-future sampler support.
 
 ## Implemented On Main
 
@@ -1309,11 +1311,12 @@ T048 positive cohorts but did not improve the T052 Act-2+/Boss or T053 harmful
 evidence over existing root-prior allocation. The allocation-repair route is
 therefore closed rather than promoted or extended into reachability.
 
-The published follow-up is T060, a fresh 10,000-terminal-run natural A20
-source-coverage scale-up using T040's accepted `expert_non_combat_v1` plus
-100-simulation Oracle profile. It targets the still-closed per-Act coverage
-gate and does not introduce another battle-controller variant, training run,
-or non-combat learner.
+T060's proposed 10,000-terminal-run natural A20 source-coverage scale-up was
+cancelled before execution: it would have measured the same weak
+policy-induced occupancy distribution more precisely without identifying its
+cause. The published follow-up is T061, a matched restored-battle budget curve
+and complete-run factorial reachability probe that must select exactly one
+next task from its evidence.
 
 T034 remains blocked on an explicit native simulator boundary for
 public-consistent hidden-future sampling.
