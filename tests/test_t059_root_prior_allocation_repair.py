@@ -138,6 +138,30 @@ def test_t059_report_rejects_unclean_battle_comparisons(mutation: str) -> None:
         assert "battle_comparison[0]: problems must be empty" in message
 
 
+def test_t059_report_rejects_out_of_range_controller_result_index() -> None:
+    comparisons = _comparison_inputs()
+    role = "t059_current_repair_comparison"
+    original = comparisons[role]
+    assert isinstance(original, T059ComparisonInput)
+    repair_rows = dict(original.results_by_label[T059_REPAIRED_ROOT_PRIOR_GUIDED_LABEL])
+    repair_rows[8] = repair_rows.pop(7)
+    results_by_label = dict(original.results_by_label)
+    results_by_label[T059_REPAIRED_ROOT_PRIOR_GUIDED_LABEL] = repair_rows
+    comparisons[role] = T059ComparisonInput(
+        role=original.role,
+        metadata=original.metadata,
+        battle_comparisons=original.battle_comparisons,
+        results_by_label=results_by_label,
+    )
+
+    with pytest.raises(ValueError, match="missing controller_result indices 7"):
+        build_t059_root_prior_allocation_repair_report(
+            input_artifacts=_verified_artifacts(),
+            t058_report=_t058_report(),
+            comparisons=comparisons,
+        )
+
+
 def test_t059_report_accepts_merged_t052_shard_record_ranges() -> None:
     report = build_t059_root_prior_allocation_repair_report(
         input_artifacts=_verified_artifacts(),

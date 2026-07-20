@@ -694,9 +694,18 @@ def _comparison_validation_problems(
     if allocation.get("guardrail") is not None or allocation.get("guardrail_revived"):
         problems.append(f"{role}: T059 comparison appears to revive guardrail")
     for label in T059_REQUIRED_COMPARISON_LABELS:
-        result_count = len(comparison.results_by_label.get(label, {}))
+        result_rows = comparison.results_by_label.get(label, {})
+        result_count = len(result_rows)
         if result_count != int(contract["record_count"]):
             problems.append(f"{role}:{label}: controller result count mismatch")
+        missing_result_indices = [
+            index for index in range(expected) if index not in result_rows
+        ]
+        if missing_result_indices:
+            problems.append(
+                f"{role}:{label}: missing controller_result indices "
+                + ", ".join(str(index) for index in missing_result_indices[:10])
+            )
     for row in comparison.battle_comparisons:
         index = _optional_int(row.get("comparison_index"))
         row_label = f"{role}:battle_comparison[{index if index is not None else '?'}]"
