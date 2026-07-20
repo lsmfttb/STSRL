@@ -43,7 +43,10 @@ comparison unavailable for every retained T048/T052 record, and selected a
 root-prior selected-action telemetry instrumentation or replay diagnostic as
 the next path. T058 completed that diagnostic, made selected-action comparison
 available for all 122 retained records, and selected a bounded root-prior
-allocation repair experiment. T059 is now the `READY` task for that experiment.
+allocation repair experiment. T059 completed that experiment: it preserved
+T048 but did not improve the T052/T053 harm, so allocation repair is closed.
+T060 is now the `READY` task: a fresh expert-non-combat natural source-coverage
+scale-up for the unresolved per-Act data gate.
 New implementation work should start only from rows marked `READY` in the task
 index; T034 remains blocked on native sampler support.
 
@@ -376,10 +379,11 @@ Work:
 - retain complete public history and context;
 - satisfy broad-training readiness per ascension and act;
 - keep mechanical cleanup separate from coverage/search experiments;
-- complete T059's bounded root-prior allocation repair experiment before
-  publishing root-prior complete-run reachability, assisted training repair,
-  broad teacher/checkpoint refresh, non-combat ranker branch, or controller
-  promotion.
+- complete T060's fresh expert-non-combat natural source-coverage scale-up and
+  evaluate the per-Act gate before publishing broad teacher/checkpoint refresh
+  or broad training;
+- keep the closed root-prior allocation-repair route out of further
+  reachability, training, and promotion work.
 
 Exit gate: enough unique A20 Boss and later-act starts exist for meaningful
 training and evaluation.
@@ -445,8 +449,10 @@ completed diagnostic task; it found the retained artifacts still lack exact
 all-arm step-level selected-action comparison. T058 completed the
 telemetry/replay diagnostic, made all retained records selected-action
 auditable, found 2 harmful selected-action divergence records, and selected the
-T059 bounded root-prior allocation repair experiment before controller
-promotion, another training branch, or complete-run reachability.
+T059 bounded root-prior allocation repair experiment. T059 preserved T048 but
+left T052/T053 tied to the harmful existing-root-prior result, so allocation
+repair is closed. The active priority is now T060's expert non-combat natural
+source-coverage scale-up in Phase D, not another battle-controller branch.
 
 Exit gate: a search change improves fixed evaluation at equal simulation or
 wall-clock budget without natural-weighted regression.

@@ -1,6 +1,6 @@
 # Current Status
 
-Last reviewed: 2026-07-04.
+Last reviewed: 2026-07-20.
 
 This document describes the latest `main` branch only. Results from local
 artifacts, old branches, or unmerged pull requests do not count as implemented
@@ -74,10 +74,13 @@ complete: it made selected-action comparison available for all 122 retained
 T048/T052 records, found first selected-action divergence against baseline and
 post-search on all 122 records, identified 2 harmful selected-action divergence
 records, and selected exactly one next path: a bounded root-prior allocation
-repair experiment. T059 is now `READY` for that experiment before any
-complete-run reachability, repair-adjacent training, non-combat, or promotion
-branch. T034 remains blocked on native public-consistent hidden-future sampler
-support.
+repair experiment. T059 completed that experiment: entropy-tempered root-prior
+allocation preserved the T048 positive result but tied the existing root-prior
+arm on the T052 and T053 harmful subsets. Allocation repair is closed; it does
+not authorize root-prior reachability, promotion, or further allocation
+variants. T060 is `READY` to test the unresolved source-distribution bottleneck
+by scaling T040's accepted expert non-combat natural-source profile. T034
+remains blocked on native public-consistent hidden-future sampler support.
 
 ## Implemented On Main
 
@@ -1112,6 +1115,24 @@ support.
   controller promotion, root-prior complete-run reachability evidence, natural
   A20 performance, broad-training readiness, live-game validation,
   normal-information strength, or final-agent evidence.
+- T059 adds `t059-root-prior-allocation-repair-report-v1` and the versioned
+  `t059_root_prior_allocation_repair_oracle_search_v1` controller. Maintainer
+  review verified the main-retained report sha256
+  `6df13014e5468b9eb3c23d8e127be3559b5bc1529f46ce9d52ae96856fed7f89`
+  with byte count `13449098` and normalized retention manifest sha256
+  `e52428f98f5f961add5f0f8e95555d97f2720fb2e09c4a95bb38c39a4447f6b5`
+  with byte count `44969` under
+  `artifacts/t059-root-prior-allocation-repair-experiment-pr/`. The report
+  verified 13 explicit input artifacts, compared all 122 retained records at
+  equal native budget, and kept selected-action identity available for every
+  record. The repair tied existing root-prior on both positive T048 cohorts
+  (6W/2L versus 5W/3L on current and 13W/8L versus 11W/10L on assist_0) but
+  also tied its T052 3W/90L regression and the T053 disagreement subset. Its
+  single recommendation is to abandon allocation repair. This is
+  `full_simulator_state_oracle_like` restored-battle diagnostic evidence only,
+  not controller promotion, root-prior reachability, natural A20 performance,
+  broad-training readiness, live-game validation, normal-information strength,
+  or final-agent evidence.
 
 ## Not Implemented On Main
 
@@ -1123,9 +1144,8 @@ unmerged legacy work:
 - model-guided search performance improvement or controller promotion;
 - sufficient Boss/later-act A20 source coverage for broad teacher/checkpoint
   refresh or broad training;
-- root-prior allocation repair evidence after T058, root-prior guided
-  complete-run reachability improvement evidence, or root-prior controller
-  promotion;
+- root-prior allocation repair, root-prior guided complete-run reachability
+  improvement evidence, or root-prior controller promotion;
 - normal-information belief search.
 
 Do not use documentation or results from these areas as evidence that `main`
@@ -1281,25 +1301,19 @@ The completed assisted source-generation batch is:
    as the primary next search path, while preserving assisted training and
    de-assisted distribution repair as secondary diagnostic follow-ups.
 
-T058 (`Root-prior selected-action telemetry replay diagnostic`) is complete. It
-consumed the accepted T057 report and stable retained T048/T052 fixed
-cohorts/checkpoints, regenerated selected-action comparison artifacts under
-`artifacts/t058-root-prior-selected-action-telemetry-replay-pr/`, and produced
-main-retained report sha256
-`ffadf375902321888f25b6883c474f0060e6aa0e82c2102fb3e3afd29ae78a04`. It made
-selected-action identity comparison available for all 122 retained records,
-found exact full-battle path comparison for 11 records, preserved the T048
-positive fixed-cohort signal and T052 Act-2+ regression as separate evidence,
-and selected exactly one next path:
-`root-prior allocation repair experiment`.
+T058 (`Root-prior selected-action telemetry replay diagnostic`) made every
+retained record's selected action auditable and authorized one bounded T059
+allocation repair experiment. T059 completed that experiment with all 122
+records available for comparison. The entropy-tempering repair preserved the
+T048 positive cohorts but did not improve the T052 Act-2+/Boss or T053 harmful
+evidence over existing root-prior allocation. The allocation-repair route is
+therefore closed rather than promoted or extended into reachability.
 
-The published follow-up is T059, which will test one bounded versioned
-allocation repair variant over the retained T048/T052 fixed cohorts. It must
-preserve the existing root-prior and abandoned guardrailed variants for
-diagnostics, avoid tuning sweeps, run restored-battle comparison through WSL
-with explicit worker/shard evidence, and make no controller-promotion,
-complete-run, natural A20, broad-training, live-game, or normal-information
-claims.
+The published follow-up is T060, a fresh 10,000-terminal-run natural A20
+source-coverage scale-up using T040's accepted `expert_non_combat_v1` plus
+100-simulation Oracle profile. It targets the still-closed per-Act coverage
+gate and does not introduce another battle-controller variant, training run,
+or non-combat learner.
 
 T034 remains blocked on an explicit native simulator boundary for
 public-consistent hidden-future sampling.

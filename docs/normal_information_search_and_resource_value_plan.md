@@ -291,8 +291,10 @@ all-arm selected-action comparison unavailable for every retained record, and
 selected a root-prior selected-action telemetry instrumentation or replay
 diagnostic. T058 completed that diagnostic, made selected-action comparison
 available for all 122 retained T048/T052 records, and selected a bounded
-root-prior allocation repair experiment. T059 is now the published `READY` task
-before larger training, complete-run reachability, or non-combat branches.
+root-prior allocation repair experiment. T059 completed that experiment: it
+preserved T048 but did not improve T052/T053 harm, closing allocation repair.
+T060 is the published `READY` task before broader training: a fresh expert
+non-combat natural source-coverage scale-up for the per-Act gate.
 
 Use the Oracle regime to validate priors, leaf values, uncertainty, and search
 instrumentation. Exit when model guidance improves the fixed Oracle curve at
@@ -329,11 +331,11 @@ Retain only auxiliary targets that improve normal-information evaluation.
    coverage, keeping raw policy diagnostics separate from search promotion.
 4. Design and pin the authoritative public-consistent hidden-future sampler;
    T034 remains blocked until that native boundary exists.
-5. Complete T059's bounded root-prior allocation repair experiment before
-   publishing root-prior complete-run reachability, assisted training repair,
-   broad teacher/checkpoint refresh, non-combat ranker branch, or controller
-   promotion; publish implementation work only through `READY` task rows in
-   the task index.
+5. Complete T060's expert non-combat natural source-coverage scale-up before
+   publishing broad teacher/checkpoint refresh or broad training. Keep the
+   closed root-prior allocation-repair route out of further reachability,
+   training, and promotion work; publish implementation work only through
+   `READY` task rows in the task index.
 6. Keep further mechanical CLI/module cleanup in later dedicated
    no-behavior-change maintenance tasks before mixing it into search research;
    the first CLI/export cleanup pass completed in

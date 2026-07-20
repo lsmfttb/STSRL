@@ -72,7 +72,8 @@ the current milestone, but they do not override this table.
 | T056 | DONE | [Post-T055 root-prior path selection](T056-post-t055-root-prior-path-selection.md) | T055, T054, T053, T052, T051, T050, T048 | guardrail-path closure and non-guardrail next-path selection |
 | T057 | DONE | [Existing root-prior allocation telemetry diagnostic](T057-existing-root-prior-allocation-telemetry-diagnostic.md) | T056, T055, T053, T052, T048, T046, T043 | offline existing-root-prior allocation and selected-action telemetry diagnostic |
 | T058 | DONE | [Root-prior selected-action telemetry replay diagnostic](T058-root-prior-selected-action-telemetry-replay-diagnostic.md) | T057, T052, T048, T046, T043 | instrumented or replayed selected-action identity comparison before any root-prior reachability or promotion branch |
-| T059 | READY | [Root-prior allocation repair experiment](T059-root-prior-allocation-repair-experiment.md) | T058, T052, T048, T046, T043 | one bounded versioned allocation repair experiment over the retained T048/T052 fixed cohorts |
+| T059 | DONE | [Root-prior allocation repair experiment](T059-root-prior-allocation-repair-experiment.md) | T058, T052, T048, T046, T043 | bounded allocation repair experiment; closes the allocation-repair route after no T052/T053 improvement |
+| T060 | READY | [Expert non-combat natural source coverage scale-up](T060-expert-non-combat-natural-source-coverage-scaleup.md) | T059, T040, T050, T039 | fresh large-scale natural A20 per-act coverage gate using the accepted expert-driver source profile |
 
 Use the table, not per-task files or roadmap prose, when deciding whether a
 task may receive a branch. Only `READY` rows should receive a new branch. After
@@ -251,10 +252,12 @@ and outcome deltas, and found exact all-arm step-level selected-action
 comparison unavailable for every retained record. T058 completed the
 telemetry/replay diagnostic: selected-action comparison is now available for
 all 122 retained T048/T052 records, exact full-battle path comparison is
-available for 11 records, and the selected next path is a bounded root-prior
-allocation repair experiment. T059 is now `READY` for that experiment before
-any controller promotion, assisted training repair, broad teacher/checkpoint
-refresh, non-combat ranker branch, or root-prior complete-run follow-up.
+available for 11 records, and the selected next path was a bounded root-prior
+allocation repair experiment. T059 completed that experiment: entropy-tempered
+root-prior allocation preserved the T048 result but tied the existing
+root-prior arm on T052 and T053 harmful subsets, so allocation repair is
+closed. T060 is now `READY` to return to the unresolved data bottleneck with a
+fresh scale-up of T040's accepted expert non-combat natural-source profile.
 T034 remains blocked on native public-consistent hidden-future sampler support.
 
 ## Standard Local Gates
@@ -319,6 +322,7 @@ are mapped as follows:
 - Existing root-prior allocation telemetry diagnostic: T057.
 - Root-prior selected-action telemetry replay diagnostic: T058.
 - Root-prior allocation repair experiment: T059.
+- Expert non-combat natural source coverage scale-up: T060.
 
 T013 supplies the shared CommunicationMod adapter and captured-sample
 compatibility gate. Simulator-only training experiments do not depend on it.
