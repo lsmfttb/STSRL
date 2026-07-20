@@ -16,7 +16,7 @@ def _provenance(distribution: str):
     return {
         "simulator": "sts_lightspeed",
         "source_manifest": "docs/sts_lightspeed_source_manifest.json",
-        "integration_commit": "commit",
+        "integration_commit": "9dd8f75bd5d2b1aa8a8b5cf1db18f899825f326a",
         "action_space": "initial_no_potions",
         "root_selection_rule": "highest_mean",
         "information_regime": "full_simulator_state_oracle_like",
@@ -27,7 +27,11 @@ def _provenance(distribution: str):
 
 
 def _artifact(name: str):
-    return {"path": f"artifacts/{name}.json", "sha256": f"hash-{name}"}
+    return {
+        "path": f"artifacts/{name}.json",
+        "sha256": "0" * 64,
+        "bytes": 0,
+    }
 
 
 def _budget_arm(budget: int):
@@ -46,6 +50,8 @@ def _budget_arm(budget: int):
             "cohort_record_ids_sha256": hashlib.sha256(
                 "r0\nr1\nr2".encode()
             ).hexdigest(),
+            "controller_implementation": f"oracle_search_v1_highest_mean_s{budget}",
+            "action_space_config": {"preferred_kinds": ["card", "end_turn"]},
         },
         "artifact_identity": _artifact(f"budget-{budget}"),
         "records": [
@@ -65,6 +71,9 @@ def _budget_arm(budget: int):
                 "room_type": "BOSS",
                 "encounter_id": "HEXAGHOST",
                 "boss": "BOSS",
+                "truncation": False,
+                "controller_error": False,
+                "unsupported_state": False,
                 "problems": [],
             }
             for i in range(3)
@@ -89,6 +98,8 @@ def _factorial_arm(driver: str, budget: int, *, later_act: bool = False):
             "seed_start": 0,
             "seed_end": 3,
             "sim_steps": 500,
+            "controller_implementation": f"oracle_search_v1_highest_mean_s{budget}",
+            "non_combat_controller_implementation": driver,
         },
         "artifact_identity": _artifact(f"{driver}-{budget}"),
         "runs": [
@@ -184,7 +195,9 @@ def test_factorial_requires_same_seed_set_and_keeps_zero_cells():
         for driver in ("stochastic_non_combat_v1", "expert_non_combat_v1")
         for budget in (20, 100, 300)
     ]
-    with pytest.raises(ValueError, match="same seeds"):
+    with pytest.raises(
+        ValueError, match="seed range|same seeds|seeds must be integers"
+    ):
         build_t061_factorial_report(
             changed_arms, expected_run_count=4, bootstrap_resamples=100
         )
@@ -233,6 +246,24 @@ def test_truncation_remains_visible_and_fails_command():
     )
     assert report["command_passed"] is False
     assert report["arms"]["stochastic_non_combat_v1@20"]["truncation_count"] == 1
+
+
+def test_controller_failure_and_problem_cannot_pass_as_success():
+    arms = _factorial_arms()
+    row = arms[0][2]["runs"][0]
+    row["status"] = "error"
+    row["controller_error"] = True
+    row["problems"] = ["injected controller failure"]
+    report = build_t061_factorial_report(
+        arms, expected_run_count=4, bootstrap_resamples=100
+    )
+    assert report["command_passed"] is False
+    assert report["arms"]["stochastic_non_combat_v1@20"]["error_count"] == 1
+
+    arms = _factorial_arms()
+    arms[0][2]["runs"][0]["controller_error"] = True
+    with pytest.raises(ValueError, match="inconsistent with failure"):
+        build_t061_factorial_report(arms, expected_run_count=4, bootstrap_resamples=100)
 
 
 def test_oracle_record_range_selects_explicit_half_open_slice():

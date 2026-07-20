@@ -14,6 +14,7 @@ import hashlib
 import json
 from pathlib import Path
 import random
+import time
 from typing import Any, TextIO
 
 from sts_combat_rl.sim.action_space import ActionSpaceConfig
@@ -144,6 +145,8 @@ class SourceRunSummary:
     problem_count: int
     problems: tuple[str, ...] = ()
     status: str = SOURCE_RUN_SUMMARY_AVAILABLE
+    simulator_step_count: int | None = None
+    wall_clock_time_s: float | None = None
 
     @classmethod
     def legacy_unavailable(
@@ -189,6 +192,8 @@ class SourceRunSummary:
             "problem_count": self.problem_count,
             "problems": list(self.problems),
             "status": self.status,
+            "simulator_step_count": self.simulator_step_count,
+            "wall_clock_time_s": self.wall_clock_time_s,
         }
 
 
@@ -462,6 +467,7 @@ def collect_natural_battle_start_pool(
                 )
             active_record_index = None
 
+        started_at = time.perf_counter()
         controlled = execute_controlled_run(
             adapter,
             controller,
@@ -471,6 +477,7 @@ def collect_natural_battle_start_pool(
             before_decision=before_decision,
             after_transition=after_transition,
         )
+        elapsed = time.perf_counter() - started_at
         problems.extend(
             f"{source_run_id}: {problem}" for problem in controlled.problems
         )
@@ -483,6 +490,7 @@ def collect_natural_battle_start_pool(
                 controlled=controlled,
                 records=records[run_record_start:],
                 run_problems=problems[run_problem_start:],
+                wall_clock_time_s=elapsed,
             )
         )
 
@@ -504,6 +512,7 @@ def _build_source_run_summary(
     controlled: ControlledRun,
     records: Sequence[BattleStartCheckpointRecord],
     run_problems: Sequence[str],
+    wall_clock_time_s: float,
 ) -> SourceRunSummary:
     final_raw = (
         controlled.final_raw if isinstance(controlled.final_raw, Mapping) else {}
@@ -531,6 +540,8 @@ def _build_source_run_summary(
         max_battle_start_act=max_act,
         problem_count=len(run_problems),
         problems=tuple(dict.fromkeys(run_problems)),
+        simulator_step_count=len(controlled.steps),
+        wall_clock_time_s=wall_clock_time_s,
     )
 
 
@@ -1806,6 +1817,19 @@ def _validated_source_run_summary(value: Any, label: str) -> dict[str, Any]:
         ),
         "problems": tuple(problems),
         "status": str(status),
+        "simulator_step_count": (
+            None
+            if summary.get("simulator_step_count") is None
+            else _require_non_negative_int(
+                summary.get("simulator_step_count"),
+                f"{label} simulator_step_count",
+            )
+        ),
+        "wall_clock_time_s": (
+            None
+            if summary.get("wall_clock_time_s") is None
+            else _optional_number(summary.get("wall_clock_time_s"))
+        ),
     }
 
 

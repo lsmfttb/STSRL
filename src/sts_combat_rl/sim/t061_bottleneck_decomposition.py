@@ -12,7 +12,9 @@ from collections import Counter
 from collections.abc import Mapping, Sequence
 import hashlib
 import json
+from pathlib import Path
 import random
+import re
 from typing import Any
 
 
@@ -91,8 +93,21 @@ _REQUIRED_BUDGET_ROW_FIELDS = (
     "room_type",
     "encounter_id",
     "boss",
+    "truncation",
+    "controller_error",
+    "unsupported_state",
     "problems",
 )
+_ALLOWED_STATUSES = {
+    "completed",
+    "win",
+    "loss",
+    "truncated",
+    "error",
+    "unsupported",
+}
+_PINNED_INTEGRATION_COMMIT = "9dd8f75bd5d2b1aa8a8b5cf1db18f899825f326a"
+_PINNED_SOURCE_MANIFEST = "docs/sts_lightspeed_source_manifest.json"
 
 
 def load_json_object(path: str) -> dict[str, Any]:
@@ -152,8 +167,9 @@ def build_t061_budget_curve_report(
             ),
             "truncation_count": sum(_status(row) == "truncated" for row in rows),
             "error_count": sum(
-                _status(row) in {"error", "unsupported"} for row in rows
+                _row_failed(row) and _status(row) != "truncated" for row in rows
             ),
+            "failure_count": sum(_row_failed(row) for row in rows),
             "potion_outcome_counts": _outcome_counts(rows, "potion_outcome"),
             "structured_terminal_resource_outcome_counts": _outcome_counts(
                 rows, "structured_terminal_resource_outcome"
@@ -230,9 +246,7 @@ def build_t061_budget_curve_report(
         "pairwise": pairwise,
         "provenance": provenance,
         "command_passed": all(
-            reports[str(budget)]["truncation_count"] == 0
-            and reports[str(budget)]["error_count"] == 0
-            for budget in _REQUIRED_BUDGETS
+            reports[str(budget)]["failure_count"] == 0 for budget in _REQUIRED_BUDGETS
         ),
     }
 
@@ -297,8 +311,7 @@ def build_t061_factorial_report(
         "effects": effects,
         "provenance": provenance,
         "command_passed": all(
-            _run_summary(_records(payload, "runs"))["truncation_count"] == 0
-            and _run_summary(_records(payload, "runs"))["error_count"] == 0
+            _run_summary(_records(payload, "runs"))["failure_count"] == 0
             for payload in by_key.values()
         ),
     }
@@ -447,7 +460,10 @@ def _run_summary(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             for row in rows
         ),
         "truncation_count": sum(_status(row) == "truncated" for row in rows),
-        "error_count": sum(_status(row) in {"error", "unsupported"} for row in rows),
+        "error_count": sum(
+            _row_failed(row) and _status(row) != "truncated" for row in rows
+        ),
+        "failure_count": sum(_row_failed(row) for row in rows),
         "natural_battle_start_counts": _count_field(rows, "natural_battle_starts"),
         "unique_source_counts": _count_field(rows, "unique_source_starts"),
         "natural_battle_start_counts_by_act": _nested_count_field(rows, "act_counts"),
@@ -471,11 +487,7 @@ def _run_summary(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             "wall_clock_seconds": sum(
                 _number(row["wall_clock_seconds"]) or 0.0 for row in rows
             ),
-            "simulator_steps_observed": False,
-            "simulator_steps_basis": (
-                "native search budget times retained natural battle starts; "
-                "per-decision native step telemetry was not retained by the source pool"
-            ),
+            "simulator_steps_observed": True,
         },
     }
 
@@ -507,6 +519,14 @@ def _validate_common_provenance(payload: Mapping[str, Any], label: str) -> None:
         raise ValueError(f"{label}: provenance missing fields {missing}")
     if provenance["simulator"] != "sts_lightspeed":
         raise ValueError(f"{label}: unsupported simulator provenance")
+    if provenance["source_manifest"] != _PINNED_SOURCE_MANIFEST:
+        raise ValueError(f"{label}: source manifest is not the pinned manifest")
+    if provenance["integration_commit"] != _PINNED_INTEGRATION_COMMIT:
+        raise ValueError(f"{label}: integration commit is not the pinned source")
+    if provenance["controller_name"] != "oracle_search_v1":
+        raise ValueError(f"{label}: unsupported controller implementation")
+    if provenance["search_api"] != "StepSimulator.battle_search.v1":
+        raise ValueError(f"{label}: unsupported search API")
     if provenance["information_regime"] != "full_simulator_state_oracle_like":
         raise ValueError(f"{label}: unsupported information regime")
     if provenance["root_selection_rule"] != "highest_mean":
@@ -547,6 +567,15 @@ def _validate_arm_common(
     for field, value in expected.items():
         if arm[field] != value:
             raise ValueError(f"{label}: arm_provenance {field} does not match arm")
+    common = _mapping(payload.get("provenance"))
+    for field in (
+        "root_selection_rule",
+        "action_space",
+        "information_regime",
+        "distribution_kind",
+    ):
+        if arm[field] != common.get(field):
+            raise ValueError(f"{label}: common and arm provenance disagree on {field}")
     if not isinstance(arm["workers"], int) or not isinstance(arm["shards"], int):
         raise ValueError(f"{label}: arm_provenance workers/shards must be integers")
     if arm["workers"] != 16 or arm["shards"] != 16:
@@ -558,6 +587,14 @@ def _validate_budget_arm(payload: Mapping[str, Any], budget: int) -> None:
     arm = _validate_arm_common(payload, f"budget {budget}", budget, "fixed_cohort")
     if "cohort_record_ids_sha256" not in arm:
         raise ValueError(f"budget {budget}: cohort identity provenance is missing")
+    if arm.get("controller_implementation") != (
+        f"oracle_search_v1_highest_mean_s{budget}"
+    ):
+        raise ValueError(
+            f"budget {budget}: controller implementation does not match arm"
+        )
+    if not isinstance(arm.get("action_space_config"), Mapping):
+        raise ValueError(f"budget {budget}: action-space configuration is missing")
     for row in _records(payload, "records"):
         _validate_row_fields(row, _REQUIRED_BUDGET_ROW_FIELDS, f"budget {budget}")
         if not isinstance(row["won"], bool):
@@ -566,8 +603,11 @@ def _validate_budget_arm(payload: Mapping[str, Any], budget: int) -> None:
             raise ValueError("T061 budget rows require numeric terminal HP")
         if not isinstance(row["selected_root_action"], Mapping):
             raise ValueError("T061 budget rows require selected_root_action objects")
+        if not isinstance(row["structured_terminal_resource_outcome"], Mapping):
+            raise ValueError("T061 budget rows require structured resource outcomes")
         if not isinstance(row["problems"], list):
             raise ValueError("T061 budget rows require a problems list")
+        _validate_failure_state(row, f"budget {budget}", {"win", "loss"})
     if _artifact_identity(payload) is None:
         raise ValueError(f"budget {budget}: input artifact identity is missing")
 
@@ -579,6 +619,16 @@ def _validate_factorial_arm(
     arm = _validate_arm_common(payload, label, budget, "natural_run")
     if arm.get("driver") != driver:
         raise ValueError(f"{label}: arm_provenance driver does not match arm")
+    if arm.get("controller_implementation") != (
+        f"oracle_search_v1_highest_mean_s{budget}"
+    ):
+        raise ValueError(
+            f"{label}: battle controller implementation does not match arm"
+        )
+    if arm.get("non_combat_controller_implementation") != driver:
+        raise ValueError(
+            f"{label}: non-combat controller implementation does not match arm"
+        )
     for field in ("seed_start", "seed_end", "sim_steps"):
         if not isinstance(arm.get(field), int):
             raise ValueError(f"{label}: arm_provenance {field} must be an integer")
@@ -627,19 +677,18 @@ def _validate_factorial_arm(
             raise ValueError(f"{label}: failure flags must be boolean")
         if not isinstance(row["problems"], list):
             raise ValueError(f"{label}: problems must be a list")
+        _validate_failure_state(row, label, {"completed"})
     numeric_seeds = []
     for row in rows:
         try:
             numeric_seeds.append(int(str(row["seed"])))
         except (TypeError, ValueError):
-            continue
-    if len(numeric_seeds) == len(rows):
-        expected_seeds = set(range(arm["seed_start"], arm["seed_end"] + 1))
-        if (
-            set(numeric_seeds) != expected_seeds
-            or len(expected_seeds) != expected_run_count
-        ):
-            raise ValueError(f"{label}: seed range does not match arm provenance")
+            raise ValueError(f"{label}: seeds must be integers") from None
+    expected_seeds = [
+        int(seed) for seed in range(arm["seed_start"], arm["seed_end"] + 1)
+    ]
+    if numeric_seeds != expected_seeds or len(expected_seeds) != expected_run_count:
+        raise ValueError(f"{label}: seed range does not match arm provenance")
     if _artifact_identity(payload) is None:
         raise ValueError(f"{label}: input artifact identity is missing")
 
@@ -652,15 +701,73 @@ def _validate_row_fields(
         raise ValueError(f"{label}: row missing fields {missing}")
 
 
+def _validate_failure_state(
+    row: Mapping[str, Any], label: str, success_statuses: set[str]
+) -> None:
+    status = _status(row)
+    if status not in _ALLOWED_STATUSES:
+        raise ValueError(f"{label}: unsupported status {status!r}")
+    flags = {
+        "truncation": row["truncation"],
+        "controller_error": row["controller_error"],
+        "unsupported_state": row["unsupported_state"],
+    }
+    has_failure = any(flags.values()) or bool(row["problems"])
+    if status in success_statuses and has_failure:
+        raise ValueError(
+            f"{label}: success status is inconsistent with failure evidence"
+        )
+    if status == "truncated" and not flags["truncation"]:
+        raise ValueError(f"{label}: truncated status requires truncation=true")
+    if status == "error" and not (flags["controller_error"] or bool(row["problems"])):
+        raise ValueError(f"{label}: error status lacks controller failure evidence")
+    if status == "unsupported" and not (
+        flags["unsupported_state"] or bool(row["problems"])
+    ):
+        raise ValueError(f"{label}: unsupported status lacks unsupported evidence")
+
+
 def _artifact_identity(payload: Mapping[str, Any]) -> dict[str, Any] | None:
     value = payload.get("artifact_identity")
     if not isinstance(value, Mapping):
         return None
-    if not isinstance(value.get("sha256"), str) or not value["sha256"]:
+    if not isinstance(value.get("sha256"), str) or not re.fullmatch(
+        r"[0-9a-fA-F]{64}", value["sha256"]
+    ):
         return None
     if not isinstance(value.get("path"), str) or not value["path"]:
         return None
+    if not isinstance(value.get("bytes"), int) or value["bytes"] < 0:
+        return None
+    path = Path(str(value["path"]))
+    if path.exists():
+        actual_hash, actual_bytes = _hash_retained_artifact(
+            path, value.get("hash_basis")
+        )
+        if actual_hash != value["sha256"].lower() or actual_bytes != value["bytes"]:
+            return None
     return {str(key): item for key, item in value.items()}
+
+
+def _hash_retained_artifact(path: Path, basis: Any) -> tuple[str, int]:
+    digest = hashlib.sha256()
+    total = 0
+    if path.is_file():
+        files = [path]
+    elif isinstance(basis, str) and "pool.jsonl" in basis:
+        files = sorted(path.glob("shards/*/pool.jsonl"))
+    elif isinstance(basis, str) and "shard jsonl" in basis:
+        files = sorted(path.glob("shard-*.jsonl"))
+    else:
+        raise ValueError(f"unsupported retained artifact hash basis for {path}")
+    if not files:
+        raise ValueError(f"retained artifact has no files to hash: {path}")
+    for child in files:
+        digest.update(child.name.encode())
+        data = child.read_bytes()
+        digest.update(data)
+        total += len(data)
+    return digest.hexdigest(), total
 
 
 def _unique_ids(rows: Sequence[Mapping[str, Any]], label: str) -> list[str]:
@@ -812,9 +919,19 @@ def _action_key(row: Mapping[str, Any]) -> str:
 
 def _status(row: Mapping[str, Any]) -> str:
     value = row.get("status")
-    if not isinstance(value, str) or not value:
+    if not isinstance(value, str) or value not in _ALLOWED_STATUSES:
         raise ValueError("T061 rows require an explicit non-empty status")
     return value
+
+
+def _row_failed(row: Mapping[str, Any]) -> bool:
+    return bool(
+        row["truncation"]
+        or row["controller_error"]
+        or row["unsupported_state"]
+        or row["problems"]
+        or _status(row) in {"truncated", "error", "unsupported"}
+    )
 
 
 def _truth(value: Any) -> int:
