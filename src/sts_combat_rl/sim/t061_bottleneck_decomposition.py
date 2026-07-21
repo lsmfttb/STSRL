@@ -604,18 +604,27 @@ def _validate_search_telemetry(
     if not isinstance(reasons, Mapping) or any(
         not isinstance(key, str)
         or not isinstance(value, list)
-        or not all(isinstance(item, str) for item in value)
+        or not value
+        or not all(isinstance(item, str) and item for item in value)
         for key, value in reasons.items()
     ):
         raise ValueError(f"{label}: unavailable reasons must be string lists")
     for metric_name in _SEARCH_SUMMARY_METRICS:
         metric = _mapping(summary[metric_name])
         missing_count = metric["missing_count"]
-        if missing_count:
-            if unavailable_counts.get(metric_name) != missing_count:
-                raise ValueError(
-                    f"{label}: unavailable count disagrees for {metric_name}"
-                )
+        if unavailable_counts.get(metric_name, 0) != missing_count:
+            raise ValueError(f"{label}: unavailable count disagrees for {metric_name}")
+    for field_name, count in unavailable_counts.items():
+        if count <= 0:
+            raise ValueError(f"{label}: unavailable counts must be positive")
+        reason_values = reasons.get(field_name)
+        if not isinstance(reason_values, list) or not any(reason_values):
+            raise ValueError(f"{label}: unavailable count {field_name} lacks a reason")
+    for field_name in reasons:
+        if unavailable_counts.get(field_name, 0) <= 0:
+            raise ValueError(
+                f"{label}: unavailable reason lacks a positive count: {field_name}"
+            )
     for field_name in unavailable_counts:
         if unavailable_counts[field_name] > decision_count:
             raise ValueError(f"{label}: unavailable count exceeds decisions")

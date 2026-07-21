@@ -366,3 +366,29 @@ def test_malformed_search_telemetry_fails_closed_for_both_report_families():
     ] = {"normal_public_policy": 1}
     with pytest.raises(ValueError, match="pinned arm provenance"):
         build_t061_budget_curve_report(budget_arms)
+
+
+def test_unavailable_search_telemetry_is_reconciled_for_both_report_families():
+    arms = _factorial_arms()
+    summary = arms[0][2]["runs"][0]["search_telemetry_summary"]
+    summary["root_decision_gap"] = {
+        "count": 0,
+        "missing_count": 1,
+        "total": None,
+        "minimum": None,
+        "maximum": None,
+        "mean": None,
+    }
+    summary["unavailable_field_counts"] = {"root_decision_gap": 1}
+    summary["unavailable_reasons"] = {}
+    with pytest.raises(ValueError, match="lacks a reason"):
+        build_t061_factorial_report(arms, expected_run_count=4, bootstrap_resamples=100)
+
+    budget_arms = [(str(budget), _budget_arm(budget)) for budget in (20, 100, 300)]
+    summary = budget_arms[0][1]["records"][0]["search_telemetry_summary"]
+    summary["unavailable_field_counts"] = {"native_simulator_steps": 1}
+    summary["unavailable_reasons"] = {
+        "native_simulator_steps": ["contradictory test evidence"]
+    }
+    with pytest.raises(ValueError, match="unavailable count disagrees"):
+        build_t061_budget_curve_report(budget_arms)
