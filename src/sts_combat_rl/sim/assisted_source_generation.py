@@ -15,6 +15,7 @@ import hashlib
 import json
 import math
 from pathlib import Path
+import time
 from typing import Any, TextIO
 
 from sts_combat_rl.sim.a20_battle_start_coverage import (
@@ -391,6 +392,7 @@ def collect_assisted_battle_start_pool(
                 )
             active_record_index = None
 
+        started_at = time.perf_counter()
         controlled = execute_controlled_run(
             adapter,
             controller,
@@ -401,6 +403,7 @@ def collect_assisted_battle_start_pool(
             before_decision=before_decision,
             after_transition=after_transition,
         )
+        elapsed = time.perf_counter() - started_at
         problems.extend(
             f"{source_run_id}: {problem}" for problem in controlled.problems
         )
@@ -413,6 +416,7 @@ def collect_assisted_battle_start_pool(
                 controlled=controlled,
                 records=records[run_record_start:],
                 run_problems=problems[run_problem_start:],
+                wall_clock_time_s=elapsed,
             )
         )
 

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -118,6 +118,7 @@ def run_oracle_fixed_evaluation_comparison_from_cohort_path(
     primary_selection_rule: str,
     action_space: ActionSpaceConfig,
     max_battle_steps: int,
+    record_range: str | None = None,
 ) -> OracleFixedEvaluationComparison:
     """Evaluate highest-mean and visit-count Oracle rules on one fixed cohort."""
 
@@ -133,6 +134,7 @@ def run_oracle_fixed_evaluation_comparison_from_cohort_path(
         ),
         action_space=action_space,
         max_battle_steps=max_battle_steps,
+        record_range=record_range,
     )
     most_visits = _evaluate_oracle_fixed_cohort(
         adapter_factory=adapter_factory,
@@ -144,6 +146,7 @@ def run_oracle_fixed_evaluation_comparison_from_cohort_path(
         ),
         action_space=action_space,
         max_battle_steps=max_battle_steps,
+        record_range=record_range,
     )
     return OracleFixedEvaluationComparison(
         primary_selection_rule=primary_selection_rule,
@@ -159,20 +162,25 @@ def _evaluate_oracle_fixed_cohort(
     controller: OracleSearchController,
     action_space: ActionSpaceConfig,
     max_battle_steps: int,
+    record_range: str | None = None,
 ) -> FixedEvaluationReport:
+    selected_records = _select_record_range(cohort.records, record_range)
     evaluation = evaluate_fixed_cohort(
         adapter_factory=adapter_factory,
-        cohort_records=cohort.records,
+        cohort_records=selected_records,
         controller=controller,
         cohort_identity=cohort.identity,
         source_pool_format_version=cohort.source_pool_format_version,
-        selection_config=cohort.selection_config.to_dict(),
+        selection_config={
+            **cohort.selection_config.to_dict(),
+            "record_range": record_range or "all",
+        },
         action_space=action_space,
         max_battle_steps=max_battle_steps,
     )
     per_stratum_counts = Counter(
         "/".join(str(value) for value in record.structural_stratum)
-        for record in cohort.records
+        for record in selected_records
     )
     return FixedEvaluationReport(
         cohort_identity=evaluation.cohort_identity,
@@ -186,6 +194,21 @@ def _evaluate_oracle_fixed_cohort(
         battle_results=evaluation.battle_results,
         problems=evaluation.problems,
     )
+
+
+def _select_record_range(
+    records: Sequence[Any], record_range: str | None
+) -> Sequence[Any]:
+    if record_range is None or record_range == "all":
+        return records
+    try:
+        start_raw, end_raw = record_range.split(":", 1)
+        start, end = int(start_raw), int(end_raw)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("record_range must use START:END") from exc
+    if start < 0 or end < start or end > len(records):
+        raise ValueError("record_range is outside the cohort")
+    return records[start:end]
 
 
 def format_oracle_fixed_evaluation_report(report: FixedEvaluationReport) -> str:

@@ -94,6 +94,10 @@ from sts_combat_rl.commands.t059_root_prior_allocation_repair import (
     run_t059_retention_manifest_from_paths,
     run_t059_root_prior_allocation_repair_from_paths,
 )
+from sts_combat_rl.commands.t061_bottleneck_decomposition import (
+    format_t061_bottleneck_report,
+    run_t061_bottleneck_decomposition_from_paths,
+)
 from sts_combat_rl.commands.teacher_guidance_calibration import (
     format_teacher_guidance_calibration_command,
     run_teacher_guidance_calibration_from_paths,
@@ -602,6 +606,23 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         print(format_a20_reachability_comparison_report(report), file=sys.stderr)
         return 0 if report.command_passed else 1
+
+    if args.t061_bottleneck_report is not None:
+        try:
+            report = run_t061_bottleneck_decomposition_from_paths(
+                budget_curve_output=args.t061_budget_curve_report,
+                factorial_output=args.t061_factorial_report,
+                bottleneck_output=args.t061_bottleneck_report,
+                budget_arm_specs=args.t061_budget_arm,
+                factorial_arm_specs=args.t061_factorial_arm,
+                expected_run_count=args.t061_expected_run_count,
+                bootstrap_resamples=args.t061_bootstrap_resamples,
+            )
+        except (OSError, ValueError) as exc:
+            print(f"failed to build T061 bottleneck reports: {exc}", file=sys.stderr)
+            return 2
+        print(format_t061_bottleneck_report(report), file=sys.stderr)
+        return 0 if report.get("command_passed") else 1
 
     if args.merge_battle_start_pool_shards is not None:
         try:

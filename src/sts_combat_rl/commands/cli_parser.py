@@ -831,6 +831,59 @@ def build_parser() -> argparse.ArgumentParser:
             "repeated --assisted-source-arm LEVEL POOL_JSONL COVERAGE_JSON inputs."
         ),
     )
+    parser.add_argument(
+        "--t061-bottleneck-report",
+        type=Path,
+        metavar="OUTPUT_JSON",
+        help=(
+            "Build T061 restored-battle budget, complete-run factorial, and "
+            "single-recommendation reports from --t061-budget-arm and "
+            "--t061-factorial-arm inputs."
+        ),
+    )
+    parser.add_argument(
+        "--t061-budget-curve-report",
+        type=Path,
+        metavar="OUTPUT_JSON",
+        help="Write the T061 restored-battle budget-curve report.",
+    )
+    parser.add_argument(
+        "--t061-factorial-report",
+        type=Path,
+        metavar="OUTPUT_JSON",
+        help="Write the T061 complete-run factorial report.",
+    )
+    parser.add_argument(
+        "--t061-budget-arm",
+        nargs=2,
+        action="append",
+        default=[],
+        metavar=("BUDGET", "JSON_PATH"),
+        help="One T061 restored-battle budget arm; repeat for 20, 100, and 300.",
+    )
+    parser.add_argument(
+        "--t061-factorial-arm",
+        nargs=3,
+        action="append",
+        default=[],
+        metavar=("DRIVER", "BUDGET", "JSON_PATH"),
+        help=(
+            "One T061 complete-run factorial arm; repeat for both drivers and "
+            "budgets 20, 100, and 300."
+        ),
+    )
+    parser.add_argument(
+        "--t061-expected-run-count",
+        type=int,
+        default=256,
+        help="Expected runs per T061 factorial arm (default: 256).",
+    )
+    parser.add_argument(
+        "--t061-bootstrap-resamples",
+        type=int,
+        default=2000,
+        help="Bootstrap resamples for T061 paired intervals (default: 2000).",
+    )
     input_group.add_argument(
         "--merge-assisted-source-pool",
         type=Path,
