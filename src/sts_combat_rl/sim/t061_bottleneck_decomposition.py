@@ -72,8 +72,11 @@ _REQUIRED_FACTORIAL_ROW_FIELDS = (
     "unique_act_counts",
     "unique_room_type_counts",
     "unique_encounter_id_counts",
-    "simulator_steps",
-    "wall_clock_seconds",
+    "outer_simulator_steps",
+    "outer_wall_clock_seconds",
+    "search_telemetry_summary",
+    "search_simulations_completed",
+    "search_simulations_completed_unavailable_reason",
     "truncation",
     "controller_error",
     "unsupported_state",
@@ -85,8 +88,11 @@ _REQUIRED_BUDGET_ROW_FIELDS = (
     "terminal_absolute_hp",
     "status",
     "selected_root_action",
-    "simulator_steps",
-    "wall_clock_seconds",
+    "outer_simulator_steps",
+    "outer_wall_clock_seconds",
+    "search_telemetry_summary",
+    "search_simulations_completed",
+    "search_simulations_completed_unavailable_reason",
     "potion_outcome",
     "structured_terminal_resource_outcome",
     "act",
@@ -159,12 +165,13 @@ def build_t061_budget_curve_report(
             "mean_terminal_absolute_hp": _mean(
                 [_number(row.get("terminal_absolute_hp")) for row in rows]
             ),
-            "simulator_steps": sum(
-                _number(row.get("simulator_steps")) or 0 for row in rows
+            "outer_simulator_steps": sum(
+                _number(row.get("outer_simulator_steps")) or 0 for row in rows
             ),
-            "wall_clock_seconds": sum(
-                _number(row.get("wall_clock_seconds")) or 0.0 for row in rows
+            "outer_wall_clock_seconds": sum(
+                _number(row.get("outer_wall_clock_seconds")) or 0.0 for row in rows
             ),
+            "search_compute": _search_compute_summary(rows),
             "truncation_count": sum(_status(row) == "truncated" for row in rows),
             "error_count": sum(
                 _row_failed(row) and _status(row) != "truncated" for row in rows
@@ -481,14 +488,82 @@ def _run_summary(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
             rows, "unique_encounter_id_counts"
         ),
         "compute": {
-            "simulator_steps": sum(
-                _number(row["simulator_steps"]) or 0 for row in rows
+            "outer_simulator_steps": sum(
+                _number(row["outer_simulator_steps"]) or 0 for row in rows
             ),
-            "wall_clock_seconds": sum(
-                _number(row["wall_clock_seconds"]) or 0.0 for row in rows
+            "outer_wall_clock_seconds": sum(
+                _number(row["outer_wall_clock_seconds"]) or 0.0 for row in rows
             ),
-            "simulator_steps_observed": True,
+            "search_compute": _search_compute_summary(rows),
+            "outer_simulator_steps_observed": True,
+            "search_cost_observed": True,
         },
+    }
+
+
+def _validate_search_telemetry(row: Mapping[str, Any], label: str) -> None:
+    summary = row["search_telemetry_summary"]
+    if not isinstance(summary, Mapping):
+        raise ValueError(f"{label}: search telemetry summary is missing")
+    if summary.get("schema_id") != "search-telemetry-summary-v1":
+        raise ValueError(f"{label}: unsupported search telemetry summary schema")
+    if summary.get("schema_version") != 1:
+        raise ValueError(f"{label}: unsupported search telemetry summary version")
+    decision_count = summary.get("decision_count")
+    if not isinstance(decision_count, int) or decision_count <= 0:
+        raise ValueError(f"{label}: search telemetry requires decisions")
+    for metric_name in (
+        "simulations_requested",
+        "root_visits",
+        "native_simulator_steps",
+        "model_calls",
+        "wall_clock_time_s",
+    ):
+        metric = summary.get(metric_name)
+        if not isinstance(metric, Mapping):
+            raise ValueError(f"{label}: search telemetry missing {metric_name}")
+        if _number(metric.get("total")) is None:
+            raise ValueError(f"{label}: search telemetry {metric_name} is unavailable")
+    completed = row["search_simulations_completed"]
+    reason = row["search_simulations_completed_unavailable_reason"]
+    if completed is None:
+        if not isinstance(reason, str) or not reason:
+            raise ValueError(
+                f"{label}: unavailable completed-simulation evidence needs a reason"
+            )
+    elif not isinstance(completed, int) or completed < 0:
+        raise ValueError(f"{label}: completed simulations must be non-negative")
+
+
+def _search_compute_summary(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+    summaries = [row["search_telemetry_summary"] for row in rows]
+
+    def total(metric_name: str) -> float:
+        return sum(
+            float(_mapping(summary[metric_name])["total"]) for summary in summaries
+        )
+
+    completed_values = [row["search_simulations_completed"] for row in rows]
+    completed = (
+        sum(int(value) for value in completed_values)
+        if all(value is not None for value in completed_values)
+        else None
+    )
+    return {
+        "decision_count": sum(int(summary["decision_count"]) for summary in summaries),
+        "native_simulator_steps": total("native_simulator_steps"),
+        "simulations_requested": total("simulations_requested"),
+        "root_visits": total("root_visits"),
+        "simulations_completed": completed,
+        "model_calls": total("model_calls"),
+        "wall_clock_seconds": total("wall_clock_time_s"),
+        "simulations_completed_available": completed is not None,
+        "simulations_completed_unavailable_reason": (
+            None
+            if completed is not None
+            else "native battle_search exposes requested simulations and native "
+            "simulator steps, but not completed simulation count"
+        ),
     }
 
 
@@ -607,6 +682,7 @@ def _validate_budget_arm(payload: Mapping[str, Any], budget: int) -> None:
             raise ValueError("T061 budget rows require structured resource outcomes")
         if not isinstance(row["problems"], list):
             raise ValueError("T061 budget rows require a problems list")
+        _validate_search_telemetry(row, f"budget {budget}")
         _validate_failure_state(row, f"budget {budget}", {"win", "loss"})
     if _artifact_identity(payload) is None:
         raise ValueError(f"budget {budget}: input artifact identity is missing")
@@ -665,8 +741,8 @@ def _validate_factorial_arm(
             if not isinstance(row[field], Mapping):
                 raise ValueError(f"{label}: {field} must be an object")
         if (
-            _number(row["simulator_steps"]) is None
-            or _number(row["wall_clock_seconds"]) is None
+            _number(row["outer_simulator_steps"]) is None
+            or _number(row["outer_wall_clock_seconds"]) is None
         ):
             raise ValueError(f"{label}: compute fields must be numeric")
         if (
@@ -677,6 +753,7 @@ def _validate_factorial_arm(
             raise ValueError(f"{label}: failure flags must be boolean")
         if not isinstance(row["problems"], list):
             raise ValueError(f"{label}: problems must be a list")
+        _validate_search_telemetry(row, label)
         _validate_failure_state(row, label, {"completed"})
     numeric_seeds = []
     for row in rows:
@@ -740,12 +817,16 @@ def _artifact_identity(payload: Mapping[str, Any]) -> dict[str, Any] | None:
     if not isinstance(value.get("bytes"), int) or value["bytes"] < 0:
         return None
     path = Path(str(value["path"]))
-    if path.exists():
+    if not path.exists():
+        return None
+    try:
         actual_hash, actual_bytes = _hash_retained_artifact(
             path, value.get("hash_basis")
         )
-        if actual_hash != value["sha256"].lower() or actual_bytes != value["bytes"]:
-            return None
+    except (OSError, ValueError):
+        return None
+    if actual_hash != value["sha256"].lower() or actual_bytes != value["bytes"]:
+        return None
     return {str(key): item for key, item in value.items()}
 
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from pathlib import Path
 
 import pytest
 
@@ -27,10 +28,41 @@ def _provenance(distribution: str):
 
 
 def _artifact(name: str):
+    path = Path(__file__)
+    data = path.read_bytes()
+    digest = hashlib.sha256(path.name.encode() + data).hexdigest()
     return {
-        "path": f"artifacts/{name}.json",
-        "sha256": "0" * 64,
-        "bytes": 0,
+        "path": str(path),
+        "sha256": digest,
+        "bytes": len(data),
+        "hash_basis": "file bytes with basename prefix",
+    }
+
+
+def _search_summary():
+    metric = {
+        "count": 1,
+        "missing_count": 0,
+        "total": 20.0,
+        "minimum": 20.0,
+        "maximum": 20.0,
+        "mean": 20.0,
+    }
+    return {
+        "schema_id": "search-telemetry-summary-v1",
+        "schema_version": 1,
+        "decision_count": 1,
+        "simulations_requested": metric,
+        "root_visits": metric,
+        "native_simulator_steps": metric,
+        "model_calls": {
+            **metric,
+            "total": 0.0,
+            "minimum": 0.0,
+            "maximum": 0.0,
+            "mean": 0.0,
+        },
+        "wall_clock_time_s": metric,
     }
 
 
@@ -61,8 +93,11 @@ def _budget_arm(budget: int):
                 "terminal_absolute_hp": 10 + budget,
                 "status": "win" if i == 0 else "loss",
                 "selected_root_action": {"action": "a"},
-                "simulator_steps": budget,
-                "wall_clock_seconds": 1.0,
+                "outer_simulator_steps": budget,
+                "outer_wall_clock_seconds": 1.0,
+                "search_telemetry_summary": _search_summary(),
+                "search_simulations_completed": None,
+                "search_simulations_completed_unavailable_reason": "native search does not expose completed simulations",
                 "potion_outcome": {"status": "available", "value": []},
                 "structured_terminal_resource_outcome": {
                     "schema_id": "structured-battle-outcome-v1"
@@ -133,8 +168,11 @@ def _factorial_arm(driver: str, budget: int, *, later_act: bool = False):
                 "unique_act_counts": {"1": 2},
                 "unique_room_type_counts": {"MONSTER": 2},
                 "unique_encounter_id_counts": {"JAW_WORM": 2},
-                "simulator_steps": budget * 2,
-                "wall_clock_seconds": 1.0,
+                "outer_simulator_steps": budget * 2,
+                "outer_wall_clock_seconds": 1.0,
+                "search_telemetry_summary": _search_summary(),
+                "search_simulations_completed": None,
+                "search_simulations_completed_unavailable_reason": "native search does not expose completed simulations",
                 "truncation": False,
                 "controller_error": False,
                 "unsupported_state": False,
@@ -271,3 +309,23 @@ def test_oracle_record_range_selects_explicit_half_open_slice():
     assert list(_select_record_range(records, "1:4")) == [1, 2, 3]
     with pytest.raises(ValueError, match="outside the cohort"):
         _select_record_range(records, "4:7")
+
+
+def test_missing_retained_artifact_path_fails_closed():
+    arms = _factorial_arms()
+    arms[0][2]["artifact_identity"] = {
+        "path": "Z:/definitely-missing/t061-artifact",
+        "sha256": "0" * 64,
+        "bytes": 0,
+    }
+    with pytest.raises(ValueError, match="input artifact identity"):
+        build_t061_factorial_report(arms, expected_run_count=4, bootstrap_resamples=100)
+
+    budget_arms = [(str(budget), _budget_arm(budget)) for budget in (20, 100, 300)]
+    budget_arms[0][1]["artifact_identity"] = {
+        "path": "Z:/definitely-missing/t061-budget-artifact",
+        "sha256": "0" * 64,
+        "bytes": 0,
+    }
+    with pytest.raises(ValueError, match="input artifact identity"):
+        build_t061_budget_curve_report(budget_arms)

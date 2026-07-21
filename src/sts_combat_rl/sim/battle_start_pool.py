@@ -77,6 +77,10 @@ from sts_combat_rl.sim.resource_outcome import (
     legacy_unavailable_battle_resource_outcome,
     unavailable_battle_resource_outcome,
 )
+from sts_combat_rl.sim.search_telemetry import (
+    iter_search_decision_telemetry_dicts,
+    summarize_search_decision_telemetry_dicts,
+)
 
 
 BATTLE_START_POOL_FORMAT_VERSION = 4
@@ -147,6 +151,9 @@ class SourceRunSummary:
     status: str = SOURCE_RUN_SUMMARY_AVAILABLE
     simulator_step_count: int | None = None
     wall_clock_time_s: float | None = None
+    search_telemetry_summary: dict[str, Any] | None = None
+    search_simulations_completed: int | None = None
+    search_simulations_completed_unavailable_reason: str | None = None
 
     @classmethod
     def legacy_unavailable(
@@ -194,6 +201,11 @@ class SourceRunSummary:
             "status": self.status,
             "simulator_step_count": self.simulator_step_count,
             "wall_clock_time_s": self.wall_clock_time_s,
+            "search_telemetry_summary": self.search_telemetry_summary,
+            "search_simulations_completed": self.search_simulations_completed,
+            "search_simulations_completed_unavailable_reason": (
+                self.search_simulations_completed_unavailable_reason
+            ),
         }
 
 
@@ -542,7 +554,26 @@ def _build_source_run_summary(
         problems=tuple(dict.fromkeys(run_problems)),
         simulator_step_count=len(controlled.steps),
         wall_clock_time_s=wall_clock_time_s,
+        search_telemetry_summary=_controlled_run_search_telemetry(controlled),
+        search_simulations_completed=None,
+        search_simulations_completed_unavailable_reason=(
+            "native battle_search exposes requested simulations and native "
+            "simulator steps, but not completed simulation count"
+        ),
     )
+
+
+def _controlled_run_search_telemetry(
+    controlled: ControlledRun,
+) -> dict[str, Any] | None:
+    """Summarize native search telemetry retained on battle decisions."""
+
+    records: list[dict[str, Any]] = []
+    for step in controlled.steps:
+        records.extend(iter_search_decision_telemetry_dicts(step.decision_metadata))
+    if not records:
+        return None
+    return summarize_search_decision_telemetry_dicts(records).to_dict()
 
 
 def sample_battle_start_pool(
@@ -1829,6 +1860,32 @@ def _validated_source_run_summary(value: Any, label: str) -> dict[str, Any]:
             None
             if summary.get("wall_clock_time_s") is None
             else _optional_number(summary.get("wall_clock_time_s"))
+        ),
+        "search_telemetry_summary": (
+            None
+            if summary.get("search_telemetry_summary") is None
+            else dict(
+                _require_mapping(
+                    summary.get("search_telemetry_summary"),
+                    f"{label} search_telemetry_summary",
+                )
+            )
+        ),
+        "search_simulations_completed": (
+            None
+            if summary.get("search_simulations_completed") is None
+            else _require_non_negative_int(
+                summary.get("search_simulations_completed"),
+                f"{label} search_simulations_completed",
+            )
+        ),
+        "search_simulations_completed_unavailable_reason": (
+            None
+            if summary.get("search_simulations_completed_unavailable_reason") is None
+            else _require_non_empty_string(
+                summary.get("search_simulations_completed_unavailable_reason"),
+                f"{label} search_simulations_completed_unavailable_reason",
+            )
         ),
     }
 
