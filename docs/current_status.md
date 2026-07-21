@@ -1,6 +1,6 @@
 # Current Status
 
-Last reviewed: 2026-07-20.
+Last reviewed: 2026-07-21.
 
 This document describes the latest `main` branch only. Results from local
 artifacts, old branches, or unmerged pull requests do not count as implemented
@@ -80,9 +80,11 @@ arm on the T052 and T053 harmful subsets. Allocation repair is closed; it does
 not authorize root-prior reachability, promotion, or further allocation
 variants. T060 was cancelled before execution because a 10,000-run scale-up of
 the unchanged profile would not diagnose the reachability-policy bottleneck.
-T061 is `IN_REVIEW` in PR #59 with matched battle-budget and complete-run
-interventions. T034 remains blocked on native public-consistent hidden-future
-sampler support.
+T061 is complete. Its matched restored-battle curve and six-arm complete-run
+factorial probe found a positive battle-budget effect on Act-2 entry under
+`expert_non_combat_v1`, no Act-3/Act-4/Heart reachability, and selected T062 as
+the single next task. T062 is the only `READY` task. T034 remains blocked on
+native public-consistent hidden-future sampler support.
 
 ## Implemented On Main
 
@@ -1135,6 +1137,31 @@ sampler support.
   not controller promotion, root-prior reachability, natural A20 performance,
   broad-training readiness, live-game validation, normal-information strength,
   or final-agent evidence.
+- T061 adds `t061-a20-reachability-bottleneck-decomposition-v1`,
+  `t061-restored-battle-budget-curve-v1`, and
+  `t061-complete-run-factorial-report-v1`. Maintainer review accepted the
+  retained bottleneck report sha256
+  `bfc3bb2bbea81940a1ed0ab9affe7b4cea27a8922896209e927b0297190894ac`
+  with byte count `44496958`, budget-curve report sha256
+  `db22b90e497bb82e144e1fe43c94c8ffd99df2dfa1b1bcbc2dab9ea7597a3408`
+  with byte count `10739122`, factorial report sha256
+  `e652aa45ae3253e1c4018d7ceeb8571f197d7334e79a0304ec291d0b1fb41b41`
+  with byte count `31340427`, and retention-manifest canonical self-hash
+  `2fb5e329505b52541edbd7aa74b5fa2025e97276523ee341884538a4d7b3ef90`
+  with byte count `6321` under
+  `artifacts/t061-a20-reachability-bottleneck-decomposition/`. The restored
+  curve evaluated the same 93 T052 records at budgets 20, 100, and 300 with 16
+  shards/workers and obtained 4, 4, and 5 wins. The complete-run factorial ran
+  256 shared A20 seeds in each of six battle-budget/non-combat-driver arms,
+  1,536 terminal runs total, with 16 shards/workers, zero failures, and zero
+  truncations. Under `expert_non_combat_v1`, increasing battle budget from 20
+  to 300 increased matched Act-2 entry by `0.02734375`, bootstrap 95% CI
+  `[0.0078125, 0.0546875]`; no arm reached Act 3, Act 4, or the Heart. T061
+  therefore selected exactly T062. This is
+  `full_simulator_state_oracle_like` diagnostic evidence only, not a new search
+  algorithm, controller promotion, natural A20 strength, broad-training
+  readiness, live-game validation, normal-information strength, or final-agent
+  evidence.
 
 ## Not Implemented On Main
 
@@ -1314,9 +1341,17 @@ therefore closed rather than promoted or extended into reachability.
 T060's proposed 10,000-terminal-run natural A20 source-coverage scale-up was
 cancelled before execution: it would have measured the same weak
 policy-induced occupancy distribution more precisely without identifying its
-cause. The published follow-up is T061, a matched restored-battle budget curve
-and complete-run factorial reachability probe that must select exactly one
-next task from its evidence.
+cause. T061 replaced it with matched restored-battle and complete-run
+interventions. The accepted result found a positive battle-budget effect on
+Act-2 entry under `expert_non_combat_v1`, no Act-3/Act-4/Heart reachability,
+and selected T062 as exactly one next task.
+
+T062 (`Battle Search v2 Minimal Surface`) is the only `READY` task. It must add
+one versioned tree-internal policy-prior/learned-leaf-value search surface and
+compare baseline, prior-only, value-only, and combined arms over the retained
+93-record T052 cohort under equal nominal, simulator-step-normalized, and
+wall-clock-normalized budgets. No further natural source scale-up is authorized
+before that fixed-cohort evidence is accepted.
 
 T034 remains blocked on an explicit native simulator boundary for
 public-consistent hidden-future sampling.
