@@ -12,6 +12,7 @@ from collections import Counter
 from collections.abc import Mapping, Sequence
 import hashlib
 import json
+import math
 from pathlib import Path
 import random
 import re
@@ -114,6 +115,28 @@ _ALLOWED_STATUSES = {
 }
 _PINNED_INTEGRATION_COMMIT = "9dd8f75bd5d2b1aa8a8b5cf1db18f899825f326a"
 _PINNED_SOURCE_MANIFEST = "docs/sts_lightspeed_source_manifest.json"
+_SEARCH_SUMMARY_METRICS = (
+    "simulations_requested",
+    "root_visits",
+    "root_action_count",
+    "legal_action_count",
+    "native_simulator_steps",
+    "model_calls",
+    "wall_clock_time_s",
+    "root_value_spread",
+    "root_decision_gap",
+    "unsearched_legal_action_count",
+    "unmapped_search_edge_count",
+    "unmapped_root_row_count",
+    "root_mapping_failure_count",
+)
+_SEARCH_MANDATORY_METRICS = {
+    "simulations_requested",
+    "root_visits",
+    "native_simulator_steps",
+    "model_calls",
+    "wall_clock_time_s",
+}
 
 
 def load_json_object(path: str) -> dict[str, Any]:
@@ -501,29 +524,110 @@ def _run_summary(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     }
 
 
-def _validate_search_telemetry(row: Mapping[str, Any], label: str) -> None:
+def _validate_search_telemetry(
+    row: Mapping[str, Any],
+    label: str,
+    provenance: Mapping[str, Any],
+    budget: int,
+) -> None:
     summary = row["search_telemetry_summary"]
     if not isinstance(summary, Mapping):
         raise ValueError(f"{label}: search telemetry summary is missing")
-    if summary.get("schema_id") != "search-telemetry-summary-v1":
+    required_summary_fields = {
+        "schema_id",
+        "schema_version",
+        "decision_telemetry_schema_id",
+        "decision_telemetry_schema_version",
+        "decision_count",
+        "information_regime_counts",
+        "controller_kind_counts",
+        "search_kind_counts",
+        "backend_counts",
+        "budget_unit_counts",
+        *_SEARCH_SUMMARY_METRICS,
+        "unavailable_field_counts",
+        "unavailable_reasons",
+        "decision_problem_count",
+        "problem_count",
+    }
+    missing = sorted(required_summary_fields.difference(summary))
+    if missing:
+        raise ValueError(f"{label}: search telemetry missing fields {missing}")
+    if summary["schema_id"] != "search-telemetry-summary-v1":
         raise ValueError(f"{label}: unsupported search telemetry summary schema")
-    if summary.get("schema_version") != 1:
+    if summary["schema_version"] != 1:
         raise ValueError(f"{label}: unsupported search telemetry summary version")
+    if summary["decision_telemetry_schema_id"] != "search-decision-telemetry-v1":
+        raise ValueError(f"{label}: unsupported decision telemetry schema")
+    if summary["decision_telemetry_schema_version"] != 1:
+        raise ValueError(f"{label}: unsupported decision telemetry version")
     decision_count = summary.get("decision_count")
     if not isinstance(decision_count, int) or decision_count <= 0:
         raise ValueError(f"{label}: search telemetry requires decisions")
-    for metric_name in (
-        "simulations_requested",
-        "root_visits",
-        "native_simulator_steps",
-        "model_calls",
-        "wall_clock_time_s",
+    _validate_search_counter(
+        summary["information_regime_counts"],
+        {str(provenance["information_regime"]): decision_count},
+        f"{label} information regime counts",
+    )
+    _validate_search_counter(
+        summary["controller_kind_counts"],
+        {"oracle_battle_search": decision_count},
+        f"{label} controller kind counts",
+    )
+    _validate_search_counter(
+        summary["search_kind_counts"],
+        {"native_random_terminal_playout": decision_count},
+        f"{label} search kind counts",
+    )
+    _validate_search_counter(
+        summary["backend_counts"],
+        {str(provenance["search_api"]): decision_count},
+        f"{label} search backend counts",
+    )
+    _validate_search_counter(
+        summary["budget_unit_counts"],
+        {"native_random_terminal_playouts": decision_count},
+        f"{label} search budget unit counts",
+    )
+    for metric_name in _SEARCH_SUMMARY_METRICS:
+        _validate_search_metric(
+            summary[metric_name],
+            decision_count,
+            metric_name in _SEARCH_MANDATORY_METRICS,
+            f"{label} {metric_name}",
+        )
+    unavailable_counts = _validate_non_negative_counter(
+        summary["unavailable_field_counts"],
+        f"{label} unavailable field counts",
+    )
+    reasons = summary["unavailable_reasons"]
+    if not isinstance(reasons, Mapping) or any(
+        not isinstance(key, str)
+        or not isinstance(value, list)
+        or not all(isinstance(item, str) for item in value)
+        for key, value in reasons.items()
     ):
-        metric = summary.get(metric_name)
-        if not isinstance(metric, Mapping):
-            raise ValueError(f"{label}: search telemetry missing {metric_name}")
-        if _number(metric.get("total")) is None:
-            raise ValueError(f"{label}: search telemetry {metric_name} is unavailable")
+        raise ValueError(f"{label}: unavailable reasons must be string lists")
+    for metric_name in _SEARCH_SUMMARY_METRICS:
+        metric = _mapping(summary[metric_name])
+        missing_count = metric["missing_count"]
+        if missing_count:
+            if unavailable_counts.get(metric_name) != missing_count:
+                raise ValueError(
+                    f"{label}: unavailable count disagrees for {metric_name}"
+                )
+    for field_name in unavailable_counts:
+        if unavailable_counts[field_name] > decision_count:
+            raise ValueError(f"{label}: unavailable count exceeds decisions")
+    if summary["decision_problem_count"] != 0 or summary["problem_count"] != 0:
+        raise ValueError(f"{label}: search telemetry contains decision problems")
+    expected_total = float(decision_count * budget)
+    for metric_name in ("simulations_requested", "root_visits"):
+        total = float(_mapping(summary[metric_name])["total"])
+        if not math.isclose(total, expected_total, rel_tol=0.0, abs_tol=1e-9):
+            raise ValueError(
+                f"{label}: {metric_name} disagrees with decision_count*budget"
+            )
     completed = row["search_simulations_completed"]
     reason = row["search_simulations_completed_unavailable_reason"]
     if completed is None:
@@ -533,6 +637,65 @@ def _validate_search_telemetry(row: Mapping[str, Any], label: str) -> None:
             )
     elif not isinstance(completed, int) or completed < 0:
         raise ValueError(f"{label}: completed simulations must be non-negative")
+
+
+def _validate_search_counter(
+    value: Any, expected: Mapping[str, int], label: str
+) -> None:
+    if not isinstance(value, Mapping) or dict(value) != dict(expected):
+        raise ValueError(f"{label} disagree with pinned arm provenance")
+
+
+def _validate_non_negative_counter(value: Any, label: str) -> dict[str, int]:
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{label} must be an object")
+    result: dict[str, int] = {}
+    for key, count in value.items():
+        if not isinstance(key, str) or not isinstance(count, int) or count < 0:
+            raise ValueError(f"{label} must contain non-negative integer counts")
+        result[key] = count
+    return result
+
+
+def _validate_search_metric(
+    value: Any, decision_count: int, mandatory: bool, label: str
+) -> None:
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{label} must be an object")
+    required = {"count", "missing_count", "total", "minimum", "maximum", "mean"}
+    missing = sorted(required.difference(value))
+    if missing:
+        raise ValueError(f"{label} missing fields {missing}")
+    count = value["count"]
+    missing_count = value["missing_count"]
+    if (
+        not isinstance(count, int)
+        or count < 0
+        or not isinstance(missing_count, int)
+        or missing_count < 0
+        or count + missing_count != decision_count
+    ):
+        raise ValueError(f"{label} count fields are inconsistent")
+    if mandatory and (count != decision_count or missing_count != 0):
+        raise ValueError(f"{label} is missing mandatory observations")
+    numeric = [value[field] for field in ("total", "minimum", "maximum", "mean")]
+    if count == 0:
+        if any(item is not None for item in numeric):
+            raise ValueError(f"{label} has values with zero observations")
+        return
+    if any(
+        not isinstance(item, (int, float))
+        or isinstance(item, bool)
+        or not math.isfinite(float(item))
+        or float(item) < 0
+        for item in numeric
+    ):
+        raise ValueError(f"{label} has invalid negative or non-finite values")
+    total, minimum, maximum, mean = (float(item) for item in numeric)
+    if minimum > maximum or not minimum <= mean <= maximum:
+        raise ValueError(f"{label} min/max/mean are inconsistent")
+    if not math.isclose(total, mean * count, rel_tol=1e-9, abs_tol=1e-9):
+        raise ValueError(f"{label} total and mean are inconsistent")
 
 
 def _search_compute_summary(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
@@ -682,7 +845,12 @@ def _validate_budget_arm(payload: Mapping[str, Any], budget: int) -> None:
             raise ValueError("T061 budget rows require structured resource outcomes")
         if not isinstance(row["problems"], list):
             raise ValueError("T061 budget rows require a problems list")
-        _validate_search_telemetry(row, f"budget {budget}")
+        _validate_search_telemetry(
+            row,
+            f"budget {budget}",
+            _mapping(payload["provenance"]),
+            budget,
+        )
         _validate_failure_state(row, f"budget {budget}", {"win", "loss"})
     if _artifact_identity(payload) is None:
         raise ValueError(f"budget {budget}: input artifact identity is missing")
@@ -753,7 +921,12 @@ def _validate_factorial_arm(
             raise ValueError(f"{label}: failure flags must be boolean")
         if not isinstance(row["problems"], list):
             raise ValueError(f"{label}: problems must be a list")
-        _validate_search_telemetry(row, label)
+        _validate_search_telemetry(
+            row,
+            label,
+            _mapping(payload["provenance"]),
+            budget,
+        )
         _validate_failure_state(row, label, {"completed"})
     numeric_seeds = []
     for row in rows:

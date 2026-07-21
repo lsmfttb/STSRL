@@ -39,30 +39,45 @@ def _artifact(name: str):
     }
 
 
-def _search_summary():
-    metric = {
-        "count": 1,
-        "missing_count": 0,
-        "total": 20.0,
-        "minimum": 20.0,
-        "maximum": 20.0,
-        "mean": 20.0,
-    }
+def _search_summary(budget=20):
+    def metric(total=float(budget)):
+        return {
+            "count": 1,
+            "missing_count": 0,
+            "total": total,
+            "minimum": total,
+            "maximum": total,
+            "mean": total,
+        }
+
     return {
         "schema_id": "search-telemetry-summary-v1",
         "schema_version": 1,
+        "decision_telemetry_schema_id": "search-decision-telemetry-v1",
+        "decision_telemetry_schema_version": 1,
         "decision_count": 1,
-        "simulations_requested": metric,
-        "root_visits": metric,
-        "native_simulator_steps": metric,
-        "model_calls": {
-            **metric,
-            "total": 0.0,
-            "minimum": 0.0,
-            "maximum": 0.0,
-            "mean": 0.0,
-        },
-        "wall_clock_time_s": metric,
+        "information_regime_counts": {"full_simulator_state_oracle_like": 1},
+        "controller_kind_counts": {"oracle_battle_search": 1},
+        "search_kind_counts": {"native_random_terminal_playout": 1},
+        "backend_counts": {"StepSimulator.battle_search.v1": 1},
+        "budget_unit_counts": {"native_random_terminal_playouts": 1},
+        "simulations_requested": metric(),
+        "root_visits": metric(),
+        "root_action_count": metric(),
+        "legal_action_count": metric(),
+        "native_simulator_steps": metric(),
+        "model_calls": metric(0.0),
+        "wall_clock_time_s": metric(),
+        "root_value_spread": metric(),
+        "root_decision_gap": metric(),
+        "unsearched_legal_action_count": metric(),
+        "unmapped_search_edge_count": metric(),
+        "unmapped_root_row_count": metric(),
+        "root_mapping_failure_count": metric(),
+        "unavailable_field_counts": {},
+        "unavailable_reasons": {},
+        "decision_problem_count": 0,
+        "problem_count": 0,
     }
 
 
@@ -95,7 +110,7 @@ def _budget_arm(budget: int):
                 "selected_root_action": {"action": "a"},
                 "outer_simulator_steps": budget,
                 "outer_wall_clock_seconds": 1.0,
-                "search_telemetry_summary": _search_summary(),
+                "search_telemetry_summary": _search_summary(budget),
                 "search_simulations_completed": None,
                 "search_simulations_completed_unavailable_reason": "native search does not expose completed simulations",
                 "potion_outcome": {"status": "available", "value": []},
@@ -170,7 +185,7 @@ def _factorial_arm(driver: str, budget: int, *, later_act: bool = False):
                 "unique_encounter_id_counts": {"JAW_WORM": 2},
                 "outer_simulator_steps": budget * 2,
                 "outer_wall_clock_seconds": 1.0,
-                "search_telemetry_summary": _search_summary(),
+                "search_telemetry_summary": _search_summary(budget),
                 "search_simulations_completed": None,
                 "search_simulations_completed_unavailable_reason": "native search does not expose completed simulations",
                 "truncation": False,
@@ -328,4 +343,26 @@ def test_missing_retained_artifact_path_fails_closed():
         "bytes": 0,
     }
     with pytest.raises(ValueError, match="input artifact identity"):
+        build_t061_budget_curve_report(budget_arms)
+
+
+def test_malformed_search_telemetry_fails_closed_for_both_report_families():
+    arms = _factorial_arms()
+    summary = arms[0][2]["runs"][0]["search_telemetry_summary"]
+    summary["native_simulator_steps"] = {
+        "count": 0,
+        "missing_count": 999,
+        "total": -123.0,
+        "minimum": -123.0,
+        "maximum": -123.0,
+        "mean": -123.0,
+    }
+    with pytest.raises(ValueError, match="count fields|invalid negative"):
+        build_t061_factorial_report(arms, expected_run_count=4, bootstrap_resamples=100)
+
+    budget_arms = [(str(budget), _budget_arm(budget)) for budget in (20, 100, 300)]
+    budget_arms[0][1]["records"][0]["search_telemetry_summary"][
+        "information_regime_counts"
+    ] = {"normal_public_policy": 1}
+    with pytest.raises(ValueError, match="pinned arm provenance"):
         build_t061_budget_curve_report(budget_arms)
