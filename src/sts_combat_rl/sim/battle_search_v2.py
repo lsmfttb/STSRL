@@ -316,9 +316,15 @@ def _validate_mechanism_telemetry(
         value = telemetry.get(telemetry_field)
         if not isinstance(value, int) or isinstance(value, bool) or value < 0:
             raise ValueError(f"native battle search v2 {telemetry_field} is invalid")
-        if enabled and (value <= 0 or callbacks[callback_key] != value):
+        # A newly expanded node can terminate immediately after its first
+        # action.  That terminal has no legal player-action mapping for the
+        # public checkpoint, so native search correctly backs up the terminal
+        # result without a learned-value call.  Require exact accounting, but
+        # do not turn that valid terminal boundary into a controller failure.
+        if enabled and callbacks[callback_key] != value:
             raise ValueError(
-                f"native battle search v2 did not exercise {telemetry_field}"
+                f"native battle search v2 callback accounting failed for "
+                f"{telemetry_field}"
             )
         if not enabled and value != 0:
             raise ValueError(

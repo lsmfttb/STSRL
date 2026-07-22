@@ -1076,6 +1076,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     input_group.add_argument(
+        "--lightspeed-t062-battle-search-v2-comparison",
+        type=Path,
+        metavar="COHORT_PATH",
+        help=(
+            "Load an immutable fixed battle cohort unchanged and evaluate the "
+            "four T062 tree-internal policy/value search ablations."
+        ),
+    )
+    input_group.add_argument(
         "--merge-root-prior-guided-search-comparison",
         type=Path,
         metavar="OUTPUT_JSONL",
@@ -1789,6 +1798,18 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         metavar="PATH",
         help="Write one T059 four-arm root-prior repair comparison JSONL report.",
+    )
+    parser.add_argument(
+        "--t062-battle-search-v2-comparison-report",
+        type=Path,
+        metavar="PATH",
+        help="Write one T062 four-arm comparison JSON report.",
+    )
+    parser.add_argument(
+        "--t062-battle-search-v2-family",
+        choices=("nominal", "simulator_step_normalized", "wall_clock_normalized"),
+        default="nominal",
+        help="Compute-matching family recorded in a T062 comparison report.",
     )
     parser.add_argument(
         "--t054-guardrailed-root-prior-repair-scale",

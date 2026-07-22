@@ -162,6 +162,7 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
         or args.lightspeed_t054_guardrailed_root_prior_repair_comparison is not None
         or args.lightspeed_t055_guardrailed_root_prior_scale_comparison is not None
         or args.lightspeed_t059_root_prior_allocation_repair_comparison is not None
+        or args.lightspeed_t062_battle_search_v2_comparison is not None
         or search_pool_uses_checkpoint
     )
     if (
@@ -187,6 +188,7 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
             "--lightspeed-t054-guardrailed-root-prior-repair-comparison or "
             "--lightspeed-t055-guardrailed-root-prior-scale-comparison or "
             "--lightspeed-t059-root-prior-allocation-repair-comparison or "
+            "--lightspeed-t062-battle-search-v2-comparison or "
             "--lightspeed-search-battle-start-pool with a checkpoint-guided "
             "--search-battle-controller"
         )
@@ -239,6 +241,14 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
         return (
             "--t059-root-prior-allocation-repair-comparison-report requires "
             "--lightspeed-t059-root-prior-allocation-repair-comparison"
+        )
+    if (
+        args.t062_battle_search_v2_comparison_report is not None
+        and args.lightspeed_t062_battle_search_v2_comparison is None
+    ):
+        return (
+            "--t062-battle-search-v2-comparison-report requires "
+            "--lightspeed-t062-battle-search-v2-comparison"
         )
     if (
         args.merge_root_prior_guided_search_comparison is not None
