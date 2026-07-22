@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
+import random
 from collections import Counter
 from collections.abc import Callable, Sequence
 from concurrent.futures import ThreadPoolExecutor
@@ -124,6 +126,180 @@ def write_t062_comparison_report(path: Path, report: dict[str, Any]) -> None:
     )
 
 
+def merge_t062_comparison_reports_from_paths(
+    *,
+    shard_paths: Sequence[Path],
+    output_path: Path,
+    expected_record_count: int,
+    bootstrap_resamples: int = 2_000,
+    bootstrap_seed: int = 6201,
+) -> dict[str, Any]:
+    """Merge disjoint T062 shards and compute deterministic paired statistics."""
+
+    if expected_record_count < 1:
+        raise ValueError("expected T062 record count must be positive")
+    if bootstrap_resamples < 100:
+        raise ValueError("T062 bootstrap resamples must be at least 100")
+    reports = [_load_t062_comparison(path) for path in shard_paths]
+    if not reports:
+        raise ValueError("at least one T062 comparison shard is required")
+    first = reports[0]
+    compatible_keys = (
+        "family",
+        "cohort_identity",
+        "cohort_total_record_count",
+        "action_space",
+        "max_battle_steps",
+        "controller_provenance",
+    )
+    problems: list[str] = []
+    combined = {label: [] for label in T062_ARM_LABELS}
+    for shard_index, report in enumerate(reports):
+        for key in compatible_keys:
+            if report.get(key) != first.get(key):
+                problems.append(f"shard {shard_index}: {key} differs")
+        if not report.get("successful"):
+            problems.append(f"shard {shard_index}: evaluation was not successful")
+        arms = report.get("arms")
+        if not isinstance(arms, dict) or set(arms) != set(T062_ARM_LABELS):
+            problems.append(f"shard {shard_index}: arms are incomplete")
+            continue
+        for label in T062_ARM_LABELS:
+            rows = arms[label].get("records")
+            if not isinstance(rows, list):
+                problems.append(f"shard {shard_index}: {label} records are missing")
+                continue
+            combined[label].extend(row for row in rows if isinstance(row, dict))
+
+    indexed = {
+        label: _index_t062_records(combined[label], label, problems)
+        for label in T062_ARM_LABELS
+    }
+    reference_indices = set(indexed["baseline"])
+    for label in T062_ARM_LABELS[1:]:
+        if set(indexed[label]) != reference_indices:
+            problems.append(f"{label}: cohort indices do not match baseline")
+        for cohort_index in reference_indices.intersection(indexed[label]):
+            if _source_key(indexed[label][cohort_index]) != _source_key(
+                indexed["baseline"][cohort_index]
+            ):
+                problems.append(f"{label}: source identity mismatch at {cohort_index}")
+    if len(reference_indices) != expected_record_count:
+        problems.append(
+            f"expected {expected_record_count} distinct records, found {len(reference_indices)}"
+        )
+    ordered = sorted(reference_indices)
+    arms = {
+        label: _merged_arm_summary(
+            [
+                indexed[label][cohort_index]
+                for cohort_index in ordered
+                if cohort_index in indexed[label]
+            ]
+        )
+        for label in T062_ARM_LABELS
+    }
+    paired = {
+        label: _paired_t062_summary(
+            baseline=arms["baseline"]["records"],
+            guided=arms[label]["records"],
+            bootstrap_resamples=bootstrap_resamples,
+            bootstrap_seed=bootstrap_seed + position,
+        )
+        for position, label in enumerate(T062_ARM_LABELS[1:], start=1)
+    }
+    merged = {
+        "schema_id": T062_COMPARISON_SCHEMA_ID,
+        "format_version": 1,
+        "task_id": "T062",
+        "report_kind": "merged_comparison",
+        "family": first.get("family"),
+        "cohort_identity": first.get("cohort_identity"),
+        "cohort_total_record_count": first.get("cohort_total_record_count"),
+        "evaluated_record_count": len(ordered),
+        "expected_record_count": expected_record_count,
+        "action_space": first.get("action_space"),
+        "max_battle_steps": first.get("max_battle_steps"),
+        "controller_provenance": first.get("controller_provenance"),
+        "worker_count": len(reports),
+        "shard_count": len(reports),
+        "shards": [str(path) for path in shard_paths],
+        "arms": arms,
+        "paired_vs_baseline": paired,
+        "problems": list(dict.fromkeys(problems)),
+        "command_passed": not problems,
+    }
+    write_t062_comparison_report(output_path, merged)
+    return merged
+
+
+def load_t062_comparison_report(path: Path) -> dict[str, Any]:
+    """Load one current-schema T062 shard or merged comparison report."""
+
+    return _load_t062_comparison(path)
+
+
+def build_t062_decision_report(
+    *,
+    nominal_report: dict[str, Any],
+    simulator_step_report: dict[str, Any],
+    wall_clock_report: dict[str, Any],
+) -> dict[str, Any]:
+    """Apply the predeclared T062 gate to the three separate families."""
+
+    reports = {
+        "nominal": nominal_report,
+        "simulator_step_normalized": simulator_step_report,
+        "wall_clock_normalized": wall_clock_report,
+    }
+    failed_families = [
+        name for name, report in reports.items() if not report.get("command_passed")
+    ]
+    nominal = _prior_value_pair(nominal_report)
+    steps = _prior_value_pair(simulator_step_report)
+    wall = _prior_value_pair(wall_clock_report)
+    equal_budget = (
+        _positive_delta(nominal, "overall")
+        and _ci_lower_nonnegative(nominal, "overall")
+        and all(
+            _nonnegative_delta(nominal, name) for name in ("boss_only", "act2_plus")
+        )
+    )
+    normalized = all(
+        _nonnegative_delta(pair, name)
+        for pair in (steps, wall)
+        for name in ("overall", "boss_only", "act2_plus")
+    ) and (_positive_delta(steps, "overall") or _positive_delta(wall, "overall"))
+    tied_hp = all(
+        _nonnegative_tied_hp(pair, name)
+        for pair in (nominal, steps, wall)
+        for name in ("overall", "boss_only", "act2_plus")
+    )
+    cost = _cost_within(steps, "native_simulator_steps", 0.05) and _cost_within(
+        wall, "wall_clock_seconds", 0.10
+    )
+    promote = not failed_families and equal_budget and normalized and tied_hp and cost
+    return {
+        "schema_id": "t062-battle-search-v2-decision-report-v1",
+        "task_id": "T062",
+        "predeclared_candidate": "prior_value",
+        "promotion_gates": {
+            "zero_failures": not failed_families,
+            "equal_budget_prior_value": equal_budget,
+            "compute_normalized_prior_value": normalized,
+            "tied_terminal_hp": tied_hp,
+            "matched_cost": cost,
+        },
+        "failed_families": failed_families,
+        "recommendation": (
+            "T062-search-v2-complete-run-evaluation"
+            if promote
+            else "T062-tree-internal-search-repair-or-closure"
+        ),
+        "command_passed": not failed_families,
+    }
+
+
 def _evaluate_t062_arm(
     *,
     adapter_factory: Callable[[], CheckpointingSimulatorAdapter],
@@ -209,6 +385,227 @@ def _fixed_report_summary(report: FixedEvaluationReport) -> dict[str, Any]:
         "evaluation_problems": report.problems,
         "records": results,
     }
+
+
+def _load_t062_comparison(path: Path) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"cannot read T062 comparison {path}: {exc}") from exc
+    if (
+        not isinstance(value, dict)
+        or value.get("schema_id") != T062_COMPARISON_SCHEMA_ID
+    ):
+        raise ValueError(f"{path}: unsupported T062 comparison schema")
+    return value
+
+
+def _index_t062_records(
+    rows: Sequence[dict[str, Any]], label: str, problems: list[str]
+) -> dict[int, dict[str, Any]]:
+    indexed: dict[int, dict[str, Any]] = {}
+    for row in rows:
+        cohort_index = row.get("cohort_index")
+        if not isinstance(cohort_index, int) or isinstance(cohort_index, bool):
+            problems.append(f"{label}: record without integer cohort_index")
+            continue
+        if cohort_index in indexed:
+            problems.append(f"{label}: duplicate cohort_index {cohort_index}")
+            continue
+        indexed[cohort_index] = row
+    return indexed
+
+
+def _source_key(row: dict[str, Any]) -> tuple[Any, ...]:
+    metadata = row.get("structural_metadata")
+    if not isinstance(metadata, dict):
+        metadata = {}
+    return (
+        row.get("cohort_index"),
+        row.get("source_checkpoint_id"),
+        metadata.get("source_run_id"),
+        metadata.get("source_battle_index"),
+    )
+
+
+def _merged_arm_summary(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
+    rows = list(rows)
+    return {
+        "record_count": len(rows),
+        "wins": sum(row.get("termination_status") == "win" for row in rows),
+        "losses": sum(row.get("termination_status") == "loss" for row in rows),
+        "truncations": sum(
+            row.get("termination_status") == "truncated" for row in rows
+        ),
+        "errors": sum(row.get("termination_status") == "error" for row in rows),
+        "outer_simulator_steps": sum(
+            _number(row.get("outer_simulator_steps")) for row in rows
+        ),
+        "wall_clock_seconds": sum(
+            _number(row.get("wall_clock_seconds")) for row in rows
+        ),
+        "native_simulator_steps": sum(
+            _telemetry_number(row, "oracle_search_native_simulator_steps")
+            for row in rows
+        ),
+        "model_calls": sum(
+            _telemetry_number(row, "oracle_search_model_calls") for row in rows
+        ),
+        "records": rows,
+    }
+
+
+def _paired_t062_summary(
+    *,
+    baseline: Sequence[dict[str, Any]],
+    guided: Sequence[dict[str, Any]],
+    bootstrap_resamples: int,
+    bootstrap_seed: int,
+) -> dict[str, Any]:
+    left = {int(row["cohort_index"]): row for row in baseline}
+    right = {int(row["cohort_index"]): row for row in guided}
+    return {
+        name: _paired_t062_stratum(
+            [index for index in sorted(left) if predicate(left[index])],
+            left,
+            right,
+            bootstrap_resamples,
+            bootstrap_seed + offset,
+        )
+        for offset, (name, predicate) in enumerate(
+            (
+                ("overall", lambda row: True),
+                (
+                    "boss_only",
+                    lambda row: (
+                        row.get("structural_metadata", {}).get("room_type") == "BOSS"
+                    ),
+                ),
+                (
+                    "act2_plus",
+                    lambda row: (
+                        _number(row.get("structural_metadata", {}).get("act")) >= 2
+                    ),
+                ),
+            )
+        )
+    }
+
+
+def _paired_t062_stratum(
+    indices: Sequence[int],
+    baseline: dict[int, dict[str, Any]],
+    guided: dict[int, dict[str, Any]],
+    resamples: int,
+    seed: int,
+) -> dict[str, Any]:
+    win_deltas = [
+        int(guided[index].get("termination_status") == "win")
+        - int(baseline[index].get("termination_status") == "win")
+        for index in indices
+    ]
+    tied_hp = [
+        _number(guided[index].get("terminal_absolute_hp"))
+        - _number(baseline[index].get("terminal_absolute_hp"))
+        for index in indices
+        if guided[index].get("termination_status")
+        == baseline[index].get("termination_status")
+        and guided[index].get("terminal_absolute_hp") is not None
+        and baseline[index].get("terminal_absolute_hp") is not None
+    ]
+    cost = {
+        metric: _ratio(
+            sum(_telemetry_number(guided[index], metric) for index in indices),
+            sum(_telemetry_number(baseline[index], metric) for index in indices),
+        )
+        for metric in ("native_simulator_steps", "wall_clock_seconds")
+    }
+    return {
+        "record_count": len(indices),
+        "paired_win_delta": sum(win_deltas),
+        "paired_win_delta_mean": _mean(win_deltas),
+        "paired_win_delta_bootstrap_95ci": _bootstrap_ci(win_deltas, resamples, seed),
+        "mean_terminal_hp_delta_among_outcome_ties": _mean(tied_hp),
+        "cost_ratio_guided_over_baseline": cost,
+    }
+
+
+def _telemetry_number(row: dict[str, Any], metric: str) -> float:
+    if metric == "wall_clock_seconds":
+        return _number(row.get("wall_clock_seconds"))
+    telemetry = row.get("controller_compute_telemetry")
+    if not isinstance(telemetry, dict):
+        return 0.0
+    return _number(telemetry.get(f"oracle_search_{metric}"))
+
+
+def _number(value: Any) -> float:
+    return (
+        float(value)
+        if isinstance(value, (int, float)) and not isinstance(value, bool)
+        else 0.0
+    )
+
+
+def _mean(values: Sequence[float]) -> float | None:
+    return None if not values else sum(values) / len(values)
+
+
+def _ratio(numerator: float, denominator: float) -> float | None:
+    return None if denominator <= 0.0 else numerator / denominator
+
+
+def _bootstrap_ci(
+    values: Sequence[float], resamples: int, seed: int
+) -> list[float | None]:
+    if not values:
+        return [None, None]
+    rng = random.Random(seed)
+    size = len(values)
+    means = sorted(
+        sum(values[rng.randrange(size)] for _ in range(size)) / size
+        for _ in range(resamples)
+    )
+    return [means[int(0.025 * (resamples - 1))], means[int(0.975 * (resamples - 1))]]
+
+
+def _prior_value_pair(report: dict[str, Any]) -> dict[str, Any]:
+    paired = report.get("paired_vs_baseline")
+    return paired.get("prior_value", {}) if isinstance(paired, dict) else {}
+
+
+def _positive_delta(pair: dict[str, Any], stratum: str) -> bool:
+    return _number(pair.get(stratum, {}).get("paired_win_delta")) > 0.0
+
+
+def _nonnegative_delta(pair: dict[str, Any], stratum: str) -> bool:
+    return _number(pair.get(stratum, {}).get("paired_win_delta")) >= 0.0
+
+
+def _ci_lower_nonnegative(pair: dict[str, Any], stratum: str) -> bool:
+    values = pair.get(stratum, {}).get("paired_win_delta_bootstrap_95ci")
+    return (
+        isinstance(values, list)
+        and len(values) == 2
+        and values[0] is not None
+        and _number(values[0]) >= 0.0
+    )
+
+
+def _nonnegative_tied_hp(pair: dict[str, Any], stratum: str) -> bool:
+    value = pair.get(stratum, {}).get("mean_terminal_hp_delta_among_outcome_ties")
+    return value is not None and _number(value) >= 0.0
+
+
+def _cost_within(pair: dict[str, Any], metric: str, tolerance: float) -> bool:
+    ratio = (
+        pair.get("overall", {}).get("cost_ratio_guided_over_baseline", {}).get(metric)
+    )
+    return (
+        ratio is not None
+        and math.isfinite(_number(ratio))
+        and abs(_number(ratio) - 1.0) <= tolerance
+    )
 
 
 def _select_record_range(

@@ -912,6 +912,50 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="CHECKPOINT_PT",
         help="Published T043 diagnostic policy/value checkpoint required by T062.",
     )
+    parser.add_argument(
+        "--merge-t062-comparison",
+        type=Path,
+        metavar="OUTPUT_JSON",
+        help="Merge explicit T062 comparison shards and compute paired statistics.",
+    )
+    parser.add_argument(
+        "--t062-comparison-shard",
+        type=Path,
+        action="append",
+        default=[],
+        metavar="SHARD_JSON",
+        help="One T062 comparison shard used by --merge-t062-comparison.",
+    )
+    parser.add_argument(
+        "--t062-expected-record-count",
+        type=int,
+        default=93,
+        help="Required distinct record count for a merged T062 report.",
+    )
+    parser.add_argument(
+        "--t062-decision-report",
+        type=Path,
+        metavar="OUTPUT_JSON",
+        help="Apply T062's predeclared promotion gate to three merged reports.",
+    )
+    parser.add_argument(
+        "--t062-nominal-comparison",
+        type=Path,
+        metavar="REPORT_JSON",
+        help="Merged equal-nominal-budget T062 comparison report.",
+    )
+    parser.add_argument(
+        "--t062-simulator-step-comparison",
+        type=Path,
+        metavar="REPORT_JSON",
+        help="Merged simulator-step-normalized T062 comparison report.",
+    )
+    parser.add_argument(
+        "--t062-wall-clock-comparison",
+        type=Path,
+        metavar="REPORT_JSON",
+        help="Merged wall-clock-normalized T062 comparison report.",
+    )
     input_group.add_argument(
         "--merge-assisted-source-pool",
         type=Path,

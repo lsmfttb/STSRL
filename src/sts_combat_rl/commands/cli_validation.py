@@ -376,6 +376,28 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
         path is not None for path in t062_inputs
     ):
         return "--t062 input paths require --t062-input-preflight-report"
+    if args.t062_expected_record_count <= 0:
+        return "--t062-expected-record-count must be positive"
+    if args.merge_t062_comparison is not None and not args.t062_comparison_shard:
+        return "--merge-t062-comparison requires --t062-comparison-shard"
+    if args.merge_t062_comparison is None and args.t062_comparison_shard:
+        return "--t062-comparison-shard requires --merge-t062-comparison"
+    t062_decision_inputs = (
+        args.t062_nominal_comparison,
+        args.t062_simulator_step_comparison,
+        args.t062_wall_clock_comparison,
+    )
+    if args.t062_decision_report is not None and any(
+        path is None for path in t062_decision_inputs
+    ):
+        return (
+            "--t062-decision-report requires --t062-nominal-comparison, "
+            "--t062-simulator-step-comparison, and --t062-wall-clock-comparison"
+        )
+    if args.t062_decision_report is None and any(
+        path is not None for path in t062_decision_inputs
+    ):
+        return "T062 merged comparison inputs require --t062-decision-report"
     if (
         args.merge_battle_start_pool_shards is not None
         and not args.battle_start_pool_shard
