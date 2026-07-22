@@ -1856,6 +1856,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Compute-matching family recorded in a T062 comparison report.",
     )
     parser.add_argument(
+        "--t062-arm-budget",
+        action="append",
+        default=[],
+        metavar="ARM=PLAYOUTS",
+        help=(
+            "Override one T062 arm's native playout budget; repeat for baseline, "
+            "prior_only, value_only, and/or prior_value."
+        ),
+    )
+    parser.add_argument(
         "--t054-guardrailed-root-prior-repair-scale",
         choices=("smoke", "fixed"),
         default="smoke",

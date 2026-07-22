@@ -54,6 +54,7 @@ from sts_combat_rl.commands.root_prior_guided_search_comparison import (
     write_root_prior_guided_search_comparison_report,
 )
 from sts_combat_rl.commands.t062_battle_search_v2 import (
+    parse_t062_arm_budgets,
     run_t062_comparison_from_cohort_path,
     write_t062_comparison_report,
 )
@@ -879,11 +880,12 @@ def run_lightspeed_command(args: argparse.Namespace) -> int:
                 if args.search_budget is None
                 else args.search_budget
             )
+            arm_budgets = parse_t062_arm_budgets(args.t062_arm_budget, budget)
             scorer = build_torch_guidance_scorer_from_checkpoint(
                 args.model_guided_oracle_checkpoint
             )
             baseline_controller = BattleSearchV2Controller(
-                simulations=budget,
+                simulations=arm_budgets["baseline"],
                 scorer=scorer,
                 ablation="baseline",
                 root_selection_rule=args.oracle_root_selection,
@@ -900,7 +902,7 @@ def run_lightspeed_command(args: argparse.Namespace) -> int:
                     (
                         "prior_only",
                         BattleSearchV2Controller(
-                            simulations=budget,
+                            simulations=arm_budgets["prior_only"],
                             scorer=scorer,
                             ablation="prior_only",
                             root_selection_rule=args.oracle_root_selection,
@@ -910,7 +912,7 @@ def run_lightspeed_command(args: argparse.Namespace) -> int:
                     (
                         "value_only",
                         BattleSearchV2Controller(
-                            simulations=budget,
+                            simulations=arm_budgets["value_only"],
                             scorer=scorer,
                             ablation="value_only",
                             root_selection_rule=args.oracle_root_selection,
@@ -920,7 +922,7 @@ def run_lightspeed_command(args: argparse.Namespace) -> int:
                     (
                         "prior_value",
                         BattleSearchV2Controller(
-                            simulations=budget,
+                            simulations=arm_budgets["prior_value"],
                             scorer=scorer,
                             ablation="prior_value",
                             root_selection_rule=args.oracle_root_selection,

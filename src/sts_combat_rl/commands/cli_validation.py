@@ -9,6 +9,7 @@ from sts_combat_rl.commands.search_battle_controller import (
     SEARCH_BATTLE_CONTROLLER_ORACLE,
     SEARCH_BATTLE_CONTROLLERS_REQUIRING_CHECKPOINT,
 )
+from sts_combat_rl.commands.t062_battle_search_v2 import parse_t062_arm_budgets
 from sts_combat_rl.sim.oracle_teacher_scaleup import (
     ORACLE_TEACHER_SCALEUP_SOURCE_SELECTION_ASSISTED_SEEDED_UNIFORM,
     ORACLE_TEACHER_SCALEUP_SOURCE_SELECTION_SEEDED_UNIFORM,
@@ -39,6 +40,15 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
         return "--oracle-search-simulations must be positive"
     if args.search_budget is not None and args.search_budget <= 0:
         return "--search-budget must be positive"
+    try:
+        parse_t062_arm_budgets(
+            args.t062_arm_budget,
+            args.oracle_search_simulations
+            if args.search_budget is None
+            else args.search_budget,
+        )
+    except ValueError as exc:
+        return str(exc)
     if args.workers <= 0:
         return "--workers must be positive"
     if args.shards <= 0:

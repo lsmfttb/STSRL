@@ -43,6 +43,32 @@ T062_COMPARISON_SCHEMA_ID = "t062-battle-search-v2-comparison-v1"
 T062_ARM_LABELS = ("baseline", "prior_only", "value_only", "prior_value")
 
 
+def parse_t062_arm_budgets(
+    values: Sequence[str], default_budget: int
+) -> dict[str, int]:
+    """Parse explicit per-arm playout overrides without silent defaults."""
+
+    if default_budget <= 0:
+        raise ValueError("default T062 search budget must be positive")
+    budgets = {label: default_budget for label in T062_ARM_LABELS}
+    seen: set[str] = set()
+    for value in values:
+        try:
+            label, raw_budget = value.split("=", 1)
+            budget = int(raw_budget)
+        except ValueError as exc:
+            raise ValueError("T062 arm budget must be ARM=PLAYOUTS") from exc
+        if label not in budgets:
+            raise ValueError(f"unknown T062 arm budget label {label!r}")
+        if label in seen:
+            raise ValueError(f"duplicate T062 arm budget for {label!r}")
+        if budget <= 0:
+            raise ValueError("T062 arm budget must be positive")
+        budgets[label] = budget
+        seen.add(label)
+    return budgets
+
+
 def run_t062_comparison_from_cohort_path(
     *,
     adapter_factory: Callable[[], CheckpointingSimulatorAdapter],
