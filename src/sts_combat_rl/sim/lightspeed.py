@@ -221,6 +221,36 @@ class LightSpeedAdapter:
             )
         )
 
+    def battle_search_v2(
+        self,
+        snapshot: SimulatorSnapshot,
+        *,
+        simulations: int,
+        include_potions: bool = False,
+        policy_prior_callback: Any | None = None,
+        leaf_value_callback: Any | None = None,
+    ) -> dict[str, Any]:
+        """Run the T062 tree-internal Oracle-like native search surface."""
+
+        if not hasattr(self._sim, "battle_search_v2"):
+            raise RuntimeError(
+                "slaythespire.StepSimulator does not expose battle_search_v2; "
+                "build the T062 tree-internal native source integration"
+            )
+        if policy_prior_callback is not None and not callable(policy_prior_callback):
+            raise ValueError("battle_search_v2 policy_prior_callback must be callable")
+        if leaf_value_callback is not None and not callable(leaf_value_callback):
+            raise ValueError("battle_search_v2 leaf_value_callback must be callable")
+        self._assert_snapshot_is_current(snapshot)
+        return dict(
+            self._sim.battle_search_v2(
+                int(simulations),
+                bool(include_potions),
+                policy_prior_callback,
+                leaf_value_callback,
+            )
+        )
+
     def legal_battle_start_encounters(
         self,
         snapshot: SimulatorSnapshot,
