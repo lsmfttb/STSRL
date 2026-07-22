@@ -445,12 +445,9 @@ def _merged_arm_summary(rows: Sequence[dict[str, Any]]) -> dict[str, Any]:
             _number(row.get("wall_clock_seconds")) for row in rows
         ),
         "native_simulator_steps": sum(
-            _telemetry_number(row, "oracle_search_native_simulator_steps")
-            for row in rows
+            _telemetry_number(row, "native_simulator_steps") for row in rows
         ),
-        "model_calls": sum(
-            _telemetry_number(row, "oracle_search_model_calls") for row in rows
-        ),
+        "model_calls": sum(_telemetry_number(row, "model_calls") for row in rows),
         "records": rows,
     }
 
