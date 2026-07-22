@@ -98,6 +98,10 @@ from sts_combat_rl.commands.t061_bottleneck_decomposition import (
     format_t061_bottleneck_report,
     run_t061_bottleneck_decomposition_from_paths,
 )
+from sts_combat_rl.commands.t062_battle_search_v2 import (
+    format_t062_input_preflight_report,
+    run_t062_input_preflight_from_paths,
+)
 from sts_combat_rl.commands.teacher_guidance_calibration import (
     format_teacher_guidance_calibration_command,
     run_teacher_guidance_calibration_from_paths,
@@ -622,6 +626,20 @@ def main(argv: list[str] | None = None) -> int:
             print(f"failed to build T061 bottleneck reports: {exc}", file=sys.stderr)
             return 2
         print(format_t061_bottleneck_report(report), file=sys.stderr)
+        return 0 if report.get("command_passed") else 1
+
+    if args.t062_input_preflight_report is not None:
+        try:
+            report = run_t062_input_preflight_from_paths(
+                output_path=args.t062_input_preflight_report,
+                t061_retention_manifest_path=args.t062_t061_retention_manifest,
+                t052_cohort_path=args.t062_fixed_cohort,
+                t043_checkpoint_path=args.t062_checkpoint,
+            )
+        except (OSError, ValueError) as exc:
+            print(f"failed to run T062 input preflight: {exc}", file=sys.stderr)
+            return 2
+        print(format_t062_input_preflight_report(report), file=sys.stderr)
         return 0 if report.get("command_passed") else 1
 
     if args.merge_battle_start_pool_shards is not None:

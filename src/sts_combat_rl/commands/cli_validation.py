@@ -350,6 +350,22 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
         return "--t061-expected-run-count must be positive"
     if args.t061_bootstrap_resamples < 100:
         return "--t061-bootstrap-resamples must be at least 100"
+    t062_inputs = (
+        args.t062_t061_retention_manifest,
+        args.t062_fixed_cohort,
+        args.t062_checkpoint,
+    )
+    if args.t062_input_preflight_report is not None and any(
+        path is None for path in t062_inputs
+    ):
+        return (
+            "--t062-input-preflight-report requires --t062-t061-retention-manifest, "
+            "--t062-fixed-cohort, and --t062-checkpoint"
+        )
+    if args.t062_input_preflight_report is None and any(
+        path is not None for path in t062_inputs
+    ):
+        return "--t062 input paths require --t062-input-preflight-report"
     if (
         args.merge_battle_start_pool_shards is not None
         and not args.battle_start_pool_shard

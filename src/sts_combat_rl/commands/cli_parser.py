@@ -884,6 +884,34 @@ def build_parser() -> argparse.ArgumentParser:
         default=2000,
         help="Bootstrap resamples for T061 paired intervals (default: 2000).",
     )
+    parser.add_argument(
+        "--t062-input-preflight-report",
+        type=Path,
+        metavar="OUTPUT_JSON",
+        help=(
+            "Verify the published T061 retention manifest, T052 93-record "
+            "cohort, and T043 diagnostic checkpoint identities before T062 "
+            "calibration or model inference."
+        ),
+    )
+    parser.add_argument(
+        "--t062-t061-retention-manifest",
+        type=Path,
+        metavar="MANIFEST_JSON",
+        help="Published T061 retention manifest required by T062.",
+    )
+    parser.add_argument(
+        "--t062-fixed-cohort",
+        type=Path,
+        metavar="COHORT_JSONL",
+        help="Published 93-record T052 fixed cohort required by T062.",
+    )
+    parser.add_argument(
+        "--t062-checkpoint",
+        type=Path,
+        metavar="CHECKPOINT_PT",
+        help="Published T043 diagnostic policy/value checkpoint required by T062.",
+    )
     input_group.add_argument(
         "--merge-assisted-source-pool",
         type=Path,
