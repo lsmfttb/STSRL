@@ -326,6 +326,63 @@ def build_t062_decision_report(
     }
 
 
+def build_t062_calibration_manifest(
+    *,
+    nominal_budget_report: dict[str, Any],
+    wall_clock_candidate_report: dict[str, Any],
+) -> dict[str, Any]:
+    """Record a cost-only calibration lock or a fail-closed infeasibility."""
+
+    _require_calibration_report(nominal_budget_report, "nominal")
+    _require_calibration_report(wall_clock_candidate_report, "wall-clock candidate")
+    if nominal_budget_report.get("evaluated_record_count") != 16:
+        raise ValueError("T062 calibration requires exactly records 0:16")
+    if wall_clock_candidate_report.get("evaluated_record_count") != 16:
+        raise ValueError("T062 wall-clock calibration requires exactly records 0:16")
+    wall_pairs = wall_clock_candidate_report["paired_vs_baseline"]
+    locks: dict[str, dict[str, Any]] = {}
+    failures: list[str] = []
+    for label in T062_ARM_LABELS[1:]:
+        ratio = wall_pairs[label]["overall"]["cost_ratio_guided_over_baseline"][
+            "wall_clock_seconds"
+        ]
+        budget = _controller_budget(wall_clock_candidate_report, label)
+        matched = ratio is not None and abs(float(ratio) - 1.0) <= 0.10
+        at_minimum = budget == 1
+        locks[label] = {
+            "budget": budget,
+            "wall_clock_ratio_guided_over_baseline": ratio,
+            "within_10_percent": matched,
+            "at_minimum_legal_budget": at_minimum,
+        }
+        if not matched:
+            if at_minimum:
+                failures.append(
+                    f"{label}: minimum legal budget 1 is still outside the 10% wall-clock tolerance"
+                )
+            else:
+                failures.append(
+                    f"{label}: candidate is outside the 10% wall-clock tolerance"
+                )
+    return {
+        "schema_id": "t062-battle-search-v2-calibration-manifest-v1",
+        "task_id": "T062",
+        "calibration_record_range": "0:16",
+        "calibration_is_cost_only": True,
+        "nominal_budget_report": nominal_budget_report,
+        "wall_clock_candidate_report": wall_clock_candidate_report,
+        "wall_clock_locks": locks,
+        "wall_clock_calibration_locked": not failures,
+        "primary_comparison_authorized": False,
+        "fail_closed_reasons": failures,
+        "next_action": (
+            "repair tree-internal prior inference overhead before rerunning calibration"
+            if failures
+            else "run the separately locked primary comparison families"
+        ),
+    }
+
+
 def _evaluate_t062_arm(
     *,
     adapter_factory: Callable[[], CheckpointingSimulatorAdapter],
@@ -424,6 +481,27 @@ def _load_t062_comparison(path: Path) -> dict[str, Any]:
     ):
         raise ValueError(f"{path}: unsupported T062 comparison schema")
     return value
+
+
+def _require_calibration_report(report: dict[str, Any], label: str) -> None:
+    if report.get("schema_id") != T062_COMPARISON_SCHEMA_ID:
+        raise ValueError(f"{label}: unsupported T062 comparison schema")
+    if not report.get("command_passed"):
+        raise ValueError(f"{label}: comparison report did not pass")
+    if set(report.get("arms", {})) != set(T062_ARM_LABELS):
+        raise ValueError(f"{label}: missing T062 arms")
+    if set(report.get("paired_vs_baseline", {})) != set(T062_ARM_LABELS[1:]):
+        raise ValueError(f"{label}: paired baseline summaries are incomplete")
+
+
+def _controller_budget(report: dict[str, Any], label: str) -> int:
+    provenance = report.get("controller_provenance", {}).get(label, {})
+    budget = provenance.get("config", {}).get("search_budget", {}).get("simulations")
+    if not isinstance(budget, int) or isinstance(budget, bool) or budget <= 0:
+        raise ValueError(
+            f"{label}: controller provenance omits a positive search budget"
+        )
+    return budget
 
 
 def _index_t062_records(
