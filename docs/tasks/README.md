@@ -75,12 +75,12 @@ the current milestone, but they do not override this table.
 | T059 | DONE | [Root-prior allocation repair experiment](T059-root-prior-allocation-repair-experiment.md) | T058, T052, T048, T046, T043 | bounded allocation repair experiment; closes the allocation-repair route after no T052/T053 improvement |
 | T060 | CANCELLED | [Expert non-combat natural source coverage scale-up](T060-expert-non-combat-natural-source-coverage-scaleup.md) | T059, T040, T050, T039 | cancelled before execution; fixed-policy 10,000-run scale-up does not address the reachability-policy bottleneck |
 | T061 | DONE | [A20 self-generated reachability bottleneck decomposition](T061-a20-self-generated-reachability-bottleneck-decomposition.md) | T059, T040, T050, T052 | battle-budget signal accepted; selects T062 as the single next task |
-| T062 | READY | [Battle Search v2 minimal surface](T062-battle-search-v2-minimal-surface.md) | T061, T052, T043, T046 | tree-internal policy prior, learned leaf value, and compute-normalized search comparison |
+| T062 | DONE | [Battle Search v2 minimal surface](T062-battle-search-v2-minimal-surface.md) | T061, T052, T043, T046 | tree-internal policy prior and learned leaf value accepted; cost calibration exited early before outcome comparison |
 | T063 | DRAFT | [Oracle-guided public battle learning](T063-oracle-guided-public-battle-learning.md) | T061, T062, T033 | simulator-only Oracle assistance with explicit public-policy transfer and no human trajectories |
 | T064 | DRAFT | [Simulator-generated later-act curriculum](T064-simulator-generated-later-act-curriculum.md) | T061, T062 | natural, Oracle-reached, assisted, and simulator-validated transformed later-act distributions |
 | T065 | DRAFT | [Learned non-combat policy v1](T065-learned-non-combat-policy-v1.md) | T061, T033 | simulator-return and counterfactual continuation targets without heuristic imitation |
 | T066 | DRAFT | [Alternating joint policy improvement and natural scale gate](T066-alternating-joint-policy-improvement-and-natural-scale-gate.md) | T062, T063, T064, T065 | separate battle/non-combat policies with shared run value, followed by conditional natural scale-up |
-| T067 | DRAFT | [Battle Search v2 inference-cost repair](T067-battle-search-v2-inference-cost-repair.md) | T062, T061, T052, T043 | semantic-preserving cost attribution/repair and conditional calibration re-entry |
+| T067 | READY | [Battle Search v2 inference-cost repair](T067-battle-search-v2-inference-cost-repair.md) | T062, T061, T052, T043 | semantic-preserving cost attribution/repair and conditional calibration re-entry |
 
 Use the table, not per-task files or roadmap prose, when deciding whether a task
 may receive a branch. Only `READY` rows should receive a new implementation
@@ -110,12 +110,12 @@ T060 was cancelled before execution because scaling the unchanged
 runs would primarily estimate the same weak policy-induced occupancy
 distribution more precisely. T061 replaced it with matched restored-battle and
 complete-run interventions. Its accepted battle-budget signal selected T062 as
-the single next task. T062 is now `READY`; T063--T066 remain draft until their
-named dependencies and publication gates are satisfied. T067 is reserved as
-the conditional repair/closure path when T062 proves that a required
-tree-internal guidance arm cannot meet its compute-calibration contract. It
-remains `DRAFT` until T062 is accepted and its exact retained evidence is
-published.
+the single next task. T062 is complete through its published
+calibration-infeasibility early exit: the tree-internal search surface is
+accepted, no 93-record outcome comparison or controller promotion was
+authorized, and T067 was selected for inference-cost repair and calibration
+re-entry. T067 is now the only `READY` task. T063--T066 remain draft until
+their named dependencies and publication gates are satisfied.
 
 ## Task Boundary And Artifact Rules
 
@@ -152,7 +152,7 @@ execution for a substantial workload.
 ## Published Queue
 
 The executable queue is exactly the set of `READY` rows in the Active Backlog.
-T062 is the only `READY` task. T034 remains blocked on native
+T067 is the only `READY` task. T034 remains blocked on native
 public-consistent hidden-future sampling support.
 
 ## Standard Local Gates

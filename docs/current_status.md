@@ -83,8 +83,9 @@ the unchanged profile would not diagnose the reachability-policy bottleneck.
 T061 is complete. Its matched restored-battle curve and six-arm complete-run
 factorial probe found a positive battle-budget effect on Act-2 entry under
 `expert_non_combat_v1`, no Act-3/Act-4/Heart reachability, and selected T062 as
-the single next task. T062 is the only `READY` task. T034 remains blocked on
-native public-consistent hidden-future sampler support.
+the single next task. T062 is complete through its accepted
+calibration-infeasibility early exit. T067 is the only `READY` task. T034
+remains blocked on native public-consistent hidden-future sampler support.
 
 ## Implemented On Main
 
@@ -329,10 +330,10 @@ native public-consistent hidden-future sampler support.
   action-count, eligibility, action-kind, and available public action-identity
   mismatches; reports native search budget/cost separately from checkpoint
   model calls; preserves checkpoint provenance and model scores in telemetry;
-  and states that current native APIs do not accept model allocation hints or
-  leaf values. This is a controller smoke entry point only, not a fixed-cohort
-  comparison, normal-information result, live-game validation, broad-training
-  result, or controller-strength claim.
+  and records that the T028-era native APIs did not accept model allocation
+  hints or leaf values. This is a controller smoke entry point only, not a
+  fixed-cohort comparison, normal-information result, live-game validation,
+  broad-training result, or controller-strength claim.
 - Versioned model-guided search fixed-cohort comparison reporting
   (`model-guided-search-fixed-comparison-v1`) for the M1 Oracle-like sandbox.
   The command loads one immutable fixed cohort, evaluates baseline
@@ -354,10 +355,11 @@ native public-consistent hidden-future sampler support.
   where `multiplier = sqrt(total_root_visits / native_visits)`, compares
   baseline Oracle search, T028 v1, and T035 v2 on identical restored starts,
   and reports separate telemetry for native playouts, model calls, native
-  simulator steps, root mapping, truncation, and restore failures. Current
-  native APIs still do not accept model allocation hints or leaf values. This
-  is diagnostic comparison evidence only, not normal-information, live-game,
-  broad-training, performance-improvement, or controller-promotion evidence.
+  simulator steps, root mapping, truncation, and restore failures. The
+  T035-era native APIs did not accept model allocation hints or leaf values.
+  This is diagnostic comparison evidence only, not normal-information,
+  live-game, broad-training, performance-improvement, or
+  controller-promotion evidence.
 - Potion-enabled Oracle-like search root mapping repair and comparison
   reporting. Native search results with positive
   `unmapped_search_edge_count` may now preserve mapped legal root rows as
@@ -374,9 +376,9 @@ native public-consistent hidden-future sampler support.
 
 ### Tests And Runtime Evidence
 
-- `573` tests pass on Windows Python as of this review. In an uninstalled
-  checkout, set `PYTHONPATH=src` (or install the package) before invoking the
-  CLI directly.
+- `743` tests pass on Windows Python as of the T062 merge review. In an
+  uninstalled checkout, set `PYTHONPATH=src` (or install the package) before
+  invoking the CLI directly.
 - The two CommunicationMod fixture smokes pass.
 - `python -m compileall -q src tests` passes.
 - `ruff check src tests` and `ruff format --check src tests` pass.
@@ -420,16 +422,19 @@ native public-consistent hidden-future sampler support.
 - The T017/T018/T008-managed pinned external source integration currently
   validates from manifest `sts-lightspeed-source-manifest-v1` version 1. The
   canonical source verifier builds integration commit
-  `242344c57c17c784708a6f072c905febc3f96527`,
+  `3cb9ebecb87c38044b34aa0e013d42b222a04087`,
   initializes `json` and `pybind11`, imports `slaythespire.StepSimulator`, and
   asserts the current native capability inventory including
-  `native_battle_search_root`, `native_terminal_resource_identity`, and
-  `constructed_battle_start_transforms`.
-  Missing-manifest and wrong-commit verifier
-  checks fail nonzero. `/home/lsmft/stsrl-spikes/sts_lightspeed/build-py` was
-  rebuilt from that pinned source and imports `slaythespire` from the rebuilt
-  directory. The required WSL smoke, public-projection capability,
-  public-context replay, and battle-training-readiness gates pass.
+  `native_battle_search_root`, `native_root_prior_allocation`,
+  `native_battle_search_v2_tree_internal`,
+  `native_terminal_resource_identity`, and
+  `constructed_battle_start_transforms`. The verifier also exercises the
+  Search v2 tree-internal policy-prior and learned-leaf-value boundary with
+  explicit native provenance. Missing-manifest and wrong-commit verifier
+  checks fail nonzero. The T062 review validated this exact source/runtime
+  pairing through the verifier, focused native tests, and a failed-shard smoke.
+  The required WSL smoke, public-projection capability, public-context replay,
+  and battle-training-readiness gates remain part of the pinned-source gate.
 - T006 validates Oracle-like search teacher collection and fixed-cohort
   comparison on the T004/T005 A20 smoke data. A fresh pool over seeds `1..3`
   produced 13 natural starts; the frozen cohort selected 8 starts with
@@ -1162,6 +1167,25 @@ native public-consistent hidden-future sampler support.
   algorithm, controller promotion, natural A20 strength, broad-training
   readiness, live-game validation, normal-information strength, or final-agent
   evidence.
+- T062 adds the versioned `battle_search_v2_oracle_like_v1` controller surface
+  with baseline, tree-internal policy-prior, learned-leaf-value, and combined
+  ablations. It is accepted on `main` at merge commit
+  `b01a83e1ec436410945e8037add301d6f952a712` with native integration commit
+  `3cb9ebecb87c38044b34aa0e013d42b222a04087`. The retained cost-only
+  calibration evidence is under
+  `artifacts/t062-battle-search-v2-minimal-surface/calibration/native-prior-fix-3cb9ebe/`;
+  its 111-artifact retention manifest is schema
+  `t062-battle-search-v2-retention-manifest-v3`, 99618 bytes, sha256
+  `dfac7d7660517cee65e311a8d1d2b6fa2d82ac7e26001b8da6ce28150e04ba12`.
+  On deterministic T052 indices `0:16` with 16 explicit shards/workers,
+  wall-clock ratios at guided budget 1 were `1.1077751075325` for
+  `prior_only`, `1.026232129024169` for `value_only`, and
+  `0.9140721130090935` for `prior_value`. `prior_only` was proven infeasible
+  at the minimum legal budget, so T062 authorized no 93-record primary
+  comparison or controller promotion and selected exactly T067. This is
+  `full_simulator_state_oracle_like` cost-feasibility evidence only, not
+  fixed-cohort outcome evidence, natural A20 performance, normal-information
+  strength, live-game validation, or final-agent evidence.
 
 ## Not Implemented On Main
 
@@ -1346,12 +1370,13 @@ interventions. The accepted result found a positive battle-budget effect on
 Act-2 entry under `expert_non_combat_v1`, no Act-3/Act-4/Heart reachability,
 and selected T062 as exactly one next task.
 
-T062 (`Battle Search v2 Minimal Surface`) is the only `READY` task. It must add
-one versioned tree-internal policy-prior/learned-leaf-value search surface and
-compare baseline, prior-only, value-only, and combined arms over the retained
-93-record T052 cohort under equal nominal, simulator-step-normalized, and
-wall-clock-normalized budgets. No further natural source scale-up is authorized
-before that fixed-cohort evidence is accepted.
+T062 (`Battle Search v2 Minimal Surface`) is complete. Its tree-internal
+policy/value search surface is accepted, but minimum-budget `prior_only`
+wall-clock cost made the primary comparison infeasible. T067 (`Battle Search
+v2 Inference-Cost Repair`) is the only `READY` task. It must attribute that
+cost, apply exactly one semantic-preserving repair, and re-enter the original
+calibration before any conditional 93-record outcome comparison. No further
+natural source scale-up is authorized by the T062 cost-only result.
 
 T034 remains blocked on an explicit native simulator boundary for
 public-consistent hidden-future sampling.

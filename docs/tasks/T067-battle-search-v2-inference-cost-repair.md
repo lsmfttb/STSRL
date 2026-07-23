@@ -13,18 +13,23 @@ direction with one evidence-based recommendation.
 
 ## Current Main Baseline
 
-T067 is a conditional draft until T062 is accepted. The current T062 draft
-evidence reports that, on deterministic T052 indices `0:16` with 16 workers,
-`prior_only` at minimum legal native budget 1 still used about `2.147` times
-the baseline-budget-100 wall clock. `value_only` was within the 10% wall-clock
-tolerance. `prior_value` at budget 1 was about `0.885` times baseline and
-therefore requires a higher-budget candidate search rather than a
-minimum-budget infeasibility claim.
+T062 is accepted on `main` at merge commit
+`b01a83e1ec436410945e8037add301d6f952a712`. It added the versioned
+`battle_search_v2_oracle_like_v1` surface and pinned the native integration to
+`3cb9ebecb87c38044b34aa0e013d42b222a04087`.
 
-These values describe unmerged T062 draft evidence and are not accepted
-current-main capabilities or durable input identities. Before T067 becomes
-`READY`, the maintainer must replace this paragraph with the accepted T062
-report, manifest, commit, and artifact hashes.
+The accepted cost-only calibration used deterministic T052 indices `0:16`,
+16 explicit one-record shards, and 16 effective workers. At minimum guided
+budget 1, the wall-clock ratios relative to baseline budget 100 were
+`1.1077751075325` for `prior_only`, `1.026232129024169` for `value_only`, and
+`0.9140721130090935` for `prior_value`. `prior_only` was therefore proven
+infeasible at the minimum legal integer budget while the other two arms
+locked. T062 correctly authorized no 93-record primary comparison, made no
+fixed-cohort outcome or controller-promotion claim, and selected exactly T067.
+
+This is accepted `full_simulator_state_oracle_like` cost-feasibility evidence,
+not normal-information strength, natural A20 performance, live-game
+validation, or final-agent evidence.
 
 ## Dependencies
 
@@ -37,17 +42,47 @@ report, manifest, commit, and artifact hashes.
 
 ## Inputs And Artifacts
 
-The published `READY` version must name:
+The accepted T062 code identity is merge commit
+`b01a83e1ec436410945e8037add301d6f952a712`. The behavior contract is
+`battle_search_v2_oracle_like_v1`. The accepted native integration identity is
+repository `lsmfttb/sts_lightspeed`, ref `stsrl/main`, commit
+`3cb9ebecb87c38044b34aa0e013d42b222a04087`.
 
-- the accepted T062 merge commit and `battle_search_v2_oracle_like_v1`
-  behavior contract;
-- the accepted native integration commit and verifier identity;
-- T062 input-preflight, nominal calibration, cost-candidate, calibration
-  manifest, decision-report, and retention-manifest schemas, paths, sizes, and
-  hashes;
-- the exact T052 cohort and T043 checkpoint identities already required by
-  T062;
-- every command needed to reproduce the accepted T062 cost result.
+The source manifest is `docs/sts_lightspeed_source_manifest.json`, schema
+`sts-lightspeed-source-manifest-v1`, 7789 bytes, sha256
+`2f4bd6710a152b080a2c6e4cfbaf509148ffb27d0139a9250f1a0ee19efd6631`.
+The accepted verifier is `scripts/verify_lightspeed_source.sh` at the T062
+merge commit, 19872 bytes, sha256
+`16fc6ff8049c9c5083260e513e1472d6736e1aac946d27c8ec7b80b64d4dd0a3`.
+
+The stable T062 artifact root is
+`artifacts/t062-battle-search-v2-minimal-surface/calibration/native-prior-fix-3cb9ebe/`.
+T067 consumes these exact artifacts:
+
+| Artifact | Schema | Bytes | SHA-256 |
+|---|---|---:|---|
+| `t062-input-preflight.json` | `t062-battle-search-v2-input-preflight-v1` | 1815 | `19a948fe9a6978d67e7b45522d03868bffd410ccf958b5cf820291c46fe3f024` |
+| `nominal-100-py313-with-native/t062-calibration-nominal-100-merged.json` | `t062-battle-search-v2-comparison-v1` | 20534396 | `16deedf7fbd9035d1f050929e50f780a9f85dcd6185ea9e74813c3cc9004988e` |
+| `wall-candidate-guided-1-py313/t062-wall-candidate-guided-1-merged.json` | `t062-battle-search-v2-comparison-v1` | 23979082 | `b9e1e17ea37cbe4dd2d51ef3c6d2248387ec0fd06b64d1977e825abb05da6b2b` |
+| `t062-calibration-manifest-v2.json` | `t062-battle-search-v2-calibration-manifest-v2` | 4856 | `aa6dc013c6828d9c363dfefd0e201e303925f4ae40eb006e18ae4d00635104b4` |
+| `t062-early-exit-decision-report-v2.json` | `t062-battle-search-v2-early-exit-decision-report-v1` | 639 | `cfa015d94611dbf117b40539ba74256e53a618dd5acc72292f0674428315fec5` |
+| `t062-retention-manifest-v3.json` | `t062-battle-search-v2-retention-manifest-v3` | 99618 | `dfac7d7660517cee65e311a8d1d2b6fa2d82ac7e26001b8da6ce28150e04ba12` |
+
+The retention manifest indexes 111 retained artifacts, both 16-shard stages,
+the complete controller/checkpoint/cohort/native identity, and the exact six
+commands required to reproduce the accepted T062 cost result. Those
+hash-pinned `regeneration_commands` are the authoritative reproduction
+sequence. `scripts/regenerate_t062_retention_manifest.py` rebuilds the manifest
+after those reports and logs exist.
+
+The fixed cohort remains
+`artifacts/t052-t051-boss-later-act-fixed-cohort-diagnostic-pr/t052-fixed-cohort.jsonl`,
+161435825 bytes, sha256
+`b7f8e9b85b53bbf8e37adfe6cc90d0579937661309b26bce2a8f2921604a8608`.
+The diagnostic checkpoint remains
+`artifacts/t044-de-assisted-comparison-pr/t043-assist_0-smoke/t043-assist_0-smoke-checkpoint.pt`,
+386717 bytes, sha256
+`a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4`.
 
 Generated outputs remain under the stable ignored root
 `artifacts/t067-battle-search-v2-inference-cost-repair/`. Retain compact
