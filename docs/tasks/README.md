@@ -80,6 +80,7 @@ the current milestone, but they do not override this table.
 | T064 | DRAFT | [Simulator-generated later-act curriculum](T064-simulator-generated-later-act-curriculum.md) | T061, T062 | natural, Oracle-reached, assisted, and simulator-validated transformed later-act distributions |
 | T065 | DRAFT | [Learned non-combat policy v1](T065-learned-non-combat-policy-v1.md) | T061, T033 | simulator-return and counterfactual continuation targets without heuristic imitation |
 | T066 | DRAFT | [Alternating joint policy improvement and natural scale gate](T066-alternating-joint-policy-improvement-and-natural-scale-gate.md) | T062, T063, T064, T065 | separate battle/non-combat policies with shared run value, followed by conditional natural scale-up |
+| T067 | DRAFT | [Battle Search v2 inference-cost repair](T067-battle-search-v2-inference-cost-repair.md) | T062, T061, T052, T043 | semantic-preserving cost attribution/repair and conditional calibration re-entry |
 
 Use the table, not per-task files or roadmap prose, when deciding whether a task
 may receive a branch. Only `READY` rows should receive a new implementation
@@ -110,7 +111,11 @@ runs would primarily estimate the same weak policy-induced occupancy
 distribution more precisely. T061 replaced it with matched restored-battle and
 complete-run interventions. Its accepted battle-budget signal selected T062 as
 the single next task. T062 is now `READY`; T063--T066 remain draft until their
-named dependencies and publication gates are satisfied.
+named dependencies and publication gates are satisfied. T067 is reserved as
+the conditional repair/closure path when T062 proves that a required
+tree-internal guidance arm cannot meet its compute-calibration contract. It
+remains `DRAFT` until T062 is accepted and its exact retained evidence is
+published.
 
 ## Task Boundary And Artifact Rules
 

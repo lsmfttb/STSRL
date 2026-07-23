@@ -125,10 +125,42 @@ Calibration is a small diagnostic stage and may use fewer than 16 workers only
 when the PR names the worker count and reason. It must not be used as outcome
 evidence.
 
+#### Calibration-infeasibility early exit
+
+The calibration is also a feasibility gate. If a guided arm is already above
+the applicable upper tolerance at native budget 1, no lower legal integer
+budget exists and that family is proven infeasible for the current
+implementation. If an arm is below the lower tolerance at budget 1, the task
+must test higher integer budgets using a predeclared deterministic candidate
+rule before calling that arm infeasible; a below-target minimum is not by
+itself a failure proof.
+
+When at least one required arm is proven infeasible, the 93-record primary
+comparison is not authorized. T062 may then complete through this early-exit
+path only if it:
+
+- retains the successful input preflight, all four nominal-budget-100
+  calibration arms, and every cost-candidate report used in the decision;
+- records exact per-arm budgets, native simulator steps, model calls, outer
+  simulator steps, wall-clock totals, worker/shard layout, and zero-count
+  failures;
+- emits a versioned calibration manifest whose fail-closed reasons distinguish
+  proven infeasibility from arms that remain merely unlocked or untested;
+- emits a versioned T062 decision report that authorizes no primary comparison
+  and recommends exactly T067, the maintainer-owned inference-cost repair and
+  calibration re-entry task;
+- retains hashes, sizes, schemas, logs, reproduction commands, and raw-artifact
+  deletion criteria under the published stable artifact root.
+
+This early exit accepts a calibration-feasibility result and reusable search
+plumbing. It is not fixed-cohort outcome evidence and cannot promote a
+controller.
+
 ### 3. Primary matched restored-battle comparison
 
-Evaluate all 93 T052 records, with identical ordering and source identity in
-every arm, in these three comparison families:
+Run this stage only when all required calibration locks succeed. Evaluate all
+93 T052 records, with identical ordering and source identity in every arm, in
+these three comparison families:
 
 1. equal nominal budget: all four arms at native budget 100;
 2. simulator-step normalized: baseline at budget 100 and the three locked
@@ -216,27 +248,31 @@ arms.
 - Focused Python/native tests for node priors, leaf values, action identity,
   ablations, provenance, telemetry, and fail-closed behavior.
 - Calibration manifest locked before primary outcome aggregation.
-- Three matched 93-record comparison families and one versioned T062 decision
-  report.
+- Either three matched 93-record comparison families after successful
+  calibration, or the complete calibration-infeasibility early-exit evidence.
+- One versioned T062 decision report for the path actually taken.
 - Stable ignored retention manifest and exactly one next recommendation.
 - Documentation updates limited to task/report surfaces; authoritative planner
   documents remain maintainer-owned.
 
 ## Acceptance Criteria
 
-- All four arms consume exactly the same 93 cohort identities exactly once in
-  each comparison family.
+- On the primary path, all four arms consume exactly the same 93 cohort
+  identities exactly once in each comparison family. On the early-exit path,
+  all four arms consume exactly the same 16 calibration identities and no
+  93-record outcome claim is made.
 - `prior_only`, `value_only`, and `prior_value` exercise tree-internal guidance;
   tests reject root-only or post-search substitutions.
 - Baseline preserves current `oracle_search_v1`, `highest_mean`, and
   `initial_no_potions` behavior and provenance.
 - The checkpoint and simulator identities match the published inputs or a
   separately documented, accepted manifest update.
-- Calibration is cost-only, locked before primary outcome inspection, and the
-  primary report shows actual matching tolerances rather than nominal-budget
-  assumptions.
-- All overall, Boss-only, and Act-2+ outcome cells, compute metrics, failures,
-  and zero counts are present for every arm and family.
+- Calibration is cost-only and either locks before primary outcome inspection
+  or proves infeasibility using the published early-exit rule.
+- On the primary path, all overall, Boss-only, and Act-2+ outcome cells,
+  compute metrics, failures, and zero counts are present for every arm and
+  family. On the early-exit path, the decision and retention reports explicitly
+  record that those outcome families were not authorized.
 - There are zero unreported truncations or replacements; any reported failure
   blocks promotion and remains visible.
 - The decision applies the predeclared promotion boundary and recommends exactly
