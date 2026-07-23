@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -96,6 +97,7 @@ def test_t062_calibration_distinguishes_proven_and_unlocked_minimums() -> None:
                 "prior_value": 100,
             },
             ratios={"prior_only": 1.2, "value_only": 0.2, "prior_value": 0.3},
+            family="nominal",
         ),
         wall_clock_candidate_report=_calibration_report(
             budgets={
@@ -130,6 +132,7 @@ def test_t062_early_exit_decision_recommends_exactly_t067() -> None:
                 "prior_value": 100,
             },
             ratios={"prior_only": 1.2, "value_only": 0.2, "prior_value": 0.3},
+            family="nominal",
         ),
         wall_clock_candidate_report=_calibration_report(
             budgets={
@@ -147,6 +150,99 @@ def test_t062_early_exit_decision_recommends_exactly_t067() -> None:
     assert decision["recommendation"] == "T067"
     assert decision["primary_comparison_authorized"] is False
     assert decision["fixed_cohort_outcome_claims"] == "not_authorized_not_reported"
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    (
+        (
+            lambda nominal, candidate: (
+                nominal.__setitem__("family", "wall_clock_normalized"),
+                nominal["controller_provenance"]["baseline"]["config"][
+                    "search_budget"
+                ].__setitem__("simulations", 99),
+            ),
+            "expected 'nominal' family",
+        ),
+        (
+            lambda nominal, candidate: candidate.__setitem__("family", "nominal"),
+            "expected 'wall_clock_normalized' family",
+        ),
+        (
+            lambda nominal, candidate: candidate.__setitem__(
+                "cohort_identity", "different-cohort"
+            ),
+            "differ in cohort_identity",
+        ),
+        (
+            lambda nominal, candidate: (
+                candidate.__setitem__("worker_count", 1),
+                candidate.__setitem__("shard_count", 1),
+            ),
+            "16 workers and 16 shards",
+        ),
+        (
+            lambda nominal, candidate: (
+                candidate["arms"]["prior_only"].__setitem__("errors", 4),
+                candidate["arms"]["prior_only"].__setitem__("truncations", 3),
+            ),
+            "errors or truncations",
+        ),
+    ),
+)
+def test_t062_calibration_rejects_mutated_evidence(mutation, message: str) -> None:
+    nominal = _calibration_report(
+        budgets={
+            "baseline": 100,
+            "prior_only": 100,
+            "value_only": 100,
+            "prior_value": 100,
+        },
+        ratios={"prior_only": 1.2, "value_only": 0.2, "prior_value": 0.3},
+        family="nominal",
+    )
+    candidate = _calibration_report(
+        budgets={"baseline": 100, "prior_only": 1, "value_only": 1, "prior_value": 1},
+        ratios={"prior_only": 2.147, "value_only": 0.97, "prior_value": 0.885},
+    )
+    mutation(nominal, candidate)
+
+    with pytest.raises(ValueError, match=message):
+        build_t062_calibration_manifest(
+            nominal_budget_report=nominal,  # type: ignore[arg-type]
+            wall_clock_candidate_report=candidate,  # type: ignore[arg-type]
+        )
+
+
+def test_t062_early_exit_decision_rejects_contradictory_manifest() -> None:
+    calibration = build_t062_calibration_manifest(
+        nominal_budget_report=_calibration_report(
+            budgets={
+                "baseline": 100,
+                "prior_only": 100,
+                "value_only": 100,
+                "prior_value": 100,
+            },
+            ratios={"prior_only": 1.2, "value_only": 0.2, "prior_value": 0.3},
+            family="nominal",
+        ),
+        wall_clock_candidate_report=_calibration_report(
+            budgets={
+                "baseline": 100,
+                "prior_only": 1,
+                "value_only": 1,
+                "prior_value": 1,
+            },
+            ratios={"prior_only": 2.147, "value_only": 0.97, "prior_value": 0.885},
+        ),
+    )
+    contradictory = deepcopy(calibration)
+    contradictory["command_passed"] = False
+    contradictory["early_exit_eligible"] = False
+    contradictory["primary_comparison_authorized"] = True
+
+    with pytest.raises(ValueError, match="passed calibration manifest"):
+        build_t062_early_exit_decision_report(calibration_manifest=contradictory)
 
 
 def test_t062_calibration_stage_evidence_records_all_shards_and_logs(
@@ -194,8 +290,12 @@ def test_t062_calibration_stage_evidence_records_all_shards_and_logs(
 
 
 def _calibration_report(
-    *, budgets: dict[str, int], ratios: dict[str, float]
+    *,
+    budgets: dict[str, int],
+    ratios: dict[str, float],
+    family: str = "wall_clock_normalized",
 ) -> dict[str, object]:
+    records = {}
     arms = {
         label: {
             "record_count": 16,
@@ -204,19 +304,58 @@ def _calibration_report(
             "native_simulator_steps": 1_600 if label != "baseline" else 160_000,
             "model_calls": 16 if label != "baseline" else 0,
             "outer_simulator_steps": 240,
-            "wall_clock_seconds": 100.0,
+            "wall_clock_seconds": 100.0
+            if label == "baseline"
+            else 100.0 * ratios[label],
+            "records": records.setdefault(
+                label,
+                [
+                    {
+                        "cohort_index": index,
+                        "source_checkpoint_id": f"checkpoint-{index}",
+                        "structural_metadata": {
+                            "source_run_id": "run",
+                            "source_battle_index": index,
+                        },
+                        "termination_status": "loss",
+                        "problems": [],
+                        "outer_simulator_steps": 15,
+                        "wall_clock_seconds": (
+                            100.0 if label == "baseline" else 100.0 * ratios[label]
+                        )
+                        / 16,
+                        "controller_compute_telemetry": {
+                            "oracle_search_native_simulator_steps": (
+                                1_600 if label != "baseline" else 160_000
+                            )
+                            / 16,
+                            "oracle_search_model_calls": (
+                                16 if label != "baseline" else 0
+                            )
+                            / 16,
+                        },
+                    }
+                    for index in range(16)
+                ],
+            ),
         }
         for label in ("baseline", "prior_only", "value_only", "prior_value")
     }
     return {
         "schema_id": "t062-battle-search-v2-comparison-v1",
         "task_id": "T062",
-        "family": "wall_clock_normalized",
+        "family": family,
         "report_kind": "merged_comparison",
-        "cohort_identity": {"cohort": "fixed"},
+        "format_version": 1,
+        "cohort_identity": "fixed-cohort",
+        "cohort_total_record_count": 93,
         "evaluated_record_count": 16,
+        "expected_record_count": 16,
         "worker_count": 16,
         "shard_count": 16,
+        "shards": [f"shard-{index:02d}.json" for index in range(16)],
+        "action_space": {"initial_no_potions": True},
+        "max_battle_steps": 200,
         "command_passed": True,
         "problems": [],
         "controller_provenance": {

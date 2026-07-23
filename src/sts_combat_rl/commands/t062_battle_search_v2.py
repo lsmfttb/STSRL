@@ -343,20 +343,43 @@ def build_t062_calibration_manifest(
     deterministic higher-budget candidate rule has been exercised.
     """
 
-    _require_calibration_report(nominal_budget_report, "nominal")
-    _require_calibration_report(wall_clock_candidate_report, "wall-clock candidate")
-    if nominal_budget_report.get("evaluated_record_count") != 16:
-        raise ValueError("T062 calibration requires exactly records 0:16")
-    if wall_clock_candidate_report.get("evaluated_record_count") != 16:
-        raise ValueError("T062 wall-clock calibration requires exactly records 0:16")
-    wall_pairs = wall_clock_candidate_report["paired_vs_baseline"]
+    nominal_sources = _require_calibration_report(
+        nominal_budget_report,
+        "nominal",
+        expected_family="nominal",
+        require_all_budgets_100=True,
+    )
+    candidate_sources = _require_calibration_report(
+        wall_clock_candidate_report,
+        "wall-clock candidate",
+        expected_family="wall_clock_normalized",
+        require_baseline_budget_100=True,
+    )
+    if nominal_sources != candidate_sources:
+        raise ValueError(
+            "T062 calibration reports do not restore identical 0:16 sources"
+        )
+    for key in (
+        "cohort_identity",
+        "cohort_total_record_count",
+        "action_space",
+        "max_battle_steps",
+    ):
+        if nominal_budget_report.get(key) != wall_clock_candidate_report.get(key):
+            raise ValueError(f"T062 calibration reports differ in {key}")
+    baseline_wall_clock = _arm_compute_total(
+        wall_clock_candidate_report, "baseline", "wall_clock_seconds"
+    )
+    if baseline_wall_clock <= 0.0:
+        raise ValueError("baseline: wall-clock calibration total must be positive")
     locks: dict[str, dict[str, Any]] = {}
     proven_infeasible: list[str] = []
     unlocked_or_untested: list[str] = []
     for label in T062_ARM_LABELS[1:]:
-        ratio = wall_pairs[label]["overall"]["cost_ratio_guided_over_baseline"][
-            "wall_clock_seconds"
-        ]
+        ratio = (
+            _arm_compute_total(wall_clock_candidate_report, label, "wall_clock_seconds")
+            / baseline_wall_clock
+        )
         budget = _controller_budget(wall_clock_candidate_report, label)
         if ratio is None:
             raise ValueError(f"{label}: wall-clock calibration ratio is missing")
@@ -432,19 +455,74 @@ def build_t062_early_exit_decision_report(
 
     if calibration_manifest.get("schema_id") != T062_CALIBRATION_MANIFEST_SCHEMA_ID:
         raise ValueError("T062 early-exit decision requires calibration manifest v2")
+    if calibration_manifest.get("command_passed") is not True:
+        raise ValueError(
+            "T062 early-exit decision requires a passed calibration manifest"
+        )
     if not calibration_manifest.get("calibration_is_cost_only"):
         raise ValueError("T062 early-exit decision requires a cost-only calibration")
+    if calibration_manifest.get("early_exit_eligible") is not True:
+        raise ValueError(
+            "T062 early-exit decision requires eligible calibration evidence"
+        )
+    if calibration_manifest.get("primary_comparison_authorized") is not False:
+        raise ValueError(
+            "T062 early-exit decision requires primary comparison prohibition"
+        )
     proven = calibration_manifest.get("proven_infeasible_arms")
     if not isinstance(proven, list) or not proven:
         raise ValueError("T062 early exit requires at least one proven-infeasible arm")
     locks = calibration_manifest.get("wall_clock_locks")
-    if not isinstance(locks, dict):
+    if not isinstance(locks, dict) or set(locks) != set(T062_ARM_LABELS[1:]):
         raise ValueError("T062 early-exit decision requires wall-clock lock evidence")
-    if any(
-        locks.get(label, {}).get("status") != "proven_infeasible_at_minimum"
-        for label in proven
-    ):
-        raise ValueError("T062 early-exit arm statuses do not prove infeasibility")
+    unlocked = calibration_manifest.get("unlocked_or_untested_arms")
+    if not isinstance(unlocked, list):
+        raise ValueError("T062 early-exit decision requires unlocked-arm evidence")
+    expected_proven: list[str] = []
+    expected_unlocked: list[str] = []
+    for label in T062_ARM_LABELS[1:]:
+        lock = locks[label]
+        if not isinstance(lock, dict):
+            raise ValueError(f"T062 early-exit lock {label!r} is malformed")
+        status = lock.get("status")
+        budget = lock.get("budget")
+        ratio = lock.get("wall_clock_ratio_guided_over_baseline")
+        within = lock.get("within_10_percent")
+        at_minimum = lock.get("at_minimum_legal_budget")
+        if not isinstance(budget, int) or isinstance(budget, bool) or budget <= 0:
+            raise ValueError(f"T062 early-exit lock {label!r} has invalid budget")
+        if not _finite_nonnegative(ratio):
+            raise ValueError(f"T062 early-exit lock {label!r} has invalid ratio")
+        if not isinstance(within, bool) or not isinstance(at_minimum, bool):
+            raise ValueError(f"T062 early-exit lock {label!r} is incomplete")
+        ratio_value = float(ratio)
+        if status == "locked":
+            if not within or abs(ratio_value - 1.0) > 0.10:
+                raise ValueError(
+                    f"T062 early-exit lock {label!r} contradicts lock status"
+                )
+        elif status == "proven_infeasible_at_minimum":
+            if not at_minimum or budget != 1 or within or ratio_value <= 1.10:
+                raise ValueError(
+                    f"T062 early-exit lock {label!r} contradicts infeasibility"
+                )
+            expected_proven.append(label)
+        elif status == "unlocked_below_target_minimum":
+            if not at_minimum or budget != 1 or within or ratio_value >= 0.90:
+                raise ValueError(
+                    f"T062 early-exit lock {label!r} contradicts below-target status"
+                )
+            expected_unlocked.append(label)
+        elif status == "unlocked_outside_tolerance":
+            if within:
+                raise ValueError(
+                    f"T062 early-exit lock {label!r} contradicts unlocked status"
+                )
+            expected_unlocked.append(label)
+        else:
+            raise ValueError(f"T062 early-exit lock {label!r} has unknown status")
+    if proven != expected_proven or unlocked != expected_unlocked:
+        raise ValueError("T062 early-exit lock lists contradict lock statuses")
     return {
         "schema_id": T062_EARLY_EXIT_DECISION_SCHEMA_ID,
         "task_id": "T062",
@@ -452,9 +530,7 @@ def build_t062_early_exit_decision_report(
         "calibration_manifest_schema_id": calibration_manifest["schema_id"],
         "calibration_record_range": calibration_manifest["calibration_record_range"],
         "proven_infeasible_arms": proven,
-        "unlocked_or_untested_arms": calibration_manifest.get(
-            "unlocked_or_untested_arms", []
-        ),
+        "unlocked_or_untested_arms": unlocked,
         "primary_comparison_authorized": False,
         "primary_comparison_status": "not_authorized_calibration_infeasible",
         "fixed_cohort_outcome_claims": "not_authorized_not_reported",
@@ -735,15 +811,164 @@ def _load_t062_comparison(path: Path) -> dict[str, Any]:
     return value
 
 
-def _require_calibration_report(report: dict[str, Any], label: str) -> None:
+def _require_calibration_report(
+    report: dict[str, Any],
+    label: str,
+    *,
+    expected_family: str | None = None,
+    require_all_budgets_100: bool = False,
+    require_baseline_budget_100: bool = False,
+) -> dict[int, tuple[Any, ...]]:
+    """Validate one 16-record calibration report before making a cost claim."""
+
     if report.get("schema_id") != T062_COMPARISON_SCHEMA_ID:
         raise ValueError(f"{label}: unsupported T062 comparison schema")
+    if report.get("task_id") != "T062":
+        raise ValueError(f"{label}: task id is not T062")
+    if report.get("report_kind") != "merged_comparison":
+        raise ValueError(f"{label}: calibration evidence must be a merged report")
+    if expected_family is not None and report.get("family") != expected_family:
+        raise ValueError(f"{label}: expected {expected_family!r} family")
     if not report.get("command_passed"):
         raise ValueError(f"{label}: comparison report did not pass")
-    if set(report.get("arms", {})) != set(T062_ARM_LABELS):
+    if report.get("problems") != []:
+        raise ValueError(f"{label}: comparison report has problems")
+    if (
+        report.get("evaluated_record_count") != 16
+        or report.get("expected_record_count") != 16
+    ):
+        raise ValueError(f"{label}: calibration must cover exactly records 0:16")
+    if report.get("cohort_total_record_count") != 93:
+        raise ValueError(f"{label}: calibration cohort total must be 93")
+    if (
+        not isinstance(report.get("cohort_identity"), str)
+        or not report["cohort_identity"]
+    ):
+        raise ValueError(f"{label}: calibration cohort identity is missing")
+    if report.get("worker_count") != 16 or report.get("shard_count") != 16:
+        raise ValueError(f"{label}: calibration requires 16 workers and 16 shards")
+    shards = report.get("shards")
+    if (
+        not isinstance(shards, list)
+        or len(shards) != 16
+        or not all(isinstance(path, str) and path for path in shards)
+    ):
+        raise ValueError(f"{label}: calibration requires 16 shard paths")
+    if not isinstance(report.get("action_space"), dict):
+        raise ValueError(f"{label}: action space is missing")
+    max_battle_steps = report.get("max_battle_steps")
+    if (
+        not isinstance(max_battle_steps, int)
+        or isinstance(max_battle_steps, bool)
+        or max_battle_steps <= 0
+    ):
+        raise ValueError(f"{label}: max battle steps is invalid")
+    arms = report.get("arms")
+    if not isinstance(arms, dict) or set(arms) != set(T062_ARM_LABELS):
         raise ValueError(f"{label}: missing T062 arms")
     if set(report.get("paired_vs_baseline", {})) != set(T062_ARM_LABELS[1:]):
         raise ValueError(f"{label}: paired baseline summaries are incomplete")
+    provenance = report.get("controller_provenance")
+    if not isinstance(provenance, dict) or set(provenance) != set(T062_ARM_LABELS):
+        raise ValueError(f"{label}: controller provenance is incomplete")
+
+    sources_by_arm: dict[str, dict[int, tuple[Any, ...]]] = {}
+    for arm_label in T062_ARM_LABELS:
+        budget = _controller_budget(report, arm_label)
+        if require_all_budgets_100 and budget != 100:
+            raise ValueError(f"{label}: {arm_label} must use nominal budget 100")
+        if require_baseline_budget_100 and arm_label == "baseline" and budget != 100:
+            raise ValueError(f"{label}: baseline must use budget 100")
+        sources_by_arm[arm_label] = _validate_calibration_arm(
+            arms[arm_label], f"{label}: {arm_label}"
+        )
+
+    baseline_sources = sources_by_arm["baseline"]
+    for arm_label in T062_ARM_LABELS[1:]:
+        if sources_by_arm[arm_label] != baseline_sources:
+            raise ValueError(
+                f"{label}: {arm_label} does not match baseline source identities"
+            )
+    return baseline_sources
+
+
+def _validate_calibration_arm(arm: Any, label: str) -> dict[int, tuple[Any, ...]]:
+    if not isinstance(arm, dict):
+        raise ValueError(f"{label}: arm summary is malformed")
+    if arm.get("record_count") != 16:
+        raise ValueError(f"{label}: arm must contain 16 records")
+    if arm.get("errors") != 0 or arm.get("truncations") != 0:
+        raise ValueError(f"{label}: calibration has errors or truncations")
+    records = arm.get("records")
+    if not isinstance(records, list) or len(records) != 16:
+        raise ValueError(f"{label}: record telemetry is incomplete")
+    sources: dict[int, tuple[Any, ...]] = {}
+    totals = {
+        "native_simulator_steps": 0.0,
+        "model_calls": 0.0,
+        "outer_simulator_steps": 0.0,
+        "wall_clock_seconds": 0.0,
+    }
+    for row in records:
+        if not isinstance(row, dict):
+            raise ValueError(f"{label}: record is malformed")
+        index = row.get("cohort_index")
+        if not isinstance(index, int) or isinstance(index, bool) or index in sources:
+            raise ValueError(f"{label}: duplicate or invalid cohort index")
+        if row.get("termination_status") not in {"win", "loss"}:
+            raise ValueError(f"{label}: calibration has non-terminal record")
+        if row.get("problems") != []:
+            raise ValueError(f"{label}: record has problems")
+        source = _source_key(row)
+        if not isinstance(source[1], str) or not source[1]:
+            raise ValueError(f"{label}: source checkpoint identity is missing")
+        if not isinstance(row.get("structural_metadata"), dict):
+            raise ValueError(f"{label}: structural metadata is missing")
+        sources[index] = source
+        for metric in totals:
+            value = _calibration_row_compute(row, metric, label)
+            totals[metric] += value
+    if set(sources) != set(range(16)):
+        raise ValueError(f"{label}: cohort indices must be exactly 0:16")
+    for metric, expected in totals.items():
+        reported = arm.get(metric)
+        if not _finite_nonnegative(reported):
+            raise ValueError(f"{label}: {metric} is missing or non-finite")
+        if not math.isclose(float(reported), expected, rel_tol=1e-9, abs_tol=1e-9):
+            raise ValueError(f"{label}: {metric} does not match record telemetry")
+    return sources
+
+
+def _calibration_row_compute(row: Mapping[str, Any], metric: str, label: str) -> float:
+    if metric in {"outer_simulator_steps", "wall_clock_seconds"}:
+        value = row.get(metric)
+    else:
+        telemetry = row.get("controller_compute_telemetry")
+        if not isinstance(telemetry, dict):
+            raise ValueError(f"{label}: controller compute telemetry is missing")
+        value = telemetry.get(f"oracle_search_{metric}")
+    if not _finite_nonnegative(value):
+        raise ValueError(f"{label}: {metric} is missing or non-finite")
+    return float(value)
+
+
+def _arm_compute_total(report: Mapping[str, Any], arm_label: str, metric: str) -> float:
+    arms = report.get("arms")
+    if not isinstance(arms, dict) or not isinstance(arms.get(arm_label), dict):
+        raise ValueError(f"{arm_label}: calibration arm is missing")
+    value = arms[arm_label].get(metric)
+    if not _finite_nonnegative(value):
+        raise ValueError(f"{arm_label}: {metric} is missing or non-finite")
+    return float(value)
+
+
+def _finite_nonnegative(value: Any) -> bool:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(float(value))
+        and float(value) >= 0.0
+    )
 
 
 def _controller_budget(report: dict[str, Any], label: str) -> int:
