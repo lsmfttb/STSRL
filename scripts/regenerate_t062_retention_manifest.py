@@ -18,6 +18,16 @@ def _wsl_command(body: str) -> str:
     return f"wsl.exe -d Ubuntu -e bash -lc {shlex.quote(body)}"
 
 
+def _wait_for_background_jobs_shell() -> str:
+    """Return the fail-closed wait loop used by both 16-shard stages."""
+
+    return (
+        'failed=0; for pid in "${pids[@]}"; do '
+        'if ! wait "$pid"; then failed=1; fi; done; '
+        'if [ "$failed" -ne 0 ]; then exit 1; fi; '
+    )
+
+
 def _stage_command(
     *,
     artifact_root: str,
@@ -36,9 +46,12 @@ def _stage_command(
     arm_budget_args = " ".join(
         f"--t062-arm-budget {shlex.quote(value)}" for value in arm_budgets
     )
+    stable_root = f"{artifact_root}/{stage_directory}"
     command = (
         "set -euo pipefail; "
-        f"root={shlex.quote(f'{artifact_root}/{stage_directory}')}; "
+        f"stable_root={shlex.quote(stable_root)}; "
+        'root="${stable_root}.staging"; rm -rf "$root"; mkdir -p "$root"; '
+        "pids=(); "
         "for start in $(seq 0 15); do end=$((start + 1)); "
         "("
         f"PYTHONPATH={shlex.quote(native_build_root)}:{shlex.quote(source_root)} "
@@ -51,7 +64,8 @@ def _stage_command(
         f"{arm_budget_args} "
         '--oracle-root-selection highest_mean --record-range "$start:$end" '
         '--workers 1 --shards 1 > "$root/shard-$start.stdout.log" '
-        '2> "$root/shard-$start.stderr.log") & done; wait; '
+        '2> "$root/shard-$start.stderr.log") & pids+=("$!"); done; '
+        f"{_wait_for_background_jobs_shell()}"
         "merge_args=(); for start in $(seq 0 15); do "
         'merge_args+=(--t062-comparison-shard "$root/shard-$start.json"); done; '
         f"PYTHONPATH={shlex.quote(native_build_root)}:{shlex.quote(source_root)} "
@@ -59,7 +73,8 @@ def _stage_command(
         f'--merge-t062-comparison "$root/{merged_report_name}" '
         '--t062-expected-record-count 16 "${merge_args[@]}" '
         f'> "$root/{merge_stdout_log_name}" '
-        f'2> "$root/{merge_stderr_log_name}"'
+        f'2> "$root/{merge_stderr_log_name}"; '
+        'rm -rf "$stable_root"; mv "$root" "$stable_root"'
     )
     return _wsl_command(command)
 

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
+import subprocess
 from copy import deepcopy
 from pathlib import Path
 
@@ -11,11 +13,13 @@ from sts_combat_rl.commands.cli_parser import build_parser
 from sts_combat_rl.commands.cli_validation import validate_cli_args
 from sts_combat_rl.commands.t062_battle_search_v2 import (
     T062_CALIBRATION_MANIFEST_SCHEMA_ID,
+    T062_RETENTION_EXECUTION_IDENTITY,
     build_t062_calibration_manifest,
     build_t062_calibration_stage_evidence,
     build_t062_early_exit_decision_report,
     run_t062_input_preflight_from_paths,
     write_t062_retention_manifest,
+    write_t062_retention_manifest_from_paths,
 )
 
 
@@ -327,30 +331,165 @@ def test_t062_calibration_stage_evidence_records_all_shards_and_logs(
         )
 
 
-def test_t062_retention_writer_emits_v3_utf8_schema_entries(tmp_path: Path) -> None:
-    report = tmp_path / "report.json"
-    log = tmp_path / "report.stderr.log"
-    report.write_text(
-        '{"schema_id":"t062-battle-search-v2-comparison-v1"}\n', encoding="utf-8"
-    )
-    log.write_text("diagnostic\n", encoding="utf-8")
-    output = tmp_path / "t062-retention-manifest-v3.json"
+def _retention_writer_kwargs(tmp_path: Path) -> dict[str, object]:
+    artifacts: dict[str, Path] = {}
+    root_schemas = {
+        "input_preflight_report": "t062-battle-search-v2-input-preflight-v1",
+        "calibration_manifest": T062_CALIBRATION_MANIFEST_SCHEMA_ID,
+        "early_exit_decision": "t062-battle-search-v2-early-exit-decision-report-v1",
+    }
+    for role, schema_id in root_schemas.items():
+        path = tmp_path / f"{role}.json"
+        path.write_text(json.dumps({"schema_id": schema_id}), encoding="utf-8")
+        artifacts[role] = path
+    for role in (
+        "input_preflight_stdout_log",
+        "input_preflight_stderr_log",
+        "calibration_manifest_stdout_log",
+        "calibration_manifest_stderr_log",
+        "early_exit_decision_stdout_log",
+        "early_exit_decision_stderr_log",
+    ):
+        path = tmp_path / f"{role}.log"
+        path.write_text("diagnostic\n", encoding="utf-8")
+        artifacts[role] = path
 
-    manifest = write_t062_retention_manifest(
-        output_path=output,
-        artifacts={"merged_report": report, "stderr_log": log},
-        calibration_stages={"nominal": {"record_range": "0:16", "shards": []}},
-        execution_identity={"native_commit": "3cb9ebe", "checkpoint": "T043"},
-        regeneration_commands=["wsl.exe -d Ubuntu -e bash -lc 'exact command'"],
-    )
+    stages: dict[str, dict[str, object]] = {}
+    for stage_name, prefix, family in (
+        ("nominal_budget_100", "nominal", "nominal"),
+        ("wall_clock_minimum_budget", "wall_clock", "wall_clock_normalized"),
+    ):
+        stage_directory = tmp_path / prefix
+        stage_directory.mkdir()
+        report = _calibration_report(
+            budgets={
+                "baseline": 100,
+                "prior_only": 1,
+                "value_only": 1,
+                "prior_value": 1,
+            },
+            ratios={"prior_only": 1.05, "value_only": 1.02, "prior_value": 0.98},
+            family=family,
+        )
+        merged_report = stage_directory / "merged.json"
+        merged_report.write_text(json.dumps(report), encoding="utf-8")
+        shard_paths = [stage_directory / f"shard-{index}.json" for index in range(16)]
+        stdout_log_paths = [
+            stage_directory / f"shard-{index}.stdout.log" for index in range(16)
+        ]
+        stderr_log_paths = [
+            stage_directory / f"shard-{index}.stderr.log" for index in range(16)
+        ]
+        for path in (*shard_paths, *stdout_log_paths, *stderr_log_paths):
+            path.write_text("evidence\n", encoding="utf-8")
+        merge_stdout_log = stage_directory / "merge.stdout.log"
+        merge_stderr_log = stage_directory / "merge.stderr.log"
+        merge_stdout_log.write_text("merge\n", encoding="utf-8")
+        merge_stderr_log.write_text("merge\n", encoding="utf-8")
+        stages[stage_name] = build_t062_calibration_stage_evidence(
+            merged_report=report,
+            merged_report_path=merged_report,
+            shard_paths=shard_paths,
+            stdout_log_paths=stdout_log_paths,
+            stderr_log_paths=stderr_log_paths,
+            worker_count_reason="16 workers, one record per explicit shard",
+            regeneration_commands=[
+                "wsl.exe -d Ubuntu -e bash -lc "
+                f"'--lightspeed-t062-battle-search-v2-comparison "
+                f"--t062-battle-search-v2-family {family}'"
+            ],
+        )
+        artifacts.update(
+            {
+                f"{prefix}_merged_report": merged_report,
+                f"{prefix}_merge_stdout_log": merge_stdout_log,
+                f"{prefix}_merge_stderr_log": merge_stderr_log,
+            }
+        )
+        artifacts.update(
+            {
+                f"{prefix}_shard_{index}_{kind}": path
+                for index in range(16)
+                for kind, path in (
+                    ("report", shard_paths[index]),
+                    ("stdout_log", stdout_log_paths[index]),
+                    ("stderr_log", stderr_log_paths[index]),
+                )
+            }
+        )
+    return {
+        "output_path": tmp_path / "t062-retention-manifest-v3.json",
+        "artifacts": artifacts,
+        "calibration_stages": stages,
+        "execution_identity": deepcopy(T062_RETENTION_EXECUTION_IDENTITY),
+        "regeneration_commands": [
+            "wsl.exe --t062-input-preflight-report",
+            "wsl.exe --lightspeed-t062-battle-search-v2-comparison "
+            "--t062-battle-search-v2-family nominal",
+            "wsl.exe --lightspeed-t062-battle-search-v2-comparison "
+            "--t062-battle-search-v2-family wall_clock_normalized",
+            "wsl.exe --t062-calibration-manifest",
+            "wsl.exe --t062-early-exit-decision-report",
+            "python scripts/regenerate_t062_retention_manifest.py",
+        ],
+    }
+
+
+def test_t062_retention_writer_emits_complete_v3_utf8_schema_entries(
+    tmp_path: Path,
+) -> None:
+    manifest = write_t062_retention_manifest(**_retention_writer_kwargs(tmp_path))  # type: ignore[arg-type]
+    output = tmp_path / "t062-retention-manifest-v3.json"
 
     assert manifest["schema_id"] == "t062-battle-search-v2-retention-manifest-v3"
     assert output.read_bytes()[:3] != b"\xef\xbb\xbf"
-    assert (
-        manifest["retained_artifacts"][0]["schema_id"]
-        == "t062-battle-search-v2-comparison-v1"
+    assert len(manifest["retained_artifacts"]) == 111
+    by_role = {entry["role"]: entry for entry in manifest["retained_artifacts"]}
+    assert by_role["calibration_manifest"]["schema_id"] == (
+        "t062-battle-search-v2-calibration-manifest-v2"
     )
-    assert manifest["retained_artifacts"][1]["schema_id"] is None
+    assert by_role["nominal_shard_0_stdout_log"]["schema_id"] is None
+
+
+@pytest.mark.parametrize("mutation", ("artifacts", "identity", "commands"))
+def test_t062_retention_writer_rejects_incomplete_current_schema_contract(
+    tmp_path: Path, mutation: str
+) -> None:
+    kwargs = _retention_writer_kwargs(tmp_path)
+    if mutation == "artifacts":
+        kwargs["artifacts"].pop("early_exit_decision")  # type: ignore[index]
+        message = "incomplete retained artifact roles"
+    elif mutation == "identity":
+        kwargs["execution_identity"].pop("controller")  # type: ignore[index]
+        message = "incomplete execution identity"
+    else:
+        kwargs["regeneration_commands"] = ["wsl.exe --t062-input-preflight-report"]
+        message = "six named commands"
+
+    with pytest.raises(ValueError, match=message):
+        write_t062_retention_manifest(**kwargs)  # type: ignore[arg-type]
+
+
+def test_t062_retention_writer_from_paths_rejects_incomplete_root_roles(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(ValueError, match="incomplete root artifact roles"):
+        write_t062_retention_manifest_from_paths(
+            output_path=tmp_path / "manifest.json",
+            root_artifacts={},
+            nominal_merged_report_path=tmp_path / "nominal.json",
+            nominal_merge_stdout_log_path=tmp_path / "nominal.stdout.log",
+            nominal_merge_stderr_log_path=tmp_path / "nominal.stderr.log",
+            nominal_shard_directory=tmp_path / "nominal",
+            nominal_regeneration_command="nominal command",
+            wall_clock_merged_report_path=tmp_path / "wall.json",
+            wall_clock_merge_stdout_log_path=tmp_path / "wall.stdout.log",
+            wall_clock_merge_stderr_log_path=tmp_path / "wall.stderr.log",
+            wall_clock_shard_directory=tmp_path / "wall",
+            wall_clock_regeneration_command="wall command",
+            execution_identity={},
+            regeneration_commands=["one command"],
+        )
 
 
 def test_t062_retention_writer_rejects_its_existing_output_as_an_artifact(
@@ -367,6 +506,35 @@ def test_t062_retention_writer_rejects_its_existing_output_as_an_artifact(
                 "python -m sts_combat_rl.cli --t062-retention-manifest"
             ],
         )
+
+
+def test_t062_retention_background_wait_fails_when_any_shard_fails() -> None:
+    script_path = (
+        Path(__file__).resolve().parents[1]
+        / "scripts"
+        / "regenerate_t062_retention_manifest.py"
+    )
+    specification = importlib.util.spec_from_file_location(
+        "t062_retention_generator", script_path
+    )
+    assert specification is not None and specification.loader is not None
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+    shell = (
+        'set -euo pipefail; pids=(); (exit 7) & pids+=("$!"); '
+        '(exit 0) & pids+=("$!"); '
+        + module._wait_for_background_jobs_shell()
+        + "echo should-not-run"
+    )
+    result = subprocess.run(
+        ["wsl.exe", "-d", "Ubuntu", "-e", "bash", "-lc", shell],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "should-not-run" not in result.stdout
 
 
 def _calibration_report(

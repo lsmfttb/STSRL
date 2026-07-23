@@ -45,6 +45,36 @@ T062_EARLY_EXIT_DECISION_SCHEMA_ID = (
     "t062-battle-search-v2-early-exit-decision-report-v1"
 )
 T062_ARM_LABELS = ("baseline", "prior_only", "value_only", "prior_value")
+T062_RETENTION_MANIFEST_SCHEMA_ID = "t062-battle-search-v2-retention-manifest-v3"
+T062_RETENTION_ROOT_ARTIFACT_SCHEMAS = {
+    "input_preflight_report": T062_INPUT_PREFLIGHT_SCHEMA_ID,
+    "input_preflight_stdout_log": None,
+    "input_preflight_stderr_log": None,
+    "calibration_manifest": T062_CALIBRATION_MANIFEST_SCHEMA_ID,
+    "calibration_manifest_stdout_log": None,
+    "calibration_manifest_stderr_log": None,
+    "early_exit_decision": T062_EARLY_EXIT_DECISION_SCHEMA_ID,
+    "early_exit_decision_stdout_log": None,
+    "early_exit_decision_stderr_log": None,
+}
+T062_RETENTION_EXECUTION_IDENTITY = {
+    "controller": "battle_search_v2_oracle_like_v1",
+    "controller_arms": list(T062_ARM_LABELS),
+    "root_selection": "highest_mean",
+    "action_space": "initial_no_potions",
+    "baseline_search_budget": 100,
+    "wall_clock_candidate_arm_budgets": {
+        "baseline": 100,
+        "prior_only": 1,
+        "value_only": 1,
+        "prior_value": 1,
+    },
+    "checkpoint_sha256": T043_CHECKPOINT_SHA256,
+    "cohort_sha256": T052_COHORT_SHA256,
+    "native_integration_repository": "lsmfttb/sts_lightspeed",
+    "native_integration_ref": "stsrl/main",
+    "native_commit": "3cb9ebecb87c38044b34aa0e013d42b222a04087",
+}
 
 
 def parse_t062_arm_budgets(
@@ -581,8 +611,14 @@ def write_t062_retention_manifest(
                 "schema_id": _json_schema_id(path),
             }
         )
+    _validate_t062_retention_contract(
+        entries=entries,
+        calibration_stages=calibration_stages,
+        execution_identity=execution_identity,
+        regeneration_commands=regeneration_commands,
+    )
     manifest = {
-        "schema_id": "t062-battle-search-v2-retention-manifest-v3",
+        "schema_id": T062_RETENTION_MANIFEST_SCHEMA_ID,
         "task_id": "T062",
         "retention_root": str(output_path.parent),
         "retained_artifacts": entries,
@@ -631,8 +667,8 @@ def write_t062_retention_manifest_from_paths(
     omitting a stage artifact or accidentally retaining its own output.
     """
 
-    if not root_artifacts:
-        raise ValueError("T062 retention manifest requires root artifacts")
+    if set(root_artifacts) != set(T062_RETENTION_ROOT_ARTIFACT_SCHEMAS):
+        raise ValueError("T062 retention manifest has incomplete root artifact roles")
     if not nominal_regeneration_command or not wall_clock_regeneration_command:
         raise ValueError("T062 retention manifest requires exact stage commands")
     if not isinstance(execution_identity, Mapping):
@@ -715,6 +751,157 @@ def write_t062_retention_manifest_from_paths(
         execution_identity=dict(execution_identity),
         regeneration_commands=regeneration_commands,
     )
+
+
+def _validate_t062_retention_contract(
+    *,
+    entries: Sequence[Mapping[str, Any]],
+    calibration_stages: Mapping[str, Mapping[str, Any]] | None,
+    execution_identity: Mapping[str, Any] | None,
+    regeneration_commands: Sequence[str],
+) -> None:
+    """Fail closed unless the versioned v3 retention contract is complete."""
+
+    expected_roles = _t062_retention_artifact_roles()
+    entries_by_role: dict[str, Mapping[str, Any]] = {}
+    for entry in entries:
+        role = entry.get("role")
+        if not isinstance(role, str) or role in entries_by_role:
+            raise ValueError("T062 retention manifest has duplicate or invalid roles")
+        entries_by_role[role] = entry
+    if set(entries_by_role) != expected_roles:
+        raise ValueError(
+            "T062 retention manifest has incomplete retained artifact roles"
+        )
+    for role, schema_id in T062_RETENTION_ROOT_ARTIFACT_SCHEMAS.items():
+        if entries_by_role[role].get("schema_id") != schema_id:
+            raise ValueError(f"T062 retention artifact {role!r} has the wrong schema")
+    if dict(execution_identity or {}) != T062_RETENTION_EXECUTION_IDENTITY:
+        raise ValueError("T062 retention manifest has incomplete execution identity")
+    _validate_t062_retention_stages(calibration_stages, entries)
+    _validate_t062_retention_commands(regeneration_commands)
+
+
+def _t062_retention_artifact_roles() -> set[str]:
+    roles = set(T062_RETENTION_ROOT_ARTIFACT_SCHEMAS)
+    for prefix in ("nominal", "wall_clock"):
+        roles.update(
+            {
+                f"{prefix}_merged_report",
+                f"{prefix}_merge_stdout_log",
+                f"{prefix}_merge_stderr_log",
+            }
+        )
+        for index in range(16):
+            roles.update(
+                {
+                    f"{prefix}_shard_{index}_report",
+                    f"{prefix}_shard_{index}_stdout_log",
+                    f"{prefix}_shard_{index}_stderr_log",
+                }
+            )
+    return roles
+
+
+def _validate_t062_retention_stages(
+    calibration_stages: Mapping[str, Mapping[str, Any]] | None,
+    entries: Sequence[Mapping[str, Any]],
+) -> None:
+    if not isinstance(calibration_stages, Mapping) or set(calibration_stages) != {
+        "nominal_budget_100",
+        "wall_clock_minimum_budget",
+    }:
+        raise ValueError("T062 retention manifest has incomplete calibration stages")
+    entry_identities = {
+        entry.get("path"): {
+            key: entry.get(key) for key in ("path", "bytes", "sha256", "schema_id")
+        }
+        for entry in entries
+    }
+    expected_stage_commands = {
+        "nominal_budget_100": "--t062-battle-search-v2-family nominal",
+        "wall_clock_minimum_budget": (
+            "--t062-battle-search-v2-family wall_clock_normalized"
+        ),
+    }
+    for stage_name, family_marker in expected_stage_commands.items():
+        stage = calibration_stages[stage_name]
+        if not isinstance(stage, Mapping):
+            raise ValueError(f"T062 retention stage {stage_name!r} is malformed")
+        if (
+            stage.get("record_range") != "0:16"
+            or stage.get("worker_count") != 16
+            or stage.get("shard_count") != 16
+            or not isinstance(stage.get("worker_count_reason"), str)
+        ):
+            raise ValueError(f"T062 retention stage {stage_name!r} is incomplete")
+        commands = stage.get("regeneration_commands")
+        if (
+            not isinstance(commands, list)
+            or len(commands) != 1
+            or not isinstance(commands[0], str)
+            or "--lightspeed-t062-battle-search-v2-comparison" not in commands[0]
+            or family_marker not in commands[0]
+        ):
+            raise ValueError(f"T062 retention stage {stage_name!r} lacks its command")
+        if not _all_zero_counts(stage.get("failure_counts")):
+            raise ValueError(f"T062 retention stage {stage_name!r} reports failures")
+        _require_retention_identity(stage.get("merged_report"), entry_identities)
+        shards = stage.get("shards")
+        if not isinstance(shards, list) or len(shards) != 16:
+            raise ValueError(f"T062 retention stage {stage_name!r} lacks 16 shards")
+        for index, shard in enumerate(shards):
+            if (
+                not isinstance(shard, Mapping)
+                or shard.get("index") != index
+                or shard.get("record_range") != f"{index}:{index + 1}"
+            ):
+                raise ValueError(
+                    f"T062 retention stage {stage_name!r} has invalid shard evidence"
+                )
+            for key in ("report", "stdout_log", "stderr_log"):
+                _require_retention_identity(shard.get(key), entry_identities)
+
+
+def _require_retention_identity(
+    identity: Any, entry_identities: Mapping[Any, Mapping[str, Any]]
+) -> None:
+    if not isinstance(identity, Mapping):
+        raise ValueError("T062 retention stage identity is malformed")
+    path = identity.get("path")
+    expected = entry_identities.get(path)
+    actual = {
+        key: identity.get(key) for key in ("path", "bytes", "sha256", "schema_id")
+    }
+    if expected != actual:
+        raise ValueError("T062 retention stage identity is not retained")
+
+
+def _all_zero_counts(value: Any) -> bool:
+    if isinstance(value, Mapping):
+        return bool(value) and all(_all_zero_counts(item) for item in value.values())
+    return isinstance(value, int) and not isinstance(value, bool) and value == 0
+
+
+def _validate_t062_retention_commands(regeneration_commands: Sequence[str]) -> None:
+    if len(regeneration_commands) != 6 or not all(
+        isinstance(command, str) and command for command in regeneration_commands
+    ):
+        raise ValueError("T062 retention manifest requires six named commands")
+    markers = (
+        "--t062-input-preflight-report",
+        "--lightspeed-t062-battle-search-v2-comparison",
+        "--t062-battle-search-v2-family nominal",
+        "--t062-battle-search-v2-family wall_clock_normalized",
+        "--t062-calibration-manifest",
+        "--t062-early-exit-decision-report",
+        "regenerate_t062_retention_manifest.py",
+    )
+    if any(
+        not any(marker in command for command in regeneration_commands)
+        for marker in markers
+    ):
+        raise ValueError("T062 retention manifest lacks complete regeneration commands")
 
 
 def build_t062_calibration_stage_evidence(
