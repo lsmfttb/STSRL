@@ -956,6 +956,45 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="REPORT_JSON",
         help="Merged wall-clock-normalized T062 comparison report.",
     )
+    parser.add_argument(
+        "--t062-calibration-manifest",
+        type=Path,
+        metavar="OUTPUT_JSON",
+        help=(
+            "Build T062's versioned cost-only calibration manifest from the "
+            "16-record nominal and wall-clock candidate reports."
+        ),
+    )
+    parser.add_argument(
+        "--t062-nominal-budget-calibration",
+        type=Path,
+        metavar="REPORT_JSON",
+        help="Merged 16-record nominal-budget-100 T062 calibration report.",
+    )
+    parser.add_argument(
+        "--t062-wall-clock-candidate-calibration",
+        type=Path,
+        metavar="REPORT_JSON",
+        help="Merged 16-record wall-clock-candidate T062 calibration report.",
+    )
+    parser.add_argument(
+        "--t062-early-exit-decision-report",
+        type=Path,
+        metavar="OUTPUT_JSON",
+        help=(
+            "Build T062's calibration-infeasibility early-exit decision report "
+            "from a versioned calibration manifest."
+        ),
+    )
+    parser.add_argument(
+        "--t062-early-exit-calibration-manifest",
+        type=Path,
+        metavar="MANIFEST_JSON",
+        help=(
+            "Versioned T062 calibration manifest consumed by the early-exit "
+            "decision command."
+        ),
+    )
     input_group.add_argument(
         "--merge-assisted-source-pool",
         type=Path,

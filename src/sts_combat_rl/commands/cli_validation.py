@@ -408,6 +408,38 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
         path is not None for path in t062_decision_inputs
     ):
         return "T062 merged comparison inputs require --t062-decision-report"
+    t062_calibration_inputs = (
+        args.t062_nominal_budget_calibration,
+        args.t062_wall_clock_candidate_calibration,
+    )
+    if args.t062_calibration_manifest is not None and any(
+        path is None for path in t062_calibration_inputs
+    ):
+        return (
+            "--t062-calibration-manifest requires "
+            "--t062-nominal-budget-calibration and "
+            "--t062-wall-clock-candidate-calibration"
+        )
+    if args.t062_calibration_manifest is None and any(
+        path is not None for path in t062_calibration_inputs
+    ):
+        return "T062 calibration inputs require --t062-calibration-manifest"
+    if (
+        args.t062_early_exit_decision_report is not None
+        and args.t062_early_exit_calibration_manifest is None
+    ):
+        return (
+            "--t062-early-exit-decision-report requires "
+            "--t062-early-exit-calibration-manifest"
+        )
+    if (
+        args.t062_early_exit_decision_report is None
+        and args.t062_early_exit_calibration_manifest is not None
+    ):
+        return (
+            "--t062-early-exit-calibration-manifest requires "
+            "--t062-early-exit-decision-report"
+        )
     if (
         args.merge_battle_start_pool_shards is not None
         and not args.battle_start_pool_shard

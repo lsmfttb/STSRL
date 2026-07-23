@@ -40,6 +40,10 @@ T043_CHECKPOINT_SHA256 = (
 )
 T043_CHECKPOINT_BYTES = 386717
 T062_COMPARISON_SCHEMA_ID = "t062-battle-search-v2-comparison-v1"
+T062_CALIBRATION_MANIFEST_SCHEMA_ID = "t062-battle-search-v2-calibration-manifest-v2"
+T062_EARLY_EXIT_DECISION_SCHEMA_ID = (
+    "t062-battle-search-v2-early-exit-decision-report-v1"
+)
 T062_ARM_LABELS = ("baseline", "prior_only", "value_only", "prior_value")
 
 
@@ -331,7 +335,13 @@ def build_t062_calibration_manifest(
     nominal_budget_report: dict[str, Any],
     wall_clock_candidate_report: dict[str, Any],
 ) -> dict[str, Any]:
-    """Record a cost-only calibration lock or a fail-closed infeasibility."""
+    """Record cost-only locks without misclassifying below-target minima.
+
+    A guided arm above the upper tolerance at the minimum legal budget is
+    infeasible because no lower integer budget exists.  Conversely, a
+    below-target minimum must remain explicitly unlocked until the published
+    deterministic higher-budget candidate rule has been exercised.
+    """
 
     _require_calibration_report(nominal_budget_report, "nominal")
     _require_calibration_report(wall_clock_candidate_report, "wall-clock candidate")
@@ -341,45 +351,116 @@ def build_t062_calibration_manifest(
         raise ValueError("T062 wall-clock calibration requires exactly records 0:16")
     wall_pairs = wall_clock_candidate_report["paired_vs_baseline"]
     locks: dict[str, dict[str, Any]] = {}
-    failures: list[str] = []
+    proven_infeasible: list[str] = []
+    unlocked_or_untested: list[str] = []
     for label in T062_ARM_LABELS[1:]:
         ratio = wall_pairs[label]["overall"]["cost_ratio_guided_over_baseline"][
             "wall_clock_seconds"
         ]
         budget = _controller_budget(wall_clock_candidate_report, label)
-        matched = ratio is not None and abs(float(ratio) - 1.0) <= 0.10
+        if ratio is None:
+            raise ValueError(f"{label}: wall-clock calibration ratio is missing")
+        ratio = float(ratio)
+        matched = abs(ratio - 1.0) <= 0.10
         at_minimum = budget == 1
+        if matched:
+            status = "locked"
+            reason = None
+        elif at_minimum and ratio > 1.10:
+            status = "proven_infeasible_at_minimum"
+            reason = (
+                "minimum legal budget 1 exceeds the upper 10% wall-clock "
+                "tolerance; no lower legal integer budget exists"
+            )
+            proven_infeasible.append(label)
+        elif at_minimum and ratio < 0.90:
+            status = "unlocked_below_target_minimum"
+            reason = (
+                "minimum legal budget 1 is below the lower 10% wall-clock "
+                "tolerance; higher deterministic candidates were not tested"
+            )
+            unlocked_or_untested.append(label)
+        else:
+            status = "unlocked_outside_tolerance"
+            reason = "candidate is outside the 10% wall-clock tolerance"
+            unlocked_or_untested.append(label)
         locks[label] = {
             "budget": budget,
             "wall_clock_ratio_guided_over_baseline": ratio,
             "within_10_percent": matched,
             "at_minimum_legal_budget": at_minimum,
+            "status": status,
+            "reason": reason,
         }
-        if not matched:
-            if at_minimum:
-                failures.append(
-                    f"{label}: minimum legal budget 1 is still outside the 10% wall-clock tolerance"
-                )
-            else:
-                failures.append(
-                    f"{label}: candidate is outside the 10% wall-clock tolerance"
-                )
+    all_locked = all(lock["status"] == "locked" for lock in locks.values())
     return {
-        "schema_id": "t062-battle-search-v2-calibration-manifest-v1",
+        "schema_id": T062_CALIBRATION_MANIFEST_SCHEMA_ID,
         "task_id": "T062",
         "calibration_record_range": "0:16",
         "calibration_is_cost_only": True,
-        "nominal_budget_report": nominal_budget_report,
-        "wall_clock_candidate_report": wall_clock_candidate_report,
-        "wall_clock_locks": locks,
-        "wall_clock_calibration_locked": not failures,
-        "primary_comparison_authorized": False,
-        "fail_closed_reasons": failures,
-        "next_action": (
-            "repair tree-internal prior inference overhead before rerunning calibration"
-            if failures
-            else "run the separately locked primary comparison families"
+        "not_fixed_cohort_outcome_evidence": True,
+        "nominal_budget_100": _calibration_report_summary(nominal_budget_report),
+        "wall_clock_candidate": _calibration_report_summary(
+            wall_clock_candidate_report
         ),
+        "wall_clock_locks": locks,
+        "wall_clock_calibration_locked": all_locked,
+        "primary_comparison_authorized": all_locked,
+        "proven_infeasible_arms": proven_infeasible,
+        "unlocked_or_untested_arms": unlocked_or_untested,
+        "early_exit_eligible": bool(proven_infeasible),
+        "fail_closed_reasons": [
+            f"{label}: {locks[label]['reason']}" for label in proven_infeasible
+        ],
+        "next_action": (
+            "emit the T062 early-exit decision report recommending T067"
+            if proven_infeasible
+            else (
+                "run the separately locked primary comparison families"
+                if all_locked
+                else "test the published deterministic higher-budget calibration candidates"
+            )
+        ),
+        "command_passed": True,
+    }
+
+
+def build_t062_early_exit_decision_report(
+    *, calibration_manifest: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Authorize no primary comparison after a proved calibration infeasibility."""
+
+    if calibration_manifest.get("schema_id") != T062_CALIBRATION_MANIFEST_SCHEMA_ID:
+        raise ValueError("T062 early-exit decision requires calibration manifest v2")
+    if not calibration_manifest.get("calibration_is_cost_only"):
+        raise ValueError("T062 early-exit decision requires a cost-only calibration")
+    proven = calibration_manifest.get("proven_infeasible_arms")
+    if not isinstance(proven, list) or not proven:
+        raise ValueError("T062 early exit requires at least one proven-infeasible arm")
+    locks = calibration_manifest.get("wall_clock_locks")
+    if not isinstance(locks, dict):
+        raise ValueError("T062 early-exit decision requires wall-clock lock evidence")
+    if any(
+        locks.get(label, {}).get("status") != "proven_infeasible_at_minimum"
+        for label in proven
+    ):
+        raise ValueError("T062 early-exit arm statuses do not prove infeasibility")
+    return {
+        "schema_id": T062_EARLY_EXIT_DECISION_SCHEMA_ID,
+        "task_id": "T062",
+        "decision_path": "calibration_infeasibility_early_exit",
+        "calibration_manifest_schema_id": calibration_manifest["schema_id"],
+        "calibration_record_range": calibration_manifest["calibration_record_range"],
+        "proven_infeasible_arms": proven,
+        "unlocked_or_untested_arms": calibration_manifest.get(
+            "unlocked_or_untested_arms", []
+        ),
+        "primary_comparison_authorized": False,
+        "primary_comparison_status": "not_authorized_calibration_infeasible",
+        "fixed_cohort_outcome_claims": "not_authorized_not_reported",
+        "controller_promotion_authorized": False,
+        "recommendation": "T067",
+        "command_passed": True,
     }
 
 
@@ -388,6 +469,8 @@ def write_t062_retention_manifest(
     output_path: Path,
     artifacts: Mapping[str, Path],
     regeneration_commands: Sequence[str],
+    calibration_stages: Mapping[str, Mapping[str, Any]] | None = None,
+    execution_identity: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Retain compact T062 calibration evidence outside review worktrees."""
 
@@ -409,18 +492,21 @@ def write_t062_retention_manifest(
             }
         )
     manifest = {
-        "schema_id": "t062-battle-search-v2-retention-manifest-v1",
+        "schema_id": "t062-battle-search-v2-retention-manifest-v2",
         "task_id": "T062",
         "retention_root": str(output_path.parent),
         "retained_artifacts": entries,
+        "calibration_stages": dict(calibration_stages or {}),
+        "execution_identity": dict(execution_identity or {}),
         "regeneration_commands": list(regeneration_commands),
         "retention_reason": (
             "fail-closed T062 tree-internal calibration evidence; preserve until a "
             "reviewed repair-or-closure task consumes the compact reports"
         ),
         "raw_artifacts_may_be_deleted_when": (
-            "after the retained calibration reports have been independently verified "
-            "and the follow-up repair-or-closure task no longer needs them"
+            "only after T067 has independently verified or superseded this exact "
+            "calibration evidence, its accepted retention manifest names the "
+            "replacement evidence, and this T062 pull request is no longer under review"
         ),
     }
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -428,6 +514,125 @@ def write_t062_retention_manifest(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
     return manifest
+
+
+def build_t062_calibration_stage_evidence(
+    *,
+    merged_report: Mapping[str, Any],
+    merged_report_path: Path,
+    shard_paths: Sequence[Path],
+    stdout_log_paths: Sequence[Path],
+    stderr_log_paths: Sequence[Path],
+    worker_count_reason: str,
+    regeneration_commands: Sequence[str],
+) -> dict[str, Any]:
+    """Index exact 16-record calibration shards, logs, and cost telemetry."""
+
+    _require_calibration_report(dict(merged_report), "calibration stage")
+    if merged_report.get("evaluated_record_count") != 16:
+        raise ValueError("T062 calibration stage requires exactly records 0:16")
+    if (
+        merged_report.get("worker_count") != 16
+        or merged_report.get("shard_count") != 16
+    ):
+        raise ValueError("T062 calibration stage requires 16 workers and 16 shards")
+    if len(shard_paths) != 16:
+        raise ValueError("T062 calibration stage requires 16 shard reports")
+    if len(stdout_log_paths) != 16 or len(stderr_log_paths) != 16:
+        raise ValueError(
+            "T062 calibration stage requires stdout and stderr logs per shard"
+        )
+    if not worker_count_reason:
+        raise ValueError("T062 calibration stage requires a worker-count reason")
+    if not regeneration_commands:
+        raise ValueError("T062 calibration stage requires regeneration commands")
+    for path in (*shard_paths, *stdout_log_paths, *stderr_log_paths):
+        if not path.is_file():
+            raise ValueError(f"T062 calibration stage file is missing: {path}")
+    return {
+        "record_range": "0:16",
+        "worker_count": merged_report.get("worker_count"),
+        "shard_count": merged_report.get("shard_count"),
+        "worker_count_reason": worker_count_reason,
+        "merged_report": _artifact_identity(merged_report_path),
+        "per_arm_cost_totals": _calibration_cost_totals(merged_report),
+        "failure_counts": _calibration_failure_counts(merged_report),
+        "shards": [
+            {
+                "index": index,
+                "record_range": f"{index}:{index + 1}",
+                "report": _artifact_identity(shard_paths[index]),
+                "stdout_log": _artifact_identity(stdout_log_paths[index]),
+                "stderr_log": _artifact_identity(stderr_log_paths[index]),
+            }
+            for index in range(16)
+        ],
+        "regeneration_commands": list(regeneration_commands),
+    }
+
+
+def _calibration_report_summary(report: Mapping[str, Any]) -> dict[str, Any]:
+    """Keep calibration evidence compact and explicitly outcome-free."""
+
+    return {
+        "schema_id": report.get("schema_id"),
+        "family": report.get("family"),
+        "report_kind": report.get("report_kind"),
+        "cohort_identity": report.get("cohort_identity"),
+        "evaluated_record_count": report.get("evaluated_record_count"),
+        "worker_count": report.get("worker_count"),
+        "shard_count": report.get("shard_count"),
+        "source_match_problems": list(report.get("problems", [])),
+        "per_arm_cost_totals": _calibration_cost_totals(report),
+        "failure_counts": _calibration_failure_counts(report),
+    }
+
+
+def _calibration_cost_totals(report: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    arms = report.get("arms", {})
+    if not isinstance(arms, dict):
+        raise ValueError("T062 calibration report omits arms")
+    result: dict[str, dict[str, Any]] = {}
+    for label in T062_ARM_LABELS:
+        arm = arms.get(label)
+        if not isinstance(arm, dict):
+            raise ValueError(f"T062 calibration report omits arm {label!r}")
+        result[label] = {
+            "search_budget": _controller_budget(dict(report), label),
+            "native_simulator_steps": arm.get("native_simulator_steps"),
+            "model_calls": arm.get("model_calls"),
+            "outer_simulator_steps": arm.get("outer_simulator_steps"),
+            "wall_clock_seconds": arm.get("wall_clock_seconds"),
+        }
+    return result
+
+
+def _calibration_failure_counts(report: Mapping[str, Any]) -> dict[str, Any]:
+    arms = report.get("arms", {})
+    if not isinstance(arms, dict):
+        raise ValueError("T062 calibration report omits arms")
+    return {
+        "source_match_problem_count": len(report.get("problems", [])),
+        "per_arm": {
+            label: {
+                "truncations": arms[label].get("truncations"),
+                "errors": arms[label].get("errors"),
+            }
+            for label in T062_ARM_LABELS
+            if isinstance(arms.get(label), dict)
+        },
+    }
+
+
+def _artifact_identity(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        raise ValueError(f"T062 artifact is missing: {path}")
+    return {
+        "path": str(path),
+        "bytes": path.stat().st_size,
+        "sha256": _sha256_file(path),
+        "schema_id": _json_schema_id(path),
+    }
 
 
 def _evaluate_t062_arm(
