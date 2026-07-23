@@ -563,8 +563,13 @@ def write_t062_retention_manifest(
         raise ValueError("T062 retention manifest requires at least one artifact")
     if not regeneration_commands:
         raise ValueError("T062 retention manifest requires regeneration commands")
+    resolved_output_path = output_path.resolve()
     entries: list[dict[str, Any]] = []
     for role, path in sorted(artifacts.items()):
+        if path.resolve() == resolved_output_path:
+            raise ValueError(
+                "T062 retention manifest must not include its output path as a retained artifact"
+            )
         if not path.is_file():
             raise ValueError(f"T062 retained artifact {role!r} is missing: {path}")
         entries.append(
@@ -599,6 +604,117 @@ def write_t062_retention_manifest(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
     return manifest
+
+
+def write_t062_retention_manifest_from_paths(
+    *,
+    output_path: Path,
+    root_artifacts: Mapping[str, Path],
+    nominal_merged_report_path: Path,
+    nominal_merge_stdout_log_path: Path,
+    nominal_merge_stderr_log_path: Path,
+    nominal_shard_directory: Path,
+    nominal_regeneration_command: str,
+    wall_clock_merged_report_path: Path,
+    wall_clock_merge_stdout_log_path: Path,
+    wall_clock_merge_stderr_log_path: Path,
+    wall_clock_shard_directory: Path,
+    wall_clock_regeneration_command: str,
+    execution_identity: Mapping[str, Any],
+    regeneration_commands: Sequence[str],
+) -> dict[str, Any]:
+    """Write the complete early-exit retention manifest from explicit paths.
+
+    The two calibration stages each retain 16 one-record reports and their
+    stdout/stderr logs, plus the deterministic merge output and logs.  Keeping
+    this assembly in the command layer prevents a hand-edited manifest from
+    omitting a stage artifact or accidentally retaining its own output.
+    """
+
+    if not root_artifacts:
+        raise ValueError("T062 retention manifest requires root artifacts")
+    if not nominal_regeneration_command or not wall_clock_regeneration_command:
+        raise ValueError("T062 retention manifest requires exact stage commands")
+    if not isinstance(execution_identity, Mapping):
+        raise ValueError("T062 retention execution identity must be an object")
+
+    artifacts = dict(root_artifacts)
+    stages: dict[str, Mapping[str, Any]] = {}
+    for (
+        stage_key,
+        stage_prefix,
+        merged_report_path,
+        merge_stdout_log_path,
+        merge_stderr_log_path,
+        shard_directory,
+        regeneration_command,
+    ) in (
+        (
+            "nominal_budget_100",
+            "nominal",
+            nominal_merged_report_path,
+            nominal_merge_stdout_log_path,
+            nominal_merge_stderr_log_path,
+            nominal_shard_directory,
+            nominal_regeneration_command,
+        ),
+        (
+            "wall_clock_minimum_budget",
+            "wall_clock",
+            wall_clock_merged_report_path,
+            wall_clock_merge_stdout_log_path,
+            wall_clock_merge_stderr_log_path,
+            wall_clock_shard_directory,
+            wall_clock_regeneration_command,
+        ),
+    ):
+        shard_paths = [shard_directory / f"shard-{index}.json" for index in range(16)]
+        stdout_log_paths = [
+            shard_directory / f"shard-{index}.stdout.log" for index in range(16)
+        ]
+        stderr_log_paths = [
+            shard_directory / f"shard-{index}.stderr.log" for index in range(16)
+        ]
+        stages[stage_key] = build_t062_calibration_stage_evidence(
+            merged_report=load_t062_comparison_report(merged_report_path),
+            merged_report_path=merged_report_path,
+            shard_paths=shard_paths,
+            stdout_log_paths=stdout_log_paths,
+            stderr_log_paths=stderr_log_paths,
+            worker_count_reason="16 workers, one record per explicit shard",
+            regeneration_commands=[regeneration_command],
+        )
+        stage_artifacts = {
+            f"{stage_prefix}_merged_report": merged_report_path,
+            f"{stage_prefix}_merge_stdout_log": merge_stdout_log_path,
+            f"{stage_prefix}_merge_stderr_log": merge_stderr_log_path,
+        }
+        stage_artifacts.update(
+            {
+                f"{stage_prefix}_shard_{index}_{kind}": path
+                for index in range(16)
+                for kind, path in (
+                    ("report", shard_paths[index]),
+                    ("stdout_log", stdout_log_paths[index]),
+                    ("stderr_log", stderr_log_paths[index]),
+                )
+            }
+        )
+        overlap = set(artifacts).intersection(stage_artifacts)
+        if overlap:
+            raise ValueError(
+                "T062 retention artifact roles are duplicated: "
+                + ", ".join(sorted(overlap))
+            )
+        artifacts.update(stage_artifacts)
+
+    return write_t062_retention_manifest(
+        output_path=output_path,
+        artifacts=artifacts,
+        calibration_stages=stages,
+        execution_identity=dict(execution_identity),
+        regeneration_commands=regeneration_commands,
+    )
 
 
 def build_t062_calibration_stage_evidence(

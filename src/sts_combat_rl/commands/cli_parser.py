@@ -995,6 +995,102 @@ def build_parser() -> argparse.ArgumentParser:
             "decision command."
         ),
     )
+    parser.add_argument(
+        "--t062-retention-manifest",
+        type=Path,
+        metavar="OUTPUT_JSON",
+        help=(
+            "Build T062's v3 early-exit retention manifest from explicit root "
+            "artifacts and two 16-shard calibration stages."
+        ),
+    )
+    parser.add_argument(
+        "--t062-retention-artifact",
+        nargs=2,
+        action="append",
+        default=[],
+        metavar=("ROLE", "PATH"),
+        help=(
+            "One non-stage artifact retained by --t062-retention-manifest. "
+            "Repeat for input-preflight, calibration, early-exit reports, and logs."
+        ),
+    )
+    parser.add_argument(
+        "--t062-retention-nominal-merged-report",
+        type=Path,
+        metavar="REPORT_JSON",
+        help="Merged nominal-budget-100 calibration report retained by T062.",
+    )
+    parser.add_argument(
+        "--t062-retention-nominal-merge-stdout-log",
+        type=Path,
+        metavar="LOG",
+        help="Retained stdout log for the nominal calibration merge.",
+    )
+    parser.add_argument(
+        "--t062-retention-nominal-merge-stderr-log",
+        type=Path,
+        metavar="LOG",
+        help="Retained stderr log for the nominal calibration merge.",
+    )
+    parser.add_argument(
+        "--t062-retention-nominal-shard-directory",
+        type=Path,
+        metavar="DIRECTORY",
+        help="Directory containing nominal shard-0 through shard-15 reports and logs.",
+    )
+    parser.add_argument(
+        "--t062-retention-nominal-command",
+        metavar="COMMAND",
+        help="Exact executable command that regenerated the nominal calibration stage.",
+    )
+    parser.add_argument(
+        "--t062-retention-wall-clock-merged-report",
+        type=Path,
+        metavar="REPORT_JSON",
+        help="Merged wall-clock-minimum-budget calibration report retained by T062.",
+    )
+    parser.add_argument(
+        "--t062-retention-wall-clock-merge-stdout-log",
+        type=Path,
+        metavar="LOG",
+        help="Retained stdout log for the wall-clock calibration merge.",
+    )
+    parser.add_argument(
+        "--t062-retention-wall-clock-merge-stderr-log",
+        type=Path,
+        metavar="LOG",
+        help="Retained stderr log for the wall-clock calibration merge.",
+    )
+    parser.add_argument(
+        "--t062-retention-wall-clock-shard-directory",
+        type=Path,
+        metavar="DIRECTORY",
+        help="Directory containing wall-clock shard-0 through shard-15 reports and logs.",
+    )
+    parser.add_argument(
+        "--t062-retention-wall-clock-command",
+        metavar="COMMAND",
+        help="Exact executable command that regenerated the wall-clock calibration stage.",
+    )
+    parser.add_argument(
+        "--t062-retention-execution-identity-json",
+        metavar="JSON",
+        help=(
+            "JSON object with the controller, checkpoint, cohort, native, and "
+            "search-configuration identities retained by T062."
+        ),
+    )
+    parser.add_argument(
+        "--t062-retention-command",
+        action="append",
+        default=[],
+        metavar="COMMAND",
+        help=(
+            "Exact executable T062 reproduction command. Repeat for input "
+            "preflight, both calibration stages, derived reports, and retention."
+        ),
+    )
     input_group.add_argument(
         "--merge-assisted-source-pool",
         type=Path,

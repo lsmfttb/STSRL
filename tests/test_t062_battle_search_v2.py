@@ -353,6 +353,22 @@ def test_t062_retention_writer_emits_v3_utf8_schema_entries(tmp_path: Path) -> N
     assert manifest["retained_artifacts"][1]["schema_id"] is None
 
 
+def test_t062_retention_writer_rejects_its_existing_output_as_an_artifact(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "t062-retention-manifest-v3.json"
+    output.write_text('{"old":"manifest"}\n', encoding="utf-8")
+
+    with pytest.raises(ValueError, match="must not include its output path"):
+        write_t062_retention_manifest(
+            output_path=output,
+            artifacts={"retention_manifest": output},
+            regeneration_commands=[
+                "python -m sts_combat_rl.cli --t062-retention-manifest"
+            ],
+        )
+
+
 def _calibration_report(
     *,
     budgets: dict[str, int],

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
 
 from sts_combat_rl.commands.cli_parser import build_parser
 from sts_combat_rl.commands.cli_paths import timestamped_path
@@ -106,6 +107,7 @@ from sts_combat_rl.commands.t062_battle_search_v2 import (
     load_t062_comparison_report,
     merge_t062_comparison_reports_from_paths,
     run_t062_input_preflight_from_paths,
+    write_t062_retention_manifest_from_paths,
     write_t062_comparison_report,
 )
 from sts_combat_rl.commands.teacher_guidance_calibration import (
@@ -723,6 +725,57 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         print(f"T062 early-exit decision: {report['recommendation']}", file=sys.stderr)
         return 0 if report["command_passed"] else 1
+
+    if args.t062_retention_manifest is not None:
+        try:
+            root_artifacts: dict[str, Path] = {}
+            for role, raw_path in args.t062_retention_artifact:
+                if role in root_artifacts:
+                    raise ValueError(f"duplicate T062 retention artifact role {role!r}")
+                root_artifacts[role] = Path(raw_path)
+            if args.t062_retention_execution_identity_json is None:
+                raise ValueError("T062 retention execution identity JSON is required")
+            execution_identity = json.loads(args.t062_retention_execution_identity_json)
+            if not isinstance(execution_identity, dict):
+                raise ValueError("T062 retention execution identity must be an object")
+            manifest = write_t062_retention_manifest_from_paths(
+                output_path=args.t062_retention_manifest,
+                root_artifacts=root_artifacts,
+                nominal_merged_report_path=args.t062_retention_nominal_merged_report,
+                nominal_merge_stdout_log_path=(
+                    args.t062_retention_nominal_merge_stdout_log
+                ),
+                nominal_merge_stderr_log_path=(
+                    args.t062_retention_nominal_merge_stderr_log
+                ),
+                nominal_shard_directory=args.t062_retention_nominal_shard_directory,
+                nominal_regeneration_command=args.t062_retention_nominal_command,
+                wall_clock_merged_report_path=(
+                    args.t062_retention_wall_clock_merged_report
+                ),
+                wall_clock_merge_stdout_log_path=(
+                    args.t062_retention_wall_clock_merge_stdout_log
+                ),
+                wall_clock_merge_stderr_log_path=(
+                    args.t062_retention_wall_clock_merge_stderr_log
+                ),
+                wall_clock_shard_directory=(
+                    args.t062_retention_wall_clock_shard_directory
+                ),
+                wall_clock_regeneration_command=(
+                    args.t062_retention_wall_clock_command
+                ),
+                execution_identity=execution_identity,
+                regeneration_commands=args.t062_retention_command,
+            )
+        except (OSError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            print(f"failed to build T062 retention manifest: {exc}", file=sys.stderr)
+            return 2
+        print(
+            f"T062 retention manifest: artifacts={len(manifest['retained_artifacts'])}",
+            file=sys.stderr,
+        )
+        return 0
 
     if args.merge_battle_start_pool_shards is not None:
         try:
