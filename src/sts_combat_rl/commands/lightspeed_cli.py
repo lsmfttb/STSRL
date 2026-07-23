@@ -53,6 +53,11 @@ from sts_combat_rl.commands.root_prior_guided_search_comparison import (
     run_root_prior_guided_search_comparison_from_cohort_path,
     write_root_prior_guided_search_comparison_report,
 )
+from sts_combat_rl.commands.t062_battle_search_v2 import (
+    parse_t062_arm_budgets,
+    run_t062_comparison_from_cohort_path,
+    write_t062_comparison_report,
+)
 from sts_combat_rl.commands.search_battle_controller import (
     SEARCH_BATTLE_CONTROLLER_MODEL_GUIDED_V2,
     SEARCH_BATTLE_CONTROLLER_ORACLE,
@@ -110,6 +115,7 @@ from sts_combat_rl.sim.battle_start_pool import (
     format_battle_start_pool_coverage_report,
     format_battle_start_pool_restore_report,
 )
+from sts_combat_rl.sim.battle_search_v2 import BattleSearchV2Controller
 from sts_combat_rl.sim.calibration import (
     format_simulator_calibration_report,
     format_tactical_feature_coverage_report,
@@ -273,6 +279,7 @@ _LIGHTSPEED_PATH_FLAGS = (
     "lightspeed_t054_guardrailed_root_prior_repair_comparison",
     "lightspeed_t055_guardrailed_root_prior_scale_comparison",
     "lightspeed_t059_root_prior_allocation_repair_comparison",
+    "lightspeed_t062_battle_search_v2_comparison",
 )
 
 
@@ -866,6 +873,81 @@ def run_lightspeed_command(args: argparse.Namespace) -> int:
                 file=sys.stderr,
             )
             if not report.evaluation_successful:
+                return 1
+        elif args.lightspeed_t062_battle_search_v2_comparison is not None:
+            budget = (
+                args.oracle_search_simulations
+                if args.search_budget is None
+                else args.search_budget
+            )
+            arm_budgets = parse_t062_arm_budgets(args.t062_arm_budget, budget)
+            scorer = build_torch_guidance_scorer_from_checkpoint(
+                args.model_guided_oracle_checkpoint
+            )
+            baseline_controller = BattleSearchV2Controller(
+                simulations=arm_budgets["baseline"],
+                scorer=scorer,
+                ablation="baseline",
+                root_selection_rule=args.oracle_root_selection,
+                action_space=action_space,
+            )
+            report = run_t062_comparison_from_cohort_path(
+                adapter_factory=lambda: LightSpeedAdapter(
+                    seed=args.sim_seed,
+                    ascension=args.sim_ascension,
+                ),
+                cohort_path=args.lightspeed_t062_battle_search_v2_comparison,
+                controller_arms=(
+                    ("baseline", baseline_controller),
+                    (
+                        "prior_only",
+                        BattleSearchV2Controller(
+                            simulations=arm_budgets["prior_only"],
+                            scorer=scorer,
+                            ablation="prior_only",
+                            root_selection_rule=args.oracle_root_selection,
+                            action_space=action_space,
+                        ),
+                    ),
+                    (
+                        "value_only",
+                        BattleSearchV2Controller(
+                            simulations=arm_budgets["value_only"],
+                            scorer=scorer,
+                            ablation="value_only",
+                            root_selection_rule=args.oracle_root_selection,
+                            action_space=action_space,
+                        ),
+                    ),
+                    (
+                        "prior_value",
+                        BattleSearchV2Controller(
+                            simulations=arm_budgets["prior_value"],
+                            scorer=scorer,
+                            ablation="prior_value",
+                            root_selection_rule=args.oracle_root_selection,
+                            action_space=action_space,
+                        ),
+                    ),
+                ),
+                action_space=action_space,
+                max_battle_steps=args.sim_steps,
+                family=args.t062_battle_search_v2_family,
+                worker_count=args.workers,
+                shard_count=args.shards,
+                record_range=args.record_range,
+            )
+            if args.t062_battle_search_v2_comparison_report is not None:
+                write_t062_comparison_report(
+                    args.t062_battle_search_v2_comparison_report, report
+                )
+            print(
+                "T062 Battle Search v2 comparison: "
+                f"family={report['family']}, records={report['evaluated_record_count']}, "
+                f"successful={'yes' if report['successful'] else 'no'}",
+                file=sys.stderr,
+            )
+            if not report["successful"]:
                 return 1
         elif args.lightspeed_root_prior_guided_search_comparison is not None:
             budget = (

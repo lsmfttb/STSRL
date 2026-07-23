@@ -9,7 +9,7 @@
     "repository_url": "https://github.com/lsmfttb/sts_lightspeed.git",
     "branch": "stsrl/main",
     "ref": "refs/heads/stsrl/main",
-    "commit": "9dd8f75bd5d2b1aa8a8b5cf1db18f899825f326a"
+    "commit": "3cb9ebecb87c38044b34aa0e013d42b222a04087"
   },
   "python_module": {
     "name": "slaythespire",
@@ -148,6 +148,19 @@
         "StepSimulator.battle_search_with_root_priors.root_action_priors",
         "StepSimulator.battle_search_with_root_priors.allocation_metadata",
         "StepSimulator.battle_search_with_root_priors.root_rows"
+      ]
+    },
+    {
+      "id": "native_battle_search_v2_tree_internal",
+      "description": "Oracle-like tree-internal public policy-prior and learned-leaf-value surface exposed through StepSimulator.battle_search_v2.",
+      "task_provenance": [
+        "T062"
+      ],
+      "required_python_api": [
+        "StepSimulator.battle_search_v2",
+        "StepSimulator.battle_search_v2.tree_internal_telemetry",
+        "StepSimulator.battle_search_v2.tree_internal_telemetry.policy_prior_calls",
+        "StepSimulator.battle_search_v2.tree_internal_telemetry.leaf_value_calls"
       ]
     },
     {

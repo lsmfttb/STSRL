@@ -98,6 +98,16 @@ from sts_combat_rl.commands.t061_bottleneck_decomposition import (
     format_t061_bottleneck_report,
     run_t061_bottleneck_decomposition_from_paths,
 )
+from sts_combat_rl.commands.t062_battle_search_v2 import (
+    build_t062_calibration_manifest,
+    build_t062_decision_report,
+    build_t062_early_exit_decision_report,
+    format_t062_input_preflight_report,
+    load_t062_comparison_report,
+    merge_t062_comparison_reports_from_paths,
+    run_t062_input_preflight_from_paths,
+    write_t062_comparison_report,
+)
 from sts_combat_rl.commands.teacher_guidance_calibration import (
     format_teacher_guidance_calibration_command,
     run_teacher_guidance_calibration_from_paths,
@@ -623,6 +633,96 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         print(format_t061_bottleneck_report(report), file=sys.stderr)
         return 0 if report.get("command_passed") else 1
+
+    if args.t062_input_preflight_report is not None:
+        try:
+            report = run_t062_input_preflight_from_paths(
+                output_path=args.t062_input_preflight_report,
+                t061_retention_manifest_path=args.t062_t061_retention_manifest,
+                t052_cohort_path=args.t062_fixed_cohort,
+                t043_checkpoint_path=args.t062_checkpoint,
+            )
+        except (OSError, ValueError) as exc:
+            print(f"failed to run T062 input preflight: {exc}", file=sys.stderr)
+            return 2
+        print(format_t062_input_preflight_report(report), file=sys.stderr)
+        return 0 if report.get("command_passed") else 1
+
+    if args.merge_t062_comparison is not None:
+        try:
+            report = merge_t062_comparison_reports_from_paths(
+                shard_paths=args.t062_comparison_shard,
+                output_path=args.merge_t062_comparison,
+                expected_record_count=args.t062_expected_record_count,
+            )
+        except (OSError, ValueError) as exc:
+            print(f"failed to merge T062 comparison shards: {exc}", file=sys.stderr)
+            return 2
+        print(
+            "T062 comparison merge: "
+            f"records={report['evaluated_record_count']}, "
+            f"passed={'yes' if report['command_passed'] else 'no'}",
+            file=sys.stderr,
+        )
+        return 0 if report["command_passed"] else 1
+
+    if args.t062_decision_report is not None:
+        try:
+            report = build_t062_decision_report(
+                nominal_report=load_t062_comparison_report(
+                    args.t062_nominal_comparison
+                ),
+                simulator_step_report=load_t062_comparison_report(
+                    args.t062_simulator_step_comparison
+                ),
+                wall_clock_report=load_t062_comparison_report(
+                    args.t062_wall_clock_comparison
+                ),
+            )
+            write_t062_comparison_report(args.t062_decision_report, report)
+        except (OSError, ValueError) as exc:
+            print(f"failed to build T062 decision report: {exc}", file=sys.stderr)
+            return 2
+        print(f"T062 decision: {report['recommendation']}", file=sys.stderr)
+        return 0 if report["command_passed"] else 1
+
+    if args.t062_calibration_manifest is not None:
+        try:
+            report = build_t062_calibration_manifest(
+                nominal_budget_report=load_t062_comparison_report(
+                    args.t062_nominal_budget_calibration
+                ),
+                wall_clock_candidate_report=load_t062_comparison_report(
+                    args.t062_wall_clock_candidate_calibration
+                ),
+            )
+            write_t062_comparison_report(args.t062_calibration_manifest, report)
+        except (OSError, ValueError) as exc:
+            print(f"failed to build T062 calibration manifest: {exc}", file=sys.stderr)
+            return 2
+        print(
+            "T062 calibration: "
+            f"early-exit={'yes' if report['early_exit_eligible'] else 'no'}",
+            file=sys.stderr,
+        )
+        return 0 if report["command_passed"] else 1
+
+    if args.t062_early_exit_decision_report is not None:
+        try:
+            calibration_manifest = json.loads(
+                args.t062_early_exit_calibration_manifest.read_text(encoding="utf-8")
+            )
+            if not isinstance(calibration_manifest, dict):
+                raise ValueError("T062 calibration manifest must contain an object")
+            report = build_t062_early_exit_decision_report(
+                calibration_manifest=calibration_manifest
+            )
+            write_t062_comparison_report(args.t062_early_exit_decision_report, report)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            print(f"failed to build T062 early-exit decision: {exc}", file=sys.stderr)
+            return 2
+        print(f"T062 early-exit decision: {report['recommendation']}", file=sys.stderr)
+        return 0 if report["command_passed"] else 1
 
     if args.merge_battle_start_pool_shards is not None:
         try:

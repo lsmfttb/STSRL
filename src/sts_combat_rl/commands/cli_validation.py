@@ -9,6 +9,7 @@ from sts_combat_rl.commands.search_battle_controller import (
     SEARCH_BATTLE_CONTROLLER_ORACLE,
     SEARCH_BATTLE_CONTROLLERS_REQUIRING_CHECKPOINT,
 )
+from sts_combat_rl.commands.t062_battle_search_v2 import parse_t062_arm_budgets
 from sts_combat_rl.sim.oracle_teacher_scaleup import (
     ORACLE_TEACHER_SCALEUP_SOURCE_SELECTION_ASSISTED_SEEDED_UNIFORM,
     ORACLE_TEACHER_SCALEUP_SOURCE_SELECTION_SEEDED_UNIFORM,
@@ -39,6 +40,15 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
         return "--oracle-search-simulations must be positive"
     if args.search_budget is not None and args.search_budget <= 0:
         return "--search-budget must be positive"
+    try:
+        parse_t062_arm_budgets(
+            args.t062_arm_budget,
+            args.oracle_search_simulations
+            if args.search_budget is None
+            else args.search_budget,
+        )
+    except ValueError as exc:
+        return str(exc)
     if args.workers <= 0:
         return "--workers must be positive"
     if args.shards <= 0:
@@ -162,6 +172,7 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
         or args.lightspeed_t054_guardrailed_root_prior_repair_comparison is not None
         or args.lightspeed_t055_guardrailed_root_prior_scale_comparison is not None
         or args.lightspeed_t059_root_prior_allocation_repair_comparison is not None
+        or args.lightspeed_t062_battle_search_v2_comparison is not None
         or search_pool_uses_checkpoint
     )
     if (
@@ -187,6 +198,7 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
             "--lightspeed-t054-guardrailed-root-prior-repair-comparison or "
             "--lightspeed-t055-guardrailed-root-prior-scale-comparison or "
             "--lightspeed-t059-root-prior-allocation-repair-comparison or "
+            "--lightspeed-t062-battle-search-v2-comparison or "
             "--lightspeed-search-battle-start-pool with a checkpoint-guided "
             "--search-battle-controller"
         )
@@ -239,6 +251,14 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
         return (
             "--t059-root-prior-allocation-repair-comparison-report requires "
             "--lightspeed-t059-root-prior-allocation-repair-comparison"
+        )
+    if (
+        args.t062_battle_search_v2_comparison_report is not None
+        and args.lightspeed_t062_battle_search_v2_comparison is None
+    ):
+        return (
+            "--t062-battle-search-v2-comparison-report requires "
+            "--lightspeed-t062-battle-search-v2-comparison"
         )
     if (
         args.merge_root_prior_guided_search_comparison is not None
@@ -350,6 +370,76 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
         return "--t061-expected-run-count must be positive"
     if args.t061_bootstrap_resamples < 100:
         return "--t061-bootstrap-resamples must be at least 100"
+    t062_inputs = (
+        args.t062_t061_retention_manifest,
+        args.t062_fixed_cohort,
+        args.t062_checkpoint,
+    )
+    if args.t062_input_preflight_report is not None and any(
+        path is None for path in t062_inputs
+    ):
+        return (
+            "--t062-input-preflight-report requires --t062-t061-retention-manifest, "
+            "--t062-fixed-cohort, and --t062-checkpoint"
+        )
+    if args.t062_input_preflight_report is None and any(
+        path is not None for path in t062_inputs
+    ):
+        return "--t062 input paths require --t062-input-preflight-report"
+    if args.t062_expected_record_count <= 0:
+        return "--t062-expected-record-count must be positive"
+    if args.merge_t062_comparison is not None and not args.t062_comparison_shard:
+        return "--merge-t062-comparison requires --t062-comparison-shard"
+    if args.merge_t062_comparison is None and args.t062_comparison_shard:
+        return "--t062-comparison-shard requires --merge-t062-comparison"
+    t062_decision_inputs = (
+        args.t062_nominal_comparison,
+        args.t062_simulator_step_comparison,
+        args.t062_wall_clock_comparison,
+    )
+    if args.t062_decision_report is not None and any(
+        path is None for path in t062_decision_inputs
+    ):
+        return (
+            "--t062-decision-report requires --t062-nominal-comparison, "
+            "--t062-simulator-step-comparison, and --t062-wall-clock-comparison"
+        )
+    if args.t062_decision_report is None and any(
+        path is not None for path in t062_decision_inputs
+    ):
+        return "T062 merged comparison inputs require --t062-decision-report"
+    t062_calibration_inputs = (
+        args.t062_nominal_budget_calibration,
+        args.t062_wall_clock_candidate_calibration,
+    )
+    if args.t062_calibration_manifest is not None and any(
+        path is None for path in t062_calibration_inputs
+    ):
+        return (
+            "--t062-calibration-manifest requires "
+            "--t062-nominal-budget-calibration and "
+            "--t062-wall-clock-candidate-calibration"
+        )
+    if args.t062_calibration_manifest is None and any(
+        path is not None for path in t062_calibration_inputs
+    ):
+        return "T062 calibration inputs require --t062-calibration-manifest"
+    if (
+        args.t062_early_exit_decision_report is not None
+        and args.t062_early_exit_calibration_manifest is None
+    ):
+        return (
+            "--t062-early-exit-decision-report requires "
+            "--t062-early-exit-calibration-manifest"
+        )
+    if (
+        args.t062_early_exit_decision_report is None
+        and args.t062_early_exit_calibration_manifest is not None
+    ):
+        return (
+            "--t062-early-exit-calibration-manifest requires "
+            "--t062-early-exit-decision-report"
+        )
     if (
         args.merge_battle_start_pool_shards is not None
         and not args.battle_start_pool_shard

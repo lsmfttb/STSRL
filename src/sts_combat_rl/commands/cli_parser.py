@@ -884,6 +884,117 @@ def build_parser() -> argparse.ArgumentParser:
         default=2000,
         help="Bootstrap resamples for T061 paired intervals (default: 2000).",
     )
+    parser.add_argument(
+        "--t062-input-preflight-report",
+        type=Path,
+        metavar="OUTPUT_JSON",
+        help=(
+            "Verify the published T061 retention manifest, T052 93-record "
+            "cohort, and T043 diagnostic checkpoint identities before T062 "
+            "calibration or model inference."
+        ),
+    )
+    parser.add_argument(
+        "--t062-t061-retention-manifest",
+        type=Path,
+        metavar="MANIFEST_JSON",
+        help="Published T061 retention manifest required by T062.",
+    )
+    parser.add_argument(
+        "--t062-fixed-cohort",
+        type=Path,
+        metavar="COHORT_JSONL",
+        help="Published 93-record T052 fixed cohort required by T062.",
+    )
+    parser.add_argument(
+        "--t062-checkpoint",
+        type=Path,
+        metavar="CHECKPOINT_PT",
+        help="Published T043 diagnostic policy/value checkpoint required by T062.",
+    )
+    parser.add_argument(
+        "--merge-t062-comparison",
+        type=Path,
+        metavar="OUTPUT_JSON",
+        help="Merge explicit T062 comparison shards and compute paired statistics.",
+    )
+    parser.add_argument(
+        "--t062-comparison-shard",
+        type=Path,
+        action="append",
+        default=[],
+        metavar="SHARD_JSON",
+        help="One T062 comparison shard used by --merge-t062-comparison.",
+    )
+    parser.add_argument(
+        "--t062-expected-record-count",
+        type=int,
+        default=93,
+        help="Required distinct record count for a merged T062 report.",
+    )
+    parser.add_argument(
+        "--t062-decision-report",
+        type=Path,
+        metavar="OUTPUT_JSON",
+        help="Apply T062's predeclared promotion gate to three merged reports.",
+    )
+    parser.add_argument(
+        "--t062-nominal-comparison",
+        type=Path,
+        metavar="REPORT_JSON",
+        help="Merged equal-nominal-budget T062 comparison report.",
+    )
+    parser.add_argument(
+        "--t062-simulator-step-comparison",
+        type=Path,
+        metavar="REPORT_JSON",
+        help="Merged simulator-step-normalized T062 comparison report.",
+    )
+    parser.add_argument(
+        "--t062-wall-clock-comparison",
+        type=Path,
+        metavar="REPORT_JSON",
+        help="Merged wall-clock-normalized T062 comparison report.",
+    )
+    parser.add_argument(
+        "--t062-calibration-manifest",
+        type=Path,
+        metavar="OUTPUT_JSON",
+        help=(
+            "Build T062's versioned cost-only calibration manifest from the "
+            "16-record nominal and wall-clock candidate reports."
+        ),
+    )
+    parser.add_argument(
+        "--t062-nominal-budget-calibration",
+        type=Path,
+        metavar="REPORT_JSON",
+        help="Merged 16-record nominal-budget-100 T062 calibration report.",
+    )
+    parser.add_argument(
+        "--t062-wall-clock-candidate-calibration",
+        type=Path,
+        metavar="REPORT_JSON",
+        help="Merged 16-record wall-clock-candidate T062 calibration report.",
+    )
+    parser.add_argument(
+        "--t062-early-exit-decision-report",
+        type=Path,
+        metavar="OUTPUT_JSON",
+        help=(
+            "Build T062's calibration-infeasibility early-exit decision report "
+            "from a versioned calibration manifest."
+        ),
+    )
+    parser.add_argument(
+        "--t062-early-exit-calibration-manifest",
+        type=Path,
+        metavar="MANIFEST_JSON",
+        help=(
+            "Versioned T062 calibration manifest consumed by the early-exit "
+            "decision command."
+        ),
+    )
     input_group.add_argument(
         "--merge-assisted-source-pool",
         type=Path,
@@ -1045,6 +1156,15 @@ def build_parser() -> argparse.ArgumentParser:
             "T059 four-arm comparison across baseline Oracle search, post-search "
             "v2 model-guided search, existing root-prior guided search, and the "
             "T059 allocation repair variant."
+        ),
+    )
+    input_group.add_argument(
+        "--lightspeed-t062-battle-search-v2-comparison",
+        type=Path,
+        metavar="COHORT_PATH",
+        help=(
+            "Load an immutable fixed battle cohort unchanged and evaluate the "
+            "four T062 tree-internal policy/value search ablations."
         ),
     )
     input_group.add_argument(
@@ -1761,6 +1881,28 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         metavar="PATH",
         help="Write one T059 four-arm root-prior repair comparison JSONL report.",
+    )
+    parser.add_argument(
+        "--t062-battle-search-v2-comparison-report",
+        type=Path,
+        metavar="PATH",
+        help="Write one T062 four-arm comparison JSON report.",
+    )
+    parser.add_argument(
+        "--t062-battle-search-v2-family",
+        choices=("nominal", "simulator_step_normalized", "wall_clock_normalized"),
+        default="nominal",
+        help="Compute-matching family recorded in a T062 comparison report.",
+    )
+    parser.add_argument(
+        "--t062-arm-budget",
+        action="append",
+        default=[],
+        metavar="ARM=PLAYOUTS",
+        help=(
+            "Override one T062 arm's native playout budget; repeat for baseline, "
+            "prior_only, value_only, and/or prior_value."
+        ),
     )
     parser.add_argument(
         "--t054-guardrailed-root-prior-repair-scale",

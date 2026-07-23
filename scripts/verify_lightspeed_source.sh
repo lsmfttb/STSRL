@@ -176,6 +176,7 @@ for method_name in (
     "public_projection",
     "battle_search",
     "battle_search_with_root_priors",
+    "battle_search_v2",
     "legal_battle_start_encounters",
     "rebuild_battle_start",
 ):
@@ -415,6 +416,70 @@ if "allocated_root_visits" not in root_prior_rows[0]:
 if "root_prior" not in root_prior_rows[0]:
     fail("native root-prior root row missing root_prior")
 
+prior_callback_calls = []
+
+
+def uniform_tree_prior(node_snapshot, node_actions):
+    if not isinstance(node_snapshot, dict):
+        fail("native v2 policy prior snapshot must be an object")
+    if not isinstance(node_actions, list) or not node_actions:
+        fail("native v2 policy prior actions must be a non-empty list")
+    prior_callback_calls.append(len(node_actions))
+    return [1.0 for _ in node_actions]
+
+
+tree_prior_search = sim.battle_search_v2(1, False, uniform_tree_prior, None)
+if not isinstance(tree_prior_search, dict):
+    fail("StepSimulator.battle_search_v2() must return a dict")
+if tree_prior_search.get("schema_id") != "native-battle-search-root-v1":
+    fail("native v2 search schema id mismatch")
+if tree_prior_search.get("native_api") != "StepSimulator.battle_search_v2.v1":
+    fail("native v2 search api id mismatch")
+if (
+    tree_prior_search.get("patch_identity")
+    != "sts_lightspeed_battle_search_v2_tree_internal_v1"
+):
+    fail("native v2 search patch identity mismatch")
+if tree_prior_search.get("simulations_requested") != 1:
+    fail("native v2 search simulations_requested mismatch")
+tree_telemetry = tree_prior_search.get("tree_internal_telemetry")
+if not isinstance(tree_telemetry, dict):
+    fail("native v2 tree-internal telemetry is missing")
+expanded_nodes = tree_telemetry.get("expanded_nodes")
+policy_prior_calls = tree_telemetry.get("policy_prior_calls")
+if expanded_nodes != 1 or policy_prior_calls != 1:
+    fail("one v2 simulation must apply exactly one tree-node prior")
+if len(prior_callback_calls) != policy_prior_calls:
+    fail("native v2 policy prior callback count disagrees with telemetry")
+if tree_prior_search.get("model_calls") != policy_prior_calls:
+    fail("native v2 policy prior model-call total disagrees with telemetry")
+if tree_telemetry.get("leaf_value_calls") != 0:
+    fail("native v2 policy-prior-only smoke invoked a leaf value")
+
+
+leaf_callback_calls = []
+
+
+def constant_leaf_value(node_snapshot, node_actions):
+    if not isinstance(node_snapshot, dict):
+        fail("native v2 leaf snapshot must be an object")
+    if not isinstance(node_actions, list) or not node_actions:
+        fail("native v2 leaf actions must be a non-empty list")
+    leaf_callback_calls.append(len(node_actions))
+    return 0.5
+
+
+leaf_value_search = sim.battle_search_v2(1, False, None, constant_leaf_value)
+leaf_telemetry = leaf_value_search.get("tree_internal_telemetry")
+if not isinstance(leaf_telemetry, dict):
+    fail("native v2 leaf telemetry is missing")
+if leaf_telemetry.get("policy_prior_calls") != 0:
+    fail("native v2 leaf-only smoke invoked a policy prior")
+if leaf_telemetry.get("leaf_value_calls") != 1 or len(leaf_callback_calls) != 1:
+    fail("native v2 leaf-only smoke must invoke exactly one learned leaf value")
+if leaf_value_search.get("model_calls") != 1:
+    fail("native v2 leaf-only model-call total disagrees with telemetry")
+
 expected_capabilities = set(manifest.capability_ids)
 observed_capabilities = {
     "step_simulation",
@@ -426,6 +491,7 @@ observed_capabilities = {
     "native_public_projection",
     "native_battle_search_root",
     "native_root_prior_allocation",
+    "native_battle_search_v2_tree_internal",
     "native_terminal_resource_identity",
     "constructed_battle_start_transforms",
 }
