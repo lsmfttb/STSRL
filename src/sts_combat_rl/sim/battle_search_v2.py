@@ -30,14 +30,23 @@ from sts_combat_rl.sim.oracle_search import (
 from sts_combat_rl.sim.policy import DecisionContext
 from sts_combat_rl.sim.search_guidance_inference import (
     SearchGuidanceCheckpointProvenance,
+    SearchGuidanceInferenceResult,
     SearchGuidanceScorer,
     search_guidance_scorer_checkpoint_provenance,
     validate_search_guidance_result,
+)
+from sts_combat_rl.sim.battle_search_v2_cost import (
+    PublicNodeInferenceCache,
+    T067_COST_ATTRIBUTION_SCHEMA_ID,
+    T067_COST_ATTRIBUTION_SCHEMA_VERSION,
+    T067_REPAIR_IDENTITY,
 )
 
 
 BATTLE_SEARCH_V2_CONTROLLER_NAME = "battle_search_v2_oracle_like_v1"
 BATTLE_SEARCH_V2_CONTROLLER_VERSION = "battle-search-v2-oracle-like-v1"
+BATTLE_SEARCH_V2_T067_CONTROLLER_NAME = "battle_search_v2_oracle_like_t067_cache_v1"
+BATTLE_SEARCH_V2_T067_CONTROLLER_VERSION = "battle-search-v2-oracle-like-t067-cache-v1"
 BATTLE_SEARCH_V2_NATIVE_API = "StepSimulator.battle_search_v2.v1"
 BATTLE_SEARCH_V2_PATCH_IDENTITY = "sts_lightspeed_battle_search_v2_tree_internal_v1"
 BATTLE_SEARCH_V2_ABLATIONS = ("baseline", "prior_only", "value_only", "prior_value")
@@ -62,6 +71,10 @@ class BattleSearchV2Controller:
         default_factory=ActionSpaceConfig.initial_no_potions
     )
     native_source_identity: Mapping[str, Any] | None = None
+    # T062 remains explicitly constructible with the cache disabled.  T067
+    # enables this exact public-node cache on its repaired v2 controller.
+    inference_cache_enabled: bool = False
+    inference_cache_capacity: int = 4096
     provenance: ControllerProvenance = field(init=False)  # type: ignore[assignment]
     checkpoint_provenance: SearchGuidanceCheckpointProvenance = field(init=False)
     _baseline: OracleSearchController = field(init=False, repr=False)
@@ -73,6 +86,10 @@ class BattleSearchV2Controller:
             raise ValueError(f"unknown battle search v2 ablation {self.ablation!r}")
         if self.root_selection_rule != "highest_mean":
             raise ValueError("battle search v2 requires highest_mean root selection")
+        if self.inference_cache_capacity <= 0:
+            raise ValueError(
+                "battle search v2 inference cache capacity must be positive"
+            )
         checkpoint = search_guidance_scorer_checkpoint_provenance(self.scorer)
         object.__setattr__(self, "checkpoint_provenance", checkpoint)
         source_identity = (
@@ -93,12 +110,16 @@ class BattleSearchV2Controller:
             ControllerProvenance(
                 kind="tree_internal_policy_value_oracle_battle_search",
                 name=(
-                    f"{BATTLE_SEARCH_V2_CONTROLLER_NAME}_{self.ablation}_"
-                    f"highest_mean_s{self.simulations}"
+                    f"{BATTLE_SEARCH_V2_T067_CONTROLLER_NAME if self.inference_cache_enabled else BATTLE_SEARCH_V2_CONTROLLER_NAME}_"
+                    f"{self.ablation}_highest_mean_s{self.simulations}"
                 ),
                 config={
-                    "controller_version": BATTLE_SEARCH_V2_CONTROLLER_VERSION,
-                    "task_id": "T062",
+                    "controller_version": (
+                        BATTLE_SEARCH_V2_T067_CONTROLLER_VERSION
+                        if self.inference_cache_enabled
+                        else BATTLE_SEARCH_V2_CONTROLLER_VERSION
+                    ),
+                    "task_id": "T067" if self.inference_cache_enabled else "T062",
                     "information_regime": NATIVE_SEARCH_INFORMATION_REGIME,
                     "native_search_schema_id": "native-battle-search-root-v1",
                     "native_search_api": BATTLE_SEARCH_V2_NATIVE_API,
@@ -124,6 +145,18 @@ class BattleSearchV2Controller:
                         "name": self.scorer.name,
                         "checkpoint_provenance": checkpoint.to_dict(),
                     },
+                    "cost_repair": (
+                        {
+                            "task_id": "T067",
+                            "repair_identity": T067_REPAIR_IDENTITY,
+                            "inference_cache_enabled": self.inference_cache_enabled,
+                            "inference_cache_capacity": self.inference_cache_capacity,
+                            "cache_scope": "one_native_search_call",
+                            "cache_key_schema_id": "t067-public-node-cache-key-v1",
+                        }
+                        if self.inference_cache_enabled
+                        else None
+                    ),
                 },
             ),
         )
@@ -155,34 +188,73 @@ class BattleSearchV2Controller:
 
         total_start = time.perf_counter()
         callback_counts = {"policy": 0, "value": 0}
+        inference_cache = (
+            PublicNodeInferenceCache(self.inference_cache_capacity)
+            if self.inference_cache_enabled
+            else None
+        )
+        attribution = {
+            "node_context_projection_ms": 0.0,
+            "checkpoint_feature_encoding_ms": 0.0,
+            "tensor_construction_ms": 0.0,
+            "policy_value_forward_pass_ms": 0.0,
+            "inference_result_postprocess_ms": 0.0,
+            "scorer_invocation_ms": 0.0,
+            "python_native_callback_overhead_ms": 0.0,
+            "python_callback_total_ms": 0.0,
+            "cache_lookup_ms": 0.0,
+        }
 
         def policy_callback(
             raw: Mapping[str, Any], native_actions: Sequence[Mapping[str, Any]]
         ) -> list[float]:
+            callback_started = time.perf_counter()
+            projection_started = time.perf_counter()
             node_context = _node_context(
                 raw, native_actions, self.action_space, context
             )
-            result = self.scorer.score_decision_context(node_context)
+            attribution["node_context_projection_ms"] += (
+                time.perf_counter() - projection_started
+            ) * 1000.0
+            result, cache_hit, lookup_ms, scorer_time_ms = _score_node_context(
+                node_context, self.scorer, inference_cache
+            )
+            attribution["cache_lookup_ms"] += lookup_ms
+            attribution["scorer_invocation_ms"] += scorer_time_ms
             validate_search_guidance_result(
                 result,
                 context=node_context,
                 expected_checkpoint=self.checkpoint_provenance,
             )
+            if not cache_hit:
+                _add_inference_timing(attribution, result)
             callback_counts["policy"] += 1
+            _finish_callback_timing(attribution, callback_started)
             return [float(score.policy_probability) for score in result.action_scores]
 
         def value_callback(
             raw: Mapping[str, Any], native_actions: Sequence[Mapping[str, Any]]
         ) -> float:
+            callback_started = time.perf_counter()
+            projection_started = time.perf_counter()
             node_context = _node_context(
                 raw, native_actions, self.action_space, context
             )
-            result = self.scorer.score_decision_context(node_context)
+            attribution["node_context_projection_ms"] += (
+                time.perf_counter() - projection_started
+            ) * 1000.0
+            result, cache_hit, lookup_ms, scorer_time_ms = _score_node_context(
+                node_context, self.scorer, inference_cache
+            )
+            attribution["cache_lookup_ms"] += lookup_ms
+            attribution["scorer_invocation_ms"] += scorer_time_ms
             validate_search_guidance_result(
                 result,
                 context=node_context,
                 expected_checkpoint=self.checkpoint_provenance,
             )
+            if not cache_hit:
+                _add_inference_timing(attribution, result)
             prediction = result.value_prediction
             value = (
                 None if prediction is None else prediction.battle_survival_probability
@@ -190,6 +262,7 @@ class BattleSearchV2Controller:
             if value is None or not math.isfinite(float(value)):
                 raise ValueError("checkpoint has no finite battle-survival value head")
             callback_counts["value"] += 1
+            _finish_callback_timing(attribution, callback_started)
             return float(value)
 
         search_start = time.perf_counter()
@@ -201,6 +274,13 @@ class BattleSearchV2Controller:
             leaf_value_callback=value_callback if self.uses_leaf_value else None,
         )
         search_elapsed = time.perf_counter() - search_start
+        attribution["python_native_callback_overhead_ms"] = max(
+            0.0,
+            attribution["python_callback_total_ms"]
+            - attribution["node_context_projection_ms"]
+            - attribution["scorer_invocation_ms"]
+            - attribution["cache_lookup_ms"],
+        )
         report = build_oracle_search_report(
             raw_search,
             actions,
@@ -232,9 +312,47 @@ class BattleSearchV2Controller:
                     "python_callback_counts": callback_counts,
                     "total_wall_clock_time_s": time.perf_counter() - total_start,
                     "checkpoint_provenance": self.checkpoint_provenance.to_dict(),
+                    "cost_attribution": {
+                        "schema_id": T067_COST_ATTRIBUTION_SCHEMA_ID,
+                        "schema_version": T067_COST_ATTRIBUTION_SCHEMA_VERSION,
+                        "native_tree_search_excluding_python_callbacks_ms": max(
+                            0.0,
+                            search_elapsed * 1000.0
+                            - attribution["python_callback_total_ms"],
+                        ),
+                        **attribution,
+                        **(
+                            inference_cache.telemetry()
+                            if inference_cache is not None
+                            else {
+                                "cache_capacity": 0.0,
+                                "cache_lookup_count": 0.0,
+                                "cache_hit_count": 0.0,
+                                "cache_miss_count": 0.0,
+                                "cache_uncacheable_count": 0.0,
+                                "cache_eviction_count": 0.0,
+                                "cache_eviction_ms": 0.0,
+                                "cache_entry_count": 0.0,
+                            }
+                        ),
+                        "policy_callback_count": float(callback_counts["policy"]),
+                        "value_callback_count": float(callback_counts["value"]),
+                        "model_call_count": float(
+                            callback_counts["policy"] + callback_counts["value"]
+                        ),
+                    },
                 }
             }
         )
+        # Fixed-evaluation aggregation intentionally sums immediate numeric
+        # mapping values.  Keep this flattened mirror for durable report
+        # aggregation while the nested record above remains human-readable.
+        flat_cost = metadata["battle_search_v2"]["cost_attribution"]
+        metadata["t067_cost_attribution"] = {
+            key: value
+            for key, value in flat_cost.items()
+            if isinstance(value, (int, float)) and not isinstance(value, bool)
+        }
         return ControllerDecision(
             selected_index=target.legal_action_index,
             provenance=self.provenance,
@@ -242,6 +360,58 @@ class BattleSearchV2Controller:
             score=target.score,
             metadata=metadata,
         )
+
+
+def _score_node_context(
+    node_context: DecisionContext,
+    scorer: SearchGuidanceScorer,
+    inference_cache: PublicNodeInferenceCache | None,
+) -> tuple[SearchGuidanceInferenceResult, bool, float, float]:
+    if inference_cache is None:
+        started = time.perf_counter()
+        result = scorer.score_decision_context(node_context)
+        return result, False, 0.0, (time.perf_counter() - started) * 1000.0
+    scored = inference_cache.score(node_context, scorer.score_decision_context)
+    return (
+        scored.result,
+        scored.cache_hit,
+        scored.cache_lookup_ms,
+        scored.scorer_time_ms,
+    )
+
+
+def _add_inference_timing(
+    attribution: dict[str, float],
+    result: SearchGuidanceInferenceResult,
+) -> None:
+    timing = result.timing_ms
+    attribution["checkpoint_feature_encoding_ms"] += _timing_value(
+        timing, "feature_encoding_ms"
+    )
+    attribution["tensor_construction_ms"] += _timing_value(
+        timing, "tensor_construction_ms"
+    )
+    attribution["policy_value_forward_pass_ms"] += _timing_value(
+        timing, "model_forward_ms"
+    )
+    attribution["inference_result_postprocess_ms"] += _timing_value(
+        timing, "result_postprocess_ms"
+    )
+
+
+def _timing_value(timing: Mapping[str, float], key: str) -> float:
+    value = timing.get(key, 0.0)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 0.0
+    return max(0.0, float(value))
+
+
+def _finish_callback_timing(
+    attribution: dict[str, float],
+    callback_started: float,
+) -> None:
+    total_ms = (time.perf_counter() - callback_started) * 1000.0
+    attribution["python_callback_total_ms"] += total_ms
 
 
 def _node_context(

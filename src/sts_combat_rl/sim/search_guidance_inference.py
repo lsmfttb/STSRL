@@ -146,6 +146,11 @@ class SearchGuidanceInferenceResult:
     action_scores: list[SearchGuidanceActionScore]
     value_prediction: SearchGuidanceValuePrediction | None = None
     duration_ms: float = 0.0
+    # Optional phase timings are populated by concrete scorers that can
+    # separate feature/tensor construction from model execution.  Keeping the
+    # field optional preserves the v1 scorer contract for framework-neutral and
+    # test scorers while allowing T067 to attribute inference cost precisely.
+    timing_ms: Mapping[str, float] = field(default_factory=dict)
     schema_id: str = SEARCH_GUIDANCE_INFERENCE_SCHEMA_ID
     schema_version: int = SEARCH_GUIDANCE_INFERENCE_SCHEMA_VERSION
     problems: tuple[str, ...] = ()
@@ -168,6 +173,9 @@ class SearchGuidanceInferenceResult:
             "legal_action_count": self.legal_action_count,
             "eligible_action_count": self.eligible_action_count,
             "duration_ms": self.duration_ms,
+            "timing_ms": {
+                str(key): float(value) for key, value in self.timing_ms.items()
+            },
             "checkpoint_provenance": self.checkpoint_provenance.to_dict(),
             "action_scores": [score.to_dict() for score in self.action_scores],
             "value_prediction": (
@@ -290,6 +298,16 @@ def validate_search_guidance_result(
         )
     if result.checkpoint_provenance.to_dict() != expected_checkpoint.to_dict():
         problems.append("guidance scorer returned changing checkpoint provenance")
+    for name, value in result.timing_ms.items():
+        if (
+            not isinstance(name, str)
+            or not name
+            or isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+            or float(value) < 0.0
+        ):
+            problems.append(f"guidance timing {name!r} is not finite and non-negative")
 
     seen: set[int] = set()
     eligible = set(context.eligible_action_indices)

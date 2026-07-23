@@ -46,10 +46,12 @@ class _Scorer:
     checkpoint_provenance: SearchGuidanceCheckpointProvenance
     with_value: bool = True
     name: str = "unit-test-scorer"
+    calls: int = 0
 
     def score_decision_context(
         self, context: DecisionContext
     ) -> SearchGuidanceInferenceResult:
+        self.calls += 1
         count = len(context.legal_action_features)
         return SearchGuidanceInferenceResult(
             scorer_name=self.name,
@@ -241,6 +243,28 @@ class _Adapter:
         return raw
 
 
+class _RepeatingAdapter(_Adapter):
+    def battle_search_v2(
+        self, snapshot: SimulatorSnapshot, **kwargs: Any
+    ) -> dict[str, Any]:
+        del snapshot
+        policy = kwargs["policy_prior_callback"]
+        value = kwargs["leaf_value_callback"]
+        policy_calls = 0
+        value_calls = 0
+        if policy is not None:
+            first = policy(_node_raw(), _node_actions())
+            second = policy(_node_raw(), _node_actions())
+            assert first == pytest.approx(second)
+            policy_calls = 2
+        if value is not None:
+            first = value(_node_raw(), _node_actions())
+            second = value(_node_raw(), _node_actions())
+            assert first == pytest.approx(second)
+            value_calls = 2
+        return _raw_search(policy_calls=policy_calls, value_calls=value_calls)
+
+
 @pytest.mark.parametrize(
     ("ablation", "policy_calls", "value_calls"),
     [("prior_only", 1, 0), ("value_only", 0, 1), ("prior_value", 1, 1)],
@@ -300,3 +324,29 @@ def test_value_ablation_rejects_checkpoint_without_survival_head() -> None:
             _context(),
             0,
         )
+
+
+def test_t067_public_node_cache_reuses_exact_policy_value_result() -> None:
+    scorer = _Scorer(_checkpoint())
+    controller = BattleSearchV2Controller(
+        simulations=10,
+        scorer=scorer,
+        ablation="prior_value",
+        inference_cache_enabled=True,
+        native_source_identity={"integration_commit": "t067"},
+    )
+    decision = controller.select_action(
+        _RepeatingAdapter(),
+        SimulatorSnapshot(observation=[], raw=_node_raw()),
+        _actions(),
+        _context(),
+        0,
+    )
+    assert decision.selected_index == 0
+    assert scorer.calls == 1
+    cost = decision.metadata["t067_cost_attribution"]
+    assert cost["cache_lookup_count"] == 4.0
+    assert cost["cache_hit_count"] == 3.0
+    assert cost["cache_miss_count"] == 1.0
+    assert cost["model_call_count"] == 4.0
+    assert decision.provenance.config["cost_repair"]["task_id"] == "T067"
