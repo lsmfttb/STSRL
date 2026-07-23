@@ -15,6 +15,7 @@ from sts_combat_rl.commands.t062_battle_search_v2 import (
     build_t062_calibration_stage_evidence,
     build_t062_early_exit_decision_report,
     run_t062_input_preflight_from_paths,
+    write_t062_retention_manifest,
 )
 
 
@@ -245,6 +246,43 @@ def test_t062_early_exit_decision_rejects_contradictory_manifest() -> None:
         build_t062_early_exit_decision_report(calibration_manifest=contradictory)
 
 
+@pytest.mark.parametrize(
+    ("key", "value", "message"),
+    (
+        ("task_id", "T999", "task id T062"),
+        ("calibration_record_range", "wrong", "records 0:16"),
+        ("wall_clock_calibration_locked", True, "lock summary"),
+        ("not_fixed_cohort_outcome_evidence", False, "cost-only evidence"),
+    ),
+)
+def test_t062_early_exit_decision_rejects_bad_top_level_identity(
+    key: str, value: object, message: str
+) -> None:
+    calibration = build_t062_calibration_manifest(
+        nominal_budget_report=_calibration_report(
+            budgets={
+                label: 100
+                for label in ("baseline", "prior_only", "value_only", "prior_value")
+            },
+            ratios={"prior_only": 1.2, "value_only": 0.2, "prior_value": 0.3},
+            family="nominal",
+        ),
+        wall_clock_candidate_report=_calibration_report(
+            budgets={
+                "baseline": 100,
+                "prior_only": 1,
+                "value_only": 1,
+                "prior_value": 1,
+            },
+            ratios={"prior_only": 2.147, "value_only": 0.97, "prior_value": 0.885},
+        ),
+    )
+    calibration[key] = value
+
+    with pytest.raises(ValueError, match=message):
+        build_t062_early_exit_decision_report(calibration_manifest=calibration)
+
+
 def test_t062_calibration_stage_evidence_records_all_shards_and_logs(
     tmp_path: Path,
 ) -> None:
@@ -287,6 +325,32 @@ def test_t062_calibration_stage_evidence_records_all_shards_and_logs(
             worker_count_reason="16 workers, one record per explicit shard",
             regeneration_commands=["python -m sts_combat_rl.cli ..."],
         )
+
+
+def test_t062_retention_writer_emits_v3_utf8_schema_entries(tmp_path: Path) -> None:
+    report = tmp_path / "report.json"
+    log = tmp_path / "report.stderr.log"
+    report.write_text(
+        '{"schema_id":"t062-battle-search-v2-comparison-v1"}\n', encoding="utf-8"
+    )
+    log.write_text("diagnostic\n", encoding="utf-8")
+    output = tmp_path / "t062-retention-manifest-v3.json"
+
+    manifest = write_t062_retention_manifest(
+        output_path=output,
+        artifacts={"merged_report": report, "stderr_log": log},
+        calibration_stages={"nominal": {"record_range": "0:16", "shards": []}},
+        execution_identity={"native_commit": "3cb9ebe", "checkpoint": "T043"},
+        regeneration_commands=["wsl.exe -d Ubuntu -e bash -lc 'exact command'"],
+    )
+
+    assert manifest["schema_id"] == "t062-battle-search-v2-retention-manifest-v3"
+    assert output.read_bytes()[:3] != b"\xef\xbb\xbf"
+    assert (
+        manifest["retained_artifacts"][0]["schema_id"]
+        == "t062-battle-search-v2-comparison-v1"
+    )
+    assert manifest["retained_artifacts"][1]["schema_id"] is None
 
 
 def _calibration_report(

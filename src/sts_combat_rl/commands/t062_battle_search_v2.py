@@ -455,6 +455,12 @@ def build_t062_early_exit_decision_report(
 
     if calibration_manifest.get("schema_id") != T062_CALIBRATION_MANIFEST_SCHEMA_ID:
         raise ValueError("T062 early-exit decision requires calibration manifest v2")
+    if calibration_manifest.get("task_id") != "T062":
+        raise ValueError("T062 early-exit decision requires task id T062")
+    if calibration_manifest.get("calibration_record_range") != "0:16":
+        raise ValueError("T062 early-exit decision requires calibration records 0:16")
+    if calibration_manifest.get("not_fixed_cohort_outcome_evidence") is not True:
+        raise ValueError("T062 early-exit decision requires cost-only evidence")
     if calibration_manifest.get("command_passed") is not True:
         raise ValueError(
             "T062 early-exit decision requires a passed calibration manifest"
@@ -523,6 +529,9 @@ def build_t062_early_exit_decision_report(
             raise ValueError(f"T062 early-exit lock {label!r} has unknown status")
     if proven != expected_proven or unlocked != expected_unlocked:
         raise ValueError("T062 early-exit lock lists contradict lock statuses")
+    all_locked = all(lock.get("status") == "locked" for lock in locks.values())
+    if calibration_manifest.get("wall_clock_calibration_locked") is not all_locked:
+        raise ValueError("T062 early-exit lock summary contradicts arm statuses")
     return {
         "schema_id": T062_EARLY_EXIT_DECISION_SCHEMA_ID,
         "task_id": "T062",
@@ -568,7 +577,7 @@ def write_t062_retention_manifest(
             }
         )
     manifest = {
-        "schema_id": "t062-battle-search-v2-retention-manifest-v2",
+        "schema_id": "t062-battle-search-v2-retention-manifest-v3",
         "task_id": "T062",
         "retention_root": str(output_path.parent),
         "retained_artifacts": entries,
