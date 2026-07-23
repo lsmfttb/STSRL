@@ -7,7 +7,7 @@ import json
 import math
 import random
 from collections import Counter
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -381,6 +381,53 @@ def build_t062_calibration_manifest(
             else "run the separately locked primary comparison families"
         ),
     }
+
+
+def write_t062_retention_manifest(
+    *,
+    output_path: Path,
+    artifacts: Mapping[str, Path],
+    regeneration_commands: Sequence[str],
+) -> dict[str, Any]:
+    """Retain compact T062 calibration evidence outside review worktrees."""
+
+    if not artifacts:
+        raise ValueError("T062 retention manifest requires at least one artifact")
+    if not regeneration_commands:
+        raise ValueError("T062 retention manifest requires regeneration commands")
+    entries: list[dict[str, Any]] = []
+    for role, path in sorted(artifacts.items()):
+        if not path.is_file():
+            raise ValueError(f"T062 retained artifact {role!r} is missing: {path}")
+        entries.append(
+            {
+                "role": role,
+                "path": str(path),
+                "bytes": path.stat().st_size,
+                "sha256": _sha256_file(path),
+                "schema_id": _json_schema_id(path),
+            }
+        )
+    manifest = {
+        "schema_id": "t062-battle-search-v2-retention-manifest-v1",
+        "task_id": "T062",
+        "retention_root": str(output_path.parent),
+        "retained_artifacts": entries,
+        "regeneration_commands": list(regeneration_commands),
+        "retention_reason": (
+            "fail-closed T062 tree-internal calibration evidence; preserve until a "
+            "reviewed repair-or-closure task consumes the compact reports"
+        ),
+        "raw_artifacts_may_be_deleted_when": (
+            "after the retained calibration reports have been independently verified "
+            "and the follow-up repair-or-closure task no longer needs them"
+        ),
+    }
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    return manifest
 
 
 def _evaluate_t062_arm(
@@ -895,3 +942,11 @@ def _sha256_file(path: Path) -> str:
         for block in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def _json_schema_id(path: Path) -> str | None:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return value.get("schema_id") if isinstance(value, dict) else None
