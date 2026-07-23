@@ -203,6 +203,27 @@ The main maintainer reviews:
 - unnecessary scope, duplication, or hidden defaults;
 - documentation impact.
 
+### Review Finding Delivery
+
+The pull request is the authoritative delivery channel for maintainer review
+findings and conclusions. A finding written only in chat, a local report, or
+maintainer notes has not been delivered to the task implementer.
+
+- After each initial review or re-review, the main maintainer publishes the
+  incremental conclusion on the same pull request before reporting that the
+  review is complete or waiting for another implementation update.
+- The published message identifies the reviewed head commit, distinguishes
+  blocking findings from non-blocking notes, states the required changes, and
+  records the relevant verification result. A no-blocker conclusion is
+  published explicitly rather than left implicit.
+- Previously published feedback does not deliver findings discovered by a
+  later re-review. New or remaining findings are posted as a new review or
+  comment on the pull request.
+- If publishing fails or the review was explicitly requested as read-only, the
+  maintainer states that the result is undelivered and does not claim that the
+  implementer has received it. The review remains pending until delivery is
+  confirmed or the user explicitly keeps it private.
+
 Review findings are resolved before merge. The maintainer merges only into
 `main`, then:
 
