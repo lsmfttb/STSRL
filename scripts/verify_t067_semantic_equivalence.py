@@ -221,7 +221,16 @@ def _verify_code_commit(repo_root: Path, code_commit: str) -> None:
 
 
 def _git_output(repo_root: Path, *arguments: str) -> str | None:
-    commands = [["git", "-C", str(repo_root), *arguments]]
+    commands = [
+        [
+            "git",
+            "-C",
+            str(repo_root),
+            "-c",
+            "core.autocrlf=true",
+            *arguments,
+        ]
+    ]
     dot_git = repo_root / ".git"
     if dot_git.is_file():
         marker = dot_git.read_text(encoding="utf-8").strip()

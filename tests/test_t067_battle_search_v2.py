@@ -254,9 +254,17 @@ def test_t067_regeneration_sequence_pins_source_and_fresh_output() -> None:
         output_root=output,
     )
     assert len(commands) == 6
-    assert "worktree add --detach" in commands[0]
+    assert "-c core.autocrlf=true worktree add --detach" in commands[0]
     assert commit in commands[0]
     assert 'test ! -e "$output_root"' in commands[0]
+    assert (
+        "2f4bd6710a152b080a2c6e4cfbaf509148ffb27d0139a9250f1a0ee19efd6631"
+        in commands[0]
+    )
+    assert (
+        "16fc6ff8049c9c5083260e513e1472d6736e1aac946d27c8ec7b80b64d4dd0a3"
+        in commands[0]
+    )
     assert all(".claude/worktrees" not in command for command in commands)
     assert all(str(source_checkout) in command for command in commands[1:])
     assert all(str(output) in command for command in commands)

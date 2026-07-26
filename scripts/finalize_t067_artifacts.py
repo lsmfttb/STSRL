@@ -393,15 +393,29 @@ def _regeneration_commands(
             f"output_root={fresh_output}; code_commit={commit}; "
             'test ! -e "$output_root"; '
             'if [ -e "$source_checkout" ]; then '
-            'test "$(git -C "$source_checkout" rev-parse HEAD)" = "$code_commit"; '
-            'test -z "$(git -C "$source_checkout" status --porcelain)"; '
+            'test "$(git -C "$source_checkout" -c core.autocrlf=true '
+            'rev-parse HEAD)" = "$code_commit"; '
+            'test -z "$(git -C "$source_checkout" -c core.autocrlf=true '
+            'status --porcelain)"; '
             "else "
             'git -C "$source_repo" cat-file -e "$code_commit^{commit}"; '
-            'git -C "$source_repo" worktree add --detach '
+            'git -C "$source_repo" -c core.autocrlf=true worktree add --detach '
             '"$source_checkout" "$code_commit"; '
             "fi; "
-            'test "$(git -C "$source_checkout" rev-parse HEAD)" = "$code_commit"; '
-            'test -z "$(git -C "$source_checkout" status --porcelain)"; '
+            'test "$(git -C "$source_checkout" -c core.autocrlf=true '
+            'rev-parse HEAD)" = "$code_commit"; '
+            'test -z "$(git -C "$source_checkout" -c core.autocrlf=true '
+            'status --porcelain)"; '
+            'test "$(wc -c < "$source_checkout/docs/'
+            'sts_lightspeed_source_manifest.json")" -eq 7789; '
+            'test "$(sha256sum "$source_checkout/docs/'
+            'sts_lightspeed_source_manifest.json" | cut -d " " -f 1)" = '
+            '"2f4bd6710a152b080a2c6e4cfbaf509148ffb27d0139a9250f1a0ee19efd6631"; '
+            'test "$(wc -c < "$source_checkout/scripts/'
+            'verify_lightspeed_source.sh")" -eq 19872; '
+            'test "$(sha256sum "$source_checkout/scripts/'
+            'verify_lightspeed_source.sh" | cut -d " " -f 1)" = '
+            '"16fc6ff8049c9c5083260e513e1472d6736e1aac946d27c8ec7b80b64d4dd0a3"; '
             'mkdir -p "$output_root"'
         ),
         (
@@ -479,7 +493,16 @@ def _validate_checkout_commit(repo_root: Path, code_commit: str) -> None:
 
 
 def _git_output(repo_root: Path, *arguments: str) -> str | None:
-    commands = [["git", "-C", str(repo_root), *arguments]]
+    commands = [
+        [
+            "git",
+            "-C",
+            str(repo_root),
+            "-c",
+            "core.autocrlf=true",
+            *arguments,
+        ]
+    ]
     dot_git = repo_root / ".git"
     if dot_git.is_file():
         marker = dot_git.read_text(encoding="utf-8").strip()
@@ -576,8 +599,10 @@ def _validate_regeneration_commands(
     preparation = commands[0]
     for marker in (
         code_commit,
-        "worktree add --detach",
+        "-c core.autocrlf=true worktree add --detach",
         'test ! -e "$output_root"',
+        EXPECTED_SOURCE_FILES["sts_lightspeed_source_manifest"][2],
+        EXPECTED_SOURCE_FILES["sts_lightspeed_source_verifier"][2],
         str(source_checkout_root),
         str(output_root),
     ):
