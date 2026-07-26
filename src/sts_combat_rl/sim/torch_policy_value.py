@@ -458,15 +458,16 @@ class TorchPolicyValueGuidanceScorer:
         _validate_context_schema(self.model, context)
 
         feature_started = perf_counter()
-        state_features = torch.tensor(
-            _state_features(
-                context.snapshot_features,
-                encode_public_context_features(context.public_run_context),
-            ),
-            dtype=torch.float32,
+        encoded_state_features = _state_features(
+            context.snapshot_features,
+            encode_public_context_features(context.public_run_context),
         )
         feature_encoded_ms = (perf_counter() - feature_started) * 1000.0
         tensor_started = perf_counter()
+        state_features = torch.tensor(
+            encoded_state_features,
+            dtype=torch.float32,
+        )
         action_features = torch.tensor(
             context.legal_action_features,
             dtype=torch.float32,

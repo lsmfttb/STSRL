@@ -153,7 +153,7 @@ def public_node_cache_key(
     actions = context.tactical_legal_actions
     if len(actions) != len(context.legal_action_features):
         return None
-    for index, action in enumerate(actions):
+    for action in actions:
         if not isinstance(action, Mapping):
             return None
         identity = action.get("identity")
@@ -166,12 +166,6 @@ def public_node_cache_key(
             return None
         if identity.get("stable_id") == "":
             return None
-        # Require the identity itself in the payload and retain ordering.  The
-        # index check prevents a future caller from accidentally dropping an
-        # action row while preserving the same unordered set of identities.
-        if index < 0:
-            return None
-
     payload = {
         "schema_id": T067_CACHE_KEY_SCHEMA_ID,
         "screen_state": context.screen_state,

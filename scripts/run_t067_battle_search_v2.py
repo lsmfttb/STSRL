@@ -66,6 +66,11 @@ def main() -> int:
         )
 
     scorer = build_torch_guidance_scorer_from_checkpoint(args.checkpoint)
+    if scorer.name != "torch_policy_value_guidance":
+        raise SystemExit(
+            "T067 model_call_count requires the one-forward-per-score "
+            "TorchPolicyValueGuidanceScorer"
+        )
     budgets = parse_t062_arm_budgets(
         args.arm_budget,
         args.baseline_budget,

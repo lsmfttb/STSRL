@@ -244,6 +244,13 @@ class _Adapter:
 
 
 class _RepeatingAdapter(_Adapter):
+    policy_results: list[list[float]]
+    value_results: list[float]
+
+    def __init__(self) -> None:
+        self.policy_results = []
+        self.value_results = []
+
     def battle_search_v2(
         self, snapshot: SimulatorSnapshot, **kwargs: Any
     ) -> dict[str, Any]:
@@ -253,14 +260,16 @@ class _RepeatingAdapter(_Adapter):
         policy_calls = 0
         value_calls = 0
         if policy is not None:
-            first = policy(_node_raw(), _node_actions())
-            second = policy(_node_raw(), _node_actions())
+            first = list(policy(_node_raw(), _node_actions()))
+            second = list(policy(_node_raw(), _node_actions()))
             assert first == pytest.approx(second)
+            self.policy_results.extend((first, second))
             policy_calls = 2
         if value is not None:
-            first = value(_node_raw(), _node_actions())
-            second = value(_node_raw(), _node_actions())
+            first = float(value(_node_raw(), _node_actions()))
+            second = float(value(_node_raw(), _node_actions()))
             assert first == pytest.approx(second)
+            self.value_results.extend((first, second))
             value_calls = 2
         return _raw_search(policy_calls=policy_calls, value_calls=value_calls)
 
@@ -309,6 +318,49 @@ def test_baseline_delegates_to_current_oracle_search_semantics() -> None:
     assert decision.selected_index == 0
 
 
+def test_cache_disabled_preserves_accepted_t062_provenance_exactly() -> None:
+    controller = BattleSearchV2Controller(
+        simulations=10,
+        scorer=_Scorer(_checkpoint()),
+        ablation="prior_value",
+        native_source_identity={"integration_commit": "t062"},
+    )
+    assert controller.provenance.to_dict() == {
+        "schema_version": 1,
+        "kind": "tree_internal_policy_value_oracle_battle_search",
+        "name": "battle_search_v2_oracle_like_v1_prior_value_highest_mean_s10",
+        "config": {
+            "controller_version": "battle-search-v2-oracle-like-v1",
+            "task_id": "T062",
+            "information_regime": NATIVE_SEARCH_INFORMATION_REGIME,
+            "native_search_schema_id": "native-battle-search-root-v1",
+            "native_search_api": BATTLE_SEARCH_V2_NATIVE_API,
+            "native_search_patch_identity": BATTLE_SEARCH_V2_PATCH_IDENTITY,
+            "native_source_identity": {"integration_commit": "t062"},
+            "search_budget": {
+                "simulations": 10,
+                "budget_unit": "native_tree_search_playouts",
+            },
+            "root_selection_rule": "highest_mean",
+            "action_space": controller.action_space.to_dict(),
+            "ablation": "prior_value",
+            "tree_internal_guidance": {
+                "policy_prior": True,
+                "policy_prior_scope": "every_expanded_player_decision_node",
+                "learned_leaf_value": True,
+                "learned_leaf_value_boundary": (
+                    "after_first_action_from_newly_expanded_node"
+                ),
+                "root_only_or_post_search_fallback": False,
+            },
+            "guidance_scorer": {
+                "name": "unit-test-scorer",
+                "checkpoint_provenance": _checkpoint().to_dict(),
+            },
+        },
+    }
+
+
 def test_value_ablation_rejects_checkpoint_without_survival_head() -> None:
     controller = BattleSearchV2Controller(
         simulations=10,
@@ -348,5 +400,77 @@ def test_t067_public_node_cache_reuses_exact_policy_value_result() -> None:
     assert cost["cache_lookup_count"] == 4.0
     assert cost["cache_hit_count"] == 3.0
     assert cost["cache_miss_count"] == 1.0
-    assert cost["model_call_count"] == 4.0
+    assert cost["model_call_count"] == 1.0
     assert decision.provenance.config["cost_repair"]["task_id"] == "T067"
+
+
+@pytest.mark.parametrize("ablation", ["prior_only", "value_only", "prior_value"])
+def test_t067_cache_preserves_frozen_outputs_and_selected_action_identity(
+    ablation: str,
+) -> None:
+    uncached_scorer = _Scorer(_checkpoint())
+    cached_scorer = _Scorer(_checkpoint())
+    uncached_adapter = _RepeatingAdapter()
+    cached_adapter = _RepeatingAdapter()
+    common = {
+        "simulations": 10,
+        "ablation": ablation,
+        "native_source_identity": {"integration_commit": "t067"},
+    }
+    uncached = BattleSearchV2Controller(
+        scorer=uncached_scorer,
+        **common,  # type: ignore[arg-type]
+    ).select_action(
+        uncached_adapter,
+        SimulatorSnapshot(observation=[], raw=_node_raw()),
+        _actions(),
+        _context(),
+        0,
+    )
+    cached = BattleSearchV2Controller(
+        scorer=cached_scorer,
+        inference_cache_enabled=True,
+        **common,  # type: ignore[arg-type]
+    ).select_action(
+        cached_adapter,
+        SimulatorSnapshot(observation=[], raw=_node_raw()),
+        _actions(),
+        _context(),
+        0,
+    )
+
+    assert len(cached_adapter.policy_results) == len(uncached_adapter.policy_results)
+    for cached_policy, uncached_policy in zip(
+        cached_adapter.policy_results, uncached_adapter.policy_results, strict=True
+    ):
+        assert cached_policy == pytest.approx(uncached_policy, rel=0.0, abs=1e-6)
+    assert cached_adapter.value_results == pytest.approx(
+        uncached_adapter.value_results, rel=0.0, abs=1e-6
+    )
+    assert cached.selected_index == uncached.selected_index
+    assert (
+        _actions()[cached.selected_index].action_id
+        == _actions()[uncached.selected_index].action_id
+    )
+    assert cached.score == pytest.approx(uncached.score, rel=0.0, abs=1e-6)
+    assert cached_scorer.calls < uncached_scorer.calls
+
+
+def test_t067_cache_scope_is_one_select_action_invocation() -> None:
+    scorer = _Scorer(_checkpoint())
+    controller = BattleSearchV2Controller(
+        simulations=10,
+        scorer=scorer,
+        ablation="prior_value",
+        inference_cache_enabled=True,
+        native_source_identity={"integration_commit": "t067"},
+    )
+    for step_index in range(2):
+        controller.select_action(
+            _RepeatingAdapter(),
+            SimulatorSnapshot(observation=[], raw=_node_raw()),
+            _actions(),
+            _context(),
+            step_index,
+        )
+    assert scorer.calls == 2
