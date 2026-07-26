@@ -138,6 +138,12 @@ def main() -> int:
         or stage.get("effective_parallel_workers") != 16
     ):
         raise SystemExit("T067 substantial calibration was not 16-worker")
+    if stage.get(
+        "python_executable"
+    ) != "/home/lsmft/stsrl-spikes/py313-torch/bin/python3.13" or stage.get(
+        "native_build_root"
+    ) != ("/home/lsmft/stsrl-spikes/sts_lightspeed-t062/build-t062-py313"):
+        raise SystemExit("T067 stage did not use the accepted Python/native pairing")
     ranges = [
         worker.get("record_range")
         for worker in stage.get("workers", [])
@@ -206,6 +212,8 @@ def main() -> int:
             "worker_count": 16,
             "effective_parallel_workers": 16,
             "record_ranges": ranges,
+            "python_executable": stage["python_executable"],
+            "native_build_root": stage["native_build_root"],
             "semantic_smoke_record_range": "0:1",
             "semantic_smoke_single_worker_reason": semantic.get("single_worker_reason"),
         },
@@ -321,9 +329,11 @@ def _regeneration_commands(
         / "t061-retention-manifest.json"
     )
     python_path = (
-        f"PYTHONPATH=/home/lsmft/stsrl-spikes/sts_lightspeed/build-py:"
+        "PYTHONPATH=/home/lsmft/stsrl-spikes/sts_lightspeed-t062/"
+        "build-t062-py313:"
         f"{repo_root / 'src'}"
     )
+    python_executable = "/home/lsmft/stsrl-spikes/py313-torch/bin/python3.13"
     shard_args = " ".join(
         f"--shard {shlex.quote(str(root / 'initial-budget-1' / f'shard-{i}.json'))}"
         for i in range(16)
@@ -333,12 +343,12 @@ def _regeneration_commands(
             f"cd {shlex.quote(str(repo_root))} && "
             "STSRL_LIGHTSPEED_BUILD_JOBS=16 "
             "bash scripts/verify_lightspeed_source.sh "
-            "/home/lsmft/stsrl-spikes/sts_lightspeed "
-            "docs/sts_lightspeed_source_manifest.json > "
+            "/home/lsmft/stsrl-spikes/sts_lightspeed > "
             f"{shlex.quote(str(root / 'pinned-source-verifier.log'))} 2>&1"
         ),
         (
-            f"cd {shlex.quote(str(repo_root))} && {python_path} python3 "
+            f"cd {shlex.quote(str(repo_root))} && {python_path} "
+            f"{python_executable} "
             "scripts/verify_t067_semantic_equivalence.py "
             f"--cohort {shlex.quote(str(cohort))} "
             f"--checkpoint {shlex.quote(str(checkpoint))} "
@@ -348,7 +358,8 @@ def _regeneration_commands(
             f"--code-commit {code_commit}"
         ),
         (
-            f"cd {shlex.quote(str(repo_root))} && {python_path} python3 "
+            f"cd {shlex.quote(str(repo_root))} && {python_path} "
+            f"{python_executable} "
             "scripts/orchestrate_t067_calibration.py "
             f"--repo-root {shlex.quote(str(repo_root))} "
             f"--artifact-root {shlex.quote(str(root))} "
@@ -356,7 +367,8 @@ def _regeneration_commands(
             f"--code-commit {code_commit}"
         ),
         (
-            f"cd {shlex.quote(str(repo_root))} && {python_path} python3 "
+            f"cd {shlex.quote(str(repo_root))} && {python_path} "
+            f"{python_executable} "
             f"scripts/merge_t067_battle_search_v2.py {shard_args} "
             f"--raw-merged {shlex.quote(str(root / 't067-budget-1-raw-merged.json'))} "
             f"--output {shlex.quote(str(root / 't067-cost-attribution.json'))} "
@@ -369,7 +381,8 @@ def _regeneration_commands(
             "--record-range 0:16"
         ),
         (
-            f"cd {shlex.quote(str(repo_root))} && {python_path} python3 "
+            f"cd {shlex.quote(str(repo_root))} && {python_path} "
+            f"{python_executable} "
             "scripts/finalize_t067_artifacts.py "
             f"--repo-root {shlex.quote(str(repo_root))} "
             f"--artifact-root {shlex.quote(str(root))} "

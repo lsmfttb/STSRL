@@ -25,6 +25,11 @@ def main() -> int:
     parser.add_argument("--input-root", type=Path, required=True)
     parser.add_argument("--code-commit", required=True)
     parser.add_argument("--cache-capacity", type=int, default=4096)
+    parser.add_argument(
+        "--native-build-root",
+        type=Path,
+        default=Path("/home/lsmft/stsrl-spikes/sts_lightspeed-t062/build-t062-py313"),
+    )
     args = parser.parse_args()
 
     repo_root = args.repo_root.resolve()
@@ -64,9 +69,7 @@ def main() -> int:
     workers: list[dict[str, object]] = []
     processes: list[tuple[subprocess.Popen[bytes], object, object]] = []
     env = dict(os.environ)
-    env["PYTHONPATH"] = (
-        f"/home/lsmft/stsrl-spikes/sts_lightspeed/build-py:{repo_root / 'src'}"
-    )
+    env["PYTHONPATH"] = f"{args.native_build_root.resolve()}:{repo_root / 'src'}"
     for index in range(16):
         output = stage / f"shard-{index}.json"
         preflight = stage / f"preflight-{index}.json"
@@ -147,6 +150,8 @@ def main() -> int:
         "stage_classification": "substantial_restored_battle_calibration",
         "code_commit": args.code_commit,
         "native_commit": NATIVE_COMMIT,
+        "python_executable": sys.executable,
+        "native_build_root": str(args.native_build_root.resolve()),
         "repair_identity": "exact-public-node-inference-cache-v1",
         "cache_capacity": args.cache_capacity,
         "record_range": "0:16",
