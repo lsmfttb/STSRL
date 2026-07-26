@@ -207,19 +207,52 @@ def main() -> int:
 
 
 def _verify_code_commit(repo_root: Path, code_commit: str) -> None:
-    result = subprocess.run(
-        ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode != 0:
+    actual = _git_output(repo_root, "rev-parse", "HEAD")
+    if actual is None:
         raise SystemExit(f"T067 cannot resolve source checkout HEAD: {repo_root}")
-    if result.stdout.strip() != code_commit:
+    if actual != code_commit:
         raise SystemExit(
             "T067 source checkout HEAD differs from --code-commit: "
-            f"{result.stdout.strip()} != {code_commit}"
+            f"{actual} != {code_commit}"
         )
+    status = _git_output(repo_root, "status", "--porcelain", "--untracked-files=no")
+    if status is None or status:
+        raise SystemExit("T067 source checkout has tracked or staged changes")
+
+
+def _git_output(repo_root: Path, *arguments: str) -> str | None:
+    commands = [["git", "-C", str(repo_root), *arguments]]
+    dot_git = repo_root / ".git"
+    if dot_git.is_file():
+        marker = dot_git.read_text(encoding="utf-8").strip()
+        if marker.startswith("gitdir:"):
+            git_dir = marker.removeprefix("gitdir:").strip()
+            match = re.fullmatch(r"([A-Za-z]):[/\\](.*)", git_dir)
+            if match is not None:
+                git_dir = (
+                    f"/mnt/{match.group(1).lower()}/"
+                    f"{match.group(2).replace(chr(92), '/')}"
+                )
+            commands.append(
+                [
+                    "git",
+                    "--git-dir",
+                    git_dir,
+                    "--work-tree",
+                    str(repo_root),
+                    *arguments,
+                ]
+            )
+    for command in commands:
+        result = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    return None
 
 
 def _arms(
