@@ -269,3 +269,21 @@ def test_t067_regeneration_sequence_pins_source_and_fresh_output() -> None:
     assert all(str(source_checkout) in command for command in commands[1:])
     assert all(str(output) in command for command in commands)
     assert all(str(accepted) not in command for command in commands)
+
+    next_output = output.with_name(f"next-{output.name}")
+    reproduced_commands = finalizer._regeneration_commands(
+        source_repository_root=source_repository,
+        source_checkout_root=source_checkout,
+        accepted_root=output,
+        output_root=next_output,
+        input_root=source_repository / "artifacts",
+        code_commit=commit,
+    )
+    finalizer._validate_regeneration_commands(
+        commands=reproduced_commands,
+        code_commit=commit,
+        source_checkout_root=source_checkout,
+        accepted_root=output,
+        output_root=next_output,
+    )
+    assert all(str(output) not in command for command in reproduced_commands)

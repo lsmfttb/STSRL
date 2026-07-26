@@ -381,7 +381,7 @@ def _regeneration_commands(
         f"--shard {shlex.quote(str(output_root / 'initial-budget-1' / f'shard-{i}.json'))}"
         for i in range(16)
     )
-    next_output_root = output_root.with_name(f"{output_root.name}-next")
+    next_output_root = output_root.with_name(f"next-{output_root.name}")
     source_repo = shlex.quote(str(source_repository_root))
     source_checkout = shlex.quote(str(source_checkout_root))
     fresh_output = shlex.quote(str(output_root))
