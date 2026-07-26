@@ -11,6 +11,7 @@ import json
 import math
 from pathlib import Path
 import re
+import subprocess
 from time import perf_counter
 from typing import Any
 
@@ -93,6 +94,7 @@ def main() -> int:
     args = parser.parse_args()
     if not re.fullmatch(r"[0-9a-f]{40}", args.code_commit):
         raise SystemExit("T067 semantics requires an exact 40-character code commit")
+    _verify_code_commit(Path.cwd(), args.code_commit)
     if args.record_range != "0:1":
         raise SystemExit("T067 semantic smoke is fixed to retained record 0")
     _verify_source_manifest(Path("docs/sts_lightspeed_source_manifest.json"))
@@ -202,6 +204,22 @@ def main() -> int:
         json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
     return 0 if report["command_passed"] else 1
+
+
+def _verify_code_commit(repo_root: Path, code_commit: str) -> None:
+    result = subprocess.run(
+        ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise SystemExit(f"T067 cannot resolve source checkout HEAD: {repo_root}")
+    if result.stdout.strip() != code_commit:
+        raise SystemExit(
+            "T067 source checkout HEAD differs from --code-commit: "
+            f"{result.stdout.strip()} != {code_commit}"
+        )
 
 
 def _arms(

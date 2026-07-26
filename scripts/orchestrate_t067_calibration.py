@@ -26,6 +26,11 @@ def main() -> int:
     parser.add_argument("--code-commit", required=True)
     parser.add_argument("--cache-capacity", type=int, default=4096)
     parser.add_argument(
+        "--preflight-only",
+        action="store_true",
+        help="Validate exact source/input/output roles without starting workers.",
+    )
+    parser.add_argument(
         "--native-build-root",
         type=Path,
         default=Path("/home/lsmft/stsrl-spikes/sts_lightspeed-t062/build-t062-py313"),
@@ -38,11 +43,10 @@ def main() -> int:
     _validate_paths(repo_root, artifact_root)
     if not re.fullmatch(r"[0-9a-f]{40}", args.code_commit):
         raise SystemExit("T067 stage requires an exact 40-character code commit")
+    _validate_code_commit(repo_root, args.code_commit)
     stage = artifact_root / "initial-budget-1"
     if stage.exists():
         raise SystemExit(f"T067 stage already exists; refusing to overwrite: {stage}")
-    logs = stage / "logs"
-    logs.mkdir(parents=True)
 
     cohort = (
         input_root
@@ -63,6 +67,17 @@ def main() -> int:
     for path in (cohort, checkpoint, t061_manifest):
         if not path.is_file():
             raise SystemExit(f"missing T067 stage input: {path}")
+    if args.preflight_only:
+        print(
+            "T067 calibration preflight passed: "
+            f"source={repo_root} commit={args.code_commit} "
+            f"fresh_stage={stage}",
+            file=sys.stderr,
+        )
+        return 0
+
+    logs = stage / "logs"
+    logs.mkdir(parents=True)
 
     started_at = _now()
     started = perf_counter()
@@ -187,6 +202,22 @@ def _validate_paths(repo_root: Path, artifact_root: Path) -> None:
     normalized = artifact_root.as_posix()
     if "/artifacts/t067-battle-search-v2-inference-cost-repair/" not in normalized:
         raise SystemExit("T067 artifact root is outside the published stable namespace")
+
+
+def _validate_code_commit(repo_root: Path, code_commit: str) -> None:
+    result = subprocess.run(
+        ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise SystemExit(f"T067 cannot resolve source checkout HEAD: {repo_root}")
+    if result.stdout.strip() != code_commit:
+        raise SystemExit(
+            "T067 source checkout HEAD differs from --code-commit: "
+            f"{result.stdout.strip()} != {code_commit}"
+        )
 
 
 def _now() -> str:

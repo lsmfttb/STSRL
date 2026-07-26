@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 import re
 import shlex
+import subprocess
 from typing import Any
 
 from sts_combat_rl.commands.t067_battle_search_v2 import (
@@ -104,6 +105,9 @@ EXPECTED_SOURCE_FILES = {
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo-root", type=Path, required=True)
+    parser.add_argument("--source-repository-root", type=Path, required=True)
+    parser.add_argument("--regeneration-source-root", type=Path, required=True)
+    parser.add_argument("--regeneration-output-root", type=Path, required=True)
     parser.add_argument("--artifact-root", type=Path, required=True)
     parser.add_argument("--input-root", type=Path, required=True)
     parser.add_argument("--attribution-report", type=Path, required=True)
@@ -116,9 +120,24 @@ def main() -> int:
         raise SystemExit("T067 finalization requires an exact code commit")
     root = args.artifact_root.resolve()
     repo_root = args.repo_root.resolve()
+    source_repository_root = args.source_repository_root.resolve()
+    regeneration_source_root = args.regeneration_source_root.resolve()
+    regeneration_output_root = args.regeneration_output_root.resolve()
     input_root = args.input_root.resolve()
     if repo_root == root or repo_root in root.parents:
         raise SystemExit("T067 stable root must be outside the disposable worktree")
+    _validate_checkout_commit(repo_root, args.code_commit)
+    _validate_regeneration_roles(
+        accepted_root=root,
+        source_repository_root=source_repository_root,
+        source_checkout_root=regeneration_source_root,
+        output_root=regeneration_output_root,
+    )
+    if not (source_repository_root / ".git").exists():
+        raise SystemExit(
+            f"T067 source repository root is not a Git checkout: "
+            f"{source_repository_root}"
+        )
 
     attribution = _load_json(args.attribution_report, T067_COMPARISON_SCHEMA_ID)
     stage = _load_json(
@@ -184,14 +203,23 @@ def main() -> int:
         if path.is_file() and path.name != "t067-retention-manifest.json"
     ]
     commands = _regeneration_commands(
-        repo_root=repo_root,
-        root=root,
+        source_repository_root=source_repository_root,
+        source_checkout_root=regeneration_source_root,
+        accepted_root=root,
+        output_root=regeneration_output_root,
         input_root=input_root,
         code_commit=args.code_commit,
     )
+    _validate_regeneration_commands(
+        commands=commands,
+        code_commit=args.code_commit,
+        source_checkout_root=regeneration_source_root,
+        accepted_root=root,
+        output_root=regeneration_output_root,
+    )
     retention = {
         "schema_id": T067_RETENTION_SCHEMA_ID,
-        "schema_version": 1,
+        "schema_version": 2,
         "task_id": "T067",
         "stable_retention_root": str(root),
         "code_commit": args.code_commit,
@@ -238,6 +266,15 @@ def main() -> int:
         "artifact_count": len(artifacts),
         "artifact_total_bytes": sum(int(item["bytes"]) for item in artifacts),
         "artifacts": artifacts,
+        "regeneration_contract": {
+            "source_repository_root": str(source_repository_root),
+            "source_checkout_root": str(regeneration_source_root),
+            "source_commit": args.code_commit,
+            "source_preparation": "detached_git_worktree_or_exact_clean_reuse",
+            "output_root": str(regeneration_output_root),
+            "output_root_was_absent_at_manifest_write": True,
+            "accepted_root_is_never_overwritten": True,
+        },
         "regeneration_commands": commands,
         "retention_reason": (
             "preserve exact T067 cost attribution and fail-closed calibration "
@@ -310,7 +347,13 @@ def _sha256(path: Path) -> str:
 
 
 def _regeneration_commands(
-    *, repo_root: Path, root: Path, input_root: Path, code_commit: str
+    *,
+    source_repository_root: Path,
+    source_checkout_root: Path,
+    accepted_root: Path,
+    output_root: Path,
+    input_root: Path,
+    code_commit: str,
 ) -> list[str]:
     cohort = (
         input_root
@@ -331,47 +374,69 @@ def _regeneration_commands(
     python_path = (
         "PYTHONPATH=/home/lsmft/stsrl-spikes/sts_lightspeed-t062/"
         "build-t062-py313:"
-        f"{repo_root / 'src'}"
+        f"{source_checkout_root / 'src'}"
     )
     python_executable = "/home/lsmft/stsrl-spikes/py313-torch/bin/python3.13"
     shard_args = " ".join(
-        f"--shard {shlex.quote(str(root / 'initial-budget-1' / f'shard-{i}.json'))}"
+        f"--shard {shlex.quote(str(output_root / 'initial-budget-1' / f'shard-{i}.json'))}"
         for i in range(16)
     )
+    next_output_root = output_root.with_name(f"{output_root.name}-next")
+    source_repo = shlex.quote(str(source_repository_root))
+    source_checkout = shlex.quote(str(source_checkout_root))
+    fresh_output = shlex.quote(str(output_root))
+    commit = shlex.quote(code_commit)
     return [
         (
-            f"cd {shlex.quote(str(repo_root))} && "
+            "set -euo pipefail; "
+            f"source_repo={source_repo}; source_checkout={source_checkout}; "
+            f"output_root={fresh_output}; code_commit={commit}; "
+            'test ! -e "$output_root"; '
+            'if [ -e "$source_checkout" ]; then '
+            'test "$(git -C "$source_checkout" rev-parse HEAD)" = "$code_commit"; '
+            'test -z "$(git -C "$source_checkout" status --porcelain)"; '
+            "else "
+            'git -C "$source_repo" cat-file -e "$code_commit^{commit}"; '
+            'git -C "$source_repo" worktree add --detach '
+            '"$source_checkout" "$code_commit"; '
+            "fi; "
+            'test "$(git -C "$source_checkout" rev-parse HEAD)" = "$code_commit"; '
+            'test -z "$(git -C "$source_checkout" status --porcelain)"; '
+            'mkdir -p "$output_root"'
+        ),
+        (
+            f"cd {shlex.quote(str(source_checkout_root))} && "
             "STSRL_LIGHTSPEED_BUILD_JOBS=16 "
             "bash scripts/verify_lightspeed_source.sh "
             "/home/lsmft/stsrl-spikes/sts_lightspeed > "
-            f"{shlex.quote(str(root / 'pinned-source-verifier.log'))} 2>&1"
+            f"{shlex.quote(str(output_root / 'pinned-source-verifier.log'))} 2>&1"
         ),
         (
-            f"cd {shlex.quote(str(repo_root))} && {python_path} "
+            f"cd {shlex.quote(str(source_checkout_root))} && {python_path} "
             f"{python_executable} "
             "scripts/verify_t067_semantic_equivalence.py "
             f"--cohort {shlex.quote(str(cohort))} "
             f"--checkpoint {shlex.quote(str(checkpoint))} "
             f"--t061-retention-manifest {shlex.quote(str(t061))} "
-            f"--preflight-output {shlex.quote(str(root / 'semantic-preflight.json'))} "
-            f"--output {shlex.quote(str(root / 't067-semantic-equivalence.json'))} "
+            f"--preflight-output {shlex.quote(str(output_root / 'semantic-preflight.json'))} "
+            f"--output {shlex.quote(str(output_root / 't067-semantic-equivalence.json'))} "
             f"--code-commit {code_commit}"
         ),
         (
-            f"cd {shlex.quote(str(repo_root))} && {python_path} "
+            f"cd {shlex.quote(str(source_checkout_root))} && {python_path} "
             f"{python_executable} "
             "scripts/orchestrate_t067_calibration.py "
-            f"--repo-root {shlex.quote(str(repo_root))} "
-            f"--artifact-root {shlex.quote(str(root))} "
+            f"--repo-root {shlex.quote(str(source_checkout_root))} "
+            f"--artifact-root {shlex.quote(str(output_root))} "
             f"--input-root {shlex.quote(str(input_root))} "
             f"--code-commit {code_commit}"
         ),
         (
-            f"cd {shlex.quote(str(repo_root))} && {python_path} "
+            f"cd {shlex.quote(str(source_checkout_root))} && {python_path} "
             f"{python_executable} "
             f"scripts/merge_t067_battle_search_v2.py {shard_args} "
-            f"--raw-merged {shlex.quote(str(root / 't067-budget-1-raw-merged.json'))} "
-            f"--output {shlex.quote(str(root / 't067-cost-attribution.json'))} "
+            f"--raw-merged {shlex.quote(str(output_root / 't067-budget-1-raw-merged.json'))} "
+            f"--output {shlex.quote(str(output_root / 't067-cost-attribution.json'))} "
             f"--cohort {shlex.quote(str(cohort))} "
             f"--checkpoint {shlex.quote(str(checkpoint))} "
             f"--t061-retention-manifest {shlex.quote(str(t061))} "
@@ -381,19 +446,116 @@ def _regeneration_commands(
             "--record-range 0:16"
         ),
         (
-            f"cd {shlex.quote(str(repo_root))} && {python_path} "
+            f"cd {shlex.quote(str(source_checkout_root))} && {python_path} "
             f"{python_executable} "
             "scripts/finalize_t067_artifacts.py "
-            f"--repo-root {shlex.quote(str(repo_root))} "
-            f"--artifact-root {shlex.quote(str(root))} "
+            f"--repo-root {shlex.quote(str(source_checkout_root))} "
+            f"--source-repository-root {shlex.quote(str(source_repository_root))} "
+            f"--regeneration-source-root {shlex.quote(str(source_checkout_root))} "
+            f"--regeneration-output-root {shlex.quote(str(next_output_root))} "
+            f"--artifact-root {shlex.quote(str(output_root))} "
             f"--input-root {shlex.quote(str(input_root))} "
-            f"--attribution-report {shlex.quote(str(root / 't067-cost-attribution.json'))} "
-            f"--stage-execution-report {shlex.quote(str(root / 't067-stage-execution.json'))} "
-            f"--semantic-report {shlex.quote(str(root / 't067-semantic-equivalence.json'))} "
-            f"--verifier-log {shlex.quote(str(root / 'pinned-source-verifier.log'))} "
+            f"--attribution-report {shlex.quote(str(output_root / 't067-cost-attribution.json'))} "
+            f"--stage-execution-report {shlex.quote(str(output_root / 't067-stage-execution.json'))} "
+            f"--semantic-report {shlex.quote(str(output_root / 't067-semantic-equivalence.json'))} "
+            f"--verifier-log {shlex.quote(str(output_root / 'pinned-source-verifier.log'))} "
             f"--code-commit {code_commit}"
         ),
     ]
+
+
+def _validate_checkout_commit(repo_root: Path, code_commit: str) -> None:
+    result = subprocess.run(
+        ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise SystemExit(f"T067 cannot resolve source checkout HEAD: {repo_root}")
+    if result.stdout.strip() != code_commit:
+        raise SystemExit(
+            "T067 source checkout HEAD differs from --code-commit: "
+            f"{result.stdout.strip()} != {code_commit}"
+        )
+
+
+def _validate_regeneration_roles(
+    *,
+    accepted_root: Path,
+    source_repository_root: Path,
+    source_checkout_root: Path,
+    output_root: Path,
+) -> None:
+    normalized_roles = {
+        "source repository": source_repository_root.as_posix(),
+        "source checkout": source_checkout_root.as_posix(),
+        "regeneration output": output_root.as_posix(),
+    }
+    for label, value in normalized_roles.items():
+        if "/.claude/worktrees/" in value:
+            raise SystemExit(
+                f"T067 {label} must not depend on disposable .claude/worktrees"
+            )
+    if output_root == accepted_root:
+        raise SystemExit("T067 regeneration output must differ from the accepted root")
+    if output_root.exists():
+        raise SystemExit(
+            f"T067 regeneration output must be a fresh absent root: {output_root}"
+        )
+    if (
+        source_checkout_root == output_root
+        or source_checkout_root in output_root.parents
+        or output_root in source_checkout_root.parents
+    ):
+        raise SystemExit("T067 regeneration source and output roles must be disjoint")
+    if (
+        accepted_root == source_checkout_root
+        or accepted_root in source_checkout_root.parents
+        or source_checkout_root in accepted_root.parents
+    ):
+        raise SystemExit("T067 accepted evidence and source roles must be disjoint")
+    if accepted_root in output_root.parents or output_root in accepted_root.parents:
+        raise SystemExit("T067 accepted and regeneration output roots must be siblings")
+    if (
+        "/artifacts/t067-battle-search-v2-inference-cost-repair/"
+        not in output_root.as_posix()
+    ):
+        raise SystemExit(
+            "T067 regeneration output is outside the stable ignored namespace"
+        )
+
+
+def _validate_regeneration_commands(
+    *,
+    commands: list[str],
+    code_commit: str,
+    source_checkout_root: Path,
+    accepted_root: Path,
+    output_root: Path,
+) -> None:
+    if len(commands) != 6:
+        raise SystemExit("T067 retention requires six durable regeneration commands")
+    if any(".claude/worktrees" in command for command in commands):
+        raise SystemExit("T067 regeneration commands use a disposable worktree")
+    preparation = commands[0]
+    for marker in (
+        code_commit,
+        "worktree add --detach",
+        'test ! -e "$output_root"',
+        str(source_checkout_root),
+        str(output_root),
+    ):
+        if marker not in preparation:
+            raise SystemExit(f"T067 source preparation lacks marker: {marker}")
+    if any(str(source_checkout_root) not in command for command in commands[1:]):
+        raise SystemExit(
+            "T067 regeneration stages do not use the exact source checkout"
+        )
+    if any(str(output_root) not in command for command in commands):
+        raise SystemExit("T067 regeneration stages do not use the fresh output root")
+    if any(str(accepted_root) in command for command in commands):
+        raise SystemExit("T067 regeneration commands target accepted evidence")
 
 
 if __name__ == "__main__":
