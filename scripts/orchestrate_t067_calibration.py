@@ -238,6 +238,8 @@ def _git_output(repo_root: Path, *arguments: str) -> str | None:
                     git_dir,
                     "--work-tree",
                     str(repo_root),
+                    "-c",
+                    "core.autocrlf=true",
                     *arguments,
                 ]
             )
