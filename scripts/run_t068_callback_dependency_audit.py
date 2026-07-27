@@ -151,13 +151,40 @@ def _verify_code_commit(repo_root: Path, code_commit: str) -> None:
 
 
 def _git_output(repo_root: Path, *arguments: str) -> str | None:
-    result = subprocess.run(
-        ["git", "-C", str(repo_root), "-c", "core.autocrlf=true", *arguments],
-        check=False,
-        capture_output=True,
-        text=True,
-    )
-    return result.stdout.strip() if result.returncode == 0 else None
+    commands = [["git", "-C", str(repo_root), "-c", "core.autocrlf=true", *arguments]]
+    dot_git = repo_root / ".git"
+    if dot_git.is_file():
+        marker = dot_git.read_text(encoding="utf-8").strip()
+        if marker.startswith("gitdir:"):
+            git_dir = marker.removeprefix("gitdir:").strip()
+            match = re.fullmatch(r"([A-Za-z]):[/\\](.*)", git_dir)
+            if match is not None:
+                git_dir = (
+                    f"/mnt/{match.group(1).lower()}/"
+                    f"{match.group(2).replace(chr(92), '/')}"
+                )
+            commands.append(
+                [
+                    "git",
+                    "--git-dir",
+                    git_dir,
+                    "--work-tree",
+                    str(repo_root),
+                    "-c",
+                    "core.autocrlf=true",
+                    *arguments,
+                ]
+            )
+    for command in commands:
+        result = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    return None
 
 
 def _verify_source_manifest(path: Path) -> None:
