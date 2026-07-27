@@ -70,7 +70,10 @@ def main() -> int:
         controller_arms=arms,
         action_space=action_space,
         max_battle_steps=200,
-        family="t068_callback_dependency_audit",
+        # T062's existing runner owns the accepted comparison-family enum.
+        # This trace is not a cost comparison, so retain its neutral nominal
+        # family while T068 stamps the audit-specific stage schema separately.
+        family="nominal",
         worker_count=1,
         shard_count=args.shard_count,
         record_range=args.record_range,
