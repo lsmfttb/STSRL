@@ -148,10 +148,13 @@ def _build_arms(
 def _extract_requests(value: Any) -> list[dict[str, Any]]:
     requests: list[dict[str, Any]] = []
     if isinstance(value, Mapping):
-        trace = value.get("t068_callback_dependency_trace")
-        if isinstance(trace, Mapping) and isinstance(trace.get("requests"), list):
+        if value.get(
+            "schema_id"
+        ) == "t068-native-callback-request-trace-v1" and isinstance(
+            value.get("requests"), list
+        ):
             requests.extend(
-                dict(item) for item in trace["requests"] if isinstance(item, Mapping)
+                dict(item) for item in value["requests"] if isinstance(item, Mapping)
             )
         for child in value.values():
             requests.extend(_extract_requests(child))

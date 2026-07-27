@@ -384,18 +384,6 @@ class BattleSearchV2Controller:
                         "value_callback_count": float(callback_counts["value"]),
                         "model_call_count": attribution["model_call_count"],
                     },
-                    **(
-                        {
-                            "t068_callback_dependency_trace": {
-                                "schema_id": "t068-native-callback-request-trace-v1",
-                                "schema_version": 1,
-                                "trace_mode": "observe_existing_synchronous_callback",
-                                "requests": callback_trace,
-                            }
-                        }
-                        if self.callback_dependency_trace_enabled
-                        else {}
-                    ),
                 }
             }
         )
@@ -408,6 +396,18 @@ class BattleSearchV2Controller:
             for key, value in flat_cost.items()
             if isinstance(value, (int, float)) and not isinstance(value, bool)
         }
+        if self.callback_dependency_trace_enabled:
+            # Fixed-battle evaluation only recursively merges numeric mapping
+            # telemetry.  Keep this diagnostic payload as a top-level sequence
+            # so its exact request order survives that existing aggregation.
+            metadata["t068_callback_dependency_trace_records"] = [
+                {
+                    "schema_id": "t068-native-callback-request-trace-v1",
+                    "schema_version": 1,
+                    "trace_mode": "observe_existing_synchronous_callback",
+                    "requests": callback_trace,
+                }
+            ]
         return ControllerDecision(
             selected_index=target.legal_action_index,
             provenance=self.provenance,
