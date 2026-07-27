@@ -65,6 +65,15 @@ def main() -> int:
     action_space = ActionSpaceConfig.initial_no_potions()
     arms = [
         (
+            "baseline",
+            BattleSearchV2Controller(
+                simulations=1,
+                scorer=scorer,
+                ablation="baseline",
+                action_space=action_space,
+            ),
+        ),
+        (
             label,
             BattleSearchV2Controller(
                 simulations=1,
