@@ -22,7 +22,18 @@ def git_output(repo_root: Path, *arguments: str) -> str | None:
     """Run Git directly, then retry a Windows worktree gitfile through WSL."""
 
     safe_directory = f"safe.directory={repo_root}"
-    commands = [["git", "-c", safe_directory, "-C", str(repo_root), *arguments]]
+    commands = [
+        [
+            "git",
+            "-c",
+            safe_directory,
+            "-C",
+            str(repo_root),
+            "-c",
+            "core.autocrlf=true",
+            *arguments,
+        ]
+    ]
     dot_git = repo_root / ".git"
     if dot_git.is_file():
         marker = dot_git.read_text(encoding="utf-8").strip()
@@ -40,6 +51,8 @@ def git_output(repo_root: Path, *arguments: str) -> str | None:
                     git_dir,
                     "--work-tree",
                     str(repo_root),
+                    "-c",
+                    "core.autocrlf=true",
                     *arguments,
                 ]
             )

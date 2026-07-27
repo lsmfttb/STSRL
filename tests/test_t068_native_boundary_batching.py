@@ -341,3 +341,4 @@ def test_t068_windows_gitfile_checkout_falls_back_to_wsl_gitdir(
     fallback_calls = [call for call in calls if "--git-dir" in call]
     assert len(fallback_calls) == 2
     assert "/mnt/d/DeadlycatCoding/STSRL/.git/worktrees/t068" in fallback_calls[0]
+    assert all("core.autocrlf=true" in call for call in calls)
