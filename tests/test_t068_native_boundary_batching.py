@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import importlib.util
+from pathlib import Path
 
 import pytest
 
@@ -10,6 +12,10 @@ from sts_combat_rl.commands.t068_native_boundary_batching import (
     T068_NEXT_RECOMMENDATION,
     build_t068_callback_dependency_audit,
     build_t068_decision_report,
+)
+from sts_combat_rl.sim.action_space import ActionSpaceConfig
+from sts_combat_rl.sim.search_guidance_inference import (
+    SearchGuidanceCheckpointProvenance,
 )
 
 
@@ -77,3 +83,43 @@ def test_t068_rejects_duplicate_or_incomplete_callback_responses() -> None:
             native_source_audit={"synchronous_return_required": True},
             code_commit="a" * 40,
         )
+
+
+def test_t068_runner_constructs_exact_t062_arm_contract() -> None:
+    script = (
+        Path(__file__).resolve().parents[1]
+        / "scripts"
+        / "run_t068_callback_dependency_audit.py"
+    )
+    spec = importlib.util.spec_from_file_location("t068_runner", script)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    checkpoint = SearchGuidanceCheckpointProvenance(
+        checkpoint_schema_id="torch-policy-value-checkpoint-v1",
+        checkpoint_format_version=1,
+        checkpoint_artifact_id="test",
+        checkpoint_path="/tmp/test.pt",
+        model_class="TestModel",
+        model_config={},
+        trainer_input_artifact_id="trainer-input-sha256:test",
+        trainer_input_sha256="test",
+        policy_target_kind="oracle_teacher_action_one_hot",
+        policy_target_source="test",
+    )
+
+    class Scorer:
+        name = "test"
+        checkpoint_provenance = checkpoint
+
+    arms = module._build_arms(Scorer(), ActionSpaceConfig.initial_no_potions())
+    assert tuple(label for label, _ in arms) == (
+        "baseline",
+        "prior_only",
+        "value_only",
+        "prior_value",
+    )
+    assert arms[0][1].callback_dependency_trace_enabled is False
+    assert all(
+        controller.callback_dependency_trace_enabled for _, controller in arms[1:]
+    )

@@ -63,31 +63,7 @@ def main() -> int:
         )
     scorer = build_torch_guidance_scorer_from_checkpoint(args.checkpoint)
     action_space = ActionSpaceConfig.initial_no_potions()
-    arms = [
-        (
-            "baseline",
-            BattleSearchV2Controller(
-                simulations=1,
-                scorer=scorer,
-                ablation="baseline",
-                action_space=action_space,
-            ),
-        ),
-        *[
-            (
-                label,
-                BattleSearchV2Controller(
-                    simulations=1,
-                    scorer=scorer,
-                    ablation=label,  # type: ignore[arg-type]
-                    action_space=action_space,
-                    inference_cache_enabled=True,
-                    callback_dependency_trace_enabled=True,
-                ),
-            )
-            for label in GUIDED_ARMS
-        ],
-    ]
+    arms = _build_arms(scorer, action_space)
     comparison = run_t062_comparison_from_cohort_path(
         adapter_factory=lambda: LightSpeedAdapter(seed=1, ascension=20),
         cohort_path=args.cohort,
@@ -132,6 +108,38 @@ def main() -> int:
         json.dumps(output, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
     return 0 if output["command_passed"] else 1
+
+
+def _build_arms(
+    scorer: Any, action_space: ActionSpaceConfig
+) -> list[tuple[str, BattleSearchV2Controller]]:
+    """Build the exact T062 arm set; only guided arms enable T068 tracing."""
+
+    return [
+        (
+            "baseline",
+            BattleSearchV2Controller(
+                simulations=1,
+                scorer=scorer,
+                ablation="baseline",
+                action_space=action_space,
+            ),
+        ),
+        *[
+            (
+                label,
+                BattleSearchV2Controller(
+                    simulations=1,
+                    scorer=scorer,
+                    ablation=label,  # type: ignore[arg-type]
+                    action_space=action_space,
+                    inference_cache_enabled=True,
+                    callback_dependency_trace_enabled=True,
+                ),
+            )
+            for label in GUIDED_ARMS
+        ],
+    ]
 
 
 def _extract_requests(value: Any) -> list[dict[str, Any]]:
