@@ -82,9 +82,19 @@ def main() -> int:
     except BaseException as exc:
         _write_failure_output(args, stage="comparison", error=repr(exc))
         raise
-    traces = {
-        label: _extract_requests(comparison["arms"][label]) for label in GUIDED_ARMS
-    }
+    try:
+        traces = {
+            label: _extract_requests(comparison["arms"][label]) for label in GUIDED_ARMS
+        }
+        comparison_problems = _comparison_problems(comparison)
+    except BaseException as exc:
+        _write_failure_output(
+            args,
+            stage="trace_extraction",
+            error=repr(exc),
+            comparison=comparison,
+        )
+        raise
     for label, requests in traces.items():
         if not requests:
             _write_failure_output(
@@ -111,7 +121,7 @@ def main() -> int:
         "input_preflight": preflight,
         "arms": traces,
         "comparison_successful": comparison["successful"],
-        "comparison_problems": comparison["problems"],
+        "comparison_problems": comparison_problems,
         "command_passed": comparison["successful"],
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -172,6 +182,33 @@ def _extract_requests(value: Any) -> list[dict[str, Any]]:
         for child in value:
             requests.extend(_extract_requests(child))
     return requests
+
+
+def _comparison_problems(comparison: Mapping[str, Any]) -> list[str]:
+    """Read the accepted T062 shard problem fields without inventing one."""
+
+    problems = [
+        str(problem)
+        for problem in comparison.get("source_match_problems", [])
+        if isinstance(problem, str)
+    ]
+    arms = comparison.get("arms", {})
+    if not isinstance(arms, Mapping):
+        return [*problems, "T062 arms mapping is missing"]
+    for label, arm in arms.items():
+        if not isinstance(arm, Mapping):
+            problems.append(f"{label}: arm summary is malformed")
+            continue
+        for problem in arm.get("evaluation_problems", []):
+            if isinstance(problem, str):
+                problems.append(f"{label}: {problem}")
+        for record in arm.get("records", []):
+            if not isinstance(record, Mapping):
+                continue
+            for problem in record.get("problems", []):
+                if isinstance(problem, str):
+                    problems.append(f"{label}: {problem}")
+    return problems
 
 
 def _write_failure_output(

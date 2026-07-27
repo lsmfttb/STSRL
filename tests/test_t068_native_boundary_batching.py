@@ -123,3 +123,20 @@ def test_t068_runner_constructs_exact_t062_arm_contract() -> None:
     assert all(
         controller.callback_dependency_trace_enabled for _, controller in arms[1:]
     )
+
+    comparison_problems = module._comparison_problems(
+        {
+            "source_match_problems": ["source mismatch"],
+            "arms": {
+                "prior_only": {
+                    "evaluation_problems": ["evaluation failure"],
+                    "records": [{"problems": ["record failure"]}],
+                }
+            },
+        }
+    )
+    assert comparison_problems == [
+        "source mismatch",
+        "prior_only: evaluation failure",
+        "prior_only: record failure",
+    ]
