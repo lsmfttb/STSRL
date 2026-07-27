@@ -506,7 +506,7 @@ def _begin_callback_trace(
         "required_outputs": list(required_outputs),
         "public_input_identity": input_identity,
         "public_input_identity_schema_id": "t067-public-node-cache-key-v1",
-        "public_input_canonical_bytes": len(cache_key[1]),
+        "public_input_canonical_byte_count": len(cache_key[1]),
         "ordered_legal_action_identities": action_identities,
         "native_traversal_point": (
             "policy_prior_apply" if callback_kind == "policy" else "leaf_value_backup"

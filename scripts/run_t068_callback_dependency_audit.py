@@ -226,8 +226,10 @@ def _arm_cost_summary(arm: Mapping[str, Any]) -> dict[str, Any]:
         "model_call_count",
     )
     totals = {field: 0.0 for field in fields}
-    native_steps = 0.0
-    wall_seconds = 0.0
+    outer_steps = 0.0
+    record_wall_seconds = 0.0
+    native_search_steps = 0.0
+    search_wall_seconds = 0.0
     failures: list[str] = []
     records = arm.get("records", [])
     if not isinstance(records, list):
@@ -250,16 +252,31 @@ def _arm_cost_summary(arm: Mapping[str, Any]) -> dict[str, Any]:
             else:
                 raise ValueError(f"T068 guided arm lacks numeric {field}")
         for field, target in (
-            ("outer_simulator_steps", "native_steps"),
-            ("wall_clock_seconds", "wall"),
+            ("outer_simulator_steps", "outer"),
+            ("wall_clock_seconds", "record_wall"),
         ):
             value = record.get(field)
             if not isinstance(value, (int, float)) or isinstance(value, bool):
                 raise ValueError(f"T068 guided arm lacks numeric {field}")
-            if target == "native_steps":
-                native_steps += float(value)
+            if target == "outer":
+                outer_steps += float(value)
             else:
-                wall_seconds += float(value)
+                record_wall_seconds += float(value)
+        search_summary = telemetry.get("search_telemetry_summary", {})
+        if not isinstance(search_summary, Mapping):
+            raise ValueError("T068 guided arm lacks search telemetry summary")
+        for field, target in (
+            ("native_simulator_steps", "native_search"),
+            ("wall_clock_time_s", "search_wall"),
+        ):
+            value = search_summary.get(field, {})
+            total = value.get("total") if isinstance(value, Mapping) else None
+            if not isinstance(total, (int, float)) or isinstance(total, bool):
+                raise ValueError(f"T068 guided arm lacks numeric search {field}.total")
+            if target == "native_search":
+                native_search_steps += float(total)
+            else:
+                search_wall_seconds += float(total)
         failures.extend(
             str(problem)
             for problem in record.get("problems", [])
@@ -268,8 +285,10 @@ def _arm_cost_summary(arm: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "record_count": len(records),
         "component_cost_ms": totals,
-        "native_simulator_steps": native_steps,
-        "wall_clock_seconds": wall_seconds,
+        "outer_simulator_steps": outer_steps,
+        "record_wall_clock_seconds": record_wall_seconds,
+        "native_search_simulator_steps": native_search_steps,
+        "search_wall_clock_seconds": search_wall_seconds,
         "failures": failures,
     }
 

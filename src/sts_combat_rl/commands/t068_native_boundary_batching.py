@@ -10,7 +10,7 @@ T068_AUDIT_SCHEMA_ID = "t068-native-boundary-callback-dependency-audit-v1"
 T068_FEASIBILITY_SCHEMA_ID = "t068-native-boundary-batch-feasibility-v1"
 T068_DECISION_SCHEMA_ID = "t068-native-boundary-batch-decision-v1"
 T068_GUIDED_ARMS = ("prior_only", "value_only", "prior_value")
-T068_NEXT_RECOMMENDATION = "T069-native-search-callback-abi-redesign-feasibility"
+T068_NEXT_RECOMMENDATION = "T069-public-node-feature-encoding-projection-feasibility"
 
 
 def build_t068_callback_dependency_audit(
@@ -92,7 +92,8 @@ def build_t068_callback_dependency_audit(
         "feasibility_gate": {
             "every_guided_arm_has_exact_batch_ge_2": feasibility_passed,
             "request_content_and_dependency_order_exact": True,
-            "prototype_measured": True,
+            "prototype_measured": False,
+            "prototype_evidence": "published separately in the versioned feasibility report",
             "conservative_projection": (
                 "not_authorized: no exact simultaneously-ready batch exists"
                 if not feasibility_passed
@@ -106,7 +107,9 @@ def build_t068_callback_dependency_audit(
     return audit
 
 
-def build_t068_decision_report(audit: Mapping[str, Any]) -> dict[str, Any]:
+def build_t068_decision_report(
+    audit: Mapping[str, Any], feasibility: Mapping[str, Any]
+) -> dict[str, Any]:
     if audit.get("schema_id") != T068_AUDIT_SCHEMA_ID:
         raise ValueError("T068 decision requires the current audit schema")
     gate = audit.get("feasibility_gate")
@@ -114,18 +117,103 @@ def build_t068_decision_report(audit: Mapping[str, Any]) -> dict[str, Any]:
         raise ValueError(
             "T068 infeasibility decision requires a failed feasibility gate"
         )
+    if feasibility.get("schema_id") != T068_FEASIBILITY_SCHEMA_ID:
+        raise ValueError("T068 decision requires the current feasibility schema")
+    prototype = feasibility.get("prototype")
+    if not isinstance(prototype, Mapping) or prototype.get("executable") is not True:
+        raise ValueError("T068 decision requires executable prototype evidence")
+    costs = prototype.get("costs")
+    if not isinstance(costs, Mapping):
+        raise ValueError("T068 decision requires prototype component costs")
+    for arm in T068_GUIDED_ARMS:
+        arm_costs = costs.get(arm)
+        components = (
+            arm_costs.get("component_cost_ms")
+            if isinstance(arm_costs, Mapping)
+            else None
+        )
+        if not isinstance(components, Mapping):
+            raise ValueError(f"T068 decision lacks {arm} component costs")
+        feature = components.get("checkpoint_feature_encoding_ms")
+        forward = components.get("policy_value_forward_pass_ms")
+        if not all(
+            isinstance(value, (int, float)) and not isinstance(value, bool)
+            for value in (feature, forward)
+        ):
+            raise ValueError(f"T068 decision has invalid {arm} component costs")
+        if float(feature) <= float(forward):
+            raise ValueError(
+                f"T068 recommendation is unsupported by {arm} measured costs"
+            )
     return {
         "schema_id": T068_DECISION_SCHEMA_ID,
         "schema_version": 1,
         "task_id": "T068",
+        "code_commit": audit["code_commit"],
+        "native_commit": audit["native_source_audit"].get("native_commit"),
+        "input_identities": dict(audit["input_identities"]),
         "decision": "close_native_boundary_batching",
         "production_batch_boundary_implemented": False,
         "calibration_authorized": False,
         "outcome_comparison_authorized": False,
         "promotion_authorized": False,
-        "reason": "all guided arms expose only synchronous singleton callbacks",
+        "reason": "all guided arms expose only synchronous singleton callbacks; retained T067 attribution identifies public-node feature encoding as the dominant measured cost rather than model forward execution",
         "recommendation": T068_NEXT_RECOMMENDATION,
         "recommendation_count": 1,
+        "command_passed": True,
+    }
+
+
+def build_t068_batch_feasibility_report(
+    audit: Mapping[str, Any], *, prototype_costs: Mapping[str, Mapping[str, Any]]
+) -> dict[str, Any]:
+    """Publish the executable unbatched-boundary probe result separately.
+
+    The current native ABI can only measure singleton callback execution.  This
+    is still a real prototype result, but it must not be mislabeled as a batch
+    speedup or authorize calibration.
+    """
+
+    if audit.get("schema_id") != T068_AUDIT_SCHEMA_ID:
+        raise ValueError("T068 feasibility requires the current dependency audit")
+    gate = audit.get("feasibility_gate")
+    if not isinstance(gate, Mapping) or gate.get("passed") is not False:
+        raise ValueError("T068 feasibility report requires the failed exact-batch gate")
+    costs: dict[str, Any] = {}
+    for arm in T068_GUIDED_ARMS:
+        cost = prototype_costs.get(arm)
+        if not isinstance(cost, Mapping):
+            raise ValueError(f"T068 feasibility lacks {arm} prototype cost")
+        components = cost.get("component_cost_ms")
+        if not isinstance(components, Mapping):
+            raise ValueError(f"T068 feasibility lacks {arm} component costs")
+        feature = components.get("checkpoint_feature_encoding_ms")
+        forward = components.get("policy_value_forward_pass_ms")
+        if not all(isinstance(value, (int, float)) for value in (feature, forward)):
+            raise ValueError(f"T068 feasibility has invalid {arm} component costs")
+        costs[arm] = dict(cost)
+    return {
+        "schema_id": T068_FEASIBILITY_SCHEMA_ID,
+        "schema_version": 1,
+        "task_id": "T068",
+        "code_commit": audit["code_commit"],
+        "native_commit": audit["native_source_audit"].get("native_commit"),
+        "input_identities": dict(audit["input_identities"]),
+        "prototype": {
+            "kind": "unbatched_synchronous_native_python_callback_probe",
+            "executable": True,
+            "batch_boundary_implemented": False,
+            "batch_size_distribution": {
+                arm: audit["arms"][arm]["batch_size_distribution"]
+                for arm in T068_GUIDED_ARMS
+            },
+            "costs": costs,
+        },
+        "conservative_projection": {
+            "both_t067_infeasible_arms_can_reach_wall_ceiling": False,
+            "reason": "no exact batch of size >= 2 exists, so no semantics-preserving batch speedup is available",
+        },
+        "calibration_authorized": False,
         "command_passed": True,
     }
 
@@ -149,6 +237,58 @@ def _validate_requests(arm: str, requests: Sequence[Mapping[str, Any]]) -> None:
             raise ValueError(f"T068 {arm} request {request_id} response order changed")
         if request.get("simultaneously_ready_batch_size") != 1:
             raise ValueError(f"T068 {arm} trace claims unsupported batch readiness")
-        if not isinstance(request.get("ordered_legal_action_identities"), Sequence):
+        if request.get("callback_kind") not in {"policy", "value"}:
+            raise ValueError(f"T068 {arm} request {request_id} lacks callback kind")
+        outputs = request.get("required_outputs")
+        if (
+            not isinstance(outputs, Sequence)
+            or isinstance(outputs, (str, bytes, bytearray))
+            or not outputs
+        ):
+            raise ValueError(f"T068 {arm} request {request_id} lacks required outputs")
+        if not isinstance(request.get("public_input_identity"), str) or not request.get(
+            "public_input_identity"
+        ):
+            raise ValueError(f"T068 {arm} request {request_id} lacks public identity")
+        if (
+            request.get("public_input_identity_schema_id")
+            != "t067-public-node-cache-key-v1"
+        ):
+            raise ValueError(
+                f"T068 {arm} request {request_id} has unknown public identity schema"
+            )
+        byte_count = request.get("public_input_canonical_byte_count")
+        if (
+            not isinstance(byte_count, int)
+            or isinstance(byte_count, bool)
+            or byte_count <= 0
+        ):
+            raise ValueError(
+                f"T068 {arm} request {request_id} lacks canonical byte count"
+            )
+        actions = request.get("ordered_legal_action_identities")
+        if (
+            not isinstance(actions, Sequence)
+            or isinstance(actions, (str, bytes, bytearray))
+            or not actions
+        ):
             raise ValueError(f"T068 {arm} request {request_id} lacks action identities")
+        if not isinstance(request.get("dependency_edges"), Sequence) or not request.get(
+            "dependency_edges"
+        ):
+            raise ValueError(f"T068 {arm} request {request_id} lacks dependency edges")
+        if (
+            request.get("flush_reason")
+            != "native callback requires this response before traversal continues"
+        ):
+            raise ValueError(
+                f"T068 {arm} request {request_id} has unknown flush reason"
+            )
+        elapsed = request.get("callback_elapsed_ms")
+        if (
+            not isinstance(elapsed, (int, float))
+            or isinstance(elapsed, bool)
+            or elapsed < 0
+        ):
+            raise ValueError(f"T068 {arm} request {request_id} lacks callback timing")
         seen.add(request_id)
