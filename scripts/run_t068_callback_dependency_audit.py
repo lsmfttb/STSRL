@@ -87,6 +87,9 @@ def main() -> int:
             label: _extract_requests(comparison["arms"][label]) for label in GUIDED_ARMS
         }
         comparison_problems = _comparison_problems(comparison)
+        cost_summaries = {
+            label: _arm_cost_summary(comparison["arms"][label]) for label in GUIDED_ARMS
+        }
     except BaseException as exc:
         _write_failure_output(
             args,
@@ -120,6 +123,7 @@ def main() -> int:
         "stage_classification": "one_record_component_of_16_worker_audit",
         "input_preflight": preflight,
         "arms": traces,
+        "arm_cost_summaries": cost_summaries,
         "comparison_successful": comparison["successful"],
         "comparison_problems": comparison_problems,
         "command_passed": comparison["successful"],
@@ -209,6 +213,65 @@ def _comparison_problems(comparison: Mapping[str, Any]) -> list[str]:
                 if isinstance(problem, str):
                     problems.append(f"{label}: {problem}")
     return problems
+
+
+def _arm_cost_summary(arm: Mapping[str, Any]) -> dict[str, Any]:
+    """Keep the required T068 component costs beside compact request traces."""
+
+    fields = (
+        "python_callback_total_ms",
+        "checkpoint_feature_encoding_ms",
+        "tensor_construction_ms",
+        "policy_value_forward_pass_ms",
+        "model_call_count",
+    )
+    totals = {field: 0.0 for field in fields}
+    native_steps = 0.0
+    wall_seconds = 0.0
+    failures: list[str] = []
+    records = arm.get("records", [])
+    if not isinstance(records, list):
+        raise ValueError("T068 arm records are missing")
+    for record in records:
+        if not isinstance(record, Mapping):
+            raise ValueError("T068 arm record is malformed")
+        telemetry = record.get("controller_compute_telemetry", {})
+        cost = (
+            telemetry.get("t067_cost_attribution", {})
+            if isinstance(telemetry, Mapping)
+            else {}
+        )
+        if not isinstance(cost, Mapping):
+            raise ValueError("T068 guided arm lacks T067 cost telemetry")
+        for field in fields:
+            value = cost.get(field)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                totals[field] += float(value)
+            else:
+                raise ValueError(f"T068 guided arm lacks numeric {field}")
+        for field, target in (
+            ("outer_simulator_steps", "native_steps"),
+            ("wall_clock_seconds", "wall"),
+        ):
+            value = record.get(field)
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                raise ValueError(f"T068 guided arm lacks numeric {field}")
+            if target == "native_steps":
+                native_steps += float(value)
+            else:
+                wall_seconds += float(value)
+        failures.extend(
+            str(problem)
+            for problem in record.get("problems", [])
+            if isinstance(problem, str)
+        )
+    return {
+        "record_count": len(records),
+        "component_cost_ms": totals,
+        "native_simulator_steps": native_steps,
+        "wall_clock_seconds": wall_seconds,
+        "failures": failures,
+    }
 
 
 def _write_failure_output(

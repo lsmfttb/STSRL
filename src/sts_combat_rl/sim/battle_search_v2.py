@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-import hashlib
 import math
 import time
 from typing import Any, Literal
@@ -495,19 +494,19 @@ def _begin_callback_trace(
         if not isinstance(identity, Mapping):
             raise ValueError("T068 callback trace requires legal action identities")
         action_identities.append(dict(identity))
-    input_identity = (
-        cache_key[0]
-        if cache_key is not None
-        else hashlib.sha256(
-            repr((node_context.screen_state, action_identities)).encode("utf-8")
-        ).hexdigest()
-    )
+    if cache_key is None:
+        raise ValueError(
+            "T068 callback trace requires the complete canonical public-node identity"
+        )
+    input_identity = cache_key[0]
     entry = {
         "request_id": f"request-{sequence:06d}",
         "request_sequence": sequence,
         "callback_kind": callback_kind,
         "required_outputs": list(required_outputs),
         "public_input_identity": input_identity,
+        "public_input_identity_schema_id": "t067-public-node-cache-key-v1",
+        "public_input_canonical_bytes": len(cache_key[1]),
         "ordered_legal_action_identities": action_identities,
         "native_traversal_point": (
             "policy_prior_apply" if callback_kind == "policy" else "leaf_value_backup"
