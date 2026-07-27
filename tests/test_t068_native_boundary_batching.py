@@ -238,6 +238,38 @@ def test_t068_runner_constructs_exact_t062_arm_contract() -> None:
     with pytest.raises(ValueError, match="finite nonnegative"):
         module._arm_cost_summary(bad_cost_arm)
 
+    accepted_integral_float_arm = {
+        "records": [
+            {
+                "outer_simulator_steps": 8.0,
+                "wall_clock_seconds": 1.0,
+                "problems": [],
+                "controller_compute_telemetry": {
+                    "t067_cost_attribution": {
+                        "python_callback_total_ms": 1.0,
+                        "checkpoint_feature_encoding_ms": 1.0,
+                        "tensor_construction_ms": 1.0,
+                        "policy_value_forward_pass_ms": 1.0,
+                        "model_call_count": 8.0,
+                    },
+                    "search_telemetry_summary": {
+                        "native_simulator_steps": {"total": 23.0},
+                        "wall_clock_time_s": {"total": 1.0},
+                    },
+                },
+            }
+        ]
+    }
+    summary = module._arm_cost_summary(accepted_integral_float_arm)
+    assert summary["model_call_count"] == 8
+    assert summary["outer_simulator_steps"] == 8
+    assert summary["native_search_simulator_steps"] == 23
+    accepted_integral_float_arm["records"][0]["controller_compute_telemetry"][
+        "t067_cost_attribution"
+    ]["model_call_count"] = 1.5
+    with pytest.raises(ValueError, match="model_call_count"):
+        module._arm_cost_summary(accepted_integral_float_arm)
+
 
 def test_t068_semantic_probe_retains_t062_four_arm_contract() -> None:
     script = (

@@ -257,7 +257,7 @@ def _arm_cost_summary(arm: Mapping[str, Any]) -> dict[str, Any]:
             raise ValueError(
                 "T068 guided arm lacks nonnegative integer model_call_count"
             )
-        model_call_count += calls
+        model_call_count += int(calls)
         for field, target in (
             ("outer_simulator_steps", "outer"),
             ("wall_clock_seconds", "record_wall"),
@@ -271,7 +271,7 @@ def _arm_cost_summary(arm: Mapping[str, Any]) -> dict[str, Any]:
             if not valid:
                 raise ValueError(f"T068 guided arm lacks finite nonnegative {field}")
             if target == "outer":
-                outer_steps += value
+                outer_steps += int(value)
             else:
                 record_wall_seconds += float(value)
         search_summary = telemetry.get("search_telemetry_summary", {})
@@ -293,7 +293,7 @@ def _arm_cost_summary(arm: Mapping[str, Any]) -> dict[str, Any]:
                     f"T068 guided arm lacks finite nonnegative search {field}.total"
                 )
             if target == "native_search":
-                native_search_steps += total
+                native_search_steps += int(total)
             else:
                 search_wall_seconds += float(total)
         failures.extend(
@@ -323,7 +323,13 @@ def _finite_nonnegative(value: Any) -> bool:
 
 
 def _nonnegative_integer(value: Any) -> bool:
-    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(float(value))
+        and value >= 0
+        and float(value).is_integer()
+    )
 
 
 def _write_failure_output(
