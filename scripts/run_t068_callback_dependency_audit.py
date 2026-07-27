@@ -1,0 +1,172 @@
+#!/usr/bin/env python3
+"""Record one T068 callback-dependency audit shard in the pinned WSL ABI."""
+
+from __future__ import annotations
+
+import argparse
+from collections.abc import Mapping
+import hashlib
+import json
+from pathlib import Path
+import re
+import subprocess
+from typing import Any
+
+from sts_combat_rl.commands.model_guided_oracle_search import (
+    build_torch_guidance_scorer_from_checkpoint,
+)
+from sts_combat_rl.commands.t062_battle_search_v2 import (
+    run_t062_comparison_from_cohort_path,
+    run_t062_input_preflight_from_paths,
+)
+from sts_combat_rl.sim.action_space import ActionSpaceConfig
+from sts_combat_rl.sim.battle_search_v2 import BattleSearchV2Controller
+from sts_combat_rl.sim.lightspeed import LightSpeedAdapter
+
+
+EXPECTED_NATIVE_COMMIT = "3cb9ebecb87c38044b34aa0e013d42b222a04087"
+EXPECTED_SOURCE_MANIFEST_SHA256 = (
+    "2f4bd6710a152b080a2c6e4cfbaf509148ffb27d0139a9250f1a0ee19efd6631"
+)
+GUIDED_ARMS = ("prior_only", "value_only", "prior_value")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--cohort", type=Path, required=True)
+    parser.add_argument("--checkpoint", type=Path, required=True)
+    parser.add_argument("--t061-retention-manifest", type=Path, required=True)
+    parser.add_argument("--preflight-output", type=Path, required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--code-commit", required=True)
+    parser.add_argument("--record-range", required=True)
+    parser.add_argument("--shard-index", type=int, required=True)
+    parser.add_argument("--shard-count", type=int, default=16)
+    args = parser.parse_args()
+    if not re.fullmatch(r"[0-9a-f]{40}", args.code_commit):
+        raise SystemExit("T068 audit requires an exact 40-character code commit")
+    if args.shard_count != 16 or args.shard_index not in range(16):
+        raise SystemExit("T068 audit requires 16 explicit one-record shards")
+    if args.record_range != f"{args.shard_index}:{args.shard_index + 1}":
+        raise SystemExit("T068 shard range does not match its explicit shard index")
+    _verify_code_commit(Path.cwd(), args.code_commit)
+    _verify_source_manifest(Path("docs/sts_lightspeed_source_manifest.json"))
+    preflight = run_t062_input_preflight_from_paths(
+        output_path=args.preflight_output,
+        t061_retention_manifest_path=args.t061_retention_manifest,
+        t052_cohort_path=args.cohort,
+        t043_checkpoint_path=args.checkpoint,
+    )
+    if not preflight["command_passed"]:
+        raise SystemExit(
+            "T068 input preflight failed: " + "; ".join(preflight["problems"])
+        )
+    scorer = build_torch_guidance_scorer_from_checkpoint(args.checkpoint)
+    action_space = ActionSpaceConfig.initial_no_potions()
+    arms = [
+        (
+            label,
+            BattleSearchV2Controller(
+                simulations=1,
+                scorer=scorer,
+                ablation=label,  # type: ignore[arg-type]
+                action_space=action_space,
+                inference_cache_enabled=True,
+                callback_dependency_trace_enabled=True,
+            ),
+        )
+        for label in GUIDED_ARMS
+    ]
+    comparison = run_t062_comparison_from_cohort_path(
+        adapter_factory=lambda: LightSpeedAdapter(seed=1, ascension=20),
+        cohort_path=args.cohort,
+        controller_arms=arms,
+        action_space=action_space,
+        max_battle_steps=200,
+        family="t068_callback_dependency_audit",
+        worker_count=1,
+        shard_count=args.shard_count,
+        record_range=args.record_range,
+    )
+    traces = {
+        label: _extract_requests(comparison["arms"][label]) for label in GUIDED_ARMS
+    }
+    for label, requests in traces.items():
+        if not requests:
+            raise SystemExit(f"T068 {label} shard produced no callback requests")
+        for ordinal, request in enumerate(requests):
+            request["request_id"] = f"shard-{args.shard_index:02d}-{ordinal:06d}"
+    output = {
+        "schema_id": "t068-native-callback-dependency-shard-v1",
+        "schema_version": 1,
+        "task_id": "T068",
+        "code_commit": args.code_commit,
+        "native_commit": EXPECTED_NATIVE_COMMIT,
+        "record_range": args.record_range,
+        "shard_index": args.shard_index,
+        "shard_count": args.shard_count,
+        "worker_count": 1,
+        "stage_worker_count": 16,
+        "stage_classification": "one_record_component_of_16_worker_audit",
+        "input_preflight": preflight,
+        "arms": traces,
+        "comparison_successful": comparison["successful"],
+        "comparison_problems": comparison["problems"],
+        "command_passed": comparison["successful"],
+    }
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    if args.output.exists():
+        raise SystemExit(f"T068 refuses to overwrite shard output: {args.output}")
+    args.output.write_text(
+        json.dumps(output, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    return 0 if output["command_passed"] else 1
+
+
+def _extract_requests(value: Any) -> list[dict[str, Any]]:
+    requests: list[dict[str, Any]] = []
+    if isinstance(value, Mapping):
+        trace = value.get("t068_callback_dependency_trace")
+        if isinstance(trace, Mapping) and isinstance(trace.get("requests"), list):
+            requests.extend(
+                dict(item) for item in trace["requests"] if isinstance(item, Mapping)
+            )
+        for child in value.values():
+            requests.extend(_extract_requests(child))
+    elif isinstance(value, list):
+        for child in value:
+            requests.extend(_extract_requests(child))
+    return requests
+
+
+def _verify_code_commit(repo_root: Path, code_commit: str) -> None:
+    actual = _git_output(repo_root, "rev-parse", "HEAD")
+    if actual != code_commit:
+        raise SystemExit(
+            f"T068 source checkout HEAD differs: {actual} != {code_commit}"
+        )
+    status = _git_output(repo_root, "status", "--porcelain", "--untracked-files=no")
+    if status is None or status:
+        raise SystemExit("T068 source checkout has tracked or staged changes")
+
+
+def _git_output(repo_root: Path, *arguments: str) -> str | None:
+    result = subprocess.run(
+        ["git", "-C", str(repo_root), "-c", "core.autocrlf=true", *arguments],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
+def _verify_source_manifest(path: Path) -> None:
+    if hashlib.sha256(path.read_bytes()).hexdigest() != EXPECTED_SOURCE_MANIFEST_SHA256:
+        raise SystemExit("T068 source manifest does not match accepted T067 ABI")
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if raw.get("integration", {}).get("commit") != EXPECTED_NATIVE_COMMIT:
+        raise SystemExit("T068 native source manifest identity is wrong")
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
