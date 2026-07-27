@@ -143,15 +143,31 @@ def _verify_code_commit(repo_root: Path, code_commit: str) -> None:
     actual = _git_output(repo_root, "rev-parse", "HEAD")
     if actual != code_commit:
         raise SystemExit(
-            f"T068 source checkout HEAD differs: {actual} != {code_commit}"
+            "T068 source checkout HEAD differs: "
+            f"{actual} != {code_commit}; {_git_diagnostic(repo_root)}"
         )
     status = _git_output(repo_root, "status", "--porcelain", "--untracked-files=no")
     if status is None or status:
-        raise SystemExit("T068 source checkout has tracked or staged changes")
+        raise SystemExit(
+            "T068 source checkout has tracked or staged changes; "
+            + _git_diagnostic(repo_root)
+        )
 
 
 def _git_output(repo_root: Path, *arguments: str) -> str | None:
-    commands = [["git", "-C", str(repo_root), "-c", "core.autocrlf=true", *arguments]]
+    safe_directory = f"safe.directory={repo_root}"
+    commands = [
+        [
+            "git",
+            "-c",
+            safe_directory,
+            "-C",
+            str(repo_root),
+            "-c",
+            "core.autocrlf=true",
+            *arguments,
+        ]
+    ]
     dot_git = repo_root / ".git"
     if dot_git.is_file():
         marker = dot_git.read_text(encoding="utf-8").strip()
@@ -166,6 +182,8 @@ def _git_output(repo_root: Path, *arguments: str) -> str | None:
             commands.append(
                 [
                     "git",
+                    "-c",
+                    safe_directory,
                     "--git-dir",
                     git_dir,
                     "--work-tree",
@@ -185,6 +203,25 @@ def _git_output(repo_root: Path, *arguments: str) -> str | None:
         if result.returncode == 0:
             return result.stdout.strip()
     return None
+
+
+def _git_diagnostic(repo_root: Path) -> str:
+    result = subprocess.run(
+        [
+            "git",
+            "-c",
+            f"safe.directory={repo_root}",
+            "-C",
+            str(repo_root),
+            "rev-parse",
+            "HEAD",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    message = (result.stderr or result.stdout).strip().replace("\n", " ")
+    return message or f"git exit={result.returncode} without diagnostic"
 
 
 def _verify_source_manifest(path: Path) -> None:
