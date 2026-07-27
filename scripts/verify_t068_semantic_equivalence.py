@@ -11,7 +11,6 @@ import json
 import math
 from pathlib import Path
 import re
-import subprocess
 from time import perf_counter
 from typing import Any
 
@@ -22,6 +21,7 @@ from sts_combat_rl.commands.t062_battle_search_v2 import (
     run_t062_comparison_from_cohort_path,
     run_t062_input_preflight_from_paths,
 )
+from sts_combat_rl.commands.t068_checkout import verify_exact_git_checkout
 from sts_combat_rl.sim.action_space import ActionSpaceConfig
 from sts_combat_rl.sim.battle_search_v2 import BattleSearchV2Controller
 from sts_combat_rl.sim.battle_search_v2_cost import public_node_cache_key
@@ -338,39 +338,10 @@ def _mismatch(left: Any, right: Any, tolerance: float, path: str = "") -> str | 
 
 
 def _verify_checkout(root: Path, commit: str) -> None:
-    output = subprocess.run(
-        [
-            "git",
-            "-C",
-            str(root),
-            "-c",
-            "safe.directory=" + str(root),
-            "rev-parse",
-            "HEAD",
-        ],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    if output.returncode or output.stdout.strip() != commit:
-        raise SystemExit("T068 semantic source checkout does not match --code-commit")
-    status = subprocess.run(
-        [
-            "git",
-            "-C",
-            str(root),
-            "-c",
-            "safe.directory=" + str(root),
-            "status",
-            "--porcelain",
-            "--untracked-files=no",
-        ],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    if status.returncode or status.stdout.strip():
-        raise SystemExit("T068 semantic source checkout has tracked or staged changes")
+    try:
+        verify_exact_git_checkout(root, commit)
+    except ValueError as exc:
+        raise SystemExit(f"T068 semantic {exc}") from exc
 
 
 def _verify_source_manifest(path: Path) -> None:

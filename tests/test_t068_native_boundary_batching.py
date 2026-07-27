@@ -4,6 +4,7 @@ from copy import deepcopy
 import importlib.util
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -16,6 +17,7 @@ from sts_combat_rl.commands.t068_native_boundary_batching import (
     build_t068_callback_dependency_audit,
     build_t068_decision_report,
 )
+from sts_combat_rl.commands import t068_checkout
 from sts_combat_rl.sim.action_space import ActionSpaceConfig
 from sts_combat_rl.sim.search_guidance_inference import (
     SearchGuidanceCheckpointProvenance,
@@ -195,7 +197,6 @@ def test_t068_runner_constructs_exact_t062_arm_contract() -> None:
     assert all(
         controller.callback_dependency_trace_enabled for _, controller in arms[1:]
     )
-
     comparison_problems = module._comparison_problems(
         {
             "source_match_problems": ["source mismatch"],
@@ -316,3 +317,27 @@ def test_t068_semantic_probe_retains_t062_four_arm_contract() -> None:
     assert all(
         controller.callback_dependency_trace_enabled for _, controller in arms[1:]
     )
+
+
+def test_t068_windows_gitfile_checkout_falls_back_to_wsl_gitdir(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / ".git").write_text(
+        "gitdir: D:/DeadlycatCoding/STSRL/.git/worktrees/t068\n", encoding="utf-8"
+    )
+    calls: list[list[str]] = []
+
+    def fake_run(command: list[str], **_: object) -> SimpleNamespace:
+        calls.append(command)
+        if "--git-dir" not in command:
+            return SimpleNamespace(returncode=1, stdout="")
+        if command[-2:] == ["rev-parse", "HEAD"]:
+            return SimpleNamespace(returncode=0, stdout="a" * 40 + "\n")
+        assert command[-3:] == ["status", "--porcelain", "--untracked-files=no"]
+        return SimpleNamespace(returncode=0, stdout="")
+
+    monkeypatch.setattr(t068_checkout.subprocess, "run", fake_run)
+    t068_checkout.verify_exact_git_checkout(tmp_path, "a" * 40)
+    fallback_calls = [call for call in calls if "--git-dir" in call]
+    assert len(fallback_calls) == 2
+    assert "/mnt/d/DeadlycatCoding/STSRL/.git/worktrees/t068" in fallback_calls[0]

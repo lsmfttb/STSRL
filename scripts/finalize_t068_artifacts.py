@@ -7,7 +7,8 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
-import subprocess
+
+from sts_combat_rl.commands.t068_checkout import verify_exact_git_checkout
 
 
 def main() -> int:
@@ -286,25 +287,10 @@ def _artifact_schema(path: Path) -> str:
 
 
 def _verify_source_checkout(path: Path, code_commit: str) -> None:
-    commands = (
-        ("rev-parse", "HEAD"),
-        ("status", "--porcelain", "--untracked-files=no"),
-    )
-    outputs: list[str] = []
-    for command in commands:
-        result = subprocess.run(
-            ["git", "-C", str(path), "-c", "safe.directory=" + str(path), *command],
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        if result.returncode:
-            raise SystemExit("T068 finalizer cannot verify source checkout")
-        outputs.append(result.stdout.strip())
-    if outputs[0] != code_commit or outputs[1]:
-        raise SystemExit(
-            "T068 finalizer source checkout differs from the exact clean code commit"
-        )
+    try:
+        verify_exact_git_checkout(path, code_commit)
+    except ValueError as exc:
+        raise SystemExit(f"T068 finalizer {exc}") from exc
 
 
 if __name__ == "__main__":
