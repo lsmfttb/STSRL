@@ -457,21 +457,29 @@ class TorchPolicyValueGuidanceScorer:
         validate_search_guidance_context(context)
         _validate_context_schema(self.model, context)
 
+        feature_started = perf_counter()
+        encoded_state_features = _state_features(
+            context.snapshot_features,
+            encode_public_context_features(context.public_run_context),
+        )
+        feature_encoded_ms = (perf_counter() - feature_started) * 1000.0
+        tensor_started = perf_counter()
         state_features = torch.tensor(
-            _state_features(
-                context.snapshot_features,
-                encode_public_context_features(context.public_run_context),
-            ),
+            encoded_state_features,
             dtype=torch.float32,
         )
         action_features = torch.tensor(
             context.legal_action_features,
             dtype=torch.float32,
         )
+        tensor_construction_ms = (perf_counter() - tensor_started) * 1000.0
+        forward_started = perf_counter()
         logits, outcome_logit, hp_value, resource_values = self.model(
             state_features,
             action_features,
         )
+        model_forward_ms = (perf_counter() - forward_started) * 1000.0
+        postprocess_started = perf_counter()
         probabilities = _eligible_policy_probabilities(
             logits,
             context.eligible_action_indices,
@@ -496,6 +504,7 @@ class TorchPolicyValueGuidanceScorer:
                 for index, name in enumerate(self.model.resource_target_names)
             },
         )
+        postprocess_ms = (perf_counter() - postprocess_started) * 1000.0
         return SearchGuidanceInferenceResult(
             scorer_name=self.name,
             checkpoint_provenance=self.checkpoint_provenance,
@@ -504,6 +513,12 @@ class TorchPolicyValueGuidanceScorer:
             action_scores=action_scores,
             value_prediction=value_prediction,
             duration_ms=(perf_counter() - started) * 1000.0,
+            timing_ms={
+                "feature_encoding_ms": feature_encoded_ms,
+                "tensor_construction_ms": tensor_construction_ms,
+                "model_forward_ms": model_forward_ms,
+                "result_postprocess_ms": postprocess_ms,
+            },
         )
 
 
