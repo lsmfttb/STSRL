@@ -64,25 +64,35 @@ def main() -> int:
     scorer = build_torch_guidance_scorer_from_checkpoint(args.checkpoint)
     action_space = ActionSpaceConfig.initial_no_potions()
     arms = _build_arms(scorer, action_space)
-    comparison = run_t062_comparison_from_cohort_path(
-        adapter_factory=lambda: LightSpeedAdapter(seed=1, ascension=20),
-        cohort_path=args.cohort,
-        controller_arms=arms,
-        action_space=action_space,
-        max_battle_steps=200,
-        # T062's existing runner owns the accepted comparison-family enum.
-        # This trace is not a cost comparison, so retain its neutral nominal
-        # family while T068 stamps the audit-specific stage schema separately.
-        family="nominal",
-        worker_count=1,
-        shard_count=args.shard_count,
-        record_range=args.record_range,
-    )
+    try:
+        comparison = run_t062_comparison_from_cohort_path(
+            adapter_factory=lambda: LightSpeedAdapter(seed=1, ascension=20),
+            cohort_path=args.cohort,
+            controller_arms=arms,
+            action_space=action_space,
+            max_battle_steps=200,
+            # T062's existing runner owns the accepted comparison-family enum.
+            # This trace is not a cost comparison, so retain its neutral nominal
+            # family while T068 stamps the audit-specific stage schema separately.
+            family="nominal",
+            worker_count=1,
+            shard_count=args.shard_count,
+            record_range=args.record_range,
+        )
+    except BaseException as exc:
+        _write_failure_output(args, stage="comparison", error=repr(exc))
+        raise
     traces = {
         label: _extract_requests(comparison["arms"][label]) for label in GUIDED_ARMS
     }
     for label, requests in traces.items():
         if not requests:
+            _write_failure_output(
+                args,
+                stage="trace_extraction",
+                error=f"{label} produced no callback requests",
+                comparison=comparison,
+            )
             raise SystemExit(f"T068 {label} shard produced no callback requests")
         for ordinal, request in enumerate(requests):
             request["request_id"] = f"shard-{args.shard_index:02d}-{ordinal:06d}"
@@ -162,6 +172,43 @@ def _extract_requests(value: Any) -> list[dict[str, Any]]:
         for child in value:
             requests.extend(_extract_requests(child))
     return requests
+
+
+def _write_failure_output(
+    args: argparse.Namespace,
+    *,
+    stage: str,
+    error: str,
+    comparison: Mapping[str, Any] | None = None,
+) -> None:
+    """Persist a fresh fail-closed shard diagnostic before surfacing an error."""
+
+    if args.output.exists():
+        return
+    payload: dict[str, Any] = {
+        "schema_id": "t068-native-callback-dependency-shard-v1",
+        "schema_version": 1,
+        "task_id": "T068",
+        "code_commit": args.code_commit,
+        "record_range": args.record_range,
+        "shard_index": args.shard_index,
+        "shard_count": args.shard_count,
+        "failure_stage": stage,
+        "failure": error,
+        "command_passed": False,
+    }
+    if comparison is not None:
+        payload["comparison_successful"] = comparison.get("successful")
+        payload["comparison_problems"] = comparison.get("source_match_problems")
+        payload["observed_arm_record_counts"] = {
+            label: len(arm.get("records", []))
+            for label, arm in comparison.get("arms", {}).items()
+            if isinstance(arm, Mapping)
+        }
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
 
 
 def _verify_code_commit(repo_root: Path, code_commit: str) -> None:
