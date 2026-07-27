@@ -73,18 +73,20 @@ def main() -> int:
                 action_space=action_space,
             ),
         ),
-        (
-            label,
-            BattleSearchV2Controller(
-                simulations=1,
-                scorer=scorer,
-                ablation=label,  # type: ignore[arg-type]
-                action_space=action_space,
-                inference_cache_enabled=True,
-                callback_dependency_trace_enabled=True,
-            ),
-        )
-        for label in GUIDED_ARMS
+        *[
+            (
+                label,
+                BattleSearchV2Controller(
+                    simulations=1,
+                    scorer=scorer,
+                    ablation=label,  # type: ignore[arg-type]
+                    action_space=action_space,
+                    inference_cache_enabled=True,
+                    callback_dependency_trace_enabled=True,
+                ),
+            )
+            for label in GUIDED_ARMS
+        ],
     ]
     comparison = run_t062_comparison_from_cohort_path(
         adapter_factory=lambda: LightSpeedAdapter(seed=1, ascension=20),
