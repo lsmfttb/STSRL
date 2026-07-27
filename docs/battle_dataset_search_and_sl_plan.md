@@ -47,9 +47,14 @@ allocation repair experiment. T059 completed that experiment: it preserved
 T048 but did not improve the T052/T053 harm, so allocation repair is closed.
 T060 was cancelled before execution. T061 replaced it with matched battle-budget
 and complete-run interventions, found a positive battle-budget effect on Act-2
-entry under the expert non-combat driver, and selected T062. T062 is now the
-`READY` task: a minimal tree-internal policy/value search comparison under
-equal nominal and compute-normalized budgets.
+entry under the expert non-combat driver, and selected T062. T062 completed the
+minimal tree-internal policy/value surface but exited before outcome comparison
+because minimum-budget calibration was infeasible. T067 attributed the cost
+and tested one exact public-node cache; 0/866 lookups hit, two guided arms
+remained minimum-budget wall-clock infeasible, and no outcome comparison or
+promotion was authorized. T068 is now the `READY` task: a fail-closed audit and
+bounded feasibility test for exact batching across the native/Python inference
+boundary.
 New implementation work should start only from rows marked `READY` in the task
 index; T034 remains blocked on native sampler support.
 
@@ -383,8 +388,9 @@ Work:
 - satisfy broad-training readiness per ascension and act;
 - keep mechanical cleanup separate from coverage/search experiments;
 - use T061's accepted bottleneck decomposition to keep another unchanged
-  natural source scale-up closed while T062 tests tree-internal policy/value
-  search guidance at matched compute;
+  natural source scale-up closed while T068 determines whether exact
+  native-boundary batching can make the accepted T062/T067 tree-internal
+  policy/value search surface compute-feasible;
 - keep the closed root-prior allocation-repair route out of further
   reachability, training, and promotion work.
 
@@ -455,9 +461,16 @@ auditable, found 2 harmful selected-action divergence records, and selected the
 T059 bounded root-prior allocation repair experiment. T059 preserved T048 but
 left T052/T053 tied to the harmful existing-root-prior result, so allocation
 repair is closed. T061 then established a positive complete-run battle-budget
-effect on Act-2 entry and selected T062. The active priority is T062's minimal
-tree-internal policy/value search surface; further natural source scale-up
-remains contingent on improved policy evidence.
+effect on Act-2 entry and selected T062. T062 implemented the minimal
+tree-internal policy/value surface but could not enter its outcome comparison
+because minimum-budget cost calibration failed. T067 attributed that cost and
+tested exact public-node caching; no cache reuse occurred, two guided arms
+remained wall-clock infeasible, and the cache direction closed. The active
+priority is T068's native-boundary batching feasibility gate. It may implement
+one exact batch boundary and re-enter cost calibration only if the accepted
+native traversal exposes simultaneously ready requests without changing tree
+semantics. Further natural source scale-up remains contingent on improved
+policy evidence.
 
 Exit gate: a search change improves fixed evaluation at equal simulation or
 wall-clock budget without natural-weighted regression.

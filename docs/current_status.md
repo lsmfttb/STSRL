@@ -1,6 +1,6 @@
 # Current Status
 
-Last reviewed: 2026-07-21.
+Last reviewed: 2026-07-27.
 
 This document describes the latest `main` branch only. Results from local
 artifacts, old branches, or unmerged pull requests do not count as implemented
@@ -84,8 +84,11 @@ T061 is complete. Its matched restored-battle curve and six-arm complete-run
 factorial probe found a positive battle-budget effect on Act-2 entry under
 `expert_non_combat_v1`, no Act-3/Act-4/Heart reachability, and selected T062 as
 the single next task. T062 is complete through its accepted
-calibration-infeasibility early exit. T067 is the only `READY` task. T034
-remains blocked on native public-consistent hidden-future sampler support.
+calibration-infeasibility early exit. T067 is complete: its exact public-node
+cache preserved semantics but recorded no reuse, left two guided arms
+minimum-budget wall-clock infeasible, and selected T068 without authorizing an
+outcome comparison. T068 is the only `READY` task. T034 remains blocked on
+native public-consistent hidden-future sampler support.
 
 ## Implemented On Main
 
@@ -376,7 +379,7 @@ remains blocked on native public-consistent hidden-future sampler support.
 
 ### Tests And Runtime Evidence
 
-- `743` tests pass on Windows Python as of the T062 merge review. In an
+- `759` tests pass on Windows Python as of the T067 merge review. In an
   uninstalled checkout, set `PYTHONPATH=src` (or install the package) before
   invoking the CLI directly.
 - The two CommunicationMod fixture smokes pass.
@@ -1186,6 +1189,35 @@ remains blocked on native public-consistent hidden-future sampler support.
   `full_simulator_state_oracle_like` cost-feasibility evidence only, not
   fixed-cohort outcome evidence, natural A20 performance, normal-information
   strength, live-game validation, or final-agent evidence.
+- T067 adds versioned Search v2 cost attribution plus the
+  `battle_search_v2_oracle_like_t067_cache_v1` exact public-node inference
+  cache. It is accepted on `main` at merge commit
+  `c65786e614d05c562eb78afaa61dbacff2f8f5bb`; the exact artifact-producing
+  implementation commit is
+  `ea47ee9df57b026bff96cf5c902f6a207b534cb1`. Semantic comparison on retained
+  T052 record `0:1` matched policy/value outputs within `1e-6` and selected
+  action identities exactly for `prior_only`, `value_only`, and
+  `prior_value`. The reproduced `0:16` stage used 16 one-record
+  shards/workers and recorded 866 cache lookups, 0 hits, 866 misses, and 0
+  evictions. Budget-1 wall ratios were `1.164582194439893` for `prior_only`,
+  `1.1487986693454382` for `value_only`, and `1.0240645131300026` for
+  `prior_value`; the first two arms were proven infeasible at the minimum
+  legal budget. T067 therefore failed all required calibration locks, ran no
+  93-record outcome comparison, authorized no controller promotion, closed the
+  exact-cache direction, and selected exactly
+  `T068-native-boundary-batched-inference-feasibility`. The canonical retained
+  root is
+  `artifacts/t067-battle-search-v2-inference-cost-repair/reproduction-ea47ee9/`.
+  Its 72-artifact retention manifest is schema
+  `t067-battle-search-v2-retention-manifest-v2`, 43659 bytes, sha256
+  `2119e36bccff86fd65f00474177d11bb222a05303651dc18423de7f1174d35da`;
+  indexed artifacts total 77,759,244 bytes. The six authoritative regeneration
+  commands prepare an exact detached source checkout and fresh output root,
+  contain no disposable `.claude/worktrees` dependency, and were executed
+  end-to-end during review. This remains `full_simulator_state_oracle_like`
+  cost-feasibility evidence only, not fixed-cohort outcome evidence, natural
+  A20 performance, normal-information strength, live-game validation,
+  broad-training evidence, or final-agent evidence.
 
 ## Not Implemented On Main
 
@@ -1195,6 +1227,8 @@ unmerged legacy work:
 - interactive live-game or A20 performance validation for any controller;
 - broad neural training on a scale/distribution-approved A20 dataset;
 - model-guided search performance improvement or controller promotion;
+- semantics-preserving native-boundary batching or compute-feasible Search v2
+  calibration;
 - sufficient Boss/later-act A20 source coverage for broad teacher/checkpoint
   refresh or broad training;
 - root-prior allocation repair, root-prior guided complete-run reachability
@@ -1370,13 +1404,21 @@ interventions. The accepted result found a positive battle-budget effect on
 Act-2 entry under `expert_non_combat_v1`, no Act-3/Act-4/Heart reachability,
 and selected T062 as exactly one next task.
 
-T062 (`Battle Search v2 Minimal Surface`) is complete. Its tree-internal
-policy/value search surface is accepted, but minimum-budget `prior_only`
-wall-clock cost made the primary comparison infeasible. T067 (`Battle Search
-v2 Inference-Cost Repair`) is the only `READY` task. It must attribute that
-cost, apply exactly one semantic-preserving repair, and re-enter the original
-calibration before any conditional 93-record outcome comparison. No further
-natural source scale-up is authorized by the T062 cost-only result.
+T062 (`Battle Search v2 Minimal Surface`) and T067 (`Battle Search v2
+Inference-Cost Repair`) are complete. T067 attributed the accepted
+tree-internal inference cost and tested one exact public-node cache, but the
+retained calibration observed 0 hits across 866 lookups. `prior_only` and
+`value_only` still exceeded the 1.10 wall-clock ceiling at budget 1, so no
+93-record outcome comparison or controller promotion was authorized.
+
+T068 (`Native-Boundary Batched Inference Feasibility`) is the only `READY`
+task. It first records exact native callback dependencies and requires proof of
+simultaneously ready public-node requests before implementing one batch
+boundary. If that gate passes, it preserves T067 semantics and re-enters the
+same 16-record calibration; otherwise it closes batching with a versioned
+infeasibility report. T068 cannot run the 93-record outcome comparison. No
+further natural source scale-up is authorized by the T062/T067 cost-only
+results.
 
 T034 remains blocked on an explicit native simulator boundary for
 public-consistent hidden-future sampling.

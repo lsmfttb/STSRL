@@ -80,7 +80,8 @@ the current milestone, but they do not override this table.
 | T064 | DRAFT | [Simulator-generated later-act curriculum](T064-simulator-generated-later-act-curriculum.md) | T061, T062 | natural, Oracle-reached, assisted, and simulator-validated transformed later-act distributions |
 | T065 | DRAFT | [Learned non-combat policy v1](T065-learned-non-combat-policy-v1.md) | T061, T033 | simulator-return and counterfactual continuation targets without heuristic imitation |
 | T066 | DRAFT | [Alternating joint policy improvement and natural scale gate](T066-alternating-joint-policy-improvement-and-natural-scale-gate.md) | T062, T063, T064, T065 | separate battle/non-combat policies with shared run value, followed by conditional natural scale-up |
-| T067 | READY | [Battle Search v2 inference-cost repair](T067-battle-search-v2-inference-cost-repair.md) | T062, T061, T052, T043 | semantic-preserving cost attribution/repair and conditional calibration re-entry |
+| T067 | DONE | [Battle Search v2 inference-cost repair](T067-battle-search-v2-inference-cost-repair.md) | T062, T061, T052, T043 | exact-cache repair preserved semantics but had 0/866 hits; cost calibration remained infeasible and selected T068 |
+| T068 | READY | [Native-boundary batched inference feasibility](T068-native-boundary-batched-inference-feasibility.md) | T067, T062, T052, T043 | prove or reject exact native/Python callback batching before any further Search v2 comparison |
 
 Use the table, not per-task files or roadmap prose, when deciding whether a task
 may receive a branch. Only `READY` rows should receive a new implementation
@@ -114,8 +115,14 @@ the single next task. T062 is complete through its published
 calibration-infeasibility early exit: the tree-internal search surface is
 accepted, no 93-record outcome comparison or controller promotion was
 authorized, and T067 was selected for inference-cost repair and calibration
-re-entry. T067 is now the only `READY` task. T063--T066 remain draft until
-their named dependencies and publication gates are satisfied.
+re-entry. T067 is complete: its exact public-node cache preserved semantics but
+recorded 0 hits in 866 lookups, left `prior_only` and `value_only` infeasible at
+minimum budget 1, ran no 93-record outcome comparison, and selected exactly
+T068. T068 is now the only `READY` task. It first audits whether the existing
+native traversal exposes simultaneously ready inference requests; production
+batching and calibration are conditional on that fail-closed feasibility gate.
+T063--T066 remain draft until their named dependencies and publication gates
+are satisfied.
 
 ## Task Boundary And Artifact Rules
 
@@ -152,7 +159,7 @@ execution for a substantial workload.
 ## Published Queue
 
 The executable queue is exactly the set of `READY` rows in the Active Backlog.
-T067 is the only `READY` task. T034 remains blocked on native
+T068 is the only `READY` task. T034 remains blocked on native
 public-consistent hidden-future sampling support.
 
 ## Standard Local Gates
@@ -173,9 +180,9 @@ requirements.
 
 ## Historical Mapping
 
-Completed and cancelled task documents remain the durable historical record for
-T001--T061. Accepted experiment details and artifact identities remain in their
-individual task documents, reports, and `current_status.md`; this index only
-owns lifecycle state and the current executable queue.
+Completed and cancelled task documents through T067 remain the durable
+historical record. Accepted experiment details and artifact identities remain
+in their individual task documents, reports, and `current_status.md`; this
+index only owns lifecycle state and the current executable queue.
 
 New task documents should start from [`TEMPLATE.md`](TEMPLATE.md).
