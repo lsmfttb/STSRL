@@ -7,6 +7,7 @@ import argparse
 from collections.abc import Mapping
 import hashlib
 import json
+import math
 from pathlib import Path
 import re
 import subprocess
@@ -223,12 +224,12 @@ def _arm_cost_summary(arm: Mapping[str, Any]) -> dict[str, Any]:
         "checkpoint_feature_encoding_ms",
         "tensor_construction_ms",
         "policy_value_forward_pass_ms",
-        "model_call_count",
     )
     totals = {field: 0.0 for field in fields}
-    outer_steps = 0.0
+    model_call_count = 0
+    outer_steps = 0
     record_wall_seconds = 0.0
-    native_search_steps = 0.0
+    native_search_steps = 0
     search_wall_seconds = 0.0
     failures: list[str] = []
     records = arm.get("records", [])
@@ -247,19 +248,30 @@ def _arm_cost_summary(arm: Mapping[str, Any]) -> dict[str, Any]:
             raise ValueError("T068 guided arm lacks T067 cost telemetry")
         for field in fields:
             value = cost.get(field)
-            if isinstance(value, (int, float)) and not isinstance(value, bool):
+            if _finite_nonnegative(value):
                 totals[field] += float(value)
             else:
-                raise ValueError(f"T068 guided arm lacks numeric {field}")
+                raise ValueError(f"T068 guided arm lacks finite nonnegative {field}")
+        calls = cost.get("model_call_count")
+        if not _nonnegative_integer(calls):
+            raise ValueError(
+                "T068 guided arm lacks nonnegative integer model_call_count"
+            )
+        model_call_count += calls
         for field, target in (
             ("outer_simulator_steps", "outer"),
             ("wall_clock_seconds", "record_wall"),
         ):
             value = record.get(field)
-            if not isinstance(value, (int, float)) or isinstance(value, bool):
-                raise ValueError(f"T068 guided arm lacks numeric {field}")
+            valid = (
+                _nonnegative_integer(value)
+                if target == "outer"
+                else _finite_nonnegative(value)
+            )
+            if not valid:
+                raise ValueError(f"T068 guided arm lacks finite nonnegative {field}")
             if target == "outer":
-                outer_steps += float(value)
+                outer_steps += value
             else:
                 record_wall_seconds += float(value)
         search_summary = telemetry.get("search_telemetry_summary", {})
@@ -271,10 +283,17 @@ def _arm_cost_summary(arm: Mapping[str, Any]) -> dict[str, Any]:
         ):
             value = search_summary.get(field, {})
             total = value.get("total") if isinstance(value, Mapping) else None
-            if not isinstance(total, (int, float)) or isinstance(total, bool):
-                raise ValueError(f"T068 guided arm lacks numeric search {field}.total")
+            valid = (
+                _nonnegative_integer(total)
+                if target == "native_search"
+                else _finite_nonnegative(total)
+            )
+            if not valid:
+                raise ValueError(
+                    f"T068 guided arm lacks finite nonnegative search {field}.total"
+                )
             if target == "native_search":
-                native_search_steps += float(total)
+                native_search_steps += total
             else:
                 search_wall_seconds += float(total)
         failures.extend(
@@ -285,12 +304,26 @@ def _arm_cost_summary(arm: Mapping[str, Any]) -> dict[str, Any]:
     return {
         "record_count": len(records),
         "component_cost_ms": totals,
+        "model_call_count": model_call_count,
         "outer_simulator_steps": outer_steps,
         "record_wall_clock_seconds": record_wall_seconds,
         "native_search_simulator_steps": native_search_steps,
         "search_wall_clock_seconds": search_wall_seconds,
         "failures": failures,
     }
+
+
+def _finite_nonnegative(value: Any) -> bool:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(float(value))
+        and value >= 0
+    )
+
+
+def _nonnegative_integer(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
 
 def _write_failure_output(

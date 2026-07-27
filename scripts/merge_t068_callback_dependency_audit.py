@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import re
 from pathlib import Path
 from typing import Any
@@ -143,9 +144,10 @@ def _aggregate_costs(shards: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         component_totals: dict[str, float] = {}
         totals = {
             "record_count": 0,
-            "outer_simulator_steps": 0.0,
+            "model_call_count": 0,
+            "outer_simulator_steps": 0,
             "record_wall_clock_seconds": 0.0,
-            "native_search_simulator_steps": 0.0,
+            "native_search_simulator_steps": 0,
             "search_wall_clock_seconds": 0.0,
         }
         failures: list[str] = []
@@ -159,14 +161,25 @@ def _aggregate_costs(shards: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
             if not isinstance(components, dict):
                 raise SystemExit(f"T068 {arm} lacks component telemetry")
             for key, item in components.items():
-                if not isinstance(item, (int, float)) or isinstance(item, bool):
-                    raise SystemExit(f"T068 {arm} has nonnumeric component telemetry")
+                if not _finite_nonnegative(item):
+                    raise SystemExit(f"T068 {arm} has invalid component telemetry")
                 component_totals[key] = component_totals.get(key, 0.0) + float(item)
             for key in totals:
                 item = value.get(key)
-                if not isinstance(item, (int, float)) or isinstance(item, bool):
-                    raise SystemExit(f"T068 {arm} lacks numeric {key}")
-                totals[key] += float(item)
+                valid = (
+                    _nonnegative_integer(item)
+                    if key
+                    in {
+                        "record_count",
+                        "model_call_count",
+                        "outer_simulator_steps",
+                        "native_search_simulator_steps",
+                    }
+                    else _finite_nonnegative(item)
+                )
+                if not valid:
+                    raise SystemExit(f"T068 {arm} lacks valid {key}")
+                totals[key] += item
             failures.extend(str(problem) for problem in value["failures"])
         output[arm] = {
             "component_cost_ms": component_totals,
@@ -188,6 +201,19 @@ def _load_json(path: Path) -> dict[str, Any]:
 
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _finite_nonnegative(value: Any) -> bool:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(float(value))
+        and value >= 0
+    )
+
+
+def _nonnegative_integer(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
 
 def _write_fresh(path: Path, payload: dict[str, Any]) -> None:

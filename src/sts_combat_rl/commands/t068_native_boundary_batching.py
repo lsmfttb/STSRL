@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+import math
 from typing import Any
 
 
@@ -136,10 +137,7 @@ def build_t068_decision_report(
             raise ValueError(f"T068 decision lacks {arm} component costs")
         feature = components.get("checkpoint_feature_encoding_ms")
         forward = components.get("policy_value_forward_pass_ms")
-        if not all(
-            isinstance(value, (int, float)) and not isinstance(value, bool)
-            for value in (feature, forward)
-        ):
+        if not all(_finite_nonnegative(value) for value in (feature, forward)):
             raise ValueError(f"T068 decision has invalid {arm} component costs")
         if float(feature) <= float(forward):
             raise ValueError(
@@ -189,8 +187,9 @@ def build_t068_batch_feasibility_report(
             raise ValueError(f"T068 feasibility lacks {arm} component costs")
         feature = components.get("checkpoint_feature_encoding_ms")
         forward = components.get("policy_value_forward_pass_ms")
-        if not all(isinstance(value, (int, float)) for value in (feature, forward)):
+        if not all(_finite_nonnegative(value) for value in (feature, forward)):
             raise ValueError(f"T068 feasibility has invalid {arm} component costs")
+        _validate_prototype_cost(arm, cost)
         costs[arm] = dict(cost)
     return {
         "schema_id": T068_FEASIBILITY_SCHEMA_ID,
@@ -285,10 +284,38 @@ def _validate_requests(arm: str, requests: Sequence[Mapping[str, Any]]) -> None:
                 f"T068 {arm} request {request_id} has unknown flush reason"
             )
         elapsed = request.get("callback_elapsed_ms")
-        if (
-            not isinstance(elapsed, (int, float))
-            or isinstance(elapsed, bool)
-            or elapsed < 0
-        ):
+        if not _finite_nonnegative(elapsed):
             raise ValueError(f"T068 {arm} request {request_id} lacks callback timing")
         seen.add(request_id)
+
+
+def _validate_prototype_cost(arm: str, cost: Mapping[str, Any]) -> None:
+    components = cost["component_cost_ms"]
+    if not isinstance(components, Mapping) or not components:
+        raise ValueError(f"T068 feasibility lacks {arm} component costs")
+    if not all(_finite_nonnegative(value) for value in components.values()):
+        raise ValueError(f"T068 feasibility has invalid {arm} component costs")
+    for name in ("record_wall_clock_seconds", "search_wall_clock_seconds"):
+        if not _finite_nonnegative(cost.get(name)):
+            raise ValueError(f"T068 feasibility has invalid {arm} {name}")
+    for name in (
+        "model_call_count",
+        "record_count",
+        "outer_simulator_steps",
+        "native_search_simulator_steps",
+    ):
+        if not _nonnegative_integer(cost.get(name)):
+            raise ValueError(f"T068 feasibility has invalid {arm} {name}")
+
+
+def _finite_nonnegative(value: Any) -> bool:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(float(value))
+        and value >= 0
+    )
+
+
+def _nonnegative_integer(value: Any) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool) and value >= 0

@@ -51,6 +51,22 @@ def _shards() -> list[dict[str, object]]:
     ]
 
 
+def _cost(*, feature: float = 2.0, forward: float = 1.0) -> dict[str, object]:
+    return {
+        "component_cost_ms": {
+            "checkpoint_feature_encoding_ms": feature,
+            "policy_value_forward_pass_ms": forward,
+        },
+        "model_call_count": 1,
+        "record_count": 1,
+        "outer_simulator_steps": 1,
+        "record_wall_clock_seconds": 1.0,
+        "native_search_simulator_steps": 1,
+        "search_wall_clock_seconds": 1.0,
+        "failures": [],
+    }
+
+
 def test_t068_synchronous_singletons_fail_closed_and_select_one_next_path() -> None:
     audit = build_t068_callback_dependency_audit(
         shard_traces=_shards(),
@@ -68,15 +84,7 @@ def test_t068_synchronous_singletons_fail_closed_and_select_one_next_path() -> N
     )
     feasibility = build_t068_batch_feasibility_report(
         audit,
-        prototype_costs={
-            arm: {
-                "component_cost_ms": {
-                    "checkpoint_feature_encoding_ms": 2.0,
-                    "policy_value_forward_pass_ms": 1.0,
-                }
-            }
-            for arm in T068_GUIDED_ARMS
-        },
+        prototype_costs={arm: _cost() for arm in T068_GUIDED_ARMS},
     )
     assert feasibility["schema_id"] == T068_FEASIBILITY_SCHEMA_ID
     decision = build_t068_decision_report(audit, feasibility)
@@ -117,6 +125,35 @@ def test_t068_rejects_duplicate_or_incomplete_callback_responses() -> None:
             native_source_audit={"synchronous_return_required": True},
             code_commit="a" * 40,
         )
+
+
+@pytest.mark.parametrize("invalid", [float("nan"), float("inf"), -0.1])
+def test_t068_rejects_nonfinite_or_negative_timing_and_costs(invalid: float) -> None:
+    invalid_trace = _shards()
+    invalid_trace[0]["arms"]["prior_only"][0]["callback_elapsed_ms"] = invalid
+    with pytest.raises(ValueError, match="callback timing"):
+        build_t068_callback_dependency_audit(
+            shard_traces=invalid_trace,
+            input_identities={},
+            native_source_audit={"synchronous_return_required": True},
+            code_commit="a" * 40,
+        )
+
+    audit = build_t068_callback_dependency_audit(
+        shard_traces=_shards(),
+        input_identities={},
+        native_source_audit={"synchronous_return_required": True},
+        code_commit="a" * 40,
+    )
+    costs = {arm: _cost() for arm in T068_GUIDED_ARMS}
+    costs["prior_only"]["component_cost_ms"]["checkpoint_feature_encoding_ms"] = invalid
+    with pytest.raises(ValueError, match="invalid prior_only component costs"):
+        build_t068_batch_feasibility_report(audit, prototype_costs=costs)
+
+    costs = {arm: _cost() for arm in T068_GUIDED_ARMS}
+    costs["value_only"]["model_call_count"] = 1.5
+    with pytest.raises(ValueError, match="model_call_count"):
+        build_t068_batch_feasibility_report(audit, prototype_costs=costs)
 
 
 def test_t068_runner_constructs_exact_t062_arm_contract() -> None:
@@ -175,6 +212,31 @@ def test_t068_runner_constructs_exact_t062_arm_contract() -> None:
         "prior_only: evaluation failure",
         "prior_only: record failure",
     ]
+
+    bad_cost_arm = {
+        "records": [
+            {
+                "outer_simulator_steps": 1,
+                "wall_clock_seconds": 1.0,
+                "problems": [],
+                "controller_compute_telemetry": {
+                    "t067_cost_attribution": {
+                        "python_callback_total_ms": float("nan"),
+                        "checkpoint_feature_encoding_ms": 1.0,
+                        "tensor_construction_ms": 1.0,
+                        "policy_value_forward_pass_ms": 1.0,
+                        "model_call_count": 1,
+                    },
+                    "search_telemetry_summary": {
+                        "native_simulator_steps": {"total": 1},
+                        "wall_clock_time_s": {"total": 1.0},
+                    },
+                },
+            }
+        ]
+    }
+    with pytest.raises(ValueError, match="finite nonnegative"):
+        module._arm_cost_summary(bad_cost_arm)
 
 
 def test_t068_semantic_probe_retains_t062_four_arm_contract() -> None:
