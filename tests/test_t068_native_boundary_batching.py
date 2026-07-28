@@ -53,6 +53,13 @@ def _shards() -> list[dict[str, object]]:
     ]
 
 
+def _native_source_audit() -> dict[str, object]:
+    return {
+        "synchronous_return_required": True,
+        "native_commit": "3cb9ebecb87c38044b34aa0e013d42b222a04087",
+    }
+
+
 def _cost(*, feature: float = 2.0, forward: float = 1.0) -> dict[str, object]:
     return {
         "component_cost_ms": {
@@ -73,7 +80,7 @@ def test_t068_synchronous_singletons_fail_closed_and_select_one_next_path() -> N
     audit = build_t068_callback_dependency_audit(
         shard_traces=_shards(),
         input_identities={"t067": {"sha256": "accepted"}},
-        native_source_audit={"synchronous_return_required": True},
+        native_source_audit=_native_source_audit(),
         code_commit="a" * 40,
     )
 
@@ -104,7 +111,7 @@ def test_t068_rejects_duplicate_or_incomplete_callback_responses() -> None:
         build_t068_callback_dependency_audit(
             shard_traces=duplicate,
             input_identities={},
-            native_source_audit={"synchronous_return_required": True},
+            native_source_audit=_native_source_audit(),
             code_commit="a" * 40,
         )
 
@@ -114,7 +121,7 @@ def test_t068_rejects_duplicate_or_incomplete_callback_responses() -> None:
         build_t068_callback_dependency_audit(
             shard_traces=incomplete,
             input_identities={},
-            native_source_audit={"synchronous_return_required": True},
+            native_source_audit=_native_source_audit(),
             code_commit="a" * 40,
         )
 
@@ -124,7 +131,7 @@ def test_t068_rejects_duplicate_or_incomplete_callback_responses() -> None:
         build_t068_callback_dependency_audit(
             shard_traces=missing_identity,
             input_identities={},
-            native_source_audit={"synchronous_return_required": True},
+            native_source_audit=_native_source_audit(),
             code_commit="a" * 40,
         )
 
@@ -137,14 +144,14 @@ def test_t068_rejects_nonfinite_or_negative_timing_and_costs(invalid: float) -> 
         build_t068_callback_dependency_audit(
             shard_traces=invalid_trace,
             input_identities={},
-            native_source_audit={"synchronous_return_required": True},
+            native_source_audit=_native_source_audit(),
             code_commit="a" * 40,
         )
 
     audit = build_t068_callback_dependency_audit(
         shard_traces=_shards(),
         input_identities={},
-        native_source_audit={"synchronous_return_required": True},
+        native_source_audit=_native_source_audit(),
         code_commit="a" * 40,
     )
     costs = {arm: _cost() for arm in T068_GUIDED_ARMS}
@@ -342,3 +349,54 @@ def test_t068_windows_gitfile_checkout_falls_back_to_wsl_gitdir(
     assert len(fallback_calls) == 2
     assert "/mnt/d/DeadlycatCoding/STSRL/.git/worktrees/t068" in fallback_calls[0]
     assert all("core.autocrlf=true" in call for call in calls)
+
+
+def test_t068_finalizer_cross_report_identity_contract_requires_audit_native_commit() -> (
+    None
+):
+    script = (
+        Path(__file__).resolve().parents[1] / "scripts" / "finalize_t068_artifacts.py"
+    )
+    spec = importlib.util.spec_from_file_location("t068_finalizer", script)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    commit = "a" * 40
+    native = "3cb9ebecb87c38044b34aa0e013d42b222a04087"
+    identities = {"t067_retention_manifest": {"sha256": "accepted"}}
+    reports = [
+        {
+            "code_commit": commit,
+            "native_commit": native,
+            "input_identities": identities,
+        },
+        {
+            "code_commit": commit,
+            "native_commit": native,
+            "input_identities": identities,
+        },
+        {"code_commit": commit, "native_commit": native},
+        {"code_commit": commit, "native_commit": native},
+    ]
+    with pytest.raises(SystemExit, match="native commit"):
+        module._verify_report_identity_contract(
+            audit={"code_commit": commit, "input_identities": identities},
+            feasibility=reports[0],
+            decision=reports[1],
+            semantic=reports[2],
+            stage_execution=reports[3],
+            code_commit=commit,
+        )
+    module._verify_report_identity_contract(
+        audit={
+            "code_commit": commit,
+            "native_commit": native,
+            "input_identities": identities,
+        },
+        feasibility=reports[0],
+        decision=reports[1],
+        semantic=reports[2],
+        stage_execution=reports[3],
+        code_commit=commit,
+    )

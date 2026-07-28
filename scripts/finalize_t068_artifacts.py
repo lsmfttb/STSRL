@@ -60,19 +60,14 @@ def main() -> int:
         != "2119e36bccff86fd65f00474177d11bb222a05303651dc18423de7f1174d35da"
     ):
         raise SystemExit("T068 finalizer requires the exact accepted T067 manifest")
-    reports = (audit, feasibility, decision, semantic, stage_execution)
-    if any(value.get("code_commit") != args.code_commit for value in reports):
-        raise SystemExit("T068 finalizer report code commit mismatch")
-    if any(
-        value.get("native_commit") != "3cb9ebecb87c38044b34aa0e013d42b222a04087"
-        for value in reports
-    ):
-        raise SystemExit("T068 finalizer report native commit mismatch")
-    if any(
-        value.get("input_identities") != audit.get("input_identities")
-        for value in (feasibility, decision)
-    ):
-        raise SystemExit("T068 finalizer report input identity mismatch")
+    _verify_report_identity_contract(
+        audit=audit,
+        feasibility=feasibility,
+        decision=decision,
+        semantic=semantic,
+        stage_execution=stage_execution,
+        code_commit=args.code_commit,
+    )
     if audit.get("command_passed") is not True or not audit.get("input_identities"):
         raise SystemExit("T068 finalizer audit is incomplete")
     audit_stage = stage_execution.get("stages", {}).get(
@@ -291,6 +286,30 @@ def _verify_source_checkout(path: Path, code_commit: str) -> None:
         verify_exact_git_checkout(path, code_commit)
     except ValueError as exc:
         raise SystemExit(f"T068 finalizer {exc}") from exc
+
+
+def _verify_report_identity_contract(
+    *,
+    audit: dict,
+    feasibility: dict,
+    decision: dict,
+    semantic: dict,
+    stage_execution: dict,
+    code_commit: str,
+) -> None:
+    reports = (audit, feasibility, decision, semantic, stage_execution)
+    if any(value.get("code_commit") != code_commit for value in reports):
+        raise SystemExit("T068 finalizer report code commit mismatch")
+    if any(
+        value.get("native_commit") != "3cb9ebecb87c38044b34aa0e013d42b222a04087"
+        for value in reports
+    ):
+        raise SystemExit("T068 finalizer report native commit mismatch")
+    if any(
+        value.get("input_identities") != audit.get("input_identities")
+        for value in (feasibility, decision)
+    ):
+        raise SystemExit("T068 finalizer report input identity mismatch")
 
 
 if __name__ == "__main__":

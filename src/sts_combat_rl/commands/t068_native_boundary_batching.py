@@ -12,6 +12,7 @@ T068_FEASIBILITY_SCHEMA_ID = "t068-native-boundary-batch-feasibility-v1"
 T068_DECISION_SCHEMA_ID = "t068-native-boundary-batch-decision-v1"
 T068_GUIDED_ARMS = ("prior_only", "value_only", "prior_value")
 T068_NEXT_RECOMMENDATION = "T069-public-node-feature-encoding-projection-feasibility"
+T068_NATIVE_COMMIT = "3cb9ebecb87c38044b34aa0e013d42b222a04087"
 
 
 def build_t068_callback_dependency_audit(
@@ -33,6 +34,8 @@ def build_t068_callback_dependency_audit(
         raise ValueError("T068 substantial audit requires exactly 16 shards")
     if native_source_audit.get("synchronous_return_required") is not True:
         raise ValueError("T068 native source audit must prove synchronous return")
+    if native_source_audit.get("native_commit") != T068_NATIVE_COMMIT:
+        raise ValueError("T068 native source audit must pin the accepted native commit")
     arms: dict[str, dict[str, Any]] = {}
     problems: list[str] = []
     for arm in T068_GUIDED_ARMS:
@@ -81,6 +84,7 @@ def build_t068_callback_dependency_audit(
         "schema_version": 1,
         "task_id": "T068",
         "code_commit": code_commit,
+        "native_commit": T068_NATIVE_COMMIT,
         "input_identities": dict(input_identities),
         "native_source_audit": dict(native_source_audit),
         "execution_layout": {
