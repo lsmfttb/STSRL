@@ -9,6 +9,7 @@ from typing import Any
 from sts_combat_rl.commands.t062_battle_search_v2 import (
     T062_ARM_LABELS,
     T062_COMPARISON_SCHEMA_ID,
+    _require_calibration_report,
 )
 from sts_combat_rl.sim.public_context_feature_projection import (
     T069_PROJECTION_IMPLEMENTATION_ID,
@@ -181,7 +182,8 @@ def build_t069_calibration_report(
     if not candidate_reports:
         raise ValueError("T069 calibration requires executed candidate reports")
     candidates: list[dict[str, Any]] = []
-    for report in candidate_reports:
+    calibration_input_identity: dict[str, Any] | None = None
+    for candidate_index, report in enumerate(candidate_reports):
         _validate_comparison(report, projected=True)
         family = report.get("family")
         if family not in {
@@ -189,6 +191,34 @@ def build_t069_calibration_report(
             "wall_clock_normalized",
         }:
             raise ValueError("T069 calibration candidate family is invalid")
+        sources = _require_calibration_report(
+            dict(report),
+            f"T069 calibration candidate {candidate_index}",
+            expected_family=family,
+            require_baseline_budget_100=True,
+        )
+        candidate_input_identity = {
+            "cohort_identity": report["cohort_identity"],
+            "cohort_total_record_count": report["cohort_total_record_count"],
+            "action_space": dict(report["action_space"]),
+            "max_battle_steps": report["max_battle_steps"],
+            "source_identities": [
+                {
+                    "cohort_index": source[0],
+                    "source_checkpoint_id": source[1],
+                    "source_run_id": source[2],
+                    "source_battle_index": source[3],
+                }
+                for _, source in sorted(sources.items())
+            ],
+        }
+        if calibration_input_identity is None:
+            calibration_input_identity = candidate_input_identity
+        elif candidate_input_identity != calibration_input_identity:
+            raise ValueError(
+                "T069 calibration candidates do not use the same cohort, "
+                "action space, max battle steps, and 0:16 source identities"
+            )
         budgets = {arm: _arm_budget(report, arm) for arm in T062_ARM_LABELS}
         if budgets["baseline"] != 100:
             raise ValueError("T069 calibration baseline budget must remain 100")
@@ -217,6 +247,7 @@ def build_t069_calibration_report(
             }
         candidates.append(
             {
+                "candidate_index": len(candidates),
                 "family": family,
                 "budgets": budgets,
                 "arms": arms,
@@ -229,17 +260,30 @@ def build_t069_calibration_report(
         raise ValueError(
             "T069 calibration must start with wall-clock baseline=100/guided=1"
         )
+    family_states = {
+        family: _evaluate_calibration_family(
+            candidates,
+            family=family,
+            tolerance=(
+                T069_STEP_TOLERANCE
+                if family == "simulator_step_normalized"
+                else T069_WALL_TOLERANCE
+            ),
+        )
+        for family in (
+            "simulator_step_normalized",
+            "wall_clock_normalized",
+        )
+    }
     final_locks = {
         arm: {
-            "simulator_step": any(
-                candidate["family"] == "simulator_step_normalized"
-                and candidate["arms"][arm]["simulator_step_locked"]
-                for candidate in candidates
+            "simulator_step": (
+                family_states["simulator_step_normalized"]["arms"][arm]["status"]
+                == "locked"
             ),
-            "wall_clock": any(
-                candidate["family"] == "wall_clock_normalized"
-                and candidate["arms"][arm]["wall_clock_locked"]
-                for candidate in candidates
+            "wall_clock": (
+                family_states["wall_clock_normalized"]["arms"][arm]["status"]
+                == "locked"
             ),
         }
         for arm in T069_GUIDED_ARMS
@@ -248,22 +292,29 @@ def build_t069_calibration_report(
         values["simulator_step"] and values["wall_clock"]
         for values in final_locks.values()
     )
+    infeasibility_proofs = [
+        state["infeasibility_proof"]
+        for family in family_states.values()
+        for state in family["arms"].values()
+        if state["infeasibility_proof"] is not None
+    ]
+    proven_infeasible_arms = sorted(
+        {str(proof["arm"]) for proof in infeasibility_proofs}
+    )
     minimum_budget_infeasible_arms = sorted(
         {
-            arm
-            for candidate in candidates
-            for arm in T069_GUIDED_ARMS
-            if candidate["family"] == "wall_clock_normalized"
-            and candidate["arms"][arm]["wall_clock_proven_infeasible_at_minimum"]
+            str(proof["arm"])
+            for proof in infeasibility_proofs
+            if proof["proof_kind"] == "minimum_budget"
         }
     )
-    calibration_complete = all_locks or bool(minimum_budget_infeasible_arms)
+    calibration_complete = all_locks or bool(proven_infeasible_arms)
     terminal_reason = (
         "all_required_locks_succeeded"
         if all_locks
         else (
-            "minimum_budget_wall_clock_infeasibility_proven"
-            if minimum_budget_infeasible_arms
+            "published_calibration_infeasibility_proven"
+            if proven_infeasible_arms
             else "candidate_sequence_continuation_required"
         )
     )
@@ -275,11 +326,26 @@ def build_t069_calibration_report(
         "record_range": "0:16",
         "worker_count": 16,
         "shard_count": 16,
+        "calibration_input_identity": calibration_input_identity,
         "candidate_sequence": list(T069_CANDIDATE_SEQUENCE),
+        "candidate_rule": {
+            "initial_budget": 1,
+            "expansion_sequence": list(T069_CANDIDATE_SEQUENCE),
+            "refinement": (
+                "after first crossing, bisect the adjacent integer interval; "
+                "choose the lower midpoint first until a tolerance lock or "
+                "adjacent budgets remain"
+            ),
+            "per_arm_and_family": True,
+            "outcome_independent": True,
+        },
         "executed_candidates": candidates,
+        "family_states": family_states,
         "final_locks": final_locks,
         "all_required_locks_succeeded": all_locks,
         "minimum_budget_infeasible_arms": minimum_budget_infeasible_arms,
+        "proven_infeasible_arms": proven_infeasible_arms,
+        "infeasibility_proofs": infeasibility_proofs,
         "calibration_complete": calibration_complete,
         "continuation_required": not calibration_complete,
         "terminal_reason": terminal_reason,
@@ -326,11 +392,11 @@ def build_t069_decision_report(
             case = "A"
             recommendation = "T062-original-93-record-outcome-comparison"
             reason = "all simulator-step and wall-clock calibration locks passed"
-        elif calibration.get("minimum_budget_infeasible_arms"):
+        elif calibration.get("proven_infeasible_arms"):
             case = "B"
             recommendation = "search-v2-no-promotion-outcome-canary"
             reason = (
-                "projection was exact and material but minimum-budget wall-clock "
+                "projection was exact and material but published calibration "
                 "infeasibility was proven"
             )
         else:
@@ -361,6 +427,223 @@ def build_t069_precalibration_decision_report(
     if feasibility.get("conditional_calibration_authorized") is True:
         return None
     return build_t069_decision_report(feasibility, None)
+
+
+def _evaluate_calibration_family(
+    candidates: Sequence[Mapping[str, Any]],
+    *,
+    family: str,
+    tolerance: float,
+) -> dict[str, Any]:
+    family_candidates = [
+        candidate for candidate in candidates if candidate["family"] == family
+    ]
+    if not family_candidates:
+        return {
+            "family": family,
+            "tolerance_fraction": tolerance,
+            "status": "not_run",
+            "arms": {
+                arm: {
+                    "arm": arm,
+                    "status": "not_run",
+                    "history": [],
+                    "next_candidate_budget": 1,
+                    "infeasibility_proof": None,
+                }
+                for arm in T069_GUIDED_ARMS
+            },
+        }
+    if any(family_candidates[0]["budgets"][arm] != 1 for arm in T069_GUIDED_ARMS):
+        raise ValueError(f"T069 {family} must start every guided arm at budget 1")
+    ratio_field = (
+        "simulator_step_ratio"
+        if family == "simulator_step_normalized"
+        else "wall_clock_ratio"
+    )
+    arms = {}
+    for arm in T069_GUIDED_ARMS:
+        observations = [
+            {
+                "candidate_index": candidate["candidate_index"],
+                "budget": candidate["budgets"][arm],
+                "ratio": candidate["arms"][arm][ratio_field],
+            }
+            for candidate in family_candidates
+        ]
+        arms[arm] = _evaluate_calibration_arm_history(
+            family=family,
+            arm=arm,
+            tolerance=tolerance,
+            observations=observations,
+        )
+    statuses = {state["status"] for state in arms.values()}
+    if statuses == {"locked"}:
+        status = "locked"
+    elif any(state["infeasibility_proof"] is not None for state in arms.values()):
+        status = "proven_infeasible"
+    else:
+        status = "continuation_required"
+    return {
+        "family": family,
+        "tolerance_fraction": tolerance,
+        "status": status,
+        "arms": arms,
+    }
+
+
+def _evaluate_calibration_arm_history(
+    *,
+    family: str,
+    arm: str,
+    tolerance: float,
+    observations: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    lower_tolerance = 1.0 - tolerance
+    upper_tolerance = 1.0 + tolerance
+    expected_budget = 1
+    lower_bracket: dict[str, Any] | None = None
+    upper_bracket: dict[str, Any] | None = None
+    terminal_budget: int | None = None
+    status = "continuation_required"
+    proof: dict[str, Any] | None = None
+    history: list[dict[str, Any]] = []
+    for observation in observations:
+        budget = int(observation["budget"])
+        ratio = float(observation["ratio"])
+        row = {
+            "candidate_index": int(observation["candidate_index"]),
+            "budget": budget,
+            "ratio": ratio,
+        }
+        if terminal_budget is not None:
+            if budget != terminal_budget:
+                raise ValueError(
+                    f"T069 {family} {arm} changed terminal budget "
+                    f"{terminal_budget} to {budget}"
+                )
+            row["observation_status"] = "held_after_terminal"
+            history.append(row)
+            continue
+        if budget != expected_budget:
+            raise ValueError(
+                f"T069 {family} {arm} expected candidate budget "
+                f"{expected_budget}, got {budget}"
+            )
+        if lower_tolerance <= ratio <= upper_tolerance:
+            status = "locked"
+            terminal_budget = budget
+            row["observation_status"] = "locked"
+        elif ratio > upper_tolerance:
+            upper_bracket = {"budget": budget, "ratio": ratio}
+            if budget == 1:
+                status = "proven_infeasible_at_minimum"
+                terminal_budget = budget
+                proof = {
+                    "family": family,
+                    "arm": arm,
+                    "proof_kind": "minimum_budget",
+                    "upper_budget": budget,
+                    "upper_ratio": ratio,
+                    "upper_tolerance": upper_tolerance,
+                    "reason": (
+                        "budget 1 exceeds the upper tolerance and no lower "
+                        "legal integer budget exists"
+                    ),
+                }
+                row["observation_status"] = status
+            else:
+                if lower_bracket is None:
+                    raise ValueError(
+                        f"T069 {family} {arm} crossed without a lower bracket"
+                    )
+                row["observation_status"] = "crossed_above_upper_tolerance"
+                expected_budget, status, proof = _next_refinement_or_proof(
+                    family=family,
+                    arm=arm,
+                    lower=lower_bracket,
+                    upper=upper_bracket,
+                )
+                if proof is not None:
+                    terminal_budget = budget
+        else:
+            lower_bracket = {"budget": budget, "ratio": ratio}
+            row["observation_status"] = "below_lower_tolerance"
+            if upper_bracket is None:
+                expected_budget = _next_expansion_budget(
+                    family=family,
+                    arm=arm,
+                    budget=budget,
+                )
+            else:
+                expected_budget, status, proof = _next_refinement_or_proof(
+                    family=family,
+                    arm=arm,
+                    lower=lower_bracket,
+                    upper=upper_bracket,
+                )
+                if proof is not None:
+                    terminal_budget = budget
+        history.append(row)
+    return {
+        "arm": arm,
+        "status": status,
+        "history": history,
+        "locked_budget": terminal_budget if status == "locked" else None,
+        "next_candidate_budget": (
+            None if terminal_budget is not None else expected_budget
+        ),
+        "lower_bracket": lower_bracket,
+        "upper_bracket": upper_bracket,
+        "infeasibility_proof": proof,
+    }
+
+
+def _next_expansion_budget(*, family: str, arm: str, budget: int) -> int:
+    try:
+        index = T069_CANDIDATE_SEQUENCE.index(budget)
+    except ValueError as exc:
+        raise ValueError(
+            f"T069 {family} {arm} expansion budget {budget} is not published"
+        ) from exc
+    if index + 1 >= len(T069_CANDIDATE_SEQUENCE):
+        raise ValueError(
+            f"T069 {family} {arm} exhausted expansion sequence without crossing"
+        )
+    return T069_CANDIDATE_SEQUENCE[index + 1]
+
+
+def _next_refinement_or_proof(
+    *,
+    family: str,
+    arm: str,
+    lower: Mapping[str, Any],
+    upper: Mapping[str, Any],
+) -> tuple[int, str, dict[str, Any] | None]:
+    lower_budget = int(lower["budget"])
+    upper_budget = int(upper["budget"])
+    if not lower_budget < upper_budget:
+        raise ValueError(f"T069 {family} {arm} has invalid crossing bracket")
+    if upper_budget - lower_budget == 1:
+        proof = {
+            "family": family,
+            "arm": arm,
+            "proof_kind": "adjacent_integer_bracket",
+            "lower_budget": lower_budget,
+            "lower_ratio": float(lower["ratio"]),
+            "upper_budget": upper_budget,
+            "upper_ratio": float(upper["ratio"]),
+            "reason": (
+                "adjacent integer budgets fall below and above the tolerance "
+                "interval, so no legal integer candidate can lock"
+            ),
+        }
+        return lower_budget, "proven_infeasible_at_adjacent_budgets", proof
+    return (
+        (lower_budget + upper_budget) // 2,
+        "continuation_required",
+        None,
+    )
 
 
 def _validate_comparison(report: Mapping[str, Any], *, projected: bool) -> None:

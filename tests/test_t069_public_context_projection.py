@@ -58,19 +58,39 @@ def _comparison(*, projected: bool, wall_after: float = 75.0):
         }
         wall = 100.0 if arm == "baseline" else (wall_after if projected else 100.0)
         steps = 100.0
-        telemetry = {
-            "search_telemetry_summary": {
-                "wall_clock_time_s": {"total": wall},
+        records = []
+        for cohort_index in range(16):
+            telemetry = {
+                "oracle_search_native_simulator_steps": steps / 16,
+                "oracle_search_model_calls": 0.0,
+                "search_telemetry_summary": {
+                    "wall_clock_time_s": {"total": wall / 16},
+                },
             }
-        }
-        if arm != "baseline":
-            telemetry[cost_key] = cost
-        arms[arm] = {
-            "records": [
+            if arm != "baseline":
+                telemetry[cost_key] = cost
+            records.append(
                 {
+                    "cohort_index": cohort_index,
+                    "source_checkpoint_id": f"source-{cohort_index}",
+                    "structural_metadata": {
+                        "source_run_id": f"run-{cohort_index}",
+                        "source_battle_index": cohort_index,
+                    },
+                    "termination_status": "loss",
+                    "problems": [],
+                    "outer_simulator_steps": 1.0,
+                    "wall_clock_seconds": wall / 16,
                     "controller_compute_telemetry": telemetry,
                 }
-            ],
+            )
+        arms[arm] = {
+            "record_count": 16,
+            "errors": 0,
+            "truncations": 0,
+            "outer_simulator_steps": 16.0,
+            "model_calls": 0.0,
+            "records": records,
             "wall_clock_seconds": wall,
             "native_simulator_steps": steps,
         }
@@ -84,14 +104,41 @@ def _comparison(*, projected: bool, wall_after: float = 75.0):
         }
     return {
         "schema_id": "t062-battle-search-v2-comparison-v1",
+        "task_id": "T062",
+        "report_kind": "merged_comparison",
         "command_passed": True,
+        "problems": [],
         "worker_count": 16,
         "shard_count": 16,
+        "shards": [f"shard-{index:02d}.json" for index in range(16)],
         "evaluated_record_count": 16,
+        "expected_record_count": 16,
+        "cohort_total_record_count": 93,
+        "cohort_identity": "test-cohort",
+        "action_space": {"preferred_kinds": ["card", "end_turn"]},
+        "max_battle_steps": 200,
         "family": "wall_clock_normalized",
         "controller_provenance": provenance,
         "arms": arms,
+        "paired_vs_baseline": {arm: {} for arm in GUIDED},
     }
+
+
+def _set_arm_costs(report, arm, *, wall=None, steps=None):
+    arm_report = report["arms"][arm]
+    if wall is not None:
+        arm_report["wall_clock_seconds"] = wall
+        for record in arm_report["records"]:
+            record["wall_clock_seconds"] = wall / 16
+            record["controller_compute_telemetry"]["search_telemetry_summary"][
+                "wall_clock_time_s"
+            ]["total"] = wall / 16
+    if steps is not None:
+        arm_report["native_simulator_steps"] = steps
+        for record in arm_report["records"]:
+            record["controller_compute_telemetry"][
+                "oracle_search_native_simulator_steps"
+            ] = steps / 16
 
 
 def _identities(*, projected: bool):
@@ -170,8 +217,7 @@ def test_t069_exact_material_projection_enters_calibration_and_case_a():
 def test_t069_material_projection_with_open_lock_selects_case_b():
     feasibility = _feasibility()
     candidate = _comparison(projected=True)
-    candidate["arms"]["prior_only"]["native_simulator_steps"] = 1.0
-    candidate["arms"]["prior_only"]["wall_clock_seconds"] = 200.0
+    _set_arm_costs(candidate, "prior_only", wall=200.0, steps=1.0)
     calibration = build_t069_calibration_report([candidate])
     decision = build_t069_decision_report(feasibility, calibration)
 
@@ -199,6 +245,88 @@ def test_t069_budget_one_without_infeasibility_requires_continuation():
     assert calibration["command_passed"] is False
     with pytest.raises(ValueError, match="sequence is not terminal"):
         build_t069_decision_report(feasibility, calibration)
+
+
+def test_t069_calibration_validates_expansion_and_adjacent_refinement():
+    feasibility = _feasibility()
+    initial = _comparison(projected=True, wall_after=100.0)
+    _set_arm_costs(initial, "prior_only", wall=50.0)
+    budget_two = _comparison(projected=True, wall_after=100.0)
+    budget_two["controller_provenance"]["prior_only"]["config"]["search_budget"][
+        "simulations"
+    ] = 2
+    _set_arm_costs(budget_two, "prior_only", wall=60.0)
+    budget_four = _comparison(projected=True, wall_after=100.0)
+    budget_four["controller_provenance"]["prior_only"]["config"]["search_budget"][
+        "simulations"
+    ] = 4
+    _set_arm_costs(budget_four, "prior_only", wall=120.0)
+
+    crossing = build_t069_calibration_report([initial, budget_two, budget_four])
+
+    prior_only = crossing["family_states"]["wall_clock_normalized"]["arms"][
+        "prior_only"
+    ]
+    assert crossing["command_passed"] is False
+    assert prior_only["status"] == "continuation_required"
+    assert prior_only["next_candidate_budget"] == 3
+    assert prior_only["lower_bracket"]["budget"] == 2
+    assert prior_only["upper_bracket"]["budget"] == 4
+
+    budget_three = _comparison(projected=True, wall_after=100.0)
+    budget_three["controller_provenance"]["prior_only"]["config"]["search_budget"][
+        "simulations"
+    ] = 3
+    _set_arm_costs(budget_three, "prior_only", wall=80.0)
+    terminal = build_t069_calibration_report(
+        [initial, budget_two, budget_four, budget_three]
+    )
+    decision = build_t069_decision_report(feasibility, terminal)
+
+    assert terminal["minimum_budget_infeasible_arms"] == []
+    assert terminal["proven_infeasible_arms"] == ["prior_only"]
+    assert terminal["calibration_complete"] is True
+    assert terminal["infeasibility_proofs"] == [
+        {
+            "family": "wall_clock_normalized",
+            "arm": "prior_only",
+            "proof_kind": "adjacent_integer_bracket",
+            "lower_budget": 3,
+            "lower_ratio": 0.8,
+            "upper_budget": 4,
+            "upper_ratio": 1.2,
+            "reason": (
+                "adjacent integer budgets fall below and above the tolerance "
+                "interval, so no legal integer candidate can lock"
+            ),
+        }
+    ]
+    assert decision["decision_case"] == "B"
+
+
+def test_t069_calibration_rejects_skipped_expansion_candidate():
+    initial = _comparison(projected=True, wall_after=50.0)
+    skipped = _comparison(projected=True, wall_after=60.0)
+    for arm in GUIDED:
+        skipped["controller_provenance"][arm]["config"]["search_budget"][
+            "simulations"
+        ] = 4
+
+    with pytest.raises(ValueError, match="expected candidate budget 2, got 4"):
+        build_t069_calibration_report([initial, skipped])
+
+
+def test_t069_calibration_rejects_candidate_source_identity_drift():
+    initial = _comparison(projected=True, wall_after=100.0)
+    step_candidate = _comparison(projected=True, wall_after=100.0)
+    step_candidate["family"] = "simulator_step_normalized"
+    for arm in ("baseline", *GUIDED):
+        step_candidate["arms"][arm]["records"][7]["source_checkpoint_id"] = (
+            "different-source"
+        )
+
+    with pytest.raises(ValueError, match="same cohort.*0:16 source identities"):
+        build_t069_calibration_report([initial, step_candidate])
 
 
 def test_t069_prototype_case_b_cannot_preempt_independent_case_a():
@@ -239,7 +367,7 @@ def test_t069_calibration_validates_initial_budget_one_candidate(arm, budget):
         "simulations"
     ] = budget
 
-    with pytest.raises(ValueError, match="baseline budget|must start"):
+    with pytest.raises(ValueError, match="baseline.*budget|must start"):
         build_t069_calibration_report([candidate])
 
 
