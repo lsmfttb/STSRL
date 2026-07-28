@@ -127,8 +127,14 @@ now the only `READY` task. It first proves whether the invariant public run
 context can be encoded once per search and reused through one exact,
 schema-checked projection without changing any public input or search semantic;
 implementation and calibration are conditional on that fail-closed feasibility
-gate. T063--T066 remain draft until their named dependencies and publication
-gates are satisfied.
+gate. T069 is the final semantics-preserving inference-cost repair for the
+current Search v2/T043 contracts. Success must lead directly to the original
+93-record outcome comparison; material partial success may lead only to a
+no-promotion outcome canary; an unavailable or immaterial projection closes
+this cost-repair line in favor of T064 or an explicit inference/encoder
+redesign. No second cache/projection, tensor/callback micro-optimization, or
+new calibration-only task is allowed. T063--T066 remain draft until their named
+dependencies and publication gates are satisfied.
 
 ## Task Boundary And Artifact Rules
 

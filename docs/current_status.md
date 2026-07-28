@@ -1453,11 +1453,19 @@ T069 (`Public-Node Feature-Encoding Projection Feasibility`) is the only
 `READY` task. It must first prove that the complete public run context is
 invariant within one search scope and that one explicit current-schema encoded
 projection produces exactly the accepted scorer input. Only an exact semantic
-gate plus measured evidence that both infeasible arms can reach the 1.10
-minimum-budget wall ceiling may authorize one search-scope projection boundary
-and re-entry to the same 16-record calibration. T069 cannot run the 93-record
-outcome comparison. No further natural source scale-up is authorized by the
-T062/T067/T068 cost-only results.
+gate plus the published public-context-share and material wall-clock
+improvement thresholds may authorize one search-scope projection boundary and
+re-entry to the same 16-record calibration; forecasting that every arm will
+pass is reported but is not required because material partial improvement has
+the bounded Case B outcome-canary path. T069 cannot run the 93-record outcome
+comparison. It is the final semantics-preserving inference-cost repair
+for the current Search v2/T043 contracts: full calibration success must lead
+next to the original outcome comparison, material partial improvement may lead
+only to a no-promotion outcome canary, and an unavailable or immaterial
+projection closes this repair line in favor of T064 or an explicit
+inference/encoder redesign. No further component micro-optimization or
+calibration-only task is authorized. No further natural source scale-up is
+authorized by the T062/T067/T068 cost-only results.
 
 T034 remains blocked on an explicit native simulator boundary for
 public-consistent hidden-future sampling.

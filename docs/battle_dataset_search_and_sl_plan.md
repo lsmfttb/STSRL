@@ -473,9 +473,16 @@ callbacks, so the native-batching direction also closed. The active priority
 is T069's public-node feature-encoding projection feasibility gate. It may
 implement one exact search-scope public-context projection and re-enter cost
 calibration only if complete current-schema vectors and accepted search
-semantics remain unchanged and measured evidence projects both infeasible arms
-under the 1.10 wall ceiling. Further natural source scale-up remains contingent
-on improved policy evidence.
+semantics remain unchanged and measured public-context share plus paired
+wall-clock improvement meet the published material thresholds. Whether both
+infeasible arms are forecast under the 1.10 wall ceiling is reported, while
+actual calibration selects full success or the bounded partial-improvement
+path. T069 is the final semantics-preserving cost repair for the current Search
+v2/T043 contracts. It must lead next to the original outcome comparison, a
+no-promotion outcome canary after material partial improvement, or closure in
+favor of T064/an explicit inference-contract redesign; no further component
+micro-optimization or calibration-only task is allowed. Further natural source
+scale-up remains contingent on improved policy evidence.
 
 Exit gate: a search change improves fixed evaluation at equal simulation or
 wall-clock budget without natural-weighted regression.

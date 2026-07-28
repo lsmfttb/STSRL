@@ -11,12 +11,20 @@ This is a bounded feasibility task. It must either:
 - prove the proposed projection is exact, implement one explicit
   search-scope projection boundary, preserve accepted T067/T068 semantics, and
   re-enter the 16-record cost calibration; or
-- prove the projection is not exact or cannot make every required guided arm
-  compute-feasible, then close this direction with one evidence-based
-  recommendation.
+- prove the projection is not exact or misses the published material-improvement
+  thresholds, then close this direction with one evidence-based
+  recommendation. A material projection may enter calibration even when its
+  conservative forecast does not show that every arm will pass; that outcome
+  is handled only by Decision Case B.
 
 T069 does not run the 93-record outcome comparison and cannot promote a
 controller.
+
+T069 is the final semantics-preserving inference-cost repair task for the
+current Battle Search v2 implementation, current feature/model contracts, and
+T043 checkpoint. Its decision must lead next to outcome evidence or close this
+cost-repair line. It must not recommend another component-level optimization
+or calibration-only task.
 
 ## Current Main Baseline
 
@@ -135,12 +143,19 @@ Before production integration, publish a deterministic gate requiring:
   semantics on record `0:1`;
 - measured projected component costs on `0:16`, not a subtraction-only
   estimate;
-- a conservative projection showing both T067/T068-infeasible arms can reach
+- public-context encoding accounts for at least 50% of accepted
+  `checkpoint_feature_encoding_ms` in `prior_value`;
+- the diagnostic projection meets all three published Case B material
+  improvement thresholds; and
+- a conservative projection reports, without making it an integration
+  prerequisite, whether both T067/T068-infeasible arms are expected to reach
   the 1.10 minimum-budget wall-clock ceiling.
 
-If any condition fails, do not integrate the projection and do not run
-calibration. Emit a versioned infeasibility report and proceed directly to the
-decision stage.
+If any exactness or material-improvement gate condition fails, do not integrate
+the projection and do not run calibration. Emit a versioned infeasibility
+report and proceed directly to Decision Case C. If the gate passes, implement
+the one boundary and run conditional calibration; calibration determines Case
+A or Case B.
 
 ### 3. One search-scope projection boundary
 
@@ -204,12 +219,67 @@ Do not run or synthesize the 93-record outcome comparison in T069.
 
 ### 6. Decision
 
-Recommend exactly one next task:
+Classify the accepted result into exactly one of these cases and recommend
+exactly one next task.
 
-- a separately published Search v2 fixed-cohort comparison re-entry only if all
-  required calibration locks succeed; or
-- closure of public-feature projection and one narrowly named alternative
-  derived from the new measured dominant remaining cost.
+#### Case A: all calibration gates pass
+
+If every required guided arm satisfies every published simulator-step and
+wall-clock lock, recommend immediate re-entry to the original T062 93-record
+fixed-cohort comparison. The next task must produce outcome evidence.
+
+Do not recommend a second cache, second feature projection, tensor
+micro-optimization, callback micro-optimization, or another calibration-only
+task.
+
+#### Case B: material improvement, but at least one required arm still fails
+
+Classify as Case B only when the projection and semantic gates pass and the
+same-stage projected measurement:
+
+- reduces `checkpoint_feature_encoding_ms` by at least 50% for `prior_value`;
+- reduces aggregate `prior_value` search wall-clock seconds by at least 5%;
+  and
+- reduces aggregate search wall-clock seconds by at least 5% for at least one
+  of `prior_only` or `value_only`.
+
+If any required calibration lock still fails, do not continue
+component-by-component optimization. Recommend one no-promotion Search v2
+outcome canary instead:
+
+- baseline is required;
+- `prior_value` is the required primary candidate;
+- `prior_only` and `value_only` may appear only as explicitly diagnostic arms;
+- actual wall-clock seconds, model calls, native simulator steps, search
+  budgets, failures, and source identities are reported without substituting
+  one cost family for another;
+- the report makes no equal-budget fairness, winning-controller, or promotion
+  claim and asks only whether a positive outcome signal exists.
+
+The canary task must predeclare that if `prior_value` shows no positive outcome
+signal even at its actual additional compute cost, the current Search v2 T043
+checkpoint route closes immediately.
+
+#### Case C: projection is unavailable or not materially useful
+
+Classify as Case C if the exact projection/semantic gate fails, if public
+context accounts for less than 50% of accepted
+`checkpoint_feature_encoding_ms` in `prior_value`, or if any Case B material
+improvement threshold is missed.
+
+Close the current cost-repair route that preserves all existing Search v2
+semantics and model/feature contracts. Recommend exactly one of:
+
+- publishing T064 (`Simulator-Generated Later-Act Curriculum`) as the next
+  executable task to improve training-data quality; or
+- a separately specified inference/encoder contract redesign that explicitly
+  permits real incremental encoding, vectorized environments, or batching
+  across multiple independent search instances.
+
+The decision must choose one of those two directions from the measured evidence;
+it may not create a snapshot-encoding cache, action-feature-copy repair, second
+projection, tensor/callback micro-optimization, or any differently named
+continuation of the same component-level cost-repair line.
 
 ## Out Of Scope
 
@@ -224,6 +294,9 @@ Recommend exactly one next task:
 - Complete-run source generation, natural A20 scale-up, broad training,
   normal-information promotion, live-game claims, or final-agent claims.
 - A second unrelated performance repair.
+- Any T070-style snapshot-encoding cache, T071-style action-feature-copy
+  repair, second projection, tensor/callback micro-optimization, or new
+  calibration-only task for the current Search v2/T043 contracts.
 
 ## Design Constraints
 
@@ -276,7 +349,14 @@ Recommend exactly one next task:
   shards/workers, deterministic candidates, and original 5%/10% tolerances.
 - T069 runs no 93-record outcome aggregation and makes no promotion, natural
   A20, normal-information, live-game, broad-training, or final-agent claim.
-- Exactly one next task is recommended from the published decision rule.
+- The decision classifies the result as exactly one of Case A, B, or C and
+  recommends exactly one next task from that case.
+- Case A leads directly to the original 93-record outcome comparison; Case B
+  leads only to the no-promotion outcome canary; Case C closes the current
+  semantics-preserving cost-repair line and chooses T064 or an explicit
+  inference/encoder redesign.
+- No second cache/projection, snapshot/action-copy repair, tensor/callback
+  micro-optimization, or calibration-only continuation is recommended.
 
 ## Required Verification
 
@@ -289,7 +369,8 @@ prototype, semantic, and any calibration gates through WSL with the exact
 PyTorch/native ABI pairing. The PR must report commands, source and checkpoint
 identities, feature schemas and hashes, record ranges, workers, shards,
 component timings, model calls, simulator steps, wall time, reuse counts,
-failures, and the conservative feasibility decision.
+failures, Case B material-improvement thresholds, and the conservative
+feasibility decision.
 
 Missing inputs, changing context, a vector mismatch, unavailable projection, or
 a failed cost gate must produce an explicit report and non-ambiguous decision
