@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 import math
 import time
-from typing import Any, Literal
+from typing import Any, Callable, Literal
 
 from sts_combat_rl.sim.action_space import ActionSpaceConfig
 from sts_combat_rl.sim.contract import (
@@ -42,12 +42,23 @@ from sts_combat_rl.sim.battle_search_v2_cost import (
     T067_REPAIR_IDENTITY,
     public_node_cache_key,
 )
+from sts_combat_rl.sim.public_context_feature_projection import (
+    T069_PROJECTION_IMPLEMENTATION_ID,
+)
 
 
 BATTLE_SEARCH_V2_CONTROLLER_NAME = "battle_search_v2_oracle_like_v1"
 BATTLE_SEARCH_V2_CONTROLLER_VERSION = "battle-search-v2-oracle-like-v1"
 BATTLE_SEARCH_V2_T067_CONTROLLER_NAME = "battle_search_v2_oracle_like_t067_cache_v1"
 BATTLE_SEARCH_V2_T067_CONTROLLER_VERSION = "battle-search-v2-oracle-like-t067-cache-v1"
+BATTLE_SEARCH_V2_T069_CONTROLLER_NAME = (
+    "battle_search_v2_oracle_like_t069_public_context_projection_v1"
+)
+BATTLE_SEARCH_V2_T069_CONTROLLER_VERSION = (
+    "battle-search-v2-oracle-like-t069-public-context-projection-v1"
+)
+T069_COST_ATTRIBUTION_SCHEMA_ID = "t069-public-context-projection-cost-attribution-v1"
+T069_COST_ATTRIBUTION_SCHEMA_VERSION = 1
 BATTLE_SEARCH_V2_NATIVE_API = "StepSimulator.battle_search_v2.v1"
 BATTLE_SEARCH_V2_PATCH_IDENTITY = "sts_lightspeed_battle_search_v2_tree_internal_v1"
 BATTLE_SEARCH_V2_ABLATIONS = ("baseline", "prior_only", "value_only", "prior_value")
@@ -76,6 +87,12 @@ class BattleSearchV2Controller:
     # enables this exact public-node cache on its repaired v2 controller.
     inference_cache_enabled: bool = False
     inference_cache_capacity: int = 4096
+    # T069 prepares the complete current-schema public-context vector once per
+    # select_action call. The accepted unprojected path remains the default.
+    public_context_projection_enabled: bool = False
+    # T069 evidence-only input identity observation. The concrete scorer
+    # remains unmodified when this default-off switch is false.
+    feature_identity_trace_enabled: bool = False
     # T068-only diagnostic instrumentation.  It records the existing
     # synchronous callback boundary; it never changes callback scheduling,
     # scoring, or native traversal.
@@ -110,17 +127,30 @@ class BattleSearchV2Controller:
         )
         object.__setattr__(self, "_baseline", baseline)
         controller_name = (
-            BATTLE_SEARCH_V2_T067_CONTROLLER_NAME
-            if self.inference_cache_enabled
-            else BATTLE_SEARCH_V2_CONTROLLER_NAME
+            BATTLE_SEARCH_V2_T069_CONTROLLER_NAME
+            if self.public_context_projection_enabled
+            else (
+                BATTLE_SEARCH_V2_T067_CONTROLLER_NAME
+                if self.inference_cache_enabled
+                else BATTLE_SEARCH_V2_CONTROLLER_NAME
+            )
         )
-        provenance_config: dict[str, Any] = {
-            "controller_version": (
+        controller_version = (
+            BATTLE_SEARCH_V2_T069_CONTROLLER_VERSION
+            if self.public_context_projection_enabled
+            else (
                 BATTLE_SEARCH_V2_T067_CONTROLLER_VERSION
                 if self.inference_cache_enabled
                 else BATTLE_SEARCH_V2_CONTROLLER_VERSION
+            )
+        )
+        provenance_config: dict[str, Any] = {
+            "controller_version": controller_version,
+            "task_id": (
+                "T069"
+                if self.public_context_projection_enabled
+                else ("T067" if self.inference_cache_enabled else "T062")
             ),
-            "task_id": "T067" if self.inference_cache_enabled else "T062",
             "information_regime": NATIVE_SEARCH_INFORMATION_REGIME,
             "native_search_schema_id": "native-battle-search-root-v1",
             "native_search_api": BATTLE_SEARCH_V2_NATIVE_API,
@@ -147,7 +177,19 @@ class BattleSearchV2Controller:
                 "checkpoint_provenance": checkpoint.to_dict(),
             },
         }
-        if self.inference_cache_enabled:
+        if self.public_context_projection_enabled:
+            provenance_config["cost_repair"] = {
+                "task_id": "T069",
+                "repair_identity": T069_PROJECTION_IMPLEMENTATION_ID,
+                "projection_scope": "one_native_search_call",
+                "complete_canonical_public_context_validation": True,
+                "digest_only_reuse": False,
+                "accepted_t067_cache_enabled": self.inference_cache_enabled,
+                "inference_cache_capacity": (
+                    self.inference_cache_capacity if self.inference_cache_enabled else 0
+                ),
+            }
+        elif self.inference_cache_enabled:
             provenance_config["cost_repair"] = {
                 "task_id": "T067",
                 "repair_identity": T067_REPAIR_IDENTITY,
@@ -155,6 +197,12 @@ class BattleSearchV2Controller:
                 "inference_cache_capacity": self.inference_cache_capacity,
                 "cache_scope": "one_native_search_call",
                 "cache_key_schema_id": "t067-public-node-cache-key-v1",
+            }
+        if self.feature_identity_trace_enabled:
+            provenance_config["diagnostic_instrumentation"] = {
+                "task_id": "T069",
+                "feature_identity_trace": True,
+                "semantic_effect": "observation_only",
             }
         object.__setattr__(
             self,
@@ -214,7 +262,63 @@ class BattleSearchV2Controller:
             "python_callback_total_ms": 0.0,
             "cache_lookup_ms": 0.0,
             "model_call_count": 0.0,
+            "public_context_projection_construction_ms": 0.0,
+            "public_context_projection_canonicalization_ms": 0.0,
+            "public_context_projection_validation_encoding_ms": 0.0,
+            "public_context_projection_validation_ms": 0.0,
+            "projected_state_vector_assembly_ms": 0.0,
+            "snapshot_action_schema_validation_ms": 0.0,
+            "public_context_schema_validation_encoding_ms": 0.0,
+            "public_context_feature_encoding_ms": 0.0,
+            "state_tensor_construction_ms": 0.0,
+            "legal_action_tensor_construction_ms": 0.0,
+            "public_context_projection_construction_count": 0.0,
+            "public_context_projection_reuse_count": 0.0,
         }
+        public_context_projection: Any | None = None
+        score_context: Callable[[DecisionContext], SearchGuidanceInferenceResult] = (
+            self.scorer.score_decision_context
+        )
+        if self.feature_identity_trace_enabled:
+            begin_scope = getattr(self.scorer, "begin_t069_search_scope", None)
+            end_scope = getattr(self.scorer, "end_t069_search_scope", None)
+            if not callable(begin_scope) or not callable(end_scope):
+                raise ValueError(
+                    "T069 feature identity trace requires an observer-aware scorer"
+                )
+            begin_scope(context.public_run_context)
+        if self.public_context_projection_enabled:
+            prepare = getattr(
+                self.scorer,
+                "prepare_public_context_projection",
+                None,
+            )
+            score_projected = getattr(
+                self.scorer,
+                "score_decision_context_with_projection",
+                None,
+            )
+            if not callable(prepare) or not callable(score_projected):
+                raise ValueError(
+                    "T069 projection requires an explicit projection-aware scorer"
+                )
+            public_context_projection = prepare(context.public_run_context)
+            projection_telemetry = public_context_projection.telemetry()
+            attribution["public_context_projection_construction_ms"] = float(
+                projection_telemetry["construction_ms"]
+            )
+            attribution["public_context_projection_canonicalization_ms"] = float(
+                projection_telemetry["canonicalization_ms"]
+            )
+            attribution["public_context_projection_validation_encoding_ms"] = float(
+                projection_telemetry["validation_encoding_ms"]
+            )
+            attribution["public_context_projection_construction_count"] = 1.0
+
+            def score_context(
+                node_context: DecisionContext,
+            ) -> SearchGuidanceInferenceResult:
+                return score_projected(node_context, public_context_projection)
 
         def policy_callback(
             raw: Mapping[str, Any], native_actions: Sequence[Mapping[str, Any]]
@@ -238,7 +342,7 @@ class BattleSearchV2Controller:
                 time.perf_counter() - projection_started
             ) * 1000.0
             result, cache_hit, lookup_ms, scorer_time_ms = _score_node_context(
-                node_context, self.scorer, inference_cache
+                node_context, score_context, inference_cache
             )
             attribution["cache_lookup_ms"] += lookup_ms
             attribution["scorer_invocation_ms"] += scorer_time_ms
@@ -251,6 +355,8 @@ class BattleSearchV2Controller:
                 # Policy and value callbacks may share one exact-node cache
                 # entry; count scorer invocations rather than callbacks.
                 attribution["model_call_count"] += 1.0
+                if self.public_context_projection_enabled:
+                    attribution["public_context_projection_reuse_count"] += 1.0
                 _add_inference_timing(attribution, result)
             callback_counts["policy"] += 1
             native_result = [
@@ -282,7 +388,7 @@ class BattleSearchV2Controller:
                 time.perf_counter() - projection_started
             ) * 1000.0
             result, cache_hit, lookup_ms, scorer_time_ms = _score_node_context(
-                node_context, self.scorer, inference_cache
+                node_context, score_context, inference_cache
             )
             attribution["cache_lookup_ms"] += lookup_ms
             attribution["scorer_invocation_ms"] += scorer_time_ms
@@ -293,6 +399,8 @@ class BattleSearchV2Controller:
             )
             if not cache_hit:
                 attribution["model_call_count"] += 1.0
+                if self.public_context_projection_enabled:
+                    attribution["public_context_projection_reuse_count"] += 1.0
                 _add_inference_timing(attribution, result)
             prediction = result.value_prediction
             value = (
@@ -314,6 +422,9 @@ class BattleSearchV2Controller:
             policy_prior_callback=policy_callback if self.uses_policy_prior else None,
             leaf_value_callback=value_callback if self.uses_leaf_value else None,
         )
+        if self.feature_identity_trace_enabled:
+            end_scope = getattr(self.scorer, "end_t069_search_scope")
+            end_scope()
         search_elapsed = time.perf_counter() - search_start
         attribution["python_native_callback_overhead_ms"] = max(
             0.0,
@@ -357,8 +468,16 @@ class BattleSearchV2Controller:
                     "total_wall_clock_time_s": time.perf_counter() - total_start,
                     "checkpoint_provenance": self.checkpoint_provenance.to_dict(),
                     "cost_attribution": {
-                        "schema_id": T067_COST_ATTRIBUTION_SCHEMA_ID,
-                        "schema_version": T067_COST_ATTRIBUTION_SCHEMA_VERSION,
+                        "schema_id": (
+                            T069_COST_ATTRIBUTION_SCHEMA_ID
+                            if self.public_context_projection_enabled
+                            else T067_COST_ATTRIBUTION_SCHEMA_ID
+                        ),
+                        "schema_version": (
+                            T069_COST_ATTRIBUTION_SCHEMA_VERSION
+                            if self.public_context_projection_enabled
+                            else T067_COST_ATTRIBUTION_SCHEMA_VERSION
+                        ),
                         "native_tree_search_excluding_python_callbacks_ms": max(
                             0.0,
                             search_elapsed * 1000.0
@@ -383,6 +502,15 @@ class BattleSearchV2Controller:
                         "value_callback_count": float(callback_counts["value"]),
                         "model_call_count": attribution["model_call_count"],
                     },
+                    **(
+                        {
+                            "public_context_projection": (
+                                public_context_projection.telemetry()
+                            )
+                        }
+                        if public_context_projection is not None
+                        else {}
+                    ),
                 }
             }
         )
@@ -395,6 +523,8 @@ class BattleSearchV2Controller:
             for key, value in flat_cost.items()
             if isinstance(value, (int, float)) and not isinstance(value, bool)
         }
+        if self.public_context_projection_enabled:
+            metadata["t069_cost_attribution"] = dict(metadata["t067_cost_attribution"])
         if self.callback_dependency_trace_enabled:
             # Fixed-battle evaluation only recursively merges numeric mapping
             # telemetry.  Keep this diagnostic payload as a top-level sequence
@@ -418,14 +548,14 @@ class BattleSearchV2Controller:
 
 def _score_node_context(
     node_context: DecisionContext,
-    scorer: SearchGuidanceScorer,
+    scorer: Callable[[DecisionContext], SearchGuidanceInferenceResult],
     inference_cache: PublicNodeInferenceCache | None,
 ) -> tuple[SearchGuidanceInferenceResult, bool, float, float]:
     if inference_cache is None:
         started = time.perf_counter()
-        result = scorer.score_decision_context(node_context)
+        result = scorer(node_context)
         return result, False, 0.0, (time.perf_counter() - started) * 1000.0
-    scored = inference_cache.score(node_context, scorer.score_decision_context)
+    scored = inference_cache.score(node_context, scorer)
     return (
         scored.result,
         scored.cache_hit,
@@ -451,6 +581,30 @@ def _add_inference_timing(
     attribution["inference_result_postprocess_ms"] += _timing_value(
         timing, "result_postprocess_ms"
     )
+    attribution["public_context_projection_validation_ms"] += _timing_value(
+        timing, "public_context_projection_validation_ms"
+    )
+    attribution["projected_state_vector_assembly_ms"] += _timing_value(
+        timing, "state_vector_assembly_ms"
+    )
+    attribution["snapshot_action_schema_validation_ms"] += _timing_value(
+        timing, "snapshot_action_schema_validation_ms"
+    )
+    attribution["public_context_schema_validation_encoding_ms"] += _timing_value(
+        timing, "public_context_schema_validation_encoding_ms"
+    )
+    attribution["public_context_feature_encoding_ms"] += _timing_value(
+        timing, "public_context_feature_encoding_ms"
+    )
+    attribution["state_tensor_construction_ms"] += _timing_value(
+        timing, "state_tensor_construction_ms"
+    )
+    attribution["legal_action_tensor_construction_ms"] += _timing_value(
+        timing, "legal_action_tensor_construction_ms"
+    )
+    attribution["t069_input_identity_observer_ms"] = attribution.get(
+        "t069_input_identity_observer_ms", 0.0
+    ) + _timing_value(timing, "t069_input_identity_observer_ms")
 
 
 def _timing_value(timing: Mapping[str, float], key: str) -> float:

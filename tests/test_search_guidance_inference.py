@@ -19,6 +19,7 @@ from sts_combat_rl.sim.search_guidance_inference import (
     SEARCH_GUIDANCE_INFERENCE_SCHEMA_ID,
     format_search_guidance_inference_result,
 )
+from sts_combat_rl.sim.t069_feature_identity import T069FeatureIdentityRecorder
 from sts_combat_rl.sim.torch_policy_value import (
     TorchPolicyValueGuidanceScorer,
     TorchPolicyValueTrainingConfig,
@@ -127,6 +128,65 @@ def test_torch_guidance_fails_closed_on_bad_context_schema(tmp_path) -> None:
         scorer.score_decision_context(
             replace(context, snapshot_features=[*context.snapshot_features, 0.0])
         )
+
+
+def test_t069_projection_matches_unprojected_scorer_and_fails_closed(tmp_path) -> None:
+    checkpoint_path, dataset = _write_checkpoint(tmp_path)
+    context = _first_context(dataset)
+    scorer = TorchPolicyValueGuidanceScorer.from_checkpoint_path(checkpoint_path)
+
+    unprojected = scorer.score_decision_context(context)
+    projection = scorer.prepare_public_context_projection(context.public_run_context)
+    projected = scorer.score_decision_context_with_projection(context, projection)
+
+    assert projected.action_scores == unprojected.action_scores
+    assert projected.value_prediction == unprojected.value_prediction
+    assert projection.public_context_features_sha256
+    assert projection.telemetry()["canonical_public_context_byte_count"] > 0
+    assert projected.timing_ms["public_context_feature_encoding_ms"] == 0.0
+    assert projected.timing_ms["public_context_projection_validation_ms"] >= 0.0
+    assert unprojected.timing_ms["public_context_feature_encoding_ms"] >= 0.0
+    assert unprojected.timing_ms["legal_action_tensor_construction_ms"] >= 0.0
+
+    changed = dict(context.public_run_context)
+    changed["current"] = {
+        **changed["current"],
+        "location": {
+            **changed["current"]["location"],
+            "floor": {
+                **changed["current"]["location"]["floor"],
+                "value": int(changed["current"]["location"]["floor"]["value"]) + 1,
+            },
+        },
+    }
+    with pytest.raises(ValueError, match="stale or belongs to another search"):
+        scorer.score_decision_context_with_projection(
+            replace(context, public_run_context=changed),
+            projection,
+        )
+
+
+def test_t069_identity_observer_records_complete_existing_scorer_input(
+    tmp_path,
+) -> None:
+    checkpoint_path, dataset = _write_checkpoint(tmp_path)
+    context = _first_context(dataset)
+    scorer = TorchPolicyValueGuidanceScorer.from_checkpoint_path(checkpoint_path)
+    recorder = T069FeatureIdentityRecorder(arm="prior_value", projected=False)
+    scorer.set_t069_input_observer(recorder)
+
+    scorer.begin_t069_search_scope(context.public_run_context)
+    scorer.score_decision_context(context)
+    scorer.end_t069_search_scope()
+
+    assert recorder.problems == []
+    assert len(recorder.records) == 1
+    identity = recorder.records[0]
+    assert identity["state_feature_size"] == (
+        identity["snapshot_feature_size"] + identity["public_context_feature_size"]
+    )
+    assert identity["ordered_legal_action_count"] == len(context.legal_action_features)
+    assert identity["ordered_legal_action_identities"]
 
 
 def test_torch_guidance_fails_closed_on_bad_checkpoint_schema(tmp_path) -> None:
