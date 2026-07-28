@@ -474,3 +474,35 @@ def test_t067_cache_scope_is_one_select_action_invocation() -> None:
             step_index,
         )
     assert scorer.calls == 2
+
+
+def test_t068_trace_survives_fixed_evaluation_telemetry_aggregation() -> None:
+    from sts_combat_rl.sim.fixed_battle_evaluation import (
+        _append_controller_telemetry_value,
+        _merge_mapping_controller_telemetry,
+    )
+
+    controller = BattleSearchV2Controller(
+        simulations=10,
+        scorer=_Scorer(_checkpoint()),
+        ablation="prior_value",
+        callback_dependency_trace_enabled=True,
+        native_source_identity={"integration_commit": "t068"},
+    )
+    decision = controller.select_action(
+        _Adapter(),
+        SimulatorSnapshot(observation=[], raw=_node_raw()),
+        _actions(),
+        _context(),
+        0,
+    )
+    telemetry: dict[str, Any] = {}
+    for key, value in decision.metadata.items():
+        if isinstance(value, dict):
+            _merge_mapping_controller_telemetry(telemetry, key, value)
+        else:
+            _append_controller_telemetry_value(telemetry, key, value)
+    traces = telemetry["t068_callback_dependency_trace_records"]
+    assert isinstance(traces, list)
+    assert traces[0][0]["schema_id"] == "t068-native-callback-request-trace-v1"
+    assert len(traces[0][0]["requests"]) == 2

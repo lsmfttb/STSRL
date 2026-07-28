@@ -40,6 +40,7 @@ from sts_combat_rl.sim.battle_search_v2_cost import (
     T067_COST_ATTRIBUTION_SCHEMA_ID,
     T067_COST_ATTRIBUTION_SCHEMA_VERSION,
     T067_REPAIR_IDENTITY,
+    public_node_cache_key,
 )
 
 
@@ -75,6 +76,10 @@ class BattleSearchV2Controller:
     # enables this exact public-node cache on its repaired v2 controller.
     inference_cache_enabled: bool = False
     inference_cache_capacity: int = 4096
+    # T068-only diagnostic instrumentation.  It records the existing
+    # synchronous callback boundary; it never changes callback scheduling,
+    # scoring, or native traversal.
+    callback_dependency_trace_enabled: bool = False
     provenance: ControllerProvenance = field(init=False)  # type: ignore[assignment]
     checkpoint_provenance: SearchGuidanceCheckpointProvenance = field(init=False)
     _baseline: OracleSearchController = field(init=False, repr=False)
@@ -191,6 +196,8 @@ class BattleSearchV2Controller:
 
         total_start = time.perf_counter()
         callback_counts = {"policy": 0, "value": 0}
+        callback_trace: list[dict[str, Any]] = []
+        callback_sequence = 0
         inference_cache = (
             PublicNodeInferenceCache(self.inference_cache_capacity)
             if self.inference_cache_enabled
@@ -212,11 +219,21 @@ class BattleSearchV2Controller:
         def policy_callback(
             raw: Mapping[str, Any], native_actions: Sequence[Mapping[str, Any]]
         ) -> list[float]:
+            nonlocal callback_sequence
             callback_started = time.perf_counter()
             projection_started = time.perf_counter()
             node_context = _node_context(
                 raw, native_actions, self.action_space, context
             )
+            trace_entry = _begin_callback_trace(
+                enabled=self.callback_dependency_trace_enabled,
+                trace=callback_trace,
+                sequence=callback_sequence,
+                callback_kind="policy",
+                node_context=node_context,
+                required_outputs=("policy_probabilities",),
+            )
+            callback_sequence += 1
             attribution["node_context_projection_ms"] += (
                 time.perf_counter() - projection_started
             ) * 1000.0
@@ -239,17 +256,28 @@ class BattleSearchV2Controller:
             native_result = [
                 float(score.policy_probability) for score in result.action_scores
             ]
+            _finish_callback_trace(trace_entry, callback_started)
             _finish_callback_timing(attribution, callback_started)
             return native_result
 
         def value_callback(
             raw: Mapping[str, Any], native_actions: Sequence[Mapping[str, Any]]
         ) -> float:
+            nonlocal callback_sequence
             callback_started = time.perf_counter()
             projection_started = time.perf_counter()
             node_context = _node_context(
                 raw, native_actions, self.action_space, context
             )
+            trace_entry = _begin_callback_trace(
+                enabled=self.callback_dependency_trace_enabled,
+                trace=callback_trace,
+                sequence=callback_sequence,
+                callback_kind="value",
+                node_context=node_context,
+                required_outputs=("battle_survival_probability",),
+            )
+            callback_sequence += 1
             attribution["node_context_projection_ms"] += (
                 time.perf_counter() - projection_started
             ) * 1000.0
@@ -274,6 +302,7 @@ class BattleSearchV2Controller:
                 raise ValueError("checkpoint has no finite battle-survival value head")
             callback_counts["value"] += 1
             native_result = float(value)
+            _finish_callback_trace(trace_entry, callback_started)
             _finish_callback_timing(attribution, callback_started)
             return native_result
 
@@ -366,6 +395,18 @@ class BattleSearchV2Controller:
             for key, value in flat_cost.items()
             if isinstance(value, (int, float)) and not isinstance(value, bool)
         }
+        if self.callback_dependency_trace_enabled:
+            # Fixed-battle evaluation only recursively merges numeric mapping
+            # telemetry.  Keep this diagnostic payload as a top-level sequence
+            # so its exact request order survives that existing aggregation.
+            metadata["t068_callback_dependency_trace_records"] = [
+                {
+                    "schema_id": "t068-native-callback-request-trace-v1",
+                    "schema_version": 1,
+                    "trace_mode": "observe_existing_synchronous_callback",
+                    "requests": callback_trace,
+                }
+            ]
         return ControllerDecision(
             selected_index=target.legal_action_index,
             provenance=self.provenance,
@@ -425,6 +466,73 @@ def _finish_callback_timing(
 ) -> None:
     total_ms = (time.perf_counter() - callback_started) * 1000.0
     attribution["python_callback_total_ms"] += total_ms
+
+
+def _begin_callback_trace(
+    *,
+    enabled: bool,
+    trace: list[dict[str, Any]],
+    sequence: int,
+    callback_kind: str,
+    node_context: DecisionContext,
+    required_outputs: tuple[str, ...],
+) -> dict[str, Any] | None:
+    """Record one exact T068 request without exposing simulator-only state.
+
+    Pybind invokes these callbacks synchronously: native code cannot issue the
+    next callback until this function returns its response.  The trace records
+    that runtime boundary explicitly; the T068 report combines it with the
+    pinned native-source audit before deciding whether a batch is legal.
+    """
+
+    if not enabled:
+        return None
+    cache_key = public_node_cache_key(node_context)
+    action_identities: list[dict[str, Any]] = []
+    for action in node_context.tactical_legal_actions:
+        identity = action.get("identity") if isinstance(action, Mapping) else None
+        if not isinstance(identity, Mapping):
+            raise ValueError("T068 callback trace requires legal action identities")
+        action_identities.append(dict(identity))
+    if cache_key is None:
+        raise ValueError(
+            "T068 callback trace requires the complete canonical public-node identity"
+        )
+    input_identity = cache_key[0]
+    entry = {
+        "request_id": f"request-{sequence:06d}",
+        "request_sequence": sequence,
+        "callback_kind": callback_kind,
+        "required_outputs": list(required_outputs),
+        "public_input_identity": input_identity,
+        "public_input_identity_schema_id": "t067-public-node-cache-key-v1",
+        "public_input_canonical_byte_count": len(cache_key[1]),
+        "ordered_legal_action_identities": action_identities,
+        "native_traversal_point": (
+            "policy_prior_apply" if callback_kind == "policy" else "leaf_value_backup"
+        ),
+        "earliest_result_consumer": (
+            "native callback return boundary before subsequent native traversal"
+        ),
+        "dependency_edges": [
+            "request_ready -> python_callback_response",
+            "python_callback_response -> immediate_native_consumer",
+            "immediate_native_consumer -> next_native_traversal_or_request",
+        ],
+        "simultaneously_ready_batch_size": 1,
+        "flush_reason": "native callback requires this response before traversal continues",
+        "response_count": 0,
+        "response_order_exact": True,
+    }
+    trace.append(entry)
+    return entry
+
+
+def _finish_callback_trace(entry: dict[str, Any] | None, started: float) -> None:
+    if entry is None:
+        return
+    entry["response_count"] = 1
+    entry["callback_elapsed_ms"] = (time.perf_counter() - started) * 1000.0
 
 
 def _node_context(
