@@ -52,9 +52,11 @@ minimal tree-internal policy/value surface but exited before outcome comparison
 because minimum-budget calibration was infeasible. T067 attributed the cost
 and tested one exact public-node cache; 0/866 lookups hit, two guided arms
 remained minimum-budget wall-clock infeasible, and no outcome comparison or
-promotion was authorized. T068 is now the `READY` task: a fail-closed audit and
-bounded feasibility test for exact batching across the native/Python inference
-boundary.
+promotion was authorized. T068 then found 207/261/398 synchronous singleton
+guided callbacks and no exact batch of size two or greater, so native-boundary
+batching, calibration, outcome comparison, and promotion remained closed.
+T069 is now the `READY` task: a fail-closed audit and bounded feasibility test
+for one exact search-scope public-context feature projection.
 New implementation work should start only from rows marked `READY` in the task
 index; T034 remains blocked on native sampler support.
 
@@ -388,9 +390,9 @@ Work:
 - satisfy broad-training readiness per ascension and act;
 - keep mechanical cleanup separate from coverage/search experiments;
 - use T061's accepted bottleneck decomposition to keep another unchanged
-  natural source scale-up closed while T068 determines whether exact
-  native-boundary batching can make the accepted T062/T067 tree-internal
-  policy/value search surface compute-feasible;
+  natural source scale-up closed while T069 determines whether one exact
+  search-scope public-context feature projection can make the accepted
+  T062/T067/T068 tree-internal policy/value search surface compute-feasible;
 - keep the closed root-prior allocation-repair route out of further
   reachability, training, and promotion work.
 
@@ -465,12 +467,15 @@ effect on Act-2 entry and selected T062. T062 implemented the minimal
 tree-internal policy/value surface but could not enter its outcome comparison
 because minimum-budget cost calibration failed. T067 attributed that cost and
 tested exact public-node caching; no cache reuse occurred, two guided arms
-remained wall-clock infeasible, and the cache direction closed. The active
-priority is T068's native-boundary batching feasibility gate. It may implement
-one exact batch boundary and re-enter cost calibration only if the accepted
-native traversal exposes simultaneously ready requests without changing tree
-semantics. Further natural source scale-up remains contingent on improved
-policy evidence.
+remained wall-clock infeasible, and the cache direction closed. T068 proved
+that the accepted native traversal exposes only synchronous singleton
+callbacks, so the native-batching direction also closed. The active priority
+is T069's public-node feature-encoding projection feasibility gate. It may
+implement one exact search-scope public-context projection and re-enter cost
+calibration only if complete current-schema vectors and accepted search
+semantics remain unchanged and measured evidence projects both infeasible arms
+under the 1.10 wall ceiling. Further natural source scale-up remains contingent
+on improved policy evidence.
 
 Exit gate: a search change improves fixed evaluation at equal simulation or
 wall-clock budget without natural-weighted regression.
