@@ -90,9 +90,12 @@ def main() -> int:
     source_path = source_root.as_posix()
     input_path = input_root.as_posix()
     candidate_commands = []
-    for path in candidate_paths[1:]:
+    for path in candidate_paths:
         stage = path.parent
-        stage_report = _load(stage / "stage-execution.json")
+        stage_execution = stage / "stage-execution.json"
+        if not stage_execution.is_file():
+            continue
+        stage_report = _load(stage_execution)
         arm_args = " ".join(
             f"--arm-budget {value}" for value in stage_report["arm_budgets"]
         )
@@ -109,7 +112,8 @@ def main() -> int:
     regeneration_commands = [
         (
             "cd /mnt/d/DeadlycatCoding/STSRL && "
-            f"git worktree add --detach {source_path} {args.code_commit}"
+            f"git -c core.autocrlf=true worktree add --detach "
+            f"{source_path} {args.code_commit}"
         ),
         (
             f"cd {source_path} && STSRL_LIGHTSPEED_BUILD_JOBS=16 "
