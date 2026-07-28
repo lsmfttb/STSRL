@@ -190,6 +190,8 @@ def build_t069_calibration_report(
         }:
             raise ValueError("T069 calibration candidate family is invalid")
         budgets = {arm: _arm_budget(report, arm) for arm in T062_ARM_LABELS}
+        if budgets["baseline"] != 100:
+            raise ValueError("T069 calibration baseline budget must remain 100")
         baseline_steps = _positive_arm_total(
             report, "baseline", "native_simulator_steps"
         )
@@ -220,6 +222,13 @@ def build_t069_calibration_report(
                 "arms": arms,
             }
         )
+    initial = candidates[0]
+    if initial["family"] != "wall_clock_normalized" or any(
+        initial["budgets"][arm] != 1 for arm in T069_GUIDED_ARMS
+    ):
+        raise ValueError(
+            "T069 calibration must start with wall-clock baseline=100/guided=1"
+        )
     final_locks = {
         arm: {
             "simulator_step": any(
@@ -239,6 +248,25 @@ def build_t069_calibration_report(
         values["simulator_step"] and values["wall_clock"]
         for values in final_locks.values()
     )
+    minimum_budget_infeasible_arms = sorted(
+        {
+            arm
+            for candidate in candidates
+            for arm in T069_GUIDED_ARMS
+            if candidate["family"] == "wall_clock_normalized"
+            and candidate["arms"][arm]["wall_clock_proven_infeasible_at_minimum"]
+        }
+    )
+    calibration_complete = all_locks or bool(minimum_budget_infeasible_arms)
+    terminal_reason = (
+        "all_required_locks_succeeded"
+        if all_locks
+        else (
+            "minimum_budget_wall_clock_infeasibility_proven"
+            if minimum_budget_infeasible_arms
+            else "candidate_sequence_continuation_required"
+        )
+    )
     return {
         "schema_id": T069_CALIBRATION_SCHEMA_ID,
         "schema_version": 1,
@@ -251,18 +279,21 @@ def build_t069_calibration_report(
         "executed_candidates": candidates,
         "final_locks": final_locks,
         "all_required_locks_succeeded": all_locks,
-        "minimum_budget_infeasible_arms": sorted(
-            {
-                arm
-                for candidate in candidates
-                for arm in T069_GUIDED_ARMS
-                if candidate["family"] == "wall_clock_normalized"
-                and candidate["arms"][arm]["wall_clock_proven_infeasible_at_minimum"]
-            }
-        ),
+        "minimum_budget_infeasible_arms": minimum_budget_infeasible_arms,
+        "calibration_complete": calibration_complete,
+        "continuation_required": not calibration_complete,
+        "terminal_reason": terminal_reason,
         "calibration_is_cost_only": True,
         "no_93_record_outcome_aggregation_performed": True,
-        "command_passed": True,
+        "command_passed": calibration_complete,
+        "problems": (
+            []
+            if calibration_complete
+            else [
+                "calibration candidate sequence is incomplete: required locks "
+                "remain open without published infeasibility proof"
+            ]
+        ),
     }
 
 
@@ -286,17 +317,24 @@ def build_t069_decision_report(
             T069_CALIBRATION_SCHEMA_ID
         ):
             raise ValueError("T069 material projection requires calibration report")
+        if (
+            calibration.get("command_passed") is not True
+            or calibration.get("calibration_complete") is not True
+        ):
+            raise ValueError("T069 calibration sequence is not terminal")
         if calibration.get("all_required_locks_succeeded") is True:
             case = "A"
             recommendation = "T062-original-93-record-outcome-comparison"
             reason = "all simulator-step and wall-clock calibration locks passed"
-        else:
+        elif calibration.get("minimum_budget_infeasible_arms"):
             case = "B"
             recommendation = "search-v2-no-promotion-outcome-canary"
             reason = (
-                "projection was exact and material but at least one calibration "
-                "lock remained open"
+                "projection was exact and material but minimum-budget wall-clock "
+                "infeasibility was proven"
             )
+        else:
+            raise ValueError("T069 terminal calibration lacks a published outcome")
     return {
         "schema_id": T069_DECISION_SCHEMA_ID,
         "schema_version": 1,
@@ -311,6 +349,18 @@ def build_t069_decision_report(
         "no_promotion_claim": True,
         "command_passed": True,
     }
+
+
+def build_t069_precalibration_decision_report(
+    feasibility: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    """Return only a terminal Case C before independent calibration runs."""
+
+    if feasibility.get("schema_id") != T069_FEASIBILITY_SCHEMA_ID:
+        raise ValueError("T069 precalibration decision requires current feasibility")
+    if feasibility.get("conditional_calibration_authorized") is True:
+        return None
+    return build_t069_decision_report(feasibility, None)
 
 
 def _validate_comparison(report: Mapping[str, Any], *, projected: bool) -> None:

@@ -1,5 +1,12 @@
 from __future__ import annotations
 
+import importlib.util
+import json
+from pathlib import Path
+import sys
+
+import pytest
+
 from sts_combat_rl.commands.t069_public_context_projection import (
     T069_DECISION_SCHEMA_ID,
     T069_FEASIBILITY_SCHEMA_ID,
@@ -7,10 +14,23 @@ from sts_combat_rl.commands.t069_public_context_projection import (
     build_t069_attribution_and_feasibility_report,
     build_t069_calibration_report,
     build_t069_decision_report,
+    build_t069_precalibration_decision_report,
 )
 
 
 GUIDED = ("prior_only", "value_only", "prior_value")
+
+
+def _load_t069_finalizer():
+    script = (
+        Path(__file__).resolve().parents[1] / "scripts" / "finalize_t069_artifacts.py"
+    )
+    specification = importlib.util.spec_from_file_location("t069_finalizer", script)
+    assert specification is not None
+    assert specification.loader is not None
+    module = importlib.util.module_from_spec(specification)
+    specification.loader.exec_module(module)
+    return module
 
 
 def _comparison(*, projected: bool, wall_after: float = 75.0):
@@ -157,19 +177,141 @@ def test_t069_material_projection_with_open_lock_selects_case_b():
 
     assert calibration["all_required_locks_succeeded"] is False
     assert calibration["minimum_budget_infeasible_arms"] == ["prior_only"]
+    assert calibration["calibration_complete"] is True
+    assert calibration["continuation_required"] is False
     assert decision["decision_case"] == "B"
     assert decision["recommendation"] == "search-v2-no-promotion-outcome-canary"
 
 
+def test_t069_budget_one_without_infeasibility_requires_continuation():
+    feasibility = _feasibility()
+    candidate = _comparison(projected=True, wall_after=100.0)
+
+    calibration = build_t069_calibration_report([candidate])
+
+    assert calibration["all_required_locks_succeeded"] is False
+    assert calibration["minimum_budget_infeasible_arms"] == []
+    assert calibration["calibration_complete"] is False
+    assert calibration["continuation_required"] is True
+    assert calibration["terminal_reason"] == (
+        "candidate_sequence_continuation_required"
+    )
+    assert calibration["command_passed"] is False
+    with pytest.raises(ValueError, match="sequence is not terminal"):
+        build_t069_decision_report(feasibility, calibration)
+
+
+def test_t069_prototype_case_b_cannot_preempt_independent_case_a():
+    feasibility = _feasibility()
+    prototype = _comparison(projected=True, wall_after=200.0)
+    prototype_calibration = build_t069_calibration_report([prototype])
+    assert set(prototype_calibration["minimum_budget_infeasible_arms"]) == set(GUIDED)
+
+    assert build_t069_precalibration_decision_report(feasibility) is None
+
+    wall_candidate = _comparison(projected=True, wall_after=100.0)
+    step_candidate = _comparison(projected=True, wall_after=100.0)
+    step_candidate["family"] = "simulator_step_normalized"
+    independent_calibration = build_t069_calibration_report(
+        [wall_candidate, step_candidate]
+    )
+    independent_decision = build_t069_decision_report(
+        feasibility,
+        independent_calibration,
+    )
+
+    assert independent_calibration["all_required_locks_succeeded"] is True
+    assert independent_decision["decision_case"] == "A"
+
+
+@pytest.mark.parametrize(
+    ("arm", "budget"),
+    [
+        ("baseline", 99),
+        ("prior_only", 2),
+        ("value_only", 2),
+        ("prior_value", 2),
+    ],
+)
+def test_t069_calibration_validates_initial_budget_one_candidate(arm, budget):
+    candidate = _comparison(projected=True, wall_after=100.0)
+    candidate["controller_provenance"][arm]["config"]["search_budget"][
+        "simulations"
+    ] = budget
+
+    with pytest.raises(ValueError, match="baseline budget|must start"):
+        build_t069_calibration_report([candidate])
+
+
 def test_t069_immaterial_projection_fails_closed_to_case_c():
     feasibility = _feasibility(wall_after=99.0)
-    decision = build_t069_decision_report(feasibility, None)
+    decision = build_t069_precalibration_decision_report(feasibility)
 
+    assert decision is not None
     assert feasibility["command_passed"] is False
     assert decision["decision_case"] == "C"
     assert decision["recommendation"] == (
         "T064-simulator-generated-later-act-curriculum"
     )
+
+
+def test_t069_finalizer_case_c_runs_without_calibration(tmp_path, monkeypatch):
+    finalizer = _load_t069_finalizer()
+    root = (
+        tmp_path
+        / "artifacts"
+        / "t069-public-node-feature-encoding-projection-feasibility"
+        / "case-c"
+    )
+    root.mkdir(parents=True)
+    source_root = Path(tmp_path.anchor) / "t069-stable-source"
+    input_root = tmp_path / "inputs"
+    input_root.mkdir()
+    (root / "t069-feasibility.json").write_text(
+        json.dumps(_feasibility(wall_after=99.0)),
+        encoding="utf-8",
+    )
+    (root / "t069-stage-execution.json").write_text(
+        json.dumps(
+            {
+                "schema_id": "t069-stage-execution-v1",
+                "command_passed": True,
+                "projection_attribution": {"worker_count": 16},
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "finalize_t069_artifacts.py",
+            "--artifact-root",
+            str(root),
+            "--source-root",
+            str(source_root),
+            "--input-root",
+            str(input_root),
+            "--code-commit",
+            "c" * 40,
+        ],
+    )
+
+    assert finalizer.main() == 0
+
+    decision = json.loads((root / "t069-decision.json").read_text(encoding="utf-8"))
+    manifest = json.loads(
+        (root / "t069-retention-manifest.json").read_text(encoding="utf-8")
+    )
+    assert decision["decision_case"] == "C"
+    assert not (root / "t069-calibration.json").exists()
+    assert manifest["calibration"] == {
+        "status": "not_run",
+        "reason": "feasibility_did_not_authorize_calibration",
+    }
+    finalizer_command = manifest["regeneration_commands"][-1]
+    assert "finalize_t069_artifacts.py" in finalizer_command
+    assert "--candidate-report" not in finalizer_command
 
 
 def test_t069_feature_identity_mismatch_is_not_exact():

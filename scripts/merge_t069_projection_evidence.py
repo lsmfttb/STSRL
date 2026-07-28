@@ -17,7 +17,7 @@ from sts_combat_rl.commands.t069_public_context_projection import (
     T069_ATTRIBUTION_SCHEMA_ID,
     build_t069_attribution_and_feasibility_report,
     build_t069_calibration_report,
-    build_t069_decision_report,
+    build_t069_precalibration_decision_report,
 )
 
 
@@ -148,16 +148,10 @@ def main() -> int:
     _write_json(args.feasibility_output, feasibility)
     _write_json(args.calibration_output, calibration)
 
-    decisive = not feasibility["conditional_calibration_authorized"] or bool(
-        calibration["minimum_budget_infeasible_arms"]
-    )
-    if decisive:
+    decision = build_t069_precalibration_decision_report(feasibility)
+    if decision is not None:
         if args.decision_output is None:
-            raise SystemExit("T069 decisive initial gate requires --decision-output")
-        decision = build_t069_decision_report(
-            feasibility,
-            calibration if feasibility["conditional_calibration_authorized"] else None,
-        )
+            raise SystemExit("T069 failed feasibility requires --decision-output")
         _write_json(args.decision_output, decision)
     return 0
 

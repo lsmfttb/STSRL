@@ -25,7 +25,7 @@ def main() -> int:
     parser.add_argument("--source-root", type=Path, required=True)
     parser.add_argument("--input-root", type=Path, required=True)
     parser.add_argument("--code-commit", required=True)
-    parser.add_argument("--candidate-report", action="append", required=True)
+    parser.add_argument("--candidate-report", action="append", default=[])
     args = parser.parse_args()
     root = args.artifact_root.resolve()
     source_root = args.source_root.resolve()
@@ -43,15 +43,38 @@ def main() -> int:
         raise SystemExit("T069 feasibility schema changed")
     candidate_paths = [Path(path).resolve() for path in args.candidate_report]
     candidates = [_load(path) for path in candidate_paths]
-    calibration = build_t069_calibration_report(candidates)
     calibration_path = root / "t069-calibration.json"
-    if calibration_path.exists():
-        raise SystemExit("T069 finalizer refuses to overwrite calibration")
-    _write(calibration_path, calibration)
-    decision = build_t069_decision_report(
-        feasibility,
-        calibration if feasibility["conditional_calibration_authorized"] else None,
+    calibration_authorized = (
+        feasibility.get("conditional_calibration_authorized") is True
     )
+    if calibration_authorized:
+        if not candidates:
+            raise SystemExit(
+                "T069 authorized calibration requires independent candidates"
+            )
+        calibration = build_t069_calibration_report(candidates)
+        if calibration.get("command_passed") is not True:
+            raise SystemExit(
+                "T069 authorized calibration requires terminal independent candidates"
+            )
+        if calibration_path.exists():
+            raise SystemExit("T069 finalizer refuses to overwrite calibration")
+        _write(calibration_path, calibration)
+        decision = build_t069_decision_report(feasibility, calibration)
+        calibration_retention = {
+            "status": "completed",
+            "schema_id": T069_CALIBRATION_SCHEMA_ID,
+            "path": calibration_path.relative_to(root).as_posix(),
+            "sha256": _sha256(calibration_path),
+        }
+    else:
+        if candidates:
+            raise SystemExit("T069 failed feasibility forbids calibration candidates")
+        decision = build_t069_decision_report(feasibility, None)
+        calibration_retention = {
+            "status": "not_run",
+            "reason": "feasibility_did_not_authorize_calibration",
+        }
     decision_path = root / "t069-decision.json"
     if decision_path.exists():
         existing = _load(decision_path)
@@ -158,11 +181,7 @@ def main() -> int:
         "input_root": input_path,
         "input_identities": feasibility["input_identities"],
         "decision": decision,
-        "calibration": {
-            "schema_id": T069_CALIBRATION_SCHEMA_ID,
-            "path": calibration_path.relative_to(root).as_posix(),
-            "sha256": _sha256(calibration_path),
-        },
+        "calibration": calibration_retention,
         "artifacts": artifacts,
         "artifact_count": len(artifacts),
         "artifact_bytes": sum(item["bytes"] for item in artifacts),
