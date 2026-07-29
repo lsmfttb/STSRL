@@ -181,13 +181,15 @@ def public_node_cache_key(
         "public_run_context": context.public_run_context,
     }
     try:
-        canonical = _canonical_json(payload)
+        canonical = canonical_public_json(payload)
     except (TypeError, ValueError, OverflowError):
         return None
     return hashlib.sha256(canonical).hexdigest(), canonical
 
 
-def _canonical_json(value: Any) -> bytes:
+def canonical_public_json(value: Any) -> bytes:
+    """Return the exact finite JSON representation used by public-input keys."""
+
     normalized = _normalize(value)
     return json.dumps(
         normalized,

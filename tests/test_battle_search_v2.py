@@ -77,6 +77,70 @@ class _Scorer:
         )
 
 
+@dataclass(frozen=True)
+class _Projection:
+    public_context: dict[str, Any]
+
+    def telemetry(self) -> dict[str, Any]:
+        return {
+            "schema_id": "t069-public-context-feature-projection-v1",
+            "schema_version": 1,
+            "implementation_id": (
+                "search-scope-complete-public-context-feature-projection-v1"
+            ),
+            "construction_ms": 1.0,
+            "canonicalization_ms": 0.25,
+            "validation_encoding_ms": 0.75,
+            "canonical_public_context_sha256": "abc",
+            "canonical_public_context_byte_count": 2,
+            "public_context_features_sha256": "def",
+            "feature_schema_id": "public-context-model-input-v1",
+            "feature_schema_version": 1,
+            "feature_names": [],
+            "feature_size": 0,
+            "dtype": "float32",
+            "device": "cpu",
+            "checkpoint_artifact_id": "unit-test-checkpoint",
+            "construction_count": 1,
+        }
+
+
+@dataclass
+class _ProjectionScorer(_Scorer):
+    projection_builds: int = 0
+    projected_calls: int = 0
+
+    def prepare_public_context_projection(
+        self, public_run_context: dict[str, Any]
+    ) -> _Projection:
+        self.projection_builds += 1
+        return _Projection(dict(public_run_context))
+
+    def score_decision_context_with_projection(
+        self, context: DecisionContext, projection: _Projection
+    ) -> SearchGuidanceInferenceResult:
+        if dict(context.public_run_context) != projection.public_context:
+            raise ValueError("stale projection")
+        self.projected_calls += 1
+        result = self.score_decision_context(context)
+        return SearchGuidanceInferenceResult(
+            scorer_name=result.scorer_name,
+            checkpoint_provenance=result.checkpoint_provenance,
+            legal_action_count=result.legal_action_count,
+            eligible_action_count=result.eligible_action_count,
+            action_scores=result.action_scores,
+            value_prediction=result.value_prediction,
+            timing_ms={
+                "feature_encoding_ms": 0.1,
+                "tensor_construction_ms": 0.2,
+                "model_forward_ms": 0.3,
+                "result_postprocess_ms": 0.4,
+                "public_context_projection_validation_ms": 0.05,
+                "state_vector_assembly_ms": 0.05,
+            },
+        )
+
+
 def _action_identity(context: DecisionContext, index: int) -> dict[str, Any]:
     if index >= len(context.tactical_legal_actions):
         return {}
@@ -474,6 +538,44 @@ def test_t067_cache_scope_is_one_select_action_invocation() -> None:
             step_index,
         )
     assert scorer.calls == 2
+
+
+def test_t069_projection_is_search_local_versioned_and_telemetrized() -> None:
+    scorer = _ProjectionScorer(_checkpoint())
+    controller = BattleSearchV2Controller(
+        simulations=10,
+        scorer=scorer,
+        ablation="prior_value",
+        inference_cache_enabled=True,
+        public_context_projection_enabled=True,
+        native_source_identity={"integration_commit": "t069"},
+    )
+    decision = controller.select_action(
+        _RepeatingAdapter(),
+        SimulatorSnapshot(observation=[], raw=_node_raw()),
+        _actions(),
+        _context(),
+        0,
+    )
+
+    assert scorer.projection_builds == 1
+    assert scorer.projected_calls == 1
+    assert decision.provenance.config["task_id"] == "T069"
+    assert decision.provenance.config["cost_repair"]["projection_scope"] == (
+        "one_native_search_call"
+    )
+    assert decision.provenance.config["cost_repair"]["digest_only_reuse"] is False
+    cost = decision.metadata["t069_cost_attribution"]
+    assert cost["public_context_projection_construction_count"] == 1.0
+    assert cost["public_context_projection_reuse_count"] == 1.0
+    assert cost["public_context_projection_validation_ms"] == pytest.approx(0.05)
+    assert cost["checkpoint_feature_encoding_ms"] == pytest.approx(0.1)
+    assert (
+        decision.metadata["battle_search_v2"]["public_context_projection"][
+            "checkpoint_artifact_id"
+        ]
+        == "unit-test-checkpoint"
+    )
 
 
 def test_t068_trace_survives_fixed_evaluation_telemetry_aggregation() -> None:

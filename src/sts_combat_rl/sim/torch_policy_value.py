@@ -8,7 +8,7 @@ resource heads without collapsing resources into a permanent scalar reward.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field
 import hashlib
 import math
@@ -38,6 +38,11 @@ from sts_combat_rl.sim.public_context_model_input import (
     PUBLIC_CONTEXT_MODEL_INPUT_SCHEMA_VERSION,
     encode_public_context_model_input,
     public_context_features as shared_public_context_features,
+)
+from sts_combat_rl.sim.public_context_feature_projection import (
+    PublicContextFeatureProjection,
+    build_public_context_feature_projection,
+    validate_public_context_feature_projection,
 )
 from sts_combat_rl.sim.resource_outcome import BATTLE_RESOURCE_OUTCOME_AVAILABLE
 from sts_combat_rl.sim.search_guidance_inference import (
@@ -429,6 +434,7 @@ class TorchPolicyValueGuidanceScorer:
             checkpoint_artifact_id=checkpoint_artifact_id,
             checkpoint_path=checkpoint_path,
         )
+        self._t069_input_observer: Callable[[Mapping[str, Any]], None] | None = None
 
     @classmethod
     def from_checkpoint_path(cls, path: str | Path) -> "TorchPolicyValueGuidanceScorer":
@@ -448,6 +454,47 @@ class TorchPolicyValueGuidanceScorer:
     def provenance_config(self) -> Mapping[str, Any]:
         return self.checkpoint_provenance.to_dict()
 
+    def set_t069_input_observer(
+        self,
+        observer: Callable[[Mapping[str, Any]], None] | None,
+    ) -> None:
+        """Install default-off T069 identity instrumentation.
+
+        The observer is diagnostic-only and receives complete public model
+        inputs that the scorer already constructed. It cannot replace or
+        mutate those inputs.
+        """
+
+        self._t069_input_observer = observer
+
+    def begin_t069_search_scope(
+        self,
+        public_run_context: Mapping[str, Any],
+    ) -> None:
+        self._notify_t069_observer(
+            {
+                "event": "begin_search_scope",
+                "public_run_context": public_run_context,
+            }
+        )
+
+    def end_t069_search_scope(self) -> None:
+        self._notify_t069_observer({"event": "end_search_scope"})
+
+    def prepare_public_context_projection(
+        self,
+        public_run_context: Mapping[str, Any],
+    ) -> PublicContextFeatureProjection:
+        """Build one exact current-schema projection for one search invocation."""
+
+        dtype, device = _model_dtype_device(self.model)
+        return build_public_context_feature_projection(
+            public_run_context,
+            checkpoint_artifact_id=(self.checkpoint_provenance.checkpoint_artifact_id),
+            dtype=dtype,
+            device=device,
+        )
+
     @torch.no_grad()
     def score_decision_context(
         self,
@@ -455,23 +502,160 @@ class TorchPolicyValueGuidanceScorer:
     ) -> SearchGuidanceInferenceResult:
         started = perf_counter()
         validate_search_guidance_context(context)
-        _validate_context_schema(self.model, context)
+        schema_started = perf_counter()
+        _validate_context_schema(
+            self.model,
+            context,
+            validate_public_context=False,
+        )
+        snapshot_action_schema_validation_ms = (
+            perf_counter() - schema_started
+        ) * 1000.0
+        public_validation_started = perf_counter()
+        validation_features = encode_public_context_features(context.public_run_context)
+        if len(validation_features) != self.model.public_context_feature_size:
+            raise ValueError(
+                "public context feature size "
+                f"{len(validation_features)} does not match model "
+                f"{self.model.public_context_feature_size}"
+            )
+        public_context_schema_validation_encoding_ms = (
+            perf_counter() - public_validation_started
+        ) * 1000.0
 
+        feature_started = perf_counter()
+        public_context_started = perf_counter()
+        public_context_features = encode_public_context_features(
+            context.public_run_context
+        )
+        public_context_feature_encoding_ms = (
+            perf_counter() - public_context_started
+        ) * 1000.0
+        assembly_started = perf_counter()
+        encoded_state_features = _state_features(
+            context.snapshot_features,
+            public_context_features,
+        )
+        state_assembly_ms = (perf_counter() - assembly_started) * 1000.0
+        feature_encoded_ms = (perf_counter() - feature_started) * 1000.0
+        return self._score_encoded_context(
+            context,
+            encoded_state_features,
+            public_context_features=public_context_features,
+            projected=False,
+            started=started,
+            timing_ms={
+                "feature_encoding_ms": feature_encoded_ms,
+                "snapshot_action_schema_validation_ms": (
+                    snapshot_action_schema_validation_ms
+                ),
+                "public_context_schema_validation_encoding_ms": (
+                    public_context_schema_validation_encoding_ms
+                ),
+                "public_context_feature_encoding_ms": (
+                    public_context_feature_encoding_ms
+                ),
+                "state_vector_assembly_ms": state_assembly_ms,
+                "public_context_projection_validation_ms": 0.0,
+            },
+        )
+
+    @torch.no_grad()
+    def score_decision_context_with_projection(
+        self,
+        context: DecisionContext,
+        projection: PublicContextFeatureProjection,
+    ) -> SearchGuidanceInferenceResult:
+        """Score with an explicit search-local, complete public-context vector."""
+
+        started = perf_counter()
+        validate_search_guidance_context(context)
+        schema_started = perf_counter()
+        _validate_context_schema(
+            self.model,
+            context,
+            validate_public_context=False,
+        )
+        snapshot_action_schema_validation_ms = (
+            perf_counter() - schema_started
+        ) * 1000.0
+        dtype, device = _model_dtype_device(self.model)
+        validation_ms = validate_public_context_feature_projection(
+            projection,
+            context.public_run_context,
+            checkpoint_artifact_id=(self.checkpoint_provenance.checkpoint_artifact_id),
+            dtype=dtype,
+            device=device,
+            feature_schema_id=self.model.public_context_feature_schema_id,
+            feature_schema_version=self.model.public_context_feature_schema_version,
+            feature_names=self.model.public_context_feature_names,
+            feature_size=self.model.public_context_feature_size,
+        )
         feature_started = perf_counter()
         encoded_state_features = _state_features(
             context.snapshot_features,
-            encode_public_context_features(context.public_run_context),
+            projection.public_context_features,
         )
-        feature_encoded_ms = (perf_counter() - feature_started) * 1000.0
+        state_assembly_ms = (perf_counter() - feature_started) * 1000.0
+        return self._score_encoded_context(
+            context,
+            encoded_state_features,
+            public_context_features=projection.public_context_features,
+            projected=True,
+            started=started,
+            timing_ms={
+                "feature_encoding_ms": state_assembly_ms,
+                "snapshot_action_schema_validation_ms": (
+                    snapshot_action_schema_validation_ms
+                ),
+                "public_context_schema_validation_encoding_ms": 0.0,
+                "public_context_feature_encoding_ms": 0.0,
+                "state_vector_assembly_ms": state_assembly_ms,
+                "public_context_projection_validation_ms": validation_ms,
+            },
+        )
+
+    def _score_encoded_context(
+        self,
+        context: DecisionContext,
+        encoded_state_features: Sequence[float],
+        *,
+        public_context_features: Sequence[float],
+        projected: bool,
+        started: float,
+        timing_ms: Mapping[str, float],
+    ) -> SearchGuidanceInferenceResult:
+        observer_ms = 0.0
+        if self._t069_input_observer is not None:
+            observer_started = perf_counter()
+            self._notify_t069_observer(
+                {
+                    "event": "score_input",
+                    "context": context,
+                    "public_context_features": tuple(public_context_features),
+                    "state_features": tuple(encoded_state_features),
+                    "legal_action_features": tuple(
+                        tuple(row) for row in context.legal_action_features
+                    ),
+                    "projected": projected,
+                }
+            )
+            observer_ms = (perf_counter() - observer_started) * 1000.0
         tensor_started = perf_counter()
+        state_tensor_started = perf_counter()
         state_features = torch.tensor(
             encoded_state_features,
             dtype=torch.float32,
         )
+        state_tensor_construction_ms = (perf_counter() - state_tensor_started) * 1000.0
+        action_tensor_started = perf_counter()
         action_features = torch.tensor(
             context.legal_action_features,
             dtype=torch.float32,
         )
+        action_tensor_construction_ms = (
+            perf_counter() - action_tensor_started
+        ) * 1000.0
         tensor_construction_ms = (perf_counter() - tensor_started) * 1000.0
         forward_started = perf_counter()
         logits, outcome_logit, hp_value, resource_values = self.model(
@@ -514,12 +698,20 @@ class TorchPolicyValueGuidanceScorer:
             value_prediction=value_prediction,
             duration_ms=(perf_counter() - started) * 1000.0,
             timing_ms={
-                "feature_encoding_ms": feature_encoded_ms,
+                **timing_ms,
+                "t069_input_identity_observer_ms": observer_ms,
                 "tensor_construction_ms": tensor_construction_ms,
+                "state_tensor_construction_ms": state_tensor_construction_ms,
+                "legal_action_tensor_construction_ms": (action_tensor_construction_ms),
                 "model_forward_ms": model_forward_ms,
                 "result_postprocess_ms": postprocess_ms,
             },
         )
+
+    def _notify_t069_observer(self, event: Mapping[str, Any]) -> None:
+        observer = self._t069_input_observer
+        if observer is not None:
+            observer(event)
 
 
 class TorchPolicyValueEnsembleActionScorer:
@@ -1795,6 +1987,8 @@ def _validate_model_dataset_compatibility(
 def _validate_context_schema(
     model: PolicyValueNetwork,
     context: DecisionContext,
+    *,
+    validate_public_context: bool = True,
 ) -> None:
     if context.tactical_feature_schema_id != model.tactical_feature_schema_id:
         raise ValueError(
@@ -1820,13 +2014,19 @@ def _validate_context_schema(
             f"action feature size {bad_action_size} does not match "
             f"model {model.action_feature_size}"
         )
-    context_features = encode_public_context_features(context.public_run_context)
-    if len(context_features) != model.public_context_feature_size:
-        raise ValueError(
-            "public context feature size "
-            f"{len(context_features)} does not match model "
-            f"{model.public_context_feature_size}"
-        )
+    if validate_public_context:
+        context_features = encode_public_context_features(context.public_run_context)
+        if len(context_features) != model.public_context_feature_size:
+            raise ValueError(
+                "public context feature size "
+                f"{len(context_features)} does not match model "
+                f"{model.public_context_feature_size}"
+            )
+
+
+def _model_dtype_device(model: PolicyValueNetwork) -> tuple[str, str]:
+    parameter = next(model.parameters())
+    return str(parameter.dtype).removeprefix("torch."), str(parameter.device)
 
 
 def _validate_batch_schema(model: PolicyValueNetwork, batch: ModelInputBatch) -> None:
