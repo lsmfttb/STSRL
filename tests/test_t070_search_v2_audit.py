@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
 import subprocess
 import sys
 
@@ -228,5 +229,6 @@ def test_t070_script_cli_smoke(script: str) -> None:
         capture_output=True,
         text=True,
         check=False,
+        env={**os.environ, "PYTHONPATH": "src"},
     )
     assert completed.returncode == 0, completed.stderr
