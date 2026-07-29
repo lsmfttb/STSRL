@@ -1,6 +1,6 @@
 # Current Status
 
-Last reviewed: 2026-07-27.
+Last reviewed: 2026-07-29.
 
 This document describes the latest `main` branch only. Results from local
 artifacts, old branches, or unmerged pull requests do not count as implemented
@@ -90,8 +90,12 @@ minimum-budget wall-clock infeasible, and selected T068 without authorizing an
 outcome comparison. T068 is complete: every guided arm exposed only
 synchronous singleton callbacks, so native-boundary batching, calibration, and
 outcome comparison remained closed; measured public-feature encoding cost
-selected T069. T069 is the only `READY` task. T034 remains blocked on native
-public-consistent hidden-future sampler support.
+selected T069. T069 is complete: its exact search-scope public-context
+projection preserved accepted semantics, passed every material-improvement
+gate, and locked all wall-clock and simulator-step calibration arms. T069 ran
+no 93-record outcome aggregation and selected T070. T070 is the only `READY`
+task. T034 remains blocked on native public-consistent hidden-future sampler
+support.
 
 ## Implemented On Main
 
@@ -382,7 +386,7 @@ public-consistent hidden-future sampler support.
 
 ### Tests And Runtime Evidence
 
-- `769` tests pass on Windows Python as of the T068 merge review. In an
+- `786` tests pass on Windows Python as of the T069 merge review. In an
   uninstalled checkout, set `PYTHONPATH=src` (or install the package) before
   invoking the CLI directly.
 - The two CommunicationMod fixture smokes pass.
@@ -1253,6 +1257,41 @@ public-consistent hidden-future sampler support.
   fixed-cohort outcome evidence, natural A20 performance, normal-information
   strength, live-game validation, broad-training evidence, or final-agent
   evidence.
+- T069 adds one opt-in, default-off search-scope public-context feature
+  projection while preserving the accepted unprojected scorer path. It is
+  accepted on `main` at merge commit
+  `db9157fc5e4c951b92b92f6689b5358091f09f7d`; the exact artifact-producing
+  implementation commit is
+  `46a5695e8921bdc62c2c5d6ef2e61c62b6b40ba2`. Semantic comparison on retained
+  T052 record `0:1` matched complete scorer inputs exactly, policy/value outputs
+  within `1e-6`, selected-action identities, traversal, simulator steps,
+  chance/RNG behavior, and terminal fields for all guided arms. The paired
+  `0:16` stage used 16 one-record shards/workers and matched all 866
+  occurrence-safe scorer requests exactly. Measured search-wall reductions
+  were `59.95948131507198%` for `prior_only`, `63.98741408672505%` for
+  `value_only`, and `66.69862645569734%` for `prior_value`; all published
+  material-improvement gates passed. Eighteen independent calibration
+  candidates then locked wall-clock budgets `1/1/2` and simulator-step budgets
+  `86/408/384` for `prior_only/value_only/prior_value`. The terminal
+  simulator-step ratios were `1.0125363964066467`,
+  `0.9773734594558252`, and `1.0430705896347172`. Every candidate used
+  records `0:16`, 16 shards/workers, exact source identities, and zero failed
+  workers. T069 therefore selected Case A and exactly
+  `T062-original-93-record-outcome-comparison`, implemented no further
+  cost-repair path, ran no 93-record outcome aggregation, and made no promotion
+  claim. The stable retained roots are
+  `artifacts/t069-public-node-feature-encoding-projection-feasibility/source-46a5695/`
+  and
+  `artifacts/t069-public-node-feature-encoding-projection-feasibility/reproduction-46a5695/`.
+  The `t069-retention-manifest-v1` file is 327765 bytes with sha256
+  `cb34f8c0c4ce00f14e424120566a09a1d666051e6effc9cd39e77d678df9dc76`;
+  it indexes 1,301 artifacts totaling 1,004,285,022 bytes. Maintainer review
+  independently matched every indexed path, size, and hash, validated all 19
+  substantial stages, and rebuilt the pinned native source. This remains
+  `full_simulator_state_oracle_like` semantic/cost evidence only, not
+  fixed-cohort outcome evidence, natural A20 performance, normal-information
+  strength, live-game validation, broad-training evidence, or final-agent
+  evidence.
 
 ## Not Implemented On Main
 
@@ -1262,8 +1301,8 @@ unmerged legacy work:
 - interactive live-game or A20 performance validation for any controller;
 - broad neural training on a scale/distribution-approved A20 dataset;
 - model-guided search performance improvement or controller promotion;
-- compute-feasible Search v2 calibration or an accepted exact public-feature
-  projection repair;
+- the T070 93-record Search v2 outcome comparison or any accepted outcome-based
+  controller advancement;
 - sufficient Boss/later-act A20 source coverage for broad teacher/checkpoint
   refresh or broad training;
 - root-prior allocation repair, root-prior guided complete-run reachability
@@ -1440,32 +1479,24 @@ Act-2 entry under `expert_non_combat_v1`, no Act-3/Act-4/Heart reachability,
 and selected T062 as exactly one next task.
 
 T062 (`Battle Search v2 Minimal Surface`), T067 (`Battle Search v2
-Inference-Cost Repair`), and T068 (`Native-Boundary Batched Inference
-Feasibility`) are complete. T067 attributed the accepted tree-internal
-inference cost and tested one exact public-node cache, but the retained
-calibration observed 0 hits across 866 lookups. T068 then proved that the
-pinned native traversal consumes every Python callback synchronously: all
-207/261/398 guided requests were singleton-only, so no semantics-preserving
-native batch exists and no calibration, 93-record outcome comparison, or
-promotion was authorized.
+Inference-Cost Repair`), T068 (`Native-Boundary Batched Inference
+Feasibility`), and T069 (`Public-Node Feature-Encoding Projection
+Feasibility`) are complete. T067 found 0 hits across 866 exact cache lookups.
+T068 proved that all 207/261/398 guided callbacks were synchronous singletons.
+T069 then proved one exact search-scope projection, materially reduced search
+wall time in every guided arm, and locked all six cost configurations without
+changing accepted scorer or search semantics.
 
-T069 (`Public-Node Feature-Encoding Projection Feasibility`) is the only
-`READY` task. It must first prove that the complete public run context is
-invariant within one search scope and that one explicit current-schema encoded
-projection produces exactly the accepted scorer input. Only an exact semantic
-gate plus the published public-context-share and material wall-clock
-improvement thresholds may authorize one search-scope projection boundary and
-re-entry to the same 16-record calibration; forecasting that every arm will
-pass is reported but is not required because material partial improvement has
-the bounded Case B outcome-canary path. T069 cannot run the 93-record outcome
-comparison. It is the final semantics-preserving inference-cost repair
-for the current Search v2/T043 contracts: full calibration success must lead
-next to the original outcome comparison, material partial improvement may lead
-only to a no-promotion outcome canary, and an unavailable or immaterial
-projection closes this repair line in favor of T064 or an explicit
-inference/encoder redesign. No further component micro-optimization or
-calibration-only task is authorized. No further natural source scale-up is
-authorized by the T062/T067/T068 cost-only results.
+T070 (`Battle Search v2 Original 93-Record Outcome Comparison`) is the only
+`READY` task. It must freeze T069's equal-nominal, simulator-step, and
+wall-clock configurations before exposing outcomes, then evaluate all four
+T062 arms on the same 93 retained T052 records in all three families. T070 may
+not recalibrate, retune after outcomes, or create another cache, projection,
+feature-copy, tensor/callback optimization, or calibration-only task. It must
+report actual compute and separate overall, Boss-only, and Act-2+ outcome
+evidence before applying the original T062 decision boundary. No further
+natural source scale-up is authorized by the T062/T067/T068/T069 semantic/cost
+results alone.
 
 T034 remains blocked on an explicit native simulator boundary for
 public-consistent hidden-future sampling.

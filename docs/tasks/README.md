@@ -82,7 +82,8 @@ the current milestone, but they do not override this table.
 | T066 | DRAFT | [Alternating joint policy improvement and natural scale gate](T066-alternating-joint-policy-improvement-and-natural-scale-gate.md) | T062, T063, T064, T065 | separate battle/non-combat policies with shared run value, followed by conditional natural scale-up |
 | T067 | DONE | [Battle Search v2 inference-cost repair](T067-battle-search-v2-inference-cost-repair.md) | T062, T061, T052, T043 | exact-cache repair preserved semantics but had 0/866 hits; cost calibration remained infeasible and selected T068 |
 | T068 | DONE | [Native-boundary batched inference feasibility](T068-native-boundary-batched-inference-feasibility.md) | T067, T062, T052, T043 | exact audit found only 207/261/398 synchronous singleton requests; batching closed and selected T069 |
-| T069 | READY | [Public-node feature-encoding projection feasibility](T069-public-node-feature-encoding-projection-feasibility.md) | T068, T067, T062, T052, T043 | prove or reject one exact search-scope public-feature projection before any Search v2 comparison |
+| T069 | DONE | [Public-node feature-encoding projection feasibility](T069-public-node-feature-encoding-projection-feasibility.md) | T068, T067, T062, T052, T043 | exact projection preserved semantics, materially reduced cost, locked all calibration families, and selected the original outcome comparison |
+| T070 | READY | [Battle Search v2 original 93-record outcome comparison](T070-battle-search-v2-original-93-record-outcome-comparison.md) | T069, T062, T052, T043 | run the predeclared matched outcome families with T069's frozen projected budgets and no further cost repair |
 
 Use the table, not per-task files or roadmap prose, when deciding whether a task
 may receive a branch. Only `READY` rows should receive a new implementation
@@ -123,18 +124,15 @@ T068. T068 is complete: the existing native traversal exposed only synchronous
 singleton requests in all three guided arms, so production batching,
 calibration, the 93-record outcome comparison, and promotion remained
 unauthorized. Its measured public-feature encoding cost selected T069. T069 is
-now the only `READY` task. It first proves whether the invariant public run
-context can be encoded once per search and reused through one exact,
-schema-checked projection without changing any public input or search semantic;
-implementation and calibration are conditional on that fail-closed feasibility
-gate. T069 is the final semantics-preserving inference-cost repair for the
-current Search v2/T043 contracts. Success must lead directly to the original
-93-record outcome comparison; material partial success may lead only to a
-no-promotion outcome canary; an unavailable or immaterial projection closes
-this cost-repair line in favor of T064 or an explicit inference/encoder
-redesign. No second cache/projection, tensor/callback micro-optimization, or
-new calibration-only task is allowed. T063--T066 remain draft until their named
-dependencies and publication gates are satisfied.
+complete: one exact search-scope public-context projection preserved accepted
+scorer and search semantics, passed every material-improvement gate, and
+locked all wall-clock and simulator-step calibration arms. T069 ran no
+93-record outcome comparison and selected exactly T070. T070 is now the only
+`READY` task. It runs the original T062 matched 93-record outcome comparison
+with T069's frozen projected budgets and may not recalibrate, retune, or add
+another cache, projection, tensor/callback micro-optimization, or
+calibration-only task. T063--T066 remain draft until their named dependencies
+and publication gates are satisfied.
 
 ## Task Boundary And Artifact Rules
 
@@ -171,7 +169,7 @@ execution for a substantial workload.
 ## Published Queue
 
 The executable queue is exactly the set of `READY` rows in the Active Backlog.
-T069 is the only `READY` task. T034 remains blocked on native
+T070 is the only `READY` task. T034 remains blocked on native
 public-consistent hidden-future sampling support.
 
 ## Standard Local Gates
@@ -192,7 +190,7 @@ requirements.
 
 ## Historical Mapping
 
-Completed and cancelled task documents through T068 remain the durable
+Completed and cancelled task documents through T069 remain the durable
 historical record. Accepted experiment details and artifact identities remain
 in their individual task documents, reports, and `current_status.md`; this
 index only owns lifecycle state and the current executable queue.

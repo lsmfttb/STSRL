@@ -55,8 +55,12 @@ remained minimum-budget wall-clock infeasible, and no outcome comparison or
 promotion was authorized. T068 then found 207/261/398 synchronous singleton
 guided callbacks and no exact batch of size two or greater, so native-boundary
 batching, calibration, outcome comparison, and promotion remained closed.
-T069 is now the `READY` task: a fail-closed audit and bounded feasibility test
-for one exact search-scope public-context feature projection.
+T069 then proved one exact search-scope public-context feature projection,
+matched all 866 scorer requests and accepted search semantics, materially
+reduced search wall time in every guided arm, and locked wall-clock budgets
+`1/1/2` plus simulator-step budgets `86/408/384`. T070 is now the `READY`
+task: the original T062 matched 93-record outcome comparison with those
+configurations frozen.
 New implementation work should start only from rows marked `READY` in the task
 index; T034 remains blocked on native sampler support.
 
@@ -390,9 +394,9 @@ Work:
 - satisfy broad-training readiness per ascension and act;
 - keep mechanical cleanup separate from coverage/search experiments;
 - use T061's accepted bottleneck decomposition to keep another unchanged
-  natural source scale-up closed while T069 determines whether one exact
-  search-scope public-context feature projection can make the accepted
-  T062/T067/T068 tree-internal policy/value search surface compute-feasible;
+  natural source scale-up closed while T070 determines whether the now
+  compute-feasible T062/T069 tree-internal policy/value search surface produces
+  positive matched outcome evidence;
 - keep the closed root-prior allocation-repair route out of further
   reachability, training, and promotion work.
 
@@ -469,20 +473,22 @@ because minimum-budget cost calibration failed. T067 attributed that cost and
 tested exact public-node caching; no cache reuse occurred, two guided arms
 remained wall-clock infeasible, and the cache direction closed. T068 proved
 that the accepted native traversal exposes only synchronous singleton
-callbacks, so the native-batching direction also closed. The active priority
-is T069's public-node feature-encoding projection feasibility gate. It may
-implement one exact search-scope public-context projection and re-enter cost
-calibration only if complete current-schema vectors and accepted search
-semantics remain unchanged and measured public-context share plus paired
-wall-clock improvement meet the published material thresholds. Whether both
-infeasible arms are forecast under the 1.10 wall ceiling is reported, while
-actual calibration selects full success or the bounded partial-improvement
-path. T069 is the final semantics-preserving cost repair for the current Search
-v2/T043 contracts. It must lead next to the original outcome comparison, a
-no-promotion outcome canary after material partial improvement, or closure in
-favor of T064/an explicit inference-contract redesign; no further component
-micro-optimization or calibration-only task is allowed. Further natural source
-scale-up remains contingent on improved policy evidence.
+callbacks, so the native-batching direction also closed. T069 then implemented
+one exact search-scope public-context projection. Complete scorer inputs and
+accepted action/traversal/RNG/terminal semantics remained unchanged; paired
+search-wall reductions were about 60.0%, 64.0%, and 66.7% for
+`prior_only`, `value_only`, and `prior_value`. Independent calibration locked
+wall-clock budgets `1/1/2` and simulator-step budgets `86/408/384`, so T069
+selected Case A and closed the semantics-preserving cost-repair line.
+
+The active priority is T070's original T062 93-record outcome comparison. It
+must freeze the accepted equal-nominal, simulator-step, and wall-clock
+configurations before exposing outcomes, evaluate all four arms on the same
+T052 cohort in each family, and keep overall, Boss-only, and Act-2+ results plus
+actual compute separate. It may not recalibrate, retune after outcomes, or add
+another cache, projection, feature-copy, tensor/callback optimization, or
+calibration-only continuation. Further natural source scale-up remains
+contingent on improved policy evidence.
 
 Exit gate: a search change improves fixed evaluation at equal simulation or
 wall-clock budget without natural-weighted regression.
