@@ -289,3 +289,130 @@ The implementation pull-request description must include:
 Using legacy code is allowed, but wholesale cherry-picking of `d56e10e` is not.
 The implementation pull request must contain only the focused task and remain
 independently reviewable.
+
+A ready-for-review implementation pull request is an implementation-complete
+claim. If any required deliverable, artifact, WSL gate, or acceptance criterion
+is still missing, the PR must be draft or must say it is incomplete before
+maintainer review starts. Incomplete ready PRs are reviewed as blocked, not
+partially accepted; follow-up fixes stay on the same PR until the published task
+contract is satisfied or the main maintainer revises the task document through a
+separate control-plane change.
+
+For any WSL stage that can reasonably use multiple workers, especially restored
+evaluation and comparison stages, the implementation PR must report the actual
+command shape, worker count, shard count, record ranges, wall-clock time, and
+reason for any single-worker execution. Reviewers treat missing worker evidence
+as a verification gap even when the output artifact schema is otherwise valid.
+
+## Review And Merge
+
+For task-proposal pull requests, the main maintainer reviews:
+
+- whether the proposal reflects the latest `main` and accepted evidence;
+- whether dependencies, scope, deliverables, verification, artifacts, and
+  decision boundaries are complete and objectively reviewable;
+- whether proposed lifecycle changes are internally consistent;
+- whether the diff remains documentation/control-plane only;
+- whether any proposed `READY` task can be dispatched without inventing missing
+  requirements.
+
+For implementation pull requests, the main maintainer reviews:
+
+- conformance to the task specification;
+- correctness and behavioral regressions;
+- architectural boundaries and information leakage;
+- provenance and artifact compatibility where relevant;
+- tests and real WSL gates required by the task;
+- unnecessary scope, duplication, or hidden defaults;
+- documentation impact.
+
+### Review Finding Delivery
+
+The pull request is the authoritative delivery channel for maintainer review
+findings and conclusions. A finding written only in chat, a local report, or
+maintainer notes has not been delivered to the planner or task implementer.
+
+- After each initial review or re-review, the main maintainer publishes the
+  incremental conclusion on the same pull request before reporting that the
+  review is complete or waiting for another update.
+- The published message identifies the reviewed head commit, distinguishes
+  blocking findings from non-blocking notes, states the required changes, and
+  records the relevant verification result. A no-blocker conclusion is
+  published explicitly rather than left implicit.
+- Previously published feedback does not deliver findings discovered by a later
+  re-review. New or remaining findings are posted as a new review or comment on
+  the pull request.
+- If publishing fails or the review was explicitly requested as read-only, the
+  maintainer states that the result is undelivered and does not claim that the
+  author has received it. The review remains pending until delivery is confirmed
+  or the user explicitly keeps it private.
+
+Review findings are resolved before merge. The maintainer merges only into
+`main`.
+
+After a task-proposal merge, the maintainer:
+
+1. verifies the resulting `main` documentation and task-index state;
+2. confirms that only merged `READY` rows are executable;
+3. dispatches an implementer only through a fresh branch from the updated
+   `main`;
+4. cleans the obsolete proposal branch and proposal worktree when no longer
+   needed.
+
+After an implementation merge, the maintainer:
+
+1. verifies the resulting `main`;
+2. marks the task `DONE` in the task index;
+3. updates `current_status.md` as the planner-facing result report;
+4. records dependency facts and blockers without originating a successor task;
+5. updates architecture or roadmap documents when the accepted behavior changes
+   them;
+6. cleans obsolete local and remote task branches and review worktrees when they
+   are no longer needed, while preserving active worktrees, unmerged branches,
+   and explicitly retained historical references.
+
+## Planner Handoff And Maintainer Reporting
+
+`docs/current_status.md` is the canonical maintainer report for the planner.
+`docs/tasks/README.md` remains the lifecycle authority. After every accepted,
+cancelled, or blocked execution result, the main maintainer keeps those
+documents synchronized and reports:
+
+- the exact task, pull request, implementation commit, and merge commit where
+  applicable;
+- observed behavior and decision outcomes without converting them into an
+  unrequested successor task;
+- verification and simulator gates;
+- retained artifact identities, provenance, and deletion conditions;
+- limitations, failed gates, unresolved questions, and dependency changes.
+
+The planner reads that report and authors any next task as a task-proposal pull
+request. The main maintainer may request clarification or reject a proposal that
+conflicts with repository contracts, but it does not substitute its own new task.
+If no planner proposal has been merged, no new task is published and the
+executable queue remains unchanged or empty.
+
+## Documentation Ownership
+
+Project-level documentation becomes authoritative through main-maintainer review
+and merge. The planner may author planning and task-specification changes only in
+task-proposal pull requests. The main maintainer owns publication, lifecycle
+state, execution-result reporting, and synchronization of authoritative
+documents.
+
+Feature pull requests should report documentation impact but should not rewrite
+authoritative project status, architecture, roadmap, collaboration, or task
+documents unless the published task explicitly requires it.
+
+Code docstrings, schema comments, and narrowly scoped operational notes may be
+part of a feature task when required for correctness.
+
+## Legacy Branch Disposition
+
+`codex/docs-consolidation` was reviewed and merged into `main`; it is no longer
+an active work line.
+
+`codex/integration-current` at commit `d56e10e` is a read-only recovery
+reference. It is neither ignored nor eligible for wholesale merge. Its useful
+work is decomposed into the task backlog. The branch may be deleted only after
+all mapped tasks are `DONE`, `CANCELLED`, or explicitly superseded.
