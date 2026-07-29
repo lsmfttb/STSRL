@@ -1,0 +1,1056 @@
+"""Fail-closed T070 fixed-cohort outcome and budget-sufficiency audit."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
+from dataclasses import replace
+import hashlib
+import json
+import math
+from pathlib import Path
+import statistics
+from typing import Any
+
+from sts_combat_rl.commands.t062_battle_search_v2 import (
+    _evaluate_t062_arm,
+    _fixed_report_summary,
+    _merged_arm_summary,
+    _paired_t062_summary,
+)
+from sts_combat_rl.sim.action_space import ActionSpaceConfig
+from sts_combat_rl.sim.battle_search_v2 import BattleSearchV2Controller
+from sts_combat_rl.sim.fixed_evaluation_set import (
+    FixedCohort,
+    FixedCohortRecord,
+    dump_fixed_cohort_jsonl,
+    load_fixed_cohort_jsonl,
+)
+
+
+NATIVE_COMMIT = "fee272f1ae21c283ad2161f55293cfe6d714134a"
+T069_RETENTION_SHA256 = (
+    "cb34f8c0c4ce00f14e424120566a09a1d666051e6effc9cd39e77d678df9dc76"
+)
+T068_RETENTION_SHA256 = (
+    "bf974134343cea06e9f58e227f4752002ee3cebc14902206991f9fe81752c678"
+)
+T052_COHORT_SHA256 = "b7f8e9b85b53bbf8e37adfe6cc90d0579937661309b26bce2a8f2921604a8608"
+T043_CHECKPOINT_SHA256 = (
+    "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
+)
+PRIMARY_RANGES = (
+    "0:6",
+    "6:12",
+    "12:18",
+    "18:24",
+    "24:30",
+    "30:36",
+    "36:42",
+    "42:48",
+    "48:54",
+    "54:60",
+    "60:66",
+    "66:72",
+    "72:78",
+    "78:83",
+    "83:88",
+    "88:93",
+)
+HIGH_BUDGET_RANGES = tuple(f"{index}:{index + 1}" for index in range(16))
+PRIMARY_STAGE_CONFIGS = (
+    ("baseline-0100", "baseline", "shared", 100),
+    ("equal-prior-only-0100", "prior_only", "equal_nominal", 100),
+    ("equal-value-only-0100", "value_only", "equal_nominal", 100),
+    ("equal-prior-value-0100", "prior_value", "equal_nominal", 100),
+    ("simstep-prior-only-0086", "prior_only", "simulator_step_normalized", 86),
+    ("simstep-value-only-0408", "value_only", "simulator_step_normalized", 408),
+    ("simstep-prior-value-0384", "prior_value", "simulator_step_normalized", 384),
+    ("wall-prior-only-0001", "prior_only", "wall_clock_normalized", 1),
+    ("wall-value-only-0001", "value_only", "wall_clock_normalized", 1),
+    ("wall-prior-value-0002", "prior_value", "wall_clock_normalized", 2),
+)
+HIGH_BUDGET_STAGE_CONFIGS = tuple(
+    (f"{arm.replace('_', '-')}-{budget:04d}", arm, "high_budget", budget)
+    for arm in ("baseline", "prior_value")
+    for budget in (100, 400, 1600)
+)
+
+NATIVE_PREFLIGHT_SCHEMA_ID = "t070-native-capability-preflight-v1"
+FROZEN_MANIFEST_SCHEMA_ID = "t070-frozen-experiment-manifest-v1"
+PRIMARY_REPORT_SCHEMA_ID = "t070-search-v2-primary-comparison-v1"
+SUBSET_MANIFEST_SCHEMA_ID = "t070-budget-subset-manifest-v1"
+BUDGET_CURVE_SCHEMA_ID = "t070-search-v2-budget-curve-v1"
+GEOMETRY_REPORT_SCHEMA_ID = "t070-search-tree-geometry-report-v1"
+DECISION_SCHEMA_ID = "t070-search-v2-decision-v1"
+STAGE_SCHEMA_ID = "t070-stage-execution-v1"
+RETENTION_SCHEMA_ID = "t070-retention-manifest-v1"
+SHARD_SCHEMA_ID = "t070-single-arm-shard-v1"
+MERGED_STAGE_SCHEMA_ID = "t070-single-arm-merged-stage-v1"
+
+
+def build_frozen_manifests(
+    *,
+    cohort_path: Path,
+    checkpoint_path: Path,
+    t068_retention_path: Path,
+    t069_retention_path: Path,
+    source_manifest_path: Path,
+    source_verifier_path: Path,
+    code_commit: str,
+    frozen_output_path: Path,
+    subset_output_path: Path,
+    subset_cohort_output_path: Path,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Verify immutable inputs and freeze both stage inventory and blind subset."""
+
+    for output in (
+        frozen_output_path,
+        subset_output_path,
+        subset_cohort_output_path,
+    ):
+        if output.exists():
+            raise ValueError(f"T070 freeze refuses to overwrite output: {output}")
+    inputs = {
+        "t052_fixed_cohort": _identity(cohort_path, T052_COHORT_SHA256),
+        "t043_checkpoint": _identity(checkpoint_path, T043_CHECKPOINT_SHA256),
+        "t068_retention_manifest": _identity(
+            t068_retention_path, T068_RETENTION_SHA256
+        ),
+        "t069_retention_manifest": _identity(
+            t069_retention_path, T069_RETENTION_SHA256
+        ),
+        "sts_lightspeed_source_manifest": _identity(source_manifest_path, None),
+        "sts_lightspeed_source_verifier": _identity(source_verifier_path, None),
+    }
+    source = json.loads(source_manifest_path.read_text(encoding="utf-8"))
+    if source.get("integration", {}).get("commit") != NATIVE_COMMIT:
+        raise ValueError("T070 source manifest does not pin the accepted native commit")
+    retained = json.loads(t069_retention_path.read_text(encoding="utf-8"))
+    if retained.get("command_passed") is not True:
+        raise ValueError("T070 requires a passed T069 retention manifest")
+    with cohort_path.open("r", encoding="utf-8") as stream:
+        cohort = load_fixed_cohort_jsonl(stream)
+    if len(cohort.records) != 93:
+        raise ValueError("T070 primary cohort must contain exactly 93 records")
+    subset, subset_manifest = _build_outcome_blind_subset(cohort, code_commit)
+    subset_cohort_output_path.parent.mkdir(parents=True, exist_ok=True)
+    with subset_cohort_output_path.open("w", encoding="utf-8", newline="\n") as stream:
+        dump_fixed_cohort_jsonl(subset, stream)
+    subset_manifest["subset_cohort"] = _identity(subset_cohort_output_path, None)
+    _write_json(subset_output_path, subset_manifest)
+
+    frozen = {
+        "schema_id": FROZEN_MANIFEST_SCHEMA_ID,
+        "schema_version": 1,
+        "task_id": "T070",
+        "code_commit": code_commit,
+        "native_commit": NATIVE_COMMIT,
+        "input_identities": inputs,
+        "primary_cohort_identity": cohort.identity,
+        "primary_record_count": 93,
+        "primary_shard_ranges": list(PRIMARY_RANGES),
+        "primary_worker_count": 16,
+        "primary_stage_inventory": [
+            {
+                "stage_name": name,
+                "arm": arm,
+                "family": family,
+                "native_budget": budget,
+                "tree_geometry_enabled": False,
+            }
+            for name, arm, family, budget in PRIMARY_STAGE_CONFIGS
+        ],
+        "high_budget_subset_manifest": _identity(subset_output_path, None),
+        "high_budget_subset_cohort": _identity(subset_cohort_output_path, None),
+        "high_budget_record_count": 16,
+        "high_budget_shard_ranges": list(HIGH_BUDGET_RANGES),
+        "high_budget_worker_count": 16,
+        "high_budget_stage_inventory": [
+            {
+                "stage_name": name,
+                "arm": arm,
+                "family": family,
+                "native_budget": budget,
+                "tree_geometry_enabled": arm == "prior_value",
+            }
+            for name, arm, family, budget in HIGH_BUDGET_STAGE_CONFIGS
+        ],
+        "projection_mode": "accepted_t069_search_scope_projection",
+        "primary_geometry_disabled": True,
+        "budgets_frozen_before_outcomes": True,
+        "subset_frozen_before_outcomes": True,
+        "command_passed": True,
+    }
+    _write_json(frozen_output_path, frozen)
+    return frozen, subset_manifest
+
+
+def run_single_arm_shard(
+    *,
+    cohort_path: Path,
+    adapter_factory,
+    controller: BattleSearchV2Controller,
+    arm: str,
+    family: str,
+    record_range: str,
+    shard_index: int,
+    expected_ranges: Sequence[str],
+    code_commit: str,
+    output_path: Path,
+    max_battle_steps: int = 200,
+) -> dict[str, Any]:
+    if shard_index not in range(16) or record_range != expected_ranges[shard_index]:
+        raise ValueError("T070 shard index/range does not match frozen inventory")
+    with cohort_path.open("r", encoding="utf-8") as stream:
+        cohort = load_fixed_cohort_jsonl(stream)
+    start, end = (int(value) for value in record_range.split(":"))
+    records = cohort.records[start:end]
+    report = _evaluate_t062_arm(
+        adapter_factory=adapter_factory,
+        cohort=cohort,
+        records=records,
+        controller=controller,
+        action_space=ActionSpaceConfig.initial_no_potions(),
+        max_battle_steps=max_battle_steps,
+        worker_count=1,
+        shard_count=1,
+    )
+    payload = {
+        "schema_id": SHARD_SCHEMA_ID,
+        "schema_version": 1,
+        "task_id": "T070",
+        "code_commit": code_commit,
+        "native_commit": NATIVE_COMMIT,
+        "arm": arm,
+        "family": family,
+        "native_budget": controller.simulations,
+        "record_range": record_range,
+        "shard_index": shard_index,
+        "cohort_identity": cohort.identity,
+        "cohort_record_count": len(cohort.records),
+        "controller_provenance": controller.provenance.to_dict(),
+        "arm_report": _fixed_report_summary(report),
+        "command_passed": report.evaluation_successful,
+    }
+    _write_json(output_path, payload)
+    return payload
+
+
+def merge_single_arm_stage(
+    *,
+    shard_paths: Sequence[Path],
+    expected_ranges: Sequence[str],
+    expected_record_count: int,
+    output_path: Path,
+) -> dict[str, Any]:
+    if len(shard_paths) != 16 or len(expected_ranges) != 16:
+        raise ValueError("T070 merged stage requires exactly 16 shards")
+    shards = [_load_schema(path, SHARD_SCHEMA_ID) for path in shard_paths]
+    first = shards[0]
+    problems: list[str] = []
+    rows: list[dict[str, Any]] = []
+    for index, shard in enumerate(shards):
+        for key in (
+            "code_commit",
+            "native_commit",
+            "arm",
+            "family",
+            "native_budget",
+            "cohort_identity",
+            "cohort_record_count",
+            "controller_provenance",
+        ):
+            if shard.get(key) != first.get(key):
+                problems.append(f"shard {index}: {key} differs")
+        if shard.get("shard_index") != index:
+            problems.append(f"shard {index}: shard_index differs")
+        if shard.get("record_range") != expected_ranges[index]:
+            problems.append(f"shard {index}: record_range differs")
+        if shard.get("command_passed") is not True:
+            problems.append(f"shard {index}: command failed")
+        arm_report = shard.get("arm_report")
+        if not isinstance(arm_report, Mapping):
+            problems.append(f"shard {index}: arm report missing")
+            continue
+        values = arm_report.get("records")
+        if not isinstance(values, list):
+            problems.append(f"shard {index}: records missing")
+            continue
+        rows.extend(dict(row) for row in values if isinstance(row, Mapping))
+    indices = [row.get("cohort_index") for row in rows]
+    if indices != list(range(expected_record_count)):
+        problems.append("merged rows do not cover ordered cohort exactly once")
+    arm_summary = _merged_arm_summary(rows)
+    if arm_summary["record_count"] != expected_record_count:
+        problems.append("merged stage record count mismatch")
+    payload = {
+        "schema_id": MERGED_STAGE_SCHEMA_ID,
+        "schema_version": 1,
+        "task_id": "T070",
+        **{
+            key: first[key]
+            for key in (
+                "code_commit",
+                "native_commit",
+                "arm",
+                "family",
+                "native_budget",
+                "cohort_identity",
+                "cohort_record_count",
+                "controller_provenance",
+            )
+        },
+        "expected_record_count": expected_record_count,
+        "worker_count": 16,
+        "shard_count": 16,
+        "effective_parallel_workers": 16,
+        "shard_ranges": list(expected_ranges),
+        "shards": [str(path) for path in shard_paths],
+        "arm_report": arm_summary,
+        "problems": list(dict.fromkeys(problems)),
+        "command_passed": not problems,
+    }
+    _write_json(output_path, payload)
+    return payload
+
+
+def build_primary_report(
+    stages: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any]:
+    expected = {
+        name: (arm, family, budget)
+        for name, arm, family, budget in PRIMARY_STAGE_CONFIGS
+    }
+    if set(stages) != set(expected):
+        raise ValueError("T070 primary stage inventory is incomplete")
+    for name, report in stages.items():
+        arm, family, budget = expected[name]
+        _validate_merged_stage(
+            report, arm=arm, family=family, budget=budget, records=93
+        )
+    baseline = stages["baseline-0100"]["arm_report"]
+    family_names = (
+        ("equal_nominal", "equal"),
+        ("simulator_step_normalized", "simstep"),
+        ("wall_clock_normalized", "wall"),
+    )
+    families: dict[str, Any] = {}
+    for family, prefix in family_names:
+        arms = {"baseline": dict(baseline)}
+        for arm in ("prior_only", "value_only", "prior_value"):
+            stage = next(
+                report
+                for name, report in stages.items()
+                if report["family"] == family and report["arm"] == arm
+            )
+            arms[arm] = dict(stage["arm_report"])
+        paired = {
+            arm: _paired_t062_summary(
+                baseline=arms["baseline"]["records"],
+                guided=arms[arm]["records"],
+                bootstrap_resamples=2_000,
+                bootstrap_seed=7000 + len(families) * 10 + offset,
+            )
+            for offset, arm in enumerate(
+                ("prior_only", "value_only", "prior_value"), start=1
+            )
+        }
+        families[family] = {
+            "arms": arms,
+            "paired_vs_baseline": paired,
+            "failure_counts": {arm: _failure_counts(arms[arm]) for arm in arms},
+            "first_selected_action_divergence": {
+                arm: _first_action_divergence(
+                    arms["baseline"]["records"], arms[arm]["records"]
+                )
+                for arm in ("prior_only", "value_only", "prior_value")
+            },
+        }
+    failures = [
+        f"{family}/{arm}/{kind}={count}"
+        for family, payload in families.items()
+        for arm, counts in payload["failure_counts"].items()
+        for kind, count in counts.items()
+        if count
+    ]
+    return {
+        "schema_id": PRIMARY_REPORT_SCHEMA_ID,
+        "schema_version": 1,
+        "task_id": "T070",
+        "record_count": 93,
+        "strata": {"boss_only": 88, "act2_plus": 5},
+        "families": families,
+        "unique_stage_count": 10,
+        "stage_inventory": {name: dict(value) for name, value in stages.items()},
+        "failure_problems": failures,
+        "command_passed": not failures,
+    }
+
+
+def build_budget_curve_and_geometry(
+    stages: Mapping[str, Mapping[str, Any]],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    expected = {
+        name: (arm, family, budget)
+        for name, arm, family, budget in HIGH_BUDGET_STAGE_CONFIGS
+    }
+    if set(stages) != set(expected):
+        raise ValueError("T070 high-budget stage inventory is incomplete")
+    by_arm_budget: dict[str, dict[int, Mapping[str, Any]]] = {
+        "baseline": {},
+        "prior_value": {},
+    }
+    for name, report in stages.items():
+        arm, family, budget = expected[name]
+        _validate_merged_stage(
+            report, arm=arm, family=family, budget=budget, records=16
+        )
+        by_arm_budget[arm][budget] = report["arm_report"]
+    comparisons: dict[str, Any] = {}
+    for budget in (100, 400, 1600):
+        comparisons[str(budget)] = _paired_t062_summary(
+            baseline=by_arm_budget["baseline"][budget]["records"],
+            guided=by_arm_budget["prior_value"][budget]["records"],
+            bootstrap_resamples=2_000,
+            bootstrap_seed=7100 + budget,
+        )
+    pv_growth = _paired_t062_summary(
+        baseline=by_arm_budget["prior_value"][100]["records"],
+        guided=by_arm_budget["prior_value"][1600]["records"],
+        bootstrap_resamples=2_000,
+        bootstrap_seed=8700,
+    )
+    geometry_rows: dict[str, list[dict[str, Any]]] = {}
+    for budget in (100, 400, 1600):
+        geometry_rows[str(budget)] = [
+            _geometry_record(row, budget)
+            for row in by_arm_budget["prior_value"][budget]["records"]
+        ]
+    insufficient, sufficiency_evidence = _budget_sufficiency(geometry_rows)
+    high_signal = _high_budget_signal(
+        pv_growth=pv_growth,
+        pv_vs_baseline_1600=comparisons["1600"],
+    )
+    curve = {
+        "schema_id": BUDGET_CURVE_SCHEMA_ID,
+        "schema_version": 1,
+        "task_id": "T070",
+        "record_count": 16,
+        "arms": {
+            arm: {
+                str(budget): dict(report)
+                for budget, report in sorted(by_arm_budget[arm].items())
+            }
+            for arm in by_arm_budget
+        },
+        "prior_value_vs_baseline": comparisons,
+        "prior_value_1600_vs_100": pv_growth,
+        "budget_100_not_sufficient": insufficient,
+        "budget_sufficiency_evidence": sufficiency_evidence,
+        "high_budget_guidance_signal": high_signal,
+        "command_passed": True,
+    }
+    geometry = {
+        "schema_id": GEOMETRY_REPORT_SCHEMA_ID,
+        "schema_version": 1,
+        "task_id": "T070",
+        "metric_scope": "empirical_exposed_edge_coverage_not_global_game_tree",
+        "budgets": geometry_rows,
+        "command_passed": all(
+            len(rows) == 16 and all(row["command_passed"] for row in rows)
+            for rows in geometry_rows.values()
+        ),
+    }
+    return curve, geometry
+
+
+def build_decision_report(
+    primary: Mapping[str, Any],
+    curve: Mapping[str, Any],
+    geometry: Mapping[str, Any],
+) -> dict[str, Any]:
+    if (
+        primary.get("schema_id") != PRIMARY_REPORT_SCHEMA_ID
+        or curve.get("schema_id") != BUDGET_CURVE_SCHEMA_ID
+        or geometry.get("schema_id") != GEOMETRY_REPORT_SCHEMA_ID
+    ):
+        raise ValueError("T070 decision inputs use unsupported schemas")
+    if not all(
+        report.get("command_passed") is True for report in (primary, curve, geometry)
+    ):
+        raise ValueError("T070 decision requires complete valid evidence")
+    promotion = _primary_promotion(primary)
+    if promotion["passed"]:
+        case = "A"
+        recommendation = (
+            "T071 Battle Search v2 Bounded Complete-Run Reachability Evaluation"
+        )
+    elif curve.get("high_budget_guidance_signal") is True:
+        case = "B"
+        recommendation = "T063 Oracle-guided public battle learning"
+    else:
+        case = "C"
+        recommendation = "T064 simulator-generated later-act curriculum"
+    return {
+        "schema_id": DECISION_SCHEMA_ID,
+        "schema_version": 1,
+        "task_id": "T070",
+        "decision_case": case,
+        "primary_promotion_gate": promotion,
+        "budget_100_not_sufficient": bool(curve.get("budget_100_not_sufficient")),
+        "high_budget_guidance_signal": bool(curve.get("high_budget_guidance_signal")),
+        "recommendation": recommendation,
+        "exactly_one_planner_recommendation": True,
+        "successor_published": False,
+        "command_passed": True,
+    }
+
+
+def build_retention_manifest(
+    *,
+    artifact_root: Path,
+    retained_paths: Sequence[Path],
+    regeneration_commands: Sequence[str],
+    code_commit: str,
+    decision: Mapping[str, Any],
+) -> dict[str, Any]:
+    entries = []
+    for path in sorted({value.resolve() for value in retained_paths}):
+        if not path.is_file():
+            raise ValueError(f"T070 retained path is missing: {path}")
+        entries.append(
+            {
+                "path": str(path),
+                "sha256": _sha256(path),
+                "bytes": path.stat().st_size,
+                "schema_id": _json_schema(path),
+                "source_identity": {
+                    "code_commit": code_commit,
+                    "native_commit": NATIVE_COMMIT,
+                },
+                "retention_reason": "T070 accepted audit or reproducibility evidence",
+                "downstream_consumer": decision["recommendation"],
+                "deletion_condition": (
+                    "after T070 is merged, the planner has received the maintainer "
+                    "result report, and the named downstream task is closed or the "
+                    "artifact is independently regenerated"
+                ),
+            }
+        )
+    if not regeneration_commands:
+        raise ValueError("T070 retention manifest requires regeneration commands")
+    return {
+        "schema_id": RETENTION_SCHEMA_ID,
+        "schema_version": 1,
+        "task_id": "T070",
+        "artifact_root": str(artifact_root.resolve()),
+        "code_commit": code_commit,
+        "native_commit": NATIVE_COMMIT,
+        "retained_artifacts": entries,
+        "regeneration_commands": list(regeneration_commands),
+        "raw_artifacts_may_be_deleted_when": (
+            "merged identities and row counts pass audit; raw hashes, sizes, "
+            "schemas and commands are retained; T070 is merged; planner has "
+            "received the maintainer result report; downstream retention is closed"
+        ),
+        "command_passed": True,
+    }
+
+
+def _build_outcome_blind_subset(
+    cohort: FixedCohort,
+    code_commit: str,
+) -> tuple[FixedCohort, dict[str, Any]]:
+    candidates = []
+    act2 = []
+    for record in cohort.records:
+        identity = _canonical_source_identity(record)
+        digest = hashlib.sha256(
+            json.dumps(identity, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        item = (digest, record, identity)
+        if _as_int(record.structural_metadata.get("act")) >= 2:
+            act2.append(item)
+        elif record.structural_metadata.get("room_type") == "BOSS":
+            candidates.append(item)
+    if len(act2) != 5:
+        raise ValueError("T070 subset requires exactly five Act-2+ records")
+    selected = sorted(act2, key=lambda item: item[1].cohort_index)
+    selected.extend(sorted(candidates, key=lambda item: item[0])[:11])
+    if len(selected) != 16:
+        raise ValueError("T070 subset requires eleven Boss-only records")
+    records = [
+        replace(item[1], cohort_index=index) for index, item in enumerate(selected)
+    ]
+    subset = FixedCohort(
+        source_pool_format_version=cohort.source_pool_format_version,
+        source_pool_controller_provenance=cohort.source_pool_controller_provenance,
+        selection_config=cohort.selection_config,
+        records=records,
+    )
+    manifest = {
+        "schema_id": SUBSET_MANIFEST_SCHEMA_ID,
+        "schema_version": 1,
+        "task_id": "T070",
+        "code_commit": code_commit,
+        "source_cohort_identity": cohort.identity,
+        "source_record_count": len(cohort.records),
+        "selection_rule": (
+            "all five Act-2+ in source order, then eleven Boss-only by ascending "
+            "SHA-256 of complete canonical source identity"
+        ),
+        "selection_allowed_fields": [
+            "source_pool_record_index",
+            "source_checkpoint_id",
+            "source_run_id",
+            "source_seed",
+            "source_battle_index",
+            "structural_stratum",
+            "structural_metadata",
+            "source_distribution_kind",
+            "checkpoint_information_regime",
+        ],
+        "selection_forbidden_fields": [
+            "outcomes",
+            "selected_actions",
+            "disagreement_labels",
+            "terminal_resources",
+        ],
+        "outcome_blind": True,
+        "records": [
+            {
+                "subset_index": index,
+                "source_cohort_index": item[1].cohort_index,
+                "stratum": (
+                    "act2_plus"
+                    if _as_int(item[1].structural_metadata.get("act")) >= 2
+                    else "boss_only"
+                ),
+                "canonical_source_identity": item[2],
+                "canonical_source_identity_sha256": item[0],
+            }
+            for index, item in enumerate(selected)
+        ],
+        "subset_identity": subset.identity,
+        "command_passed": True,
+    }
+    return subset, manifest
+
+
+def _canonical_source_identity(record: FixedCohortRecord) -> dict[str, Any]:
+    return {
+        "source_pool_record_index": record.source_pool_record_index,
+        "source_checkpoint_id": record.source_checkpoint_id,
+        "source_run_id": record.source_run_id,
+        "source_seed": record.source_seed,
+        "source_battle_index": record.source_battle_index,
+        "structural_stratum": list(record.structural_stratum),
+        "structural_metadata": record.structural_metadata,
+        "source_distribution_kind": record.source_distribution_kind,
+        "checkpoint_information_regime": record.checkpoint_information_regime,
+    }
+
+
+def _validate_merged_stage(
+    report: Mapping[str, Any],
+    *,
+    arm: str,
+    family: str,
+    budget: int,
+    records: int,
+) -> None:
+    if (
+        report.get("schema_id") != MERGED_STAGE_SCHEMA_ID
+        or report.get("command_passed") is not True
+        or report.get("arm") != arm
+        or report.get("family") != family
+        or report.get("native_budget") != budget
+        or report.get("expected_record_count") != records
+        or report.get("worker_count") != 16
+        or report.get("shard_count") != 16
+        or report.get("effective_parallel_workers") != 16
+    ):
+        raise ValueError(f"T070 stage {arm}/{family}/{budget} is invalid")
+
+
+def _failure_counts(arm: Mapping[str, Any]) -> dict[str, int]:
+    records = arm.get("records")
+    if not isinstance(records, Sequence):
+        raise ValueError("T070 arm records are missing")
+    problem_text = [
+        str(problem).lower()
+        for row in records
+        if isinstance(row, Mapping)
+        for problem in row.get("problems", [])
+    ]
+    mapping = {
+        "restore": ("restore", "restoration"),
+        "action_mapping": ("mapping", "unmapped"),
+        "checkpoint": ("checkpoint",),
+        "missing_value": ("missing", "value head"),
+        "fallback": ("fallback",),
+        "controller": ("controller",),
+        "truncation": ("truncat",),
+        "worker": ("worker",),
+        "mixed_provenance": ("provenance",),
+    }
+    counts = {
+        name: sum(any(token in text for token in tokens) for text in problem_text)
+        for name, tokens in mapping.items()
+    }
+    counts["truncation"] += int(arm.get("truncations", 0))
+    counts["controller"] += int(arm.get("errors", 0))
+    return counts
+
+
+def _first_action_divergence(
+    baseline: Sequence[Mapping[str, Any]],
+    guided: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    left = {int(row["cohort_index"]): row for row in baseline}
+    right = {int(row["cohort_index"]): row for row in guided}
+    divergent = []
+    for index in sorted(left):
+        a = _first_search_decision(left[index])
+        b = _first_search_decision(right[index])
+        if _selected_identity(a) != _selected_identity(b):
+            divergent.append(
+                {
+                    "cohort_index": index,
+                    "baseline": _selected_identity(a),
+                    "guided": _selected_identity(b),
+                }
+            )
+    return {
+        "divergent_record_count": len(divergent),
+        "records": divergent,
+    }
+
+
+def _first_search_decision(row: Mapping[str, Any]) -> Mapping[str, Any]:
+    telemetry = row.get("controller_compute_telemetry")
+    if not isinstance(telemetry, Mapping):
+        return {}
+    reports = telemetry.get("oracle_search_decision_reports")
+    for value in _flatten(reports):
+        if isinstance(value, Mapping) and "selected_action_identity" in value:
+            return value
+    return {}
+
+
+def _selected_identity(report: Mapping[str, Any]) -> Any:
+    return report.get("selected_action_identity")
+
+
+def _geometry_record(row: Mapping[str, Any], budget: int) -> dict[str, Any]:
+    telemetry = row.get("controller_compute_telemetry")
+    if not isinstance(telemetry, Mapping):
+        raise ValueError("T070 geometry record lacks controller telemetry")
+    values = [
+        value
+        for value in _flatten(telemetry.get("t070_tree_geometry_records"))
+        if isinstance(value, Mapping)
+        and value.get("schema_id") == "t070-search-tree-geometry-decision-v1"
+    ]
+    if not values:
+        raise ValueError("T070 prior_value record has no geometry decisions")
+    decisions = [_geometry_decision(value) for value in values]
+    return {
+        "cohort_index": row["cohort_index"],
+        "budget": budget,
+        "decision_count": len(decisions),
+        "first_decision": decisions[0],
+        "decisions": decisions,
+        "record_max_expanded_depth": max(
+            decision["maximum_expanded_depth"] for decision in decisions
+        ),
+        "command_passed": True,
+    }
+
+
+def _geometry_decision(value: Mapping[str, Any]) -> dict[str, Any]:
+    geometry = value.get("native_geometry")
+    roots = value.get("root_actions")
+    if not isinstance(geometry, Mapping) or not isinstance(roots, Sequence):
+        raise ValueError("T070 geometry decision is incomplete")
+    depth_rows = []
+    branch_factors = []
+    native_rows = geometry.get("depth_rows")
+    if not isinstance(native_rows, Sequence):
+        raise ValueError("T070 geometry depth rows are missing")
+    for index, raw in enumerate(native_rows):
+        if not isinstance(raw, Mapping) or raw.get("depth") != index:
+            raise ValueError("T070 geometry depth rows are not ordered")
+        expanded = _as_int(raw.get("expanded_node_count"))
+        discovered = _as_int(raw.get("discovered_child_edge_count"))
+        visited = _as_int(raw.get("visited_child_edge_count"))
+        histogram = raw.get("branching_histogram")
+        if not isinstance(histogram, Sequence):
+            raise ValueError("T070 geometry branching histogram is missing")
+        factors = [
+            _as_int(bucket["child_count"])
+            for bucket in histogram
+            if isinstance(bucket, Mapping)
+            for _ in range(_as_int(bucket.get("node_count")))
+        ]
+        branch_factors.extend(factors)
+        next_expanded = (
+            _as_int(native_rows[index + 1].get("expanded_node_count"))
+            if index + 1 < len(native_rows)
+            and isinstance(native_rows[index + 1], Mapping)
+            else 0
+        )
+        depth_rows.append(
+            {
+                **dict(raw),
+                "effective_branching_factor": discovered / max(expanded, 1),
+                "visited_edge_coverage_next_depth": visited / max(discovered, 1),
+                "expanded_node_coverage_next_depth": (
+                    next_expanded / max(discovered, 1)
+                ),
+            }
+        )
+    visits = sorted(
+        (_as_int(root.get("visits")) for root in roots if isinstance(root, Mapping)),
+        reverse=True,
+    )
+    total_visits = sum(visits)
+    entropy = (
+        -sum(
+            (count / total_visits) * math.log(count / total_visits)
+            for count in visits
+            if count > 0
+        )
+        if total_visits
+        else 0.0
+    )
+    return {
+        "decision_step_index": value.get("decision_step_index"),
+        "expanded_nodes_by_depth": [row["expanded_node_count"] for row in depth_rows],
+        "discovered_edges_by_depth": [
+            row["discovered_child_edge_count"] for row in depth_rows
+        ],
+        "visited_edges_by_depth": [
+            row["visited_child_edge_count"] for row in depth_rows
+        ],
+        "depth_rows": depth_rows,
+        "branch_factor_summary": {
+            "mean": statistics.fmean(branch_factors) if branch_factors else 0.0,
+            "median": statistics.median(branch_factors) if branch_factors else 0.0,
+            "p90": _percentile(branch_factors, 0.90),
+            "maximum": max(branch_factors, default=0),
+        },
+        "maximum_expanded_depth": geometry.get("max_expanded_depth"),
+        "root_legal_action_count": value.get("root_legal_action_count"),
+        "root_visit_entropy": entropy,
+        "root_top1_minus_top2_visit_gap": (
+            visits[0] - visits[1] if len(visits) > 1 else (visits[0] if visits else 0)
+        ),
+        "root_visit_leader_identity": _root_visit_leader(roots),
+        "selected_root_action": value.get("selected_action_identity"),
+        "native_simulator_steps": value.get("native_simulator_steps"),
+        "model_calls": value.get("model_calls"),
+        "wall_clock_seconds": value.get("wall_clock_seconds"),
+    }
+
+
+def _budget_sufficiency(
+    rows: Mapping[str, Sequence[Mapping[str, Any]]],
+) -> tuple[bool, dict[str, Any]]:
+    at100 = {int(row["cohort_index"]): row["first_decision"] for row in rows["100"]}
+    at1600 = {int(row["cohort_index"]): row["first_decision"] for row in rows["1600"]}
+    selected_changes = sum(
+        at100[index]["selected_root_action"] != at1600[index]["selected_root_action"]
+        for index in at100
+    )
+    leader_changes = sum(
+        at100[index]["root_visit_leader_identity"]
+        != at1600[index]["root_visit_leader_identity"]
+        for index in at100
+    )
+    depth100 = [value["maximum_expanded_depth"] for value in at100.values()]
+    depth1600 = [value["maximum_expanded_depth"] for value in at1600.values()]
+    depth_growth = statistics.median(depth1600) - statistics.median(depth100)
+    depth2_coverage = [
+        _depth_coverage(value, 1, "expanded_node_coverage_next_depth")
+        for value in at100.values()
+    ]
+    low_depth2 = statistics.median(depth2_coverage) < 0.25
+    continuing = statistics.median(depth1600) > statistics.median(depth100)
+    conditions = {
+        "selected_actions_change_at_least_4": selected_changes >= 4,
+        "root_visit_leaders_change_at_least_4": leader_changes >= 4,
+        "median_max_depth_grows_at_least_2": depth_growth >= 2,
+        "low_depth2_coverage_and_depth_continues": low_depth2 and continuing,
+    }
+    return any(conditions.values()), {
+        "selected_action_change_count": selected_changes,
+        "root_visit_leader_change_count": leader_changes,
+        "median_max_depth_100": statistics.median(depth100),
+        "median_max_depth_1600": statistics.median(depth1600),
+        "median_max_depth_growth": depth_growth,
+        "median_depth2_expanded_node_coverage_100": statistics.median(depth2_coverage),
+        "conditions": conditions,
+    }
+
+
+def _high_budget_signal(
+    *,
+    pv_growth: Mapping[str, Any],
+    pv_vs_baseline_1600: Mapping[str, Any],
+) -> bool:
+    overall_growth = pv_growth["overall"]
+    versus = pv_vs_baseline_1600
+    return bool(
+        overall_growth["paired_win_delta"] >= 2
+        and versus["overall"]["paired_win_delta"] >= 0
+        and overall_growth["mean_terminal_hp_delta_among_outcome_ties"] is not None
+        and overall_growth["mean_terminal_hp_delta_among_outcome_ties"] >= 0
+        and pv_growth["act2_plus"]["paired_win_delta"] >= 0
+    )
+
+
+def _primary_promotion(primary: Mapping[str, Any]) -> dict[str, Any]:
+    families = primary["families"]
+    equal = families["equal_nominal"]["paired_vs_baseline"]["prior_value"]
+    simstep = families["simulator_step_normalized"]["paired_vs_baseline"]["prior_value"]
+    wall = families["wall_clock_normalized"]["paired_vs_baseline"]["prior_value"]
+    zero_failures = not primary.get("failure_problems")
+    equal_gate = (
+        equal["overall"]["paired_win_delta"] > 0
+        and equal["overall"]["paired_win_delta_bootstrap_95ci"][0] >= 0
+        and equal["boss_only"]["paired_win_delta"] >= 0
+        and equal["act2_plus"]["paired_win_delta"] >= 0
+    )
+    normalized = all(
+        pair[stratum]["paired_win_delta"] >= 0
+        for pair in (simstep, wall)
+        for stratum in ("overall", "boss_only", "act2_plus")
+    ) and (
+        simstep["overall"]["paired_win_delta"] > 0
+        or wall["overall"]["paired_win_delta"] > 0
+    )
+    tied_hp = all(
+        pair[stratum]["mean_terminal_hp_delta_among_outcome_ties"] is not None
+        and pair[stratum]["mean_terminal_hp_delta_among_outcome_ties"] >= 0
+        for pair in (equal, simstep, wall)
+        for stratum in ("overall", "boss_only", "act2_plus")
+    )
+    sim_ratio = simstep["overall"]["cost_ratio_guided_over_baseline"][
+        "native_simulator_steps"
+    ]
+    wall_ratio = wall["overall"]["cost_ratio_guided_over_baseline"][
+        "wall_clock_seconds"
+    ]
+    cost = (
+        sim_ratio is not None
+        and abs(sim_ratio - 1.0) <= 0.05
+        and wall_ratio is not None
+        and abs(wall_ratio - 1.0) <= 0.10
+    )
+    gates = {
+        "zero_failures": zero_failures,
+        "equal_nominal_prior_value": equal_gate,
+        "compute_normalized_prior_value": normalized,
+        "tied_terminal_hp": tied_hp,
+        "matched_cost": cost,
+    }
+    return {
+        "gates": gates,
+        "passed": all(gates.values()),
+        "simulator_step_cost_ratio": sim_ratio,
+        "wall_clock_cost_ratio": wall_ratio,
+    }
+
+
+def _root_visit_leader(roots: Sequence[Any]) -> Any:
+    candidates = [root for root in roots if isinstance(root, Mapping)]
+    if not candidates:
+        return None
+    leader = max(
+        candidates,
+        key=lambda row: (
+            _as_int(row.get("visits")),
+            -_as_int(row.get("legal_action_index")),
+        ),
+    )
+    return leader.get("action_identity")
+
+
+def _depth_coverage(value: Mapping[str, Any], depth: int, key: str) -> float:
+    rows = value.get("depth_rows")
+    if not isinstance(rows, Sequence) or depth >= len(rows):
+        return 0.0
+    row = rows[depth]
+    return float(row.get(key, 0.0)) if isinstance(row, Mapping) else 0.0
+
+
+def _percentile(values: Sequence[int], quantile: float) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    index = math.ceil(quantile * len(ordered)) - 1
+    return float(ordered[max(0, min(index, len(ordered) - 1))])
+
+
+def _flatten(value: Any):
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        for item in value:
+            yield from _flatten(item)
+    else:
+        yield value
+
+
+def _identity(path: Path, expected_sha256: str | None) -> dict[str, Any]:
+    if not path.is_file():
+        raise ValueError(f"T070 input is missing: {path}")
+    actual = _sha256(path)
+    if expected_sha256 is not None and actual != expected_sha256:
+        raise ValueError(f"T070 input hash mismatch: {path}")
+    return {
+        "path": str(path.resolve()),
+        "sha256": actual,
+        "bytes": path.stat().st_size,
+        "schema_id": _json_schema(path),
+    }
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _json_schema(path: Path) -> str | None:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    return value.get("schema_id") if isinstance(value, Mapping) else None
+
+
+def _load_schema(path: Path, schema_id: str) -> dict[str, Any]:
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict) or value.get("schema_id") != schema_id:
+        raise ValueError(f"unsupported T070 schema in {path}")
+    return value
+
+
+def _write_json(path: Path, value: Mapping[str, Any]) -> None:
+    if path.exists():
+        raise ValueError(f"T070 writer refuses to overwrite output: {path}")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(value, indent=2, sort_keys=True, allow_nan=False) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _as_int(value: Any) -> int:
+    return (
+        int(value)
+        if isinstance(value, (int, float)) and not isinstance(value, bool)
+        else 0
+    )

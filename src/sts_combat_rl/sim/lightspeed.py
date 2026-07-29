@@ -251,6 +251,43 @@ class LightSpeedAdapter:
             )
         )
 
+    def battle_search_v2_with_tree_geometry(
+        self,
+        snapshot: SimulatorSnapshot,
+        *,
+        simulations: int,
+        include_potions: bool = False,
+        policy_prior_callback: Any | None = None,
+        leaf_value_callback: Any | None = None,
+    ) -> dict[str, Any]:
+        """Run Search v2 with the accepted read-only T070 geometry companion."""
+
+        if not hasattr(self._sim, "battle_search_v2_with_tree_geometry"):
+            raise RuntimeError(
+                "slaythespire.StepSimulator does not expose "
+                "battle_search_v2_with_tree_geometry; build the T070 native "
+                "tree-geometry source integration"
+            )
+        if policy_prior_callback is not None and not callable(policy_prior_callback):
+            raise ValueError(
+                "battle_search_v2_with_tree_geometry policy_prior_callback "
+                "must be callable"
+            )
+        if leaf_value_callback is not None and not callable(leaf_value_callback):
+            raise ValueError(
+                "battle_search_v2_with_tree_geometry leaf_value_callback "
+                "must be callable"
+            )
+        self._assert_snapshot_is_current(snapshot)
+        return dict(
+            self._sim.battle_search_v2_with_tree_geometry(
+                int(simulations),
+                bool(include_potions),
+                policy_prior_callback,
+                leaf_value_callback,
+            )
+        )
+
     def legal_battle_start_encounters(
         self,
         snapshot: SimulatorSnapshot,

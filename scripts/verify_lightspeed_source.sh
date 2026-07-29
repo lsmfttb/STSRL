@@ -177,6 +177,7 @@ for method_name in (
     "battle_search",
     "battle_search_with_root_priors",
     "battle_search_v2",
+    "battle_search_v2_with_tree_geometry",
     "legal_battle_start_encounters",
     "rebuild_battle_start",
 ):
@@ -492,6 +493,7 @@ observed_capabilities = {
     "native_battle_search_root",
     "native_root_prior_allocation",
     "native_battle_search_v2_tree_internal",
+    "native_battle_search_v2_tree_geometry",
     "native_terminal_resource_identity",
     "constructed_battle_start_transforms",
 }
@@ -501,5 +503,8 @@ if missing:
 
 print("native API capability assertions passed")
 PY
+
+python3 scripts/stsrl_api_smoke.py --build-dir "$build_dir"
+python3 scripts/test_battle_search_v2_tree_geometry.py --build-dir "$build_dir"
 
 echo "clean sts_lightspeed pinned-source build passed"

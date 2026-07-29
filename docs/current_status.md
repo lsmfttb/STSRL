@@ -436,11 +436,12 @@ hidden-future sampler support.
 - The T017/T018/T008-managed pinned external source integration currently
   validates from manifest `sts-lightspeed-source-manifest-v1` version 1. The
   canonical source verifier builds integration commit
-  `3cb9ebecb87c38044b34aa0e013d42b222a04087`,
+  `fee272f1ae21c283ad2161f55293cfe6d714134a`,
   initializes `json` and `pybind11`, imports `slaythespire.StepSimulator`, and
   asserts the current native capability inventory including
   `native_battle_search_root`, `native_root_prior_allocation`,
   `native_battle_search_v2_tree_internal`,
+  `native_battle_search_v2_tree_geometry`,
   `native_terminal_resource_identity`, and
   `constructed_battle_start_transforms`. The verifier also exercises the
   Search v2 tree-internal policy-prior and learned-leaf-value boundary with
