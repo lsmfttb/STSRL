@@ -87,6 +87,11 @@ def main() -> int:
             for name, *_ in PRIMARY_STAGE_CONFIGS
         ],
         *[
+            shard
+            for name, *_ in PRIMARY_STAGE_CONFIGS
+            for shard in (root / "primary" / name).glob("shard-*.json")
+        ],
+        *[
             log
             for name, *_ in PRIMARY_STAGE_CONFIGS
             for log in (root / "primary" / name / "logs").glob("*.log")
@@ -98,6 +103,11 @@ def main() -> int:
         *[
             root / "high-budget" / name / "stage-execution.json"
             for name, *_ in HIGH_BUDGET_STAGE_CONFIGS
+        ],
+        *[
+            shard
+            for name, *_ in HIGH_BUDGET_STAGE_CONFIGS
+            for shard in (root / "high-budget" / name).glob("shard-*.json")
         ],
         *[
             log
