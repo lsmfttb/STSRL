@@ -87,5 +87,9 @@ When documents disagree, use this order:
 
 `main` is the only integration line. Concrete work begins only from a `READY`
 task under `tasks/`, and each task receives one fresh branch and one pull
-request based on latest `main`. See `collaboration_workflow.md`; do not infer
-workflow from old branch names or historical documents.
+request based on latest `main`. New task content comes from the
+repository-read-only planner, is published and managed by the main maintainer,
+and is implemented by a maintainer-managed sub-agent. The maintainer owns
+review, merge, and the `current_status.md` result report. See
+`collaboration_workflow.md`; do not infer workflow from old branch names or
+historical documents.

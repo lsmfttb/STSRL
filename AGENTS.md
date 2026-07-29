@@ -143,8 +143,23 @@ current contracts.
 
 ## Parallel Development
 
-- Implement only a published `READY` task. Task lifecycle state is
-  authoritative only in `docs/tasks/README.md`.
+- The planner is repository-read-only and owns new task proposals. It sends
+  proposed task content to the main maintainer and does not edit files,
+  branches, pull requests, or lifecycle state.
+- The main maintainer validates and publishes planner-proposed task documents,
+  manages lifecycle state, and maintains `docs/current_status.md` as the
+  planner-facing execution-result report. It does not proactively originate
+  new tasks.
+- Implement only a planner-proposed, maintainer-published `READY` task. Task
+  lifecycle state is authoritative only in `docs/tasks/README.md`; an empty
+  `READY` queue is valid while awaiting planner direction.
+- The task implementer is a sub-agent of the main maintainer. The maintainer
+  chooses the implementer's model and reasoning effort by balancing task
+  capability requirements against cost, assigns an isolated worktree/branch,
+  and manages the implementation handoff.
+- The main maintainer does not implement feature code directly. It remains the
+  independent code reviewer, publishes every review or re-review conclusion on
+  the pull request, and owns merge decisions.
 - One task uses one fresh branch and one pull request based on latest `main`.
 - A ready-for-review pull request must satisfy the task's published
   deliverables, required artifacts, verification, and acceptance criteria.
@@ -153,8 +168,10 @@ current contracts.
 - `main` is the only integration line.
 - Use isolated worktrees for parallel tasks; never switch branches in a shared
   worktree.
-- Project-level documentation and task specifications are owned by the main
-  maintainer. Report documentation impact in the pull request.
+- Project-level documentation, task publication, lifecycle state, and
+  execution-result reporting are owned by the main maintainer. The planner
+  supplies task content without modifying the repository. Feature pull
+  requests report documentation impact.
 - Do not revert or overwrite changes from other branches or agents.
 - Before merging, review behavior, provenance, artifact compatibility, tests,
   and documentation impact.

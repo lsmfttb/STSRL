@@ -23,12 +23,18 @@ reproducible, and separate from STSRL Python/controller work.
 
 The STSRL main maintainer owns:
 
-- STSRL task boundaries and readiness;
+- validation and publication of planner-proposed STSRL task boundaries and
+  readiness;
 - `docs/sts_lightspeed_source_manifest.json`;
 - source-verifier requirements;
 - Python adapters, public contracts, and artifact compatibility in STSRL;
 - review of whether a native fork commit satisfies the STSRL task contract;
 - merge decisions into STSRL `main`.
+
+The repository-read-only planner proposes any new native-heavy STSRL task and
+the capability it requires. The main maintainer does not originate that task;
+it records accepted planner content, manages the implementer sub-agent, and
+reports the execution result back through `docs/current_status.md`.
 
 The STSRL main maintainer may perform small fork housekeeping such as verifying
 refs, creating the documented active branch, or checking tags. They should not
@@ -48,7 +54,8 @@ The `sts_lightspeed` maintainer owns work in a separate fork workspace:
 
 ### STSRL Task Implementer
 
-The STSRL task implementer owns STSRL-side work for a published task:
+The STSRL task implementer is a main-maintainer sub-agent and owns STSRL-side
+work for one published task:
 
 - Python adapter updates;
 - manifest updates to an exact external commit;
@@ -112,9 +119,9 @@ Rules:
 
 Use this sequence for native-heavy work:
 
-1. The STSRL main maintainer publishes a `READY` STSRL task that names the
-   required native capability, information regime, public API, and verifier
-   assertions.
+1. The planner sends the required native capability, information regime,
+   public API, verifier assertions, and task content to the STSRL main
+   maintainer. The maintainer validates and publishes it as a `READY` task.
 2. The `sts_lightspeed` maintainer creates a temporary fork branch from the
    current active integration commit.
 3. Native implementation stays minimal: expose required API and telemetry, but

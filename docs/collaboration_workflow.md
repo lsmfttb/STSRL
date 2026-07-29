@@ -5,26 +5,59 @@ It is the authority for branch and pull-request workflow.
 
 ## Roles
 
+### Planner
+
+The planner:
+
+- reads the repository, task index, maintainer reports, accepted pull requests,
+  and retained evidence needed to understand the current project state;
+- decides what new task should be proposed, including its objective, priority,
+  dependencies, scope, deliverables, acceptance criteria, verification, and
+  artifact requirements;
+- sends the proposed task content to the main maintainer for repository
+  publication and lifecycle management;
+- reviews maintainer result reports before proposing a successor task or
+  revising the broader plan.
+
+The planner is read-only with respect to the repository. It does not edit
+files, create or modify branches or pull requests, change task lifecycle state,
+or directly dispatch implementation work. A planner proposal is not executable
+until the main maintainer has published it as a `READY` task.
+
 ### Main Maintainer
 
 The main maintainer:
 
 - maintains the `main` branch;
 - maintains project documentation and task specifications;
-- decides task boundaries, dependencies, and readiness;
+- receives task proposals from the planner, checks them against current
+  repository contracts, and publishes their task documents and lifecycle
+  state;
+- returns materially incomplete, inconsistent, or infeasible proposals to the
+  planner for clarification instead of inventing a replacement task;
+- dispatches and manages the task implementer as a sub-agent for each published
+  `READY` task;
+- selects the implementer's model and reasoning effort, balancing required
+  capability against cost;
 - reviews submitted pull requests against the published task document;
 - requests revisions or merges approved pull requests;
-- updates current status and follow-up tasks after a merge.
+- updates the task index and the maintainer result report after a merge so the
+  planner can evaluate the result.
 
-The main maintainer does not implement feature tasks, invoke sub-agents to
-implement them, or manage task branches.
+The main maintainer does not implement feature tasks directly and does not
+proactively propose new tasks. It may identify blockers, missing evidence, or
+questions in its result report, but the planner owns the next task proposal.
+Maintainer-owned documentation, review, merge, branch/worktree management, and
+other control-plane actions are not feature implementation.
 
 ### Task Implementer
 
-A task implementer:
+The task implementer is a sub-agent of the main maintainer. The implementer:
 
 - works on exactly one published task;
-- creates one fresh branch and pull request for that task;
+- works in one fresh isolated branch and worktree assigned or approved by the
+  main maintainer;
+- creates or updates one pull request for that task under maintainer direction;
 - starts from the latest `main`;
 - implements only the task's documented scope;
 - reports verification results, known limitations, and deviations;
@@ -34,8 +67,9 @@ A task implementer:
   with each missing acceptance criterion named in the pull-request body;
 - responds to review findings on the same pull request.
 
-The user creates task branches and pull requests. The main maintainer does not
-create or switch to those branches during implementation.
+The implementer does not choose its own model or reasoning effort and does not
+merge its pull request. The main maintainer remains independent reviewer and
+merge owner; it does not edit feature code on the implementer's branch.
 
 ## Source Of Truth
 
@@ -51,8 +85,12 @@ create or switch to those branches during implementation.
   wins and the disagreement is a documentation bug.
 - Acceptance is based on the task document. Chat summaries are explanatory,
   not substitutes for the specification.
+- A planner handoff becomes an executable contract only after the main
+  maintainer records it in a task document and marks it `READY` in the task
+  index. Planner chat or notes do not independently authorize a branch.
 - If scope or acceptance criteria change, the main maintainer updates the task
-  document before the changed work is accepted.
+  document before the changed work is accepted. A material planning change is
+  returned to the planner rather than originated by the maintainer.
 - Project policy decisions made during maintainer discussion become durable
   only when the main maintainer writes them into the authoritative documents.
   A spoken or chat-only reminder is not enough to change future review
@@ -89,7 +127,10 @@ stable identity.
 - `DONE`: accepted pull request is merged into `main`.
 - `CANCELLED`: task will not be implemented; the task document records why.
 
-Only the main maintainer changes task state in the task index.
+Only the main maintainer changes task state in the task index. New task content
+and priority originate with the planner; the maintainer validates and
+publishes that handoff. An empty `READY` queue is valid while the planner is
+considering the maintainer's latest report.
 
 ## Required Task Specification
 
@@ -229,13 +270,34 @@ Review findings are resolved before merge. The maintainer merges only into
 
 1. verifies the resulting `main`;
 2. marks the task `DONE` in the task index;
-3. updates `current_status.md`;
-4. unblocks or revises dependent tasks;
+3. updates `current_status.md` as the planner-facing result report;
+4. records dependency facts and blockers without originating a successor task;
 5. updates architecture or roadmap documents when the accepted behavior changes
-   them.
+   them;
 6. cleans obsolete local and remote task branches and review worktrees when
    they are no longer needed, while preserving active worktrees, unmerged
    branches, and explicitly retained historical references.
+
+## Planner Handoff And Maintainer Reporting
+
+`docs/current_status.md` is the canonical maintainer report for the planner.
+`docs/tasks/README.md` remains the lifecycle authority. After every accepted,
+cancelled, or blocked execution result, the main maintainer keeps those
+documents synchronized and reports:
+
+- the exact task, pull request, implementation commit, and merge commit where
+  applicable;
+- observed behavior and decision outcomes without converting them into an
+  unrequested successor task;
+- verification and simulator gates;
+- retained artifact identities, provenance, and deletion conditions;
+- limitations, failed gates, unresolved questions, and dependency changes.
+
+The planner reads that report and sends any next task proposal back to the main
+maintainer. The main maintainer may request clarification or reject a proposal
+that conflicts with repository contracts, but it does not substitute its own
+new task. If no planner proposal has been accepted, no new task is published
+and the executable queue remains empty.
 
 ## Documentation Ownership
 
@@ -243,6 +305,10 @@ Project-level documentation is maintained directly by the main maintainer.
 Feature pull requests should report documentation impact but should not rewrite
 authoritative project status, architecture, roadmap, collaboration, or task
 documents unless the task explicitly requires it.
+
+The planner supplies planning content but remains repository-read-only. The
+main maintainer records accepted planning handoffs and execution results in the
+authoritative documents.
 
 Code docstrings, schema comments, and narrowly scoped operational notes may be
 part of a feature task when required for correctness.

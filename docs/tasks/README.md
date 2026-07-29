@@ -10,6 +10,12 @@ lifecycle state. Individual task documents intentionally omit mutable
 disposition where needed. `current_status.md` and roadmap files may summarize
 the current milestone, but they do not override this table.
 
+New task content originates with the repository-read-only planner. The planner
+sends a complete proposal to the main maintainer; the maintainer validates,
+records, and manages it here. The maintainer does not proactively add successor
+tasks. Implementers are maintainer-managed sub-agents and may start only a
+published `READY` row.
+
 ## Active Backlog
 
 | ID | Status | Task | Depends On | Legacy Reference Areas |
@@ -82,8 +88,7 @@ the current milestone, but they do not override this table.
 | T066 | DRAFT | [Alternating joint policy improvement and natural scale gate](T066-alternating-joint-policy-improvement-and-natural-scale-gate.md) | T062, T063, T064, T065 | separate battle/non-combat policies with shared run value, followed by conditional natural scale-up |
 | T067 | DONE | [Battle Search v2 inference-cost repair](T067-battle-search-v2-inference-cost-repair.md) | T062, T061, T052, T043 | exact-cache repair preserved semantics but had 0/866 hits; cost calibration remained infeasible and selected T068 |
 | T068 | DONE | [Native-boundary batched inference feasibility](T068-native-boundary-batched-inference-feasibility.md) | T067, T062, T052, T043 | exact audit found only 207/261/398 synchronous singleton requests; batching closed and selected T069 |
-| T069 | DONE | [Public-node feature-encoding projection feasibility](T069-public-node-feature-encoding-projection-feasibility.md) | T068, T067, T062, T052, T043 | exact projection preserved semantics, materially reduced cost, locked all calibration families, and selected the original outcome comparison |
-| T070 | READY | [Battle Search v2 original 93-record outcome comparison](T070-battle-search-v2-original-93-record-outcome-comparison.md) | T069, T062, T052, T043 | run the predeclared matched outcome families with T069's frozen projected budgets and no further cost repair |
+| T069 | DONE | [Public-node feature-encoding projection feasibility](T069-public-node-feature-encoding-projection-feasibility.md) | T068, T067, T062, T052, T043 | exact projection preserved semantics, materially reduced cost, locked all calibration families, and recommended the original outcome comparison for planner consideration |
 
 Use the table, not per-task files or roadmap prose, when deciding whether a task
 may receive a branch. Only `READY` rows should receive a new implementation
@@ -127,12 +132,11 @@ unauthorized. Its measured public-feature encoding cost selected T069. T069 is
 complete: one exact search-scope public-context projection preserved accepted
 scorer and search semantics, passed every material-improvement gate, and
 locked all wall-clock and simulator-step calibration arms. T069 ran no
-93-record outcome comparison and selected exactly T070. T070 is now the only
-`READY` task. It runs the original T062 matched 93-record outcome comparison
-with T069's frozen projected budgets and may not recalibrate, retune, or add
-another cache, projection, tensor/callback micro-optimization, or
-calibration-only task. T063--T066 remain draft until their named dependencies
-and publication gates are satisfied.
+93-record outcome comparison. Its terminal evidence recommended the original
+T062 93-record outcome comparison, but that recommendation is a result for the
+planner to evaluate, not a maintainer-published successor task. T063--T066
+remain draft until the planner proposes a task and the maintainer publishes it
+through the normal readiness gate.
 
 ## Task Boundary And Artifact Rules
 
@@ -169,8 +173,9 @@ execution for a substantial workload.
 ## Published Queue
 
 The executable queue is exactly the set of `READY` rows in the Active Backlog.
-T070 is the only `READY` task. T034 remains blocked on native
-public-consistent hidden-future sampling support.
+There are currently no `READY` tasks. The maintainer is waiting for the
+planner's next task handoff. T034 remains blocked on native public-consistent
+hidden-future sampling support.
 
 ## Standard Local Gates
 

@@ -362,10 +362,18 @@ boundary.
 - Every task branch starts from latest `main`.
 - Parallel tasks use isolated worktrees and never switch branches in a shared
   worktree.
-- The main maintainer owns project documentation, task publication, review,
-  and merging.
-- Task implementers own only their task branch and report documentation impact
+- The repository-read-only planner proposes new task content and priority to
+  the main maintainer; planner proposals do not authorize implementation.
+- The main maintainer owns project documentation, task publication and
+  lifecycle state, implementer dispatch, execution-result reporting, review,
+  and merging. It does not proactively originate new tasks or directly
+  implement feature code.
+- Task implementers are maintainer-managed sub-agents. The maintainer selects
+  their model and reasoning effort for capability and cost, and implementers
+  own only their assigned task branch while reporting documentation impact
   rather than rewriting authoritative project documents.
+- `current_status.md` is the maintainer report that returns accepted execution
+  results, evidence, limitations, and blockers to the planner.
 - Unmerged branches and artifacts are not implemented project capabilities.
 - Do not revert or overwrite unrelated changes from other tasks.
 

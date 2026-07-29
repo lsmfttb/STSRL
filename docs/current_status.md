@@ -2,9 +2,11 @@
 
 Last reviewed: 2026-07-29.
 
-This document describes the latest `main` branch only. Results from local
+This document is the main maintainer's canonical execution-result report for
+the planner and describes the latest `main` branch only. Results from local
 artifacts, old branches, or unmerged pull requests do not count as implemented
-capabilities.
+capabilities. It reports accepted behavior, evidence, limitations, and
+blockers; it does not itself propose or authorize a successor task.
 
 ## Current Goal
 
@@ -93,9 +95,11 @@ outcome comparison remained closed; measured public-feature encoding cost
 selected T069. T069 is complete: its exact search-scope public-context
 projection preserved accepted semantics, passed every material-improvement
 gate, and locked all wall-clock and simulator-step calibration arms. T069 ran
-no 93-record outcome aggregation and selected T070. T070 is the only `READY`
-task. T034 remains blocked on native public-consistent hidden-future sampler
-support.
+no 93-record outcome aggregation. Its terminal evidence recommended the
+original T062 93-record outcome comparison for planner consideration. There
+are currently no `READY` tasks; the main maintainer is awaiting the planner's
+next task handoff. T034 remains blocked on native public-consistent
+hidden-future sampler support.
 
 ## Implemented On Main
 
@@ -1301,7 +1305,7 @@ unmerged legacy work:
 - interactive live-game or A20 performance validation for any controller;
 - broad neural training on a scale/distribution-approved A20 dataset;
 - model-guided search performance improvement or controller promotion;
-- the T070 93-record Search v2 outcome comparison or any accepted outcome-based
+- a 93-record Search v2 outcome comparison or any accepted outcome-based
   controller advancement;
 - sufficient Boss/later-act A20 source coverage for broad teacher/checkpoint
   refresh or broad training;
@@ -1487,16 +1491,13 @@ T069 then proved one exact search-scope projection, materially reduced search
 wall time in every guided arm, and locked all six cost configurations without
 changing accepted scorer or search semantics.
 
-T070 (`Battle Search v2 Original 93-Record Outcome Comparison`) is the only
-`READY` task. It must freeze T069's equal-nominal, simulator-step, and
-wall-clock configurations before exposing outcomes, then evaluate all four
-T062 arms on the same 93 retained T052 records in all three families. T070 may
-not recalibrate, retune after outcomes, or create another cache, projection,
-feature-copy, tensor/callback optimization, or calibration-only task. It must
-report actual compute and separate overall, Boss-only, and Act-2+ outcome
-evidence before applying the original T062 decision boundary. No further
-natural source scale-up is authorized by the T062/T067/T068/T069 semantic/cost
-results alone.
+No task is currently `READY`. T069's terminal evidence recommended the
+original T062 93-record outcome comparison with the accepted equal-nominal,
+simulator-step, and wall-clock configurations, but the main maintainer has not
+published that recommendation as a successor task and will not proactively do
+so. The planner must evaluate this report and send any next task proposal to
+the maintainer. No further natural source scale-up is authorized by the
+T062/T067/T068/T069 semantic/cost results alone.
 
 T034 remains blocked on an explicit native simulator boundary for
 public-consistent hidden-future sampling.
@@ -1513,8 +1514,9 @@ artifact migrations are covered, optional PyTorch stays isolated behind the
 `train` dependency group, project-level docs are maintainer-owned, and real
 simulator gates run through WSL against the pinned source manifest.
 
-No urgent correctness-driven cleanup is required before publishing the next
-research task. T019 removed the largest CLI routing hotspot:
+No urgent correctness-driven cleanup is currently reported. The planner may
+use the following maintenance assessment when deciding whether to propose
+another research task. T019 removed the largest CLI routing hotspot:
 
 - `src/sts_combat_rl/cli.py` is about 230 lines and now delegates parser
   construction, validation, path helpers, simulator policy construction, and

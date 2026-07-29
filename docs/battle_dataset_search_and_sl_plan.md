@@ -58,11 +58,12 @@ batching, calibration, outcome comparison, and promotion remained closed.
 T069 then proved one exact search-scope public-context feature projection,
 matched all 866 scorer requests and accepted search semantics, materially
 reduced search wall time in every guided arm, and locked wall-clock budgets
-`1/1/2` plus simulator-step budgets `86/408/384`. T070 is now the `READY`
-task: the original T062 matched 93-record outcome comparison with those
-configurations frozen.
+`1/1/2` plus simulator-step budgets `86/408/384`. Its terminal evidence
+recommended the original T062 matched 93-record outcome comparison for planner
+consideration, but no successor task is currently published.
 New implementation work should start only from rows marked `READY` in the task
-index; T034 remains blocked on native sampler support.
+index. The queue is currently empty while the planner reviews the maintainer
+report; T034 remains blocked on native sampler support.
 
 ## Goals
 
@@ -394,9 +395,10 @@ Work:
 - satisfy broad-training readiness per ascension and act;
 - keep mechanical cleanup separate from coverage/search experiments;
 - use T061's accepted bottleneck decomposition to keep another unchanged
-  natural source scale-up closed while T070 determines whether the now
-  compute-feasible T062/T069 tree-internal policy/value search surface produces
-  positive matched outcome evidence;
+  natural source scale-up closed; T069's now-compute-feasible
+  tree-internal policy/value surface and missing matched outcome evidence are
+  reported to the planner rather than converted into a maintainer-authored
+  successor task;
 - keep the closed root-prior allocation-repair route out of further
   reachability, training, and promotion work.
 
@@ -481,14 +483,14 @@ search-wall reductions were about 60.0%, 64.0%, and 66.7% for
 wall-clock budgets `1/1/2` and simulator-step budgets `86/408/384`, so T069
 selected Case A and closed the semantics-preserving cost-repair line.
 
-The active priority is T070's original T062 93-record outcome comparison. It
-must freeze the accepted equal-nominal, simulator-step, and wall-clock
-configurations before exposing outcomes, evaluate all four arms on the same
-T052 cohort in each family, and keep overall, Boss-only, and Act-2+ results plus
-actual compute separate. It may not recalibrate, retune after outcomes, or add
-another cache, projection, feature-copy, tensor/callback optimization, or
-calibration-only continuation. Further natural source scale-up remains
-contingent on improved policy evidence.
+There is no active implementation priority or published successor task. T069's
+terminal evidence reports that the original T062 93-record outcome comparison
+is now compute-feasible under the accepted equal-nominal, simulator-step, and
+wall-clock configurations, while the semantics-preserving cost-repair line is
+closed. That is planner input, not maintainer task authorization. The planner
+must provide the next task content; the maintainer will validate and publish
+it without substituting a self-authored task. Further natural source scale-up
+remains contingent on improved policy evidence.
 
 Exit gate: a search change improves fixed evaluation at equal simulation or
 wall-clock budget without natural-weighted regression.

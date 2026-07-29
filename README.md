@@ -110,9 +110,12 @@ task documents until merged.
 ## Collaboration
 
 `main` is the only integration line. Each published task uses one fresh branch
-and one pull request based on the latest `main`. The main maintainer owns
-project documentation, task publication, review, and merging; task implementers
-own only their published task branch.
+and one pull request based on the latest `main`. The read-only planner proposes
+new task content to the main maintainer. The main maintainer publishes and
+manages tasks, selects and directs an implementer sub-agent, maintains
+planner-facing result reports, reviews code, and merges accepted pull requests.
+The maintainer does not proactively propose new tasks or directly implement
+feature code.
 
 The large legacy commit `d56e10e` is a read-only recovery reference. It is not
 an integration line and will not be merged wholesale. Its useful work is mapped

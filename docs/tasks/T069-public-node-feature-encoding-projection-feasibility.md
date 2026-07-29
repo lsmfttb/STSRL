@@ -294,9 +294,9 @@ continuation of the same component-level cost-repair line.
 - Complete-run source generation, natural A20 scale-up, broad training,
   normal-information promotion, live-game claims, or final-agent claims.
 - A second unrelated performance repair.
-- Any T070-style snapshot-encoding cache, T071-style action-feature-copy
-  repair, second projection, tensor/callback micro-optimization, or new
-  calibration-only task for the current Search v2/T043 contracts.
+- Any follow-up snapshot-encoding cache, action-feature-copy repair, second
+  projection, tensor/callback micro-optimization, or new calibration-only task
+  for the current Search v2/T043 contracts.
 
 ## Design Constraints
 
