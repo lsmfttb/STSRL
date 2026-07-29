@@ -11,11 +11,17 @@ from sts_combat_rl.commands.t070_search_v2_audit import (
     BUDGET_CURVE_SCHEMA_ID,
     DECISION_SCHEMA_ID,
     GEOMETRY_REPORT_SCHEMA_ID,
+    HIGH_BUDGET_CELL_SCHEMA_ID,
+    HIGH_BUDGET_STAGE_CONFIGS,
     MERGED_STAGE_SCHEMA_ID,
+    PRIMARY_CELL_SCHEMA_ID,
+    PRIMARY_STAGE_CONFIGS,
     PRIMARY_REPORT_SCHEMA_ID,
     PRIMARY_RANGES,
     _build_outcome_blind_subset,
+    build_budget_curve_and_geometry,
     build_decision_report,
+    build_primary_report,
     merge_single_arm_stage,
 )
 from sts_combat_rl.sim.fixed_evaluation_set import (
@@ -186,6 +192,7 @@ def test_t070_merge_requires_exact_ordered_stage_inventory(tmp_path: Path) -> No
                     "schema_id": "t070-single-arm-shard-v1",
                     "code_commit": "a" * 40,
                     "native_commit": "fee272f1ae21c283ad2161f55293cfe6d714134a",
+                    "stage_name": "baseline-0100",
                     "arm": "baseline",
                     "family": "shared",
                     "native_budget": 100,
@@ -211,6 +218,213 @@ def test_t070_merge_requires_exact_ordered_stage_inventory(tmp_path: Path) -> No
     assert merged["arm_report"]["record_count"] == 93
     assert merged["effective_parallel_workers"] == 16
     assert merged["command_passed"] is True
+
+
+def _audit_row(
+    index: int,
+    *,
+    guided: bool,
+    budget: int,
+    geometry: bool = False,
+) -> dict:
+    action = {
+        "action_id": f"battle:{index % 3}",
+        "kind": "card",
+        "occurrence": index % 2,
+        "stable_id": f"action-{index % 3}-occurrence-{index % 2}",
+    }
+    telemetry = {
+        "oracle_search_native_simulator_steps": budget,
+        "oracle_search_model_calls": 1 if guided else 0,
+        "oracle_search_root_mapping_failures": 0,
+        "oracle_search_unmapped_root_rows": 0,
+        "oracle_search_unmapped_search_edges": 0,
+        "oracle_search_decision_reports": [
+            [{"decision_step_index": 0, "selected_action_identity": action}]
+        ],
+    }
+    if guided:
+        telemetry["t069_cost_attribution"] = {
+            "public_context_projection_construction_count": 1,
+            "public_context_projection_reuse_count": 1,
+        }
+    if geometry:
+        telemetry["t070_tree_geometry_records"] = [
+            [
+                {
+                    "schema_id": "t070-search-tree-geometry-decision-v1",
+                    "decision_step_index": 0,
+                    "native_geometry": {
+                        "depth_rows": [
+                            {
+                                "depth": 0,
+                                "expanded_node_count": 1,
+                                "discovered_child_edge_count": 1,
+                                "visited_child_edge_count": 1,
+                                "branching_histogram": [
+                                    {"child_count": 1, "node_count": 1}
+                                ],
+                            }
+                        ],
+                        "max_expanded_depth": 0,
+                    },
+                    "root_actions": [
+                        {
+                            "visits": budget,
+                            "legal_action_index": 0,
+                            "action_identity": action,
+                        }
+                    ],
+                    "root_legal_action_count": 1,
+                    "selected_action_identity": action,
+                    "native_simulator_steps": budget,
+                    "model_calls": 1,
+                    "wall_clock_seconds": 0.25,
+                }
+            ]
+        ]
+    potion_slots = {
+        "status": "available",
+        "value": [{"slot_index": 0, "id_label": "EMPTY", "is_empty": True}],
+    }
+    return {
+        "cohort_index": index,
+        "source_checkpoint_id": "checkpoint",
+        "structural_metadata": {
+            "act": 1 if index < 88 else 2,
+            "room_type": "BOSS" if index < 88 else "MONSTER",
+        },
+        "termination_status": "win",
+        "terminal_absolute_hp": 20,
+        "structured_battle_outcome": {
+            "schema_id": "structured-battle-outcome-v1",
+            "start": {"potion_slots": potion_slots},
+            "terminal": {
+                "current_hp": {"status": "available", "value": 20},
+                "potion_slots": potion_slots,
+            },
+            "deltas": {
+                "potion_slots_delta": {
+                    "status": "available",
+                    "added": [],
+                    "removed": [],
+                }
+            },
+            "problems": [],
+        },
+        "outer_simulator_steps": budget + 1,
+        "wall_clock_seconds": 0.25,
+        "controller_compute_telemetry": telemetry,
+        "problems": [],
+    }
+
+
+def _merged_stage(
+    name: str,
+    arm: str,
+    family: str,
+    budget: int,
+    *,
+    record_count: int,
+    geometry: bool = False,
+) -> dict:
+    rows = [
+        _audit_row(
+            index,
+            guided=arm != "baseline",
+            budget=budget,
+            geometry=geometry,
+        )
+        for index in range(record_count)
+    ]
+    return {
+        "schema_id": MERGED_STAGE_SCHEMA_ID,
+        "stage_name": name,
+        "arm": arm,
+        "family": family,
+        "native_budget": budget,
+        "expected_record_count": record_count,
+        "worker_count": 16,
+        "shard_count": 16,
+        "effective_parallel_workers": 16,
+        "arm_report": {
+            "record_count": record_count,
+            "wins": record_count,
+            "losses": 0,
+            "truncations": 0,
+            "errors": 0,
+            "records": rows,
+        },
+        "command_passed": True,
+    }
+
+
+def test_t070_primary_report_has_all_family_arm_stratum_cells() -> None:
+    stages = {
+        name: _merged_stage(name, arm, family, budget, record_count=93)
+        for name, arm, family, budget in PRIMARY_STAGE_CONFIGS
+    }
+    report = build_primary_report(stages)
+
+    assert report["command_passed"] is True
+    assert report["strata"] == {"overall": 93, "boss_only": 88, "act2_plus": 5}
+    assert len(report["families"]) == 3
+    for family in report["families"].values():
+        assert family["cell_inventory"]["actual_cell_count"] == 12
+        for stratum, count in report["strata"].items():
+            assert set(family["cells"][stratum]) == {
+                "baseline",
+                "prior_only",
+                "value_only",
+                "prior_value",
+            }
+            for cell in family["cells"][stratum].values():
+                assert cell["schema_id"] == PRIMARY_CELL_SCHEMA_ID
+                assert cell["record_count"] == count
+                assert cell["termination_status_counts"]["win"] == count
+                assert len(cell["structured_battle_end_resources"]) == count
+                assert len(cell["potion_outcomes"]) == count
+                assert len(cell["first_selected_root_actions"]) == count
+                assert set(cell["failure_counts"]) == {
+                    "restore",
+                    "action_mapping",
+                    "checkpoint",
+                    "missing_value",
+                    "fallback",
+                    "controller",
+                    "truncation",
+                    "worker",
+                    "mixed_provenance",
+                }
+                assert cell["paired_vs_baseline"][
+                    "paired_win_delta_bootstrap_95ci"
+                ] == [0.0, 0.0]
+
+
+def test_t070_high_budget_curve_retains_outcome_compute_cells() -> None:
+    stages = {
+        name: _merged_stage(
+            name,
+            arm,
+            family,
+            budget,
+            record_count=16,
+            geometry=arm == "prior_value",
+        )
+        for name, arm, family, budget in HIGH_BUDGET_STAGE_CONFIGS
+    }
+    curve, geometry = build_budget_curve_and_geometry(stages)
+
+    assert curve["command_passed"] is True
+    assert geometry["command_passed"] is True
+    for arm in ("baseline", "prior_value"):
+        for budget in ("100", "400", "1600"):
+            cell = curve["arms"][arm][budget]
+            assert cell["schema_id"] == HIGH_BUDGET_CELL_SCHEMA_ID
+            assert cell["record_count"] == 16
+            assert cell["compute"]["native_simulator_steps"] > 0
+            assert len(cell["structured_battle_end_resources"]) == 16
+            assert len(cell["first_selected_root_actions"]) == 16
 
 
 @pytest.mark.parametrize(

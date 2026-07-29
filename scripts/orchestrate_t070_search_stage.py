@@ -19,6 +19,8 @@ from sts_combat_rl.commands.t070_search_v2_audit import (
     PRIMARY_RANGES,
     STAGE_SCHEMA_ID,
     merge_single_arm_stage,
+    validate_t070_frozen_stage,
+    validate_t070_preflight,
 )
 
 
@@ -49,9 +51,6 @@ def main() -> int:
     stage = artifact / stage_parent / args.stage_name
     if stage.exists():
         raise SystemExit("T070 stage refuses to overwrite output")
-    stage.mkdir(parents=True)
-    logs = stage / "logs"
-    logs.mkdir()
     ranges = PRIMARY_RANGES if args.range_kind == "primary" else HIGH_BUDGET_RANGES
     cohort = (
         inputs
@@ -67,6 +66,36 @@ def main() -> int:
         / "t043-assist_0-smoke-checkpoint.pt"
     )
     frozen = artifact / "frozen-manifest" / "t070-frozen-manifest.json"
+    preflight = artifact / "native-preflight" / "t070-native-capability-preflight.json"
+    source_manifest = repo / "docs" / "sts_lightspeed_source_manifest.json"
+    source_verifier = repo / "scripts" / "verify_lightspeed_source.sh"
+    validate_t070_preflight(
+        preflight,
+        code_commit=args.code_commit,
+        source_manifest_path=source_manifest,
+        source_verifier_path=source_verifier,
+    )
+    _, frozen_ranges = validate_t070_frozen_stage(
+        frozen,
+        code_commit=args.code_commit,
+        stage_name=args.stage_name,
+        arm=args.arm,
+        family=args.family,
+        budget=args.budget,
+        range_kind=args.range_kind,
+        tree_geometry=args.tree_geometry,
+        cohort_path=cohort,
+        checkpoint_path=checkpoint,
+        source_manifest_path=source_manifest,
+        source_verifier_path=source_verifier,
+    )
+    if tuple(ranges) != tuple(frozen_ranges):
+        raise SystemExit(
+            "T070 orchestrator range topology differs from frozen manifest"
+        )
+    stage.mkdir(parents=True)
+    logs = stage / "logs"
+    logs.mkdir()
     env = dict(os.environ)
     env["PYTHONPATH"] = f"{args.native_build_root.resolve()}:{repo / 'src'}"
     workers: list[dict[str, Any]] = []
@@ -83,10 +112,14 @@ def main() -> int:
             str(checkpoint),
             "--frozen-manifest",
             str(frozen),
+            "--native-preflight",
+            str(preflight),
             "--output",
             str(stage / f"shard-{index:02d}.json"),
             "--code-commit",
             args.code_commit,
+            "--stage-name",
+            args.stage_name,
             "--arm",
             args.arm,
             "--family",
@@ -146,6 +179,7 @@ def main() -> int:
         "native_budget": args.budget,
         "tree_geometry_enabled": args.tree_geometry,
         "code_commit": args.code_commit,
+        "native_commit": "fee272f1ae21c283ad2161f55293cfe6d714134a",
         "record_ranges": list(ranges),
         "worker_count": 16,
         "shard_count": 16,

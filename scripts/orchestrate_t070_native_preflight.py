@@ -30,10 +30,10 @@ def main() -> int:
     args = parser.parse_args()
     repo = args.repo_root.resolve()
     output = args.artifact_root.resolve() / "native-preflight"
+    verify_exact_git_checkout(repo, args.code_commit)
     if output.exists():
         raise SystemExit("T070 native preflight refuses to overwrite output")
     output.mkdir(parents=True)
-    verify_exact_git_checkout(repo, args.code_commit)
     manifest = repo / "docs" / "sts_lightspeed_source_manifest.json"
     verifier = repo / "scripts" / "verify_lightspeed_source.sh"
     manifest_value = json.loads(manifest.read_text(encoding="utf-8"))

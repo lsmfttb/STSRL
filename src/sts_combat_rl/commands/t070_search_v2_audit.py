@@ -78,8 +78,10 @@ HIGH_BUDGET_STAGE_CONFIGS = tuple(
 NATIVE_PREFLIGHT_SCHEMA_ID = "t070-native-capability-preflight-v1"
 FROZEN_MANIFEST_SCHEMA_ID = "t070-frozen-experiment-manifest-v1"
 PRIMARY_REPORT_SCHEMA_ID = "t070-search-v2-primary-comparison-v1"
+PRIMARY_CELL_SCHEMA_ID = "t070-search-v2-primary-arm-cell-v1"
 SUBSET_MANIFEST_SCHEMA_ID = "t070-budget-subset-manifest-v1"
 BUDGET_CURVE_SCHEMA_ID = "t070-search-v2-budget-curve-v1"
+HIGH_BUDGET_CELL_SCHEMA_ID = "t070-search-v2-high-budget-arm-cell-v1"
 GEOMETRY_REPORT_SCHEMA_ID = "t070-search-tree-geometry-report-v1"
 DECISION_SCHEMA_ID = "t070-search-v2-decision-v1"
 STAGE_SCHEMA_ID = "t070-stage-execution-v1"
@@ -190,6 +192,7 @@ def run_single_arm_shard(
     cohort_path: Path,
     adapter_factory,
     controller: BattleSearchV2Controller,
+    stage_name: str,
     arm: str,
     family: str,
     record_range: str,
@@ -221,6 +224,7 @@ def run_single_arm_shard(
         "task_id": "T070",
         "code_commit": code_commit,
         "native_commit": NATIVE_COMMIT,
+        "stage_name": stage_name,
         "arm": arm,
         "family": family,
         "native_budget": controller.simulations,
@@ -253,6 +257,7 @@ def merge_single_arm_stage(
         for key in (
             "code_commit",
             "native_commit",
+            "stage_name",
             "arm",
             "family",
             "native_budget",
@@ -292,6 +297,7 @@ def merge_single_arm_stage(
             for key in (
                 "code_commit",
                 "native_commit",
+                "stage_name",
                 "arm",
                 "family",
                 "native_budget",
@@ -326,7 +332,12 @@ def build_primary_report(
     for name, report in stages.items():
         arm, family, budget = expected[name]
         _validate_merged_stage(
-            report, arm=arm, family=family, budget=budget, records=93
+            report,
+            stage_name=name,
+            arm=arm,
+            family=family,
+            budget=budget,
+            records=93,
         )
     baseline = stages["baseline-0100"]["arm_report"]
     family_names = (
@@ -355,35 +366,100 @@ def build_primary_report(
                 ("prior_only", "value_only", "prior_value"), start=1
             )
         }
+        paired["baseline"] = _paired_t062_summary(
+            baseline=arms["baseline"]["records"],
+            guided=arms["baseline"]["records"],
+            bootstrap_resamples=2_000,
+            bootstrap_seed=7000 + len(families) * 10,
+        )
+        cells = {
+            stratum: {
+                arm: _build_outcome_compute_cell(
+                    rows=_stratum_rows(arms[arm]["records"], stratum),
+                    expected_count=expected_count,
+                    budget=_family_arm_budget(stages, family, arm),
+                    arm=arm,
+                    schema_id=PRIMARY_CELL_SCHEMA_ID,
+                    stratum=stratum,
+                    paired_vs_baseline=paired[arm][stratum],
+                )
+                for arm in ("baseline", "prior_only", "value_only", "prior_value")
+            }
+            for stratum, expected_count in (
+                ("overall", 93),
+                ("boss_only", 88),
+                ("act2_plus", 5),
+            )
+        }
         families[family] = {
             "arms": arms,
-            "paired_vs_baseline": paired,
-            "failure_counts": {arm: _failure_counts(arms[arm]) for arm in arms},
+            "cells": cells,
+            "paired_vs_baseline": {
+                arm: value for arm, value in paired.items() if arm != "baseline"
+            },
+            "failure_counts": {
+                arm: cells["overall"][arm]["failure_counts"] for arm in arms
+            },
             "first_selected_action_divergence": {
-                arm: _first_action_divergence(
-                    arms["baseline"]["records"], arms[arm]["records"]
-                )
-                for arm in ("prior_only", "value_only", "prior_value")
+                stratum: {
+                    arm: _first_action_divergence(
+                        _stratum_rows(arms["baseline"]["records"], stratum),
+                        _stratum_rows(arms[arm]["records"], stratum),
+                    )
+                    for arm in ("prior_only", "value_only", "prior_value")
+                }
+                for stratum in ("overall", "boss_only", "act2_plus")
+            },
+            "cell_inventory": {
+                "schema_id": PRIMARY_CELL_SCHEMA_ID,
+                "strata": ["overall", "boss_only", "act2_plus"],
+                "arms": ["baseline", "prior_only", "value_only", "prior_value"],
+                "expected_cell_count": 12,
+                "actual_cell_count": sum(len(value) for value in cells.values()),
+                "command_passed": (
+                    sum(len(value) for value in cells.values()) == 12
+                    and all(
+                        cell["command_passed"]
+                        for stratum_cells in cells.values()
+                        for cell in stratum_cells.values()
+                    )
+                ),
             },
         }
     failures = [
-        f"{family}/{arm}/{kind}={count}"
+        f"{family}/{stratum}/{arm}/{kind}={count}"
         for family, payload in families.items()
-        for arm, counts in payload["failure_counts"].items()
-        for kind, count in counts.items()
+        for stratum, cells in payload["cells"].items()
+        for arm, cell in cells.items()
+        for kind, count in cell["failure_counts"].items()
         if count
+    ]
+    incomplete_cells = [
+        f"{family}/{stratum}/{arm}"
+        for family, payload in families.items()
+        for stratum, cells in payload["cells"].items()
+        for arm, cell in cells.items()
+        if not cell["command_passed"]
     ]
     return {
         "schema_id": PRIMARY_REPORT_SCHEMA_ID,
         "schema_version": 1,
         "task_id": "T070",
         "record_count": 93,
-        "strata": {"boss_only": 88, "act2_plus": 5},
+        "strata": {"overall": 93, "boss_only": 88, "act2_plus": 5},
         "families": families,
+        "family_order": [
+            "equal_nominal",
+            "simulator_step_normalized",
+            "wall_clock_normalized",
+        ],
+        "arm_order": ["baseline", "prior_only", "value_only", "prior_value"],
+        "stratum_order": ["overall", "boss_only", "act2_plus"],
         "unique_stage_count": 10,
         "stage_inventory": {name: dict(value) for name, value in stages.items()},
         "failure_problems": failures,
-        "command_passed": not failures,
+        "incomplete_cells": incomplete_cells,
+        "command_passed": not failures and not incomplete_cells,
     }
 
 
@@ -403,7 +479,12 @@ def build_budget_curve_and_geometry(
     for name, report in stages.items():
         arm, family, budget = expected[name]
         _validate_merged_stage(
-            report, arm=arm, family=family, budget=budget, records=16
+            report,
+            stage_name=name,
+            arm=arm,
+            family=family,
+            budget=budget,
+            records=16,
         )
         by_arm_budget[arm][budget] = report["arm_report"]
     comparisons: dict[str, Any] = {}
@@ -431,24 +512,47 @@ def build_budget_curve_and_geometry(
         pv_growth=pv_growth,
         pv_vs_baseline_1600=comparisons["1600"],
     )
+    budget_cells = {
+        arm: {
+            str(budget): _build_outcome_compute_cell(
+                rows=report["records"],
+                expected_count=16,
+                budget=budget,
+                arm=arm,
+                schema_id=HIGH_BUDGET_CELL_SCHEMA_ID,
+                stratum="frozen_budget_subset",
+                paired_vs_baseline=(
+                    comparisons[str(budget)]["overall"]
+                    if arm == "prior_value"
+                    else _paired_t062_summary(
+                        baseline=report["records"],
+                        guided=report["records"],
+                        bootstrap_resamples=2_000,
+                        bootstrap_seed=7200 + budget,
+                    )["overall"]
+                ),
+            )
+            for budget, report in sorted(by_arm_budget[arm].items())
+        }
+        for arm in by_arm_budget
+    }
     curve = {
         "schema_id": BUDGET_CURVE_SCHEMA_ID,
         "schema_version": 1,
         "task_id": "T070",
         "record_count": 16,
-        "arms": {
-            arm: {
-                str(budget): dict(report)
-                for budget, report in sorted(by_arm_budget[arm].items())
-            }
-            for arm in by_arm_budget
-        },
+        "arms": budget_cells,
         "prior_value_vs_baseline": comparisons,
         "prior_value_1600_vs_100": pv_growth,
         "budget_100_not_sufficient": insufficient,
         "budget_sufficiency_evidence": sufficiency_evidence,
         "high_budget_guidance_signal": high_signal,
-        "command_passed": True,
+        "cell_schema_id": HIGH_BUDGET_CELL_SCHEMA_ID,
+        "command_passed": all(
+            cell["command_passed"]
+            for cells in budget_cells.values()
+            for cell in cells.values()
+        ),
     }
     geometry = {
         "schema_id": GEOMETRY_REPORT_SCHEMA_ID,
@@ -557,6 +661,103 @@ def build_retention_manifest(
     }
 
 
+def validate_t070_preflight(
+    preflight_path: Path,
+    *,
+    code_commit: str,
+    source_manifest_path: Path,
+    source_verifier_path: Path,
+) -> dict[str, Any]:
+    preflight = _load_schema(preflight_path, NATIVE_PREFLIGHT_SCHEMA_ID)
+    if (
+        preflight.get("stsrl_code_commit") != code_commit
+        or preflight.get("native_commit") != NATIVE_COMMIT
+        or preflight.get("semantic_parity_result") is not True
+        or preflight.get("return_code") != 0
+        or preflight.get("worker_count") != 16
+        or preflight.get("command_passed") is not True
+        or preflight.get("source_manifest_sha256") != _sha256(source_manifest_path)
+        or preflight.get("source_verifier_sha256") != _sha256(source_verifier_path)
+    ):
+        raise ValueError("T070 native preflight is missing, stale, or failed")
+    return preflight
+
+
+def validate_t070_frozen_stage(
+    frozen_path: Path,
+    *,
+    code_commit: str,
+    stage_name: str,
+    arm: str,
+    family: str,
+    budget: int,
+    range_kind: str,
+    tree_geometry: bool,
+    cohort_path: Path,
+    checkpoint_path: Path,
+    source_manifest_path: Path,
+    source_verifier_path: Path,
+) -> tuple[dict[str, Any], tuple[str, ...]]:
+    frozen = _load_schema(frozen_path, FROZEN_MANIFEST_SCHEMA_ID)
+    if (
+        frozen.get("code_commit") != code_commit
+        or frozen.get("native_commit") != NATIVE_COMMIT
+        or frozen.get("command_passed") is not True
+    ):
+        raise ValueError("T070 frozen manifest identity is invalid")
+    if range_kind == "primary":
+        inventory_key = "primary_stage_inventory"
+        ranges_key = "primary_shard_ranges"
+        worker_key = "primary_worker_count"
+        expected_ranges = PRIMARY_RANGES
+        expected_input = frozen["input_identities"]["t052_fixed_cohort"]
+    elif range_kind == "high_budget":
+        inventory_key = "high_budget_stage_inventory"
+        ranges_key = "high_budget_shard_ranges"
+        worker_key = "high_budget_worker_count"
+        expected_ranges = HIGH_BUDGET_RANGES
+        expected_input = frozen["high_budget_subset_cohort"]
+    else:
+        raise ValueError("T070 stage range kind is invalid")
+    expected_tuple = {
+        "stage_name": stage_name,
+        "arm": arm,
+        "family": family,
+        "native_budget": budget,
+        "tree_geometry_enabled": tree_geometry,
+    }
+    inventory = frozen.get(inventory_key)
+    if not isinstance(inventory, list) or expected_tuple not in inventory:
+        raise ValueError("T070 stage tuple is not present in frozen inventory")
+    if frozen.get(ranges_key) != list(expected_ranges) or frozen.get(worker_key) != 16:
+        raise ValueError("T070 frozen shard/worker topology is invalid")
+    for path, expected, label in (
+        (cohort_path, expected_input, "cohort"),
+        (
+            checkpoint_path,
+            frozen["input_identities"]["t043_checkpoint"],
+            "checkpoint",
+        ),
+        (
+            source_manifest_path,
+            frozen["input_identities"]["sts_lightspeed_source_manifest"],
+            "source manifest",
+        ),
+        (
+            source_verifier_path,
+            frozen["input_identities"]["sts_lightspeed_source_verifier"],
+            "source verifier",
+        ),
+    ):
+        if (
+            not path.is_file()
+            or _sha256(path) != expected.get("sha256")
+            or path.stat().st_size != expected.get("bytes")
+        ):
+            raise ValueError(f"T070 frozen {label} identity mismatch")
+    return frozen, expected_ranges
+
+
 def _build_outcome_blind_subset(
     cohort: FixedCohort,
     code_commit: str,
@@ -654,6 +855,7 @@ def _canonical_source_identity(record: FixedCohortRecord) -> dict[str, Any]:
 def _validate_merged_stage(
     report: Mapping[str, Any],
     *,
+    stage_name: str,
     arm: str,
     family: str,
     budget: int,
@@ -662,6 +864,7 @@ def _validate_merged_stage(
     if (
         report.get("schema_id") != MERGED_STAGE_SCHEMA_ID
         or report.get("command_passed") is not True
+        or report.get("stage_name") != stage_name
         or report.get("arm") != arm
         or report.get("family") != family
         or report.get("native_budget") != budget
@@ -671,6 +874,267 @@ def _validate_merged_stage(
         or report.get("effective_parallel_workers") != 16
     ):
         raise ValueError(f"T070 stage {arm}/{family}/{budget} is invalid")
+
+
+def _family_arm_budget(
+    stages: Mapping[str, Mapping[str, Any]], family: str, arm: str
+) -> int:
+    if arm == "baseline":
+        return 100
+    matches = [
+        int(report["native_budget"])
+        for report in stages.values()
+        if report.get("family") == family and report.get("arm") == arm
+    ]
+    if len(matches) != 1:
+        raise ValueError(f"T070 cannot resolve budget for {family}/{arm}")
+    return matches[0]
+
+
+def _stratum_rows(
+    rows: Sequence[Mapping[str, Any]], stratum: str
+) -> list[dict[str, Any]]:
+    predicates = {
+        "overall": lambda row: True,
+        "boss_only": lambda row: (
+            row.get("structural_metadata", {}).get("room_type") == "BOSS"
+        ),
+        "act2_plus": lambda row: (
+            _numeric(row.get("structural_metadata", {}).get("act")) >= 2
+        ),
+        "frozen_budget_subset": lambda row: True,
+    }
+    if stratum not in predicates:
+        raise ValueError(f"T070 unknown report stratum {stratum!r}")
+    return [dict(row) for row in rows if predicates[stratum](row)]
+
+
+def _build_outcome_compute_cell(
+    *,
+    rows: Sequence[Mapping[str, Any]],
+    expected_count: int,
+    budget: int,
+    arm: str,
+    schema_id: str,
+    stratum: str,
+    paired_vs_baseline: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Build one complete, versioned T070 outcome/compute cell.
+
+    The cell intentionally retains occurrence-safe selected actions and exact
+    structured battle-end resources per record. Aggregates never replace those
+    non-scalar outcomes.
+    """
+
+    values = [dict(row) for row in rows]
+    indices = [row.get("cohort_index") for row in values]
+    problems: list[str] = []
+    if len(values) != expected_count:
+        problems.append(
+            f"record_count={len(values)} does not match expected {expected_count}"
+        )
+    if (
+        not all(
+            isinstance(index, int) and not isinstance(index, bool) for index in indices
+        )
+        or len(set(indices)) != len(indices)
+        or indices != sorted(indices)
+    ):
+        problems.append("cohort indices are not unique ordered integers")
+    statuses = ("win", "loss", "truncated", "error")
+    status_counts = {
+        status: sum(row.get("termination_status") == status for row in values)
+        for status in statuses
+    }
+    unknown_statuses = sorted(
+        {
+            str(row.get("termination_status"))
+            for row in values
+            if row.get("termination_status") not in statuses
+        }
+    )
+    if unknown_statuses:
+        problems.append(f"unknown termination statuses: {unknown_statuses}")
+
+    hp_values: list[float] = []
+    resource_rows: list[dict[str, Any]] = []
+    potion_rows: list[dict[str, Any]] = []
+    selected_actions: list[dict[str, Any]] = []
+    for row in values:
+        index = row.get("cohort_index")
+        hp = row.get("terminal_absolute_hp")
+        if isinstance(hp, (int, float)) and not isinstance(hp, bool):
+            hp_values.append(float(hp))
+        else:
+            problems.append(f"record {index}: terminal absolute HP missing")
+        outcome = row.get("structured_battle_outcome")
+        if (
+            not isinstance(outcome, Mapping)
+            or outcome.get("schema_id") != "structured-battle-outcome-v1"
+            or not isinstance(outcome.get("terminal"), Mapping)
+            or not isinstance(outcome.get("deltas"), Mapping)
+        ):
+            problems.append(f"record {index}: structured battle outcome incomplete")
+            outcome = {}
+        terminal = outcome.get("terminal", {})
+        deltas = outcome.get("deltas", {})
+        start = outcome.get("start", {})
+        resource_rows.append(
+            {
+                "cohort_index": index,
+                "schema_id": outcome.get("schema_id"),
+                "terminal": terminal,
+                "deltas": deltas,
+                "outcome_problems": outcome.get("problems"),
+            }
+        )
+        potion_rows.append(
+            {
+                "cohort_index": index,
+                "start_potion_slots": (
+                    start.get("potion_slots") if isinstance(start, Mapping) else None
+                ),
+                "terminal_potion_slots": (
+                    terminal.get("potion_slots")
+                    if isinstance(terminal, Mapping)
+                    else None
+                ),
+                "potion_slots_delta": (
+                    deltas.get("potion_slots_delta")
+                    if isinstance(deltas, Mapping)
+                    else None
+                ),
+            }
+        )
+        first = _first_search_decision(row)
+        identity = _selected_identity(first)
+        if not _occurrence_safe_identity(identity):
+            problems.append(
+                f"record {index}: first selected action identity is not occurrence-safe"
+            )
+        selected_actions.append(
+            {
+                "cohort_index": index,
+                "decision_step_index": first.get("decision_step_index"),
+                "selected_action_identity": identity,
+            }
+        )
+
+    summary = _merged_arm_summary(values)
+    failures = _failure_counts(summary)
+    compute = {
+        "native_simulator_steps": summary["native_simulator_steps"],
+        "outer_simulator_steps": summary["outer_simulator_steps"],
+        "model_calls": summary["model_calls"],
+        "wall_clock_seconds": summary["wall_clock_seconds"],
+        "projection_construction_count": _attribution_total(
+            values, "public_context_projection_construction_count"
+        ),
+        "projection_reuse_count": _attribution_total(
+            values, "public_context_projection_reuse_count"
+        ),
+    }
+    for metric, value in compute.items():
+        if not _is_finite_nonnegative(value):
+            problems.append(f"{metric} is missing or non-finite")
+    if arm != "baseline" and any(
+        not isinstance(
+            row.get("controller_compute_telemetry", {}).get("t069_cost_attribution"),
+            Mapping,
+        )
+        for row in values
+    ):
+        problems.append("guided arm lacks T069 projection attribution")
+    paired = dict(paired_vs_baseline)
+    if paired.get("record_count") != expected_count:
+        problems.append("paired summary record count differs from cell")
+    if not (
+        isinstance(paired.get("paired_win_delta_bootstrap_95ci"), list)
+        and len(paired["paired_win_delta_bootstrap_95ci"]) == 2
+    ):
+        problems.append("paired bootstrap interval is missing")
+    return {
+        "schema_id": schema_id,
+        "schema_version": 1,
+        "task_id": "T070",
+        "arm": arm,
+        "stratum": stratum,
+        "budget": budget,
+        "expected_record_count": expected_count,
+        "record_count": len(values),
+        "cohort_indices": indices,
+        "wins": status_counts["win"],
+        "losses": status_counts["loss"],
+        "termination_status_counts": {
+            **status_counts,
+            "unknown": len(unknown_statuses),
+        },
+        "terminal_absolute_current_hp": {
+            "available_count": len(hp_values),
+            "missing_count": len(values) - len(hp_values),
+            "sum": sum(hp_values),
+            "mean": statistics.fmean(hp_values) if hp_values else None,
+            "median": statistics.median(hp_values) if hp_values else None,
+            "minimum": min(hp_values, default=None),
+            "maximum": max(hp_values, default=None),
+            "values_by_record": [
+                {
+                    "cohort_index": row.get("cohort_index"),
+                    "value": row.get("terminal_absolute_hp"),
+                }
+                for row in values
+            ],
+        },
+        "structured_battle_end_resources": resource_rows,
+        "potion_outcomes": potion_rows,
+        "first_selected_root_actions": selected_actions,
+        "paired_vs_baseline": paired,
+        "compute": compute,
+        "failure_counts": failures,
+        "problems": problems,
+        "command_passed": not problems and not any(failures.values()),
+    }
+
+
+def _occurrence_safe_identity(value: Any) -> bool:
+    if not isinstance(value, Mapping):
+        return False
+    return (
+        isinstance(value.get("stable_id"), str)
+        and bool(value["stable_id"])
+        and isinstance(value.get("occurrence"), int)
+        and not isinstance(value.get("occurrence"), bool)
+    )
+
+
+def _attribution_total(rows: Sequence[Mapping[str, Any]], metric: str) -> float:
+    total = 0.0
+    for row in rows:
+        telemetry = row.get("controller_compute_telemetry")
+        attribution = (
+            telemetry.get("t069_cost_attribution")
+            if isinstance(telemetry, Mapping)
+            else None
+        )
+        if not isinstance(attribution, Mapping):
+            continue
+        total += _numeric(attribution.get(metric))
+    return total
+
+
+def _numeric(value: Any) -> float:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    return 0.0
+
+
+def _is_finite_nonnegative(value: Any) -> bool:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(float(value))
+        and float(value) >= 0.0
+    )
 
 
 def _failure_counts(arm: Mapping[str, Any]) -> dict[str, int]:
@@ -698,9 +1162,31 @@ def _failure_counts(arm: Mapping[str, Any]) -> dict[str, int]:
         name: sum(any(token in text for token in tokens) for text in problem_text)
         for name, tokens in mapping.items()
     }
+    records = arm.get("records", [])
+    if isinstance(records, Sequence):
+        counts["action_mapping"] += int(
+            sum(
+                _telemetry_failure_total(row)
+                for row in records
+                if isinstance(row, Mapping)
+            )
+        )
     counts["truncation"] += int(arm.get("truncations", 0))
     counts["controller"] += int(arm.get("errors", 0))
     return counts
+
+
+def _telemetry_failure_total(row: Mapping[str, Any]) -> float:
+    telemetry = row.get("controller_compute_telemetry")
+    if not isinstance(telemetry, Mapping):
+        return 0.0
+    return sum(
+        _numeric(telemetry.get(key))
+        for key in (
+            "oracle_search_root_mapping_failures",
+            "oracle_search_unmapped_search_edges",
+        )
+    )
 
 
 def _first_action_divergence(

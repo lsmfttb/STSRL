@@ -9,11 +9,14 @@ from pathlib import Path
 
 from sts_combat_rl.commands.t070_search_v2_audit import (
     HIGH_BUDGET_STAGE_CONFIGS,
+    NATIVE_COMMIT,
     PRIMARY_STAGE_CONFIGS,
+    STAGE_SCHEMA_ID,
     build_budget_curve_and_geometry,
     build_decision_report,
     build_primary_report,
     build_retention_manifest,
+    validate_t070_preflight,
 )
 
 
@@ -26,7 +29,55 @@ def main() -> int:
     reports = root / "reports"
     if reports.exists() or (root / "t070-retention-manifest.json").exists():
         raise SystemExit("T070 finalizer refuses to overwrite visible outcomes")
-    reports.mkdir(parents=True, exist_ok=True)
+    preflight_path = root / "native-preflight" / "t070-native-capability-preflight.json"
+    validate_t070_preflight(
+        preflight_path,
+        code_commit=args.code_commit,
+        source_manifest_path=Path("docs/sts_lightspeed_source_manifest.json"),
+        source_verifier_path=Path("scripts/verify_lightspeed_source.sh"),
+    )
+    stage_executions = [
+        _validated_stage_execution(
+            root / "primary" / name / "stage-execution.json",
+            stage_name=name,
+            stage_kind="primary",
+            arm=arm,
+            family=family,
+            budget=budget,
+            ranges=[
+                "0:6",
+                "6:12",
+                "12:18",
+                "18:24",
+                "24:30",
+                "30:36",
+                "36:42",
+                "42:48",
+                "48:54",
+                "54:60",
+                "60:66",
+                "66:72",
+                "72:78",
+                "78:83",
+                "83:88",
+                "88:93",
+            ],
+            code_commit=args.code_commit,
+        )
+        for name, arm, family, budget in PRIMARY_STAGE_CONFIGS
+    ] + [
+        _validated_stage_execution(
+            root / "high-budget" / name / "stage-execution.json",
+            stage_name=name,
+            stage_kind="high_budget",
+            arm=arm,
+            family=family,
+            budget=budget,
+            ranges=[f"{index}:{index + 1}" for index in range(16)],
+            code_commit=args.code_commit,
+        )
+        for name, arm, family, budget in HIGH_BUDGET_STAGE_CONFIGS
+    ]
     primary_stages = {
         name: _load(root / "primary" / name / "merged.json")
         for name, *_ in PRIMARY_STAGE_CONFIGS
@@ -38,6 +89,7 @@ def main() -> int:
     primary = build_primary_report(primary_stages)
     curve, geometry = build_budget_curve_and_geometry(high_stages)
     decision = build_decision_report(primary, curve, geometry)
+    reports.mkdir(parents=True, exist_ok=True)
     paths = {
         "primary": reports / "t070-primary-comparison.json",
         "curve": reports / "t070-budget-curve.json",
@@ -55,14 +107,7 @@ def main() -> int:
         "schema_id": "t070-stage-execution-v1",
         "schema_version": 1,
         "task_id": "T070",
-        "stages": [
-            _load(root / "primary" / name / "stage-execution.json")
-            for name, *_ in PRIMARY_STAGE_CONFIGS
-        ]
-        + [
-            _load(root / "high-budget" / name / "stage-execution.json")
-            for name, *_ in HIGH_BUDGET_STAGE_CONFIGS
-        ],
+        "stages": stage_executions,
         "primary_stage_count": 10,
         "high_budget_stage_count": 6,
         "command_passed": True,
@@ -134,6 +179,50 @@ def main() -> int:
 
 def _load(path: Path):
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _validated_stage_execution(
+    path: Path,
+    *,
+    stage_name: str,
+    stage_kind: str,
+    arm: str,
+    family: str,
+    budget: int,
+    ranges: list[str],
+    code_commit: str,
+):
+    report = _load(path)
+    workers = report.get("workers")
+    if (
+        report.get("schema_id") != STAGE_SCHEMA_ID
+        or report.get("stage_name") != stage_name
+        or report.get("stage_kind") != stage_kind
+        or report.get("arm") != arm
+        or report.get("family") != family
+        or report.get("native_budget") != budget
+        or report.get("tree_geometry_enabled")
+        != (stage_kind == "high_budget" and arm == "prior_value")
+        or report.get("code_commit") != code_commit
+        or report.get("native_commit") != NATIVE_COMMIT
+        or report.get("record_ranges") != ranges
+        or report.get("worker_count") != 16
+        or report.get("shard_count") != 16
+        or report.get("effective_parallel_workers") != 16
+        or not isinstance(workers, list)
+        or len(workers) != 16
+        or any(
+            worker.get("worker_index") != index
+            or worker.get("record_range") != ranges[index]
+            or worker.get("returncode") != 0
+            for index, worker in enumerate(workers)
+            if isinstance(worker, dict)
+        )
+        or not all(isinstance(worker, dict) for worker in workers)
+        or report.get("command_passed") is not True
+    ):
+        raise ValueError(f"T070 stage execution is invalid: {stage_name}")
+    return report
 
 
 def _write(path: Path, value) -> None:

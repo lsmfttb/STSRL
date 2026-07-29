@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import json
 from pathlib import Path
 import re
 
@@ -14,11 +13,10 @@ from sts_combat_rl.commands.model_guided_oracle_search import (
 )
 from sts_combat_rl.commands.t068_checkout import verify_exact_git_checkout
 from sts_combat_rl.commands.t070_search_v2_audit import (
-    HIGH_BUDGET_RANGES,
-    NATIVE_COMMIT,
-    PRIMARY_RANGES,
     T043_CHECKPOINT_SHA256,
     run_single_arm_shard,
+    validate_t070_frozen_stage,
+    validate_t070_preflight,
 )
 from sts_combat_rl.sim.action_space import ActionSpaceConfig
 from sts_combat_rl.sim.battle_search_v2 import BattleSearchV2Controller
@@ -30,8 +28,10 @@ def main() -> int:
     parser.add_argument("--cohort", type=Path, required=True)
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--frozen-manifest", type=Path, required=True)
+    parser.add_argument("--native-preflight", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--code-commit", required=True)
+    parser.add_argument("--stage-name", required=True)
     parser.add_argument(
         "--arm",
         choices=("baseline", "prior_only", "value_only", "prior_value"),
@@ -56,21 +56,28 @@ def main() -> int:
         != T043_CHECKPOINT_SHA256
     ):
         raise SystemExit("T070 checkpoint hash mismatch")
-    frozen = json.loads(args.frozen_manifest.read_text(encoding="utf-8"))
-    if (
-        frozen.get("schema_id") != "t070-frozen-experiment-manifest-v1"
-        or frozen.get("command_passed") is not True
-        or frozen.get("code_commit") != args.code_commit
-        or frozen.get("native_commit") != NATIVE_COMMIT
-    ):
-        raise SystemExit("T070 frozen manifest is invalid")
-    expected_ranges = (
-        PRIMARY_RANGES if args.range_kind == "primary" else HIGH_BUDGET_RANGES
+    source_manifest = Path("docs/sts_lightspeed_source_manifest.json")
+    source_verifier = Path("scripts/verify_lightspeed_source.sh")
+    validate_t070_preflight(
+        args.native_preflight,
+        code_commit=args.code_commit,
+        source_manifest_path=source_manifest,
+        source_verifier_path=source_verifier,
     )
-    if args.tree_geometry != (
-        args.range_kind == "high_budget" and args.arm == "prior_value"
-    ):
-        raise SystemExit("T070 geometry mode contradicts frozen stage kind/arm")
+    _, expected_ranges = validate_t070_frozen_stage(
+        args.frozen_manifest,
+        code_commit=args.code_commit,
+        stage_name=args.stage_name,
+        arm=args.arm,
+        family=args.family,
+        budget=args.budget,
+        range_kind=args.range_kind,
+        tree_geometry=args.tree_geometry,
+        cohort_path=args.cohort,
+        checkpoint_path=args.checkpoint,
+        source_manifest_path=source_manifest,
+        source_verifier_path=source_verifier,
+    )
     scorer = build_torch_guidance_scorer_from_checkpoint(args.checkpoint)
     controller = BattleSearchV2Controller(
         simulations=args.budget,
@@ -86,6 +93,7 @@ def main() -> int:
         cohort_path=args.cohort,
         adapter_factory=lambda: LightSpeedAdapter(seed=1, ascension=20),
         controller=controller,
+        stage_name=args.stage_name,
         arm=args.arm,
         family=args.family,
         record_range=args.record_range,
