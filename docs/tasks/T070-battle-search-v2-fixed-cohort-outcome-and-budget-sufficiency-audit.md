@@ -376,6 +376,11 @@ Every schema must define required fields, identity rules, ordering, missingness,
 and compatibility behavior. Reports fail closed on incomplete arms, records,
 strata, geometry rows, or stage inventories.
 
+The reviewable machine-readable contract for those rules is
+[`docs/t070_artifact_schema_contract.json`](../t070_artifact_schema_contract.json).
+It is part of the T070 implementation and must remain consistent with the
+current writers and validators.
+
 ## Stable Artifact Root And Retention
 
 Use stable ignored root:

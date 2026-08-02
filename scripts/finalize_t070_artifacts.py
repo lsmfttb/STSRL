@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -12,6 +13,7 @@ from sts_combat_rl.commands.t070_search_v2_audit import (
     HIGH_BUDGET_STAGE_CONFIGS,
     NATIVE_COMMIT,
     PRIMARY_STAGE_CONFIGS,
+    STAGE_DETAIL_SCHEMA_ID,
     STAGE_SCHEMA_ID,
     build_budget_curve_and_geometry,
     build_decision_report,
@@ -122,9 +124,12 @@ def main() -> int:
     ):
         _write(paths[key], value)
     stage_inventory = {
-        "schema_id": "t070-stage-execution-v1",
+        "schema_id": STAGE_SCHEMA_ID,
         "schema_version": 1,
         "task_id": "T070",
+        "code_commit": args.code_commit,
+        "native_commit": NATIVE_COMMIT,
+        "native_runtime_identity": native_runtime_identity,
         "stages": stage_executions,
         "primary_stage_count": 10,
         "high_budget_stage_count": 6,
@@ -132,12 +137,47 @@ def main() -> int:
     }
     stage_path = reports / "t070-stage-execution.json"
     _write(stage_path, stage_inventory)
-    retained = [
-        root / "native-preflight" / "t070-native-capability-preflight.json",
+    retained_logs = [
         root / "native-preflight" / "source-verifier.stdout.log",
         root / "native-preflight" / "source-verifier.stderr.log",
         root / "native-preflight" / "runtime-build.stdout.log",
         root / "native-preflight" / "runtime-build.stderr.log",
+        *[
+            log
+            for name, *_ in PRIMARY_STAGE_CONFIGS
+            for log in (root / "primary" / name / "logs").glob("*.log")
+        ],
+        *[
+            log
+            for name, *_ in HIGH_BUDGET_STAGE_CONFIGS
+            for log in (root / "high-budget" / name / "logs").glob("*.log")
+        ],
+    ]
+    log_index_path = root / "logs" / "t070-log-index.json"
+    log_index_path.parent.mkdir(parents=True, exist_ok=False)
+    _write(
+        log_index_path,
+        {
+            "schema_id": "t070-retained-log-index-v1",
+            "schema_version": 1,
+            "task_id": "T070",
+            "ordering": "relative_path_ascending",
+            "logs": [
+                {
+                    "relative_path": str(path.relative_to(root)).replace("\\", "/"),
+                    "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                    "bytes": path.stat().st_size,
+                }
+                for path in sorted(retained_logs)
+            ],
+            "log_count": len(retained_logs),
+            "command_passed": all(path.is_file() for path in retained_logs),
+        },
+    )
+    retained = [
+        root / "native-preflight" / "t070-native-capability-preflight.json",
+        *retained_logs,
+        log_index_path,
         root / "frozen-manifest" / "t070-frozen-manifest.json",
         root / "budget-subset" / "t070-budget-subset-manifest.json",
         root / "budget-subset" / "t070-budget-subset-cohort.jsonl",
@@ -157,11 +197,6 @@ def main() -> int:
             for shard in (root / "primary" / name).glob("shard-*.json")
         ],
         *[
-            log
-            for name, *_ in PRIMARY_STAGE_CONFIGS
-            for log in (root / "primary" / name / "logs").glob("*.log")
-        ],
-        *[
             root / "high-budget" / name / "merged.json"
             for name, *_ in HIGH_BUDGET_STAGE_CONFIGS
         ],
@@ -174,17 +209,27 @@ def main() -> int:
             for name, *_ in HIGH_BUDGET_STAGE_CONFIGS
             for shard in (root / "high-budget" / name).glob("shard-*.json")
         ],
-        *[
-            log
-            for name, *_ in HIGH_BUDGET_STAGE_CONFIGS
-            for log in (root / "high-budget" / name / "logs").glob("*.log")
-        ],
     ]
-    commands = [
-        "freeze_t070_experiment.py --input-root <stable-artifacts> --artifact-root <t070-root> --code-commit <exact>",
-        "orchestrate_t070_search_stage.py (each frozen stage; exact args in stage execution reports)",
-        "finalize_t070_artifacts.py --artifact-root <t070-root> --code-commit <exact>",
-    ]
+    commands = {
+        "preflight": (
+            "orchestrate_t070_native_preflight.py --repo-root <source> "
+            "--native-checkout <native-source> --native-build-root <native-build> "
+            "--artifact-root <t070-root> --code-commit <exact>"
+        ),
+        "freeze": (
+            "freeze_t070_experiment.py --input-root <stable-artifacts> "
+            "--artifact-root <t070-root> --code-commit <exact>"
+        ),
+        "stage": (
+            "orchestrate_t070_search_stage.py (each frozen stage; exact args, "
+            "native checkout/build identity, and ranges in stage execution reports)"
+        ),
+        "finalize": (
+            "finalize_t070_artifacts.py --artifact-root <t070-root> "
+            "--code-commit <exact> --native-checkout <native-source> "
+            "--native-build-root <native-build>"
+        ),
+    }
     retention = build_retention_manifest(
         artifact_root=root,
         retained_paths=retained,
@@ -216,7 +261,7 @@ def _validated_stage_execution(
     report = _load(path)
     workers = report.get("workers")
     if (
-        report.get("schema_id") != STAGE_SCHEMA_ID
+        report.get("schema_id") != STAGE_DETAIL_SCHEMA_ID
         or report.get("stage_name") != stage_name
         or report.get("stage_kind") != stage_kind
         or report.get("arm") != arm

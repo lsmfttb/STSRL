@@ -89,6 +89,7 @@ HIGH_BUDGET_CELL_SCHEMA_ID = "t070-search-v2-high-budget-arm-cell-v1"
 GEOMETRY_REPORT_SCHEMA_ID = "t070-search-tree-geometry-report-v1"
 DECISION_SCHEMA_ID = "t070-search-v2-decision-v1"
 STAGE_SCHEMA_ID = "t070-stage-execution-v1"
+STAGE_DETAIL_SCHEMA_ID = "t070-stage-execution-detail-v1"
 RETENTION_SCHEMA_ID = "t070-retention-manifest-v1"
 SHARD_SCHEMA_ID = "t070-single-arm-shard-v1"
 MERGED_STAGE_SCHEMA_ID = "t070-single-arm-merged-stage-v1"
@@ -517,7 +518,7 @@ def build_budget_curve_and_geometry(
             for row in by_arm_budget["prior_value"][budget]["records"]
         ]
     insufficient, sufficiency_evidence = _budget_sufficiency(geometry_rows)
-    high_signal = _high_budget_signal(
+    high_signal, high_signal_evidence = _high_budget_signal(
         pv_growth=pv_growth,
         pv_vs_baseline_1600=comparisons["1600"],
     )
@@ -556,6 +557,7 @@ def build_budget_curve_and_geometry(
         "budget_100_not_sufficient": insufficient,
         "budget_sufficiency_evidence": sufficiency_evidence,
         "high_budget_guidance_signal": high_signal,
+        "high_budget_guidance_evidence": high_signal_evidence,
         "cell_schema_id": HIGH_BUDGET_CELL_SCHEMA_ID,
         "command_passed": all(
             cell["command_passed"]
@@ -568,6 +570,17 @@ def build_budget_curve_and_geometry(
         "schema_version": 1,
         "task_id": "T070",
         "metric_scope": "empirical_exposed_edge_coverage_not_global_game_tree",
+        "metric_definitions": {
+            "effective_branching_factor": (
+                "discovered_child_edges(d) / max(expanded_nodes(d), 1)"
+            ),
+            "visited_edge_coverage_next_depth": (
+                "visited_child_edges(d) / max(discovered_child_edges(d), 1)"
+            ),
+            "expanded_node_coverage_next_depth": (
+                "expanded_nodes(d + 1) / max(discovered_child_edges(d), 1)"
+            ),
+        },
         "budgets": geometry_rows,
         "command_passed": all(
             len(rows) == 16 and all(row["command_passed"] for row in rows)
@@ -623,14 +636,38 @@ def build_retention_manifest(
     *,
     artifact_root: Path,
     retained_paths: Sequence[Path],
-    regeneration_commands: Sequence[str],
+    regeneration_commands: Mapping[str, str],
     code_commit: str,
     decision: Mapping[str, Any],
 ) -> dict[str, Any]:
+    required_command_kinds = {"preflight", "freeze", "stage", "finalize"}
+    if set(regeneration_commands) != required_command_kinds or any(
+        not value for value in regeneration_commands.values()
+    ):
+        raise ValueError(
+            "T070 retention manifest requires preflight/freeze/stage/finalize commands"
+        )
+    root = artifact_root.resolve()
     entries = []
     for path in sorted({value.resolve() for value in retained_paths}):
         if not path.is_file():
             raise ValueError(f"T070 retained path is missing: {path}")
+        try:
+            relative = path.relative_to(root)
+        except ValueError as exc:
+            raise ValueError(
+                f"T070 retained path is outside artifact root: {path}"
+            ) from exc
+        top = relative.parts[0]
+        command_kind = (
+            "preflight"
+            if top == "native-preflight"
+            else "freeze"
+            if top in {"frozen-manifest", "budget-subset"}
+            else "stage"
+            if top in {"primary", "high-budget"}
+            else "finalize"
+        )
         entries.append(
             {
                 "path": str(path),
@@ -641,6 +678,11 @@ def build_retention_manifest(
                     "code_commit": code_commit,
                     "native_commit": NATIVE_COMMIT,
                 },
+                "regeneration_command": regeneration_commands[command_kind],
+                "compatibility_requirements": (
+                    "current T070 schema readers only; exact STSRL/native identities "
+                    "must match; legacy or missing provenance fails closed without guessing"
+                ),
                 "retention_reason": "T070 accepted audit or reproducibility evidence",
                 "downstream_consumer": decision["recommendation"],
                 "deletion_condition": (
@@ -650,8 +692,6 @@ def build_retention_manifest(
                 ),
             }
         )
-    if not regeneration_commands:
-        raise ValueError("T070 retention manifest requires regeneration commands")
     return {
         "schema_id": RETENTION_SCHEMA_ID,
         "schema_version": 1,
@@ -660,7 +700,11 @@ def build_retention_manifest(
         "code_commit": code_commit,
         "native_commit": NATIVE_COMMIT,
         "retained_artifacts": entries,
-        "regeneration_commands": list(regeneration_commands),
+        "regeneration_commands": dict(regeneration_commands),
+        "compatibility_requirements": (
+            "writers emit current schemas only; readers reject incomplete, mixed, legacy, "
+            "or identity-mismatched evidence without inferred provenance"
+        ),
         "raw_artifacts_may_be_deleted_when": (
             "merged identities and row counts pass audit; raw hashes, sizes, "
             "schemas and commands are retained; T070 is merged; planner has "
@@ -689,8 +733,12 @@ def validate_t070_preflight(
         or preflight.get("command_passed") is not True
         or preflight.get("source_manifest_sha256") != _sha256(source_manifest_path)
         or preflight.get("source_verifier_sha256") != _sha256(source_verifier_path)
-        or preflight.get("clean_worktree_mode")
+        or preflight.get("verifier_clean_worktree_mode")
         != "temporary_detached_exact_commit_worktree"
+        or preflight.get("verifier_clean_worktree_scope")
+        != "clean_source_verifier_only"
+        or preflight.get("runtime_source_mode")
+        != "exact_head_tracked_clean_stable_checkout"
         or preflight.get("build_jobs") != 16
         or not isinstance(preflight.get("cmake_identity"), str)
         or not preflight["cmake_identity"]
@@ -902,6 +950,7 @@ def _build_outcome_blind_subset(
         "code_commit": code_commit,
         "source_cohort_identity": cohort.identity,
         "source_record_count": len(cohort.records),
+        "selected_record_count": 16,
         "selection_rule": (
             "all five Act-2+ in source order, then eleven Boss-only by ascending "
             "SHA-256 of complete canonical source identity"
@@ -1490,16 +1539,36 @@ def _high_budget_signal(
     *,
     pv_growth: Mapping[str, Any],
     pv_vs_baseline_1600: Mapping[str, Any],
-) -> bool:
+) -> tuple[bool, dict[str, Any]]:
     overall_growth = pv_growth["overall"]
     versus = pv_vs_baseline_1600
-    return bool(
-        overall_growth["paired_win_delta"] >= 2
-        and versus["overall"]["paired_win_delta"] >= 0
-        and overall_growth["mean_terminal_hp_delta_among_outcome_ties"] is not None
-        and overall_growth["mean_terminal_hp_delta_among_outcome_ties"] >= 0
-        and pv_growth["act2_plus"]["paired_win_delta"] >= 0
-    )
+    tied_hp = overall_growth["mean_terminal_hp_delta_among_outcome_ties"]
+    values = {
+        "prior_value_1600_vs_100_paired_win_delta": overall_growth["paired_win_delta"],
+        "prior_value_1600_vs_baseline_1600_paired_win_delta": versus["overall"][
+            "paired_win_delta"
+        ],
+        "prior_value_1600_vs_100_mean_tied_terminal_hp_delta": tied_hp,
+        "prior_value_1600_vs_100_act2_plus_paired_win_delta": pv_growth["act2_plus"][
+            "paired_win_delta"
+        ],
+    }
+    conditions = {
+        "paired_win_growth_at_least_2": values[
+            "prior_value_1600_vs_100_paired_win_delta"
+        ]
+        >= 2,
+        "nonnegative_vs_baseline_1600": values[
+            "prior_value_1600_vs_baseline_1600_paired_win_delta"
+        ]
+        >= 0,
+        "nonnegative_tied_terminal_hp": tied_hp is not None and tied_hp >= 0,
+        "no_act2_plus_win_regression": values[
+            "prior_value_1600_vs_100_act2_plus_paired_win_delta"
+        ]
+        >= 0,
+    }
+    return all(conditions.values()), {"values": values, "conditions": conditions}
 
 
 def _primary_promotion(primary: Mapping[str, Any]) -> dict[str, Any]:

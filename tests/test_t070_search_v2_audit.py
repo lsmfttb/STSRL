@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 import os
 import subprocess
@@ -27,6 +28,7 @@ from sts_combat_rl.commands.t070_search_v2_audit import (
     build_budget_curve_and_geometry,
     build_decision_report,
     build_primary_report,
+    build_retention_manifest,
     merge_single_arm_stage,
     probe_t070_native_runtime_identity,
 )
@@ -100,6 +102,105 @@ def test_t070_native_runtime_identity_rejects_extension_outside_build(
             native_checkout=checkout,
             native_build_root=build,
         )
+
+
+def test_t070_schema_contract_covers_all_required_outputs() -> None:
+    path = Path("docs/t070_artifact_schema_contract.json")
+    contract = json.loads(path.read_text(encoding="utf-8"))
+    expected = {
+        "t070-native-capability-preflight-v1",
+        "t070-frozen-experiment-manifest-v1",
+        "t070-search-v2-primary-comparison-v1",
+        "t070-budget-subset-manifest-v1",
+        "t070-search-v2-budget-curve-v1",
+        "t070-search-tree-geometry-report-v1",
+        "t070-search-v2-decision-v1",
+        "t070-stage-execution-v1",
+        "t070-retention-manifest-v1",
+    }
+    rows = contract["schemas"]
+    assert {row["schema_id"] for row in rows} == expected
+    for row in rows:
+        assert row["required_fields"]
+        assert row["identity_rules"]
+        assert row["ordering"]
+        assert row["missingness"]
+        assert row["compatibility"]
+    supplemental_expected = {
+        "t070-native-runtime-identity-v1",
+        "t070-search-v2-primary-arm-cell-v1",
+        "t070-search-v2-high-budget-arm-cell-v1",
+        "t070-single-arm-shard-v1",
+        "t070-single-arm-merged-stage-v1",
+        "t070-stage-execution-detail-v1",
+        "t070-search-tree-geometry-decision-v1",
+        "t070-retained-log-index-v1",
+    }
+    supplemental = contract["supplemental_schemas"]
+    assert {row["schema_id"] for row in supplemental} == supplemental_expected
+    for row in supplemental:
+        assert row["required_fields"]
+        assert row["identity_rules"]
+        assert row["ordering"]
+        assert row["missingness"]
+        assert row["compatibility"]
+    task = Path(
+        "docs/tasks/T070-battle-search-v2-fixed-cohort-outcome-and-budget-sufficiency-audit.md"
+    ).read_text(encoding="utf-8")
+    assert "t070_artifact_schema_contract.json" in task
+
+
+def test_t070_retention_has_per_file_command_and_compatibility(
+    tmp_path: Path,
+) -> None:
+    paths = []
+    for relative in (
+        "native-preflight/preflight.json",
+        "frozen-manifest/frozen.json",
+        "primary/stage/shard.json",
+        "reports/decision.json",
+    ):
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"schema_id": "fixture-v1"}), encoding="utf-8")
+        paths.append(path)
+    commands = {
+        "preflight": "preflight-command",
+        "freeze": "freeze-command",
+        "stage": "stage-command",
+        "finalize": "finalize-command",
+    }
+    manifest = build_retention_manifest(
+        artifact_root=tmp_path,
+        retained_paths=paths,
+        regeneration_commands=commands,
+        code_commit="a" * 40,
+        decision={"recommendation": "planner recommendation"},
+    )
+    by_relative = {
+        str(Path(row["path"]).relative_to(tmp_path)).replace("\\", "/"): row
+        for row in manifest["retained_artifacts"]
+    }
+    assert (
+        by_relative["native-preflight/preflight.json"]["regeneration_command"]
+        == "preflight-command"
+    )
+    assert (
+        by_relative["frozen-manifest/frozen.json"]["regeneration_command"]
+        == "freeze-command"
+    )
+    assert (
+        by_relative["primary/stage/shard.json"]["regeneration_command"]
+        == "stage-command"
+    )
+    assert (
+        by_relative["reports/decision.json"]["regeneration_command"]
+        == "finalize-command"
+    )
+    assert all(
+        row["compatibility_requirements"] for row in manifest["retained_artifacts"]
+    )
+    assert manifest["compatibility_requirements"]
 
 
 def _record(index: int, *, act: int, room_type: str) -> FixedCohortRecord:
@@ -489,6 +590,12 @@ def test_t070_high_budget_curve_retains_outcome_compute_cells() -> None:
 
     assert curve["command_passed"] is True
     assert geometry["command_passed"] is True
+    assert set(curve["high_budget_guidance_evidence"]) == {"values", "conditions"}
+    assert set(geometry["metric_definitions"]) == {
+        "effective_branching_factor",
+        "visited_edge_coverage_next_depth",
+        "expanded_node_coverage_next_depth",
+    }
     for arm in ("baseline", "prior_value"):
         for budget in ("100", "400", "1600"):
             cell = curve["arms"][arm][budget]

@@ -17,7 +17,7 @@ from typing import Any
 from sts_combat_rl.commands.t070_search_v2_audit import (
     HIGH_BUDGET_RANGES,
     PRIMARY_RANGES,
-    STAGE_SCHEMA_ID,
+    STAGE_DETAIL_SCHEMA_ID,
     merge_single_arm_stage,
     validate_t070_frozen_stage,
     validate_t070_preflight,
@@ -192,7 +192,7 @@ def main() -> int:
         )
         failed |= merged.get("command_passed") is not True
     execution = {
-        "schema_id": STAGE_SCHEMA_ID,
+        "schema_id": STAGE_DETAIL_SCHEMA_ID,
         "schema_version": 1,
         "task_id": "T070",
         "stage_name": args.stage_name,
