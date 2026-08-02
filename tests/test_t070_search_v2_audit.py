@@ -25,6 +25,8 @@ from sts_combat_rl.commands.t070_search_v2_audit import (
     PRIMARY_REPORT_SCHEMA_ID,
     PRIMARY_RANGES,
     _build_outcome_blind_subset,
+    _runtime_configure_command,
+    _validate_cmake_python_identity,
     build_budget_curve_and_geometry,
     build_decision_report,
     build_primary_report,
@@ -37,6 +39,57 @@ from sts_combat_rl.sim.fixed_evaluation_set import (
     FixedCohortRecord,
     FixedCohortSelectionConfig,
 )
+
+
+def test_t070_runtime_configure_binds_modern_cmake_python(tmp_path: Path) -> None:
+    runner = tmp_path / "venv" / "bin" / "python3.13"
+    command = _runtime_configure_command(
+        native_checkout=tmp_path / "native",
+        native_build_root=tmp_path / "native" / "build",
+        cmake_policy_version_minimum="3.5",
+        python_executable=runner,
+    )
+
+    assert "-DPYBIND11_FINDPYTHON=ON" in command
+    assert f"-DPython_EXECUTABLE={runner}" in command
+    assert not any(argument.startswith("-DPYTHON_EXECUTABLE=") for argument in command)
+
+
+def test_t070_cmake_python_identity_requires_runner_abi(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runner = tmp_path / "venv" / "bin" / "python3.13"
+    runner.parent.mkdir(parents=True)
+    runner.write_bytes(b"runner")
+    build = tmp_path / "native" / "build"
+    build.mkdir(parents=True)
+    suffix = sysconfig.get_config_var("EXT_SUFFIX")
+    assert isinstance(suffix, str)
+    extension = build / f"slaythespire{suffix}"
+    extension.write_bytes(b"extension")
+    (build / "CMakeCache.txt").write_text(
+        f"Python_EXECUTABLE:FILEPATH={runner}\n", encoding="utf-8"
+    )
+
+    identity = _validate_cmake_python_identity(
+        native_build_root=build, python_executable=runner
+    )
+
+    assert identity["cmake_python_executable"] == str(runner.resolve())
+    assert identity["runner_python_executable"] == str(runner.resolve())
+    assert identity["runner_python_extension_suffix"] == suffix
+    assert identity["matching_extension_path"] == str(extension.resolve())
+
+    wrong = tmp_path / "usr" / "bin" / "python3.14"
+    wrong.parent.mkdir(parents=True)
+    wrong.write_bytes(b"wrong")
+    (build / "CMakeCache.txt").write_text(
+        f"Python_EXECUTABLE:FILEPATH={wrong}\n", encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match="selected a different Python"):
+        _validate_cmake_python_identity(
+            native_build_root=build, python_executable=runner
+        )
 
 
 def test_t070_native_runtime_identity_binds_extension_and_abi(

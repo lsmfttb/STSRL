@@ -29,6 +29,7 @@
         "runtime_source_mode",
         "native_source_checkout",
         "native_runtime_build_root",
+        "cmake_python_identity",
         "native_runtime_identity",
         "required_apis",
         "geometry_schema",
@@ -46,7 +47,7 @@
         "runtime_build_stderr",
         "command_passed"
       ],
-      "identity_rules": "Exact STSRL code commit, native fee272f1 commit, source manifest/verifier hashes, and t070-native-runtime-identity-v1 extension hash/size/path/Python ABI must all match at every consumer.",
+      "identity_rules": "Exact STSRL code commit, native fee272f1 commit, source manifest/verifier hashes, CMake-selected Python executable and runner extension suffix, and t070-native-runtime-identity-v1 extension hash/size/path/Python ABI must all match at every consumer.",
       "ordering": "commands and return_codes preserve verifier, runtime configure, runtime build order; required_apis is published order.",
       "missingness": "No required field is nullable; a missing runtime identity, command result, or build identity invalidates Stage 0.",
       "compatibility": "Current v1 only; no migration or inferred native provenance."

@@ -18,6 +18,8 @@ from sts_combat_rl.commands.t068_checkout import verify_exact_git_checkout
 from sts_combat_rl.commands.t070_search_v2_audit import (
     NATIVE_COMMIT,
     NATIVE_PREFLIGHT_SCHEMA_ID,
+    _runtime_configure_command,
+    _validate_cmake_python_identity,
     probe_t070_native_runtime_identity,
 )
 
@@ -58,15 +60,12 @@ def main() -> int:
     build = manifest_value["build"]
     build_jobs = 16
     verifier_command = ["bash", str(verifier), str(native_checkout)]
-    configure_command = [
-        "cmake",
-        "-S",
-        str(native_checkout),
-        "-B",
-        str(native_build_root),
-        f"-DCMAKE_POLICY_VERSION_MINIMUM={build['cmake_policy_version_minimum']}",
-        f"-DPYTHON_EXECUTABLE={sys.executable}",
-    ]
+    configure_command = _runtime_configure_command(
+        native_checkout=native_checkout,
+        native_build_root=native_build_root,
+        cmake_policy_version_minimum=build["cmake_policy_version_minimum"],
+        python_executable=Path(sys.executable),
+    )
     build_command = [
         "cmake",
         "--build",
@@ -127,8 +126,13 @@ def main() -> int:
     cmake = subprocess.run(
         ["cmake", "--version"], capture_output=True, text=True, check=False
     )
+    cmake_python_identity = None
     runtime_identity = None
     if build_result is not None and build_result.returncode == 0:
+        cmake_python_identity = _validate_cmake_python_identity(
+            native_build_root=native_build_root,
+            python_executable=Path(sys.executable),
+        )
         sys.path.insert(0, str(native_build_root))
         try:
             runtime_identity = probe_t070_native_runtime_identity(
@@ -168,6 +172,7 @@ def main() -> int:
         "runtime_source_mode": "exact_head_tracked_clean_stable_checkout",
         "native_source_checkout": str(native_checkout),
         "native_runtime_build_root": str(native_build_root),
+        "cmake_python_identity": cmake_python_identity,
         "native_runtime_identity": runtime_identity,
         "required_apis": [
             "StepSimulator.battle_search_v2",

@@ -749,6 +749,19 @@ def validate_t070_preflight(
     expected_runtime = preflight.get("native_runtime_identity")
     if not isinstance(expected_runtime, Mapping):
         raise ValueError("T070 native preflight lacks runtime extension identity")
+    cmake_python = preflight.get("cmake_python_identity")
+    if (
+        not isinstance(cmake_python, Mapping)
+        or cmake_python.get("cmake_python_executable")
+        != expected_runtime.get("python_executable")
+        or cmake_python.get("runner_python_executable")
+        != expected_runtime.get("python_executable")
+        or cmake_python.get("runner_python_extension_suffix")
+        != expected_runtime.get("python_extension_suffix")
+        or cmake_python.get("matching_extension_path")
+        != expected_runtime.get("native_extension_path")
+    ):
+        raise ValueError("T070 native preflight CMake Python identity is inconsistent")
     if native_checkout is not None or native_build_root is not None:
         if native_checkout is None or native_build_root is None:
             raise ValueError(
@@ -763,6 +776,69 @@ def validate_t070_preflight(
                 "T070 outcome runtime extension differs from native preflight"
             )
     return preflight
+
+
+def _runtime_configure_command(
+    *,
+    native_checkout: Path,
+    native_build_root: Path,
+    cmake_policy_version_minimum: str,
+    python_executable: Path,
+) -> list[str]:
+    """Configure pybind11 with the exact Python that will run the audit."""
+
+    return [
+        "cmake",
+        "-S",
+        str(native_checkout),
+        "-B",
+        str(native_build_root),
+        f"-DCMAKE_POLICY_VERSION_MINIMUM={cmake_policy_version_minimum}",
+        "-DPYBIND11_FINDPYTHON=ON",
+        f"-DPython_EXECUTABLE={python_executable}",
+    ]
+
+
+def _validate_cmake_python_identity(
+    *, native_build_root: Path, python_executable: Path
+) -> dict[str, str]:
+    """Fail closed unless CMake and the generated extension use the runner ABI."""
+
+    cache_path = native_build_root / "CMakeCache.txt"
+    if not cache_path.is_file():
+        raise ValueError("T070 runtime build omitted CMakeCache.txt")
+    cache_values: dict[str, str] = {}
+    for line in cache_path.read_text(encoding="utf-8").splitlines():
+        if not line or line.startswith(("//", "#")) or "=" not in line:
+            continue
+        key_and_type, value = line.split("=", 1)
+        key = key_and_type.split(":", 1)[0]
+        cache_values[key] = value
+    configured = cache_values.get("Python_EXECUTABLE")
+    if configured is None:
+        raise ValueError("T070 runtime CMake cache omitted Python_EXECUTABLE")
+    configured_path = Path(configured).resolve()
+    runner_path = python_executable.resolve()
+    if configured_path != runner_path:
+        raise ValueError(
+            "T070 runtime CMake selected a different Python executable: "
+            f"{configured_path} != {runner_path}"
+        )
+    suffix = sysconfig.get_config_var("EXT_SUFFIX")
+    if not isinstance(suffix, str) or not suffix:
+        raise ValueError("T070 runtime Python EXT_SUFFIX is unavailable")
+    extension_path = (native_build_root / f"slaythespire{suffix}").resolve()
+    if not extension_path.is_file():
+        raise ValueError(
+            "T070 runtime extension suffix does not match the runner ABI: "
+            f"missing {extension_path}"
+        )
+    return {
+        "cmake_python_executable": str(configured_path),
+        "runner_python_executable": str(runner_path),
+        "runner_python_extension_suffix": suffix,
+        "matching_extension_path": str(extension_path),
+    }
 
 
 def probe_t070_native_runtime_identity(
