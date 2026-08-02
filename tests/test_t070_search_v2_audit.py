@@ -26,6 +26,7 @@ from sts_combat_rl.commands.t070_search_v2_audit import (
     PRIMARY_RANGES,
     _build_outcome_blind_subset,
     _runtime_configure_command,
+    _runtime_verification_commands,
     _validate_cmake_python_identity,
     build_budget_curve_and_geometry,
     build_decision_report,
@@ -33,6 +34,7 @@ from sts_combat_rl.commands.t070_search_v2_audit import (
     build_retention_manifest,
     merge_single_arm_stage,
     probe_t070_native_runtime_identity,
+    validate_t070_preflight,
 )
 from sts_combat_rl.sim.fixed_evaluation_set import (
     FixedCohort,
@@ -89,6 +91,118 @@ def test_t070_cmake_python_identity_requires_runner_abi(
     with pytest.raises(ValueError, match="selected a different Python"):
         _validate_cmake_python_identity(
             native_build_root=build, python_executable=runner
+        )
+
+
+def test_t070_runtime_verification_uses_exact_runner_and_build(tmp_path: Path) -> None:
+    checkout = tmp_path / "native"
+    build = checkout / "build"
+    runner = tmp_path / "venv" / "bin" / "python3.13"
+
+    api_smoke, geometry = _runtime_verification_commands(
+        native_checkout=checkout,
+        native_build_root=build,
+        python_executable=runner,
+    )
+
+    assert api_smoke == [
+        str(runner),
+        str(checkout / "scripts" / "stsrl_api_smoke.py"),
+        "--build-dir",
+        str(build),
+    ]
+    assert geometry == [
+        str(runner),
+        str(checkout / "scripts" / "test_battle_search_v2_tree_geometry.py"),
+        "--build-dir",
+        str(build),
+    ]
+
+
+def test_t070_preflight_requires_runtime_gate_commands_and_logs(tmp_path: Path) -> None:
+    manifest = tmp_path / "manifest.json"
+    verifier = tmp_path / "verifier.sh"
+    manifest.write_text("manifest", encoding="utf-8")
+    verifier.write_text("verifier", encoding="utf-8")
+    log_fields = (
+        "stdout",
+        "stderr",
+        "runtime_build_stdout",
+        "runtime_build_stderr",
+        "runtime_api_smoke_stdout",
+        "runtime_api_smoke_stderr",
+        "runtime_geometry_stdout",
+        "runtime_geometry_stderr",
+    )
+    logs = {}
+    for field in log_fields:
+        path = tmp_path / f"{field}.log"
+        path.write_text(field, encoding="utf-8")
+        logs[field] = str(path)
+    python_executable = str((tmp_path / "python3.13").resolve())
+    suffix = ".cpython-313-x86_64-linux-gnu.so"
+    extension = str((tmp_path / f"slaythespire{suffix}").resolve())
+    payload = {
+        "schema_id": "t070-native-capability-preflight-v1",
+        "stsrl_code_commit": "a" * 40,
+        "native_commit": NATIVE_COMMIT,
+        "semantic_parity_result": True,
+        "runtime_api_smoke_passed": True,
+        "runtime_geometry_passed": True,
+        "return_codes": [0, 0, 0, 0, 0],
+        "return_code": 0,
+        "worker_count": 16,
+        "command_passed": True,
+        "source_manifest_sha256": hashlib.sha256(manifest.read_bytes()).hexdigest(),
+        "source_verifier_sha256": hashlib.sha256(verifier.read_bytes()).hexdigest(),
+        "verifier_clean_worktree_mode": "temporary_detached_exact_commit_worktree",
+        "verifier_clean_worktree_scope": "clean_source_verifier_only",
+        "runtime_source_mode": "exact_head_tracked_clean_stable_checkout",
+        "build_jobs": 16,
+        "cmake_identity": "cmake version test",
+        "manifest_build_directory": "build-stsrl-source-py",
+        "manifest_cmake_target": "slaythespire",
+        "commands": [
+            {"name": name, "argv": [name]}
+            for name in (
+                "clean_source_verifier",
+                "runtime_cmake_configure",
+                "runtime_cmake_build",
+                "runtime_api_smoke",
+                "runtime_geometry",
+            )
+        ],
+        "native_runtime_identity": {
+            "python_executable": python_executable,
+            "python_extension_suffix": suffix,
+            "native_extension_path": extension,
+        },
+        "cmake_python_identity": {
+            "cmake_python_executable": python_executable,
+            "runner_python_executable": python_executable,
+            "runner_python_extension_suffix": suffix,
+            "matching_extension_path": extension,
+        },
+        **logs,
+    }
+    preflight = tmp_path / "preflight.json"
+    preflight.write_text(json.dumps(payload), encoding="utf-8")
+
+    validated = validate_t070_preflight(
+        preflight,
+        code_commit="a" * 40,
+        source_manifest_path=manifest,
+        source_verifier_path=verifier,
+    )
+    assert validated["return_codes"] == [0, 0, 0, 0, 0]
+
+    Path(logs["runtime_geometry_stdout"]).unlink()
+    with pytest.raises(ValueError, match="log evidence is incomplete"):
+        validate_t070_preflight(
+            preflight,
+            code_commit="a" * 40,
+            source_manifest_path=manifest,
+            source_verifier_path=verifier,
         )
 
 

@@ -19,6 +19,7 @@ from sts_combat_rl.commands.t070_search_v2_audit import (
     NATIVE_COMMIT,
     NATIVE_PREFLIGHT_SCHEMA_ID,
     _runtime_configure_command,
+    _runtime_verification_commands,
     _validate_cmake_python_identity,
     probe_t070_native_runtime_identity,
 )
@@ -75,10 +76,19 @@ def main() -> int:
         "-j",
         str(build_jobs),
     ]
+    runtime_api_command, runtime_geometry_command = _runtime_verification_commands(
+        native_checkout=native_checkout,
+        native_build_root=native_build_root,
+        python_executable=Path(sys.executable),
+    )
     stdout_path = output / "source-verifier.stdout.log"
     stderr_path = output / "source-verifier.stderr.log"
     build_stdout_path = output / "runtime-build.stdout.log"
     build_stderr_path = output / "runtime-build.stderr.log"
+    runtime_api_stdout_path = output / "runtime-api-smoke.stdout.log"
+    runtime_api_stderr_path = output / "runtime-api-smoke.stderr.log"
+    runtime_geometry_stdout_path = output / "runtime-geometry.stdout.log"
+    runtime_geometry_stderr_path = output / "runtime-geometry.stderr.log"
     started_at = _now()
     started = perf_counter()
     env = dict(os.environ)
@@ -128,11 +138,37 @@ def main() -> int:
     )
     cmake_python_identity = None
     runtime_identity = None
+    runtime_api_result = None
+    runtime_geometry_result = None
     if build_result is not None and build_result.returncode == 0:
         cmake_python_identity = _validate_cmake_python_identity(
             native_build_root=native_build_root,
             python_executable=Path(sys.executable),
         )
+        with (
+            runtime_api_stdout_path.open("wb") as stdout,
+            runtime_api_stderr_path.open("wb") as stderr,
+        ):
+            runtime_api_result = subprocess.run(
+                runtime_api_command,
+                cwd=native_checkout,
+                env=env,
+                stdout=stdout,
+                stderr=stderr,
+                check=False,
+            )
+        with (
+            runtime_geometry_stdout_path.open("wb") as stdout,
+            runtime_geometry_stderr_path.open("wb") as stderr,
+        ):
+            runtime_geometry_result = subprocess.run(
+                runtime_geometry_command,
+                cwd=native_checkout,
+                env=env,
+                stdout=stdout,
+                stderr=stderr,
+                check=False,
+            )
         sys.path.insert(0, str(native_build_root))
         try:
             runtime_identity = probe_t070_native_runtime_identity(
@@ -145,8 +181,12 @@ def main() -> int:
         verifier_result.returncode,
         configure_result.returncode if configure_result is not None else None,
         build_result.returncode if build_result is not None else None,
+        runtime_api_result.returncode if runtime_api_result is not None else None,
+        runtime_geometry_result.returncode
+        if runtime_geometry_result is not None
+        else None,
     ]
-    passed = return_codes == [0, 0, 0] and runtime_identity is not None
+    passed = return_codes == [0, 0, 0, 0, 0] and runtime_identity is not None
     aggregate_return_code = next(
         (code for code in return_codes if code not in (None, 0)), 0 if passed else 1
     )
@@ -179,11 +219,23 @@ def main() -> int:
             "StepSimulator.battle_search_v2_with_tree_geometry",
         ],
         "geometry_schema": "native-battle-search-v2-tree-geometry-v1",
-        "semantic_parity_result": verifier_result.returncode == 0,
+        "semantic_parity_result": (
+            runtime_geometry_result is not None
+            and runtime_geometry_result.returncode == 0
+        ),
+        "runtime_api_smoke_passed": (
+            runtime_api_result is not None and runtime_api_result.returncode == 0
+        ),
+        "runtime_geometry_passed": (
+            runtime_geometry_result is not None
+            and runtime_geometry_result.returncode == 0
+        ),
         "commands": [
             {"name": "clean_source_verifier", "argv": verifier_command},
             {"name": "runtime_cmake_configure", "argv": configure_command},
             {"name": "runtime_cmake_build", "argv": build_command},
+            {"name": "runtime_api_smoke", "argv": runtime_api_command},
+            {"name": "runtime_geometry", "argv": runtime_geometry_command},
         ],
         "return_codes": return_codes,
         "return_code": aggregate_return_code,
@@ -195,6 +247,10 @@ def main() -> int:
         "stderr": str(stderr_path),
         "runtime_build_stdout": str(build_stdout_path),
         "runtime_build_stderr": str(build_stderr_path),
+        "runtime_api_smoke_stdout": str(runtime_api_stdout_path),
+        "runtime_api_smoke_stderr": str(runtime_api_stderr_path),
+        "runtime_geometry_stdout": str(runtime_geometry_stdout_path),
+        "runtime_geometry_stderr": str(runtime_geometry_stderr_path),
         "command_passed": passed,
     }
     (output / "t070-native-capability-preflight.json").write_text(

@@ -728,6 +728,9 @@ def validate_t070_preflight(
         preflight.get("stsrl_code_commit") != code_commit
         or preflight.get("native_commit") != NATIVE_COMMIT
         or preflight.get("semantic_parity_result") is not True
+        or preflight.get("runtime_api_smoke_passed") is not True
+        or preflight.get("runtime_geometry_passed") is not True
+        or preflight.get("return_codes") != [0, 0, 0, 0, 0]
         or preflight.get("return_code") != 0
         or preflight.get("worker_count") != 16
         or preflight.get("command_passed") is not True
@@ -746,6 +749,44 @@ def validate_t070_preflight(
         or preflight.get("manifest_cmake_target") != "slaythespire"
     ):
         raise ValueError("T070 native preflight is missing, stale, or failed")
+    command_rows = preflight.get("commands")
+    expected_command_names = [
+        "clean_source_verifier",
+        "runtime_cmake_configure",
+        "runtime_cmake_build",
+        "runtime_api_smoke",
+        "runtime_geometry",
+    ]
+    if (
+        not isinstance(command_rows, list)
+        or [
+            row.get("name") if isinstance(row, Mapping) else None
+            for row in command_rows
+        ]
+        != expected_command_names
+        or any(
+            not isinstance(row.get("argv"), list) or not row["argv"]
+            for row in command_rows
+            if isinstance(row, Mapping)
+        )
+    ):
+        raise ValueError("T070 native preflight command evidence is incomplete")
+    required_log_fields = (
+        "stdout",
+        "stderr",
+        "runtime_build_stdout",
+        "runtime_build_stderr",
+        "runtime_api_smoke_stdout",
+        "runtime_api_smoke_stderr",
+        "runtime_geometry_stdout",
+        "runtime_geometry_stderr",
+    )
+    if any(
+        not isinstance(preflight.get(field), str)
+        or not Path(preflight[field]).is_file()
+        for field in required_log_fields
+    ):
+        raise ValueError("T070 native preflight log evidence is incomplete")
     expected_runtime = preflight.get("native_runtime_identity")
     if not isinstance(expected_runtime, Mapping):
         raise ValueError("T070 native preflight lacks runtime extension identity")
@@ -797,6 +838,29 @@ def _runtime_configure_command(
         "-DPYBIND11_FINDPYTHON=ON",
         f"-DPython_EXECUTABLE={python_executable}",
     ]
+
+
+def _runtime_verification_commands(
+    *,
+    native_checkout: Path,
+    native_build_root: Path,
+    python_executable: Path,
+) -> tuple[list[str], list[str]]:
+    """Run native acceptance checks under the exact outcome Python runtime."""
+
+    api_smoke = [
+        str(python_executable),
+        str(native_checkout / "scripts" / "stsrl_api_smoke.py"),
+        "--build-dir",
+        str(native_build_root),
+    ]
+    geometry = [
+        str(python_executable),
+        str(native_checkout / "scripts" / "test_battle_search_v2_tree_geometry.py"),
+        "--build-dir",
+        str(native_build_root),
+    ]
+    return api_smoke, geometry
 
 
 def _validate_cmake_python_identity(

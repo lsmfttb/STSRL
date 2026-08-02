@@ -34,6 +34,8 @@
         "required_apis",
         "geometry_schema",
         "semantic_parity_result",
+        "runtime_api_smoke_passed",
+        "runtime_geometry_passed",
         "commands",
         "return_codes",
         "return_code",
@@ -45,11 +47,15 @@
         "stderr",
         "runtime_build_stdout",
         "runtime_build_stderr",
+        "runtime_api_smoke_stdout",
+        "runtime_api_smoke_stderr",
+        "runtime_geometry_stdout",
+        "runtime_geometry_stderr",
         "command_passed"
       ],
-      "identity_rules": "Exact STSRL code commit, native fee272f1 commit, source manifest/verifier hashes, CMake-selected Python executable and runner extension suffix, and t070-native-runtime-identity-v1 extension hash/size/path/Python ABI must all match at every consumer.",
-      "ordering": "commands and return_codes preserve verifier, runtime configure, runtime build order; required_apis is published order.",
-      "missingness": "No required field is nullable; a missing runtime identity, command result, or build identity invalidates Stage 0.",
+      "identity_rules": "Exact STSRL code commit, native fee272f1 commit, source manifest/verifier hashes, CMake-selected Python executable and runner extension suffix, runtime API/geometry checks executed by that Python against that build root, and t070-native-runtime-identity-v1 extension hash/size/path/Python ABI must all match at every consumer.",
+      "ordering": "commands and return_codes preserve verifier, runtime configure, runtime build, runtime API smoke, and runtime geometry order; required_apis is published order.",
+      "missingness": "No required field is nullable; a missing runtime identity, runtime acceptance result/log, command result, or build identity invalidates Stage 0.",
       "compatibility": "Current v1 only; no migration or inferred native provenance."
     },
     {

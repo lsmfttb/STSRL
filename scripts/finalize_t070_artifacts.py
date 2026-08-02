@@ -142,6 +142,10 @@ def main() -> int:
         root / "native-preflight" / "source-verifier.stderr.log",
         root / "native-preflight" / "runtime-build.stdout.log",
         root / "native-preflight" / "runtime-build.stderr.log",
+        root / "native-preflight" / "runtime-api-smoke.stdout.log",
+        root / "native-preflight" / "runtime-api-smoke.stderr.log",
+        root / "native-preflight" / "runtime-geometry.stdout.log",
+        root / "native-preflight" / "runtime-geometry.stderr.log",
         *[
             log
             for name, *_ in PRIMARY_STAGE_CONFIGS
