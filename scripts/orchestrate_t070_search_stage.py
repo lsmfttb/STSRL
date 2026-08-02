@@ -38,6 +38,7 @@ def main() -> int:
         "--range-kind", choices=("primary", "high_budget"), required=True
     )
     parser.add_argument("--tree-geometry", action="store_true")
+    parser.add_argument("--native-checkout", type=Path, required=True)
     parser.add_argument("--native-build-root", type=Path, required=True)
     args = parser.parse_args()
     if not re.fullmatch(r"[0-9a-f]{40}", args.code_commit):
@@ -69,12 +70,20 @@ def main() -> int:
     preflight = artifact / "native-preflight" / "t070-native-capability-preflight.json"
     source_manifest = repo / "docs" / "sts_lightspeed_source_manifest.json"
     source_verifier = repo / "scripts" / "verify_lightspeed_source.sh"
-    validate_t070_preflight(
-        preflight,
-        code_commit=args.code_commit,
-        source_manifest_path=source_manifest,
-        source_verifier_path=source_verifier,
-    )
+    native_build_root = args.native_build_root.resolve()
+    sys.path.insert(0, str(native_build_root))
+    try:
+        preflight_report = validate_t070_preflight(
+            preflight,
+            code_commit=args.code_commit,
+            source_manifest_path=source_manifest,
+            source_verifier_path=source_verifier,
+            native_checkout=args.native_checkout,
+            native_build_root=native_build_root,
+        )
+    finally:
+        sys.path.remove(str(native_build_root))
+    native_runtime_identity = preflight_report["native_runtime_identity"]
     _, frozen_ranges = validate_t070_frozen_stage(
         frozen,
         code_commit=args.code_commit,
@@ -97,7 +106,7 @@ def main() -> int:
     logs = stage / "logs"
     logs.mkdir()
     env = dict(os.environ)
-    env["PYTHONPATH"] = f"{args.native_build_root.resolve()}:{repo / 'src'}"
+    env["PYTHONPATH"] = f"{native_build_root}:{repo / 'src'}"
     workers: list[dict[str, Any]] = []
     processes = []
     started = perf_counter()
@@ -114,6 +123,10 @@ def main() -> int:
             str(frozen),
             "--native-preflight",
             str(preflight),
+            "--native-checkout",
+            str(args.native_checkout.resolve()),
+            "--native-build-root",
+            str(native_build_root),
             "--output",
             str(stage / f"shard-{index:02d}.json"),
             "--code-commit",
@@ -158,6 +171,16 @@ def main() -> int:
         stdout.close()
         stderr.close()
         worker["returncode"] = code
+        if code == 0:
+            shard_payload = json.loads(
+                (stage / f"shard-{worker['worker_index']:02d}.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            worker["native_runtime_identity"] = shard_payload.get(
+                "native_runtime_identity"
+            )
+            failed |= worker["native_runtime_identity"] != native_runtime_identity
         failed |= code != 0
     merged_path = stage / "merged.json"
     if not failed:
@@ -186,7 +209,9 @@ def main() -> int:
         "effective_parallel_workers": 16,
         "host_logical_cpu_count": os.cpu_count(),
         "python_executable": sys.executable,
-        "native_build_root": str(args.native_build_root.resolve()),
+        "native_source_checkout": str(args.native_checkout.resolve()),
+        "native_build_root": str(native_build_root),
+        "native_runtime_identity": native_runtime_identity,
         "started_at_utc": started_at,
         "finished_at_utc": _now(),
         "stage_wall_clock_seconds": perf_counter() - started,

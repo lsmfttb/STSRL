@@ -5,10 +5,14 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 import hashlib
+from importlib import import_module
 import json
 import math
 from pathlib import Path
 import statistics
+import subprocess
+import sys
+import sysconfig
 from typing import Any
 
 from sts_combat_rl.commands.t062_battle_search_v2 import (
@@ -88,6 +92,7 @@ STAGE_SCHEMA_ID = "t070-stage-execution-v1"
 RETENTION_SCHEMA_ID = "t070-retention-manifest-v1"
 SHARD_SCHEMA_ID = "t070-single-arm-shard-v1"
 MERGED_STAGE_SCHEMA_ID = "t070-single-arm-merged-stage-v1"
+NATIVE_RUNTIME_SCHEMA_ID = "t070-native-runtime-identity-v1"
 
 
 def build_frozen_manifests(
@@ -199,6 +204,7 @@ def run_single_arm_shard(
     shard_index: int,
     expected_ranges: Sequence[str],
     code_commit: str,
+    native_runtime_identity: Mapping[str, Any],
     output_path: Path,
     max_battle_steps: int = 200,
 ) -> dict[str, Any]:
@@ -224,6 +230,7 @@ def run_single_arm_shard(
         "task_id": "T070",
         "code_commit": code_commit,
         "native_commit": NATIVE_COMMIT,
+        "native_runtime_identity": dict(native_runtime_identity),
         "stage_name": stage_name,
         "arm": arm,
         "family": family,
@@ -264,6 +271,7 @@ def merge_single_arm_stage(
             "cohort_identity",
             "cohort_record_count",
             "controller_provenance",
+            "native_runtime_identity",
         ):
             if shard.get(key) != first.get(key):
                 problems.append(f"shard {index}: {key} differs")
@@ -304,6 +312,7 @@ def merge_single_arm_stage(
                 "cohort_identity",
                 "cohort_record_count",
                 "controller_provenance",
+                "native_runtime_identity",
             )
         },
         "expected_record_count": expected_record_count,
@@ -667,6 +676,8 @@ def validate_t070_preflight(
     code_commit: str,
     source_manifest_path: Path,
     source_verifier_path: Path,
+    native_checkout: Path | None = None,
+    native_build_root: Path | None = None,
 ) -> dict[str, Any]:
     preflight = _load_schema(preflight_path, NATIVE_PREFLIGHT_SCHEMA_ID)
     if (
@@ -678,9 +689,104 @@ def validate_t070_preflight(
         or preflight.get("command_passed") is not True
         or preflight.get("source_manifest_sha256") != _sha256(source_manifest_path)
         or preflight.get("source_verifier_sha256") != _sha256(source_verifier_path)
+        or preflight.get("clean_worktree_mode")
+        != "temporary_detached_exact_commit_worktree"
+        or preflight.get("build_jobs") != 16
+        or not isinstance(preflight.get("cmake_identity"), str)
+        or not preflight["cmake_identity"]
+        or preflight.get("manifest_build_directory") != "build-stsrl-source-py"
+        or preflight.get("manifest_cmake_target") != "slaythespire"
     ):
         raise ValueError("T070 native preflight is missing, stale, or failed")
+    expected_runtime = preflight.get("native_runtime_identity")
+    if not isinstance(expected_runtime, Mapping):
+        raise ValueError("T070 native preflight lacks runtime extension identity")
+    if native_checkout is not None or native_build_root is not None:
+        if native_checkout is None or native_build_root is None:
+            raise ValueError(
+                "T070 native runtime validation requires checkout and build root"
+            )
+        observed_runtime = probe_t070_native_runtime_identity(
+            native_checkout=native_checkout,
+            native_build_root=native_build_root,
+        )
+        if dict(expected_runtime) != observed_runtime:
+            raise ValueError(
+                "T070 outcome runtime extension differs from native preflight"
+            )
     return preflight
+
+
+def probe_t070_native_runtime_identity(
+    *,
+    native_checkout: Path,
+    native_build_root: Path,
+) -> dict[str, Any]:
+    """Bind the imported extension to an exact native checkout and Python ABI."""
+
+    checkout = native_checkout.resolve()
+    build_root = native_build_root.resolve()
+    try:
+        build_root.relative_to(checkout)
+    except ValueError as exc:
+        raise ValueError(
+            "T070 native build root must be inside its source checkout"
+        ) from exc
+    head = _git_output(checkout, "rev-parse", "HEAD")
+    if head != NATIVE_COMMIT:
+        raise ValueError(f"T070 native checkout is {head}, expected {NATIVE_COMMIT}")
+    tracked_status = _git_output(checkout, "status", "--short", "--untracked-files=no")
+    if tracked_status:
+        raise ValueError("T070 native checkout has tracked modifications")
+    module = import_module("slaythespire")
+    origin_value = getattr(module, "__file__", None)
+    if not isinstance(origin_value, str) or not origin_value:
+        raise ValueError("T070 native module has no extension path")
+    extension = Path(origin_value).resolve()
+    try:
+        extension.relative_to(build_root)
+    except ValueError as exc:
+        raise ValueError(
+            "T070 imported native extension is outside the declared build root"
+        ) from exc
+    extension_suffix = sysconfig.get_config_var("EXT_SUFFIX")
+    if not isinstance(extension_suffix, str) or not extension.name.endswith(
+        extension_suffix
+    ):
+        raise ValueError("T070 native extension does not match the Python ABI suffix")
+    return {
+        "schema_id": NATIVE_RUNTIME_SCHEMA_ID,
+        "schema_version": 1,
+        "native_commit": NATIVE_COMMIT,
+        "native_source_checkout": str(checkout),
+        "native_source_head": head,
+        "native_source_tracked_clean": True,
+        "native_build_root": str(build_root),
+        "native_extension_path": str(extension),
+        "native_extension_sha256": _sha256(extension),
+        "native_extension_size_bytes": extension.stat().st_size,
+        "python_executable": str(Path(sys.executable).resolve()),
+        "python_version": sys.version,
+        "python_implementation": sys.implementation.name,
+        "python_cache_tag": sys.implementation.cache_tag,
+        "python_soabi": sysconfig.get_config_var("SOABI"),
+        "python_extension_suffix": extension_suffix,
+    }
+
+
+def _git_output(checkout: Path, *args: str) -> str:
+    completed = subprocess.run(
+        ["git", "-C", str(checkout), *args],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise ValueError(
+            "T070 native checkout identity command failed: "
+            + (completed.stderr.strip() or completed.stdout.strip())
+        )
+    return completed.stdout.strip()
 
 
 def validate_t070_frozen_stage(

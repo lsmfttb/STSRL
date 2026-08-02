@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import sys
 
 from sts_combat_rl.commands.t070_search_v2_audit import (
     HIGH_BUDGET_STAGE_CONFIGS,
@@ -24,18 +25,28 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--artifact-root", type=Path, required=True)
     parser.add_argument("--code-commit", required=True)
+    parser.add_argument("--native-checkout", type=Path, required=True)
+    parser.add_argument("--native-build-root", type=Path, required=True)
     args = parser.parse_args()
     root = args.artifact_root.resolve()
     reports = root / "reports"
     if reports.exists() or (root / "t070-retention-manifest.json").exists():
         raise SystemExit("T070 finalizer refuses to overwrite visible outcomes")
     preflight_path = root / "native-preflight" / "t070-native-capability-preflight.json"
-    validate_t070_preflight(
-        preflight_path,
-        code_commit=args.code_commit,
-        source_manifest_path=Path("docs/sts_lightspeed_source_manifest.json"),
-        source_verifier_path=Path("scripts/verify_lightspeed_source.sh"),
-    )
+    native_build_root = args.native_build_root.resolve()
+    sys.path.insert(0, str(native_build_root))
+    try:
+        preflight = validate_t070_preflight(
+            preflight_path,
+            code_commit=args.code_commit,
+            source_manifest_path=Path("docs/sts_lightspeed_source_manifest.json"),
+            source_verifier_path=Path("scripts/verify_lightspeed_source.sh"),
+            native_checkout=args.native_checkout,
+            native_build_root=native_build_root,
+        )
+    finally:
+        sys.path.remove(str(native_build_root))
+    native_runtime_identity = preflight["native_runtime_identity"]
     stage_executions = [
         _validated_stage_execution(
             root / "primary" / name / "stage-execution.json",
@@ -63,6 +74,7 @@ def main() -> int:
                 "88:93",
             ],
             code_commit=args.code_commit,
+            native_runtime_identity=native_runtime_identity,
         )
         for name, arm, family, budget in PRIMARY_STAGE_CONFIGS
     ] + [
@@ -75,6 +87,7 @@ def main() -> int:
             budget=budget,
             ranges=[f"{index}:{index + 1}" for index in range(16)],
             code_commit=args.code_commit,
+            native_runtime_identity=native_runtime_identity,
         )
         for name, arm, family, budget in HIGH_BUDGET_STAGE_CONFIGS
     ]
@@ -86,6 +99,11 @@ def main() -> int:
         name: _load(root / "high-budget" / name / "merged.json")
         for name, *_ in HIGH_BUDGET_STAGE_CONFIGS
     }
+    if any(
+        report.get("native_runtime_identity") != native_runtime_identity
+        for report in (*primary_stages.values(), *high_stages.values())
+    ):
+        raise ValueError("T070 merged stage runtime identities differ from preflight")
     primary = build_primary_report(primary_stages)
     curve, geometry = build_budget_curve_and_geometry(high_stages)
     decision = build_decision_report(primary, curve, geometry)
@@ -118,6 +136,8 @@ def main() -> int:
         root / "native-preflight" / "t070-native-capability-preflight.json",
         root / "native-preflight" / "source-verifier.stdout.log",
         root / "native-preflight" / "source-verifier.stderr.log",
+        root / "native-preflight" / "runtime-build.stdout.log",
+        root / "native-preflight" / "runtime-build.stderr.log",
         root / "frozen-manifest" / "t070-frozen-manifest.json",
         root / "budget-subset" / "t070-budget-subset-manifest.json",
         root / "budget-subset" / "t070-budget-subset-cohort.jsonl",
@@ -191,6 +211,7 @@ def _validated_stage_execution(
     budget: int,
     ranges: list[str],
     code_commit: str,
+    native_runtime_identity,
 ):
     report = _load(path)
     workers = report.get("workers")
@@ -205,6 +226,7 @@ def _validated_stage_execution(
         != (stage_kind == "high_budget" and arm == "prior_value")
         or report.get("code_commit") != code_commit
         or report.get("native_commit") != NATIVE_COMMIT
+        or report.get("native_runtime_identity") != native_runtime_identity
         or report.get("record_ranges") != ranges
         or report.get("worker_count") != 16
         or report.get("shard_count") != 16
@@ -215,6 +237,7 @@ def _validated_stage_execution(
             worker.get("worker_index") != index
             or worker.get("record_range") != ranges[index]
             or worker.get("returncode") != 0
+            or worker.get("native_runtime_identity") != native_runtime_identity
             for index, worker in enumerate(workers)
             if isinstance(worker, dict)
         )

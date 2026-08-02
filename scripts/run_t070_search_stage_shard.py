@@ -29,6 +29,8 @@ def main() -> int:
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--frozen-manifest", type=Path, required=True)
     parser.add_argument("--native-preflight", type=Path, required=True)
+    parser.add_argument("--native-checkout", type=Path, required=True)
+    parser.add_argument("--native-build-root", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--code-commit", required=True)
     parser.add_argument("--stage-name", required=True)
@@ -58,11 +60,13 @@ def main() -> int:
         raise SystemExit("T070 checkpoint hash mismatch")
     source_manifest = Path("docs/sts_lightspeed_source_manifest.json")
     source_verifier = Path("scripts/verify_lightspeed_source.sh")
-    validate_t070_preflight(
+    preflight = validate_t070_preflight(
         args.native_preflight,
         code_commit=args.code_commit,
         source_manifest_path=source_manifest,
         source_verifier_path=source_verifier,
+        native_checkout=args.native_checkout,
+        native_build_root=args.native_build_root,
     )
     _, expected_ranges = validate_t070_frozen_stage(
         args.frozen_manifest,
@@ -100,6 +104,7 @@ def main() -> int:
         shard_index=args.shard_index,
         expected_ranges=expected_ranges,
         code_commit=args.code_commit,
+        native_runtime_identity=preflight["native_runtime_identity"],
         output_path=args.output,
     )
     return 0 if report["command_passed"] else 1

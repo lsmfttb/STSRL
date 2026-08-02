@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 import os
 import subprocess
 import sys
+import sysconfig
+from types import SimpleNamespace
 
 import pytest
 
@@ -14,6 +17,8 @@ from sts_combat_rl.commands.t070_search_v2_audit import (
     HIGH_BUDGET_CELL_SCHEMA_ID,
     HIGH_BUDGET_STAGE_CONFIGS,
     MERGED_STAGE_SCHEMA_ID,
+    NATIVE_COMMIT,
+    NATIVE_RUNTIME_SCHEMA_ID,
     PRIMARY_CELL_SCHEMA_ID,
     PRIMARY_STAGE_CONFIGS,
     PRIMARY_REPORT_SCHEMA_ID,
@@ -23,12 +28,78 @@ from sts_combat_rl.commands.t070_search_v2_audit import (
     build_decision_report,
     build_primary_report,
     merge_single_arm_stage,
+    probe_t070_native_runtime_identity,
 )
 from sts_combat_rl.sim.fixed_evaluation_set import (
     FixedCohort,
     FixedCohortRecord,
     FixedCohortSelectionConfig,
 )
+
+
+def test_t070_native_runtime_identity_binds_extension_and_abi(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    checkout = tmp_path / "native"
+    build = checkout / "build-t070"
+    build.mkdir(parents=True)
+    suffix = sysconfig.get_config_var("EXT_SUFFIX")
+    assert isinstance(suffix, str)
+    extension = build / f"slaythespire{suffix}"
+    extension.write_bytes(b"exact-native-extension")
+
+    def fake_git(_checkout: Path, *args: str) -> str:
+        return NATIVE_COMMIT if args == ("rev-parse", "HEAD") else ""
+
+    monkeypatch.setattr(
+        "sts_combat_rl.commands.t070_search_v2_audit._git_output", fake_git
+    )
+    monkeypatch.setattr(
+        "sts_combat_rl.commands.t070_search_v2_audit.import_module",
+        lambda name: SimpleNamespace(__file__=str(extension)),
+    )
+
+    identity = probe_t070_native_runtime_identity(
+        native_checkout=checkout,
+        native_build_root=build,
+    )
+
+    assert identity["schema_id"] == NATIVE_RUNTIME_SCHEMA_ID
+    assert identity["native_commit"] == NATIVE_COMMIT
+    assert identity["native_source_checkout"] == str(checkout.resolve())
+    assert identity["native_build_root"] == str(build.resolve())
+    assert (
+        identity["native_extension_sha256"]
+        == hashlib.sha256(extension.read_bytes()).hexdigest()
+    )
+    assert identity["native_extension_size_bytes"] == extension.stat().st_size
+    assert identity["python_soabi"] == sysconfig.get_config_var("SOABI")
+    assert identity["python_extension_suffix"] == suffix
+
+
+def test_t070_native_runtime_identity_rejects_extension_outside_build(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    checkout = tmp_path / "native"
+    build = checkout / "build-t070"
+    build.mkdir(parents=True)
+    suffix = sysconfig.get_config_var("EXT_SUFFIX")
+    extension = checkout / f"slaythespire{suffix}"
+    extension.write_bytes(b"wrong-build")
+    monkeypatch.setattr(
+        "sts_combat_rl.commands.t070_search_v2_audit._git_output",
+        lambda _checkout, *args: NATIVE_COMMIT if args == ("rev-parse", "HEAD") else "",
+    )
+    monkeypatch.setattr(
+        "sts_combat_rl.commands.t070_search_v2_audit.import_module",
+        lambda name: SimpleNamespace(__file__=str(extension)),
+    )
+
+    with pytest.raises(ValueError, match="outside the declared build root"):
+        probe_t070_native_runtime_identity(
+            native_checkout=checkout,
+            native_build_root=build,
+        )
 
 
 def _record(index: int, *, act: int, room_type: str) -> FixedCohortRecord:
@@ -192,6 +263,7 @@ def test_t070_merge_requires_exact_ordered_stage_inventory(tmp_path: Path) -> No
                     "schema_id": "t070-single-arm-shard-v1",
                     "code_commit": "a" * 40,
                     "native_commit": "fee272f1ae21c283ad2161f55293cfe6d714134a",
+                    "native_runtime_identity": {"schema_id": NATIVE_RUNTIME_SCHEMA_ID},
                     "stage_name": "baseline-0100",
                     "arm": "baseline",
                     "family": "shared",
