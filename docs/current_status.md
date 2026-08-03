@@ -1302,7 +1302,10 @@ native public-consistent hidden-future sampler support.
   fixed-cohort outcome evidence, natural A20 performance, normal-information
   strength, live-game validation, broad-training evidence, or final-agent
   evidence.
-- T070 pins native commit
+- T070 was accepted from pull request `#67` against approved specification
+  commit `684f53f2f24881a10146387632797eaac3b3fd46`. Its final reviewed head is
+  `40e062fdef37f96f5c5d1f19579ff25f4e7623cc`, and its `main` merge commit is
+  `5c27c8caf4fe8f15603b3737be33c097be03a3c7`. T070 pins native commit
   `fee272f1ae21c283ad2161f55293cfe6d714134a`, exposes its read-only
   `battle_search_v2_with_tree_geometry` companion through the adapter, and
   leaves the existing Search v2 API and primary path unchanged. The exact
