@@ -89,7 +89,7 @@ published `READY` row.
 | T067 | DONE | [Battle Search v2 inference-cost repair](T067-battle-search-v2-inference-cost-repair.md) | T062, T061, T052, T043 | exact-cache repair preserved semantics but had 0/866 hits; cost calibration remained infeasible and selected T068 |
 | T068 | DONE | [Native-boundary batched inference feasibility](T068-native-boundary-batched-inference-feasibility.md) | T067, T062, T052, T043 | exact audit found only 207/261/398 synchronous singleton requests; batching closed and selected T069 |
 | T069 | DONE | [Public-node feature-encoding projection feasibility](T069-public-node-feature-encoding-projection-feasibility.md) | T068, T067, T062, T052, T043 | exact projection preserved semantics, materially reduced cost, locked all calibration families, and recommended the original outcome comparison for planner consideration |
-| T070 | READY | [Battle Search v2 fixed-cohort outcome and budget-sufficiency audit](T070-battle-search-v2-fixed-cohort-outcome-and-budget-sufficiency-audit.md) | T069, T062, T052, T043 | integrate accepted native tree geometry, run the frozen 93-record outcome families, and measure bounded high-budget search sufficiency |
+| T070 | DONE | [Battle Search v2 fixed-cohort outcome and budget-sufficiency audit](T070-battle-search-v2-fixed-cohort-outcome-and-budget-sufficiency-audit.md) | T069, T062, T052, T043 | fixed primary and high-budget audits complete; Case C recommends T064 to the planner without publishing a successor |
 
 Use the table, not per-task files or roadmap prose, when deciding whether a task
 may receive a branch. Only `READY` rows should receive a new implementation
@@ -134,10 +134,11 @@ complete: one exact search-scope public-context projection preserved accepted
 scorer and search semantics, passed every material-improvement gate, and
 locked all wall-clock and simulator-step calibration arms. T069 ran no
 93-record outcome comparison. The planner reviewed that terminal evidence and
-the accepted native tree-geometry capability, then proposed T070. T070 is the
-only `READY` task. It integrates the exact native commit, runs the frozen primary
-outcome families, and adds a bounded high-budget budget-sufficiency diagnostic
-without reopening cost repair. T063--T066 remain draft.
+the accepted native tree-geometry capability, then proposed T070. T070 is
+complete. Its frozen primary comparison did not pass the Search v2 promotion
+boundary, while the bounded curve found the 100-simulation budget insufficient
+but no high-budget guidance signal. The terminal Case C recommends T064 to the
+planner without publishing it. T063--T066 remain draft.
 
 ## Task Boundary And Artifact Rules
 
@@ -174,8 +175,9 @@ execution for a substantial workload.
 ## Published Queue
 
 The executable queue is exactly the set of `READY` rows in the Active Backlog.
-T070 is the only `READY` task. T034 remains blocked on native public-consistent
-hidden-future sampling support.
+There are currently no `READY` tasks. T034 remains blocked on native
+public-consistent hidden-future sampling support; the planner must evaluate the
+T070 maintainer report before proposing any successor.
 
 ## Standard Local Gates
 
@@ -195,10 +197,10 @@ requirements.
 
 ## Historical Mapping
 
-Completed and cancelled task documents through T069 remain the durable
-historical record. T070 is the current executable contract. Accepted experiment
-details and artifact identities remain in individual task documents, reports,
-and `current_status.md`; this index only owns lifecycle state and the current
+Completed and cancelled task documents through T070 remain the durable
+historical record. No task is currently executable. Accepted experiment details
+and artifact identities remain in individual task documents, reports, and
+`current_status.md`; this index only owns lifecycle state and the current
 executable queue.
 
 New task documents should start from [`TEMPLATE.md`](TEMPLATE.md).
