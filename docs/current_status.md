@@ -1,6 +1,6 @@
 # Current Status
 
-Last reviewed: 2026-07-29.
+Last reviewed: 2026-08-03.
 
 This document is the main maintainer's canonical execution-result report for
 the planner and describes the latest `main` branch only. Results from local
@@ -95,11 +95,14 @@ outcome comparison remained closed; measured public-feature encoding cost
 selected T069. T069 is complete: its exact search-scope public-context
 projection preserved accepted semantics, passed every material-improvement
 gate, and locked all wall-clock and simulator-step calibration arms. T069 ran
-no 93-record outcome aggregation. Its terminal evidence recommended the
-original T062 93-record outcome comparison for planner consideration. There
-are currently no `READY` tasks; the main maintainer is awaiting the planner's
-next task handoff. T034 remains blocked on native public-consistent
-hidden-future sampler support.
+no 93-record outcome aggregation. T070 is complete: it integrated the accepted
+native tree-geometry companion, ran all ten frozen 93-record primary stages and
+all six frozen 16-record high-budget stages, rejected Search v2 promotion, and
+selected Case C. The 100-simulation budget is descriptively insufficient, but
+the high-budget guidance signal is false. T070 recommends T064 to the planner
+without publishing it. There are currently no `READY` tasks; the main
+maintainer is awaiting the planner's next task handoff. T034 remains blocked on
+native public-consistent hidden-future sampler support.
 
 ## Implemented On Main
 
@@ -128,7 +131,9 @@ hidden-future sampler support.
   `gamerpuppy/sts_lightspeed` base commit
   `7476a81954020087da31d41d16fddf475746ec2d` and the active fork integration
   branch `refs/heads/stsrl/main` at commit
-  `9dd8f75bd5d2b1aa8a8b5cf1db18f899825f326a`. Historical task-shaped fork
+  `fee272f1ae21c283ad2161f55293cfe6d714134a`. The supported capability set
+  includes the opt-in `native_battle_search_v2_tree_geometry` companion API;
+  the existing Search v2 method remains unchanged. Historical task-shaped fork
   branches are retained only as provenance, and the old ordered patch stack is
   retained only as retired provenance.
 
@@ -390,7 +395,7 @@ hidden-future sampler support.
 
 ### Tests And Runtime Evidence
 
-- `786` tests pass on Windows Python as of the T069 merge review. In an
+- `810` tests pass on Windows Python as of the T070 implementation review. In an
   uninstalled checkout, set `PYTHONPATH=src` (or install the package) before
   invoking the CLI directly.
 - The two CommunicationMod fixture smokes pass.
@@ -436,11 +441,12 @@ hidden-future sampler support.
 - The T017/T018/T008-managed pinned external source integration currently
   validates from manifest `sts-lightspeed-source-manifest-v1` version 1. The
   canonical source verifier builds integration commit
-  `3cb9ebecb87c38044b34aa0e013d42b222a04087`,
+  `fee272f1ae21c283ad2161f55293cfe6d714134a`,
   initializes `json` and `pybind11`, imports `slaythespire.StepSimulator`, and
   asserts the current native capability inventory including
   `native_battle_search_root`, `native_root_prior_allocation`,
   `native_battle_search_v2_tree_internal`,
+  `native_battle_search_v2_tree_geometry`,
   `native_terminal_resource_identity`, and
   `constructed_battle_start_transforms`. The verifier also exercises the
   Search v2 tree-internal policy-prior and learned-leaf-value boundary with
@@ -1296,6 +1302,58 @@ hidden-future sampler support.
   fixed-cohort outcome evidence, natural A20 performance, normal-information
   strength, live-game validation, broad-training evidence, or final-agent
   evidence.
+- T070 pins native commit
+  `fee272f1ae21c283ad2161f55293cfe6d714134a`, exposes its read-only
+  `battle_search_v2_with_tree_geometry` companion through the adapter, and
+  leaves the existing Search v2 API and primary path unchanged. The exact
+  artifact-producing STSRL commit is
+  `ca8da8e4183798daf3c310566ede74daf90822aa`; Stage 0 used the matching
+  CPython 3.13 extension with sha256
+  `37853df3b51624a5f1a22fc5915db9a2c8d43d681638e97880018a58892bf38a`.
+  All ten 93-record primary stages and six 16-record high-budget stages used
+  the published 16 workers and ranges, returned zero worker, restore, mapping,
+  checkpoint, missing-value, fallback, controller, truncation, or
+  mixed-provenance failures, and passed the frozen-identity audit.
+
+  The equal-nominal overall outcomes were `4/6/1/2` wins for
+  `baseline/prior_only/value_only/prior_value`; equal-nominal `prior_value`
+  regressed by two wins and had mean paired terminal-HP delta `-0.319` among
+  outcome ties. Simulator-step-normalized outcomes were also `4/6/1/2`, with
+  `prior_value` native-step ratio `0.849` rather than the required 5% match.
+  Wall-clock-normalized outcomes were `4/2/4/1`, with `prior_value` wall ratio
+  `1.384` rather than the required 10% match. The original T062 primary
+  promotion gate therefore failed.
+
+  On the frozen high-budget subset, baseline wins at budgets `100/400/1600`
+  were `2/3/3`, while `prior_value` wins were `2/2/2`. Between
+  `prior_value@100` and `prior_value@1600`, selected root actions changed on
+  `8/16` records, root visit leaders changed on `6/16`, and first-root median
+  maximum expanded depth grew from `4` to `8`, so
+  `budget_100_not_sufficient=true`. The paired win delta remained `0/16`, and
+  `prior_value@1600` regressed by one win against `baseline@1600`, so
+  `high_budget_guidance_signal=false`. The terminal decision is Case C with
+  exactly one planner recommendation, `T064 simulator-generated later-act
+  curriculum`; no successor was published.
+
+  Stable ignored evidence lives under
+  `artifacts/t070-search-v2-outcome-budget-sufficiency/source-ca8da8e4183798daf3c310566ede74daf90822aa/`
+  and
+  `artifacts/t070-search-v2-outcome-budget-sufficiency/reproduction-ca8da8e4183798daf3c310566ede74daf90822aa/`.
+  The primary, curve, geometry, decision, and stage-inventory report hashes are
+  respectively `f02c53aef2aff805cdf83779d2ca9984cd4d48fedcb8814c544036dfbd18b067`,
+  `49490b92f44d54907da5a25a5eb46e6f8b08361a47255622ac5dd1433b94f733`,
+  `c62e745f107a00b06ce3b48098bf0178c5ebba150550ce9b4985e57e46dcbb1a`,
+  `80afc3faa4a3369f1ca86abb4fd748eb5dd4cc22e1ad9c6335cc0024ebce30c9`,
+  and `bfedf063291cfee32205c5604c2e40acdd56c471f8aa0555e7651d3b5f044795`.
+  Retention manifest sha256
+  `cc732f44ffb17cbc7ed9c08c9e664e5caa0be33a6cf7bce86c02eaea772d0ac0`
+  indexes 897 files totaling 1,596,280,428 bytes; its 599-log index also
+  retains transparent OOM and host-reboot attempts without mixing their shards
+  into successful stages. Raw files remain retained until T070 is merged, the
+  planner receives this maintainer report, and the named downstream retention
+  condition closes. This is `full_simulator_state_oracle_like` fixed-cohort
+  diagnostic evidence, not natural A20 performance, normal-information,
+  live-game, broad-training, controller-promotion, or final-agent evidence.
 
 ## Not Implemented On Main
 
@@ -1305,8 +1363,7 @@ unmerged legacy work:
 - interactive live-game or A20 performance validation for any controller;
 - broad neural training on a scale/distribution-approved A20 dataset;
 - model-guided search performance improvement or controller promotion;
-- a 93-record Search v2 outcome comparison or any accepted outcome-based
-  controller advancement;
+- accepted outcome-based Search v2 controller advancement;
 - sufficient Boss/later-act A20 source coverage for broad teacher/checkpoint
   refresh or broad training;
 - root-prior allocation repair, root-prior guided complete-run reachability
@@ -1489,15 +1546,16 @@ Feasibility`) are complete. T067 found 0 hits across 866 exact cache lookups.
 T068 proved that all 207/261/398 guided callbacks were synchronous singletons.
 T069 then proved one exact search-scope projection, materially reduced search
 wall time in every guided arm, and locked all six cost configurations without
-changing accepted scorer or search semantics.
+changing accepted scorer or search semantics. T070 is also complete. Its
+primary outcome gate failed, its bounded diagnostic found the 100-simulation
+budget insufficient without a high-budget guidance signal, and its Case C
+decision recommends T064 to the planner without publishing it.
 
-No task is currently `READY`. T069's terminal evidence recommended the
-original T062 93-record outcome comparison with the accepted equal-nominal,
-simulator-step, and wall-clock configurations, but the main maintainer has not
-published that recommendation as a successor task and will not proactively do
-so. The planner must evaluate this report and send any next task proposal to
-the maintainer. No further natural source scale-up is authorized by the
-T062/T067/T068/T069 semantic/cost results alone.
+No task is currently `READY`. The planner must evaluate the T070 Case C report
+and send any next task proposal to the maintainer. T064 remains `DRAFT`; the
+T070 recommendation does not authorize implementation or publish a successor.
+No further natural source scale-up is authorized by the
+T062/T067/T068/T069/T070 evidence alone.
 
 T034 remains blocked on an explicit native simulator boundary for
 public-consistent hidden-future sampling.

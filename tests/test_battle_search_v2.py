@@ -295,6 +295,37 @@ class _Adapter:
             value_calls = 1
         return _raw_search(policy_calls=policy_calls, value_calls=value_calls)
 
+    def battle_search_v2_with_tree_geometry(
+        self, snapshot: SimulatorSnapshot, **kwargs: Any
+    ) -> dict[str, Any]:
+        raw = self.battle_search_v2(snapshot, **kwargs)
+        raw["tree_internal_telemetry"]["tree_geometry"] = {
+            "schema_id": "native-battle-search-v2-tree-geometry-v1",
+            "schema_version": 1,
+            "root_depth": 0,
+            "total_expanded_node_count": 5,
+            "total_discovered_child_edge_count": 6,
+            "total_visited_child_edge_count": 4,
+            "max_expanded_depth": 1,
+            "depth_rows": [
+                {
+                    "depth": 0,
+                    "expanded_node_count": 1,
+                    "discovered_child_edge_count": 2,
+                    "visited_child_edge_count": 2,
+                    "branching_histogram": [{"child_count": 2, "node_count": 1}],
+                },
+                {
+                    "depth": 1,
+                    "expanded_node_count": 4,
+                    "discovered_child_edge_count": 4,
+                    "visited_child_edge_count": 2,
+                    "branching_histogram": [{"child_count": 1, "node_count": 4}],
+                },
+            ],
+        }
+        return raw
+
     def battle_search(
         self, snapshot: SimulatorSnapshot, **kwargs: Any
     ) -> dict[str, Any]:
@@ -576,6 +607,45 @@ def test_t069_projection_is_search_local_versioned_and_telemetrized() -> None:
         ]
         == "unit-test-checkpoint"
     )
+
+
+def test_t070_geometry_companion_is_explicit_validated_and_retained() -> None:
+    controller = BattleSearchV2Controller(
+        simulations=10,
+        scorer=_ProjectionScorer(_checkpoint()),
+        ablation="prior_value",
+        inference_cache_enabled=True,
+        public_context_projection_enabled=True,
+        tree_geometry_enabled=True,
+        native_source_identity={"integration_commit": "t070"},
+    )
+    decision = controller.select_action(
+        _Adapter(),
+        SimulatorSnapshot(observation=[], raw=_node_raw()),
+        _actions(),
+        _context(),
+        3,
+    )
+
+    assert decision.provenance.config["task_id"] == "T070"
+    assert decision.provenance.config["tree_geometry"]["semantic_effect"] == (
+        "read_only_post_search_aggregation"
+    )
+    record = decision.metadata["t070_tree_geometry_records"][0]
+    assert record["decision_step_index"] == 3
+    assert record["native_geometry"]["max_expanded_depth"] == 1
+    assert record["selected_action_identity"]["action_id"] == "battle:11"
+    assert record["model_calls"] == 1
+
+
+def test_t070_geometry_rejects_non_prior_value_arm() -> None:
+    with pytest.raises(ValueError, match="only for the prior_value"):
+        BattleSearchV2Controller(
+            simulations=10,
+            scorer=_Scorer(_checkpoint()),
+            ablation="prior_only",
+            tree_geometry_enabled=True,
+        )
 
 
 def test_t068_trace_survives_fixed_evaluation_telemetry_aggregation() -> None:

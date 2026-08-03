@@ -57,6 +57,13 @@ BATTLE_SEARCH_V2_T069_CONTROLLER_NAME = (
 BATTLE_SEARCH_V2_T069_CONTROLLER_VERSION = (
     "battle-search-v2-oracle-like-t069-public-context-projection-v1"
 )
+BATTLE_SEARCH_V2_T070_GEOMETRY_CONTROLLER_NAME = (
+    "battle_search_v2_oracle_like_t070_tree_geometry_v1"
+)
+BATTLE_SEARCH_V2_T070_GEOMETRY_CONTROLLER_VERSION = (
+    "battle-search-v2-oracle-like-t070-tree-geometry-v1"
+)
+T070_TREE_GEOMETRY_SCHEMA_ID = "native-battle-search-v2-tree-geometry-v1"
 T069_COST_ATTRIBUTION_SCHEMA_ID = "t069-public-context-projection-cost-attribution-v1"
 T069_COST_ATTRIBUTION_SCHEMA_VERSION = 1
 BATTLE_SEARCH_V2_NATIVE_API = "StepSimulator.battle_search_v2.v1"
@@ -97,6 +104,9 @@ class BattleSearchV2Controller:
     # synchronous callback boundary; it never changes callback scheduling,
     # scoring, or native traversal.
     callback_dependency_trace_enabled: bool = False
+    # T070-only, explicitly requested read-only native telemetry. Primary T070
+    # stages leave this disabled so the accepted T069 calibration applies.
+    tree_geometry_enabled: bool = False
     provenance: ControllerProvenance = field(init=False)  # type: ignore[assignment]
     checkpoint_provenance: SearchGuidanceCheckpointProvenance = field(init=False)
     _baseline: OracleSearchController = field(init=False, repr=False)
@@ -111,6 +121,10 @@ class BattleSearchV2Controller:
         if self.inference_cache_capacity <= 0:
             raise ValueError(
                 "battle search v2 inference cache capacity must be positive"
+            )
+        if self.tree_geometry_enabled and self.ablation != "prior_value":
+            raise ValueError(
+                "T070 tree geometry is defined only for the prior_value arm"
             )
         checkpoint = search_guidance_scorer_checkpoint_provenance(self.scorer)
         object.__setattr__(self, "checkpoint_provenance", checkpoint)
@@ -127,29 +141,41 @@ class BattleSearchV2Controller:
         )
         object.__setattr__(self, "_baseline", baseline)
         controller_name = (
-            BATTLE_SEARCH_V2_T069_CONTROLLER_NAME
-            if self.public_context_projection_enabled
+            BATTLE_SEARCH_V2_T070_GEOMETRY_CONTROLLER_NAME
+            if self.tree_geometry_enabled
             else (
-                BATTLE_SEARCH_V2_T067_CONTROLLER_NAME
-                if self.inference_cache_enabled
-                else BATTLE_SEARCH_V2_CONTROLLER_NAME
+                BATTLE_SEARCH_V2_T069_CONTROLLER_NAME
+                if self.public_context_projection_enabled
+                else (
+                    BATTLE_SEARCH_V2_T067_CONTROLLER_NAME
+                    if self.inference_cache_enabled
+                    else BATTLE_SEARCH_V2_CONTROLLER_NAME
+                )
             )
         )
         controller_version = (
-            BATTLE_SEARCH_V2_T069_CONTROLLER_VERSION
-            if self.public_context_projection_enabled
+            BATTLE_SEARCH_V2_T070_GEOMETRY_CONTROLLER_VERSION
+            if self.tree_geometry_enabled
             else (
-                BATTLE_SEARCH_V2_T067_CONTROLLER_VERSION
-                if self.inference_cache_enabled
-                else BATTLE_SEARCH_V2_CONTROLLER_VERSION
+                BATTLE_SEARCH_V2_T069_CONTROLLER_VERSION
+                if self.public_context_projection_enabled
+                else (
+                    BATTLE_SEARCH_V2_T067_CONTROLLER_VERSION
+                    if self.inference_cache_enabled
+                    else BATTLE_SEARCH_V2_CONTROLLER_VERSION
+                )
             )
         )
         provenance_config: dict[str, Any] = {
             "controller_version": controller_version,
             "task_id": (
-                "T069"
-                if self.public_context_projection_enabled
-                else ("T067" if self.inference_cache_enabled else "T062")
+                "T070"
+                if self.tree_geometry_enabled
+                else (
+                    "T069"
+                    if self.public_context_projection_enabled
+                    else ("T067" if self.inference_cache_enabled else "T062")
+                )
             ),
             "information_regime": NATIVE_SEARCH_INFORMATION_REGIME,
             "native_search_schema_id": "native-battle-search-root-v1",
@@ -197,6 +223,14 @@ class BattleSearchV2Controller:
                 "inference_cache_capacity": self.inference_cache_capacity,
                 "cache_scope": "one_native_search_call",
                 "cache_key_schema_id": "t067-public-node-cache-key-v1",
+            }
+        if self.tree_geometry_enabled:
+            provenance_config["tree_geometry"] = {
+                "task_id": "T070",
+                "enabled": True,
+                "native_api": "StepSimulator.battle_search_v2_with_tree_geometry",
+                "schema_id": T070_TREE_GEOMETRY_SCHEMA_ID,
+                "semantic_effect": "read_only_post_search_aggregation",
             }
         if self.feature_identity_trace_enabled:
             provenance_config["diagnostic_instrumentation"] = {
@@ -415,7 +449,16 @@ class BattleSearchV2Controller:
             return native_result
 
         search_start = time.perf_counter()
-        raw_search = getattr(adapter, "battle_search_v2")(
+        method_name = (
+            "battle_search_v2_with_tree_geometry"
+            if self.tree_geometry_enabled
+            else "battle_search_v2"
+        )
+        if not hasattr(adapter, method_name):
+            raise ValueError(
+                f"battle search v2 controller requires {method_name} adapter"
+            )
+        raw_search = getattr(adapter, method_name)(
             snapshot,
             simulations=self.simulations,
             include_potions=False,
@@ -449,6 +492,13 @@ class BattleSearchV2Controller:
                 "battle search v2 root mapping failed: " + "; ".join(report.problems)
             )
         telemetry = _require_tree_internal_telemetry(raw_search)
+        geometry: dict[str, Any] | None = None
+        if self.tree_geometry_enabled:
+            geometry = _validate_t070_tree_geometry(raw_search, telemetry)
+        elif "tree_geometry" in telemetry:
+            raise ValueError(
+                "native battle_search_v2 unexpectedly returned tree geometry"
+            )
         _validate_mechanism_telemetry(
             telemetry,
             use_policy_prior=self.uses_policy_prior,
@@ -535,6 +585,25 @@ class BattleSearchV2Controller:
                     "schema_version": 1,
                     "trace_mode": "observe_existing_synchronous_callback",
                     "requests": callback_trace,
+                }
+            ]
+        if geometry is not None:
+            metadata["t070_tree_geometry_records"] = [
+                {
+                    "schema_id": "t070-search-tree-geometry-decision-v1",
+                    "schema_version": 1,
+                    "decision_step_index": step_index,
+                    "native_geometry": geometry,
+                    "root_actions": [
+                        action.to_dict() for action in report.root_actions
+                    ],
+                    "root_visits": report.root_visits,
+                    "root_legal_action_count": report.legal_action_count,
+                    "selected_action_identity": dict(target.action_identity),
+                    "selected_legal_action_index": target.legal_action_index,
+                    "native_simulator_steps": report.native_simulator_steps,
+                    "model_calls": int(attribution["model_call_count"]),
+                    "wall_clock_seconds": search_elapsed,
                 }
             ]
         return ControllerDecision(
@@ -735,6 +804,110 @@ def _require_tree_internal_telemetry(raw_search: Mapping[str, Any]) -> dict[str,
     if not isinstance(telemetry, Mapping):
         raise ValueError("native battle search v2 omitted tree-internal telemetry")
     return dict(telemetry)
+
+
+def _validate_t070_tree_geometry(
+    raw_search: Mapping[str, Any],
+    telemetry: Mapping[str, Any],
+) -> dict[str, Any]:
+    geometry = telemetry.get("tree_geometry")
+    if not isinstance(geometry, Mapping):
+        raise ValueError("native battle search v2 omitted T070 tree geometry")
+    value = dict(geometry)
+    expected_keys = {
+        "schema_id",
+        "schema_version",
+        "root_depth",
+        "total_expanded_node_count",
+        "total_discovered_child_edge_count",
+        "total_visited_child_edge_count",
+        "max_expanded_depth",
+        "depth_rows",
+    }
+    if set(value) != expected_keys:
+        raise ValueError("native battle search v2 tree geometry fields mismatch")
+    if (
+        value.get("schema_id") != T070_TREE_GEOMETRY_SCHEMA_ID
+        or value.get("schema_version") != 1
+        or value.get("root_depth") != 0
+    ):
+        raise ValueError("native battle search v2 tree geometry identity mismatch")
+    rows = value.get("depth_rows")
+    if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes)):
+        raise ValueError("native battle search v2 tree geometry rows are invalid")
+    expanded_total = 0
+    discovered_total = 0
+    visited_total = 0
+    normalized_rows: list[dict[str, Any]] = []
+    for expected_depth, raw_row in enumerate(rows):
+        if not isinstance(raw_row, Mapping):
+            raise ValueError("native tree geometry row must be an object")
+        row = dict(raw_row)
+        if row.get("depth") != expected_depth:
+            raise ValueError("native tree geometry depths must be contiguous")
+        counts: dict[str, int] = {}
+        for key in (
+            "expanded_node_count",
+            "discovered_child_edge_count",
+            "visited_child_edge_count",
+        ):
+            count = row.get(key)
+            if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+                raise ValueError(f"native tree geometry {key} is invalid")
+            counts[key] = count
+        if counts["visited_child_edge_count"] > counts["discovered_child_edge_count"]:
+            raise ValueError("native tree geometry visited edges exceed discovered")
+        histogram = row.get("branching_histogram")
+        if not isinstance(histogram, Sequence) or isinstance(histogram, (str, bytes)):
+            raise ValueError("native tree geometry branching histogram is invalid")
+        previous = -1
+        histogram_nodes = 0
+        histogram_edges = 0
+        for bucket in histogram:
+            if not isinstance(bucket, Mapping):
+                raise ValueError("native tree geometry histogram bucket is invalid")
+            child_count = bucket.get("child_count")
+            node_count = bucket.get("node_count")
+            if (
+                isinstance(child_count, bool)
+                or not isinstance(child_count, int)
+                or child_count < 0
+                or isinstance(node_count, bool)
+                or not isinstance(node_count, int)
+                or node_count < 0
+                or child_count <= previous
+            ):
+                raise ValueError("native tree geometry histogram is not canonical")
+            previous = child_count
+            histogram_nodes += node_count
+            histogram_edges += child_count * node_count
+        if (
+            histogram_nodes != counts["expanded_node_count"]
+            or histogram_edges != counts["discovered_child_edge_count"]
+        ):
+            raise ValueError("native tree geometry histogram totals mismatch")
+        expanded_total += counts["expanded_node_count"]
+        discovered_total += counts["discovered_child_edge_count"]
+        visited_total += counts["visited_child_edge_count"]
+        normalized_rows.append(row)
+    totals = (
+        ("total_expanded_node_count", expanded_total),
+        ("total_discovered_child_edge_count", discovered_total),
+        ("total_visited_child_edge_count", visited_total),
+    )
+    for key, expected in totals:
+        if value.get(key) != expected:
+            raise ValueError(f"native tree geometry {key} mismatch")
+    if expanded_total != telemetry.get("expanded_nodes"):
+        raise ValueError("native tree geometry expanded-node parity failed")
+    expected_max = -1 if not normalized_rows else len(normalized_rows) - 1
+    if value.get("max_expanded_depth") != expected_max:
+        raise ValueError("native tree geometry maximum depth mismatch")
+    if normalized_rows and normalized_rows[0][
+        "discovered_child_edge_count"
+    ] != raw_search.get("search_edge_count"):
+        raise ValueError("native tree geometry root edge count mismatch")
+    return value
 
 
 def _validate_mechanism_telemetry(
