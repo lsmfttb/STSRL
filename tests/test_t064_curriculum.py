@@ -6,6 +6,7 @@ import json
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
+import threading
 
 import pytest
 
@@ -657,7 +658,9 @@ def test_t044_t070_reuse_contracts_use_persisted_roles_and_frozen_ranges() -> No
     )
 
 
-def test_t044_dependent_stage_routes_only_frozen_roles_and_ranges() -> None:
+def test_t044_dependent_stage_routes_only_frozen_roles_and_ranges(
+    tmp_path: Path,
+) -> None:
     calls = []
 
     def shard_runner(*args, **kwargs):
@@ -668,7 +671,7 @@ def test_t044_dependent_stage_routes_only_frozen_roles_and_ranges() -> None:
         return kwargs
 
     controller = SimpleNamespace(action_space=object())
-    output = transfer_command.run_t064_t044_dependent_stage(
+    output, shard_records = transfer_command.run_t064_t044_dependent_stage(
         adapter_factory=lambda: object(),
         cohort_path=Path("cohort.jsonl"),
         controller_arms=(
@@ -676,21 +679,30 @@ def test_t044_dependent_stage_routes_only_frozen_roles_and_ranges() -> None:
             ("raw", transfer_command.T044_DEPENDENT_ROLES[1], controller),
         ),
         cohort_kind="assist_hp50",
+        log_dir=tmp_path / "logs",
+        shard_output_dir=tmp_path / "shards",
+        merged_output_path=tmp_path / "merged.jsonl",
         shard_runner=shard_runner,
         merger=merger,
+        report_writer=lambda _path, _report: None,
     )
-    assert [kwargs["record_range"] for _, kwargs in calls] == list(
+    assert sorted(kwargs["record_range"] for _, kwargs in calls) == sorted(
         transfer_command.T044_ASSIST_HP50_RANGES
     )
     assert output["expected_ranges"] == transfer_command.T044_ASSIST_HP50_RANGES
+    assert [record["return_code"] for record in shard_records] == [0] * 16
     with pytest.raises(ValueError, match="dependent roles"):
         transfer_command.run_t064_t044_dependent_stage(
             adapter_factory=lambda: object(),
             cohort_path=Path("cohort.jsonl"),
             controller_arms=(("wrong", "a display label", controller),),
             cohort_kind="assist_0",
+            log_dir=tmp_path / "other-logs",
+            shard_output_dir=tmp_path / "other-shards",
+            merged_output_path=tmp_path / "other-merged.jsonl",
             shard_runner=shard_runner,
             merger=merger,
+            report_writer=lambda _path, _report: None,
         )
 
 
@@ -724,6 +736,43 @@ def test_t064_transfer_gates_and_historical_t070_wrapper_are_frozen() -> None:
     assert wrapper["worker_count"] == 16
 
 
+def test_t070_prior_value_stage_dispatches_all_real_runner_arguments(
+    tmp_path: Path,
+) -> None:
+    calls = []
+
+    def runner(**kwargs):
+        calls.append(kwargs)
+        kwargs["output_path"].write_text("{}", encoding="utf-8")
+        return {"command_passed": True}
+
+    def merger(**kwargs):
+        return {
+            "arm": "prior_value",
+            "native_budget": 100,
+            "command_passed": True,
+            "problems": [],
+        }
+
+    merged, records = transfer_command.run_t064_t070_prior_value_stage(
+        shard_runner=runner,
+        merger=merger,
+        runner_kwargs={
+            "cohort_path": Path("cohort.jsonl"),
+            "adapter_factory": object(),
+        },
+        shard_dir=tmp_path / "shards",
+        log_dir=tmp_path / "logs",
+        merged_output_path=tmp_path / "merged.json",
+    )
+    assert merged["arm"] == "prior_value"
+    assert len(calls) == len(records) == 16
+    assert sorted(call["record_range"] for call in calls) == sorted(
+        transfer_command.T070_T052_RANGES
+    )
+    assert all(call["arm"] == "prior_value" for call in calls)
+
+
 def test_stage2_to_7_dry_plan_has_exact_worker_range_and_stage_inventory() -> None:
     manifest = {
         "code_commit": "a" * 40,
@@ -742,6 +791,27 @@ def test_stage2_to_7_dry_plan_has_exact_worker_range_and_stage_inventory() -> No
     assert len([row for row in plan if row["stage"] == "stage5_t044"]) == 8
     assert len([row for row in plan if row["stage"] == "stage6_t070"]) == 4
     assert plan[-1]["stage"] == "stage7_aggregate"
+
+
+def test_actual_sixteen_worker_dispatch_writes_per_shard_logs(tmp_path: Path) -> None:
+    barrier = threading.Barrier(16)
+    thread_ids = set()
+    lock = threading.Lock()
+
+    def worker(index: int, record_range: str):
+        del index, record_range
+        barrier.wait(timeout=5)
+        with lock:
+            thread_ids.add(threading.get_ident())
+        return "ok"
+
+    results, records = transfer_command.dispatch_t064_shards(
+        ranges=contiguous_ranges(460), log_dir=tmp_path / "logs", worker=worker
+    )
+    assert results == ["ok"] * 16
+    assert len(thread_ids) == 16
+    assert [record["return_code"] for record in records] == [0] * 16
+    assert all(Path(record["log_path"]).is_file() for record in records)
 
 
 def test_stage_summary_carries_retained_prior_attempts_without_log_index() -> None:

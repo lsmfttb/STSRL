@@ -8,7 +8,10 @@ evaluation format: callers provide the existing T043/T044/T070 runners.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+import argparse
 from dataclasses import replace
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import json
 from pathlib import Path
 import time
 from typing import Any
@@ -19,14 +22,23 @@ from sts_combat_rl.commands.oracle_teacher_scaleup import (
 from sts_combat_rl.commands.de_assisted_fixed_cohort_comparison import (
     merge_de_assisted_fixed_cohort_comparison_shards,
     run_de_assisted_fixed_cohort_comparison_from_cohort_path,
+    write_de_assisted_fixed_cohort_comparison_report,
 )
-from sts_combat_rl.sim.oracle_teacher import OracleTeacherDataset
+from sts_combat_rl.sim.de_assisted_fixed_cohort_comparison import (
+    load_de_assisted_fixed_cohort_comparison_jsonl,
+)
+from sts_combat_rl.sim.oracle_teacher import (
+    OracleTeacherDataset,
+    dump_oracle_teacher_dataset_jsonl,
+)
+from sts_combat_rl.sim.trainer_input import dump_trainer_input_dataset_jsonl
 from sts_combat_rl.sim.t064_curriculum import (
     BUCKETS,
     COMPACT_FILENAMES,
     TRAINING_RUN_ORDER,
     TRAINING_RUN_REPORT_FILENAME,
     TRANSFER_GATE_NAMES,
+    build_ordered_batch_plan,
     build_transfer_decision,
     contiguous_ranges,
     independent_rehash,
@@ -88,6 +100,37 @@ def current_code_identity(checkout: Path) -> str:
     return value
 
 
+def main(argv: Sequence[str] | None = None) -> int:
+    """Thin operational dispatcher; simulator construction stays in existing runners."""
+
+    parser = argparse.ArgumentParser(description="T064 staged curriculum dispatcher")
+    parser.add_argument("--dry-run-manifest", type=Path)
+    parser.add_argument("--code-commit")
+    parser.add_argument(
+        "--stage",
+        choices=(
+            "stage2_teacher",
+            "stage3_trainer",
+            "stage4_training",
+            "stage5_t044",
+            "stage6_t070",
+            "stage7_aggregate",
+        ),
+        help="Emit one frozen stage's dispatch inventory.",
+    )
+    args = parser.parse_args(argv)
+    if args.dry_run_manifest is None or args.code_commit is None:
+        parser.error("--dry-run-manifest and --code-commit are required")
+    with args.dry_run_manifest.open(encoding="utf-8") as stream:
+        manifest = load_compact_json(stream)
+    stages = build_t064_stage_execution_plan(manifest, code_commit=args.code_commit)
+    if args.stage is not None:
+        stages = [stage for stage in stages if stage["stage"] == args.stage]
+    for stage in stages:
+        print(json.dumps(stage, sort_keys=True, separators=(",", ":")))
+    return 0
+
+
 def validate_resume_manifest(manifest: Mapping[str, Any], *, code_commit: str) -> None:
     """Refuse resumes after a code change or before a completed restore audit."""
 
@@ -105,6 +148,73 @@ def refuse_overwrite(path: Path) -> None:
 
     if path.exists():
         raise ValueError(f"T064 stage refuses to overwrite existing output: {path}")
+
+
+def dispatch_t064_shards(
+    *,
+    ranges: Sequence[str],
+    log_dir: Path,
+    worker: Callable[[int, str], Any],
+) -> tuple[list[Any], list[dict[str, Any]]]:
+    """Execute exactly sixteen shard jobs concurrently and retain every result log.
+
+    Output serialization remains in the existing T043/T044/T070 writers used by
+    each worker.  This function records only ordinary text logs and return
+    codes; it deliberately creates no alternate artifact schema.
+    """
+
+    if len(ranges) != 16:
+        raise ValueError("T064 substantial stages require exactly 16 shards")
+    log_dir.mkdir(parents=True, exist_ok=True)
+    results: list[Any] = [None] * 16
+    records: list[dict[str, Any]] = [{} for _ in ranges]
+
+    def invoke(index: int, record_range: str) -> tuple[int, Any, dict[str, Any]]:
+        log_path = log_dir / f"shard-{index:02d}.log"
+        started = time.perf_counter()
+        try:
+            value = worker(index, record_range)
+        except BaseException as exc:
+            log_path.write_text(f"return_code=1\nerror={exc!r}\n", encoding="utf-8")
+            return (
+                index,
+                None,
+                {
+                    "shard_index": index,
+                    "range": record_range,
+                    "return_code": 1,
+                    "log_path": str(log_path),
+                    "wall_clock_seconds": time.perf_counter() - started,
+                    "problem": str(exc),
+                },
+            )
+        log_path.write_text("return_code=0\n", encoding="utf-8")
+        return (
+            index,
+            value,
+            {
+                "shard_index": index,
+                "range": record_range,
+                "return_code": 0,
+                "log_path": str(log_path),
+                "wall_clock_seconds": time.perf_counter() - started,
+            },
+        )
+
+    with ThreadPoolExecutor(max_workers=16, thread_name_prefix="t064-shard") as pool:
+        futures = [
+            pool.submit(invoke, index, record_range)
+            for index, record_range in enumerate(ranges)
+        ]
+        for future in as_completed(futures):
+            index, value, record = future.result()
+            results[index] = value
+            records[index] = record
+    if any(record["return_code"] for record in records):
+        raise RuntimeError(
+            "T064 shard stage failed; retained outputs cannot contribute"
+        )
+    return results, records
 
 
 def build_t064_stage_execution_plan(
@@ -207,7 +317,7 @@ def merge_t064_teacher_shards(
     shards: Sequence[OracleTeacherDataset],
     selected_manifest: Mapping[str, Any],
     expected_ranges: Sequence[str] | None = None,
-) -> OracleTeacherDataset:
+) -> tuple[OracleTeacherDataset, list[dict[str, Any]]]:
     """Merge the existing teacher rows in frozen complete-source order."""
 
     sources = _selected_sources(selected_manifest)
@@ -250,6 +360,9 @@ def collect_t064_teacher_stage(
     adapter_factory: Callable[[], Any],
     controller: Any,
     action_space: Any,
+    log_dir: Path,
+    shard_output_dir: Path,
+    merged_output_path: Path,
     shard_runner: Callable[
         ..., OracleTeacherDataset
     ] = collect_oracle_teacher_range_from_selected_manifest,
@@ -263,9 +376,13 @@ def collect_t064_teacher_stage(
         or selected_manifest.get("teacher_worker_count") != 16
     ):
         raise ValueError("T064 teacher topology is not frozen at 16 shards/workers")
-    started = time.perf_counter()
-    shards = [
-        shard_runner(
+    refuse_overwrite(merged_output_path)
+    shard_output_dir.mkdir(parents=True, exist_ok=True)
+
+    def one(index: int, record_range: str) -> OracleTeacherDataset:
+        output = shard_output_dir / f"shard-{index:02d}.jsonl"
+        refuse_overwrite(output)
+        shard = shard_runner(
             adapter_factory=adapter_factory,
             pool=pool,
             controller=controller,
@@ -273,12 +390,22 @@ def collect_t064_teacher_stage(
             record_range=record_range,
             action_space=action_space,
         )
-        for record_range in ranges
-    ]
-    del started  # the caller records wall-clock timing in the sole stage summary.
-    return merge_t064_teacher_shards(
+        with output.open("w", encoding="utf-8", newline="\n") as stream:
+            dump_oracle_teacher_dataset_jsonl(shard, stream)
+        return shard
+
+    shards, shard_records = dispatch_t064_shards(
+        ranges=ranges,
+        log_dir=log_dir,
+        worker=one,
+    )
+    merged = merge_t064_teacher_shards(
         shards=shards, selected_manifest=selected_manifest, expected_ranges=ranges
     )
+    # The caller puts this list directly in the sole stage summary.
+    with merged_output_path.open("w", encoding="utf-8", newline="\n") as stream:
+        dump_oracle_teacher_dataset_jsonl(merged, stream)
+    return merged, shard_records
 
 
 def build_trainer_row_mapping(
@@ -300,6 +427,37 @@ def build_trainer_row_mapping(
     if len(expected) != len(set(expected)):
         raise ValueError("T064 selected identities are duplicated")
     return {identity: index for index, identity in enumerate(expected)}
+
+
+def build_t064_trainer_input_stage(
+    *,
+    selected_manifest: Mapping[str, Any],
+    teacher_dataset: OracleTeacherDataset,
+    selected_pool: Any,
+    trainer_builder: Callable[..., tuple[Any, Any]],
+    trainer_identity_resolver: Callable[[Any], Sequence[str]],
+    output_path: Path,
+) -> tuple[Any, Any, dict[str, int]]:
+    """Call the existing T043 bridge and write its existing trainer-input schema."""
+
+    refuse_overwrite(output_path)
+    dataset, bridge_report = trainer_builder(
+        teacher_dataset=teacher_dataset,
+        source_pool=selected_pool,
+    )
+    teacher_hashes = [
+        source["complete_identity_sha256"]
+        for source in _selected_sources(selected_manifest)
+    ]
+    mapping = build_trainer_row_mapping(
+        selected_manifest=selected_manifest,
+        teacher_source_hashes=teacher_hashes,
+        trainer_source_hashes=trainer_identity_resolver(dataset),
+    )
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w", encoding="utf-8", newline="\n") as stream:
+        dump_trainer_input_dataset_jsonl(dataset, stream)
+    return dataset, bridge_report, mapping
 
 
 def frozen_training_configuration(*, seed: int) -> dict[str, Any]:
@@ -354,11 +512,11 @@ def t064_plan_indices(
 
 def run_t064_paired_training(
     *,
+    selected_manifest: Mapping[str, Any],
     dataset: Any,
     initialization_checkpoint_path: Path,
     initialization_sha256: str,
     trainer_input_path: Path,
-    batch_plans: Sequence[Mapping[str, Any]],
     identity_to_trainer_index: Mapping[str, int],
     checkpoint_paths: Mapping[tuple[str, int], Path],
 ) -> dict[str, Any]:
@@ -383,12 +541,22 @@ def run_t064_paired_training(
 
     if _sha256(initialization_checkpoint_path) != initialization_sha256:
         raise ValueError("T064 initialization checkpoint identity mismatch")
-    plans_by_run = {
-        (str(plan.get("arm")), int(plan.get("seed"))): plan for plan in batch_plans
-    }
-    if tuple(plans_by_run) != TRAINING_RUN_ORDER:
-        raise ValueError("T064 training plans do not use the frozen run order")
-    validate_exposure_parity([plans_by_run[key] for key in TRAINING_RUN_ORDER])
+    selected = selected_manifest.get("selected_buckets")
+    manifest_plans = selected_manifest.get("batch_plans")
+    if not isinstance(selected, Mapping) or not isinstance(manifest_plans, list):
+        raise ValueError("T064 training requires validated manifest batch plans")
+    regenerated = [
+        build_ordered_batch_plan(selected, seed=seed, arm=arm)
+        for arm, seed in TRAINING_RUN_ORDER
+    ]
+    expected_summaries = [
+        {key: value for key, value in plan.items() if key != "ordered_batches"}
+        for plan in regenerated
+    ]
+    if manifest_plans != expected_summaries:
+        raise ValueError("T064 manifest batch plans do not rehash to frozen plans")
+    validate_exposure_parity(regenerated)
+    plans_by_run = {(plan["arm"], plan["seed"]): plan for plan in regenerated}
     trainer_sha256 = _sha256(trainer_input_path)
     trainer_bytes = trainer_input_path.read_bytes()
     runs: list[dict[str, Any]] = []
@@ -455,6 +623,15 @@ def run_t064_paired_training(
                     "batch_plan_sha256": plan["batch_plan_sha256"],
                 },
             )
+            written = load_torch_policy_value_checkpoint(str(output))
+            if (
+                written.config != config
+                or written.metadata.get("batch_plan_sha256")
+                != plan["batch_plan_sha256"]
+            ):
+                raise ValueError(
+                    "T064 written checkpoint metadata/config verification failed"
+                )
             checkpoint = _file_identity(output)
             linkage = {
                 "schema_id": "torch-policy-value-checkpoint-v1",
@@ -526,10 +703,16 @@ def run_t064_t044_dependent_stage(
     cohort_path: Path,
     controller_arms: Sequence[Any],
     cohort_kind: str,
+    log_dir: Path,
+    shard_output_dir: Path,
+    merged_output_path: Path,
     shard_runner: Callable[
         ..., Any
     ] = run_de_assisted_fixed_cohort_comparison_from_cohort_path,
     merger: Callable[..., Any] = merge_de_assisted_fixed_cohort_comparison_shards,
+    report_writer: Callable[
+        [Path, Any], None
+    ] = write_de_assisted_fixed_cohort_comparison_report,
 ) -> Any:
     """Run/merge only the two checkpoint-dependent T044 arms in 16 shards."""
 
@@ -542,8 +725,13 @@ def run_t064_t044_dependent_stage(
     roles = tuple(item[1] for item in controller_arms)
     if roles != T044_DEPENDENT_ROLES:
         raise ValueError("T064 T044 stage must contain only persisted dependent roles")
-    shards = [
-        shard_runner(
+    refuse_overwrite(merged_output_path)
+    shard_output_dir.mkdir(parents=True, exist_ok=True)
+
+    def one(index: int, record_range: str) -> Any:
+        output = shard_output_dir / f"shard-{index:02d}.jsonl"
+        refuse_overwrite(output)
+        shard = shard_runner(
             adapter_factory,
             cohort_path,
             controller_arms=controller_arms,
@@ -552,9 +740,17 @@ def run_t064_t044_dependent_stage(
             run_scale="fixed",
             record_range=record_range,
         )
-        for record_range in ranges
-    ]
-    return merger(cohort_path=cohort_path, shards=shards, expected_ranges=ranges)
+        report_writer(output, shard)
+        return shard
+
+    shards, shard_records = dispatch_t064_shards(
+        ranges=ranges,
+        log_dir=log_dir,
+        worker=one,
+    )
+    merged = merger(cohort_path=cohort_path, shards=shards, expected_ranges=ranges)
+    report_writer(merged_output_path, merged)
+    return merged, shard_records
 
 
 def validate_t070_baseline_reuse(
@@ -604,6 +800,55 @@ def t064_t070_wrapper(
         "shard_ranges": list(T070_T052_RANGES),
         "worker_count": 16,
     }
+
+
+def run_t064_t070_prior_value_stage(
+    *,
+    shard_runner: Callable[..., Mapping[str, Any]],
+    merger: Callable[..., Mapping[str, Any]],
+    runner_kwargs: Mapping[str, Any],
+    shard_dir: Path,
+    log_dir: Path,
+    merged_output_path: Path,
+) -> tuple[Mapping[str, Any], list[dict[str, Any]]]:
+    """Route one checkpoint through the existing T070 16-shard runner/merge."""
+
+    refuse_overwrite(merged_output_path)
+    shard_dir.mkdir(parents=True, exist_ok=True)
+    ranges = T070_T052_RANGES
+
+    def one(index: int, record_range: str) -> Mapping[str, Any]:
+        output = shard_dir / f"shard-{index:02d}.json"
+        refuse_overwrite(output)
+        return shard_runner(
+            **runner_kwargs,
+            stage_name="t064_prior_value",
+            arm="prior_value",
+            family="primary",
+            record_range=record_range,
+            shard_index=index,
+            expected_ranges=ranges,
+            output_path=output,
+            max_battle_steps=200,
+        )
+
+    shards, records = dispatch_t064_shards(ranges=ranges, log_dir=log_dir, worker=one)
+    merged = merger(
+        shard_paths=[shard_dir / f"shard-{index:02d}.json" for index in range(16)],
+        expected_ranges=ranges,
+        expected_record_count=93,
+        output_path=merged_output_path,
+    )
+    if (
+        merged.get("arm") != "prior_value"
+        or merged.get("native_budget") != 100
+        or merged.get("command_passed") is not True
+        or merged.get("problems")
+    ):
+        raise ValueError(
+            "T064 T070 merged stage violates the frozen prior_value contract"
+        )
+    return merged, records
 
 
 def compute_transfer_gates(metrics: Mapping[str, Any]) -> dict[str, bool]:
@@ -701,6 +946,209 @@ def assert_exact_compact_inventory(root: Path) -> None:
             load_compact_json(stream)
 
 
+def aggregate_t064_stage7_from_artifacts(
+    *,
+    root: Path,
+    code_commit: str,
+    teacher_path: Path,
+    trainer_input_path: Path,
+    t044_paths: Mapping[tuple[str, int], Mapping[str, Path]],
+    t070_paths: Mapping[tuple[str, int], Path],
+    stage_summary: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Independently load, validate, hash, and aggregate the real stage outputs.
+
+    There is intentionally no ``experiment_complete`` or metrics argument: both
+    are derived here, after every referenced artifact has been opened again.
+    """
+
+    manifest_path = root / "t064-curriculum-manifest.json"
+    training_path = root / TRAINING_RUN_REPORT_FILENAME
+    with manifest_path.open(encoding="utf-8") as stream:
+        manifest = load_compact_json(stream)
+    validate_resume_manifest(manifest, code_commit=code_commit)
+    with training_path.open(encoding="utf-8") as stream:
+        training = load_compact_json(stream)
+    problems: list[str] = []
+    unmet: list[str] = []
+    references = [manifest_path, training_path, teacher_path, trainer_input_path]
+    if not teacher_path.is_file() or not trainer_input_path.is_file():
+        problems.append("teacher or trainer-input artifact missing")
+    runs = training.get("runs", [])
+    if [(row.get("arm"), row.get("seed")) for row in runs] != list(TRAINING_RUN_ORDER):
+        problems.append("aggregate training report lacks four frozen runs")
+    else:
+        plans = manifest.get("batch_plans", [])
+        if [(plan.get("arm"), plan.get("seed")) for plan in plans] != list(
+            TRAINING_RUN_ORDER
+        ):
+            problems.append("manifest lacks four frozen batch plans")
+        else:
+            try:
+                validate_exposure_parity(plans)
+            except (KeyError, TypeError, ValueError) as exc:
+                problems.append(f"manifest exposure parity failed: {exc}")
+        for run in runs:
+            checkpoint = run.get("checkpoint", {})
+            path = Path(str(checkpoint.get("path", "")))
+            if (
+                run.get("completion_status") != "complete"
+                or not path.is_file()
+                or _sha256(path) != checkpoint.get("sha256")
+                or path.stat().st_size != checkpoint.get("bytes")
+            ):
+                problems.append(
+                    f"checkpoint identity/completion failed for {run.get('arm')}/{run.get('seed')}"
+                )
+            else:
+                references.append(path)
+    metrics: dict[str, Any] = {
+        "curriculum_t052_prior_value_wins": {},
+        "static_t052_prior_value_wins": {},
+        "paired_t052_win_deltas": {},
+        "t052_subset_deltas": {"boss": 0, "act2_plus": 0},
+        "curriculum_t044_assist_hp50_model_guided_wins": 0,
+        "static_t044_assist_hp50_model_guided_wins": 0,
+        "curriculum_t044_assist_hp50_raw_policy_wins": 0,
+        "static_t044_assist_hp50_raw_policy_wins": 0,
+        "curriculum_t044_assist_0_model_guided_wins": 0,
+        "static_t044_assist_0_model_guided_wins": 0,
+    }
+    t052_rows: dict[tuple[str, int], list[Mapping[str, Any]]] = {}
+    for key in TRAINING_RUN_ORDER:
+        cohort_paths = t044_paths.get(key)
+        t070_path = t070_paths.get(key)
+        if not isinstance(cohort_paths, Mapping) or set(cohort_paths) != {
+            "assist_0",
+            "assist_hp50",
+        }:
+            problems.append(f"T044 stage inventory missing for {key[0]}/{key[1]}")
+            continue
+        for cohort_name, path in cohort_paths.items():
+            if not path.is_file():
+                problems.append(f"T044 artifact missing: {path}")
+                continue
+            references.append(path)
+            with path.open(encoding="utf-8") as stream:
+                report = load_de_assisted_fixed_cohort_comparison_jsonl(stream)
+            expected_count = 21 if cohort_name == "assist_0" else 38
+            if not validate_t044_reuse(
+                report,
+                cohort_identity=report.cohort_identity,
+                cohort_count=expected_count,
+            ):
+                problems.append(f"T044 frozen contract mismatch: {path}")
+                continue
+            wins = {arm.role: arm.report.authoritative_wins for arm in report.arms}
+            prefix = (
+                "curriculum"
+                if key[0] == "assistance_annealed_curriculum_v1"
+                else "static"
+            )
+            if cohort_name == "assist_hp50":
+                metrics[f"{prefix}_t044_assist_hp50_model_guided_wins"] += wins[
+                    T044_DEPENDENT_ROLES[0]
+                ]
+                metrics[f"{prefix}_t044_assist_hp50_raw_policy_wins"] += wins[
+                    T044_DEPENDENT_ROLES[1]
+                ]
+            else:
+                metrics[f"{prefix}_t044_assist_0_model_guided_wins"] += wins[
+                    T044_DEPENDENT_ROLES[0]
+                ]
+        if t070_path is None or not t070_path.is_file():
+            problems.append(f"T070 artifact missing for {key[0]}/{key[1]}")
+            continue
+        references.append(t070_path)
+        report = json.loads(t070_path.read_text(encoding="utf-8"))
+        if (
+            report.get("arm") != "prior_value"
+            or report.get("native_budget") != 100
+            or report.get("command_passed") is not True
+            or report.get("problems")
+        ):
+            problems.append(f"T070 frozen contract mismatch: {t070_path}")
+            continue
+        rows = report.get("arm_report", {}).get("records", [])
+        if not isinstance(rows, list) or len(rows) != 93:
+            problems.append(f"T070 rows incomplete: {t070_path}")
+            continue
+        t052_rows[key] = [row for row in rows if isinstance(row, Mapping)]
+        wins = sum(row.get("termination_status") == "win" for row in t052_rows[key])
+        metrics[
+            (
+                "curriculum"
+                if key[0] == "assistance_annealed_curriculum_v1"
+                else "static"
+            )
+            + "_t052_prior_value_wins"
+        ][key[1]] = wins
+    if len(t052_rows) == 4:
+        for seed in (64001, 64002):
+            static_rows = t052_rows[("static_mixture_v1", seed)]
+            curriculum_rows = t052_rows[("assistance_annealed_curriculum_v1", seed)]
+            metrics["paired_t052_win_deltas"][seed] = sum(
+                a.get("termination_status") == "win" for a in curriculum_rows
+            ) - sum(a.get("termination_status") == "win" for a in static_rows)
+            for subset, predicate in (
+                (
+                    "boss",
+                    lambda row: (
+                        row.get("structural_metadata", {}).get("room_type") == "BOSS"
+                    ),
+                ),
+                (
+                    "act2_plus",
+                    lambda row: row.get("structural_metadata", {}).get("act") >= 2,
+                ),
+            ):
+                metrics["t052_subset_deltas"][subset] += sum(
+                    row.get("termination_status") == "win"
+                    for row in curriculum_rows
+                    if predicate(row)
+                ) - sum(
+                    row.get("termination_status") == "win"
+                    for row in static_rows
+                    if predicate(row)
+                )
+    complete = not problems and len(t052_rows) == 4
+    if not complete:
+        unmet.append(
+            "complete validated teacher, trainer, checkpoint, T044, and T070 artifact set"
+        )
+    gates = (
+        compute_transfer_gates(metrics)
+        if complete
+        else {name: None for name in TRANSFER_GATE_NAMES}
+    )
+    source_audit = manifest["complete_source_audit"]
+    decision = build_transfer_decision(
+        source_adequate=bool(manifest["source_adequacy"]),
+        source_integrity_valid=True,
+        experiment_complete=complete,
+        complete_source_audit_status=source_audit["status"],
+        transfer_gates=gates,
+        diagnostics={
+            "derived_from_artifacts": True,
+            "metrics": metrics,
+            "referenced_artifacts": [
+                _file_identity(path) for path in references if path.is_file()
+            ],
+        },
+        problems=problems,
+        unmet_acceptance_criteria=unmet,
+    )
+    refuse_overwrite(root / "t064-stage-summary.json")
+    refuse_overwrite(root / "t064-transfer-decision.json")
+    write_compact_json(root / "t064-stage-summary.json", stage_summary)
+    write_compact_json(root / "t064-transfer-decision.json", decision)
+    return {
+        "decision": decision,
+        "metrics": metrics,
+        "rehash": independent_rehash(root, references),
+    }
+
+
 def training_report_for_source_inadequacy(root: Path) -> dict[str, Any]:
     """Write the sole aggregate training report when Case B correctly skips training."""
 
@@ -787,3 +1235,7 @@ def _sha256(path: Path) -> str:
 
 def _file_identity(path: Path) -> dict[str, Any]:
     return {"path": str(path), "sha256": _sha256(path), "bytes": path.stat().st_size}
+
+
+if __name__ == "__main__":  # pragma: no cover - exercised through the CLI shell.
+    raise SystemExit(main())
