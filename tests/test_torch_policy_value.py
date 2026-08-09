@@ -169,6 +169,45 @@ def test_torch_policy_value_trains_and_checkpoint_round_trips(tmp_path) -> None:
     assert len(TorchPolicyValueActionScorer(loaded.model).score_actions(context)) == 2
 
 
+def test_torch_training_accepts_initial_model_and_ordered_batch_plan() -> None:
+    dataset = make_trainer_dataset([(20, 1), (20, 1)])
+    gate = build_training_gate_report(
+        dataset,
+        TrainingScaleGateConfig(
+            required_ascensions=(20,),
+            required_acts=(1,),
+            min_records_per_ascension_act=2,
+            min_unique_sources_per_ascension_act=2,
+        ),
+    )
+    initial = train_torch_policy_value(
+        dataset,
+        TorchPolicyValueTrainingConfig(epochs=1, hidden_size=16, batch_size=1),
+        gate_report=gate,
+    )
+    original_state = {
+        name: value.detach().clone() for name, value in initial.model.state_dict().items()
+    }
+    result = train_torch_policy_value(
+        dataset,
+        TorchPolicyValueTrainingConfig(
+            epochs=2,
+            hidden_size=16,
+            batch_size=1,
+            seed=64001,
+        ),
+        gate_report=gate,
+        initial_model=initial.model,
+        ordered_batch_plan=((1,), (0,)),
+    )
+    assert result.report.training_ok
+    assert len(result.report.epochs) == 2
+    assert all(
+        torch.equal(original_state[name], value)
+        for name, value in initial.model.state_dict().items()
+    )
+
+
 def test_torch_policy_value_fails_closed_without_gate_or_override(tmp_path) -> None:
     dataset = make_trainer_dataset([(20, 1), (20, 1)])
 

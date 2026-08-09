@@ -13,7 +13,7 @@ from sts_combat_rl.commands.model_guided_oracle_search import (
 )
 from sts_combat_rl.commands.t068_checkout import verify_exact_git_checkout
 from sts_combat_rl.commands.t070_search_v2_audit import (
-    T043_CHECKPOINT_SHA256,
+    expected_checkpoint_identity_from_stage_manifest,
     run_single_arm_shard,
     validate_t070_frozen_stage,
     validate_t070_preflight,
@@ -53,9 +53,13 @@ def main() -> int:
     verify_exact_git_checkout(Path.cwd(), args.code_commit)
     if args.output.exists():
         raise SystemExit("T070 shard refuses to overwrite output")
+    checkpoint_identity = expected_checkpoint_identity_from_stage_manifest(
+        args.frozen_manifest
+    )
     if (
         hashlib.sha256(args.checkpoint.read_bytes()).hexdigest()
-        != T043_CHECKPOINT_SHA256
+        != checkpoint_identity["sha256"]
+        or args.checkpoint.stat().st_size != checkpoint_identity["bytes"]
     ):
         raise SystemExit("T070 checkpoint hash mismatch")
     source_manifest = Path("docs/sts_lightspeed_source_manifest.json")

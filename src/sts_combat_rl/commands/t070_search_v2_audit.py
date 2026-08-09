@@ -9,6 +9,7 @@ from importlib import import_module
 import json
 import math
 from pathlib import Path
+import re
 import statistics
 import subprocess
 import sys
@@ -108,6 +109,7 @@ def build_frozen_manifests(
     frozen_output_path: Path,
     subset_output_path: Path,
     subset_cohort_output_path: Path,
+    expected_checkpoint_sha256: str = T043_CHECKPOINT_SHA256,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Verify immutable inputs and freeze both stage inventory and blind subset."""
 
@@ -120,7 +122,7 @@ def build_frozen_manifests(
             raise ValueError(f"T070 freeze refuses to overwrite output: {output}")
     inputs = {
         "t052_fixed_cohort": _identity(cohort_path, T052_COHORT_SHA256),
-        "t043_checkpoint": _identity(checkpoint_path, T043_CHECKPOINT_SHA256),
+        "t043_checkpoint": _identity(checkpoint_path, expected_checkpoint_sha256),
         "t068_retention_manifest": _identity(
             t068_retention_path, T068_RETENTION_SHA256
         ),
@@ -191,6 +193,33 @@ def build_frozen_manifests(
     }
     _write_json(frozen_output_path, frozen)
     return frozen, subset_manifest
+
+
+def expected_checkpoint_identity_from_stage_manifest(
+    path: Path,
+) -> dict[str, Any]:
+    """Read the evaluated checkpoint identity while preserving T070 manifests."""
+
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, Mapping):
+        raise ValueError("stage manifest must be an object")
+    if payload.get("schema_id") == FROZEN_MANIFEST_SCHEMA_ID:
+        inputs = payload.get("input_identities")
+        identity = inputs.get("t043_checkpoint") if isinstance(inputs, Mapping) else None
+    elif payload.get("schema_id") == "t064-curriculum-manifest-v1":
+        stage = payload.get("t070_stage_manifest")
+        identity = stage.get("checkpoint") if isinstance(stage, Mapping) else None
+    else:
+        raise ValueError("unsupported frozen stage manifest schema")
+    if not isinstance(identity, Mapping):
+        raise ValueError("stage manifest lacks checkpoint identity")
+    sha256 = identity.get("sha256")
+    expected_bytes = identity.get("bytes")
+    if not isinstance(sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", sha256):
+        raise ValueError("stage manifest checkpoint SHA-256 is invalid")
+    if isinstance(expected_bytes, bool) or not isinstance(expected_bytes, int) or expected_bytes < 0:
+        raise ValueError("stage manifest checkpoint byte count is invalid")
+    return {"path": identity.get("path"), "sha256": sha256, "bytes": expected_bytes}
 
 
 def run_single_arm_shard(

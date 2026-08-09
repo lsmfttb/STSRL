@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import json
 import time
 from typing import Any, TextIO
@@ -379,6 +379,54 @@ def load_oracle_teacher_dataset_jsonl(
         if problems:
             raise ValueError("invalid oracle teacher dataset: " + "; ".join(problems))
     return dataset
+
+
+def merge_oracle_teacher_dataset_shards(
+    shards: Sequence[OracleTeacherDataset],
+    *,
+    expected_source_checkpoint_ids: Sequence[str],
+) -> OracleTeacherDataset:
+    """Deterministically merge range-collected rows into the existing schema."""
+
+    if not shards:
+        raise ValueError("Oracle teacher merge requires at least one shard")
+    first = shards[0]
+    rows: list[OracleTeacherRow] = []
+    problems: list[str] = []
+    for shard in shards:
+        for field_name in (
+            "native_source_identity",
+            "controller_provenance",
+            "action_space_config",
+            "source_pool_format_version",
+            "source_pool_controller_provenance",
+            "artifact_schema_id",
+            "format_version",
+            "native_search_schema_id",
+            "information_regime",
+        ):
+            if getattr(shard, field_name) != getattr(first, field_name):
+                raise ValueError(
+                    f"Oracle teacher shard configuration differs: {field_name}"
+                )
+        problems.extend(shard.problems)
+        rows.extend(shard.records)
+    actual = [row.source_checkpoint_id for row in rows]
+    expected = list(expected_source_checkpoint_ids)
+    if problems:
+        raise ValueError("Oracle teacher shard contains failures: " + "; ".join(problems))
+    if actual != expected or len(actual) != len(set(actual)):
+        raise ValueError(
+            "Oracle teacher merge requires exactly one ordered row per selected source"
+        )
+    return OracleTeacherDataset(
+        native_source_identity=first.native_source_identity,
+        controller_provenance=first.controller_provenance,
+        action_space_config=first.action_space_config,
+        source_pool_format_version=first.source_pool_format_version,
+        source_pool_controller_provenance=first.source_pool_controller_provenance,
+        records=[replace(row, row_index=index) for index, row in enumerate(rows)],
+    )
 
 
 def _sampling_component_for_record(record: Any) -> str:

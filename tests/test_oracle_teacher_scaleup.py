@@ -44,7 +44,11 @@ from sts_combat_rl.sim.controller_contract import ControllerProvenance
 from sts_combat_rl.sim.lightspeed_source import lightspeed_source_identity_dict
 from sts_combat_rl.sim.online_controller import NATIVE_SEARCH_INFORMATION_REGIME
 from sts_combat_rl.sim.oracle_search import OracleSearchController
-from sts_combat_rl.sim.oracle_teacher import OracleTeacherDataset, OracleTeacherRow
+from sts_combat_rl.sim.oracle_teacher import (
+    OracleTeacherDataset,
+    OracleTeacherRow,
+    merge_oracle_teacher_dataset_shards,
+)
 from sts_combat_rl.sim.oracle_teacher_scaleup import (
     ORACLE_TEACHER_SCALEUP_SOURCE_SELECTION_T032_T039_NARROW,
     T032_T039_ACT1_BOSS_SOURCE_COUNT,
@@ -648,6 +652,33 @@ def _dataset(
         source_pool_controller_provenance=_provenance("routed"),
         records=records,
     )
+
+
+def test_teacher_range_merge_requires_exact_selected_order() -> None:
+    shards = (
+        _dataset(
+            budget=100,
+            records=[
+                _row(0, budget=100, selected_action=1, probabilities=[0.2, 0.8])
+            ],
+        ),
+        _dataset(
+            budget=100,
+            records=[
+                _row(1, budget=100, selected_action=1, probabilities=[0.2, 0.8])
+            ],
+        ),
+    )
+    merged = merge_oracle_teacher_dataset_shards(
+        shards,
+        expected_source_checkpoint_ids=("checkpoint-0", "checkpoint-1"),
+    )
+    assert [row.row_index for row in merged.records] == [0, 1]
+    with pytest.raises(ValueError, match="exactly one ordered row"):
+        merge_oracle_teacher_dataset_shards(
+            shards,
+            expected_source_checkpoint_ids=("checkpoint-1", "checkpoint-0"),
+        )
 
 
 def _row(

@@ -32,6 +32,7 @@ from sts_combat_rl.commands.t070_search_v2_audit import (
     build_decision_report,
     build_primary_report,
     build_retention_manifest,
+    expected_checkpoint_identity_from_stage_manifest,
     merge_single_arm_stage,
     probe_t070_native_runtime_identity,
     validate_t070_preflight,
@@ -315,6 +316,32 @@ def test_t070_schema_contract_covers_all_required_outputs() -> None:
         "docs/tasks/T070-battle-search-v2-fixed-cohort-outcome-and-budget-sufficiency-audit.md"
     ).read_text(encoding="utf-8")
     assert "t070_artifact_schema_contract.json" in task
+
+
+def test_t070_checkpoint_identity_can_be_supplied_by_t064_manifest(tmp_path) -> None:
+    checkpoint = {"path": "checkpoint.pt", "sha256": "a" * 64, "bytes": 123}
+    historical = tmp_path / "t070.json"
+    historical.write_text(
+        json.dumps(
+            {
+                "schema_id": "t070-frozen-experiment-manifest-v1",
+                "input_identities": {"t043_checkpoint": checkpoint},
+            }
+        ),
+        encoding="utf-8",
+    )
+    t064 = tmp_path / "t064.json"
+    t064.write_text(
+        json.dumps(
+            {
+                "schema_id": "t064-curriculum-manifest-v1",
+                "t070_stage_manifest": {"checkpoint": checkpoint},
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert expected_checkpoint_identity_from_stage_manifest(historical) == checkpoint
+    assert expected_checkpoint_identity_from_stage_manifest(t064) == checkpoint
 
 
 def test_t070_retention_has_per_file_command_and_compatibility(
