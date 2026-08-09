@@ -48,8 +48,13 @@ The main maintainer:
 - records the exact approved specification commit on the pull request;
 - dispatches and manages the task implementer on the same branch and pull
   request after specification approval;
-- selects the implementer's model and reasoning effort, balancing required
-  capability against cost;
+- selects the implementer's model and reasoning effort with cost-effectiveness
+  as the default: prefer the least expensive current option that is still
+  reasonably expected to complete the task correctly and safely, including a
+  high-value model such as Luna when it is available and sufficiently capable;
+- escalates to a more capable or expensive model only when task complexity,
+  specialized requirements, review risk, or observed implementation failures
+  justify the added cost;
 - suspends implementation authorization and requires reapproval when the frozen
   specification changes materially;
 - independently reviews the final implementation against the approved
@@ -64,6 +69,14 @@ questions in its result report, but the planner owns new task content and
 priority. Maintainer-owned review, authorization, merge, branch/worktree
 management, lifecycle management, and result reporting are control-plane work,
 not feature implementation.
+
+Model selection optimizes expected total implementation cost, not token price
+alone. The maintainer accounts for likely retries, review load, expensive
+downstream reruns, and the cost of an incorrect implementation. It reassesses
+current model availability, capability, and price at dispatch time instead of
+assuming that the strongest model is the default. Reasoning effort is set to the
+lowest level consistent with the task's complexity and risk, then raised when
+evidence shows that more depth is needed.
 
 ### Task Implementer
 

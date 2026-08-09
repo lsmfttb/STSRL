@@ -368,10 +368,14 @@ boundary.
   lifecycle state, implementer dispatch, execution-result reporting, review,
   and merging. It does not proactively originate new tasks or directly
   implement feature code.
-- Task implementers are maintainer-managed sub-agents. The maintainer selects
-  their model and reasoning effort for capability and cost, and implementers
-  own only their assigned task branch while reporting documentation impact
-  rather than rewriting authoritative project documents.
+- Task implementers are maintainer-managed sub-agents. The maintainer defaults
+  to the highest-cost-effectiveness current model that is sufficiently capable
+  for the task, including inexpensive options such as Luna when appropriate,
+  and escalates only when complexity, risk, or observed failure justifies it.
+  Expected rework and downstream rerun cost count alongside model price. The
+  maintainer also calibrates reasoning effort to task risk, and implementers own
+  only their assigned task branch while reporting documentation impact rather
+  than rewriting authoritative project documents.
 - `current_status.md` is the maintainer report that returns accepted execution
   results, evidence, limitations, and blockers to the planner.
 - Unmerged branches and artifacts are not implemented project capabilities.
