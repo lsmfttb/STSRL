@@ -197,7 +197,7 @@ def build_frozen_manifests(
 
 
 def expected_checkpoint_identity_from_stage_manifest(
-    path: Path,
+    path: Path, *, t064_selection: str | None = None
 ) -> dict[str, Any]:
     """Read the evaluated checkpoint identity while preserving T070 manifests."""
 
@@ -211,7 +211,20 @@ def expected_checkpoint_identity_from_stage_manifest(
         )
     elif payload.get("schema_id") == "t064-curriculum-manifest-v1":
         stage = payload.get("t070_stage_manifest")
-        identity = stage.get("checkpoint") if isinstance(stage, Mapping) else None
+        if not isinstance(stage, Mapping):
+            identity = None
+        elif t064_selection is None:
+            identity = stage.get("checkpoint")
+        else:
+            selections = stage.get("checkpoint_selections")
+            selected = (
+                selections.get(t064_selection)
+                if isinstance(selections, Mapping)
+                else None
+            )
+            identity = (
+                selected.get("checkpoint") if isinstance(selected, Mapping) else None
+            )
     else:
         raise ValueError("unsupported frozen stage manifest schema")
     if not isinstance(identity, Mapping):
@@ -238,7 +251,7 @@ def expected_checkpoint_identity_from_stage_manifest(
 
 
 def _t070_frozen_contract_from_stage_manifest(
-    path: Path,
+    path: Path, *, t064_selection: str | None = None
 ) -> tuple[dict[str, Any], str | None]:
     """Resolve a T070 manifest or the T064 wrapper that substitutes only a checkpoint.
 
@@ -1093,8 +1106,11 @@ def validate_t070_frozen_stage(
     checkpoint_path: Path,
     source_manifest_path: Path,
     source_verifier_path: Path,
+    t064_selection: str | None = None,
 ) -> tuple[dict[str, Any], tuple[str, ...]]:
-    frozen, wrapper_code_commit = _t070_frozen_contract_from_stage_manifest(frozen_path)
+    frozen, wrapper_code_commit = _t070_frozen_contract_from_stage_manifest(
+        frozen_path, t064_selection=t064_selection
+    )
     if (
         (wrapper_code_commit is None and frozen.get("code_commit") != code_commit)
         or (wrapper_code_commit is not None and wrapper_code_commit != code_commit)
@@ -1132,7 +1148,9 @@ def validate_t070_frozen_stage(
         (cohort_path, expected_input, "cohort"),
         (
             checkpoint_path,
-            expected_checkpoint_identity_from_stage_manifest(frozen_path),
+            expected_checkpoint_identity_from_stage_manifest(
+                frozen_path, t064_selection=t064_selection
+            ),
             "checkpoint",
         ),
         (

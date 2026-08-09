@@ -35,6 +35,10 @@ def main() -> int:
     parser.add_argument("--code-commit", required=True)
     parser.add_argument("--stage-name", required=True)
     parser.add_argument(
+        "--t064-selection",
+        help="Checkpoint selection key in one persisted T064 curriculum manifest.",
+    )
+    parser.add_argument(
         "--arm",
         choices=("baseline", "prior_only", "value_only", "prior_value"),
         required=True,
@@ -54,7 +58,7 @@ def main() -> int:
     if args.output.exists():
         raise SystemExit("T070 shard refuses to overwrite output")
     checkpoint_identity = expected_checkpoint_identity_from_stage_manifest(
-        args.frozen_manifest
+        args.frozen_manifest, t064_selection=args.t064_selection
     )
     if (
         hashlib.sha256(args.checkpoint.read_bytes()).hexdigest()
@@ -69,6 +73,7 @@ def main() -> int:
         code_commit=args.code_commit,
         source_manifest_path=source_manifest,
         source_verifier_path=source_verifier,
+        t064_selection=args.t064_selection,
         native_checkout=args.native_checkout,
         native_build_root=args.native_build_root,
     )

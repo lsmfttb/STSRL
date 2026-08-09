@@ -565,7 +565,9 @@ def test_source_inadequacy_skips_batch_plans_and_forms_valid_case_b(
     assert decision["terminal_case"] == "Case B"
     repository = Path(__file__).resolve().parents[1]
     environment = dict(os.environ)
-    environment["PYTHONPATH"] = str(repository / "src")
+    environment["PYTHONPATH"] = os.pathsep.join(
+        (str(repository / "src"), str(repository / "tests"))
+    )
     expected_executions = {
         "stage2_teacher": 1,
         "stage3_trainer": 1,
@@ -598,6 +600,30 @@ def test_source_inadequacy_skips_batch_plans_and_forms_valid_case_b(
         assert completed.returncode == 0, completed.stderr
         payload = json.loads(completed.stdout)
         assert len(payload["executions"]) == expected_count
+        executed = subprocess.run(
+            [
+                sys.executable,
+                str(repository / "scripts" / "t064_curriculum_transfer.py"),
+                "--dry-run-manifest",
+                str(tmp_path / "t064-curriculum-manifest.json"),
+                "--code-commit",
+                "d" * 40,
+                "--stage",
+                stage,
+                "--execute",
+                "--stage-runner",
+                "t064_stage_runner_fixture:run",
+                "--attempt-root",
+                str(tmp_path / "real-attempt" / stage),
+            ],
+            cwd=repository,
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert executed.returncode == 0, executed.stderr
+        assert json.loads(executed.stdout)["executed"] == expected_count
 
 
 def test_empty_selected_source_pool_is_valid_for_complete_source_inadequacy() -> None:
@@ -952,6 +978,7 @@ def test_t070_script_runner_uses_the_repository_argument_contract(
         native_checkout=tmp_path / "native",
         native_build_root=tmp_path / "native" / "build",
         code_commit="a" * 40,
+        selection_key="static_mixture_v1:64001",
         output_path=tmp_path / "shard.json",
         record_range="88:93",
         shard_index=15,
@@ -966,6 +993,7 @@ def test_t070_script_runner_uses_the_repository_argument_contract(
     assert command[command.index("--stage-name") + 1] == "equal-prior-value-0100"
     assert command[command.index("--family") + 1] == "equal_nominal"
     assert command[command.index("--range-kind") + 1] == "primary"
+    assert command[command.index("--t064-selection") + 1] == "static_mixture_v1:64001"
     assert kwargs == {"check": False, "text": True, "capture_output": True}
 
 
@@ -1010,18 +1038,24 @@ def test_t070_existing_reader_accepts_persisted_t064_checkpoint_selection(
             {
                 "schema_id": "t064-curriculum-manifest-v1",
                 "code_commit": "a" * 40,
-                "t070_stage_manifest": transfer_command.t064_t070_wrapper(
+                "t070_stage_manifest": transfer_command.build_t064_t070_checkpoint_selections(
                     current_code_commit="a" * 40,
                     frozen_t070_manifest=json.loads(frozen.read_text(encoding="utf-8")),
                     frozen_identity=frozen_identity,
-                    checkpoint_identity=checkpoint_identity,
+                    checkpoints={
+                        f"{arm}:{seed}": checkpoint_identity
+                        for arm, seed in TRAINING_RUN_ORDER
+                    },
                 ),
             }
         ),
         encoding="utf-8",
     )
     assert (
-        expected_checkpoint_identity_from_stage_manifest(outer) == checkpoint_identity
+        expected_checkpoint_identity_from_stage_manifest(
+            outer, t064_selection="static_mixture_v1:64001"
+        )
+        == checkpoint_identity
     )
 
 
@@ -1037,10 +1071,20 @@ def test_stage7_t070_rows_require_exact_order_clean_rows_and_frozen_subsets() ->
         }
         for index in range(93)
     ]
-    assert transfer_command._validate_t070_rows(rows, cohort_identity="t052") == rows
+    cohort = SimpleNamespace(
+        identity="t052",
+        records=[
+            SimpleNamespace(
+                source_checkpoint_id=None,
+                structural_metadata=row["structural_metadata"],
+            )
+            for row in rows
+        ],
+    )
+    assert transfer_command._validate_t070_rows(rows, cohort=cohort) == rows
     rows[92] = "forged-non-mapping"
     with pytest.raises(ValueError, match="mapping"):
-        transfer_command._validate_t070_rows(rows, cohort_identity="t052")
+        transfer_command._validate_t070_rows(rows, cohort=cohort)
 
 
 def test_stage2_to_7_dry_plan_has_exact_worker_range_and_stage_inventory() -> None:
