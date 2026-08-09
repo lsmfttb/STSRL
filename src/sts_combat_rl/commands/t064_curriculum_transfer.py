@@ -118,6 +118,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         ),
         help="Emit one frozen stage's dispatch inventory.",
     )
+    parser.add_argument(
+        "--mock-execute",
+        action="store_true",
+        help="Execute the selected stage's dispatcher with no simulator/artifact runner.",
+    )
+    parser.add_argument("--attempt-root", type=Path)
     args = parser.parse_args(argv)
     if args.dry_run_manifest is None or args.code_commit is None:
         parser.error("--dry-run-manifest and --code-commit are required")
@@ -126,6 +132,26 @@ def main(argv: Sequence[str] | None = None) -> int:
     stages = build_t064_stage_execution_plan(manifest, code_commit=args.code_commit)
     if args.stage is not None:
         stages = [stage for stage in stages if stage["stage"] == args.stage]
+    if args.mock_execute:
+        if len(stages) != 1 or args.attempt_root is None:
+            parser.error("--mock-execute requires one --stage and --attempt-root")
+        stage = stages[0]
+        if stage["workers"] == 16:
+            _, records = dispatch_t064_shards(
+                ranges=stage["ranges"],
+                log_dir=args.attempt_root / stage["stage"] / "logs",
+                worker=lambda index, record_range: {
+                    "shard_index": index,
+                    "range": record_range,
+                    "mock": True,
+                },
+            )
+            print(
+                json.dumps({"stage": stage["stage"], "shards": records}, sort_keys=True)
+            )
+        else:
+            print(json.dumps({"stage": stage["stage"], "mock": True}, sort_keys=True))
+        return 0
     for stage in stages:
         print(json.dumps(stage, sort_keys=True, separators=(",", ":")))
     return 0
@@ -148,6 +174,22 @@ def refuse_overwrite(path: Path) -> None:
 
     if path.exists():
         raise ValueError(f"T064 stage refuses to overwrite existing output: {path}")
+
+
+def prepare_t064_attempt(root: Path, *, stage: str, code_commit: str) -> Path:
+    """Create an isolated attempt directory; failed outputs are never reused."""
+
+    if not stage or len(code_commit) != 40:
+        raise ValueError("T064 attempt requires a named stage and exact code commit")
+    attempts = root / "attempts"
+    attempts.mkdir(parents=True, exist_ok=True)
+    sequence = 0
+    while True:
+        candidate = attempts / f"{stage}-{code_commit[:12]}-{sequence:03d}"
+        if not candidate.exists():
+            candidate.mkdir()
+            return candidate
+        sequence += 1
 
 
 def dispatch_t064_shards(
@@ -890,46 +932,12 @@ def write_t064_final_documents(
     diagnostics: Mapping[str, Any],
     referenced_paths: Sequence[Path],
 ) -> dict[str, Any]:
-    """Write the final two compact documents and independently rehash all evidence."""
+    """Retired unsafe API; Stage 7 must use the strict artifact aggregator."""
 
-    if root.name != T064_ARTIFACT_ROOT_NAME:
-        raise ValueError("T064 artifacts must use the stable named root")
-    _assert_existing_or_new(root, COMPACT_FILENAMES)
-    source_audit = manifest.get("complete_source_audit", {})
-    integrity = (
-        isinstance(source_audit, Mapping)
-        and source_audit.get("status") == "complete"
-        and source_audit.get("candidate_duplicate_complete_identity_count") == 0
-        and source_audit.get("selected_duplicate_complete_identity_count") == 0
-        and source_audit.get("selected_holdout_overlap_count") == 0
-        and source_audit.get("selected_restore_failure_count") == 0
+    del manifest, training_report, stage_summary, diagnostics, referenced_paths
+    raise RuntimeError(
+        "write_t064_final_documents is retired; use aggregate_t064_stage7_from_artifacts"
     )
-    complete = bool(diagnostics.get("experiment_complete"))
-    gates = (
-        compute_transfer_gates(diagnostics)
-        if complete
-        else {name: None for name in TRANSFER_GATE_NAMES}
-    )
-    decision = build_transfer_decision(
-        source_adequate=bool(manifest.get("source_adequacy")),
-        source_integrity_valid=integrity,
-        experiment_complete=complete,
-        complete_source_audit_status=(
-            source_audit.get("status") if isinstance(source_audit, Mapping) else None
-        ),
-        transfer_gates=gates,
-        diagnostics=diagnostics,
-        problems=tuple(diagnostics.get("problems", ())),
-        unmet_acceptance_criteria=tuple(
-            diagnostics.get("unmet_acceptance_criteria", ())
-        ),
-    )
-    refuse_overwrite(root / "t064-stage-summary.json")
-    refuse_overwrite(root / "t064-transfer-decision.json")
-    write_compact_json(root / "t064-stage-summary.json", stage_summary)
-    write_compact_json(root / "t064-transfer-decision.json", decision)
-    rehash = independent_rehash(root, referenced_paths)
-    return {"decision": decision, "rehash": rehash}
 
 
 def assert_exact_compact_inventory(root: Path) -> None:
@@ -969,6 +977,34 @@ def aggregate_t064_stage7_from_artifacts(
     validate_resume_manifest(manifest, code_commit=code_commit)
     with training_path.open(encoding="utf-8") as stream:
         training = load_compact_json(stream)
+    if not manifest["source_adequacy"]:
+        if (
+            training.get("runs") != []
+            or training.get("not_run_reason") != "source_inadequate"
+        ):
+            raise ValueError(
+                "source-inadequate Case B requires the explicit skipped training report"
+            )
+        decision = build_transfer_decision(
+            source_adequate=False,
+            source_integrity_valid=True,
+            experiment_complete=False,
+            complete_source_audit_status=manifest["complete_source_audit"]["status"],
+            transfer_gates={name: None for name in TRANSFER_GATE_NAMES},
+            diagnostics={
+                "derived_from_artifacts": True,
+                "downstream_stages": "skipped_source_inadequate",
+            },
+        )
+        refuse_overwrite(root / "t064-stage-summary.json")
+        refuse_overwrite(root / "t064-transfer-decision.json")
+        write_compact_json(root / "t064-stage-summary.json", stage_summary)
+        write_compact_json(root / "t064-transfer-decision.json", decision)
+        return {
+            "decision": decision,
+            "metrics": {},
+            "rehash": independent_rehash(root, [manifest_path, training_path]),
+        }
     problems: list[str] = []
     unmet: list[str] = []
     references = [manifest_path, training_path, teacher_path, trainer_input_path]
