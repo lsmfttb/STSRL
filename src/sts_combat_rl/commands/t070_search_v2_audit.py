@@ -205,7 +205,9 @@ def expected_checkpoint_identity_from_stage_manifest(
         raise ValueError("stage manifest must be an object")
     if payload.get("schema_id") == FROZEN_MANIFEST_SCHEMA_ID:
         inputs = payload.get("input_identities")
-        identity = inputs.get("t043_checkpoint") if isinstance(inputs, Mapping) else None
+        identity = (
+            inputs.get("t043_checkpoint") if isinstance(inputs, Mapping) else None
+        )
     elif payload.get("schema_id") == "t064-curriculum-manifest-v1":
         stage = payload.get("t070_stage_manifest")
         identity = stage.get("checkpoint") if isinstance(stage, Mapping) else None
@@ -217,9 +219,57 @@ def expected_checkpoint_identity_from_stage_manifest(
     expected_bytes = identity.get("bytes")
     if not isinstance(sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", sha256):
         raise ValueError("stage manifest checkpoint SHA-256 is invalid")
-    if isinstance(expected_bytes, bool) or not isinstance(expected_bytes, int) or expected_bytes < 0:
+    if (
+        isinstance(expected_bytes, bool)
+        or not isinstance(expected_bytes, int)
+        or expected_bytes < 0
+    ):
         raise ValueError("stage manifest checkpoint byte count is invalid")
     return {"path": identity.get("path"), "sha256": sha256, "bytes": expected_bytes}
+
+
+def _t070_frozen_contract_from_stage_manifest(path: Path) -> dict[str, Any]:
+    """Resolve a T070 manifest or the T064 wrapper that substitutes only a checkpoint.
+
+    The wrapper carries an identity-bound copy of the old frozen manifest; this
+    deliberately keeps the old stage inventory, cohort, ranges, and failure
+    policy authoritative while allowing T064 to evaluate a newly trained
+    checkpoint.
+    """
+
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, Mapping):
+        raise ValueError("stage manifest must be an object")
+    if payload.get("schema_id") == FROZEN_MANIFEST_SCHEMA_ID:
+        return dict(payload)
+    if payload.get("schema_id") != "t064-curriculum-manifest-v1":
+        raise ValueError("unsupported frozen stage manifest schema")
+    stage = payload.get("t070_stage_manifest")
+    if not isinstance(stage, Mapping):
+        raise ValueError("T064 stage manifest is missing")
+    frozen_identity = stage.get("frozen_t070_manifest")
+    if not isinstance(frozen_identity, Mapping):
+        raise ValueError("T064 stage manifest lacks frozen T070 identity")
+    frozen_path = frozen_identity.get("path")
+    expected_sha256 = frozen_identity.get("sha256")
+    expected_bytes = frozen_identity.get("bytes")
+    if (
+        not isinstance(frozen_path, str)
+        or not isinstance(expected_sha256, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", expected_sha256)
+        or isinstance(expected_bytes, bool)
+        or not isinstance(expected_bytes, int)
+        or expected_bytes < 0
+    ):
+        raise ValueError("T064 frozen T070 identity is invalid")
+    resolved = Path(frozen_path)
+    if (
+        not resolved.is_file()
+        or _sha256(resolved) != expected_sha256
+        or resolved.stat().st_size != expected_bytes
+    ):
+        raise ValueError("T064 frozen T070 manifest identity mismatch")
+    return _load_schema(resolved, FROZEN_MANIFEST_SCHEMA_ID)
 
 
 def run_single_arm_shard(
@@ -1021,7 +1071,7 @@ def validate_t070_frozen_stage(
     source_manifest_path: Path,
     source_verifier_path: Path,
 ) -> tuple[dict[str, Any], tuple[str, ...]]:
-    frozen = _load_schema(frozen_path, FROZEN_MANIFEST_SCHEMA_ID)
+    frozen = _t070_frozen_contract_from_stage_manifest(frozen_path)
     if (
         frozen.get("code_commit") != code_commit
         or frozen.get("native_commit") != NATIVE_COMMIT
@@ -1058,7 +1108,7 @@ def validate_t070_frozen_stage(
         (cohort_path, expected_input, "cohort"),
         (
             checkpoint_path,
-            frozen["input_identities"]["t043_checkpoint"],
+            expected_checkpoint_identity_from_stage_manifest(frozen_path),
             "checkpoint",
         ),
         (

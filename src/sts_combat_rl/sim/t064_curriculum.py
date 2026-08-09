@@ -44,9 +44,7 @@ ARM_STATIC = "static_mixture_v1"
 ARM_CURRICULUM = "assistance_annealed_curriculum_v1"
 TRAINING_SEEDS = (64001, 64002)
 TRAINING_RUN_ORDER = tuple(
-    (arm, seed)
-    for seed in TRAINING_SEEDS
-    for arm in (ARM_STATIC, ARM_CURRICULUM)
+    (arm, seed) for seed in TRAINING_SEEDS for arm in (ARM_STATIC, ARM_CURRICULUM)
 )
 PHASE_TOKEN_PATTERNS = {
     ARM_STATIC: (
@@ -63,6 +61,14 @@ PHASE_TOKEN_PATTERNS = {
 RECOMMENDATION_CASE_A = "T063-oracle-guided-public-battle-learning"
 RECOMMENDATION_CASE_B = "T065-learned-non-combat-policy-v1"
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
+TRANSFER_GATE_NAMES = (
+    "t052_prior_value_aggregate_margin",
+    "t052_per_seed_non_regression",
+    "t052_subset_non_regression",
+    "t044_assist_hp50_model_guided_margin",
+    "t044_assist_hp50_raw_policy_non_regression",
+    "t044_assist_0_model_guided_non_regression",
+)
 
 
 def canonical_json_bytes(value: Any) -> bytes:
@@ -97,7 +103,10 @@ def action_trace_identity_sha256(record: BattleStartCheckpointRecord) -> str:
         if occurrence < 0:
             raise ValueError("action trace identity occurrence cannot be negative")
         identity = dict(raw)
-        if identity.get("stable_id") != stable_id or identity.get("occurrence") != occurrence:
+        if (
+            identity.get("stable_id") != stable_id
+            or identity.get("occurrence") != occurrence
+        ):
             raise ValueError("action trace identity is not occurrence-safe")
         rows.append({"decision_index": decision_index, "selected_action": identity})
     return canonical_sha256(rows)
@@ -110,7 +119,9 @@ def complete_source_identity(
 ) -> dict[str, Any]:
     """Build the frozen complete identity without guessing absent provenance."""
 
-    metadata = record.structural_metadata
+    metadata = getattr(record, "structural_metadata", None)
+    if not isinstance(metadata, Mapping):
+        raise ValueError("structural_metadata must be an object")
     existing_trace = metadata.get("action_trace_identity")
     if existing_trace is None:
         trace_identity = action_trace_identity_sha256(record)
@@ -121,7 +132,9 @@ def complete_source_identity(
     assistance_level = metadata.get("assistance_level", "")
     if not isinstance(assistance_level, str):
         raise ValueError("assistance_level must be a string when present")
-    mapped_source_arm = metadata.get("source_arm", "") if source_arm is None else source_arm
+    mapped_source_arm = (
+        metadata.get("source_arm", "") if source_arm is None else source_arm
+    )
     if not isinstance(mapped_source_arm, str):
         raise ValueError("source_arm must be a string when present")
     identity = {
@@ -132,12 +145,15 @@ def complete_source_identity(
         "source_battle_index": record.source_battle_index,
         "action_trace_identity": trace_identity,
         "distribution_kind": getattr(
-            record, "distribution_kind", getattr(record, "source_distribution_kind", None)
+            record,
+            "distribution_kind",
+            getattr(record, "source_distribution_kind", None),
         ),
         "assistance_level": assistance_level,
         "source_arm": mapped_source_arm,
         "checkpoint_information_regime": record.checkpoint_information_regime,
     }
+    _validate_complete_identity(identity)
     identity["complete_identity_sha256"] = canonical_sha256(identity)
     return identity
 
@@ -175,8 +191,7 @@ def source_descriptor(
 ) -> dict[str, Any]:
     identity = complete_source_identity(record)
     metadata = record.structural_metadata
-    floor = metadata.get("floor")
-    floor_bucket = int(floor) // 5 if isinstance(floor, int) and not isinstance(floor, bool) else None
+    floor_bucket = _floor_bucket(metadata.get("floor"))
     return {
         "component": component,
         "source_path": source_path,
@@ -235,7 +250,12 @@ def select_curriculum_buckets(
     strata: defaultdict[str, list[dict[str, Any]]] = defaultdict(list)
     for row in anchor_candidates:
         key = canonical_json_bytes(
-            [row.get("act"), row.get("room_type"), row.get("encounter_id"), row.get("floor_bucket")]
+            [
+                row.get("act"),
+                row.get("room_type"),
+                row.get("encounter_id"),
+                row.get("floor_bucket"),
+            ]
         ).decode("utf-8")
         strata[key].append(row)
     anchor: list[dict[str, Any]] = []
@@ -253,7 +273,11 @@ def select_curriculum_buckets(
         if not progressed:
             break
     selected = {BUCKET_STRONG: strong, BUCKET_MEDIUM: medium, BUCKET_ANCHOR: anchor}
-    flattened = [row["complete_identity_sha256"] for bucket in BUCKETS for row in selected[bucket]]
+    flattened = [
+        row["complete_identity_sha256"]
+        for bucket in BUCKETS
+        for row in selected[bucket]
+    ]
     if len(flattened) != len(set(flattened)):
         raise ValueError("selected curriculum buckets are not disjoint")
     return selected
@@ -274,7 +298,21 @@ def contiguous_ranges(count: int, shards: int = 16) -> tuple[str, ...]:
     return tuple(ranges)
 
 
-def source_adequacy(selected: Mapping[str, Sequence[Mapping[str, Any]]]) -> bool:
+def source_adequacy(
+    selected: Mapping[str, Sequence[Mapping[str, Any]]],
+    *,
+    duplicate_complete_identity_count: int = 0,
+    holdout_overlap_count: int = 0,
+) -> bool:
+    if (
+        isinstance(duplicate_complete_identity_count, bool)
+        or not isinstance(duplicate_complete_identity_count, int)
+        or duplicate_complete_identity_count < 0
+        or isinstance(holdout_overlap_count, bool)
+        or not isinstance(holdout_overlap_count, int)
+        or holdout_overlap_count < 0
+    ):
+        raise ValueError("T064 source-audit counts must be non-negative integers")
     later = len(selected.get(BUCKET_STRONG, ())) + len(selected.get(BUCKET_MEDIUM, ()))
     anchor = len(selected.get(BUCKET_ANCHOR, ()))
     identities = [
@@ -282,7 +320,13 @@ def source_adequacy(selected: Mapping[str, Sequence[Mapping[str, Any]]]) -> bool
         for bucket in BUCKETS
         for row in selected.get(bucket, ())
     ]
-    return later >= 128 and anchor == 256 and len(identities) == len(set(identities))
+    return (
+        later >= 128
+        and anchor == 256
+        and len(identities) == len(set(identities))
+        and duplicate_complete_identity_count == 0
+        and holdout_overlap_count == 0
+    )
 
 
 def build_bucket_exposure_sequence(
@@ -376,14 +420,22 @@ def build_transfer_decision(
     problems: Sequence[str] = (),
     unmet_acceptance_criteria: Sequence[str] = (),
 ) -> dict[str, Any]:
-    required_gate_values = tuple(transfer_gates.values())
-    if not source_adequate and not problems:
+    if set(transfer_gates) != set(TRANSFER_GATE_NAMES):
+        raise ValueError("T064 transfer decision requires exactly the six frozen gates")
+    if not all(
+        value is None or isinstance(value, bool) for value in transfer_gates.values()
+    ):
+        raise ValueError("T064 transfer gates must be boolean or null")
+    required_gate_values = tuple(transfer_gates[name] for name in TRANSFER_GATE_NAMES)
+    if not source_adequate and not experiment_complete and not problems:
         terminal_case = "Case B"
         recommendation: str | None = RECOMMENDATION_CASE_B
     elif experiment_complete and all(value is True for value in required_gate_values):
         terminal_case = "Case A"
         recommendation = RECOMMENDATION_CASE_A
-    elif experiment_complete and all(value is not None for value in required_gate_values):
+    elif experiment_complete and all(
+        value is not None for value in required_gate_values
+    ):
         terminal_case = "Case B"
         recommendation = RECOMMENDATION_CASE_B
     else:
@@ -414,9 +466,66 @@ def validate_training_run_report(payload: Mapping[str, Any]) -> dict[str, Any]:
         if validated.get("not_run_reason") != "source_inadequate":
             raise ValueError("empty T064 training runs require source_inadequate")
         return validated
-    order = [(run.get("arm"), run.get("seed")) for run in runs if isinstance(run, Mapping)]
+    if "not_run_reason" in validated:
+        raise ValueError("completed T064 training report cannot have not_run_reason")
+    order = [
+        (run.get("arm"), run.get("seed")) for run in runs if isinstance(run, Mapping)
+    ]
     if order != list(TRAINING_RUN_ORDER):
         raise ValueError("T064 training report run order/cardinality is invalid")
+    for index, run in enumerate(runs):
+        if not isinstance(run, Mapping):
+            raise ValueError(f"T064 training run {index} must be an object")
+        _require_fields(
+            run,
+            (
+                "arm",
+                "seed",
+                "initialization_sha256",
+                "configuration",
+                "trainer_input_sha256",
+                "batch_plan_sha256",
+                "per_bucket_exposure_counts",
+                "per_source_exposure_counts",
+                "checkpoint",
+                "checkpoint_metadata_linkage",
+                "completion_status",
+                "problems",
+            ),
+            f"T064 training run {index}",
+        )
+        _require_non_empty_string(run["arm"], f"T064 training run {index} arm")
+        _require_int(run["seed"], f"T064 training run {index} seed")
+        _require_sha256(
+            run["initialization_sha256"], f"T064 training run {index} initialization"
+        )
+        if not isinstance(run["configuration"], Mapping):
+            raise ValueError(
+                f"T064 training run {index} configuration must be an object"
+            )
+        _require_sha256(
+            run["trainer_input_sha256"], f"T064 training run {index} trainer input"
+        )
+        _require_sha256(
+            run["batch_plan_sha256"], f"T064 training run {index} batch plan"
+        )
+        if not isinstance(run["per_bucket_exposure_counts"], Mapping) or not isinstance(
+            run["per_source_exposure_counts"], Mapping
+        ):
+            raise ValueError(
+                f"T064 training run {index} exposure counts must be objects"
+            )
+        _validate_file_identity(
+            run["checkpoint"], f"T064 training run {index} checkpoint"
+        )
+        if not isinstance(run["checkpoint_metadata_linkage"], Mapping):
+            raise ValueError(
+                f"T064 training run {index} checkpoint linkage must be an object"
+            )
+        _require_non_empty_string(
+            run["completion_status"], f"T064 training run {index} completion status"
+        )
+        _require_string_list(run["problems"], f"T064 training run {index} problems")
     return validated
 
 
@@ -431,7 +540,12 @@ def validate_compact_document(payload: Mapping[str, Any]) -> dict[str, Any]:
     }:
         raise ValueError("unsupported T064 compact schema_id")
     validated = _validate_document(payload, str(schema_id))
+    if schema_id == CURRICULUM_MANIFEST_SCHEMA_ID:
+        _validate_curriculum_manifest(validated)
+    elif schema_id == STAGE_SUMMARY_SCHEMA_ID:
+        _validate_stage_summary(validated)
     if schema_id == TRANSFER_DECISION_SCHEMA_ID:
+        _validate_transfer_decision(validated)
         case = validated.get("terminal_case")
         if case not in {"Case A", "Case B", "INCOMPLETE"}:
             raise ValueError("invalid T064 terminal case")
@@ -487,6 +601,243 @@ def _validate_document(payload: Mapping[str, Any], schema_id: str) -> dict[str, 
     return result
 
 
+def _validate_complete_identity(identity: Mapping[str, Any]) -> None:
+    _require_fields(
+        identity,
+        (
+            "schema_id",
+            "source_checkpoint_id",
+            "source_seed",
+            "source_run_id",
+            "source_battle_index",
+            "action_trace_identity",
+            "distribution_kind",
+            "assistance_level",
+            "source_arm",
+            "checkpoint_information_regime",
+        ),
+        "T064 complete source identity",
+    )
+    if identity["schema_id"] != COMPLETE_SOURCE_IDENTITY_SCHEMA_ID:
+        raise ValueError("T064 complete source identity schema is invalid")
+    for field in (
+        "source_checkpoint_id",
+        "source_run_id",
+        "action_trace_identity",
+        "distribution_kind",
+        "assistance_level",
+        "source_arm",
+        "checkpoint_information_regime",
+    ):
+        _require_non_empty_string(
+            identity[field], f"T064 complete identity {field}"
+        ) if field not in {"assistance_level", "source_arm"} else _require_string(
+            identity[field], f"T064 complete identity {field}"
+        )
+    _require_int(identity["source_seed"], "T064 complete identity source_seed")
+    _require_int(
+        identity["source_battle_index"], "T064 complete identity source_battle_index"
+    )
+
+
+def _floor_bucket(value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 56:
+        raise ValueError("T064 floor must be a non-Boolean Python integer in 1..56")
+    return value
+
+
+def _validate_curriculum_manifest(payload: Mapping[str, Any]) -> None:
+    _require_fields(
+        payload,
+        (
+            "task_id",
+            "code_commit",
+            "native_commit",
+            "input_artifacts",
+            "frozen_holdouts",
+            "complete_source_audit",
+            "selected_buckets",
+            "selected_sources",
+            "selected_bucket_counts",
+            "source_adequacy",
+            "teacher_shard_ranges",
+            "teacher_worker_count",
+            "batch_plans",
+            "exposure_parity",
+            "t070_stage_manifest",
+            "problems",
+        ),
+        "T064 curriculum manifest",
+    )
+    if payload["task_id"] != "T064":
+        raise ValueError("T064 curriculum manifest task_id is invalid")
+    _require_non_empty_string(
+        payload["code_commit"], "T064 curriculum manifest code_commit"
+    )
+    _require_non_empty_string(
+        payload["native_commit"], "T064 curriculum manifest native_commit"
+    )
+    if not isinstance(payload["input_artifacts"], Mapping):
+        raise ValueError("T064 curriculum manifest input_artifacts must be an object")
+    if not isinstance(payload["frozen_holdouts"], list):
+        raise ValueError("T064 curriculum manifest frozen_holdouts must be a list")
+    if not isinstance(payload["complete_source_audit"], Mapping):
+        raise ValueError(
+            "T064 curriculum manifest complete_source_audit must be an object"
+        )
+    if not isinstance(payload["selected_buckets"], Mapping) or set(
+        payload["selected_buckets"]
+    ) != set(BUCKETS):
+        raise ValueError("T064 curriculum manifest selected buckets are invalid")
+    if not isinstance(payload["selected_sources"], list):
+        raise ValueError("T064 curriculum manifest selected_sources must be a list")
+    if not isinstance(payload["selected_bucket_counts"], Mapping) or set(
+        payload["selected_bucket_counts"]
+    ) != set(BUCKETS):
+        raise ValueError("T064 curriculum manifest selected bucket counts are invalid")
+    if not isinstance(payload["source_adequacy"], bool) or not isinstance(
+        payload["exposure_parity"], bool
+    ):
+        raise ValueError("T064 curriculum manifest booleans are invalid")
+    if tuple(payload["teacher_shard_ranges"]) != contiguous_ranges(
+        len(payload["selected_sources"])
+    ):
+        raise ValueError("T064 curriculum manifest teacher ranges are invalid")
+    if payload["teacher_worker_count"] != 16:
+        raise ValueError("T064 curriculum manifest teacher worker count is invalid")
+    if not isinstance(payload["batch_plans"], list) or len(payload["batch_plans"]) != 4:
+        raise ValueError("T064 curriculum manifest batch plans are invalid")
+    _require_string_list(payload["problems"], "T064 curriculum manifest problems")
+
+
+def _validate_stage_summary(payload: Mapping[str, Any]) -> None:
+    _require_fields(
+        payload,
+        (
+            "reuse_inventory",
+            "stages",
+            "retention_reason",
+            "downstream_consumer",
+            "deletion_condition",
+            "problems",
+        ),
+        "T064 stage summary",
+    )
+    if not isinstance(payload["reuse_inventory"], list) or not isinstance(
+        payload["stages"], list
+    ):
+        raise ValueError("T064 stage summary inventory and stages must be lists")
+    for index, stage in enumerate(payload["stages"]):
+        if not isinstance(stage, Mapping):
+            raise ValueError(f"T064 stage {index} must be an object")
+        _require_fields(
+            stage,
+            (
+                "name",
+                "status",
+                "command",
+                "code_commit",
+                "native_commit",
+                "inputs",
+                "outputs",
+                "workers",
+                "shards",
+                "ranges",
+                "return_codes",
+                "wall_clock_seconds",
+                "failure_count",
+                "referenced_artifacts",
+                "failed_attempts",
+                "retained_log_paths",
+            ),
+            f"T064 stage {index}",
+        )
+    for field in ("retention_reason", "downstream_consumer", "deletion_condition"):
+        _require_non_empty_string(payload[field], f"T064 stage summary {field}")
+    _require_string_list(payload["problems"], "T064 stage summary problems")
+
+
+def _validate_transfer_decision(payload: Mapping[str, Any]) -> None:
+    _require_fields(
+        payload,
+        (
+            "source_adequacy",
+            "experiment_complete",
+            "transfer_gates",
+            "diagnostics",
+            "terminal_case",
+            "problems",
+            "unmet_acceptance_criteria",
+        ),
+        "T064 transfer decision",
+    )
+    if not isinstance(payload["source_adequacy"], bool) or not isinstance(
+        payload["experiment_complete"], bool
+    ):
+        raise ValueError("T064 transfer decision booleans are invalid")
+    gates = payload["transfer_gates"]
+    if not isinstance(gates, Mapping) or set(gates) != set(TRANSFER_GATE_NAMES):
+        raise ValueError("T064 transfer decision must contain exactly six frozen gates")
+    if not all(value is None or isinstance(value, bool) for value in gates.values()):
+        raise ValueError("T064 transfer decision gates must be boolean or null")
+    if not isinstance(payload["diagnostics"], Mapping):
+        raise ValueError("T064 transfer decision diagnostics must be an object")
+    _require_string_list(payload["problems"], "T064 transfer decision problems")
+    _require_string_list(
+        payload["unmet_acceptance_criteria"], "T064 transfer decision unmet criteria"
+    )
+
+
+def _require_fields(
+    payload: Mapping[str, Any], fields: Sequence[str], label: str
+) -> None:
+    missing = [field for field in fields if field not in payload]
+    if missing:
+        raise ValueError(f"{label} is missing required fields: {', '.join(missing)}")
+
+
+def _require_string(value: Any, label: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{label} must be a string")
+    return value
+
+
+def _require_non_empty_string(value: Any, label: str) -> str:
+    value = _require_string(value, label)
+    if not value:
+        raise ValueError(f"{label} must be non-empty")
+    return value
+
+
+def _require_int(value: Any, label: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{label} must be an integer")
+    return value
+
+
+def _require_sha256(value: Any, label: str) -> str:
+    value = _require_non_empty_string(value, label)
+    if not _SHA256_RE.fullmatch(value):
+        raise ValueError(f"{label} must be a SHA-256")
+    return value
+
+
+def _require_string_list(value: Any, label: str) -> list[str]:
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise ValueError(f"{label} must be a list of strings")
+    return list(value)
+
+
+def _validate_file_identity(value: Any, label: str) -> None:
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{label} must be an object")
+    _require_fields(value, ("path", "sha256", "bytes"), label)
+    _require_non_empty_string(value["path"], f"{label} path")
+    _require_sha256(value["sha256"], f"{label} sha256")
+    if _require_int(value["bytes"], f"{label} bytes") < 0:
+        raise ValueError(f"{label} bytes must be non-negative")
+
+
 def _file_identity(path: Path) -> dict[str, Any]:
     if not path.is_file():
         raise ValueError(f"referenced artifact is missing: {path}")
@@ -494,4 +845,8 @@ def _file_identity(path: Path) -> dict[str, Any]:
     with path.open("rb") as stream:
         for block in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(block)
-    return {"path": str(path), "sha256": digest.hexdigest(), "bytes": path.stat().st_size}
+    return {
+        "path": str(path),
+        "sha256": digest.hexdigest(),
+        "bytes": path.stat().st_size,
+    }

@@ -57,6 +57,30 @@ def _audit_one(index: int) -> dict[str, Any]:
     }
 
 
+def _parse_range(value: str, *, count: int) -> tuple[int, int]:
+    parts = value.split(":")
+    if len(parts) != 2 or not all(part.isdigit() for part in parts):
+        raise ValueError("T064 shard range must use start:end")
+    start, end = (int(part) for part in parts)
+    if start < 0 or end < start or end > count:
+        raise ValueError("T064 shard range is outside selected sources")
+    return start, end
+
+
+def _audit_shard(item: tuple[int, str]) -> dict[str, Any]:
+    shard_index, record_range = item
+    start, end = _parse_range(record_range, count=len(_SELECTED))
+    started = time.perf_counter()
+    results = [_audit_one(index) for index in range(start, end)]
+    return {
+        "shard_index": shard_index,
+        "record_range": record_range,
+        "workers": 1,
+        "wall_clock_seconds": time.perf_counter() - started,
+        "results": results,
+    }
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--manifest", type=Path, required=True)
@@ -69,19 +93,37 @@ def main() -> int:
     global _POOL, _SELECTED
     _POOL, _SELECTED = load_selected_source_pool(payload)
     ranges = payload.get("teacher_shard_ranges")
-    if not isinstance(ranges, list) or len(ranges) != 16:
+    if (
+        not isinstance(ranges, list)
+        or len(ranges) != 16
+        or not all(isinstance(item, str) for item in ranges)
+    ):
         raise SystemExit("T064 manifest has invalid frozen ranges")
+    parsed_ranges = [_parse_range(item, count=len(_SELECTED)) for item in ranges]
+    if (
+        parsed_ranges[0][0] != 0
+        or parsed_ranges[-1][1] != len(_SELECTED)
+        or any(
+            left[1] != right[0] for left, right in zip(parsed_ranges, parsed_ranges[1:])
+        )
+    ):
+        raise SystemExit("T064 manifest shard ranges are not complete and contiguous")
     context = mp.get_context("fork")
     started = time.perf_counter()
     with context.Pool(processes=args.workers) as pool:
-        results = pool.map(_audit_one, range(len(_SELECTED)), chunksize=1)
+        shard_results = pool.map(_audit_shard, list(enumerate(ranges)), chunksize=1)
     wall = time.perf_counter() - started
+    results = [result for shard in shard_results for result in shard["results"]]
+    if [result["selected_index"] for result in results] != list(range(len(_SELECTED))):
+        raise SystemExit(
+            "T064 audit shards did not return each selected source exactly once"
+        )
     args.log.parent.mkdir(parents=True, exist_ok=True)
     with args.log.open("w", encoding="utf-8", newline="\n") as stream:
         stream.write(f"workers=16\nshards=16\nranges={','.join(ranges)}\n")
         stream.write(f"wall_clock_seconds={wall:.6f}\n")
-        for result in results:
-            stream.write(json.dumps(result, sort_keys=True, separators=(",", ":")))
+        for shard in shard_results:
+            stream.write(json.dumps(shard, sort_keys=True, separators=(",", ":")))
             stream.write("\n")
     finalized = finalize_source_audit(
         manifest_path=args.manifest,
@@ -92,4 +134,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

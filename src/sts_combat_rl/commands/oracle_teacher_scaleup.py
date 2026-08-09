@@ -45,6 +45,7 @@ from sts_combat_rl.sim.oracle_teacher_scaleup import (
     selected_natural_battle_start_pool,
     validate_oracle_teacher_scaleup_budgets,
 )
+from sts_combat_rl.sim.t064_curriculum import complete_source_identity
 
 
 ORACLE_TEACHER_SCALEUP_MANIFEST_FILENAME = "oracle-teacher-scaleup-manifest.json"
@@ -64,22 +65,38 @@ def collect_oracle_teacher_range_from_selected_manifest(
     raw_sources = selected_source_manifest.get("selected_sources")
     if not isinstance(raw_sources, list) or not raw_sources:
         raise ValueError("selected source manifest must contain selected_sources")
-    selected_ids: list[str] = []
+    selected_identities: list[dict[str, Any]] = []
     for index, raw in enumerate(raw_sources):
         if not isinstance(raw, Mapping):
             raise ValueError(f"selected source {index} must be an object")
         identity = raw.get("complete_identity", raw)
         if not isinstance(identity, Mapping):
             raise ValueError(f"selected source {index} identity must be an object")
-        checkpoint_id = identity.get("source_checkpoint_id")
-        if not isinstance(checkpoint_id, str) or not checkpoint_id:
-            raise ValueError(f"selected source {index} lacks source_checkpoint_id")
-        selected_ids.append(checkpoint_id)
-    if len(selected_ids) != len(set(selected_ids)):
-        raise ValueError("selected source manifest contains duplicate checkpoints")
-    start, end = _record_range(record_range, len(selected_ids))
-    records_by_id = {record.source_checkpoint_id: record for record in pool.records}
-    missing = [identity for identity in selected_ids if identity not in records_by_id]
+        complete_hash = raw.get("complete_identity_sha256")
+        if not isinstance(complete_hash, str) or len(complete_hash) != 64:
+            raise ValueError(f"selected source {index} lacks complete identity hash")
+        identity_copy = dict(identity)
+        if identity_copy.get("complete_identity_sha256") not in (None, complete_hash):
+            raise ValueError(
+                f"selected source {index} complete identity hash mismatches"
+            )
+        identity_copy["complete_identity_sha256"] = complete_hash
+        selected_identities.append(identity_copy)
+    expected_hashes = [item["complete_identity_sha256"] for item in selected_identities]
+    if len(expected_hashes) != len(set(expected_hashes)):
+        raise ValueError(
+            "selected source manifest contains duplicate complete identities"
+        )
+    start, end = _record_range(record_range, len(selected_identities))
+    records_by_identity = {
+        complete_source_identity(record)["complete_identity_sha256"]: record
+        for record in pool.records
+    }
+    if len(records_by_identity) != len(pool.records):
+        raise ValueError("teacher source pool contains duplicate complete identities")
+    missing = [
+        identity for identity in expected_hashes if identity not in records_by_identity
+    ]
     if missing:
         raise ValueError("selected source manifest references missing pool records")
     selected_pool = NaturalBattleStartPool(
@@ -88,7 +105,7 @@ def collect_oracle_teacher_range_from_selected_manifest(
         truncated_run_count=pool.truncated_run_count,
         source_controller_provenance=pool.source_controller_provenance,
         format_version=pool.format_version,
-        records=[records_by_id[value] for value in selected_ids[start:end]],
+        records=[records_by_identity[value] for value in expected_hashes[start:end]],
         source_run_summaries=pool.source_run_summaries,
         problems=pool.problems,
     )
@@ -98,10 +115,29 @@ def collect_oracle_teacher_range_from_selected_manifest(
         controller,
         action_space=action_space,
     )
-    actual = [row.source_checkpoint_id for row in dataset.records]
-    if dataset.problems or actual != selected_ids[start:end]:
+    expected_rows = selected_identities[start:end]
+    if dataset.problems or len(dataset.records) != len(expected_rows):
         raise ValueError("teacher range did not produce one row per selected source")
+    for row, identity in zip(dataset.records, expected_rows, strict=True):
+        if not _teacher_row_matches_complete_identity(row, identity):
+            raise ValueError(
+                "teacher range did not preserve complete source identity order"
+            )
     return dataset
+
+
+def _teacher_row_matches_complete_identity(
+    row: Any, identity: Mapping[str, Any]
+) -> bool:
+    return (
+        row.source_checkpoint_id == identity.get("source_checkpoint_id")
+        and row.source_seed == identity.get("source_seed")
+        and row.source_run_id == identity.get("source_run_id")
+        and row.source_battle_index == identity.get("source_battle_index")
+        and row.source_distribution_kind == identity.get("distribution_kind")
+        and row.checkpoint_information_regime
+        == identity.get("checkpoint_information_regime")
+    )
 
 
 def _record_range(value: str, count: int) -> tuple[int, int]:

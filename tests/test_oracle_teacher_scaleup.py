@@ -658,15 +658,11 @@ def test_teacher_range_merge_requires_exact_selected_order() -> None:
     shards = (
         _dataset(
             budget=100,
-            records=[
-                _row(0, budget=100, selected_action=1, probabilities=[0.2, 0.8])
-            ],
+            records=[_row(0, budget=100, selected_action=1, probabilities=[0.2, 0.8])],
         ),
         _dataset(
             budget=100,
-            records=[
-                _row(1, budget=100, selected_action=1, probabilities=[0.2, 0.8])
-            ],
+            records=[_row(1, budget=100, selected_action=1, probabilities=[0.2, 0.8])],
         ),
     )
     merged = merge_oracle_teacher_dataset_shards(
@@ -678,6 +674,43 @@ def test_teacher_range_merge_requires_exact_selected_order() -> None:
         merge_oracle_teacher_dataset_shards(
             shards,
             expected_source_checkpoint_ids=("checkpoint-1", "checkpoint-0"),
+        )
+
+
+def test_teacher_range_merge_accepts_complete_identity_order_with_duplicate_checkpoint_ids() -> (
+    None
+):
+    first = _row(0, budget=100, selected_action=1, probabilities=[0.2, 0.8])
+    second = _row(1, budget=100, selected_action=1, probabilities=[0.2, 0.8])
+    second = replace(second, source_checkpoint_id=first.source_checkpoint_id)
+    shards = (
+        _dataset(budget=100, records=[first]),
+        _dataset(budget=100, records=[second]),
+    )
+
+    def identity(row: OracleTeacherRow, digest: str) -> dict[str, object]:
+        return {
+            "complete_identity_sha256": digest * 64,
+            "source_checkpoint_id": row.source_checkpoint_id,
+            "source_seed": row.source_seed,
+            "source_run_id": row.source_run_id,
+            "source_battle_index": row.source_battle_index,
+            "distribution_kind": row.source_distribution_kind,
+            "checkpoint_information_regime": row.checkpoint_information_regime,
+        }
+
+    merged = merge_oracle_teacher_dataset_shards(
+        shards,
+        expected_complete_identities=(identity(first, "a"), identity(second, "b")),
+    )
+    assert [row.source_seed for row in merged.records] == [
+        first.source_seed,
+        second.source_seed,
+    ]
+    with pytest.raises(ValueError, match="complete identities"):
+        merge_oracle_teacher_dataset_shards(
+            shards,
+            expected_complete_identities=(identity(second, "a"), identity(first, "b")),
         )
 
 

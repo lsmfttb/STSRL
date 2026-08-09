@@ -35,6 +35,7 @@ from sts_combat_rl.commands.t070_search_v2_audit import (
     expected_checkpoint_identity_from_stage_manifest,
     merge_single_arm_stage,
     probe_t070_native_runtime_identity,
+    validate_t070_frozen_stage,
     validate_t070_preflight,
 )
 from sts_combat_rl.sim.fixed_evaluation_set import (
@@ -342,6 +343,89 @@ def test_t070_checkpoint_identity_can_be_supplied_by_t064_manifest(tmp_path) -> 
     )
     assert expected_checkpoint_identity_from_stage_manifest(historical) == checkpoint
     assert expected_checkpoint_identity_from_stage_manifest(t064) == checkpoint
+
+
+def test_t070_stage_validation_accepts_identity_bound_t064_checkpoint_wrapper(
+    tmp_path: Path,
+) -> None:
+    cohort = tmp_path / "cohort.jsonl"
+    source_manifest = tmp_path / "source.json"
+    verifier = tmp_path / "verify.sh"
+    old_checkpoint = tmp_path / "old.pt"
+    new_checkpoint = tmp_path / "new.pt"
+    for path, content in (
+        (cohort, b"cohort"),
+        (source_manifest, b"source"),
+        (verifier, b"verifier"),
+        (old_checkpoint, b"old"),
+        (new_checkpoint, b"new"),
+    ):
+        path.write_bytes(content)
+
+    def identity(path: Path) -> dict[str, object]:
+        return {
+            "path": str(path),
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            "bytes": path.stat().st_size,
+        }
+
+    frozen = tmp_path / "frozen.json"
+    frozen.write_text(
+        json.dumps(
+            {
+                "schema_id": "t070-frozen-experiment-manifest-v1",
+                "code_commit": "a" * 40,
+                "native_commit": NATIVE_COMMIT,
+                "command_passed": True,
+                "input_identities": {
+                    "t052_fixed_cohort": identity(cohort),
+                    "t043_checkpoint": identity(old_checkpoint),
+                    "sts_lightspeed_source_manifest": identity(source_manifest),
+                    "sts_lightspeed_source_verifier": identity(verifier),
+                },
+                "primary_stage_inventory": [
+                    {
+                        "stage_name": "baseline-0100",
+                        "arm": "baseline",
+                        "family": "shared",
+                        "native_budget": 100,
+                        "tree_geometry_enabled": False,
+                    }
+                ],
+                "primary_shard_ranges": list(PRIMARY_RANGES),
+                "primary_worker_count": 16,
+            }
+        ),
+        encoding="utf-8",
+    )
+    wrapper = tmp_path / "t064.json"
+    wrapper.write_text(
+        json.dumps(
+            {
+                "schema_id": "t064-curriculum-manifest-v1",
+                "t070_stage_manifest": {
+                    "frozen_t070_manifest": identity(frozen),
+                    "checkpoint": identity(new_checkpoint),
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    _, ranges = validate_t070_frozen_stage(
+        wrapper,
+        code_commit="a" * 40,
+        stage_name="baseline-0100",
+        arm="baseline",
+        family="shared",
+        budget=100,
+        range_kind="primary",
+        tree_geometry=False,
+        cohort_path=cohort,
+        checkpoint_path=new_checkpoint,
+        source_manifest_path=source_manifest,
+        source_verifier_path=verifier,
+    )
+    assert ranges == PRIMARY_RANGES
 
 
 def test_t070_retention_has_per_file_command_and_compatibility(

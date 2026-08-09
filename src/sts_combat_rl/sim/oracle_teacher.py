@@ -384,7 +384,8 @@ def load_oracle_teacher_dataset_jsonl(
 def merge_oracle_teacher_dataset_shards(
     shards: Sequence[OracleTeacherDataset],
     *,
-    expected_source_checkpoint_ids: Sequence[str],
+    expected_source_checkpoint_ids: Sequence[str] | None = None,
+    expected_complete_identities: Sequence[Mapping[str, Any]] | None = None,
 ) -> OracleTeacherDataset:
     """Deterministically merge range-collected rows into the existing schema."""
 
@@ -411,14 +412,37 @@ def merge_oracle_teacher_dataset_shards(
                 )
         problems.extend(shard.problems)
         rows.extend(shard.records)
-    actual = [row.source_checkpoint_id for row in rows]
-    expected = list(expected_source_checkpoint_ids)
-    if problems:
-        raise ValueError("Oracle teacher shard contains failures: " + "; ".join(problems))
-    if actual != expected or len(actual) != len(set(actual)):
+    if (expected_source_checkpoint_ids is None) == (
+        expected_complete_identities is None
+    ):
         raise ValueError(
-            "Oracle teacher merge requires exactly one ordered row per selected source"
+            "Oracle teacher merge requires exactly one selected identity contract"
         )
+    if problems:
+        raise ValueError(
+            "Oracle teacher shard contains failures: " + "; ".join(problems)
+        )
+    if expected_complete_identities is not None:
+        expected = list(expected_complete_identities)
+        if len(expected) != len(rows):
+            raise ValueError("Oracle teacher merge complete identity count mismatches")
+        hashes = [item.get("complete_identity_sha256") for item in expected]
+        if not all(isinstance(value, str) and value for value in hashes) or len(
+            set(hashes)
+        ) != len(hashes):
+            raise ValueError("Oracle teacher merge complete identities are invalid")
+        for row, identity in zip(rows, expected, strict=True):
+            if not _teacher_row_matches_complete_identity(row, identity):
+                raise ValueError(
+                    "Oracle teacher merge requires exact ordered complete identities"
+                )
+    else:
+        actual = [row.source_checkpoint_id for row in rows]
+        expected = list(expected_source_checkpoint_ids or ())
+        if actual != expected or len(actual) != len(set(actual)):
+            raise ValueError(
+                "Oracle teacher merge requires exactly one ordered row per selected source"
+            )
     return OracleTeacherDataset(
         native_source_identity=first.native_source_identity,
         controller_provenance=first.controller_provenance,
@@ -426,6 +450,21 @@ def merge_oracle_teacher_dataset_shards(
         source_pool_format_version=first.source_pool_format_version,
         source_pool_controller_provenance=first.source_pool_controller_provenance,
         records=[replace(row, row_index=index) for index, row in enumerate(rows)],
+    )
+
+
+def _teacher_row_matches_complete_identity(
+    row: OracleTeacherRow,
+    identity: Mapping[str, Any],
+) -> bool:
+    return (
+        row.source_checkpoint_id == identity.get("source_checkpoint_id")
+        and row.source_seed == identity.get("source_seed")
+        and row.source_run_id == identity.get("source_run_id")
+        and row.source_battle_index == identity.get("source_battle_index")
+        and row.source_distribution_kind == identity.get("distribution_kind")
+        and row.checkpoint_information_regime
+        == identity.get("checkpoint_information_regime")
     )
 
 

@@ -58,9 +58,7 @@ def build_curriculum_manifest(
     if output_path.name != CURRICULUM_MANIFEST_FILENAME:
         raise ValueError("T064 curriculum manifest path is frozen")
     input_artifacts = {
-        "t042_scale_manifest": _identity(
-            scale_manifest_path, scale_manifest_sha256
-        ),
+        "t042_scale_manifest": _identity(scale_manifest_path, scale_manifest_sha256),
         "initialization_checkpoint": _identity(
             initialization_checkpoint_path, initialization_checkpoint_sha256
         ),
@@ -94,8 +92,12 @@ def build_curriculum_manifest(
         expected_count = int(raw["record_count"])
         if len(cohort.records) != expected_count:
             raise ValueError("frozen holdout record count mismatch")
-        record_identities = [complete_source_identity(record) for record in cohort.records]
-        hashes = [str(identity["complete_identity_sha256"]) for identity in record_identities]
+        record_identities = [
+            complete_source_identity(record) for record in cohort.records
+        ]
+        hashes = [
+            str(identity["complete_identity_sha256"]) for identity in record_identities
+        ]
         if len(hashes) != len(set(hashes)):
             raise ValueError("frozen holdout contains duplicate complete identities")
         overlap = holdout_identity_hashes.intersection(hashes)
@@ -145,10 +147,15 @@ def build_curriculum_manifest(
         },
         "selected_buckets": selected,
         "selected_sources": selected_sources,
-        "selected_bucket_counts": {
-            bucket: len(selected[bucket]) for bucket in BUCKETS
-        },
-        "source_adequacy": source_adequacy(selected),
+        "selected_bucket_counts": {bucket: len(selected[bucket]) for bucket in BUCKETS},
+        "source_adequacy": source_adequacy(
+            selected,
+            duplicate_complete_identity_count=_duplicate_count(descriptors),
+            holdout_overlap_count=sum(
+                descriptor["complete_identity_sha256"] in holdout_identity_hashes
+                for descriptor in descriptors
+            ),
+        ),
         "teacher_shard_ranges": list(contiguous_ranges(len(selected_sources))),
         "teacher_worker_count": 16,
         "batch_plans": plan_summaries,
@@ -176,7 +183,9 @@ def stream_assisted_pool_records(
                 raise ValueError(f"{path}:{line_number}: row must be an object")
             if row.get("type") == "metadata":
                 if metadata is not None or not isinstance(row.get("metadata"), Mapping):
-                    raise ValueError(f"{path}:{line_number}: invalid duplicate metadata")
+                    raise ValueError(
+                        f"{path}:{line_number}: invalid duplicate metadata"
+                    )
                 metadata = dict(row["metadata"])
                 if (
                     metadata.get("schema_id") != ASSISTED_SOURCE_POOL_SCHEMA_ID
@@ -301,7 +310,6 @@ def finalize_source_audit(
             "selected_restore_failures": failures,
         }
     )
-    payload["source_adequacy"] = bool(payload["source_adequacy"] and not failures)
     payload["problems"] = failures
     write_compact_json(manifest_path, payload)
     return payload
@@ -337,4 +345,3 @@ def _sha256(path: Path) -> str:
 def _duplicate_count(descriptors: Iterable[Mapping[str, Any]]) -> int:
     counts = Counter(str(item.get("complete_identity_sha256")) for item in descriptors)
     return sum(value - 1 for value in counts.values() if value > 1)
-
