@@ -138,8 +138,16 @@ def test_bucket_selection_is_deterministic_holdout_excluding_and_stratified() ->
     assert holdout not in {
         row["complete_identity_sha256"] for row in first[BUCKET_STRONG]
     }
+    assert sum(row["complete_identity_sha256"] == holdout for row in rows) == 1
     assert len(first[BUCKET_MEDIUM]) == 64
     assert len(first[BUCKET_ANCHOR]) == 256
+    # The frozen T044 holdout is expected to be present in the candidate T042
+    # pool.  It is an exclusion, not a selected-training-set leak.
+    assert source_adequacy(
+        first,
+        selected_duplicate_complete_identity_count=0,
+        selected_holdout_overlap_count=0,
+    )
     assert source_adequacy(first)
 
 
@@ -361,8 +369,8 @@ def test_source_adequacy_requires_zero_duplicate_and_holdout_counts() -> None:
         ],
     }
     assert source_adequacy(selected)
-    assert not source_adequacy(selected, duplicate_complete_identity_count=1)
-    assert not source_adequacy(selected, holdout_overlap_count=1)
+    assert not source_adequacy(selected, selected_duplicate_complete_identity_count=1)
+    assert not source_adequacy(selected, selected_holdout_overlap_count=1)
 
 
 def test_compact_documents_fail_closed_on_required_fields() -> None:

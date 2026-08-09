@@ -302,16 +302,16 @@ def contiguous_ranges(count: int, shards: int = 16) -> tuple[str, ...]:
 def source_adequacy(
     selected: Mapping[str, Sequence[Mapping[str, Any]]],
     *,
-    duplicate_complete_identity_count: int = 0,
-    holdout_overlap_count: int = 0,
+    selected_duplicate_complete_identity_count: int = 0,
+    selected_holdout_overlap_count: int = 0,
 ) -> bool:
     if (
-        isinstance(duplicate_complete_identity_count, bool)
-        or not isinstance(duplicate_complete_identity_count, int)
-        or duplicate_complete_identity_count < 0
-        or isinstance(holdout_overlap_count, bool)
-        or not isinstance(holdout_overlap_count, int)
-        or holdout_overlap_count < 0
+        isinstance(selected_duplicate_complete_identity_count, bool)
+        or not isinstance(selected_duplicate_complete_identity_count, int)
+        or selected_duplicate_complete_identity_count < 0
+        or isinstance(selected_holdout_overlap_count, bool)
+        or not isinstance(selected_holdout_overlap_count, int)
+        or selected_holdout_overlap_count < 0
     ):
         raise ValueError("T064 source-audit counts must be non-negative integers")
     later = len(selected.get(BUCKET_STRONG, ())) + len(selected.get(BUCKET_MEDIUM, ()))
@@ -325,8 +325,8 @@ def source_adequacy(
         later >= 128
         and anchor == 256
         and len(identities) == len(set(identities))
-        and duplicate_complete_identity_count == 0
-        and holdout_overlap_count == 0
+        and selected_duplicate_complete_identity_count == 0
+        and selected_holdout_overlap_count == 0
     )
 
 
@@ -728,8 +728,10 @@ def _validate_curriculum_manifest(payload: Mapping[str, Any]) -> None:
             "status",
             "source_count",
             "sources",
-            "duplicate_complete_identity_count",
-            "holdout_overlap_count",
+            "candidate_duplicate_complete_identity_count",
+            "candidate_holdout_exclusion_count",
+            "selected_duplicate_complete_identity_count",
+            "selected_holdout_overlap_count",
         ),
         "T064 complete source audit",
     )
@@ -740,10 +742,20 @@ def _validate_curriculum_manifest(payload: Mapping[str, Any]) -> None:
     }:
         raise ValueError("T064 complete source audit status is invalid")
     _require_non_negative_int(
-        audit["duplicate_complete_identity_count"], "T064 source audit duplicate count"
+        audit["candidate_duplicate_complete_identity_count"],
+        "T064 candidate source-audit duplicate count",
     )
     _require_non_negative_int(
-        audit["holdout_overlap_count"], "T064 source audit holdout overlap count"
+        audit["candidate_holdout_exclusion_count"],
+        "T064 candidate holdout exclusion count",
+    )
+    _require_non_negative_int(
+        audit["selected_duplicate_complete_identity_count"],
+        "T064 selected source-audit duplicate count",
+    )
+    _require_non_negative_int(
+        audit["selected_holdout_overlap_count"],
+        "T064 selected holdout overlap count",
     )
     if not isinstance(audit["sources"], list):
         raise ValueError("T064 source audit sources must be a list")
@@ -753,6 +765,19 @@ def _validate_curriculum_manifest(payload: Mapping[str, Any]) -> None:
         raise ValueError("T064 source audit source cardinality is invalid")
     for index, descriptor in enumerate(audit["sources"]):
         _validate_source_descriptor(descriptor, f"T064 source audit descriptor {index}")
+    candidate_hashes = [
+        descriptor["complete_identity_sha256"] for descriptor in audit["sources"]
+    ]
+    candidate_duplicate_count = len(candidate_hashes) - len(set(candidate_hashes))
+    if (
+        candidate_duplicate_count
+        != audit["candidate_duplicate_complete_identity_count"]
+    ):
+        raise ValueError("T064 candidate source-audit duplicate count is inconsistent")
+    if candidate_duplicate_count:
+        raise ValueError(
+            "T064 candidate source audit has duplicate complete identities"
+        )
     if audit["status"] in {"complete", "failed"}:
         _require_fields(
             audit,
@@ -803,12 +828,32 @@ def _validate_curriculum_manifest(payload: Mapping[str, Any]) -> None:
         for descriptor in payload["selected_sources"]
     ] or len(selected_hashes) != len(set(selected_hashes)):
         raise ValueError("T064 selected source order or uniqueness is invalid")
+    frozen_holdout_hashes = {
+        identity
+        for holdout in payload["frozen_holdouts"]
+        for identity in holdout["complete_identity_sha256s"]
+    }
+    candidate_holdout_exclusion_count = sum(
+        identity in frozen_holdout_hashes for identity in candidate_hashes
+    )
+    if candidate_holdout_exclusion_count != audit["candidate_holdout_exclusion_count"]:
+        raise ValueError("T064 candidate holdout exclusion count is inconsistent")
+    selected_duplicate_count = len(selected_hashes) - len(set(selected_hashes))
+    if selected_duplicate_count != audit["selected_duplicate_complete_identity_count"]:
+        raise ValueError("T064 selected source-audit duplicate count is inconsistent")
+    selected_holdout_overlap_count = sum(
+        identity in frozen_holdout_hashes for identity in selected_hashes
+    )
+    if selected_holdout_overlap_count != audit["selected_holdout_overlap_count"]:
+        raise ValueError("T064 selected holdout overlap count is inconsistent")
     if not isinstance(payload["source_adequacy"], bool):
         raise ValueError("T064 curriculum manifest source adequacy is invalid")
     if payload["source_adequacy"] != source_adequacy(
         payload["selected_buckets"],
-        duplicate_complete_identity_count=audit["duplicate_complete_identity_count"],
-        holdout_overlap_count=audit["holdout_overlap_count"],
+        selected_duplicate_complete_identity_count=(
+            audit["selected_duplicate_complete_identity_count"]
+        ),
+        selected_holdout_overlap_count=audit["selected_holdout_overlap_count"],
     ):
         raise ValueError("T064 curriculum manifest source adequacy is inconsistent")
     if audit["status"] in {"complete", "failed"}:

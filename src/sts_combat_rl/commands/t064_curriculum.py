@@ -118,15 +118,24 @@ def build_curriculum_manifest(
         holdout_identity_sha256s=holdout_identity_hashes,
     )
     selected_sources = [row for bucket in BUCKETS for row in selected[bucket]]
-    duplicate_complete_identity_count = _duplicate_count(descriptors)
-    holdout_overlap_count = sum(
+    candidate_duplicate_complete_identity_count = _duplicate_count(descriptors)
+    if candidate_duplicate_complete_identity_count:
+        raise ValueError("T064 source candidates contain duplicate complete identities")
+    candidate_holdout_exclusion_count = sum(
         descriptor["complete_identity_sha256"] in holdout_identity_hashes
         for descriptor in descriptors
     )
+    selected_duplicate_complete_identity_count = _duplicate_count(selected_sources)
+    selected_holdout_overlap_count = sum(
+        descriptor["complete_identity_sha256"] in holdout_identity_hashes
+        for descriptor in selected_sources
+    )
     adequate = source_adequacy(
         selected,
-        duplicate_complete_identity_count=duplicate_complete_identity_count,
-        holdout_overlap_count=holdout_overlap_count,
+        selected_duplicate_complete_identity_count=(
+            selected_duplicate_complete_identity_count
+        ),
+        selected_holdout_overlap_count=selected_holdout_overlap_count,
     )
     plans = (
         [
@@ -154,8 +163,14 @@ def build_curriculum_manifest(
             "status": "static_complete_selected_restore_pending",
             "source_count": len(descriptors),
             "sources": descriptors,
-            "duplicate_complete_identity_count": duplicate_complete_identity_count,
-            "holdout_overlap_count": holdout_overlap_count,
+            "candidate_duplicate_complete_identity_count": (
+                candidate_duplicate_complete_identity_count
+            ),
+            "candidate_holdout_exclusion_count": candidate_holdout_exclusion_count,
+            "selected_duplicate_complete_identity_count": (
+                selected_duplicate_complete_identity_count
+            ),
+            "selected_holdout_overlap_count": selected_holdout_overlap_count,
         },
         "selected_buckets": selected,
         "selected_sources": selected_sources,
