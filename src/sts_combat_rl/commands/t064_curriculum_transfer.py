@@ -32,8 +32,12 @@ from sts_combat_rl.sim.de_assisted_fixed_cohort_comparison import (
 from sts_combat_rl.sim.oracle_teacher import (
     OracleTeacherDataset,
     dump_oracle_teacher_dataset_jsonl,
+    load_oracle_teacher_dataset_jsonl,
 )
-from sts_combat_rl.sim.trainer_input import dump_trainer_input_dataset_jsonl
+from sts_combat_rl.sim.trainer_input import (
+    dump_trainer_input_dataset_jsonl,
+    load_trainer_input_dataset_jsonl,
+)
 from sts_combat_rl.sim.t064_curriculum import (
     BUCKETS,
     COMPACT_FILENAMES,
@@ -547,6 +551,16 @@ def build_t064_trainer_input_stage(
         teacher_source_hashes=teacher_hashes,
         trainer_source_hashes=trainer_identity_resolver(dataset),
     )
+    # This linkage is deliberately in the existing trainer-input metadata, not
+    # in a T064 sidecar.  Stage 7 can therefore reload and prove the exact
+    # selected identity order without trusting a caller-supplied report.
+    dataset = replace(
+        dataset,
+        generation_metadata={
+            **dict(getattr(dataset, "generation_metadata", {})),
+            "t064_complete_identity_order": teacher_hashes,
+        },
+    )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with output_path.open("w", encoding="utf-8", newline="\n") as stream:
         dump_trainer_input_dataset_jsonl(dataset, stream)
@@ -774,7 +788,7 @@ def validate_t044_reuse(
         or config.get("cohort_record_count") != cohort_count
     ):
         return False
-    if config.get("max_battle_steps") != 200:
+    if config.get("max_battle_steps") != 200 or config.get("run_scale") != "fixed":
         return False
     action_space = config.get("action_space")
     if (
@@ -784,10 +798,31 @@ def validate_t044_reuse(
         return False
     if not getattr(report, "evaluation_successful", False) or len(arms) != 4:
         return False
-    return all(
+    return tuple(
+        getattr(arm, "role", None) for arm in arms
+    ) == T044_CONTROLLER_ROLES and all(
         not arm.report.problems and len(arm.report.battle_results) == cohort_count
         for arm in arms
     )
+
+
+def t044_independent_arm_disposition(
+    historical_report: Any | None,
+    *,
+    frozen_cohort: Mapping[str, Any],
+) -> str:
+    """Choose a historical four-arm reuse or one clean cohort rerun.
+
+    The dependent two-arm output is never a substitute for the independent
+    baseline/scripted evidence.  A failed historical validation therefore
+    schedules precisely one all-four-arm fixed-cohort rerun for that cohort.
+    """
+
+    if historical_report is not None and validate_t044_historical_reuse(
+        historical_report, frozen_cohort=frozen_cohort
+    ):
+        return "reuse_historical_four_arm"
+    return "rerun_once_four_arm"
 
 
 def run_t064_t044_dependent_stage(
@@ -806,7 +841,7 @@ def run_t064_t044_dependent_stage(
     report_writer: Callable[
         [Path, Any], None
     ] = write_de_assisted_fixed_cohort_comparison_report,
-) -> Any:
+) -> tuple[Any, list[dict[str, Any]]]:
     """Run/merge only the two checkpoint-dependent T044 arms in 16 shards."""
 
     if cohort_kind == "assist_0":
@@ -847,11 +882,14 @@ def run_t064_t044_dependent_stage(
 
 
 def validate_t070_baseline_reuse(
-    report: Mapping[str, Any], *, cohort_identity: str
+    report: Mapping[str, Any],
+    *,
+    cohort_identity: str,
+    frozen_contract: Mapping[str, Any] | None = None,
 ) -> bool:
     """Validate the T070 baseline without treating a display label as an arm role."""
 
-    return (
+    valid = (
         report.get("schema_id") == "t070-single-arm-merged-stage-v1"
         and report.get("cohort_identity") == cohort_identity
         and report.get("cohort_record_count") == 93
@@ -861,6 +899,22 @@ def validate_t070_baseline_reuse(
         and tuple(report.get("shard_ranges", ())) == T070_T052_RANGES
         and report.get("command_passed") is True
         and not report.get("problems")
+    )
+    if not valid or frozen_contract is None:
+        return valid
+    return all(
+        report.get(field) == frozen_contract.get(field)
+        for field in (
+            "code_commit",
+            "native_commit",
+            "native_runtime_identity",
+            "controller_provenance",
+            "family",
+            "stage_name",
+            "worker_count",
+            "shard_count",
+            "effective_parallel_workers",
+        )
     )
 
 
@@ -906,6 +960,22 @@ def run_t064_t070_prior_value_stage(
 ) -> tuple[Mapping[str, Any], list[dict[str, Any]]]:
     """Route one checkpoint through the existing T070 16-shard runner/merge."""
 
+    wrapper = runner_kwargs.get("t064_wrapper")
+    if not isinstance(wrapper, Mapping):
+        raise ValueError("T064 T070 stage requires an identity-bound wrapper")
+    if (
+        wrapper.get("arm") != "prior_value"
+        or wrapper.get("native_budget") != 100
+        or wrapper.get("tree_geometry_enabled") is not False
+        or tuple(wrapper.get("shard_ranges", ())) != T070_T052_RANGES
+        or wrapper.get("worker_count") != 16
+        or wrapper.get("historical_code_commit") == wrapper.get("current_code_commit")
+        or runner_kwargs.get("code_commit") != wrapper.get("current_code_commit")
+    ):
+        raise ValueError("T064 T070 wrapper/runner contract mismatch")
+    forwarded_kwargs = {
+        key: value for key, value in runner_kwargs.items() if key != "t064_wrapper"
+    }
     refuse_overwrite(merged_output_path)
     shard_dir.mkdir(parents=True, exist_ok=True)
     ranges = T070_T052_RANGES
@@ -914,7 +984,7 @@ def run_t064_t070_prior_value_stage(
         output = shard_dir / f"shard-{index:02d}.json"
         refuse_overwrite(output)
         return shard_runner(
-            **runner_kwargs,
+            **forwarded_kwargs,
             stage_name="t064_prior_value",
             arm="prior_value",
             family="primary",
@@ -1045,6 +1115,9 @@ def validate_t044_dependent_report(
     """Validate a new T064 two-arm output separately from reusable historical arms."""
 
     config = getattr(report, "comparison_config", {})
+    expected_ranges = (
+        T044_ASSIST_0_RANGES if cohort_count == 21 else T044_ASSIST_HP50_RANGES
+    )
     return (
         getattr(report, "evaluation_successful", False)
         and tuple(arm.role for arm in getattr(report, "arms", ()))
@@ -1052,11 +1125,146 @@ def validate_t044_dependent_report(
         and config.get("cohort_identity") == cohort_identity
         and config.get("cohort_record_count") == cohort_count
         and config.get("max_battle_steps") == 200
+        and config.get("run_scale") == "fixed"
+        and config.get("shard_count") == 16
+        and tuple(config.get("shard_ranges", ())) == expected_ranges
+        and isinstance(config.get("action_space"), Mapping)
+        and config["action_space"].get("include_potions") is False
         and all(
             len(arm.report.battle_results) == cohort_count and not arm.report.problems
             for arm in report.arms
         )
     )
+
+
+def _validate_teacher_against_selected_manifest(
+    dataset: OracleTeacherDataset, manifest: Mapping[str, Any]
+) -> None:
+    """Reloaded T043 rows must be the 460 selected identities in order."""
+
+    selected = _selected_sources(manifest)
+    if len(selected) != 460 or len(dataset.records) != len(selected):
+        raise ValueError("T064 teacher does not contain exactly 460 selected rows")
+    expected_hashes = [item.get("complete_identity_sha256") for item in selected]
+    if len(set(expected_hashes)) != len(expected_hashes) or not all(
+        isinstance(value, str) and value for value in expected_hashes
+    ):
+        raise ValueError("T064 selected manifest identities are invalid")
+    for index, (row, expected) in enumerate(
+        zip(dataset.records, selected, strict=True)
+    ):
+        if (
+            row.row_index != index
+            or row.source_checkpoint_id != expected.get("source_checkpoint_id")
+            or row.source_seed != expected.get("source_seed")
+            or row.source_run_id != expected.get("source_run_id")
+            or row.source_battle_index != expected.get("source_battle_index")
+            or row.source_distribution_kind != expected.get("distribution_kind")
+            or row.checkpoint_information_regime
+            != expected.get("checkpoint_information_regime")
+            or not row.soft_visit_target
+        ):
+            raise ValueError(f"T064 teacher identity/target mismatch at row {index}")
+    if (
+        dataset.information_regime != "full_simulator_state_oracle_like"
+        or dataset.action_space_config.get("include_potions") is not False
+        or dataset.problems
+    ):
+        raise ValueError("T064 teacher configuration is not the frozen T043 contract")
+
+
+def _validate_trainer_against_selected_manifest(
+    dataset: Any, manifest: Mapping[str, Any]
+) -> None:
+    """Require bridge metadata rather than letting a report repopulate order."""
+
+    expected = [
+        item.get("complete_identity_sha256") for item in _selected_sources(manifest)
+    ]
+    recorded = getattr(dataset, "generation_metadata", {}).get(
+        "t064_complete_identity_order"
+    )
+    if recorded != expected or len(dataset.records) == 0 or dataset.problems:
+        raise ValueError("T064 trainer-input identity linkage/config is invalid")
+
+
+def _validate_frozen_manifest_plans(manifest: Mapping[str, Any]) -> None:
+    """Rebuild all four plans so summary hashes cannot be forged or collapsed."""
+
+    selected = manifest.get("selected_buckets")
+    stored = manifest.get("batch_plans")
+    if not isinstance(selected, Mapping) or not isinstance(stored, list):
+        raise ValueError("T064 manifest batch plans are missing")
+    generated = [
+        build_ordered_batch_plan(selected, seed=seed, arm=arm)
+        for arm, seed in TRAINING_RUN_ORDER
+    ]
+    summaries = [
+        {key: value for key, value in plan.items() if key != "ordered_batches"}
+        for plan in generated
+    ]
+    if stored != summaries:
+        raise ValueError("T064 manifest plan/phase/exposure hash mismatch")
+    keys = [(plan["arm"], plan["seed"]) for plan in generated]
+    if keys != list(TRAINING_RUN_ORDER) or len(set(keys)) != 4:
+        raise ValueError("T064 manifest plans have duplicate/collapsed run keys")
+    validate_exposure_parity(generated)
+
+
+def validate_t070_prior_value_report(
+    report: Mapping[str, Any],
+    *,
+    checkpoint: Mapping[str, Any],
+    frozen_t070: Mapping[str, Any],
+) -> None:
+    """Validate every persisted T070 invariant needed by a T064 wrapper.
+
+    ``frozen_t070`` is a separately hashed external input, so none of these
+    expected values can be copied out of the report being accepted.
+    """
+
+    expected_ranges = list(T070_T052_RANGES)
+    required = {
+        "schema_id": "t070-single-arm-merged-stage-v1",
+        "task_id": "T070",
+        "stage_name": "t064_prior_value",
+        "arm": "prior_value",
+        "family": "primary",
+        "native_budget": 100,
+        "cohort_record_count": 93,
+        "worker_count": 16,
+        "shard_count": 16,
+        "effective_parallel_workers": 16,
+    }
+    for field, value in required.items():
+        if report.get(field) != value:
+            raise ValueError(f"T070 prior_value {field} mismatch")
+    if (
+        report.get("shard_ranges") != expected_ranges
+        or report.get("problems")
+        or frozen_t070.get("tree_geometry_enabled") is not False
+        or frozen_t070.get("projection_mode") != "accepted_t069_search_scope_projection"
+    ):
+        raise ValueError("T070 prior_value ranges/problems mismatch")
+    if report.get("command_passed") is not True:
+        raise ValueError("T070 prior_value command did not pass")
+    for field in (
+        "cohort_identity",
+        "native_commit",
+        "native_runtime_identity",
+        "controller_provenance",
+    ):
+        if report.get(field) != frozen_t070.get(field):
+            raise ValueError(f"T070 prior_value frozen {field} mismatch")
+    if report.get("code_commit") != frozen_t070.get("current_code_commit"):
+        raise ValueError("T070 prior_value current wrapper code mismatch")
+    provenance = report.get("controller_provenance")
+    if not isinstance(provenance, Mapping) or any(
+        key not in provenance for key in ("schema_version", "kind", "name", "config")
+    ):
+        raise ValueError("T070 prior_value controller semantics are incomplete")
+    if frozen_t070.get("checkpoint") != checkpoint:
+        raise ValueError("T070 prior_value wrapper checkpoint mismatch")
 
 
 def aggregate_t064_stage7_from_artifacts(
@@ -1128,20 +1336,26 @@ def aggregate_t064_stage7_from_artifacts(
                 problems.append(str(exc))
     if not teacher_path.is_file() or not trainer_input_path.is_file():
         problems.append("teacher or trainer-input artifact missing")
+    else:
+        try:
+            with teacher_path.open(encoding="utf-8") as stream:
+                _validate_teacher_against_selected_manifest(
+                    load_oracle_teacher_dataset_jsonl(stream), manifest
+                )
+            with trainer_input_path.open(encoding="utf-8") as stream:
+                _validate_trainer_against_selected_manifest(
+                    load_trainer_input_dataset_jsonl(stream), manifest
+                )
+        except (OSError, ValueError) as exc:
+            problems.append(f"teacher/trainer schema/linkage mismatch: {exc}")
     runs = training.get("runs", [])
     if [(row.get("arm"), row.get("seed")) for row in runs] != list(TRAINING_RUN_ORDER):
         problems.append("aggregate training report lacks four frozen runs")
     else:
-        plans = manifest.get("batch_plans", [])
-        if [(plan.get("arm"), plan.get("seed")) for plan in plans] != list(
-            TRAINING_RUN_ORDER
-        ):
-            problems.append("manifest lacks four frozen batch plans")
-        else:
-            try:
-                validate_exposure_parity(plans)
-            except (KeyError, TypeError, ValueError) as exc:
-                problems.append(f"manifest exposure parity failed: {exc}")
+        try:
+            _validate_frozen_manifest_plans(manifest)
+        except (KeyError, TypeError, ValueError) as exc:
+            problems.append(f"manifest frozen plan validation failed: {exc}")
         for run in runs:
             checkpoint = run.get("checkpoint", {})
             path = Path(str(checkpoint.get("path", "")))
@@ -1169,6 +1383,44 @@ def aggregate_t064_stage7_from_artifacts(
         "static_t044_assist_0_model_guided_wins": 0,
     }
     t052_rows: dict[tuple[str, int], list[Mapping[str, Any]]] = {}
+    t044_cohorts = frozen_inputs.get("t044_cohorts")
+    frozen_t070 = frozen_inputs.get("t070")
+    if not isinstance(t044_cohorts, Mapping):
+        problems.append("external frozen T044 cohort contracts missing")
+    if not isinstance(frozen_t070, Mapping):
+        problems.append("external frozen T070 contract missing")
+    else:
+        for label in ("manifest", "baseline", "cohort"):
+            expected = frozen_t070.get(label)
+            if not isinstance(expected, Mapping):
+                problems.append(f"external frozen T070 {label} identity missing")
+                continue
+            candidate = Path(str(expected.get("path", "")))
+            try:
+                validate_external_frozen_identity(
+                    candidate, expected, label=f"t070_{label}"
+                )
+                references.append(candidate)
+            except ValueError as exc:
+                problems.append(str(exc))
+        baseline_identity = frozen_t070.get("baseline")
+        baseline_contract = frozen_t070.get("baseline_contract")
+        if isinstance(baseline_identity, Mapping) and isinstance(
+            baseline_contract, Mapping
+        ):
+            baseline_path = Path(str(baseline_identity.get("path", "")))
+            try:
+                baseline_report = json.loads(baseline_path.read_text(encoding="utf-8"))
+                if not validate_t070_baseline_reuse(
+                    baseline_report,
+                    cohort_identity=str(frozen_t070.get("cohort_identity", "")),
+                    frozen_contract=baseline_contract,
+                ):
+                    problems.append("external frozen T070 baseline contract mismatch")
+            except (OSError, ValueError, json.JSONDecodeError) as exc:
+                problems.append(f"external frozen T070 baseline unreadable: {exc}")
+        else:
+            problems.append("external frozen T070 baseline contract missing")
     for key in TRAINING_RUN_ORDER:
         cohort_paths = t044_paths.get(key)
         t070_path = t070_paths.get(key)
@@ -1185,11 +1437,17 @@ def aggregate_t064_stage7_from_artifacts(
             references.append(path)
             with path.open(encoding="utf-8") as stream:
                 report = load_de_assisted_fixed_cohort_comparison_jsonl(stream)
-            expected_count = 21 if cohort_name == "assist_0" else 38
-            if not validate_t044_reuse(
+            frozen_cohort = (
+                t044_cohorts.get(cohort_name)
+                if isinstance(t044_cohorts, Mapping)
+                else None
+            )
+            if not isinstance(
+                frozen_cohort, Mapping
+            ) or not validate_t044_dependent_report(
                 report,
-                cohort_identity=report.cohort_identity,
-                cohort_count=expected_count,
+                cohort_identity=str(frozen_cohort.get("identity", "")),
+                cohort_count=int(frozen_cohort.get("record_count", -1)),
             ):
                 problems.append(f"T044 frozen contract mismatch: {path}")
                 continue
@@ -1215,13 +1473,32 @@ def aggregate_t064_stage7_from_artifacts(
             continue
         references.append(t070_path)
         report = json.loads(t070_path.read_text(encoding="utf-8"))
-        if (
-            report.get("arm") != "prior_value"
-            or report.get("native_budget") != 100
-            or report.get("command_passed") is not True
-            or report.get("problems")
-        ):
-            problems.append(f"T070 frozen contract mismatch: {t070_path}")
+        checkpoint = next(
+            (
+                row.get("checkpoint", {})
+                for row in runs
+                if (row.get("arm"), row.get("seed")) == key
+            ),
+            {},
+        )
+        try:
+            if not isinstance(frozen_t070, Mapping):
+                raise ValueError("external T070 contract missing")
+            wrappers = frozen_t070.get("wrappers")
+            wrapper_key = f"{key[0]}:{key[1]}"
+            wrapper = (
+                wrappers.get(wrapper_key) if isinstance(wrappers, Mapping) else None
+            )
+            if not isinstance(wrapper, Mapping):
+                raise ValueError("external T070 checkpoint wrapper missing")
+            contract = {**dict(frozen_t070), **dict(wrapper)}
+            validate_t070_prior_value_report(
+                report,
+                checkpoint=checkpoint,
+                frozen_t070=contract,
+            )
+        except ValueError as exc:
+            problems.append(f"T070 frozen contract mismatch: {t070_path}: {exc}")
             continue
         rows = report.get("arm_report", {}).get("records", [])
         if not isinstance(rows, list) or len(rows) != 93:

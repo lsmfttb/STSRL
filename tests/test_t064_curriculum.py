@@ -4,7 +4,10 @@ import hashlib
 from io import StringIO
 import json
 from dataclasses import replace
+import os
 from pathlib import Path
+import subprocess
+import sys
 from types import SimpleNamespace
 import threading
 
@@ -557,6 +560,57 @@ def test_source_inadequacy_skips_batch_plans_and_forms_valid_case_b(
         diagnostics={},
     )
     assert decision["terminal_case"] == "Case B"
+    repository = Path(__file__).resolve().parents[1]
+    environment = dict(os.environ)
+    environment["PYTHONPATH"] = str(repository / "src")
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(repository / "scripts" / "t064_curriculum_transfer.py"),
+            "--dry-run-manifest",
+            str(tmp_path / "t064-curriculum-manifest.json"),
+            "--code-commit",
+            "d" * 40,
+            "--stage",
+            "stage2_teacher",
+            "--mock-execute",
+            "--attempt-root",
+            str(tmp_path / "mock-attempt"),
+        ],
+        cwd=repository,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    payload = json.loads(completed.stdout)
+    assert len(payload["shards"]) == 16
+    child = subprocess.run(
+        [
+            sys.executable,
+            str(repository / "scripts" / "t064_curriculum_transfer.py"),
+            "--dry-run-manifest",
+            str(tmp_path / "t064-curriculum-manifest.json"),
+            "--code-commit",
+            "d" * 40,
+            "--stage",
+            "stage2_teacher",
+            "--execute-command",
+            f'"{sys.executable}" -c "import sys; raise SystemExit(0)"',
+            "--attempt-root",
+            str(tmp_path / "command-attempt"),
+        ],
+        cwd=repository,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert child.returncode == 0, child.stderr
+    attempt = Path(json.loads(child.stdout)["attempt"])
+    assert len(list(attempt.glob("shard-*"))) == 16
+    assert len(list((attempt / "logs").glob("shard-*.log"))) == 16
 
 
 def test_empty_selected_source_pool_is_valid_for_complete_source_inadequacy() -> None:
@@ -618,17 +672,18 @@ def test_t044_t070_reuse_contracts_use_persisted_roles_and_frozen_ranges() -> No
         "cohort_identity": "cohort",
         "cohort_record_count": 21,
         "max_battle_steps": 200,
+        "run_scale": "fixed",
         "action_space": {"include_potions": False},
     }
 
-    def arm():
+    def arm(role):
         return SimpleNamespace(
-            report=SimpleNamespace(problems=[], battle_results=[1] * 21)
+            role=role, report=SimpleNamespace(problems=[], battle_results=[1] * 21)
         )
 
     report = SimpleNamespace(
         comparison_config=config,
-        arms=tuple(arm() for _ in range(4)),
+        arms=tuple(arm(role) for role in transfer_command.T044_CONTROLLER_ROLES),
         evaluation_successful=True,
     )
     assert transfer_command.validate_t044_reuse(
@@ -637,6 +692,22 @@ def test_t044_t070_reuse_contracts_use_persisted_roles_and_frozen_ranges() -> No
     config["controller_roles"]["a"] = "display label only"
     assert not transfer_command.validate_t044_reuse(
         report, cohort_identity="cohort", cohort_count=21
+    )
+    config["controller_roles"]["a"] = transfer_command.T044_CONTROLLER_ROLES[0]
+    assert (
+        transfer_command.t044_independent_arm_disposition(
+            report,
+            frozen_cohort={"identity": "cohort", "record_count": 21},
+        )
+        == "reuse_historical_four_arm"
+    )
+    config["max_battle_steps"] = 199
+    assert (
+        transfer_command.t044_independent_arm_disposition(
+            report,
+            frozen_cohort={"identity": "cohort", "record_count": 21},
+        )
+        == "rerun_once_four_arm"
     )
     baseline = {
         "schema_id": "t070-single-arm-merged-stage-v1",
@@ -760,6 +831,16 @@ def test_t070_prior_value_stage_dispatches_all_real_runner_arguments(
         runner_kwargs={
             "cohort_path": Path("cohort.jsonl"),
             "adapter_factory": object(),
+            "code_commit": "a" * 40,
+            "t064_wrapper": {
+                "arm": "prior_value",
+                "native_budget": 100,
+                "tree_geometry_enabled": False,
+                "shard_ranges": list(transfer_command.T070_T052_RANGES),
+                "worker_count": 16,
+                "historical_code_commit": "b" * 40,
+                "current_code_commit": "a" * 40,
+            },
         },
         shard_dir=tmp_path / "shards",
         log_dir=tmp_path / "logs",
@@ -771,6 +852,7 @@ def test_t070_prior_value_stage_dispatches_all_real_runner_arguments(
         transfer_command.T070_T052_RANGES
     )
     assert all(call["arm"] == "prior_value" for call in calls)
+    assert all("t064_wrapper" not in call for call in calls)
 
 
 def test_stage2_to_7_dry_plan_has_exact_worker_range_and_stage_inventory() -> None:
@@ -812,6 +894,30 @@ def test_actual_sixteen_worker_dispatch_writes_per_shard_logs(tmp_path: Path) ->
     assert len(thread_ids) == 16
     assert [record["return_code"] for record in records] == [0] * 16
     assert all(Path(record["log_path"]).is_file() for record in records)
+
+
+def test_attempt_directories_are_isolated_and_never_promote_failed_shards(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "artifact-root"
+    first = transfer_command.prepare_t064_attempt(
+        root, stage="stage5_t044", code_commit="a" * 40
+    )
+    second = transfer_command.prepare_t064_attempt(
+        root, stage="stage5_t044", code_commit="a" * 40
+    )
+    assert first != second
+    assert first.name.endswith("-000") and second.name.endswith("-001")
+
+    def fails(_index: int, _record_range: str):
+        raise RuntimeError("intentional mock shard failure")
+
+    with pytest.raises(RuntimeError, match="cannot contribute"):
+        transfer_command.dispatch_t064_shards(
+            ranges=contiguous_ranges(460), log_dir=first / "logs", worker=fails
+        )
+    assert not (root / "promoted-output").exists()
+    assert len(list((first / "logs").glob("shard-*.log"))) == 16
 
 
 def test_stage_summary_carries_retained_prior_attempts_without_log_index() -> None:
