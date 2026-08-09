@@ -321,7 +321,13 @@ def test_t070_schema_contract_covers_all_required_outputs() -> None:
 
 
 def test_t070_checkpoint_identity_can_be_supplied_by_t064_manifest(tmp_path) -> None:
-    checkpoint = {"path": "checkpoint.pt", "sha256": "a" * 64, "bytes": 123}
+    checkpoint_path = tmp_path / "checkpoint.pt"
+    checkpoint_path.write_bytes(b"checkpoint")
+    checkpoint = {
+        "path": str(checkpoint_path),
+        "sha256": hashlib.sha256(checkpoint_path.read_bytes()).hexdigest(),
+        "bytes": checkpoint_path.stat().st_size,
+    }
     historical = tmp_path / "t070.json"
     historical.write_text(
         json.dumps(

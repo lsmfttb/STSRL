@@ -16,6 +16,7 @@ import sys
 import sysconfig
 from typing import Any
 
+from sts_combat_rl.artifact_paths import resolve_runtime_artifact_path
 from sts_combat_rl.commands.t062_battle_search_v2 import (
     _evaluate_t062_arm,
     _fixed_report_summary,
@@ -225,7 +226,15 @@ def expected_checkpoint_identity_from_stage_manifest(
         or expected_bytes < 0
     ):
         raise ValueError("stage manifest checkpoint byte count is invalid")
-    return {"path": identity.get("path"), "sha256": sha256, "bytes": expected_bytes}
+    runtime_identity = resolve_runtime_artifact_path(identity.get("path"))
+    runtime_path = Path(runtime_identity["runtime_path"])
+    if _sha256(runtime_path) != sha256 or runtime_path.stat().st_size != expected_bytes:
+        raise ValueError("stage manifest checkpoint runtime identity mismatch")
+    return {
+        "path": identity.get("path"),
+        "sha256": sha256,
+        "bytes": expected_bytes,
+    }
 
 
 def _t070_frozen_contract_from_stage_manifest(
@@ -269,7 +278,8 @@ def _t070_frozen_contract_from_stage_manifest(
         r"[0-9a-f]{40}", outer_code_commit
     ):
         raise ValueError("T064 stage manifest code commit is invalid")
-    resolved = Path(frozen_path)
+    runtime_identity = resolve_runtime_artifact_path(frozen_path)
+    resolved = Path(runtime_identity["runtime_path"])
     if (
         not resolved.is_file()
         or _sha256(resolved) != expected_sha256

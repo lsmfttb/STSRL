@@ -13,6 +13,7 @@ from typing import Any
 from sts_combat_rl.commands.t064_curriculum import (
     finalize_source_audit,
     load_selected_source_pool,
+    verified_selected_source_runtime_identities,
 )
 from sts_combat_rl.sim.assisted_source_generation import (
     AssistedSourcePoolArtifact,
@@ -21,6 +22,7 @@ from sts_combat_rl.sim.assisted_source_generation import (
 )
 from sts_combat_rl.sim.battle_start_pool import NaturalBattleStartPool
 from sts_combat_rl.sim.lightspeed import LightSpeedAdapter
+from sts_combat_rl.sim.t064_curriculum import validate_compact_document
 
 
 _POOL: NaturalBattleStartPool | None = None
@@ -90,8 +92,12 @@ def main() -> int:
     if args.workers != 16:
         raise SystemExit("T064 source audit requires exactly 16 effective workers")
     payload = json.loads(args.manifest.read_text(encoding="utf-8"))
+    validate_compact_document(payload)
     global _POOL, _SELECTED
-    _POOL, _SELECTED = load_selected_source_pool(payload)
+    runtime_source_identities = verified_selected_source_runtime_identities(payload)
+    _POOL, _SELECTED = load_selected_source_pool(
+        payload, runtime_source_identities=runtime_source_identities
+    )
     ranges = payload.get("teacher_shard_ranges")
     if (
         not isinstance(ranges, list)
@@ -121,6 +127,13 @@ def main() -> int:
     args.log.parent.mkdir(parents=True, exist_ok=True)
     with args.log.open("w", encoding="utf-8", newline="\n") as stream:
         stream.write(f"workers=16\nshards=16\nranges={','.join(ranges)}\n")
+        stream.write(
+            "runtime_source_identities="
+            + json.dumps(
+                runtime_source_identities, sort_keys=True, separators=(",", ":")
+            )
+            + "\n"
+        )
         stream.write(f"wall_clock_seconds={wall:.6f}\n")
         for shard in shard_results:
             stream.write(json.dumps(shard, sort_keys=True, separators=(",", ":")))

@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from sts_combat_rl.artifact_paths import resolve_runtime_artifact_path
 from sts_combat_rl.sim.assisted_source_generation import (
     ASSISTED_SOURCE_POOL_FORMAT_VERSION,
     ASSISTED_SOURCE_POOL_SCHEMA_ID,
@@ -242,6 +243,8 @@ def stream_assisted_pool_records(
 
 def load_selected_source_pool(
     manifest: Mapping[str, Any],
+    *,
+    runtime_source_identities: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> tuple[NaturalBattleStartPool, list[dict[str, Any]]]:
     """Load only manifest-selected records in the exact frozen order."""
 
@@ -258,8 +261,18 @@ def load_selected_source_pool(
         )
     records_by_key: dict[tuple[str, int], BattleStartCheckpointRecord] = {}
     source_controller: dict[str, Any] | None = None
+    verified_identities = (
+        dict(runtime_source_identities)
+        if runtime_source_identities is not None
+        else verified_selected_source_runtime_identities(manifest)
+    )
     for source_path, indices in wanted_by_path.items():
-        path = Path(source_path)
+        runtime_identity = verified_identities.get(source_path)
+        if not isinstance(runtime_identity, Mapping):
+            raise ValueError("T064 selected source runtime identity is missing")
+        if runtime_identity.get("persistent_path") != source_path:
+            raise ValueError("T064 selected source persistent path is inconsistent")
+        path = Path(runtime_identity["runtime_path"])
         with path.open("r", encoding="utf-8") as stream:
             for raw_line in stream:
                 row = json.loads(raw_line)
@@ -297,6 +310,59 @@ def load_selected_source_pool(
         records=ordered_records,
     )
     return pool, selected
+
+
+def verified_selected_source_runtime_identities(
+    manifest: Mapping[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """Resolve and rehash selected source files without changing stored paths."""
+
+    raw_selected = manifest.get("selected_sources")
+    input_artifacts = manifest.get("input_artifacts")
+    if not isinstance(raw_selected, list):
+        raise ValueError("T064 manifest has no selected sources")
+    if raw_selected and not isinstance(input_artifacts, Mapping):
+        raise ValueError("T064 selected source audit lacks input artifact identities")
+    identities_by_path = (
+        {
+            str(identity.get("path")): identity
+            for identity in input_artifacts.values()
+            if isinstance(identity, Mapping) and isinstance(identity.get("path"), str)
+        }
+        if isinstance(input_artifacts, Mapping)
+        else {}
+    )
+    verified: dict[str, dict[str, Any]] = {}
+    for descriptor in raw_selected:
+        if not isinstance(descriptor, Mapping):
+            raise ValueError("T064 selected source descriptor is invalid")
+        source_path = descriptor.get("source_path")
+        if not isinstance(source_path, str):
+            raise ValueError("T064 selected source path is invalid")
+        if source_path in verified:
+            continue
+        identity = identities_by_path.get(source_path)
+        if not isinstance(identity, Mapping):
+            raise ValueError("T064 selected source path lacks a frozen input identity")
+        runtime_identity = resolve_runtime_artifact_path(source_path)
+        runtime_path = Path(runtime_identity["runtime_path"])
+        expected_sha256 = identity.get("sha256")
+        expected_bytes = identity.get("bytes")
+        if (
+            not isinstance(expected_sha256, str)
+            or len(expected_sha256) != 64
+            or isinstance(expected_bytes, bool)
+            or not isinstance(expected_bytes, int)
+            or runtime_path.stat().st_size != expected_bytes
+            or _sha256(runtime_path) != expected_sha256
+        ):
+            raise ValueError("T064 selected source runtime identity mismatch")
+        verified[source_path] = {
+            **runtime_identity,
+            "sha256": expected_sha256,
+            "bytes": expected_bytes,
+        }
+    return verified
 
 
 def finalize_source_audit(
