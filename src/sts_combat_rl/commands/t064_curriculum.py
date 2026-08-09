@@ -118,11 +118,26 @@ def build_curriculum_manifest(
         holdout_identity_sha256s=holdout_identity_hashes,
     )
     selected_sources = [row for bucket in BUCKETS for row in selected[bucket]]
-    plans = [
-        build_ordered_batch_plan(selected, seed=seed, arm=arm)
-        for arm, seed in TRAINING_RUN_ORDER
-    ]
-    validate_exposure_parity(plans)
+    duplicate_complete_identity_count = _duplicate_count(descriptors)
+    holdout_overlap_count = sum(
+        descriptor["complete_identity_sha256"] in holdout_identity_hashes
+        for descriptor in descriptors
+    )
+    adequate = source_adequacy(
+        selected,
+        duplicate_complete_identity_count=duplicate_complete_identity_count,
+        holdout_overlap_count=holdout_overlap_count,
+    )
+    plans = (
+        [
+            build_ordered_batch_plan(selected, seed=seed, arm=arm)
+            for arm, seed in TRAINING_RUN_ORDER
+        ]
+        if adequate
+        else []
+    )
+    if plans:
+        validate_exposure_parity(plans)
     plan_summaries = [
         {key: value for key, value in plan.items() if key != "ordered_batches"}
         for plan in plans
@@ -139,27 +154,18 @@ def build_curriculum_manifest(
             "status": "static_complete_selected_restore_pending",
             "source_count": len(descriptors),
             "sources": descriptors,
-            "duplicate_complete_identity_count": _duplicate_count(descriptors),
-            "holdout_overlap_count": sum(
-                descriptor["complete_identity_sha256"] in holdout_identity_hashes
-                for descriptor in descriptors
-            ),
+            "duplicate_complete_identity_count": duplicate_complete_identity_count,
+            "holdout_overlap_count": holdout_overlap_count,
         },
         "selected_buckets": selected,
         "selected_sources": selected_sources,
         "selected_bucket_counts": {bucket: len(selected[bucket]) for bucket in BUCKETS},
-        "source_adequacy": source_adequacy(
-            selected,
-            duplicate_complete_identity_count=_duplicate_count(descriptors),
-            holdout_overlap_count=sum(
-                descriptor["complete_identity_sha256"] in holdout_identity_hashes
-                for descriptor in descriptors
-            ),
-        ),
+        "source_adequacy": adequate,
         "teacher_shard_ranges": list(contiguous_ranges(len(selected_sources))),
         "teacher_worker_count": 16,
         "batch_plans": plan_summaries,
-        "exposure_parity": True,
+        "batch_plan_status": "complete" if adequate else "not_run_source_inadequate",
+        "exposure_parity": True if adequate else None,
         "t070_stage_manifest": None,
         "problems": [],
     }

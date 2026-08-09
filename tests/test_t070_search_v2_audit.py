@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 from pathlib import Path
 import os
@@ -403,6 +404,7 @@ def test_t070_stage_validation_accepts_identity_bound_t064_checkpoint_wrapper(
         json.dumps(
             {
                 "schema_id": "t064-curriculum-manifest-v1",
+                "code_commit": "b" * 40,
                 "t070_stage_manifest": {
                     "frozen_t070_manifest": identity(frozen),
                     "checkpoint": identity(new_checkpoint),
@@ -413,7 +415,7 @@ def test_t070_stage_validation_accepts_identity_bound_t064_checkpoint_wrapper(
     )
     _, ranges = validate_t070_frozen_stage(
         wrapper,
-        code_commit="a" * 40,
+        code_commit="b" * 40,
         stage_name="baseline-0100",
         arm="baseline",
         family="shared",
@@ -426,6 +428,153 @@ def test_t070_stage_validation_accepts_identity_bound_t064_checkpoint_wrapper(
         source_verifier_path=verifier,
     )
     assert ranges == PRIMARY_RANGES
+    _, direct_ranges = validate_t070_frozen_stage(
+        frozen,
+        code_commit="a" * 40,
+        stage_name="baseline-0100",
+        arm="baseline",
+        family="shared",
+        budget=100,
+        range_kind="primary",
+        tree_geometry=False,
+        cohort_path=cohort,
+        checkpoint_path=old_checkpoint,
+        source_manifest_path=source_manifest,
+        source_verifier_path=verifier,
+    )
+    assert direct_ranges == PRIMARY_RANGES
+
+
+def test_t070_shard_runner_routes_t064_wrapper_through_checkout_and_preflight(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    code_commit = "b" * 40
+    historical_code_commit = "a" * 40
+    cohort = tmp_path / "cohort.jsonl"
+    checkpoint = tmp_path / "checkpoint.pt"
+    for path, content in ((cohort, b"cohort"), (checkpoint, b"checkpoint")):
+        path.write_bytes(content)
+
+    def identity(path: Path) -> dict[str, object]:
+        return {
+            "path": str(path),
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            "bytes": path.stat().st_size,
+        }
+
+    source_manifest = Path("docs/sts_lightspeed_source_manifest.json")
+    verifier = Path("scripts/verify_lightspeed_source.sh")
+    frozen = tmp_path / "historical-frozen.json"
+    frozen.write_text(
+        json.dumps(
+            {
+                "schema_id": "t070-frozen-experiment-manifest-v1",
+                "code_commit": historical_code_commit,
+                "native_commit": NATIVE_COMMIT,
+                "command_passed": True,
+                "input_identities": {
+                    "t052_fixed_cohort": identity(cohort),
+                    "t043_checkpoint": identity(checkpoint),
+                    "sts_lightspeed_source_manifest": identity(source_manifest),
+                    "sts_lightspeed_source_verifier": identity(verifier),
+                },
+                "primary_stage_inventory": [
+                    {
+                        "stage_name": "baseline-0100",
+                        "arm": "baseline",
+                        "family": "shared",
+                        "native_budget": 100,
+                        "tree_geometry_enabled": False,
+                    }
+                ],
+                "primary_shard_ranges": list(PRIMARY_RANGES),
+                "primary_worker_count": 16,
+            }
+        ),
+        encoding="utf-8",
+    )
+    wrapper = tmp_path / "t064-wrapper.json"
+    wrapper.write_text(
+        json.dumps(
+            {
+                "schema_id": "t064-curriculum-manifest-v1",
+                "code_commit": code_commit,
+                "t070_stage_manifest": {
+                    "frozen_t070_manifest": identity(frozen),
+                    "checkpoint": identity(checkpoint),
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    script_path = Path("scripts/run_t070_search_stage_shard.py")
+    spec = importlib.util.spec_from_file_location("t070_shard_runner_test", script_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    checkout_calls: list[str] = []
+    preflight_calls: list[str] = []
+    monkeypatch.setattr(
+        module,
+        "verify_exact_git_checkout",
+        lambda _root, commit: checkout_calls.append(commit),
+    )
+    monkeypatch.setattr(
+        module,
+        "validate_t070_preflight",
+        lambda _path, **kwargs: (
+            preflight_calls.append(kwargs["code_commit"])
+            or {"native_runtime_identity": {"schema_id": "fixture"}}
+        ),
+    )
+    monkeypatch.setattr(
+        module, "build_torch_guidance_scorer_from_checkpoint", lambda _path: object()
+    )
+    monkeypatch.setattr(module, "BattleSearchV2Controller", lambda **kwargs: kwargs)
+    monkeypatch.setattr(
+        module, "run_single_arm_shard", lambda **kwargs: {"command_passed": True}
+    )
+    output = tmp_path / "result.json"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            str(script_path),
+            "--cohort",
+            str(cohort),
+            "--checkpoint",
+            str(checkpoint),
+            "--frozen-manifest",
+            str(wrapper),
+            "--native-preflight",
+            str(tmp_path / "preflight.json"),
+            "--native-checkout",
+            str(tmp_path / "native"),
+            "--native-build-root",
+            str(tmp_path / "build"),
+            "--output",
+            str(output),
+            "--code-commit",
+            code_commit,
+            "--stage-name",
+            "baseline-0100",
+            "--arm",
+            "baseline",
+            "--family",
+            "shared",
+            "--budget",
+            "100",
+            "--record-range",
+            "0:6",
+            "--shard-index",
+            "0",
+            "--range-kind",
+            "primary",
+        ],
+    )
+    assert module.main() == 0
+    assert checkout_calls == [code_commit]
+    assert preflight_calls == [code_commit]
 
 
 def test_t070_retention_has_per_file_command_and_compatibility(

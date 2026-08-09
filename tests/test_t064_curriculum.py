@@ -7,6 +7,7 @@ from dataclasses import replace
 
 import pytest
 
+from sts_combat_rl.commands import t064_curriculum as curriculum_command
 from sts_combat_rl.sim.battle_start_pool import BattleStartCheckpointRecord
 from sts_combat_rl.sim.t064_curriculum import (
     ARM_CURRICULUM,
@@ -302,3 +303,71 @@ def test_compact_documents_fail_closed_on_required_fields() -> None:
         validate_compact_document(
             {"schema_id": "t064-transfer-decision-v1", "format_version": 1}
         )
+
+
+def test_source_inadequacy_skips_batch_plans_and_forms_valid_case_b(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pool_paths = {
+        name: tmp_path / f"{name}.jsonl"
+        for name in (
+            "assist_0",
+            "assist_hp50",
+            "assist_hp50_potion_elite_boss",
+            "assist_hp75_potion",
+        )
+    }
+    for path in (
+        *pool_paths.values(),
+        tmp_path / "scale.json",
+        tmp_path / "initial.pt",
+    ):
+        path.write_bytes(b"fixture")
+
+    def fake_identity(path, expected_sha256):
+        return {
+            "path": str(path),
+            "sha256": expected_sha256,
+            "bytes": path.stat().st_size,
+        }
+
+    def fake_pool(path, *, component):
+        rows = (
+            [_descriptor(component, f"{len(component):064x}", act=1)]
+            if component == "assist_0"
+            else []
+        )
+        return {
+            "schema_id": "assisted-complete-run-source-pool-v1",
+            "format_version": 1,
+            "record_count": len(rows),
+        }, rows
+
+    monkeypatch.setattr(curriculum_command, "_identity", fake_identity)
+    monkeypatch.setattr(curriculum_command, "stream_assisted_pool_records", fake_pool)
+    monkeypatch.setattr(
+        curriculum_command,
+        "load_fixed_cohort_jsonl",
+        lambda _stream: type("Cohort", (), {"records": ()})(),
+    )
+    manifest = curriculum_command.build_curriculum_manifest(
+        pool_paths=pool_paths,
+        pool_sha256s={name: "a" * 64 for name in pool_paths},
+        scale_manifest_path=tmp_path / "scale.json",
+        scale_manifest_sha256="b" * 64,
+        holdouts=(),
+        initialization_checkpoint_path=tmp_path / "initial.pt",
+        initialization_checkpoint_sha256="c" * 64,
+        code_commit="d" * 40,
+        output_path=tmp_path / "t064-curriculum-manifest.json",
+    )
+    assert manifest["source_adequacy"] is False
+    assert manifest["batch_plans"] == []
+    assert manifest["batch_plan_status"] == "not_run_source_inadequate"
+    decision = build_transfer_decision(
+        source_adequate=False,
+        experiment_complete=False,
+        transfer_gates={name: None for name in TRANSFER_GATE_NAMES},
+        diagnostics={},
+    )
+    assert decision["terminal_case"] == "Case B"

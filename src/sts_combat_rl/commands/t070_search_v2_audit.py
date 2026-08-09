@@ -228,7 +228,9 @@ def expected_checkpoint_identity_from_stage_manifest(
     return {"path": identity.get("path"), "sha256": sha256, "bytes": expected_bytes}
 
 
-def _t070_frozen_contract_from_stage_manifest(path: Path) -> dict[str, Any]:
+def _t070_frozen_contract_from_stage_manifest(
+    path: Path,
+) -> tuple[dict[str, Any], str | None]:
     """Resolve a T070 manifest or the T064 wrapper that substitutes only a checkpoint.
 
     The wrapper carries an identity-bound copy of the old frozen manifest; this
@@ -241,7 +243,7 @@ def _t070_frozen_contract_from_stage_manifest(path: Path) -> dict[str, Any]:
     if not isinstance(payload, Mapping):
         raise ValueError("stage manifest must be an object")
     if payload.get("schema_id") == FROZEN_MANIFEST_SCHEMA_ID:
-        return dict(payload)
+        return dict(payload), None
     if payload.get("schema_id") != "t064-curriculum-manifest-v1":
         raise ValueError("unsupported frozen stage manifest schema")
     stage = payload.get("t070_stage_manifest")
@@ -262,6 +264,11 @@ def _t070_frozen_contract_from_stage_manifest(path: Path) -> dict[str, Any]:
         or expected_bytes < 0
     ):
         raise ValueError("T064 frozen T070 identity is invalid")
+    outer_code_commit = payload.get("code_commit")
+    if not isinstance(outer_code_commit, str) or not re.fullmatch(
+        r"[0-9a-f]{40}", outer_code_commit
+    ):
+        raise ValueError("T064 stage manifest code commit is invalid")
     resolved = Path(frozen_path)
     if (
         not resolved.is_file()
@@ -269,7 +276,13 @@ def _t070_frozen_contract_from_stage_manifest(path: Path) -> dict[str, Any]:
         or resolved.stat().st_size != expected_bytes
     ):
         raise ValueError("T064 frozen T070 manifest identity mismatch")
-    return _load_schema(resolved, FROZEN_MANIFEST_SCHEMA_ID)
+    frozen = _load_schema(resolved, FROZEN_MANIFEST_SCHEMA_ID)
+    historical_code_commit = frozen.get("code_commit")
+    if not isinstance(historical_code_commit, str) or not re.fullmatch(
+        r"[0-9a-f]{40}", historical_code_commit
+    ):
+        raise ValueError("historical frozen T070 code commit is invalid")
+    return frozen, outer_code_commit
 
 
 def run_single_arm_shard(
@@ -1071,9 +1084,10 @@ def validate_t070_frozen_stage(
     source_manifest_path: Path,
     source_verifier_path: Path,
 ) -> tuple[dict[str, Any], tuple[str, ...]]:
-    frozen = _t070_frozen_contract_from_stage_manifest(frozen_path)
+    frozen, wrapper_code_commit = _t070_frozen_contract_from_stage_manifest(frozen_path)
     if (
-        frozen.get("code_commit") != code_commit
+        (wrapper_code_commit is None and frozen.get("code_commit") != code_commit)
+        or (wrapper_code_commit is not None and wrapper_code_commit != code_commit)
         or frozen.get("native_commit") != NATIVE_COMMIT
         or frozen.get("command_passed") is not True
     ):

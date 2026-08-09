@@ -663,6 +663,7 @@ def _validate_curriculum_manifest(payload: Mapping[str, Any]) -> None:
             "teacher_shard_ranges",
             "teacher_worker_count",
             "batch_plans",
+            "batch_plan_status",
             "exposure_parity",
             "t070_stage_manifest",
             "problems",
@@ -695,18 +696,28 @@ def _validate_curriculum_manifest(payload: Mapping[str, Any]) -> None:
         payload["selected_bucket_counts"]
     ) != set(BUCKETS):
         raise ValueError("T064 curriculum manifest selected bucket counts are invalid")
-    if not isinstance(payload["source_adequacy"], bool) or not isinstance(
-        payload["exposure_parity"], bool
-    ):
-        raise ValueError("T064 curriculum manifest booleans are invalid")
+    if not isinstance(payload["source_adequacy"], bool):
+        raise ValueError("T064 curriculum manifest source adequacy is invalid")
     if tuple(payload["teacher_shard_ranges"]) != contiguous_ranges(
         len(payload["selected_sources"])
     ):
         raise ValueError("T064 curriculum manifest teacher ranges are invalid")
     if payload["teacher_worker_count"] != 16:
         raise ValueError("T064 curriculum manifest teacher worker count is invalid")
-    if not isinstance(payload["batch_plans"], list) or len(payload["batch_plans"]) != 4:
-        raise ValueError("T064 curriculum manifest batch plans are invalid")
+    if payload["source_adequacy"]:
+        if (
+            payload["batch_plan_status"] != "complete"
+            or payload["exposure_parity"] is not True
+            or not isinstance(payload["batch_plans"], list)
+            or len(payload["batch_plans"]) != 4
+        ):
+            raise ValueError("T064 adequate manifest batch plans are invalid")
+    elif (
+        payload["batch_plan_status"] != "not_run_source_inadequate"
+        or payload["exposure_parity"] is not None
+        or payload["batch_plans"] != []
+    ):
+        raise ValueError("T064 source-inadequate manifest batch plan status is invalid")
     _require_string_list(payload["problems"], "T064 curriculum manifest problems")
 
 
