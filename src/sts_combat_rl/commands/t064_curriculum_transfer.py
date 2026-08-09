@@ -12,6 +12,8 @@ import argparse
 from dataclasses import replace
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
+import shlex
+import subprocess
 from pathlib import Path
 import time
 from typing import Any
@@ -124,6 +126,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Execute the selected stage's dispatcher with no simulator/artifact runner.",
     )
     parser.add_argument("--attempt-root", type=Path)
+    parser.add_argument(
+        "--execute-command",
+        help="Existing stage command prefix; dispatched once per frozen shard, never synthesized.",
+    )
     args = parser.parse_args(argv)
     if args.dry_run_manifest is None or args.code_commit is None:
         parser.error("--dry-run-manifest and --code-commit are required")
@@ -151,6 +157,51 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         else:
             print(json.dumps({"stage": stage["stage"], "mock": True}, sort_keys=True))
+        return 0
+    if args.execute_command is not None:
+        if len(stages) != 1 or args.attempt_root is None:
+            parser.error("--execute-command requires one --stage and --attempt-root")
+        stage = stages[0]
+        ranges = stage.get("ranges")
+        if not isinstance(ranges, list) or len(ranges) != 16:
+            parser.error("--execute-command is only valid for one 16-shard stage")
+        prefix = shlex.split(args.execute_command)
+        if not prefix:
+            parser.error("--execute-command must not be empty")
+        attempt = prepare_t064_attempt(
+            args.attempt_root, stage=stage["stage"], code_commit=args.code_commit
+        )
+
+        def invoke(index: int, record_range: str) -> int:
+            output_dir = attempt / f"shard-{index:02d}"
+            output_dir.mkdir()
+            completed = subprocess.run(
+                [
+                    *prefix,
+                    "--record-range",
+                    record_range,
+                    "--shard-index",
+                    str(index),
+                    "--output-dir",
+                    str(output_dir),
+                ],
+                check=False,
+            )
+            if completed.returncode:
+                raise RuntimeError(
+                    f"existing stage command returned {completed.returncode}"
+                )
+            return completed.returncode
+
+        _, records = dispatch_t064_shards(
+            ranges=ranges, log_dir=attempt / "logs", worker=invoke
+        )
+        print(
+            json.dumps(
+                {"stage": stage["stage"], "attempt": str(attempt), "shards": records},
+                sort_keys=True,
+            )
+        )
         return 0
     for stage in stages:
         print(json.dumps(stage, sort_keys=True, separators=(",", ":")))
@@ -954,6 +1005,60 @@ def assert_exact_compact_inventory(root: Path) -> None:
             load_compact_json(stream)
 
 
+def validate_external_frozen_identity(
+    path: Path, expected: Mapping[str, Any], *, label: str
+) -> dict[str, Any]:
+    """Validate a path against an identity frozen outside the report it contains."""
+
+    if not path.is_file():
+        raise ValueError(f"T064 frozen {label} artifact is missing")
+    actual = _file_identity(path)
+    for field in ("sha256", "bytes"):
+        if actual[field] != expected.get(field):
+            raise ValueError(f"T064 frozen {label} {field} mismatch")
+    expected_path = expected.get("path")
+    if expected_path is not None and str(path) != expected_path:
+        raise ValueError(f"T064 frozen {label} path mismatch")
+    return actual
+
+
+def validate_t044_historical_reuse(
+    report: Any,
+    *,
+    frozen_cohort: Mapping[str, Any],
+    expected_roles: Sequence[str] = T044_CONTROLLER_ROLES,
+) -> bool:
+    """Validate only a historical full four-arm report, never a new 2-arm stage."""
+
+    identity = frozen_cohort.get("identity")
+    count = frozen_cohort.get("record_count")
+    if not isinstance(identity, str) or not isinstance(count, int):
+        return False
+    return validate_t044_reuse(
+        report, cohort_identity=identity, cohort_count=count
+    ) and tuple(arm.role for arm in report.arms) == tuple(expected_roles)
+
+
+def validate_t044_dependent_report(
+    report: Any, *, cohort_identity: str, cohort_count: int
+) -> bool:
+    """Validate a new T064 two-arm output separately from reusable historical arms."""
+
+    config = getattr(report, "comparison_config", {})
+    return (
+        getattr(report, "evaluation_successful", False)
+        and tuple(arm.role for arm in getattr(report, "arms", ()))
+        == T044_DEPENDENT_ROLES
+        and config.get("cohort_identity") == cohort_identity
+        and config.get("cohort_record_count") == cohort_count
+        and config.get("max_battle_steps") == 200
+        and all(
+            len(arm.report.battle_results) == cohort_count and not arm.report.problems
+            for arm in report.arms
+        )
+    )
+
+
 def aggregate_t064_stage7_from_artifacts(
     *,
     root: Path,
@@ -963,6 +1068,7 @@ def aggregate_t064_stage7_from_artifacts(
     t044_paths: Mapping[tuple[str, int], Mapping[str, Path]],
     t070_paths: Mapping[tuple[str, int], Path],
     stage_summary: Mapping[str, Any],
+    frozen_inputs: Mapping[str, Mapping[str, Any]],
 ) -> dict[str, Any]:
     """Independently load, validate, hash, and aggregate the real stage outputs.
 
@@ -1008,6 +1114,18 @@ def aggregate_t064_stage7_from_artifacts(
     problems: list[str] = []
     unmet: list[str] = []
     references = [manifest_path, training_path, teacher_path, trainer_input_path]
+    for label, path in (
+        ("teacher", teacher_path),
+        ("trainer_input", trainer_input_path),
+    ):
+        expected = frozen_inputs.get(label)
+        if not isinstance(expected, Mapping):
+            problems.append(f"external frozen identity missing for {label}")
+        else:
+            try:
+                validate_external_frozen_identity(path, expected, label=label)
+            except ValueError as exc:
+                problems.append(str(exc))
     if not teacher_path.is_file() or not trainer_input_path.is_file():
         problems.append("teacher or trainer-input artifact missing")
     runs = training.get("runs", [])
