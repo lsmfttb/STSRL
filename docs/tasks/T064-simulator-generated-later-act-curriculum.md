@@ -177,11 +177,21 @@ Concatenate components in the order listed above.
 ### `anchor`
 
 Use only eligible `assist_0` records. Group by
-`(act, room_type, encounter_id, floor_bucket)`. Order strata lexicographically
-using their canonical JSON representation and order records within each stratum
-by complete identity SHA-256. Repeatedly traverse strata in that fixed order,
-taking the next unused record from each non-empty stratum, until exactly 256
-records are selected or all strata are exhausted.
+`(act, room_type, encounter_id, floor_bucket)`. For T064, `floor_bucket` is not
+a coarse or learned bucket: it is the identity mapping of the raw persisted
+`structural_metadata["floor"]` value. The input must be a Python integer but not
+a Boolean, must satisfy `1 <= floor <= 56` with both boundaries inclusive, and
+`floor_bucket = floor` exactly. No integer coercion, act-specific rebucketing,
+or other boundary scheme is permitted. A missing `floor`, Boolean, non-integer,
+or out-of-range value is an integrity failure that makes the experiment
+`INCOMPLETE`; it must not be converted to `None`, silently excluded, or counted
+as scientific source inadequacy.
+
+Order strata lexicographically using their canonical JSON representation and
+order records within each stratum by complete identity SHA-256. Repeatedly
+traverse strata in that fixed order, taking the next unused record from each
+non-empty stratum, until exactly 256 records are selected or all strata are
+exhausted.
 
 A complete source audit is scientifically valid even when coverage is
 insufficient. Source adequacy is true only when:
@@ -472,7 +482,9 @@ T064 is accepted only when:
 Run the standard suite, compileall, Ruff check/format, fixture smokes, task-doc
 checks, and `git diff --check`, plus focused tests for:
 
-- source identity, holdout exclusion, deterministic bucket selection;
+- source identity, holdout exclusion, deterministic bucket selection, exact raw
+  `floor` identity mapping to `floor_bucket`, and fail-closed invalid-floor
+  handling;
 - existing per-decision occurrence-safe action identity reuse and fail-closed
   trace fallback;
 - T043 range collection and merge compatibility;
