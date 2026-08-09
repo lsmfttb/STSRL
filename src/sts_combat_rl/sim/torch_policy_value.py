@@ -122,6 +122,11 @@ class TorchPolicyValueTrainingConfig:
     resource_loss_weight: float = 1.0
     batch_size: int = 32
     seed: int = 1
+    adam_betas: tuple[float, float] = (0.9, 0.999)
+    adam_epsilon: float = 1e-8
+    weight_decay: float = 0.0
+    amsgrad: bool = False
+    gradient_clip_norm: float = 10.0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -915,7 +920,14 @@ def train_torch_policy_value(
             ),
         )
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=active_config.learning_rate)
+    optimizer = torch.optim.Adam(
+        model.parameters(),
+        lr=active_config.learning_rate,
+        betas=active_config.adam_betas,
+        eps=active_config.adam_epsilon,
+        weight_decay=active_config.weight_decay,
+        amsgrad=active_config.amsgrad,
+    )
     initial = evaluate_torch_policy_value(model, dataset, active_config)
     epoch_stats: list[TorchPolicyValueEpochStats] = []
     record_indices = list(range(len(dataset.records)))
@@ -944,7 +956,9 @@ def train_torch_policy_value(
             optimizer.zero_grad()
             losses = _batch_losses(model, batch_records, active_config)
             losses[0].backward()
-            nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
+            nn.utils.clip_grad_norm_(
+                model.parameters(), max_norm=active_config.gradient_clip_norm
+            )
             optimizer.step()
             for index, loss in enumerate(losses):
                 totals[index] += float(loss.detach()) * len(batch_records)

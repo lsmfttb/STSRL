@@ -4,10 +4,13 @@ import hashlib
 from io import StringIO
 import json
 from dataclasses import replace
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from sts_combat_rl.commands import t064_curriculum as curriculum_command
+from sts_combat_rl.commands import t064_curriculum_transfer as transfer_command
 from sts_combat_rl.sim.battle_start_pool import BattleStartCheckpointRecord
 from sts_combat_rl.sim.t064_curriculum import (
     ARM_CURRICULUM,
@@ -561,3 +564,209 @@ def test_empty_selected_source_pool_is_valid_for_complete_source_inadequacy() ->
     )
     assert selected == []
     assert pool.records == []
+
+
+def test_stage2_to_7_contract_helpers_refuse_stale_resume_and_preserve_identity_order() -> (
+    None
+):
+    manifest = {
+        "code_commit": "a" * 40,
+        "complete_source_audit": {
+            "status": "complete",
+            "selected_restore_failure_count": 0,
+        },
+        "selected_sources": [
+            {
+                "complete_identity_sha256": f"{index:064x}",
+                "complete_identity": {
+                    "source_checkpoint_id": "checkpoint",
+                    "source_seed": 1,
+                    "source_run_id": f"run-{index}",
+                    "source_battle_index": index,
+                    "distribution_kind": "assisted_run",
+                    "checkpoint_information_regime": "full_simulator_state_oracle_like",
+                },
+            }
+            for index in range(2)
+        ],
+    }
+    transfer_command.validate_resume_manifest(manifest, code_commit="a" * 40)
+    with pytest.raises(ValueError, match="stale"):
+        transfer_command.validate_resume_manifest(manifest, code_commit="b" * 40)
+    identities = [
+        row["complete_identity_sha256"] for row in manifest["selected_sources"]
+    ]
+    assert transfer_command.build_trainer_row_mapping(
+        selected_manifest=manifest,
+        teacher_source_hashes=identities,
+        trainer_source_hashes=identities,
+    ) == {identities[0]: 0, identities[1]: 1}
+    with pytest.raises(ValueError, match="trainer identity"):
+        transfer_command.build_trainer_row_mapping(
+            selected_manifest=manifest,
+            teacher_source_hashes=identities,
+            trainer_source_hashes=list(reversed(identities)),
+        )
+
+
+def test_t044_t070_reuse_contracts_use_persisted_roles_and_frozen_ranges() -> None:
+    config = {
+        "controller_roles": dict(
+            zip(("a", "b", "c", "d"), transfer_command.T044_CONTROLLER_ROLES)
+        ),
+        "cohort_identity": "cohort",
+        "cohort_record_count": 21,
+        "max_battle_steps": 200,
+        "action_space": {"include_potions": False},
+    }
+
+    def arm():
+        return SimpleNamespace(
+            report=SimpleNamespace(problems=[], battle_results=[1] * 21)
+        )
+
+    report = SimpleNamespace(
+        comparison_config=config,
+        arms=tuple(arm() for _ in range(4)),
+        evaluation_successful=True,
+    )
+    assert transfer_command.validate_t044_reuse(
+        report, cohort_identity="cohort", cohort_count=21
+    )
+    config["controller_roles"]["a"] = "display label only"
+    assert not transfer_command.validate_t044_reuse(
+        report, cohort_identity="cohort", cohort_count=21
+    )
+    baseline = {
+        "schema_id": "t070-single-arm-merged-stage-v1",
+        "cohort_identity": "t052",
+        "cohort_record_count": 93,
+        "arm": "baseline",
+        "native_budget": 100,
+        "tree_geometry_enabled": False,
+        "shard_ranges": list(transfer_command.T070_T052_RANGES),
+        "command_passed": True,
+        "problems": [],
+    }
+    assert transfer_command.validate_t070_baseline_reuse(
+        baseline, cohort_identity="t052"
+    )
+    baseline["tree_geometry_enabled"] = True
+    assert not transfer_command.validate_t070_baseline_reuse(
+        baseline, cohort_identity="t052"
+    )
+
+
+def test_t044_dependent_stage_routes_only_frozen_roles_and_ranges() -> None:
+    calls = []
+
+    def shard_runner(*args, **kwargs):
+        calls.append((args, kwargs))
+        return kwargs["record_range"]
+
+    def merger(**kwargs):
+        return kwargs
+
+    controller = SimpleNamespace(action_space=object())
+    output = transfer_command.run_t064_t044_dependent_stage(
+        adapter_factory=lambda: object(),
+        cohort_path=Path("cohort.jsonl"),
+        controller_arms=(
+            ("guided", transfer_command.T044_DEPENDENT_ROLES[0], controller),
+            ("raw", transfer_command.T044_DEPENDENT_ROLES[1], controller),
+        ),
+        cohort_kind="assist_hp50",
+        shard_runner=shard_runner,
+        merger=merger,
+    )
+    assert [kwargs["record_range"] for _, kwargs in calls] == list(
+        transfer_command.T044_ASSIST_HP50_RANGES
+    )
+    assert output["expected_ranges"] == transfer_command.T044_ASSIST_HP50_RANGES
+    with pytest.raises(ValueError, match="dependent roles"):
+        transfer_command.run_t064_t044_dependent_stage(
+            adapter_factory=lambda: object(),
+            cohort_path=Path("cohort.jsonl"),
+            controller_arms=(("wrong", "a display label", controller),),
+            cohort_kind="assist_0",
+            shard_runner=shard_runner,
+            merger=merger,
+        )
+
+
+def test_t064_transfer_gates_and_historical_t070_wrapper_are_frozen() -> None:
+    metrics = {
+        "curriculum_t052_prior_value_wins": {64001: 10, 64002: 11},
+        "static_t052_prior_value_wins": {64001: 9, 64002: 10},
+        "paired_t052_win_deltas": {64001: 1, 64002: 1},
+        "t052_subset_deltas": {"boss": 1, "act2_plus": 0},
+        "curriculum_t044_assist_hp50_model_guided_wins": 12,
+        "static_t044_assist_hp50_model_guided_wins": 10,
+        "curriculum_t044_assist_hp50_raw_policy_wins": 9,
+        "static_t044_assist_hp50_raw_policy_wins": 9,
+        "curriculum_t044_assist_0_model_guided_wins": 8,
+        "static_t044_assist_0_model_guided_wins": 9,
+    }
+    assert all(transfer_command.compute_transfer_gates(metrics).values())
+    historical = {
+        "schema_id": "t070-frozen-manifest-v1",
+        "code_commit": "b" * 40,
+        "primary_shard_ranges": list(transfer_command.T070_T052_RANGES),
+    }
+    wrapper = transfer_command.t064_t070_wrapper(
+        current_code_commit="a" * 40,
+        frozen_t070_manifest=historical,
+        frozen_identity={"path": "historical.json", "sha256": "c" * 64, "bytes": 1},
+        checkpoint_identity={"path": "new.pt", "sha256": "d" * 64, "bytes": 2},
+    )
+    assert wrapper["arm"] == "prior_value"
+    assert wrapper["tree_geometry_enabled"] is False
+    assert wrapper["worker_count"] == 16
+
+
+def test_stage2_to_7_dry_plan_has_exact_worker_range_and_stage_inventory() -> None:
+    manifest = {
+        "code_commit": "a" * 40,
+        "complete_source_audit": {
+            "status": "complete",
+            "selected_restore_failure_count": 0,
+        },
+        "selected_sources": [{} for _ in range(460)],
+        "teacher_shard_ranges": list(contiguous_ranges(460)),
+    }
+    plan = transfer_command.build_t064_stage_execution_plan(
+        manifest, code_commit="a" * 40
+    )
+    assert plan[0]["workers"] == plan[0]["shards"] == 16
+    assert plan[0]["ranges"] == list(contiguous_ranges(460))
+    assert len([row for row in plan if row["stage"] == "stage5_t044"]) == 8
+    assert len([row for row in plan if row["stage"] == "stage6_t070"]) == 4
+    assert plan[-1]["stage"] == "stage7_aggregate"
+
+
+def test_stage_summary_carries_retained_prior_attempts_without_log_index() -> None:
+    stage = {
+        "name": "stage1_source_audit",
+        "status": "complete",
+        "command": "python -m sts_combat_rl.commands.t064_curriculum",
+        "code_commit": "a" * 40,
+        "native_commit": "b" * 40,
+        "inputs": {},
+        "outputs": {},
+        "workers": 16,
+        "shards": 16,
+        "ranges": list(contiguous_ranges(0)),
+        "return_codes": [0],
+        "wall_clock_seconds": 1.0,
+        "failure_count": 0,
+        "referenced_artifacts": [],
+        "failed_attempts": [],
+        "retained_log_paths": [],
+    }
+    summary = transfer_command.build_t064_stage_summary(
+        reuse_inventory=[], stages=[stage]
+    )
+    assert summary["stages"][0]["failed_attempts"] == list(
+        transfer_command.KNOWN_PRIOR_ATTEMPTS
+    )
+    assert validate_compact_document(summary) == summary
