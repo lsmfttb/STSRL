@@ -150,8 +150,30 @@ input.
 The complete identity SHA-256 is computed from the canonical JSON object above.
 Two records are equal only when all required fields are equal. Existing pool and
 cohort readers perform field mapping; a missing required value, ambiguous trace,
-or incompatible provenance makes the record ineligible. Duplicate complete
-identities and any holdout overlap fail closed.
+or incompatible provenance makes the record ineligible.
+
+Candidate-inventory integrity and frozen-holdout exclusion are distinct:
+
+- `candidate_duplicate_complete_identity_count` is computed over the complete
+  T042 candidate inventory before holdout exclusion. It must be zero. A nonzero
+  value is an integrity failure and makes T064 `INCOMPLETE`; candidate records
+  are never silently deduplicated.
+- `candidate_holdout_exclusion_count` is the number of candidate records whose
+  complete identities match any frozen holdout identity. These matches are
+  reported and excluded before bucket selection. A nonzero value is expected
+  when a frozen holdout was drawn from a retained T042 pool and does not by
+  itself make source adequacy false or constitute selected-training leakage.
+- after final bucket membership is fixed,
+  `selected_holdout_overlap_count` is recomputed from the flattened selected
+  complete identities intersected with all frozen holdout identities, and
+  `selected_duplicate_complete_identity_count` is recomputed from the flattened
+  selected complete identities. Both must be zero. A nonzero selected overlap or
+  selected duplicate count is an integrity failure and makes T064 `INCOMPLETE`,
+  never scientific source-insufficiency Case B.
+
+The manifest must retain enough identity evidence to reproduce each count and
+prove which candidate rows were excluded and which final selected identities
+were checked.
 
 ## Deterministic Selection
 
@@ -193,16 +215,27 @@ traverse strata in that fixed order, taking the next unused record from each
 non-empty stratum, until exactly 256 records are selected or all strata are
 exhausted.
 
-A complete source audit is scientifically valid even when coverage is
-insufficient. Source adequacy is true only when:
+A complete source audit is scientifically valid even when post-exclusion
+coverage is insufficient. `source_adequacy` is true only when:
 
 - `strong_later_act` plus `medium_later_act` contain at least 128 unique records;
 - `anchor` contains exactly 256 unique records;
-- holdout overlap and duplicate counts are zero.
+- `selected_holdout_overlap_count == 0`;
+- `selected_duplicate_complete_identity_count == 0`.
 
-If an exhaustive valid audit completes but source adequacy is false, T064 may
-produce the complete-negative Case B without running teacher/training stages.
-Invalid, missing, or unaudited evidence is `INCOMPLETE`, not Case B.
+`candidate_holdout_exclusion_count` is not an adequacy gate. Candidate duplicate
+identities, selected holdout overlap, or selected duplicate identities are
+integrity failures; even if they make the adequacy Boolean false, the terminal
+result is `INCOMPLETE`, not Case B. Source-inadequate Case B is permitted only
+when candidate integrity is valid, selected leakage/duplicate checks are zero,
+an exhaustive restore/context audit completes with zero integrity failures, and
+the remaining inadequacy is solely a frozen post-exclusion coverage/cardinality
+shortfall.
+
+If an exhaustive valid audit completes under those conditions but source
+adequacy is false, T064 may produce the complete-negative Case B without running
+teacher/training stages. Invalid, missing, unaudited, or leakage-contaminated
+evidence is `INCOMPLETE`, not Case B.
 
 ## Teacher And Trainer Construction
 
@@ -361,12 +394,15 @@ cannot replace these gates.
 - **Case A — transfer demonstrated:** `experiment_complete=true` and every
   transfer gate passes. Recommend `T063-oracle-guided-public-battle-learning`.
 - **Case B — complete valid negative:** either a complete exhaustive source
-  audit finds source adequacy false, or `experiment_complete=true` and at least
-  one transfer gate fails. Recommend `T065-learned-non-combat-policy-v1`.
-- **INCOMPLETE:** missing/invalid artifacts, provenance mismatch, code defect,
-  OOM, interruption, incomplete shards, training/checkpoint failure, exposure
-  mismatch, or incomplete evaluation. Emit no planner recommendation. Repair on
-  this PR or obtain specification reapproval.
+  audit finds source adequacy false solely from valid post-exclusion
+  coverage/cardinality shortfall after candidate-integrity and selected-leakage
+  checks pass, or `experiment_complete=true` and at least one transfer gate
+  fails. Recommend `T065-learned-non-combat-policy-v1`.
+- **INCOMPLETE:** missing/invalid artifacts, provenance mismatch, candidate
+  duplicate identities, selected holdout overlap, selected duplicate identities,
+  code defect, OOM, interruption, incomplete shards, training/checkpoint
+  failure, exposure mismatch, or incomplete evaluation. Emit no planner
+  recommendation. Repair on this PR or obtain specification reapproval.
 
 T064 emits exactly one of Case A, Case B, or INCOMPLETE. Only Case A/B are valid
 accepted research outcomes.
@@ -385,7 +421,12 @@ later file unproduced, but no fifth T064 compact JSON file is authorized.
    - input paths/hashes and native/code identities;
    - frozen holdout identities;
    - complete source identities and exclusion reasons;
+   - `candidate_holdout_exclusion_count` plus identity evidence for excluded
+     candidate rows, and `candidate_duplicate_complete_identity_count`;
    - selected bucket membership and structural counts;
+   - `selected_holdout_overlap_count` and
+     `selected_duplicate_complete_identity_count` recomputed from flattened
+     final selected membership;
    - source-audit status, adequacy result, teacher shard ranges;
    - exact exposure-sequence and batch-plan hashes.
 2. `t064-training-run-report-v1`
@@ -440,8 +481,12 @@ Stages are:
    every referenced existing artifact.
 
 Interrupted or failed attempts are retained separately and never mixed into an
-accepted rerun. Non-simulator manifest, merge, training, aggregation, and hash
-steps may be single-process. Substantial simulator stages use 16 effective
+accepted rerun. The Stage-0 manifest produced before the holdout-scope
+clarification is explicitly non-evidence; it must remain under
+`logs/failed-attempts` with its exact SHA-256 recorded in the stage summary and
+final PR report, and none of its records or adequacy conclusion may contribute
+to an accepted rerun. Non-simulator manifest, merge, training, aggregation, and
+hash steps may be single-process. Substantial simulator stages use 16 effective
 workers and 16 shards.
 
 ## Out Of Scope
@@ -469,12 +514,16 @@ T064 is accepted only when:
 - no parallel T042/T043/T044/T070 subsystem or fifth T064 artifact contract was
   introduced;
 - all required retained input hashes match;
-- holdouts precede selection/training and overlap is zero;
+- holdouts precede selection/training, candidate holdout exclusions are reported
+  separately from selected leakage, and final selected holdout overlap is zero;
+- candidate duplicate complete identities and selected duplicate complete
+  identities are zero;
 - complete source identity, selection, and batch plans are deterministic;
 - static and curriculum arms differ only in exposure order;
 - reused artifact schemas and merge invariants pass compatibility tests;
 - required simulator stages use the frozen ranges and 16 workers;
-- the terminal output correctly separates Case A/B from INCOMPLETE;
+- the terminal output correctly separates valid post-exclusion source
+  insufficiency Case B from leakage/integrity `INCOMPLETE`;
 - no prohibited performance or natural-distribution claim is made.
 
 ## Required Verification
@@ -482,9 +531,13 @@ T064 is accepted only when:
 Run the standard suite, compileall, Ruff check/format, fixture smokes, task-doc
 checks, and `git diff --check`, plus focused tests for:
 
-- source identity, holdout exclusion, deterministic bucket selection, exact raw
-  `floor` identity mapping to `floor_bucket`, and fail-closed invalid-floor
+- source identity, candidate holdout exclusion versus selected overlap,
+  candidate/selected duplicate detection, deterministic bucket selection, exact
+  raw `floor` identity mapping to `floor_bucket`, and fail-closed invalid-floor
   handling;
+- source adequacy recomputation that ignores candidate holdout exclusions but
+  requires zero selected overlap/duplicates, and routes any leakage/integrity
+  failure to `INCOMPLETE` rather than source-negative Case B;
 - existing per-decision occurrence-safe action identity reuse and fail-closed
   trace fallback;
 - T043 range collection and merge compatibility;
@@ -527,7 +580,12 @@ surface. It must include:
 - reuse inventory naming each existing T042/T043/T044/T052/T069/T070 module,
   command, schema, reader/writer, and compatibility test used;
 - verified retained-input paths, SHA-256 identities, native/runtime identities,
-  and holdout identities, plus the zero-overlap proof;
+  and holdout identities;
+- `candidate_holdout_exclusion_count` with component/identity evidence,
+  `candidate_duplicate_complete_identity_count`,
+  `selected_holdout_overlap_count`, and
+  `selected_duplicate_complete_identity_count`, plus the final selected
+  zero-leakage/zero-duplicate proof;
 - selected source counts by bucket, component, act, room/encounter stratum, and
   the final source-adequacy result;
 - teacher budget/configuration, teacher and trainer-input identities, row counts,
@@ -544,11 +602,13 @@ surface. It must include:
   A/B;
 - SHA-256 identities for each of the four compact T064 JSON files and every
   referenced retained artifact used as final evidence;
-- failed/interrupted attempts and why none contributed records to accepted
-  reruns;
+- failed/interrupted attempts, including the pre-clarification failed Stage-0
+  manifest path and SHA-256, and why none contributed records or conclusions to
+  accepted reruns;
 - verification commands/results, known limitations, unresolved risks, and every
   unmet acceptance criterion.
 
 The PR report must distinguish historical accepted evidence from commands run on
-the implementation head and must not turn missing/incomplete evidence into a
+the implementation head and must not turn missing/incomplete evidence,
+candidate holdout exclusions, or selected leakage/integrity failures into a
 scientific Case B.
