@@ -154,9 +154,12 @@ current contracts.
   lifecycle state is authoritative only in `docs/tasks/README.md`; an empty
   `READY` queue is valid while awaiting planner direction.
 - The task implementer is a sub-agent of the main maintainer. The maintainer
-  chooses the implementer's model and reasoning effort by balancing task
-  capability requirements against cost, assigns an isolated worktree/branch,
-  and manages the implementation handoff.
+  prioritizes the highest-cost-effectiveness current model that is sufficiently
+  capable for the task, including inexpensive options such as Luna when
+  appropriate, and escalates only for justified complexity, risk, or observed
+  failure. Expected rework and downstream rerun cost count alongside model
+  price. The maintainer calibrates reasoning effort, assigns an isolated
+  worktree/branch, and manages the implementation handoff.
 - The main maintainer does not implement feature code directly. It remains the
   independent code reviewer, publishes every review or re-review conclusion on
   the pull request, and owns merge decisions.
