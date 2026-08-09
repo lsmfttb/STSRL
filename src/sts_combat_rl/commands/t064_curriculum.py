@@ -231,7 +231,7 @@ def load_selected_source_pool(
     """Load only manifest-selected records in the exact frozen order."""
 
     raw_selected = manifest.get("selected_sources")
-    if not isinstance(raw_selected, list) or not raw_selected:
+    if not isinstance(raw_selected, list):
         raise ValueError("T064 manifest has no selected sources")
     selected = [dict(item) for item in raw_selected if isinstance(item, Mapping)]
     if len(selected) != len(raw_selected):

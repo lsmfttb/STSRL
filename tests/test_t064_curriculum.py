@@ -188,6 +188,7 @@ def test_frozen_range_and_terminal_decision_truth_table() -> None:
     transfer = build_transfer_decision(
         source_adequate=True,
         experiment_complete=True,
+        complete_source_audit_status="complete",
         transfer_gates={name: True for name in TRANSFER_GATE_NAMES},
         diagnostics={},
     )
@@ -195,6 +196,7 @@ def test_frozen_range_and_terminal_decision_truth_table() -> None:
     negative = build_transfer_decision(
         source_adequate=True,
         experiment_complete=True,
+        complete_source_audit_status="complete",
         transfer_gates={
             name: False if name == TRANSFER_GATE_NAMES[0] else True
             for name in TRANSFER_GATE_NAMES
@@ -205,6 +207,7 @@ def test_frozen_range_and_terminal_decision_truth_table() -> None:
     incomplete = build_transfer_decision(
         source_adequate=True,
         experiment_complete=False,
+        complete_source_audit_status="pending",
         transfer_gates={name: None for name in TRANSFER_GATE_NAMES},
         diagnostics={},
         problems=("missing",),
@@ -215,9 +218,50 @@ def test_frozen_range_and_terminal_decision_truth_table() -> None:
         build_transfer_decision(
             source_adequate=True,
             experiment_complete=True,
+            complete_source_audit_status="complete",
             transfer_gates={},
             diagnostics={},
         )
+
+
+@pytest.mark.parametrize(
+    ("source_adequate", "experiment_complete", "problems", "unmet"),
+    [
+        (False, True, (), ()),
+        (True, True, ("integrity failure",), ()),
+        (True, True, (), ("missing acceptance criterion",)),
+    ],
+)
+def test_transfer_truth_table_rejects_inconsistent_or_failed_case_a_inputs(
+    source_adequate: bool,
+    experiment_complete: bool,
+    problems: tuple[str, ...],
+    unmet: tuple[str, ...],
+) -> None:
+    decision = build_transfer_decision(
+        source_adequate=source_adequate,
+        experiment_complete=experiment_complete,
+        complete_source_audit_status="complete",
+        transfer_gates={name: True for name in TRANSFER_GATE_NAMES},
+        diagnostics={},
+        problems=problems,
+        unmet_acceptance_criteria=unmet,
+    )
+    assert decision["terminal_case"] == "INCOMPLETE"
+    assert "recommendation" not in decision
+
+
+def test_transfer_reader_rejects_tampered_terminal_case_and_recommendation() -> None:
+    decision = build_transfer_decision(
+        source_adequate=True,
+        experiment_complete=True,
+        complete_source_audit_status="complete",
+        transfer_gates={name: True for name in TRANSFER_GATE_NAMES},
+        diagnostics={},
+    )
+    decision["recommendation"] = "T065-learned-non-combat-policy-v1"
+    with pytest.raises(ValueError, match="recommendation fails"):
+        validate_compact_document(decision)
 
 
 def test_aggregate_training_report_cardinality_order_and_canonical_writer() -> None:
@@ -249,6 +293,7 @@ def test_aggregate_training_report_cardinality_order_and_canonical_writer() -> N
     decision = build_transfer_decision(
         source_adequate=False,
         experiment_complete=False,
+        complete_source_audit_status="complete",
         transfer_gates={name: None for name in TRANSFER_GATE_NAMES},
         diagnostics={},
     )
@@ -305,6 +350,41 @@ def test_compact_documents_fail_closed_on_required_fields() -> None:
         )
 
 
+def test_stage_summary_rejects_required_field_type_mutations() -> None:
+    stage = {
+        "name": "source_audit",
+        "status": "complete",
+        "command": "python audit.py",
+        "code_commit": "a" * 40,
+        "native_commit": "b" * 40,
+        "inputs": {},
+        "outputs": {},
+        "workers": 16,
+        "shards": 16,
+        "ranges": ["0:0"],
+        "return_codes": [0],
+        "wall_clock_seconds": 1.0,
+        "failure_count": 0,
+        "referenced_artifacts": [],
+        "failed_attempts": [],
+        "retained_log_paths": [],
+    }
+    payload = {
+        "schema_id": "t064-stage-summary-v1",
+        "format_version": 1,
+        "reuse_inventory": [],
+        "stages": [stage],
+        "retention_reason": "T064 review evidence",
+        "downstream_consumer": "T065",
+        "deletion_condition": "after acceptance",
+        "problems": [],
+    }
+    assert validate_compact_document(payload) == payload
+    payload["stages"][0]["workers"] = "16"
+    with pytest.raises(ValueError, match="workers"):
+        validate_compact_document(payload)
+
+
 def test_source_inadequacy_skips_batch_plans_and_forms_valid_case_b(
     tmp_path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -332,11 +412,7 @@ def test_source_inadequacy_skips_batch_plans_and_forms_valid_case_b(
         }
 
     def fake_pool(path, *, component):
-        rows = (
-            [_descriptor(component, f"{len(component):064x}", act=1)]
-            if component == "assist_0"
-            else []
-        )
+        rows = []
         return {
             "schema_id": "assisted-complete-run-source-pool-v1",
             "format_version": 1,
@@ -364,10 +440,32 @@ def test_source_inadequacy_skips_batch_plans_and_forms_valid_case_b(
     assert manifest["source_adequacy"] is False
     assert manifest["batch_plans"] == []
     assert manifest["batch_plan_status"] == "not_run_source_inadequate"
+    assert manifest["teacher_shard_ranges"] == ["0:0"] * 16
+    pending = build_transfer_decision(
+        source_adequate=False,
+        experiment_complete=False,
+        complete_source_audit_status="pending",
+        transfer_gates={name: None for name in TRANSFER_GATE_NAMES},
+        diagnostics={},
+    )
+    assert pending["terminal_case"] == "INCOMPLETE"
+    finalized = curriculum_command.finalize_source_audit(
+        manifest_path=tmp_path / "t064-curriculum-manifest.json",
+        restore_results=(),
+    )
     decision = build_transfer_decision(
         source_adequate=False,
         experiment_complete=False,
+        complete_source_audit_status=finalized["complete_source_audit"]["status"],
         transfer_gates={name: None for name in TRANSFER_GATE_NAMES},
         diagnostics={},
     )
     assert decision["terminal_case"] == "Case B"
+
+
+def test_empty_selected_source_pool_is_valid_for_complete_source_inadequacy() -> None:
+    pool, selected = curriculum_command.load_selected_source_pool(
+        {"selected_sources": []}
+    )
+    assert selected == []
+    assert pool.records == []
