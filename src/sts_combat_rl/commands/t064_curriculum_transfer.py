@@ -50,6 +50,7 @@ from sts_combat_rl.sim.t064_curriculum import (
     build_ordered_batch_plan,
     build_transfer_decision,
     contiguous_ranges,
+    dump_compact_json,
     independent_rehash,
     load_compact_json,
     validate_exposure_parity,
@@ -152,6 +153,24 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--stage2-teacher-output", type=Path)
     parser.add_argument("--stage2-shard-output-dir", type=Path)
     parser.add_argument("--stage2-log-dir", type=Path)
+    parser.add_argument("--stage3-teacher", type=Path)
+    parser.add_argument("--stage3-output", type=Path)
+    parser.add_argument("--stage3-bridge-contract", type=Path)
+    parser.add_argument("--stage4-trainer-input", type=Path)
+    parser.add_argument("--stage4-initialization", type=Path)
+    parser.add_argument("--stage4-initialization-sha256")
+    parser.add_argument("--stage4-checkpoint-root", type=Path)
+    parser.add_argument("--stage4-frozen-t070-manifest", type=Path)
+    parser.add_argument("--stage5-cohort", type=Path)
+    parser.add_argument("--stage5-checkpoint", type=Path)
+    parser.add_argument("--stage5-cohort-kind", choices=("assist_0", "assist_hp50"))
+    parser.add_argument("--stage5-log-dir", type=Path)
+    parser.add_argument("--stage5-shard-output-dir", type=Path)
+    parser.add_argument("--stage5-merged-output", type=Path)
+    parser.add_argument("--stage7-root", type=Path)
+    parser.add_argument("--stage7-teacher", type=Path)
+    parser.add_argument("--stage7-trainer-input", type=Path)
+    parser.add_argument("--stage7-artifact-contract", type=Path)
     args = parser.parse_args(argv)
     if args.dry_run_manifest is None or args.code_commit is None:
         parser.error("--dry-run-manifest and --code-commit are required")
@@ -216,6 +235,141 @@ def main(argv: Sequence[str] | None = None) -> int:
                     "stage": "stage2_teacher",
                     "rows": len(merged.records),
                     "shards": records,
+                },
+                sort_keys=True,
+            )
+        )
+        return 0
+    stage3_values = (
+        args.stage3_teacher,
+        args.stage3_output,
+        args.stage3_bridge_contract,
+    )
+    if any(value is not None for value in stage3_values):
+        if (
+            len(stages) != 1
+            or stages[0].get("stage") != "stage3_trainer"
+            or any(value is None for value in stage3_values)
+        ):
+            parser.error(
+                "Stage3 execution requires teacher, output, and T043 bridge-contract paths"
+            )
+        contract = json.loads(args.stage3_bridge_contract.read_text(encoding="utf-8"))
+        result = run_t064_stage3_production(
+            selected_manifest=manifest,
+            teacher_path=args.stage3_teacher,
+            output_path=args.stage3_output,
+            bridge_contract=contract,
+        )
+        print(
+            json.dumps(
+                {"stage": "stage3_trainer", "rows": len(result[0].records)},
+                sort_keys=True,
+            )
+        )
+        return 0
+    stage4_values = (
+        args.stage4_trainer_input,
+        args.stage4_initialization,
+        args.stage4_initialization_sha256,
+        args.stage4_checkpoint_root,
+        args.stage4_frozen_t070_manifest,
+    )
+    if any(value is not None for value in stage4_values):
+        if (
+            len(stages) != 1
+            or stages[0].get("stage") != "stage4_training"
+            or any(value is None for value in stage4_values)
+        ):
+            parser.error("Stage4 execution requires all fixed artifact paths")
+        report = run_t064_stage4_production(
+            manifest_path=args.dry_run_manifest,
+            trainer_input_path=args.stage4_trainer_input,
+            initialization_checkpoint_path=args.stage4_initialization,
+            initialization_sha256=args.stage4_initialization_sha256,
+            checkpoint_root=args.stage4_checkpoint_root,
+            frozen_t070_manifest_path=args.stage4_frozen_t070_manifest,
+        )
+        print(
+            json.dumps(
+                {"stage": "stage4_training", "runs": len(report["runs"])},
+                sort_keys=True,
+            )
+        )
+        return 0
+    stage5_values = (
+        args.stage5_cohort,
+        args.stage5_checkpoint,
+        args.stage5_cohort_kind,
+        args.stage5_log_dir,
+        args.stage5_shard_output_dir,
+        args.stage5_merged_output,
+    )
+    if any(value is not None for value in stage5_values):
+        if (
+            len(stages) != 1
+            or stages[0].get("stage") != "stage5_t044"
+            or any(value is None for value in stage5_values)
+        ):
+            parser.error(
+                "Stage5 execution requires one planned checkpoint/cohort and all output paths"
+            )
+        report, records = run_t064_stage5_dependent_production(
+            cohort_path=args.stage5_cohort,
+            checkpoint_path=args.stage5_checkpoint,
+            cohort_kind=args.stage5_cohort_kind,
+            log_dir=args.stage5_log_dir,
+            shard_output_dir=args.stage5_shard_output_dir,
+            merged_output_path=args.stage5_merged_output,
+        )
+        print(
+            json.dumps(
+                {"stage": "stage5_t044", "arms": len(report.arms), "shards": records},
+                sort_keys=True,
+            )
+        )
+        return 0
+    stage7_values = (
+        args.stage7_root,
+        args.stage7_teacher,
+        args.stage7_trainer_input,
+        args.stage7_artifact_contract,
+    )
+    if any(value is not None for value in stage7_values):
+        if (
+            len(stages) != 1
+            or stages[0].get("stage") != "stage7_aggregate"
+            or any(value is None for value in stage7_values)
+        ):
+            parser.error(
+                "Stage7 execution requires root, teacher, trainer, and artifact-contract paths"
+            )
+        contract = json.loads(args.stage7_artifact_contract.read_text(encoding="utf-8"))
+        t044 = {
+            (arm, int(seed)): {name: Path(path) for name, path in paths.items()}
+            for key, paths in contract["t044_paths"].items()
+            for arm, seed in (key.split(":", 1),)
+        }
+        t070 = {
+            (arm, int(seed)): Path(path)
+            for key, path in contract["t070_paths"].items()
+            for arm, seed in (key.split(":", 1),)
+        }
+        result = aggregate_t064_stage7_from_artifacts(
+            root=args.stage7_root,
+            code_commit=args.code_commit,
+            teacher_path=args.stage7_teacher,
+            trainer_input_path=args.stage7_trainer_input,
+            t044_paths=t044,
+            t070_paths=t070,
+            stage_summary=contract["stage_summary"],
+            frozen_inputs=contract["frozen_inputs"],
+        )
+        print(
+            json.dumps(
+                {
+                    "stage": "stage7_aggregate",
+                    "terminal_case": result["decision"]["terminal_case"],
                 },
                 sort_keys=True,
             )
@@ -1397,8 +1551,16 @@ def persist_t064_t070_checkpoint_selections(
     updated["t070_stage_manifest"] = selections
     temporary = manifest_path.with_suffix(manifest_path.suffix + ".tmp")
     refuse_overwrite(temporary)
-    write_compact_json(temporary, updated)
-    os.replace(temporary, manifest_path)
+    try:
+        with temporary.open("w", encoding="utf-8", newline="\n") as stream:
+            dump_compact_json(updated, stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, manifest_path)
+    except BaseException:
+        if temporary.exists():
+            temporary.unlink()
+        raise
     return updated
 
 
