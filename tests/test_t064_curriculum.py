@@ -600,30 +600,6 @@ def test_source_inadequacy_skips_batch_plans_and_forms_valid_case_b(
         assert completed.returncode == 0, completed.stderr
         payload = json.loads(completed.stdout)
         assert len(payload["executions"]) == expected_count
-        executed = subprocess.run(
-            [
-                sys.executable,
-                str(repository / "scripts" / "t064_curriculum_transfer.py"),
-                "--dry-run-manifest",
-                str(tmp_path / "t064-curriculum-manifest.json"),
-                "--code-commit",
-                "d" * 40,
-                "--stage",
-                stage,
-                "--execute",
-                "--stage-runner",
-                "t064_stage_runner_fixture:run",
-                "--attempt-root",
-                str(tmp_path / "real-attempt" / stage),
-            ],
-            cwd=repository,
-            env=environment,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        assert executed.returncode == 0, executed.stderr
-        assert json.loads(executed.stdout)["executed"] == expected_count
 
 
 def test_empty_selected_source_pool_is_valid_for_complete_source_inadequacy() -> None:
@@ -699,6 +675,7 @@ def test_t044_t070_reuse_contracts_use_persisted_roles_and_frozen_ranges() -> No
         arms=tuple(arm(role) for role in transfer_command.T044_CONTROLLER_ROLES),
         evaluation_successful=True,
     )
+
     assert transfer_command.validate_t044_reuse(
         report, cohort_identity="cohort", cohort_count=21
     )
@@ -720,7 +697,7 @@ def test_t044_t070_reuse_contracts_use_persisted_roles_and_frozen_ranges() -> No
             report,
             frozen_cohort={"identity": "cohort", "record_count": 21},
         )
-        == "rerun_once_four_arm"
+        == "rerun_once_two_independent_arms"
     )
     baseline = {
         "schema_id": "t070-single-arm-merged-stage-v1",
@@ -740,6 +717,82 @@ def test_t044_t070_reuse_contracts_use_persisted_roles_and_frozen_ranges() -> No
     assert not transfer_command.validate_t070_baseline_reuse(
         baseline, cohort_identity="t052"
     )
+
+
+@pytest.mark.parametrize(
+    ("stage", "target"),
+    (
+        ("stage2_teacher", "collect_t064_teacher_stage"),
+        ("stage3_trainer", "build_t064_trainer_input_stage"),
+        ("stage4_training", "run_t064_paired_training"),
+        ("stage5_t044_dependent", "run_t064_t044_dependent_stage"),
+        ("stage5_t044_independent", "run_t064_t044_independent_fallback_stage"),
+        ("stage6_t070", "run_t064_t070_prior_value_stage"),
+        ("stage7_aggregate", "aggregate_t064_stage7_from_artifacts"),
+    ),
+)
+def test_production_stage_dispatcher_routes_only_existing_primitives(
+    monkeypatch: pytest.MonkeyPatch, stage: str, target: str
+) -> None:
+    calls = []
+
+    def primitive(**kwargs):
+        calls.append(kwargs)
+        return target
+
+    monkeypatch.setattr(transfer_command, target, primitive)
+    assert (
+        transfer_command.execute_t064_production_stage(
+            stage, inputs={"frozen": "exact"}
+        )
+        == target
+    )
+    assert calls == [{"frozen": "exact"}]
+
+
+def test_stage2_cli_routes_to_fixed_production_adapter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(transfer_command, "load_compact_json", lambda _stream: {})
+    monkeypatch.setattr(
+        transfer_command,
+        "build_t064_stage_execution_plan",
+        lambda _manifest, *, code_commit: [
+            {"stage": "stage2_teacher", "workers": 16, "ranges": ["0:1"] * 16}
+        ],
+    )
+    calls = []
+    monkeypatch.setattr(
+        transfer_command,
+        "run_t064_stage2_production",
+        lambda **kwargs: (
+            SimpleNamespace(records=[object()]),
+            calls.append(kwargs) or [],
+        ),
+    )
+    assert (
+        transfer_command.main(
+            [
+                "--dry-run-manifest",
+                str(manifest_path),
+                "--code-commit",
+                "a" * 40,
+                "--stage",
+                "stage2_teacher",
+                "--stage2-teacher-output",
+                str(tmp_path / "teacher.jsonl"),
+                "--stage2-shard-output-dir",
+                str(tmp_path / "shards"),
+                "--stage2-log-dir",
+                str(tmp_path / "logs"),
+            ]
+        )
+        == 0
+    )
+    assert calls and calls[0]["merged_output_path"] == tmp_path / "teacher.jsonl"
+    assert json.loads(capsys.readouterr().out)["stage"] == "stage2_teacher"
 
 
 def test_stage7_teacher_validation_reads_nested_complete_identity_descriptors() -> None:
@@ -869,6 +922,94 @@ def test_t044_fallback_routes_only_baseline_and_scripted_once_per_cohort(
         == transfer_command.T044_INDEPENDENT_ROLES
         for call in calls
     )
+
+
+def test_t044_semantics_bind_raw_checkpoint_and_scripted_public_contract() -> None:
+    checkpoint = {"path": "checkpoint.pt", "sha256": "a" * 64}
+    artifact = "torch-policy-value-checkpoint-v1-sha256:" + checkpoint["sha256"]
+    guided = {
+        "kind": "model_guided_oracle_battle_search",
+        "config": {
+            "information_regime": "full_simulator_state_oracle_like",
+            "search_budget": {"simulations": 1},
+            "root_selection_rule": "highest_mean",
+            "action_space": {"excluded_kinds": ["potion"]},
+            "guidance_scorer": {
+                "policy_probability_weight": 0.1,
+                "checkpoint_provenance": {
+                    "checkpoint_artifact_id": artifact,
+                    "checkpoint_path": "checkpoint.pt",
+                },
+            },
+        },
+    }
+    raw = {
+        "kind": "search_guidance_public_policy",
+        "config": {
+            "information_regime": "normal_public_policy",
+            "guidance_scorer": {
+                "checkpoint_provenance": {
+                    "checkpoint_artifact_id": artifact,
+                    "checkpoint_path": "checkpoint.pt",
+                }
+            },
+        },
+    }
+    report = SimpleNamespace(
+        arms=tuple(
+            SimpleNamespace(role=role) for role in transfer_command.T044_DEPENDENT_ROLES
+        ),
+        comparison_config={
+            "controller_roles": {
+                "guided": transfer_command.T044_DEPENDENT_ROLES[0],
+                "raw": transfer_command.T044_DEPENDENT_ROLES[1],
+            },
+            "controller_provenance": {"guided": guided, "raw": raw},
+        },
+    )
+    transfer_command._validate_t044_controller_semantics(report, checkpoint=checkpoint)
+    raw["config"]["guidance_scorer"]["checkpoint_provenance"]["checkpoint_path"] = (
+        "forged.pt"
+    )
+    with pytest.raises(ValueError, match="raw checkpoint identity"):
+        transfer_command._validate_t044_controller_semantics(
+            report, checkpoint=checkpoint
+        )
+
+    scripted = SimpleNamespace(
+        arms=tuple(
+            SimpleNamespace(role=role)
+            for role in transfer_command.T044_INDEPENDENT_ROLES
+        ),
+        comparison_config={
+            "controller_roles": {
+                "baseline": transfer_command.T044_INDEPENDENT_ROLES[0],
+                "scripted": transfer_command.T044_INDEPENDENT_ROLES[1],
+            },
+            "controller_provenance": {
+                "baseline": {
+                    "kind": "oracle_battle_search",
+                    "config": {
+                        "information_regime": "full_simulator_state_oracle_like",
+                        "search_budget": {"simulations": 1},
+                        "root_selection_rule": "highest_mean",
+                        "action_space": {"excluded_kinds": ["potion"]},
+                    },
+                },
+                "scripted": {
+                    "kind": "decision_policy",
+                    "config": {
+                        "information_regime": "normal_public_policy",
+                        "policy_class": "ScoredActionPolicy",
+                    },
+                },
+            },
+        },
+    )
+    transfer_command._validate_t044_controller_semantics(scripted, checkpoint=None)
+    scripted.comparison_config["controller_provenance"]["scripted"]["kind"] = "forged"
+    with pytest.raises(ValueError, match="scripted public-policy"):
+        transfer_command._validate_t044_controller_semantics(scripted, checkpoint=None)
 
 
 def test_t064_transfer_gates_and_historical_t070_wrapper_are_frozen() -> None:
@@ -1057,6 +1198,35 @@ def test_t070_existing_reader_accepts_persisted_t064_checkpoint_selection(
         )
         == checkpoint_identity
     )
+
+
+def test_single_manifest_t070_selector_requires_all_four_frozen_keys() -> None:
+    checkpoint = {"path": "checkpoint.pt", "sha256": "a" * 64, "bytes": 1}
+    stage = {
+        "frozen_t070_manifest": {
+            "path": "frozen.json",
+            "sha256": "b" * 64,
+            "bytes": 1,
+        },
+        "historical_code_commit": "b" * 40,
+        "current_code_commit": "a" * 40,
+        "arm": "prior_value",
+        "native_budget": 100,
+        "tree_geometry_enabled": False,
+        "projection_mode": "accepted_t069_search_scope_projection",
+        "shard_ranges": list(contiguous_ranges(93)),
+        "worker_count": 16,
+        "checkpoint_selections": {
+            f"{arm}:{seed}": {"checkpoint": checkpoint}
+            for arm, seed in TRAINING_RUN_ORDER
+        },
+    }
+    from sts_combat_rl.sim import t064_curriculum as curriculum_sim
+
+    curriculum_sim._validate_t070_stage_manifest(stage, {"code_commit": "a" * 40})
+    del stage["checkpoint_selections"]["static_mixture_v1:64001"]
+    with pytest.raises(ValueError, match="exactly four"):
+        curriculum_sim._validate_t070_stage_manifest(stage, {"code_commit": "a" * 40})
 
 
 def test_stage7_t070_rows_require_exact_order_clean_rows_and_frozen_subsets() -> None:

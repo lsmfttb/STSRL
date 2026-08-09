@@ -901,6 +901,7 @@ def _validate_curriculum_manifest(payload: Mapping[str, Any]) -> None:
         raise ValueError("T064 curriculum manifest teacher ranges are invalid")
     if payload["teacher_worker_count"] != 16:
         raise ValueError("T064 curriculum manifest teacher worker count is invalid")
+    _validate_t070_stage_manifest(payload["t070_stage_manifest"], payload)
     if payload["source_adequacy"]:
         if (
             payload["batch_plan_status"] != "complete"
@@ -916,6 +917,71 @@ def _validate_curriculum_manifest(payload: Mapping[str, Any]) -> None:
     ):
         raise ValueError("T064 source-inadequate manifest batch plan status is invalid")
     _require_string_list(payload["problems"], "T064 curriculum manifest problems")
+
+
+def _validate_t070_stage_manifest(value: Any, manifest: Mapping[str, Any]) -> None:
+    """Validate the sole in-manifest T070 four-checkpoint selector contract."""
+
+    if value is None:
+        return
+    if not isinstance(value, Mapping):
+        raise ValueError("T064 t070_stage_manifest must be null or an object")
+    _require_fields(
+        value,
+        (
+            "frozen_t070_manifest",
+            "historical_code_commit",
+            "current_code_commit",
+            "arm",
+            "native_budget",
+            "tree_geometry_enabled",
+            "projection_mode",
+            "shard_ranges",
+            "worker_count",
+            "checkpoint_selections",
+        ),
+        "T064 T070 stage manifest",
+    )
+    _validate_file_identity(value["frozen_t070_manifest"], "T064 frozen T070 manifest")
+    _require_git_commit(
+        value["historical_code_commit"], "T064 historical T070 code commit"
+    )
+    _require_git_commit(value["current_code_commit"], "T064 current T070 code commit")
+    if (
+        value["current_code_commit"] != manifest["code_commit"]
+        or value["historical_code_commit"] == manifest["code_commit"]
+        or value["arm"] != "prior_value"
+        or value["native_budget"] != 100
+        or value["tree_geometry_enabled"] is not False
+        or value["projection_mode"] != "accepted_t069_search_scope_projection"
+        or value["shard_ranges"] != list(contiguous_ranges(93))
+        or value["worker_count"] != 16
+    ):
+        raise ValueError("T064 T070 selector contract is invalid")
+    selections = value["checkpoint_selections"]
+    expected_keys = {
+        "static_mixture_v1:64001",
+        "static_mixture_v1:64002",
+        "assistance_annealed_curriculum_v1:64001",
+        "assistance_annealed_curriculum_v1:64002",
+    }
+    if not isinstance(selections, Mapping) or set(selections) != expected_keys:
+        raise ValueError("T064 T070 selector must contain exactly four checkpoints")
+    for key, selection in selections.items():
+        if not isinstance(selection, Mapping):
+            raise ValueError(f"T064 T070 selection {key} must be an object")
+        _validate_file_identity(
+            selection.get("checkpoint"), f"T064 T070 selection {key} checkpoint"
+        )
+
+
+def validate_t064_t070_stage_manifest(manifest: Mapping[str, Any]) -> None:
+    """Validate the embedded T070 selector before a shard resolves its checkpoint."""
+
+    code_commit = manifest.get("code_commit")
+    if not isinstance(code_commit, str):
+        raise ValueError("T064 selector manifest lacks code commit")
+    _validate_t070_stage_manifest(manifest.get("t070_stage_manifest"), manifest)
 
 
 def _validate_stage_summary(payload: Mapping[str, Any]) -> None:

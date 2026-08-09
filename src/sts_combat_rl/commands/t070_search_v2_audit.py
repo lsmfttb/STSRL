@@ -31,6 +31,7 @@ from sts_combat_rl.sim.fixed_evaluation_set import (
     dump_fixed_cohort_jsonl,
     load_fixed_cohort_jsonl,
 )
+from sts_combat_rl.sim.t064_curriculum import validate_t064_t070_stage_manifest
 
 
 NATIVE_COMMIT = "fee272f1ae21c283ad2161f55293cfe6d714134a"
@@ -210,10 +211,15 @@ def expected_checkpoint_identity_from_stage_manifest(
             inputs.get("t043_checkpoint") if isinstance(inputs, Mapping) else None
         )
     elif payload.get("schema_id") == "t064-curriculum-manifest-v1":
+        if t064_selection is not None:
+            validate_t064_t070_stage_manifest(payload)
         stage = payload.get("t070_stage_manifest")
         if not isinstance(stage, Mapping):
             identity = None
         elif t064_selection is None:
+            # Historical single-checkpoint T064 wrappers remain readable for
+            # T070 compatibility. New T064 production calls always provide a
+            # selection and therefore take the strict four-selection branch.
             identity = stage.get("checkpoint")
         else:
             selections = stage.get("checkpoint_selections")
@@ -268,6 +274,8 @@ def _t070_frozen_contract_from_stage_manifest(
         return dict(payload), None
     if payload.get("schema_id") != "t064-curriculum-manifest-v1":
         raise ValueError("unsupported frozen stage manifest schema")
+    if t064_selection is not None:
+        validate_t064_t070_stage_manifest(payload)
     stage = payload.get("t070_stage_manifest")
     if not isinstance(stage, Mapping):
         raise ValueError("T064 stage manifest is missing")

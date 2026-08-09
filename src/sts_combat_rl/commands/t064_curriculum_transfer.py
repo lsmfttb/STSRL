@@ -12,7 +12,7 @@ import argparse
 from dataclasses import replace
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
-from importlib import import_module
+import os
 import subprocess
 from pathlib import Path
 import time
@@ -21,6 +21,7 @@ from typing import Any
 from sts_combat_rl.commands.oracle_teacher_scaleup import (
     collect_oracle_teacher_range_from_selected_manifest,
 )
+from sts_combat_rl.commands.t064_curriculum import load_selected_source_pool
 from sts_combat_rl.commands.de_assisted_fixed_cohort_comparison import (
     merge_de_assisted_fixed_cohort_comparison_shards,
     run_de_assisted_fixed_cohort_comparison_from_cohort_path,
@@ -139,15 +140,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Execute the selected stage's dispatcher with no simulator/artifact runner.",
     )
     parser.add_argument("--attempt-root", type=Path)
-    parser.add_argument(
-        "--execute",
-        action="store_true",
-        help="Call a stage-specific existing-primitive adapter for the selected stage.",
-    )
-    parser.add_argument(
-        "--stage-runner",
-        help="Dotted callable receiving stage, manifest, and attempt; used by real stage adapters.",
-    )
     parser.add_argument("--checkpoint-arm")
     parser.add_argument("--stage6-shard-script", type=Path)
     parser.add_argument("--stage6-python", default="python")
@@ -157,6 +149,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--stage6-native-preflight", type=Path)
     parser.add_argument("--stage6-native-checkout", type=Path)
     parser.add_argument("--stage6-native-build-root", type=Path)
+    parser.add_argument("--stage2-teacher-output", type=Path)
+    parser.add_argument("--stage2-shard-output-dir", type=Path)
+    parser.add_argument("--stage2-log-dir", type=Path)
     args = parser.parse_args(argv)
     if args.dry_run_manifest is None or args.code_commit is None:
         parser.error("--dry-run-manifest and --code-commit are required")
@@ -197,22 +192,33 @@ def main(argv: Sequence[str] | None = None) -> int:
                 )
         print(json.dumps({"executions": executions}, sort_keys=True))
         return 0
-    if args.execute:
-        if not stages or args.attempt_root is None or not args.stage_runner:
-            parser.error(
-                "--execute requires --stage, --attempt-root, and --stage-runner"
-            )
-        runner = _load_stage_runner(args.stage_runner)
-        results: list[Any] = []
-        for ordinal, stage in enumerate(stages):
-            attempt = prepare_t064_attempt(
-                args.attempt_root,
-                stage=f"{stage['stage']}-{ordinal:02d}",
-                code_commit=args.code_commit,
-            )
-            results.append(runner(stage=stage, manifest=manifest, attempt=attempt))
+    stage2_values = (
+        args.stage2_teacher_output,
+        args.stage2_shard_output_dir,
+        args.stage2_log_dir,
+    )
+    if any(value is not None for value in stage2_values):
+        if (
+            len(stages) != 1
+            or stages[0].get("stage") != "stage2_teacher"
+            or any(value is None for value in stage2_values)
+        ):
+            parser.error("Stage2 execution requires its three explicit output paths")
+        merged, records = run_t064_stage2_production(
+            manifest=manifest,
+            merged_output_path=args.stage2_teacher_output,
+            shard_output_dir=args.stage2_shard_output_dir,
+            log_dir=args.stage2_log_dir,
+        )
         print(
-            json.dumps({"stage": args.stage, "executed": len(results)}, sort_keys=True)
+            json.dumps(
+                {
+                    "stage": "stage2_teacher",
+                    "rows": len(merged.records),
+                    "shards": records,
+                },
+                sort_keys=True,
+            )
         )
         return 0
     stage6_values = (
@@ -268,16 +274,144 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0
 
 
-def _load_stage_runner(value: str) -> Callable[..., Any]:
-    """Load a thin adapter that calls the existing stage primitive in-process."""
+def execute_t064_production_stage(stage: str, *, inputs: Mapping[str, Any]) -> Any:
+    """Directly route a named T064 stage to its repository-owned primitive.
 
-    module_name, separator, attribute = value.partition(":")
-    if not separator or not module_name or not attribute:
-        raise ValueError("stage runner must use module:function")
-    runner = getattr(import_module(module_name), attribute, None)
-    if not callable(runner):
-        raise ValueError("stage runner is not callable")
-    return runner
+    This intentionally has an explicit branch per stage instead of a plug-in
+    runner mechanism.  The command layer supplies standard LightSpeed and
+    controller construction; tests may pass ordinary mock values through the
+    same fixed arguments.
+    """
+
+    if stage == "stage2_teacher":
+        return collect_t064_teacher_stage(**inputs)
+    if stage == "stage3_trainer":
+        return build_t064_trainer_input_stage(**inputs)
+    if stage == "stage4_training":
+        return run_t064_paired_training(**inputs)
+    if stage == "stage5_t044_dependent":
+        return run_t064_t044_dependent_stage(**inputs)
+    if stage == "stage5_t044_independent":
+        return run_t064_t044_independent_fallback_stage(**inputs)
+    if stage == "stage6_t070":
+        return run_t064_t070_prior_value_stage(**inputs)
+    if stage == "stage7_aggregate":
+        return aggregate_t064_stage7_from_artifacts(**inputs)
+    raise ValueError(f"unsupported T064 production stage {stage!r}")
+
+
+def run_t064_stage2_production(
+    *,
+    manifest: Mapping[str, Any],
+    merged_output_path: Path,
+    shard_output_dir: Path,
+    log_dir: Path,
+) -> tuple[OracleTeacherDataset, list[dict[str, Any]]]:
+    """Construct the repository LightSpeed oracle path for the real Stage 2 route."""
+
+    from sts_combat_rl.sim.action_space import ActionSpaceConfig
+    from sts_combat_rl.sim.lightspeed import LightSpeedAdapter
+    from sts_combat_rl.sim.oracle_search import OracleSearchController
+
+    pool, _ = load_selected_source_pool(manifest)
+    action_space = ActionSpaceConfig.initial_no_potions()
+    controller = OracleSearchController(
+        simulations=100,
+        root_selection_rule="highest_mean",
+        action_space=action_space,
+    )
+    return collect_t064_teacher_stage(
+        selected_manifest=manifest,
+        pool=pool,
+        adapter_factory=lambda: LightSpeedAdapter(seed=1, ascension=20),
+        controller=controller,
+        action_space=action_space,
+        log_dir=log_dir,
+        shard_output_dir=shard_output_dir,
+        merged_output_path=merged_output_path,
+    )
+
+
+def run_t064_stage3_production(
+    *,
+    selected_manifest: Mapping[str, Any],
+    teacher_path: Path,
+    output_path: Path,
+    bridge_contract: Mapping[str, Any],
+) -> tuple[Any, Any, dict[str, int]]:
+    """Use the existing T043 bridge with its explicit accepted input contract."""
+
+    from sts_combat_rl.sim.lightspeed import LightSpeedAdapter
+    from sts_combat_rl.sim.oracle_teacher_search_guidance import (
+        build_oracle_teacher_search_guidance_dataset,
+    )
+
+    with teacher_path.open(encoding="utf-8") as stream:
+        teacher = load_oracle_teacher_dataset_jsonl(stream)
+    pool, selected = load_selected_source_pool(selected_manifest)
+    required = (
+        "manifest",
+        "selected_budget",
+        "target",
+        "stability_filter",
+        "manifest_identity",
+        "teacher_artifact_identity",
+        "t022_report_identity",
+        "source_pool_identity",
+    )
+    if any(key not in bridge_contract for key in required):
+        raise ValueError("T064 Stage3 requires the accepted T043 bridge contract")
+
+    def builder(*, teacher_dataset: Any, source_pool: Any) -> tuple[Any, Any]:
+        return build_oracle_teacher_search_guidance_dataset(
+            adapter_factory=lambda: LightSpeedAdapter(seed=1, ascension=20),
+            manifest=bridge_contract["manifest"],
+            teacher_dataset=teacher_dataset,
+            source_pool=source_pool,
+            selected_budget=bridge_contract["selected_budget"],
+            target=bridge_contract["target"],
+            stability_filter=bridge_contract["stability_filter"],
+            manifest_identity=bridge_contract["manifest_identity"],
+            teacher_artifact_identity=bridge_contract["teacher_artifact_identity"],
+            t022_report_identity=bridge_contract["t022_report_identity"],
+            source_pool_identity=bridge_contract["source_pool_identity"],
+        )
+
+    identities_by_source = {
+        _source_key(descriptor): descriptor["complete_identity_sha256"]
+        for descriptor in selected
+    }
+
+    def resolver(dataset: Any) -> list[str]:
+        identities: list[str] = []
+        for record in dataset.records:
+            metadata = record.source_metadata
+            key = (
+                metadata.get("source_checkpoint_id"),
+                metadata.get("source_seed"),
+                metadata.get("source_run_id"),
+                metadata.get("source_battle_index"),
+                metadata.get("distribution_kind"),
+                metadata.get("checkpoint_information_regime"),
+            )
+            matching = [
+                identity
+                for source, identity in identities_by_source.items()
+                if source[:6] == key
+            ]
+            if len(matching) != 1:
+                raise ValueError("T064 Stage3 cannot resolve a unique source identity")
+            identities.append(matching[0])
+        return identities
+
+    return build_t064_trainer_input_stage(
+        selected_manifest=selected_manifest,
+        teacher_dataset=teacher,
+        selected_pool=pool,
+        trainer_builder=builder,
+        trainer_identity_resolver=resolver,
+        output_path=output_path,
+    )
 
 
 def validate_resume_manifest(manifest: Mapping[str, Any], *, code_commit: str) -> None:
@@ -531,7 +665,7 @@ def collect_t064_teacher_stage(
     shard_runner: Callable[
         ..., OracleTeacherDataset
     ] = collect_oracle_teacher_range_from_selected_manifest,
-) -> OracleTeacherDataset:
+) -> tuple[OracleTeacherDataset, list[dict[str, Any]]]:
     """Route all 16 T064 teacher shards through the existing T043 primitive."""
 
     sources = _selected_sources(selected_manifest)
@@ -694,6 +828,9 @@ def run_t064_paired_training(
     trainer_input_path: Path,
     identity_to_trainer_index: Mapping[str, int],
     checkpoint_paths: Mapping[tuple[str, int], Path],
+    manifest_path: Path | None = None,
+    frozen_t070_manifest: Mapping[str, Any] | None = None,
+    frozen_t070_identity: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run the four fixed CPU jobs using the existing trainer/checkpoint writer.
 
@@ -832,11 +969,73 @@ def run_t064_paired_training(
                 "problems": problems,
             }
         )
-    return {
+    report = {
         "schema_id": "t064-training-run-report-v1",
         "format_version": 1,
         "runs": runs,
     }
+    if any(
+        value is not None
+        for value in (manifest_path, frozen_t070_manifest, frozen_t070_identity)
+    ):
+        if (
+            manifest_path is None
+            or frozen_t070_manifest is None
+            or frozen_t070_identity is None
+            or any(run["completion_status"] != "complete" for run in runs)
+        ):
+            raise ValueError("T064 Stage4 cannot persist partial T070 selections")
+        persist_t064_t070_checkpoint_selections(
+            manifest_path=manifest_path,
+            code_commit=str(selected_manifest["code_commit"]),
+            frozen_t070_manifest=frozen_t070_manifest,
+            frozen_identity=frozen_t070_identity,
+            checkpoints={
+                f"{run['arm']}:{run['seed']}": run["checkpoint"] for run in runs
+            },
+        )
+    return report
+
+
+def run_t064_stage4_production(
+    *,
+    manifest_path: Path,
+    trainer_input_path: Path,
+    initialization_checkpoint_path: Path,
+    initialization_sha256: str,
+    checkpoint_root: Path,
+    frozen_t070_manifest_path: Path,
+) -> dict[str, Any]:
+    """Load fixed artifacts and run the one four-run Stage 4 production route."""
+
+    with manifest_path.open(encoding="utf-8") as stream:
+        manifest = load_compact_json(stream)
+    with trainer_input_path.open(encoding="utf-8") as stream:
+        dataset = load_trainer_input_dataset_jsonl(stream)
+    order = dataset.generation_metadata.get("t064_complete_identity_order")
+    if not isinstance(order, list) or any(not isinstance(item, str) for item in order):
+        raise ValueError("T064 Stage4 trainer input lacks identity-bound order")
+    frozen = json.loads(frozen_t070_manifest_path.read_text(encoding="utf-8"))
+    if not isinstance(frozen, Mapping):
+        raise ValueError("T064 Stage4 frozen T070 manifest is invalid")
+    paths = {
+        (arm, seed): checkpoint_root / f"{arm}-{seed}.pt"
+        for arm, seed in TRAINING_RUN_ORDER
+    }
+    return run_t064_paired_training(
+        selected_manifest=manifest,
+        dataset=dataset,
+        initialization_checkpoint_path=initialization_checkpoint_path,
+        initialization_sha256=initialization_sha256,
+        trainer_input_path=trainer_input_path,
+        identity_to_trainer_index={
+            identity: index for index, identity in enumerate(order)
+        },
+        checkpoint_paths=paths,
+        manifest_path=manifest_path,
+        frozen_t070_manifest=frozen,
+        frozen_t070_identity=_file_identity(frozen_t070_manifest_path),
+    )
 
 
 def validate_t044_reuse(
@@ -879,18 +1078,18 @@ def t044_independent_arm_disposition(
     *,
     frozen_cohort: Mapping[str, Any],
 ) -> str:
-    """Choose a historical four-arm reuse or one clean cohort rerun.
+    """Choose a historical four-arm reuse or one clean independent-arm rerun.
 
     The dependent two-arm output is never a substitute for the independent
     baseline/scripted evidence.  A failed historical validation therefore
-    schedules precisely one all-four-arm fixed-cohort rerun for that cohort.
+    schedules precisely one baseline/scripted fixed-cohort rerun for that cohort.
     """
 
     if historical_report is not None and validate_t044_historical_reuse(
         historical_report, frozen_cohort=frozen_cohort
     ):
         return "reuse_historical_four_arm"
-    return "rerun_once_four_arm"
+    return "rerun_once_two_independent_arms"
 
 
 def run_t064_t044_dependent_stage(
@@ -947,6 +1146,58 @@ def run_t064_t044_dependent_stage(
     merged = merger(cohort_path=cohort_path, shards=shards, expected_ranges=ranges)
     report_writer(merged_output_path, merged)
     return merged, shard_records
+
+
+def run_t064_stage5_dependent_production(
+    *,
+    cohort_path: Path,
+    checkpoint_path: Path,
+    cohort_kind: str,
+    log_dir: Path,
+    shard_output_dir: Path,
+    merged_output_path: Path,
+) -> tuple[Any, list[dict[str, Any]]]:
+    """Construct the existing LightSpeed T044 dependent arms for one checkpoint."""
+
+    from sts_combat_rl.commands.lightspeed_cli import (
+        MODEL_GUIDED_ORACLE_V2_LABEL,
+        RAW_CHECKPOINT_POLICY_LABEL,
+    )
+    from sts_combat_rl.sim.action_space import ActionSpaceConfig
+    from sts_combat_rl.sim.lightspeed import LightSpeedAdapter
+    from sts_combat_rl.commands.model_guided_oracle_search import (
+        build_torch_guidance_scorer_from_checkpoint,
+    )
+    from sts_combat_rl.sim.model_guided_oracle_search import (
+        ModelGuidedOracleSearchV2Controller,
+    )
+    from sts_combat_rl.sim.search_guidance_policy import SearchGuidancePolicyController
+
+    action_space = ActionSpaceConfig.initial_no_potions()
+    scorer = build_torch_guidance_scorer_from_checkpoint(checkpoint_path)
+    guided = ModelGuidedOracleSearchV2Controller(
+        simulations=T044_SEARCH_BUDGET,
+        scorer=scorer,
+        policy_probability_weight=T044_GUIDANCE_WEIGHT,
+        action_space=action_space,
+    )
+    raw = SearchGuidancePolicyController(scorer)
+    return run_t064_t044_dependent_stage(
+        adapter_factory=lambda: LightSpeedAdapter(seed=1, ascension=20),
+        cohort_path=cohort_path,
+        controller_arms=(
+            (
+                MODEL_GUIDED_ORACLE_V2_LABEL,
+                T044_DEPENDENT_ROLES[0],
+                guided,
+            ),
+            (RAW_CHECKPOINT_POLICY_LABEL, T044_DEPENDENT_ROLES[1], raw),
+        ),
+        cohort_kind=cohort_kind,
+        log_dir=log_dir,
+        shard_output_dir=shard_output_dir,
+        merged_output_path=merged_output_path,
+    )
 
 
 def run_t064_t044_independent_fallback_stage(
@@ -1119,6 +1370,36 @@ def build_t064_t070_checkpoint_selections(
             for key, checkpoint in checkpoints.items()
         },
     }
+
+
+def persist_t064_t070_checkpoint_selections(
+    *,
+    manifest_path: Path,
+    code_commit: str,
+    frozen_t070_manifest: Mapping[str, Any],
+    frozen_identity: Mapping[str, Any],
+    checkpoints: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Atomically add all four selections to the one authorized manifest file."""
+
+    with manifest_path.open(encoding="utf-8") as stream:
+        manifest = load_compact_json(stream)
+    validate_resume_manifest(manifest, code_commit=code_commit)
+    if manifest.get("t070_stage_manifest") is not None:
+        raise ValueError("T064 refuses to overwrite its persisted T070 selections")
+    selections = build_t064_t070_checkpoint_selections(
+        current_code_commit=code_commit,
+        frozen_t070_manifest=frozen_t070_manifest,
+        frozen_identity=frozen_identity,
+        checkpoints=checkpoints,
+    )
+    updated = dict(manifest)
+    updated["t070_stage_manifest"] = selections
+    temporary = manifest_path.with_suffix(manifest_path.suffix + ".tmp")
+    refuse_overwrite(temporary)
+    write_compact_json(temporary, updated)
+    os.replace(temporary, manifest_path)
+    return updated
 
 
 def run_t064_t070_shard_script(
@@ -1457,18 +1738,30 @@ def _validate_t044_controller_semantics(
     )
     if not isinstance(roles, Mapping) or not isinstance(provenance, Mapping):
         raise ValueError("T044 roles/controller provenance are missing")
+    actual_roles = tuple(getattr(arm, "role", None) for arm in report.arms)
+    if (
+        actual_roles
+        not in (
+            T044_CONTROLLER_ROLES,
+            T044_DEPENDENT_ROLES,
+            T044_INDEPENDENT_ROLES,
+        )
+        or tuple(roles.values()) != actual_roles
+        or len(set(actual_roles)) != len(actual_roles)
+    ):
+        raise ValueError("T044 persisted role set is not an exact accepted type")
     by_role = {role: label for label, role in roles.items()}
-    for role in ("baseline_oracle_search", *T044_DEPENDENT_ROLES):
+    for role in actual_roles:
         label = by_role.get(role)
         if label is None:
-            continue
+            raise ValueError(f"T044 controller label missing for {role}")
         entry = provenance.get(label) if isinstance(label, str) else None
         if not isinstance(entry, Mapping):
             raise ValueError(f"T044 controller provenance missing for {role}")
         settings = entry.get("config")
         if not isinstance(settings, Mapping):
             raise ValueError(f"T044 controller config missing for {role}")
-        if role != "raw_checkpoint_public_policy":
+        if role in {"baseline_oracle_search", "model_guided_search_t043_checkpoint"}:
             budget = settings.get("search_budget")
             if (
                 not isinstance(budget, Mapping)
@@ -1478,6 +1771,38 @@ def _validate_t044_controller_semantics(
                 != "full_simulator_state_oracle_like"
             ):
                 raise ValueError(f"T044 search semantics mismatch for {role}")
+            action_space = settings.get("action_space")
+            if not isinstance(
+                action_space, Mapping
+            ) or "potion" not in action_space.get("excluded_kinds", ()):
+                raise ValueError(f"T044 action-space semantics mismatch for {role}")
+        if role == "raw_checkpoint_public_policy":
+            scorer = settings.get("guidance_scorer")
+            if (
+                settings.get("information_regime") != "normal_public_policy"
+                or not isinstance(scorer, Mapping)
+                or checkpoint is None
+            ):
+                raise ValueError("T044 raw checkpoint policy semantics mismatch")
+            raw_checkpoint = scorer.get("checkpoint_provenance")
+            if not isinstance(raw_checkpoint, Mapping):
+                raise ValueError("T044 raw checkpoint provenance missing")
+            expected_artifact = "torch-policy-value-checkpoint-v1-sha256:" + str(
+                checkpoint.get("sha256")
+            )
+            if raw_checkpoint.get(
+                "checkpoint_artifact_id"
+            ) != expected_artifact or raw_checkpoint.get(
+                "checkpoint_path"
+            ) != checkpoint.get("path"):
+                raise ValueError("T044 raw checkpoint identity mismatch")
+        if role == "scripted_public_policy_baseline":
+            if (
+                entry.get("kind") != "decision_policy"
+                or settings.get("information_regime") != "normal_public_policy"
+                or settings.get("policy_class") != "ScoredActionPolicy"
+            ):
+                raise ValueError("T044 scripted public-policy semantics mismatch")
     guided_label = by_role.get("model_guided_search_t043_checkpoint")
     if guided_label is None:
         return
