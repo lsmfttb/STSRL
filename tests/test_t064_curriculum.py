@@ -15,6 +15,9 @@ import pytest
 
 from sts_combat_rl.commands import t064_curriculum as curriculum_command
 from sts_combat_rl.commands import t064_curriculum_transfer as transfer_command
+from sts_combat_rl.commands.t070_search_v2_audit import (
+    expected_checkpoint_identity_from_stage_manifest,
+)
 from sts_combat_rl.sim.battle_start_pool import BattleStartCheckpointRecord
 from sts_combat_rl.sim.t064_curriculum import (
     ARM_CURRICULUM,
@@ -563,54 +566,38 @@ def test_source_inadequacy_skips_batch_plans_and_forms_valid_case_b(
     repository = Path(__file__).resolve().parents[1]
     environment = dict(os.environ)
     environment["PYTHONPATH"] = str(repository / "src")
-    completed = subprocess.run(
-        [
-            sys.executable,
-            str(repository / "scripts" / "t064_curriculum_transfer.py"),
-            "--dry-run-manifest",
-            str(tmp_path / "t064-curriculum-manifest.json"),
-            "--code-commit",
-            "d" * 40,
-            "--stage",
-            "stage2_teacher",
-            "--mock-execute",
-            "--attempt-root",
-            str(tmp_path / "mock-attempt"),
-        ],
-        cwd=repository,
-        env=environment,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert completed.returncode == 0, completed.stderr
-    payload = json.loads(completed.stdout)
-    assert len(payload["shards"]) == 16
-    child = subprocess.run(
-        [
-            sys.executable,
-            str(repository / "scripts" / "t064_curriculum_transfer.py"),
-            "--dry-run-manifest",
-            str(tmp_path / "t064-curriculum-manifest.json"),
-            "--code-commit",
-            "d" * 40,
-            "--stage",
-            "stage2_teacher",
-            "--execute-command",
-            f'"{sys.executable}" -c "import sys; raise SystemExit(0)"',
-            "--attempt-root",
-            str(tmp_path / "command-attempt"),
-        ],
-        cwd=repository,
-        env=environment,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert child.returncode == 0, child.stderr
-    attempt = Path(json.loads(child.stdout)["attempt"])
-    assert len(list(attempt.glob("shard-*"))) == 16
-    assert len(list((attempt / "logs").glob("shard-*.log"))) == 16
+    expected_executions = {
+        "stage2_teacher": 1,
+        "stage3_trainer": 1,
+        "stage4_training": 1,
+        "stage5_t044": 8,
+        "stage6_t070": 4,
+        "stage7_aggregate": 1,
+    }
+    for stage, expected_count in expected_executions.items():
+        completed = subprocess.run(
+            [
+                sys.executable,
+                str(repository / "scripts" / "t064_curriculum_transfer.py"),
+                "--dry-run-manifest",
+                str(tmp_path / "t064-curriculum-manifest.json"),
+                "--code-commit",
+                "d" * 40,
+                "--stage",
+                stage,
+                "--mock-execute",
+                "--attempt-root",
+                str(tmp_path / "mock-attempt" / stage),
+            ],
+            cwd=repository,
+            env=environment,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert completed.returncode == 0, completed.stderr
+        payload = json.loads(completed.stdout)
+        assert len(payload["executions"]) == expected_count
 
 
 def test_empty_selected_source_pool_is_valid_for_complete_source_inadequacy() -> None:
@@ -729,6 +716,53 @@ def test_t044_t070_reuse_contracts_use_persisted_roles_and_frozen_ranges() -> No
     )
 
 
+def test_stage7_teacher_validation_reads_nested_complete_identity_descriptors() -> None:
+    """Stage-0 persisted descriptors keep identity fields below complete_identity."""
+
+    selected = []
+    rows = []
+    for index in range(460):
+        identity = {
+            "source_checkpoint_id": f"checkpoint-{index}",
+            "source_seed": index,
+            "source_run_id": f"run-{index}",
+            "source_battle_index": index,
+            "distribution_kind": "assisted_run",
+            "checkpoint_information_regime": "full_simulator_state_oracle_like",
+        }
+        selected.append(
+            {
+                "component": "assist_hp75_potion",
+                "structural_metadata": {"act": 2},
+                "complete_identity_sha256": f"{index + 1:064x}",
+                "complete_identity": identity,
+            }
+        )
+        rows.append(
+            SimpleNamespace(
+                row_index=index,
+                source_checkpoint_id=identity["source_checkpoint_id"],
+                source_seed=identity["source_seed"],
+                source_run_id=identity["source_run_id"],
+                source_battle_index=identity["source_battle_index"],
+                source_distribution_kind=identity["distribution_kind"],
+                checkpoint_information_regime=identity["checkpoint_information_regime"],
+                soft_visit_target={"target": 1.0},
+            )
+        )
+    # JSON round-trip mirrors the compact manifest's retained descriptor shape.
+    manifest = json.loads(json.dumps({"selected_sources": selected}))
+    dataset = SimpleNamespace(
+        records=rows,
+        information_regime="full_simulator_state_oracle_like",
+        action_space_config={"include_potions": False},
+        problems=[],
+    )
+    transfer_command._validate_teacher_against_selected_manifest(dataset, manifest)
+    manifest["selected_sources"][0]["source_checkpoint_id"] = "forged-top-level"
+    transfer_command._validate_teacher_against_selected_manifest(dataset, manifest)
+
+
 def test_t044_dependent_stage_routes_only_frozen_roles_and_ranges(
     tmp_path: Path,
 ) -> None:
@@ -777,6 +811,40 @@ def test_t044_dependent_stage_routes_only_frozen_roles_and_ranges(
         )
 
 
+def test_t044_fallback_routes_only_baseline_and_scripted_once_per_cohort(
+    tmp_path: Path,
+) -> None:
+    calls = []
+
+    def shard_runner(*args, **kwargs):
+        calls.append(kwargs)
+        return kwargs["record_range"]
+
+    controller = SimpleNamespace(action_space=object())
+    output, records = transfer_command.run_t064_t044_independent_fallback_stage(
+        adapter_factory=lambda: object(),
+        cohort_path=Path("cohort.jsonl"),
+        controller_arms=(
+            ("baseline", transfer_command.T044_INDEPENDENT_ROLES[0], controller),
+            ("scripted", transfer_command.T044_INDEPENDENT_ROLES[1], controller),
+        ),
+        cohort_kind="assist_0",
+        log_dir=tmp_path / "logs",
+        shard_output_dir=tmp_path / "shards",
+        merged_output_path=tmp_path / "merged.jsonl",
+        shard_runner=shard_runner,
+        merger=lambda **kwargs: kwargs,
+        report_writer=lambda _path, _report: None,
+    )
+    assert len(calls) == len(records) == 16
+    assert output["expected_ranges"] == transfer_command.T044_ASSIST_0_RANGES
+    assert all(
+        tuple(item[1] for item in call["controller_arms"])
+        == transfer_command.T044_INDEPENDENT_ROLES
+        for call in calls
+    )
+
+
 def test_t064_transfer_gates_and_historical_t070_wrapper_are_frozen() -> None:
     metrics = {
         "curriculum_t052_prior_value_wins": {64001: 10, 64002: 11},
@@ -792,9 +860,18 @@ def test_t064_transfer_gates_and_historical_t070_wrapper_are_frozen() -> None:
     }
     assert all(transfer_command.compute_transfer_gates(metrics).values())
     historical = {
-        "schema_id": "t070-frozen-manifest-v1",
+        "schema_id": "t070-frozen-experiment-manifest-v1",
         "code_commit": "b" * 40,
         "primary_shard_ranges": list(transfer_command.T070_T052_RANGES),
+        "primary_stage_inventory": [
+            {
+                "stage_name": "equal-prior-value-0100",
+                "arm": "prior_value",
+                "family": "equal_nominal",
+                "native_budget": 100,
+                "tree_geometry_enabled": False,
+            }
+        ],
     }
     wrapper = transfer_command.t064_t070_wrapper(
         current_code_commit="a" * 40,
@@ -853,6 +930,117 @@ def test_t070_prior_value_stage_dispatches_all_real_runner_arguments(
     )
     assert all(call["arm"] == "prior_value" for call in calls)
     assert all("t064_wrapper" not in call for call in calls)
+
+
+def test_t070_script_runner_uses_the_repository_argument_contract(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured = []
+
+    def fake_run(command, **kwargs):
+        captured.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(transfer_command.subprocess, "run", fake_run)
+    completed = transfer_command.run_t064_t070_shard_script(
+        script_path=Path("scripts/run_t070_search_stage_shard.py"),
+        python_executable="python",
+        cohort_path=tmp_path / "t052.jsonl",
+        checkpoint_path=tmp_path / "checkpoint.pt",
+        wrapper_manifest_path=tmp_path / "t064-wrapper.json",
+        native_preflight_path=tmp_path / "preflight.json",
+        native_checkout=tmp_path / "native",
+        native_build_root=tmp_path / "native" / "build",
+        code_commit="a" * 40,
+        output_path=tmp_path / "shard.json",
+        record_range="88:93",
+        shard_index=15,
+    )
+    assert completed.returncode == 0
+    command, kwargs = captured[0]
+    assert "--output-dir" not in command
+    assert command[command.index("--output") + 1] == str(tmp_path / "shard.json")
+    assert command[command.index("--frozen-manifest") + 1] == str(
+        tmp_path / "t064-wrapper.json"
+    )
+    assert command[command.index("--stage-name") + 1] == "equal-prior-value-0100"
+    assert command[command.index("--family") + 1] == "equal_nominal"
+    assert command[command.index("--range-kind") + 1] == "primary"
+    assert kwargs == {"check": False, "text": True, "capture_output": True}
+
+
+def test_t070_existing_reader_accepts_persisted_t064_checkpoint_selection(
+    tmp_path: Path,
+) -> None:
+    checkpoint = tmp_path / "checkpoint.pt"
+    checkpoint.write_bytes(b"checkpoint")
+    checkpoint_identity = {
+        "path": str(checkpoint),
+        "sha256": hashlib.sha256(checkpoint.read_bytes()).hexdigest(),
+        "bytes": checkpoint.stat().st_size,
+    }
+    frozen = tmp_path / "t070-frozen-experiment.json"
+    frozen.write_text(
+        json.dumps(
+            {
+                "schema_id": "t070-frozen-experiment-manifest-v1",
+                "code_commit": "b" * 40,
+                "primary_shard_ranges": list(transfer_command.T070_T052_RANGES),
+                "primary_stage_inventory": [
+                    {
+                        "stage_name": "equal-prior-value-0100",
+                        "arm": "prior_value",
+                        "family": "equal_nominal",
+                        "native_budget": 100,
+                        "tree_geometry_enabled": False,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    frozen_identity = {
+        "path": str(frozen),
+        "sha256": hashlib.sha256(frozen.read_bytes()).hexdigest(),
+        "bytes": frozen.stat().st_size,
+    }
+    outer = tmp_path / "t064-curriculum-wrapper.json"
+    outer.write_text(
+        json.dumps(
+            {
+                "schema_id": "t064-curriculum-manifest-v1",
+                "code_commit": "a" * 40,
+                "t070_stage_manifest": transfer_command.t064_t070_wrapper(
+                    current_code_commit="a" * 40,
+                    frozen_t070_manifest=json.loads(frozen.read_text(encoding="utf-8")),
+                    frozen_identity=frozen_identity,
+                    checkpoint_identity=checkpoint_identity,
+                ),
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert (
+        expected_checkpoint_identity_from_stage_manifest(outer) == checkpoint_identity
+    )
+
+
+def test_stage7_t070_rows_require_exact_order_clean_rows_and_frozen_subsets() -> None:
+    rows = [
+        {
+            "cohort_index": index,
+            "problems": [],
+            "structural_metadata": {
+                "room_type": "BOSS" if index < 88 else "MONSTER",
+                "act": 1 if index < 88 else 2,
+            },
+        }
+        for index in range(93)
+    ]
+    assert transfer_command._validate_t070_rows(rows, cohort_identity="t052") == rows
+    rows[92] = "forged-non-mapping"
+    with pytest.raises(ValueError, match="mapping"):
+        transfer_command._validate_t070_rows(rows, cohort_identity="t052")
 
 
 def test_stage2_to_7_dry_plan_has_exact_worker_range_and_stage_inventory() -> None:

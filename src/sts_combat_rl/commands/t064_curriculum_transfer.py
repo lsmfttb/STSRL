@@ -12,7 +12,6 @@ import argparse
 from dataclasses import replace
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
-import shlex
 import subprocess
 from pathlib import Path
 import time
@@ -26,9 +25,11 @@ from sts_combat_rl.commands.de_assisted_fixed_cohort_comparison import (
     run_de_assisted_fixed_cohort_comparison_from_cohort_path,
     write_de_assisted_fixed_cohort_comparison_report,
 )
+from sts_combat_rl.commands.t070_search_v2_audit import FROZEN_MANIFEST_SCHEMA_ID
 from sts_combat_rl.sim.de_assisted_fixed_cohort_comparison import (
     load_de_assisted_fixed_cohort_comparison_jsonl,
 )
+from sts_combat_rl.sim.fixed_evaluation_set import load_fixed_cohort_jsonl
 from sts_combat_rl.sim.oracle_teacher import (
     OracleTeacherDataset,
     dump_oracle_teacher_dataset_jsonl,
@@ -61,6 +62,10 @@ T044_CONTROLLER_ROLES = (
     "scripted_public_policy_baseline",
 )
 T044_DEPENDENT_ROLES = T044_CONTROLLER_ROLES[1:3]
+T044_INDEPENDENT_ROLES = (
+    T044_CONTROLLER_ROLES[0],
+    T044_CONTROLLER_ROLES[3],
+)
 T044_ASSIST_0_RANGES = contiguous_ranges(21)
 T044_ASSIST_HP50_RANGES = contiguous_ranges(38)
 T070_T052_RANGES = contiguous_ranges(93)
@@ -130,10 +135,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Execute the selected stage's dispatcher with no simulator/artifact runner.",
     )
     parser.add_argument("--attempt-root", type=Path)
-    parser.add_argument(
-        "--execute-command",
-        help="Existing stage command prefix; dispatched once per frozen shard, never synthesized.",
-    )
+    parser.add_argument("--checkpoint-arm")
+    parser.add_argument("--stage6-shard-script", type=Path)
+    parser.add_argument("--stage6-python", default="python")
+    parser.add_argument("--stage6-cohort", type=Path)
+    parser.add_argument("--stage6-checkpoint", type=Path)
+    parser.add_argument("--stage6-wrapper-manifest", type=Path)
+    parser.add_argument("--stage6-native-preflight", type=Path)
+    parser.add_argument("--stage6-native-checkout", type=Path)
+    parser.add_argument("--stage6-native-build-root", type=Path)
     args = parser.parse_args(argv)
     if args.dry_run_manifest is None or args.code_commit is None:
         parser.error("--dry-run-manifest and --code-commit are required")
@@ -142,70 +152,84 @@ def main(argv: Sequence[str] | None = None) -> int:
     stages = build_t064_stage_execution_plan(manifest, code_commit=args.code_commit)
     if args.stage is not None:
         stages = [stage for stage in stages if stage["stage"] == args.stage]
+    if args.checkpoint_arm is not None:
+        stages = [
+            stage
+            for stage in stages
+            if stage.get("checkpoint_arm") == args.checkpoint_arm
+        ]
     if args.mock_execute:
-        if len(stages) != 1 or args.attempt_root is None:
+        if not stages or args.attempt_root is None:
             parser.error("--mock-execute requires one --stage and --attempt-root")
-        stage = stages[0]
-        if stage["workers"] == 16:
-            _, records = dispatch_t064_shards(
-                ranges=stage["ranges"],
-                log_dir=args.attempt_root / stage["stage"] / "logs",
-                worker=lambda index, record_range: {
-                    "shard_index": index,
-                    "range": record_range,
-                    "mock": True,
-                },
-            )
-            print(
-                json.dumps({"stage": stage["stage"], "shards": records}, sort_keys=True)
-            )
-        else:
-            print(json.dumps({"stage": stage["stage"], "mock": True}, sort_keys=True))
+        executions: list[dict[str, Any]] = []
+        for ordinal, stage in enumerate(stages):
+            label = f"{stage['stage']}-{ordinal:02d}"
+            if stage["workers"] == 16:
+                _, records = dispatch_t064_shards(
+                    ranges=stage["ranges"],
+                    log_dir=args.attempt_root / label / "logs",
+                    worker=lambda index, record_range: {
+                        "shard_index": index,
+                        "range": record_range,
+                        "mock": True,
+                    },
+                )
+                executions.append({"stage": stage["stage"], "shards": records})
+            else:
+                log = args.attempt_root / label / "stage.log"
+                log.parent.mkdir(parents=True, exist_ok=True)
+                log.write_text("return_code=0\\nmock=true\\n", encoding="utf-8")
+                executions.append(
+                    {"stage": stage["stage"], "return_code": 0, "log_path": str(log)}
+                )
+        print(json.dumps({"executions": executions}, sort_keys=True))
         return 0
-    if args.execute_command is not None:
-        if len(stages) != 1 or args.attempt_root is None:
-            parser.error("--execute-command requires one --stage and --attempt-root")
-        stage = stages[0]
-        ranges = stage.get("ranges")
-        if not isinstance(ranges, list) or len(ranges) != 16:
-            parser.error("--execute-command is only valid for one 16-shard stage")
-        prefix = shlex.split(args.execute_command)
-        if not prefix:
-            parser.error("--execute-command must not be empty")
+    stage6_values = (
+        args.stage6_shard_script,
+        args.stage6_cohort,
+        args.stage6_checkpoint,
+        args.stage6_wrapper_manifest,
+        args.stage6_native_preflight,
+        args.stage6_native_checkout,
+        args.stage6_native_build_root,
+    )
+    if any(value is not None for value in stage6_values):
+        if (
+            len(stages) != 1
+            or stages[0].get("stage") != "stage6_t070"
+            or args.attempt_root is None
+            or any(value is None for value in stage6_values)
+        ):
+            parser.error(
+                "Stage6 execution requires one checkpoint arm and all T070 paths"
+            )
         attempt = prepare_t064_attempt(
-            args.attempt_root, stage=stage["stage"], code_commit=args.code_commit
+            args.attempt_root, stage="stage6_t070", code_commit=args.code_commit
         )
 
-        def invoke(index: int, record_range: str) -> int:
-            output_dir = attempt / f"shard-{index:02d}"
-            output_dir.mkdir()
-            completed = subprocess.run(
-                [
-                    *prefix,
-                    "--record-range",
-                    record_range,
-                    "--shard-index",
-                    str(index),
-                    "--output-dir",
-                    str(output_dir),
-                ],
-                check=False,
+        def invoke_stage6(index: int, record_range: str) -> int:
+            completed = run_t064_t070_shard_script(
+                script_path=args.stage6_shard_script,
+                python_executable=args.stage6_python,
+                cohort_path=args.stage6_cohort,
+                checkpoint_path=args.stage6_checkpoint,
+                wrapper_manifest_path=args.stage6_wrapper_manifest,
+                native_preflight_path=args.stage6_native_preflight,
+                native_checkout=args.stage6_native_checkout,
+                native_build_root=args.stage6_native_build_root,
+                code_commit=args.code_commit,
+                output_path=attempt / f"shard-{index:02d}.json",
+                record_range=record_range,
+                shard_index=index,
             )
             if completed.returncode:
-                raise RuntimeError(
-                    f"existing stage command returned {completed.returncode}"
-                )
+                raise RuntimeError(completed.stderr or "T070 shard script failed")
             return completed.returncode
 
         _, records = dispatch_t064_shards(
-            ranges=ranges, log_dir=attempt / "logs", worker=invoke
+            ranges=stages[0]["ranges"], log_dir=attempt / "logs", worker=invoke_stage6
         )
-        print(
-            json.dumps(
-                {"stage": stage["stage"], "attempt": str(attempt), "shards": records},
-                sort_keys=True,
-            )
-        )
+        print(json.dumps({"stage": "stage6_t070", "shards": records}, sort_keys=True))
         return 0
     for stage in stages:
         print(json.dumps(stage, sort_keys=True, separators=(",", ":")))
@@ -881,6 +905,57 @@ def run_t064_t044_dependent_stage(
     return merged, shard_records
 
 
+def run_t064_t044_independent_fallback_stage(
+    *,
+    adapter_factory: Callable[[], Any],
+    cohort_path: Path,
+    controller_arms: Sequence[Any],
+    cohort_kind: str,
+    log_dir: Path,
+    shard_output_dir: Path,
+    merged_output_path: Path,
+    shard_runner: Callable[
+        ..., Any
+    ] = run_de_assisted_fixed_cohort_comparison_from_cohort_path,
+    merger: Callable[..., Any] = merge_de_assisted_fixed_cohort_comparison_shards,
+    report_writer: Callable[
+        [Path, Any], None
+    ] = write_de_assisted_fixed_cohort_comparison_report,
+) -> tuple[Any, list[dict[str, Any]]]:
+    """Rerun only baseline+scripted once for one invalid historical cohort."""
+
+    ranges = {
+        "assist_0": T044_ASSIST_0_RANGES,
+        "assist_hp50": T044_ASSIST_HP50_RANGES,
+    }.get(cohort_kind)
+    if ranges is None:
+        raise ValueError("T064 fallback only accepts frozen T044 cohorts")
+    if tuple(item[1] for item in controller_arms) != T044_INDEPENDENT_ROLES:
+        raise ValueError("T064 T044 fallback must contain baseline/scripted only")
+    refuse_overwrite(merged_output_path)
+    shard_output_dir.mkdir(parents=True, exist_ok=True)
+
+    def one(index: int, record_range: str) -> Any:
+        output = shard_output_dir / f"shard-{index:02d}.jsonl"
+        refuse_overwrite(output)
+        shard = shard_runner(
+            adapter_factory,
+            cohort_path,
+            controller_arms=controller_arms,
+            action_space=controller_arms[0][2].action_space,
+            max_battle_steps=200,
+            run_scale="fixed",
+            record_range=record_range,
+        )
+        report_writer(output, shard)
+        return shard
+
+    shards, records = dispatch_t064_shards(ranges=ranges, log_dir=log_dir, worker=one)
+    merged = merger(cohort_path=cohort_path, shards=shards, expected_ranges=ranges)
+    report_writer(merged_output_path, merged)
+    return merged, records
+
+
 def validate_t070_baseline_reuse(
     report: Mapping[str, Any],
     *,
@@ -927,7 +1002,7 @@ def t064_t070_wrapper(
 ) -> dict[str, Any]:
     """Build the identity-bound wrapper consumed by the parameterized T070 runner."""
 
-    if frozen_t070_manifest.get("schema_id") != "t070-frozen-manifest-v1":
+    if frozen_t070_manifest.get("schema_id") != FROZEN_MANIFEST_SCHEMA_ID:
         raise ValueError("T064 wrapper needs the historical T070 frozen manifest")
     if frozen_t070_manifest.get("code_commit") == current_code_commit:
         raise ValueError(
@@ -935,7 +1010,20 @@ def t064_t070_wrapper(
         )
     if tuple(frozen_t070_manifest.get("primary_shard_ranges", ())) != T070_T052_RANGES:
         raise ValueError("T064 wrapper refuses non-frozen T070 ranges")
+    inventory = frozen_t070_manifest.get("primary_stage_inventory")
+    required_stage = {
+        "stage_name": "equal-prior-value-0100",
+        "arm": "prior_value",
+        "family": "equal_nominal",
+        "native_budget": 100,
+        "tree_geometry_enabled": False,
+    }
+    if not isinstance(inventory, list) or required_stage not in inventory:
+        raise ValueError("T064 wrapper requires the accepted T070 prior_value stage")
     return {
+        # This mapping is the persisted ``t070_stage_manifest`` member of an
+        # existing t064-curriculum-manifest-v1, consumed directly by the T070
+        # reader and shard script.  It is not an alternate wrapper schema.
         "checkpoint": dict(checkpoint_identity),
         "frozen_t070_manifest": dict(frozen_identity),
         "historical_code_commit": frozen_t070_manifest["code_commit"],
@@ -947,6 +1035,101 @@ def t064_t070_wrapper(
         "shard_ranges": list(T070_T052_RANGES),
         "worker_count": 16,
     }
+
+
+def write_t064_t070_stage_manifest(
+    *,
+    base_manifest_path: Path,
+    output_path: Path,
+    code_commit: str,
+    frozen_t070_manifest: Mapping[str, Any],
+    frozen_identity: Mapping[str, Any],
+    checkpoint_identity: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Persist one checkpoint's existing-schema T070 wrapper for its shard script.
+
+    Each of the four checkpoint stages receives an attempt-scoped
+    ``t064-curriculum-manifest-v1``.  The existing T070 reader already knows
+    that schema and resolves ``t070_stage_manifest`` without any T064-only
+    reader or invented wrapper file format.
+    """
+
+    refuse_overwrite(output_path)
+    with base_manifest_path.open(encoding="utf-8") as stream:
+        base = load_compact_json(stream)
+    validate_resume_manifest(base, code_commit=code_commit)
+    validate_external_frozen_identity(
+        Path(str(frozen_identity.get("path", ""))),
+        frozen_identity,
+        label="T070 historical manifest",
+    )
+    wrapper = t064_t070_wrapper(
+        current_code_commit=code_commit,
+        frozen_t070_manifest=frozen_t070_manifest,
+        frozen_identity=frozen_identity,
+        checkpoint_identity=checkpoint_identity,
+    )
+    payload = dict(base)
+    payload["t070_stage_manifest"] = wrapper
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    write_compact_json(output_path, payload)
+    return payload
+
+
+def run_t064_t070_shard_script(
+    *,
+    script_path: Path,
+    python_executable: str,
+    cohort_path: Path,
+    checkpoint_path: Path,
+    wrapper_manifest_path: Path,
+    native_preflight_path: Path,
+    native_checkout: Path,
+    native_build_root: Path,
+    code_commit: str,
+    output_path: Path,
+    record_range: str,
+    shard_index: int,
+) -> subprocess.CompletedProcess[str]:
+    """Invoke the repository T070 shard script with its real argument surface."""
+
+    if output_path.exists():
+        raise ValueError("T064 T070 shard refuses to overwrite output")
+    command = [
+        python_executable,
+        str(script_path),
+        "--cohort",
+        str(cohort_path),
+        "--checkpoint",
+        str(checkpoint_path),
+        "--frozen-manifest",
+        str(wrapper_manifest_path),
+        "--native-preflight",
+        str(native_preflight_path),
+        "--native-checkout",
+        str(native_checkout),
+        "--native-build-root",
+        str(native_build_root),
+        "--output",
+        str(output_path),
+        "--code-commit",
+        code_commit,
+        "--stage-name",
+        "equal-prior-value-0100",
+        "--arm",
+        "prior_value",
+        "--family",
+        "equal_nominal",
+        "--budget",
+        "100",
+        "--record-range",
+        record_range,
+        "--shard-index",
+        str(shard_index),
+        "--range-kind",
+        "primary",
+    ]
+    return subprocess.run(command, check=False, text=True, capture_output=True)
 
 
 def run_t064_t070_prior_value_stage(
@@ -985,9 +1168,9 @@ def run_t064_t070_prior_value_stage(
         refuse_overwrite(output)
         return shard_runner(
             **forwarded_kwargs,
-            stage_name="t064_prior_value",
+            stage_name="equal-prior-value-0100",
             arm="prior_value",
-            family="primary",
+            family="equal_nominal",
             record_range=record_range,
             shard_index=index,
             expected_ranges=ranges,
@@ -1110,7 +1293,11 @@ def validate_t044_historical_reuse(
 
 
 def validate_t044_dependent_report(
-    report: Any, *, cohort_identity: str, cohort_count: int
+    report: Any,
+    *,
+    cohort_identity: str,
+    cohort_count: int,
+    expected_controller_provenance: Mapping[str, Any] | None = None,
 ) -> bool:
     """Validate a new T064 two-arm output separately from reusable historical arms."""
 
@@ -1118,10 +1305,20 @@ def validate_t044_dependent_report(
     expected_ranges = (
         T044_ASSIST_0_RANGES if cohort_count == 21 else T044_ASSIST_HP50_RANGES
     )
+    arms = getattr(report, "arms", ())
+    exact_order = all(
+        [result.cohort_index for result in arm.report.battle_results]
+        == list(range(cohort_count))
+        and not arm.report.problems
+        for arm in arms
+    )
+    provenance_ok = (
+        expected_controller_provenance is None
+        or config.get("controller_provenance") == expected_controller_provenance
+    )
     return (
         getattr(report, "evaluation_successful", False)
-        and tuple(arm.role for arm in getattr(report, "arms", ()))
-        == T044_DEPENDENT_ROLES
+        and tuple(arm.role for arm in arms) == T044_DEPENDENT_ROLES
         and config.get("cohort_identity") == cohort_identity
         and config.get("cohort_record_count") == cohort_count
         and config.get("max_battle_steps") == 200
@@ -1130,11 +1327,76 @@ def validate_t044_dependent_report(
         and tuple(config.get("shard_ranges", ())) == expected_ranges
         and isinstance(config.get("action_space"), Mapping)
         and config["action_space"].get("include_potions") is False
+        and exact_order
+        and provenance_ok
         and all(
             len(arm.report.battle_results) == cohort_count and not arm.report.problems
-            for arm in report.arms
+            for arm in arms
         )
     )
+
+
+def validate_t044_independent_report(
+    report: Any,
+    *,
+    cohort_identity: str,
+    cohort_count: int,
+    expected_controller_provenance: Mapping[str, Any],
+) -> bool:
+    """Validate the retained four-arm reuse or the two-arm fallback separately."""
+
+    config = getattr(report, "comparison_config", {})
+    arms = getattr(report, "arms", ())
+    roles = tuple(getattr(arm, "role", None) for arm in arms)
+    valid_roles = roles in (T044_CONTROLLER_ROLES, T044_INDEPENDENT_ROLES)
+    return (
+        getattr(report, "evaluation_successful", False)
+        and valid_roles
+        and config.get("cohort_identity") == cohort_identity
+        and config.get("cohort_record_count") == cohort_count
+        and config.get("run_scale") == "fixed"
+        and config.get("max_battle_steps") == 200
+        and config.get("controller_provenance") == expected_controller_provenance
+        and isinstance(config.get("action_space"), Mapping)
+        and config["action_space"].get("include_potions") is False
+        and all(
+            [result.cohort_index for result in arm.report.battle_results]
+            == list(range(cohort_count))
+            and not arm.report.problems
+            for arm in arms
+        )
+    )
+
+
+def _validate_t044_frozen_cohort(
+    contract: Mapping[str, Any], *, cohort_kind: str
+) -> None:
+    """Rehash and reload a holdout before accepting any T044 report on it."""
+
+    artifact = contract.get("artifact")
+    if not isinstance(artifact, Mapping):
+        raise ValueError("T044 frozen cohort artifact identity missing")
+    path = Path(str(artifact.get("path", "")))
+    validate_external_frozen_identity(
+        path, artifact, label=f"T044 {cohort_kind} cohort"
+    )
+    with path.open(encoding="utf-8") as stream:
+        cohort = load_fixed_cohort_jsonl(stream)
+    expected_count = 21 if cohort_kind == "assist_0" else 38
+    if (
+        cohort.identity != contract.get("identity")
+        or len(cohort.records) != expected_count
+        or contract.get("record_count") != expected_count
+        or [record.cohort_index for record in cohort.records]
+        != list(range(expected_count))
+        or cohort.problems
+        or cohort.source_pool_format_version
+        != contract.get("source_pool_format_version")
+        or cohort.source_pool_controller_provenance
+        != contract.get("source_pool_controller_provenance")
+        or cohort.selection_config.to_dict() != contract.get("selection_config")
+    ):
+        raise ValueError("T044 frozen cohort order/source-format contract mismatch")
 
 
 def _validate_teacher_against_selected_manifest(
@@ -1150,9 +1412,14 @@ def _validate_teacher_against_selected_manifest(
         isinstance(value, str) and value for value in expected_hashes
     ):
         raise ValueError("T064 selected manifest identities are invalid")
-    for index, (row, expected) in enumerate(
+    for index, (row, descriptor) in enumerate(
         zip(dataset.records, selected, strict=True)
     ):
+        expected = descriptor.get("complete_identity")
+        if not isinstance(expected, Mapping):
+            raise ValueError(
+                f"T064 selected descriptor lacks complete identity at {index}"
+            )
         if (
             row.row_index != index
             or row.source_checkpoint_id != expected.get("source_checkpoint_id")
@@ -1227,9 +1494,9 @@ def validate_t070_prior_value_report(
     required = {
         "schema_id": "t070-single-arm-merged-stage-v1",
         "task_id": "T070",
-        "stage_name": "t064_prior_value",
+        "stage_name": "equal-prior-value-0100",
         "arm": "prior_value",
-        "family": "primary",
+        "family": "equal_nominal",
         "native_budget": 100,
         "cohort_record_count": 93,
         "worker_count": 16,
@@ -1267,6 +1534,104 @@ def validate_t070_prior_value_report(
         raise ValueError("T070 prior_value wrapper checkpoint mismatch")
 
 
+def _validate_t070_rows(rows: Any, *, cohort_identity: str) -> list[Mapping[str, Any]]:
+    """Fail closed on every T052 primary row and its frozen structural split."""
+
+    if (
+        not isinstance(rows, list)
+        or len(rows) != 93
+        or not all(isinstance(row, Mapping) for row in rows)
+    ):
+        raise ValueError("T070 rows must be 93 mapping records")
+    typed = [row for row in rows if isinstance(row, Mapping)]
+    if [row.get("cohort_index") for row in typed] != list(range(93)):
+        raise ValueError("T070 rows do not preserve cohort order 0..92")
+    if any(row.get("problems") not in ([], None) for row in typed):
+        raise ValueError("T070 rows contain evaluation problems")
+    if any(not isinstance(row.get("structural_metadata"), Mapping) for row in typed):
+        raise ValueError("T070 rows lack structural metadata")
+    boss_count = sum(
+        row["structural_metadata"].get("room_type") == "BOSS" for row in typed
+    )
+    act2_plus_count = sum(
+        row["structural_metadata"].get("act", 0) >= 2 for row in typed
+    )
+    if boss_count != 88 or act2_plus_count != 5:
+        raise ValueError("T070 rows do not match the frozen 88-boss/5-act2+ split")
+    if not cohort_identity:
+        raise ValueError("T070 frozen cohort identity is missing")
+    return typed
+
+
+def _validate_stage_summary_evidence(
+    summary: Mapping[str, Any], *, manifest: Mapping[str, Any], code_commit: str
+) -> None:
+    """Make completion depend on Stage 0--7 evidence, not just merged outputs."""
+
+    stages = summary.get("stages")
+    if not isinstance(stages, list) or summary.get("problems") != []:
+        raise ValueError("T064 stage summary is missing clean stage evidence")
+    expected_counts = {
+        "stage0": 1,
+        "stage1": 1,
+        "stage2": 1,
+        "stage3": 1,
+        "stage4": 1,
+        "stage5": 8,
+        "stage6": 4,
+        "stage7": 1,
+    }
+    actual_counts = {prefix: 0 for prefix in expected_counts}
+    adequate = bool(manifest.get("source_adequacy"))
+    for stage in stages:
+        if not isinstance(stage, Mapping):
+            raise ValueError("T064 stage summary has a non-mapping stage")
+        name = stage.get("name")
+        prefix = name.split("_", 1)[0] if isinstance(name, str) else ""
+        if prefix not in expected_counts:
+            raise ValueError("T064 stage summary has an unknown stage inventory item")
+        actual_counts[prefix] += 1
+        if (
+            stage.get("code_commit") != code_commit
+            or stage.get("native_commit") != manifest.get("native_commit")
+            or stage.get("failure_count") != 0
+            or any(code != 0 for code in stage.get("return_codes", ()))
+        ):
+            raise ValueError(f"T064 stage summary failure/stale identity: {name}")
+        downstream = prefix in {"stage2", "stage3", "stage4", "stage5", "stage6"}
+        required_status = (
+            "complete" if adequate or not downstream else "skipped_source_inadequate"
+        )
+        if stage.get("status") != required_status:
+            raise ValueError(f"T064 stage summary status mismatch: {name}")
+        if prefix in {"stage2", "stage5", "stage6"}:
+            ranges = stage.get("ranges")
+            if stage.get("workers") != 16 or stage.get("shards") != 16:
+                raise ValueError(
+                    f"T064 stage summary worker inventory mismatch: {name}"
+                )
+            if prefix == "stage2" and ranges != manifest.get("teacher_shard_ranges"):
+                raise ValueError("T064 Stage2 ranges differ from the manifest")
+            if prefix == "stage5" and ranges not in (
+                list(T044_ASSIST_0_RANGES),
+                list(T044_ASSIST_HP50_RANGES),
+            ):
+                raise ValueError("T064 Stage5 ranges are not frozen")
+            if prefix == "stage6" and ranges != list(T070_T052_RANGES):
+                raise ValueError("T064 Stage6 ranges are not frozen")
+        for identity in (
+            *stage.get("outputs", {}).values(),
+            *stage.get("referenced_artifacts", []),
+        ):
+            if not isinstance(identity, Mapping):
+                raise ValueError("T064 stage summary artifact identity is invalid")
+            validate_external_frozen_identity(
+                Path(str(identity.get("path", ""))), identity, label=f"{name} output"
+            )
+    if actual_counts != expected_counts:
+        raise ValueError("T064 stage summary Stage0--7 inventory is incomplete")
+
+
 def aggregate_t064_stage7_from_artifacts(
     *,
     root: Path,
@@ -1291,10 +1656,18 @@ def aggregate_t064_stage7_from_artifacts(
     validate_resume_manifest(manifest, code_commit=code_commit)
     with training_path.open(encoding="utf-8") as stream:
         training = load_compact_json(stream)
+    stage_summary_problem: str | None = None
+    try:
+        _validate_stage_summary_evidence(
+            stage_summary, manifest=manifest, code_commit=code_commit
+        )
+    except ValueError as exc:
+        stage_summary_problem = str(exc)
     if not manifest["source_adequacy"]:
         if (
             training.get("runs") != []
             or training.get("not_run_reason") != "source_inadequate"
+            or stage_summary_problem is not None
         ):
             raise ValueError(
                 "source-inadequate Case B requires the explicit skipped training report"
@@ -1321,6 +1694,8 @@ def aggregate_t064_stage7_from_artifacts(
         }
     problems: list[str] = []
     unmet: list[str] = []
+    if stage_summary_problem is not None:
+        problems.append(f"stage summary evidence invalid: {stage_summary_problem}")
     references = [manifest_path, training_path, teacher_path, trainer_input_path]
     for label, path in (
         ("teacher", teacher_path),
@@ -1387,6 +1762,42 @@ def aggregate_t064_stage7_from_artifacts(
     frozen_t070 = frozen_inputs.get("t070")
     if not isinstance(t044_cohorts, Mapping):
         problems.append("external frozen T044 cohort contracts missing")
+    independent_reports = frozen_inputs.get("t044_independent_reports")
+    if not isinstance(independent_reports, Mapping):
+        problems.append("external T044 independent baseline/scripted evidence missing")
+    elif isinstance(t044_cohorts, Mapping):
+        for cohort_name in ("assist_0", "assist_hp50"):
+            cohort_contract = t044_cohorts.get(cohort_name)
+            evidence = independent_reports.get(cohort_name)
+            if not isinstance(cohort_contract, Mapping) or not isinstance(
+                evidence, Mapping
+            ):
+                problems.append(
+                    f"external T044 independent evidence missing: {cohort_name}"
+                )
+                continue
+            try:
+                path = Path(str(evidence.get("path", "")))
+                validate_external_frozen_identity(
+                    path, evidence, label=f"T044 {cohort_name} independent report"
+                )
+                with path.open(encoding="utf-8") as stream:
+                    independent = load_de_assisted_fixed_cohort_comparison_jsonl(stream)
+                expected_provenance = cohort_contract.get(
+                    "independent_controller_provenance"
+                )
+                if not isinstance(
+                    expected_provenance, Mapping
+                ) or not validate_t044_independent_report(
+                    independent,
+                    cohort_identity=str(cohort_contract.get("identity", "")),
+                    cohort_count=int(cohort_contract.get("record_count", -1)),
+                    expected_controller_provenance=expected_provenance,
+                ):
+                    raise ValueError("T044 independent roles/config/order mismatch")
+                references.append(path)
+            except (OSError, ValueError) as exc:
+                problems.append(f"external T044 independent evidence invalid: {exc}")
     if not isinstance(frozen_t070, Mapping):
         problems.append("external frozen T070 contract missing")
     else:
@@ -1421,6 +1832,24 @@ def aggregate_t064_stage7_from_artifacts(
                 problems.append(f"external frozen T070 baseline unreadable: {exc}")
         else:
             problems.append("external frozen T070 baseline contract missing")
+        cohort_identity = frozen_t070.get("cohort")
+        if isinstance(cohort_identity, Mapping):
+            t052_path = Path(str(cohort_identity.get("path", "")))
+            try:
+                with t052_path.open(encoding="utf-8") as stream:
+                    t052_cohort = load_fixed_cohort_jsonl(stream)
+                if (
+                    t052_cohort.identity != frozen_t070.get("cohort_identity")
+                    or len(t052_cohort.records) != 93
+                    or [record.cohort_index for record in t052_cohort.records]
+                    != list(range(93))
+                    or t052_cohort.problems
+                ):
+                    problems.append(
+                        "external frozen T070 cohort order/identity mismatch"
+                    )
+            except (OSError, ValueError) as exc:
+                problems.append(f"external frozen T070 cohort unreadable: {exc}")
     for key in TRAINING_RUN_ORDER:
         cohort_paths = t044_paths.get(key)
         t070_path = t070_paths.get(key)
@@ -1442,12 +1871,22 @@ def aggregate_t064_stage7_from_artifacts(
                 if isinstance(t044_cohorts, Mapping)
                 else None
             )
+            if not isinstance(frozen_cohort, Mapping):
+                problems.append(f"T044 frozen contract mismatch: {path}")
+                continue
+            try:
+                _validate_t044_frozen_cohort(frozen_cohort, cohort_kind=cohort_name)
+            except (OSError, ValueError) as exc:
+                problems.append(f"T044 frozen cohort mismatch: {exc}")
+                continue
+            expected_provenance = frozen_cohort.get("dependent_controller_provenance")
             if not isinstance(
-                frozen_cohort, Mapping
+                expected_provenance, Mapping
             ) or not validate_t044_dependent_report(
                 report,
                 cohort_identity=str(frozen_cohort.get("identity", "")),
                 cohort_count=int(frozen_cohort.get("record_count", -1)),
+                expected_controller_provenance=expected_provenance,
             ):
                 problems.append(f"T044 frozen contract mismatch: {path}")
                 continue
@@ -1491,6 +1930,25 @@ def aggregate_t064_stage7_from_artifacts(
             )
             if not isinstance(wrapper, Mapping):
                 raise ValueError("external T070 checkpoint wrapper missing")
+            wrapper_artifact = wrapper.get("artifact")
+            if not isinstance(wrapper_artifact, Mapping):
+                raise ValueError("external persisted T070 wrapper identity missing")
+            wrapper_path = Path(str(wrapper_artifact.get("path", "")))
+            validate_external_frozen_identity(
+                wrapper_path, wrapper_artifact, label="T070 checkpoint wrapper"
+            )
+            with wrapper_path.open(encoding="utf-8") as stream:
+                persisted_wrapper = load_compact_json(stream)
+            persisted_stage = persisted_wrapper.get("t070_stage_manifest")
+            if (
+                persisted_wrapper.get("code_commit") != code_commit
+                or not isinstance(persisted_stage, Mapping)
+                or persisted_stage.get("checkpoint") != checkpoint
+                or persisted_stage.get("frozen_t070_manifest")
+                != frozen_t070.get("manifest")
+            ):
+                raise ValueError("persisted T070 wrapper selection mismatch")
+            references.append(wrapper_path)
             contract = {**dict(frozen_t070), **dict(wrapper)}
             validate_t070_prior_value_report(
                 report,
@@ -1501,10 +1959,13 @@ def aggregate_t064_stage7_from_artifacts(
             problems.append(f"T070 frozen contract mismatch: {t070_path}: {exc}")
             continue
         rows = report.get("arm_report", {}).get("records", [])
-        if not isinstance(rows, list) or len(rows) != 93:
-            problems.append(f"T070 rows incomplete: {t070_path}")
+        try:
+            t052_rows[key] = _validate_t070_rows(
+                rows, cohort_identity=str(frozen_t070.get("cohort_identity", ""))
+            )
+        except ValueError as exc:
+            problems.append(f"T070 rows incomplete: {t070_path}: {exc}")
             continue
-        t052_rows[key] = [row for row in rows if isinstance(row, Mapping)]
         wins = sum(row.get("termination_status") == "win" for row in t052_rows[key])
         metrics[
             (
