@@ -415,6 +415,7 @@ def validate_exposure_parity(plans: Sequence[Mapping[str, Any]]) -> None:
 def build_transfer_decision(
     *,
     source_adequate: bool,
+    source_integrity_valid: bool,
     experiment_complete: bool,
     complete_source_audit_status: str | None,
     transfer_gates: Mapping[str, bool | None],
@@ -422,6 +423,12 @@ def build_transfer_decision(
     problems: Sequence[str] = (),
     unmet_acceptance_criteria: Sequence[str] = (),
 ) -> dict[str, Any]:
+    if (
+        not isinstance(source_adequate, bool)
+        or not isinstance(source_integrity_valid, bool)
+        or not isinstance(experiment_complete, bool)
+    ):
+        raise ValueError("T064 transfer decision status fields must be boolean")
     if set(transfer_gates) != set(TRANSFER_GATE_NAMES):
         raise ValueError("T064 transfer decision requires exactly the six frozen gates")
     if not all(
@@ -435,6 +442,7 @@ def build_transfer_decision(
     recommendation: str | None = None
     if (
         complete_source_audit_status == "complete"
+        and source_integrity_valid
         and not problems
         and not unmet_acceptance_criteria
     ):
@@ -452,6 +460,7 @@ def build_transfer_decision(
         "schema_id": TRANSFER_DECISION_SCHEMA_ID,
         "format_version": T064_FORMAT_VERSION,
         "source_adequacy": source_adequate,
+        "source_integrity_valid": source_integrity_valid,
         "experiment_complete": experiment_complete,
         "complete_source_audit_status": complete_source_audit_status,
         "transfer_gates": dict(transfer_gates),
@@ -757,6 +766,14 @@ def _validate_curriculum_manifest(payload: Mapping[str, Any]) -> None:
         audit["selected_holdout_overlap_count"],
         "T064 selected holdout overlap count",
     )
+    if audit["candidate_duplicate_complete_identity_count"]:
+        raise ValueError(
+            "T064 candidate source audit has duplicate complete identities"
+        )
+    if audit["selected_duplicate_complete_identity_count"]:
+        raise ValueError("T064 selected source audit has duplicate complete identities")
+    if audit["selected_holdout_overlap_count"]:
+        raise ValueError("T064 selected source audit overlaps frozen holdouts")
     if not isinstance(audit["sources"], list):
         raise ValueError("T064 source audit sources must be a list")
     if _require_non_negative_int(
@@ -994,6 +1011,7 @@ def _validate_transfer_decision(payload: Mapping[str, Any]) -> None:
         payload,
         (
             "source_adequacy",
+            "source_integrity_valid",
             "experiment_complete",
             "complete_source_audit_status",
             "transfer_gates",
@@ -1004,8 +1022,13 @@ def _validate_transfer_decision(payload: Mapping[str, Any]) -> None:
         ),
         "T064 transfer decision",
     )
-    if not isinstance(payload["source_adequacy"], bool) or not isinstance(
-        payload["experiment_complete"], bool
+    if not all(
+        isinstance(payload[name], bool)
+        for name in (
+            "source_adequacy",
+            "source_integrity_valid",
+            "experiment_complete",
+        )
     ):
         raise ValueError("T064 transfer decision booleans are invalid")
     if payload["complete_source_audit_status"] not in {
@@ -1028,6 +1051,7 @@ def _validate_transfer_decision(payload: Mapping[str, Any]) -> None:
     )
     expected = build_transfer_decision(
         source_adequate=payload["source_adequacy"],
+        source_integrity_valid=payload["source_integrity_valid"],
         experiment_complete=payload["experiment_complete"],
         complete_source_audit_status=payload["complete_source_audit_status"],
         transfer_gates=payload["transfer_gates"],

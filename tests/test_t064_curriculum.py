@@ -196,6 +196,7 @@ def test_frozen_range_and_terminal_decision_truth_table() -> None:
     )
     transfer = build_transfer_decision(
         source_adequate=True,
+        source_integrity_valid=True,
         experiment_complete=True,
         complete_source_audit_status="complete",
         transfer_gates={name: True for name in TRANSFER_GATE_NAMES},
@@ -204,6 +205,7 @@ def test_frozen_range_and_terminal_decision_truth_table() -> None:
     assert transfer["terminal_case"] == "Case A"
     negative = build_transfer_decision(
         source_adequate=True,
+        source_integrity_valid=True,
         experiment_complete=True,
         complete_source_audit_status="complete",
         transfer_gates={
@@ -215,6 +217,7 @@ def test_frozen_range_and_terminal_decision_truth_table() -> None:
     assert negative["terminal_case"] == "Case B"
     incomplete = build_transfer_decision(
         source_adequate=True,
+        source_integrity_valid=True,
         experiment_complete=False,
         complete_source_audit_status="pending",
         transfer_gates={name: None for name in TRANSFER_GATE_NAMES},
@@ -226,6 +229,7 @@ def test_frozen_range_and_terminal_decision_truth_table() -> None:
     with pytest.raises(ValueError, match="exactly the six"):
         build_transfer_decision(
             source_adequate=True,
+            source_integrity_valid=True,
             experiment_complete=True,
             complete_source_audit_status="complete",
             transfer_gates={},
@@ -249,6 +253,7 @@ def test_transfer_truth_table_rejects_inconsistent_or_failed_case_a_inputs(
 ) -> None:
     decision = build_transfer_decision(
         source_adequate=source_adequate,
+        source_integrity_valid=True,
         experiment_complete=experiment_complete,
         complete_source_audit_status="complete",
         transfer_gates={name: True for name in TRANSFER_GATE_NAMES},
@@ -263,6 +268,7 @@ def test_transfer_truth_table_rejects_inconsistent_or_failed_case_a_inputs(
 def test_transfer_reader_rejects_tampered_terminal_case_and_recommendation() -> None:
     decision = build_transfer_decision(
         source_adequate=True,
+        source_integrity_valid=True,
         experiment_complete=True,
         complete_source_audit_status="complete",
         transfer_gates={name: True for name in TRANSFER_GATE_NAMES},
@@ -271,6 +277,38 @@ def test_transfer_reader_rejects_tampered_terminal_case_and_recommendation() -> 
     decision["recommendation"] = "T065-learned-non-combat-policy-v1"
     with pytest.raises(ValueError, match="recommendation fails"):
         validate_compact_document(decision)
+
+
+def test_source_integrity_failure_is_incomplete_and_reader_rejects_forged_case_b() -> (
+    None
+):
+    gates = {name: None for name in TRANSFER_GATE_NAMES}
+    coverage_shortfall = build_transfer_decision(
+        source_adequate=False,
+        source_integrity_valid=True,
+        experiment_complete=False,
+        complete_source_audit_status="complete",
+        transfer_gates=gates,
+        diagnostics={},
+    )
+    assert coverage_shortfall["terminal_case"] == "Case B"
+
+    integrity_failure = build_transfer_decision(
+        source_adequate=False,
+        source_integrity_valid=False,
+        experiment_complete=False,
+        complete_source_audit_status="complete",
+        transfer_gates=gates,
+        diagnostics={},
+    )
+    assert integrity_failure["terminal_case"] == "INCOMPLETE"
+    assert "recommendation" not in integrity_failure
+    assert validate_compact_document(integrity_failure) == integrity_failure
+
+    integrity_failure["terminal_case"] = "Case B"
+    integrity_failure["recommendation"] = "T065-learned-non-combat-policy-v1"
+    with pytest.raises(ValueError, match="terminal case fails"):
+        validate_compact_document(integrity_failure)
 
 
 def test_aggregate_training_report_cardinality_order_and_canonical_writer() -> None:
@@ -301,6 +339,7 @@ def test_aggregate_training_report_cardinality_order_and_canonical_writer() -> N
         validate_training_run_report(report)
     decision = build_transfer_decision(
         source_adequate=False,
+        source_integrity_valid=True,
         experiment_complete=False,
         complete_source_audit_status="complete",
         transfer_gates={name: None for name in TRANSFER_GATE_NAMES},
@@ -477,6 +516,7 @@ def test_source_inadequacy_skips_batch_plans_and_forms_valid_case_b(
     assert manifest["teacher_shard_ranges"] == ["0:0"] * 16
     pending = build_transfer_decision(
         source_adequate=False,
+        source_integrity_valid=True,
         experiment_complete=False,
         complete_source_audit_status="pending",
         transfer_gates={name: None for name in TRANSFER_GATE_NAMES},
@@ -495,8 +535,18 @@ def test_source_inadequacy_skips_batch_plans_and_forms_valid_case_b(
     with pytest.raises(ValueError, match="failure count"):
         validate_compact_document(finalized)
     finalized["complete_source_audit"]["selected_restore_failure_count"] = 0
+    for field in (
+        "candidate_duplicate_complete_identity_count",
+        "selected_duplicate_complete_identity_count",
+        "selected_holdout_overlap_count",
+    ):
+        finalized["complete_source_audit"][field] = 1
+        with pytest.raises(ValueError, match="duplicate|overlaps"):
+            validate_compact_document(finalized)
+        finalized["complete_source_audit"][field] = 0
     decision = build_transfer_decision(
         source_adequate=False,
+        source_integrity_valid=True,
         experiment_complete=False,
         complete_source_audit_status=finalized["complete_source_audit"]["status"],
         transfer_gates={name: None for name in TRANSFER_GATE_NAMES},
