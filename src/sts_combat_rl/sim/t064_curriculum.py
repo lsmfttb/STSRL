@@ -11,6 +11,7 @@ from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 import hashlib
 import json
+import math
 from pathlib import Path
 import re
 from typing import Any, TextIO
@@ -679,10 +680,8 @@ def _validate_curriculum_manifest(payload: Mapping[str, Any]) -> None:
     )
     if payload["task_id"] != "T064":
         raise ValueError("T064 curriculum manifest task_id is invalid")
-    _require_non_empty_string(
-        payload["code_commit"], "T064 curriculum manifest code_commit"
-    )
-    _require_non_empty_string(
+    _require_git_commit(payload["code_commit"], "T064 curriculum manifest code_commit")
+    _require_git_commit(
         payload["native_commit"], "T064 curriculum manifest native_commit"
     )
     if not isinstance(payload["input_artifacts"], Mapping):
@@ -789,7 +788,10 @@ def _validate_curriculum_manifest(payload: Mapping[str, Any]) -> None:
         rows = payload["selected_buckets"][bucket]
         if not isinstance(rows, list):
             raise ValueError(f"T064 selected bucket {bucket} must be a list")
-        if payload["selected_bucket_counts"][bucket] != len(rows):
+        if _require_non_negative_int(
+            payload["selected_bucket_counts"][bucket],
+            f"T064 selected bucket {bucket} count",
+        ) != len(rows):
             raise ValueError(f"T064 selected bucket {bucket} count is invalid")
         for index, descriptor in enumerate(rows):
             _validate_source_descriptor(descriptor, f"T064 selected {bucket} {index}")
@@ -803,6 +805,34 @@ def _validate_curriculum_manifest(payload: Mapping[str, Any]) -> None:
         raise ValueError("T064 selected source order or uniqueness is invalid")
     if not isinstance(payload["source_adequacy"], bool):
         raise ValueError("T064 curriculum manifest source adequacy is invalid")
+    if payload["source_adequacy"] != source_adequacy(
+        payload["selected_buckets"],
+        duplicate_complete_identity_count=audit["duplicate_complete_identity_count"],
+        holdout_overlap_count=audit["holdout_overlap_count"],
+    ):
+        raise ValueError("T064 curriculum manifest source adequacy is inconsistent")
+    if audit["status"] in {"complete", "failed"}:
+        if audit["selected_restore_count"] != len(payload["selected_sources"]):
+            raise ValueError("T064 source audit restore count is inconsistent")
+        failure_count = audit["selected_restore_failure_count"]
+        failures = audit["selected_restore_failures"]
+        if failure_count != len(failures):
+            raise ValueError("T064 source audit failure count is inconsistent")
+        selected_statuses = [
+            descriptor["fresh_restore_status"]
+            for descriptor in payload["selected_sources"]
+        ]
+        if audit["status"] == "complete" and (
+            failure_count != 0
+            or any(status != "passed" for status in selected_statuses)
+        ):
+            raise ValueError("T064 complete source audit has restore failures")
+        if audit["status"] == "failed" and (
+            failure_count == 0
+            or sum(status == "failed" for status in selected_statuses) != failure_count
+            or any(status == "pending" for status in selected_statuses)
+        ):
+            raise ValueError("T064 failed source audit status is inconsistent")
     if tuple(payload["teacher_shard_ranges"]) != contiguous_ranges(
         len(payload["selected_sources"])
     ):
@@ -868,8 +898,10 @@ def _validate_stage_summary(payload: Mapping[str, Any]) -> None:
             ),
             f"T064 stage {index}",
         )
-        for field in ("name", "status", "command", "code_commit", "native_commit"):
+        for field in ("name", "status", "command"):
             _require_non_empty_string(stage[field], f"T064 stage {index} {field}")
+        for field in ("code_commit", "native_commit"):
+            _require_git_commit(stage[field], f"T064 stage {index} {field}")
         for field in ("inputs", "outputs"):
             if not isinstance(stage[field], Mapping):
                 raise ValueError(f"T064 stage {index} {field} must be an object")
@@ -1003,9 +1035,21 @@ def _require_non_negative_int(value: Any, label: str) -> int:
 
 
 def _require_non_negative_number(value: Any, label: str) -> float:
-    if isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(float(value))
+        or value < 0
+    ):
         raise ValueError(f"{label} must be a non-negative number")
     return float(value)
+
+
+def _require_git_commit(value: Any, label: str) -> str:
+    value = _require_non_empty_string(value, label)
+    if not re.fullmatch(r"[0-9a-f]{40}", value):
+        raise ValueError(f"{label} must be a lowercase 40-hex commit")
+    return value
 
 
 def _require_sha256(value: Any, label: str) -> str:
@@ -1070,12 +1114,19 @@ def _validate_source_descriptor(value: Any, label: str) -> None:
     complete_hash = identity.pop("complete_identity_sha256", None)
     _validate_complete_identity(identity)
     _require_sha256(complete_hash, f"{label} nested complete identity hash")
-    if complete_hash != value["complete_identity_sha256"]:
+    expected_hash = canonical_sha256(identity)
+    if (
+        complete_hash != expected_hash
+        or value["complete_identity_sha256"] != expected_hash
+    ):
         raise ValueError(f"{label} complete identity hash mismatch")
     _require_sha256(
         value["complete_identity_sha256"], f"{label} complete identity hash"
     )
     _floor_bucket(value["floor_bucket"])
+    _require_int(value["act"], f"{label} act")
+    _require_non_empty_string(value["room_type"], f"{label} room type")
+    _require_non_empty_string(value["encounter_id"], f"{label} encounter id")
     _require_string_list(value["exclusion_reasons"], f"{label} exclusion reasons")
     if value["fresh_restore_status"] not in {"pending", "passed", "failed"}:
         raise ValueError(f"{label} fresh restore status is invalid")

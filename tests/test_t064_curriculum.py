@@ -17,6 +17,7 @@ from sts_combat_rl.sim.t064_curriculum import (
     BUCKET_STRONG,
     TRAINING_RUN_ORDER,
     TRANSFER_GATE_NAMES,
+    _validate_source_descriptor,
     action_trace_identity_sha256,
     build_ordered_batch_plan,
     build_transfer_decision,
@@ -322,6 +323,27 @@ def test_source_descriptor_uses_exact_floor_identity_mapping() -> None:
     assert descriptor["floor_bucket"] == 56
 
 
+def test_source_descriptor_validator_rehashes_identity_and_rejects_structural_types() -> (
+    None
+):
+    record = _record()
+    record.structural_metadata["floor"] = 12
+    descriptor = source_descriptor(
+        record, component="assist_hp75_potion", source_path="pool.jsonl"
+    )
+    _validate_source_descriptor(descriptor, "fixture")
+    descriptor["complete_identity_sha256"] = "a" * 64
+    descriptor["complete_identity"]["complete_identity_sha256"] = "a" * 64
+    with pytest.raises(ValueError, match="hash mismatch"):
+        _validate_source_descriptor(descriptor, "fixture")
+    descriptor = source_descriptor(
+        record, component="assist_hp75_potion", source_path="pool.jsonl"
+    )
+    descriptor["act"] = True
+    with pytest.raises(ValueError, match="act"):
+        _validate_source_descriptor(descriptor, "fixture")
+
+
 def test_complete_identity_rejects_wrong_typed_required_fields() -> None:
     record = replace(_record(), source_seed=True)
     with pytest.raises(ValueError, match="source_seed"):
@@ -382,6 +404,10 @@ def test_stage_summary_rejects_required_field_type_mutations() -> None:
     assert validate_compact_document(payload) == payload
     payload["stages"][0]["workers"] = "16"
     with pytest.raises(ValueError, match="workers"):
+        validate_compact_document(payload)
+    payload["stages"][0]["workers"] = 16
+    payload["stages"][0]["wall_clock_seconds"] = float("inf")
+    with pytest.raises(ValueError, match="wall clock"):
         validate_compact_document(payload)
 
 
@@ -453,6 +479,14 @@ def test_source_inadequacy_skips_batch_plans_and_forms_valid_case_b(
         manifest_path=tmp_path / "t064-curriculum-manifest.json",
         restore_results=(),
     )
+    finalized["source_adequacy"] = True
+    with pytest.raises(ValueError, match="source adequacy"):
+        validate_compact_document(finalized)
+    finalized["source_adequacy"] = False
+    finalized["complete_source_audit"]["selected_restore_failure_count"] = 1
+    with pytest.raises(ValueError, match="failure count"):
+        validate_compact_document(finalized)
+    finalized["complete_source_audit"]["selected_restore_failure_count"] = 0
     decision = build_transfer_decision(
         source_adequate=False,
         experiment_complete=False,
