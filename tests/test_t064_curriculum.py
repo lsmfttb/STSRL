@@ -921,6 +921,83 @@ def test_stage2_production_uses_validated_assisted_restorer(
     assert captured["dispatch_backend"] == "fork"
 
 
+def test_stage3_production_injects_validated_assisted_restorer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured = {}
+    from sts_combat_rl.sim import oracle_teacher_search_guidance as bridge
+
+    teacher = SimpleNamespace(records=[])
+    monkeypatch.setattr(
+        transfer_command, "load_oracle_teacher_dataset_jsonl", lambda _stream: teacher
+    )
+    monkeypatch.setattr(
+        transfer_command,
+        "load_selected_source_pool",
+        lambda _manifest: (
+            SimpleNamespace(),
+            [
+                {
+                    "complete_identity_sha256": "a" * 64,
+                    "complete_identity": {
+                        "source_checkpoint_id": "checkpoint-116",
+                        "source_seed": 116,
+                        "source_run_id": "run-116",
+                        "source_battle_index": 116,
+                        "distribution_kind": "assisted_run",
+                        "checkpoint_information_regime": (
+                            "full_simulator_state_oracle_like"
+                        ),
+                    },
+                }
+            ],
+        ),
+    )
+
+    def bridge_builder(**kwargs):
+        captured.update(kwargs)
+        return SimpleNamespace(records=[]), SimpleNamespace()
+
+    monkeypatch.setattr(
+        bridge, "build_oracle_teacher_search_guidance_dataset", bridge_builder
+    )
+    monkeypatch.setattr(
+        transfer_command,
+        "build_t064_trainer_input_stage",
+        lambda **kwargs: (
+            kwargs["trainer_builder"](
+                teacher_dataset=kwargs["teacher_dataset"],
+                source_pool=kwargs["selected_pool"],
+            ),
+            {},
+        ),
+    )
+    teacher_path = tmp_path / "teacher.jsonl"
+    teacher_path.write_text("metadata is mocked", encoding="utf-8")
+    contract = {
+        "manifest": {},
+        "selected_budget": 100,
+        "target": "soft_visit_distribution",
+        "stability_filter": "none",
+        "manifest_identity": {},
+        "teacher_artifact_identity": {},
+        "t022_report_identity": {},
+        "source_pool_identity": {},
+    }
+
+    transfer_command.run_t064_stage3_production(
+        selected_manifest={},
+        teacher_path=teacher_path,
+        output_path=tmp_path / "trainer.jsonl",
+        bridge_contract=contract,
+    )
+
+    assert (
+        captured["record_restorer"]
+        is transfer_command.restore_assisted_battle_start_record
+    )
+
+
 def test_stage5_production_uses_fork_dispatch_backend(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -657,6 +657,7 @@ def run_t064_stage3_production(
             teacher_artifact_identity=bridge_contract["teacher_artifact_identity"],
             t022_report_identity=bridge_contract["t022_report_identity"],
             source_pool_identity=bridge_contract["source_pool_identity"],
+            record_restorer=restore_assisted_battle_start_record,
         )
 
     identities_by_source = {

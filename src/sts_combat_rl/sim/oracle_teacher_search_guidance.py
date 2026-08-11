@@ -20,7 +20,7 @@ from sts_combat_rl.sim.battle_start_pool import (
     NaturalBattleStartPool,
     restore_battle_start_record,
 )
-from sts_combat_rl.sim.contract import CheckpointingSimulatorAdapter
+from sts_combat_rl.sim.contract import CheckpointingSimulatorAdapter, SimulatorSnapshot
 from sts_combat_rl.sim.controlled_run import build_decision_context
 from sts_combat_rl.sim.decision_record import (
     action_identity_dicts_for_actions,
@@ -207,8 +207,17 @@ def build_oracle_teacher_search_guidance_dataset(
     teacher_artifact_identity: Mapping[str, Any],
     t022_report_identity: Mapping[str, Any],
     source_pool_identity: Mapping[str, Any],
+    record_restorer: Callable[
+        [CheckpointingSimulatorAdapter, BattleStartCheckpointRecord],
+        tuple[SimulatorSnapshot, str],
+    ] = restore_battle_start_record,
 ) -> tuple[TrainerInputDataset, OracleTeacherSearchGuidanceBridgeReport]:
-    """Convert one selected T023 budget into explicit trainer input records."""
+    """Convert one selected T023 budget into explicit trainer input records.
+
+    Natural-source callers retain the original seed/action-trace restorer by
+    default.  Explicitly tagged assisted pools may inject their existing
+    validated replay primitive without changing the bridge schema.
+    """
 
     policy_target_kind, policy_target_source = _policy_target_config(target)
     problems = _manifest_identity_problems(
@@ -261,6 +270,7 @@ def build_oracle_teacher_search_guidance_dataset(
                 example_index=len(records),
                 teacher_artifact_identity=teacher_artifact_identity,
                 selected_budget=selected_budget,
+                record_restorer=record_restorer,
             )
         except (RuntimeError, ValueError) as exc:
             skipped["conversion_error"] += 1
@@ -505,9 +515,13 @@ def _trainer_record_from_teacher_row(
     example_index: int,
     teacher_artifact_identity: Mapping[str, Any],
     selected_budget: int,
+    record_restorer: Callable[
+        [CheckpointingSimulatorAdapter, BattleStartCheckpointRecord],
+        tuple[SimulatorSnapshot, str],
+    ],
 ) -> tuple[TrainerInputRecord, str]:
     adapter = adapter_factory()
-    snapshot, restoration_method = restore_battle_start_record(adapter, source)
+    snapshot, restoration_method = record_restorer(adapter, source)
     actions = list(adapter.legal_actions(snapshot))
     current_identities = action_identity_dicts_for_actions(actions)
     _require_teacher_legal_identities(row, current_identities)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -39,6 +40,7 @@ from sts_combat_rl.sim.oracle_teacher_scaleup import (
 from sts_combat_rl.sim.oracle_teacher_search_guidance import (
     ORACLE_TEACHER_SEARCH_GUIDANCE_ASSISTED_TASK_ID,
     ORACLE_TEACHER_SEARCH_GUIDANCE_NATURAL_TASK_ID,
+    build_oracle_teacher_search_guidance_dataset,
 )
 from sts_combat_rl.sim.public_run_context import build_public_run_context
 from sts_combat_rl.sim.resource_outcome import (
@@ -205,6 +207,48 @@ def test_bridge_loads_assisted_pool_and_preserves_assistance_metadata(
     assert report_json["source_group_summary"]["assistance_act_room_counts"] == {
         f"{ASSIST_LEVEL_0}/act1/MONSTER": 1
     }
+
+
+def test_bridge_accepts_injected_assisted_restorer_for_record_index_116(
+    tmp_path: Path,
+) -> None:
+    manifest_path, _trainer_path, _report_path = _write_artifact_chain(
+        tmp_path,
+        assisted=True,
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    source = replace(_pool(assisted=True).records[0], record_index=116)
+    pool = replace(_pool(assisted=True), records=[source])
+    teacher = replace(
+        _teacher_dataset(assisted=True),
+        records=[replace(_teacher_row(assisted=True), source_pool_record_index=116)],
+    )
+    restored_indices: list[int] = []
+
+    def assisted_restorer(adapter: _BridgeAdapter, record: BattleStartCheckpointRecord):
+        assert isinstance(adapter, _BridgeAdapter)
+        restored_indices.append(record.record_index)
+        return _snapshot(), "assisted_replay"
+
+    artifact = manifest["generated_artifacts"][0]
+    _dataset, report = build_oracle_teacher_search_guidance_dataset(
+        adapter_factory=_BridgeAdapter,
+        manifest=manifest,
+        teacher_dataset=teacher,
+        source_pool=pool,
+        selected_budget=100,
+        target="soft_visit_distribution",
+        stability_filter="none",
+        manifest_identity={"sha256": _sha256_file(manifest_path)},
+        teacher_artifact_identity=artifact["teacher_artifact"],
+        t022_report_identity=artifact["t022_report_artifact"],
+        source_pool_identity=manifest["input_artifacts"]["assisted_pool"],
+        record_restorer=assisted_restorer,
+    )
+
+    assert report.command_passed
+    assert restored_indices == [116]
+    assert report.restore_counts == {"assisted_replay": 1}
 
 
 def test_bridge_fails_closed_for_manifest_teacher_sha_mismatch(
