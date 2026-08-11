@@ -19,6 +19,7 @@ from sts_combat_rl.commands.t070_search_v2_audit import (
     expected_checkpoint_identity_from_stage_manifest,
 )
 from sts_combat_rl.sim.battle_start_pool import BattleStartCheckpointRecord
+from sts_combat_rl.sim.action_space import ActionSpaceConfig
 from sts_combat_rl.sim.t064_curriculum import (
     ARM_CURRICULUM,
     ARM_STATIC,
@@ -710,12 +711,88 @@ def test_t044_t070_reuse_contracts_use_persisted_roles_and_frozen_ranges() -> No
         "command_passed": True,
         "problems": [],
     }
-    assert transfer_command.validate_t070_baseline_reuse(
+    assert not transfer_command.validate_t070_baseline_reuse(
         baseline, cohort_identity="t052"
     )
     baseline["tree_geometry_enabled"] = True
     assert not transfer_command.validate_t070_baseline_reuse(
         baseline, cohort_identity="t052"
+    )
+
+
+def test_t070_baseline_reuse_strictly_checks_controller_and_failures() -> None:
+    controller = {
+        "config": {
+            "information_regime": "full_simulator_state_oracle_like",
+            "action_space": ActionSpaceConfig.initial_no_potions().to_dict(),
+            "root_selection_rule": "highest_mean",
+            "ablation": "baseline",
+            "search_budget": {"simulations": 100},
+            "tree_internal_guidance": {
+                "policy_prior": False,
+                "learned_leaf_value": False,
+                "root_only_or_post_search_fallback": False,
+            },
+        }
+    }
+    report = {
+        "schema_id": "t070-single-arm-merged-stage-v1",
+        "cohort_identity": "t052",
+        "cohort_record_count": 93,
+        "arm": "baseline",
+        "native_budget": 100,
+        "shard_ranges": list(transfer_command.T070_T052_RANGES),
+        "command_passed": True,
+        "problems": [],
+        "code_commit": "a" * 40,
+        "native_commit": "b" * 40,
+        "native_runtime_identity": {"runtime": "frozen"},
+        "controller_provenance": controller,
+        "family": "shared",
+        "stage_name": "baseline-0100",
+        "worker_count": 16,
+        "shard_count": 16,
+        "effective_parallel_workers": 16,
+        "arm_report": {
+            "record_count": 93,
+            "wins": 50,
+            "losses": 43,
+            "truncations": 0,
+            "errors": 0,
+            "evaluation_problems": [],
+        },
+    }
+    contract = {
+        key: report[key]
+        for key in (
+            "code_commit",
+            "native_commit",
+            "native_runtime_identity",
+            "controller_provenance",
+            "family",
+            "stage_name",
+            "worker_count",
+            "shard_count",
+            "effective_parallel_workers",
+        )
+    }
+    contract["primary_stage_inventory"] = [
+        {
+            "stage_name": "baseline-0100",
+            "arm": "baseline",
+            "family": "shared",
+            "native_budget": 100,
+            "tree_geometry_enabled": False,
+        }
+    ]
+    assert transfer_command.validate_t070_baseline_reuse(
+        report, cohort_identity="t052", frozen_contract=contract
+    )
+    report["controller_provenance"]["config"]["tree_internal_guidance"][
+        "policy_prior"
+    ] = True
+    assert not transfer_command.validate_t070_baseline_reuse(
+        report, cohort_identity="t052", frozen_contract=contract
     )
 
 
@@ -793,6 +870,362 @@ def test_stage2_cli_routes_to_fixed_production_adapter(
     )
     assert calls and calls[0]["merged_output_path"] == tmp_path / "teacher.jsonl"
     assert json.loads(capsys.readouterr().out)["stage"] == "stage2_teacher"
+
+
+def test_atomic_t070_selection_persist_promotes_once_and_cleans_failed_temp(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "t064-curriculum-manifest.json"
+    path.write_text('{"old":true}', encoding="utf-8")
+    manifest = {"code_commit": "a" * 40, "t070_stage_manifest": None}
+    monkeypatch.setattr(transfer_command, "load_compact_json", lambda _stream: manifest)
+    monkeypatch.setattr(
+        transfer_command, "validate_resume_manifest", lambda *_args, **_kw: None
+    )
+    monkeypatch.setattr(
+        transfer_command,
+        "build_t064_t070_checkpoint_selections",
+        lambda **_kw: {"checkpoint_selections": {"fixed": True}},
+    )
+    monkeypatch.setattr(
+        transfer_command,
+        "dump_compact_json",
+        lambda payload, stream: json.dump(payload, stream, sort_keys=True),
+    )
+    transfer_command.persist_t064_t070_checkpoint_selections(
+        manifest_path=path,
+        code_commit="a" * 40,
+        frozen_t070_manifest={},
+        frozen_identity={},
+        checkpoints={},
+    )
+    assert json.loads(path.read_text(encoding="utf-8"))["t070_stage_manifest"]
+    original = path.read_bytes()
+    monkeypatch.setattr(transfer_command, "load_compact_json", lambda _stream: manifest)
+    monkeypatch.setattr(
+        transfer_command,
+        "dump_compact_json",
+        lambda *_args: (_ for _ in ()).throw(OSError("write")),
+    )
+    with pytest.raises(OSError, match="write"):
+        transfer_command.persist_t064_t070_checkpoint_selections(
+            manifest_path=path,
+            code_commit="a" * 40,
+            frozen_t070_manifest={},
+            frozen_identity={},
+            checkpoints={},
+        )
+    assert path.read_bytes() == original
+    assert not path.with_suffix(".json.tmp").exists()
+
+
+def _complete_training_report() -> dict[str, object]:
+    return {
+        "schema_id": "t064-training-run-report-v1",
+        "format_version": 1,
+        "runs": [
+            {
+                "arm": arm,
+                "seed": seed,
+                "initialization_sha256": "a" * 64,
+                "configuration": {},
+                "trainer_input_sha256": "b" * 64,
+                "batch_plan_sha256": "c" * 64,
+                "per_bucket_exposure_counts": {},
+                "per_source_exposure_counts": {},
+                "checkpoint": {
+                    "path": f"{arm}-{seed}.pt",
+                    "sha256": "d" * 64,
+                    "bytes": 1,
+                },
+                "checkpoint_metadata_linkage": {},
+                "completion_status": "complete",
+                "problems": [],
+            }
+            for arm, seed in TRAINING_RUN_ORDER
+        ],
+    }
+
+
+def test_stage4_cli_writes_report_before_finalizing_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest_path = tmp_path / "t064-curriculum-manifest.json"
+    manifest_path.write_text("{}", encoding="utf-8")
+    frozen = tmp_path / "t070-frozen.json"
+    frozen.write_text("{}", encoding="utf-8")
+    report_path = tmp_path / "t064-training-run-report.json"
+    calls: list[str] = []
+    monkeypatch.setattr(transfer_command, "load_compact_json", lambda _stream: {})
+    monkeypatch.setattr(
+        transfer_command,
+        "build_t064_stage_execution_plan",
+        lambda _manifest, *, code_commit: [{"stage": "stage4_training"}],
+    )
+    monkeypatch.setattr(
+        transfer_command, "_preflight_t064_stage4_paths", lambda **_kwargs: {}
+    )
+    monkeypatch.setattr(
+        transfer_command,
+        "run_t064_stage4_production",
+        lambda **_kwargs: _complete_training_report(),
+    )
+
+    def finalize(**_kwargs):
+        calls.append("finalize")
+        assert report_path.is_file()
+
+    monkeypatch.setattr(
+        transfer_command, "persist_t064_t070_checkpoint_selections", finalize
+    )
+    assert (
+        transfer_command.main(
+            [
+                "--dry-run-manifest",
+                str(manifest_path),
+                "--code-commit",
+                "a" * 40,
+                "--stage",
+                "stage4_training",
+                "--stage4-trainer-input",
+                str(tmp_path / "trainer.jsonl"),
+                "--stage4-initialization",
+                str(tmp_path / "initial.pt"),
+                "--stage4-initialization-sha256",
+                transfer_command.T064_INITIALIZATION_SHA256,
+                "--stage4-checkpoint-root",
+                str(tmp_path / "checkpoints"),
+                "--stage4-frozen-t070-manifest",
+                str(frozen),
+                "--stage4-training-report",
+                str(report_path),
+            ]
+        )
+        == 0
+    )
+    assert calls == ["finalize"]
+    assert not report_path.with_suffix(".json.tmp").exists()
+
+
+def test_stage4_cli_rejects_output_path_before_training(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest_path = tmp_path / "t064-curriculum-manifest.json"
+    manifest_path.write_text("{}", encoding="utf-8")
+    frozen = tmp_path / "t070-frozen.json"
+    frozen.write_text("{}", encoding="utf-8")
+    calls: list[object] = []
+    monkeypatch.setattr(transfer_command, "load_compact_json", lambda _stream: {})
+    monkeypatch.setattr(
+        transfer_command,
+        "build_t064_stage_execution_plan",
+        lambda _manifest, *, code_commit: [{"stage": "stage4_training"}],
+    )
+    monkeypatch.setattr(
+        transfer_command,
+        "run_t064_stage4_production",
+        lambda **_kwargs: calls.append(_kwargs),
+    )
+    with pytest.raises(SystemExit):
+        transfer_command.main(
+            [
+                "--dry-run-manifest",
+                str(manifest_path),
+                "--code-commit",
+                "a" * 40,
+                "--stage",
+                "stage4_training",
+                "--stage4-trainer-input",
+                str(tmp_path / "trainer.jsonl"),
+                "--stage4-initialization",
+                str(tmp_path / "initial.pt"),
+                "--stage4-initialization-sha256",
+                transfer_command.T064_INITIALIZATION_SHA256,
+                "--stage4-checkpoint-root",
+                str(tmp_path / "checkpoints"),
+                "--stage4-frozen-t070-manifest",
+                str(frozen),
+                "--stage4-training-report",
+                str(tmp_path / "wrong-name.json"),
+            ]
+        )
+    assert calls == []
+
+
+def test_stage4_cli_rejects_nonfrozen_initialization_before_training(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest_path = tmp_path / "t064-curriculum-manifest.json"
+    manifest_path.write_text("{}", encoding="utf-8")
+    frozen = tmp_path / "t070-frozen.json"
+    frozen.write_text("{}", encoding="utf-8")
+    calls: list[object] = []
+    monkeypatch.setattr(transfer_command, "load_compact_json", lambda _stream: {})
+    monkeypatch.setattr(
+        transfer_command,
+        "build_t064_stage_execution_plan",
+        lambda _manifest, *, code_commit: [{"stage": "stage4_training"}],
+    )
+    monkeypatch.setattr(
+        transfer_command,
+        "run_t064_stage4_production",
+        lambda **kwargs: calls.append(kwargs),
+    )
+    with pytest.raises(SystemExit):
+        transfer_command.main(
+            [
+                "--dry-run-manifest",
+                str(manifest_path),
+                "--code-commit",
+                "a" * 40,
+                "--stage",
+                "stage4_training",
+                "--stage4-trainer-input",
+                str(tmp_path / "trainer.jsonl"),
+                "--stage4-initialization",
+                str(tmp_path / "initial.pt"),
+                "--stage4-initialization-sha256",
+                "0" * 64,
+                "--stage4-checkpoint-root",
+                str(tmp_path / "checkpoints"),
+                "--stage4-frozen-t070-manifest",
+                str(frozen),
+                "--stage4-training-report",
+                str(tmp_path / "t064-training-run-report.json"),
+            ]
+        )
+    assert calls == []
+
+
+def test_atomic_training_report_write_preserves_target_and_cleans_temp(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "t064-training-run-report.json"
+    monkeypatch.setattr(
+        transfer_command,
+        "dump_compact_json",
+        lambda *_args: (_ for _ in ()).throw(OSError("report write failed")),
+    )
+    with pytest.raises(OSError, match="report write failed"):
+        transfer_command._write_new_compact_json_atomically(
+            target, _complete_training_report()
+        )
+    assert not target.exists()
+    assert not target.with_suffix(".json.tmp").exists()
+
+
+def test_stage4_selection_finalization_failure_follows_report_persist(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest_path = tmp_path / "t064-curriculum-manifest.json"
+    manifest_path.write_text("{}", encoding="utf-8")
+    frozen = tmp_path / "t070-frozen.json"
+    frozen.write_text("{}", encoding="utf-8")
+    report_path = tmp_path / "t064-training-run-report.json"
+    monkeypatch.setattr(transfer_command, "load_compact_json", lambda _stream: {})
+    monkeypatch.setattr(
+        transfer_command,
+        "build_t064_stage_execution_plan",
+        lambda _manifest, *, code_commit: [{"stage": "stage4_training"}],
+    )
+    monkeypatch.setattr(
+        transfer_command, "_preflight_t064_stage4_paths", lambda **_kwargs: {}
+    )
+    monkeypatch.setattr(
+        transfer_command,
+        "run_t064_stage4_production",
+        lambda **_kwargs: _complete_training_report(),
+    )
+    monkeypatch.setattr(
+        transfer_command,
+        "persist_t064_t070_checkpoint_selections",
+        lambda **_kwargs: (_ for _ in ()).throw(OSError("finalize failed")),
+    )
+    with pytest.raises(OSError, match="finalize failed"):
+        transfer_command.main(
+            [
+                "--dry-run-manifest",
+                str(manifest_path),
+                "--code-commit",
+                "a" * 40,
+                "--stage",
+                "stage4_training",
+                "--stage4-trainer-input",
+                str(tmp_path / "trainer.jsonl"),
+                "--stage4-initialization",
+                str(tmp_path / "initial.pt"),
+                "--stage4-initialization-sha256",
+                transfer_command.T064_INITIALIZATION_SHA256,
+                "--stage4-checkpoint-root",
+                str(tmp_path / "checkpoints"),
+                "--stage4-frozen-t070-manifest",
+                str(frozen),
+                "--stage4-training-report",
+                str(report_path),
+            ]
+        )
+    assert report_path.is_file()
+    assert manifest_path.read_text(encoding="utf-8") == "{}"
+    assert not report_path.with_suffix(".json.tmp").exists()
+
+
+def test_stage5_historical_cli_is_cohort_level_and_checkpoint_free(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    manifest_path = tmp_path / "t064-curriculum-manifest.json"
+    manifest_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(transfer_command, "load_compact_json", lambda _stream: {})
+    monkeypatch.setattr(
+        transfer_command,
+        "build_t064_stage_execution_plan",
+        lambda _manifest, *, code_commit: [
+            {"stage": "stage5_t044", "cohort": cohort, "checkpoint_arm": arm}
+            for arm in (
+                "static/64001",
+                "curriculum/64001",
+                "static/64002",
+                "curriculum/64002",
+            )
+            for cohort in ("assist_0", "assist_hp50")
+        ],
+    )
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        transfer_command,
+        "run_t064_stage5_historical_disposition_production",
+        lambda **kwargs: (
+            True,
+            SimpleNamespace(arms=(1, 2, 3, 4)),
+            calls.append(kwargs) or [],
+        ),
+    )
+    assert (
+        transfer_command.main(
+            [
+                "--dry-run-manifest",
+                str(manifest_path),
+                "--code-commit",
+                "a" * 40,
+                "--stage",
+                "stage5_t044",
+                "--stage5-cohort",
+                str(tmp_path / "assist0.jsonl"),
+                "--stage5-cohort-kind",
+                "assist_0",
+                "--stage5-log-dir",
+                str(tmp_path / "logs"),
+                "--stage5-shard-output-dir",
+                str(tmp_path / "shards"),
+                "--stage5-merged-output",
+                str(tmp_path / "merged.jsonl"),
+                "--stage5-historical-report",
+                str(tmp_path / "historical.jsonl"),
+            ]
+        )
+        == 0
+    )
+    assert calls and "checkpoint_path" not in calls[0]
+    assert json.loads(capsys.readouterr().out)["disposition"] == "reused_historical"
 
 
 def test_stage7_teacher_validation_reads_nested_complete_identity_descriptors() -> None:
@@ -1136,6 +1569,156 @@ def test_t070_script_runner_uses_the_repository_argument_contract(
     assert command[command.index("--range-kind") + 1] == "primary"
     assert command[command.index("--t064-selection") + 1] == "static_mixture_v1:64001"
     assert kwargs == {"check": False, "text": True, "capture_output": True}
+
+
+def test_stage6_cli_invalid_baseline_starts_zero_shards(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest_path = tmp_path / "t064-curriculum-manifest.json"
+    manifest_path.write_text("{}", encoding="utf-8")
+    for name in ("baseline.json", "contract.json"):
+        (tmp_path / name).write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(transfer_command, "load_compact_json", lambda _stream: {})
+    monkeypatch.setattr(
+        transfer_command,
+        "build_t064_stage_execution_plan",
+        lambda _manifest, *, code_commit: [
+            {
+                "stage": "stage6_t070",
+                "checkpoint_arm": "static_mixture_v1/64001",
+                "ranges": list(transfer_command.T070_T052_RANGES),
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        transfer_command, "_validate_t064_stage6_preflight", lambda **_kwargs: False
+    )
+    shard_calls: list[object] = []
+    monkeypatch.setattr(
+        transfer_command,
+        "run_t064_t070_shard_script",
+        lambda **kwargs: shard_calls.append(kwargs),
+    )
+    with pytest.raises(SystemExit):
+        transfer_command.main(
+            [
+                "--dry-run-manifest",
+                str(manifest_path),
+                "--code-commit",
+                "a" * 40,
+                "--stage",
+                "stage6_t070",
+                "--checkpoint-arm",
+                "static_mixture_v1/64001",
+                "--attempt-root",
+                str(tmp_path / "attempts"),
+                "--stage6-shard-script",
+                "scripts/run_t070_search_stage_shard.py",
+                "--stage6-cohort",
+                str(tmp_path / "cohort.jsonl"),
+                "--stage6-checkpoint",
+                str(tmp_path / "checkpoint.pt"),
+                "--stage6-wrapper-manifest",
+                str(manifest_path),
+                "--stage6-native-preflight",
+                str(tmp_path / "preflight.json"),
+                "--stage6-native-checkout",
+                str(tmp_path / "native"),
+                "--stage6-native-build-root",
+                str(tmp_path / "native-build"),
+                "--stage6-baseline-report",
+                str(tmp_path / "baseline.json"),
+                "--stage6-baseline-contract",
+                str(tmp_path / "contract.json"),
+                "--stage6-merged-output",
+                str(tmp_path / "merged.json"),
+            ]
+        )
+    assert shard_calls == []
+
+
+def test_stage6_cli_valid_preflight_invokes_exactly_sixteen_shards(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest_path = tmp_path / "t064-curriculum-manifest.json"
+    manifest_path.write_text("{}", encoding="utf-8")
+    for name in ("baseline.json", "contract.json"):
+        (tmp_path / name).write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(transfer_command, "load_compact_json", lambda _stream: {})
+    monkeypatch.setattr(
+        transfer_command,
+        "build_t064_stage_execution_plan",
+        lambda _manifest, *, code_commit: [
+            {
+                "stage": "stage6_t070",
+                "checkpoint_arm": "static_mixture_v1/64001",
+                "ranges": list(transfer_command.T070_T052_RANGES),
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        transfer_command, "_validate_t064_stage6_preflight", lambda **_kwargs: True
+    )
+    calls: list[dict[str, object]] = []
+
+    def shard(**kwargs):
+        calls.append(kwargs)
+        kwargs["output_path"].write_text("{}", encoding="utf-8")
+        return subprocess.CompletedProcess([], 0, "", "")
+
+    monkeypatch.setattr(transfer_command, "run_t064_t070_shard_script", shard)
+    merged: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        transfer_command,
+        "merge_single_arm_stage",
+        lambda **kwargs: (
+            kwargs["output_path"].write_text("{}", encoding="utf-8"),
+            merged.append(kwargs),
+            {"command_passed": True, "problems": []},
+        )[-1],
+    )
+    assert (
+        transfer_command.main(
+            [
+                "--dry-run-manifest",
+                str(manifest_path),
+                "--code-commit",
+                "a" * 40,
+                "--stage",
+                "stage6_t070",
+                "--checkpoint-arm",
+                "static_mixture_v1/64001",
+                "--attempt-root",
+                str(tmp_path / "attempts"),
+                "--stage6-shard-script",
+                "scripts/run_t070_search_stage_shard.py",
+                "--stage6-cohort",
+                str(tmp_path / "cohort.jsonl"),
+                "--stage6-checkpoint",
+                str(tmp_path / "checkpoint.pt"),
+                "--stage6-wrapper-manifest",
+                str(manifest_path),
+                "--stage6-native-preflight",
+                str(tmp_path / "preflight.json"),
+                "--stage6-native-checkout",
+                str(tmp_path / "native"),
+                "--stage6-native-build-root",
+                str(tmp_path / "native-build"),
+                "--stage6-baseline-report",
+                str(tmp_path / "baseline.json"),
+                "--stage6-baseline-contract",
+                str(tmp_path / "contract.json"),
+                "--stage6-merged-output",
+                str(tmp_path / "merged.json"),
+            ]
+        )
+        == 0
+    )
+    assert len(calls) == 16
+    assert sorted(call["record_range"] for call in calls) == sorted(
+        transfer_command.T070_T052_RANGES
+    )
+    assert len(merged) == 1 and len(merged[0]["shard_paths"]) == 16
 
 
 def test_t070_existing_reader_accepts_persisted_t064_checkpoint_selection(

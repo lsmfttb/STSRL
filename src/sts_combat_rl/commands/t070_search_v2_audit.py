@@ -316,6 +316,17 @@ def _t070_frozen_contract_from_stage_manifest(
     return frozen, outer_code_commit
 
 
+def load_t070_frozen_contract(
+    path: Path, *, t064_selection: str | None = None
+) -> dict[str, Any]:
+    """Load the rehashed historical T070 contract behind a stage manifest."""
+
+    frozen, _ = _t070_frozen_contract_from_stage_manifest(
+        path, t064_selection=t064_selection
+    )
+    return frozen
+
+
 def run_single_arm_shard(
     *,
     cohort_path: Path,
