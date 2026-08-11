@@ -898,6 +898,50 @@ def test_stage2_production_uses_validated_assisted_restorer(
         captured["record_restorer"]
         is transfer_command.restore_assisted_battle_start_record
     )
+    assert captured["dispatch_backend"] == "fork"
+
+
+def test_stage5_production_uses_fork_dispatch_backend(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured = {}
+    from sts_combat_rl.commands import model_guided_oracle_search as guided_command
+    from sts_combat_rl.sim import model_guided_oracle_search as guided_sim
+    from sts_combat_rl.sim import search_guidance_policy
+
+    monkeypatch.setattr(
+        guided_command,
+        "build_torch_guidance_scorer_from_checkpoint",
+        lambda _path: object(),
+    )
+    monkeypatch.setattr(
+        guided_sim,
+        "ModelGuidedOracleSearchV2Controller",
+        lambda **kwargs: SimpleNamespace(action_space=kwargs["action_space"]),
+    )
+    monkeypatch.setattr(
+        search_guidance_policy,
+        "SearchGuidancePolicyController",
+        lambda _scorer: SimpleNamespace(
+            action_space=ActionSpaceConfig.initial_no_potions()
+        ),
+    )
+    monkeypatch.setattr(
+        transfer_command,
+        "run_t064_t044_dependent_stage",
+        lambda **kwargs: (captured.update(kwargs) or SimpleNamespace(), []),
+    )
+
+    transfer_command.run_t064_stage5_dependent_production(
+        cohort_path=tmp_path / "cohort.jsonl",
+        checkpoint_path=tmp_path / "checkpoint.pt",
+        cohort_kind="assist_0",
+        log_dir=tmp_path / "logs",
+        shard_output_dir=tmp_path / "shards",
+        merged_output_path=tmp_path / "merged.jsonl",
+    )
+
+    assert captured["dispatch_backend"] == "fork"
 
 
 def test_atomic_t070_selection_persist_promotes_once_and_cleans_failed_temp(
@@ -1907,6 +1951,57 @@ def test_actual_sixteen_worker_dispatch_writes_per_shard_logs(tmp_path: Path) ->
     assert len(thread_ids) == 16
     assert [record["return_code"] for record in records] == [0] * 16
     assert all(Path(record["log_path"]).is_file() for record in records)
+
+
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="the production fork backend is intentionally WSL/Linux only",
+)
+def test_fork_dispatch_uses_sixteen_distinct_processes_and_ordered_results(
+    tmp_path: Path,
+) -> None:
+    parent_pid = os.getpid()
+
+    def worker(index: int, record_range: str) -> dict[str, object]:
+        return {"index": index, "range": record_range, "pid": os.getpid()}
+
+    results, records = transfer_command.dispatch_t064_shards(
+        ranges=contiguous_ranges(16),
+        log_dir=tmp_path / "logs",
+        worker=worker,
+        backend="fork",
+    )
+
+    assert [result["index"] for result in results] == list(range(16))
+    assert [record["range"] for record in records] == list(contiguous_ranges(16))
+    assert len({record["worker_pid"] for record in records}) == 16
+    assert parent_pid not in {record["worker_pid"] for record in records}
+    assert all(Path(record["log_path"]).is_file() for record in records)
+
+
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="the production fork backend is intentionally WSL/Linux only",
+)
+def test_fork_dispatch_failure_keeps_all_logs_and_blocks_merge(tmp_path: Path) -> None:
+    def worker(index: int, _record_range: str) -> str:
+        if index == 7:
+            raise RuntimeError("intentional fork shard failure")
+        return "ok"
+
+    with pytest.raises(RuntimeError, match="cannot contribute"):
+        transfer_command.dispatch_t064_shards(
+            ranges=contiguous_ranges(16),
+            log_dir=tmp_path / "logs",
+            worker=worker,
+            backend="fork",
+        )
+
+    logs = sorted((tmp_path / "logs").glob("shard-*.log"))
+    assert len(logs) == 16
+    assert "return_code=1" in (tmp_path / "logs" / "shard-07.log").read_text(
+        encoding="utf-8"
+    )
 
 
 def test_attempt_directories_are_isolated_and_never_promote_failed_shards(

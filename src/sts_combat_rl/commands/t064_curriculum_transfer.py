@@ -12,6 +12,7 @@ import argparse
 from dataclasses import replace
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
+import multiprocessing
 import os
 import subprocess
 from pathlib import Path
@@ -609,6 +610,7 @@ def run_t064_stage2_production(
         shard_output_dir=shard_output_dir,
         merged_output_path=merged_output_path,
         record_restorer=restore_assisted_battle_start_record,
+        dispatch_backend="fork",
     )
 
 
@@ -798,6 +800,7 @@ def dispatch_t064_shards(
     ranges: Sequence[str],
     log_dir: Path,
     worker: Callable[[int, str], Any],
+    backend: str = "thread",
 ) -> tuple[list[Any], list[dict[str, Any]]]:
     """Execute exactly sixteen shard jobs concurrently and retain every result log.
 
@@ -808,51 +811,152 @@ def dispatch_t064_shards(
 
     if len(ranges) != 16:
         raise ValueError("T064 substantial stages require exactly 16 shards")
+    if backend not in {"thread", "fork"}:
+        raise ValueError("T064 shard backend must be thread or fork")
+    if backend == "fork":
+        return _dispatch_t064_fork_shards(ranges=ranges, log_dir=log_dir, worker=worker)
     log_dir.mkdir(parents=True, exist_ok=True)
     results: list[Any] = [None] * 16
     records: list[dict[str, Any]] = [{} for _ in ranges]
 
-    def invoke(index: int, record_range: str) -> tuple[int, Any, dict[str, Any]]:
-        log_path = log_dir / f"shard-{index:02d}.log"
-        started = time.perf_counter()
-        try:
-            value = worker(index, record_range)
-        except BaseException as exc:
-            log_path.write_text(f"return_code=1\nerror={exc!r}\n", encoding="utf-8")
-            return (
-                index,
-                None,
-                {
-                    "shard_index": index,
-                    "range": record_range,
-                    "return_code": 1,
-                    "log_path": str(log_path),
-                    "wall_clock_seconds": time.perf_counter() - started,
-                    "problem": str(exc),
-                },
-            )
-        log_path.write_text("return_code=0\n", encoding="utf-8")
-        return (
-            index,
-            value,
-            {
-                "shard_index": index,
-                "range": record_range,
-                "return_code": 0,
-                "log_path": str(log_path),
-                "wall_clock_seconds": time.perf_counter() - started,
-            },
-        )
-
     with ThreadPoolExecutor(max_workers=16, thread_name_prefix="t064-shard") as pool:
         futures = [
-            pool.submit(invoke, index, record_range)
+            pool.submit(
+                _invoke_t064_shard,
+                worker,
+                index,
+                record_range,
+                log_dir / f"shard-{index:02d}.log",
+            )
             for index, record_range in enumerate(ranges)
         ]
         for future in as_completed(futures):
             index, value, record = future.result()
             results[index] = value
             records[index] = record
+    if any(record["return_code"] for record in records):
+        raise RuntimeError(
+            "T064 shard stage failed; retained outputs cannot contribute"
+        )
+    return results, records
+
+
+def _invoke_t064_shard(
+    worker: Callable[[int, str], Any],
+    index: int,
+    record_range: str,
+    log_path: Path,
+) -> tuple[int, Any, dict[str, Any]]:
+    """Run one shard and return its ordinary log/return-code record."""
+
+    started = time.perf_counter()
+    try:
+        value = worker(index, record_range)
+    except BaseException as exc:
+        log_path.write_text(f"return_code=1\nerror={exc!r}\n", encoding="utf-8")
+        return (
+            index,
+            None,
+            {
+                "shard_index": index,
+                "range": record_range,
+                "return_code": 1,
+                "log_path": str(log_path),
+                "wall_clock_seconds": time.perf_counter() - started,
+                "worker_pid": os.getpid(),
+                "problem": str(exc),
+            },
+        )
+    log_path.write_text("return_code=0\n", encoding="utf-8")
+    return (
+        index,
+        value,
+        {
+            "shard_index": index,
+            "range": record_range,
+            "return_code": 0,
+            "log_path": str(log_path),
+            "wall_clock_seconds": time.perf_counter() - started,
+            "worker_pid": os.getpid(),
+        },
+    )
+
+
+def _fork_t064_shard_worker(
+    worker: Callable[[int, str], Any],
+    index: int,
+    record_range: str,
+    log_path: Path,
+    sender: Any,
+) -> None:
+    """Execute one inherited worker closure and return its result to the parent."""
+
+    try:
+        sender.send(_invoke_t064_shard(worker, index, record_range, log_path))
+    finally:
+        sender.close()
+
+
+def _dispatch_t064_fork_shards(
+    *,
+    ranges: Sequence[str],
+    log_dir: Path,
+    worker: Callable[[int, str], Any],
+) -> tuple[list[Any], list[dict[str, Any]]]:
+    """Fork sixteen inherited WSL workers after their parent has loaded inputs."""
+
+    if os.name == "nt" or "fork" not in multiprocessing.get_all_start_methods():
+        raise RuntimeError("T064 fork shard backend requires WSL/Linux")
+    log_dir.mkdir(parents=True, exist_ok=True)
+    context = multiprocessing.get_context("fork")
+    children: list[tuple[Any, Any, int, str, Path]] = []
+    for index, record_range in enumerate(ranges):
+        receiver, sender = context.Pipe(duplex=False)
+        log_path = log_dir / f"shard-{index:02d}.log"
+        child = context.Process(
+            target=_fork_t064_shard_worker,
+            args=(worker, index, record_range, log_path, sender),
+            name=f"t064-shard-{index:02d}",
+        )
+        child.start()
+        sender.close()
+        children.append((child, receiver, index, record_range, log_path))
+
+    results: list[Any] = [None] * 16
+    records: list[dict[str, Any]] = [{} for _ in ranges]
+    for child, receiver, index, record_range, log_path in children:
+        try:
+            received_index, value, record = receiver.recv()
+        except EOFError:
+            record = {
+                "shard_index": index,
+                "range": record_range,
+                "return_code": 1,
+                "log_path": str(log_path),
+                "wall_clock_seconds": 0.0,
+                "worker_pid": child.pid,
+                "problem": "forked T064 shard exited without a result",
+            }
+            log_path.write_text(
+                "return_code=1\nerror=forked T064 shard exited without a result\n",
+                encoding="utf-8",
+            )
+            received_index, value = index, None
+        finally:
+            receiver.close()
+        child.join()
+        if child.exitcode not in {0, None} and record["return_code"] == 0:
+            record = {
+                **record,
+                "return_code": 1,
+                "problem": f"forked T064 shard exited with code {child.exitcode}",
+            }
+            log_path.write_text(
+                f"return_code=1\nerror={record['problem']}\n", encoding="utf-8"
+            )
+            value = None
+        results[received_index] = value
+        records[received_index] = record
     if any(record["return_code"] for record in records):
         raise RuntimeError(
             "T064 shard stage failed; retained outputs cannot contribute"
@@ -1007,6 +1111,7 @@ def collect_t064_teacher_stage(
     shard_output_dir: Path,
     merged_output_path: Path,
     record_restorer: Callable[[Any, Any], tuple[Any, str]] | None = None,
+    dispatch_backend: str = "thread",
     shard_runner: Callable[
         ..., OracleTeacherDataset
     ] = collect_oracle_teacher_range_from_selected_manifest,
@@ -1047,6 +1152,7 @@ def collect_t064_teacher_stage(
         ranges=ranges,
         log_dir=log_dir,
         worker=one,
+        backend=dispatch_backend,
     )
     merged = merge_t064_teacher_shards(
         shards=shards, selected_manifest=selected_manifest, expected_ranges=ranges
@@ -1431,6 +1537,7 @@ def run_t064_t044_dependent_stage(
     report_writer: Callable[
         [Path, Any], None
     ] = write_de_assisted_fixed_cohort_comparison_report,
+    dispatch_backend: str = "thread",
 ) -> tuple[Any, list[dict[str, Any]]]:
     """Run/merge only the two checkpoint-dependent T044 arms in 16 shards."""
 
@@ -1465,6 +1572,7 @@ def run_t064_t044_dependent_stage(
         ranges=ranges,
         log_dir=log_dir,
         worker=one,
+        backend=dispatch_backend,
     )
     merged = merger(cohort_path=cohort_path, shards=shards, expected_ranges=ranges)
     report_writer(merged_output_path, merged)
@@ -1520,6 +1628,7 @@ def run_t064_stage5_dependent_production(
         log_dir=log_dir,
         shard_output_dir=shard_output_dir,
         merged_output_path=merged_output_path,
+        dispatch_backend="fork",
     )
 
 
@@ -1571,6 +1680,7 @@ def run_t064_stage5_independent_production(
         log_dir=log_dir,
         shard_output_dir=shard_output_dir,
         merged_output_path=merged_output_path,
+        dispatch_backend="fork",
     )
 
 
@@ -1663,6 +1773,7 @@ def run_t064_t044_independent_fallback_stage(
     report_writer: Callable[
         [Path, Any], None
     ] = write_de_assisted_fixed_cohort_comparison_report,
+    dispatch_backend: str = "thread",
 ) -> tuple[Any, list[dict[str, Any]]]:
     """Rerun only baseline+scripted once for one invalid historical cohort."""
 
@@ -1692,7 +1803,12 @@ def run_t064_t044_independent_fallback_stage(
         report_writer(output, shard)
         return shard
 
-    shards, records = dispatch_t064_shards(ranges=ranges, log_dir=log_dir, worker=one)
+    shards, records = dispatch_t064_shards(
+        ranges=ranges,
+        log_dir=log_dir,
+        worker=one,
+        backend=dispatch_backend,
+    )
     merged = merger(cohort_path=cohort_path, shards=shards, expected_ranges=ranges)
     report_writer(merged_output_path, merged)
     return merged, records
