@@ -7,7 +7,7 @@ evaluation format: callers provide the existing T043/T044/T070 runners.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 import argparse
 from dataclasses import replace
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -779,6 +779,58 @@ def _write_new_compact_json_atomically(path: Path, payload: Mapping[str, Any]) -
         raise
 
 
+def _write_oracle_teacher_shard_atomically(
+    path: Path, dataset: OracleTeacherDataset
+) -> None:
+    """Publish a completed teacher shard only after its JSONL stream is durable."""
+
+    refuse_overwrite(path)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    refuse_overwrite(temporary)
+    try:
+        with temporary.open("x", encoding="utf-8", newline="\n") as stream:
+            dump_oracle_teacher_dataset_jsonl(dataset, stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    except BaseException:
+        if temporary.exists():
+            temporary.unlink()
+        raise
+
+
+def _iter_t064_persisted_teacher_shards(
+    *,
+    descriptors: Sequence[Any],
+    expected_ranges: Sequence[str],
+    shard_output_dir: Path,
+) -> Iterator[OracleTeacherDataset]:
+    """Yield validated forked Stage-2 shards without retaining all 16 datasets."""
+
+    if len(descriptors) != 16 or len(expected_ranges) != 16:
+        raise ValueError("T064 persisted teacher shard topology requires 16 shards")
+    for index, (descriptor, record_range) in enumerate(
+        zip(descriptors, expected_ranges, strict=True)
+    ):
+        output = shard_output_dir / f"shard-{index:02d}.jsonl"
+        temporary = output.with_suffix(output.suffix + ".tmp")
+        if (
+            not isinstance(descriptor, Mapping)
+            or descriptor.get("shard_index") != index
+            or descriptor.get("record_range") != record_range
+            or descriptor.get("path") != str(output)
+        ):
+            raise ValueError(f"T064 forked teacher shard {index} descriptor is invalid")
+        if temporary.exists():
+            raise ValueError(
+                f"T064 forked teacher shard {index} has an incomplete temp"
+            )
+        if not output.is_file():
+            raise ValueError(f"T064 forked teacher shard {index} was not persisted")
+        with output.open(encoding="utf-8") as stream:
+            yield load_oracle_teacher_dataset_jsonl(stream)
+
+
 def prepare_t064_attempt(root: Path, *, stage: str, code_commit: str) -> Path:
     """Create an isolated attempt directory; failed outputs are never reused."""
 
@@ -1103,18 +1155,37 @@ def merge_t064_teacher_shards(
     shards: Sequence[OracleTeacherDataset],
     selected_manifest: Mapping[str, Any],
     expected_ranges: Sequence[str] | None = None,
-) -> tuple[OracleTeacherDataset, list[dict[str, Any]]]:
+) -> OracleTeacherDataset:
     """Merge the existing teacher rows in frozen complete-source order."""
 
     sources = _selected_sources(selected_manifest)
     ranges = tuple(expected_ranges or contiguous_ranges(len(sources)))
     if len(shards) != 16 or len(ranges) != 16:
         raise ValueError("T064 teacher merge requires exactly 16 shards")
-    if not shards:
-        raise ValueError("T064 teacher merge requires shards")
-    first = shards[0]
+    return _merge_t064_teacher_shard_stream(
+        shards=shards, selected_manifest=selected_manifest, expected_ranges=ranges
+    )
+
+
+def _merge_t064_teacher_shard_stream(
+    *,
+    shards: Iterable[OracleTeacherDataset],
+    selected_manifest: Mapping[str, Any],
+    expected_ranges: Sequence[str],
+) -> OracleTeacherDataset:
+    """Apply the frozen strict merge contract while retaining one input shard."""
+
+    sources = _selected_sources(selected_manifest)
+    if len(expected_ranges) != 16:
+        raise ValueError("T064 teacher merge requires exactly 16 shard ranges")
+    first: OracleTeacherDataset | None = None
     rows = []
-    for index, (shard, record_range) in enumerate(zip(shards, ranges, strict=True)):
+    shard_count = 0
+    for index, (shard, record_range) in enumerate(
+        zip(shards, expected_ranges, strict=True)
+    ):
+        if first is None:
+            first = shard
         start, end = _range(record_range, len(sources))
         for attribute in (
             "native_source_identity",
@@ -1134,6 +1205,9 @@ def merge_t064_teacher_shards(
             if not row.soft_visit_target:
                 raise ValueError("T064 teacher rows require soft visit targets")
             rows.append(replace(row, row_index=len(rows)))
+        shard_count += 1
+    if first is None or shard_count != 16:
+        raise ValueError("T064 teacher merge requires exactly 16 shards")
     if len(rows) != len(sources):
         raise ValueError("T064 teacher merge dropped selected sources")
     return replace(first, records=rows, problems=[])
@@ -1167,9 +1241,8 @@ def collect_t064_teacher_stage(
     refuse_overwrite(merged_output_path)
     shard_output_dir.mkdir(parents=True, exist_ok=True)
 
-    def one(index: int, record_range: str) -> OracleTeacherDataset:
+    def one(index: int, record_range: str) -> OracleTeacherDataset | dict[str, Any]:
         output = shard_output_dir / f"shard-{index:02d}.jsonl"
-        refuse_overwrite(output)
         shard = shard_runner(
             adapter_factory=adapter_factory,
             pool=pool,
@@ -1183,19 +1256,40 @@ def collect_t064_teacher_stage(
                 else {}
             ),
         )
-        with output.open("w", encoding="utf-8", newline="\n") as stream:
-            dump_oracle_teacher_dataset_jsonl(shard, stream)
+        _write_oracle_teacher_shard_atomically(output, shard)
+        if dispatch_backend == "fork":
+            # Do not pickle a 20--90 MB OracleTeacherDataset back through the
+            # parent pipe.  The parent reloads this exact, atomically-published
+            # path before it performs the normal strict merge validation.
+            return {
+                "shard_index": index,
+                "record_range": record_range,
+                "path": str(output),
+            }
         return shard
 
-    shards, shard_records = dispatch_t064_shards(
+    dispatched, shard_records = dispatch_t064_shards(
         ranges=ranges,
         log_dir=log_dir,
         worker=one,
         backend=dispatch_backend,
     )
-    merged = merge_t064_teacher_shards(
-        shards=shards, selected_manifest=selected_manifest, expected_ranges=ranges
-    )
+    if dispatch_backend == "fork":
+        merged = _merge_t064_teacher_shard_stream(
+            shards=_iter_t064_persisted_teacher_shards(
+                descriptors=dispatched,
+                expected_ranges=ranges,
+                shard_output_dir=shard_output_dir,
+            ),
+            selected_manifest=selected_manifest,
+            expected_ranges=ranges,
+        )
+    else:
+        merged = merge_t064_teacher_shards(
+            shards=dispatched,
+            selected_manifest=selected_manifest,
+            expected_ranges=ranges,
+        )
     # The caller puts this list directly in the sole stage summary.
     with merged_output_path.open("w", encoding="utf-8", newline="\n") as stream:
         dump_oracle_teacher_dataset_jsonl(merged, stream)

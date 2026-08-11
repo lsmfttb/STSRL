@@ -22,6 +22,8 @@ from sts_combat_rl.commands.t070_search_v2_audit import (
 )
 from sts_combat_rl.sim.battle_start_pool import BattleStartCheckpointRecord
 from sts_combat_rl.sim.action_space import ActionSpaceConfig
+from sts_combat_rl.sim.controller_contract import ControllerProvenance
+from sts_combat_rl.sim.oracle_teacher import OracleTeacherDataset
 from sts_combat_rl.sim.t064_curriculum import (
     ARM_CURRICULUM,
     ARM_STATIC,
@@ -96,6 +98,22 @@ def _descriptor(component: str, identity: str, *, act: int = 1, stratum: int = 1
         "floor_bucket": stratum,
         "exclusion_reasons": [],
     }
+
+
+def _empty_oracle_teacher_dataset() -> OracleTeacherDataset:
+    """A current-schema shard with no rows, suitable for persistence tests."""
+
+    return OracleTeacherDataset(
+        native_source_identity={"integration_commit": "test"},
+        controller_provenance=ControllerProvenance(
+            kind="oracle_battle_search",
+            name="test-oracle",
+            config={"information_regime": "full_simulator_state_oracle_like"},
+        ).to_dict(),
+        action_space_config={"include_potions": False},
+        source_pool_format_version=1,
+        source_pool_controller_provenance={"kind": "test"},
+    )
 
 
 def test_complete_source_identity_reuses_occurrence_safe_trace_exactly() -> None:
@@ -1953,6 +1971,302 @@ def test_actual_sixteen_worker_dispatch_writes_per_shard_logs(tmp_path: Path) ->
     assert len(thread_ids) == 16
     assert [record["return_code"] for record in records] == [0] * 16
     assert all(Path(record["log_path"]).is_file() for record in records)
+
+
+def test_stage2_fork_returns_small_descriptors_and_reloads_persisted_shards(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ranges = contiguous_ranges(16)
+    manifest = {
+        "selected_sources": [{} for _ in range(16)],
+        "teacher_shard_ranges": list(ranges),
+        "teacher_worker_count": 16,
+    }
+    descriptors: list[dict[str, object]] = []
+    reloaded = []
+    original_iterator = transfer_command._iter_t064_persisted_teacher_shards
+
+    def fake_fork_dispatch(*, ranges, log_dir, worker, backend):
+        assert backend == "fork"
+        del log_dir
+        results = [
+            worker(index, record_range) for index, record_range in enumerate(ranges)
+        ]
+        assert all(isinstance(value, dict) for value in results)
+        assert all(len(json.dumps(value)) < 512 for value in results)
+        descriptors.extend(results)
+        return results, [
+            {"shard_index": index, "return_code": 0} for index in range(len(results))
+        ]
+
+    def capture_iterator(**kwargs):
+        for value in original_iterator(**kwargs):
+            reloaded.append(value)
+            yield value
+
+    def capture_merge(*, shards, **kwargs):
+        del kwargs
+        values = list(shards)
+        assert values == reloaded
+        assert all(isinstance(shard, OracleTeacherDataset) for shard in values)
+        return values[0]
+
+    monkeypatch.setattr(transfer_command, "dispatch_t064_shards", fake_fork_dispatch)
+    monkeypatch.setattr(
+        transfer_command, "_iter_t064_persisted_teacher_shards", capture_iterator
+    )
+    monkeypatch.setattr(
+        transfer_command, "_merge_t064_teacher_shard_stream", capture_merge
+    )
+
+    merged, records = transfer_command.collect_t064_teacher_stage(
+        selected_manifest=manifest,
+        pool=object(),
+        adapter_factory=lambda: object(),
+        controller=object(),
+        action_space=object(),
+        log_dir=tmp_path / "logs",
+        shard_output_dir=tmp_path / "shards",
+        merged_output_path=tmp_path / "merged.jsonl",
+        dispatch_backend="fork",
+        shard_runner=lambda **_kwargs: _empty_oracle_teacher_dataset(),
+    )
+
+    assert isinstance(merged, OracleTeacherDataset)
+    assert len(descriptors) == len(reloaded) == 16
+    assert records == [{"shard_index": index, "return_code": 0} for index in range(16)]
+    assert all(
+        (tmp_path / "shards" / f"shard-{index:02d}.jsonl").is_file()
+        for index in range(16)
+    )
+
+
+def test_stage2_persisted_teacher_shards_reject_partial_or_corrupt_outputs(
+    tmp_path: Path,
+) -> None:
+    ranges = contiguous_ranges(16)
+    output_dir = tmp_path / "shards"
+    output_dir.mkdir()
+    descriptors = []
+    for index, record_range in enumerate(ranges):
+        output = output_dir / f"shard-{index:02d}.jsonl"
+        transfer_command._write_oracle_teacher_shard_atomically(
+            output, _empty_oracle_teacher_dataset()
+        )
+        descriptors.append(
+            {
+                "shard_index": index,
+                "record_range": record_range,
+                "path": str(output),
+            }
+        )
+
+    loaded = list(
+        transfer_command._iter_t064_persisted_teacher_shards(
+            descriptors=descriptors, expected_ranges=ranges, shard_output_dir=output_dir
+        )
+    )
+    assert len(loaded) == 16
+
+    temporary = output_dir / "shard-03.jsonl.tmp"
+    temporary.write_text("partial", encoding="utf-8")
+    with pytest.raises(ValueError, match="incomplete temp"):
+        list(
+            transfer_command._iter_t064_persisted_teacher_shards(
+                descriptors=descriptors,
+                expected_ranges=ranges,
+                shard_output_dir=output_dir,
+            )
+        )
+    temporary.unlink()
+    (output_dir / "shard-03.jsonl").write_text("not-json", encoding="utf-8")
+    with pytest.raises(ValueError, match="invalid JSON"):
+        list(
+            transfer_command._iter_t064_persisted_teacher_shards(
+                descriptors=descriptors,
+                expected_ranges=ranges,
+                shard_output_dir=output_dir,
+            )
+        )
+
+
+def test_stage2_teacher_shard_atomic_writer_never_publishes_partial_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output = tmp_path / "shard-00.jsonl"
+
+    def partial_then_fail(_dataset, stream) -> None:
+        stream.write('{"type":"metadata"}\n')
+        raise RuntimeError("intentional interrupted shard write")
+
+    monkeypatch.setattr(
+        transfer_command, "dump_oracle_teacher_dataset_jsonl", partial_then_fail
+    )
+    with pytest.raises(RuntimeError, match="interrupted shard write"):
+        transfer_command._write_oracle_teacher_shard_atomically(
+            output, _empty_oracle_teacher_dataset()
+        )
+    assert not output.exists()
+    assert not output.with_suffix(output.suffix + ".tmp").exists()
+
+
+def test_stage2_reloaded_invalid_shard_blocks_merged_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ranges = contiguous_ranges(16)
+    manifest = {
+        "selected_sources": [{} for _ in range(16)],
+        "teacher_shard_ranges": list(ranges),
+        "teacher_worker_count": 16,
+    }
+
+    def fake_fork_dispatch(*, ranges, log_dir, worker, backend):
+        assert backend == "fork"
+        del log_dir
+        return (
+            [worker(index, record_range) for index, record_range in enumerate(ranges)],
+            [{"shard_index": index, "return_code": 0} for index in range(16)],
+        )
+
+    monkeypatch.setattr(transfer_command, "dispatch_t064_shards", fake_fork_dispatch)
+    merged_output = tmp_path / "merged.jsonl"
+    with pytest.raises(ValueError, match="teacher shard 0 is incomplete"):
+        transfer_command.collect_t064_teacher_stage(
+            selected_manifest=manifest,
+            pool=object(),
+            adapter_factory=lambda: object(),
+            controller=object(),
+            action_space=object(),
+            log_dir=tmp_path / "logs",
+            shard_output_dir=tmp_path / "shards",
+            merged_output_path=merged_output,
+            dispatch_backend="fork",
+            shard_runner=lambda **_kwargs: _empty_oracle_teacher_dataset(),
+        )
+    assert not merged_output.exists()
+
+
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="the production fork backend is intentionally WSL/Linux only",
+)
+def test_stage2_production_fork_returns_descriptors_then_reloads_shards(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ranges = contiguous_ranges(16)
+    manifest = {
+        "selected_sources": [{} for _ in range(16)],
+        "teacher_shard_ranges": list(ranges),
+        "teacher_worker_count": 16,
+    }
+    descriptors: list[object] = []
+    original_iterator = transfer_command._iter_t064_persisted_teacher_shards
+
+    def capture_iterator(**kwargs):
+        descriptors.extend(kwargs["descriptors"])
+        yield from original_iterator(**kwargs)
+
+    def capture_merge(*, shards, **kwargs):
+        del kwargs
+        values = list(shards)
+        assert len(values) == 16
+        assert all(isinstance(shard, OracleTeacherDataset) for shard in values)
+        return values[0]
+
+    monkeypatch.setattr(
+        transfer_command, "_iter_t064_persisted_teacher_shards", capture_iterator
+    )
+    monkeypatch.setattr(
+        transfer_command, "_merge_t064_teacher_shard_stream", capture_merge
+    )
+    _, records = transfer_command.collect_t064_teacher_stage(
+        selected_manifest=manifest,
+        pool=object(),
+        adapter_factory=lambda: object(),
+        controller=object(),
+        action_space=object(),
+        log_dir=tmp_path / "logs",
+        shard_output_dir=tmp_path / "shards",
+        merged_output_path=tmp_path / "merged.jsonl",
+        dispatch_backend="fork",
+        shard_runner=lambda **_kwargs: _empty_oracle_teacher_dataset(),
+    )
+
+    assert len(descriptors) == 16
+    assert all(
+        isinstance(value, dict) and len(json.dumps(value)) < 512
+        for value in descriptors
+    )
+    assert len({record["worker_pid"] for record in records}) == 16
+    assert all(
+        (tmp_path / "shards" / f"shard-{index:02d}.jsonl").is_file()
+        for index in range(16)
+    )
+
+
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="the production fork backend is intentionally WSL/Linux only",
+)
+def test_stage2_fork_fast_workers_exit_while_parent_waits_for_shard_zero(
+    tmp_path: Path,
+) -> None:
+    ranges = contiguous_ranges(16)
+    marker_dir = tmp_path / "pids"
+    marker_dir.mkdir()
+    output_dir = tmp_path / "shards"
+    observed = tmp_path / "fast-workers-exited"
+
+    def worker(index: int, record_range: str) -> dict[str, object]:
+        marker = marker_dir / f"{index:02d}"
+        marker.write_text(str(os.getpid()), encoding="utf-8")
+        if index == 0:
+            deadline = time.monotonic() + 5
+            while len(list(marker_dir.iterdir())) != 16 and time.monotonic() < deadline:
+                time.sleep(0.01)
+            assert len(list(marker_dir.iterdir())) == 16
+            fast_pids = [
+                int((marker_dir / f"{ordinal:02d}").read_text(encoding="utf-8"))
+                for ordinal in range(1, 16)
+            ]
+
+            def exited_or_reaped(pid: int) -> bool:
+                status = Path(f"/proc/{pid}/status")
+                return not status.is_file() or "State:\tZ" in status.read_text(
+                    encoding="utf-8"
+                )
+
+            while (
+                not all(exited_or_reaped(pid) for pid in fast_pids)
+                and time.monotonic() < deadline
+            ):
+                time.sleep(0.01)
+            # Before shard 00 can return, fast children are either reaped by a
+            # later Process.start() cleanup or remain as zombies pending the
+            # ordered join.  Both states have released their address spaces.
+            assert all(exited_or_reaped(pid) for pid in fast_pids)
+            observed.write_text("before-shard-00-return", encoding="utf-8")
+        output = output_dir / f"shard-{index:02d}.jsonl"
+        output.parent.mkdir(parents=True, exist_ok=True)
+        transfer_command._write_oracle_teacher_shard_atomically(
+            output, _empty_oracle_teacher_dataset()
+        )
+        return {
+            "shard_index": index,
+            "record_range": record_range,
+            "path": str(output),
+        }
+
+    results, records = transfer_command.dispatch_t064_shards(
+        ranges=ranges,
+        log_dir=tmp_path / "logs",
+        worker=worker,
+        backend="fork",
+    )
+
+    assert observed.read_text(encoding="utf-8") == "before-shard-00-return"
+    assert all(len(json.dumps(result)) < 512 for result in results)
+    assert len({record["worker_pid"] for record in records}) == 16
 
 
 @pytest.mark.skipif(
