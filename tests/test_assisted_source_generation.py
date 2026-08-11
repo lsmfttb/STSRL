@@ -14,6 +14,7 @@ from sts_combat_rl.sim.assisted_source_generation import (
     dump_assisted_source_pool_jsonl,
     load_assisted_source_pool_jsonl,
     merge_assisted_source_pool_shards,
+    restore_assisted_battle_start_record,
     verify_assisted_source_pool_restores,
     write_assisted_a20_coverage_report,
 )
@@ -198,6 +199,11 @@ def test_assisted_pool_records_hp_potion_provenance_and_restores() -> None:
     assert restore.restore_ok
     assert restore.replay_restored_count == 2
     assert restore.context_matched_count == 2
+    restored, method = restore_assisted_battle_start_record(
+        _AssistedAdapter(), loaded.pool.records[0]
+    )
+    assert method == "assisted_seed_action_trace"
+    assert tuple(restored.observation) == loaded.pool.records[0].snapshot_observation
 
 
 def test_fixed_evaluation_workflow_loads_assisted_source_pool(tmp_path) -> None:

@@ -872,6 +872,34 @@ def test_stage2_cli_routes_to_fixed_production_adapter(
     assert json.loads(capsys.readouterr().out)["stage"] == "stage2_teacher"
 
 
+def test_stage2_production_uses_validated_assisted_restorer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured = {}
+    monkeypatch.setattr(
+        transfer_command,
+        "load_selected_source_pool",
+        lambda _manifest: (SimpleNamespace(), []),
+    )
+    monkeypatch.setattr(
+        transfer_command,
+        "collect_t064_teacher_stage",
+        lambda **kwargs: (captured.update(kwargs) or SimpleNamespace(records=[]), []),
+    )
+
+    transfer_command.run_t064_stage2_production(
+        manifest={},
+        merged_output_path=tmp_path / "teacher.jsonl",
+        shard_output_dir=tmp_path / "shards",
+        log_dir=tmp_path / "logs",
+    )
+
+    assert (
+        captured["record_restorer"]
+        is transfer_command.restore_assisted_battle_start_record
+    )
+
+
 def test_atomic_t070_selection_persist_promotes_once_and_cleans_failed_temp(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

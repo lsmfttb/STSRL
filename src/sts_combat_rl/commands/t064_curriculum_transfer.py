@@ -21,6 +21,9 @@ from typing import Any
 from sts_combat_rl.commands.oracle_teacher_scaleup import (
     collect_oracle_teacher_range_from_selected_manifest,
 )
+from sts_combat_rl.sim.assisted_source_generation import (
+    restore_assisted_battle_start_record,
+)
 from sts_combat_rl.commands.t064_curriculum import load_selected_source_pool
 from sts_combat_rl.commands.de_assisted_fixed_cohort_comparison import (
     merge_de_assisted_fixed_cohort_comparison_shards,
@@ -605,6 +608,7 @@ def run_t064_stage2_production(
         log_dir=log_dir,
         shard_output_dir=shard_output_dir,
         merged_output_path=merged_output_path,
+        record_restorer=restore_assisted_battle_start_record,
     )
 
 
@@ -1002,6 +1006,7 @@ def collect_t064_teacher_stage(
     log_dir: Path,
     shard_output_dir: Path,
     merged_output_path: Path,
+    record_restorer: Callable[[Any, Any], tuple[Any, str]] | None = None,
     shard_runner: Callable[
         ..., OracleTeacherDataset
     ] = collect_oracle_teacher_range_from_selected_manifest,
@@ -1028,6 +1033,11 @@ def collect_t064_teacher_stage(
             selected_source_manifest=selected_manifest,
             record_range=record_range,
             action_space=action_space,
+            **(
+                {"record_restorer": record_restorer}
+                if record_restorer is not None
+                else {}
+            ),
         )
         with output.open("w", encoding="utf-8", newline="\n") as stream:
             dump_oracle_teacher_dataset_jsonl(shard, stream)

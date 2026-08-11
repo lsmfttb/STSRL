@@ -6,14 +6,17 @@ import hashlib
 import json
 import random
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from sts_combat_rl.commands.oracle_teacher_scaleup import (
     ORACLE_TEACHER_SCALEUP_MANIFEST_FILENAME,
+    collect_oracle_teacher_range_from_selected_manifest,
     run_assisted_oracle_teacher_scaleup_from_paths,
     run_oracle_teacher_scaleup_from_paths,
 )
+from sts_combat_rl.commands import oracle_teacher_scaleup as teacher_scaleup_command
 from sts_combat_rl.sim.assisted_source_generation import (
     ASSISTED_RUN_DISTRIBUTION_KIND,
     ASSIST_LEVEL_0,
@@ -47,6 +50,7 @@ from sts_combat_rl.sim.oracle_search import OracleSearchController
 from sts_combat_rl.sim.oracle_teacher import (
     OracleTeacherDataset,
     OracleTeacherRow,
+    load_oracle_teacher_dataset_jsonl,
     merge_oracle_teacher_dataset_shards,
 )
 from sts_combat_rl.sim.oracle_teacher_scaleup import (
@@ -61,6 +65,7 @@ from sts_combat_rl.sim.oracle_teacher_scaleup import (
     dump_oracle_teacher_scaleup_manifest_json,
     validate_oracle_teacher_scaleup_budgets,
 )
+from sts_combat_rl.sim.t064_curriculum import complete_source_identity
 
 
 class _ScaleupAdapter:
@@ -607,8 +612,45 @@ def test_assisted_command_workflow_writes_teacher_reports_and_manifest(
     assert manifest_json["input_artifacts"]["assisted_pool"]["distribution_kind"] == (
         "assisted_run"
     )
-    assert (output_dir / "oracle-teacher-budget-20.jsonl").exists()
+    teacher_path = output_dir / "oracle-teacher-budget-20.jsonl"
+    assert teacher_path.exists()
+    with teacher_path.open(encoding="utf-8") as stream:
+        teacher = load_oracle_teacher_dataset_jsonl(stream)
+    assert teacher.records[0].restoration_method == "assisted_seed_action_trace"
     assert (output_dir / "oracle-teacher-report-budget-20.json").exists()
+
+
+def test_teacher_range_preserves_individual_collection_problem(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    record = _record(0)
+    identity = complete_source_identity(record)
+    monkeypatch.setattr(
+        teacher_scaleup_command,
+        "collect_oracle_teacher_dataset_from_pool",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            records=[],
+            problems=["pool record 0: action identity matched 0 legal actions"],
+        ),
+    )
+
+    with pytest.raises(ValueError, match="action identity matched 0 legal actions"):
+        collect_oracle_teacher_range_from_selected_manifest(
+            adapter_factory=_ScaleupAdapter,
+            pool=_custom_pool([record]),
+            controller=OracleSearchController(simulations=20),
+            selected_source_manifest={
+                "selected_sources": [
+                    {
+                        "complete_identity": identity,
+                        "complete_identity_sha256": identity[
+                            "complete_identity_sha256"
+                        ],
+                    }
+                ]
+            },
+            record_range="0:1",
+        )
 
 
 def test_command_workflow_rejects_t021_source_pool_mismatch(

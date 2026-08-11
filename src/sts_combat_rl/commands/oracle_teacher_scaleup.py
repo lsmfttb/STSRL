@@ -13,11 +13,16 @@ from sts_combat_rl.sim.assisted_source_generation import (
     load_assisted_source_pool_jsonl,
 )
 from sts_combat_rl.sim.action_space import ActionSpaceConfig
+from sts_combat_rl.sim.assisted_source_generation import (
+    restore_assisted_battle_start_record,
+)
 from sts_combat_rl.sim.battle_start_pool import (
+    BattleStartCheckpointRecord,
     NaturalBattleStartPool,
     load_natural_battle_start_pool_jsonl,
+    restore_battle_start_record,
 )
-from sts_combat_rl.sim.contract import CheckpointingSimulatorAdapter
+from sts_combat_rl.sim.contract import CheckpointingSimulatorAdapter, SimulatorSnapshot
 from sts_combat_rl.sim.lightspeed_source import lightspeed_source_identity_dict
 from sts_combat_rl.sim.oracle_search import OracleSearchController
 from sts_combat_rl.sim.oracle_teacher import (
@@ -59,6 +64,10 @@ def collect_oracle_teacher_range_from_selected_manifest(
     selected_source_manifest: Mapping[str, Any],
     record_range: str,
     action_space: ActionSpaceConfig | None = None,
+    record_restorer: Callable[
+        [CheckpointingSimulatorAdapter, BattleStartCheckpointRecord],
+        tuple[SimulatorSnapshot, str],
+    ] = restore_battle_start_record,
 ) -> OracleTeacherDataset:
     """Collect one contiguous shard from an already-frozen selected source order."""
 
@@ -114,10 +123,16 @@ def collect_oracle_teacher_range_from_selected_manifest(
         selected_pool,
         controller,
         action_space=action_space,
+        record_restorer=record_restorer,
     )
     expected_rows = selected_identities[start:end]
     if dataset.problems or len(dataset.records) != len(expected_rows):
-        raise ValueError("teacher range did not produce one row per selected source")
+        details = "; ".join(dataset.problems) or (
+            f"received {len(dataset.records)} rows for {len(expected_rows)} sources"
+        )
+        raise ValueError(
+            "teacher range did not produce one row per selected source: " + details
+        )
     for row, identity in zip(dataset.records, expected_rows, strict=True):
         if not _teacher_row_matches_complete_identity(row, identity):
             raise ValueError(
@@ -218,6 +233,7 @@ def run_assisted_oracle_teacher_scaleup_from_paths(
         coverage_report_path=coverage_report_path,
         root_selection_rule=root_selection_rule,
         action_space=action_space,
+        record_restorer=restore_assisted_battle_start_record,
     )
 
 
@@ -236,6 +252,10 @@ def _run_oracle_teacher_scaleup_for_pool(
     coverage_report_path: Path | None,
     root_selection_rule: str,
     action_space: ActionSpaceConfig | None,
+    record_restorer: Callable[
+        [CheckpointingSimulatorAdapter, BattleStartCheckpointRecord],
+        tuple[SimulatorSnapshot, str],
+    ] = restore_battle_start_record,
 ) -> OracleTeacherScaleupManifest:
     requested_budgets = validate_oracle_teacher_scaleup_budgets(budgets)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -311,6 +331,7 @@ def _run_oracle_teacher_scaleup_for_pool(
             selected_pool,
             controller,
             action_space=active_action_space,
+            record_restorer=record_restorer,
         )
         if dataset.problems:
             raise ValueError(

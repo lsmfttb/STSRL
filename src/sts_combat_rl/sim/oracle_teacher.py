@@ -16,12 +16,13 @@ from sts_combat_rl.sim.artifact_versioning import (
     preserved_migration_report,
 )
 from sts_combat_rl.sim.battle_start_pool import (
+    BattleStartCheckpointRecord,
     NATURAL_DISTRIBUTION_KIND,
     NATURAL_SAMPLING_COMPONENT,
     NaturalBattleStartPool,
     restore_battle_start_record,
 )
-from sts_combat_rl.sim.contract import CheckpointingSimulatorAdapter
+from sts_combat_rl.sim.contract import CheckpointingSimulatorAdapter, SimulatorSnapshot
 from sts_combat_rl.sim.controlled_run import build_decision_context
 from sts_combat_rl.sim.controller_contract import controller_provenance_from_dict
 from sts_combat_rl.sim.decision_record import action_identity_dicts_for_actions
@@ -173,8 +174,17 @@ def collect_oracle_teacher_dataset_from_pool(
     controller: OracleSearchController,
     *,
     action_space: ActionSpaceConfig | None = None,
+    record_restorer: Callable[
+        [CheckpointingSimulatorAdapter, BattleStartCheckpointRecord],
+        tuple[SimulatorSnapshot, str],
+    ] = restore_battle_start_record,
 ) -> OracleTeacherDataset:
-    """Restore each pool record and collect one Oracle teacher row."""
+    """Restore each pool record and collect one Oracle teacher row.
+
+    ``record_restorer`` defaults to the portable natural-source restore path.
+    Explicitly tagged source distributions may provide their own validated
+    restorer without changing the teacher artifact schema or collection logic.
+    """
 
     active_action_space = action_space or controller.action_space
     rows: list[OracleTeacherRow] = []
@@ -183,7 +193,7 @@ def collect_oracle_teacher_dataset_from_pool(
         label = f"pool record {record.record_index}"
         try:
             adapter = adapter_factory()
-            snapshot, restoration_method = restore_battle_start_record(adapter, record)
+            snapshot, restoration_method = record_restorer(adapter, record)
             actions = list(adapter.legal_actions(snapshot))
             public_run_context = _row_public_context(
                 record.public_context_status, record
