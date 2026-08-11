@@ -897,6 +897,39 @@ def _fork_t064_shard_worker(
         sender.close()
 
 
+def _receive_t064_fork_shard_result(receiver: Any) -> tuple[int, Any, dict[str, Any]]:
+    """Receive one forked shard result; kept separate for interruption tests."""
+
+    return receiver.recv()
+
+
+def _cleanup_t064_fork_children(
+    children: Sequence[tuple[Any, Any, Any, int, str, Path]],
+) -> None:
+    """Close parent pipes and stop only children created by this dispatcher."""
+
+    for _child, receiver, sender, _index, _record_range, _log_path in children:
+        for connection in (receiver, sender):
+            try:
+                connection.close()
+            except BaseException:
+                pass
+    for child, _receiver, _sender, _index, _record_range, _log_path in children:
+        try:
+            if child.is_alive():
+                child.terminate()
+        except BaseException:
+            pass
+    for child, _receiver, _sender, _index, _record_range, _log_path in children:
+        try:
+            child.join(timeout=5)
+            if child.is_alive():
+                child.kill()
+                child.join()
+        except BaseException:
+            pass
+
+
 def _dispatch_t064_fork_shards(
     *,
     ranges: Sequence[str],
@@ -909,59 +942,65 @@ def _dispatch_t064_fork_shards(
         raise RuntimeError("T064 fork shard backend requires WSL/Linux")
     log_dir.mkdir(parents=True, exist_ok=True)
     context = multiprocessing.get_context("fork")
-    children: list[tuple[Any, Any, int, str, Path]] = []
-    for index, record_range in enumerate(ranges):
-        receiver, sender = context.Pipe(duplex=False)
-        log_path = log_dir / f"shard-{index:02d}.log"
-        child = context.Process(
-            target=_fork_t064_shard_worker,
-            args=(worker, index, record_range, log_path, sender),
-            name=f"t064-shard-{index:02d}",
-        )
-        child.start()
-        sender.close()
-        children.append((child, receiver, index, record_range, log_path))
+    children: list[tuple[Any, Any, Any, int, str, Path]] = []
+    try:
+        for index, record_range in enumerate(ranges):
+            receiver, sender = context.Pipe(duplex=False)
+            log_path = log_dir / f"shard-{index:02d}.log"
+            child = context.Process(
+                target=_fork_t064_shard_worker,
+                args=(worker, index, record_range, log_path, sender),
+                name=f"t064-shard-{index:02d}",
+            )
+            children.append((child, receiver, sender, index, record_range, log_path))
+            child.start()
+            sender.close()
 
-    results: list[Any] = [None] * 16
-    records: list[dict[str, Any]] = [{} for _ in ranges]
-    for child, receiver, index, record_range, log_path in children:
-        try:
-            received_index, value, record = receiver.recv()
-        except EOFError:
-            record = {
-                "shard_index": index,
-                "range": record_range,
-                "return_code": 1,
-                "log_path": str(log_path),
-                "wall_clock_seconds": 0.0,
-                "worker_pid": child.pid,
-                "problem": "forked T064 shard exited without a result",
-            }
-            log_path.write_text(
-                "return_code=1\nerror=forked T064 shard exited without a result\n",
-                encoding="utf-8",
+        results: list[Any] = [None] * 16
+        records: list[dict[str, Any]] = [{} for _ in ranges]
+        for child, receiver, _sender, index, record_range, log_path in children:
+            try:
+                received_index, value, record = _receive_t064_fork_shard_result(
+                    receiver
+                )
+            except EOFError:
+                record = {
+                    "shard_index": index,
+                    "range": record_range,
+                    "return_code": 1,
+                    "log_path": str(log_path),
+                    "wall_clock_seconds": 0.0,
+                    "worker_pid": child.pid,
+                    "problem": "forked T064 shard exited without a result",
+                }
+                log_path.write_text(
+                    "return_code=1\nerror=forked T064 shard exited without a result\n",
+                    encoding="utf-8",
+                )
+                received_index, value = index, None
+            finally:
+                receiver.close()
+            child.join()
+            if child.exitcode not in {0, None} and record["return_code"] == 0:
+                record = {
+                    **record,
+                    "return_code": 1,
+                    "problem": f"forked T064 shard exited with code {child.exitcode}",
+                }
+                log_path.write_text(
+                    f"return_code=1\nerror={record['problem']}\n", encoding="utf-8"
+                )
+                value = None
+            results[received_index] = value
+            records[received_index] = record
+        if any(record["return_code"] for record in records):
+            raise RuntimeError(
+                "T064 shard stage failed; retained outputs cannot contribute"
             )
-            received_index, value = index, None
-        finally:
-            receiver.close()
-        child.join()
-        if child.exitcode not in {0, None} and record["return_code"] == 0:
-            record = {
-                **record,
-                "return_code": 1,
-                "problem": f"forked T064 shard exited with code {child.exitcode}",
-            }
-            log_path.write_text(
-                f"return_code=1\nerror={record['problem']}\n", encoding="utf-8"
-            )
-            value = None
-        results[received_index] = value
-        records[received_index] = record
-    if any(record["return_code"] for record in records):
-        raise RuntimeError(
-            "T064 shard stage failed; retained outputs cannot contribute"
-        )
-    return results, records
+        return results, records
+    except BaseException:
+        _cleanup_t064_fork_children(children)
+        raise
 
 
 def build_t064_stage_execution_plan(

@@ -4,12 +4,14 @@ import hashlib
 from io import StringIO
 import json
 from dataclasses import replace
+import multiprocessing
 import os
 from pathlib import Path
 import subprocess
 import sys
 from types import SimpleNamespace
 import threading
+import time
 
 import pytest
 
@@ -2002,6 +2004,119 @@ def test_fork_dispatch_failure_keeps_all_logs_and_blocks_merge(tmp_path: Path) -
     assert "return_code=1" in (tmp_path / "logs" / "shard-07.log").read_text(
         encoding="utf-8"
     )
+
+
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="the production fork backend is intentionally WSL/Linux only",
+)
+def test_fork_dispatch_interrupt_cleans_children_and_preserves_logs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    retained_log = log_dir / "shard-00.log"
+    retained_log.write_text("preexisting diagnostic log\n", encoding="utf-8")
+    marker_dir = tmp_path / "pids"
+    marker_dir.mkdir()
+
+    def worker(index: int, _record_range: str) -> str:
+        (marker_dir / f"{index:02d}").write_text(str(os.getpid()), encoding="utf-8")
+        time.sleep(30)
+        return "unreachable"
+
+    def interrupt_parent_receive(
+        _receiver: object,
+    ) -> tuple[int, object, dict[str, object]]:
+        deadline = time.monotonic() + 5
+        while len(list(marker_dir.iterdir())) != 16 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert len(list(marker_dir.iterdir())) == 16
+        raise KeyboardInterrupt("intentional parent receive interruption")
+
+    monkeypatch.setattr(
+        transfer_command,
+        "_receive_t064_fork_shard_result",
+        interrupt_parent_receive,
+    )
+    with pytest.raises(KeyboardInterrupt, match="parent receive interruption"):
+        transfer_command.dispatch_t064_shards(
+            ranges=contiguous_ranges(16),
+            log_dir=log_dir,
+            worker=worker,
+            backend="fork",
+        )
+
+    child_pids = [
+        int(path.read_text(encoding="utf-8")) for path in marker_dir.iterdir()
+    ]
+    assert all(not Path(f"/proc/{pid}").exists() for pid in child_pids)
+    assert retained_log.read_text(encoding="utf-8") == "preexisting diagnostic log\n"
+
+
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="the production fork backend is intentionally WSL/Linux only",
+)
+def test_fork_dispatch_start_failure_cleans_already_started_children(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_context = multiprocessing.get_context("fork")
+    marker_dir = tmp_path / "pids"
+    marker_dir.mkdir()
+    created = []
+
+    def worker(index: int, _record_range: str) -> str:
+        (marker_dir / f"{index:02d}").write_text(str(os.getpid()), encoding="utf-8")
+        time.sleep(30)
+        return "unreachable"
+
+    class StartFailureProcess:
+        def __init__(self, process: object, ordinal: int) -> None:
+            self.process = process
+            self.ordinal = ordinal
+
+        def start(self) -> None:
+            if self.ordinal == 2:
+                deadline = time.monotonic() + 5
+                while (
+                    len(list(marker_dir.iterdir())) != 2 and time.monotonic() < deadline
+                ):
+                    time.sleep(0.01)
+                assert len(list(marker_dir.iterdir())) == 2
+                raise RuntimeError("intentional fork start failure")
+            self.process.start()
+
+        def __getattr__(self, name: str) -> object:
+            return getattr(self.process, name)
+
+    class StartFailureContext:
+        def Pipe(self, *, duplex: bool) -> object:
+            return real_context.Pipe(duplex=duplex)
+
+        def Process(self, **kwargs: object) -> StartFailureProcess:
+            wrapped = StartFailureProcess(real_context.Process(**kwargs), len(created))
+            created.append(wrapped)
+            return wrapped
+
+    monkeypatch.setattr(
+        transfer_command.multiprocessing,
+        "get_context",
+        lambda _method: StartFailureContext(),
+    )
+    with pytest.raises(RuntimeError, match="fork start failure"):
+        transfer_command.dispatch_t064_shards(
+            ranges=contiguous_ranges(16),
+            log_dir=tmp_path / "logs",
+            worker=worker,
+            backend="fork",
+        )
+
+    child_pids = [
+        int(path.read_text(encoding="utf-8")) for path in marker_dir.iterdir()
+    ]
+    assert len(child_pids) == 2
+    assert all(not Path(f"/proc/{pid}").exists() for pid in child_pids)
 
 
 def test_attempt_directories_are_isolated_and_never_promote_failed_shards(
