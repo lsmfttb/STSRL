@@ -91,6 +91,16 @@ Implementation begins with a concise reuse inventory in the PR report. It names
 the existing function, schema, reader/writer, and tests used for each operation.
 The inventory is report content, not a new standalone framework.
 
+T064 assumes repository-owned stages and their in-repository callers are trusted
+participants. Validation exists to catch accidental corruption, stale or
+mismatched configuration, incomplete execution, and experiment-design drift; it
+is not an adversarial attestation system. Existing hashes remain where they are
+already part of accepted artifact identity or are useful for detecting stale
+inputs, but T064 must not add duplicate proof artifacts, independent identity
+chains, or caller-vs-producer distrust solely to make trusted in-repository
+stages tamper-evident. Prefer deterministic derivation from authoritative inputs
+plus ordinary schema, count, order, configuration, and completion checks.
+
 The following thin extensions are authorized:
 
 1. T043 teacher collection may accept an already-selected source manifest and a
@@ -111,6 +121,14 @@ The following thin extensions are authorized:
 4. `train_torch_policy_value` may accept an initial compatible model/checkpoint
    and an explicit ordered batch plan. Without those optional arguments, its
    existing initialization and epoch-shuffle behavior remains unchanged.
+5. The existing T043 trainer bridge may accept a T064 direct-provenance mode and
+   a contiguous record range. In that mode the validated exact-head T064
+   curriculum manifest and merged Stage-2 teacher artifact are the authoritative
+   inputs; source linkage is derived by code from `selected_sources` rather than
+   accepted from a caller-authored T022/T023/source-pool identity mapping.
+   Legacy T024/T043 manifest-driven behavior remains unchanged. Range outputs
+   use the existing trainer-input schema and merge into one final existing-schema
+   trainer input in exact selected-source order.
 
 No parallel source pool, restore, coverage, teacher, trainer-input, checkpoint,
 fixed-cohort, evaluation, Search v2, retention, or logging subsystem is allowed.
@@ -257,8 +275,41 @@ curriculum manifest before any teacher result exists. Every selected source must
 produce one valid row. Missing, duplicate, invalid, or silently dropped rows are
 integrity failures and leave T064 incomplete.
 
+Stage 3 uses a direct T064 adapter to the existing T043 trainer conversion. Its
+authoritative inputs are only the validated exact-head curriculum manifest after
+a complete zero-failure selected-source audit and the merged Stage-2 teacher
+artifact from that same head. T064 does not require a caller-authored synthetic
+`oracle-teacher-scaleup-manifest-v1`, synthetic T022 identity, synthetic
+single-source-pool identity, or a newly persisted 460-row selected-pool artifact
+solely to prove provenance between trusted repository stages. The existing
+T024/T043 manifest-driven bridge remains unchanged for its historical callers.
+
+Before conversion, Stage 3 must check the ordinary consistency conditions that
+protect the experiment from accidental mismatch or drift:
+
+- teacher row count equals the selected-source count;
+- teacher rows match `selected_sources` in exact order and source identity;
+- teacher configuration remains budget 100, `highest_mean`,
+  `initial_no_potions`, and `full_simulator_state_oracle_like`;
+- each selected source is restored with the already validated assisted replay
+  path, and the restored snapshot/public context/legal actions match the source
+  and teacher row as required by the existing T043 conversion;
+- every emitted trainer row maps one-to-one, in order, to the selected complete
+  source identity and retains the existing trainer-input schema.
+
+Stage 3 is a substantial simulator restore stage and therefore uses the same 16
+contiguous ranges as the selected-source/teacher inventory and 16 effective WSL
+fork workers. Each worker converts only its range, atomically writes one
+existing-schema trainer-input shard, and returns only a small persisted-shard
+descriptor. The parent re-reads the shards through the existing trainer-input
+reader, rejects missing/invalid/duplicate/out-of-order rows, and merges exactly
+one final existing-schema trainer input in selected-source order. This is a
+bounded range/merge extension of the existing bridge, not a new trainer-input
+subsystem or T064 compact artifact.
+
 The merged teacher dataset and trainer input retain their existing schemas. No
-T064 teacher or trainer-input schema is introduced.
+T064 teacher, trainer-input, selected-pool, T022/T023 adapter, or Stage-3 bridge
+schema is introduced.
 
 ## Frozen Paired Training
 
@@ -471,7 +522,10 @@ Stages are:
 1. build curriculum manifest and run 16-shard selected-source restore/context
    audit;
 2. run and merge 16-shard T043 teacher collection;
-3. build existing trainer input plus frozen batch plans;
+3. run 16-shard direct T064-to-T043 trainer conversion from the validated
+   curriculum manifest plus merged teacher artifact, merge one existing-schema
+   trainer input in exact selected-source order, then validate the frozen batch
+   plans;
 4. run four deterministic training jobs and write the single aggregate
    `t064-training-run-report-v1` after all four run outcomes are known;
 5. validate/reuse checkpoint-independent T044 arms, then run eight
@@ -494,6 +548,9 @@ workers and 16 shards.
 - T039 regeneration or new natural source collection;
 - new assistance schedules, source schemas, teacher formats, trainer-input
   formats, checkpoint formats, model architectures, or evaluation formats;
+- adversarial artifact attestation, duplicate provenance proof chains, or
+  additional sidecars whose only purpose is to distrust another trusted
+  repository-owned stage;
 - Search v2 changes, budget tuning, cache/batching/projection work, or native
   tree changes;
 - human trajectories, action labels, win-rate tables, or handcrafted strategic
@@ -505,7 +562,13 @@ workers and 16 shards.
 Local refactoring is permitted only when it directly parameterizes an existing
 path and reduces duplication. Broader simplification should be proposed as a
 separate planner task after T064 only if implementation evidence shows repeated
-orchestration/contract duplication across multiple task paths.
+orchestration/contract duplication across multiple task paths. That follow-up
+must explicitly audit over-defensive validation and provenance design as a
+maintenance risk: duplicated truths, repeated rehash/cross-link glue, brittle
+reruns, blocked iteration, and code paths whose only value is defending against
+a malicious in-repository producer should be candidates for removal or
+simplification while retaining checks that catch realistic accidental errors and
+design drift.
 
 ## Acceptance Criteria
 
@@ -519,6 +582,9 @@ T064 is accepted only when:
 - candidate duplicate complete identities and selected duplicate complete
   identities are zero;
 - complete source identity, selection, and batch plans are deterministic;
+- Stage 3 derives its linkage from the validated T064 manifest plus merged
+  teacher artifact, uses no caller-authored synthetic provenance contract, and
+  produces exact one-to-one selected-source/trainer-row order;
 - static and curriculum arms differ only in exposure order;
 - reused artifact schemas and merge invariants pass compatibility tests;
 - required simulator stages use the frozen ranges and 16 workers;
@@ -540,7 +606,11 @@ checks, and `git diff --check`, plus focused tests for:
   failure to `INCOMPLETE` rather than source-negative Case B;
 - existing per-decision occurrence-safe action identity reuse and fail-closed
   trace fallback;
-- T043 range collection and merge compatibility;
+- T043 teacher range collection/merge and direct T064 trainer range conversion,
+  assisted restore, exact selected identity/order merge, and legacy T024/T043
+  default-path compatibility;
+- Stage-3 script-level 16-fork execution proving it reaches the existing T043
+  conversion without a caller-authored synthetic bridge contract;
 - checkpoint initialization and default-training backward compatibility;
 - deterministic batch plans and exact exposure parity;
 - exact T044 persisted role strings, frozen ranges, and range/arm-subset merge
@@ -590,6 +660,10 @@ surface. It must include:
   the final source-adequacy result;
 - teacher budget/configuration, teacher and trainer-input identities, row counts,
   failures, and all four checkpoint identities;
+- Stage-3 direct-provenance disposition: validated curriculum-manifest/teacher
+  linkage, 16-shard restore/conversion evidence, exact trainer-row identity/order,
+  and confirmation that no synthetic caller-authored bridge contract or extra
+  provenance-only artifact was used;
 - the exact paired training configuration, initialization identity, seeds,
   phase/batch-plan hashes, per-bucket and per-source exposure-parity result;
 - T044 outcomes for both frozen cohorts and T052/T070 `prior_value` outcomes,
