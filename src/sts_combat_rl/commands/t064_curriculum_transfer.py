@@ -11,6 +11,7 @@ from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 import argparse
 from dataclasses import replace
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import gc
 import json
 import multiprocessing
 import os
@@ -22,6 +23,7 @@ from typing import Any
 from sts_combat_rl.commands.oracle_teacher_scaleup import (
     collect_oracle_teacher_range_from_selected_manifest,
 )
+from sts_combat_rl.sim.action_space import ActionSpaceConfig
 from sts_combat_rl.sim.assisted_source_generation import (
     restore_assisted_battle_start_record,
 )
@@ -58,6 +60,7 @@ from sts_combat_rl.sim.t064_curriculum import (
     TRANSFER_GATE_NAMES,
     build_ordered_batch_plan,
     build_transfer_decision,
+    complete_source_identity,
     contiguous_ranges,
     dump_compact_json,
     independent_rehash,
@@ -171,7 +174,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--stage2-log-dir", type=Path)
     parser.add_argument("--stage3-teacher", type=Path)
     parser.add_argument("--stage3-output", type=Path)
-    parser.add_argument("--stage3-bridge-contract", type=Path)
+    parser.add_argument("--stage3-shard-output-dir", type=Path)
+    parser.add_argument("--stage3-log-dir", type=Path)
     parser.add_argument("--stage4-trainer-input", type=Path)
     parser.add_argument("--stage4-initialization", type=Path)
     parser.add_argument("--stage4-initialization-sha256")
@@ -261,7 +265,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     stage3_values = (
         args.stage3_teacher,
         args.stage3_output,
-        args.stage3_bridge_contract,
+        args.stage3_shard_output_dir,
+        args.stage3_log_dir,
     )
     if any(value is not None for value in stage3_values):
         if (
@@ -270,14 +275,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             or any(value is None for value in stage3_values)
         ):
             parser.error(
-                "Stage3 execution requires teacher, output, and T043 bridge-contract paths"
+                "Stage3 execution requires teacher, output, shard-output, and log paths"
             )
-        contract = json.loads(args.stage3_bridge_contract.read_text(encoding="utf-8"))
         result = run_t064_stage3_production(
             selected_manifest=manifest,
             teacher_path=args.stage3_teacher,
             output_path=args.stage3_output,
-            bridge_contract=contract,
+            shard_output_dir=args.stage3_shard_output_dir,
+            log_dir=args.stage3_log_dir,
+            code_commit=args.code_commit,
         )
         print(
             json.dumps(
@@ -619,82 +625,84 @@ def run_t064_stage3_production(
     selected_manifest: Mapping[str, Any],
     teacher_path: Path,
     output_path: Path,
-    bridge_contract: Mapping[str, Any],
+    shard_output_dir: Path,
+    log_dir: Path,
+    code_commit: str,
 ) -> tuple[Any, Any, dict[str, int]]:
-    """Use the existing T043 bridge with its explicit accepted input contract."""
+    """Run the T043 converter from the authoritative T064 Stage-1/2 inputs."""
 
     from sts_combat_rl.sim.lightspeed import LightSpeedAdapter
     from sts_combat_rl.sim.oracle_teacher_search_guidance import (
-        build_oracle_teacher_search_guidance_dataset,
+        build_oracle_teacher_search_guidance_dataset_from_direct_provenance,
     )
 
+    validate_resume_manifest(selected_manifest, code_commit=code_commit)
     with teacher_path.open(encoding="utf-8") as stream:
         teacher = load_oracle_teacher_dataset_jsonl(stream)
     pool, selected = load_selected_source_pool(selected_manifest)
-    required = (
-        "manifest",
-        "selected_budget",
-        "target",
-        "stability_filter",
-        "manifest_identity",
-        "teacher_artifact_identity",
-        "t022_report_identity",
-        "source_pool_identity",
-    )
-    if any(key not in bridge_contract for key in required):
-        raise ValueError("T064 Stage3 requires the accepted T043 bridge contract")
+    _validate_teacher_against_selected_manifest(teacher, selected_manifest)
+    ranges = tuple(selected_manifest.get("teacher_shard_ranges", ()))
+    if ranges != contiguous_ranges(len(selected)) or len(ranges) != 16:
+        raise ValueError("T064 Stage3 ranges must reuse the frozen 16 teacher ranges")
+    refuse_overwrite(output_path)
+    shard_output_dir.mkdir(parents=True, exist_ok=True)
+    teacher_identity = _file_identity(teacher_path)
+    pool_by_identity = {
+        complete_source_identity(record)["complete_identity_sha256"]: record
+        for record in pool.records
+    }
+    if len(pool_by_identity) != len(pool.records):
+        raise ValueError("T064 Stage3 selected pool has duplicate complete identities")
 
-    def builder(*, teacher_dataset: Any, source_pool: Any) -> tuple[Any, Any]:
-        return build_oracle_teacher_search_guidance_dataset(
+    def one(index: int, record_range: str) -> dict[str, Any]:
+        start, end = _range(record_range, len(selected))
+        output = shard_output_dir / f"shard-{index:02d}.jsonl"
+        selected_range = selected[start:end]
+        try:
+            range_pool = replace(
+                pool,
+                records=[
+                    pool_by_identity[item["complete_identity_sha256"]]
+                    for item in selected_range
+                ],
+            )
+        except KeyError as exc:
+            raise ValueError("T064 Stage3 selected range source is missing") from exc
+        shard = build_oracle_teacher_search_guidance_dataset_from_direct_provenance(
             adapter_factory=lambda: LightSpeedAdapter(seed=1, ascension=20),
-            manifest=bridge_contract["manifest"],
-            teacher_dataset=teacher_dataset,
-            source_pool=source_pool,
-            selected_budget=bridge_contract["selected_budget"],
-            target=bridge_contract["target"],
-            stability_filter=bridge_contract["stability_filter"],
-            manifest_identity=bridge_contract["manifest_identity"],
-            teacher_artifact_identity=bridge_contract["teacher_artifact_identity"],
-            t022_report_identity=bridge_contract["t022_report_identity"],
-            source_pool_identity=bridge_contract["source_pool_identity"],
+            teacher_dataset=replace(teacher, records=teacher.records[start:end]),
+            source_pool=range_pool,
+            selected_sources=selected_range,
+            teacher_artifact_identity=teacher_identity,
             record_restorer=restore_assisted_battle_start_record,
         )
+        _write_trainer_input_shard_atomically(output, shard)
+        return {"shard_index": index, "record_range": record_range, "path": str(output)}
 
-    identities_by_source = {
-        _source_key(descriptor): descriptor["complete_identity_sha256"]
-        for descriptor in selected
-    }
-
-    def resolver(dataset: Any) -> list[str]:
-        identities: list[str] = []
-        for record in dataset.records:
-            metadata = record.source_metadata
-            key = (
-                metadata.get("source_checkpoint_id"),
-                metadata.get("source_seed"),
-                metadata.get("source_run_id"),
-                metadata.get("source_battle_index"),
-                metadata.get("distribution_kind"),
-                metadata.get("checkpoint_information_regime"),
-            )
-            matching = [
-                identity
-                for source, identity in identities_by_source.items()
-                if source[:6] == key
-            ]
-            if len(matching) != 1:
-                raise ValueError("T064 Stage3 cannot resolve a unique source identity")
-            identities.append(matching[0])
-        return identities
-
-    return build_t064_trainer_input_stage(
-        selected_manifest=selected_manifest,
-        teacher_dataset=teacher,
-        selected_pool=pool,
-        trainer_builder=builder,
-        trainer_identity_resolver=resolver,
-        output_path=output_path,
+    # ``teacher``, ``pool``, and ``pool_by_identity`` are deliberately loaded
+    # once before the 16-way fork.  Freeze their tracked heap graph so child GC
+    # can collect only objects allocated for its own range rather than dirtying
+    # the multi-GB merged teacher/source pages through copy-on-write.
+    descriptors, shard_records = _dispatch_t064_stage3_fork_shards(
+        ranges=ranges, log_dir=log_dir, worker=one, backend="fork"
     )
+    merged = _merge_t064_trainer_shard_stream(
+        shards=_iter_t064_persisted_trainer_shards(
+            descriptors=descriptors,
+            expected_ranges=ranges,
+            shard_output_dir=shard_output_dir,
+        ),
+        selected_manifest=selected_manifest,
+        expected_ranges=ranges,
+    )
+    _write_trainer_input_shard_atomically(output_path, merged)
+    expected = [item["complete_identity_sha256"] for item in selected]
+    mapping = build_trainer_row_mapping(
+        selected_manifest=selected_manifest,
+        teacher_source_hashes=expected,
+        trainer_source_hashes=_trainer_identity_hashes(merged),
+    )
+    return merged, None, mapping
 
 
 def validate_resume_manifest(manifest: Mapping[str, Any], *, code_commit: str) -> None:
@@ -832,6 +840,197 @@ def _iter_t064_persisted_teacher_shards(
             yield load_oracle_teacher_dataset_jsonl(stream)
 
 
+def _write_trainer_input_shard_atomically(path: Path, dataset: Any) -> None:
+    """Publish an existing-schema trainer shard only after its stream is durable."""
+
+    refuse_overwrite(path)
+    temporary = path.with_suffix(path.suffix + ".tmp")
+    refuse_overwrite(temporary)
+    try:
+        with temporary.open("x", encoding="utf-8", newline="\n") as stream:
+            dump_trainer_input_dataset_jsonl(dataset, stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    except BaseException:
+        if temporary.exists():
+            temporary.unlink()
+        raise
+
+
+def _iter_t064_persisted_trainer_shards(
+    *,
+    descriptors: Sequence[Any],
+    expected_ranges: Sequence[str],
+    shard_output_dir: Path,
+) -> Iterator[Any]:
+    """Stream the 16 existing-schema Stage-3 shards in their frozen order."""
+
+    if len(descriptors) != 16 or len(expected_ranges) != 16:
+        raise ValueError("T064 persisted trainer shard topology requires 16 shards")
+    for index, (descriptor, record_range) in enumerate(
+        zip(descriptors, expected_ranges, strict=True)
+    ):
+        output = shard_output_dir / f"shard-{index:02d}.jsonl"
+        temporary = output.with_suffix(output.suffix + ".tmp")
+        if (
+            not isinstance(descriptor, Mapping)
+            or descriptor.get("shard_index") != index
+            or descriptor.get("record_range") != record_range
+            or descriptor.get("path") != str(output)
+        ):
+            raise ValueError(f"T064 forked trainer shard {index} descriptor is invalid")
+        if temporary.exists():
+            raise ValueError(
+                f"T064 forked trainer shard {index} has an incomplete temp"
+            )
+        if not output.is_file():
+            raise ValueError(f"T064 forked trainer shard {index} was not persisted")
+        with output.open(encoding="utf-8") as stream:
+            yield load_trainer_input_dataset_jsonl(stream)
+
+
+def _trainer_identity_hashes(dataset: Any) -> list[str]:
+    """Read the direct selected identity link from existing trainer row metadata."""
+
+    values: list[str] = []
+    for index, record in enumerate(dataset.records):
+        metadata = record.source_metadata
+        identity = metadata.get("t064_complete_identity_sha256")
+        if not isinstance(identity, str) or len(identity) != 64:
+            raise ValueError(
+                f"T064 trainer row {index} lacks complete identity linkage"
+            )
+        values.append(identity)
+    return values
+
+
+def _merge_t064_trainer_shard_stream(
+    *,
+    shards: Iterable[Any],
+    selected_manifest: Mapping[str, Any],
+    expected_ranges: Sequence[str],
+) -> Any:
+    """Strictly merge existing trainer datasets without retaining shard datasets."""
+
+    selected = _selected_sources(selected_manifest)
+    if len(expected_ranges) != 16:
+        raise ValueError("T064 trainer merge requires exactly 16 shard ranges")
+    first: Any | None = None
+    rows: list[Any] = []
+    expected_metadata: dict[str, Any] | None = None
+    restore_counts: dict[str, int] = {}
+    expected_identities = [item.get("complete_identity_sha256") for item in selected]
+    if len(expected_identities) != len(set(expected_identities)) or not all(
+        isinstance(value, str) and len(value) == 64 for value in expected_identities
+    ):
+        raise ValueError("T064 trainer merge selected identity inventory is invalid")
+    shard_count = 0
+    for index, (shard, record_range) in enumerate(
+        zip(shards, expected_ranges, strict=True)
+    ):
+        start, end = _range(record_range, len(selected))
+        if shard.problems or len(shard.records) != end - start:
+            raise ValueError(f"T064 trainer shard {index} is incomplete")
+        metadata = getattr(shard, "generation_metadata", {})
+        if (
+            not isinstance(metadata, Mapping)
+            or metadata.get("direct_provenance_mode")
+            != "t064_manifest_and_merged_teacher"
+        ):
+            raise ValueError(f"T064 trainer shard {index} lacks direct provenance mode")
+        metadata_fields = (
+            "task_id",
+            "workflow",
+            "direct_provenance_mode",
+            "teacher_artifact_identity",
+        )
+        if any(field not in metadata for field in metadata_fields):
+            raise ValueError(
+                f"T064 trainer shard {index} direct provenance is incomplete"
+            )
+        signature = {field: metadata[field] for field in metadata_fields}
+        if expected_metadata is None:
+            expected_metadata = signature
+        elif signature != expected_metadata:
+            raise ValueError(f"T064 trainer shard {index} direct provenance differs")
+        raw_restore_counts = metadata.get("restore_counts")
+        if not isinstance(raw_restore_counts, Mapping) or not raw_restore_counts:
+            raise ValueError(f"T064 trainer shard {index} restore counts are invalid")
+        for method, count in raw_restore_counts.items():
+            if (
+                not isinstance(method, str)
+                or not method
+                or isinstance(count, bool)
+                or not isinstance(count, int)
+                or count < 0
+            ):
+                raise ValueError(
+                    f"T064 trainer shard {index} restore counts are invalid"
+                )
+            restore_counts[method] = restore_counts.get(method, 0) + count
+        actual_identities = _trainer_identity_hashes(shard)
+        if actual_identities != expected_identities[start:end]:
+            raise ValueError(f"T064 trainer shard {index} identity/order mismatch")
+        if first is None:
+            first = shard
+        else:
+            for attribute in (
+                "format_version",
+                "reward_allocation",
+                "snapshot_feature_size",
+                "action_feature_size",
+                "decision_record_schema_version",
+                "tactical_feature_schema_id",
+                "tactical_feature_schema_version",
+                "identity_vocabulary_version",
+                "policy_target_schema_id",
+                "policy_target_schema_version",
+                "structured_battle_outcome_schema_id",
+                "structured_battle_outcome_schema_version",
+            ):
+                if getattr(shard, attribute) != getattr(first, attribute):
+                    raise ValueError(
+                        f"T064 trainer shard {index} configuration differs"
+                    )
+        for record in shard.records:
+            row_index = len(rows)
+            rows.append(
+                replace(
+                    record,
+                    example_index=row_index,
+                    rollout_index=row_index,
+                    segment_index=row_index,
+                )
+            )
+        shard_count += 1
+    if first is None or shard_count != 16 or len(rows) != len(selected):
+        raise ValueError("T064 trainer merge dropped selected sources")
+    source_run_ids = {record.source_metadata.get("source_run_id") for record in rows}
+    if not source_run_ids or any(
+        not isinstance(source_run_id, str) or not source_run_id
+        for source_run_id in source_run_ids
+    ):
+        raise ValueError("T064 trainer merge source-run provenance is invalid")
+    if sum(restore_counts.values()) != len(rows):
+        raise ValueError("T064 trainer merge restore counts do not cover every row")
+    merged = replace(
+        first,
+        source_rollout_count=len(source_run_ids),
+        segment_count=len(rows),
+        generation_metadata={
+            **dict(first.generation_metadata),
+            "restore_counts": dict(sorted(restore_counts.items())),
+            "t064_complete_identity_order": list(expected_identities),
+        },
+        records=rows,
+        problems=[],
+    )
+    if _trainer_identity_hashes(merged) != expected_identities:
+        raise ValueError("T064 trainer merge output identity/order mismatch")
+    return merged
+
+
 def prepare_t064_attempt(root: Path, *, stage: str, code_commit: str) -> Path:
     """Create an isolated attempt directory; failed outputs are never reused."""
 
@@ -892,6 +1091,43 @@ def dispatch_t064_shards(
             "T064 shard stage failed; retained outputs cannot contribute"
         )
     return results, records
+
+
+def _dispatch_t064_stage3_fork_shards(
+    *,
+    ranges: Sequence[str],
+    log_dir: Path,
+    worker: Callable[[int, str], Any],
+    backend: str,
+) -> tuple[list[Any], list[dict[str, Any]]]:
+    """Fork Stage 3 after freezing its preloaded teacher/source heap graph.
+
+    This is intentionally Stage-3-specific.  Other T064 stages retain their
+    existing dispatcher semantics, while the retained merged teacher can be
+    several GB and must not be GC-scanned in every child after ``fork``.
+    """
+
+    if backend != "fork":
+        raise ValueError("T064 Stage3 requires the WSL fork backend")
+    was_enabled = gc.isenabled()
+    frozen = False
+    try:
+        gc.collect()
+        gc.freeze()
+        frozen = True
+        return dispatch_t064_shards(
+            ranges=ranges,
+            log_dir=log_dir,
+            worker=worker,
+            backend="fork",
+        )
+    finally:
+        if frozen:
+            gc.unfreeze()
+        if was_enabled:
+            gc.enable()
+        else:
+            gc.disable()
 
 
 def _invoke_t064_shard(
@@ -1075,9 +1311,9 @@ def build_t064_stage_execution_plan(
         },
         {
             "stage": "stage3_trainer",
-            "workers": 1,
-            "shards": 1,
-            "ranges": [f"0:{source_count}"],
+            "workers": 16,
+            "shards": 16,
+            "ranges": list(teacher_ranges),
         },
         {
             "stage": "stage4_training",
@@ -2753,6 +2989,9 @@ def _validate_teacher_against_selected_manifest(
         isinstance(value, str) and value for value in expected_hashes
     ):
         raise ValueError("T064 selected manifest identities are invalid")
+    expected_action_space = ActionSpaceConfig.initial_no_potions().to_dict()
+    if dataset.action_space_config != expected_action_space:
+        raise ValueError("T064 teacher dataset action space is not initial_no_potions")
     for index, (row, descriptor) in enumerate(
         zip(dataset.records, selected, strict=True)
     ):
@@ -2773,9 +3012,33 @@ def _validate_teacher_against_selected_manifest(
             or not row.soft_visit_target
         ):
             raise ValueError(f"T064 teacher identity/target mismatch at row {index}")
+        row_config = row.controller_provenance.get("config", {})
+        row_budget = (
+            row_config.get("search_budget", {})
+            if isinstance(row_config, Mapping)
+            else {}
+        )
+        if (
+            not isinstance(row_config, Mapping)
+            or row_config.get("information_regime")
+            != "full_simulator_state_oracle_like"
+            or not isinstance(row_budget, Mapping)
+            or row_budget.get("simulations") != 100
+            or row_config.get("root_selection_rule") != "highest_mean"
+        ):
+            raise ValueError(f"T064 teacher configuration mismatch at row {index}")
+        if row_config.get("action_space") != expected_action_space:
+            raise ValueError(f"T064 teacher action-space mismatch at row {index}")
+    config = dataset.controller_provenance.get("config", {})
+    budget = config.get("search_budget", {}) if isinstance(config, Mapping) else {}
     if (
         dataset.information_regime != "full_simulator_state_oracle_like"
-        or dataset.action_space_config.get("include_potions") is not False
+        or not isinstance(config, Mapping)
+        or config.get("information_regime") != "full_simulator_state_oracle_like"
+        or not isinstance(budget, Mapping)
+        or budget.get("simulations") != 100
+        or config.get("root_selection_rule") != "highest_mean"
+        or config.get("action_space") != expected_action_space
         or dataset.problems
     ):
         raise ValueError("T064 teacher configuration is not the frozen T043 contract")
@@ -2789,10 +3052,14 @@ def _validate_trainer_against_selected_manifest(
     expected = [
         item.get("complete_identity_sha256") for item in _selected_sources(manifest)
     ]
-    recorded = getattr(dataset, "generation_metadata", {}).get(
-        "t064_complete_identity_order"
-    )
-    if recorded != expected or len(dataset.records) == 0 or dataset.problems:
+    metadata = getattr(dataset, "generation_metadata", {})
+    recorded = metadata.get("t064_complete_identity_order")
+    if (
+        recorded != expected
+        or _trainer_identity_hashes(dataset) != expected
+        or len(dataset.records) != len(expected)
+        or dataset.problems
+    ):
         raise ValueError("T064 trainer-input identity linkage/config is invalid")
 
 

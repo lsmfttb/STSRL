@@ -371,6 +371,130 @@ def build_oracle_teacher_search_guidance_dataset(
     return dataset, report
 
 
+def build_oracle_teacher_search_guidance_dataset_from_direct_provenance(
+    *,
+    adapter_factory: Callable[[], CheckpointingSimulatorAdapter],
+    teacher_dataset: OracleTeacherDataset,
+    source_pool: NaturalBattleStartPool,
+    selected_sources: Sequence[Mapping[str, Any]],
+    teacher_artifact_identity: Mapping[str, Any],
+    record_restorer: Callable[
+        [CheckpointingSimulatorAdapter, BattleStartCheckpointRecord],
+        tuple[SimulatorSnapshot, str],
+    ],
+) -> TrainerInputDataset:
+    """Convert a T064 selected range without a legacy T022/T023 bridge map.
+
+    This is deliberately a second *input mode* for the T043 conversion, not a
+    second conversion implementation.  It retains the existing per-row restore,
+    public-context, legal-action, and target construction in
+    :func:`_trainer_record_from_teacher_row`; only the historical manifest
+    identity adapter is replaced by the validated T064 selected-source order.
+    """
+
+    from sts_combat_rl.sim.t064_curriculum import complete_source_identity
+
+    if len(teacher_dataset.records) != len(selected_sources):
+        raise ValueError("T064 direct conversion teacher/source range count mismatch")
+    policy_target_kind, policy_target_source = _policy_target_config(
+        CLI_TARGET_SOFT_VISIT_DISTRIBUTION
+    )
+    source_by_identity = {
+        complete_source_identity(source)["complete_identity_sha256"]: source
+        for source in source_pool.records
+    }
+    if len(source_by_identity) != len(source_pool.records):
+        raise ValueError("T064 direct conversion source pool has duplicate identities")
+
+    records: list[TrainerInputRecord] = []
+    methods = Counter()
+    identities: list[str] = []
+    for index, (row, descriptor) in enumerate(
+        zip(teacher_dataset.records, selected_sources, strict=True)
+    ):
+        identity = descriptor.get("complete_identity")
+        identity_hash = descriptor.get("complete_identity_sha256")
+        if not isinstance(identity, Mapping) or not isinstance(identity_hash, str):
+            raise ValueError("T064 direct conversion selected identity is invalid")
+        if (
+            row.source_checkpoint_id != identity.get("source_checkpoint_id")
+            or row.source_seed != identity.get("source_seed")
+            or row.source_run_id != identity.get("source_run_id")
+            or row.source_battle_index != identity.get("source_battle_index")
+            or row.source_distribution_kind != identity.get("distribution_kind")
+            or row.checkpoint_information_regime
+            != identity.get("checkpoint_information_regime")
+            or not row.soft_visit_target
+        ):
+            raise ValueError("T064 direct conversion teacher identity/target mismatch")
+        source = source_by_identity.get(identity_hash)
+        if source is None:
+            raise ValueError("T064 direct conversion source identity is missing")
+        record, method = _trainer_record_from_teacher_row(
+            adapter_factory=adapter_factory,
+            source=source,
+            row=row,
+            target=CLI_TARGET_SOFT_VISIT_DISTRIBUTION,
+            policy_target_kind=policy_target_kind,
+            policy_target_source=policy_target_source,
+            action_space=_action_space_from_mapping(
+                teacher_dataset.action_space_config
+            ),
+            example_index=index,
+            teacher_artifact_identity=teacher_artifact_identity,
+            selected_budget=100,
+            record_restorer=record_restorer,
+        )
+        records.append(
+            replace(
+                record,
+                source_metadata={
+                    **record.source_metadata,
+                    "t064_complete_identity_sha256": identity_hash,
+                },
+            )
+        )
+        methods[method] += 1
+        identities.append(identity_hash)
+
+    if len(records) != len(selected_sources):
+        raise ValueError("T064 direct conversion dropped selected sources")
+    first = records[0] if records else None
+    return TrainerInputDataset(
+        format_version=TRAINER_INPUT_DATASET_FORMAT_VERSION,
+        reward_allocation=TERMINAL_STEP_REWARD_ALLOCATION,
+        source_rollout_count=len(
+            {record.source_run_id for record in source_pool.records}
+        ),
+        segment_count=len(records),
+        snapshot_feature_size=(
+            len(first.snapshot_features) if first is not None else None
+        ),
+        action_feature_size=(
+            len(first.legal_action_features[0])
+            if first is not None and first.legal_action_features
+            else None
+        ),
+        tactical_feature_schema_id=TACTICAL_FEATURE_SCHEMA_ID,
+        tactical_feature_schema_version=TACTICAL_FEATURE_SCHEMA_VERSION,
+        identity_vocabulary_version=IDENTITY_VOCABULARY_VERSION,
+        policy_target_schema_id=TRAINER_POLICY_TARGET_SCHEMA_ID,
+        policy_target_schema_version=TRAINER_POLICY_TARGET_SCHEMA_VERSION,
+        structured_battle_outcome_schema_id=BATTLE_RESOURCE_OUTCOME_SCHEMA_ID,
+        structured_battle_outcome_schema_version=BATTLE_RESOURCE_OUTCOME_SCHEMA_VERSION,
+        generation_metadata={
+            "task_id": "T064",
+            "workflow": "oracle_teacher_search_guidance_bridge",
+            "direct_provenance_mode": "t064_manifest_and_merged_teacher",
+            "teacher_artifact_identity": _json_safe_mapping(teacher_artifact_identity),
+            "t064_complete_identity_order": identities,
+            "restore_counts": _counter_dict(methods),
+        },
+        records=records,
+        problems=[],
+    )
+
+
 def attach_trainer_artifact_identity(
     report: OracleTeacherSearchGuidanceBridgeReport,
     identity: Mapping[str, Any],

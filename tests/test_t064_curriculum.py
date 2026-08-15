@@ -3,7 +3,8 @@ from __future__ import annotations
 import hashlib
 from io import StringIO
 import json
-from dataclasses import replace
+from dataclasses import dataclass, replace
+import gc
 import multiprocessing
 import os
 from pathlib import Path
@@ -921,80 +922,166 @@ def test_stage2_production_uses_validated_assisted_restorer(
     assert captured["dispatch_backend"] == "fork"
 
 
-def test_stage3_production_injects_validated_assisted_restorer(
+def test_stage3_production_rejects_caller_authored_synthetic_bridge_contract(
+    tmp_path: Path,
+) -> None:
+    """The direct mode has no public synthetic T022/T023 contract argument."""
+
+    with pytest.raises(TypeError, match="bridge_contract"):
+        transfer_command.run_t064_stage3_production(
+            selected_manifest={},
+            teacher_path=tmp_path / "teacher.jsonl",
+            output_path=tmp_path / "trainer.jsonl",
+            shard_output_dir=tmp_path / "shards",
+            log_dir=tmp_path / "logs",
+            code_commit="a" * 40,
+            bridge_contract={},  # type: ignore[call-arg]
+        )
+
+
+def test_stage3_cli_exposes_direct_inputs_without_bridge_contract() -> None:
+    repository = Path(__file__).resolve().parents[1]
+    environment = dict(os.environ)
+    environment["PYTHONPATH"] = os.pathsep.join(
+        (str(repository / "src"), str(repository / "tests"))
+    )
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(repository / "scripts" / "t064_curriculum_transfer.py"),
+            "--help",
+        ],
+        cwd=repository,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0
+    assert "--stage3-bridge-contract" not in completed.stdout
+    assert "--stage3-teacher" in completed.stdout
+    assert "--stage3-output" in completed.stdout
+
+
+def test_stage3_cli_requires_all_four_direct_paths(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text("{}", encoding="utf-8")
+    stage = {"stage": "stage3_trainer", "workers": 16, "shards": 16}
+    monkeypatch.setattr(transfer_command, "load_compact_json", lambda _: {})
+    monkeypatch.setattr(
+        transfer_command,
+        "build_t064_stage_execution_plan",
+        lambda *_args, **_kwargs: [stage],
+    )
+    common = [
+        "--dry-run-manifest",
+        str(manifest_path),
+        "--code-commit",
+        "a" * 40,
+        "--stage",
+        "stage3_trainer",
+    ]
+    with pytest.raises(SystemExit) as partial:
+        transfer_command.main(
+            [*common, "--stage3-shard-output-dir", str(tmp_path / "shards")]
+        )
+    assert partial.value.code == 2
     captured = {}
-    from sts_combat_rl.sim import oracle_teacher_search_guidance as bridge
-
-    teacher = SimpleNamespace(records=[])
-    monkeypatch.setattr(
-        transfer_command, "load_oracle_teacher_dataset_jsonl", lambda _stream: teacher
-    )
     monkeypatch.setattr(
         transfer_command,
-        "load_selected_source_pool",
-        lambda _manifest: (
-            SimpleNamespace(),
-            [
-                {
-                    "complete_identity_sha256": "a" * 64,
-                    "complete_identity": {
-                        "source_checkpoint_id": "checkpoint-116",
-                        "source_seed": 116,
-                        "source_run_id": "run-116",
-                        "source_battle_index": 116,
-                        "distribution_kind": "assisted_run",
-                        "checkpoint_information_regime": (
-                            "full_simulator_state_oracle_like"
-                        ),
-                    },
-                }
-            ],
-        ),
-    )
-
-    def bridge_builder(**kwargs):
-        captured.update(kwargs)
-        return SimpleNamespace(records=[]), SimpleNamespace()
-
-    monkeypatch.setattr(
-        bridge, "build_oracle_teacher_search_guidance_dataset", bridge_builder
-    )
-    monkeypatch.setattr(
-        transfer_command,
-        "build_t064_trainer_input_stage",
+        "run_t064_stage3_production",
         lambda **kwargs: (
-            kwargs["trainer_builder"](
-                teacher_dataset=kwargs["teacher_dataset"],
-                source_pool=kwargs["selected_pool"],
-            ),
-            {},
+            captured.update(kwargs) or (SimpleNamespace(records=[]), None, {})
         ),
     )
-    teacher_path = tmp_path / "teacher.jsonl"
-    teacher_path.write_text("metadata is mocked", encoding="utf-8")
-    contract = {
-        "manifest": {},
-        "selected_budget": 100,
-        "target": "soft_visit_distribution",
-        "stability_filter": "none",
-        "manifest_identity": {},
-        "teacher_artifact_identity": {},
-        "t022_report_identity": {},
-        "source_pool_identity": {},
+    assert (
+        transfer_command.main(
+            [
+                *common,
+                "--stage3-teacher",
+                str(tmp_path / "teacher.jsonl"),
+                "--stage3-output",
+                str(tmp_path / "trainer.jsonl"),
+                "--stage3-shard-output-dir",
+                str(tmp_path / "shards"),
+                "--stage3-log-dir",
+                str(tmp_path / "logs"),
+            ]
+        )
+        == 0
+    )
+    assert captured["shard_output_dir"] == tmp_path / "shards"
+    assert captured["log_dir"] == tmp_path / "logs"
+
+
+def test_t043_direct_conversion_reuses_assisted_restore_and_existing_row_builder(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from sts_combat_rl.sim import oracle_teacher_search_guidance as guidance
+
+    source = _record()
+    identity = complete_source_identity(source)
+    descriptor = {
+        "complete_identity": identity,
+        "complete_identity_sha256": identity["complete_identity_sha256"],
     }
 
-    transfer_command.run_t064_stage3_production(
-        selected_manifest={},
-        teacher_path=teacher_path,
-        output_path=tmp_path / "trainer.jsonl",
-        bridge_contract=contract,
+    @dataclass(frozen=True)
+    class ConvertedRow:
+        source_metadata: dict[str, object]
+        snapshot_features: list[float]
+        legal_action_features: list[list[float]]
+
+    captured = {}
+
+    def convert(**kwargs):
+        captured.update(kwargs)
+        return (
+            ConvertedRow(
+                source_metadata={},
+                snapshot_features=[1.0],
+                legal_action_features=[[1.0]],
+            ),
+            "assisted_replay",
+        )
+
+    monkeypatch.setattr(guidance, "_trainer_record_from_teacher_row", convert)
+    teacher_row = SimpleNamespace(
+        source_checkpoint_id=source.source_checkpoint_id,
+        source_seed=source.source_seed,
+        source_run_id=source.source_run_id,
+        source_battle_index=source.source_battle_index,
+        source_distribution_kind=source.distribution_kind,
+        checkpoint_information_regime=source.checkpoint_information_regime,
+        soft_visit_target={"probabilities": [1.0]},
+    )
+    teacher = SimpleNamespace(
+        records=[teacher_row], action_space_config={"include_potions": False}
+    )
+    dataset = (
+        guidance.build_oracle_teacher_search_guidance_dataset_from_direct_provenance(
+            adapter_factory=lambda: object(),
+            teacher_dataset=teacher,
+            source_pool=SimpleNamespace(records=[source]),
+            selected_sources=[descriptor],
+            teacher_artifact_identity={"sha256": "a" * 64},
+            record_restorer=transfer_command.restore_assisted_battle_start_record,
+        )
     )
 
     assert (
         captured["record_restorer"]
         is transfer_command.restore_assisted_battle_start_record
+    )
+    assert captured["selected_budget"] == 100
+    assert dataset.generation_metadata["direct_provenance_mode"] == (
+        "t064_manifest_and_merged_teacher"
+    )
+    assert (
+        dataset.records[0].source_metadata["t064_complete_identity_sha256"]
+        == (identity["complete_identity_sha256"])
     )
 
 
@@ -1402,6 +1489,7 @@ def test_stage7_teacher_validation_reads_nested_complete_identity_descriptors() 
 
     selected = []
     rows = []
+    initial_action_space = ActionSpaceConfig.initial_no_potions().to_dict()
     for index in range(460):
         identity = {
             "source_checkpoint_id": f"checkpoint-{index}",
@@ -1429,6 +1517,14 @@ def test_stage7_teacher_validation_reads_nested_complete_identity_descriptors() 
                 source_distribution_kind=identity["distribution_kind"],
                 checkpoint_information_regime=identity["checkpoint_information_regime"],
                 soft_visit_target={"target": 1.0},
+                controller_provenance={
+                    "config": {
+                        "information_regime": "full_simulator_state_oracle_like",
+                        "search_budget": {"simulations": 100},
+                        "root_selection_rule": "highest_mean",
+                        "action_space": initial_action_space,
+                    }
+                },
             )
         )
     # JSON round-trip mirrors the compact manifest's retained descriptor shape.
@@ -1436,12 +1532,35 @@ def test_stage7_teacher_validation_reads_nested_complete_identity_descriptors() 
     dataset = SimpleNamespace(
         records=rows,
         information_regime="full_simulator_state_oracle_like",
-        action_space_config={"include_potions": False},
+        action_space_config=initial_action_space,
+        controller_provenance={
+            "config": {
+                "information_regime": "full_simulator_state_oracle_like",
+                "search_budget": {"simulations": 100},
+                "root_selection_rule": "highest_mean",
+                "action_space": initial_action_space,
+            }
+        },
         problems=[],
     )
     transfer_command._validate_teacher_against_selected_manifest(dataset, manifest)
     manifest["selected_sources"][0]["source_checkpoint_id"] = "forged-top-level"
     transfer_command._validate_teacher_against_selected_manifest(dataset, manifest)
+    dataset.action_space_config = ActionSpaceConfig.include_all().to_dict()
+    with pytest.raises(ValueError, match="dataset action space"):
+        transfer_command._validate_teacher_against_selected_manifest(dataset, manifest)
+    dataset.action_space_config = initial_action_space
+    dataset.controller_provenance["config"]["action_space"] = (
+        ActionSpaceConfig.include_all().to_dict()
+    )
+    with pytest.raises(ValueError, match="frozen T043 contract"):
+        transfer_command._validate_teacher_against_selected_manifest(dataset, manifest)
+    dataset.controller_provenance["config"]["action_space"] = initial_action_space
+    rows[0].controller_provenance["config"]["action_space"] = (
+        ActionSpaceConfig.include_all().to_dict()
+    )
+    with pytest.raises(ValueError, match="action-space mismatch"):
+        transfer_command._validate_teacher_against_selected_manifest(dataset, manifest)
 
 
 def test_t044_dependent_stage_routes_only_frozen_roles_and_ranges(
@@ -2024,9 +2143,261 @@ def test_stage2_to_7_dry_plan_has_exact_worker_range_and_stage_inventory() -> No
     )
     assert plan[0]["workers"] == plan[0]["shards"] == 16
     assert plan[0]["ranges"] == list(contiguous_ranges(460))
+    assert plan[1] == {
+        "stage": "stage3_trainer",
+        "workers": 16,
+        "shards": 16,
+        "ranges": list(contiguous_ranges(460)),
+    }
     assert len([row for row in plan if row["stage"] == "stage5_t044"]) == 8
     assert len([row for row in plan if row["stage"] == "stage6_t070"]) == 4
     assert plan[-1]["stage"] == "stage7_aggregate"
+
+
+def test_stage3_production_routes_all_sixteen_frozen_ranges_through_fork(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The script path dispatches descriptors, never a synthetic bridge object."""
+
+    from sts_combat_rl.sim import oracle_teacher_search_guidance as guidance
+
+    identities = [f"{index:064x}" for index in range(460)]
+    selected = [
+        {
+            "complete_identity_sha256": identity,
+            "complete_identity": {
+                "source_checkpoint_id": f"checkpoint-{index}",
+                "source_seed": index,
+                "source_run_id": f"run-{index}",
+                "source_battle_index": index,
+                "distribution_kind": "assisted_run",
+                "checkpoint_information_regime": "full_simulator_state_oracle_like",
+            },
+        }
+        for index, identity in enumerate(identities)
+    ]
+    manifest = {
+        "code_commit": "a" * 40,
+        "complete_source_audit": {
+            "status": "complete",
+            "selected_restore_failure_count": 0,
+        },
+        "selected_sources": selected,
+        "teacher_shard_ranges": list(contiguous_ranges(460)),
+        "teacher_worker_count": 16,
+    }
+    teacher = _empty_oracle_teacher_dataset()
+    teacher_path = tmp_path / "teacher.jsonl"
+    teacher_path.write_text("teacher", encoding="utf-8")
+    calls: list[tuple[int, str]] = []
+
+    @dataclass
+    class Pool:
+        records: list[dict[str, str]]
+
+    pool = Pool(
+        records=[{"complete_identity_sha256": identity} for identity in identities]
+    )
+
+    monkeypatch.setattr(
+        transfer_command, "load_oracle_teacher_dataset_jsonl", lambda _: teacher
+    )
+    monkeypatch.setattr(
+        transfer_command, "load_selected_source_pool", lambda _: (pool, selected)
+    )
+    monkeypatch.setattr(
+        transfer_command, "complete_source_identity", lambda record: record
+    )
+    monkeypatch.setattr(
+        transfer_command, "_validate_teacher_against_selected_manifest", lambda *_: None
+    )
+    monkeypatch.setattr(
+        transfer_command, "_file_identity", lambda _: {"sha256": "b" * 64}
+    )
+    monkeypatch.setattr(
+        transfer_command, "_write_trainer_input_shard_atomically", lambda *_: None
+    )
+
+    def direct_builder(*, selected_sources, **_kwargs):
+        return SimpleNamespace(
+            records=[
+                SimpleNamespace(
+                    source_metadata={
+                        "t064_complete_identity_sha256": item[
+                            "complete_identity_sha256"
+                        ]
+                    }
+                )
+                for item in selected_sources
+            ]
+        )
+
+    monkeypatch.setattr(
+        guidance,
+        "build_oracle_teacher_search_guidance_dataset_from_direct_provenance",
+        direct_builder,
+    )
+
+    def fork_dispatch(*, ranges, log_dir, worker, backend):
+        assert backend == "fork"
+        del log_dir
+        descriptors = []
+        for index, record_range in enumerate(ranges):
+            calls.append((index, record_range))
+            descriptors.append(worker(index, record_range))
+        return descriptors, [{"return_code": 0} for _ in ranges]
+
+    monkeypatch.setattr(transfer_command, "dispatch_t064_shards", fork_dispatch)
+    monkeypatch.setattr(
+        transfer_command, "_iter_t064_persisted_trainer_shards", lambda **_: iter(())
+    )
+    merged = SimpleNamespace(
+        records=[
+            SimpleNamespace(source_metadata={"t064_complete_identity_sha256": identity})
+            for identity in identities
+        ]
+    )
+    monkeypatch.setattr(
+        transfer_command, "_merge_t064_trainer_shard_stream", lambda **_: merged
+    )
+
+    dataset, _report, mapping = transfer_command.run_t064_stage3_production(
+        selected_manifest=manifest,
+        teacher_path=teacher_path,
+        output_path=tmp_path / "trainer.jsonl",
+        shard_output_dir=tmp_path / "shards",
+        log_dir=tmp_path / "logs",
+        code_commit="a" * 40,
+    )
+
+    assert dataset is merged
+    assert calls == list(enumerate(contiguous_ranges(460)))
+    assert mapping[identities[-1]] == 459
+
+
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="the production fork backend is intentionally WSL/Linux only",
+)
+def test_stage3_production_actual_fork_invokes_direct_converter_and_merges(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Exercise the production Stage-3 route with fork-safe, no-simulator stubs."""
+
+    from sts_combat_rl.sim import oracle_teacher_search_guidance as guidance
+    from sts_combat_rl.sim.trainer_input import load_trainer_input_dataset_jsonl
+    from t009_helpers import make_trainer_dataset
+
+    identities = [f"{index:064x}" for index in range(460)]
+    selected = [
+        {
+            "complete_identity_sha256": identity,
+            "complete_identity": {
+                "source_checkpoint_id": f"checkpoint-{index}",
+                "source_seed": index,
+                "source_run_id": f"run-{index}",
+                "source_battle_index": index,
+                "distribution_kind": "assisted_run",
+                "checkpoint_information_regime": "full_simulator_state_oracle_like",
+            },
+        }
+        for index, identity in enumerate(identities)
+    ]
+    manifest = {
+        "code_commit": "a" * 40,
+        "complete_source_audit": {
+            "status": "complete",
+            "selected_restore_failure_count": 0,
+        },
+        "selected_sources": selected,
+        "teacher_shard_ranges": list(contiguous_ranges(460)),
+        "teacher_worker_count": 16,
+    }
+
+    @dataclass(frozen=True)
+    class Pool:
+        records: list[dict[str, str]]
+
+    pool = Pool(
+        records=[{"complete_identity_sha256": identity} for identity in identities]
+    )
+    marker_dir = tmp_path / "converter-pids"
+    marker_dir.mkdir()
+    teacher_path = tmp_path / "teacher.jsonl"
+    teacher_path.write_text("teacher", encoding="utf-8")
+    teacher = _empty_oracle_teacher_dataset()
+    monkeypatch.setattr(
+        transfer_command, "load_oracle_teacher_dataset_jsonl", lambda _: teacher
+    )
+    monkeypatch.setattr(
+        transfer_command, "load_selected_source_pool", lambda _: (pool, selected)
+    )
+    monkeypatch.setattr(
+        transfer_command, "complete_source_identity", lambda record: record
+    )
+    monkeypatch.setattr(
+        transfer_command, "_validate_teacher_against_selected_manifest", lambda *_: None
+    )
+    monkeypatch.setattr(
+        transfer_command, "_file_identity", lambda _: {"sha256": "b" * 64}
+    )
+
+    def direct_builder(*, selected_sources, **_kwargs):
+        (marker_dir / selected_sources[0]["complete_identity_sha256"]).write_text(
+            str(os.getpid()), encoding="utf-8"
+        )
+        dataset = make_trainer_dataset([(20, 1)] * len(selected_sources))
+        records = [
+            replace(
+                record,
+                source_metadata={
+                    **record.source_metadata,
+                    "t064_complete_identity_sha256": descriptor[
+                        "complete_identity_sha256"
+                    ],
+                },
+            )
+            for record, descriptor in zip(
+                dataset.records, selected_sources, strict=True
+            )
+        ]
+        return replace(
+            dataset,
+            generation_metadata={
+                "task_id": "T064",
+                "workflow": "oracle_teacher_search_guidance_bridge",
+                "direct_provenance_mode": "t064_manifest_and_merged_teacher",
+                "teacher_artifact_identity": {"sha256": "b" * 64},
+                "restore_counts": {"assisted_replay": len(records)},
+            },
+            records=records,
+        )
+
+    monkeypatch.setattr(
+        guidance,
+        "build_oracle_teacher_search_guidance_dataset_from_direct_provenance",
+        direct_builder,
+    )
+    output_path = tmp_path / "trainer.jsonl"
+    dataset, _report, mapping = transfer_command.run_t064_stage3_production(
+        selected_manifest=manifest,
+        teacher_path=teacher_path,
+        output_path=output_path,
+        shard_output_dir=tmp_path / "shards",
+        log_dir=tmp_path / "logs",
+        code_commit="a" * 40,
+    )
+
+    assert (
+        len({int(path.read_text(encoding="utf-8")) for path in marker_dir.iterdir()})
+        == 16
+    )
+    assert len(list((tmp_path / "shards").glob("shard-*.jsonl"))) == 16
+    assert dataset.generation_metadata["restore_counts"] == {"assisted_replay": 460}
+    assert mapping[identities[-1]] == 459
+    with output_path.open(encoding="utf-8") as stream:
+        persisted = load_trainer_input_dataset_jsonl(stream)
+    assert transfer_command._trainer_identity_hashes(persisted) == identities
 
 
 def test_actual_sixteen_worker_dispatch_writes_per_shard_logs(tmp_path: Path) -> None:
@@ -2048,6 +2419,104 @@ def test_actual_sixteen_worker_dispatch_writes_per_shard_logs(tmp_path: Path) ->
     assert len(thread_ids) == 16
     assert [record["return_code"] for record in records] == [0] * 16
     assert all(Path(record["log_path"]).is_file() for record in records)
+
+
+def test_stage3_fork_dispatch_freezes_then_unfreezes_and_restores_gc_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    events = []
+    monkeypatch.setattr(transfer_command.gc, "isenabled", lambda: True)
+    monkeypatch.setattr(
+        transfer_command.gc, "collect", lambda: events.append("collect")
+    )
+    monkeypatch.setattr(transfer_command.gc, "freeze", lambda: events.append("freeze"))
+    monkeypatch.setattr(
+        transfer_command.gc, "unfreeze", lambda: events.append("unfreeze")
+    )
+    monkeypatch.setattr(transfer_command.gc, "enable", lambda: events.append("enable"))
+    monkeypatch.setattr(
+        transfer_command.gc, "disable", lambda: events.append("disable")
+    )
+    monkeypatch.setattr(
+        transfer_command,
+        "dispatch_t064_shards",
+        lambda **kwargs: events.append(("dispatch", kwargs["backend"])) or ([], []),
+    )
+
+    assert transfer_command._dispatch_t064_stage3_fork_shards(
+        ranges=contiguous_ranges(16),
+        log_dir=tmp_path / "logs",
+        worker=lambda *_: None,
+        backend="fork",
+    ) == ([], [])
+    assert events == ["collect", "freeze", ("dispatch", "fork"), "unfreeze", "enable"]
+
+
+def test_stage3_fork_dispatch_unfreezes_after_base_exception_and_restores_disabled_gc(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    events = []
+    monkeypatch.setattr(transfer_command.gc, "isenabled", lambda: False)
+    monkeypatch.setattr(
+        transfer_command.gc, "collect", lambda: events.append("collect")
+    )
+    monkeypatch.setattr(transfer_command.gc, "freeze", lambda: events.append("freeze"))
+    monkeypatch.setattr(
+        transfer_command.gc, "unfreeze", lambda: events.append("unfreeze")
+    )
+    monkeypatch.setattr(transfer_command.gc, "enable", lambda: events.append("enable"))
+    monkeypatch.setattr(
+        transfer_command.gc, "disable", lambda: events.append("disable")
+    )
+
+    def interrupted(**_kwargs):
+        events.append("dispatch")
+        raise KeyboardInterrupt("intentional Stage3 fork interruption")
+
+    monkeypatch.setattr(transfer_command, "dispatch_t064_shards", interrupted)
+    with pytest.raises(KeyboardInterrupt, match="Stage3 fork interruption"):
+        transfer_command._dispatch_t064_stage3_fork_shards(
+            ranges=contiguous_ranges(16),
+            log_dir=tmp_path / "logs",
+            worker=lambda *_: None,
+            backend="fork",
+        )
+    assert events == ["collect", "freeze", "dispatch", "unfreeze", "disable"]
+
+
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="the Stage3 COW fork regression is intentionally WSL/Linux only",
+)
+def test_stage3_fork_freezes_preloaded_tracked_graph_before_child_gc(
+    tmp_path: Path,
+) -> None:
+    """A child collection sees the parent graph frozen, not collectible/scannable."""
+
+    preloaded_graph = [[index] for index in range(40_000)]
+
+    def worker(index: int, _record_range: str) -> dict[str, int]:
+        # This explicit collection models automatic child GC after allocation.
+        # Frozen parent objects remain in the permanent generation.
+        gc.collect()
+        return {
+            "index": index,
+            "pid": os.getpid(),
+            "frozen_count": gc.get_freeze_count(),
+            "preloaded_length": len(preloaded_graph),
+        }
+
+    results, records = transfer_command._dispatch_t064_stage3_fork_shards(
+        ranges=contiguous_ranges(16),
+        log_dir=tmp_path / "logs",
+        worker=worker,
+        backend="fork",
+    )
+
+    assert len({result["pid"] for result in results}) == 16
+    assert all(result["preloaded_length"] == len(preloaded_graph) for result in results)
+    assert all(result["frozen_count"] >= len(preloaded_graph) for result in results)
+    assert [record["return_code"] for record in records] == [0] * 16
 
 
 def test_stage2_fork_returns_small_descriptors_and_reloads_persisted_shards(
@@ -2185,6 +2654,218 @@ def test_stage2_teacher_shard_atomic_writer_never_publishes_partial_output(
         )
     assert not output.exists()
     assert not output.with_suffix(output.suffix + ".tmp").exists()
+
+
+def test_stage3_trainer_shard_atomic_writer_never_publishes_partial_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output = tmp_path / "shard-00.jsonl"
+
+    def partial_then_fail(_dataset, stream) -> None:
+        stream.write('{"type":"metadata"}\n')
+        raise RuntimeError("intentional interrupted trainer shard write")
+
+    monkeypatch.setattr(
+        transfer_command, "dump_trainer_input_dataset_jsonl", partial_then_fail
+    )
+    with pytest.raises(RuntimeError, match="interrupted trainer shard write"):
+        transfer_command._write_trainer_input_shard_atomically(
+            output, SimpleNamespace()
+        )
+    assert not output.exists()
+    assert not output.with_suffix(output.suffix + ".tmp").exists()
+
+
+def test_stage3_persisted_trainer_shards_reject_incomplete_or_corrupt_output(
+    tmp_path: Path,
+) -> None:
+    ranges = contiguous_ranges(16)
+    output_dir = tmp_path / "trainer-shards"
+    output_dir.mkdir()
+    descriptors = []
+    for index, record_range in enumerate(ranges):
+        output = output_dir / f"shard-{index:02d}.jsonl"
+        output.write_text("not-json", encoding="utf-8")
+        descriptors.append(
+            {
+                "shard_index": index,
+                "record_range": record_range,
+                "path": str(output),
+            }
+        )
+    with pytest.raises(ValueError, match="invalid JSON"):
+        list(
+            transfer_command._iter_t064_persisted_trainer_shards(
+                descriptors=descriptors,
+                expected_ranges=ranges,
+                shard_output_dir=output_dir,
+            )
+        )
+    (output_dir / "shard-00.jsonl").unlink()
+    temporary = output_dir / "shard-00.jsonl.tmp"
+    temporary.write_text("partial", encoding="utf-8")
+    with pytest.raises(ValueError, match="incomplete temp"):
+        list(
+            transfer_command._iter_t064_persisted_trainer_shards(
+                descriptors=descriptors,
+                expected_ranges=ranges,
+                shard_output_dir=output_dir,
+            )
+        )
+
+
+def test_stage3_trainer_merge_rejects_out_of_order_or_incomplete_rows() -> None:
+    identities = [f"{index:064x}" for index in range(16)]
+    manifest = {
+        "selected_sources": [
+            {"complete_identity_sha256": identity} for identity in identities
+        ]
+    }
+
+    @dataclass(frozen=True)
+    class Row:
+        source_metadata: dict[str, str]
+        example_index: int = 0
+        rollout_index: int = 0
+        segment_index: int = 0
+
+    def shard(identity: str, *, problems=()):
+        return SimpleNamespace(
+            records=[
+                Row(
+                    source_metadata={
+                        "t064_complete_identity_sha256": identity,
+                        "source_run_id": f"run-{identity}",
+                    }
+                )
+            ],
+            problems=list(problems),
+            generation_metadata={
+                "task_id": "T064",
+                "workflow": "oracle_teacher_search_guidance_bridge",
+                "direct_provenance_mode": "t064_manifest_and_merged_teacher",
+                "teacher_artifact_identity": {"sha256": "a" * 64},
+                "restore_counts": {"assisted_replay": 1},
+            },
+            format_version=6,
+            reward_allocation="terminal_step",
+            snapshot_feature_size=1,
+            action_feature_size=1,
+            decision_record_schema_version=1,
+            tactical_feature_schema_id="tactical",
+            tactical_feature_schema_version=1,
+            identity_vocabulary_version="identity",
+            policy_target_schema_id="target",
+            policy_target_schema_version=1,
+            structured_battle_outcome_schema_id="resource",
+            structured_battle_outcome_schema_version=1,
+        )
+
+    out_of_order = [shard(identity) for identity in identities]
+    out_of_order[3] = shard(identities[4])
+    with pytest.raises(ValueError, match="identity/order mismatch"):
+        transfer_command._merge_t064_trainer_shard_stream(
+            shards=out_of_order,
+            selected_manifest=manifest,
+            expected_ranges=contiguous_ranges(16),
+        )
+    incomplete = [shard(identity) for identity in identities]
+    incomplete[5] = shard(identities[5], problems=("corrupt",))
+    with pytest.raises(ValueError, match="incomplete"):
+        transfer_command._merge_t064_trainer_shard_stream(
+            shards=incomplete,
+            selected_manifest=manifest,
+            expected_ranges=contiguous_ranges(16),
+        )
+
+
+def test_stage3_trainer_merge_aggregates_metadata_and_restore_counts() -> None:
+    identities = [f"{index:064x}" for index in range(16)]
+
+    @dataclass(frozen=True)
+    class Row:
+        source_metadata: dict[str, str]
+        example_index: int = 0
+        rollout_index: int = 0
+        segment_index: int = 0
+
+    @dataclass(frozen=True)
+    class Dataset:
+        format_version: int
+        reward_allocation: str
+        source_rollout_count: int
+        segment_count: int
+        snapshot_feature_size: int
+        action_feature_size: int
+        decision_record_schema_version: int
+        tactical_feature_schema_id: str
+        tactical_feature_schema_version: int
+        identity_vocabulary_version: str
+        policy_target_schema_id: str
+        policy_target_schema_version: int
+        structured_battle_outcome_schema_id: str
+        structured_battle_outcome_schema_version: int
+        generation_metadata: dict[str, object]
+        records: list[Row]
+        problems: list[str]
+
+    def shard(index: int, *, teacher_sha: str = "a" * 64) -> Dataset:
+        identity = identities[index]
+        return Dataset(
+            format_version=6,
+            reward_allocation="terminal_step",
+            source_rollout_count=1,
+            segment_count=1,
+            snapshot_feature_size=1,
+            action_feature_size=1,
+            decision_record_schema_version=1,
+            tactical_feature_schema_id="tactical",
+            tactical_feature_schema_version=1,
+            identity_vocabulary_version="identity",
+            policy_target_schema_id="target",
+            policy_target_schema_version=1,
+            structured_battle_outcome_schema_id="resource",
+            structured_battle_outcome_schema_version=1,
+            generation_metadata={
+                "task_id": "T064",
+                "workflow": "oracle_teacher_search_guidance_bridge",
+                "direct_provenance_mode": "t064_manifest_and_merged_teacher",
+                "teacher_artifact_identity": {"sha256": teacher_sha},
+                "restore_counts": {"assisted_replay": 1},
+            },
+            records=[
+                Row(
+                    source_metadata={
+                        "t064_complete_identity_sha256": identity,
+                        "source_run_id": f"run-{index // 2}",
+                    }
+                )
+            ],
+            problems=[],
+        )
+
+    manifest = {
+        "selected_sources": [
+            {"complete_identity_sha256": identity} for identity in identities
+        ]
+    }
+    merged = transfer_command._merge_t064_trainer_shard_stream(
+        shards=[shard(index) for index in range(16)],
+        selected_manifest=manifest,
+        expected_ranges=contiguous_ranges(16),
+    )
+    assert merged.source_rollout_count == 8
+    assert merged.generation_metadata["restore_counts"] == {"assisted_replay": 16}
+    assert merged.generation_metadata["t064_complete_identity_order"] == identities
+    with pytest.raises(ValueError, match="direct provenance differs"):
+        transfer_command._merge_t064_trainer_shard_stream(
+            shards=[
+                shard(index, teacher_sha="b" * 64 if index == 4 else "a" * 64)
+                for index in range(16)
+            ],
+            selected_manifest=manifest,
+            expected_ranges=contiguous_ranges(16),
+        )
 
 
 def test_stage2_reloaded_invalid_shard_blocks_merged_output(
