@@ -72,7 +72,7 @@ or checkpoint outcomes:
 - T044 `assist_0`: identity `a336ffb1fda9ed7e`, 21 records, SHA-256
   `4ee0eb125ac37e870f0f2c950290b131f4693185c60b6c71cd46b5265a4d0037`;
 - T044 `assist_hp50`: identity `e99a0938307c0e7a`, 38 records, SHA-256
-  `bc9372a67fe6536b848616e4b700765d6a47f49b4044bd973dbcaff4dd3bba36`;
+  `bc9372a67fe6b848616e4b700765d6a47f49b4044bd973dbcaff4dd3bba36`;
 - T052 natural Boss/later-act: 93 records, SHA-256
   `b7f8e9b85b53bbf8e37adfe6cc90d0579937661309b26bce2a8f2921604a8608`.
 
@@ -80,6 +80,9 @@ or checkpoint outcomes:
 
 All four training runs initialize from checkpoint SHA-256
 `a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4`.
+This retained checkpoint encodes model hidden size 16. T064 therefore freezes
+hidden size 16 so the experiment preserves the exact accepted initialization;
+there is no hidden-size migration or newly initialized replacement model.
 The loader must retain every model parameter and registered normalization buffer
 exactly. Optimizer state is always fresh. A required schema migration must be
 deterministic and produce one identical migrated initialization for all runs;
@@ -322,7 +325,7 @@ All runs use:
 - CPU execution;
 - `torch.use_deterministic_algorithms(True)` and one Torch CPU thread;
 - `torch.manual_seed(seed)` and `random.seed(seed)`;
-- existing model architecture with hidden size 128;
+- existing model architecture with hidden size 16;
 - Adam with learning rate `0.001`, betas `(0.9, 0.999)`, epsilon `1e-8`,
   weight decay `0`, and `amsgrad=false`;
 - no learning-rate scheduler;
