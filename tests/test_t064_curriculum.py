@@ -1085,6 +1085,104 @@ def test_t043_direct_conversion_reuses_assisted_restore_and_existing_row_builder
     )
 
 
+def test_t064_paired_training_uses_frozen_hidden_size_without_changing_defaults(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """T064 passes the retained architecture while shared defaults stay legacy."""
+
+    from sts_combat_rl.sim import torch_policy_value
+
+    assert transfer_command.T064_TRAINING_HIDDEN_SIZE == 16
+    assert torch_policy_value.TorchPolicyValueTrainingConfig().hidden_size == 128
+
+    identity = "a" * 64
+    plan = {
+        "ordered_batches": [[identity] * 32 for _ in range(900)],
+        "batch_plan_sha256": "b" * 64,
+        "per_source_exposure_counts": {identity: 9600},
+    }
+    monkeypatch.setattr(
+        transfer_command,
+        "build_ordered_batch_plan",
+        lambda _selected, *, seed, arm: {
+            **plan,
+            "arm": arm,
+            "seed": seed,
+        },
+    )
+    monkeypatch.setattr(
+        transfer_command, "validate_exposure_parity", lambda _plans: None
+    )
+    monkeypatch.setattr(
+        transfer_command,
+        "_sha256",
+        lambda _path: transfer_command.T064_INITIALIZATION_SHA256,
+    )
+    monkeypatch.setattr(
+        torch_policy_value,
+        "load_torch_policy_value_checkpoint",
+        lambda _path: object(),
+    )
+    captured_configs = []
+
+    def fake_train(_dataset, config, **_kwargs):
+        captured_configs.append(config)
+        return SimpleNamespace(report=SimpleNamespace(training_ok=False, problems=[]))
+
+    monkeypatch.setattr(torch_policy_value, "train_torch_policy_value", fake_train)
+    from sts_combat_rl.sim import training_gate
+
+    monkeypatch.setattr(
+        training_gate,
+        "build_training_gate_report",
+        lambda _dataset, *, override: {"override": override},
+    )
+    initialization = tmp_path / "initialization.pt"
+    initialization.write_bytes(b"retained-initialization")
+    trainer_input = tmp_path / "trainer.jsonl"
+    trainer_input.write_bytes(b"trainer-input")
+    checkpoint_paths = {
+        (arm, seed): tmp_path / f"{arm}-{seed}.pt" for arm, seed in TRAINING_RUN_ORDER
+    }
+    report = transfer_command.run_t064_paired_training(
+        selected_manifest={
+            "selected_buckets": {},
+            "batch_plans": [
+                {key: value for key, value in plan.items() if key != "ordered_batches"}
+                | {"arm": arm, "seed": seed}
+                for arm, seed in TRAINING_RUN_ORDER
+            ],
+        },
+        dataset=SimpleNamespace(),
+        initialization_checkpoint_path=initialization,
+        initialization_sha256=transfer_command.T064_INITIALIZATION_SHA256,
+        trainer_input_path=trainer_input,
+        identity_to_trainer_index={identity: 0},
+        checkpoint_paths=checkpoint_paths,
+    )
+
+    assert len(captured_configs) == len(TRAINING_RUN_ORDER)
+    assert {config.hidden_size for config in captured_configs} == {16}
+    assert [run["configuration"]["hidden_size"] for run in report["runs"]] == [16] * 4
+
+
+@pytest.mark.skipif(
+    not os.environ.get("STSRL_T064_INITIALIZATION_CHECKPOINT"),
+    reason="set STSRL_T064_INITIALIZATION_CHECKPOINT to audit the retained artifact",
+)
+def test_t064_retained_initialization_checkpoint_matches_frozen_architecture() -> None:
+    """Audit the real retained input when the maintainer exposes its stable path."""
+
+    from sts_combat_rl.sim.torch_policy_value import load_torch_policy_value_checkpoint
+
+    checkpoint_path = Path(os.environ["STSRL_T064_INITIALIZATION_CHECKPOINT"])
+    if not checkpoint_path.is_file():
+        pytest.skip(f"retained checkpoint is unavailable: {checkpoint_path}")
+    checkpoint = load_torch_policy_value_checkpoint(str(checkpoint_path))
+    assert checkpoint.config.hidden_size == transfer_command.T064_TRAINING_HIDDEN_SIZE
+    assert checkpoint.model.hidden_size == transfer_command.T064_TRAINING_HIDDEN_SIZE
+
+
 def test_stage5_production_uses_fork_dispatch_backend(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

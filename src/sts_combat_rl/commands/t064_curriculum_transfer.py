@@ -92,6 +92,10 @@ T064_ARTIFACT_ROOT_NAME = "t064-later-act-curriculum-transfer"
 T064_INITIALIZATION_SHA256 = (
     "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
 )
+# The retained T043 initialization was created with the existing 16-wide
+# architecture.  Keep this override local to T064; the shared training
+# configuration default remains 128 for legacy callers.
+T064_TRAINING_HIDDEN_SIZE = 16
 
 # These are retained history, never inputs to an accepted rerun.  Keeping them
 # in the sole stage summary avoids a fifth T064 log-index artifact.
@@ -1603,7 +1607,7 @@ def frozen_training_configuration(*, seed: int) -> dict[str, Any]:
         "deterministic_algorithms": True,
         "torch_threads": 1,
         "seed": seed,
-        "hidden_size": 128,
+        "hidden_size": T064_TRAINING_HIDDEN_SIZE,
         "optimizer": {
             "kind": "Adam",
             "learning_rate": 0.001,
@@ -1708,7 +1712,7 @@ def run_t064_paired_training(
         config = TorchPolicyValueTrainingConfig(
             epochs=900,
             learning_rate=0.001,
-            hidden_size=128,
+            hidden_size=T064_TRAINING_HIDDEN_SIZE,
             hp_loss_scale=100.0,
             policy_loss_weight=1.0,
             outcome_loss_weight=1.0,
