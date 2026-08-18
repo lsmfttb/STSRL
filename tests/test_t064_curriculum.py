@@ -684,7 +684,7 @@ def test_t044_t070_reuse_contracts_use_persisted_roles_and_frozen_ranges() -> No
         "cohort_record_count": 21,
         "max_battle_steps": 200,
         "run_scale": "fixed",
-        "action_space": {"include_potions": False},
+        "action_space": ActionSpaceConfig.initial_no_potions().to_dict(),
     }
 
     def arm(role):
@@ -701,6 +701,11 @@ def test_t044_t070_reuse_contracts_use_persisted_roles_and_frozen_ranges() -> No
     assert transfer_command.validate_t044_reuse(
         report, cohort_identity="cohort", cohort_count=21
     )
+    config["action_space"]["allow_excluded_fallback"] = False
+    assert not transfer_command.validate_t044_reuse(
+        report, cohort_identity="cohort", cohort_count=21
+    )
+    config["action_space"] = ActionSpaceConfig.initial_no_potions().to_dict()
     config["controller_roles"]["a"] = "display label only"
     assert not transfer_command.validate_t044_reuse(
         report, cohort_identity="cohort", cohort_count=21
@@ -738,6 +743,63 @@ def test_t044_t070_reuse_contracts_use_persisted_roles_and_frozen_ranges() -> No
     baseline["tree_geometry_enabled"] = True
     assert not transfer_command.validate_t070_baseline_reuse(
         baseline, cohort_identity="t052"
+    )
+
+
+def test_t044_current_action_space_is_exact_for_new_reports() -> None:
+    def arm(role: str, count: int) -> SimpleNamespace:
+        return SimpleNamespace(
+            role=role,
+            report=SimpleNamespace(
+                problems=[],
+                battle_results=[
+                    SimpleNamespace(cohort_index=index) for index in range(count)
+                ],
+            ),
+        )
+
+    action_space = ActionSpaceConfig.initial_no_potions().to_dict()
+    independent = SimpleNamespace(
+        comparison_config={
+            "cohort_identity": "assist-0",
+            "cohort_record_count": 21,
+            "max_battle_steps": 200,
+            "run_scale": "fixed",
+            "action_space": action_space,
+        },
+        arms=tuple(arm(role, 21) for role in transfer_command.T044_INDEPENDENT_ROLES),
+        evaluation_successful=True,
+    )
+    dependent = SimpleNamespace(
+        comparison_config={
+            "cohort_identity": "assist-0",
+            "cohort_record_count": 21,
+            "max_battle_steps": 200,
+            "run_scale": "fixed",
+            "shard_count": 16,
+            "shard_ranges": list(transfer_command.T044_ASSIST_0_RANGES),
+            "action_space": action_space,
+        },
+        arms=tuple(arm(role, 21) for role in transfer_command.T044_DEPENDENT_ROLES),
+        evaluation_successful=True,
+    )
+
+    assert transfer_command.validate_t044_independent_report(
+        independent, cohort_identity="assist-0", cohort_count=21
+    )
+    assert transfer_command.validate_t044_dependent_report(
+        dependent, cohort_identity="assist-0", cohort_count=21
+    )
+
+    mutated = ActionSpaceConfig.initial_no_potions().to_dict()
+    mutated["allow_excluded_fallback"] = False
+    independent.comparison_config["action_space"] = mutated
+    dependent.comparison_config["action_space"] = mutated
+    assert not transfer_command.validate_t044_independent_report(
+        independent, cohort_identity="assist-0", cohort_count=21
+    )
+    assert not transfer_command.validate_t044_dependent_report(
+        dependent, cohort_identity="assist-0", cohort_count=21
     )
 
 

@@ -121,6 +121,15 @@ KNOWN_PRIOR_ATTEMPTS = (
 )
 
 
+def _is_t044_frozen_action_space(value: Any) -> bool:
+    """Require the complete current ``initial_no_potions`` action-space contract."""
+
+    return (
+        isinstance(value, Mapping)
+        and dict(value) == ActionSpaceConfig.initial_no_potions().to_dict()
+    )
+
+
 def current_code_identity(checkout: Path) -> str:
     """Read the exact source revision without permitting a stale continuation."""
 
@@ -1860,11 +1869,7 @@ def validate_t044_reuse(
         return False
     if config.get("max_battle_steps") != 200 or config.get("run_scale") != "fixed":
         return False
-    action_space = config.get("action_space")
-    if (
-        not isinstance(action_space, Mapping)
-        or action_space.get("include_potions") is not False
-    ):
+    if not _is_t044_frozen_action_space(config.get("action_space")):
         return False
     if not getattr(report, "evaluation_successful", False) or len(arms) != 4:
         return False
@@ -2774,8 +2779,7 @@ def validate_t044_dependent_report(
         and config.get("run_scale") == "fixed"
         and config.get("shard_count") == 16
         and tuple(config.get("shard_ranges", ())) == expected_ranges
-        and isinstance(config.get("action_space"), Mapping)
-        and config["action_space"].get("include_potions") is False
+        and _is_t044_frozen_action_space(config.get("action_space"))
         and exact_order
         and provenance_ok
         and all(
@@ -2806,8 +2810,7 @@ def validate_t044_independent_report(
         and config.get("cohort_record_count") == cohort_count
         and config.get("run_scale") == "fixed"
         and config.get("max_battle_steps") == 200
-        and isinstance(config.get("action_space"), Mapping)
-        and config["action_space"].get("include_potions") is False
+        and _is_t044_frozen_action_space(config.get("action_space"))
         and all(
             [result.cohort_index for result in arm.report.battle_results]
             == list(range(cohort_count))
