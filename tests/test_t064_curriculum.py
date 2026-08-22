@@ -117,6 +117,58 @@ def _empty_oracle_teacher_dataset() -> OracleTeacherDataset:
     )
 
 
+def _complete_source_inadequate_manifest(*, code_commit: str) -> dict[str, object]:
+    """Return a compact-reader-valid completed manifest with the real shape."""
+
+    artifact = {"path": "fixture", "sha256": "a" * 64, "bytes": 1}
+    return {
+        "schema_id": "t064-curriculum-manifest-v1",
+        "format_version": 1,
+        "task_id": "T064",
+        "code_commit": code_commit,
+        "native_commit": "b" * 40,
+        "input_artifacts": {
+            name: dict(artifact)
+            for name in (
+                "t042_scale_manifest",
+                "initialization_checkpoint",
+                "assist_0",
+                "assist_hp50",
+                "assist_hp50_potion_elite_boss",
+                "assist_hp75_potion",
+            )
+        },
+        "frozen_holdouts": [],
+        "complete_source_audit": {
+            "status": "complete",
+            "source_count": 0,
+            "sources": [],
+            "candidate_duplicate_complete_identity_count": 0,
+            "candidate_holdout_exclusion_count": 0,
+            "selected_duplicate_complete_identity_count": 0,
+            "selected_holdout_overlap_count": 0,
+            "selected_restore_count": 0,
+            "selected_restore_failure_count": 0,
+            "selected_restore_failures": [],
+        },
+        "selected_buckets": {
+            bucket: [] for bucket in (BUCKET_STRONG, BUCKET_MEDIUM, BUCKET_ANCHOR)
+        },
+        "selected_sources": [],
+        "selected_bucket_counts": {
+            bucket: 0 for bucket in (BUCKET_STRONG, BUCKET_MEDIUM, BUCKET_ANCHOR)
+        },
+        "source_adequacy": False,
+        "teacher_shard_ranges": list(contiguous_ranges(0)),
+        "teacher_worker_count": 16,
+        "batch_plans": [],
+        "batch_plan_status": "not_run_source_inadequate",
+        "exposure_parity": None,
+        "t070_stage_manifest": None,
+        "problems": [],
+    }
+
+
 def test_complete_source_identity_reuses_occurrence_safe_trace_exactly() -> None:
     record = _record()
     identity = complete_source_identity(record)
@@ -1588,23 +1640,12 @@ def test_stage4_selection_finalization_failure_follows_report_persist(
 def test_stage5_historical_cli_is_cohort_level_and_checkpoint_free(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    code_commit = "a" * 40
     manifest_path = tmp_path / "t064-curriculum-manifest.json"
-    manifest_path.write_text("{}", encoding="utf-8")
-    monkeypatch.setattr(transfer_command, "load_compact_json", lambda _stream: {})
-    monkeypatch.setattr(
-        transfer_command,
-        "build_t064_stage_execution_plan",
-        lambda _manifest, *, code_commit: [
-            {"stage": "stage5_t044", "cohort": cohort, "checkpoint_arm": arm}
-            for arm in (
-                "static/64001",
-                "curriculum/64001",
-                "static/64002",
-                "curriculum/64002",
-            )
-            for cohort in ("assist_0", "assist_hp50")
-        ],
-    )
+    with manifest_path.open("w", encoding="utf-8", newline="\n") as stream:
+        dump_compact_json(
+            _complete_source_inadequate_manifest(code_commit=code_commit), stream
+        )
     calls: list[dict[str, object]] = []
     monkeypatch.setattr(
         transfer_command,
@@ -1621,7 +1662,7 @@ def test_stage5_historical_cli_is_cohort_level_and_checkpoint_free(
                 "--dry-run-manifest",
                 str(manifest_path),
                 "--code-commit",
-                "a" * 40,
+                code_commit,
                 "--stage",
                 "stage5_t044",
                 "--stage5-cohort",
@@ -1642,6 +1683,116 @@ def test_stage5_historical_cli_is_cohort_level_and_checkpoint_free(
     )
     assert calls and "checkpoint_path" not in calls[0]
     assert json.loads(capsys.readouterr().out)["disposition"] == "reused_historical"
+
+
+@pytest.mark.parametrize(
+    "checkpoint_arm",
+    [f"{arm}/{seed}" for arm, seed in TRAINING_RUN_ORDER],
+)
+@pytest.mark.parametrize("cohort_kind", ("assist_0", "assist_hp50"))
+def test_stage5_dependent_cli_routes_real_plan_to_exact_checkpoint_and_cohort(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    checkpoint_arm: str,
+    cohort_kind: str,
+) -> None:
+    code_commit = "a" * 40
+    manifest_path = tmp_path / "t064-curriculum-manifest.json"
+    with manifest_path.open("w", encoding="utf-8", newline="\n") as stream:
+        dump_compact_json(
+            _complete_source_inadequate_manifest(code_commit=code_commit), stream
+        )
+    checkpoint_path = tmp_path / f"{checkpoint_arm.replace('/', '-')}.pt"
+    calls: list[dict[str, object]] = []
+
+    def run_stage(**kwargs):
+        calls.append(kwargs)
+        return SimpleNamespace(arms=(1, 2)), []
+
+    monkeypatch.setattr(
+        transfer_command, "run_t064_stage5_dependent_production", run_stage
+    )
+    assert (
+        transfer_command.main(
+            [
+                "--dry-run-manifest",
+                str(manifest_path),
+                "--code-commit",
+                code_commit,
+                "--stage",
+                "stage5_t044",
+                "--checkpoint-arm",
+                checkpoint_arm,
+                "--stage5-cohort",
+                str(tmp_path / f"{cohort_kind}.jsonl"),
+                "--stage5-checkpoint",
+                str(checkpoint_path),
+                "--stage5-cohort-kind",
+                cohort_kind,
+                "--stage5-log-dir",
+                str(tmp_path / "logs"),
+                "--stage5-shard-output-dir",
+                str(tmp_path / "shards"),
+                "--stage5-merged-output",
+                str(tmp_path / "merged.jsonl"),
+            ]
+        )
+        == 0
+    )
+    assert len(calls) == 1
+    assert calls[0]["checkpoint_path"] == checkpoint_path
+    assert calls[0]["cohort_kind"] == cohort_kind
+    assert json.loads(capsys.readouterr().out)["stage"] == "stage5_t044"
+
+
+@pytest.mark.parametrize(
+    "cohort_args",
+    ((), ("--stage5-cohort-kind", "unknown_cohort")),
+    ids=("missing", "invalid"),
+)
+def test_stage5_dependent_cli_fails_closed_for_missing_or_invalid_cohort(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    cohort_args: tuple[str, ...],
+) -> None:
+    code_commit = "a" * 40
+    manifest_path = tmp_path / "t064-curriculum-manifest.json"
+    with manifest_path.open("w", encoding="utf-8", newline="\n") as stream:
+        dump_compact_json(
+            _complete_source_inadequate_manifest(code_commit=code_commit), stream
+        )
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        transfer_command,
+        "run_t064_stage5_dependent_production",
+        lambda **kwargs: calls.append(kwargs),
+    )
+    argv = [
+        "--dry-run-manifest",
+        str(manifest_path),
+        "--code-commit",
+        code_commit,
+        "--stage",
+        "stage5_t044",
+        "--checkpoint-arm",
+        "static_mixture_v1/64001",
+        "--stage5-cohort",
+        str(tmp_path / "cohort.jsonl"),
+        "--stage5-checkpoint",
+        str(tmp_path / "checkpoint.pt"),
+        "--stage5-log-dir",
+        str(tmp_path / "logs"),
+        "--stage5-shard-output-dir",
+        str(tmp_path / "shards"),
+        "--stage5-merged-output",
+        str(tmp_path / "merged.jsonl"),
+        *cohort_args,
+    ]
+    with pytest.raises(SystemExit) as exc_info:
+        transfer_command.main(argv)
+    assert exc_info.value.code == 2
+    assert calls == []
 
 
 def test_stage7_teacher_validation_reads_nested_complete_identity_descriptors() -> None:

@@ -220,6 +220,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             for stage in stages
             if stage.get("checkpoint_arm") == args.checkpoint_arm
         ]
+    if args.stage5_checkpoint is not None:
+        stages = [
+            stage for stage in stages if stage.get("cohort") == args.stage5_cohort_kind
+        ]
     if args.mock_execute:
         if not stages or args.attempt_root is None:
             parser.error("--mock-execute requires one --stage and --attempt-root")
