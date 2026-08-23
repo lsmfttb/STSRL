@@ -1456,26 +1456,11 @@ def test_stage5_production_uses_fork_dispatch_backend(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     captured = {}
-    from sts_combat_rl.commands import model_guided_oracle_search as guided_command
-    from sts_combat_rl.sim import model_guided_oracle_search as guided_sim
-    from sts_combat_rl.sim import search_guidance_policy
 
     monkeypatch.setattr(
-        guided_command,
-        "build_torch_guidance_scorer_from_checkpoint",
-        lambda _path: object(),
-    )
-    monkeypatch.setattr(
-        guided_sim,
-        "ModelGuidedOracleSearchV2Controller",
-        lambda **kwargs: SimpleNamespace(action_space=kwargs["action_space"]),
-    )
-    monkeypatch.setattr(
-        search_guidance_policy,
-        "SearchGuidancePolicyController",
-        lambda _scorer: SimpleNamespace(
-            action_space=ActionSpaceConfig.initial_no_potions()
-        ),
+        transfer_command,
+        "_build_t064_stage5_dependent_arms",
+        lambda _path: pytest.fail("Torch scorer initialized in the fork parent"),
     )
     monkeypatch.setattr(
         transfer_command,
@@ -1493,6 +1478,84 @@ def test_stage5_production_uses_fork_dispatch_backend(
     )
 
     assert captured["dispatch_backend"] == "fork"
+    assert captured["controller_arms"] is None
+    assert callable(captured["controller_arms_factory"])
+    assert (
+        captured["adapter_factory"]
+        is transfer_command._t064_stage5_lightspeed_adapter_factory
+    )
+
+
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="the production fork backend is intentionally WSL/Linux only",
+)
+def test_stage5_dependent_factory_runs_after_sixteen_processes_are_isolated(
+    tmp_path: Path,
+) -> None:
+    parent_pid = os.getpid()
+
+    def arms_factory():
+        controller = SimpleNamespace(
+            action_space=ActionSpaceConfig.initial_no_potions(),
+            created_pid=os.getpid(),
+        )
+        return (
+            ("guided", transfer_command.T044_DEPENDENT_ROLES[0], controller),
+            ("raw", transfer_command.T044_DEPENDENT_ROLES[1], controller),
+        )
+
+    def shard_runner(*_args, **kwargs):
+        arms = kwargs["controller_arms"]
+        return {
+            "worker_pid": os.getpid(),
+            "controller_pids": [arm[2].created_pid for arm in arms],
+            "roles": [arm[1] for arm in arms],
+        }
+
+    merged, records = transfer_command.run_t064_t044_dependent_stage(
+        adapter_factory=lambda: object(),
+        cohort_path=tmp_path / "cohort.jsonl",
+        controller_arms=None,
+        cohort_kind="assist_0",
+        log_dir=tmp_path / "logs",
+        shard_output_dir=tmp_path / "shards",
+        merged_output_path=tmp_path / "merged.jsonl",
+        shard_runner=shard_runner,
+        merger=lambda **kwargs: kwargs["shards"],
+        report_writer=lambda _path, _report: None,
+        dispatch_backend="fork",
+        controller_arms_factory=arms_factory,
+    )
+
+    worker_pids = {item["worker_pid"] for item in merged}
+    assert len(worker_pids) == 16
+    assert parent_pid not in worker_pids
+    assert {record["worker_pid"] for record in records} == worker_pids
+    assert all(set(item["controller_pids"]) == {item["worker_pid"]} for item in merged)
+    assert all(
+        tuple(item["roles"]) == transfer_command.T044_DEPENDENT_ROLES for item in merged
+    )
+
+
+@pytest.mark.skipif(
+    os.name == "nt"
+    or not os.environ.get("STSRL_T064_STAGE5_SMOKE_COHORT")
+    or not os.environ.get("STSRL_T064_STAGE5_SMOKE_CHECKPOINT"),
+    reason="set the two T064 Stage5 smoke paths and run through WSL",
+)
+def test_stage5_real_dependent_one_record_smoke_after_fork() -> None:
+    cohort_path = Path(os.environ["STSRL_T064_STAGE5_SMOKE_COHORT"])
+    checkpoint_path = Path(os.environ["STSRL_T064_STAGE5_SMOKE_CHECKPOINT"])
+    assert cohort_path.is_file()
+    assert checkpoint_path.is_file()
+    parent_pid = os.getpid()
+    summary = transfer_command.run_t064_stage5_dependent_one_record_smoke(
+        cohort_path=cohort_path,
+        checkpoint_path=checkpoint_path,
+    )
+
+    assert summary["worker_pid"] != parent_pid
 
 
 def test_atomic_t070_selection_persist_promotes_once_and_cleans_failed_temp(

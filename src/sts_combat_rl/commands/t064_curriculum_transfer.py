@@ -40,6 +40,8 @@ from sts_combat_rl.commands.t070_search_v2_audit import (
     merge_single_arm_stage,
 )
 from sts_combat_rl.sim.de_assisted_fixed_cohort_comparison import (
+    MODEL_GUIDED_ORACLE_V2_LABEL,
+    RAW_CHECKPOINT_POLICY_LABEL,
     load_de_assisted_fixed_cohort_comparison_jsonl,
 )
 from sts_combat_rl.sim.fixed_evaluation_set import load_fixed_cohort_jsonl
@@ -2379,7 +2381,7 @@ def run_t064_t044_dependent_stage(
     *,
     adapter_factory: Callable[[], Any],
     cohort_path: Path,
-    controller_arms: Sequence[Any],
+    controller_arms: Sequence[Any] | None,
     cohort_kind: str,
     log_dir: Path,
     shard_output_dir: Path,
@@ -2392,6 +2394,7 @@ def run_t064_t044_dependent_stage(
         [Path, Any], None
     ] = write_de_assisted_fixed_cohort_comparison_report,
     dispatch_backend: str = "thread",
+    controller_arms_factory: Callable[[], Sequence[Any]] | None = None,
 ) -> tuple[Any, list[dict[str, Any]]]:
     """Run/merge only the two checkpoint-dependent T044 arms in 16 shards."""
 
@@ -2401,20 +2404,33 @@ def run_t064_t044_dependent_stage(
         ranges = T044_ASSIST_HP50_RANGES
     else:
         raise ValueError("T064 only evaluates the two frozen T044 cohorts")
-    roles = tuple(item[1] for item in controller_arms)
-    if roles != T044_DEPENDENT_ROLES:
+    if (controller_arms is None) == (controller_arms_factory is None):
+        raise ValueError("T064 dependent stage requires exactly one arm source")
+    if (
+        controller_arms is not None
+        and tuple(item[1] for item in controller_arms) != T044_DEPENDENT_ROLES
+    ):
         raise ValueError("T064 T044 stage must contain only persisted dependent roles")
     refuse_overwrite(merged_output_path)
     shard_output_dir.mkdir(parents=True, exist_ok=True)
 
     def one(index: int, record_range: str) -> Any:
+        active_arms = tuple(
+            controller_arms_factory()
+            if controller_arms_factory is not None
+            else controller_arms or ()
+        )
+        if tuple(item[1] for item in active_arms) != T044_DEPENDENT_ROLES:
+            raise ValueError(
+                "T064 T044 stage must contain only persisted dependent roles"
+            )
         output = shard_output_dir / f"shard-{index:02d}.jsonl"
         refuse_overwrite(output)
         shard = shard_runner(
             adapter_factory,
             cohort_path,
-            controller_arms=controller_arms,
-            action_space=controller_arms[0][2].action_space,
+            controller_arms=active_arms,
+            action_space=active_arms[0][2].action_space,
             max_battle_steps=200,
             run_scale="fixed",
             record_range=record_range,
@@ -2433,6 +2449,122 @@ def run_t064_t044_dependent_stage(
     return merged, shard_records
 
 
+def _build_t064_stage5_dependent_arms(checkpoint_path: Path) -> tuple[Any, ...]:
+    """Load the Torch scorer and controllers inside one isolated shard worker."""
+
+    from sts_combat_rl.commands.model_guided_oracle_search import (
+        build_torch_guidance_scorer_from_checkpoint,
+    )
+    from sts_combat_rl.sim.model_guided_oracle_search import (
+        ModelGuidedOracleSearchV2Controller,
+    )
+    from sts_combat_rl.sim.search_guidance_policy import (
+        SearchGuidancePolicyController,
+    )
+
+    action_space = ActionSpaceConfig.initial_no_potions()
+    scorer = build_torch_guidance_scorer_from_checkpoint(checkpoint_path)
+    return (
+        (
+            MODEL_GUIDED_ORACLE_V2_LABEL,
+            T044_DEPENDENT_ROLES[0],
+            ModelGuidedOracleSearchV2Controller(
+                simulations=T044_SEARCH_BUDGET,
+                scorer=scorer,
+                policy_probability_weight=T044_GUIDANCE_WEIGHT,
+                action_space=action_space,
+            ),
+        ),
+        (
+            RAW_CHECKPOINT_POLICY_LABEL,
+            T044_DEPENDENT_ROLES[1],
+            SearchGuidancePolicyController(scorer),
+        ),
+    )
+
+
+def _t064_stage5_lightspeed_adapter_factory() -> Any:
+    """Construct one frozen T044 adapter after the shard process is isolated."""
+
+    from sts_combat_rl.sim.lightspeed import LightSpeedAdapter
+
+    return LightSpeedAdapter(seed=1, ascension=20)
+
+
+def run_t064_stage5_dependent_one_record_smoke(
+    *,
+    cohort_path: Path,
+    checkpoint_path: Path,
+    timeout_seconds: float = 300.0,
+) -> Mapping[str, Any]:
+    """Fork, then run both real dependent roles on one frozen cohort record."""
+
+    if os.name == "nt" or "fork" not in multiprocessing.get_all_start_methods():
+        raise RuntimeError("T064 Stage5 real dependent smoke requires WSL/Linux")
+    if not cohort_path.is_file() or not checkpoint_path.is_file():
+        raise ValueError("T064 Stage5 real dependent smoke input is missing")
+    context = multiprocessing.get_context("fork")
+    receiver, sender = context.Pipe(duplex=False)
+
+    def run_one_record() -> None:
+        try:
+            arms = _build_t064_stage5_dependent_arms(checkpoint_path)
+            report = run_de_assisted_fixed_cohort_comparison_from_cohort_path(
+                _t064_stage5_lightspeed_adapter_factory,
+                cohort_path,
+                controller_arms=arms,
+                action_space=arms[0][2].action_space,
+                max_battle_steps=200,
+                run_scale="fixed",
+                record_range="0:1",
+            )
+            sender.send(
+                {
+                    "worker_pid": os.getpid(),
+                    "roles": [arm.role for arm in report.arms],
+                    "result_counts": [arm.report.total_battles for arm in report.arms],
+                    "evaluation_successful": report.evaluation_successful,
+                    "problems": report.problems,
+                }
+            )
+        except BaseException as exc:
+            sender.send({"worker_pid": os.getpid(), "error": repr(exc)})
+        finally:
+            sender.close()
+
+    process = context.Process(target=run_one_record, name="t064-stage5-real-smoke")
+    process.start()
+    sender.close()
+    try:
+        if not receiver.poll(timeout_seconds):
+            raise TimeoutError("T064 Stage5 real dependent one-record smoke timed out")
+        try:
+            summary = receiver.recv()
+        except EOFError as exc:
+            raise RuntimeError(
+                "T064 Stage5 real dependent smoke exited without a result"
+            ) from exc
+    finally:
+        receiver.close()
+        process.join(timeout=5)
+        if process.is_alive():
+            process.terminate()
+            process.join()
+    if process.exitcode != 0 or summary.get("error") is not None:
+        raise RuntimeError(
+            "T064 Stage5 real dependent one-record smoke failed: "
+            f"{summary.get('error', f'exit code {process.exitcode}')}"
+        )
+    if (
+        tuple(summary.get("roles", ())) != T044_DEPENDENT_ROLES
+        or summary.get("result_counts") != [1, 1]
+        or summary.get("evaluation_successful") is not True
+        or summary.get("problems") != []
+    ):
+        raise ValueError("T064 Stage5 real dependent one-record smoke is incomplete")
+    return summary
+
+
 def run_t064_stage5_dependent_production(
     *,
     cohort_path: Path,
@@ -2442,47 +2574,20 @@ def run_t064_stage5_dependent_production(
     shard_output_dir: Path,
     merged_output_path: Path,
 ) -> tuple[Any, list[dict[str, Any]]]:
-    """Construct the existing LightSpeed T044 dependent arms for one checkpoint."""
+    """Fork first, then construct the frozen Torch-dependent arms per shard."""
 
-    from sts_combat_rl.commands.lightspeed_cli import (
-        MODEL_GUIDED_ORACLE_V2_LABEL,
-        RAW_CHECKPOINT_POLICY_LABEL,
-    )
-    from sts_combat_rl.sim.action_space import ActionSpaceConfig
-    from sts_combat_rl.sim.lightspeed import LightSpeedAdapter
-    from sts_combat_rl.commands.model_guided_oracle_search import (
-        build_torch_guidance_scorer_from_checkpoint,
-    )
-    from sts_combat_rl.sim.model_guided_oracle_search import (
-        ModelGuidedOracleSearchV2Controller,
-    )
-    from sts_combat_rl.sim.search_guidance_policy import SearchGuidancePolicyController
-
-    action_space = ActionSpaceConfig.initial_no_potions()
-    scorer = build_torch_guidance_scorer_from_checkpoint(checkpoint_path)
-    guided = ModelGuidedOracleSearchV2Controller(
-        simulations=T044_SEARCH_BUDGET,
-        scorer=scorer,
-        policy_probability_weight=T044_GUIDANCE_WEIGHT,
-        action_space=action_space,
-    )
-    raw = SearchGuidancePolicyController(scorer)
     return run_t064_t044_dependent_stage(
-        adapter_factory=lambda: LightSpeedAdapter(seed=1, ascension=20),
+        adapter_factory=_t064_stage5_lightspeed_adapter_factory,
         cohort_path=cohort_path,
-        controller_arms=(
-            (
-                MODEL_GUIDED_ORACLE_V2_LABEL,
-                T044_DEPENDENT_ROLES[0],
-                guided,
-            ),
-            (RAW_CHECKPOINT_POLICY_LABEL, T044_DEPENDENT_ROLES[1], raw),
-        ),
+        controller_arms=None,
         cohort_kind=cohort_kind,
         log_dir=log_dir,
         shard_output_dir=shard_output_dir,
         merged_output_path=merged_output_path,
         dispatch_backend="fork",
+        controller_arms_factory=lambda: _build_t064_stage5_dependent_arms(
+            checkpoint_path
+        ),
     )
 
 

@@ -422,6 +422,14 @@ ranges:
 - 38-record `assist_hp50` cohort:
   `0:3,3:6,6:9,9:12,12:15,15:18,18:20,20:22,22:24,24:26,26:28,28:30,30:32,32:34,34:36,36:38`.
 
+For these dependent stages, the WSL parent forks the 16 frozen range workers
+before loading Torch or constructing the checkpoint scorer/controllers. Each
+child independently loads the exact checkpoint and constructs both dependent
+controllers and its LightSpeed adapter after isolation. No initialized Torch
+model, scorer, or mutable runtime state is inherited from the fork parent.
+This topology changes no role, action-space, checkpoint, cohort, range, merge,
+or report semantics.
+
 Merge retains the existing T044 report schema and original cohort order.
 
 ### T052 natural Boss/later-act cohort
@@ -614,6 +622,13 @@ and 462,895 bytes; it may be reused when the boundary is
 configuration, trainer, batch-plan, metadata, provenance, and file-identity
 check above passes. Its older producer provenance remains unchanged.
 
+The Stage-5 dependent fork-deadlock repair has
+`earliest_affected_stage=5`. Within Stage 5 only checkpoint-dependent worker
+construction/execution is affected. Strictly validated Stage-0--4 outputs, all
+four checkpoints, and the two completed checkpoint-independent T044 reports
+remain reusable with their original provenance; all eight dependent stages and
+their downstream consumers rerun after exact-head approval.
+
 Before formal Stage 4--7 execution, run one cheap readiness pass that verifies:
 
 - the local and remote execution head equal the exact head named in the latest
@@ -644,9 +659,10 @@ Before formal Stage 4--7 execution, run one cheap readiness pass that verifies:
 - the real Stage-7 aggregator accepts representative complete fixture/mock
   inputs and derives a complete terminal decision; and
 - the existing one-record-range T044 simulator-dependent route smoke passes
-  with its test adapter. A real WSL one-record smoke may additionally be used
-  when useful, but it is not a substitute for the frozen 16-worker formal
-  Stage-5/6 execution.
+  with its test adapter, and a bounded real WSL one-record dependent-route smoke
+  loads an actual retained checkpoint only after fork and completes both frozen
+  roles without deadlock. This smoke is not a substitute for the frozen
+  16-worker formal Stage-5/6 execution.
 
 The corrected task document and exact-head approval are both required before
 formal execution resumes. The readiness pass must finish before the first
@@ -730,6 +746,8 @@ checks, and `git diff --check`, plus focused tests for:
 - deterministic batch plans and exact exposure parity;
 - exact T044 persisted role strings, frozen ranges, and range/arm-subset merge
   compatibility;
+- Stage-5 dependent scorer/controller construction only after fork, 16 distinct
+  isolated workers, and the bounded real WSL one-record dependent-route smoke;
 - manifest-driven T070 checkpoint substitution and unchanged old-manifest
   validation;
 - aggregate four-run training report cardinality/order;
