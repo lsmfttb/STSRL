@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 import argparse
-from dataclasses import replace
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import dataclass, replace
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
 import gc
 import json
 import multiprocessing
@@ -96,6 +96,14 @@ T064_INITIALIZATION_SHA256 = (
 # architecture.  Keep this override local to T064; the shared training
 # configuration default remains 128 for legacy callers.
 T064_TRAINING_HIDDEN_SIZE = 16
+T064_STAGE4_MAX_WORKERS = 2
+T064_TRAINING_RUN_LABELS = tuple(f"{arm}/{seed}" for arm, seed in TRAINING_RUN_ORDER)
+T064_RETAINED_REUSABLE_CHECKPOINT_IDENTITIES = {
+    ("static_mixture_v1", 64001): {
+        "sha256": "c0c38c239047f6be67e983768e53bd680007e9cba117e17c7d226583ed751193",
+        "bytes": 462895,
+    }
+}
 
 # These are retained history, never inputs to an accepted rerun.  Keeping them
 # in the sole stage summary avoids a fifth T064 log-index artifact.
@@ -117,6 +125,13 @@ KNOWN_PRIOR_ATTEMPTS = (
     },
     {"kind": "windows_path_stage1", "return_code": 1, "shards": 0},
     {"kind": "hand_entered_commit_rerun", "wall_clock_seconds": 30.0, "artifacts": 0},
+    {
+        "kind": "serial_stage4_interrupted_after_one_complete_run",
+        "status": "retained_for_strict_reuse_audit",
+        "run": "static_mixture_v1/64001",
+        "checkpoint_sha256": "c0c38c239047f6be67e983768e53bd680007e9cba117e17c7d226583ed751193",
+        "checkpoint_bytes": 462895,
+    },
     {"kind": "other_terminated_attempts", "status": "retained_non_evidence"},
 )
 
@@ -195,6 +210,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--stage4-checkpoint-root", type=Path)
     parser.add_argument("--stage4-frozen-t070-manifest", type=Path)
     parser.add_argument("--stage4-training-report", type=Path)
+    parser.add_argument(
+        "--stage4-earliest-affected-run",
+        choices=T064_TRAINING_RUN_LABELS,
+        help=(
+            "Allow strict reuse only for completed runs before this frozen run; "
+            "omit to require four absent checkpoint targets."
+        ),
+    )
     parser.add_argument("--stage5-cohort", type=Path)
     parser.add_argument("--stage5-checkpoint", type=Path)
     parser.add_argument("--stage5-cohort-kind", choices=("assist_0", "assist_hp50"))
@@ -328,12 +351,32 @@ def main(argv: Sequence[str] | None = None) -> int:
             parser.error("Stage4 report path must be t064-training-run-report.json")
         if args.stage4_initialization_sha256 != T064_INITIALIZATION_SHA256:
             parser.error("Stage4 initialization SHA-256 is not the frozen T064 input")
+        reusable_runs: dict[tuple[str, int], Mapping[str, Any]] = {}
+
+        def validate_reusable_checkpoint(
+            arm: str, seed: int, checkpoint_path: Path
+        ) -> Mapping[str, Any]:
+            return _validate_reusable_t064_stage4_isolated(
+                _T064Stage4RunRequest(
+                    manifest_path=args.dry_run_manifest,
+                    trainer_input_path=args.stage4_trainer_input,
+                    initialization_checkpoint_path=args.stage4_initialization,
+                    initialization_sha256=args.stage4_initialization_sha256,
+                    checkpoint_path=checkpoint_path,
+                    arm=arm,
+                    seed=seed,
+                )
+            )
+
         frozen_t070_manifest = _preflight_t064_stage4_paths(
             manifest_path=args.dry_run_manifest,
             training_report_path=args.stage4_training_report,
             checkpoint_root=args.stage4_checkpoint_root,
             frozen_t070_manifest_path=args.stage4_frozen_t070_manifest,
             code_commit=args.code_commit,
+            earliest_affected_run=args.stage4_earliest_affected_run,
+            reusable_checkpoint_validator=validate_reusable_checkpoint,
+            reusable_runs=reusable_runs,
         )
         report = run_t064_stage4_production(
             manifest_path=args.dry_run_manifest,
@@ -342,6 +385,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             initialization_sha256=args.stage4_initialization_sha256,
             checkpoint_root=args.stage4_checkpoint_root,
             frozen_t070_manifest_path=args.stage4_frozen_t070_manifest,
+            earliest_affected_run=args.stage4_earliest_affected_run,
+            reusable_runs=reusable_runs,
         )
         _validate_completed_t064_training_report(report)
         _write_new_compact_json_atomically(args.stage4_training_report, report)
@@ -749,6 +794,20 @@ def refuse_overwrite(path: Path) -> None:
         raise ValueError(f"T064 stage refuses to overwrite existing output: {path}")
 
 
+def _t064_reusable_run_keys(
+    earliest_affected_run: str | None,
+) -> tuple[tuple[str, int], ...]:
+    """Return the canonical prefix excluded by a reviewed per-run boundary."""
+
+    if earliest_affected_run is None:
+        return ()
+    try:
+        boundary = T064_TRAINING_RUN_LABELS.index(earliest_affected_run)
+    except ValueError as exc:
+        raise ValueError("T064 earliest affected run is not frozen") from exc
+    return TRAINING_RUN_ORDER[:boundary]
+
+
 def _preflight_t064_stage4_paths(
     *,
     manifest_path: Path,
@@ -756,8 +815,13 @@ def _preflight_t064_stage4_paths(
     checkpoint_root: Path,
     frozen_t070_manifest_path: Path,
     code_commit: str,
+    earliest_affected_run: str | None = None,
+    reusable_checkpoint_validator: (
+        Callable[[str, int, Path], Mapping[str, Any]] | None
+    ) = None,
+    reusable_runs: dict[tuple[str, int], Mapping[str, Any]] | None = None,
 ) -> Mapping[str, Any]:
-    """Reject every Stage 4 output/path error before training changes anything."""
+    """Validate-or-refuse every Stage 4 output before training changes anything."""
 
     if training_report_path.parent.resolve() != manifest_path.parent.resolve():
         raise ValueError("T064 Stage4 report must share the curriculum manifest root")
@@ -774,8 +838,26 @@ def _preflight_t064_stage4_paths(
     frozen = json.loads(frozen_t070_manifest_path.read_text(encoding="utf-8"))
     if not isinstance(frozen, Mapping):
         raise ValueError("T064 Stage4 frozen T070 manifest is invalid")
+    reusable = set(_t064_reusable_run_keys(earliest_affected_run))
     for arm, seed in TRAINING_RUN_ORDER:
-        refuse_overwrite(checkpoint_root / f"{arm}-{seed}.pt")
+        checkpoint = checkpoint_root / f"{arm}-{seed}.pt"
+        partial = checkpoint.with_suffix(checkpoint.suffix + ".tmp")
+        if partial.exists():
+            raise ValueError(f"T064 Stage4 partial checkpoint blocks reuse: {partial}")
+        if not checkpoint.exists():
+            continue
+        if (arm, seed) not in reusable:
+            raise ValueError(
+                "T064 Stage4 existing checkpoint is not excluded by "
+                f"earliest_affected_run: {checkpoint}"
+            )
+        if reusable_checkpoint_validator is None:
+            raise ValueError(
+                f"T064 Stage4 existing checkpoint requires strict validation: {checkpoint}"
+            )
+        validated = reusable_checkpoint_validator(arm, seed, checkpoint)
+        if reusable_runs is not None:
+            reusable_runs[(arm, seed)] = validated
     # Establish the stable root before expensive training.  This makes an
     # unwritable/missing artifact location fail before any checkpoint is made.
     training_report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1343,7 +1425,7 @@ def build_t064_stage_execution_plan(
         },
         {
             "stage": "stage4_training",
-            "workers": 1,
+            "workers": T064_STAGE4_MAX_WORKERS,
             "shards": 4,
             "runs": [f"{arm}/{seed}" for arm, seed in TRAINING_RUN_ORDER],
         },
@@ -1671,39 +1753,31 @@ def t064_plan_indices(
     return result
 
 
-def run_t064_paired_training(
-    *,
+def _t064_torch_training_config(seed: int) -> Any:
+    from sts_combat_rl.sim.torch_policy_value import TorchPolicyValueTrainingConfig
+
+    return TorchPolicyValueTrainingConfig(
+        epochs=900,
+        learning_rate=0.001,
+        hidden_size=T064_TRAINING_HIDDEN_SIZE,
+        hp_loss_scale=100.0,
+        policy_loss_weight=1.0,
+        outcome_loss_weight=1.0,
+        hp_loss_weight=1.0,
+        resource_loss_weight=1.0,
+        batch_size=32,
+        seed=seed,
+        adam_betas=(0.9, 0.999),
+        adam_epsilon=1e-8,
+        weight_decay=0.0,
+        amsgrad=False,
+        gradient_clip_norm=10.0,
+    )
+
+
+def _validated_t064_training_plans(
     selected_manifest: Mapping[str, Any],
-    dataset: Any,
-    initialization_checkpoint_path: Path,
-    initialization_sha256: str,
-    trainer_input_path: Path,
-    identity_to_trainer_index: Mapping[str, int],
-    checkpoint_paths: Mapping[tuple[str, int], Path],
-) -> dict[str, Any]:
-    """Run the four fixed CPU jobs using the existing trainer/checkpoint writer.
-
-    The T009 broad gate stays closed; this passes only the named narrow
-    curriculum override.  Every call reloads the same checkpoint then lets the
-    existing trainer deep-copy it and allocate a new Adam optimizer.
-    """
-
-    from sts_combat_rl.commands.pytorch_search_guidance import (
-        build_pytorch_search_guidance_training_data_provenance,
-    )
-    from sts_combat_rl.sim.torch_policy_value import (
-        TorchPolicyValueTrainingConfig,
-        load_torch_policy_value_checkpoint,
-        save_torch_policy_value_checkpoint,
-        train_torch_policy_value,
-    )
-    from sts_combat_rl.sim.training_gate import build_training_gate_report
-    import torch
-
-    if initialization_sha256 != T064_INITIALIZATION_SHA256:
-        raise ValueError("T064 initialization SHA-256 is not the frozen input")
-    if _sha256(initialization_checkpoint_path) != initialization_sha256:
-        raise ValueError("T064 initialization checkpoint identity mismatch")
+) -> dict[tuple[str, int], Mapping[str, Any]]:
     selected = selected_manifest.get("selected_buckets")
     manifest_plans = selected_manifest.get("batch_plans")
     if not isinstance(selected, Mapping) or not isinstance(manifest_plans, list):
@@ -1719,35 +1793,150 @@ def run_t064_paired_training(
     if manifest_plans != expected_summaries:
         raise ValueError("T064 manifest batch plans do not rehash to frozen plans")
     validate_exposure_parity(regenerated)
-    plans_by_run = {(plan["arm"], plan["seed"]): plan for plan in regenerated}
+    return {(plan["arm"], plan["seed"]): plan for plan in regenerated}
+
+
+def _t064_training_data_provenance(
+    dataset: Any,
+    trainer_input_path: Path,
+    *,
+    trainer_sha256: str,
+    trainer_byte_count: int,
+    gate_report: Any,
+) -> dict[str, Any]:
+    from sts_combat_rl.commands.pytorch_search_guidance import (
+        build_pytorch_search_guidance_training_data_provenance,
+    )
+
+    payload = build_pytorch_search_guidance_training_data_provenance(
+        dataset,
+        trainer_input_path,
+        trainer_input_sha256=trainer_sha256,
+        trainer_input_byte_count=trainer_byte_count,
+        gate_report=gate_report,
+    )
+    # The checkpoint writer applies the same JSON-safe normalization before
+    # persistence (notably stringifying integer mapping keys in gate evidence).
+    return json.loads(json.dumps(payload, allow_nan=False, sort_keys=True))
+
+
+def _validate_loaded_t064_run_checkpoint(
+    loaded: Any,
+    *,
+    arm: str,
+    seed: int,
+    initialization_sha256: str,
+    plan: Mapping[str, Any],
+    expected_provenance: Mapping[str, Any],
+) -> None:
+    expected_config = _t064_torch_training_config(seed)
+    expected_metadata = {
+        "task_id": "T064",
+        "arm": arm,
+        "seed": seed,
+        "initialization_sha256": initialization_sha256,
+        "batch_plan_sha256": plan["batch_plan_sha256"],
+    }
+    if loaded.config != expected_config or any(
+        loaded.metadata.get(key) != value for key, value in expected_metadata.items()
+    ):
+        raise ValueError("T064 checkpoint frozen run config/metadata mismatch")
+    if loaded.training_data_provenance != dict(expected_provenance):
+        raise ValueError("T064 checkpoint trainer provenance mismatch")
+    model = loaded.model
+    if (
+        model.hidden_size != T064_TRAINING_HIDDEN_SIZE
+        or any(parameter.device.type != "cpu" for parameter in model.parameters())
+        or any(buffer.device.type != "cpu" for buffer in model.buffers())
+    ):
+        raise ValueError("T064 checkpoint model metadata/device mismatch")
+
+
+def _t064_training_run_entry(
+    *,
+    arm: str,
+    seed: int,
+    initialization_sha256: str,
+    trainer_sha256: str,
+    trainer_byte_count: int,
+    plan: Mapping[str, Any],
+    checkpoint: Mapping[str, Any],
+    completion_status: str,
+    problems: Sequence[str],
+    disposition: str,
+) -> dict[str, Any]:
+    return {
+        "arm": arm,
+        "seed": seed,
+        "initialization_sha256": initialization_sha256,
+        "configuration": frozen_training_configuration(seed=seed),
+        "trainer_input_sha256": trainer_sha256,
+        "trainer_input_bytes": trainer_byte_count,
+        "batch_plan_sha256": plan["batch_plan_sha256"],
+        "per_bucket_exposure_counts": _bucket_exposure_counts(plan),
+        "per_source_exposure_counts": plan["per_source_exposure_counts"],
+        "checkpoint": dict(checkpoint),
+        "checkpoint_metadata_linkage": {
+            "schema_id": "torch-policy-value-checkpoint-v1",
+            "training_ok": completion_status == "complete",
+            "task_id": "T064",
+            "arm": arm,
+            "seed": seed,
+            "initialization_sha256": initialization_sha256,
+            "batch_plan_sha256": plan["batch_plan_sha256"],
+            "trainer_input_sha256": trainer_sha256,
+            "trainer_input_bytes": trainer_byte_count,
+        },
+        "run_disposition": disposition,
+        "completion_status": completion_status,
+        "problems": list(problems),
+    }
+
+
+def run_t064_paired_training(
+    *,
+    selected_manifest: Mapping[str, Any],
+    dataset: Any,
+    initialization_checkpoint_path: Path,
+    initialization_sha256: str,
+    trainer_input_path: Path,
+    identity_to_trainer_index: Mapping[str, int],
+    checkpoint_paths: Mapping[tuple[str, int], Path],
+    run_order: Sequence[tuple[str, int]] = TRAINING_RUN_ORDER,
+) -> dict[str, Any]:
+    """Run fixed CPU jobs sequentially; production isolates at most two calls."""
+
+    from sts_combat_rl.sim.torch_policy_value import (
+        load_torch_policy_value_checkpoint,
+        save_torch_policy_value_checkpoint,
+        train_torch_policy_value,
+    )
+    from sts_combat_rl.sim.training_gate import build_training_gate_report
+    import torch
+
+    if initialization_sha256 != T064_INITIALIZATION_SHA256:
+        raise ValueError("T064 initialization SHA-256 is not the frozen input")
+    if _sha256(initialization_checkpoint_path) != initialization_sha256:
+        raise ValueError("T064 initialization checkpoint identity mismatch")
+    plans_by_run = _validated_t064_training_plans(selected_manifest)
+    if any(run not in TRAINING_RUN_ORDER for run in run_order) or len(
+        set(run_order)
+    ) != len(run_order):
+        raise ValueError("T064 requested training run inventory is invalid")
     trainer_sha256 = _sha256(trainer_input_path)
-    trainer_bytes = trainer_input_path.read_bytes()
+    trainer_byte_count = trainer_input_path.stat().st_size
     runs: list[dict[str, Any]] = []
     torch.use_deterministic_algorithms(True)
     torch.set_num_threads(1)
-    for arm, seed in TRAINING_RUN_ORDER:
+    for arm, seed in run_order:
         plan = plans_by_run[(arm, seed)]
         output = checkpoint_paths.get((arm, seed))
         if output is None:
             raise ValueError("T064 training checkpoint path is missing")
+        temporary = output.with_suffix(output.suffix + ".tmp")
         refuse_overwrite(output)
-        config = TorchPolicyValueTrainingConfig(
-            epochs=900,
-            learning_rate=0.001,
-            hidden_size=T064_TRAINING_HIDDEN_SIZE,
-            hp_loss_scale=100.0,
-            policy_loss_weight=1.0,
-            outcome_loss_weight=1.0,
-            hp_loss_weight=1.0,
-            resource_loss_weight=1.0,
-            batch_size=32,
-            seed=seed,
-            adam_betas=(0.9, 0.999),
-            adam_epsilon=1e-8,
-            weight_decay=0.0,
-            amsgrad=False,
-            gradient_clip_norm=10.0,
-        )
+        refuse_overwrite(temporary)
+        config = _t064_torch_training_config(seed)
         initial = load_torch_policy_value_checkpoint(
             str(initialization_checkpoint_path)
         )
@@ -1767,17 +1956,18 @@ def run_t064_paired_training(
             "sha256": "0" * 64,
             "bytes": 0,
         }
-        linkage: dict[str, Any] = {}
         if result.report.training_ok:
+            provenance = _t064_training_data_provenance(
+                dataset,
+                trainer_input_path,
+                trainer_sha256=trainer_sha256,
+                trainer_byte_count=trainer_byte_count,
+                gate_report=gate,
+            )
             save_torch_policy_value_checkpoint(
                 result,
-                str(output),
-                training_data_provenance=build_pytorch_search_guidance_training_data_provenance(
-                    dataset,
-                    trainer_input_path,
-                    trainer_input_bytes=trainer_bytes,
-                    gate_report=gate,
-                ),
+                str(temporary),
+                training_data_provenance=provenance,
                 metadata={
                     "task_id": "T064",
                     "arm": arm,
@@ -1786,46 +1976,247 @@ def run_t064_paired_training(
                     "batch_plan_sha256": plan["batch_plan_sha256"],
                 },
             )
-            written = load_torch_policy_value_checkpoint(str(output))
-            if (
-                written.config != config
-                or written.metadata.get("batch_plan_sha256")
-                != plan["batch_plan_sha256"]
-            ):
-                raise ValueError(
-                    "T064 written checkpoint metadata/config verification failed"
-                )
+            written = load_torch_policy_value_checkpoint(str(temporary))
+            _validate_loaded_t064_run_checkpoint(
+                written,
+                arm=arm,
+                seed=seed,
+                initialization_sha256=initialization_sha256,
+                plan=plan,
+                expected_provenance=provenance,
+            )
+            os.replace(temporary, output)
             checkpoint = _file_identity(output)
-            linkage = {
-                "schema_id": "torch-policy-value-checkpoint-v1",
-                "training_ok": True,
-            }
         else:
             problems.append("T064 checkpoint was not written")
         runs.append(
-            {
-                "arm": arm,
-                "seed": seed,
-                "initialization_sha256": initialization_sha256,
-                "configuration": frozen_training_configuration(seed=seed),
-                "trainer_input_sha256": trainer_sha256,
-                "batch_plan_sha256": plan["batch_plan_sha256"],
-                "per_bucket_exposure_counts": _bucket_exposure_counts(plan),
-                "per_source_exposure_counts": plan["per_source_exposure_counts"],
-                "checkpoint": checkpoint,
-                "checkpoint_metadata_linkage": linkage,
-                "completion_status": "complete"
-                if result.report.training_ok
-                else "failed",
-                "problems": problems,
-            }
+            _t064_training_run_entry(
+                arm=arm,
+                seed=seed,
+                initialization_sha256=initialization_sha256,
+                trainer_sha256=trainer_sha256,
+                trainer_byte_count=trainer_byte_count,
+                plan=plan,
+                checkpoint=checkpoint,
+                completion_status="complete" if result.report.training_ok else "failed",
+                problems=problems,
+                disposition="trained_new",
+            )
         )
-    report = {
+    return {
         "schema_id": "t064-training-run-report-v1",
         "format_version": 1,
         "runs": runs,
     }
-    return report
+
+
+@dataclass(frozen=True)
+class _T064Stage4RunRequest:
+    manifest_path: Path
+    trainer_input_path: Path
+    initialization_checkpoint_path: Path
+    initialization_sha256: str
+    checkpoint_path: Path
+    arm: str
+    seed: int
+
+
+def _load_t064_stage4_worker_inputs(request: _T064Stage4RunRequest) -> tuple[Any, Any]:
+    with request.manifest_path.open(encoding="utf-8") as stream:
+        manifest = load_compact_json(stream)
+    with request.trainer_input_path.open(encoding="utf-8") as stream:
+        dataset = load_trainer_input_dataset_jsonl(stream)
+    order = dataset.generation_metadata.get("t064_complete_identity_order")
+    if not isinstance(order, list) or any(not isinstance(item, str) for item in order):
+        raise ValueError("T064 Stage4 trainer input lacks identity-bound order")
+    if len(set(order)) != len(order):
+        raise ValueError("T064 Stage4 trainer input identity order is duplicated")
+    return manifest, dataset
+
+
+def _run_t064_stage4_worker(request: _T064Stage4RunRequest) -> Mapping[str, Any]:
+    manifest, dataset = _load_t064_stage4_worker_inputs(request)
+    order = dataset.generation_metadata["t064_complete_identity_order"]
+    report = run_t064_paired_training(
+        selected_manifest=manifest,
+        dataset=dataset,
+        initialization_checkpoint_path=request.initialization_checkpoint_path,
+        initialization_sha256=request.initialization_sha256,
+        trainer_input_path=request.trainer_input_path,
+        identity_to_trainer_index={
+            identity: index for index, identity in enumerate(order)
+        },
+        checkpoint_paths={(request.arm, request.seed): request.checkpoint_path},
+        run_order=((request.arm, request.seed),),
+    )
+    run = report["runs"][0]
+    del report, dataset, manifest
+    gc.collect()
+    return run
+
+
+def _validate_reusable_t064_stage4_worker(
+    request: _T064Stage4RunRequest,
+) -> Mapping[str, Any]:
+    from sts_combat_rl.sim.torch_policy_value import (
+        load_torch_policy_value_checkpoint,
+    )
+    from sts_combat_rl.sim.training_gate import build_training_gate_report
+
+    if _sha256(request.initialization_checkpoint_path) != request.initialization_sha256:
+        raise ValueError("T064 initialization checkpoint identity mismatch")
+    manifest, dataset = _load_t064_stage4_worker_inputs(request)
+    plans = _validated_t064_training_plans(manifest)
+    plan = plans[(request.arm, request.seed)]
+    trainer_sha256 = _sha256(request.trainer_input_path)
+    trainer_byte_count = request.trainer_input_path.stat().st_size
+    gate = build_training_gate_report(dataset, override="narrow_curriculum")
+    expected_provenance = _t064_training_data_provenance(
+        dataset,
+        request.trainer_input_path,
+        trainer_sha256=trainer_sha256,
+        trainer_byte_count=trainer_byte_count,
+        gate_report=gate,
+    )
+    loaded = load_torch_policy_value_checkpoint(str(request.checkpoint_path))
+    _validate_loaded_t064_run_checkpoint(
+        loaded,
+        arm=request.arm,
+        seed=request.seed,
+        initialization_sha256=request.initialization_sha256,
+        plan=plan,
+        expected_provenance=expected_provenance,
+    )
+    checkpoint_identity = _file_identity(request.checkpoint_path)
+    retained_identity = T064_RETAINED_REUSABLE_CHECKPOINT_IDENTITIES.get(
+        (request.arm, request.seed)
+    )
+    if retained_identity is not None and any(
+        checkpoint_identity[field] != value
+        for field, value in retained_identity.items()
+    ):
+        raise ValueError("T064 retained checkpoint file identity mismatch")
+    return _t064_training_run_entry(
+        arm=request.arm,
+        seed=request.seed,
+        initialization_sha256=request.initialization_sha256,
+        trainer_sha256=trainer_sha256,
+        trainer_byte_count=trainer_byte_count,
+        plan=plan,
+        checkpoint=checkpoint_identity,
+        completion_status="complete",
+        problems=(),
+        disposition="reused_validated",
+    )
+
+
+def _t064_stage4_process_executor(max_workers: int) -> ProcessPoolExecutor:
+    return ProcessPoolExecutor(
+        max_workers=max_workers,
+        mp_context=multiprocessing.get_context("spawn"),
+    )
+
+
+def _validate_reusable_t064_stage4_isolated(
+    request: _T064Stage4RunRequest,
+) -> Mapping[str, Any]:
+    with _t064_stage4_process_executor(1) as executor:
+        return executor.submit(_validate_reusable_t064_stage4_worker, request).result()
+
+
+def _canonical_t064_training_report(
+    runs: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    by_key: dict[tuple[str, int], Mapping[str, Any]] = {}
+    for run in runs:
+        arm = run.get("arm")
+        seed = run.get("seed")
+        if (
+            not isinstance(arm, str)
+            or not isinstance(seed, int)
+            or isinstance(seed, bool)
+        ):
+            raise ValueError("T064 completed/reused run inventory is invalid")
+        key = (arm, seed)
+        if key not in TRAINING_RUN_ORDER or key in by_key:
+            raise ValueError("T064 completed/reused run inventory is invalid")
+        by_key[key] = run
+    if set(by_key) != set(TRAINING_RUN_ORDER):
+        raise ValueError("T064 Stage4 did not produce all four frozen runs")
+    return {
+        "schema_id": "t064-training-run-report-v1",
+        "format_version": 1,
+        "runs": [dict(by_key[key]) for key in TRAINING_RUN_ORDER],
+    }
+
+
+def _validate_cached_t064_reuse_summary(
+    run: Mapping[str, Any],
+    *,
+    key: tuple[str, int],
+    plan: Mapping[str, Any],
+    initialization_sha256: str,
+    trainer_sha256: str,
+    trainer_byte_count: int,
+) -> None:
+    arm, seed = key
+    expected = {
+        "arm": arm,
+        "seed": seed,
+        "initialization_sha256": initialization_sha256,
+        "configuration": frozen_training_configuration(seed=seed),
+        "trainer_input_sha256": trainer_sha256,
+        "trainer_input_bytes": trainer_byte_count,
+        "batch_plan_sha256": plan["batch_plan_sha256"],
+        "per_bucket_exposure_counts": _bucket_exposure_counts(plan),
+        "per_source_exposure_counts": plan["per_source_exposure_counts"],
+        "run_disposition": "reused_validated",
+        "completion_status": "complete",
+        "problems": [],
+    }
+    if any(run.get(field) != value for field, value in expected.items()):
+        raise ValueError("T064 cached reusable run summary no longer matches inputs")
+    linkage = run.get("checkpoint_metadata_linkage")
+    if not isinstance(linkage, Mapping) or any(
+        linkage.get(field) != value
+        for field, value in {
+            "schema_id": "torch-policy-value-checkpoint-v1",
+            "training_ok": True,
+            "task_id": "T064",
+            "arm": arm,
+            "seed": seed,
+            "initialization_sha256": initialization_sha256,
+            "batch_plan_sha256": plan["batch_plan_sha256"],
+            "trainer_input_sha256": trainer_sha256,
+            "trainer_input_bytes": trainer_byte_count,
+        }.items()
+    ):
+        raise ValueError("T064 cached reusable checkpoint linkage is invalid")
+
+
+def _run_t064_stage4_requests(
+    requests: Sequence[_T064Stage4RunRequest],
+) -> list[Mapping[str, Any]]:
+    if not requests:
+        return []
+    completed: list[Mapping[str, Any]] = []
+    failures: list[BaseException] = []
+    worker_count = min(T064_STAGE4_MAX_WORKERS, len(requests))
+    with _t064_stage4_process_executor(worker_count) as executor:
+        futures = [
+            executor.submit(_run_t064_stage4_worker, request) for request in requests
+        ]
+        for future in as_completed(futures):
+            try:
+                completed.append(future.result())
+            except BaseException as exc:
+                failures.append(exc)
+    if failures:
+        raise RuntimeError(
+            "T064 Stage4 worker failed; other complete checkpoints are retained "
+            "for a later strict reuse audit"
+        ) from failures[0]
+    return completed
 
 
 def run_t064_stage4_production(
@@ -1836,31 +2227,75 @@ def run_t064_stage4_production(
     initialization_sha256: str,
     checkpoint_root: Path,
     frozen_t070_manifest_path: Path,
+    earliest_affected_run: str | None = None,
+    reusable_runs: Mapping[tuple[str, int], Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
-    """Load fixed artifacts and run the one four-run Stage 4 production route."""
+    """Run missing jobs in at most two isolated workers and canonically aggregate."""
 
+    del frozen_t070_manifest_path  # Stage-4 preflight owns this frozen input.
+    reusable_keys = set(_t064_reusable_run_keys(earliest_affected_run))
+    validated_reuse = dict(reusable_runs or {})
     with manifest_path.open(encoding="utf-8") as stream:
         manifest = load_compact_json(stream)
-    with trainer_input_path.open(encoding="utf-8") as stream:
-        dataset = load_trainer_input_dataset_jsonl(stream)
-    order = dataset.generation_metadata.get("t064_complete_identity_order")
-    if not isinstance(order, list) or any(not isinstance(item, str) for item in order):
-        raise ValueError("T064 Stage4 trainer input lacks identity-bound order")
+    plans = _validated_t064_training_plans(manifest)
+    trainer_sha256 = _sha256(trainer_input_path)
+    trainer_byte_count = trainer_input_path.stat().st_size
     paths = {
         (arm, seed): checkpoint_root / f"{arm}-{seed}.pt"
         for arm, seed in TRAINING_RUN_ORDER
     }
-    return run_t064_paired_training(
-        selected_manifest=manifest,
-        dataset=dataset,
-        initialization_checkpoint_path=initialization_checkpoint_path,
-        initialization_sha256=initialization_sha256,
-        trainer_input_path=trainer_input_path,
-        identity_to_trainer_index={
-            identity: index for index, identity in enumerate(order)
-        },
-        checkpoint_paths=paths,
-    )
+    for path in paths.values():
+        partial = path.with_suffix(path.suffix + ".tmp")
+        if partial.exists():
+            raise ValueError(
+                f"T064 Stage4 partial checkpoint blocks execution: {partial}"
+            )
+    for key, path in paths.items():
+        if not path.exists():
+            continue
+        if key not in reusable_keys:
+            raise ValueError("T064 Stage4 found an affected existing checkpoint")
+        if key not in validated_reuse:
+            validated_reuse[key] = _validate_reusable_t064_stage4_isolated(
+                _T064Stage4RunRequest(
+                    manifest_path=manifest_path,
+                    trainer_input_path=trainer_input_path,
+                    initialization_checkpoint_path=initialization_checkpoint_path,
+                    initialization_sha256=initialization_sha256,
+                    checkpoint_path=path,
+                    arm=key[0],
+                    seed=key[1],
+                )
+            )
+        if validated_reuse[key].get("checkpoint") != _file_identity(path):
+            raise ValueError("T064 reusable checkpoint changed after preflight")
+        _validate_cached_t064_reuse_summary(
+            validated_reuse[key],
+            key=key,
+            plan=plans[key],
+            initialization_sha256=initialization_sha256,
+            trainer_sha256=trainer_sha256,
+            trainer_byte_count=trainer_byte_count,
+        )
+    if set(validated_reuse) != {key for key, path in paths.items() if path.exists()}:
+        raise ValueError("T064 reusable checkpoint inventory does not match disk")
+    requests = [
+        _T064Stage4RunRequest(
+            manifest_path=manifest_path,
+            trainer_input_path=trainer_input_path,
+            initialization_checkpoint_path=initialization_checkpoint_path,
+            initialization_sha256=initialization_sha256,
+            checkpoint_path=path,
+            arm=key[0],
+            seed=key[1],
+        )
+        for key, path in paths.items()
+        if not path.exists()
+    ]
+    del manifest, plans
+    gc.collect()
+    trained = _run_t064_stage4_requests(requests)
+    return _canonical_t064_training_report([*validated_reuse.values(), *trained])
 
 
 def validate_t044_reuse(
@@ -3256,6 +3691,11 @@ def _validate_stage_summary_evidence(
         )
         if stage.get("status") != required_status:
             raise ValueError(f"T064 stage summary status mismatch: {name}")
+        if prefix == "stage4" and (
+            stage.get("workers") != T064_STAGE4_MAX_WORKERS
+            or stage.get("shards") != len(TRAINING_RUN_ORDER)
+        ):
+            raise ValueError("T064 stage summary Stage4 worker inventory mismatch")
         if prefix in {"stage2", "stage5", "stage6"}:
             ranges = stage.get("ranges")
             if stage.get("workers") != 16 or stage.get("shards") != 16:

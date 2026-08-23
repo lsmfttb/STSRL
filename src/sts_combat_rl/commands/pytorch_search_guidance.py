@@ -260,7 +260,9 @@ def build_pytorch_search_guidance_training_data_provenance(
     dataset: Any,
     trainer_input_path: Path,
     *,
-    trainer_input_bytes: bytes,
+    trainer_input_bytes: bytes | None = None,
+    trainer_input_sha256: str | None = None,
+    trainer_input_byte_count: int | None = None,
     gate_report: TrainingGateReport,
 ) -> dict[str, Any]:
     """Summarize exact trainer input provenance stored in model checkpoints."""
@@ -276,13 +278,32 @@ def build_pytorch_search_guidance_training_data_provenance(
         STRUCTURED_RESOURCE_TARGET_KIND,
     )
 
-    trainer_input_sha256 = hashlib.sha256(trainer_input_bytes).hexdigest()
+    if trainer_input_bytes is not None:
+        if trainer_input_sha256 is not None or trainer_input_byte_count is not None:
+            raise ValueError(
+                "trainer input provenance accepts bytes or a precomputed identity, not both"
+            )
+        trainer_input_sha256 = hashlib.sha256(trainer_input_bytes).hexdigest()
+        trainer_input_byte_count = len(trainer_input_bytes)
+    elif (
+        not isinstance(trainer_input_sha256, str)
+        or len(trainer_input_sha256) != 64
+        or any(
+            character not in "0123456789abcdef" for character in trainer_input_sha256
+        )
+        or not isinstance(trainer_input_byte_count, int)
+        or isinstance(trainer_input_byte_count, bool)
+        or trainer_input_byte_count <= 0
+    ):
+        raise ValueError(
+            "trainer input provenance requires an exact precomputed identity"
+        )
     return {
         "schema_id": "pytorch-search-guidance-training-data-provenance-v1",
         "trainer_input_path": str(trainer_input_path),
         "trainer_input_artifact_id": f"trainer-input-sha256:{trainer_input_sha256}",
         "trainer_input_sha256": trainer_input_sha256,
-        "trainer_input_byte_count": len(trainer_input_bytes),
+        "trainer_input_byte_count": trainer_input_byte_count,
         "trainer_input_format_version": dataset.format_version,
         "trainer_record_count": len(dataset.records),
         "source_rollout_count": dataset.source_rollout_count,

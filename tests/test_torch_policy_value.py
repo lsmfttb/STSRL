@@ -3,6 +3,7 @@ from __future__ import annotations
 # ruff: noqa: E402
 
 from dataclasses import replace
+import hashlib
 
 import pytest
 
@@ -34,6 +35,38 @@ from sts_combat_rl.sim.training_gate import (
 )
 
 from t009_helpers import make_trainer_dataset
+
+
+def test_training_provenance_accepts_equivalent_precomputed_file_identity(
+    tmp_path,
+) -> None:
+    dataset = make_trainer_dataset([(20, 1), (20, 1)])
+    gate = build_training_gate_report(
+        dataset,
+        TrainingScaleGateConfig(
+            required_ascensions=(20,),
+            required_acts=(1,),
+            min_records_per_ascension_act=2,
+            min_unique_sources_per_ascension_act=2,
+        ),
+    )
+    trainer_path = tmp_path / "trainer.jsonl"
+    trainer_bytes = trainer_input_dataset_to_jsonl_text(dataset).encode("utf-8")
+    from_bytes = build_pytorch_search_guidance_training_data_provenance(
+        dataset,
+        trainer_path,
+        trainer_input_bytes=trainer_bytes,
+        gate_report=gate,
+    )
+    precomputed = build_pytorch_search_guidance_training_data_provenance(
+        dataset,
+        trainer_path,
+        trainer_input_sha256=hashlib.sha256(trainer_bytes).hexdigest(),
+        trainer_input_byte_count=len(trainer_bytes),
+        gate_report=gate,
+    )
+
+    assert precomputed == from_bytes
 
 
 def test_torch_policy_value_trains_and_checkpoint_round_trips(tmp_path) -> None:
@@ -186,7 +219,8 @@ def test_torch_training_accepts_initial_model_and_ordered_batch_plan() -> None:
         gate_report=gate,
     )
     original_state = {
-        name: value.detach().clone() for name, value in initial.model.state_dict().items()
+        name: value.detach().clone()
+        for name, value in initial.model.state_dict().items()
     }
     result = train_torch_policy_value(
         dataset,

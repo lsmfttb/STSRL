@@ -336,6 +336,28 @@ All runs use:
 - gradient norm clipping at `10.0`;
 - existing target heads, loss functions, evaluation, and checkpoint writer.
 
+Each `(arm, seed)` run remains an independent deterministic CPU job with one
+Torch thread. Up to two runs may execute concurrently in isolated spawned
+workers; workers never share a model, optimizer, mutable RNG state, or loaded
+trainer dataset. The parent process does not retain another loaded trainer
+dataset while those two workers run, keeping the topology viable on the
+31-GB maintainer host. Scheduling and completion order are operational only:
+the aggregate report always restores exact `TRAINING_RUN_ORDER`.
+
+A completed run may be reused only when a reviewed `earliest_affected_run`
+boundary excludes that run and preflight validates the existing checkpoint
+against the exact arm, seed, initialization SHA-256, trainer-input SHA-256 and
+bytes, regenerated batch-plan hash and exposures, full frozen Torch training
+configuration, current checkpoint schema/model semantic metadata, T064
+metadata, complete training-data provenance, and checkpoint file identity.
+Unexpected, affected, invalid, mismatched, or partial checkpoints fail closed;
+preflight never overwrites them. Reuse preserves the checkpoint's producer
+provenance and records `reused_validated`, never relabeling it as produced by
+the current execution head. If one concurrent worker fails, the other worker is
+allowed to finish and its valid checkpoint remains retained for a later strict
+reuse audit; no aggregate training report is published until all four canonical
+runs validate.
+
 Each phase therefore consumes 9,600 record draws. For each training seed and
 bucket, build one deterministic exposure sequence of exactly 9,600 records by
 repeated cycles. In cycle `k`, order bucket records by
@@ -494,6 +516,8 @@ later file unproduced, but no fifth T064 compact JSON file is authorized.
      optimizer/configuration, trainer-input and batch-plan hashes,
      per-bucket/per-source exposure counts, checkpoint path/hash and existing
      checkpoint metadata linkage, completion status, and problems;
+   - each run records `trained_new` or `reused_validated`; reused entries retain
+     the checkpoint's actual file identity and producer metadata;
    - if source adequacy is false and training is correctly skipped, `runs` is an
      empty array and `not_run_reason="source_inadequate"` is required.
 3. `t064-stage-summary-v1`
@@ -530,7 +554,8 @@ Stages are:
    trainer input in exact selected-source order, then validate the frozen batch
    plans;
 4. run four deterministic training jobs and write the single aggregate
-   `t064-training-run-report-v1` after all four run outcomes are known;
+   `t064-training-run-report-v1` after all four run outcomes are known, using
+   at most two isolated one-thread CPU workers and canonical report ordering;
 5. validate/reuse checkpoint-independent T044 arms, then run eight
    checkpoint-dependent T044 stages;
 6. validate/reuse T070 baseline, then run four T052 `prior_value` stages;
@@ -569,6 +594,17 @@ checkpoint publication. Its `earliest_affected_stage` is 4. The accepted
 Stage-0 manifest, Stage-1 restore audit, Stage-2 teacher, and Stage-3 trainer
 input from the preceding producer head are therefore reused after strict
 reader/rehash/linkage validation; they are not regenerated or relabeled.
+
+The Stage-4 worker/reuse repair has an `earliest_affected_run` boundary in the
+frozen `TRAINING_RUN_ORDER`. Only completed runs strictly before that boundary
+are eligible for strict validation and reuse. The retained
+`static_mixture_v1/64001` checkpoint from the interrupted approved run is a
+candidate with SHA-256
+`c0c38c239047f6be67e983768e53bd680007e9cba117e17c7d226583ed751193`
+and 462,895 bytes; it may be reused when the boundary is
+`assistance_annealed_curriculum_v1/64001` only after every checkpoint, frozen
+configuration, trainer, batch-plan, metadata, provenance, and file-identity
+check above passes. Its older producer provenance remains unchanged.
 
 Before formal Stage 4--7 execution, run one cheap readiness pass that verifies:
 
@@ -679,6 +715,10 @@ checks, and `git diff --check`, plus focused tests for:
 - Stage-3 script-level 16-fork execution proving it reaches the existing T043
   conversion without a caller-authored synthetic bridge contract;
 - checkpoint initialization and default-training backward compatibility;
+- Stage-4 two-worker cap and spawned-process isolation, per-run deterministic
+  configuration, schedule-order independence with canonical aggregate order,
+  exact valid-checkpoint reuse, affected/mismatched/partial checkpoint refusal,
+  one-worker-failure retention, and legacy sequential/unit-call compatibility;
 - deterministic batch plans and exact exposure parity;
 - exact T044 persisted role strings, frozen ranges, and range/arm-subset merge
   compatibility;

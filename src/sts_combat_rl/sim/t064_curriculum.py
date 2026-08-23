@@ -501,11 +501,13 @@ def validate_training_run_report(payload: Mapping[str, Any]) -> dict[str, Any]:
                 "initialization_sha256",
                 "configuration",
                 "trainer_input_sha256",
+                "trainer_input_bytes",
                 "batch_plan_sha256",
                 "per_bucket_exposure_counts",
                 "per_source_exposure_counts",
                 "checkpoint",
                 "checkpoint_metadata_linkage",
+                "run_disposition",
                 "completion_status",
                 "problems",
             ),
@@ -523,6 +525,15 @@ def validate_training_run_report(payload: Mapping[str, Any]) -> dict[str, Any]:
         _require_sha256(
             run["trainer_input_sha256"], f"T064 training run {index} trainer input"
         )
+        trainer_input_bytes = run["trainer_input_bytes"]
+        if (
+            not isinstance(trainer_input_bytes, int)
+            or isinstance(trainer_input_bytes, bool)
+            or trainer_input_bytes <= 0
+        ):
+            raise ValueError(
+                f"T064 training run {index} trainer input bytes must be positive"
+            )
         _require_sha256(
             run["batch_plan_sha256"], f"T064 training run {index} batch plan"
         )
@@ -539,6 +550,8 @@ def validate_training_run_report(payload: Mapping[str, Any]) -> dict[str, Any]:
             raise ValueError(
                 f"T064 training run {index} checkpoint linkage must be an object"
             )
+        if run["run_disposition"] not in {"trained_new", "reused_validated"}:
+            raise ValueError(f"T064 training run {index} disposition is not supported")
         _require_non_empty_string(
             run["completion_status"], f"T064 training run {index} completion status"
         )

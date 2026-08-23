@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+from concurrent.futures import ThreadPoolExecutor
 from io import StringIO
 import json
 from dataclasses import dataclass, replace
@@ -406,11 +407,13 @@ def test_aggregate_training_report_cardinality_order_and_canonical_writer() -> N
                 "initialization_sha256": "a" * 64,
                 "configuration": {},
                 "trainer_input_sha256": "b" * 64,
+                "trainer_input_bytes": 1,
                 "batch_plan_sha256": "c" * 64,
                 "per_bucket_exposure_counts": {},
                 "per_source_exposure_counts": {},
                 "checkpoint": {"path": "checkpoint.pt", "sha256": "d" * 64, "bytes": 1},
                 "checkpoint_metadata_linkage": {},
+                "run_disposition": "trained_new",
                 "completion_status": "complete",
                 "problems": [],
             }
@@ -1297,6 +1300,106 @@ def test_t064_paired_training_uses_frozen_hidden_size_without_changing_defaults(
     assert [run["configuration"]["hidden_size"] for run in report["runs"]] == [16] * 4
 
 
+def test_t064_single_run_checkpoint_publication_validates_temp_before_replace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from sts_combat_rl.sim import torch_policy_value, training_gate
+
+    identity = "a" * 64
+    plan = {
+        "ordered_batches": [[identity] * 32 for _ in range(900)],
+        "batch_plan_sha256": "b" * 64,
+        "per_source_exposure_counts": {identity: 9600},
+        "arm": "static_mixture_v1",
+        "seed": 64001,
+    }
+    monkeypatch.setattr(
+        transfer_command,
+        "_validated_t064_training_plans",
+        lambda _manifest: {("static_mixture_v1", 64001): plan},
+    )
+    monkeypatch.setattr(
+        transfer_command,
+        "_sha256",
+        lambda path: (
+            transfer_command.T064_INITIALIZATION_SHA256
+            if path.name == "initial.pt"
+            else "c" * 64
+        ),
+    )
+    provenance = {"normalized": True}
+    monkeypatch.setattr(
+        transfer_command,
+        "_t064_training_data_provenance",
+        lambda *_a, **_k: provenance,
+    )
+    monkeypatch.setattr(
+        training_gate,
+        "build_training_gate_report",
+        lambda *_a, **_k: SimpleNamespace(),
+    )
+    monkeypatch.setattr(
+        torch_policy_value,
+        "train_torch_policy_value",
+        lambda *_a, **_k: SimpleNamespace(
+            report=SimpleNamespace(training_ok=True, problems=[])
+        ),
+    )
+    cpu_tensor = SimpleNamespace(device=SimpleNamespace(type="cpu"))
+    loaded = SimpleNamespace(
+        config=transfer_command._t064_torch_training_config(64001),
+        metadata={
+            "task_id": "T064",
+            "arm": "static_mixture_v1",
+            "seed": 64001,
+            "initialization_sha256": transfer_command.T064_INITIALIZATION_SHA256,
+            "batch_plan_sha256": "b" * 64,
+        },
+        training_data_provenance=provenance,
+        model=SimpleNamespace(
+            hidden_size=16,
+            parameters=lambda: iter((cpu_tensor,)),
+            buffers=lambda: iter((cpu_tensor,)),
+        ),
+    )
+    monkeypatch.setattr(
+        torch_policy_value,
+        "load_torch_policy_value_checkpoint",
+        lambda path: object() if path.endswith("initial.pt") else loaded,
+    )
+    monkeypatch.setattr(
+        torch_policy_value,
+        "save_torch_policy_value_checkpoint",
+        lambda _result, path, **_kwargs: Path(path).write_bytes(b"checkpoint"),
+    )
+    initialization = tmp_path / "initial.pt"
+    initialization.write_bytes(b"initial")
+    trainer = tmp_path / "trainer.jsonl"
+    trainer.write_bytes(b"trainer")
+    output = tmp_path / "checkpoint.pt"
+    kwargs = {
+        "selected_manifest": {},
+        "dataset": SimpleNamespace(),
+        "initialization_checkpoint_path": initialization,
+        "initialization_sha256": transfer_command.T064_INITIALIZATION_SHA256,
+        "trainer_input_path": trainer,
+        "identity_to_trainer_index": {identity: 0},
+        "checkpoint_paths": {("static_mixture_v1", 64001): output},
+        "run_order": (("static_mixture_v1", 64001),),
+    }
+    report = transfer_command.run_t064_paired_training(**kwargs)
+    assert output.read_bytes() == b"checkpoint"
+    assert not output.with_suffix(".pt.tmp").exists()
+    assert report["runs"][0]["run_disposition"] == "trained_new"
+
+    output.unlink()
+    loaded.metadata["seed"] = 64002
+    with pytest.raises(ValueError, match="config/metadata"):
+        transfer_command.run_t064_paired_training(**kwargs)
+    assert not output.exists()
+    assert output.with_suffix(".pt.tmp").read_bytes() == b"checkpoint"
+
+
 @pytest.mark.skipif(
     not os.environ.get("STSRL_T064_INITIALIZATION_CHECKPOINT"),
     reason="set STSRL_T064_INITIALIZATION_CHECKPOINT to audit the retained artifact",
@@ -1450,6 +1553,7 @@ def _complete_training_report() -> dict[str, object]:
                 "initialization_sha256": "a" * 64,
                 "configuration": {},
                 "trainer_input_sha256": "b" * 64,
+                "trainer_input_bytes": 1,
                 "batch_plan_sha256": "c" * 64,
                 "per_bucket_exposure_counts": {},
                 "per_source_exposure_counts": {},
@@ -1459,6 +1563,7 @@ def _complete_training_report() -> dict[str, object]:
                     "bytes": 1,
                 },
                 "checkpoint_metadata_linkage": {},
+                "run_disposition": "trained_new",
                 "completion_status": "complete",
                 "problems": [],
             }
@@ -1507,7 +1612,7 @@ def test_stage4_preflight_refuses_existing_checkpoint_without_overwrite(
     existing = checkpoint_root / f"{arm}-{seed}.pt"
     existing.write_bytes(b"retained checkpoint")
 
-    with pytest.raises(ValueError, match="refuses to overwrite existing output"):
+    with pytest.raises(ValueError, match="not excluded by earliest_affected_run"):
         transfer_command._preflight_t064_stage4_paths(
             manifest_path=manifest_path,
             training_report_path=tmp_path / "t064-training-run-report.json",
@@ -1518,6 +1623,366 @@ def test_stage4_preflight_refuses_existing_checkpoint_without_overwrite(
 
     assert existing.read_bytes() == b"retained checkpoint"
     assert list(checkpoint_root.iterdir()) == [existing]
+
+
+def test_stage4_preflight_validates_only_runs_before_exact_boundary(
+    tmp_path: Path,
+) -> None:
+    code_commit = "a" * 40
+    manifest_path = tmp_path / "t064-curriculum-manifest.json"
+    with manifest_path.open("w", encoding="utf-8", newline="\n") as stream:
+        dump_compact_json(
+            _complete_source_inadequate_manifest(code_commit=code_commit), stream
+        )
+    frozen = tmp_path / "t070-frozen.json"
+    frozen.write_text("{}", encoding="utf-8")
+    checkpoint_root = tmp_path / "training" / "checkpoints"
+    checkpoint_root.mkdir(parents=True)
+    checkpoint = checkpoint_root / "static_mixture_v1-64001.pt"
+    checkpoint.write_bytes(b"retained checkpoint")
+    calls: list[tuple[str, int, Path]] = []
+    reusable_runs: dict[tuple[str, int], object] = {}
+
+    def validate(arm: str, seed: int, path: Path) -> dict[str, object]:
+        calls.append((arm, seed, path))
+        return {"arm": arm, "seed": seed, "checkpoint": {"path": str(path)}}
+
+    transfer_command._preflight_t064_stage4_paths(
+        manifest_path=manifest_path,
+        training_report_path=tmp_path / "t064-training-run-report.json",
+        checkpoint_root=checkpoint_root,
+        frozen_t070_manifest_path=frozen,
+        code_commit=code_commit,
+        earliest_affected_run="assistance_annealed_curriculum_v1/64001",
+        reusable_checkpoint_validator=validate,
+        reusable_runs=reusable_runs,
+    )
+
+    assert calls == [("static_mixture_v1", 64001, checkpoint)]
+    assert list(reusable_runs) == [("static_mixture_v1", 64001)]
+
+
+def test_stage4_preflight_fails_closed_on_partial_or_mismatched_reuse(
+    tmp_path: Path,
+) -> None:
+    code_commit = "a" * 40
+    manifest_path = tmp_path / "t064-curriculum-manifest.json"
+    with manifest_path.open("w", encoding="utf-8", newline="\n") as stream:
+        dump_compact_json(
+            _complete_source_inadequate_manifest(code_commit=code_commit), stream
+        )
+    frozen = tmp_path / "t070-frozen.json"
+    frozen.write_text("{}", encoding="utf-8")
+    checkpoint_root = tmp_path / "training" / "checkpoints"
+    checkpoint_root.mkdir(parents=True)
+    checkpoint = checkpoint_root / "static_mixture_v1-64001.pt"
+    partial = checkpoint.with_suffix(".pt.tmp")
+    partial.write_bytes(b"partial")
+    kwargs = {
+        "manifest_path": manifest_path,
+        "training_report_path": tmp_path / "t064-training-run-report.json",
+        "checkpoint_root": checkpoint_root,
+        "frozen_t070_manifest_path": frozen,
+        "code_commit": code_commit,
+        "earliest_affected_run": "assistance_annealed_curriculum_v1/64001",
+    }
+    with pytest.raises(ValueError, match="partial checkpoint"):
+        transfer_command._preflight_t064_stage4_paths(**kwargs)
+    partial.unlink()
+    checkpoint.write_bytes(b"mismatch")
+    with pytest.raises(ValueError, match="frozen config mismatch"):
+        transfer_command._preflight_t064_stage4_paths(
+            **kwargs,
+            reusable_checkpoint_validator=lambda *_args: (_ for _ in ()).throw(
+                ValueError("frozen config mismatch")
+            ),
+        )
+
+
+def test_stage4_loaded_checkpoint_validation_covers_full_frozen_contract() -> None:
+    plan = {
+        "batch_plan_sha256": "b" * 64,
+        "per_source_exposure_counts": {"source": 9600},
+    }
+    provenance = {"trainer_input_sha256": "c" * 64, "exact": True}
+    cpu_tensor = SimpleNamespace(device=SimpleNamespace(type="cpu"))
+    model = SimpleNamespace(
+        hidden_size=16,
+        parameters=lambda: iter((cpu_tensor,)),
+        buffers=lambda: iter((cpu_tensor,)),
+    )
+    loaded = SimpleNamespace(
+        config=transfer_command._t064_torch_training_config(64001),
+        metadata={
+            "task_id": "T064",
+            "arm": "static_mixture_v1",
+            "seed": 64001,
+            "initialization_sha256": transfer_command.T064_INITIALIZATION_SHA256,
+            "batch_plan_sha256": "b" * 64,
+        },
+        training_data_provenance=provenance,
+        model=model,
+    )
+    transfer_command._validate_loaded_t064_run_checkpoint(
+        loaded,
+        arm="static_mixture_v1",
+        seed=64001,
+        initialization_sha256=transfer_command.T064_INITIALIZATION_SHA256,
+        plan=plan,
+        expected_provenance=provenance,
+    )
+    loaded.metadata["arm"] = "wrong"
+    with pytest.raises(ValueError, match="config/metadata"):
+        transfer_command._validate_loaded_t064_run_checkpoint(
+            loaded,
+            arm="static_mixture_v1",
+            seed=64001,
+            initialization_sha256=transfer_command.T064_INITIALIZATION_SHA256,
+            plan=plan,
+            expected_provenance=provenance,
+        )
+    loaded.metadata["arm"] = "static_mixture_v1"
+    loaded.training_data_provenance = {"trainer_input_sha256": "d" * 64}
+    with pytest.raises(ValueError, match="trainer provenance"):
+        transfer_command._validate_loaded_t064_run_checkpoint(
+            loaded,
+            arm="static_mixture_v1",
+            seed=64001,
+            initialization_sha256=transfer_command.T064_INITIALIZATION_SHA256,
+            plan=plan,
+            expected_provenance=provenance,
+        )
+    loaded.training_data_provenance = provenance
+    loaded.config = transfer_command._t064_torch_training_config(64002)
+    with pytest.raises(ValueError, match="config/metadata"):
+        transfer_command._validate_loaded_t064_run_checkpoint(
+            loaded,
+            arm="static_mixture_v1",
+            seed=64001,
+            initialization_sha256=transfer_command.T064_INITIALIZATION_SHA256,
+            plan=plan,
+            expected_provenance=provenance,
+        )
+    loaded.config = transfer_command._t064_torch_training_config(64001)
+    loaded.model.hidden_size = 128
+    with pytest.raises(ValueError, match="model metadata/device"):
+        transfer_command._validate_loaded_t064_run_checkpoint(
+            loaded,
+            arm="static_mixture_v1",
+            seed=64001,
+            initialization_sha256=transfer_command.T064_INITIALIZATION_SHA256,
+            plan=plan,
+            expected_provenance=provenance,
+        )
+
+
+def test_stage4_default_executor_is_spawned_process_isolation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeProcessPool:
+        def __init__(self, *, max_workers, mp_context):
+            captured["max_workers"] = max_workers
+            captured["start_method"] = mp_context.get_start_method()
+
+    monkeypatch.setattr(transfer_command, "ProcessPoolExecutor", FakeProcessPool)
+    executor = transfer_command._t064_stage4_process_executor(2)
+
+    assert isinstance(executor, FakeProcessPool)
+    assert captured == {"max_workers": 2, "start_method": "spawn"}
+
+
+def test_stage4_cached_reuse_summary_requires_exact_exposure_and_config() -> None:
+    plan = {
+        "batch_plan_sha256": "b" * 64,
+        "per_source_exposure_counts": {"source": 9600},
+    }
+    run = transfer_command._t064_training_run_entry(
+        arm="static_mixture_v1",
+        seed=64001,
+        initialization_sha256=transfer_command.T064_INITIALIZATION_SHA256,
+        trainer_sha256="c" * 64,
+        trainer_byte_count=123,
+        plan=plan,
+        checkpoint={"path": "checkpoint.pt", "sha256": "d" * 64, "bytes": 1},
+        completion_status="complete",
+        problems=(),
+        disposition="reused_validated",
+    )
+    kwargs = {
+        "key": ("static_mixture_v1", 64001),
+        "plan": plan,
+        "initialization_sha256": transfer_command.T064_INITIALIZATION_SHA256,
+        "trainer_sha256": "c" * 64,
+        "trainer_byte_count": 123,
+    }
+    transfer_command._validate_cached_t064_reuse_summary(run, **kwargs)
+    run["per_source_exposure_counts"] = {"source": 9599}
+    with pytest.raises(ValueError, match="no longer matches"):
+        transfer_command._validate_cached_t064_reuse_summary(run, **kwargs)
+
+
+def test_stage4_worker_cap_and_failure_retains_other_completed_checkpoint(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    observed_workers: list[int] = []
+    active = 0
+    maximum_active = 0
+    lock = threading.Lock()
+
+    def executor_factory(max_workers: int):
+        observed_workers.append(max_workers)
+        return ThreadPoolExecutor(max_workers=max_workers)
+
+    def worker(request):
+        nonlocal active, maximum_active
+        with lock:
+            active += 1
+            maximum_active = max(maximum_active, active)
+        try:
+            time.sleep(0.02)
+            if request.arm == "assistance_annealed_curriculum_v1":
+                raise RuntimeError("simulated worker failure")
+            request.checkpoint_path.write_bytes(b"complete")
+            return {"arm": request.arm, "seed": request.seed}
+        finally:
+            with lock:
+                active -= 1
+
+    monkeypatch.setattr(
+        transfer_command, "_t064_stage4_process_executor", executor_factory
+    )
+    monkeypatch.setattr(transfer_command, "_run_t064_stage4_worker", worker)
+    requests = [
+        transfer_command._T064Stage4RunRequest(
+            manifest_path=tmp_path / "manifest.json",
+            trainer_input_path=tmp_path / "trainer.jsonl",
+            initialization_checkpoint_path=tmp_path / "initial.pt",
+            initialization_sha256=transfer_command.T064_INITIALIZATION_SHA256,
+            checkpoint_path=tmp_path / f"{arm}-{seed}.pt",
+            arm=arm,
+            seed=seed,
+        )
+        for arm, seed in TRAINING_RUN_ORDER[:2]
+    ]
+    with pytest.raises(RuntimeError, match="other complete checkpoints are retained"):
+        transfer_command._run_t064_stage4_requests(requests)
+
+    assert observed_workers == [2]
+    assert maximum_active == 2
+    assert requests[0].checkpoint_path.read_bytes() == b"complete"
+    assert not requests[1].checkpoint_path.exists()
+    assert all(
+        isinstance(value, (Path, str, int)) for value in vars(requests[0]).values()
+    )
+
+
+def test_stage4_canonical_report_ignores_schedule_completion_order() -> None:
+    runs = list(reversed(_complete_training_report()["runs"]))
+    report = transfer_command._canonical_t064_training_report(runs)
+    assert [(run["arm"], run["seed"]) for run in report["runs"]] == list(
+        TRAINING_RUN_ORDER
+    )
+
+
+def test_stage4_production_rehashes_reuse_after_preflight(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    checkpoint_root = tmp_path / "checkpoints"
+    checkpoint_root.mkdir()
+    checkpoint = checkpoint_root / "static_mixture_v1-64001.pt"
+    checkpoint.write_bytes(b"validated")
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text("{}", encoding="utf-8")
+    trainer_path = tmp_path / "trainer.jsonl"
+    trainer_path.write_bytes(b"trainer")
+    reused = {
+        ("static_mixture_v1", 64001): {
+            "arm": "static_mixture_v1",
+            "seed": 64001,
+            "checkpoint": transfer_command._file_identity(checkpoint),
+        }
+    }
+    checkpoint.write_bytes(b"changed-after-preflight")
+    monkeypatch.setattr(
+        transfer_command,
+        "_run_t064_stage4_requests",
+        lambda _requests: pytest.fail("training must not start after checkpoint drift"),
+    )
+    monkeypatch.setattr(
+        transfer_command,
+        "_validated_t064_training_plans",
+        lambda _manifest: {key: {} for key in TRAINING_RUN_ORDER},
+    )
+    monkeypatch.setattr(transfer_command, "load_compact_json", lambda _stream: {})
+
+    with pytest.raises(ValueError, match="changed after preflight"):
+        transfer_command.run_t064_stage4_production(
+            manifest_path=manifest_path,
+            trainer_input_path=trainer_path,
+            initialization_checkpoint_path=tmp_path / "initial.pt",
+            initialization_sha256=transfer_command.T064_INITIALIZATION_SHA256,
+            checkpoint_root=checkpoint_root,
+            frozen_t070_manifest_path=tmp_path / "t070.json",
+            earliest_affected_run="assistance_annealed_curriculum_v1/64001",
+            reusable_runs=reused,
+        )
+
+
+def test_stage4_production_combines_valid_reuse_and_out_of_order_completions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    checkpoint_root = tmp_path / "checkpoints"
+    checkpoint_root.mkdir()
+    checkpoint = checkpoint_root / "static_mixture_v1-64001.pt"
+    checkpoint.write_bytes(b"validated")
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text("{}", encoding="utf-8")
+    trainer_path = tmp_path / "trainer.jsonl"
+    trainer_path.write_bytes(b"trainer")
+    reused_run = {
+        "arm": "static_mixture_v1",
+        "seed": 64001,
+        "checkpoint": transfer_command._file_identity(checkpoint),
+        "run_disposition": "reused_validated",
+    }
+    missing = list(TRAINING_RUN_ORDER[1:])
+
+    def finish_out_of_order(requests):
+        assert [(request.arm, request.seed) for request in requests] == missing
+        return [
+            {"arm": arm, "seed": seed, "run_disposition": "trained_new"}
+            for arm, seed in reversed(missing)
+        ]
+
+    monkeypatch.setattr(
+        transfer_command, "_run_t064_stage4_requests", finish_out_of_order
+    )
+    monkeypatch.setattr(
+        transfer_command,
+        "_validated_t064_training_plans",
+        lambda _manifest: {key: {} for key in TRAINING_RUN_ORDER},
+    )
+    monkeypatch.setattr(transfer_command, "load_compact_json", lambda _stream: {})
+    monkeypatch.setattr(
+        transfer_command, "_validate_cached_t064_reuse_summary", lambda *_a, **_k: None
+    )
+    report = transfer_command.run_t064_stage4_production(
+        manifest_path=manifest_path,
+        trainer_input_path=trainer_path,
+        initialization_checkpoint_path=tmp_path / "initial.pt",
+        initialization_sha256=transfer_command.T064_INITIALIZATION_SHA256,
+        checkpoint_root=checkpoint_root,
+        frozen_t070_manifest_path=tmp_path / "t070.json",
+        earliest_affected_run="assistance_annealed_curriculum_v1/64001",
+        reusable_runs={("static_mixture_v1", 64001): reused_run},
+    )
+
+    assert [(run["arm"], run["seed"]) for run in report["runs"]] == list(
+        TRAINING_RUN_ORDER
+    )
+    assert report["runs"][0]["run_disposition"] == "reused_validated"
 
 
 def test_stage4_invalid_preflight_does_not_create_checkpoint_root(
@@ -2835,6 +3300,12 @@ def test_stage2_to_7_dry_plan_has_exact_worker_range_and_stage_inventory() -> No
         "shards": 16,
         "ranges": list(contiguous_ranges(460)),
     }
+    assert next(row for row in plan if row["stage"] == "stage4_training") == {
+        "stage": "stage4_training",
+        "workers": 2,
+        "shards": 4,
+        "runs": [f"{arm}/{seed}" for arm, seed in TRAINING_RUN_ORDER],
+    }
     assert len([row for row in plan if row["stage"] == "stage5_t044"]) == 8
     assert len([row for row in plan if row["stage"] == "stage6_t070"]) == 4
     assert plan[-1]["stage"] == "stage7_aggregate"
@@ -2879,7 +3350,12 @@ def test_stage_summary_allows_reused_stage0_to_3_producer_commits_only() -> None
             ranges=teacher_ranges,
         ),
         stage("stage3_trainer", code_commit=producer_commit),
-        stage("stage4_training", code_commit=current_commit),
+        stage(
+            "stage4_training",
+            code_commit=current_commit,
+            workers=2,
+            shards=4,
+        ),
         *[
             stage(
                 f"stage5_checkpoint_{index}",
