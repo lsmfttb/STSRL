@@ -771,6 +771,7 @@ def _preflight_t064_stage4_paths(
     # Establish the stable root before expensive training.  This makes an
     # unwritable/missing artifact location fail before any checkpoint is made.
     training_report_path.parent.mkdir(parents=True, exist_ok=True)
+    checkpoint_root.mkdir(parents=True, exist_ok=True)
     return frozen
 
 

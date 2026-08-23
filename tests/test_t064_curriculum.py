@@ -1415,6 +1415,85 @@ def _complete_training_report() -> dict[str, object]:
     }
 
 
+def test_stage4_preflight_creates_missing_checkpoint_root(tmp_path: Path) -> None:
+    code_commit = "a" * 40
+    manifest_path = tmp_path / "t064-curriculum-manifest.json"
+    with manifest_path.open("w", encoding="utf-8", newline="\n") as stream:
+        dump_compact_json(
+            _complete_source_inadequate_manifest(code_commit=code_commit), stream
+        )
+    frozen = tmp_path / "t070-frozen.json"
+    frozen.write_text("{}", encoding="utf-8")
+    checkpoint_root = tmp_path / "training" / "checkpoints"
+
+    loaded = transfer_command._preflight_t064_stage4_paths(
+        manifest_path=manifest_path,
+        training_report_path=tmp_path / "t064-training-run-report.json",
+        checkpoint_root=checkpoint_root,
+        frozen_t070_manifest_path=frozen,
+        code_commit=code_commit,
+    )
+
+    assert loaded == {}
+    assert checkpoint_root.is_dir()
+
+
+@pytest.mark.parametrize("arm,seed", TRAINING_RUN_ORDER)
+def test_stage4_preflight_refuses_existing_checkpoint_without_overwrite(
+    tmp_path: Path, arm: str, seed: int
+) -> None:
+    code_commit = "a" * 40
+    manifest_path = tmp_path / "t064-curriculum-manifest.json"
+    with manifest_path.open("w", encoding="utf-8", newline="\n") as stream:
+        dump_compact_json(
+            _complete_source_inadequate_manifest(code_commit=code_commit), stream
+        )
+    frozen = tmp_path / "t070-frozen.json"
+    frozen.write_text("{}", encoding="utf-8")
+    checkpoint_root = tmp_path / "training" / "checkpoints"
+    checkpoint_root.mkdir(parents=True)
+    existing = checkpoint_root / f"{arm}-{seed}.pt"
+    existing.write_bytes(b"retained checkpoint")
+
+    with pytest.raises(ValueError, match="refuses to overwrite existing output"):
+        transfer_command._preflight_t064_stage4_paths(
+            manifest_path=manifest_path,
+            training_report_path=tmp_path / "t064-training-run-report.json",
+            checkpoint_root=checkpoint_root,
+            frozen_t070_manifest_path=frozen,
+            code_commit=code_commit,
+        )
+
+    assert existing.read_bytes() == b"retained checkpoint"
+    assert list(checkpoint_root.iterdir()) == [existing]
+
+
+def test_stage4_invalid_preflight_does_not_create_checkpoint_root(
+    tmp_path: Path,
+) -> None:
+    manifest_path = tmp_path / "t064-curriculum-manifest.json"
+    with manifest_path.open("w", encoding="utf-8", newline="\n") as stream:
+        dump_compact_json(
+            _complete_source_inadequate_manifest(code_commit="a" * 40), stream
+        )
+    frozen = tmp_path / "t070-frozen.json"
+    frozen.write_text("{}", encoding="utf-8")
+    checkpoint_root = tmp_path / "training" / "checkpoints"
+    report_path = tmp_path / "t064-training-run-report.json"
+
+    with pytest.raises(ValueError, match="stale code head"):
+        transfer_command._preflight_t064_stage4_paths(
+            manifest_path=manifest_path,
+            training_report_path=report_path,
+            checkpoint_root=checkpoint_root,
+            frozen_t070_manifest_path=frozen,
+            code_commit="b" * 40,
+        )
+
+    assert not checkpoint_root.exists()
+    assert not report_path.exists()
+
+
 def test_stage4_cli_writes_report_before_finalizing_manifest(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
