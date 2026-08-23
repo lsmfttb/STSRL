@@ -579,12 +579,36 @@ Before formal Stage 4--7 execution, run one cheap readiness pass that verifies:
 - reused Stage-0--3 artifacts pass their existing strict readers, hashes,
   bytes, row/order/linkage checks, frozen 16-worker ranges, return codes, and
   zero-problem gates;
-- the frozen initialization checkpoint and T070 manifest retain their published
-  identities, and the Stage-4 preflight regression passes without training.
+- every frozen Stage-4--7 input path exists and retains its published identity,
+  including the initialization checkpoint, both T044 cohorts and historical
+  reports, the T052 cohort, and the T070 manifest, baseline, native-preflight,
+  source, and wrapper inputs;
+- the frozen initialization checkpoint is actually loaded and its hidden size,
+  state/action normalizers, encoders, and policy/outcome/HP/resource head shapes
+  match the frozen Stage-4 architecture;
+- every Stage-4--7 output and checkpoint directory can be created and written;
+  use a uniquely named, refuse-overwrite probe and remove only that probe after
+  the check, without creating a compact artifact;
+- the existing checkpoint writer completes one tiny save-and-load round trip,
+  and the Stage-4 preflight regression passes without training;
+- the existing Stage-5 production-plan route loads both frozen T044 cohort
+  contracts and their exact action/controller configurations, and each
+  checkpoint/cohort selector resolves exactly one dependent stage;
+- the existing Stage-6 route loads the T070 wrapper and both its historical
+  frozen identity and current checkpoint-selection identity without confusing
+  producer and execution commits;
+- the real Stage-7 aggregator accepts representative complete fixture/mock
+  inputs and derives a complete terminal decision; and
+- the existing one-record-range T044 simulator-dependent route smoke passes
+  with its test adapter. A real WSL one-record smoke may additionally be used
+  when useful, but it is not a substitute for the frozen 16-worker formal
+  Stage-5/6 execution.
 
-The exact-head approval is required after this readiness result and before the
-first expensive Stage-4 run. Readiness and approval are workflow evidence, not
-a fifth compact artifact or a new attestation framework.
+The corrected task document and exact-head approval are both required before
+formal execution resumes. The readiness pass must finish before the first
+expensive Stage-4 run; no additional ordering between approval and readiness is
+required. Readiness and approval are workflow evidence, not a fifth compact
+artifact or a new attestation framework.
 
 ## Out Of Scope
 

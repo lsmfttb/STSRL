@@ -1304,6 +1304,7 @@ def test_t064_paired_training_uses_frozen_hidden_size_without_changing_defaults(
 def test_t064_retained_initialization_checkpoint_matches_frozen_architecture() -> None:
     """Audit the real retained input when the maintainer exposes its stable path."""
 
+    torch = pytest.importorskip("torch")
     from sts_combat_rl.sim.torch_policy_value import load_torch_policy_value_checkpoint
 
     checkpoint_path = Path(os.environ["STSRL_T064_INITIALIZATION_CHECKPOINT"])
@@ -1311,7 +1312,41 @@ def test_t064_retained_initialization_checkpoint_matches_frozen_architecture() -
         pytest.skip(f"retained checkpoint is unavailable: {checkpoint_path}")
     checkpoint = load_torch_policy_value_checkpoint(str(checkpoint_path))
     assert checkpoint.config.hidden_size == transfer_command.T064_TRAINING_HIDDEN_SIZE
-    assert checkpoint.model.hidden_size == transfer_command.T064_TRAINING_HIDDEN_SIZE
+    model = checkpoint.model
+    hidden_size = transfer_command.T064_TRAINING_HIDDEN_SIZE
+    assert model.hidden_size == hidden_size
+    assert (
+        model.state_mean.shape == model.state_std.shape == (model.state_feature_size,)
+    )
+    assert (
+        model.action_mean.shape
+        == model.action_std.shape
+        == (model.action_feature_size,)
+    )
+    assert torch.isfinite(model.state_mean).all()
+    assert torch.isfinite(model.action_mean).all()
+    assert torch.isfinite(model.state_std).all() and torch.all(model.state_std > 0)
+    assert torch.isfinite(model.action_std).all() and torch.all(model.action_std > 0)
+    assert model.state_encoder[0].in_features == model.state_feature_size
+    assert model.state_encoder[0].out_features == hidden_size
+    assert model.state_encoder[2].in_features == hidden_size
+    assert model.state_encoder[2].out_features == hidden_size
+    assert model.action_encoder[0].in_features == model.action_feature_size
+    assert model.action_encoder[0].out_features == hidden_size
+    assert model.action_encoder[2].in_features == hidden_size
+    assert model.action_encoder[2].out_features == hidden_size
+    assert model.policy_head[0].in_features == hidden_size * 3
+    assert model.policy_head[0].out_features == hidden_size
+    assert model.policy_head[2].in_features == hidden_size
+    assert model.policy_head[2].out_features == 1
+    for head in (model.outcome_head, model.hp_head):
+        assert head[0].in_features == head[0].out_features == hidden_size
+        assert head[2].in_features == hidden_size
+        assert head[2].out_features == 1
+    assert model.resource_head[0].in_features == hidden_size
+    assert model.resource_head[0].out_features == hidden_size
+    assert model.resource_head[2].in_features == hidden_size
+    assert model.resource_head[2].out_features == len(model.resource_target_names)
 
 
 def test_stage5_production_uses_fork_dispatch_backend(
@@ -2539,6 +2574,244 @@ def test_stage7_t070_rows_require_exact_order_clean_rows_and_frozen_subsets() ->
     rows[92] = "forged-non-mapping"
     with pytest.raises(ValueError, match="mapping"):
         transfer_command._validate_t070_rows(rows, cohort=cohort)
+
+
+def test_stage7_aggregation_consumes_complete_representative_mock_inputs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    producer_commit = "a" * 40
+    current_commit = "c" * 40
+    root = tmp_path / "artifact-root"
+    root.mkdir()
+
+    def write(name: str, payload: object | None = None) -> Path:
+        path = tmp_path / name
+        path.write_text(
+            json.dumps({} if payload is None else payload), encoding="utf-8"
+        )
+        return path
+
+    def identity(path: Path) -> dict[str, object]:
+        data = path.read_bytes()
+        return {
+            "path": str(path),
+            "sha256": hashlib.sha256(data).hexdigest(),
+            "bytes": len(data),
+        }
+
+    teacher_path = write("teacher.jsonl")
+    trainer_path = write("trainer.jsonl")
+    checkpoint_paths = {
+        key: write(f"{key[0]}-{key[1]}.pt", {"checkpoint": list(key)})
+        for key in TRAINING_RUN_ORDER
+    }
+    checkpoints = {key: identity(path) for key, path in checkpoint_paths.items()}
+    frozen_manifest_path = write("t070-frozen.json")
+    baseline_path = write("t070-baseline.json")
+    t052_path = write("t052-cohort.jsonl")
+    frozen_manifest_identity = identity(frozen_manifest_path)
+    t052_identity = identity(t052_path)
+    t044_cohort_paths = {
+        "assist_0": write("assist-0-cohort.jsonl"),
+        "assist_hp50": write("assist-hp50-cohort.jsonl"),
+    }
+    t044_independent_paths = {
+        name: write(f"{name}-independent.jsonl") for name in t044_cohort_paths
+    }
+    t044_paths = {
+        key: {
+            name: write(f"{key[0]}-{key[1]}-{name}.jsonl") for name in t044_cohort_paths
+        }
+        for key in TRAINING_RUN_ORDER
+    }
+    t052_records = [
+        SimpleNamespace(
+            cohort_index=index,
+            source_checkpoint_id=f"source-{index}",
+            structural_metadata={
+                "room_type": "BOSS" if index < 88 else "MONSTER",
+                "act": 1 if index < 88 else 2,
+            },
+        )
+        for index in range(93)
+    ]
+    t070_rows = [
+        {
+            "cohort_index": index,
+            "source_checkpoint_id": record.source_checkpoint_id,
+            "structural_metadata": record.structural_metadata,
+            "termination_status": "win" if index % 2 == 0 else "loss",
+            "problems": [],
+        }
+        for index, record in enumerate(t052_records)
+    ]
+    t070_paths = {
+        key: write(
+            f"{key[0]}-{key[1]}-t070.json",
+            {"arm_report": {"records": t070_rows}},
+        )
+        for key in TRAINING_RUN_ORDER
+    }
+    checkpoint_selections = {
+        f"{arm}:{seed}": {"checkpoint": checkpoints[(arm, seed)]}
+        for arm, seed in TRAINING_RUN_ORDER
+    }
+    manifest = {
+        "code_commit": producer_commit,
+        "source_adequacy": True,
+        "complete_source_audit": {
+            "status": "complete",
+            "selected_restore_failure_count": 0,
+        },
+        "t070_stage_manifest": {
+            "frozen_t070_manifest": frozen_manifest_identity,
+            "checkpoint_selections": checkpoint_selections,
+        },
+    }
+    training = {
+        "runs": [
+            {
+                "arm": arm,
+                "seed": seed,
+                "completion_status": "complete",
+                "checkpoint": checkpoints[(arm, seed)],
+            }
+            for arm, seed in TRAINING_RUN_ORDER
+        ]
+    }
+    (root / "t064-curriculum-manifest.json").write_text("{}", encoding="utf-8")
+    (root / "t064-training-run-report.json").write_text("{}", encoding="utf-8")
+
+    def load_compact(stream):
+        return manifest if "curriculum-manifest" in stream.name else training
+
+    dependent_report = SimpleNamespace(
+        arms=tuple(
+            SimpleNamespace(
+                role=role,
+                report=SimpleNamespace(authoritative_wins=1),
+            )
+            for role in transfer_command.T044_DEPENDENT_ROLES
+        )
+    )
+    t052_cohort = SimpleNamespace(identity="t052", records=t052_records, problems=[])
+    written: dict[str, object] = {}
+    monkeypatch.setattr(transfer_command, "load_compact_json", load_compact)
+    monkeypatch.setattr(
+        transfer_command, "_validate_stage_summary_evidence", lambda *_a, **_k: None
+    )
+    monkeypatch.setattr(
+        transfer_command, "validate_external_frozen_identity", lambda *_a, **_k: None
+    )
+    monkeypatch.setattr(
+        transfer_command, "load_oracle_teacher_dataset_jsonl", lambda _stream: object()
+    )
+    monkeypatch.setattr(
+        transfer_command, "load_trainer_input_dataset_jsonl", lambda _stream: object()
+    )
+    monkeypatch.setattr(
+        transfer_command,
+        "_validate_teacher_against_selected_manifest",
+        lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(
+        transfer_command,
+        "_validate_trainer_against_selected_manifest",
+        lambda *_a, **_k: None,
+    )
+    monkeypatch.setattr(
+        transfer_command, "_validate_frozen_manifest_plans", lambda *_a, **_k: None
+    )
+    monkeypatch.setattr(
+        transfer_command,
+        "_validate_t044_frozen_cohort",
+        lambda contract, *, cohort_kind: SimpleNamespace(
+            identity=contract["identity"], records=[]
+        ),
+    )
+    monkeypatch.setattr(
+        transfer_command,
+        "load_de_assisted_fixed_cohort_comparison_jsonl",
+        lambda _stream: dependent_report,
+    )
+    monkeypatch.setattr(
+        transfer_command, "validate_t044_independent_report", lambda *_a, **_k: True
+    )
+    monkeypatch.setattr(
+        transfer_command, "validate_t044_dependent_report", lambda *_a, **_k: True
+    )
+    monkeypatch.setattr(
+        transfer_command, "_validate_t044_controller_semantics", lambda *_a, **_k: None
+    )
+    monkeypatch.setattr(
+        transfer_command,
+        "load_t070_frozen_contract",
+        lambda *_a, **_k: {"input_identities": {"t052_fixed_cohort": t052_identity}},
+    )
+    monkeypatch.setattr(
+        transfer_command, "load_fixed_cohort_jsonl", lambda _stream: t052_cohort
+    )
+    monkeypatch.setattr(
+        transfer_command, "validate_t070_baseline_reuse", lambda *_a, **_k: True
+    )
+    monkeypatch.setattr(
+        transfer_command, "validate_t070_prior_value_report", lambda *_a, **_k: None
+    )
+    monkeypatch.setattr(
+        transfer_command, "_validate_stage_summary_crosslinks", lambda *_a, **_k: None
+    )
+    monkeypatch.setattr(
+        transfer_command,
+        "write_compact_json",
+        lambda path, payload: written.__setitem__(path.name, payload),
+    )
+    monkeypatch.setattr(
+        transfer_command, "independent_rehash", lambda *_a, **_k: {"ok": True}
+    )
+    frozen_inputs = {
+        "teacher": identity(teacher_path),
+        "trainer_input": identity(trainer_path),
+        "t044_cohorts": {
+            name: {
+                "identity": name,
+                "record_count": 21 if name == "assist_0" else 38,
+                "artifact": identity(path),
+            }
+            for name, path in t044_cohort_paths.items()
+        },
+        "t044_independent_reports": {
+            name: identity(path) for name, path in t044_independent_paths.items()
+        },
+        "t070": {
+            "manifest": frozen_manifest_identity,
+            "baseline": identity(baseline_path),
+            "baseline_contract": {},
+            "cohort": t052_identity,
+            "cohort_identity": "t052",
+            "wrappers": {
+                f"{arm}:{seed}": {
+                    "historical_code_commit": "b" * 40,
+                    "current_code_commit": current_commit,
+                }
+                for arm, seed in TRAINING_RUN_ORDER
+            },
+        },
+    }
+
+    result = transfer_command.aggregate_t064_stage7_from_artifacts(
+        root=root,
+        code_commit=current_commit,
+        teacher_path=teacher_path,
+        trainer_input_path=trainer_path,
+        t044_paths=t044_paths,
+        t070_paths=t070_paths,
+        stage_summary={},
+        frozen_inputs=frozen_inputs,
+    )
+
+    assert result["decision"]["experiment_complete"] is True
+    assert result["decision"]["terminal_case"] in {"Case A", "Case B"}
+    assert set(written) == {"t064-stage-summary.json", "t064-transfer-decision.json"}
 
 
 def test_stage2_to_7_dry_plan_has_exact_worker_range_and_stage_inventory() -> None:
