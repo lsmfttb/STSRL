@@ -684,7 +684,7 @@ def test_empty_selected_source_pool_is_valid_for_complete_source_inadequacy() ->
     assert pool.records == []
 
 
-def test_stage2_to_7_contract_helpers_refuse_stale_resume_and_preserve_identity_order() -> (
+def test_stage2_to_7_contract_helpers_allow_producer_head_mismatch_and_preserve_identity_order() -> (
     None
 ):
     manifest = {
@@ -709,8 +709,25 @@ def test_stage2_to_7_contract_helpers_refuse_stale_resume_and_preserve_identity_
         ],
     }
     transfer_command.validate_resume_manifest(manifest, code_commit="a" * 40)
-    with pytest.raises(ValueError, match="stale"):
-        transfer_command.validate_resume_manifest(manifest, code_commit="b" * 40)
+    transfer_command.validate_resume_manifest(manifest, code_commit="b" * 40)
+    pending = {
+        **manifest,
+        "complete_source_audit": {
+            **manifest["complete_source_audit"],
+            "status": "static_complete_selected_restore_pending",
+        },
+    }
+    with pytest.raises(ValueError, match="completed selected-source audit"):
+        transfer_command.validate_resume_manifest(pending, code_commit="b" * 40)
+    failed = {
+        **manifest,
+        "complete_source_audit": {
+            **manifest["complete_source_audit"],
+            "selected_restore_failure_count": 1,
+        },
+    }
+    with pytest.raises(ValueError, match="failed selected-source audit"):
+        transfer_command.validate_resume_manifest(failed, code_commit="b" * 40)
     identities = [
         row["complete_identity_sha256"] for row in manifest["selected_sources"]
     ]
@@ -1431,7 +1448,7 @@ def test_stage4_preflight_creates_missing_checkpoint_root(tmp_path: Path) -> Non
         training_report_path=tmp_path / "t064-training-run-report.json",
         checkpoint_root=checkpoint_root,
         frozen_t070_manifest_path=frozen,
-        code_commit=code_commit,
+        code_commit="b" * 40,
     )
 
     assert loaded == {}
@@ -1472,16 +1489,18 @@ def test_stage4_invalid_preflight_does_not_create_checkpoint_root(
     tmp_path: Path,
 ) -> None:
     manifest_path = tmp_path / "t064-curriculum-manifest.json"
+    manifest = _complete_source_inadequate_manifest(code_commit="a" * 40)
+    manifest["complete_source_audit"]["status"] = (
+        "static_complete_selected_restore_pending"
+    )
     with manifest_path.open("w", encoding="utf-8", newline="\n") as stream:
-        dump_compact_json(
-            _complete_source_inadequate_manifest(code_commit="a" * 40), stream
-        )
+        dump_compact_json(manifest, stream)
     frozen = tmp_path / "t070-frozen.json"
     frozen.write_text("{}", encoding="utf-8")
     checkpoint_root = tmp_path / "training" / "checkpoints"
     report_path = tmp_path / "t064-training-run-report.json"
 
-    with pytest.raises(ValueError, match="stale code head"):
+    with pytest.raises(ValueError, match="completed selected-source audit"):
         transfer_command._preflight_t064_stage4_paths(
             manifest_path=manifest_path,
             training_report_path=report_path,
@@ -2484,10 +2503,14 @@ def test_single_manifest_t070_selector_requires_all_four_frozen_keys() -> None:
     }
     from sts_combat_rl.sim import t064_curriculum as curriculum_sim
 
-    curriculum_sim._validate_t070_stage_manifest(stage, {"code_commit": "a" * 40})
+    curriculum_sim._validate_t070_stage_manifest(stage, {"code_commit": "c" * 40})
+    stage["historical_code_commit"] = stage["current_code_commit"]
+    with pytest.raises(ValueError, match="selector contract"):
+        curriculum_sim._validate_t070_stage_manifest(stage, {"code_commit": "c" * 40})
+    stage["historical_code_commit"] = "b" * 40
     del stage["checkpoint_selections"]["static_mixture_v1:64001"]
     with pytest.raises(ValueError, match="exactly four"):
-        curriculum_sim._validate_t070_stage_manifest(stage, {"code_commit": "a" * 40})
+        curriculum_sim._validate_t070_stage_manifest(stage, {"code_commit": "c" * 40})
 
 
 def test_stage7_t070_rows_require_exact_order_clean_rows_and_frozen_subsets() -> None:
@@ -2529,7 +2552,7 @@ def test_stage2_to_7_dry_plan_has_exact_worker_range_and_stage_inventory() -> No
         "teacher_shard_ranges": list(contiguous_ranges(460)),
     }
     plan = transfer_command.build_t064_stage_execution_plan(
-        manifest, code_commit="a" * 40
+        manifest, code_commit="b" * 40
     )
     assert plan[0]["workers"] == plan[0]["shards"] == 16
     assert plan[0]["ranges"] == list(contiguous_ranges(460))
@@ -2542,6 +2565,92 @@ def test_stage2_to_7_dry_plan_has_exact_worker_range_and_stage_inventory() -> No
     assert len([row for row in plan if row["stage"] == "stage5_t044"]) == 8
     assert len([row for row in plan if row["stage"] == "stage6_t070"]) == 4
     assert plan[-1]["stage"] == "stage7_aggregate"
+
+
+def test_stage_summary_allows_reused_stage0_to_3_producer_commits_only() -> None:
+    producer_commit = "a" * 40
+    native_commit = "b" * 40
+    current_commit = "c" * 40
+
+    def stage(
+        name: str,
+        *,
+        code_commit: str,
+        workers: int = 1,
+        shards: int = 1,
+        ranges: list[str] | None = None,
+    ) -> dict[str, object]:
+        return {
+            "name": name,
+            "status": "complete",
+            "code_commit": code_commit,
+            "native_commit": native_commit,
+            "failure_count": 0,
+            "return_codes": [0],
+            "outputs": {},
+            "referenced_artifacts": [],
+            "workers": workers,
+            "shards": shards,
+            "ranges": ranges or [],
+        }
+
+    teacher_ranges = list(contiguous_ranges(460))
+    stages = [
+        stage("stage0_inputs", code_commit=producer_commit),
+        stage("stage1_source_audit", code_commit=producer_commit),
+        stage(
+            "stage2_teacher",
+            code_commit=producer_commit,
+            workers=16,
+            shards=16,
+            ranges=teacher_ranges,
+        ),
+        stage("stage3_trainer", code_commit=producer_commit),
+        stage("stage4_training", code_commit=current_commit),
+        *[
+            stage(
+                f"stage5_checkpoint_{index}",
+                code_commit=current_commit,
+                workers=16,
+                shards=16,
+                ranges=list(transfer_command.T044_ASSIST_0_RANGES),
+            )
+            for index in range(8)
+        ],
+        *[
+            stage(
+                f"stage6_checkpoint_{index}",
+                code_commit=current_commit,
+                workers=16,
+                shards=16,
+                ranges=list(transfer_command.T070_T052_RANGES),
+            )
+            for index in range(4)
+        ],
+        stage("stage7_aggregate", code_commit=current_commit),
+    ]
+    summary = {
+        "problems": [],
+        "reuse_inventory": [
+            {"cohort": cohort, "disposition": "reuse_historical_four_arm"}
+            for cohort in ("assist_0", "assist_hp50")
+        ],
+        "stages": stages,
+    }
+    manifest = {
+        "source_adequacy": True,
+        "native_commit": native_commit,
+        "teacher_shard_ranges": teacher_ranges,
+    }
+
+    transfer_command._validate_stage_summary_evidence(
+        summary, manifest=manifest, code_commit=current_commit
+    )
+    stages[4]["code_commit"] = producer_commit
+    with pytest.raises(ValueError, match="failure/stale identity: stage4_training"):
+        transfer_command._validate_stage_summary_evidence(
+            summary, manifest=manifest, code_commit=current_commit
+        )
 
 
 def test_stage3_production_routes_all_sixteen_frozen_ranges_through_fork(

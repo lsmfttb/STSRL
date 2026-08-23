@@ -125,9 +125,9 @@ The following thin extensions are authorized:
    and an explicit ordered batch plan. Without those optional arguments, its
    existing initialization and epoch-shuffle behavior remains unchanged.
 5. The existing T043 trainer bridge may accept a T064 direct-provenance mode and
-   a contiguous record range. In that mode the validated exact-head T064
-   curriculum manifest and merged Stage-2 teacher artifact are the authoritative
-   inputs; source linkage is derived by code from `selected_sources` rather than
+   a contiguous record range. In that mode the validated T064 curriculum
+   manifest and merged Stage-2 teacher artifact are the authoritative inputs;
+   source linkage is derived by code from `selected_sources` rather than
    accepted from a caller-authored T022/T023/source-pool identity mapping.
    Legacy T024/T043 manifest-driven behavior remains unchanged. Range outputs
    use the existing trainer-input schema and merge into one final existing-schema
@@ -279,9 +279,9 @@ produce one valid row. Missing, duplicate, invalid, or silently dropped rows are
 integrity failures and leave T064 incomplete.
 
 Stage 3 uses a direct T064 adapter to the existing T043 trainer conversion. Its
-authoritative inputs are only the validated exact-head curriculum manifest after
-a complete zero-failure selected-source audit and the merged Stage-2 teacher
-artifact from that same head. T064 does not require a caller-authored synthetic
+authoritative inputs are only the validated curriculum manifest after a
+complete zero-failure selected-source audit and the linked merged Stage-2
+teacher artifact. T064 does not require a caller-authored synthetic
 `oracle-teacher-scaleup-manifest-v1`, synthetic T022 identity, synthetic
 single-source-pool identity, or a newly persisted 460-row selected-pool artifact
 solely to prove provenance between trusted repository stages. The existing
@@ -545,6 +545,46 @@ final PR report, and none of its records or adequacy conclusion may contribute
 to an accepted rerun. Non-simulator manifest, merge, training, aggregation, and
 hash steps may be single-process. Substantial simulator stages use 16 effective
 workers and 16 shards.
+
+### Stage-Affect Boundary And Approved Reuse
+
+Git commit fields are producer and execution provenance. A curriculum
+manifest's `code_commit` records the Stage-0 producer and is never rewritten to
+claim that an older artifact was produced by a later head. A producer commit
+that differs from the current approved execution head is not, by itself, a
+reason to reject reuse. Reuse still requires the ordinary schema, frozen-input,
+configuration, hash/byte, row/order/linkage, worker/range, return-code, and
+zero-problem checks defined by this task.
+
+For each reviewed repair, the planner and maintainer name an
+`earliest_affected_stage`. Strictly validated outputs before that boundary may
+be reused with their original producer provenance; the affected stage and all
+downstream stages are rerun. If the reviewed diff or cheap readiness checks
+cannot prove that boundary, execution stops for a narrower determination or
+moves the boundary earlier.
+
+The checkpoint-root repair introduced at
+`dce4a818f2c107073030fbede3fc98a32d84a664` changes only Stage-4 preflight and
+checkpoint publication. Its `earliest_affected_stage` is 4. The accepted
+Stage-0 manifest, Stage-1 restore audit, Stage-2 teacher, and Stage-3 trainer
+input from the preceding producer head are therefore reused after strict
+reader/rehash/linkage validation; they are not regenerated or relabeled.
+
+Before formal Stage 4--7 execution, run one cheap readiness pass that verifies:
+
+- the local and remote execution head equal the exact head named in the latest
+  planner/maintainer approval comment;
+- no formal T064 process is active and every Stage-4--7 output target is absent
+  or separately retained as failed evidence;
+- reused Stage-0--3 artifacts pass their existing strict readers, hashes,
+  bytes, row/order/linkage checks, frozen 16-worker ranges, return codes, and
+  zero-problem gates;
+- the frozen initialization checkpoint and T070 manifest retain their published
+  identities, and the Stage-4 preflight regression passes without training.
+
+The exact-head approval is required after this readiness result and before the
+first expensive Stage-4 run. Readiness and approval are workflow evidence, not
+a fifth compact artifact or a new attestation framework.
 
 ## Out Of Scope
 

@@ -723,10 +723,18 @@ def run_t064_stage3_production(
 
 
 def validate_resume_manifest(manifest: Mapping[str, Any], *, code_commit: str) -> None:
-    """Refuse resumes after a code change or before a completed restore audit."""
+    """Validate recorded producer provenance and the completed restore audit."""
 
-    if manifest.get("code_commit") != code_commit:
-        raise ValueError("T064 resume refuses stale code head")
+    for label, value in (
+        ("manifest producer", manifest.get("code_commit")),
+        ("current execution", code_commit),
+    ):
+        if (
+            not isinstance(value, str)
+            or len(value) != 40
+            or any(character not in "0123456789abcdef" for character in value)
+        ):
+            raise ValueError(f"T064 {label} code commit is invalid")
     audit = manifest.get("complete_source_audit")
     if not isinstance(audit, Mapping) or audit.get("status") != "complete":
         raise ValueError("T064 resume requires a completed selected-source audit")
@@ -3234,8 +3242,9 @@ def _validate_stage_summary_evidence(
         actual_counts[prefix] += 1
         if prefix == "stage5" and "independent" in name:
             independent_stage_count += 1
+        current_head_required = prefix in {"stage4", "stage5", "stage6", "stage7"}
         if (
-            stage.get("code_commit") != code_commit
+            (current_head_required and stage.get("code_commit") != code_commit)
             or stage.get("native_commit") != manifest.get("native_commit")
             or stage.get("failure_count") != 0
             or any(code != 0 for code in stage.get("return_codes", ()))

@@ -948,8 +948,7 @@ def _validate_t070_stage_manifest(value: Any, manifest: Mapping[str, Any]) -> No
     )
     _require_git_commit(value["current_code_commit"], "T064 current T070 code commit")
     if (
-        value["current_code_commit"] != manifest["code_commit"]
-        or value["historical_code_commit"] == manifest["code_commit"]
+        value["historical_code_commit"] == value["current_code_commit"]
         or value["arm"] != "prior_value"
         or value["native_budget"] != 100
         or value["tree_geometry_enabled"] is not False
