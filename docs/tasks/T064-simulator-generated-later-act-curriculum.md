@@ -344,19 +344,27 @@ dataset while those two workers run, keeping the topology viable on the
 31-GB maintainer host. Scheduling and completion order are operational only:
 the aggregate report always restores exact `TRAINING_RUN_ORDER`.
 
-A completed run may be reused only when a reviewed `earliest_affected_run`
-boundary excludes that run and preflight validates the existing checkpoint
-against the exact arm, seed, initialization SHA-256, trainer-input SHA-256 and
-bytes, regenerated batch-plan hash and exposures, full frozen Torch training
+A completed run may be reused through either of two explicit routes. A reviewed
+`earliest_affected_run` repair boundary permits reuse only for its canonical
+prefix. A retry of the same exact approved-head attempt uses
+`--stage4-failure-recovery`; with no repair boundary it may reuse any completed
+canonical run, regardless of scheduling or canonical position, and trains only
+missing runs. If both are supplied, the repair boundary remains authoritative:
+the boundary run and its suffix are affected and cannot be reused.
+
+Both routes require preflight to validate every retained checkpoint against the
+exact arm, seed, initialization SHA-256, trainer-input SHA-256 and bytes,
+regenerated batch-plan hash and exposures, full frozen Torch training
 configuration, current checkpoint schema/model semantic metadata, T064
 metadata, complete training-data provenance, and checkpoint file identity.
 Unexpected, affected, invalid, mismatched, or partial checkpoints fail closed;
 preflight never overwrites them. Reuse preserves the checkpoint's producer
 provenance and records `reused_validated`, never relabeling it as produced by
-the current execution head. If one concurrent worker fails, the other worker is
-allowed to finish and its valid checkpoint remains retained for a later strict
-reuse audit; no aggregate training report is published until all four canonical
-runs validate.
+the retry head. If one concurrent worker fails, the other worker is allowed to
+finish and its valid checkpoint remains retained; a same-approved-head retry
+can strictly audit and reuse that later completed run even when an earlier
+canonical run failed. No aggregate training report is published until all four
+canonical runs validate.
 
 Each phase therefore consumes 9,600 record draws. For each training seed and
 bucket, build one deterministic exposure sequence of exactly 9,600 records by

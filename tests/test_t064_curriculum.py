@@ -1985,6 +1985,98 @@ def test_stage4_production_combines_valid_reuse_and_out_of_order_completions(
     assert report["runs"][0]["run_disposition"] == "reused_validated"
 
 
+def test_stage4_failure_recovery_reuses_later_completed_run_and_trains_only_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    code_commit = "a" * 40
+    manifest_path = tmp_path / "t064-curriculum-manifest.json"
+    with manifest_path.open("w", encoding="utf-8", newline="\n") as stream:
+        dump_compact_json(
+            _complete_source_inadequate_manifest(code_commit=code_commit), stream
+        )
+    frozen = tmp_path / "t070-frozen.json"
+    frozen.write_text("{}", encoding="utf-8")
+    trainer_path = tmp_path / "trainer.jsonl"
+    trainer_path.write_bytes(b"trainer")
+    checkpoint_root = tmp_path / "checkpoints"
+    checkpoint_root.mkdir()
+    completed_keys = (TRAINING_RUN_ORDER[0], *TRAINING_RUN_ORDER[2:])
+    for arm, seed in completed_keys:
+        (checkpoint_root / f"{arm}-{seed}.pt").write_bytes(
+            f"complete:{arm}:{seed}".encode()
+        )
+    reusable_runs: dict[tuple[str, int], object] = {}
+
+    def validate(arm: str, seed: int, path: Path) -> dict[str, object]:
+        return {
+            "arm": arm,
+            "seed": seed,
+            "checkpoint": transfer_command._file_identity(path),
+            "run_disposition": "reused_validated",
+        }
+
+    transfer_command._preflight_t064_stage4_paths(
+        manifest_path=manifest_path,
+        training_report_path=tmp_path / "t064-training-run-report.json",
+        checkpoint_root=checkpoint_root,
+        frozen_t070_manifest_path=frozen,
+        code_commit=code_commit,
+        failure_recovery=True,
+        reusable_checkpoint_validator=validate,
+        reusable_runs=reusable_runs,
+    )
+    assert tuple(reusable_runs) == completed_keys
+    assert (
+        "assistance_annealed_curriculum_v1",
+        64002,
+    ) in reusable_runs  # Final canonical run completed after the earlier failure.
+
+    failed_key = TRAINING_RUN_ORDER[1]
+
+    def finish_missing(requests):
+        assert [(request.arm, request.seed) for request in requests] == [failed_key]
+        return [
+            {
+                "arm": failed_key[0],
+                "seed": failed_key[1],
+                "run_disposition": "trained_new",
+            }
+        ]
+
+    monkeypatch.setattr(transfer_command, "_run_t064_stage4_requests", finish_missing)
+    monkeypatch.setattr(
+        transfer_command,
+        "_validated_t064_training_plans",
+        lambda _manifest: {key: {} for key in TRAINING_RUN_ORDER},
+    )
+    monkeypatch.setattr(
+        transfer_command, "_validate_cached_t064_reuse_summary", lambda *_a, **_k: None
+    )
+    report = transfer_command.run_t064_stage4_production(
+        manifest_path=manifest_path,
+        trainer_input_path=trainer_path,
+        initialization_checkpoint_path=tmp_path / "initial.pt",
+        initialization_sha256=transfer_command.T064_INITIALIZATION_SHA256,
+        checkpoint_root=checkpoint_root,
+        frozen_t070_manifest_path=frozen,
+        failure_recovery=True,
+        reusable_runs=reusable_runs,
+    )
+
+    assert [(run["arm"], run["seed"]) for run in report["runs"]] == list(
+        TRAINING_RUN_ORDER
+    )
+    assert report["runs"][1]["run_disposition"] == "trained_new"
+    assert report["runs"][3]["run_disposition"] == "reused_validated"
+    assert (
+        transfer_command._t064_reusable_run_keys(
+            "assistance_annealed_curriculum_v1/64001",
+            failure_recovery=True,
+        )
+        == TRAINING_RUN_ORDER[:1]
+    )
+
+
 def test_stage4_invalid_preflight_does_not_create_checkpoint_root(
     tmp_path: Path,
 ) -> None:
@@ -2028,14 +2120,19 @@ def test_stage4_cli_writes_report_before_finalizing_manifest(
         "build_t064_stage_execution_plan",
         lambda _manifest, *, code_commit: [{"stage": "stage4_training"}],
     )
-    monkeypatch.setattr(
-        transfer_command, "_preflight_t064_stage4_paths", lambda **_kwargs: {}
-    )
-    monkeypatch.setattr(
-        transfer_command,
-        "run_t064_stage4_production",
-        lambda **_kwargs: _complete_training_report(),
-    )
+
+    def preflight(**kwargs):
+        assert kwargs["failure_recovery"] is True
+        calls.append("preflight")
+        return {}
+
+    def train(**kwargs):
+        assert kwargs["failure_recovery"] is True
+        calls.append("train")
+        return _complete_training_report()
+
+    monkeypatch.setattr(transfer_command, "_preflight_t064_stage4_paths", preflight)
+    monkeypatch.setattr(transfer_command, "run_t064_stage4_production", train)
 
     def finalize(**_kwargs):
         calls.append("finalize")
@@ -2065,11 +2162,12 @@ def test_stage4_cli_writes_report_before_finalizing_manifest(
                 str(frozen),
                 "--stage4-training-report",
                 str(report_path),
+                "--stage4-failure-recovery",
             ]
         )
         == 0
     )
-    assert calls == ["finalize"]
+    assert calls == ["preflight", "train", "finalize"]
     assert not report_path.with_suffix(".json.tmp").exists()
 
 

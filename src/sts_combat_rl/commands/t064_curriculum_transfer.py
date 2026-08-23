@@ -218,6 +218,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             "omit to require four absent checkpoint targets."
         ),
     )
+    parser.add_argument(
+        "--stage4-failure-recovery",
+        action="store_true",
+        help=(
+            "Retry the same approved-head Stage4 attempt by strictly auditing "
+            "completed checkpoints not invalidated by the repair boundary."
+        ),
+    )
     parser.add_argument("--stage5-cohort", type=Path)
     parser.add_argument("--stage5-checkpoint", type=Path)
     parser.add_argument("--stage5-cohort-kind", choices=("assist_0", "assist_hp50"))
@@ -340,7 +348,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.stage4_frozen_t070_manifest,
         args.stage4_training_report,
     )
-    if any(value is not None for value in stage4_values):
+    if (
+        any(value is not None for value in stage4_values)
+        or args.stage4_failure_recovery
+    ):
         if (
             len(stages) != 1
             or stages[0].get("stage") != "stage4_training"
@@ -375,6 +386,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             frozen_t070_manifest_path=args.stage4_frozen_t070_manifest,
             code_commit=args.code_commit,
             earliest_affected_run=args.stage4_earliest_affected_run,
+            failure_recovery=args.stage4_failure_recovery,
             reusable_checkpoint_validator=validate_reusable_checkpoint,
             reusable_runs=reusable_runs,
         )
@@ -386,6 +398,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             checkpoint_root=args.stage4_checkpoint_root,
             frozen_t070_manifest_path=args.stage4_frozen_t070_manifest,
             earliest_affected_run=args.stage4_earliest_affected_run,
+            failure_recovery=args.stage4_failure_recovery,
             reusable_runs=reusable_runs,
         )
         _validate_completed_t064_training_report(report)
@@ -796,11 +809,13 @@ def refuse_overwrite(path: Path) -> None:
 
 def _t064_reusable_run_keys(
     earliest_affected_run: str | None,
+    *,
+    failure_recovery: bool = False,
 ) -> tuple[tuple[str, int], ...]:
-    """Return the canonical prefix excluded by a reviewed per-run boundary."""
+    """Return runs excluded by repair boundary or same-head failure recovery."""
 
     if earliest_affected_run is None:
-        return ()
+        return TRAINING_RUN_ORDER if failure_recovery else ()
     try:
         boundary = T064_TRAINING_RUN_LABELS.index(earliest_affected_run)
     except ValueError as exc:
@@ -816,6 +831,7 @@ def _preflight_t064_stage4_paths(
     frozen_t070_manifest_path: Path,
     code_commit: str,
     earliest_affected_run: str | None = None,
+    failure_recovery: bool = False,
     reusable_checkpoint_validator: (
         Callable[[str, int, Path], Mapping[str, Any]] | None
     ) = None,
@@ -838,7 +854,12 @@ def _preflight_t064_stage4_paths(
     frozen = json.loads(frozen_t070_manifest_path.read_text(encoding="utf-8"))
     if not isinstance(frozen, Mapping):
         raise ValueError("T064 Stage4 frozen T070 manifest is invalid")
-    reusable = set(_t064_reusable_run_keys(earliest_affected_run))
+    reusable = set(
+        _t064_reusable_run_keys(
+            earliest_affected_run,
+            failure_recovery=failure_recovery,
+        )
+    )
     for arm, seed in TRAINING_RUN_ORDER:
         checkpoint = checkpoint_root / f"{arm}-{seed}.pt"
         partial = checkpoint.with_suffix(checkpoint.suffix + ".tmp")
@@ -2228,12 +2249,18 @@ def run_t064_stage4_production(
     checkpoint_root: Path,
     frozen_t070_manifest_path: Path,
     earliest_affected_run: str | None = None,
+    failure_recovery: bool = False,
     reusable_runs: Mapping[tuple[str, int], Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Run missing jobs in at most two isolated workers and canonically aggregate."""
 
     del frozen_t070_manifest_path  # Stage-4 preflight owns this frozen input.
-    reusable_keys = set(_t064_reusable_run_keys(earliest_affected_run))
+    reusable_keys = set(
+        _t064_reusable_run_keys(
+            earliest_affected_run,
+            failure_recovery=failure_recovery,
+        )
+    )
     validated_reuse = dict(reusable_runs or {})
     with manifest_path.open(encoding="utf-8") as stream:
         manifest = load_compact_json(stream)
