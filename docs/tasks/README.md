@@ -10,11 +10,12 @@ lifecycle state. Individual task documents intentionally omit mutable
 disposition where needed. `current_status.md` and roadmap files may summarize
 the current milestone, but they do not override this table.
 
-New task content originates with the repository-read-only planner. The planner
-sends a complete proposal to the main maintainer; the maintainer validates,
-records, and manages it here. The maintainer does not proactively add successor
-tasks. Implementers are maintainer-managed sub-agents and may start only a
-published `READY` row.
+New task content originates with the planner. For a new task, the planner creates
+a fresh task branch and draft pull request, writes the complete specification and
+proposed lifecycle changes there, and submits that exact head to the maintainer
+for independent review. The maintainer does not proactively add successor tasks.
+Implementers are maintainer-managed sub-agents and may start only after the
+workflow's explicit implementation-authorization gate is satisfied.
 
 ## Active Backlog
 
@@ -178,9 +179,10 @@ execution for a substantial workload.
 ## Published Queue
 
 The executable queue is exactly the set of `READY` rows in the Active Backlog.
-There are currently no `READY` tasks. T034 remains blocked on native
-public-consistent hidden-future sampling support; the planner must evaluate the
-T070 maintainer report before proposing any successor.
+Merged `main` currently has no `READY` task. This proposal branch adds T071 as
+`DRAFT`; it is not executable until the maintainer approves an exact
+specification head under the single-PR workflow. T034 remains blocked on native
+public-consistent hidden-future sampling support.
 
 ## Standard Local Gates
 
