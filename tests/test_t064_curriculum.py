@@ -2857,8 +2857,15 @@ def test_t044_fallback_routes_only_baseline_and_scripted_once_per_cohort(
     )
 
 
-def test_t044_semantics_bind_raw_checkpoint_and_scripted_public_contract() -> None:
-    checkpoint = {"path": "checkpoint.pt", "sha256": "a" * 64}
+def test_t044_semantics_bind_raw_checkpoint_and_scripted_public_contract(
+    tmp_path: Path,
+) -> None:
+    checkpoint_path = tmp_path / "checkpoint.pt"
+    checkpoint_path.write_bytes(b"checkpoint")
+    checkpoint = transfer_command._file_identity(checkpoint_path)
+    drive = checkpoint_path.drive.rstrip(":").lower()
+    relative = checkpoint_path.relative_to(checkpoint_path.anchor).as_posix()
+    report_checkpoint_path = f"/mnt/{drive}/{relative}"
     artifact = "torch-policy-value-checkpoint-v1-sha256:" + checkpoint["sha256"]
     guided = {
         "kind": transfer_command.MODEL_GUIDED_ORACLE_V2_CONTROLLER_KIND,
@@ -2873,7 +2880,7 @@ def test_t044_semantics_bind_raw_checkpoint_and_scripted_public_contract() -> No
                 "policy_probability_weight": 0.1,
                 "checkpoint_provenance": {
                     "checkpoint_artifact_id": artifact,
-                    "checkpoint_path": "checkpoint.pt",
+                    "checkpoint_path": report_checkpoint_path,
                 },
             },
         },
@@ -2885,7 +2892,7 @@ def test_t044_semantics_bind_raw_checkpoint_and_scripted_public_contract() -> No
             "guidance_scorer": {
                 "checkpoint_provenance": {
                     "checkpoint_artifact_id": artifact,
-                    "checkpoint_path": "checkpoint.pt",
+                    "checkpoint_path": report_checkpoint_path,
                 }
             },
         },
@@ -2939,9 +2946,25 @@ def test_t044_semantics_bind_raw_checkpoint_and_scripted_public_contract() -> No
             report, checkpoint=checkpoint
         )
     guided["kind"] = transfer_command.MODEL_GUIDED_ORACLE_V2_CONTROLLER_KIND
-    raw["config"]["guidance_scorer"]["checkpoint_provenance"]["checkpoint_path"] = (
-        "forged.pt"
-    )
+    raw_checkpoint = raw["config"]["guidance_scorer"]["checkpoint_provenance"]
+    guided_checkpoint = guided["config"]["guidance_scorer"]["checkpoint_provenance"]
+    alternate = tmp_path / "alternate.pt"
+    alternate.write_bytes(checkpoint_path.read_bytes())
+    raw_checkpoint["checkpoint_path"] = str(alternate)
+    with pytest.raises(ValueError, match="raw checkpoint identity"):
+        transfer_command._validate_t044_controller_semantics(
+            report, checkpoint=checkpoint
+        )
+    raw_checkpoint["checkpoint_path"] = report_checkpoint_path
+    missing = tmp_path / "missing.pt"
+    missing_relative = missing.relative_to(missing.anchor).as_posix()
+    guided_checkpoint["checkpoint_path"] = f"/mnt/{drive}/{missing_relative}"
+    with pytest.raises(ValueError, match="model-guided checkpoint identity"):
+        transfer_command._validate_t044_controller_semantics(
+            report, checkpoint=checkpoint
+        )
+    guided_checkpoint["checkpoint_path"] = report_checkpoint_path
+    raw_checkpoint["checkpoint_artifact_id"] = "forged"
     with pytest.raises(ValueError, match="raw checkpoint identity"):
         transfer_command._validate_t044_controller_semantics(
             report, checkpoint=checkpoint

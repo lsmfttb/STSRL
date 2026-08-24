@@ -3573,6 +3573,37 @@ def _validate_t044_frozen_cohort(
     return cohort
 
 
+def _validate_t044_checkpoint_provenance(
+    provenance: object,
+    *,
+    checkpoint: Mapping[str, Any] | None,
+    expected_artifact: str,
+    label: str,
+) -> None:
+    """Bind equivalent persisted spellings to one exact runtime checkpoint."""
+
+    if (
+        not isinstance(provenance, Mapping)
+        or provenance.get("checkpoint_artifact_id") != expected_artifact
+    ):
+        raise ValueError(f"T044 {label} checkpoint identity mismatch")
+    if checkpoint is None:
+        return
+    try:
+        reported_path = Path(
+            resolve_runtime_artifact_path(provenance.get("checkpoint_path"))[
+                "runtime_path"
+            ]
+        )
+        expected_path = Path(
+            resolve_runtime_artifact_path(checkpoint.get("path"))["runtime_path"]
+        )
+    except ValueError as exc:
+        raise ValueError(f"T044 {label} checkpoint identity mismatch") from exc
+    if reported_path != expected_path:
+        raise ValueError(f"T044 {label} checkpoint identity mismatch")
+
+
 def _validate_t044_controller_semantics(
     report: Any, *, checkpoint: Mapping[str, Any] | None
 ) -> None:
@@ -3647,17 +3678,15 @@ def _validate_t044_controller_semantics(
             ):
                 raise ValueError("T044 raw checkpoint policy semantics mismatch")
             raw_checkpoint = scorer.get("checkpoint_provenance")
-            if not isinstance(raw_checkpoint, Mapping):
-                raise ValueError("T044 raw checkpoint provenance missing")
             expected_artifact = "torch-policy-value-checkpoint-v1-sha256:" + str(
                 checkpoint.get("sha256")
             )
-            if raw_checkpoint.get(
-                "checkpoint_artifact_id"
-            ) != expected_artifact or raw_checkpoint.get(
-                "checkpoint_path"
-            ) != checkpoint.get("path"):
-                raise ValueError("T044 raw checkpoint identity mismatch")
+            _validate_t044_checkpoint_provenance(
+                raw_checkpoint,
+                checkpoint=checkpoint,
+                expected_artifact=expected_artifact,
+                label="raw",
+            )
         if role == "scripted_public_policy_baseline":
             if (
                 entry.get("kind") != "decision_policy"
@@ -3689,15 +3718,12 @@ def _validate_t044_controller_semantics(
         expected_artifact = "torch-policy-value-checkpoint-v1-sha256:" + str(
             checkpoint.get("sha256")
         )
-    if (
-        not isinstance(checkpoint_provenance, Mapping)
-        or checkpoint_provenance.get("checkpoint_artifact_id") != expected_artifact
-        or (
-            checkpoint is not None
-            and checkpoint_provenance.get("checkpoint_path") != checkpoint.get("path")
-        )
-    ):
-        raise ValueError("T044 model-guided checkpoint identity mismatch")
+    _validate_t044_checkpoint_provenance(
+        checkpoint_provenance,
+        checkpoint=checkpoint,
+        expected_artifact=expected_artifact,
+        label="model-guided",
+    )
 
 
 def _validate_teacher_against_selected_manifest(
