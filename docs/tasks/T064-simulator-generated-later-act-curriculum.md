@@ -785,11 +785,10 @@ checks, and `git diff --check`, plus focused tests for:
 
 ## Lifecycle And PR Contract
 
-T064 remains `DRAFT` on merged `main` throughout this open PR. There is no
-intermediate specification merge. Implementation begins only after an exact
-`SPEC APPROVED` comment for a specific commit on this PR. Before accepted final
-merge, the same PR updates the task index to the direct dependency set above and
-records T064 as `DONE` with its terminal result.
+T064 remained `DRAFT` on merged `main` throughout implementation. There was no
+intermediate specification merge. Implementation began only after exact
+`SPEC APPROVED` comments for specific commits on this PR. This final same-PR
+landing update records T064 as `DONE` with its terminal result.
 
 Known acceptance risks before implementation are:
 
@@ -848,3 +847,205 @@ The PR report must distinguish historical accepted evidence from commands run on
 the implementation head and must not turn missing/incomplete evidence,
 candidate holdout exclusions, or selected leakage/integrity failures into a
 scientific Case B.
+
+## Accepted Result Report (2026-08-25)
+
+### Identity and terminal decision
+
+- Task: T064; latest approved specification/execution contract:
+  `cecf0e5372534163d2620f595dfe7e763d57f3fc`; final implementation evidence
+  head before this report: `b2bc6420135f8811a62ca13c101bda8c1140d3d4`; merge base:
+  `ca4823c8c2c5c7b0bc602f5b1d0e7cae2d107c5e`.
+- Runtime identity: pinned native `sts_lightspeed` commit
+  `fee272f1ae21c283ad2161f55293cfe6d714134a`; formal simulator stages ran in
+  WSL. Training ran on CPU with deterministic algorithms and `torch_threads=1`
+  per run, with at most two isolated concurrent workers.
+- Final decision: `experiment_complete=true`, `source_adequacy=true`,
+  `source_integrity_valid=true`, complete source-audit status `complete`, no
+  problems, and no unmet acceptance criteria. Terminal result is **Case B**, a
+  complete valid negative. The exactly one recommendation is
+  `T065-learned-non-combat-policy-v1`; this does not publish or authorize T065.
+
+### Reuse boundary and retained inputs
+
+The implementation reused the T042 assisted-source pool reader and scale
+manifest, T043 teacher collection/merge and direct trainer conversion, T044
+de-assisted cohort runner and report merge, T052 fixed-cohort reader, T069
+native projection, and T070 manifest-driven substituted-checkpoint comparison
+and aggregation. The T064 router is
+`sts_combat_rl.commands.t064_curriculum_transfer`; current writers emit the
+four T064 schemas and strict readers validate them before aggregation. Existing
+legacy/default-path compatibility, direct-provenance conversion, controller
+role, checkpoint substitution, and artifact-validator tests passed. No new
+simulator, searcher, trainer, evaluation framework, synthetic bridge contract,
+or fifth compact artifact was introduced. The compact schema/reader-writer
+surface is `t064-curriculum-manifest-v1`, `t064-training-run-report-v1`,
+`t064-stage-summary-v1`, and `t064-transfer-decision-v1`, implemented by
+`sim.t064_curriculum.load_compact_json`, `validate_compact_document`, and
+`write_compact_json`; compatibility and workflow coverage is in
+`tests/test_t064_curriculum.py`, with reused subsystem compatibility covered by
+the existing T052, T069, and T070 test modules.
+
+Retained source and holdout identities were independently rehashed:
+
+| Input | Rows | Bytes | SHA-256 |
+| --- | ---: | ---: | --- |
+| T042 `assist_0` pool | 4,855 | 2,174,087,622 | `d124d94a94df534c0bcc32072582a4448746f0a9734a41410e45c51c1b1ff87f` |
+| T042 `assist_hp50` pool | 5,440 | 3,077,340,092 | `1231bcd24309df9fbeb22ec56dfa12b661c38c6f440bdea1850053734cc32d8f` |
+| T042 `assist_hp50_potion_elite_boss` pool | 5,471 | 3,240,381,446 | `642d11d4956316e96f58ddf5fceec94f59a50c3dd051205e2fdfca94485ab201` |
+| T042 `assist_hp75_potion` pool | 6,577 | 7,114,826,466 | `1bbcbfebbde4fd2eec1be249f9843bf25a288abb0672950f47ad540c9bb8f46f` |
+| T042 scale manifest | - | 8,159 | `25efae30dc9a61c8b97cb09e1844b93b9ffe693bde51c0f494f0f65203a1d327` |
+| T043 initialization checkpoint | - | 386,717 | `a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4` |
+| T044 `assist_0` holdout | 21 | 16,265,964 | `4ee0eb125ac37e870f0f2c950290b131f4693185c60b6c71cd46b5265a4d0037` |
+| T044 `assist_hp50` holdout | 38 | 65,500,639 | `bc9372a67fe6536b848616e4b700765d6a47f49b4044bd973dbcaff4dd3bba36` |
+| T052 fixed cohort | 93 | 161,435,825 | `b7f8e9b85b53bbf8e37adfe6cc90d0579937661309b26bce2a8f2921604a8608` |
+
+### Source audit, teacher, and training
+
+The complete 22,343-record source audit excluded 59 candidate holdout matches,
+found zero candidate duplicate complete identities, selected 460 records, and
+fresh-restored all 460 with zero failures. The selected set has zero holdout
+overlap and zero duplicate complete identities. It contains 256 anchor, 44
+medium-later-act, and 160 strong-later-act records; components are `assist_0`
+256, `assist_hp50` 12, `assist_hp50_potion_elite_boss` 32, and
+`assist_hp75_potion` 160; acts are Act 1 = 256 and Act 2 = 204; room strata are
+BOSS 9, ELITE 77, EVENT 5, and MONSTER 369. Encounter counts are:
+
+`AUTOMATON=1; BLUE_SLAVER=20; BOOK_OF_STABBING=8; CENTURION_AND_HEALER=19;
+CHAMP=1; CHOSEN=21; CHOSEN_AND_BYRDS=2; COLLECTOR=1; CULTIST=14;
+CULTIST_AND_CHOSEN=9; EXORDIUM_THUGS=20; EXORDIUM_WILDLIFE=20;
+GREMLIN_GANG=20; GREMLIN_LEADER=12; GREMLIN_NOB=16; HEXAGHOST=2;
+JAW_WORM=17; LAGAVULIN=16; LARGE_SLIME=18; LOOTER=10;
+LOTS_OF_SLIMES=10; MASKED_BANDITS_EVENT=2; MUSHROOMS_EVENT=3;
+RED_SLAVER=9; SENTRY_AND_SPHERE=2; SHELL_PARASITE=14;
+SHELLED_PARASITE_AND_FUNGI=6; SLAVERS=9; SLIME_BOSS=2; SMALL_SLIMES=11;
+SNAKE_PLANT=13; SNECKO=14; SPHERIC_GUARDIAN=20; THE_GUARDIAN=2;
+THREE_BYRDS=23; THREE_CULTIST=7; THREE_LOUSE=10; THREE_SENTRIES=16;
+TWO_FUNGI_BEASTS=10; TWO_LOUSE=10; TWO_THIEVES=20`.
+
+The teacher used the frozen configuration `full_simulator_state_oracle_like`,
+100 simulations, `highest_mean` root selection, `initial_no_potions` action
+space, and mandatory soft visit-distribution policy targets. It produced 460
+merged rows
+(1,031,417,027 bytes, SHA-256
+`1352eb301509f258ae92509b804125d59d2da17ef5f7f6e5b81131f11e1d0d72`).
+Direct T043-to-T064 conversion produced exactly the same 460 selected identities
+in manifest order with no synthetic caller-authored bridge; the trainer input
+is 998,761,499 bytes, SHA-256
+`aae847505ece7c4d535d08cffc9e24bc2aaead334234332f41c69f0b2c99bada`.
+Both stages used the same 16 exact contiguous ranges over `0:460` and had no
+failures.
+
+All four runs used hidden size 16, batch size 32, Adam at 0.001, 900 optimizer
+steps in phases 300/300/300, identical unit loss weights, gradient clip 10,
+the same initialization above, and exact per-source/per-bucket exposure parity.
+The static/curriculum batch-plan hashes are respectively
+`71b22d06943252c5c1f9b1f57760931063daf9344dd8538c4b381f5d09569c61` /
+`045490a96770d70227cb5f20588f5730c18ef4ad612a46a901cadd9bf458c97c`
+for seed 64001 and
+`8b9e21e907e38bedbc62a5503932e28fb589d8e4bc983ede04df2cfd63b49704` /
+`2534bf2cc06b3a9a75eb2657b168f61d3d2e6e7153b33f11ecf2fc1b4a449714`
+for seed 64002. The valid static-64001 checkpoint was strictly reused after an
+interruption; the other three were trained new. Canonical report order remained
+the frozen training order:
+
+| Arm / seed | Disposition | Bytes | Checkpoint SHA-256 |
+| --- | --- | ---: | --- |
+| static / 64001 | reused validated | 462,895 | `c0c38c239047f6be67e983768e53bd680007e9cba117e17c7d226583ed751193` |
+| curriculum / 64001 | trained new | 504,949 | `8b099e922e82a06655e0b524ea6f41c709fe75fc046d2b128d44aee7f6210c30` |
+| static / 64002 | trained new | 504,341 | `32dbf18a187e8b6d465bb026d90643e3dd28624066628019c61455fcd8f5573a` |
+| curriculum / 64002 | trained new | 504,949 | `ebd4ce96db19b5b351e0538f42292d374ac67925afbc955c594b20d6691abd97` |
+
+### Frozen evaluation and transfer gates
+
+Historical four-arm T044 reports failed strict safe-reuse validation, so both
+checkpoint-independent baselines were rerun once and shared across the four
+dependent evaluations. Results were:
+
+| Cohort / metric | Static | Curriculum | Delta |
+| --- | ---: | ---: | ---: |
+| T044 `assist_hp50`, model-guided wins | 46 | 46 | 0 |
+| T044 `assist_hp50`, raw-policy wins | 18 | 19 | +1 |
+| T044 `assist_0`, model-guided wins | 18 | 18 | 0 |
+| T052/T070 `prior_value`, seed 64001 | 2 | 2 | 0 |
+| T052/T070 `prior_value`, seed 64002 | 2 | 1 | -1 |
+| T052 Boss-only subset | - | - | 0 |
+| T052 Act-2+ subset | - | - | -1 |
+
+Three gates passed: T052 per-seed non-regression, T044 `assist_hp50` raw-policy
+non-regression, and T044 `assist_0` model-guided non-regression. Three failed:
+T052 aggregate margin, T052 subset non-regression, and T044 `assist_hp50`
+model-guided margin. This exact six-gate vector yields Case B.
+
+### Formal execution inventory and artifact identities
+
+All accepted substantial simulator stages returned zero with zero recorded
+failures. Stage 1 source audit, Stage 2 teacher collection, and Stage 3 direct
+trainer conversion each used 16 workers/16 shards over the exact contiguous
+`0:460` ranges and took 3,616.944, 4,852.544, and 6,113.625 seconds. Stage 4
+used two isolated workers for four `(arm, seed)` runs and took 20,846.164
+seconds. Stage 5 used 16 workers/16 shards for each cohort: independent
+`assist_0` 108.768 seconds and `assist_hp50` 571.434 seconds; dependent static
+64001 176.955/785.380, curriculum 64001 139.951/611.014, static 64002
+117.344/589.607, and curriculum 64002 115.741/569.323 seconds for
+`assist_0`/`assist_hp50`. Stage 6 used 16 workers/16 shards over the exact
+93-record ranges for static 64001 2,192.453, curriculum 64001 968.518, static
+64002 1,097.837, and curriculum 64002 1,007.971 seconds. Stage 7 was
+non-simulator aggregation (one worker/one shard).
+
+| Compact artifact | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `t064-curriculum-manifest.json` | 23,072,419 | `a111e082d4bc11e03bc5b785a814c422619404245ddda55c2954be09dded46c7` |
+| `t064-training-run-report.json` | 135,805 | `3e838bed72f5ca565532d39d77b1991e0d32919dcd9b1d6afe4d2c8f8ecdc38c` |
+| `t064-stage-summary.json` | 33,823 | `5748e79a23152fa51475f8cb7359c81816d6bbdd26ed2a10d7489f1853b6b880` |
+| `t064-transfer-decision.json` | 7,023 | `f8407acbc17cb13bba53009c91009fea961e7307071d54b0ff82147ff092603f` |
+
+Every additional retained artifact referenced by the final decision is below;
+the T042/T043/T044 inputs, T052 cohort, teacher, trainer, and checkpoints are
+listed above.
+
+| Evidence | Bytes | SHA-256 |
+| --- | ---: | --- |
+| independent T044 `assist_0` | 34,594,525 | `d2a4fc678a60c21990a61ea372c35b196bb2141d52fa20a225ff3c45933314c3` |
+| independent T044 `assist_hp50` | 137,041,892 | `50d9c4f87d3a5b4dff37ee18ab2af6d91eab2c202b7a7d71835577522c3ee50a` |
+| static-64001 T044 `assist_0` | 154,749,959 | `80ad6e7a33c689bb0af675663d958306b6fc7abce77e412f2bd23bfde7df6ba8` |
+| static-64001 T044 `assist_hp50` | 437,061,188 | `f35a9e73a797a8e77c29937fbf5869144725988236711db9db53e697c43f3a2a` |
+| curriculum-64001 T044 `assist_0` | 147,001,628 | `b38cc728a5c365bb270ff035c50f7eab92688240aa76438aeea75d9bed7beeda` |
+| curriculum-64001 T044 `assist_hp50` | 428,831,267 | `e2f1e4834121f498ee39f91492f20d58ff6e5974c1abd60aa773caf17d2eae6f` |
+| static-64002 T044 `assist_0` | 149,654,784 | `7fb197835f62fbe7b572cc81276cd32a17be0c9819638dc6e5a5a7f3ef6d5e5d` |
+| static-64002 T044 `assist_hp50` | 440,042,941 | `bfa602c998b6fb66419b1cf14eb1726358ef379b0e77852fe5f3c0107586e1fc` |
+| curriculum-64002 T044 `assist_0` | 149,630,162 | `9565b867a004378f37059e8c54437aab93192e514decb0e439c80dbf836cf734` |
+| curriculum-64002 T044 `assist_hp50` | 437,901,312 | `b80d78062c4e8230e4dfe1dceb27e0f5d639c03377fa60de932e7366f0260a8a` |
+| historical T070 baseline | 41,206,599 | `ece1448d0fb684bca64cc9f4dcf77f550622ed5e22a89043b7d9bcc681f0f0d7` |
+| historical T070 frozen manifest | 6,923 | `3c46c59fde70a0863e72587b5fc9c71e94354c44653dd45c7509749ec4931bba` |
+| static-64001 T070 | 22,739,987 | `c0fb61e68582f82f1c5f52330e3f6aa84f2a3ea8f7e7c833c937e6ac067bd7fc` |
+| curriculum-64001 T070 | 22,691,587 | `1f363791a837f0ee26765e56c61edb8ca433043fc8a434567f09ba0982204e76` |
+| static-64002 T070 | 22,304,143 | `8290191e2a539e83368807241003aeae92d2720260a28d6b714196697368f98b` |
+| curriculum-64002 T070 | 23,917,846 | `3dc897a1254af79deca19d6920067f41da13a9c539a35b5b376b93ca765c5d9e` |
+
+### Failed attempts, verification, and limitations
+
+The pre-overlap-fix Stage-0 manifest is retained as non-evidence at
+`logs/failed-attempts/t064-curriculum-manifest.pre-overlap-fix-431f098.json`
+(SHA-256 `7c631d0cd136508be5e04a6d8bfe27b49c064a198e78d114921ad2b2c610ea17`).
+An earlier successful-but-incomplete Stage-1 attempt, a Windows-path Stage-1
+failure, a hand-entered-commit rerun, the interrupted serial Stage-4 attempt,
+and other terminated attempts are also retained as non-evidence. Two Stage-7
+fail-closed attempts were archived: Windows path spelling caused contract
+paths to mismatch, then sorted controller-role labels were incorrectly treated
+as arm order. Both emitted `INCOMPLETE`; neither contributed records or a
+conclusion. The accepted WSL rerun strictly revalidated all inputs and emitted
+Case B.
+
+Verification on implementation head `b2bc6420135f8811a62ca13c101bda8c1140d3d4`:
+full `pytest` = 942 passed, 11 skipped; T064-relevant tests = 114 passed,
+11 skipped; focused Stage-7 real-artifact validation = 1 passed; Ruff, Ruff
+format check, `compileall`, and `git diff --check` all passed. The final four
+compact artifacts were strict-loaded and independently rehashed.
+
+Known scientific limitations remain: only two training seeds were frozen;
+T052 contains only five Act-2+ records; no Act-3/Act-4/Heart transfer evidence
+was established; and this simulator-only experiment did not validate a live
+CommunicationMod controller. These are limitations of the valid negative, not
+unmet acceptance criteria. There are no unresolved execution risks or unmet
+T064 acceptance criteria.
