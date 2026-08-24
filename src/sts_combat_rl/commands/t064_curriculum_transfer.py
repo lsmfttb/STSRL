@@ -48,6 +48,10 @@ from sts_combat_rl.sim.de_assisted_fixed_cohort_comparison import (
     load_de_assisted_fixed_cohort_comparison_jsonl,
 )
 from sts_combat_rl.sim.fixed_evaluation_set import load_fixed_cohort_jsonl
+from sts_combat_rl.sim.model_guided_oracle_search import (
+    MODEL_GUIDED_ORACLE_V2_CONTROLLER_KIND,
+    MODEL_GUIDED_ORACLE_V2_ROOT_SELECTION_RULE,
+)
 from sts_combat_rl.sim.oracle_teacher import (
     OracleTeacherDataset,
     dump_oracle_teacher_dataset_jsonl,
@@ -3613,9 +3617,20 @@ def _validate_t044_controller_semantics(
             if (
                 not isinstance(budget, Mapping)
                 or budget.get("simulations") != T044_SEARCH_BUDGET
-                or settings.get("root_selection_rule") != T044_ROOT_SELECTION
                 or settings.get("information_regime")
                 != "full_simulator_state_oracle_like"
+            ):
+                raise ValueError(f"T044 search semantics mismatch for {role}")
+            if role == "baseline_oracle_search":
+                if (
+                    entry.get("kind") != "oracle_battle_search"
+                    or settings.get("root_selection_rule") != T044_ROOT_SELECTION
+                ):
+                    raise ValueError(f"T044 search semantics mismatch for {role}")
+            elif (
+                entry.get("kind") != MODEL_GUIDED_ORACLE_V2_CONTROLLER_KIND
+                or settings.get("root_selection_rule")
+                != MODEL_GUIDED_ORACLE_V2_ROOT_SELECTION_RULE
             ):
                 raise ValueError(f"T044 search semantics mismatch for {role}")
             action_space = settings.get("action_space")

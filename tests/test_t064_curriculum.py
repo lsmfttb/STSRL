@@ -2861,11 +2861,13 @@ def test_t044_semantics_bind_raw_checkpoint_and_scripted_public_contract() -> No
     checkpoint = {"path": "checkpoint.pt", "sha256": "a" * 64}
     artifact = "torch-policy-value-checkpoint-v1-sha256:" + checkpoint["sha256"]
     guided = {
-        "kind": "model_guided_oracle_battle_search",
+        "kind": transfer_command.MODEL_GUIDED_ORACLE_V2_CONTROLLER_KIND,
         "config": {
             "information_regime": "full_simulator_state_oracle_like",
             "search_budget": {"simulations": 1},
-            "root_selection_rule": "highest_mean",
+            "root_selection_rule": (
+                transfer_command.MODEL_GUIDED_ORACLE_V2_ROOT_SELECTION_RULE
+            ),
             "action_space": {"excluded_kinds": ["potion"]},
             "guidance_scorer": {
                 "policy_probability_weight": 0.1,
@@ -2923,6 +2925,20 @@ def test_t044_semantics_bind_raw_checkpoint_and_scripted_public_contract() -> No
                 report, checkpoint=checkpoint
             )
     report.comparison_config["controller_roles"] = accepted_roles
+    guided["config"]["root_selection_rule"] = "highest_mean"
+    with pytest.raises(ValueError, match="search semantics"):
+        transfer_command._validate_t044_controller_semantics(
+            report, checkpoint=checkpoint
+        )
+    guided["config"]["root_selection_rule"] = (
+        transfer_command.MODEL_GUIDED_ORACLE_V2_ROOT_SELECTION_RULE
+    )
+    guided["kind"] = "model_guided_oracle_battle_search"
+    with pytest.raises(ValueError, match="search semantics"):
+        transfer_command._validate_t044_controller_semantics(
+            report, checkpoint=checkpoint
+        )
+    guided["kind"] = transfer_command.MODEL_GUIDED_ORACLE_V2_CONTROLLER_KIND
     raw["config"]["guidance_scorer"]["checkpoint_provenance"]["checkpoint_path"] = (
         "forged.pt"
     )
