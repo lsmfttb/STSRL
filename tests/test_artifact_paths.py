@@ -34,6 +34,26 @@ def test_runtime_resolver_preserves_posix_absolute_identity(monkeypatch) -> None
     assert resolved["persistent_path"] == "/stable/artifacts/source.jsonl"
 
 
+def test_runtime_resolver_translates_wsl_mount_without_rewriting_identity(
+    tmp_path: Path,
+) -> None:
+    runtime = tmp_path / "source.jsonl"
+    runtime.write_text("source", encoding="utf-8")
+    drive = runtime.drive.rstrip(":").lower()
+    relative = runtime.relative_to(runtime.anchor).as_posix()
+    persistent = f"/mnt/{drive}/{relative}"
+
+    resolved = artifact_paths.resolve_runtime_artifact_path(
+        persistent,
+        runtime_platform="nt",
+    )
+
+    assert resolved == {
+        "persistent_path": persistent,
+        "runtime_path": str(runtime),
+    }
+
+
 @pytest.mark.parametrize(
     "path",
     [

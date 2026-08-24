@@ -3414,6 +3414,29 @@ def test_stage7_t070_rows_require_exact_order_clean_rows_and_frozen_subsets() ->
         transfer_command._validate_t070_rows(rows, cohort=cohort)
 
 
+def test_stage7_mixed_runtime_resolution_refuses_same_bytes_at_another_path(
+    tmp_path: Path,
+) -> None:
+    frozen = tmp_path / "frozen.json"
+    alternate = tmp_path / "alternate.json"
+    frozen.write_text("same", encoding="utf-8")
+    alternate.write_text("same", encoding="utf-8")
+    drive = frozen.drive.rstrip(":").lower()
+    relative = frozen.relative_to(frozen.anchor).as_posix()
+    expected = {
+        "path": f"/mnt/{drive}/{relative}",
+        "sha256": hashlib.sha256(frozen.read_bytes()).hexdigest(),
+        "bytes": frozen.stat().st_size,
+    }
+
+    with pytest.raises(ValueError, match="runtime path mismatch"):
+        transfer_command._stage7_frozen_reference(
+            expected,
+            label="mixed-path fixture",
+            supplied_path=alternate,
+        )
+
+
 def test_stage7_aggregation_consumes_complete_representative_mock_inputs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -3429,10 +3452,15 @@ def test_stage7_aggregation_consumes_complete_representative_mock_inputs(
         )
         return path
 
-    def identity(path: Path) -> dict[str, object]:
+    def identity(path: Path, *, persisted_as_wsl: bool = False) -> dict[str, object]:
         data = path.read_bytes()
+        persisted_path = str(path)
+        if persisted_as_wsl:
+            drive = path.drive.rstrip(":").lower()
+            relative = path.relative_to(path.anchor).as_posix()
+            persisted_path = f"/mnt/{drive}/{relative}"
         return {
-            "path": str(path),
+            "path": persisted_path,
             "sha256": hashlib.sha256(data).hexdigest(),
             "bytes": len(data),
         }
@@ -3447,8 +3475,8 @@ def test_stage7_aggregation_consumes_complete_representative_mock_inputs(
     frozen_manifest_path = write("t070-frozen.json")
     baseline_path = write("t070-baseline.json")
     t052_path = write("t052-cohort.jsonl")
-    frozen_manifest_identity = identity(frozen_manifest_path)
-    t052_identity = identity(t052_path)
+    frozen_manifest_identity = identity(frozen_manifest_path, persisted_as_wsl=True)
+    t052_identity = identity(t052_path, persisted_as_wsl=True)
     t044_cohort_paths = {
         "assist_0": write("assist-0-cohort.jsonl"),
         "assist_hp50": write("assist-hp50-cohort.jsonl"),
@@ -3539,9 +3567,6 @@ def test_stage7_aggregation_consumes_complete_representative_mock_inputs(
         transfer_command, "_validate_stage_summary_evidence", lambda *_a, **_k: None
     )
     monkeypatch.setattr(
-        transfer_command, "validate_external_frozen_identity", lambda *_a, **_k: None
-    )
-    monkeypatch.setattr(
         transfer_command, "load_oracle_teacher_dataset_jsonl", lambda _stream: object()
     )
     monkeypatch.setattr(
@@ -3563,7 +3588,7 @@ def test_stage7_aggregation_consumes_complete_representative_mock_inputs(
     monkeypatch.setattr(
         transfer_command,
         "_validate_t044_frozen_cohort",
-        lambda contract, *, cohort_kind: SimpleNamespace(
+        lambda contract, **_kwargs: SimpleNamespace(
             identity=contract["identity"], records=[]
         ),
     )
@@ -3607,7 +3632,7 @@ def test_stage7_aggregation_consumes_complete_representative_mock_inputs(
         transfer_command, "independent_rehash", lambda *_a, **_k: {"ok": True}
     )
     frozen_inputs = {
-        "teacher": identity(teacher_path),
+        "teacher": identity(teacher_path, persisted_as_wsl=True),
         "trainer_input": identity(trainer_path),
         "t044_cohorts": {
             name: {
@@ -3618,11 +3643,12 @@ def test_stage7_aggregation_consumes_complete_representative_mock_inputs(
             for name, path in t044_cohort_paths.items()
         },
         "t044_independent_reports": {
-            name: identity(path) for name, path in t044_independent_paths.items()
+            name: identity(path, persisted_as_wsl=True)
+            for name, path in t044_independent_paths.items()
         },
         "t070": {
             "manifest": frozen_manifest_identity,
-            "baseline": identity(baseline_path),
+            "baseline": identity(baseline_path, persisted_as_wsl=True),
             "baseline_contract": {},
             "cohort": t052_identity,
             "cohort_identity": "t052",
@@ -3649,6 +3675,13 @@ def test_stage7_aggregation_consumes_complete_representative_mock_inputs(
 
     assert result["decision"]["experiment_complete"] is True
     assert result["decision"]["terminal_case"] in {"Case A", "Case B"}
+    referenced_paths = {
+        item["path"]
+        for item in result["decision"]["diagnostics"]["referenced_artifacts"]
+    }
+    assert checkpoints[TRAINING_RUN_ORDER[0]]["path"] in referenced_paths
+    assert frozen_manifest_identity["path"] in referenced_paths
+    assert str(frozen_manifest_path) not in referenced_paths
     assert set(written) == {"t064-stage-summary.json", "t064-transfer-decision.json"}
 
 
@@ -3684,7 +3717,9 @@ def test_stage2_to_7_dry_plan_has_exact_worker_range_and_stage_inventory() -> No
     assert plan[-1]["stage"] == "stage7_aggregate"
 
 
-def test_stage_summary_allows_reused_stage0_to_3_producer_commits_only() -> None:
+def test_stage_summary_allows_reused_commits_and_mixed_persisted_paths(
+    tmp_path: Path,
+) -> None:
     producer_commit = "a" * 40
     native_commit = "b" * 40
     current_commit = "c" * 40
@@ -3751,6 +3786,17 @@ def test_stage_summary_allows_reused_stage0_to_3_producer_commits_only() -> None
         ],
         stage("stage7_aggregate", code_commit=current_commit),
     ]
+    windows_output = tmp_path / "windows-persisted.json"
+    wsl_output = tmp_path / "wsl-persisted.json"
+    windows_output.write_text("windows", encoding="utf-8")
+    wsl_output.write_text("wsl", encoding="utf-8")
+    windows_identity = transfer_command._file_identity(windows_output)
+    wsl_identity = transfer_command._file_identity(wsl_output)
+    drive = wsl_output.drive.rstrip(":").lower()
+    relative = wsl_output.relative_to(wsl_output.anchor).as_posix()
+    wsl_identity["path"] = f"/mnt/{drive}/{relative}"
+    stages[0]["outputs"] = {"windows": windows_identity}
+    stages[4]["outputs"] = {"wsl": wsl_identity}
     summary = {
         "problems": [],
         "reuse_inventory": [
@@ -3768,6 +3814,8 @@ def test_stage_summary_allows_reused_stage0_to_3_producer_commits_only() -> None
     transfer_command._validate_stage_summary_evidence(
         summary, manifest=manifest, code_commit=current_commit
     )
+    assert windows_identity["path"] == str(windows_output)
+    assert wsl_identity["path"].startswith("/mnt/")
     stages[4]["code_commit"] = producer_commit
     with pytest.raises(ValueError, match="failure/stale identity: stage4_training"):
         transfer_command._validate_stage_summary_evidence(

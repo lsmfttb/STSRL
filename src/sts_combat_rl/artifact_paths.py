@@ -14,8 +14,9 @@ def resolve_runtime_artifact_path(
 ) -> dict[str, str]:
     """Resolve an absolute persisted path without mutating its stored identity.
 
-    Windows paths are translated only for a POSIX runtime, while POSIX absolute
-    paths are retained exactly.  The returned mapping records both spellings so
+    Windows paths are translated for a POSIX runtime. WSL ``/mnt/<drive>``
+    paths are translated for a Windows runtime, while other POSIX absolute
+    paths are retained exactly. The returned mapping records both spellings so
     callers can persist auditable runtime evidence.
     """
 
@@ -45,7 +46,18 @@ def resolve_runtime_artifact_path(
             raise ValueError("artifact path must be absolute")
         if any(part in {"..", "."} for part in posix.parts):
             raise ValueError("artifact path must not contain traversal")
-        resolved = Path(persistent_path)
+        parts = posix.parts
+        if (
+            platform == "nt"
+            and len(parts) >= 3
+            and parts[1] == "mnt"
+            and len(parts[2]) == 1
+            and parts[2].isascii()
+            and parts[2].isalpha()
+        ):
+            resolved = Path(f"{parts[2].upper()}:\\", *parts[3:])
+        else:
+            resolved = Path(persistent_path)
 
     if not resolved.is_file():
         raise ValueError(f"artifact runtime path is missing: {resolved}")

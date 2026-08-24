@@ -21,6 +21,7 @@ from pathlib import Path
 import time
 from typing import Any
 
+from sts_combat_rl.artifact_paths import resolve_runtime_artifact_path
 from sts_combat_rl.commands.oracle_teacher_scaleup import (
     collect_oracle_teacher_range_from_selected_manifest,
 )
@@ -3395,7 +3396,11 @@ def assert_exact_compact_inventory(root: Path) -> None:
 
 
 def validate_external_frozen_identity(
-    path: Path, expected: Mapping[str, Any], *, label: str
+    path: Path,
+    expected: Mapping[str, Any],
+    *,
+    label: str,
+    persistent_path: str | None = None,
 ) -> dict[str, Any]:
     """Validate a path against an identity frozen outside the report it contains."""
 
@@ -3406,7 +3411,8 @@ def validate_external_frozen_identity(
         if actual[field] != expected.get(field):
             raise ValueError(f"T064 frozen {label} {field} mismatch")
     expected_path = expected.get("path")
-    if expected_path is not None and str(path) != expected_path:
+    compared_path = str(path) if persistent_path is None else persistent_path
+    if expected_path is not None and compared_path != expected_path:
         raise ValueError(f"T064 frozen {label} path mismatch")
     return actual
 
@@ -3523,16 +3529,25 @@ def _t044_results_match_cohort(arms: Sequence[Any], cohort: Any) -> bool:
 
 
 def _validate_t044_frozen_cohort(
-    contract: Mapping[str, Any], *, cohort_kind: str
+    contract: Mapping[str, Any], *, cohort_kind: str, resolve_runtime_path: bool = False
 ) -> Any:
     """Rehash and reload a holdout before accepting any T044 report on it."""
 
     artifact = contract.get("artifact")
     if not isinstance(artifact, Mapping):
         raise ValueError("T044 frozen cohort artifact identity missing")
-    path = Path(str(artifact.get("path", "")))
+    persistent_path: str | None = None
+    if resolve_runtime_path:
+        runtime = resolve_runtime_artifact_path(artifact.get("path"))
+        path = Path(runtime["runtime_path"])
+        persistent_path = runtime["persistent_path"]
+    else:
+        path = Path(str(artifact.get("path", "")))
     validate_external_frozen_identity(
-        path, artifact, label=f"T044 {cohort_kind} cohort"
+        path,
+        artifact,
+        label=f"T044 {cohort_kind} cohort",
+        persistent_path=persistent_path,
     )
     with path.open(encoding="utf-8") as stream:
         cohort = load_fixed_cohort_jsonl(stream)
@@ -3952,9 +3967,7 @@ def _validate_stage_summary_evidence(
         ):
             if not isinstance(identity, Mapping):
                 raise ValueError("T064 stage summary artifact identity is invalid")
-            validate_external_frozen_identity(
-                Path(str(identity.get("path", ""))), identity, label=f"{name} output"
-            )
+            _stage7_frozen_reference(identity, label=f"{name} output")
     if actual_counts != expected_counts:
         if actual_counts["stage5"] != 8 + expected_independent:
             raise ValueError("T064 stage summary Stage0--7 inventory is incomplete")
@@ -3965,8 +3978,43 @@ def _validate_stage_summary_evidence(
         raise ValueError("T064 Stage5 independent fallback disposition mismatch")
 
 
+def _stage7_runtime_reference(persistent_path: object) -> tuple[Path, str]:
+    """Resolve one persisted spelling while retaining it for provenance checks."""
+
+    runtime = resolve_runtime_artifact_path(persistent_path)
+    return Path(runtime["runtime_path"]), runtime["persistent_path"]
+
+
+def _stage7_frozen_reference(
+    expected: Mapping[str, Any],
+    *,
+    label: str,
+    supplied_path: Path | None = None,
+) -> tuple[Path, str]:
+    """Resolve and validate one frozen identity without rewriting its path."""
+
+    reference = _stage7_runtime_reference(expected.get("path"))
+    if supplied_path is not None:
+        supplied = _stage7_runtime_reference(str(supplied_path))
+        if supplied[0] != reference[0]:
+            raise ValueError(f"T064 frozen {label} runtime path mismatch")
+    validate_external_frozen_identity(
+        reference[0],
+        expected,
+        label=label,
+        persistent_path=reference[1],
+    )
+    return reference
+
+
+def _stage7_reference_identity(reference: tuple[Path, str]) -> dict[str, Any]:
+    identity = _file_identity(reference[0])
+    identity["path"] = reference[1]
+    return identity
+
+
 def _validate_stage_summary_crosslinks(
-    summary: Mapping[str, Any], references: Sequence[Path]
+    summary: Mapping[str, Any], references: Sequence[tuple[Path, str]]
 ) -> None:
     """Require summary output identities to name the artifacts accepted by Stage 7."""
 
@@ -3980,14 +4028,17 @@ def _validate_stage_summary_crosslinks(
         ):
             if isinstance(identity, Mapping) and isinstance(identity.get("path"), str):
                 summarized[identity["path"]] = identity
-    for path in references:
+    for path, persistent_path in references:
         if not path.is_file():
             continue
-        identity = summarized.get(str(path))
+        identity = summarized.get(persistent_path)
         if identity is None:
-            raise ValueError(f"stage summary omits accepted artifact {path}")
+            raise ValueError(f"stage summary omits accepted artifact {persistent_path}")
         validate_external_frozen_identity(
-            path, identity, label="Stage7 accepted artifact"
+            path,
+            identity,
+            label="Stage7 accepted artifact",
+            persistent_path=persistent_path,
         )
 
 
@@ -4055,8 +4106,12 @@ def aggregate_t064_stage7_from_artifacts(
     unmet: list[str] = []
     if stage_summary_problem is not None:
         problems.append(f"stage summary evidence invalid: {stage_summary_problem}")
-    references = [manifest_path, training_path, teacher_path, trainer_input_path]
-    for label, path in (
+    references = [
+        _stage7_runtime_reference(str(manifest_path)),
+        _stage7_runtime_reference(str(training_path)),
+    ]
+    external_runtime_paths: dict[str, Path] = {}
+    for label, supplied_path in (
         ("teacher", teacher_path),
         ("trainer_input", trainer_input_path),
     ):
@@ -4065,18 +4120,26 @@ def aggregate_t064_stage7_from_artifacts(
             problems.append(f"external frozen identity missing for {label}")
         else:
             try:
-                validate_external_frozen_identity(path, expected, label=label)
+                reference = _stage7_frozen_reference(
+                    expected,
+                    label=label,
+                    supplied_path=supplied_path,
+                )
+                external_runtime_paths[label] = reference[0]
+                references.append(reference)
             except ValueError as exc:
                 problems.append(str(exc))
-    if not teacher_path.is_file() or not trainer_input_path.is_file():
+    if set(external_runtime_paths) != {"teacher", "trainer_input"}:
         problems.append("teacher or trainer-input artifact missing")
     else:
         try:
-            with teacher_path.open(encoding="utf-8") as stream:
+            with external_runtime_paths["teacher"].open(encoding="utf-8") as stream:
                 _validate_teacher_against_selected_manifest(
                     load_oracle_teacher_dataset_jsonl(stream), manifest
                 )
-            with trainer_input_path.open(encoding="utf-8") as stream:
+            with external_runtime_paths["trainer_input"].open(
+                encoding="utf-8"
+            ) as stream:
                 _validate_trainer_against_selected_manifest(
                     load_trainer_input_dataset_jsonl(stream), manifest
                 )
@@ -4092,18 +4155,20 @@ def aggregate_t064_stage7_from_artifacts(
             problems.append(f"manifest frozen plan validation failed: {exc}")
         for run in runs:
             checkpoint = run.get("checkpoint", {})
-            path = Path(str(checkpoint.get("path", "")))
-            if (
-                run.get("completion_status") != "complete"
-                or not path.is_file()
-                or _sha256(path) != checkpoint.get("sha256")
-                or path.stat().st_size != checkpoint.get("bytes")
-            ):
+            try:
+                if run.get("completion_status") != "complete" or not isinstance(
+                    checkpoint, Mapping
+                ):
+                    raise ValueError("checkpoint is incomplete")
+                reference = _stage7_frozen_reference(
+                    checkpoint, label="training checkpoint"
+                )
+            except ValueError:
                 problems.append(
                     f"checkpoint identity/completion failed for {run.get('arm')}/{run.get('seed')}"
                 )
             else:
-                references.append(path)
+                references.append(reference)
     metrics: dict[str, Any] = {
         "curriculum_t052_prior_value_wins": {},
         "static_t052_prior_value_wins": {},
@@ -4138,12 +4203,15 @@ def aggregate_t064_stage7_from_artifacts(
                 continue
             try:
                 cohort = _validate_t044_frozen_cohort(
-                    cohort_contract, cohort_kind=cohort_name
+                    cohort_contract,
+                    cohort_kind=cohort_name,
+                    resolve_runtime_path=True,
                 )
-                path = Path(str(evidence.get("path", "")))
-                validate_external_frozen_identity(
-                    path, evidence, label=f"T044 {cohort_name} independent report"
+                reference = _stage7_frozen_reference(
+                    evidence,
+                    label=f"T044 {cohort_name} independent report",
                 )
+                path = reference[0]
                 with path.open(encoding="utf-8") as stream:
                     independent = load_de_assisted_fixed_cohort_comparison_jsonl(stream)
                 if not validate_t044_independent_report(
@@ -4154,7 +4222,7 @@ def aggregate_t064_stage7_from_artifacts(
                 ):
                     raise ValueError("T044 independent roles/config/order mismatch")
                 _validate_t044_controller_semantics(independent, checkpoint=None)
-                references.append(path)
+                references.append(reference)
             except (OSError, ValueError) as exc:
                 problems.append(f"external T044 independent evidence invalid: {exc}")
     if not isinstance(frozen_t070, Mapping):
@@ -4164,9 +4232,11 @@ def aggregate_t064_stage7_from_artifacts(
         manifest_identity = frozen_t070.get("manifest")
         if isinstance(manifest_identity, Mapping):
             try:
-                historical_frozen = load_t070_frozen_contract(
-                    Path(str(manifest_identity.get("path", "")))
+                manifest_reference = _stage7_frozen_reference(
+                    manifest_identity,
+                    label="t070_manifest",
                 )
+                historical_frozen = load_t070_frozen_contract(manifest_reference[0])
                 inputs = historical_frozen.get("input_identities")
                 if not isinstance(inputs, Mapping) or inputs.get(
                     "t052_fixed_cohort"
@@ -4180,20 +4250,24 @@ def aggregate_t064_stage7_from_artifacts(
             if not isinstance(expected, Mapping):
                 problems.append(f"external frozen T070 {label} identity missing")
                 continue
-            candidate = Path(str(expected.get("path", "")))
             try:
-                validate_external_frozen_identity(
-                    candidate, expected, label=f"t070_{label}"
+                reference = _stage7_frozen_reference(
+                    expected,
+                    label=f"t070_{label}",
                 )
-                references.append(candidate)
+                references.append(reference)
             except ValueError as exc:
                 problems.append(str(exc))
         baseline_identity = frozen_t070.get("baseline")
         baseline_contract = frozen_t070.get("baseline_contract")
         cohort_identity = frozen_t070.get("cohort")
         if isinstance(cohort_identity, Mapping):
-            t052_path = Path(str(cohort_identity.get("path", "")))
             try:
+                t052_reference = _stage7_frozen_reference(
+                    cohort_identity,
+                    label="t070_cohort",
+                )
+                t052_path = t052_reference[0]
                 with t052_path.open(encoding="utf-8") as stream:
                     t052_cohort = load_fixed_cohort_jsonl(stream)
                 if (
@@ -4215,8 +4289,12 @@ def aggregate_t064_stage7_from_artifacts(
             and t052_cohort is not None
             and historical_frozen is not None
         ):
-            baseline_path = Path(str(baseline_identity.get("path", "")))
             try:
+                baseline_reference = _stage7_frozen_reference(
+                    baseline_identity,
+                    label="t070_baseline",
+                )
+                baseline_path = baseline_reference[0]
                 baseline_report = json.loads(baseline_path.read_text(encoding="utf-8"))
                 if not validate_t070_baseline_reuse(
                     baseline_report,
@@ -4246,11 +4324,14 @@ def aggregate_t064_stage7_from_artifacts(
         }:
             problems.append(f"T044 stage inventory missing for {key[0]}/{key[1]}")
             continue
-        for cohort_name, path in cohort_paths.items():
-            if not path.is_file():
-                problems.append(f"T044 artifact missing: {path}")
+        for cohort_name, persistent_path in cohort_paths.items():
+            try:
+                reference = _stage7_runtime_reference(str(persistent_path))
+            except ValueError:
+                problems.append(f"T044 artifact missing: {persistent_path}")
                 continue
-            references.append(path)
+            path = reference[0]
+            references.append(reference)
             with path.open(encoding="utf-8") as stream:
                 report = load_de_assisted_fixed_cohort_comparison_jsonl(stream)
             frozen_cohort = (
@@ -4263,7 +4344,9 @@ def aggregate_t064_stage7_from_artifacts(
                 continue
             try:
                 cohort = _validate_t044_frozen_cohort(
-                    frozen_cohort, cohort_kind=cohort_name
+                    frozen_cohort,
+                    cohort_kind=cohort_name,
+                    resolve_runtime_path=True,
                 )
             except (OSError, ValueError) as exc:
                 problems.append(f"T044 frozen cohort mismatch: {exc}")
@@ -4298,11 +4381,17 @@ def aggregate_t064_stage7_from_artifacts(
                 metrics[f"{prefix}_t044_assist_0_model_guided_wins"] += wins[
                     T044_DEPENDENT_ROLES[0]
                 ]
-        if t070_path is None or not t070_path.is_file():
+        if t070_path is None:
             problems.append(f"T070 artifact missing for {key[0]}/{key[1]}")
             continue
-        references.append(t070_path)
-        report = json.loads(t070_path.read_text(encoding="utf-8"))
+        try:
+            t070_reference = _stage7_runtime_reference(str(t070_path))
+        except ValueError:
+            problems.append(f"T070 artifact missing for {key[0]}/{key[1]}")
+            continue
+        references.append(t070_reference)
+        runtime_t070_path = t070_reference[0]
+        report = json.loads(runtime_t070_path.read_text(encoding="utf-8"))
         try:
             if not isinstance(frozen_t070, Mapping):
                 raise ValueError("external T070 contract missing")
@@ -4342,7 +4431,9 @@ def aggregate_t064_stage7_from_artifacts(
                 frozen_t070=contract,
             )
         except ValueError as exc:
-            problems.append(f"T070 frozen contract mismatch: {t070_path}: {exc}")
+            problems.append(
+                f"T070 frozen contract mismatch: {t070_reference[1]}: {exc}"
+            )
             continue
         rows = report.get("arm_report", {}).get("records", [])
         try:
@@ -4350,7 +4441,7 @@ def aggregate_t064_stage7_from_artifacts(
                 raise ValueError("frozen T052 cohort was not loaded")
             t052_rows[key] = _validate_t070_rows(rows, cohort=t052_cohort)
         except ValueError as exc:
-            problems.append(f"T070 rows incomplete: {t070_path}: {exc}")
+            problems.append(f"T070 rows incomplete: {t070_reference[1]}: {exc}")
             continue
         wins = sum(row.get("termination_status") == "win" for row in t052_rows[key])
         metrics[
@@ -4414,7 +4505,9 @@ def aggregate_t064_stage7_from_artifacts(
             "derived_from_artifacts": True,
             "metrics": metrics,
             "referenced_artifacts": [
-                _file_identity(path) for path in references if path.is_file()
+                _stage7_reference_identity(reference)
+                for reference in references
+                if reference[0].is_file()
             ],
         },
         problems=problems,
@@ -4427,7 +4520,7 @@ def aggregate_t064_stage7_from_artifacts(
     return {
         "decision": decision,
         "metrics": metrics,
-        "rehash": independent_rehash(root, references),
+        "rehash": independent_rehash(root, [reference[0] for reference in references]),
     }
 
 
