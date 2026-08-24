@@ -9,12 +9,14 @@ from importlib import import_module
 import json
 import math
 from pathlib import Path
+import re
 import statistics
 import subprocess
 import sys
 import sysconfig
 from typing import Any
 
+from sts_combat_rl.artifact_paths import resolve_runtime_artifact_path
 from sts_combat_rl.commands.t062_battle_search_v2 import (
     _evaluate_t062_arm,
     _fixed_report_summary,
@@ -29,6 +31,7 @@ from sts_combat_rl.sim.fixed_evaluation_set import (
     dump_fixed_cohort_jsonl,
     load_fixed_cohort_jsonl,
 )
+from sts_combat_rl.sim.t064_curriculum import validate_t064_t070_stage_manifest
 
 
 NATIVE_COMMIT = "fee272f1ae21c283ad2161f55293cfe6d714134a"
@@ -108,6 +111,7 @@ def build_frozen_manifests(
     frozen_output_path: Path,
     subset_output_path: Path,
     subset_cohort_output_path: Path,
+    expected_checkpoint_sha256: str = T043_CHECKPOINT_SHA256,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Verify immutable inputs and freeze both stage inventory and blind subset."""
 
@@ -120,7 +124,7 @@ def build_frozen_manifests(
             raise ValueError(f"T070 freeze refuses to overwrite output: {output}")
     inputs = {
         "t052_fixed_cohort": _identity(cohort_path, T052_COHORT_SHA256),
-        "t043_checkpoint": _identity(checkpoint_path, T043_CHECKPOINT_SHA256),
+        "t043_checkpoint": _identity(checkpoint_path, expected_checkpoint_sha256),
         "t068_retention_manifest": _identity(
             t068_retention_path, T068_RETENTION_SHA256
         ),
@@ -191,6 +195,141 @@ def build_frozen_manifests(
     }
     _write_json(frozen_output_path, frozen)
     return frozen, subset_manifest
+
+
+def expected_checkpoint_identity_from_stage_manifest(
+    path: Path, *, t064_selection: str | None = None
+) -> dict[str, Any]:
+    """Read the evaluated checkpoint identity while preserving T070 manifests."""
+
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, Mapping):
+        raise ValueError("stage manifest must be an object")
+    if payload.get("schema_id") == FROZEN_MANIFEST_SCHEMA_ID:
+        inputs = payload.get("input_identities")
+        identity = (
+            inputs.get("t043_checkpoint") if isinstance(inputs, Mapping) else None
+        )
+    elif payload.get("schema_id") == "t064-curriculum-manifest-v1":
+        if t064_selection is not None:
+            validate_t064_t070_stage_manifest(payload)
+        stage = payload.get("t070_stage_manifest")
+        if not isinstance(stage, Mapping):
+            identity = None
+        elif t064_selection is None:
+            # Historical single-checkpoint T064 wrappers remain readable for
+            # T070 compatibility. New T064 production calls always provide a
+            # selection and therefore take the strict four-selection branch.
+            identity = stage.get("checkpoint")
+        else:
+            selections = stage.get("checkpoint_selections")
+            selected = (
+                selections.get(t064_selection)
+                if isinstance(selections, Mapping)
+                else None
+            )
+            identity = (
+                selected.get("checkpoint") if isinstance(selected, Mapping) else None
+            )
+    else:
+        raise ValueError("unsupported frozen stage manifest schema")
+    if not isinstance(identity, Mapping):
+        raise ValueError("stage manifest lacks checkpoint identity")
+    sha256 = identity.get("sha256")
+    expected_bytes = identity.get("bytes")
+    if not isinstance(sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", sha256):
+        raise ValueError("stage manifest checkpoint SHA-256 is invalid")
+    if (
+        isinstance(expected_bytes, bool)
+        or not isinstance(expected_bytes, int)
+        or expected_bytes < 0
+    ):
+        raise ValueError("stage manifest checkpoint byte count is invalid")
+    runtime_identity = resolve_runtime_artifact_path(identity.get("path"))
+    runtime_path = Path(runtime_identity["runtime_path"])
+    if _sha256(runtime_path) != sha256 or runtime_path.stat().st_size != expected_bytes:
+        raise ValueError("stage manifest checkpoint runtime identity mismatch")
+    return {
+        "path": identity.get("path"),
+        "sha256": sha256,
+        "bytes": expected_bytes,
+    }
+
+
+def _t070_frozen_contract_from_stage_manifest(
+    path: Path, *, t064_selection: str | None = None
+) -> tuple[dict[str, Any], str | None]:
+    """Resolve a T070 manifest or the T064 wrapper that substitutes only a checkpoint.
+
+    The wrapper carries an identity-bound copy of the old frozen manifest; this
+    deliberately keeps the old stage inventory, cohort, ranges, and failure
+    policy authoritative while allowing T064 to evaluate a newly trained
+    checkpoint.
+    """
+
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, Mapping):
+        raise ValueError("stage manifest must be an object")
+    if payload.get("schema_id") == FROZEN_MANIFEST_SCHEMA_ID:
+        return dict(payload), None
+    if payload.get("schema_id") != "t064-curriculum-manifest-v1":
+        raise ValueError("unsupported frozen stage manifest schema")
+    if t064_selection is not None:
+        validate_t064_t070_stage_manifest(payload)
+    stage = payload.get("t070_stage_manifest")
+    if not isinstance(stage, Mapping):
+        raise ValueError("T064 stage manifest is missing")
+    frozen_identity = stage.get("frozen_t070_manifest")
+    if not isinstance(frozen_identity, Mapping):
+        raise ValueError("T064 stage manifest lacks frozen T070 identity")
+    frozen_path = frozen_identity.get("path")
+    expected_sha256 = frozen_identity.get("sha256")
+    expected_bytes = frozen_identity.get("bytes")
+    if (
+        not isinstance(frozen_path, str)
+        or not isinstance(expected_sha256, str)
+        or not re.fullmatch(r"[0-9a-f]{64}", expected_sha256)
+        or isinstance(expected_bytes, bool)
+        or not isinstance(expected_bytes, int)
+        or expected_bytes < 0
+    ):
+        raise ValueError("T064 frozen T070 identity is invalid")
+    producer_code_commit = payload.get("code_commit")
+    if not isinstance(producer_code_commit, str) or not re.fullmatch(
+        r"[0-9a-f]{40}", producer_code_commit
+    ):
+        raise ValueError("T064 stage manifest code commit is invalid")
+    execution_code_commit = stage.get("current_code_commit", producer_code_commit)
+    if not isinstance(execution_code_commit, str) or not re.fullmatch(
+        r"[0-9a-f]{40}", execution_code_commit
+    ):
+        raise ValueError("T064 stage manifest execution commit is invalid")
+    runtime_identity = resolve_runtime_artifact_path(frozen_path)
+    resolved = Path(runtime_identity["runtime_path"])
+    if (
+        not resolved.is_file()
+        or _sha256(resolved) != expected_sha256
+        or resolved.stat().st_size != expected_bytes
+    ):
+        raise ValueError("T064 frozen T070 manifest identity mismatch")
+    frozen = _load_schema(resolved, FROZEN_MANIFEST_SCHEMA_ID)
+    historical_code_commit = frozen.get("code_commit")
+    if not isinstance(historical_code_commit, str) or not re.fullmatch(
+        r"[0-9a-f]{40}", historical_code_commit
+    ):
+        raise ValueError("historical frozen T070 code commit is invalid")
+    return frozen, execution_code_commit
+
+
+def load_t070_frozen_contract(
+    path: Path, *, t064_selection: str | None = None
+) -> dict[str, Any]:
+    """Load the rehashed historical T070 contract behind a stage manifest."""
+
+    frozen, _ = _t070_frozen_contract_from_stage_manifest(
+        path, t064_selection=t064_selection
+    )
+    return frozen
 
 
 def run_single_arm_shard(
@@ -991,10 +1130,14 @@ def validate_t070_frozen_stage(
     checkpoint_path: Path,
     source_manifest_path: Path,
     source_verifier_path: Path,
+    t064_selection: str | None = None,
 ) -> tuple[dict[str, Any], tuple[str, ...]]:
-    frozen = _load_schema(frozen_path, FROZEN_MANIFEST_SCHEMA_ID)
+    frozen, wrapper_code_commit = _t070_frozen_contract_from_stage_manifest(
+        frozen_path, t064_selection=t064_selection
+    )
     if (
-        frozen.get("code_commit") != code_commit
+        (wrapper_code_commit is None and frozen.get("code_commit") != code_commit)
+        or (wrapper_code_commit is not None and wrapper_code_commit != code_commit)
         or frozen.get("native_commit") != NATIVE_COMMIT
         or frozen.get("command_passed") is not True
     ):
@@ -1029,7 +1172,9 @@ def validate_t070_frozen_stage(
         (cohort_path, expected_input, "cohort"),
         (
             checkpoint_path,
-            frozen["input_identities"]["t043_checkpoint"],
+            expected_checkpoint_identity_from_stage_manifest(
+                frozen_path, t064_selection=t064_selection
+            ),
             "checkpoint",
         ),
         (

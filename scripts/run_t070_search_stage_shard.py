@@ -13,7 +13,7 @@ from sts_combat_rl.commands.model_guided_oracle_search import (
 )
 from sts_combat_rl.commands.t068_checkout import verify_exact_git_checkout
 from sts_combat_rl.commands.t070_search_v2_audit import (
-    T043_CHECKPOINT_SHA256,
+    expected_checkpoint_identity_from_stage_manifest,
     run_single_arm_shard,
     validate_t070_frozen_stage,
     validate_t070_preflight,
@@ -35,6 +35,10 @@ def main() -> int:
     parser.add_argument("--code-commit", required=True)
     parser.add_argument("--stage-name", required=True)
     parser.add_argument(
+        "--t064-selection",
+        help="Checkpoint selection key in one persisted T064 curriculum manifest.",
+    )
+    parser.add_argument(
         "--arm",
         choices=("baseline", "prior_only", "value_only", "prior_value"),
         required=True,
@@ -53,22 +57,9 @@ def main() -> int:
     verify_exact_git_checkout(Path.cwd(), args.code_commit)
     if args.output.exists():
         raise SystemExit("T070 shard refuses to overwrite output")
-    if (
-        hashlib.sha256(args.checkpoint.read_bytes()).hexdigest()
-        != T043_CHECKPOINT_SHA256
-    ):
-        raise SystemExit("T070 checkpoint hash mismatch")
     source_manifest = Path("docs/sts_lightspeed_source_manifest.json")
     source_verifier = Path("scripts/verify_lightspeed_source.sh")
-    preflight = validate_t070_preflight(
-        args.native_preflight,
-        code_commit=args.code_commit,
-        source_manifest_path=source_manifest,
-        source_verifier_path=source_verifier,
-        native_checkout=args.native_checkout,
-        native_build_root=args.native_build_root,
-    )
-    _, expected_ranges = validate_t070_frozen_stage(
+    frozen, expected_ranges = validate_t070_frozen_stage(
         args.frozen_manifest,
         code_commit=args.code_commit,
         stage_name=args.stage_name,
@@ -81,6 +72,24 @@ def main() -> int:
         checkpoint_path=args.checkpoint,
         source_manifest_path=source_manifest,
         source_verifier_path=source_verifier,
+        t064_selection=args.t064_selection,
+    )
+    checkpoint_identity = expected_checkpoint_identity_from_stage_manifest(
+        args.frozen_manifest, t064_selection=args.t064_selection
+    )
+    if (
+        hashlib.sha256(args.checkpoint.read_bytes()).hexdigest()
+        != checkpoint_identity["sha256"]
+        or args.checkpoint.stat().st_size != checkpoint_identity["bytes"]
+    ):
+        raise SystemExit("T070 checkpoint hash mismatch")
+    preflight = validate_t070_preflight(
+        args.native_preflight,
+        code_commit=frozen["code_commit"],
+        source_manifest_path=source_manifest,
+        source_verifier_path=source_verifier,
+        native_checkout=args.native_checkout,
+        native_build_root=args.native_build_root,
     )
     scorer = build_torch_guidance_scorer_from_checkpoint(args.checkpoint)
     controller = BattleSearchV2Controller(

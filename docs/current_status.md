@@ -1,6 +1,6 @@
 # Current Status
 
-Last reviewed: 2026-08-03.
+Last reviewed: 2026-08-25.
 
 This document is the main maintainer's canonical execution-result report for
 the planner and describes the latest `main` branch only. Results from local
@@ -100,9 +100,16 @@ native tree-geometry companion, ran all ten frozen 93-record primary stages and
 all six frozen 16-record high-budget stages, rejected Search v2 promotion, and
 selected Case C. The 100-simulation budget is descriptively insufficient, but
 the high-budget guidance signal is false. T070 recommends T064 to the planner
-without publishing it. There are currently no `READY` tasks; the main
-maintainer is awaiting the planner's next task handoff. T034 remains blocked on
-native public-consistent hidden-future sampler support.
+without publishing it. T064 is now complete with a valid negative Case B. It
+selected 460 leakage-free, duplicate-free restored starts, trained the frozen
+static and assistance-annealed arms for seeds 64001/64002, and completed both
+frozen T044 cohorts and the 93-record T052/T070 comparison. The curriculum arm
+tied static on T044 model-guided wins (46 at `assist_hp50`, 18 at `assist_0`),
+but lost one T052 win at seed 64002 and on the Act-2+ subset. Only three of six
+transfer gates passed, so no curriculum promotion or natural scale-up is
+authorized. The terminal decision recommends T065 to the planner; it does not
+publish or authorize T065. There are currently no `READY` tasks. T034 remains
+blocked on native public-consistent hidden-future sampler support.
 
 ## Implemented On Main
 
@@ -1554,11 +1561,15 @@ primary outcome gate failed, its bounded diagnostic found the 100-simulation
 budget insufficient without a high-budget guidance signal, and its Case C
 decision recommends T064 to the planner without publishing it.
 
-No task is currently `READY`. The planner must evaluate the T070 Case C report
-and send any next task proposal to the maintainer. T064 remains `DRAFT`; the
-T070 recommendation does not authorize implementation or publish a successor.
-No further natural source scale-up is authorized by the
-T062/T067/T068/T069/T070 evidence alone.
+T064 is complete with `experiment_complete=true`, source adequacy and integrity
+valid, no unmet acceptance criteria, and terminal `Case B`. Its assistance-
+annealed curriculum tied the static mixture on both T044 model-guided cohorts,
+improved `assist_hp50` raw-policy wins by one, tied seed 64001 on T052, and
+regressed by one win at seed 64002 and on the Act-2+ subset. The accepted result
+therefore does not promote the curriculum and recommends T065 to the planner.
+No task is currently `READY`; that recommendation does not publish or authorize
+T065. No further natural source scale-up is authorized by the
+T062/T067/T068/T069/T070/T064 evidence alone.
 
 T034 remains blocked on an explicit native simulator boundary for
 public-consistent hidden-future sampling.

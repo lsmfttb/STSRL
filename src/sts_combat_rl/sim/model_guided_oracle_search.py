@@ -63,6 +63,7 @@ MODEL_GUIDED_ORACLE_SEARCH_V2_CONTROLLER_VERSION = (
     "model-guided-oracle-search-controller-v2"
 )
 MODEL_GUIDED_ORACLE_V2_CONTROLLER_NAME = "model_guided_oracle_search_v2"
+MODEL_GUIDED_ORACLE_V2_CONTROLLER_KIND = "model_guided_oracle_battle_search_v2"
 MODEL_GUIDED_ORACLE_V2_ROOT_SELECTION_RULE = (
     "native_mean_plus_visit_adjusted_policy_probability"
 )
@@ -393,7 +394,7 @@ class ModelGuidedOracleSearchV2Controller:
             self,
             "provenance",
             ControllerProvenance(
-                kind="model_guided_oracle_battle_search_v2",
+                kind=MODEL_GUIDED_ORACLE_V2_CONTROLLER_KIND,
                 name=(
                     f"{MODEL_GUIDED_ORACLE_V2_CONTROLLER_NAME}_"
                     f"s{self.simulations}_"
@@ -538,7 +539,7 @@ class ModelGuidedOracleSearchV2Controller:
             guidance_formula=_v2_guidance_formula(
                 float(self.policy_probability_weight)
             ),
-            telemetry_controller_kind="model_guided_oracle_battle_search_v2",
+            telemetry_controller_kind=MODEL_GUIDED_ORACLE_V2_CONTROLLER_KIND,
             search_kind=(
                 "native_random_terminal_playout_with_visit_adjusted_public_root_guidance"
             ),

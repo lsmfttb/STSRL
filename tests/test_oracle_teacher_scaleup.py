@@ -6,14 +6,17 @@ import hashlib
 import json
 import random
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from sts_combat_rl.commands.oracle_teacher_scaleup import (
     ORACLE_TEACHER_SCALEUP_MANIFEST_FILENAME,
+    collect_oracle_teacher_range_from_selected_manifest,
     run_assisted_oracle_teacher_scaleup_from_paths,
     run_oracle_teacher_scaleup_from_paths,
 )
+from sts_combat_rl.commands import oracle_teacher_scaleup as teacher_scaleup_command
 from sts_combat_rl.sim.assisted_source_generation import (
     ASSISTED_RUN_DISTRIBUTION_KIND,
     ASSIST_LEVEL_0,
@@ -44,7 +47,12 @@ from sts_combat_rl.sim.controller_contract import ControllerProvenance
 from sts_combat_rl.sim.lightspeed_source import lightspeed_source_identity_dict
 from sts_combat_rl.sim.online_controller import NATIVE_SEARCH_INFORMATION_REGIME
 from sts_combat_rl.sim.oracle_search import OracleSearchController
-from sts_combat_rl.sim.oracle_teacher import OracleTeacherDataset, OracleTeacherRow
+from sts_combat_rl.sim.oracle_teacher import (
+    OracleTeacherDataset,
+    OracleTeacherRow,
+    load_oracle_teacher_dataset_jsonl,
+    merge_oracle_teacher_dataset_shards,
+)
 from sts_combat_rl.sim.oracle_teacher_scaleup import (
     ORACLE_TEACHER_SCALEUP_SOURCE_SELECTION_T032_T039_NARROW,
     T032_T039_ACT1_BOSS_SOURCE_COUNT,
@@ -57,6 +65,7 @@ from sts_combat_rl.sim.oracle_teacher_scaleup import (
     dump_oracle_teacher_scaleup_manifest_json,
     validate_oracle_teacher_scaleup_budgets,
 )
+from sts_combat_rl.sim.t064_curriculum import complete_source_identity
 
 
 class _ScaleupAdapter:
@@ -603,8 +612,45 @@ def test_assisted_command_workflow_writes_teacher_reports_and_manifest(
     assert manifest_json["input_artifacts"]["assisted_pool"]["distribution_kind"] == (
         "assisted_run"
     )
-    assert (output_dir / "oracle-teacher-budget-20.jsonl").exists()
+    teacher_path = output_dir / "oracle-teacher-budget-20.jsonl"
+    assert teacher_path.exists()
+    with teacher_path.open(encoding="utf-8") as stream:
+        teacher = load_oracle_teacher_dataset_jsonl(stream)
+    assert teacher.records[0].restoration_method == "assisted_seed_action_trace"
     assert (output_dir / "oracle-teacher-report-budget-20.json").exists()
+
+
+def test_teacher_range_preserves_individual_collection_problem(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    record = _record(0)
+    identity = complete_source_identity(record)
+    monkeypatch.setattr(
+        teacher_scaleup_command,
+        "collect_oracle_teacher_dataset_from_pool",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            records=[],
+            problems=["pool record 0: action identity matched 0 legal actions"],
+        ),
+    )
+
+    with pytest.raises(ValueError, match="action identity matched 0 legal actions"):
+        collect_oracle_teacher_range_from_selected_manifest(
+            adapter_factory=_ScaleupAdapter,
+            pool=_custom_pool([record]),
+            controller=OracleSearchController(simulations=20),
+            selected_source_manifest={
+                "selected_sources": [
+                    {
+                        "complete_identity": identity,
+                        "complete_identity_sha256": identity[
+                            "complete_identity_sha256"
+                        ],
+                    }
+                ]
+            },
+            record_range="0:1",
+        )
 
 
 def test_command_workflow_rejects_t021_source_pool_mismatch(
@@ -648,6 +694,66 @@ def _dataset(
         source_pool_controller_provenance=_provenance("routed"),
         records=records,
     )
+
+
+def test_teacher_range_merge_requires_exact_selected_order() -> None:
+    shards = (
+        _dataset(
+            budget=100,
+            records=[_row(0, budget=100, selected_action=1, probabilities=[0.2, 0.8])],
+        ),
+        _dataset(
+            budget=100,
+            records=[_row(1, budget=100, selected_action=1, probabilities=[0.2, 0.8])],
+        ),
+    )
+    merged = merge_oracle_teacher_dataset_shards(
+        shards,
+        expected_source_checkpoint_ids=("checkpoint-0", "checkpoint-1"),
+    )
+    assert [row.row_index for row in merged.records] == [0, 1]
+    with pytest.raises(ValueError, match="exactly one ordered row"):
+        merge_oracle_teacher_dataset_shards(
+            shards,
+            expected_source_checkpoint_ids=("checkpoint-1", "checkpoint-0"),
+        )
+
+
+def test_teacher_range_merge_accepts_complete_identity_order_with_duplicate_checkpoint_ids() -> (
+    None
+):
+    first = _row(0, budget=100, selected_action=1, probabilities=[0.2, 0.8])
+    second = _row(1, budget=100, selected_action=1, probabilities=[0.2, 0.8])
+    second = replace(second, source_checkpoint_id=first.source_checkpoint_id)
+    shards = (
+        _dataset(budget=100, records=[first]),
+        _dataset(budget=100, records=[second]),
+    )
+
+    def identity(row: OracleTeacherRow, digest: str) -> dict[str, object]:
+        return {
+            "complete_identity_sha256": digest * 64,
+            "source_checkpoint_id": row.source_checkpoint_id,
+            "source_seed": row.source_seed,
+            "source_run_id": row.source_run_id,
+            "source_battle_index": row.source_battle_index,
+            "distribution_kind": row.source_distribution_kind,
+            "checkpoint_information_regime": row.checkpoint_information_regime,
+        }
+
+    merged = merge_oracle_teacher_dataset_shards(
+        shards,
+        expected_complete_identities=(identity(first, "a"), identity(second, "b")),
+    )
+    assert [row.source_seed for row in merged.records] == [
+        first.source_seed,
+        second.source_seed,
+    ]
+    with pytest.raises(ValueError, match="complete identities"):
+        merge_oracle_teacher_dataset_shards(
+            shards,
+            expected_complete_identities=(identity(second, "a"), identity(first, "b")),
+        )
 
 
 def _row(

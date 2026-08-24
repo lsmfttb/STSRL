@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 import json
 import time
 from typing import Any, TextIO
@@ -16,12 +16,13 @@ from sts_combat_rl.sim.artifact_versioning import (
     preserved_migration_report,
 )
 from sts_combat_rl.sim.battle_start_pool import (
+    BattleStartCheckpointRecord,
     NATURAL_DISTRIBUTION_KIND,
     NATURAL_SAMPLING_COMPONENT,
     NaturalBattleStartPool,
     restore_battle_start_record,
 )
-from sts_combat_rl.sim.contract import CheckpointingSimulatorAdapter
+from sts_combat_rl.sim.contract import CheckpointingSimulatorAdapter, SimulatorSnapshot
 from sts_combat_rl.sim.controlled_run import build_decision_context
 from sts_combat_rl.sim.controller_contract import controller_provenance_from_dict
 from sts_combat_rl.sim.decision_record import action_identity_dicts_for_actions
@@ -173,8 +174,17 @@ def collect_oracle_teacher_dataset_from_pool(
     controller: OracleSearchController,
     *,
     action_space: ActionSpaceConfig | None = None,
+    record_restorer: Callable[
+        [CheckpointingSimulatorAdapter, BattleStartCheckpointRecord],
+        tuple[SimulatorSnapshot, str],
+    ] = restore_battle_start_record,
 ) -> OracleTeacherDataset:
-    """Restore each pool record and collect one Oracle teacher row."""
+    """Restore each pool record and collect one Oracle teacher row.
+
+    ``record_restorer`` defaults to the portable natural-source restore path.
+    Explicitly tagged source distributions may provide their own validated
+    restorer without changing the teacher artifact schema or collection logic.
+    """
 
     active_action_space = action_space or controller.action_space
     rows: list[OracleTeacherRow] = []
@@ -183,7 +193,7 @@ def collect_oracle_teacher_dataset_from_pool(
         label = f"pool record {record.record_index}"
         try:
             adapter = adapter_factory()
-            snapshot, restoration_method = restore_battle_start_record(adapter, record)
+            snapshot, restoration_method = record_restorer(adapter, record)
             actions = list(adapter.legal_actions(snapshot))
             public_run_context = _row_public_context(
                 record.public_context_status, record
@@ -379,6 +389,93 @@ def load_oracle_teacher_dataset_jsonl(
         if problems:
             raise ValueError("invalid oracle teacher dataset: " + "; ".join(problems))
     return dataset
+
+
+def merge_oracle_teacher_dataset_shards(
+    shards: Sequence[OracleTeacherDataset],
+    *,
+    expected_source_checkpoint_ids: Sequence[str] | None = None,
+    expected_complete_identities: Sequence[Mapping[str, Any]] | None = None,
+) -> OracleTeacherDataset:
+    """Deterministically merge range-collected rows into the existing schema."""
+
+    if not shards:
+        raise ValueError("Oracle teacher merge requires at least one shard")
+    first = shards[0]
+    rows: list[OracleTeacherRow] = []
+    problems: list[str] = []
+    for shard in shards:
+        for field_name in (
+            "native_source_identity",
+            "controller_provenance",
+            "action_space_config",
+            "source_pool_format_version",
+            "source_pool_controller_provenance",
+            "artifact_schema_id",
+            "format_version",
+            "native_search_schema_id",
+            "information_regime",
+        ):
+            if getattr(shard, field_name) != getattr(first, field_name):
+                raise ValueError(
+                    f"Oracle teacher shard configuration differs: {field_name}"
+                )
+        problems.extend(shard.problems)
+        rows.extend(shard.records)
+    if (expected_source_checkpoint_ids is None) == (
+        expected_complete_identities is None
+    ):
+        raise ValueError(
+            "Oracle teacher merge requires exactly one selected identity contract"
+        )
+    if problems:
+        raise ValueError(
+            "Oracle teacher shard contains failures: " + "; ".join(problems)
+        )
+    if expected_complete_identities is not None:
+        expected = list(expected_complete_identities)
+        if len(expected) != len(rows):
+            raise ValueError("Oracle teacher merge complete identity count mismatches")
+        hashes = [item.get("complete_identity_sha256") for item in expected]
+        if not all(isinstance(value, str) and value for value in hashes) or len(
+            set(hashes)
+        ) != len(hashes):
+            raise ValueError("Oracle teacher merge complete identities are invalid")
+        for row, identity in zip(rows, expected, strict=True):
+            if not _teacher_row_matches_complete_identity(row, identity):
+                raise ValueError(
+                    "Oracle teacher merge requires exact ordered complete identities"
+                )
+    else:
+        actual = [row.source_checkpoint_id for row in rows]
+        expected = list(expected_source_checkpoint_ids or ())
+        if actual != expected or len(actual) != len(set(actual)):
+            raise ValueError(
+                "Oracle teacher merge requires exactly one ordered row per selected source"
+            )
+    return OracleTeacherDataset(
+        native_source_identity=first.native_source_identity,
+        controller_provenance=first.controller_provenance,
+        action_space_config=first.action_space_config,
+        source_pool_format_version=first.source_pool_format_version,
+        source_pool_controller_provenance=first.source_pool_controller_provenance,
+        records=[replace(row, row_index=index) for index, row in enumerate(rows)],
+    )
+
+
+def _teacher_row_matches_complete_identity(
+    row: OracleTeacherRow,
+    identity: Mapping[str, Any],
+) -> bool:
+    return (
+        row.source_checkpoint_id == identity.get("source_checkpoint_id")
+        and row.source_seed == identity.get("source_seed")
+        and row.source_run_id == identity.get("source_run_id")
+        and row.source_battle_index == identity.get("source_battle_index")
+        and row.source_distribution_kind == identity.get("distribution_kind")
+        and row.checkpoint_information_regime
+        == identity.get("checkpoint_information_regime")
+    )
 
 
 def _sampling_component_for_record(record: Any) -> str:

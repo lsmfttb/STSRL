@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 from pathlib import Path
 import os
@@ -32,8 +33,10 @@ from sts_combat_rl.commands.t070_search_v2_audit import (
     build_decision_report,
     build_primary_report,
     build_retention_manifest,
+    expected_checkpoint_identity_from_stage_manifest,
     merge_single_arm_stage,
     probe_t070_native_runtime_identity,
+    validate_t070_frozen_stage,
     validate_t070_preflight,
 )
 from sts_combat_rl.sim.fixed_evaluation_set import (
@@ -315,6 +318,364 @@ def test_t070_schema_contract_covers_all_required_outputs() -> None:
         "docs/tasks/T070-battle-search-v2-fixed-cohort-outcome-and-budget-sufficiency-audit.md"
     ).read_text(encoding="utf-8")
     assert "t070_artifact_schema_contract.json" in task
+
+
+def test_t070_checkpoint_identity_can_be_supplied_by_t064_manifest(tmp_path) -> None:
+    checkpoint_path = tmp_path / "checkpoint.pt"
+    checkpoint_path.write_bytes(b"checkpoint")
+    checkpoint = {
+        "path": str(checkpoint_path),
+        "sha256": hashlib.sha256(checkpoint_path.read_bytes()).hexdigest(),
+        "bytes": checkpoint_path.stat().st_size,
+    }
+    historical = tmp_path / "t070.json"
+    historical.write_text(
+        json.dumps(
+            {
+                "schema_id": "t070-frozen-experiment-manifest-v1",
+                "input_identities": {"t043_checkpoint": checkpoint},
+            }
+        ),
+        encoding="utf-8",
+    )
+    t064 = tmp_path / "t064.json"
+    t064.write_text(
+        json.dumps(
+            {
+                "schema_id": "t064-curriculum-manifest-v1",
+                "t070_stage_manifest": {"checkpoint": checkpoint},
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert expected_checkpoint_identity_from_stage_manifest(historical) == checkpoint
+    assert expected_checkpoint_identity_from_stage_manifest(t064) == checkpoint
+
+
+def test_t070_stage_validation_accepts_identity_bound_t064_checkpoint_wrapper(
+    tmp_path: Path,
+) -> None:
+    cohort = tmp_path / "cohort.jsonl"
+    source_manifest = tmp_path / "source.json"
+    verifier = tmp_path / "verify.sh"
+    old_checkpoint = tmp_path / "old.pt"
+    new_checkpoint = tmp_path / "new.pt"
+    for path, content in (
+        (cohort, b"cohort"),
+        (source_manifest, b"source"),
+        (verifier, b"verifier"),
+        (old_checkpoint, b"old"),
+        (new_checkpoint, b"new"),
+    ):
+        path.write_bytes(content)
+
+    def identity(path: Path) -> dict[str, object]:
+        return {
+            "path": str(path),
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            "bytes": path.stat().st_size,
+        }
+
+    frozen = tmp_path / "frozen.json"
+    frozen.write_text(
+        json.dumps(
+            {
+                "schema_id": "t070-frozen-experiment-manifest-v1",
+                "code_commit": "a" * 40,
+                "native_commit": NATIVE_COMMIT,
+                "command_passed": True,
+                "input_identities": {
+                    "t052_fixed_cohort": identity(cohort),
+                    "t043_checkpoint": identity(old_checkpoint),
+                    "sts_lightspeed_source_manifest": identity(source_manifest),
+                    "sts_lightspeed_source_verifier": identity(verifier),
+                },
+                "primary_stage_inventory": [
+                    {
+                        "stage_name": "baseline-0100",
+                        "arm": "baseline",
+                        "family": "shared",
+                        "native_budget": 100,
+                        "tree_geometry_enabled": False,
+                    }
+                ],
+                "primary_shard_ranges": list(PRIMARY_RANGES),
+                "primary_worker_count": 16,
+            }
+        ),
+        encoding="utf-8",
+    )
+    wrapper = tmp_path / "t064.json"
+    wrapper.write_text(
+        json.dumps(
+            {
+                "schema_id": "t064-curriculum-manifest-v1",
+                "code_commit": "b" * 40,
+                "t070_stage_manifest": {
+                    "frozen_t070_manifest": identity(frozen),
+                    "checkpoint": identity(new_checkpoint),
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    _, ranges = validate_t070_frozen_stage(
+        wrapper,
+        code_commit="b" * 40,
+        stage_name="baseline-0100",
+        arm="baseline",
+        family="shared",
+        budget=100,
+        range_kind="primary",
+        tree_geometry=False,
+        cohort_path=cohort,
+        checkpoint_path=new_checkpoint,
+        source_manifest_path=source_manifest,
+        source_verifier_path=verifier,
+    )
+    assert ranges == PRIMARY_RANGES
+    _, direct_ranges = validate_t070_frozen_stage(
+        frozen,
+        code_commit="a" * 40,
+        stage_name="baseline-0100",
+        arm="baseline",
+        family="shared",
+        budget=100,
+        range_kind="primary",
+        tree_geometry=False,
+        cohort_path=cohort,
+        checkpoint_path=old_checkpoint,
+        source_manifest_path=source_manifest,
+        source_verifier_path=verifier,
+    )
+    assert direct_ranges == PRIMARY_RANGES
+
+
+def test_t070_shard_runner_routes_t064_wrapper_through_checkout_and_preflight(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    code_commit = "b" * 40
+    historical_code_commit = "a" * 40
+    producer_code_commit = "c" * 40
+    cohort = tmp_path / "cohort.jsonl"
+    checkpoint = tmp_path / "checkpoint.pt"
+    for path, content in ((cohort, b"cohort"), (checkpoint, b"checkpoint")):
+        path.write_bytes(content)
+
+    def identity(path: Path) -> dict[str, object]:
+        return {
+            "path": str(path),
+            "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+            "bytes": path.stat().st_size,
+        }
+
+    source_manifest = Path("docs/sts_lightspeed_source_manifest.json")
+    verifier = Path("scripts/verify_lightspeed_source.sh")
+    frozen = tmp_path / "historical-frozen.json"
+    frozen.write_text(
+        json.dumps(
+            {
+                "schema_id": "t070-frozen-experiment-manifest-v1",
+                "code_commit": historical_code_commit,
+                "native_commit": NATIVE_COMMIT,
+                "command_passed": True,
+                "input_identities": {
+                    "t052_fixed_cohort": identity(cohort),
+                    "t043_checkpoint": identity(checkpoint),
+                    "sts_lightspeed_source_manifest": identity(source_manifest),
+                    "sts_lightspeed_source_verifier": identity(verifier),
+                },
+                "primary_stage_inventory": [
+                    {
+                        "stage_name": "equal-prior-value-0100",
+                        "arm": "prior_value",
+                        "family": "equal_nominal",
+                        "native_budget": 100,
+                        "tree_geometry_enabled": False,
+                    }
+                ],
+                "primary_shard_ranges": list(PRIMARY_RANGES),
+                "primary_worker_count": 16,
+            }
+        ),
+        encoding="utf-8",
+    )
+    wrapper = tmp_path / "t064-wrapper.json"
+    wrapper.write_text(
+        json.dumps(
+            {
+                "schema_id": "t064-curriculum-manifest-v1",
+                "code_commit": producer_code_commit,
+                "t070_stage_manifest": {
+                    "frozen_t070_manifest": identity(frozen),
+                    "historical_code_commit": historical_code_commit,
+                    "current_code_commit": code_commit,
+                    "arm": "prior_value",
+                    "native_budget": 100,
+                    "tree_geometry_enabled": False,
+                    "projection_mode": "accepted_t069_search_scope_projection",
+                    "shard_ranges": list(PRIMARY_RANGES),
+                    "worker_count": 16,
+                    "checkpoint_selections": {
+                        key: {"checkpoint": identity(checkpoint)}
+                        for key in (
+                            "static_mixture_v1:64001",
+                            "static_mixture_v1:64002",
+                            "assistance_annealed_curriculum_v1:64001",
+                            "assistance_annealed_curriculum_v1:64002",
+                        )
+                    },
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    log_fields = (
+        "stdout",
+        "stderr",
+        "runtime_build_stdout",
+        "runtime_build_stderr",
+        "runtime_api_smoke_stdout",
+        "runtime_api_smoke_stderr",
+        "runtime_geometry_stdout",
+        "runtime_geometry_stderr",
+    )
+    logs: dict[str, str] = {}
+    for field in log_fields:
+        path = tmp_path / f"{field}.log"
+        path.write_text(field, encoding="utf-8")
+        logs[field] = str(path)
+    runtime_identity = {
+        "python_executable": str(tmp_path / "python3.13"),
+        "python_extension_suffix": ".cpython-313-x86_64-linux-gnu.so",
+        "native_extension_path": str(tmp_path / "slaythespire.so"),
+    }
+    preflight = tmp_path / "preflight.json"
+    preflight.write_text(
+        json.dumps(
+            {
+                "schema_id": "t070-native-capability-preflight-v1",
+                "stsrl_code_commit": historical_code_commit,
+                "native_commit": NATIVE_COMMIT,
+                "semantic_parity_result": True,
+                "runtime_api_smoke_passed": True,
+                "runtime_geometry_passed": True,
+                "return_codes": [0, 0, 0, 0, 0],
+                "return_code": 0,
+                "worker_count": 16,
+                "command_passed": True,
+                "source_manifest_sha256": hashlib.sha256(
+                    source_manifest.read_bytes()
+                ).hexdigest(),
+                "source_verifier_sha256": hashlib.sha256(
+                    verifier.read_bytes()
+                ).hexdigest(),
+                "verifier_clean_worktree_mode": (
+                    "temporary_detached_exact_commit_worktree"
+                ),
+                "verifier_clean_worktree_scope": "clean_source_verifier_only",
+                "runtime_source_mode": "exact_head_tracked_clean_stable_checkout",
+                "build_jobs": 16,
+                "cmake_identity": "cmake version fixture",
+                "manifest_build_directory": "build-stsrl-source-py",
+                "manifest_cmake_target": "slaythespire",
+                "commands": [
+                    {"name": name, "argv": [name]}
+                    for name in (
+                        "clean_source_verifier",
+                        "runtime_cmake_configure",
+                        "runtime_cmake_build",
+                        "runtime_api_smoke",
+                        "runtime_geometry",
+                    )
+                ],
+                "native_runtime_identity": runtime_identity,
+                "cmake_python_identity": {
+                    "cmake_python_executable": runtime_identity["python_executable"],
+                    "runner_python_executable": runtime_identity["python_executable"],
+                    "runner_python_extension_suffix": runtime_identity[
+                        "python_extension_suffix"
+                    ],
+                    "matching_extension_path": runtime_identity[
+                        "native_extension_path"
+                    ],
+                },
+                **logs,
+            }
+        ),
+        encoding="utf-8",
+    )
+    script_path = Path("scripts/run_t070_search_stage_shard.py")
+    spec = importlib.util.spec_from_file_location("t070_shard_runner_test", script_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    checkout_calls: list[str] = []
+    monkeypatch.setattr(
+        module,
+        "verify_exact_git_checkout",
+        lambda _root, commit: checkout_calls.append(commit),
+    )
+    monkeypatch.setattr(
+        "sts_combat_rl.commands.t070_search_v2_audit.probe_t070_native_runtime_identity",
+        lambda **_kwargs: dict(runtime_identity),
+    )
+    monkeypatch.setattr(
+        module, "build_torch_guidance_scorer_from_checkpoint", lambda _path: object()
+    )
+    monkeypatch.setattr(module, "BattleSearchV2Controller", lambda **kwargs: kwargs)
+    shard_calls: list[dict[str, object]] = []
+
+    def run_shard(**kwargs):
+        shard_calls.append(kwargs)
+        return {"command_passed": True}
+
+    monkeypatch.setattr(module, "run_single_arm_shard", run_shard)
+    output = tmp_path / "result.json"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            str(script_path),
+            "--cohort",
+            str(cohort),
+            "--checkpoint",
+            str(checkpoint),
+            "--frozen-manifest",
+            str(wrapper),
+            "--native-preflight",
+            str(preflight),
+            "--native-checkout",
+            str(tmp_path / "native"),
+            "--native-build-root",
+            str(tmp_path / "build"),
+            "--output",
+            str(output),
+            "--code-commit",
+            code_commit,
+            "--stage-name",
+            "equal-prior-value-0100",
+            "--t064-selection",
+            "static_mixture_v1:64001",
+            "--arm",
+            "prior_value",
+            "--family",
+            "equal_nominal",
+            "--budget",
+            "100",
+            "--record-range",
+            "0:6",
+            "--shard-index",
+            "0",
+            "--range-kind",
+            "primary",
+        ],
+    )
+    assert module.main() == 0
+    assert checkout_calls == [code_commit]
+    assert len(shard_calls) == 1
+    assert shard_calls[0]["code_commit"] == code_commit
+    assert shard_calls[0]["native_runtime_identity"] == runtime_identity
 
 
 def test_t070_retention_has_per_file_command_and_compatibility(

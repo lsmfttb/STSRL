@@ -288,6 +288,33 @@ def test_oracle_teacher_dataset_preserves_teacher_targets_and_round_trips() -> N
     assert loaded.records[0].soft_visit_target == row.soft_visit_target
 
 
+def test_oracle_teacher_dataset_accepts_explicit_validated_record_restorer() -> None:
+    controller = OracleSearchController(
+        simulations=5,
+        native_source_identity={"integration_commit": "abc"},
+    )
+    restored_records = []
+
+    def assisted_restorer(
+        adapter: _TeacherAdapter, record: BattleStartCheckpointRecord
+    ) -> tuple[SimulatorSnapshot, str]:
+        restored_records.append(record.record_index)
+        return adapter.restore_checkpoint(
+            SimulatorCheckpoint("ignored", "ignored", None)
+        ), "assisted_seed_action_trace"
+
+    dataset = collect_oracle_teacher_dataset_from_pool(
+        _TeacherAdapter,
+        _pool(),
+        controller,
+        record_restorer=assisted_restorer,
+    )
+
+    assert not dataset.problems
+    assert restored_records == [0]
+    assert dataset.records[0].restoration_method == "assisted_seed_action_trace"
+
+
 def test_oracle_teacher_dataset_rejects_behavior_teacher_alias() -> None:
     controller = OracleSearchController(
         simulations=5,

@@ -83,7 +83,7 @@ published `READY` row.
 | T061 | DONE | [A20 self-generated reachability bottleneck decomposition](T061-a20-self-generated-reachability-bottleneck-decomposition.md) | T059, T040, T050, T052 | battle-budget signal accepted; selects T062 as the single next task |
 | T062 | DONE | [Battle Search v2 minimal surface](T062-battle-search-v2-minimal-surface.md) | T061, T052, T043, T046 | tree-internal policy prior and learned leaf value accepted; cost calibration exited early before outcome comparison |
 | T063 | DRAFT | [Oracle-guided public battle learning](T063-oracle-guided-public-battle-learning.md) | T061, T062, T033 | simulator-only Oracle assistance with explicit public-policy transfer and no human trajectories |
-| T064 | DRAFT | [Simulator-generated later-act curriculum](T064-simulator-generated-later-act-curriculum.md) | T061, T062 | natural, Oracle-reached, assisted, and simulator-validated transformed later-act distributions |
+| T064 | DONE | [Simulator-generated later-act curriculum](T064-simulator-generated-later-act-curriculum.md) | T033, T042, T043, T044, T052, T069, T070 | complete valid Case B: exposure-order curriculum did not improve the frozen transfer gates; recommends T065 to the planner |
 | T065 | DRAFT | [Learned non-combat policy v1](T065-learned-non-combat-policy-v1.md) | T061, T033 | simulator-return and counterfactual continuation targets without heuristic imitation |
 | T066 | DRAFT | [Alternating joint policy improvement and natural scale gate](T066-alternating-joint-policy-improvement-and-natural-scale-gate.md) | T062, T063, T064, T065 | separate battle/non-combat policies with shared run value, followed by conditional natural scale-up |
 | T067 | DONE | [Battle Search v2 inference-cost repair](T067-battle-search-v2-inference-cost-repair.md) | T062, T061, T052, T043 | exact-cache repair preserved semantics but had 0/866 hits; cost calibration remained infeasible and selected T068 |
@@ -138,7 +138,8 @@ the accepted native tree-geometry capability, then proposed T070. T070 is
 complete. Its frozen primary comparison did not pass the Search v2 promotion
 boundary, while the bounded curve found the 100-simulation budget insufficient
 but no high-budget guidance signal. The terminal Case C recommends T064 to the
-planner without publishing it. T063--T066 remain draft.
+planner without publishing it. T063, T065, and T066 remain draft; T064 is
+complete with a valid negative Case B.
 
 ## Task Boundary And Artifact Rules
 

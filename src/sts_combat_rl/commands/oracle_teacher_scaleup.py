@@ -13,14 +13,20 @@ from sts_combat_rl.sim.assisted_source_generation import (
     load_assisted_source_pool_jsonl,
 )
 from sts_combat_rl.sim.action_space import ActionSpaceConfig
+from sts_combat_rl.sim.assisted_source_generation import (
+    restore_assisted_battle_start_record,
+)
 from sts_combat_rl.sim.battle_start_pool import (
+    BattleStartCheckpointRecord,
     NaturalBattleStartPool,
     load_natural_battle_start_pool_jsonl,
+    restore_battle_start_record,
 )
-from sts_combat_rl.sim.contract import CheckpointingSimulatorAdapter
+from sts_combat_rl.sim.contract import CheckpointingSimulatorAdapter, SimulatorSnapshot
 from sts_combat_rl.sim.lightspeed_source import lightspeed_source_identity_dict
 from sts_combat_rl.sim.oracle_search import OracleSearchController
 from sts_combat_rl.sim.oracle_teacher import (
+    OracleTeacherDataset,
     collect_oracle_teacher_dataset_from_pool,
     dump_oracle_teacher_dataset_jsonl,
 )
@@ -44,9 +50,119 @@ from sts_combat_rl.sim.oracle_teacher_scaleup import (
     selected_natural_battle_start_pool,
     validate_oracle_teacher_scaleup_budgets,
 )
+from sts_combat_rl.sim.t064_curriculum import complete_source_identity
 
 
 ORACLE_TEACHER_SCALEUP_MANIFEST_FILENAME = "oracle-teacher-scaleup-manifest.json"
+
+
+def collect_oracle_teacher_range_from_selected_manifest(
+    *,
+    adapter_factory: Callable[[], CheckpointingSimulatorAdapter],
+    pool: NaturalBattleStartPool,
+    controller: OracleSearchController,
+    selected_source_manifest: Mapping[str, Any],
+    record_range: str,
+    action_space: ActionSpaceConfig | None = None,
+    record_restorer: Callable[
+        [CheckpointingSimulatorAdapter, BattleStartCheckpointRecord],
+        tuple[SimulatorSnapshot, str],
+    ] = restore_battle_start_record,
+) -> OracleTeacherDataset:
+    """Collect one contiguous shard from an already-frozen selected source order."""
+
+    raw_sources = selected_source_manifest.get("selected_sources")
+    if not isinstance(raw_sources, list) or not raw_sources:
+        raise ValueError("selected source manifest must contain selected_sources")
+    selected_identities: list[dict[str, Any]] = []
+    for index, raw in enumerate(raw_sources):
+        if not isinstance(raw, Mapping):
+            raise ValueError(f"selected source {index} must be an object")
+        identity = raw.get("complete_identity", raw)
+        if not isinstance(identity, Mapping):
+            raise ValueError(f"selected source {index} identity must be an object")
+        complete_hash = raw.get("complete_identity_sha256")
+        if not isinstance(complete_hash, str) or len(complete_hash) != 64:
+            raise ValueError(f"selected source {index} lacks complete identity hash")
+        identity_copy = dict(identity)
+        if identity_copy.get("complete_identity_sha256") not in (None, complete_hash):
+            raise ValueError(
+                f"selected source {index} complete identity hash mismatches"
+            )
+        identity_copy["complete_identity_sha256"] = complete_hash
+        selected_identities.append(identity_copy)
+    expected_hashes = [item["complete_identity_sha256"] for item in selected_identities]
+    if len(expected_hashes) != len(set(expected_hashes)):
+        raise ValueError(
+            "selected source manifest contains duplicate complete identities"
+        )
+    start, end = _record_range(record_range, len(selected_identities))
+    records_by_identity = {
+        complete_source_identity(record)["complete_identity_sha256"]: record
+        for record in pool.records
+    }
+    if len(records_by_identity) != len(pool.records):
+        raise ValueError("teacher source pool contains duplicate complete identities")
+    missing = [
+        identity for identity in expected_hashes if identity not in records_by_identity
+    ]
+    if missing:
+        raise ValueError("selected source manifest references missing pool records")
+    selected_pool = NaturalBattleStartPool(
+        source_run_count=pool.source_run_count,
+        terminal_run_count=pool.terminal_run_count,
+        truncated_run_count=pool.truncated_run_count,
+        source_controller_provenance=pool.source_controller_provenance,
+        format_version=pool.format_version,
+        records=[records_by_identity[value] for value in expected_hashes[start:end]],
+        source_run_summaries=pool.source_run_summaries,
+        problems=pool.problems,
+    )
+    dataset = collect_oracle_teacher_dataset_from_pool(
+        adapter_factory,
+        selected_pool,
+        controller,
+        action_space=action_space,
+        record_restorer=record_restorer,
+    )
+    expected_rows = selected_identities[start:end]
+    if dataset.problems or len(dataset.records) != len(expected_rows):
+        details = "; ".join(dataset.problems) or (
+            f"received {len(dataset.records)} rows for {len(expected_rows)} sources"
+        )
+        raise ValueError(
+            "teacher range did not produce one row per selected source: " + details
+        )
+    for row, identity in zip(dataset.records, expected_rows, strict=True):
+        if not _teacher_row_matches_complete_identity(row, identity):
+            raise ValueError(
+                "teacher range did not preserve complete source identity order"
+            )
+    return dataset
+
+
+def _teacher_row_matches_complete_identity(
+    row: Any, identity: Mapping[str, Any]
+) -> bool:
+    return (
+        row.source_checkpoint_id == identity.get("source_checkpoint_id")
+        and row.source_seed == identity.get("source_seed")
+        and row.source_run_id == identity.get("source_run_id")
+        and row.source_battle_index == identity.get("source_battle_index")
+        and row.source_distribution_kind == identity.get("distribution_kind")
+        and row.checkpoint_information_regime
+        == identity.get("checkpoint_information_regime")
+    )
+
+
+def _record_range(value: str, count: int) -> tuple[int, int]:
+    parts = value.split(":")
+    if len(parts) != 2 or not all(part.isdigit() for part in parts):
+        raise ValueError("teacher record range must use start:end")
+    start, end = (int(part) for part in parts)
+    if start < 0 or end < start or end > count:
+        raise ValueError("teacher record range is outside selected sources")
+    return start, end
 
 
 def run_oracle_teacher_scaleup_from_paths(
@@ -117,6 +233,7 @@ def run_assisted_oracle_teacher_scaleup_from_paths(
         coverage_report_path=coverage_report_path,
         root_selection_rule=root_selection_rule,
         action_space=action_space,
+        record_restorer=restore_assisted_battle_start_record,
     )
 
 
@@ -135,6 +252,10 @@ def _run_oracle_teacher_scaleup_for_pool(
     coverage_report_path: Path | None,
     root_selection_rule: str,
     action_space: ActionSpaceConfig | None,
+    record_restorer: Callable[
+        [CheckpointingSimulatorAdapter, BattleStartCheckpointRecord],
+        tuple[SimulatorSnapshot, str],
+    ] = restore_battle_start_record,
 ) -> OracleTeacherScaleupManifest:
     requested_budgets = validate_oracle_teacher_scaleup_budgets(budgets)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -210,6 +331,7 @@ def _run_oracle_teacher_scaleup_for_pool(
             selected_pool,
             controller,
             action_space=active_action_space,
+            record_restorer=record_restorer,
         )
         if dataset.problems:
             raise ValueError(

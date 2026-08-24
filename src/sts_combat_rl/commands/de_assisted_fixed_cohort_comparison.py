@@ -33,12 +33,15 @@ def run_de_assisted_fixed_cohort_comparison_from_cohort_path(
     action_space: ActionSpaceConfig,
     max_battle_steps: int,
     run_scale: str,
+    record_range: str | None = None,
 ) -> DeAssistedFixedCohortComparisonReport:
     """Evaluate every configured arm on one immutable fixed cohort."""
 
     with cohort_path.open("r", encoding="utf-8") as stream:
         cohort = load_fixed_cohort_jsonl(stream)
 
+    start, end = _validated_record_range(record_range, len(cohort.records))
+    selected_records = cohort.records[start:end]
     evaluated: list[tuple[str, str, FixedEvaluationReport]] = []
     for label, role, controller in controller_arms:
         evaluated.append(
@@ -48,6 +51,7 @@ def run_de_assisted_fixed_cohort_comparison_from_cohort_path(
                 _evaluate_with_cohort_counts(
                     adapter_factory=adapter_factory,
                     cohort=cohort,
+                    cohort_records=selected_records,
                     controller=controller,
                     action_space=action_space,
                     max_battle_steps=max_battle_steps,
@@ -63,6 +67,7 @@ def run_de_assisted_fixed_cohort_comparison_from_cohort_path(
             "cohort_path": str(cohort_path),
             "cohort_identity": cohort.identity,
             "cohort_record_count": len(cohort.records),
+            "record_range": f"{start}:{end}",
             "cohort_source_distribution_summary": _cohort_distribution_summary(cohort),
             "action_space": action_space.to_dict(),
             "max_battle_steps": max_battle_steps,
@@ -94,13 +99,14 @@ def _evaluate_with_cohort_counts(
     *,
     adapter_factory: Callable[[], CheckpointingSimulatorAdapter],
     cohort: FixedCohort,
+    cohort_records: Sequence[Any] | None = None,
     controller: OnlineController,
     action_space: ActionSpaceConfig,
     max_battle_steps: int,
 ) -> FixedEvaluationReport:
     evaluation = evaluate_fixed_cohort(
         adapter_factory=adapter_factory,
-        cohort_records=cohort.records,
+        cohort_records=(cohort.records if cohort_records is None else cohort_records),
         controller=controller,
         cohort_identity=cohort.identity,
         source_pool_format_version=cohort.source_pool_format_version,
@@ -110,7 +116,7 @@ def _evaluate_with_cohort_counts(
     )
     per_stratum_counts = Counter(
         "/".join(str(value) for value in record.structural_stratum)
-        for record in cohort.records
+        for record in (cohort.records if cohort_records is None else cohort_records)
     )
     return FixedEvaluationReport(
         cohort_identity=evaluation.cohort_identity,
@@ -124,6 +130,109 @@ def _evaluate_with_cohort_counts(
         battle_results=evaluation.battle_results,
         problems=evaluation.problems,
     )
+
+
+def merge_de_assisted_fixed_cohort_comparison_shards(
+    *,
+    cohort_path: Path,
+    shards: Sequence[DeAssistedFixedCohortComparisonReport],
+    expected_ranges: Sequence[str],
+) -> DeAssistedFixedCohortComparisonReport:
+    """Merge range/subset T044 reports in original cohort order."""
+
+    with cohort_path.open("r", encoding="utf-8") as stream:
+        cohort = load_fixed_cohort_jsonl(stream)
+    if len(shards) != len(expected_ranges) or not shards:
+        raise ValueError("T044 shard merge requires every expected range")
+    expected_labels = tuple(arm.label for arm in shards[0].arms)
+    expected_roles = tuple(arm.role for arm in shards[0].arms)
+    if not expected_labels:
+        raise ValueError("T044 shard merge requires at least one controller arm")
+    reports_by_label: dict[str, list[FixedEvaluationReport]] = {
+        label: [] for label in expected_labels
+    }
+    common_config = dict(shards[0].comparison_config)
+    for shard, record_range in zip(shards, expected_ranges, strict=True):
+        if shard.comparison_config.get("record_range") != record_range:
+            raise ValueError("T044 shard merge range/order mismatch")
+        if tuple(arm.label for arm in shard.arms) != expected_labels:
+            raise ValueError("T044 shard merge controller labels differ")
+        if tuple(arm.role for arm in shard.arms) != expected_roles:
+            raise ValueError("T044 shard merge persisted roles differ")
+        for key in (
+            "cohort_identity",
+            "cohort_record_count",
+            "action_space",
+            "max_battle_steps",
+            "controller_roles",
+            "controller_provenance",
+            "checkpoint_provenance",
+        ):
+            if shard.comparison_config.get(key) != common_config.get(key):
+                raise ValueError(f"T044 shard merge configuration differs: {key}")
+        for arm in shard.arms:
+            reports_by_label[arm.label].append(arm.report)
+
+    merged_arms: list[tuple[str, str, FixedEvaluationReport]] = []
+    for label, role in zip(expected_labels, expected_roles, strict=True):
+        reports = reports_by_label[label]
+        first = reports[0]
+        for report in reports[1:]:
+            for field in (
+                "cohort_identity",
+                "controller_provenance",
+                "information_regime",
+                "action_space_config",
+                "max_battle_steps",
+                "source_pool_format_version",
+                "selection_config",
+            ):
+                if getattr(report, field) != getattr(first, field):
+                    raise ValueError(f"T044 fixed report configuration differs: {field}")
+        results = [result for report in reports for result in report.battle_results]
+        if [result.cohort_index for result in results] != list(range(len(cohort.records))):
+            raise ValueError("T044 shard merge does not cover original cohort order")
+        counts = Counter(
+            "/".join(str(value) for value in record.structural_stratum)
+            for record in cohort.records
+        )
+        merged_arms.append(
+            (
+                label,
+                role,
+                FixedEvaluationReport(
+                    cohort_identity=first.cohort_identity,
+                    controller_provenance=first.controller_provenance,
+                    information_regime=first.information_regime,
+                    action_space_config=first.action_space_config,
+                    max_battle_steps=first.max_battle_steps,
+                    source_pool_format_version=first.source_pool_format_version,
+                    selection_config=first.selection_config,
+                    per_stratum_source_counts=dict(counts),
+                    battle_results=results,
+                    problems=[problem for report in reports for problem in report.problems],
+                ),
+            )
+        )
+    common_config["record_range"] = f"0:{len(cohort.records)}"
+    common_config["shard_ranges"] = list(expected_ranges)
+    common_config["shard_count"] = len(expected_ranges)
+    return build_de_assisted_fixed_cohort_comparison_report(
+        arms=merged_arms,
+        comparison_config=common_config,
+    )
+
+
+def _validated_record_range(value: str | None, count: int) -> tuple[int, int]:
+    if value is None:
+        return 0, count
+    parts = value.split(":")
+    if len(parts) != 2 or not all(part.isdigit() for part in parts):
+        raise ValueError("T044 record range must use start:end")
+    start, end = (int(part) for part in parts)
+    if start < 0 or end < start or end > count:
+        raise ValueError("T044 record range is outside the cohort")
+    return start, end
 
 
 def _cohort_distribution_summary(cohort: FixedCohort) -> dict[str, Any]:

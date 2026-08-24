@@ -4,6 +4,7 @@ from dataclasses import dataclass, field, replace
 from io import StringIO
 
 from sts_combat_rl.commands.de_assisted_fixed_cohort_comparison import (
+    merge_de_assisted_fixed_cohort_comparison_shards,
     run_de_assisted_fixed_cohort_comparison_from_cohort_path,
 )
 from sts_combat_rl.sim.action_space import ActionSpaceConfig
@@ -427,3 +428,39 @@ def test_de_assisted_comparison_runs_four_arms_on_identical_sources(
     assert loaded.evaluation_successful
     assert loaded.arms[2].label == RAW_CHECKPOINT_POLICY_LABEL
     assert loaded.arms[2].report.authoritative_wins == 2
+
+
+def test_de_assisted_range_subset_merge_preserves_roles_and_order(tmp_path) -> None:
+    cohort_path = tmp_path / "cohort.jsonl"
+    with cohort_path.open("w", encoding="utf-8", newline="\n") as stream:
+        dump_fixed_cohort_jsonl(_cohort(), stream)
+    action_space = ActionSpaceConfig.initial_no_potions()
+
+    def run(record_range: str):
+        controller = OracleSearchController(
+            simulations=1,
+            root_selection_rule="highest_mean",
+            action_space=action_space,
+            native_source_identity={"integration_commit": "abc"},
+        )
+        return run_de_assisted_fixed_cohort_comparison_from_cohort_path(
+            adapter_factory=_ComparisonAdapter,
+            cohort_path=cohort_path,
+            controller_arms=(
+                (BASELINE_ORACLE_LABEL, "baseline_oracle_search", controller),
+            ),
+            action_space=action_space,
+            max_battle_steps=3,
+            run_scale="fixed",
+            record_range=record_range,
+        )
+
+    merged = merge_de_assisted_fixed_cohort_comparison_shards(
+        cohort_path=cohort_path,
+        shards=(run("0:1"), run("1:2")),
+        expected_ranges=("0:1", "1:2"),
+    )
+    assert [row.cohort_index for row in merged.arms[0].report.battle_results] == [0, 1]
+    assert merged.comparison_config["controller_roles"] == {
+        BASELINE_ORACLE_LABEL: "baseline_oracle_search"
+    }

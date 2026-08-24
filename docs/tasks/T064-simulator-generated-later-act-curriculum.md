@@ -1,92 +1,1051 @@
-# T064: Simulator-Generated Later-Act Curriculum
+# T064: Reuse-First Later-Act Curriculum Transfer
 
 ## Objective
 
-Create a later-act curriculum using only authoritative simulator generation,
-search, assistance, and simulator-validated transforms, with strict separation
-from natural A20 evaluation.
+Test one narrow hypothesis: whether changing only the order of exposure to
+existing simulator-generated later-act data improves public policy/value
+guidance relative to a static mixture with identical rows, initialization,
+optimizer budget, and per-source exposure.
 
-## Current Main Baseline
+T064 is not a new data-generation, search, trainer, or evaluation framework.
+It reuses the accepted T042 source pools, T043 teacher/trainer/checkpoint
+contracts, T044 de-assisted evaluation, and T052/T069/T070 fixed Search v2
+evaluation. New code is limited to parameterizing those paths where the current
+interfaces are too rigid and to four compact T064 control/report artifacts.
 
-Natural later-act sources are scarce under current policies. Constructed and
-assisted battle-start infrastructure exists, but earlier training over assisted
-data did not improve the accepted de-assisted fixed cohorts. The next curriculum
-must be tied to a stronger or explicitly diagnosed generating policy and must
-preserve distribution identity so that curriculum coverage is not mistaken for
-natural reachability.
+## Current Baseline
 
-## Dependencies
+T042 proved that the existing assistance schedules can produce later-act
+starts. T043 established the teacher/trainer/checkpoint path. T044 established
+de-assisted fixed-cohort evaluation, but its accepted checkpoint was trained
+from four `assist_0` sources and did not consume the later-act pool. T070 showed
+that deeper Search v2 traversal changes actions and tree geometry without
+turning the existing learned guidance into better outcomes.
 
-- T061 accepted reachability diagnosis.
-- T062 accepted search surface when the diagnosis selects battle improvement as
-  a prerequisite.
-- T008, T039, T042, and T050 distribution, coverage, assistance, and shard
-  contracts.
+The missing experiment is therefore curriculum transfer, not another coverage
+scale-up or Search v2 variant.
 
-## Inputs And Artifacts
+## Direct Dependencies
 
-No human trajectory or human action label is permitted. Inputs may include
-natural simulator checkpoints, Oracle-reached checkpoints, assisted complete-run
-states, and source-linked simulator transforms. The published task must name
-eligibility, generation, restore, retention, and deletion contracts.
+- T033 public-context model input and checkpoint compatibility;
+- T042 assisted source pools, restore, coverage, provenance, and retention;
+- T043 Oracle teacher, trainer bridge, model, checkpoint, and calibration;
+- T044 de-assisted fixed-cohort evaluation;
+- T052 frozen natural Boss/later-act cohort;
+- T069 public-context projection;
+- T070 Search v2 controller and fixed-cohort comparison semantics.
 
-## Scope
+T008, T039, and T051 remain historical references. They are not runtime inputs
+to T064. In particular, T064 does not regenerate the missing T039 artifacts.
+The natural-distribution check is the frozen T052 holdout; the training anchor
+is the accepted T042 `assist_0` control and remains labeled `assisted_run` /
+`assist_0`, never `natural_run`.
 
-- Define separate `natural`, `oracle_reached`, `assisted`, `transformed`, and
-  `constructed` curriculum components.
-- Generate later-act states through standard-start runs, high-budget Oracle
-  trajectory discovery, restored continuation, versioned assistance schedules,
-  or conservative simulator-validated transforms.
-- Preserve immutable source identity and every requested/actual change.
-- Measure unique source coverage by Act, room, encounter, Boss, resource bucket,
-  and public-context availability.
-- Define curriculum sampling weights without treating resampling as new coverage.
-- Publish de-curriculum fixed evaluation and natural distribution checks before
-  any training claim.
+No new native `sts_lightspeed` capability is required. The active integration
+commit is `fee272f1ae21c283ad2161f55293cfe6d714134a`.
+
+## Frozen Inputs
+
+### T042 training candidates
+
+The retained T042 manifest and pools are mandatory and must match:
+
+- scale manifest SHA-256:
+  `25efae30dc9a61c8b97cb09e1844b93b9ffe693bde51c0f494f0f65203a1d327`;
+- `assist_0` pool SHA-256:
+  `d124d94a94df534c0bcc32072582a4448746f0a9734a41410e45c51c1b1ff87f`;
+- `assist_hp50` pool SHA-256:
+  `1231bcd24309df9fbeb22ec56dfa12b661c38c6f440bdea1850053734cc32d8f`;
+- `assist_hp50_potion_elite_boss` pool SHA-256:
+  `642d11d4956316e96f58ddf5fceec94f59a50c3dd051205e2fdfca94485ab201`;
+- `assist_hp75_potion` pool SHA-256:
+  `1bbcbfebbde4fd2eec1be249f9843bf25a288abb0672950f47ad540c9bb8f46f`.
+
+A missing or mismatched required pool is an integrity failure. T064 does not
+regenerate a replacement pool or add another assistance schedule.
+
+### Frozen holdouts
+
+The holdouts are frozen before source selection, teacher collection, training,
+or checkpoint outcomes:
+
+- T044 `assist_0`: identity `a336ffb1fda9ed7e`, 21 records, SHA-256
+  `4ee0eb125ac37e870f0f2c950290b131f4693185c60b6c71cd46b5265a4d0037`;
+- T044 `assist_hp50`: identity `e99a0938307c0e7a`, 38 records, SHA-256
+  `bc9372a67fe6b848616e4b700765d6a47f49b4044bd973dbcaff4dd3bba36`;
+- T052 natural Boss/later-act: 93 records, SHA-256
+  `b7f8e9b85b53bbf8e37adfe6cc90d0579937661309b26bce2a8f2921604a8608`.
+
+### Initialization checkpoint
+
+All four training runs initialize from checkpoint SHA-256
+`a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4`.
+This retained checkpoint encodes model hidden size 16. T064 therefore freezes
+hidden size 16 so the experiment preserves the exact accepted initialization;
+there is no hidden-size migration or newly initialized replacement model.
+The loader must retain every model parameter and registered normalization buffer
+exactly. Optimizer state is always fresh. A required schema migration must be
+deterministic and produce one identical migrated initialization for all runs;
+otherwise execution is incomplete.
+
+## Complexity And Reuse Boundary
+
+Implementation begins with a concise reuse inventory in the PR report. It names
+the existing function, schema, reader/writer, and tests used for each operation.
+The inventory is report content, not a new standalone framework.
+
+T064 assumes repository-owned stages and their in-repository callers are trusted
+participants. Validation exists to catch accidental corruption, stale or
+mismatched configuration, incomplete execution, and experiment-design drift; it
+is not an adversarial attestation system. Existing hashes remain where they are
+already part of accepted artifact identity or are useful for detecting stale
+inputs, but T064 must not add duplicate proof artifacts, independent identity
+chains, or caller-vs-producer distrust solely to make trusted in-repository
+stages tamper-evident. Prefer deterministic derivation from authoritative inputs
+plus ordinary schema, count, order, configuration, and completion checks.
+
+The following thin extensions are authorized:
+
+1. T043 teacher collection may accept an already-selected source manifest and a
+   contiguous record range. Shards write the existing Oracle teacher rows and
+   existing audit data. A deterministic merge reuses existing loaders/writers
+   and requires identical configuration/provenance, disjoint complete ranges,
+   exact selected-source order, and exactly one valid teacher row per selected
+   source.
+2. T044 evaluation may accept a cohort record range and a subset of its existing
+   controller arms. Shard merge reuses `FixedEvaluationReport` and the existing
+   de-assisted comparison report; it requires identical cohort/configuration,
+   disjoint complete ranges, original cohort order, and no duplicate result.
+3. The existing T070 shard runner may read expected checkpoint path and SHA-256
+   from its frozen stage manifest instead of the historical constant. The old
+   T070 manifest must still validate unchanged. T064 changes no controller,
+   search, projection, root/leaf, RNG/chance, action-order, geometry, or failure
+   semantics.
+4. `train_torch_policy_value` may accept an initial compatible model/checkpoint
+   and an explicit ordered batch plan. Without those optional arguments, its
+   existing initialization and epoch-shuffle behavior remains unchanged.
+5. The existing T043 trainer bridge may accept a T064 direct-provenance mode and
+   a contiguous record range. In that mode the validated T064 curriculum
+   manifest and merged Stage-2 teacher artifact are the authoritative inputs;
+   source linkage is derived by code from `selected_sources` rather than
+   accepted from a caller-authored T022/T023/source-pool identity mapping.
+   Legacy T024/T043 manifest-driven behavior remains unchanged. Range outputs
+   use the existing trainer-input schema and merge into one final existing-schema
+   trainer input in exact selected-source order.
+
+No parallel source pool, restore, coverage, teacher, trainer-input, checkpoint,
+fixed-cohort, evaluation, Search v2, retention, or logging subsystem is allowed.
+No new model architecture or checkpoint format is allowed. If implementation
+requires a broader framework or a fifth T064-specific artifact contract, stop
+and request specification reapproval rather than expanding scope.
+
+## Complete Source Identity
+
+`t064-complete-source-identity-v1` is embedded in the curriculum manifest. Its
+required fields are:
+
+- `source_checkpoint_id` string;
+- `source_seed` integer;
+- `source_run_id` string;
+- `source_battle_index` integer;
+- `action_trace_identity` string;
+- `distribution_kind` string;
+- `assistance_level` string, using `""` only when the source schema has no
+  assistance field;
+- `source_arm` string, using `""` only when the source schema has no source-arm
+  field;
+- `checkpoint_information_regime` string.
+
+When an existing validated `action_trace_identity` is present, it is used
+unchanged. Otherwise, derive it only from the existing validated selected-action
+identity at each decision. The ordered hash input is a canonical JSON array of
+objects containing `decision_index` and that decision's occurrence-safe
+selected-action identity exactly as emitted by the repository action-identity
+contract. Its per-decision `stable_id` and `occurrence` are preserved unchanged;
+`occurrence` is scoped to duplicate legal actions within that decision and is
+never recomputed across earlier trace entries. Missing or invalid occurrence-safe
+identity, `stable_id`, or `occurrence` fails closed. Canonical JSON is UTF-8,
+sorted keys, compact separators, no NaN/Infinity, and has no trailing LF in hash
+input.
+
+The complete identity SHA-256 is computed from the canonical JSON object above.
+Two records are equal only when all required fields are equal. Existing pool and
+cohort readers perform field mapping; a missing required value, ambiguous trace,
+or incompatible provenance makes the record ineligible.
+
+Candidate-inventory integrity and frozen-holdout exclusion are distinct:
+
+- `candidate_duplicate_complete_identity_count` is computed over the complete
+  T042 candidate inventory before holdout exclusion. It must be zero. A nonzero
+  value is an integrity failure and makes T064 `INCOMPLETE`; candidate records
+  are never silently deduplicated.
+- `candidate_holdout_exclusion_count` is the number of candidate records whose
+  complete identities match any frozen holdout identity. These matches are
+  reported and excluded before bucket selection. A nonzero value is expected
+  when a frozen holdout was drawn from a retained T042 pool and does not by
+  itself make source adequacy false or constitute selected-training leakage.
+- after final bucket membership is fixed,
+  `selected_holdout_overlap_count` is recomputed from the flattened selected
+  complete identities intersected with all frozen holdout identities, and
+  `selected_duplicate_complete_identity_count` is recomputed from the flattened
+  selected complete identities. Both must be zero. A nonzero selected overlap or
+  selected duplicate count is an integrity failure and makes T064 `INCOMPLETE`,
+  never scientific source-insufficiency Case B.
+
+The manifest must retain enough identity evidence to reproduce each count and
+prove which candidate rows were excluded and which final selected identities
+were checked.
+
+## Deterministic Selection
+
+Eligibility requires A20, valid current-schema provenance, fresh restore,
+replay-matched public context, valid structured outcome, and no recorded
+controller/truncation/mapping/source/provenance failure. Selection never uses
+battle result, terminal HP, teacher/model output, deck or relic quality, or
+perceived winnability.
+
+Three disjoint buckets are selected:
+
+### `strong_later_act`
+
+Take eligible Act-2+ records from `assist_hp75_potion`, ordered by complete
+identity SHA-256, capped at 160.
+
+### `medium_later_act`
+
+For each of `assist_hp50` and `assist_hp50_potion_elite_boss`, take eligible
+Act-2+ records ordered by complete identity SHA-256, capped at 32 per component.
+Concatenate components in the order listed above.
+
+### `anchor`
+
+Use only eligible `assist_0` records. Group by
+`(act, room_type, encounter_id, floor_bucket)`. For T064, `floor_bucket` is not
+a coarse or learned bucket: it is the identity mapping of the raw persisted
+`structural_metadata["floor"]` value. The input must be a Python integer but not
+a Boolean, must satisfy `1 <= floor <= 56` with both boundaries inclusive, and
+`floor_bucket = floor` exactly. No integer coercion, act-specific rebucketing,
+or other boundary scheme is permitted. A missing `floor`, Boolean, non-integer,
+or out-of-range value is an integrity failure that makes the experiment
+`INCOMPLETE`; it must not be converted to `None`, silently excluded, or counted
+as scientific source inadequacy.
+
+Order strata lexicographically using their canonical JSON representation and
+order records within each stratum by complete identity SHA-256. Repeatedly
+traverse strata in that fixed order, taking the next unused record from each
+non-empty stratum, until exactly 256 records are selected or all strata are
+exhausted.
+
+A complete source audit is scientifically valid even when post-exclusion
+coverage is insufficient. `source_adequacy` is true only when:
+
+- `strong_later_act` plus `medium_later_act` contain at least 128 unique records;
+- `anchor` contains exactly 256 unique records;
+- `selected_holdout_overlap_count == 0`;
+- `selected_duplicate_complete_identity_count == 0`.
+
+`candidate_holdout_exclusion_count` is not an adequacy gate. Candidate duplicate
+identities, selected holdout overlap, or selected duplicate identities are
+integrity failures; even if they make the adequacy Boolean false, the terminal
+result is `INCOMPLETE`, not Case B. Source-inadequate Case B is permitted only
+when candidate integrity is valid, selected leakage/duplicate checks are zero,
+an exhaustive restore/context audit completes with zero integrity failures, and
+the remaining inadequacy is solely a frozen post-exclusion coverage/cardinality
+shortfall.
+
+If an exhaustive valid audit completes under those conditions but source
+adequacy is false, T064 may produce the complete-negative Case B without running
+teacher/training stages. Invalid, missing, unaudited, or leakage-contaminated
+evidence is `INCOMPLETE`, not Case B.
+
+## Teacher And Trainer Construction
+
+Use the existing T043 teacher and trainer bridge with:
+
+- information regime `full_simulator_state_oracle_like`;
+- search budget 100 for every source;
+- root selection `highest_mean`;
+- action space `initial_no_potions`;
+- mandatory soft visit-distribution policy targets;
+- existing separate behavior, policy, survival, terminal-HP, and structured
+  resource fields;
+- assistance and bucket metadata available only to selection, scheduling, and
+  reporting, never to normal public model inputs.
+
+Teacher collection uses 16 contiguous shards and 16 effective workers. Exact
+ranges are generated from the final selected count and written into the
+curriculum manifest before any teacher result exists. Every selected source must
+produce one valid row. Missing, duplicate, invalid, or silently dropped rows are
+integrity failures and leave T064 incomplete.
+
+Stage 3 uses a direct T064 adapter to the existing T043 trainer conversion. Its
+authoritative inputs are only the validated curriculum manifest after a
+complete zero-failure selected-source audit and the linked merged Stage-2
+teacher artifact. T064 does not require a caller-authored synthetic
+`oracle-teacher-scaleup-manifest-v1`, synthetic T022 identity, synthetic
+single-source-pool identity, or a newly persisted 460-row selected-pool artifact
+solely to prove provenance between trusted repository stages. The existing
+T024/T043 manifest-driven bridge remains unchanged for its historical callers.
+
+Before conversion, Stage 3 must check the ordinary consistency conditions that
+protect the experiment from accidental mismatch or drift:
+
+- teacher row count equals the selected-source count;
+- teacher rows match `selected_sources` in exact order and source identity;
+- teacher configuration remains budget 100, `highest_mean`,
+  `initial_no_potions`, and `full_simulator_state_oracle_like`;
+- each selected source is restored with the already validated assisted replay
+  path, and the restored snapshot/public context/legal actions match the source
+  and teacher row as required by the existing T043 conversion;
+- every emitted trainer row maps one-to-one, in order, to the selected complete
+  source identity and retains the existing trainer-input schema.
+
+Stage 3 is a substantial simulator restore stage and therefore uses the same 16
+contiguous ranges as the selected-source/teacher inventory and 16 effective WSL
+fork workers. Each worker converts only its range, atomically writes one
+existing-schema trainer-input shard, and returns only a small persisted-shard
+descriptor. The parent re-reads the shards through the existing trainer-input
+reader, rejects missing/invalid/duplicate/out-of-order rows, and merges exactly
+one final existing-schema trainer input in selected-source order. This is a
+bounded range/merge extension of the existing bridge, not a new trainer-input
+subsystem or T064 compact artifact.
+
+The merged teacher dataset and trainer input retain their existing schemas. No
+T064 teacher, trainer-input, selected-pool, T022/T023 adapter, or Stage-3 bridge
+schema is introduced.
+
+## Frozen Paired Training
+
+Train `static_mixture_v1` and `assistance_annealed_curriculum_v1` for paired
+seeds `64001` and `64002`, producing four checkpoints.
+
+All runs use:
+
+- the identical loaded initialization parameters and normalization buffers;
+- CPU execution;
+- `torch.use_deterministic_algorithms(True)` and one Torch CPU thread;
+- `torch.manual_seed(seed)` and `random.seed(seed)`;
+- existing model architecture with hidden size 16;
+- Adam with learning rate `0.001`, betas `(0.9, 0.999)`, epsilon `1e-8`,
+  weight decay `0`, and `amsgrad=false`;
+- no learning-rate scheduler;
+- batch size 32;
+- 900 optimizer steps, divided into three phases of 300 steps;
+- policy, outcome, HP, and resource loss weights all `1.0`;
+- HP loss scale `100.0`;
+- gradient norm clipping at `10.0`;
+- existing target heads, loss functions, evaluation, and checkpoint writer.
+
+Each `(arm, seed)` run remains an independent deterministic CPU job with one
+Torch thread. Up to two runs may execute concurrently in isolated spawned
+workers; workers never share a model, optimizer, mutable RNG state, or loaded
+trainer dataset. The parent process does not retain another loaded trainer
+dataset while those two workers run, keeping the topology viable on the
+31-GB maintainer host. Scheduling and completion order are operational only:
+the aggregate report always restores exact `TRAINING_RUN_ORDER`.
+
+A completed run may be reused through either of two explicit routes. A reviewed
+`earliest_affected_run` repair boundary permits reuse only for its canonical
+prefix. A retry of the same exact approved-head attempt uses
+`--stage4-failure-recovery`; with no repair boundary it may reuse any completed
+canonical run, regardless of scheduling or canonical position, and trains only
+missing runs. If both are supplied, the repair boundary remains authoritative:
+the boundary run and its suffix are affected and cannot be reused.
+
+Both routes require preflight to validate every retained checkpoint against the
+exact arm, seed, initialization SHA-256, trainer-input SHA-256 and bytes,
+regenerated batch-plan hash and exposures, full frozen Torch training
+configuration, current checkpoint schema/model semantic metadata, T064
+metadata, complete training-data provenance, and checkpoint file identity.
+Unexpected, affected, invalid, mismatched, or partial checkpoints fail closed;
+preflight never overwrites them. Reuse preserves the checkpoint's producer
+provenance and records `reused_validated`, never relabeling it as produced by
+the retry head. If one concurrent worker fails, the other worker is allowed to
+finish and its valid checkpoint remains retained; a same-approved-head retry
+can strictly audit and reuse that later completed run even when an earlier
+canonical run failed. No aggregate training report is published until all four
+canonical runs validate.
+
+Each phase therefore consumes 9,600 record draws. For each training seed and
+bucket, build one deterministic exposure sequence of exactly 9,600 records by
+repeated cycles. In cycle `k`, order bucket records by
+`SHA256("<seed>:<bucket>:<k>:<complete_identity_sha256>")`. Append cycles until
+9,600 entries exist and truncate exactly at 9,600.
+
+Phase token patterns are repeated 3,200 times:
+
+| arm | phase 1 | phase 2 | phase 3 |
+|---|---|---|---|
+| static | `strong, medium, anchor` | `strong, medium, anchor` | `strong, medium, anchor` |
+| curriculum | `strong, strong, medium` | `strong, medium, anchor` | `medium, anchor, anchor` |
+
+Each token consumes the next record from that bucket's exposure sequence. The
+9,600 phase draws are chunked in order into 300 batches of 32. Across all three
+phases, both arms consume every bucket exposure sequence exactly once, proving
+identical per-bucket and per-source aggregate exposure. Any plan mismatch,
+missing draw, duplicate batch position, or checkpoint/config mismatch is an
+integrity failure.
+
+The broad T009 training gate remains closed; this is a named narrow curriculum
+diagnostic only.
+
+## Frozen Evaluation
+
+### T044 low-assistance cohorts
+
+Use the existing T044 controller definitions and freeze:
+
+- Oracle search simulations: 1;
+- root selection: `highest_mean`;
+- model-guided policy-probability weight: `0.1`;
+- action space: `initial_no_potions`;
+- maximum battle steps: 200;
+- persisted `comparison_config.controller_roles` values exactly:
+  `baseline_oracle_search`, `model_guided_search_t043_checkpoint`,
+  `raw_checkpoint_public_policy`, and `scripted_public_policy_baseline`.
+
+Existing controller/display labels remain whatever the current T044 command
+emits; they are not persisted-role substitutes and are not changed by T064.
+
+Checkpoint-independent baseline and scripted results are reused from accepted
+T044 reports only when cohort SHA/identity/order, source format, action space,
+maximum steps, controller provenance, the exact persisted role map above,
+search budget/root/weight, information regime, and zero-failure status all
+match. Otherwise each such arm is rerun once per cohort, not once per checkpoint.
+
+For every new checkpoint, run only the two checkpoint-dependent arms on both
+cohorts. Each checkpoint/cohort stage uses 16 shards and the following frozen
+ranges:
+
+- 21-record `assist_0` cohort:
+  `0:2,2:4,4:6,6:8,8:10,10:11,11:12,12:13,13:14,14:15,15:16,16:17,17:18,18:19,19:20,20:21`;
+- 38-record `assist_hp50` cohort:
+  `0:3,3:6,6:9,9:12,12:15,15:18,18:20,20:22,22:24,24:26,26:28,28:30,30:32,32:34,34:36,36:38`.
+
+For these dependent stages, the WSL parent forks the 16 frozen range workers
+before loading Torch or constructing the checkpoint scorer/controllers. Each
+child independently loads the exact checkpoint and constructs both dependent
+controllers and its LightSpeed adapter after isolation. No initialized Torch
+model, scorer, or mutable runtime state is inherited from the fork parent.
+This topology changes no role, action-space, checkpoint, cohort, range, merge,
+or report semantics.
+
+Merge retains the existing T044 report schema and original cohort order.
+
+### T052 natural Boss/later-act cohort
+
+For each checkpoint run only T070-compatible `prior_value` on the frozen T052
+cohort with budget 100, geometry disabled, T069 projection enabled, and all
+accepted T070 controller/root/leaf/RNG/chance/action-order/failure semantics
+unchanged. The 16 frozen contiguous ranges are:
+
+`0:6,6:12,12:18,18:24,24:30,30:36,36:42,42:48,48:54,54:60,60:66,66:72,72:78,78:83,83:88,88:93`.
+
+Use 16 effective workers.
+
+The accepted T070 baseline is reused only when its report validates:
+
+- report schema and complete 93-record cohort SHA/identity/count/order;
+- source manifest and native runtime identities;
+- budget 100, baseline ablation, action space, geometry setting, root/leaf,
+  RNG/chance, action ordering, and failure policy;
+- exact shard ranges and zero failures;
+- compatibility tests proving the parameterized runner still accepts the old
+  T070 frozen manifest without changing its expected historical checkpoint.
+
+A T064 stage manifest supplies the evaluated checkpoint path and SHA-256 while
+freezing every other T070 field. No high-budget, cost recalibration, or geometry
+stage is run.
+
+Each Stage-6 shard first validates that current T064 wrapper and its selected
+checkpoint against the current execution commit, yielding the rehashed
+historical T070 frozen contract and ranges. It then validates the retained
+native preflight against the historical frozen T070 `code_commit` and native
+identity. The T064 checkpoint selector is never passed to the historical native
+preflight validator, and neither commit is substituted for the other.
+
+Before the first Stage-6 shard at a newly approved execution head, the
+maintainer passes `--stage6-rebind-from-code-commit` with the exact previously
+approved execution commit. The command atomically changes only
+`t070_stage_manifest.current_code_commit` to `--code-commit` after strict
+validation of the sole manifest and all four checkpoint selections. It preserves
+the top-level manifest `code_commit` as producer provenance, the historical
+frozen T070 identity, every checkpoint identity, selection inventory/order, and
+all other fields. A no-op, stale expected old commit, invalid/missing/mixed
+selection inventory, or existing temporary target fails closed. Later Stage-6
+checkpoint calls at that same head omit the rebind option and must find the
+selector already bound to the exact current execution commit.
+
+## Completeness And Transfer Gates
+
+`experiment_complete` requires valid inputs, complete source audit, source
+adequacy, complete teacher/trainer artifacts, exact exposure parity, four valid
+checkpoints, complete evaluations, and zero integrity/execution failures.
+
+When `experiment_complete=true`, curriculum transfer is true only if:
+
+1. summed curriculum `prior_value` wins on T052 are at least two above paired
+   static wins;
+2. neither curriculum seed is more than one T052 win below its paired static
+   seed;
+3. aggregate curriculum-minus-static win deltas are non-negative on both the
+   88-record Boss and 5-record Act-2+ T052 subsets;
+4. summed curriculum model-guided wins on T044 `assist_hp50` are at least two
+   above paired static wins;
+5. curriculum raw-public-policy wins on T044 `assist_hp50` are not below static;
+6. curriculum model-guided wins on T044 `assist_0` are no more than one below
+   static.
+
+Terminal HP, structured resources, policy/value calibration, model calls,
+simulator steps, root visits, and wall-clock cost are mandatory diagnostics but
+cannot replace these gates.
+
+## Terminal Decision
+
+- **Case A — transfer demonstrated:** `experiment_complete=true` and every
+  transfer gate passes. Recommend `T063-oracle-guided-public-battle-learning`.
+- **Case B — complete valid negative:** either a complete exhaustive source
+  audit finds source adequacy false solely from valid post-exclusion
+  coverage/cardinality shortfall after candidate-integrity and selected-leakage
+  checks pass, or `experiment_complete=true` and at least one transfer gate
+  fails. Recommend `T065-learned-non-combat-policy-v1`.
+- **INCOMPLETE:** missing/invalid artifacts, provenance mismatch, candidate
+  duplicate identities, selected holdout overlap, selected duplicate identities,
+  code defect, OOM, interruption, incomplete shards, training/checkpoint
+  failure, exposure mismatch, or incomplete evaluation. Emit no planner
+  recommendation. Repair on this PR or obtain specification reapproval.
+
+T064 emits exactly one of Case A, Case B, or INCOMPLETE. Only Case A/B are valid
+accepted research outcomes.
+
+## Compact T064 Artifacts
+
+T064 defines exactly four compact JSON file paths under the stable T064 artifact
+root. There is one file instance per schema, not one training-report file per
+run. They use UTF-8, LF, sorted keys, compact separators, required `schema_id`
+and `format_version=1`, reject an unsupported version, and fail closed on
+missing required fields. Existing large teacher, trainer, checkpoint, T044, and
+T070 artifacts retain existing schemas. An early integrity failure may leave a
+later file unproduced, but no fifth T064 compact JSON file is authorized.
+
+1. `t064-curriculum-manifest-v1`
+   - input paths/hashes and native/code identities;
+   - frozen holdout identities;
+   - complete source identities and exclusion reasons;
+   - `candidate_holdout_exclusion_count` plus identity evidence for excluded
+     candidate rows, and `candidate_duplicate_complete_identity_count`;
+   - selected bucket membership and structural counts;
+   - `selected_holdout_overlap_count` and
+     `selected_duplicate_complete_identity_count` recomputed from flattened
+     final selected membership;
+   - source-audit status, adequacy result, teacher shard ranges;
+   - exact exposure-sequence and batch-plan hashes.
+2. `t064-training-run-report-v1`
+   - one aggregate document with a required `runs` array;
+   - deterministic run order exactly:
+     `static_mixture_v1/64001`,
+     `assistance_annealed_curriculum_v1/64001`,
+     `static_mixture_v1/64002`,
+     `assistance_annealed_curriculum_v1/64002`;
+   - each run entry contains arm, seed, initialization hash, full frozen
+     optimizer/configuration, trainer-input and batch-plan hashes,
+     per-bucket/per-source exposure counts, checkpoint path/hash and existing
+     checkpoint metadata linkage, completion status, and problems;
+   - each run records `trained_new` or `reused_validated`; reused entries retain
+     the checkpoint's actual file identity and producer metadata;
+   - if source adequacy is false and training is correctly skipped, `runs` is an
+     empty array and `not_run_reason="source_inadequate"` is required.
+3. `t064-stage-summary-v1`
+   - concise reuse inventory;
+   - stage name/status, exact command, code/native identity, inputs/outputs;
+   - workers, shards, ranges, return codes, wall-clock and failure counts;
+   - referenced existing artifact schema/path/hash/bytes;
+   - failed attempts and retained log paths;
+   - retention reason, downstream consumer, and deletion condition.
+4. `t064-transfer-decision-v1`
+   - source adequacy, completeness, every transfer gate and diagnostic summary;
+   - Case A, Case B, or INCOMPLETE;
+   - exactly one recommendation only for Case A/B;
+   - problems and unmet acceptance criteria.
+
+A separate T064 log-index, retention, teacher-merge, evaluation-merge, per-run
+training-report, or source-identity framework is prohibited; those facts live
+in the four files above or in the existing reused artifacts.
+
+## Execution Topology
+
+Use stable ignored root:
+
+`artifacts/t064-later-act-curriculum-transfer/`
+
+Stages are:
+
+0. verify retained inputs, runtime, holdouts, and initialization;
+1. build curriculum manifest and run 16-shard selected-source restore/context
+   audit;
+2. run and merge 16-shard T043 teacher collection;
+3. run 16-shard direct T064-to-T043 trainer conversion from the validated
+   curriculum manifest plus merged teacher artifact, merge one existing-schema
+   trainer input in exact selected-source order, then validate the frozen batch
+   plans;
+4. run four deterministic training jobs and write the single aggregate
+   `t064-training-run-report-v1` after all four run outcomes are known, using
+   at most two isolated one-thread CPU workers and canonical report ordering;
+5. validate/reuse checkpoint-independent T044 arms, then run eight
+   checkpoint-dependent T044 stages;
+6. validate/reuse T070 baseline, then run four T052 `prior_value` stages;
+7. aggregate decision and independently rehash the four compact T064 files plus
+   every referenced existing artifact.
+
+Interrupted or failed attempts are retained separately and never mixed into an
+accepted rerun. The Stage-0 manifest produced before the holdout-scope
+clarification is explicitly non-evidence; it must remain under
+`logs/failed-attempts` with its exact SHA-256 recorded in the stage summary and
+final PR report, and none of its records or adequacy conclusion may contribute
+to an accepted rerun. Non-simulator manifest, merge, training, aggregation, and
+hash steps may be single-process. Substantial simulator stages use 16 effective
+workers and 16 shards.
+
+### Stage-Affect Boundary And Approved Reuse
+
+Git commit fields are producer and execution provenance. A curriculum
+manifest's `code_commit` records the Stage-0 producer and is never rewritten to
+claim that an older artifact was produced by a later head. A producer commit
+that differs from the current approved execution head is not, by itself, a
+reason to reject reuse. Reuse still requires the ordinary schema, frozen-input,
+configuration, hash/byte, row/order/linkage, worker/range, return-code, and
+zero-problem checks defined by this task.
+
+For each reviewed repair, the planner and maintainer name an
+`earliest_affected_stage`. Strictly validated outputs before that boundary may
+be reused with their original producer provenance; the affected stage and all
+downstream stages are rerun. If the reviewed diff or cheap readiness checks
+cannot prove that boundary, execution stops for a narrower determination or
+moves the boundary earlier.
+
+The checkpoint-root repair introduced at
+`dce4a818f2c107073030fbede3fc98a32d84a664` changes only Stage-4 preflight and
+checkpoint publication. Its `earliest_affected_stage` is 4. The accepted
+Stage-0 manifest, Stage-1 restore audit, Stage-2 teacher, and Stage-3 trainer
+input from the preceding producer head are therefore reused after strict
+reader/rehash/linkage validation; they are not regenerated or relabeled.
+
+The Stage-4 worker/reuse repair has an `earliest_affected_run` boundary in the
+frozen `TRAINING_RUN_ORDER`. Only completed runs strictly before that boundary
+are eligible for strict validation and reuse. The retained
+`static_mixture_v1/64001` checkpoint from the interrupted approved run is a
+candidate with SHA-256
+`c0c38c239047f6be67e983768e53bd680007e9cba117e17c7d226583ed751193`
+and 462,895 bytes; it may be reused when the boundary is
+`assistance_annealed_curriculum_v1/64001` only after every checkpoint, frozen
+configuration, trainer, batch-plan, metadata, provenance, and file-identity
+check above passes. Its older producer provenance remains unchanged.
+
+The Stage-5 dependent fork-deadlock repair has
+`earliest_affected_stage=5`. Within Stage 5 only checkpoint-dependent worker
+construction/execution is affected. Strictly validated Stage-0--4 outputs, all
+four checkpoints, and the two completed checkpoint-independent T044 reports
+remain reusable with their original provenance; all eight dependent stages and
+their downstream consumers rerun after exact-head approval.
+
+The Stage-6 wrapper/preflight invocation and execution-binding repairs have
+`earliest_affected_stage=6`. The formal attempt at
+`dc49b055e3da184fade45c7769e82523b2c26d9e` failed in all 16 shards on the
+unsupported preflight selector before simulator work; retained-artifact review
+at `dd6e46105933a23fa3552ee5494f804699e25368` then exposed the stale
+`cecf0e5372534163d2620f595dfe7e763d57f3fc` execution binding before simulator
+work. Neither attempt wrote a shard or merged artifact. Strictly validated
+Stage-0--5 outputs remain reusable with their original producer provenance;
+Stage 6 and downstream aggregation rerun after exact-head approval.
+
+Before formal Stage 4--7 execution, run one cheap readiness pass that verifies:
+
+- the local and remote execution head equal the exact head named in the latest
+  planner/maintainer approval comment;
+- no formal T064 process is active and every Stage-4--7 output target is absent
+  or separately retained as failed evidence;
+- reused Stage-0--3 artifacts pass their existing strict readers, hashes,
+  bytes, row/order/linkage checks, frozen 16-worker ranges, return codes, and
+  zero-problem gates;
+- every frozen Stage-4--7 input path exists and retains its published identity,
+  including the initialization checkpoint, both T044 cohorts and historical
+  reports, the T052 cohort, and the T070 manifest, baseline, native-preflight,
+  source, and wrapper inputs;
+- the frozen initialization checkpoint is actually loaded and its hidden size,
+  state/action normalizers, encoders, and policy/outcome/HP/resource head shapes
+  match the frozen Stage-4 architecture;
+- every Stage-4--7 output and checkpoint directory can be created and written;
+  use a uniquely named, refuse-overwrite probe and remove only that probe after
+  the check, without creating a compact artifact;
+- the existing checkpoint writer completes one tiny save-and-load round trip,
+  and the Stage-4 preflight regression passes without training;
+- the existing Stage-5 production-plan route loads both frozen T044 cohort
+  contracts and their exact action/controller configurations, and each
+  checkpoint/cohort selector resolves exactly one dependent stage;
+- the existing Stage-6 route loads the T070 wrapper and both its historical
+  frozen identity and current checkpoint-selection identity without confusing
+  producer and execution commits;
+- the real Stage-7 aggregator accepts representative complete fixture/mock
+  inputs and derives a complete terminal decision; and
+- the existing one-record-range T044 simulator-dependent route smoke passes
+  with its test adapter, and a bounded real WSL one-record dependent-route smoke
+  loads an actual retained checkpoint only after fork and completes both frozen
+  roles without deadlock. This smoke is not a substitute for the frozen
+  16-worker formal Stage-5/6 execution.
+
+The corrected task document and exact-head approval are both required before
+formal execution resumes. The readiness pass must finish before the first
+expensive Stage-4 run; no additional ordering between approval and readiness is
+required. Readiness and approval are workflow evidence, not a fifth compact
+artifact or a new attestation framework.
 
 ## Out Of Scope
 
-- Human data or human strategy labels.
-- Arbitrary deck/relic generation that is not linked to an authoritative source
-  and validated by the simulator.
-- Using assisted or transformed rows as natural A20 performance evidence.
-- Permanent hand-written reward weights for strategic quality.
+- T039 regeneration or new natural source collection;
+- new assistance schedules, source schemas, teacher formats, trainer-input
+  formats, checkpoint formats, model architectures, or evaluation formats;
+- adversarial artifact attestation, duplicate provenance proof chains, or
+  additional sidecars whose only purpose is to distrust another trusted
+  repository-owned stage;
+- Search v2 changes, budget tuning, cache/batching/projection work, or native
+  tree changes;
+- human trajectories, action labels, win-rate tables, or handcrafted strategic
+  labels/rewards;
+- treating `assist_0` or any assisted/constructed data as natural coverage;
+- complete-run A20, live-game, controller-promotion, or final-agent claims;
+- broad repository refactoring inside this experiment.
 
-## Design Constraints
-
-- Every component retains behavior controller, target controller, information
-  regime, assistance/transform policy, source run, and simulator identity.
-- The final model must not receive assistance flags or hidden generator-only
-  features unless a task explicitly defines a training-only privileged regime.
-- Curriculum success is coverage and learnability evidence, not natural
-  reachability evidence.
-
-## Deliverables
-
-- Versioned generation and merge contracts for each curriculum component.
-- Bounded-memory manifests and coverage reports.
-- Restore/public-context/structured-outcome audits.
-- A curriculum sampling specification and de-curriculum evaluation plan.
-- Focused tests for provenance, distribution separation, transform validity, and
-  duplicate-source handling.
+Local refactoring is permitted only when it directly parameterizes an existing
+path and reduces duplication. Broader simplification should be proposed as a
+separate planner task after T064 only if implementation evidence shows repeated
+orchestration/contract duplication across multiple task paths. That follow-up
+must explicitly audit over-defensive validation and provenance design as a
+maintenance risk: duplicated truths, repeated rehash/cross-link glue, brittle
+reruns, blocked iteration, and code paths whose only value is defending against
+a malicious in-repository producer should be candidates for removal or
+simplification while retaining checks that catch realistic accidental errors and
+design drift.
 
 ## Acceptance Criteria
 
-The published task must define per-component scales and coverage gates from the
-accepted T061/T062 evidence. No component may satisfy a natural-data gate through
-resampling or distribution relabeling.
+T064 is accepted only when:
+
+- no parallel T042/T043/T044/T070 subsystem or fifth T064 artifact contract was
+  introduced;
+- all required retained input hashes match;
+- holdouts precede selection/training, candidate holdout exclusions are reported
+  separately from selected leakage, and final selected holdout overlap is zero;
+- candidate duplicate complete identities and selected duplicate complete
+  identities are zero;
+- complete source identity, selection, and batch plans are deterministic;
+- Stage 3 derives its linkage from the validated T064 manifest plus merged
+  teacher artifact, uses no caller-authored synthetic provenance contract, and
+  produces exact one-to-one selected-source/trainer-row order;
+- static and curriculum arms differ only in exposure order;
+- reused artifact schemas and merge invariants pass compatibility tests;
+- required simulator stages use the frozen ranges and 16 workers;
+- the terminal output correctly separates valid post-exclusion source
+  insufficiency Case B from leakage/integrity `INCOMPLETE`;
+- no prohibited performance or natural-distribution claim is made.
 
 ## Required Verification
 
-Run standard local gates, pinned-source verification, sharded generation and
-restore audits, deterministic merge checks, and distribution-separation tests.
+Run the standard suite, compileall, Ruff check/format, fixture smokes, task-doc
+checks, and `git diff --check`, plus focused tests for:
 
-## Legacy Reference
+- source identity, candidate holdout exclusion versus selected overlap,
+  candidate/selected duplicate detection, deterministic bucket selection, exact
+  raw `floor` identity mapping to `floor_bucket`, and fail-closed invalid-floor
+  handling;
+- source adequacy recomputation that ignores candidate holdout exclusions but
+  requires zero selected overlap/duplicates, and routes any leakage/integrity
+  failure to `INCOMPLETE` rather than source-negative Case B;
+- existing per-decision occurrence-safe action identity reuse and fail-closed
+  trace fallback;
+- T043 teacher range collection/merge and direct T064 trainer range conversion,
+  assisted restore, exact selected identity/order merge, and legacy T024/T043
+  default-path compatibility;
+- Stage-3 script-level 16-fork execution proving it reaches the existing T043
+  conversion without a caller-authored synthetic bridge contract;
+- checkpoint initialization and default-training backward compatibility;
+- Stage-4 two-worker cap and spawned-process isolation, per-run deterministic
+  configuration, schedule-order independence with canonical aggregate order,
+  exact valid-checkpoint reuse, affected/mismatched/partial checkpoint refusal,
+  one-worker-failure retention, and legacy sequential/unit-call compatibility;
+- deterministic batch plans and exact exposure parity;
+- exact T044 persisted role strings, frozen ranges, and range/arm-subset merge
+  compatibility;
+- Stage-5 dependent scorer/controller construction only after fork, 16 distinct
+  isolated workers, and the bounded real WSL one-record dependent-route smoke;
+- manifest-driven T070 checkpoint substitution and unchanged old-manifest
+  validation;
+- aggregate four-run training report cardinality/order;
+- completeness, Case A/B, and INCOMPLETE decision logic;
+- independent artifact rehash.
 
-Consult T008, T021--T024, T039--T044, T050--T052, and accepted T061/T062 reports.
+## Lifecycle And PR Contract
+
+T064 remained `DRAFT` on merged `main` throughout implementation. There was no
+intermediate specification merge. Implementation began only after exact
+`SPEC APPROVED` comments for specific commits on this PR. This final same-PR
+landing update records T064 as `DONE` with its terminal result.
+
+Known acceptance risks before implementation are:
+
+- holdout exclusion may reduce eligible later-act sources below 128;
+- teacher budget 100 may expose runtime or memory limits;
+- the existing checkpoint may be compatible but provide no transfer benefit;
+- historical T044/T070 baseline reuse may fail strict identity validation and
+  require one checkpoint-independent rerun per cohort;
+- T052 has only five Act-2+ records, so subset conclusions remain diagnostic.
 
 ## PR Report
 
-Report all generator and distribution identities, source/unique counts,
-assistance or transform policies, restore results, retention manifests, compute
-costs, limitations, and one next recommendation.
+Before final review, the pull request report must summarize the accepted T064
+result using existing artifacts and the four compact T064 files; this section is
+reporting policy only and does not authorize another artifact or execution
+surface. It must include:
+
+- task ID, approved specification commit, final implementation head, and merge
+  base;
+- reuse inventory naming each existing T042/T043/T044/T052/T069/T070 module,
+  command, schema, reader/writer, and compatibility test used;
+- verified retained-input paths, SHA-256 identities, native/runtime identities,
+  and holdout identities;
+- `candidate_holdout_exclusion_count` with component/identity evidence,
+  `candidate_duplicate_complete_identity_count`,
+  `selected_holdout_overlap_count`, and
+  `selected_duplicate_complete_identity_count`, plus the final selected
+  zero-leakage/zero-duplicate proof;
+- selected source counts by bucket, component, act, room/encounter stratum, and
+  the final source-adequacy result;
+- teacher budget/configuration, teacher and trainer-input identities, row counts,
+  failures, and all four checkpoint identities;
+- Stage-3 direct-provenance disposition: validated curriculum-manifest/teacher
+  linkage, 16-shard restore/conversion evidence, exact trainer-row identity/order,
+  and confirmation that no synthetic caller-authored bridge contract or extra
+  provenance-only artifact was used;
+- the exact paired training configuration, initialization identity, seeds,
+  phase/batch-plan hashes, per-bucket and per-source exposure-parity result;
+- T044 outcomes for both frozen cohorts and T052/T070 `prior_value` outcomes,
+  including required subset diagnostics and checkpoint-independent baseline
+  reuse/rerun disposition;
+- for every substantial simulator stage: workers, shards, exact ranges,
+  wall-clock seconds, return/failure counts, and referenced artifact hashes;
+- `experiment_complete`, every frozen transfer gate, and the terminal Case A,
+  Case B, or INCOMPLETE result, with exactly one recommendation only for Case
+  A/B;
+- SHA-256 identities for each of the four compact T064 JSON files and every
+  referenced retained artifact used as final evidence;
+- failed/interrupted attempts, including the pre-clarification failed Stage-0
+  manifest path and SHA-256, and why none contributed records or conclusions to
+  accepted reruns;
+- verification commands/results, known limitations, unresolved risks, and every
+  unmet acceptance criterion.
+
+The PR report must distinguish historical accepted evidence from commands run on
+the implementation head and must not turn missing/incomplete evidence,
+candidate holdout exclusions, or selected leakage/integrity failures into a
+scientific Case B.
+
+## Accepted Result Report (2026-08-25)
+
+### Identity and terminal decision
+
+- Task: T064; latest approved specification/execution contract:
+  `cecf0e5372534163d2620f595dfe7e763d57f3fc`; final implementation evidence
+  head before this report: `b2bc6420135f8811a62ca13c101bda8c1140d3d4`; merge base:
+  `ca4823c8c2c5c7b0bc602f5b1d0e7cae2d107c5e`.
+- Runtime identity: pinned native `sts_lightspeed` commit
+  `fee272f1ae21c283ad2161f55293cfe6d714134a`; formal simulator stages ran in
+  WSL. Training ran on CPU with deterministic algorithms and `torch_threads=1`
+  per run, with at most two isolated concurrent workers.
+- Final decision: `experiment_complete=true`, `source_adequacy=true`,
+  `source_integrity_valid=true`, complete source-audit status `complete`, no
+  problems, and no unmet acceptance criteria. Terminal result is **Case B**, a
+  complete valid negative. The exactly one recommendation is
+  `T065-learned-non-combat-policy-v1`; this does not publish or authorize T065.
+
+### Reuse boundary and retained inputs
+
+The implementation reused the T042 assisted-source pool reader and scale
+manifest, T043 teacher collection/merge and direct trainer conversion, T044
+de-assisted cohort runner and report merge, T052 fixed-cohort reader, T069
+native projection, and T070 manifest-driven substituted-checkpoint comparison
+and aggregation. The T064 router is
+`sts_combat_rl.commands.t064_curriculum_transfer`; current writers emit the
+four T064 schemas and strict readers validate them before aggregation. Existing
+legacy/default-path compatibility, direct-provenance conversion, controller
+role, checkpoint substitution, and artifact-validator tests passed. No new
+simulator, searcher, trainer, evaluation framework, synthetic bridge contract,
+or fifth compact artifact was introduced. The compact schema/reader-writer
+surface is `t064-curriculum-manifest-v1`, `t064-training-run-report-v1`,
+`t064-stage-summary-v1`, and `t064-transfer-decision-v1`, implemented by
+`sim.t064_curriculum.load_compact_json`, `validate_compact_document`, and
+`write_compact_json`; compatibility and workflow coverage is in
+`tests/test_t064_curriculum.py`, with reused subsystem compatibility covered by
+the existing T052, T069, and T070 test modules.
+
+Retained source and holdout identities were independently rehashed:
+
+| Input | Rows | Bytes | SHA-256 |
+| --- | ---: | ---: | --- |
+| T042 `assist_0` pool | 4,855 | 2,174,087,622 | `d124d94a94df534c0bcc32072582a4448746f0a9734a41410e45c51c1b1ff87f` |
+| T042 `assist_hp50` pool | 5,440 | 3,077,340,092 | `1231bcd24309df9fbeb22ec56dfa12b661c38c6f440bdea1850053734cc32d8f` |
+| T042 `assist_hp50_potion_elite_boss` pool | 5,471 | 3,240,381,446 | `642d11d4956316e96f58ddf5fceec94f59a50c3dd051205e2fdfca94485ab201` |
+| T042 `assist_hp75_potion` pool | 6,577 | 7,114,826,466 | `1bbcbfebbde4fd2eec1be249f9843bf25a288abb0672950f47ad540c9bb8f46f` |
+| T042 scale manifest | - | 8,159 | `25efae30dc9a61c8b97cb09e1844b93b9ffe693bde51c0f494f0f65203a1d327` |
+| T043 initialization checkpoint | - | 386,717 | `a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4` |
+| T044 `assist_0` holdout | 21 | 16,265,964 | `4ee0eb125ac37e870f0f2c950290b131f4693185c60b6c71cd46b5265a4d0037` |
+| T044 `assist_hp50` holdout | 38 | 65,500,639 | `bc9372a67fe6536b848616e4b700765d6a47f49b4044bd973dbcaff4dd3bba36` |
+| T052 fixed cohort | 93 | 161,435,825 | `b7f8e9b85b53bbf8e37adfe6cc90d0579937661309b26bce2a8f2921604a8608` |
+
+### Source audit, teacher, and training
+
+The complete 22,343-record source audit excluded 59 candidate holdout matches,
+found zero candidate duplicate complete identities, selected 460 records, and
+fresh-restored all 460 with zero failures. The selected set has zero holdout
+overlap and zero duplicate complete identities. It contains 256 anchor, 44
+medium-later-act, and 160 strong-later-act records; components are `assist_0`
+256, `assist_hp50` 12, `assist_hp50_potion_elite_boss` 32, and
+`assist_hp75_potion` 160; acts are Act 1 = 256 and Act 2 = 204; room strata are
+BOSS 9, ELITE 77, EVENT 5, and MONSTER 369. Encounter counts are:
+
+`AUTOMATON=1; BLUE_SLAVER=20; BOOK_OF_STABBING=8; CENTURION_AND_HEALER=19;
+CHAMP=1; CHOSEN=21; CHOSEN_AND_BYRDS=2; COLLECTOR=1; CULTIST=14;
+CULTIST_AND_CHOSEN=9; EXORDIUM_THUGS=20; EXORDIUM_WILDLIFE=20;
+GREMLIN_GANG=20; GREMLIN_LEADER=12; GREMLIN_NOB=16; HEXAGHOST=2;
+JAW_WORM=17; LAGAVULIN=16; LARGE_SLIME=18; LOOTER=10;
+LOTS_OF_SLIMES=10; MASKED_BANDITS_EVENT=2; MUSHROOMS_EVENT=3;
+RED_SLAVER=9; SENTRY_AND_SPHERE=2; SHELL_PARASITE=14;
+SHELLED_PARASITE_AND_FUNGI=6; SLAVERS=9; SLIME_BOSS=2; SMALL_SLIMES=11;
+SNAKE_PLANT=13; SNECKO=14; SPHERIC_GUARDIAN=20; THE_GUARDIAN=2;
+THREE_BYRDS=23; THREE_CULTIST=7; THREE_LOUSE=10; THREE_SENTRIES=16;
+TWO_FUNGI_BEASTS=10; TWO_LOUSE=10; TWO_THIEVES=20`.
+
+The teacher used the frozen configuration `full_simulator_state_oracle_like`,
+100 simulations, `highest_mean` root selection, `initial_no_potions` action
+space, and mandatory soft visit-distribution policy targets. It produced 460
+merged rows
+(1,031,417,027 bytes, SHA-256
+`1352eb301509f258ae92509b804125d59d2da17ef5f7f6e5b81131f11e1d0d72`).
+Direct T043-to-T064 conversion produced exactly the same 460 selected identities
+in manifest order with no synthetic caller-authored bridge; the trainer input
+is 998,761,499 bytes, SHA-256
+`aae847505ece7c4d535d08cffc9e24bc2aaead334234332f41c69f0b2c99bada`.
+Both stages used the same 16 exact contiguous ranges over `0:460` and had no
+failures.
+
+All four runs used hidden size 16, batch size 32, Adam at 0.001, 900 optimizer
+steps in phases 300/300/300, identical unit loss weights, gradient clip 10,
+the same initialization above, and exact per-source/per-bucket exposure parity.
+The static/curriculum batch-plan hashes are respectively
+`71b22d06943252c5c1f9b1f57760931063daf9344dd8538c4b381f5d09569c61` /
+`045490a96770d70227cb5f20588f5730c18ef4ad612a46a901cadd9bf458c97c`
+for seed 64001 and
+`8b9e21e907e38bedbc62a5503932e28fb589d8e4bc983ede04df2cfd63b49704` /
+`2534bf2cc06b3a9a75eb2657b168f61d3d2e6e7153b33f11ecf2fc1b4a449714`
+for seed 64002. The valid static-64001 checkpoint was strictly reused after an
+interruption; the other three were trained new. Canonical report order remained
+the frozen training order:
+
+| Arm / seed | Disposition | Bytes | Checkpoint SHA-256 |
+| --- | --- | ---: | --- |
+| static / 64001 | reused validated | 462,895 | `c0c38c239047f6be67e983768e53bd680007e9cba117e17c7d226583ed751193` |
+| curriculum / 64001 | trained new | 504,949 | `8b099e922e82a06655e0b524ea6f41c709fe75fc046d2b128d44aee7f6210c30` |
+| static / 64002 | trained new | 504,341 | `32dbf18a187e8b6d465bb026d90643e3dd28624066628019c61455fcd8f5573a` |
+| curriculum / 64002 | trained new | 504,949 | `ebd4ce96db19b5b351e0538f42292d374ac67925afbc955c594b20d6691abd97` |
+
+### Frozen evaluation and transfer gates
+
+Historical four-arm T044 reports failed strict safe-reuse validation, so both
+checkpoint-independent baselines were rerun once and shared across the four
+dependent evaluations. Results were:
+
+| Cohort / metric | Static | Curriculum | Delta |
+| --- | ---: | ---: | ---: |
+| T044 `assist_hp50`, model-guided wins | 46 | 46 | 0 |
+| T044 `assist_hp50`, raw-policy wins | 18 | 19 | +1 |
+| T044 `assist_0`, model-guided wins | 18 | 18 | 0 |
+| T052/T070 `prior_value`, seed 64001 | 2 | 2 | 0 |
+| T052/T070 `prior_value`, seed 64002 | 2 | 1 | -1 |
+| T052 Boss-only subset | - | - | 0 |
+| T052 Act-2+ subset | - | - | -1 |
+
+Three gates passed: T052 per-seed non-regression, T044 `assist_hp50` raw-policy
+non-regression, and T044 `assist_0` model-guided non-regression. Three failed:
+T052 aggregate margin, T052 subset non-regression, and T044 `assist_hp50`
+model-guided margin. This exact six-gate vector yields Case B.
+
+### Formal execution inventory and artifact identities
+
+All accepted substantial simulator stages returned zero with zero recorded
+failures. Stage 1 source audit, Stage 2 teacher collection, and Stage 3 direct
+trainer conversion each used 16 workers/16 shards over the exact contiguous
+`0:460` ranges and took 3,616.944, 4,852.544, and 6,113.625 seconds. Stage 4
+used two isolated workers for four `(arm, seed)` runs and took 20,846.164
+seconds. Stage 5 used 16 workers/16 shards for each cohort: independent
+`assist_0` 108.768 seconds and `assist_hp50` 571.434 seconds; dependent static
+64001 176.955/785.380, curriculum 64001 139.951/611.014, static 64002
+117.344/589.607, and curriculum 64002 115.741/569.323 seconds for
+`assist_0`/`assist_hp50`. Stage 6 used 16 workers/16 shards over the exact
+93-record ranges for static 64001 2,192.453, curriculum 64001 968.518, static
+64002 1,097.837, and curriculum 64002 1,007.971 seconds. Stage 7 was
+non-simulator aggregation (one worker/one shard).
+
+| Compact artifact | Bytes | SHA-256 |
+| --- | ---: | --- |
+| `t064-curriculum-manifest.json` | 23,072,419 | `a111e082d4bc11e03bc5b785a814c422619404245ddda55c2954be09dded46c7` |
+| `t064-training-run-report.json` | 135,805 | `3e838bed72f5ca565532d39d77b1991e0d32919dcd9b1d6afe4d2c8f8ecdc38c` |
+| `t064-stage-summary.json` | 33,823 | `5748e79a23152fa51475f8cb7359c81816d6bbdd26ed2a10d7489f1853b6b880` |
+| `t064-transfer-decision.json` | 7,023 | `f8407acbc17cb13bba53009c91009fea961e7307071d54b0ff82147ff092603f` |
+
+Every additional retained artifact referenced by the final decision is below;
+the T042/T043/T044 inputs, T052 cohort, teacher, trainer, and checkpoints are
+listed above.
+
+| Evidence | Bytes | SHA-256 |
+| --- | ---: | --- |
+| independent T044 `assist_0` | 34,594,525 | `d2a4fc678a60c21990a61ea372c35b196bb2141d52fa20a225ff3c45933314c3` |
+| independent T044 `assist_hp50` | 137,041,892 | `50d9c4f87d3a5b4dff37ee18ab2af6d91eab2c202b7a7d71835577522c3ee50a` |
+| static-64001 T044 `assist_0` | 154,749,959 | `80ad6e7a33c689bb0af675663d958306b6fc7abce77e412f2bd23bfde7df6ba8` |
+| static-64001 T044 `assist_hp50` | 437,061,188 | `f35a9e73a797a8e77c29937fbf5869144725988236711db9db53e697c43f3a2a` |
+| curriculum-64001 T044 `assist_0` | 147,001,628 | `b38cc728a5c365bb270ff035c50f7eab92688240aa76438aeea75d9bed7beeda` |
+| curriculum-64001 T044 `assist_hp50` | 428,831,267 | `e2f1e4834121f498ee39f91492f20d58ff6e5974c1abd60aa773caf17d2eae6f` |
+| static-64002 T044 `assist_0` | 149,654,784 | `7fb197835f62fbe7b572cc81276cd32a17be0c9819638dc6e5a5a7f3ef6d5e5d` |
+| static-64002 T044 `assist_hp50` | 440,042,941 | `bfa602c998b6fb66419b1cf14eb1726358ef379b0e77852fe5f3c0107586e1fc` |
+| curriculum-64002 T044 `assist_0` | 149,630,162 | `9565b867a004378f37059e8c54437aab93192e514decb0e439c80dbf836cf734` |
+| curriculum-64002 T044 `assist_hp50` | 437,901,312 | `b80d78062c4e8230e4dfe1dceb27e0f5d639c03377fa60de932e7366f0260a8a` |
+| historical T070 baseline | 41,206,599 | `ece1448d0fb684bca64cc9f4dcf77f550622ed5e22a89043b7d9bcc681f0f0d7` |
+| historical T070 frozen manifest | 6,923 | `3c46c59fde70a0863e72587b5fc9c71e94354c44653dd45c7509749ec4931bba` |
+| static-64001 T070 | 22,739,987 | `c0fb61e68582f82f1c5f52330e3f6aa84f2a3ea8f7e7c833c937e6ac067bd7fc` |
+| curriculum-64001 T070 | 22,691,587 | `1f363791a837f0ee26765e56c61edb8ca433043fc8a434567f09ba0982204e76` |
+| static-64002 T070 | 22,304,143 | `8290191e2a539e83368807241003aeae92d2720260a28d6b714196697368f98b` |
+| curriculum-64002 T070 | 23,917,846 | `3dc897a1254af79deca19d6920067f41da13a9c539a35b5b376b93ca765c5d9e` |
+
+### Failed attempts, verification, and limitations
+
+The pre-overlap-fix Stage-0 manifest is retained as non-evidence at
+`logs/failed-attempts/t064-curriculum-manifest.pre-overlap-fix-431f098.json`
+(SHA-256 `7c631d0cd136508be5e04a6d8bfe27b49c064a198e78d114921ad2b2c610ea17`).
+An earlier successful-but-incomplete Stage-1 attempt, a Windows-path Stage-1
+failure, a hand-entered-commit rerun, the interrupted serial Stage-4 attempt,
+and other terminated attempts are also retained as non-evidence. Two Stage-7
+fail-closed attempts were archived: Windows path spelling caused contract
+paths to mismatch, then sorted controller-role labels were incorrectly treated
+as arm order. Both emitted `INCOMPLETE`; neither contributed records or a
+conclusion. The accepted WSL rerun strictly revalidated all inputs and emitted
+Case B.
+
+Verification on implementation head `b2bc6420135f8811a62ca13c101bda8c1140d3d4`:
+full `pytest` = 942 passed, 11 skipped; T064-relevant tests = 114 passed,
+11 skipped; focused Stage-7 real-artifact validation = 1 passed; Ruff, Ruff
+format check, `compileall`, and `git diff --check` all passed. The final four
+compact artifacts were strict-loaded and independently rehashed.
+
+Known scientific limitations remain: only two training seeds were frozen;
+T052 contains only five Act-2+ records; no Act-3/Act-4/Heart transfer evidence
+was established; and this simulator-only experiment did not validate a live
+CommunicationMod controller. These are limitations of the valid negative, not
+unmet acceptance criteria. There are no unresolved execution risks or unmet
+T064 acceptance criteria.

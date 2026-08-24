@@ -1096,24 +1096,7 @@ def verify_assisted_source_pool_restores(
         else:
             context_legacy_unavailable_count += 1
         try:
-            restored, replayed_context = restore_assisted_by_seed_action_trace(
-                adapter_factory(),
-                record,
-            )
-            if not _snapshot_matches_record(restored, record):
-                raise ValueError(
-                    f"record {record.record_index}: restored snapshot does not "
-                    "match assisted source"
-                )
-            if record.public_context_status == PUBLIC_CONTEXT_AVAILABLE:
-                expected = sanitize_public_context_artifact(
-                    record.public_run_context,
-                    label=f"record {record.record_index}",
-                )
-                if expected != replayed_context:
-                    raise ValueError(
-                        f"record {record.record_index}: public context replay mismatch"
-                    )
+            restore_assisted_battle_start_record(adapter_factory(), record)
         except (RuntimeError, ValueError) as exc:
             problems.append(f"record {record.record_index}: {exc}")
             if record.public_context_status == PUBLIC_CONTEXT_AVAILABLE:
@@ -1488,6 +1471,35 @@ def _build_assisted_record(
         ),
         native_checkpoint=native_checkpoint,
     )
+
+
+def restore_assisted_battle_start_record(
+    adapter: CheckpointingSimulatorAdapter,
+    record: BattleStartCheckpointRecord,
+) -> tuple[SimulatorSnapshot, str]:
+    """Restore and validate an assisted source in a fresh adapter.
+
+    Assisted source traces require their recorded native rebuilds before the
+    corresponding battle actions are replayed.  This is the counterpart to
+    ``restore_battle_start_record`` for the explicitly tagged assisted
+    distribution.
+    """
+
+    restored, replayed_context = restore_assisted_by_seed_action_trace(adapter, record)
+    if not _snapshot_matches_record(restored, record):
+        raise ValueError(
+            f"record {record.record_index}: restored snapshot does not match assisted source"
+        )
+    if record.public_context_status == PUBLIC_CONTEXT_AVAILABLE:
+        expected = sanitize_public_context_artifact(
+            record.public_run_context,
+            label=f"record {record.record_index}",
+        )
+        if expected != replayed_context:
+            raise ValueError(
+                f"record {record.record_index}: public context replay mismatch"
+            )
+    return restored, "assisted_seed_action_trace"
 
 
 def restore_assisted_by_seed_action_trace(

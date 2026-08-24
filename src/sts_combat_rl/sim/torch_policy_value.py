@@ -9,6 +9,7 @@ resource heads without collapsing resources into a permanent scalar reward.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
+import copy
 from dataclasses import asdict, dataclass, field
 import hashlib
 import math
@@ -121,6 +122,11 @@ class TorchPolicyValueTrainingConfig:
     resource_loss_weight: float = 1.0
     batch_size: int = 32
     seed: int = 1
+    adam_betas: tuple[float, float] = (0.9, 0.999)
+    adam_epsilon: float = 1e-8
+    weight_decay: float = 0.0
+    amsgrad: bool = False
+    gradient_clip_norm: float = 10.0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -833,6 +839,8 @@ def train_torch_policy_value(
     gate_report: TrainingGateReport | None = None,
     gate_config: TrainingScaleGateConfig | None = None,
     gate_override: str = TRAINING_GATE_OVERRIDE_NONE,
+    initial_model: PolicyValueNetwork | LoadedTorchPolicyValueCheckpoint | None = None,
+    ordered_batch_plan: Sequence[Sequence[int]] | None = None,
 ) -> TorchPolicyValueTrainingResult:
     """Train the optional policy/value model against public trainer input."""
 
@@ -850,23 +858,40 @@ def train_torch_policy_value(
     snapshot_size = int(dataset.snapshot_feature_size or 1)
     action_size = int(dataset.action_feature_size or 1)
     state_size = snapshot_size + PUBLIC_CONTEXT_FEATURE_SIZE
-    normalizers = (
-        _feature_normalizers(dataset, snapshot_size, action_size)
-        if not problems
-        else (None, None, None, None)
-    )
-    model = PolicyValueNetwork(
-        state_size,
-        action_size,
-        snapshot_feature_size=snapshot_size,
-        public_context_feature_size=PUBLIC_CONTEXT_FEATURE_SIZE,
-        public_context_feature_schema_version=PUBLIC_CONTEXT_FEATURE_SCHEMA_VERSION,
-        public_context_feature_names=PUBLIC_CONTEXT_FEATURE_NAMES,
-        hidden_size=active_config.hidden_size,
-        state_mean=normalizers[0],
-        state_std=normalizers[1],
-        action_mean=normalizers[2],
-        action_std=normalizers[3],
+    if initial_model is None:
+        normalizers = (
+            _feature_normalizers(dataset, snapshot_size, action_size)
+            if not problems
+            else (None, None, None, None)
+        )
+        model = PolicyValueNetwork(
+            state_size,
+            action_size,
+            snapshot_feature_size=snapshot_size,
+            public_context_feature_size=PUBLIC_CONTEXT_FEATURE_SIZE,
+            public_context_feature_schema_version=PUBLIC_CONTEXT_FEATURE_SCHEMA_VERSION,
+            public_context_feature_names=PUBLIC_CONTEXT_FEATURE_NAMES,
+            hidden_size=active_config.hidden_size,
+            state_mean=normalizers[0],
+            state_std=normalizers[1],
+            action_mean=normalizers[2],
+            action_std=normalizers[3],
+        )
+    else:
+        supplied = (
+            initial_model.model
+            if isinstance(initial_model, LoadedTorchPolicyValueCheckpoint)
+            else initial_model
+        )
+        model = copy.deepcopy(supplied).cpu()
+        _validate_model_dataset_compatibility(model, dataset)
+        if model.hidden_size != active_config.hidden_size:
+            raise ValueError("initial policy/value model hidden size is incompatible")
+    validated_batch_plan = _validated_ordered_batch_plan(
+        ordered_batch_plan,
+        record_count=len(dataset.records),
+        batch_size=active_config.batch_size,
+        epochs=active_config.epochs,
     )
     if problems:
         empty = _empty_evaluation()
@@ -895,25 +920,50 @@ def train_torch_policy_value(
             ),
         )
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=active_config.learning_rate)
+    optimizer = torch.optim.Adam(
+        model.parameters(),
+        lr=active_config.learning_rate,
+        betas=active_config.adam_betas,
+        eps=active_config.adam_epsilon,
+        weight_decay=active_config.weight_decay,
+        amsgrad=active_config.amsgrad,
+    )
     initial = evaluate_torch_policy_value(model, dataset, active_config)
     epoch_stats: list[TorchPolicyValueEpochStats] = []
     record_indices = list(range(len(dataset.records)))
+    planned_batches_per_epoch = (
+        len(validated_batch_plan) // active_config.epochs
+        if validated_batch_plan is not None
+        else 0
+    )
     for epoch in range(1, active_config.epochs + 1):
-        random.shuffle(record_indices)
+        if validated_batch_plan is None:
+            random.shuffle(record_indices)
+            epoch_batches = [
+                record_indices[start : start + active_config.batch_size]
+                for start in range(0, len(record_indices), active_config.batch_size)
+            ]
+        else:
+            start = (epoch - 1) * planned_batches_per_epoch
+            epoch_batches = validated_batch_plan[
+                start : start + planned_batches_per_epoch
+            ]
         totals = [0.0, 0.0, 0.0, 0.0, 0.0]
+        processed = 0
         model.train()
-        for start in range(0, len(record_indices), active_config.batch_size):
-            batch_indices = record_indices[start : start + active_config.batch_size]
+        for batch_indices in epoch_batches:
             batch_records = [dataset.records[index] for index in batch_indices]
             optimizer.zero_grad()
             losses = _batch_losses(model, batch_records, active_config)
             losses[0].backward()
-            nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)
+            nn.utils.clip_grad_norm_(
+                model.parameters(), max_norm=active_config.gradient_clip_norm
+            )
             optimizer.step()
             for index, loss in enumerate(losses):
                 totals[index] += float(loss.detach()) * len(batch_records)
-        denominator = len(record_indices)
+            processed += len(batch_records)
+        denominator = processed
         epoch_stats.append(
             TorchPolicyValueEpochStats(
                 epoch=epoch,
@@ -960,6 +1010,35 @@ def train_torch_policy_value(
             problems=tuple(problems),
         ),
     )
+
+
+def _validated_ordered_batch_plan(
+    plan: Sequence[Sequence[int]] | None,
+    *,
+    record_count: int,
+    batch_size: int,
+    epochs: int,
+) -> list[list[int]] | None:
+    """Validate an explicit optimizer-step plan while preserving default shuffling."""
+
+    if plan is None:
+        return None
+    if not plan or len(plan) % epochs:
+        raise ValueError("ordered batch plan must divide evenly across epochs")
+    result: list[list[int]] = []
+    for batch_index, raw_batch in enumerate(plan):
+        batch = list(raw_batch)
+        if not batch or len(batch) > batch_size:
+            raise ValueError(
+                f"ordered batch plan batch {batch_index} has invalid cardinality"
+            )
+        for index in batch:
+            if isinstance(index, bool) or not isinstance(index, int):
+                raise ValueError("ordered batch plan indices must be integers")
+            if index < 0 or index >= record_count:
+                raise ValueError("ordered batch plan index is outside the dataset")
+        result.append(batch)
+    return result
 
 
 @torch.no_grad()
