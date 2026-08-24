@@ -486,9 +486,9 @@ def test_t070_shard_runner_routes_t064_wrapper_through_checkout_and_preflight(
                 },
                 "primary_stage_inventory": [
                     {
-                        "stage_name": "baseline-0100",
-                        "arm": "baseline",
-                        "family": "shared",
+                        "stage_name": "equal-prior-value-0100",
+                        "arm": "prior_value",
+                        "family": "equal_nominal",
                         "native_budget": 100,
                         "tree_geometry_enabled": False,
                     }
@@ -507,8 +507,99 @@ def test_t070_shard_runner_routes_t064_wrapper_through_checkout_and_preflight(
                 "code_commit": code_commit,
                 "t070_stage_manifest": {
                     "frozen_t070_manifest": identity(frozen),
-                    "checkpoint": identity(checkpoint),
+                    "historical_code_commit": historical_code_commit,
+                    "current_code_commit": code_commit,
+                    "arm": "prior_value",
+                    "native_budget": 100,
+                    "tree_geometry_enabled": False,
+                    "projection_mode": "accepted_t069_search_scope_projection",
+                    "shard_ranges": list(PRIMARY_RANGES),
+                    "worker_count": 16,
+                    "checkpoint_selections": {
+                        key: {"checkpoint": identity(checkpoint)}
+                        for key in (
+                            "static_mixture_v1:64001",
+                            "static_mixture_v1:64002",
+                            "assistance_annealed_curriculum_v1:64001",
+                            "assistance_annealed_curriculum_v1:64002",
+                        )
+                    },
                 },
+            }
+        ),
+        encoding="utf-8",
+    )
+    log_fields = (
+        "stdout",
+        "stderr",
+        "runtime_build_stdout",
+        "runtime_build_stderr",
+        "runtime_api_smoke_stdout",
+        "runtime_api_smoke_stderr",
+        "runtime_geometry_stdout",
+        "runtime_geometry_stderr",
+    )
+    logs: dict[str, str] = {}
+    for field in log_fields:
+        path = tmp_path / f"{field}.log"
+        path.write_text(field, encoding="utf-8")
+        logs[field] = str(path)
+    runtime_identity = {
+        "python_executable": str(tmp_path / "python3.13"),
+        "python_extension_suffix": ".cpython-313-x86_64-linux-gnu.so",
+        "native_extension_path": str(tmp_path / "slaythespire.so"),
+    }
+    preflight = tmp_path / "preflight.json"
+    preflight.write_text(
+        json.dumps(
+            {
+                "schema_id": "t070-native-capability-preflight-v1",
+                "stsrl_code_commit": historical_code_commit,
+                "native_commit": NATIVE_COMMIT,
+                "semantic_parity_result": True,
+                "runtime_api_smoke_passed": True,
+                "runtime_geometry_passed": True,
+                "return_codes": [0, 0, 0, 0, 0],
+                "return_code": 0,
+                "worker_count": 16,
+                "command_passed": True,
+                "source_manifest_sha256": hashlib.sha256(
+                    source_manifest.read_bytes()
+                ).hexdigest(),
+                "source_verifier_sha256": hashlib.sha256(
+                    verifier.read_bytes()
+                ).hexdigest(),
+                "verifier_clean_worktree_mode": (
+                    "temporary_detached_exact_commit_worktree"
+                ),
+                "verifier_clean_worktree_scope": "clean_source_verifier_only",
+                "runtime_source_mode": "exact_head_tracked_clean_stable_checkout",
+                "build_jobs": 16,
+                "cmake_identity": "cmake version fixture",
+                "manifest_build_directory": "build-stsrl-source-py",
+                "manifest_cmake_target": "slaythespire",
+                "commands": [
+                    {"name": name, "argv": [name]}
+                    for name in (
+                        "clean_source_verifier",
+                        "runtime_cmake_configure",
+                        "runtime_cmake_build",
+                        "runtime_api_smoke",
+                        "runtime_geometry",
+                    )
+                ],
+                "native_runtime_identity": runtime_identity,
+                "cmake_python_identity": {
+                    "cmake_python_executable": runtime_identity["python_executable"],
+                    "runner_python_executable": runtime_identity["python_executable"],
+                    "runner_python_extension_suffix": runtime_identity[
+                        "python_extension_suffix"
+                    ],
+                    "matching_extension_path": runtime_identity[
+                        "native_extension_path"
+                    ],
+                },
+                **logs,
             }
         ),
         encoding="utf-8",
@@ -519,27 +610,26 @@ def test_t070_shard_runner_routes_t064_wrapper_through_checkout_and_preflight(
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     checkout_calls: list[str] = []
-    preflight_calls: list[str] = []
     monkeypatch.setattr(
         module,
         "verify_exact_git_checkout",
         lambda _root, commit: checkout_calls.append(commit),
     )
     monkeypatch.setattr(
-        module,
-        "validate_t070_preflight",
-        lambda _path, **kwargs: (
-            preflight_calls.append(kwargs["code_commit"])
-            or {"native_runtime_identity": {"schema_id": "fixture"}}
-        ),
+        "sts_combat_rl.commands.t070_search_v2_audit.probe_t070_native_runtime_identity",
+        lambda **_kwargs: dict(runtime_identity),
     )
     monkeypatch.setattr(
         module, "build_torch_guidance_scorer_from_checkpoint", lambda _path: object()
     )
     monkeypatch.setattr(module, "BattleSearchV2Controller", lambda **kwargs: kwargs)
-    monkeypatch.setattr(
-        module, "run_single_arm_shard", lambda **kwargs: {"command_passed": True}
-    )
+    shard_calls: list[dict[str, object]] = []
+
+    def run_shard(**kwargs):
+        shard_calls.append(kwargs)
+        return {"command_passed": True}
+
+    monkeypatch.setattr(module, "run_single_arm_shard", run_shard)
     output = tmp_path / "result.json"
     monkeypatch.setattr(
         sys,
@@ -553,7 +643,7 @@ def test_t070_shard_runner_routes_t064_wrapper_through_checkout_and_preflight(
             "--frozen-manifest",
             str(wrapper),
             "--native-preflight",
-            str(tmp_path / "preflight.json"),
+            str(preflight),
             "--native-checkout",
             str(tmp_path / "native"),
             "--native-build-root",
@@ -563,11 +653,13 @@ def test_t070_shard_runner_routes_t064_wrapper_through_checkout_and_preflight(
             "--code-commit",
             code_commit,
             "--stage-name",
-            "baseline-0100",
+            "equal-prior-value-0100",
+            "--t064-selection",
+            "static_mixture_v1:64001",
             "--arm",
-            "baseline",
+            "prior_value",
             "--family",
-            "shared",
+            "equal_nominal",
             "--budget",
             "100",
             "--record-range",
@@ -580,7 +672,9 @@ def test_t070_shard_runner_routes_t064_wrapper_through_checkout_and_preflight(
     )
     assert module.main() == 0
     assert checkout_calls == [code_commit]
-    assert preflight_calls == [code_commit]
+    assert len(shard_calls) == 1
+    assert shard_calls[0]["code_commit"] == code_commit
+    assert shard_calls[0]["native_runtime_identity"] == runtime_identity
 
 
 def test_t070_retention_has_per_file_command_and_compatibility(

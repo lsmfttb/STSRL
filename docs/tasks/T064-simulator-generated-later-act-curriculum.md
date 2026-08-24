@@ -457,6 +457,13 @@ A T064 stage manifest supplies the evaluated checkpoint path and SHA-256 while
 freezing every other T070 field. No high-budget, cost recalibration, or geometry
 stage is run.
 
+Each Stage-6 shard first validates that current T064 wrapper and its selected
+checkpoint against the current execution commit, yielding the rehashed
+historical T070 frozen contract and ranges. It then validates the retained
+native preflight against the historical frozen T070 `code_commit` and native
+identity. The T064 checkpoint selector is never passed to the historical native
+preflight validator, and neither commit is substituted for the other.
+
 ## Completeness And Transfer Gates
 
 `experiment_complete` requires valid inputs, complete source audit, source
@@ -628,6 +635,12 @@ construction/execution is affected. Strictly validated Stage-0--4 outputs, all
 four checkpoints, and the two completed checkpoint-independent T044 reports
 remain reusable with their original provenance; all eight dependent stages and
 their downstream consumers rerun after exact-head approval.
+
+The Stage-6 wrapper/preflight invocation repair has
+`earliest_affected_stage=6`. The failed attempt reached no simulator work and
+wrote no shard or merged artifact. Strictly validated Stage-0--5 outputs remain
+reusable with their original producer provenance; Stage 6 and downstream
+aggregation rerun after exact-head approval.
 
 Before formal Stage 4--7 execution, run one cheap readiness pass that verifies:
 
