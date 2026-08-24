@@ -3582,6 +3582,7 @@ def _validate_t044_controller_semantics(
     if not isinstance(roles, Mapping) or not isinstance(provenance, Mapping):
         raise ValueError("T044 roles/controller provenance are missing")
     actual_roles = tuple(getattr(arm, "role", None) for arm in report.arms)
+    mapped_roles = tuple(roles.values())
     if (
         actual_roles
         not in (
@@ -3589,8 +3590,11 @@ def _validate_t044_controller_semantics(
             T044_DEPENDENT_ROLES,
             T044_INDEPENDENT_ROLES,
         )
-        or tuple(roles.values()) != actual_roles
         or len(set(actual_roles)) != len(actual_roles)
+        or any(not isinstance(role, str) for role in mapped_roles)
+        or len(mapped_roles) != len(actual_roles)
+        or len(set(mapped_roles)) != len(mapped_roles)
+        or set(mapped_roles) != set(actual_roles)
     ):
         raise ValueError("T044 persisted role set is not an exact accepted type")
     by_role = {role: label for label, role in roles.items()}

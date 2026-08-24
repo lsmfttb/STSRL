@@ -2894,13 +2894,35 @@ def test_t044_semantics_bind_raw_checkpoint_and_scripted_public_contract() -> No
         ),
         comparison_config={
             "controller_roles": {
-                "guided": transfer_command.T044_DEPENDENT_ROLES[0],
-                "raw": transfer_command.T044_DEPENDENT_ROLES[1],
+                "checkpoint_raw_policy": transfer_command.T044_DEPENDENT_ROLES[1],
+                "model_guided_checkpoint": transfer_command.T044_DEPENDENT_ROLES[0],
             },
-            "controller_provenance": {"guided": guided, "raw": raw},
+            "controller_provenance": {
+                "checkpoint_raw_policy": raw,
+                "model_guided_checkpoint": guided,
+            },
         },
     )
     transfer_command._validate_t044_controller_semantics(report, checkpoint=checkpoint)
+    accepted_roles = dict(report.comparison_config["controller_roles"])
+    invalid_role_maps = (
+        {"checkpoint_raw_policy": transfer_command.T044_DEPENDENT_ROLES[1]},
+        {
+            **accepted_roles,
+            "unexpected": "unexpected_controller_role",
+        },
+        {
+            "checkpoint_raw_policy": transfer_command.T044_DEPENDENT_ROLES[1],
+            "model_guided_checkpoint": transfer_command.T044_DEPENDENT_ROLES[1],
+        },
+    )
+    for invalid_roles in invalid_role_maps:
+        report.comparison_config["controller_roles"] = invalid_roles
+        with pytest.raises(ValueError, match="role set"):
+            transfer_command._validate_t044_controller_semantics(
+                report, checkpoint=checkpoint
+            )
+    report.comparison_config["controller_roles"] = accepted_roles
     raw["config"]["guidance_scorer"]["checkpoint_provenance"]["checkpoint_path"] = (
         "forged.pt"
     )
