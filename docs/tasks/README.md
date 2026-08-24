@@ -90,6 +90,7 @@ published `READY` row.
 | T068 | DONE | [Native-boundary batched inference feasibility](T068-native-boundary-batched-inference-feasibility.md) | T067, T062, T052, T043 | exact audit found only 207/261/398 synchronous singleton requests; batching closed and selected T069 |
 | T069 | DONE | [Public-node feature-encoding projection feasibility](T069-public-node-feature-encoding-projection-feasibility.md) | T068, T067, T062, T052, T043 | exact projection preserved semantics, materially reduced cost, locked all calibration families, and recommended the original outcome comparison for planner consideration |
 | T070 | DONE | [Battle Search v2 fixed-cohort outcome and budget-sufficiency audit](T070-battle-search-v2-fixed-cohort-outcome-and-budget-sufficiency-audit.md) | T069, T062, T052, T043 | fixed primary and high-budget audits complete; Case C recommends T064 to the planner without publishing a successor |
+| T071 | DRAFT | [Post-T064 experiment execution simplification](T071-post-t064-experiment-execution-simplification.md) | T019, T064 | reduce task-specific orchestration/provenance overhead and add lightweight detached long-job control before revising T065 |
 
 Use the table, not per-task files or roadmap prose, when deciding whether a task
 may receive a branch. Only `READY` rows should receive a new implementation
@@ -139,7 +140,8 @@ complete. Its frozen primary comparison did not pass the Search v2 promotion
 boundary, while the bounded curve found the 100-simulation budget insufficient
 but no high-budget guidance signal. The terminal Case C recommends T064 to the
 planner without publishing it. T063, T065, and T066 remain draft; T064 is
-complete with a valid negative Case B.
+complete with a valid negative Case B. T071 is proposed as a short execution-
+simplification prerequisite before T065 is revised for publication.
 
 ## Task Boundary And Artifact Rules
 
