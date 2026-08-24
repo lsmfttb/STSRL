@@ -464,6 +464,18 @@ native preflight against the historical frozen T070 `code_commit` and native
 identity. The T064 checkpoint selector is never passed to the historical native
 preflight validator, and neither commit is substituted for the other.
 
+Before the first Stage-6 shard at a newly approved execution head, the
+maintainer passes `--stage6-rebind-from-code-commit` with the exact previously
+approved execution commit. The command atomically changes only
+`t070_stage_manifest.current_code_commit` to `--code-commit` after strict
+validation of the sole manifest and all four checkpoint selections. It preserves
+the top-level manifest `code_commit` as producer provenance, the historical
+frozen T070 identity, every checkpoint identity, selection inventory/order, and
+all other fields. A no-op, stale expected old commit, invalid/missing/mixed
+selection inventory, or existing temporary target fails closed. Later Stage-6
+checkpoint calls at that same head omit the rebind option and must find the
+selector already bound to the exact current execution commit.
+
 ## Completeness And Transfer Gates
 
 `experiment_complete` requires valid inputs, complete source audit, source
@@ -636,11 +648,15 @@ four checkpoints, and the two completed checkpoint-independent T044 reports
 remain reusable with their original provenance; all eight dependent stages and
 their downstream consumers rerun after exact-head approval.
 
-The Stage-6 wrapper/preflight invocation repair has
-`earliest_affected_stage=6`. The failed attempt reached no simulator work and
-wrote no shard or merged artifact. Strictly validated Stage-0--5 outputs remain
-reusable with their original producer provenance; Stage 6 and downstream
-aggregation rerun after exact-head approval.
+The Stage-6 wrapper/preflight invocation and execution-binding repairs have
+`earliest_affected_stage=6`. The formal attempt at
+`dc49b055e3da184fade45c7769e82523b2c26d9e` failed in all 16 shards on the
+unsupported preflight selector before simulator work; retained-artifact review
+at `dd6e46105933a23fa3552ee5494f804699e25368` then exposed the stale
+`cecf0e5372534163d2620f595dfe7e763d57f3fc` execution binding before simulator
+work. Neither attempt wrote a shard or merged artifact. Strictly validated
+Stage-0--5 outputs remain reusable with their original producer provenance;
+Stage 6 and downstream aggregation rerun after exact-head approval.
 
 Before formal Stage 4--7 execution, run one cheap readiness pass that verifies:
 

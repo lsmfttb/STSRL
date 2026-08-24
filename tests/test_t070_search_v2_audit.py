@@ -456,6 +456,7 @@ def test_t070_shard_runner_routes_t064_wrapper_through_checkout_and_preflight(
 ) -> None:
     code_commit = "b" * 40
     historical_code_commit = "a" * 40
+    producer_code_commit = "c" * 40
     cohort = tmp_path / "cohort.jsonl"
     checkpoint = tmp_path / "checkpoint.pt"
     for path, content in ((cohort, b"cohort"), (checkpoint, b"checkpoint")):
@@ -504,7 +505,7 @@ def test_t070_shard_runner_routes_t064_wrapper_through_checkout_and_preflight(
         json.dumps(
             {
                 "schema_id": "t064-curriculum-manifest-v1",
-                "code_commit": code_commit,
+                "code_commit": producer_code_commit,
                 "t070_stage_manifest": {
                     "frozen_t070_manifest": identity(frozen),
                     "historical_code_commit": historical_code_commit,

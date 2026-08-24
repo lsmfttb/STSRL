@@ -294,11 +294,16 @@ def _t070_frozen_contract_from_stage_manifest(
         or expected_bytes < 0
     ):
         raise ValueError("T064 frozen T070 identity is invalid")
-    outer_code_commit = payload.get("code_commit")
-    if not isinstance(outer_code_commit, str) or not re.fullmatch(
-        r"[0-9a-f]{40}", outer_code_commit
+    producer_code_commit = payload.get("code_commit")
+    if not isinstance(producer_code_commit, str) or not re.fullmatch(
+        r"[0-9a-f]{40}", producer_code_commit
     ):
         raise ValueError("T064 stage manifest code commit is invalid")
+    execution_code_commit = stage.get("current_code_commit", producer_code_commit)
+    if not isinstance(execution_code_commit, str) or not re.fullmatch(
+        r"[0-9a-f]{40}", execution_code_commit
+    ):
+        raise ValueError("T064 stage manifest execution commit is invalid")
     runtime_identity = resolve_runtime_artifact_path(frozen_path)
     resolved = Path(runtime_identity["runtime_path"])
     if (
@@ -313,7 +318,7 @@ def _t070_frozen_contract_from_stage_manifest(
         r"[0-9a-f]{40}", historical_code_commit
     ):
         raise ValueError("historical frozen T070 code commit is invalid")
-    return frozen, outer_code_commit
+    return frozen, execution_code_commit
 
 
 def load_t070_frozen_contract(

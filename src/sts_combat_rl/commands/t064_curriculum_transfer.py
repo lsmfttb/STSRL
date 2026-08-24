@@ -15,6 +15,7 @@ import gc
 import json
 import multiprocessing
 import os
+import re
 import subprocess
 from pathlib import Path
 import time
@@ -39,6 +40,7 @@ from sts_combat_rl.commands.t070_search_v2_audit import (
     load_t070_frozen_contract,
     merge_single_arm_stage,
 )
+from sts_combat_rl.commands.t068_checkout import verify_exact_git_checkout
 from sts_combat_rl.sim.de_assisted_fixed_cohort_comparison import (
     MODEL_GUIDED_ORACLE_V2_LABEL,
     RAW_CHECKPOINT_POLICY_LABEL,
@@ -57,6 +59,7 @@ from sts_combat_rl.sim.trainer_input import (
 from sts_combat_rl.sim.t064_curriculum import (
     BUCKETS,
     COMPACT_FILENAMES,
+    CURRICULUM_MANIFEST_FILENAME,
     TRAINING_RUN_ORDER,
     TRAINING_RUN_REPORT_FILENAME,
     TRANSFER_GATE_NAMES,
@@ -199,6 +202,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--stage6-baseline-report", type=Path)
     parser.add_argument("--stage6-baseline-contract", type=Path)
     parser.add_argument("--stage6-merged-output", type=Path)
+    parser.add_argument(
+        "--stage6-rebind-from-code-commit",
+        help=(
+            "Atomically rebind the existing T070 selector from this exact prior "
+            "approved execution commit to --code-commit before Stage6 shards."
+        ),
+    )
     parser.add_argument("--stage2-teacher-output", type=Path)
     parser.add_argument("--stage2-shard-output-dir", type=Path)
     parser.add_argument("--stage2-log-dir", type=Path)
@@ -558,7 +568,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         args.stage6_baseline_contract,
         args.stage6_merged_output,
     )
-    if any(value is not None for value in stage6_values):
+    if (
+        any(value is not None for value in stage6_values)
+        or args.stage6_rebind_from_code_commit is not None
+    ):
         if (
             len(stages) != 1
             or stages[0].get("stage") != "stage6_t070"
@@ -594,6 +607,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         ):
             parser.error("Stage6 baseline report does not match its frozen contract")
         refuse_overwrite(args.stage6_merged_output)
+        if args.stage6_rebind_from_code_commit is not None:
+            verify_exact_git_checkout(Path.cwd(), args.code_commit)
+            manifest = rebind_t064_t070_execution_commit(
+                manifest_path=args.stage6_wrapper_manifest,
+                expected_previous_code_commit=(args.stage6_rebind_from_code_commit),
+                new_code_commit=args.code_commit,
+            )
+        else:
+            _validate_t064_t070_execution_binding(
+                manifest,
+                code_commit=args.code_commit,
+            )
         attempt = prepare_t064_attempt(
             args.attempt_root, stage="stage6_t070", code_commit=args.code_commit
         )
@@ -3104,6 +3129,84 @@ def persist_t064_t070_checkpoint_selections(
             temporary.unlink()
         raise
     return updated
+
+
+def _validate_t064_t070_execution_binding(
+    manifest: Mapping[str, Any], *, code_commit: str
+) -> Mapping[str, Any]:
+    """Require the sole T070 selector to target one exact approved execution head."""
+
+    if not isinstance(code_commit, str) or not re.fullmatch(
+        r"[0-9a-f]{40}", code_commit
+    ):
+        raise ValueError("T064 Stage6 execution commit is invalid")
+    stage = manifest.get("t070_stage_manifest")
+    if not isinstance(stage, Mapping):
+        raise ValueError("T064 Stage6 selector manifest is missing")
+    if stage.get("current_code_commit") != code_commit:
+        raise ValueError("T064 Stage6 selector is bound to a different execution head")
+    return stage
+
+
+def rebind_t064_t070_execution_commit(
+    *,
+    manifest_path: Path,
+    expected_previous_code_commit: str,
+    new_code_commit: str,
+) -> dict[str, Any]:
+    """Atomically rebind only the existing T070 selector's execution commit."""
+
+    if manifest_path.name != CURRICULUM_MANIFEST_FILENAME:
+        raise ValueError("T064 Stage6 rebind requires the sole curriculum manifest")
+    for value, label in (
+        (expected_previous_code_commit, "previous"),
+        (new_code_commit, "new"),
+    ):
+        if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{40}", value):
+            raise ValueError(f"T064 Stage6 {label} execution commit is invalid")
+    if expected_previous_code_commit == new_code_commit:
+        raise ValueError("T064 Stage6 rebind refuses an ambiguous no-op")
+    temporary = manifest_path.with_suffix(manifest_path.suffix + ".tmp")
+    refuse_overwrite(temporary)
+    with manifest_path.open(encoding="utf-8") as stream:
+        manifest = load_compact_json(stream)
+    stage = _validate_t064_t070_execution_binding(
+        manifest,
+        code_commit=expected_previous_code_commit,
+    )
+    selections = stage.get("checkpoint_selections")
+    if not isinstance(selections, Mapping):
+        raise ValueError("T064 Stage6 checkpoint selection inventory is invalid")
+    original_selection_items = list(selections.items())
+    updated_stage = dict(stage)
+    updated_stage["current_code_commit"] = new_code_commit
+    updated = dict(manifest)
+    updated["t070_stage_manifest"] = updated_stage
+    _validate_t064_t070_execution_binding(updated, code_commit=new_code_commit)
+    try:
+        with temporary.open("w", encoding="utf-8", newline="\n") as stream:
+            dump_compact_json(updated, stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+        with temporary.open(encoding="utf-8") as stream:
+            verified = load_compact_json(stream)
+        verified_stage = _validate_t064_t070_execution_binding(
+            verified,
+            code_commit=new_code_commit,
+        )
+        verified_selections = verified_stage.get("checkpoint_selections")
+        if (
+            verified != updated
+            or not isinstance(verified_selections, Mapping)
+            or list(verified_selections.items()) != original_selection_items
+        ):
+            raise ValueError("T064 Stage6 rebind changed frozen selector evidence")
+        os.replace(temporary, manifest_path)
+    except BaseException:
+        if temporary.exists():
+            temporary.unlink()
+        raise
+    return verified
 
 
 def run_t064_t070_shard_script(

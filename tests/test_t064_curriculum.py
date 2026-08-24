@@ -1605,6 +1605,148 @@ def test_atomic_t070_selection_persist_promotes_once_and_cleans_failed_temp(
     assert not path.with_suffix(".json.tmp").exists()
 
 
+def _persisted_t064_selector_fixture(tmp_path: Path) -> tuple[Path, str, str]:
+    producer_commit = "1" * 40
+    previous_commit = "2" * 40
+    historical_commit = "3" * 40
+    frozen = tmp_path / "t070-frozen.json"
+    frozen_payload = {
+        "schema_id": "t070-frozen-experiment-manifest-v1",
+        "code_commit": historical_commit,
+        "primary_shard_ranges": list(transfer_command.T070_T052_RANGES),
+        "primary_stage_inventory": [
+            {
+                "stage_name": "equal-prior-value-0100",
+                "arm": "prior_value",
+                "family": "equal_nominal",
+                "native_budget": 100,
+                "tree_geometry_enabled": False,
+            }
+        ],
+    }
+    frozen.write_text(json.dumps(frozen_payload), encoding="utf-8")
+    checkpoints: dict[str, dict[str, object]] = {}
+    for arm, seed in TRAINING_RUN_ORDER:
+        checkpoint = tmp_path / f"{arm}-{seed}.pt"
+        checkpoint.write_bytes(f"{arm}:{seed}".encode())
+        checkpoints[f"{arm}:{seed}"] = transfer_command._file_identity(checkpoint)
+    manifest = _complete_source_inadequate_manifest(code_commit=producer_commit)
+    manifest["t070_stage_manifest"] = (
+        transfer_command.build_t064_t070_checkpoint_selections(
+            current_code_commit=previous_commit,
+            frozen_t070_manifest=frozen_payload,
+            frozen_identity=transfer_command._file_identity(frozen),
+            checkpoints=checkpoints,
+        )
+    )
+    path = tmp_path / "t064-curriculum-manifest.json"
+    with path.open("w", encoding="utf-8", newline="\n") as stream:
+        dump_compact_json(manifest, stream)
+    return path, producer_commit, previous_commit
+
+
+def test_t064_stage6_rebind_changes_only_execution_commit_atomically(
+    tmp_path: Path,
+) -> None:
+    path, producer_commit, previous_commit = _persisted_t064_selector_fixture(tmp_path)
+    with path.open(encoding="utf-8") as stream:
+        before = transfer_command.load_compact_json(stream)
+    before_bytes = path.read_bytes()
+    new_commit = "4" * 40
+
+    rebound = transfer_command.rebind_t064_t070_execution_commit(
+        manifest_path=path,
+        expected_previous_code_commit=previous_commit,
+        new_code_commit=new_commit,
+    )
+
+    expected = dict(before)
+    expected_stage = dict(before["t070_stage_manifest"])
+    expected_stage["current_code_commit"] = new_commit
+    expected["t070_stage_manifest"] = expected_stage
+    assert rebound == expected
+    assert rebound["code_commit"] == producer_commit
+    assert path.read_bytes() != before_bytes
+    with path.open(encoding="utf-8") as stream:
+        assert transfer_command.load_compact_json(stream) == expected
+    assert (
+        transfer_command._validate_t064_t070_execution_binding(
+            rebound, code_commit=new_commit
+        )
+        == rebound["t070_stage_manifest"]
+    )
+    assert not path.with_suffix(".json.tmp").exists()
+
+
+@pytest.mark.parametrize("mutation", ("missing", "mixed", "invalid_identity"))
+def test_t064_stage6_rebind_refuses_invalid_selection_inventory(
+    tmp_path: Path, mutation: str
+) -> None:
+    path, _producer_commit, previous_commit = _persisted_t064_selector_fixture(tmp_path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    selections = payload["t070_stage_manifest"]["checkpoint_selections"]
+    if mutation == "missing":
+        selections.pop("static_mixture_v1:64001")
+    elif mutation == "mixed":
+        selections["unexpected_arm:99999"] = next(iter(selections.values()))
+    else:
+        selections["static_mixture_v1:64001"]["checkpoint"]["sha256"] = "invalid"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    original = path.read_bytes()
+
+    with pytest.raises(ValueError):
+        transfer_command.rebind_t064_t070_execution_commit(
+            manifest_path=path,
+            expected_previous_code_commit=previous_commit,
+            new_code_commit="4" * 40,
+        )
+
+    assert path.read_bytes() == original
+    assert not path.with_suffix(".json.tmp").exists()
+
+
+def test_t064_stage6_rebind_refuses_noop_stale_old_and_failed_atomic_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path, _producer_commit, previous_commit = _persisted_t064_selector_fixture(tmp_path)
+    original = path.read_bytes()
+    with pytest.raises(ValueError, match="no-op"):
+        transfer_command.rebind_t064_t070_execution_commit(
+            manifest_path=path,
+            expected_previous_code_commit=previous_commit,
+            new_code_commit=previous_commit,
+        )
+    with pytest.raises(ValueError, match="different execution head"):
+        transfer_command.rebind_t064_t070_execution_commit(
+            manifest_path=path,
+            expected_previous_code_commit="5" * 40,
+            new_code_commit="4" * 40,
+        )
+    temporary = path.with_suffix(".json.tmp")
+    temporary.write_text("retained failed evidence", encoding="utf-8")
+    with pytest.raises(ValueError, match="refuses to overwrite"):
+        transfer_command.rebind_t064_t070_execution_commit(
+            manifest_path=path,
+            expected_previous_code_commit=previous_commit,
+            new_code_commit="4" * 40,
+        )
+    assert temporary.read_text(encoding="utf-8") == "retained failed evidence"
+    temporary.unlink()
+    monkeypatch.setattr(
+        transfer_command,
+        "dump_compact_json",
+        lambda *_args: (_ for _ in ()).throw(OSError("atomic write failed")),
+    )
+    with pytest.raises(OSError, match="atomic write failed"):
+        transfer_command.rebind_t064_t070_execution_commit(
+            manifest_path=path,
+            expected_previous_code_commit=previous_commit,
+            new_code_commit="4" * 40,
+        )
+    assert path.read_bytes() == original
+    assert not path.with_suffix(".json.tmp").exists()
+
+
 def _complete_training_report() -> dict[str, object]:
     return {
         "schema_id": "t064-training-run-report-v1",
@@ -3017,9 +3159,27 @@ def test_stage6_cli_valid_preflight_invokes_exactly_sixteen_shards(
     monkeypatch.setattr(
         transfer_command, "_validate_t064_stage6_preflight", lambda **_kwargs: True
     )
+    events: list[str] = []
+    rebind_calls: list[dict[str, object]] = []
+
+    def verify_checkout(checkout: Path, code_commit: str) -> str:
+        events.append("verify")
+        assert checkout == Path.cwd()
+        assert code_commit == "a" * 40
+        return code_commit
+
+    monkeypatch.setattr(transfer_command, "verify_exact_git_checkout", verify_checkout)
+
+    def rebind(**kwargs):
+        events.append("rebind")
+        rebind_calls.append(kwargs)
+        return {}
+
+    monkeypatch.setattr(transfer_command, "rebind_t064_t070_execution_commit", rebind)
     calls: list[dict[str, object]] = []
 
     def shard(**kwargs):
+        events.append("shard")
         calls.append(kwargs)
         kwargs["output_path"].write_text("{}", encoding="utf-8")
         return subprocess.CompletedProcess([], 0, "", "")
@@ -3068,15 +3228,67 @@ def test_stage6_cli_valid_preflight_invokes_exactly_sixteen_shards(
                 str(tmp_path / "contract.json"),
                 "--stage6-merged-output",
                 str(tmp_path / "merged.json"),
+                "--stage6-rebind-from-code-commit",
+                "b" * 40,
             ]
         )
         == 0
     )
     assert len(calls) == 16
+    assert events[:2] == ["verify", "rebind"]
+    assert rebind_calls == [
+        {
+            "manifest_path": manifest_path,
+            "expected_previous_code_commit": "b" * 40,
+            "new_code_commit": "a" * 40,
+        }
+    ]
     assert sorted(call["record_range"] for call in calls) == sorted(
         transfer_command.T070_T052_RANGES
     )
     assert len(merged) == 1 and len(merged[0]["shard_paths"]) == 16
+
+    events.clear()
+    calls.clear()
+    with pytest.raises(ValueError, match="refuses to overwrite"):
+        transfer_command.main(
+            [
+                "--dry-run-manifest",
+                str(manifest_path),
+                "--code-commit",
+                "a" * 40,
+                "--stage",
+                "stage6_t070",
+                "--checkpoint-arm",
+                "static_mixture_v1/64001",
+                "--attempt-root",
+                str(tmp_path / "attempts-second"),
+                "--stage6-shard-script",
+                "scripts/run_t070_search_stage_shard.py",
+                "--stage6-cohort",
+                str(tmp_path / "cohort.jsonl"),
+                "--stage6-checkpoint",
+                str(tmp_path / "checkpoint.pt"),
+                "--stage6-wrapper-manifest",
+                str(manifest_path),
+                "--stage6-native-preflight",
+                str(tmp_path / "preflight.json"),
+                "--stage6-native-checkout",
+                str(tmp_path / "native"),
+                "--stage6-native-build-root",
+                str(tmp_path / "native-build"),
+                "--stage6-baseline-report",
+                str(tmp_path / "baseline.json"),
+                "--stage6-baseline-contract",
+                str(tmp_path / "contract.json"),
+                "--stage6-merged-output",
+                str(tmp_path / "merged.json"),
+                "--stage6-rebind-from-code-commit",
+                "b" * 40,
+            ]
+        )
+    assert events == []
+    assert calls == []
 
 
 def test_t070_existing_reader_accepts_persisted_t064_checkpoint_selection(
