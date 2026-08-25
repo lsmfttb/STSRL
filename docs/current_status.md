@@ -114,6 +114,14 @@ complete after PR #70 merged at `dce372b`; it reduced T064-specific validation
 duplication, established T044 validation ownership, and added the detached
 long-job/status and stage/run-local reuse conventions. No T064 scientific rerun
 was required, and T065 remains `DRAFT`.
+T072 is now complete after PR #71 merged at `98de21b`. It retired the closed
+T053–T059 task-specific simulation/command/test executors and their CLI and
+lightspeed routing, while preserving the generic root-prior/native-search and
+T052 retention surfaces. Its 21-file deletion passed the required size gate
+with 19,916 fewer tracked `src`/`tests` Python lines. T072 changed no accepted
+artifact schema or scientific result, and its historical task records point to
+the frozen pre-retirement source anchor. No simulator, training, or evaluation
+rerun was required. T065 remains `DRAFT`.
 
 ## Implemented On Main
 
@@ -154,6 +162,12 @@ was required, and T065 remains `DRAFT`.
   T044-owned report surface now provides reusable controller-semantic and
   checkpoint validation, while T064 retains its strict artifact, provenance,
   order/linkage, completion, deterministic-plan, and reuse-boundary checks.
+- T072 closed executor cleanup is merged on `main` (PR #71). The seven closed
+  T053–T059 task-specific simulation modules, command modules, and tests were
+  deleted, along with their CLI/parser/validation/lightspeed routes. Generic
+  root-prior/search behavior and T052 retention-manifest support remain
+  available; historical task documents and scientific conclusions are
+  unchanged.
 - `scripts/run_detached_job.py` provides a small disposable status contract
   with PID, command/cwd, logs, terminal state, exit code, and coarse ETA. Healthy
   long jobs are reported once and rechecked after the expected window rather
@@ -161,6 +175,10 @@ was required, and T065 remains `DRAFT`.
 - T071 produced no scientific result artifact and did not rerun T064,
   `sts_lightspeed`, teacher/training, or fixed-cohort evaluation. T065 remains
   a draft planner task.
+- T072 produced no scientific result artifact and did not rerun
+  `sts_lightspeed`, training, or evaluation. Its accepted maintenance evidence
+  is the 21-file deletion audit, the 19,916-line size reduction, and the local
+  regression gates; T065 remains a draft planner task.
 
 ### Battle-Agent Data Spike
 

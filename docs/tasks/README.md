@@ -92,6 +92,7 @@ workflow's explicit implementation-authorization gate is satisfied.
 | T069 | DONE | [Public-node feature-encoding projection feasibility](T069-public-node-feature-encoding-projection-feasibility.md) | T068, T067, T062, T052, T043 | exact projection preserved semantics, materially reduced cost, locked all calibration families, and recommended the original outcome comparison for planner consideration |
 | T070 | DONE | [Battle Search v2 fixed-cohort outcome and budget-sufficiency audit](T070-battle-search-v2-fixed-cohort-outcome-and-budget-sufficiency-audit.md) | T069, T062, T052, T043 | fixed primary and high-budget audits complete; Case C recommends T064 to the planner without publishing a successor |
 | T071 | DONE | [Post-T064 experiment execution simplification](T071-post-t064-experiment-execution-simplification.md) | T019, T064 | simplified T064 validation/reuse ownership and added lightweight detached long-job control before revising T065 |
+| T072 | DONE | [Retire closed root-prior experiment executors](T072-retire-closed-root-prior-experiment-executors.md) | T053, T054, T055, T056, T057, T058, T059, T071 | retired the closed T053–T059 executor chain while preserving generic root-prior/search and T052 forward surfaces |
 
 Use the table, not per-task files or roadmap prose, when deciding whether a task
 may receive a branch. Only `READY` rows should receive a new implementation
@@ -144,8 +145,11 @@ planner without publishing it. T063, T065, and T066 remain draft; T064 is
 complete with a valid negative Case B. T071 is complete after merge of PR #70:
 it consolidated T044 validation ownership and redundant fixed-report checks,
 added the detached-job status convention, and documented stage/run-local reuse
-before revising T065 for publication. T065 remains DRAFT and is not authorized
-by this completion.
+before revising T065 for publication. T072 is complete after merge of PR #71:
+it retired the closed T053–T059 task-specific executors, removed their CLI and
+lightspeed routes, preserved generic root-prior/search and T052 surfaces, and
+left the historical scientific records available through the frozen source
+anchor. T065 remains DRAFT and is not authorized by these maintenance tasks.
 
 ## Task Boundary And Artifact Rules
 
@@ -189,8 +193,9 @@ and inspect again after the expected window or on request rather than continuous
 
 The executable queue is exactly the set of `READY` rows in the Active Backlog.
 Merged `main` currently has no `READY` task. T071 is `DONE` after PR #70 was
-merged; it is not an executable research task. T065 remains `DRAFT` and T034
-remains blocked on native public-consistent hidden-future sampling support.
+merged and T072 is `DONE` after PR #71 was merged; neither is an executable
+research task. T065 remains `DRAFT` and T034 remains blocked on native
+public-consistent hidden-future sampling support.
 
 ## Standard Local Gates
 
