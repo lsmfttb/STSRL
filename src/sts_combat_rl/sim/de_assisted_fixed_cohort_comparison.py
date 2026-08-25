@@ -123,44 +123,62 @@ def is_t044_frozen_action_space(value: Any) -> bool:
     )
 
 
+def _t044_fixed_report_parts(
+    report: Any,
+    *,
+    cohort_identity: str,
+    cohort_count: int,
+    accepted_roles: Sequence[tuple[str, ...]],
+    require_order: bool,
+) -> tuple[Mapping[str, Any], tuple[Any, ...]] | None:
+    """Apply the one common fixed-report contract before role-specific checks."""
+
+    config = getattr(report, "comparison_config", None)
+    arms = getattr(report, "arms", None)
+    actual_roles = (
+        tuple(getattr(arm, "role", None) for arm in arms)
+        if isinstance(arms, tuple)
+        else ()
+    )
+    if (
+        not isinstance(config, Mapping)
+        or not isinstance(arms, tuple)
+        or actual_roles not in accepted_roles
+        or not getattr(report, "evaluation_successful", False)
+        or config.get("cohort_identity") != cohort_identity
+        or config.get("cohort_record_count") != cohort_count
+        or config.get("max_battle_steps") != 200
+        or config.get("run_scale") != "fixed"
+        or not is_t044_frozen_action_space(config.get("action_space"))
+    ):
+        return None
+    if require_order and any(
+        [result.cohort_index for result in arm.report.battle_results]
+        != list(range(cohort_count))
+        for arm in arms
+    ):
+        return None
+    return config, arms
+
+
 def validate_t044_reuse(
     report: Any, *, cohort_identity: str, cohort_count: int
 ) -> bool:
-    config = getattr(report, "comparison_config", None)
-    arms = getattr(report, "arms", None)
-    if not isinstance(config, Mapping) or not isinstance(arms, tuple):
+    parts = _t044_fixed_report_parts(
+        report,
+        cohort_identity=cohort_identity,
+        cohort_count=cohort_count,
+        accepted_roles=(T044_CONTROLLER_ROLES,),
+        require_order=False,
+    )
+    if parts is None:
         return False
+    config, arms = parts
     roles = config.get("controller_roles")
     return bool(
         isinstance(roles, Mapping)
         and tuple(roles.values()) == T044_CONTROLLER_ROLES
-        and config.get("cohort_identity") == cohort_identity
-        and config.get("cohort_record_count") == cohort_count
-        and config.get("max_battle_steps") == 200
-        and config.get("run_scale") == "fixed"
-        and is_t044_frozen_action_space(config.get("action_space"))
-        and getattr(report, "evaluation_successful", False)
-        and len(arms) == 4
-        and tuple(getattr(arm, "role", None) for arm in arms) == T044_CONTROLLER_ROLES
-        and all(
-            not arm.report.problems and len(arm.report.battle_results) == cohort_count
-            for arm in arms
-        )
-    )
-
-
-def validate_t044_historical_reuse(
-    report: Any,
-    *,
-    frozen_cohort: Mapping[str, Any],
-    expected_roles: Sequence[str] = T044_CONTROLLER_ROLES,
-) -> bool:
-    identity, count = frozen_cohort.get("identity"), frozen_cohort.get("record_count")
-    return bool(
-        isinstance(identity, str)
-        and isinstance(count, int)
-        and validate_t044_reuse(report, cohort_identity=identity, cohort_count=count)
-        and tuple(arm.role for arm in report.arms) == tuple(expected_roles)
+        and all(len(arm.report.battle_results) == cohort_count for arm in arms)
     )
 
 
@@ -172,35 +190,23 @@ def validate_t044_dependent_report(
     expected_controller_provenance: Mapping[str, Any] | None = None,
     cohort: Any | None = None,
 ) -> bool:
-    config = getattr(report, "comparison_config", {})
-    arms = getattr(report, "arms", ())
-    exact_order = all(
-        [result.cohort_index for result in arm.report.battle_results]
-        == list(range(cohort_count))
-        and not arm.report.problems
-        for arm in arms
+    parts = _t044_fixed_report_parts(
+        report,
+        cohort_identity=cohort_identity,
+        cohort_count=cohort_count,
+        accepted_roles=(T044_DEPENDENT_ROLES,),
+        require_order=True,
     )
-    provenance_ok = (
-        expected_controller_provenance is None
-        or config.get("controller_provenance") == expected_controller_provenance
-    )
+    if parts is None or cohort_count not in (21, 38):
+        return False
+    config, arms = parts
     valid = (
-        getattr(report, "evaluation_successful", False)
-        and tuple(arm.role for arm in arms) == T044_DEPENDENT_ROLES
-        and config.get("cohort_identity") == cohort_identity
-        and config.get("cohort_record_count") == cohort_count
-        and config.get("max_battle_steps") == 200
-        and config.get("run_scale") == "fixed"
-        and config.get("shard_count") == 16
-        and cohort_count in (21, 38)
+        config.get("shard_count") == 16
         and tuple(config.get("shard_ranges", ()))
         == contiguous_ranges(21 if cohort_count == 21 else 38)
-        and is_t044_frozen_action_space(config.get("action_space"))
-        and exact_order
-        and provenance_ok
-        and all(
-            len(arm.report.battle_results) == cohort_count and not arm.report.problems
-            for arm in arms
+        and (
+            expected_controller_provenance is None
+            or config.get("controller_provenance") == expected_controller_provenance
         )
     )
     return valid and (cohort is None or _t044_results_match_cohort(arms, cohort))
@@ -212,26 +218,24 @@ def validate_t044_independent_report(
     cohort_identity: str,
     cohort_count: int,
     cohort: Any | None = None,
+    expected_roles: Sequence[str] | None = None,
 ) -> bool:
-    config = getattr(report, "comparison_config", {})
-    arms = getattr(report, "arms", ())
-    roles = tuple(getattr(arm, "role", None) for arm in arms)
-    valid = (
-        getattr(report, "evaluation_successful", False)
-        and roles in (T044_CONTROLLER_ROLES, T044_INDEPENDENT_ROLES)
-        and config.get("cohort_identity") == cohort_identity
-        and config.get("cohort_record_count") == cohort_count
-        and config.get("run_scale") == "fixed"
-        and config.get("max_battle_steps") == 200
-        and is_t044_frozen_action_space(config.get("action_space"))
-        and all(
-            [result.cohort_index for result in arm.report.battle_results]
-            == list(range(cohort_count))
-            and not arm.report.problems
-            for arm in arms
-        )
+    accepted_roles = (
+        (tuple(expected_roles),)
+        if expected_roles is not None
+        else (T044_CONTROLLER_ROLES, T044_INDEPENDENT_ROLES)
     )
-    return valid and (cohort is None or _t044_results_match_cohort(arms, cohort))
+    parts = _t044_fixed_report_parts(
+        report,
+        cohort_identity=cohort_identity,
+        cohort_count=cohort_count,
+        accepted_roles=accepted_roles,
+        require_order=True,
+    )
+    if parts is None:
+        return False
+    _, arms = parts
+    return cohort is None or _t044_results_match_cohort(arms, cohort)
 
 
 def validate_t044_controller_semantics(
@@ -257,31 +261,28 @@ def validate_t044_controller_semantics(
     ):
         raise ValueError("T044 persisted role set is not an exact accepted type")
     by_role = {role: label for label, role in roles.items()}
+    search_roles = {
+        "baseline_oracle_search": ("oracle_battle_search", T044_ROOT_SELECTION),
+        "model_guided_search_t043_checkpoint": (
+            MODEL_GUIDED_ORACLE_V2_CONTROLLER_KIND,
+            MODEL_GUIDED_ORACLE_V2_ROOT_SELECTION_RULE,
+        ),
+    }
     for role in actual_roles:
         label = by_role.get(role)
         entry = provenance.get(label) if isinstance(label, str) else None
         settings = entry.get("config") if isinstance(entry, Mapping) else None
         if not isinstance(entry, Mapping) or not isinstance(settings, Mapping):
             raise ValueError(f"T044 controller provenance/config missing for {role}")
-        if role in {"baseline_oracle_search", "model_guided_search_t043_checkpoint"}:
+        if role in search_roles:
             budget = settings.get("search_budget")
+            expected_kind, expected_rule = search_roles[role]
             if (
                 not isinstance(budget, Mapping)
                 or budget.get("simulations") != T044_SEARCH_BUDGET
                 or settings.get("information_regime")
                 != "full_simulator_state_oracle_like"
-            ):
-                raise ValueError(f"T044 search semantics mismatch for {role}")
-            expected_kind, expected_rule = (
-                ("oracle_battle_search", T044_ROOT_SELECTION)
-                if role == "baseline_oracle_search"
-                else (
-                    MODEL_GUIDED_ORACLE_V2_CONTROLLER_KIND,
-                    MODEL_GUIDED_ORACLE_V2_ROOT_SELECTION_RULE,
-                )
-            )
-            if (
-                entry.get("kind") != expected_kind
+                or entry.get("kind") != expected_kind
                 or settings.get("root_selection_rule") != expected_rule
             ):
                 raise ValueError(f"T044 search semantics mismatch for {role}")

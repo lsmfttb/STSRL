@@ -53,7 +53,6 @@ from sts_combat_rl.sim.de_assisted_fixed_cohort_comparison import (
     load_de_assisted_fixed_cohort_comparison_jsonl,
     validate_t044_controller_semantics,
     validate_t044_dependent_report,
-    validate_t044_historical_reuse,
     validate_t044_independent_report,
     validate_t044_reuse,  # noqa: F401 - compatibility export
 )
@@ -2357,8 +2356,10 @@ def t044_independent_arm_disposition(
     schedules precisely one baseline/scripted fixed-cohort rerun for that cohort.
     """
 
-    if historical_report is not None and validate_t044_historical_reuse(
-        historical_report, frozen_cohort=frozen_cohort
+    if historical_report is not None and validate_t044_reuse(
+        historical_report,
+        cohort_identity=frozen_cohort.get("identity"),
+        cohort_count=frozen_cohort.get("record_count"),
     ):
         return "reuse_historical_four_arm"
     return "rerun_once_two_independent_arms"
@@ -2670,13 +2671,12 @@ def run_t064_stage5_historical_disposition_production(
     try:
         with historical_report_path.open(encoding="utf-8") as stream:
             historical = load_de_assisted_fixed_cohort_comparison_jsonl(stream)
-        if not validate_t044_historical_reuse(historical, frozen_cohort=frozen_cohort):
-            historical = None
-        elif not validate_t044_independent_report(
+        if not validate_t044_independent_report(
             historical,
             cohort_identity=cohort.identity,
             cohort_count=expected_count,
             cohort=cohort,
+            expected_roles=T044_CONTROLLER_ROLES,
         ):
             historical = None
         else:
