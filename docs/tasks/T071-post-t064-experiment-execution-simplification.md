@@ -4,10 +4,17 @@
 
 Reduce the execution and maintenance overhead exposed by T064 before the next
 research experiment. Preserve accepted scientific behavior while simplifying
-T064-specific orchestration, removing validation/provenance checks whose only
-purpose is to distrust another repository-owned stage, and adding a lightweight
-way to launch and inspect long-running jobs without keeping an AI maintainer or
-implementer in a polling loop.
+T064-specific orchestration, reusing authoritative subsystem validation, and
+adding a lightweight way to launch and inspect long-running jobs without keeping
+an AI maintainer or implementer in a polling loop.
+
+STSRL is a lightweight open-source/personal research project. The implementation
+should favor clear ownership, direct data flow, simple interfaces, efficient
+execution, and focused validation at real correctness or experimental-validity
+boundaries. Repository-owned stages and developer/AI tooling are trusted
+participants; provenance identifies inputs and results, while validation exists
+to catch realistic mismatch, incomplete execution, leakage, incompatible state,
+and design drift.
 
 T071 is a mechanical/operational cleanup task. It does not change the T064 Case B
 result and does not implement T065. T065 remains the next intended research task
@@ -19,19 +26,17 @@ T064 merged as PR #68 at merge commit
 `ac1b06dd2db4ad25a7b0bdc8097cc0cfdc26dffa` with a complete valid Case B. The
 accepted result recommends T065 but does not authorize it.
 
-The T064 implementation also exposed a maintenance problem that is now large
-enough to address before another multi-stage experiment:
+The T064 implementation exposed enough execution and maintenance overhead to
+justify a short cleanup before another multi-stage experiment:
 
 - PR #68 accumulated 47 commits, touched 29 files, and added about 14k lines;
 - `src/sts_combat_rl/commands/t064_curriculum_transfer.py` became a large
   task-specific orchestration/validation surface;
-- multiple failures were discovered only after expensive stages had started;
-- early execution initially coupled artifact reuse to exact Git heads, requiring
-  unnecessary upstream reruns until a stage-affect boundary was introduced;
-- Stage 4 later needed run-local reuse and independent-worker execution;
-- Stage 5/6 needed additional task-specific routing and process-isolation fixes;
-- long-running stages had no small detached-job/status convention, so agents
-  repeatedly inspected processes and logs while jobs were simply still running.
+- several failures were discovered only after expensive stages had started;
+- execution initially coupled reuse too closely to exact Git heads and later
+  required stage/run-local recovery semantics;
+- long-running stages lacked a small detached-job/status convention, causing
+  repeated process/log inspection while healthy jobs were still running.
 
 The accepted T064 task document explicitly deferred broader simplification until
 after T064 if implementation evidence showed repeated orchestration/contract
@@ -40,191 +45,249 @@ duplication. That condition is now met.
 ## Dependencies
 
 - T019 codebase mechanical-refactor conventions;
-- T043/T044/T070 existing teacher, evaluation, and search artifact readers and
-  validators reused by T064;
-- T064 accepted execution/reuse evidence and final Case B artifacts.
+- T043/T044/T070 existing teacher, evaluation, and search readers/validators
+  reused by T064;
+- T064 accepted execution/reuse behavior and final Case B report.
 
-T065 remains `DRAFT` while T071 is in progress. T071 is intended to make the
-subsequent T065 specification smaller and less likely to duplicate T064's
-execution machinery.
+T065 remains `DRAFT` while T071 is in progress.
+
+## Required Inputs, Outputs, And Reproduction Contract
+
+T071 has no required external or ignored T064 artifact. It must not depend on a
+local T064 worktree, retained GB-scale teacher/trainer data, or retained
+fixed-cohort outputs. No retention contract is required for T071.
+
+The compatibility baseline is merged `main` at
+`ac1b06dd2db4ad25a7b0bdc8097cc0cfdc26dffa`. The four accepted T064 compact
+schemas remain compatible:
+
+- `t064-curriculum-manifest-v1`;
+- `t064-training-run-report-v1`;
+- `t064-stage-summary-v1`;
+- `t064-transfer-decision-v1`.
+
+Their authoritative compact reader/validator surface is
+`src/sts_combat_rl/sim/t064_curriculum.py`, including `load_compact_json` and
+`validate_compact_document`. Compatibility is exercised through committed test
+code in `tests/test_t064_curriculum.py`; implementation may add small committed
+fixtures where useful, but T071 does not require the accepted large external
+artifacts to be present.
+
+Generated outputs are source/test/documentation changes only. T071 produces no
+scientific result artifact and does not regenerate T064 evidence.
+
+Focused reproduction commands are:
+
+```bash
+pytest tests/test_t064_curriculum.py
+pytest tests/test_detached_job.py
+```
+
+plus the standard local gates listed below.
 
 ## Scope
 
-### 1. Simplify T064 validation and provenance handling
+### 1. Simplify T064 validation through clear ownership
 
-Audit the T064-specific production and test surfaces and classify checks into two
-groups.
+The primary concrete duplication target is the T064-local
+`_validate_t044_controller_semantics()` path in
+`src/sts_combat_rl/commands/t064_curriculum_transfer.py`. T044 semantics should
+be validated by the T044-owned report/validator surface rather than restated in
+T064. If the existing T044 reader does not expose the needed reusable check, a
+small compatibility-preserving validator may be extracted into
+`src/sts_combat_rl/sim/de_assisted_fixed_cohort_comparison.py` and called by
+T064 and existing T044 callers.
 
-Keep checks that protect realistic correctness or scientific validity, including:
+The simplification keeps the checks that directly protect the accepted
+experiment contract:
 
-- schema/type/readability checks;
-- frozen experiment configuration checks;
+- artifact schema/readability and required identity/provenance fields;
+- frozen configuration and information-regime compatibility;
 - holdout leakage and duplicate-source checks;
-- row/cardinality/order/linkage checks where those facts affect the experiment;
-- checkpoint/model compatibility checks;
-- process return codes, output completeness, and partial-file detection;
-- deterministic seed/batch-plan semantics;
-- stage/run reuse boundaries after a behavior-affecting repair.
+- row/cardinality/order/source-linkage checks where order is part of the
+  experiment;
+- checkpoint/model compatibility;
+- process completion, return codes, missing/partial outputs;
+- deterministic seed and batch-plan semantics;
+- reviewed stage/run reuse boundaries after behavior-affecting repairs.
 
-Remove or replace checks that add maintenance cost without protecting this
-trusted personal-project workflow, including where present:
+Git producer commit remains useful provenance metadata. Reuse decisions are
+based on the affected stage/run plus the authoritative input/configuration and
+reader checks for that output.
 
-- exact producer Git commit equality used as an artifact-reuse gate rather than
-  provenance metadata;
-- repeated rehashing of the same immutable input several times in one command
-  path when one verified identity is already available;
-- duplicated task-local restatements of T043/T044/T070 semantics when an
-  authoritative existing reader/validator can be reused directly;
-- duplicate identity/cross-link fields whose only purpose is to prove that a
-  trusted repository-owned previous stage was not maliciously forged;
-- retained-attempt bookkeeping or mutation tests aimed only at adversarial
-  tampering rather than accidental corruption, stale configuration, incomplete
-  execution, leakage, or design drift.
+### 2. Shrink the task-specific execution surface
 
-Prefer one source of truth for each fact. If a T064 local validator exists only
-because an underlying reused subsystem does not expose a reusable validation
-function, a small extraction into that subsystem is allowed when it reduces net
-duplication and preserves existing callers.
-
-### 2. Shrink the task-specific orchestration surface
-
-Review these primary surfaces first:
+The primary physical-line-count scope starts with:
 
 - `src/sts_combat_rl/commands/t064_curriculum_transfer.py`;
 - `src/sts_combat_rl/commands/t064_curriculum.py`;
 - `src/sts_combat_rl/sim/t064_curriculum.py`;
 - `tests/test_t064_curriculum.py`.
 
-Delete redundant code before moving code. Mechanical splitting is allowed only
-when a remaining boundary is genuinely clearer; moving unchanged code into many
-new modules does not satisfy this task.
+If implementation adds T071-specific reusable validation code to a T043, T044,
+or T070 module, every such touched source/test file is added to the same
+measurement scope. The PR reports physical line counts at the T064 merge commit
+and at the final head for the complete scope. The final total must be lower than
+the baseline total; moving unchanged logic to another file does not count as
+simplification.
 
-Keep the existing T064 command behavior and the four accepted compact artifact
-schemas compatible. No T064 scientific stage, gate, cohort, seed, budget, model,
-or terminal decision changes.
+A reproducible measurement may use `wc -l`/`Get-Content` or an equivalent Python
+line-count command against the named base and final files. The PR must list the
+exact files and command used.
 
-### 3. Preserve incremental stage/run reuse as the normal rule
+Existing T064 command behavior and the four compact schemas remain compatible.
+No T064 scientific stage, gate, cohort, seed, budget, model, or terminal decision
+changes.
 
-Codify the accepted T064 lesson as a repository workflow rule:
+### 3. Make incremental reuse the normal execution rule
 
-- a Git commit recorded on an artifact is producer provenance, not a global
-  cache key;
-- after a reviewed repair, identify the earliest affected stage or run;
-- strictly validated outputs before that boundary remain reusable with their
-  original producer provenance;
-- within an independent multi-run or multi-shard stage, completed outputs may be
-  reused when their own inputs/configuration/reader checks still pass;
-- missing, partial, failed, or behavior-affected outputs rerun;
-- if the impact boundary cannot be established cheaply, choose an earlier
-  conservative boundary rather than automatically invalidating the whole task.
+Update repository guidance so expensive workflows use the smallest reviewed
+repair boundary that preserves correctness:
 
-This rule must not introduce a dependency-hash graph, Merkle tree, attestation
-system, or new artifact framework.
+- producer Git SHA records where an artifact came from;
+- a behavior-affecting repair identifies its earliest affected stage or run;
+- validated outputs before that boundary remain reusable with their original
+  producer provenance;
+- independent completed runs/shards remain reusable when their own inputs,
+  configuration, and reader checks still pass;
+- affected, missing, partial, or failed work is rerun.
 
-### 4. Add lightweight detached long-job control
+When impact is uncertain, reviewers may choose an earlier conservative boundary.
+The rule should stay operationally simple rather than creating a new dependency
+or artifact system.
 
-Add one small repository-owned operational utility for commands expected to run
-longer than an interactive agent turn. It may be a script or narrowly scoped
-command helper, but it is not a scientific artifact system or scheduler.
+### 4. Add one lightweight detached long-job utility
 
-The utility must support:
+Implement exactly one small operational entry point:
 
-- launching an arbitrary already-approved repository command in a detached local
-  process/supervisor so the invoking agent can return immediately;
-- persistent stdout/stderr log paths;
-- one overwriteable operational status file with at least command, PID,
-  `RUNNING`/`SUCCEEDED`/`FAILED`, start time, finish time when known, and exit
-  code when known;
-- an optional caller-supplied expected duration for a coarse ETA display;
-- a status query that does not require continuous polling;
-- clean handling of startup failure and a process that exits nonzero.
+`python scripts/run_detached_job.py`
 
-The status file is disposable operational state. It is not one of a task's
-accepted evidence artifacts, needs no SHA/attestation chain, and must not become
-a retained project contract.
+Supported commands:
 
-Update collaboration guidance so an AI maintainer/implementer that starts a
-healthy long job reports the PID/status/log/ETA once and stops active monitoring.
-It should inspect again only after the expected window, on an explicit user
-request, or when an external completion/failure signal is available. Do not add
-a polling daemon, queue service, database, or background web service.
+```text
+python scripts/run_detached_job.py start \
+  --status <status.json> \
+  --stdout <stdout.log> \
+  --stderr <stderr.log> \
+  [--cwd <dir>] \
+  [--expected-seconds N] \
+  -- <command...>
 
-### 5. Keep numerical parallelism separate from orchestration parallelism
+python scripts/run_detached_job.py status --status <status.json>
+```
 
-Document the T064 Stage-4 lesson for future tasks: per-run numerical settings
-such as `torch_threads=1` may be frozen for determinism/performance, while
-independent `(arm, seed)` runs can still execute concurrently when resources
-permit. Future task specifications should freeze worker counts only when they
-matter scientifically or are required by measured resource limits.
+`start` launches a detached local supervisor and returns after launch rather than
+waiting for the target command. The target inherits the caller environment;
+`--cwd` defaults to the caller's current working directory. The supervisor PID
+is the `pid` recorded in status and owns the command/status lifecycle.
+
+The status JSON is disposable operational state with these fields:
+
+- `command`: argument vector;
+- `cwd`;
+- `pid`: detached supervisor PID;
+- `state`: `RUNNING`, `SUCCEEDED`, or `FAILED`;
+- `started_at`;
+- `finished_at`: null while running;
+- `exit_code`: null while running;
+- `expected_seconds`: null when omitted;
+- `estimated_finish_at`: derived from start plus expected duration when supplied;
+- `stdout_path` and `stderr_path`;
+- `startup_error`: null on normal launch, otherwise a short error string.
+
+The supervisor writes `RUNNING` after the target process starts. Normal exit 0
+becomes `SUCCEEDED`; startup failure or nonzero exit becomes `FAILED` with the
+corresponding exit code/error. Status updates are atomic enough that readers do
+not observe a partially written JSON document. ETA is coarse display metadata,
+not a scheduling guarantee.
+
+Focused tests live in `tests/test_detached_job.py` and cover start/status,
+success, startup failure, nonzero exit, log persistence, cwd/environment
+inheritance, and expected-duration fields.
+
+### 5. Keep numerical settings separate from orchestration concurrency
+
+Document the T064 Stage-4 lesson for future tasks: a per-run numerical setting
+such as `torch_threads=1` may remain frozen while independent `(arm, seed)` runs
+execute concurrently when resources permit. Worker topology should be frozen
+when it affects experiment semantics or when a measured resource limit requires
+it; otherwise it is an execution choice.
+
+## Collaboration Guidance Files
+
+T071 must leave the collaboration documents consistent and concise:
+
+- `AGENTS.md`: align the Planner/Main Maintainer roles with the current
+  planner-authored single-task PR workflow, summarize the lightweight design
+  principle, and add the concise stage/run-reuse plus detached-long-job agent
+  behavior;
+- `docs/README.md`: make `docs/collaboration_workflow.md` the explicit authority
+  for workflow questions and align the Branch Workflow summary with it;
+- `docs/collaboration_workflow.md`: add the durable stage/run-local reuse rule and
+  long-job execution guidance, including coarse ETA and non-continuous agent
+  monitoring;
+- `docs/tasks/README.md`: keep the task-index/work-queue wording consistent and
+  summarize the same execution conventions for task authors without duplicating
+  the detailed workflow text.
+
+`docs/project_architecture.md` remains the design authority for runtime/model
+architecture and does not need a T071-specific workflow edit.
 
 ## Out Of Scope
 
-- implementing or publishing T065, T063, or T066;
-- changing the accepted T064 Case B result or regenerating T064 scientific
-  evidence;
-- changing T043/T044/T070 search, model, controller, evaluation, or artifact
-  semantics;
-- changing model architecture, training targets, optimizer behavior, seeds,
-  cohorts, search budgets, or simulator/native behavior;
-- adding a generic workflow engine, plugin architecture, scheduler, database,
-  distributed executor, artifact graph, or security/attestation framework;
-- deleting checks that detect real holdout leakage, accidental artifact mismatch,
-  incomplete execution, incompatible checkpoints, or scientific design drift;
-- broad unrelated repository cleanup.
+T071 does not implement T065/T063/T066, alter the accepted T064 result, change
+T043/T044/T070 scientific semantics, change simulator/native behavior, or create
+another research/orchestration framework. The task is complete when the existing
+path is simpler, easier to resume, and cheaper to operate while the accepted
+scientific checks remain intact.
 
 ## Design Constraints
 
-- Treat repository-owned stages and the developer/AI tools as trusted actors.
-  Validation is for accidental mistakes and scientific consistency, not an
-  adversarial producer threat model.
-- Preserve current public CLI behavior and artifact schemas unless a purely
-  internal compatibility-preserving extraction is required.
-- Prefer net deletion and direct reuse of existing subsystem validators over new
-  abstractions.
-- A new reusable helper must have at least two concrete current/future call sites
-  or solve the detached-long-job requirement; otherwise keep the logic local.
+- Prefer clear module ownership and direct reuse of subsystem contracts.
+- Keep validation close to the fact it owns and proportional to realistic
+  correctness or experimental-validity risk.
+- Preserve public CLI and artifact compatibility unless a narrow internal
+  extraction is required.
+- Prefer net deletion to new abstraction layers.
 - Optional PyTorch imports remain isolated behind the existing training path.
 - No substantial simulator experiment is required for this task.
 
 ## Deliverables
 
-- Simplified T064 execution/validation code with redundant defensive logic
-  removed or replaced by authoritative reused validators.
-- Regression tests focused on realistic corruption/configuration/reuse failures,
-  with adversarial-only duplicate tests removed where no longer justified.
-- One lightweight detached long-job utility plus focused tests.
-- Collaboration/task-authoring guidance for stage-local/run-local reuse,
-  detached long jobs, coarse ETA reporting, and non-polling agent behavior.
-- PR report with before/after physical line counts for the four primary T064
-  surfaces, a list of removed/reused validation responsibilities, and a concise
-  note on what intentionally remains strict.
+- Simplified T064 execution/validation code with T044 semantic ownership moved to
+  the authoritative T044 surface;
+- regression tests covering the retained scientific/correctness boundaries and
+  incremental reuse;
+- `scripts/run_detached_job.py` and `tests/test_detached_job.py`;
+- consistent collaboration guidance in the four files named above;
+- a PR report with before/after physical line counts, removed/reused validation
+  responsibilities, and the checks intentionally kept strict.
 
 ## Acceptance Criteria
 
 T071 is accepted only when:
 
-- accepted T064 compact artifacts and checkpoint/report readers remain
-  compatible; no T064 schema version changes are introduced;
-- T064 stage/run reuse no longer depends on exact current Git-head equality;
-- every retained strict validation has a realistic accidental-error or
-  scientific-validity purpose documented in code/tests or is inherited from an
-  authoritative reused subsystem;
-- at least one material block of duplicated T043/T044/T070 semantic validation
-  is removed from T064 or replaced by an authoritative reusable validator;
-- the combined T064-specific production/test surface decreases in physical lines
-  after accounting for moved code; the PR must not claim simplification by only
-  relocating unchanged logic;
-- no new T064-specific artifact schema, sidecar, manifest family, or workflow
-  framework is added;
-- the detached long-job utility passes start/status/success/failure tests and its
-  status file is explicitly disposable operational state;
-- collaboration guidance explicitly discourages continuous AI polling of a
-  healthy long-running job;
-- no T064 full scientific rerun is required for acceptance.
+- the four accepted T064 compact schemas still load through the current reader
+  and no T064 schema version changes;
+- T064 stage/run reuse accepts producer/current-commit differences when the
+  reviewed impact boundary and frozen input/configuration checks allow reuse;
+- T064 no longer carries its own full T044 controller-semantic restatement;
+- the authoritative T044 validation still checks the accepted role/controller,
+  information-regime, action-space, budget, and checkpoint compatibility needed
+  by T064;
+- the complete line-count scope defined above has a lower final physical-line
+  total than the T064-merge baseline;
+- leakage/duplicate, source/order, configuration, checkpoint compatibility,
+  completion/partial-output, and deterministic plan checks remain effective;
+- the detached utility passes its focused contract tests and the status file is
+  treated as disposable operational state;
+- the collaboration documents agree on task ownership, stage/run-local reuse,
+  coarse ETA reporting, and non-continuous monitoring of healthy long jobs;
+- no full T064 scientific rerun is required for acceptance.
 
 ## Required Verification
 
-Run the standard local gates:
+Run:
 
 ```bash
 pytest
@@ -233,35 +296,21 @@ ruff check src tests
 ruff format --check src tests
 python -m sts_combat_rl.cli --mock tests/fixtures/combat_basic.json
 python -m sts_combat_rl.cli --mock tests/fixtures/non_combat.json
+pytest tests/test_t064_curriculum.py
+pytest tests/test_detached_job.py
 ```
 
-Also run focused checks that prove:
-
-- accepted/current T064 manifest, training report, stage summary, and transfer
-  decision fixtures or retained artifacts still strict-load;
-- stage/run reuse accepts producer/current-commit differences when frozen inputs
-  and semantics are unchanged, and rejects an actually affected or incompatible
-  output;
-- authoritative T043/T044/T070 validation remains in force after removing any
-  duplicated T064 checks;
-- the detached utility returns promptly after a trivial long command starts,
-  reports `RUNNING`, later reports `SUCCEEDED`/`FAILED` with the correct exit
-  code, and preserves logs;
-- no busy-loop or high-frequency polling is required for status inspection.
-
-A bounded WSL process-detachment smoke of a trivial command is allowed if needed
-to verify host behavior. No `sts_lightspeed` scale run, T064 teacher/training
-rerun, or fixed-cohort evaluation is required.
+Also report the exact physical-line-count command and result for the accepted
+measurement scope. A bounded local/WSL detachment smoke of a trivial command may
+be used if needed to verify host behavior. No `sts_lightspeed` scale run, T064
+teacher/training rerun, or fixed-cohort evaluation is required.
 
 ## Lifecycle And Next Research Step
 
-T071 is proposed as a short engineering prerequisite before revising T065 for
-publication. T065 remains the next research direction selected by the accepted
-T064 Case B, but its current draft predates the T064 execution lessons and must
-not simply copy T064's task-specific orchestration/validation machinery.
-
-After T071 merges, the planner should re-read T061/T064 evidence and revise T065
-with concrete supported screens, source scale, continuation-target budget,
+T071 is a short engineering prerequisite before revising T065 for publication.
+T065 remains the research direction selected by T064 Case B. After T071 merges,
+the planner should re-read T061/T064 evidence and revise T065 with concrete
+supported screens, source scale, continuation-target budget,
 training/evaluation gates, parallelism, and long-job execution using the
 simplified conventions.
 
@@ -270,13 +319,12 @@ simplified conventions.
 The final PR report must include:
 
 - task ID, approved specification commit, implementation commit, and merge base;
-- before/after line counts for the four primary T064 files above and any new
-  operational utility;
-- deleted, centralized, and intentionally retained validation responsibilities;
-- confirmation that accepted T064 schemas/results were not changed;
+- exact line-count scope, command, and before/after totals;
+- the T044 validation responsibility moved/reused and any other material
+  simplification;
+- the retained correctness/scientific checks;
+- confirmation that accepted T064 schemas/results were unchanged;
 - stage/run reuse compatibility tests;
 - detached-job start/status/success/failure evidence and one coarse ETA example;
 - exact verification commands/results;
-- any cleanup deliberately left for a later task;
-- confirmation that T065 was not implemented or scientifically re-specified in
-  this task.
+- confirmation that T065 was not implemented in this task.
