@@ -30,7 +30,7 @@ from sts_combat_rl.sim.online_controller import (
     PolicyController,
     RoutedRunController,
 )
-from sts_combat_rl.sim.policy import DecisionPolicy
+from sts_combat_rl.sim.policy_contract import DecisionPolicy
 from sts_combat_rl.sim.resource_outcome import (
     available_battle_resource_outcome,
     build_battle_resource_outcome,

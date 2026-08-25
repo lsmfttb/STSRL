@@ -24,7 +24,7 @@ from sts_combat_rl.sim.decision_record import (
 )
 from sts_combat_rl.sim.lightspeed_source import lightspeed_source_identity_dict
 from sts_combat_rl.sim.online_controller import NATIVE_SEARCH_INFORMATION_REGIME
-from sts_combat_rl.sim.policy import DecisionContext
+from sts_combat_rl.sim.policy_contract import DecisionContext
 from sts_combat_rl.sim.search_telemetry import (
     SEARCH_DECISION_TELEMETRY_SCHEMA_ID,
     SEARCH_DECISION_TELEMETRY_SCHEMA_VERSION,

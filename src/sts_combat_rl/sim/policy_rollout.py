@@ -18,7 +18,7 @@ from sts_combat_rl.sim.contract import (
     SimulatorAdapter,
 )
 from sts_combat_rl.sim.online_controller import PolicyController
-from sts_combat_rl.sim.policy import DecisionPolicy
+from sts_combat_rl.sim.policy_contract import DecisionPolicy
 
 
 def collect_policy_simulator_rollout(

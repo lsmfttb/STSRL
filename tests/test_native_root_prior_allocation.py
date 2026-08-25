@@ -20,7 +20,7 @@ from sts_combat_rl.sim.native_root_prior_allocation import (
 )
 from sts_combat_rl.sim.action_space import ActionSpaceConfig
 from sts_combat_rl.sim.online_controller import NATIVE_SEARCH_INFORMATION_REGIME
-from sts_combat_rl.sim.policy import DecisionContext
+from sts_combat_rl.sim.policy_contract import DecisionContext
 
 
 def _actions() -> list[SimulatorAction]:

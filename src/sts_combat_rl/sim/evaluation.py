@@ -14,7 +14,7 @@ from typing import Any
 
 from sts_combat_rl.sim.action_space import ActionSpaceConfig
 from sts_combat_rl.sim.contract import SimulatorAdapter
-from sts_combat_rl.sim.policy import DecisionPolicy
+from sts_combat_rl.sim.policy_contract import DecisionPolicy
 from sts_combat_rl.sim.policy_rollout import collect_policy_simulator_rollout
 from sts_combat_rl.sim.controlled_run import ControlledRun
 

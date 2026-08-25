@@ -15,7 +15,7 @@ from sts_combat_rl.sim.battle_start_pool import (
     collect_natural_battle_start_pool,
 )
 from sts_combat_rl.sim.contract import CheckpointingSimulatorAdapter
-from sts_combat_rl.sim.policy import DecisionPolicy
+from sts_combat_rl.sim.policy_contract import DecisionPolicy
 from sts_combat_rl.sim.resource_outcome import (
     BATTLE_RESOURCE_OUTCOME_SCHEMA_ID,
     BATTLE_RESOURCE_OUTCOME_SCHEMA_VERSION,

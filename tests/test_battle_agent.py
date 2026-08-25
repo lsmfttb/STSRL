@@ -26,8 +26,10 @@ from sts_combat_rl.sim.features import (
 )
 from sts_combat_rl.sim.controlled_run import ControlledRun, ControlledRunStep
 from sts_combat_rl.sim.decision_record import DECISION_RECORD_SCHEMA_VERSION
-from sts_combat_rl.sim.policy import (
+from sts_combat_rl.sim.policy_contract import (
     PolicyDecision,
+)
+from sts_combat_rl.sim.policy import (
     PreferredKindPolicy,
     choose_highest_scored_eligible_index,
 )

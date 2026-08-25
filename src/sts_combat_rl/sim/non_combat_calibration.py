@@ -21,9 +21,11 @@ from sts_combat_rl.sim.online_controller import (
     PolicyController,
     is_battle_state,
 )
-from sts_combat_rl.sim.policy import (
+from sts_combat_rl.sim.policy_contract import (
     DecisionContext,
     DecisionPolicy,
+)
+from sts_combat_rl.sim.non_combat_policy import (
     ExpertNonCombatDriver,
     StochasticNonCombatDriver,
     non_combat_action_category,

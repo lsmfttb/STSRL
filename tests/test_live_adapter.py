@@ -35,8 +35,10 @@ from sts_combat_rl.sim.features import (
     TACTICAL_FEATURE_SCHEMA_VERSION,
 )
 from sts_combat_rl.sim.online_controller import PolicyController
-from sts_combat_rl.sim.policy import (
+from sts_combat_rl.sim.policy_contract import (
     DecisionContext,
+)
+from sts_combat_rl.sim.policy import (
     FirstEligiblePolicy,
     PreferredKindPolicy,
 )

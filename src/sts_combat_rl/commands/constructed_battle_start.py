@@ -18,7 +18,7 @@ from sts_combat_rl.sim.constructed_battle_start import (
     dump_constructed_battle_start_artifact_jsonl,
 )
 from sts_combat_rl.sim.contract import CheckpointingSimulatorAdapter
-from sts_combat_rl.sim.policy import DecisionPolicy
+from sts_combat_rl.sim.policy_contract import DecisionPolicy
 
 
 def run_constructed_battle_start_audit(

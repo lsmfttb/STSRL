@@ -24,7 +24,10 @@ from sts_combat_rl.sim.expert_source_coverage import (
 )
 from sts_combat_rl.sim.online_controller import PolicyController, RoutedRunController
 from sts_combat_rl.sim.oracle_search import OracleSearchController
-from sts_combat_rl.sim.policy import ExpertNonCombatDriver, StochasticNonCombatDriver
+from sts_combat_rl.sim.non_combat_policy import (
+    ExpertNonCombatDriver,
+    StochasticNonCombatDriver,
+)
 from sts_combat_rl.sim.resource_outcome import unavailable_battle_resource_outcome
 from sts_combat_rl.sim.training_gate import TrainingScaleGateConfig
 

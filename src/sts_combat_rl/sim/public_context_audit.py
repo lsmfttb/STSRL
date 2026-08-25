@@ -24,7 +24,8 @@ from sts_combat_rl.sim.controlled_run import ControlledRunStep, execute_controll
 from sts_combat_rl.sim.decision_record import source_metadata_from_snapshot
 from sts_combat_rl.sim.native_public_projection import KNOWN_SCREEN_STATES
 from sts_combat_rl.sim.online_controller import PolicyController, RoutedRunController
-from sts_combat_rl.sim.policy import PreferredKindPolicy, StochasticNonCombatDriver
+from sts_combat_rl.sim.policy import PreferredKindPolicy
+from sts_combat_rl.sim.non_combat_policy import StochasticNonCombatDriver
 from sts_combat_rl.sim.lightspeed_source import (
     format_lightspeed_source_identity,
     lightspeed_source_identity_dict,

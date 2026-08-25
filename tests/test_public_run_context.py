@@ -20,7 +20,7 @@ from sts_combat_rl.sim.native_public_projection import (
     NATIVE_PUBLIC_PROJECTION_SCHEMA_ID,
     parse_native_public_projection,
 )
-from sts_combat_rl.sim.policy import DecisionContext
+from sts_combat_rl.sim.policy_contract import DecisionContext
 from sts_combat_rl.sim.public_run_context import (
     PUBLIC_RUN_CONTEXT_SCHEMA_ID,
     forbidden_public_context_problems,

@@ -14,7 +14,7 @@ from sts_combat_rl.sim.oracle_search import (
     oracle_search_decision_telemetry,
     select_oracle_root_action,
 )
-from sts_combat_rl.sim.policy import DecisionContext
+from sts_combat_rl.sim.policy_contract import DecisionContext
 
 
 def _actions() -> list[SimulatorAction]:

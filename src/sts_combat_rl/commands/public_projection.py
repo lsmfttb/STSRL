@@ -10,7 +10,8 @@ from sts_combat_rl.sim.native_public_projection import (
     NativePublicProjectionCapabilityReport,
 )
 from sts_combat_rl.sim.online_controller import PolicyController, RoutedRunController
-from sts_combat_rl.sim.policy import PreferredKindPolicy, StochasticNonCombatDriver
+from sts_combat_rl.sim.policy import PreferredKindPolicy
+from sts_combat_rl.sim.non_combat_policy import StochasticNonCombatDriver
 
 
 def run_public_projection_capability_audit(

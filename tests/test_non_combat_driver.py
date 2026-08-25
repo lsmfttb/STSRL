@@ -20,10 +20,14 @@ from sts_combat_rl.sim.non_combat_calibration import (
     run_non_combat_driver_calibration,
 )
 from sts_combat_rl.sim.online_controller import PolicyController, RoutedRunController
-from sts_combat_rl.sim.policy import (
+from sts_combat_rl.sim.policy_contract import (
     DecisionContext,
-    ExpertNonCombatDriver,
+)
+from sts_combat_rl.sim.policy import (
     FirstEligiblePolicy,
+)
+from sts_combat_rl.sim.non_combat_policy import (
+    ExpertNonCombatDriver,
     StochasticNonCombatDriver,
     non_combat_action_category,
 )

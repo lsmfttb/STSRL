@@ -27,7 +27,7 @@ from sts_combat_rl.sim.oracle_search import (
     oracle_search_controller_metadata,
     select_oracle_root_action,
 )
-from sts_combat_rl.sim.policy import DecisionContext
+from sts_combat_rl.sim.policy_contract import DecisionContext
 from sts_combat_rl.sim.search_guidance_inference import (
     SearchGuidanceCheckpointProvenance,
     SearchGuidanceInferenceResult,

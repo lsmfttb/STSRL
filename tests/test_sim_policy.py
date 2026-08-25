@@ -3,15 +3,19 @@ from __future__ import annotations
 import pytest
 
 from sts_combat_rl.sim.batching import DecisionBatch, DecisionExample
-from sts_combat_rl.sim.policy import (
+from sts_combat_rl.sim.policy_contract import (
     DecisionContext,
-    FirstEligiblePolicy,
     PolicyDecision,
+)
+from sts_combat_rl.sim.policy import (
+    FirstEligiblePolicy,
     PreferredKindPolicy,
     RandomEligiblePolicy,
-    ReplayChosenPolicy,
     ScoredActionPolicy,
     choose_highest_scored_eligible_index,
+)
+from sts_combat_rl.sim.policy_evaluation import (
+    ReplayChosenPolicy,
     evaluate_decision_policy,
     format_policy_evaluation_report,
 )

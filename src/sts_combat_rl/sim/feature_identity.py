@@ -10,7 +10,7 @@ from time import perf_counter
 from typing import Any
 
 from sts_combat_rl.sim.search_cost import canonical_public_json
-from sts_combat_rl.sim.policy import DecisionContext
+from sts_combat_rl.sim.policy_contract import DecisionContext
 from sts_combat_rl.sim.public_context_feature_projection import (
     feature_vector_sha256,
 )

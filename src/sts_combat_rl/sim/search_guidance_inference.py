@@ -17,7 +17,7 @@ from sts_combat_rl.sim.features import (
     tactical_action_problems,
     tactical_state_problems,
 )
-from sts_combat_rl.sim.policy import DecisionContext
+from sts_combat_rl.sim.policy_contract import DecisionContext
 from sts_combat_rl.sim.public_context_artifacts import sanitize_public_context_artifact
 
 

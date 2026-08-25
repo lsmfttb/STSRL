@@ -30,7 +30,7 @@ from sts_combat_rl.sim.controller_contract import (
     ControllerProvenance,
 )
 from sts_combat_rl.sim.contract import SimulatorAdapter, SimulatorSnapshot
-from sts_combat_rl.sim.policy import DecisionContext, DecisionPolicy
+from sts_combat_rl.sim.policy_contract import DecisionContext, DecisionPolicy
 
 PUBLIC_POLICY_INFORMATION_REGIME = "normal_public_policy"
 """A public policy/value acts from player-visible state and public history only."""

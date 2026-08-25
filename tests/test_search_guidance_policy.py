@@ -6,7 +6,7 @@ import pytest
 
 from sts_combat_rl.sim.contract import SimulatorAction, SimulatorSnapshot
 from sts_combat_rl.sim.online_controller import PUBLIC_POLICY_INFORMATION_REGIME
-from sts_combat_rl.sim.policy import DecisionContext
+from sts_combat_rl.sim.policy_contract import DecisionContext
 from sts_combat_rl.sim.search_guidance_inference import (
     SearchGuidanceActionScore,
     SearchGuidanceCheckpointProvenance,
