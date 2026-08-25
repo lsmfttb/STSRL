@@ -238,3 +238,9 @@ after T058, first-divergence summaries, T052 subset summaries, worker/shard
 evidence for any WSL stages, verification commands and results, known
 limitations, rejected alternatives, selected next path, and documentation
 impact.
+
+## Historical Executor Note
+
+T058 remains DONE and its scientific record is unchanged. Its task-specific
+executor was retired by T072; executable historical source is available at
+`09f58a7352f8dd860c2ed1d7f2b59beacb61d648`.

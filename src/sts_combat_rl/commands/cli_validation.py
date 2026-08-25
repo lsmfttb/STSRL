@@ -70,27 +70,6 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
         or args.root_prior_allocation_weight > 1.0
     ):
         return "--root-prior-allocation-weight must be between zero and one"
-    if (
-        not math.isfinite(args.root_prior_guardrail_uniform_blend_weight)
-        or args.root_prior_guardrail_uniform_blend_weight < 0.0
-        or args.root_prior_guardrail_uniform_blend_weight > 1.0
-    ):
-        return (
-            "--root-prior-guardrail-uniform-blend-weight must be between zero and one"
-        )
-    if (
-        not math.isfinite(args.root_prior_guardrail_max_prior_probability)
-        or args.root_prior_guardrail_max_prior_probability <= 0.0
-        or args.root_prior_guardrail_max_prior_probability > 1.0
-    ):
-        return (
-            "--root-prior-guardrail-max-prior-probability must be in the range (0, 1]"
-        )
-    if (
-        not math.isfinite(args.t059_root_prior_repair_entropy_temperature)
-        or args.t059_root_prior_repair_entropy_temperature < 1.0
-    ):
-        return "--t059-root-prior-repair-entropy-temperature must be at least 1"
     if args.assistance_policy_seed is not None and args.assistance_policy_seed < 0:
         return "--assistance-policy-seed must be non-negative"
     if (
@@ -169,9 +148,6 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
         or args.lightspeed_model_guided_search_v2_fixed_comparison is not None
         or args.lightspeed_de_assisted_fixed_cohort_comparison is not None
         or args.lightspeed_root_prior_guided_search_comparison is not None
-        or args.lightspeed_t054_guardrailed_root_prior_repair_comparison is not None
-        or args.lightspeed_t055_guardrailed_root_prior_scale_comparison is not None
-        or args.lightspeed_t059_root_prior_allocation_repair_comparison is not None
         or args.lightspeed_t062_battle_search_v2_comparison is not None
         or search_pool_uses_checkpoint
     )
@@ -195,9 +171,6 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
             "--lightspeed-model-guided-search-v2-fixed-comparison or "
             "--lightspeed-de-assisted-fixed-cohort-comparison or "
             "--lightspeed-root-prior-guided-search-comparison or "
-            "--lightspeed-t054-guardrailed-root-prior-repair-comparison or "
-            "--lightspeed-t055-guardrailed-root-prior-scale-comparison or "
-            "--lightspeed-t059-root-prior-allocation-repair-comparison or "
             "--lightspeed-t062-battle-search-v2-comparison or "
             "--lightspeed-search-battle-start-pool with a checkpoint-guided "
             "--search-battle-controller"
@@ -227,30 +200,6 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
         return (
             "--root-prior-guided-search-comparison-report requires "
             "--lightspeed-root-prior-guided-search-comparison"
-        )
-    if (
-        args.t054_guardrailed_root_prior_comparison_report is not None
-        and args.lightspeed_t054_guardrailed_root_prior_repair_comparison is None
-    ):
-        return (
-            "--t054-guardrailed-root-prior-comparison-report requires "
-            "--lightspeed-t054-guardrailed-root-prior-repair-comparison"
-        )
-    if (
-        args.t055_guardrailed_root_prior_comparison_report is not None
-        and args.lightspeed_t055_guardrailed_root_prior_scale_comparison is None
-    ):
-        return (
-            "--t055-guardrailed-root-prior-comparison-report requires "
-            "--lightspeed-t055-guardrailed-root-prior-scale-comparison"
-        )
-    if (
-        args.t059_root_prior_allocation_repair_comparison_report is not None
-        and args.lightspeed_t059_root_prior_allocation_repair_comparison is None
-    ):
-        return (
-            "--t059-root-prior-allocation-repair-comparison-report requires "
-            "--lightspeed-t059-root-prior-allocation-repair-comparison"
         )
     if (
         args.t062_battle_search_v2_comparison_report is not None
@@ -597,206 +546,6 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
             "--post-t044-comparison and --post-t044-linked-artifact require "
             "--post-t044-failure-analysis-report"
         )
-    if args.t053_root_prior_allocation_failure_analysis_report is not None:
-        if len(args.t053_t052_artifact) != 4:
-            return (
-                "--t053-root-prior-allocation-failure-analysis-report requires "
-                "exactly four --t053-t052-artifact values"
-            )
-        roles = [values[0] for values in args.t053_t052_artifact]
-        if sorted(roles) != [
-            "fixed_cohort",
-            "result_summary",
-            "retention_manifest",
-            "root_prior_guided_comparison",
-        ]:
-            return (
-                "--t053-t052-artifact roles must be fixed_cohort, "
-                "result_summary, retention_manifest, and "
-                "root_prior_guided_comparison"
-            )
-    elif args.t053_t052_artifact:
-        return (
-            "--t053-t052-artifact requires "
-            "--t053-root-prior-allocation-failure-analysis-report"
-        )
-    if args.t054_guardrailed_root_prior_repair_report is not None:
-        if len(args.t054_input_artifact) != 6:
-            return (
-                "--t054-guardrailed-root-prior-repair-report requires exactly "
-                "six --t054-input-artifact values"
-            )
-        roles = [values[0] for values in args.t054_input_artifact]
-        if sorted(roles) != [
-            "t052_fixed_cohort",
-            "t052_result_summary",
-            "t052_retention_manifest",
-            "t052_root_prior_guided_comparison",
-            "t053_failure_analysis",
-            "t054_guardrailed_comparison",
-        ]:
-            return (
-                "--t054-input-artifact roles must be t052_fixed_cohort, "
-                "t052_result_summary, t052_retention_manifest, "
-                "t052_root_prior_guided_comparison, t053_failure_analysis, "
-                "and t054_guardrailed_comparison"
-            )
-    elif args.t054_input_artifact:
-        return (
-            "--t054-input-artifact requires --t054-guardrailed-root-prior-repair-report"
-        )
-    if args.t055_guardrailed_root_prior_scale_validation_report is not None:
-        if len(args.t055_input_artifact) != 11:
-            return (
-                "--t055-guardrailed-root-prior-scale-validation-report requires "
-                "exactly eleven --t055-input-artifact values"
-            )
-        roles = [values[0] for values in args.t055_input_artifact]
-        if sorted(roles) != [
-            "t043_assist0_smoke_checkpoint",
-            "t043_main_runs1000_assist0_checkpoint",
-            "t048_assist0_fixed_cohort",
-            "t048_assist0_reference_comparison",
-            "t048_current_fixed_cohort",
-            "t048_current_reference_comparison",
-            "t054_guardrailed_comparison",
-            "t054_guardrailed_repair_report",
-            "t054_retention_manifest",
-            "t055_assist0_guardrailed_comparison",
-            "t055_current_guardrailed_comparison",
-        ]:
-            return (
-                "--t055-input-artifact roles must include T054 "
-                "report/comparison/manifest, both T048 reference comparisons, "
-                "both retained cohorts, both checkpoints, and both generated "
-                "T055 guardrailed comparisons"
-            )
-    elif args.t055_input_artifact:
-        return (
-            "--t055-input-artifact requires "
-            "--t055-guardrailed-root-prior-scale-validation-report"
-        )
-    if args.t056_post_t055_root_prior_path_selection_report is not None:
-        if len(args.t056_input_artifact) != 13:
-            return (
-                "--t056-post-t055-root-prior-path-selection-report requires "
-                "exactly thirteen --t056-input-artifact values"
-            )
-        roles = [values[0] for values in args.t056_input_artifact]
-        if sorted(roles) != [
-            "t048_assist0_reference_comparison",
-            "t048_current_reference_comparison",
-            "t050_reachability_report",
-            "t050_retention_manifest",
-            "t051_reachability_report",
-            "t051_retention_manifest",
-            "t052_result_summary",
-            "t053_failure_analysis_report",
-            "t054_guardrailed_repair_report",
-            "t055_assist0_guardrailed_comparison",
-            "t055_current_guardrailed_comparison",
-            "t055_retention_manifest",
-            "t055_scale_validation_report",
-        ]:
-            return (
-                "--t056-input-artifact roles must include T048 comparisons, "
-                "T050/T051 reachability reports and manifests, T052/T053/T054 "
-                "reports, and T055 report/manifest/comparisons"
-            )
-    elif args.t056_input_artifact:
-        return (
-            "--t056-input-artifact requires "
-            "--t056-post-t055-root-prior-path-selection-report"
-        )
-    if args.t057_existing_root_prior_telemetry_diagnostic_report is not None:
-        if len(args.t057_input_artifact) != 9:
-            return (
-                "--t057-existing-root-prior-telemetry-diagnostic-report "
-                "requires exactly nine --t057-input-artifact values"
-            )
-        roles = [values[0] for values in args.t057_input_artifact]
-        if sorted(roles) != [
-            "t048_assist0_reference_comparison",
-            "t048_current_reference_comparison",
-            "t052_result_summary",
-            "t052_root_prior_guided_comparison",
-            "t053_failure_analysis_report",
-            "t055_assist0_guardrailed_comparison",
-            "t055_current_guardrailed_comparison",
-            "t055_scale_validation_report",
-            "t056_path_selection_report",
-        ]:
-            return (
-                "--t057-input-artifact roles must include the T056 "
-                "path-selection report, T048/T052/T055 comparisons, T052 "
-                "result summary, T053 failure-analysis report, and T055 "
-                "scale-validation report"
-            )
-    elif args.t057_input_artifact:
-        return (
-            "--t057-input-artifact requires "
-            "--t057-existing-root-prior-telemetry-diagnostic-report"
-        )
-    if args.t058_root_prior_selected_action_telemetry_report is not None:
-        if len(args.t058_input_artifact) != 9:
-            return (
-                "--t058-root-prior-selected-action-telemetry-report "
-                "requires exactly nine --t058-input-artifact values"
-            )
-        roles = [values[0] for values in args.t058_input_artifact]
-        if sorted(roles) != [
-            "t043_assist0_smoke_checkpoint",
-            "t043_runs1000_assist0_checkpoint",
-            "t048_assist0_fixed_cohort",
-            "t048_assist0_replay_comparison",
-            "t048_current_fixed_cohort",
-            "t048_current_replay_comparison",
-            "t052_boss_later_act_fixed_cohort",
-            "t052_replay_comparison",
-            "t057_telemetry_diagnostic_report",
-        ]:
-            return (
-                "--t058-input-artifact roles must include the T057 report, "
-                "three retained fixed cohorts, two T043 checkpoints, and "
-                "three instrumented T058 replay comparisons"
-            )
-    elif args.t058_input_artifact:
-        return (
-            "--t058-input-artifact requires "
-            "--t058-root-prior-selected-action-telemetry-report"
-        )
-    if args.t059_root_prior_allocation_repair_report is not None:
-        if len(args.t059_input_artifact) != 13:
-            return (
-                "--t059-root-prior-allocation-repair-report "
-                "requires exactly thirteen --t059-input-artifact values"
-            )
-        roles = [values[0] for values in args.t059_input_artifact]
-        if sorted(roles) != [
-            "t043_assist0_smoke_checkpoint",
-            "t043_runs1000_assist0_checkpoint",
-            "t048_assist0_fixed_cohort",
-            "t048_assist0_t058_comparison",
-            "t048_current_fixed_cohort",
-            "t048_current_t058_comparison",
-            "t052_boss_later_act_fixed_cohort",
-            "t052_t058_comparison",
-            "t058_retention_manifest",
-            "t058_selected_action_telemetry_report",
-            "t059_assist0_repair_comparison",
-            "t059_current_repair_comparison",
-            "t059_t052_repair_comparison",
-        ]:
-            return (
-                "--t059-input-artifact roles must include the T058 report/"
-                "manifest, retained T058 comparison artifacts, three fixed "
-                "cohorts, two T043 checkpoints, and three generated T059 "
-                "repair comparisons"
-            )
-    elif args.t059_input_artifact:
-        return (
-            "--t059-input-artifact requires --t059-root-prior-allocation-repair-report"
-        )
     if args.t052_t051_boss_later_act_fixed_cohort is not None:
         if len(args.t052_source_arm) != 3:
             return (
@@ -835,48 +584,6 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
             "--t052-retained-artifact, --t052-retention-command, "
             "--t052-retention-stage, and --t052-retention-note require "
             "--t052-retention-manifest"
-        )
-    if args.t054_retention_manifest is not None:
-        if not args.t054_retained_artifact:
-            return "--t054-retention-manifest requires --t054-retained-artifact"
-    elif (
-        args.t054_retained_artifact
-        or args.t054_retention_command
-        or args.t054_retention_stage
-        or args.t054_retention_note
-    ):
-        return (
-            "--t054-retained-artifact, --t054-retention-command, "
-            "--t054-retention-stage, and --t054-retention-note require "
-            "--t054-retention-manifest"
-        )
-    if args.t055_retention_manifest is not None:
-        if not args.t055_retained_artifact:
-            return "--t055-retention-manifest requires --t055-retained-artifact"
-    elif (
-        args.t055_retained_artifact
-        or args.t055_retention_command
-        or args.t055_retention_stage
-        or args.t055_retention_note
-    ):
-        return (
-            "--t055-retained-artifact, --t055-retention-command, "
-            "--t055-retention-stage, and --t055-retention-note require "
-            "--t055-retention-manifest"
-        )
-    if args.t059_retention_manifest is not None:
-        if not args.t059_retained_artifact:
-            return "--t059-retention-manifest requires --t059-retained-artifact"
-    elif (
-        args.t059_retained_artifact
-        or args.t059_retention_command
-        or args.t059_retention_stage
-        or args.t059_retention_note
-    ):
-        return (
-            "--t059-retained-artifact, --t059-retention-command, "
-            "--t059-retention-stage, and --t059-retention-note require "
-            "--t059-retention-manifest"
         )
     if (
         args.root_prior_allocation_report is not None

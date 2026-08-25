@@ -38,10 +38,6 @@ ROOT_PRIOR_GUIDED_SEARCH_COMPARISON_FORMAT_VERSION = 1
 BASELINE_ORACLE_LABEL = "baseline_oracle_search"
 POST_SEARCH_MODEL_GUIDED_LABEL = "model_guided_oracle_search_v2"
 ROOT_PRIOR_GUIDED_LABEL = "root_prior_guided_oracle_search"
-GUARDRAILED_ROOT_PRIOR_GUIDED_LABEL = "guardrailed_root_prior_guided_oracle_search"
-T059_REPAIRED_ROOT_PRIOR_GUIDED_LABEL = (
-    "t059_root_prior_allocation_repair_oracle_search"
-)
 REQUIRED_ROOT_PRIOR_COMPARISON_LABELS = (
     BASELINE_ORACLE_LABEL,
     POST_SEARCH_MODEL_GUIDED_LABEL,
