@@ -85,7 +85,7 @@ workflow's explicit implementation-authorization gate is satisfied.
 | T062 | DONE | [Battle Search v2 minimal surface](T062-battle-search-v2-minimal-surface.md) | T061, T052, T043, T046 | tree-internal policy prior and learned leaf value accepted; cost calibration exited early before outcome comparison |
 | T063 | DRAFT | [Oracle-guided public battle learning](T063-oracle-guided-public-battle-learning.md) | T061, T062, T033 | simulator-only Oracle assistance with explicit public-policy transfer and no human trajectories |
 | T064 | DONE | [Simulator-generated later-act curriculum](T064-simulator-generated-later-act-curriculum.md) | T033, T042, T043, T044, T052, T069, T070 | complete valid Case B: exposure-order curriculum did not improve the frozen transfer gates; recommends T065 to the planner |
-| T065 | DRAFT | [Learned non-combat policy v1](T065-learned-non-combat-policy-v1.md) | T061, T033 | simulator-return and counterfactual continuation targets without heuristic imitation |
+| T065 | DRAFT | [Learned non-combat policy v1](T065-learned-non-combat-policy-v1.md) | T033, T040, T061, T064, T071, T074 | proposed bounded counterfactual action-value learning with a held-out gate before matched complete-run scale |
 | T066 | DRAFT | [Alternating joint policy improvement and natural scale gate](T066-alternating-joint-policy-improvement-and-natural-scale-gate.md) | T062, T063, T064, T065 | separate battle/non-combat policies with shared run value, followed by conditional natural scale-up |
 | T067 | DONE | [Battle Search v2 inference-cost repair](T067-battle-search-v2-inference-cost-repair.md) | T062, T061, T052, T043 | exact-cache repair preserved semantics but had 0/866 hits; cost calibration remained infeasible and selected T068 |
 | T068 | DONE | [Native-boundary batched inference feasibility](T068-native-boundary-batched-inference-feasibility.md) | T067, T062, T052, T043 | exact audit found only 207/261/398 synchronous singleton requests; batching closed and selected T069 |
@@ -143,32 +143,25 @@ the accepted native tree-geometry capability, then proposed T070. T070 is
 complete. Its frozen primary comparison did not pass the Search v2 promotion
 boundary, while the bounded curve found the 100-simulation budget insufficient
 but no high-budget guidance signal. The terminal Case C recommends T064 to the
-planner without publishing it. T063, T065, and T066 remain draft; T064 is
-complete with a valid negative Case B. T071 is complete after merge of PR #70:
-it consolidated T044 validation ownership and redundant fixed-report checks,
-added the detached-job status convention, and documented stage/run-local reuse
-before revising T065 for publication. T072 is complete after merge of PR #71:
-it retired the closed T053–T059 task-specific executors, removed their CLI and
-lightspeed routes, preserved generic root-prior/search and T052 surfaces, and
-left the historical scientific records available through the frozen source
-anchor. T073 is complete after PR #72 merged at
-`dac26774f7cc70abae6be1693772418398e1e7eb`: it retired completed
-T064/T067--T070 executor ownership, moved live shared helpers to neutral
-modules, preserved accepted schemas and generic Search v2/public-context
-capabilities, and recorded that the frozen baseline contained no targeted CLI
-routes to remove. The mandatory post-T073 Planner review then found a separate
-forward-code defect: `controlled_run -> policy -> batching -> controlled_run`
-forms a real cycle, `policy.py` mixes low-level runtime contracts with offline
-batch evaluation and non-combat driver ownership, and `sts_combat_rl.sim`
-freezes 336 package-level compatibility exports. T074 was approved as the
-narrow core-boundary repair and is complete after PR #73 merged at
-`7c2dcf5d8a6d74bb03e7fda173000dad006933ce`. It established the acyclic policy
-contract, explicit non-combat/offline evaluation ownership, and a 31-name
-foundational package surface without changing schemas or scientific results.
-The same review recorded unresolved CLI, tracked-fixture, CI/open-source
-packaging, and large-module concerns; those remain inputs to the required
-post-T074 Planner review. T065 remains DRAFT and is not authorized by this
-maintenance merge.
+planner without publishing it. T064 is complete with a valid negative Case B
+and recommends T065. T071--T074 then completed the maintenance gate before that
+publication decision: T071 simplified experiment execution/reuse, T072/T073
+retired closed historical executor ownership, and T074 repaired the real
+`controlled_run -> policy -> batching -> controlled_run` dependency cycle,
+separated non-combat/offline evaluation ownership, and contracted the simulator
+package barrel to 31 foundational exports.
+
+The required post-T074 Planner quality review is now complete. It reconfirmed
+that the remaining legacy flat CLI/parser, roughly 71 MB of tracked real sample
+captures, absent CI/branch protection, open-source license, and unrelated large
+module concerns are genuine but do not block the next scientific step. T065 is
+therefore the next proposed research task, with one important engineering
+boundary: it must not add T065-specific routes or flags to the legacy flat CLI.
+Its revised spec freezes a 512-run source pool, four mandatory learned screen
+families, all-eligible-action counterfactual targets, a 64-state held-out gate,
+and only conditionally a 256-seed three-arm complete-run evaluation. T065 remains
+`DRAFT` on this planner branch and implementation is unauthorized until the Main
+Maintainer independently approves the exact specification head.
 
 ## Task Boundary And Artifact Rules
 
@@ -212,10 +205,11 @@ and inspect again after the expected window or on request rather than continuous
 
 The executable queue is exactly the set of `READY` rows in the Active Backlog.
 Merged `main` currently has no `READY` task. T071, T072, T073, and T074 are
-`DONE`. The post-T074 quality review remains required before any T065
-publication decision. T065 remains `DRAFT` and must not be published merely
-because T074 merged. T034 remains blocked on native public-consistent
-hidden-future sampling support.
+`DONE`. The post-T074 Planner quality review is complete and the current planner
+proposal revises T065 for publication, but T065 remains `DRAFT` and is not
+executable until the Main Maintainer independently approves the exact proposal
+head and records implementation authorization. T034 remains blocked on native
+public-consistent hidden-future sampling support.
 
 ## Standard Local Gates
 
