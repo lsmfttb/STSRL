@@ -10,7 +10,7 @@ import struct
 from time import perf_counter
 from typing import Any
 
-from sts_combat_rl.sim.battle_search_v2_cost import canonical_public_json
+from sts_combat_rl.sim.search_cost import canonical_public_json
 from sts_combat_rl.sim.public_context_artifacts import PUBLIC_CONTEXT_AVAILABLE
 from sts_combat_rl.sim.public_context_model_input import (
     PUBLIC_CONTEXT_MODEL_INPUT_FEATURE_NAMES,

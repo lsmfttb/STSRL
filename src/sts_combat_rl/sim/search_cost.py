@@ -1,4 +1,4 @@
-"""T067 cost attribution and semantic-preserving node inference cache.
+"""Search cost attribution and semantic-preserving node inference cache.
 
 The cache is deliberately process-local and scoped to one native search call.
 Its key contains every public model input plus the occurrence-safe ordered legal
@@ -44,7 +44,7 @@ class PublicNodeInferenceCache:
 
     def __init__(self, capacity: int = 4096) -> None:
         if capacity <= 0:
-            raise ValueError("T067 inference cache capacity must be positive")
+            raise ValueError("inference cache capacity must be positive")
         self.capacity = int(capacity)
         self._entries: OrderedDict[str, tuple[bytes, SearchGuidanceInferenceResult]] = (
             OrderedDict()

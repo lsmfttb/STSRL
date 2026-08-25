@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "sts-combat-rl"
 version = "0.1.0"
-description = "Minimal Slay the Spire CommunicationMod-style combat probe."
+description = "Battle-agent research infrastructure for Slay the Spire."
 readme = "README.md"
 requires-python = ">=3.11"
 authors = [

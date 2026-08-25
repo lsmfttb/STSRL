@@ -460,7 +460,7 @@ class TorchPolicyValueGuidanceScorer:
     def provenance_config(self) -> Mapping[str, Any]:
         return self.checkpoint_provenance.to_dict()
 
-    def set_t069_input_observer(
+    def set_input_identity_observer(
         self,
         observer: Callable[[Mapping[str, Any]], None] | None,
     ) -> None:
@@ -473,7 +473,7 @@ class TorchPolicyValueGuidanceScorer:
 
         self._t069_input_observer = observer
 
-    def begin_t069_search_scope(
+    def begin_search_scope(
         self,
         public_run_context: Mapping[str, Any],
     ) -> None:
@@ -484,7 +484,7 @@ class TorchPolicyValueGuidanceScorer:
             }
         )
 
-    def end_t069_search_scope(self) -> None:
+    def end_search_scope(self) -> None:
         self._notify_t069_observer({"event": "end_search_scope"})
 
     def prepare_public_context_projection(

@@ -1,4 +1,4 @@
-"""Occurrence-safe T069 feature identities for diagnostic scorer observation."""
+"""Occurrence-safe feature identities for diagnostic scorer observation."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import struct
 from time import perf_counter
 from typing import Any
 
-from sts_combat_rl.sim.battle_search_v2_cost import canonical_public_json
+from sts_combat_rl.sim.search_cost import canonical_public_json
 from sts_combat_rl.sim.policy import DecisionContext
 from sts_combat_rl.sim.public_context_feature_projection import (
     feature_vector_sha256,
@@ -21,11 +21,11 @@ from sts_combat_rl.sim.public_context_model_input import (
 )
 
 
-T069_FEATURE_IDENTITY_SCHEMA_ID = "t069-scorer-input-identity-v1"
-T069_FEATURE_IDENTITY_SCHEMA_VERSION = 1
+FEATURE_IDENTITY_SCHEMA_ID = "t069-scorer-input-identity-v1"
+FEATURE_IDENTITY_SCHEMA_VERSION = 1
 
 
-class T069FeatureIdentityRecorder:
+class FeatureIdentityRecorder:
     """Observe complete scorer inputs without changing their values or ordering."""
 
     def __init__(self, *, arm: str, projected: bool) -> None:
@@ -115,8 +115,8 @@ class T069FeatureIdentityRecorder:
         self._request_index += 1
         self.records.append(
             {
-                "schema_id": T069_FEATURE_IDENTITY_SCHEMA_ID,
-                "schema_version": T069_FEATURE_IDENTITY_SCHEMA_VERSION,
+                "schema_id": FEATURE_IDENTITY_SCHEMA_ID,
+                "schema_version": FEATURE_IDENTITY_SCHEMA_VERSION,
                 "arm": self.arm,
                 "projected": self.projected,
                 "search_scope_index": self._scope_index,
