@@ -12,8 +12,10 @@ from sts_combat_rl.sim.features import (
     simulator_action_feature_size,
 )
 from sts_combat_rl.sim.model_scoring import ActionKindPriorScorer
-from sts_combat_rl.sim.policy import (
+from sts_combat_rl.sim.policy_contract import (
     PolicyDecision,
+)
+from sts_combat_rl.sim.policy import (
     PreferredKindPolicy,
     ScoredActionPolicy,
 )

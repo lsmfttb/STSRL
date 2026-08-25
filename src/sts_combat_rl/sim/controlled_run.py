@@ -16,7 +16,7 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from sts_combat_rl.sim.action_space import (
     ActionSpaceConfig,
@@ -50,11 +50,7 @@ from sts_combat_rl.sim.public_run_context import (
     build_public_run_context,
     read_native_public_projection,
 )
-
-# DecisionContext is imported lazily inside build_decision_context to avoid
-# a circular import: controlled_run → policy → batching → controlled_run.
-if TYPE_CHECKING:
-    from sts_combat_rl.sim.policy import DecisionContext
+from sts_combat_rl.sim.policy_contract import DecisionContext
 
 
 # ---------------------------------------------------------------------------
@@ -430,8 +426,6 @@ def build_decision_context(
     ``battle_agent.py``. It encodes snapshot features, per-action features, and
     computes the eligible-action mask from the action-space config.
     """
-
-    from sts_combat_rl.sim.policy import DecisionContext
 
     raw = raw_snapshot if isinstance(raw_snapshot, Mapping) else {}
     screen_state = str(raw.get("screen_state", "(none)"))

@@ -12,7 +12,7 @@ from dataclasses import dataclass, field, replace
 import math
 from typing import Any
 
-from sts_combat_rl.sim.policy import DecisionContext
+from sts_combat_rl.sim.policy_contract import DecisionContext
 from sts_combat_rl.sim.trainer_input import TrainerInputDataset
 from sts_combat_rl.sim.features import (
     IDENTITY_VOCABULARY_VERSION,

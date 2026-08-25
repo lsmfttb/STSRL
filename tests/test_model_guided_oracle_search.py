@@ -19,7 +19,7 @@ from sts_combat_rl.sim.oracle_search import (
     ORACLE_SEARCH_PATCH_IDENTITY,
     ORACLE_SEARCH_SCHEMA_ID,
 )
-from sts_combat_rl.sim.policy import DecisionContext
+from sts_combat_rl.sim.policy_contract import DecisionContext
 from sts_combat_rl.sim.search_guidance_inference import (
     SearchGuidanceActionScore,
     SearchGuidanceCheckpointProvenance,

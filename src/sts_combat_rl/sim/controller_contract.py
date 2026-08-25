@@ -28,7 +28,7 @@ if TYPE_CHECKING:
         SimulatorAdapter,
         SimulatorSnapshot,
     )
-    from sts_combat_rl.sim.policy import DecisionContext
+    from sts_combat_rl.sim.policy_contract import DecisionContext
 
 
 CONTROLLER_PROVENANCE_SCHEMA_VERSION = 1

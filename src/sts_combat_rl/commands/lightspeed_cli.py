@@ -189,6 +189,8 @@ from sts_combat_rl.sim.root_prior_guided_search_comparison import (
 )
 from sts_combat_rl.sim.policy import (
     ScoredActionPolicy,
+)
+from sts_combat_rl.sim.policy_evaluation import (
     evaluate_decision_policy,
     format_policy_evaluation_report,
 )

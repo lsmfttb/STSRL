@@ -6,13 +6,17 @@ import argparse
 
 from sts_combat_rl.sim.model_scoring import ActionKindPriorScorer
 from sts_combat_rl.sim.policy import (
-    ExpertNonCombatDriver,
     FirstEligiblePolicy,
     PreferredKindPolicy,
     RandomEligiblePolicy,
-    ReplayChosenPolicy,
     ScoredActionPolicy,
+)
+from sts_combat_rl.sim.non_combat_policy import (
+    ExpertNonCombatDriver,
     StochasticNonCombatDriver,
+)
+from sts_combat_rl.sim.policy_evaluation import (
+    ReplayChosenPolicy,
 )
 from sts_combat_rl.sim.training_gate import TrainingScaleGateConfig
 

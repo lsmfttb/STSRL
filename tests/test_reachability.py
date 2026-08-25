@@ -19,7 +19,8 @@ from sts_combat_rl.sim.battle_start_pool import (
 )
 from sts_combat_rl.sim.online_controller import PolicyController, RoutedRunController
 from sts_combat_rl.sim.oracle_search import OracleSearchController
-from sts_combat_rl.sim.policy import FirstEligiblePolicy, StochasticNonCombatDriver
+from sts_combat_rl.sim.policy import FirstEligiblePolicy
+from sts_combat_rl.sim.non_combat_policy import StochasticNonCombatDriver
 from sts_combat_rl.sim.reachability import (
     build_a20_reachability_comparison_report,
 )

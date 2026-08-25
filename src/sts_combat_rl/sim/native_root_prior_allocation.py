@@ -33,7 +33,7 @@ from sts_combat_rl.sim.oracle_search import (
     OracleSearchReport,
     build_oracle_search_report,
 )
-from sts_combat_rl.sim.policy import DecisionContext
+from sts_combat_rl.sim.policy_contract import DecisionContext
 
 
 NATIVE_ROOT_PRIOR_ALLOCATION_REPORT_SCHEMA_ID = "native-root-prior-allocation-report-v1"

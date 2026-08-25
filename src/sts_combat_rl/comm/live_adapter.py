@@ -33,7 +33,7 @@ from sts_combat_rl.sim.features import (
     public_tactical_missing_fields,
     tactical_field_parity_rows,
 )
-from sts_combat_rl.sim.policy import DecisionContext
+from sts_combat_rl.sim.policy_contract import DecisionContext
 from sts_combat_rl.sim.public_run_context import build_public_run_context
 
 if TYPE_CHECKING:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from sts_combat_rl.sim import (
+from sts_combat_rl.sim.contract import (
     SimulatorAction,
     SimulatorSnapshot,
     SimulatorTransition,

@@ -15,7 +15,7 @@ import math
 from typing import Any, Protocol
 
 from sts_combat_rl.sim.model_input import ModelInputBatch
-from sts_combat_rl.sim.policy import DecisionContext
+from sts_combat_rl.sim.policy_contract import DecisionContext
 
 
 DEFAULT_ACTION_KIND_SCORE_PRIOR: Mapping[str, float] = {

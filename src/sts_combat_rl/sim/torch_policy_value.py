@@ -30,7 +30,7 @@ from sts_combat_rl.sim.features import (
 )
 from sts_combat_rl.sim.model_input import ModelInputBatch
 from sts_combat_rl.sim.model_scoring import DEFAULT_ACTION_KIND_SCORE_PRIOR
-from sts_combat_rl.sim.policy import DecisionContext
+from sts_combat_rl.sim.policy_contract import DecisionContext
 from sts_combat_rl.sim.public_context_artifacts import PUBLIC_CONTEXT_AVAILABLE
 from sts_combat_rl.sim.public_context_model_input import (
     PUBLIC_CONTEXT_MODEL_INPUT_FEATURE_NAMES,

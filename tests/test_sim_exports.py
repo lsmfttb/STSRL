@@ -2,35 +2,31 @@ from __future__ import annotations
 
 import sts_combat_rl.sim as sim
 
-EXPECTED_SIM_EXPORT_COUNT = 336
-KEY_COMPATIBILITY_EXPORTS = {
+FOUNDATIONAL_EXPORTS = {
     "ActionSpaceConfig",
-    "BattleStartCheckpointRecord",
+    "CheckpointingSimulatorAdapter",
+    "ControllerProvenance",
     "DecisionContext",
-    "FixedEvaluationReport",
-    "LightSpeedAdapter",
-    "ModelGuidedOracleSearchController",
-    "OracleSearchController",
+    "DecisionPolicy",
     "SimulatorAction",
     "SimulatorAdapter",
-    "SimulatorSnapshot",
-    "SimulatorTransition",
     "build_decision_context",
-    "build_model_input_batch",
     "execute_controlled_run",
-    "format_fixed_evaluation_report",
-    "load_trainer_input_dataset_jsonl",
 }
 
 
-def test_sim_all_export_surface_is_explicit_and_stable() -> None:
-    assert len(sim.__all__) == EXPECTED_SIM_EXPORT_COUNT
-    assert len(set(sim.__all__)) == EXPECTED_SIM_EXPORT_COUNT
+def test_sim_all_is_small_and_foundational() -> None:
+    assert len(sim.__all__) <= 32
+    assert len(set(sim.__all__)) == len(sim.__all__)
     assert all(hasattr(sim, name) for name in sim.__all__)
+    assert FOUNDATIONAL_EXPORTS <= set(sim.__all__)
+    assert "DecisionBatch" not in sim.__all__
+    assert "FixedEvaluationReport" not in sim.__all__
+    assert "TrainerInputDataset" not in sim.__all__
 
 
-def test_sim_star_import_retains_key_compatibility_exports() -> None:
+def test_sim_star_import_matches_documented_surface() -> None:
     namespace: dict[str, object] = {}
     exec("from sts_combat_rl.sim import *", namespace)  # noqa: S102
 
-    assert KEY_COMPATIBILITY_EXPORTS <= set(namespace)
+    assert {name for name in namespace if not name.startswith("_")} == set(sim.__all__)

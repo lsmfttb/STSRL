@@ -18,7 +18,7 @@ import math
 from time import perf_counter
 from typing import Any, Callable
 
-from sts_combat_rl.sim.policy import DecisionContext
+from sts_combat_rl.sim.policy_contract import DecisionContext
 from sts_combat_rl.sim.search_guidance_inference import (
     SearchGuidanceInferenceResult,
 )

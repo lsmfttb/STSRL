@@ -13,7 +13,7 @@ from sts_combat_rl.commands.pytorch_search_guidance import (
     build_pytorch_search_guidance_training_data_provenance,
 )
 from sts_combat_rl.sim.model_input import build_model_input_batch
-from sts_combat_rl.sim.policy import DecisionContext
+from sts_combat_rl.sim.policy_contract import DecisionContext
 from sts_combat_rl.sim.trainer_input import trainer_input_dataset_to_jsonl_text
 from sts_combat_rl.sim.trainer_input import (
     POLICY_TARGET_KIND_ORACLE_TEACHER_ACTION,

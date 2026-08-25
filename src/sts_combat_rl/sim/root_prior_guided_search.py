@@ -49,7 +49,7 @@ from sts_combat_rl.sim.oracle_search import (
     selected_action_identity_telemetry,
     validate_oracle_root_selection_rule,
 )
-from sts_combat_rl.sim.policy import DecisionContext
+from sts_combat_rl.sim.policy_contract import DecisionContext
 from sts_combat_rl.sim.search_guidance_inference import (
     SEARCH_GUIDANCE_INFERENCE_SCHEMA_ID,
     SEARCH_GUIDANCE_INFERENCE_SCHEMA_VERSION,

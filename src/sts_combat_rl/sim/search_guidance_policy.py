@@ -18,7 +18,7 @@ from sts_combat_rl.sim.controller_contract import (
     json_safe_mapping,
 )
 from sts_combat_rl.sim.online_controller import PUBLIC_POLICY_INFORMATION_REGIME
-from sts_combat_rl.sim.policy import DecisionContext
+from sts_combat_rl.sim.policy_contract import DecisionContext
 from sts_combat_rl.sim.search_guidance_inference import (
     SEARCH_GUIDANCE_INFERENCE_SCHEMA_ID,
     SEARCH_GUIDANCE_INFERENCE_SCHEMA_VERSION,

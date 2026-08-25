@@ -50,8 +50,10 @@ from sts_combat_rl.sim.online_controller import (
     deterministic_chooser_controller,
     is_battle_state,
 )
-from sts_combat_rl.sim.policy import (
+from sts_combat_rl.sim.policy_contract import (
     DecisionContext,
+)
+from sts_combat_rl.sim.policy import (
     FirstEligiblePolicy,
     PreferredKindPolicy,
     RandomEligiblePolicy,
@@ -1047,32 +1049,6 @@ class TestNoHiddenDefaults:
                 seed=1,
                 max_steps=10,
             )
-
-
-# ---------------------------------------------------------------------------
-# Package export regression
-# ---------------------------------------------------------------------------
-
-
-class TestPackageExports:
-    def test_build_decision_context_importable_from_sim(self) -> None:
-        """build_decision_context must be importable from sts_combat_rl.sim."""
-        from sts_combat_rl.sim import build_decision_context
-
-        assert callable(build_decision_context)
-
-    def test_build_decision_context_in_all(self) -> None:
-        """build_decision_context must be in sim.__all__."""
-        import sts_combat_rl.sim
-
-        assert "build_decision_context" in sts_combat_rl.sim.__all__
-
-    def test_star_import_includes_build_decision_context(self) -> None:
-        """from sts_combat_rl.sim import * must include build_decision_context."""
-        namespace: dict[str, Any] = {}
-        # Use exec to simulate star import without polluting this module
-        exec("from sts_combat_rl.sim import *", namespace)  # noqa: S102
-        assert "build_decision_context" in namespace
 
 
 # ---------------------------------------------------------------------------

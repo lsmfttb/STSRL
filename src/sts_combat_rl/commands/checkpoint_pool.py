@@ -27,7 +27,7 @@ from sts_combat_rl.sim.checkpoint_verification import (
 )
 from sts_combat_rl.sim.contract import CheckpointingSimulatorAdapter
 from sts_combat_rl.sim.online_controller import PolicyController, RoutedRunController
-from sts_combat_rl.sim.policy import DecisionPolicy
+from sts_combat_rl.sim.policy_contract import DecisionPolicy
 import json
 
 

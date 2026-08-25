@@ -11,7 +11,7 @@ from sts_combat_rl.sim.search_cost import (
 )
 from sts_combat_rl.sim.contract import SimulatorAction
 from sts_combat_rl.sim.controlled_run import build_decision_context
-from sts_combat_rl.sim.policy import DecisionContext
+from sts_combat_rl.sim.policy_contract import DecisionContext
 from sts_combat_rl.sim.search_guidance_inference import (
     SearchGuidanceActionScore,
     SearchGuidanceCheckpointProvenance,
