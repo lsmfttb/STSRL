@@ -188,9 +188,13 @@ def merge_de_assisted_fixed_cohort_comparison_shards(
                 "selection_config",
             ):
                 if getattr(report, field) != getattr(first, field):
-                    raise ValueError(f"T044 fixed report configuration differs: {field}")
+                    raise ValueError(
+                        f"T044 fixed report configuration differs: {field}"
+                    )
         results = [result for report in reports for result in report.battle_results]
-        if [result.cohort_index for result in results] != list(range(len(cohort.records))):
+        if [result.cohort_index for result in results] != list(
+            range(len(cohort.records))
+        ):
             raise ValueError("T044 shard merge does not cover original cohort order")
         counts = Counter(
             "/".join(str(value) for value in record.structural_stratum)
@@ -210,7 +214,9 @@ def merge_de_assisted_fixed_cohort_comparison_shards(
                     selection_config=first.selection_config,
                     per_stratum_source_counts=dict(counts),
                     battle_results=results,
-                    problems=[problem for report in reports for problem in report.problems],
+                    problems=[
+                        problem for report in reports for problem in report.problems
+                    ],
                 ),
             )
         )

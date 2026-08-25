@@ -6,8 +6,11 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 import io
 import json
+from pathlib import Path
 from typing import Any, TextIO
 
+from sts_combat_rl.artifact_paths import resolve_runtime_artifact_path
+from sts_combat_rl.sim.action_space import ActionSpaceConfig
 from sts_combat_rl.sim.fixed_battle_evaluation import (
     AggregateSlice,
     FixedEvaluationReport,
@@ -21,11 +24,16 @@ from sts_combat_rl.sim.lightspeed_source import format_lightspeed_source_identit
 from sts_combat_rl.sim.model_guided_search_comparison import (
     fixed_report_sequence_source_match_problems,
 )
+from sts_combat_rl.sim.model_guided_oracle_search import (
+    MODEL_GUIDED_ORACLE_V2_CONTROLLER_KIND,
+    MODEL_GUIDED_ORACLE_V2_ROOT_SELECTION_RULE,
+)
 from sts_combat_rl.sim.search_telemetry import (
     format_search_telemetry_summary,
     iter_search_decision_telemetry_dicts,
     summarize_search_decision_telemetry_dicts,
 )
+from sts_combat_rl.sim.t064_curriculum import contiguous_ranges
 
 
 DE_ASSISTED_FIXED_COHORT_COMPARISON_SCHEMA_ID = "de-assisted-fixed-cohort-comparison-v1"
@@ -34,6 +42,17 @@ BASELINE_ORACLE_LABEL = "baseline_oracle_search"
 MODEL_GUIDED_ORACLE_V2_LABEL = "model_guided_oracle_search_v2"
 RAW_CHECKPOINT_POLICY_LABEL = "checkpoint_raw_policy"
 SCRIPTED_POLICY_LABEL = "scripted_action_kind_prior_policy"
+T044_CONTROLLER_ROLES = (
+    "baseline_oracle_search",
+    "model_guided_search_t043_checkpoint",
+    "raw_checkpoint_public_policy",
+    "scripted_public_policy_baseline",
+)
+T044_DEPENDENT_ROLES = T044_CONTROLLER_ROLES[1:3]
+T044_INDEPENDENT_ROLES = (T044_CONTROLLER_ROLES[0], T044_CONTROLLER_ROLES[3])
+T044_SEARCH_BUDGET = 1
+T044_ROOT_SELECTION = "highest_mean"
+T044_GUIDANCE_WEIGHT = 0.1
 DE_ASSISTED_FIXED_COHORT_EVIDENCE_BOUNDARY = (
     "de-assisted fixed-cohort diagnostics only; Oracle-like search arms remain "
     "full_simulator_state_oracle_like, raw checkpoint policy arms are "
@@ -95,6 +114,277 @@ class DeAssistedFixedCohortComparisonReport:
         return all(arm.report.evaluation_successful for arm in self.arms) and not (
             self.problems
         )
+
+
+def is_t044_frozen_action_space(value: Any) -> bool:
+    return (
+        isinstance(value, Mapping)
+        and dict(value) == ActionSpaceConfig.initial_no_potions().to_dict()
+    )
+
+
+def validate_t044_reuse(
+    report: Any, *, cohort_identity: str, cohort_count: int
+) -> bool:
+    config = getattr(report, "comparison_config", None)
+    arms = getattr(report, "arms", None)
+    if not isinstance(config, Mapping) or not isinstance(arms, tuple):
+        return False
+    roles = config.get("controller_roles")
+    return bool(
+        isinstance(roles, Mapping)
+        and tuple(roles.values()) == T044_CONTROLLER_ROLES
+        and config.get("cohort_identity") == cohort_identity
+        and config.get("cohort_record_count") == cohort_count
+        and config.get("max_battle_steps") == 200
+        and config.get("run_scale") == "fixed"
+        and is_t044_frozen_action_space(config.get("action_space"))
+        and getattr(report, "evaluation_successful", False)
+        and len(arms) == 4
+        and tuple(getattr(arm, "role", None) for arm in arms) == T044_CONTROLLER_ROLES
+        and all(
+            not arm.report.problems and len(arm.report.battle_results) == cohort_count
+            for arm in arms
+        )
+    )
+
+
+def validate_t044_historical_reuse(
+    report: Any,
+    *,
+    frozen_cohort: Mapping[str, Any],
+    expected_roles: Sequence[str] = T044_CONTROLLER_ROLES,
+) -> bool:
+    identity, count = frozen_cohort.get("identity"), frozen_cohort.get("record_count")
+    return bool(
+        isinstance(identity, str)
+        and isinstance(count, int)
+        and validate_t044_reuse(report, cohort_identity=identity, cohort_count=count)
+        and tuple(arm.role for arm in report.arms) == tuple(expected_roles)
+    )
+
+
+def validate_t044_dependent_report(
+    report: Any,
+    *,
+    cohort_identity: str,
+    cohort_count: int,
+    expected_controller_provenance: Mapping[str, Any] | None = None,
+    cohort: Any | None = None,
+) -> bool:
+    config = getattr(report, "comparison_config", {})
+    arms = getattr(report, "arms", ())
+    exact_order = all(
+        [result.cohort_index for result in arm.report.battle_results]
+        == list(range(cohort_count))
+        and not arm.report.problems
+        for arm in arms
+    )
+    provenance_ok = (
+        expected_controller_provenance is None
+        or config.get("controller_provenance") == expected_controller_provenance
+    )
+    valid = (
+        getattr(report, "evaluation_successful", False)
+        and tuple(arm.role for arm in arms) == T044_DEPENDENT_ROLES
+        and config.get("cohort_identity") == cohort_identity
+        and config.get("cohort_record_count") == cohort_count
+        and config.get("max_battle_steps") == 200
+        and config.get("run_scale") == "fixed"
+        and config.get("shard_count") == 16
+        and cohort_count in (21, 38)
+        and tuple(config.get("shard_ranges", ()))
+        == contiguous_ranges(21 if cohort_count == 21 else 38)
+        and is_t044_frozen_action_space(config.get("action_space"))
+        and exact_order
+        and provenance_ok
+        and all(
+            len(arm.report.battle_results) == cohort_count and not arm.report.problems
+            for arm in arms
+        )
+    )
+    return valid and (cohort is None or _t044_results_match_cohort(arms, cohort))
+
+
+def validate_t044_independent_report(
+    report: Any,
+    *,
+    cohort_identity: str,
+    cohort_count: int,
+    cohort: Any | None = None,
+) -> bool:
+    config = getattr(report, "comparison_config", {})
+    arms = getattr(report, "arms", ())
+    roles = tuple(getattr(arm, "role", None) for arm in arms)
+    valid = (
+        getattr(report, "evaluation_successful", False)
+        and roles in (T044_CONTROLLER_ROLES, T044_INDEPENDENT_ROLES)
+        and config.get("cohort_identity") == cohort_identity
+        and config.get("cohort_record_count") == cohort_count
+        and config.get("run_scale") == "fixed"
+        and config.get("max_battle_steps") == 200
+        and is_t044_frozen_action_space(config.get("action_space"))
+        and all(
+            [result.cohort_index for result in arm.report.battle_results]
+            == list(range(cohort_count))
+            and not arm.report.problems
+            for arm in arms
+        )
+    )
+    return valid and (cohort is None or _t044_results_match_cohort(arms, cohort))
+
+
+def validate_t044_controller_semantics(
+    report: Any, *, checkpoint: Mapping[str, Any] | None
+) -> None:
+    config = getattr(report, "comparison_config", {})
+    roles = config.get("controller_roles") if isinstance(config, Mapping) else None
+    provenance = (
+        config.get("controller_provenance") if isinstance(config, Mapping) else None
+    )
+    if not isinstance(roles, Mapping) or not isinstance(provenance, Mapping):
+        raise ValueError("T044 roles/controller provenance are missing")
+    actual_roles = tuple(getattr(arm, "role", None) for arm in report.arms)
+    mapped_roles = tuple(roles.values())
+    if (
+        actual_roles
+        not in (T044_CONTROLLER_ROLES, T044_DEPENDENT_ROLES, T044_INDEPENDENT_ROLES)
+        or len(set(actual_roles)) != len(actual_roles)
+        or any(not isinstance(role, str) for role in mapped_roles)
+        or len(mapped_roles) != len(actual_roles)
+        or len(set(mapped_roles)) != len(mapped_roles)
+        or set(mapped_roles) != set(actual_roles)
+    ):
+        raise ValueError("T044 persisted role set is not an exact accepted type")
+    by_role = {role: label for label, role in roles.items()}
+    for role in actual_roles:
+        label = by_role.get(role)
+        entry = provenance.get(label) if isinstance(label, str) else None
+        settings = entry.get("config") if isinstance(entry, Mapping) else None
+        if not isinstance(entry, Mapping) or not isinstance(settings, Mapping):
+            raise ValueError(f"T044 controller provenance/config missing for {role}")
+        if role in {"baseline_oracle_search", "model_guided_search_t043_checkpoint"}:
+            budget = settings.get("search_budget")
+            if (
+                not isinstance(budget, Mapping)
+                or budget.get("simulations") != T044_SEARCH_BUDGET
+                or settings.get("information_regime")
+                != "full_simulator_state_oracle_like"
+            ):
+                raise ValueError(f"T044 search semantics mismatch for {role}")
+            expected_kind, expected_rule = (
+                ("oracle_battle_search", T044_ROOT_SELECTION)
+                if role == "baseline_oracle_search"
+                else (
+                    MODEL_GUIDED_ORACLE_V2_CONTROLLER_KIND,
+                    MODEL_GUIDED_ORACLE_V2_ROOT_SELECTION_RULE,
+                )
+            )
+            if (
+                entry.get("kind") != expected_kind
+                or settings.get("root_selection_rule") != expected_rule
+            ):
+                raise ValueError(f"T044 search semantics mismatch for {role}")
+            action_space = settings.get("action_space")
+            if not isinstance(
+                action_space, Mapping
+            ) or "potion" not in action_space.get("excluded_kinds", ()):
+                raise ValueError(f"T044 action-space semantics mismatch for {role}")
+        elif role == "raw_checkpoint_public_policy":
+            scorer = settings.get("guidance_scorer")
+            if (
+                settings.get("information_regime") != "normal_public_policy"
+                or not isinstance(scorer, Mapping)
+                or checkpoint is None
+            ):
+                raise ValueError("T044 raw checkpoint policy semantics mismatch")
+            _validate_t044_checkpoint_provenance(
+                scorer.get("checkpoint_provenance"),
+                checkpoint=checkpoint,
+                expected_artifact="torch-policy-value-checkpoint-v1-sha256:"
+                + str(checkpoint.get("sha256")),
+                label="raw",
+            )
+        elif (
+            entry.get("kind") != "decision_policy"
+            or settings.get("information_regime") != "normal_public_policy"
+            or settings.get("policy_class") != "ScoredActionPolicy"
+        ):
+            raise ValueError("T044 scripted public-policy semantics mismatch")
+    guided_label = by_role.get("model_guided_search_t043_checkpoint")
+    if guided_label is None:
+        return
+    guided = provenance.get(guided_label)
+    guided_config = guided.get("config") if isinstance(guided, Mapping) else None
+    scorer = (
+        guided_config.get("guidance_scorer")
+        if isinstance(guided_config, Mapping)
+        else None
+    )
+    if (
+        not isinstance(scorer, Mapping)
+        or scorer.get("policy_probability_weight") != T044_GUIDANCE_WEIGHT
+    ):
+        raise ValueError("T044 model-guided weight/checkpoint semantics mismatch")
+    expected_artifact = (
+        "torch-policy-value-checkpoint-v1-sha256:" + str(checkpoint.get("sha256"))
+        if checkpoint is not None
+        else "torch-policy-value-checkpoint-v1-sha256:a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
+    )
+    _validate_t044_checkpoint_provenance(
+        scorer.get("checkpoint_provenance"),
+        checkpoint=checkpoint,
+        expected_artifact=expected_artifact,
+        label="model-guided",
+    )
+
+
+def _validate_t044_checkpoint_provenance(
+    provenance: object,
+    *,
+    checkpoint: Mapping[str, Any] | None,
+    expected_artifact: str,
+    label: str,
+) -> None:
+    if (
+        not isinstance(provenance, Mapping)
+        or provenance.get("checkpoint_artifact_id") != expected_artifact
+    ):
+        raise ValueError(f"T044 {label} checkpoint identity mismatch")
+    if checkpoint is None:
+        return
+    try:
+        reported = Path(
+            resolve_runtime_artifact_path(provenance.get("checkpoint_path"))[
+                "runtime_path"
+            ]
+        )
+        expected = Path(
+            resolve_runtime_artifact_path(checkpoint.get("path"))["runtime_path"]
+        )
+    except ValueError as exc:
+        raise ValueError(f"T044 {label} checkpoint identity mismatch") from exc
+    if reported != expected:
+        raise ValueError(f"T044 {label} checkpoint identity mismatch")
+
+
+def _t044_results_match_cohort(arms: Sequence[Any], cohort: Any) -> bool:
+    for arm in arms:
+        for result, record in zip(
+            arm.report.battle_results, cohort.records, strict=True
+        ):
+            if any(
+                getattr(result, field) != getattr(record, field)
+                for field in (
+                    "source_checkpoint_id",
+                    "source_seed",
+                    "source_run_id",
+                    "source_battle_index",
+                    "structural_metadata",
+                )
+            ):
+                return False
+    return True
 
 
 def build_de_assisted_fixed_cohort_comparison_report(

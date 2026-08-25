@@ -176,6 +176,12 @@ commands, worker and shard counts, seed or cohort ranges, artifact identities,
 and wall-clock cost. A `smoke` label does not justify undocumented single-worker
 execution for a substantial workload.
 
+Task authors should define the earliest affected stage or independent run after a
+repair. Validated work before that boundary may be reused with its producer
+provenance; affected, partial, or failed work is rerun. Healthy long jobs may use
+`scripts/run_detached_job.py`; report the PID, status/log paths, and coarse ETA once
+and inspect again after the expected window or on request rather than continuously.
+
 ## Published Queue
 
 The executable queue is exactly the set of `READY` rows in the Active Backlog.
