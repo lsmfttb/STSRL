@@ -93,7 +93,7 @@ workflow's explicit implementation-authorization gate is satisfied.
 | T070 | DONE | [Battle Search v2 fixed-cohort outcome and budget-sufficiency audit](T070-battle-search-v2-fixed-cohort-outcome-and-budget-sufficiency-audit.md) | T069, T062, T052, T043 | fixed primary and high-budget audits complete; Case C recommends T064 to the planner without publishing a successor |
 | T071 | DONE | [Post-T064 experiment execution simplification](T071-post-t064-experiment-execution-simplification.md) | T019, T064 | simplified T064 validation/reuse ownership and added lightweight detached long-job control before revising T065 |
 | T072 | DONE | [Retire closed root-prior experiment executors](T072-retire-closed-root-prior-experiment-executors.md) | T053, T054, T055, T056, T057, T058, T059, T071 | retired the closed T053–T059 executor chain while preserving generic root-prior/search and T052 forward surfaces |
-| T073 | DRAFT | [Forward surface health gate](T073-forward-surface-health-gate.md) | T019, T064, T067, T068, T069, T070, T071, T072 | retire historical experiment execution surfaces, restore neutral forward ownership, and require a fresh post-merge repository quality review before T065 |
+| T073 | DONE | [Forward surface health gate](T073-forward-surface-health-gate.md) | T019, T064, T067, T068, T069, T070, T071, T072 | PR #72 retired historical executor surfaces, restored neutral forward ownership, and requires a fresh post-merge repository quality review before T065 |
 
 Use the table, not per-task files or roadmap prose, when deciding whether a task
 may receive a branch. Only `READY` rows should receive a new implementation
@@ -150,9 +150,12 @@ before revising T065 for publication. T072 is complete after merge of PR #71:
 it retired the closed T053–T059 task-specific executors, removed their CLI and
 lightspeed routes, preserved generic root-prior/search and T052 surfaces, and
 left the historical scientific records available through the frozen source
-anchor. T073 is now the proposed maintenance gate before any return to feature
-development. It targets completed T064/T067--T070 executor ownership and CLI
-surface, but its merge will not itself declare the repository healthy: the
+anchor. T073 is complete after PR #72 merged at
+`dac26774f7cc70abae6be1693772418398e1e7eb`: it retired completed
+T064/T067--T070 executor ownership, moved live shared helpers to neutral
+modules, preserved accepted schemas and generic Search v2/public-context
+capabilities, and recorded that the frozen baseline contained no targeted CLI
+routes to remove. The merge does not itself declare the repository healthy: the
 Planner must perform a fresh repository-wide code-quality review from the merged
 result before deciding whether to revise/publish T065 or propose another
 maintenance task. T065 remains DRAFT throughout this gate.
@@ -198,12 +201,11 @@ and inspect again after the expected window or on request rather than continuous
 ## Published Queue
 
 The executable queue is exactly the set of `READY` rows in the Active Backlog.
-Merged `main` currently has no `READY` task. T071 and T072 are `DONE`; T073 is a
-`DRAFT` proposal and is not executable until an exact-head Maintainer
-specification approval. T065 remains `DRAFT` and must not be published merely
-because T073 later merges; the mandatory post-T073 Planner quality review comes
-first. T034 remains blocked on native public-consistent hidden-future sampling
-support.
+Merged `main` currently has no `READY` task. T071, T072, and T073 are `DONE`.
+The mandatory post-T073 Planner quality review comes before any decision to
+revise or publish T065; T065 remains `DRAFT` and must not be published merely
+because T073 merged. T034 remains blocked on native public-consistent
+hidden-future sampling support.
 
 ## Standard Local Gates
 
@@ -223,7 +225,7 @@ requirements.
 
 ## Historical Mapping
 
-Completed and cancelled task documents through T072 remain the durable
+Completed and cancelled task documents through T073 remain the durable
 historical record. No task is currently executable. Accepted experiment details
 and artifact identities remain in individual task documents, reports, and
 `current_status.md`; this index only owns lifecycle state and the current

@@ -122,6 +122,19 @@ with 19,916 fewer tracked `src`/`tests` Python lines. T072 changed no accepted
 artifact schema or scientific result, and its historical task records point to
 the frozen pre-retirement source anchor. No simulator, training, or evaluation
 rerun was required. T065 remains `DRAFT`.
+T073 is now complete after PR #72 merged at
+`dac26774f7cc70abae6be1693772418398e1e7eb`. It removed the completed T064 and
+T067--T070 executor command modules, scripts, and executor-only tests; moved
+live source-identity, sharding, search-cost, and feature-identity helpers to
+neutral owners; and preserved the accepted T064/T067/T069 schema identifiers
+and T070 schema-contract blob. The frozen-baseline inventory found no targeted
+T064/T067/T068/T069/T070 CLI routes, so no maintained T062 or generic Search v2
+route was removed. The final Git-object gate reduced tracked Python by 16,854
+lines across `src` and `tests`, including 9,634 lines under `src`; the final
+local suite passed 729 tests. No simulator, training, evaluation, or scientific
+artifact rerun was required. The merge does not authorize or publish T065:
+the Planner must first perform the fresh repository-wide quality review
+required by T073, and T065 remains `DRAFT`.
 
 ## Implemented On Main
 
@@ -179,6 +192,12 @@ rerun was required. T065 remains `DRAFT`.
   `sts_lightspeed`, training, or evaluation. Its accepted maintenance evidence
   is the 21-file deletion audit, the 19,916-line size reduction, and the local
   regression gates; T065 remains a draft planner task.
+- T073 produced no scientific result artifact and did not rerun
+  `sts_lightspeed`, training, or evaluation. Its accepted maintenance evidence
+  is the T064/T067--T070 executor deletion audit, neutral ownership inventory,
+  exact T070 schema-contract retention, 16,854-line `src`/`tests` reduction,
+  729-test final-head suite, and the post-merge Planner quality-review gate.
+  T065 remains a draft planner task.
 
 ### Battle-Agent Data Spike
 
