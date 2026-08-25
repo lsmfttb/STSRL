@@ -91,7 +91,7 @@ workflow's explicit implementation-authorization gate is satisfied.
 | T068 | DONE | [Native-boundary batched inference feasibility](T068-native-boundary-batched-inference-feasibility.md) | T067, T062, T052, T043 | exact audit found only 207/261/398 synchronous singleton requests; batching closed and selected T069 |
 | T069 | DONE | [Public-node feature-encoding projection feasibility](T069-public-node-feature-encoding-projection-feasibility.md) | T068, T067, T062, T052, T043 | exact projection preserved semantics, materially reduced cost, locked all calibration families, and recommended the original outcome comparison for planner consideration |
 | T070 | DONE | [Battle Search v2 fixed-cohort outcome and budget-sufficiency audit](T070-battle-search-v2-fixed-cohort-outcome-and-budget-sufficiency-audit.md) | T069, T062, T052, T043 | fixed primary and high-budget audits complete; Case C recommends T064 to the planner without publishing a successor |
-| T071 | DRAFT | [Post-T064 experiment execution simplification](T071-post-t064-experiment-execution-simplification.md) | T019, T064 | reduce task-specific orchestration/provenance overhead and add lightweight detached long-job control before revising T065 |
+| T071 | DONE | [Post-T064 experiment execution simplification](T071-post-t064-experiment-execution-simplification.md) | T019, T064 | simplified T064 validation/reuse ownership and added lightweight detached long-job control before revising T065 |
 
 Use the table, not per-task files or roadmap prose, when deciding whether a task
 may receive a branch. Only `READY` rows should receive a new implementation
@@ -141,8 +141,11 @@ complete. Its frozen primary comparison did not pass the Search v2 promotion
 boundary, while the bounded curve found the 100-simulation budget insufficient
 but no high-budget guidance signal. The terminal Case C recommends T064 to the
 planner without publishing it. T063, T065, and T066 remain draft; T064 is
-complete with a valid negative Case B. T071 is proposed as a short execution-
-simplification prerequisite before T065 is revised for publication.
+complete with a valid negative Case B. T071 is complete after merge of PR #70:
+it consolidated T044 validation ownership and redundant fixed-report checks,
+added the detached-job status convention, and documented stage/run-local reuse
+before revising T065 for publication. T065 remains DRAFT and is not authorized
+by this completion.
 
 ## Task Boundary And Artifact Rules
 
@@ -185,10 +188,9 @@ and inspect again after the expected window or on request rather than continuous
 ## Published Queue
 
 The executable queue is exactly the set of `READY` rows in the Active Backlog.
-Merged `main` currently has no `READY` task. This proposal branch adds T071 as
-`DRAFT`; it is not executable until the maintainer approves an exact
-specification head under the single-PR workflow. T034 remains blocked on native
-public-consistent hidden-future sampling support.
+Merged `main` currently has no `READY` task. T071 is `DONE` after PR #70 was
+merged; it is not an executable research task. T065 remains `DRAFT` and T034
+remains blocked on native public-consistent hidden-future sampling support.
 
 ## Standard Local Gates
 

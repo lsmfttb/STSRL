@@ -109,7 +109,11 @@ but lost one T052 win at seed 64002 and on the Act-2+ subset. Only three of six
 transfer gates passed, so no curriculum promotion or natural scale-up is
 authorized. The terminal decision recommends T065 to the planner; it does not
 publish or authorize T065. There are currently no `READY` tasks. T034 remains
-blocked on native public-consistent hidden-future sampler support.
+blocked on native public-consistent hidden-future sampler support. T071 is now
+complete after PR #70 merged at `dce372b`; it reduced T064-specific validation
+duplication, established T044 validation ownership, and added the detached
+long-job/status and stage/run-local reuse conventions. No T064 scientific rerun
+was required, and T065 remains `DRAFT`.
 
 ## Implemented On Main
 
@@ -143,6 +147,20 @@ blocked on native public-consistent hidden-future sampler support.
   the existing Search v2 method remains unchanged. Historical task-shaped fork
   branches are retained only as provenance, and the old ordered patch stack is
   retained only as retired provenance.
+
+### Execution And Maintenance
+
+- T071 post-T064 execution simplification is merged on `main` (PR #70). The
+  T044-owned report surface now provides reusable controller-semantic and
+  checkpoint validation, while T064 retains its strict artifact, provenance,
+  order/linkage, completion, deterministic-plan, and reuse-boundary checks.
+- `scripts/run_detached_job.py` provides a small disposable status contract
+  with PID, command/cwd, logs, terminal state, exit code, and coarse ETA. Healthy
+  long jobs are reported once and rechecked after the expected window rather
+  than continuously monitored.
+- T071 produced no scientific result artifact and did not rerun T064,
+  `sts_lightspeed`, teacher/training, or fixed-cohort evaluation. T065 remains
+  a draft planner task.
 
 ### Battle-Agent Data Spike
 
