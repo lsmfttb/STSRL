@@ -6,16 +6,20 @@ it should be used during implementation and review.
 
 ## Authority Order
 
-When documents disagree, use this order:
+Use the document that owns the question rather than duplicating rules across
+several files:
 
 1. [`../AGENTS.md`](../AGENTS.md): concise repository-wide contributor rules.
-2. [`project_architecture.md`](project_architecture.md): authoritative design
-   and ownership boundaries.
-3. [`current_status.md`](current_status.md): implemented capabilities, known
+2. [`project_architecture.md`](project_architecture.md): runtime, model, data,
+   information-regime, and code-ownership architecture.
+3. [`collaboration_workflow.md`](collaboration_workflow.md): authoritative task
+   roles, branch/PR workflow, specification approval, execution reuse, and
+   review/merge process.
+4. [`current_status.md`](current_status.md): implemented capabilities, known
    gaps, and current priorities.
-4. Active roadmap documents: intended future work within the architecture.
-5. Operational guides: commands and environment details.
-6. [`history/`](history/README.md): past investigations and superseded plans.
+5. Active roadmap documents: intended future work within the architecture.
+6. Operational guides: commands and environment details.
+7. [`history/`](history/README.md): past investigations and superseded plans.
 
 `README.md` is the project entry point, not an exhaustive specification.
 
@@ -44,8 +48,8 @@ When documents disagree, use this order:
 ### Collaboration
 
 - [`collaboration_workflow.md`](collaboration_workflow.md): authoritative
-  roles, one-task-one-branch workflow, task specification contract, review, and
-  merge process.
+  roles, one-task-one-branch workflow, task specification contract, execution
+  reuse, review, and merge process.
 - [`sts_lightspeed_maintainer_role.md`](sts_lightspeed_maintainer_role.md):
   operating contract for the external `sts_lightspeed` fork maintainer role,
   branch policy, cross-repository handoff, and review evidence.
@@ -71,8 +75,11 @@ When documents disagree, use this order:
 
 ## Maintenance Rules
 
-- Put repository-wide invariants only in `project_architecture.md` and summarize
-  the most important ones in `AGENTS.md`.
+- Put repository-wide runtime/design invariants in `project_architecture.md` and
+  summarize the most important ones in `AGENTS.md`.
+- Put task ownership and execution/review workflow in
+  `collaboration_workflow.md`; keep other summaries short and consistent with
+  it.
 - Update `current_status.md` when implementation capability or the immediate
   blocker changes.
 - Put future design in the relevant roadmap; do not mix dated experiment
@@ -85,11 +92,13 @@ When documents disagree, use this order:
 
 ## Branch Workflow
 
-`main` is the only integration line. Concrete work begins only from a `READY`
-task under `tasks/`, and each task receives one fresh branch and one pull
-request based on latest `main`. New task content comes from the
-repository-read-only planner, is published and managed by the main maintainer,
-and is implemented by a maintainer-managed sub-agent. The maintainer owns
-review, merge, and the `current_status.md` result report. See
-`collaboration_workflow.md`; do not infer workflow from old branch names or
-historical documents.
+`main` is the only integration line. For a new task, the planner creates one
+fresh branch and one draft pull request from current `main`, writes the task
+specification and proposed lifecycle changes there, and responds to
+specification review on that same PR. The main maintainer independently approves
+an exact specification commit, dispatches the implementer on the same branch/PR,
+reviews the implementation, and owns merge plus the `current_status.md` result
+report. Merged task lifecycle remains authoritative in `tasks/README.md`.
+
+See `collaboration_workflow.md` for the complete contract; do not infer workflow
+from old branch names, historical documents, or stale role summaries.

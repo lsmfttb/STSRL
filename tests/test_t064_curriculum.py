@@ -3882,6 +3882,10 @@ def test_stage_summary_allows_reused_commits_and_mixed_persisted_paths(
         transfer_command._validate_stage_summary_evidence(
             summary, manifest=manifest, code_commit=current_commit
         )
+    stages[4]["reuse_disposition"] = "reused_validated"
+    transfer_command._validate_stage_summary_evidence(
+        summary, manifest=manifest, code_commit=current_commit
+    )
 
 
 def test_stage3_production_routes_all_sixteen_frozen_ranges_through_fork(

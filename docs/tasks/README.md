@@ -10,11 +10,12 @@ lifecycle state. Individual task documents intentionally omit mutable
 disposition where needed. `current_status.md` and roadmap files may summarize
 the current milestone, but they do not override this table.
 
-New task content originates with the repository-read-only planner. The planner
-sends a complete proposal to the main maintainer; the maintainer validates,
-records, and manages it here. The maintainer does not proactively add successor
-tasks. Implementers are maintainer-managed sub-agents and may start only a
-published `READY` row.
+New task content originates with the planner. For a new task, the planner creates
+a fresh task branch and draft pull request, writes the complete specification and
+proposed lifecycle changes there, and submits that exact head to the maintainer
+for independent review. The maintainer does not proactively add successor tasks.
+Implementers are maintainer-managed sub-agents and may start only after the
+workflow's explicit implementation-authorization gate is satisfied.
 
 ## Active Backlog
 
@@ -90,6 +91,7 @@ published `READY` row.
 | T068 | DONE | [Native-boundary batched inference feasibility](T068-native-boundary-batched-inference-feasibility.md) | T067, T062, T052, T043 | exact audit found only 207/261/398 synchronous singleton requests; batching closed and selected T069 |
 | T069 | DONE | [Public-node feature-encoding projection feasibility](T069-public-node-feature-encoding-projection-feasibility.md) | T068, T067, T062, T052, T043 | exact projection preserved semantics, materially reduced cost, locked all calibration families, and recommended the original outcome comparison for planner consideration |
 | T070 | DONE | [Battle Search v2 fixed-cohort outcome and budget-sufficiency audit](T070-battle-search-v2-fixed-cohort-outcome-and-budget-sufficiency-audit.md) | T069, T062, T052, T043 | fixed primary and high-budget audits complete; Case C recommends T064 to the planner without publishing a successor |
+| T071 | DRAFT | [Post-T064 experiment execution simplification](T071-post-t064-experiment-execution-simplification.md) | T019, T064 | reduce task-specific orchestration/provenance overhead and add lightweight detached long-job control before revising T065 |
 
 Use the table, not per-task files or roadmap prose, when deciding whether a task
 may receive a branch. Only `READY` rows should receive a new implementation
@@ -139,7 +141,8 @@ complete. Its frozen primary comparison did not pass the Search v2 promotion
 boundary, while the bounded curve found the 100-simulation budget insufficient
 but no high-budget guidance signal. The terminal Case C recommends T064 to the
 planner without publishing it. T063, T065, and T066 remain draft; T064 is
-complete with a valid negative Case B.
+complete with a valid negative Case B. T071 is proposed as a short execution-
+simplification prerequisite before T065 is revised for publication.
 
 ## Task Boundary And Artifact Rules
 
@@ -173,12 +176,19 @@ commands, worker and shard counts, seed or cohort ranges, artifact identities,
 and wall-clock cost. A `smoke` label does not justify undocumented single-worker
 execution for a substantial workload.
 
+Task authors should define the earliest affected stage or independent run after a
+repair. Validated work before that boundary may be reused with its producer
+provenance; affected, partial, or failed work is rerun. Healthy long jobs may use
+`scripts/run_detached_job.py`; report the PID, status/log paths, and coarse ETA once
+and inspect again after the expected window or on request rather than continuously.
+
 ## Published Queue
 
 The executable queue is exactly the set of `READY` rows in the Active Backlog.
-There are currently no `READY` tasks. T034 remains blocked on native
-public-consistent hidden-future sampling support; the planner must evaluate the
-T070 maintainer report before proposing any successor.
+Merged `main` currently has no `READY` task. This proposal branch adds T071 as
+`DRAFT`; it is not executable until the maintainer approves an exact
+specification head under the single-PR workflow. T034 remains blocked on native
+public-consistent hidden-future sampling support.
 
 ## Standard Local Gates
 

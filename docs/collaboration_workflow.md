@@ -309,6 +309,30 @@ workers requires a reported resource or tooling reason. The final PR report must
 include shard and worker counts, seed/source-run or cohort-record ranges, and
 wall-clock cost for each WSL stage.
 
+## Incremental Reuse And Long-Running Execution
+
+Expensive workflows should preserve validated work whenever a reviewed change does
+not affect its semantics. A producer Git commit remains useful provenance, while
+reuse is decided from the artifact's relevant inputs, configuration, completion
+state, and the reviewed impact boundary of the change. After a repair, identify
+the earliest affected stage or independent run; validated outputs before that
+boundary remain reusable with their original provenance. Independent completed
+shards or runs may likewise be reused when their own inputs and contract still
+validate.
+
+Long-running work should be prepared with cheap preflight checks and launched so
+it can continue without an interactive agent remaining active. Record a coarse
+expected duration when one is available, together with the process/status and log
+locations needed to inspect progress. After a healthy launch, the maintainer or
+implementer reports that information once and returns to other work; another
+status check is appropriate after the expected window, on an explicit request, or
+when a completion/failure signal is available. Operational status files are
+short-lived execution state rather than scientific artifacts.
+
+Per-run numerical settings and orchestration parallelism are separate concerns.
+A task may freeze numerical settings for reproducibility while still running
+independent shards, seeds, or arms concurrently when resources permit.
+
 ## Task Artifact Boundaries
 
 Tasks may depend on merged contracts from prerequisite tasks, but not on temporary

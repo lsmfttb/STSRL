@@ -19,6 +19,16 @@ current contracts.
   templates. This is required for multi-line commands, nested quoting, `gh pr`
   review/merge flows, artifact verification, and worktree/branch cleanup.
 
+## Project Design Principle
+
+- STSRL is a lightweight open-source/personal research project. Prefer clear
+  ownership, direct data flow, simple interfaces, efficient execution, and
+  focused checks at real correctness or experimental-validity boundaries.
+  Scientific boundaries remain strict, while repository-owned stages and
+  developer/AI tooling are trusted participants. Keep validation proportional
+  to realistic mismatch, incomplete execution, leakage, incompatible state,
+  and design drift rather than letting validation become a parallel system.
+
 ## Scope And Simulator Boundary
 
 - The trainable scope is currently battle decisions. Non-combat decisions stay
@@ -90,6 +100,13 @@ current contracts.
   discarding potions.
 - Versioned controller names are behavior contracts. Behavior changes require a
   new version; old versions remain explicitly constructible for diagnostics.
+- For expensive staged work, Git commit identity is producer provenance rather
+  than a global cache key. After a reviewed repair, reuse validated work before
+  the earliest affected stage/run and rerun the affected boundary onward.
+- Launch healthy long-running approved jobs through the repository detached-job
+  convention when available. Report the PID, status path, log paths, and coarse
+  ETA once, then return control instead of continuously polling a job that is
+  simply still running.
 
 ## Data And Evaluation
 
@@ -143,38 +160,40 @@ current contracts.
 
 ## Parallel Development
 
-- The planner is repository-read-only and owns new task proposals. It sends
-  proposed task content to the main maintainer and does not edit files,
-  branches, pull requests, or lifecycle state.
-- The main maintainer validates and publishes planner-proposed task documents,
-  manages lifecycle state, and maintains `docs/current_status.md` as the
-  planner-facing execution-result report. It does not proactively originate
-  new tasks.
-- Implement only a planner-proposed, maintainer-published `READY` task. Task
-  lifecycle state is authoritative only in `docs/tasks/README.md`; an empty
-  `READY` queue is valid while awaiting planner direction.
+- The planner owns new task proposals. For each new task it creates one fresh
+  branch and one draft pull request from current `main`, writes the complete task
+  specification and proposed lifecycle changes there, and responds to
+  specification review on that same PR. Planner write authority is limited to
+  this specification/control-plane phase.
+- The main maintainer independently reviews and approves the exact task
+  specification, manages lifecycle state, dispatches the implementer on the same
+  branch/PR, and maintains `docs/current_status.md` as the planner-facing result
+  report. It does not proactively originate new tasks.
+- A task implementer starts only after a valid exact-commit specification
+  approval. Task lifecycle state is authoritative only in
+  `docs/tasks/README.md`; an empty executable queue is valid while awaiting
+  planner direction.
 - The task implementer is a sub-agent of the main maintainer. The maintainer
   prioritizes the highest-cost-effectiveness current model that is sufficiently
   capable for the task, including inexpensive options such as Luna when
   appropriate, and escalates only for justified complexity, risk, or observed
   failure. Expected rework and downstream rerun cost count alongside model
-  price. The maintainer calibrates reasoning effort, assigns an isolated
-  worktree/branch, and manages the implementation handoff.
+  price. The maintainer calibrates reasoning effort and manages the
+  implementation handoff.
 - The main maintainer does not implement feature code directly. It remains the
   independent code reviewer, publishes every review or re-review conclusion on
   the pull request, and owns merge decisions.
 - One task uses one fresh branch and one pull request based on latest `main`.
 - A ready-for-review pull request must satisfy the task's published
   deliverables, required artifacts, verification, and acceptance criteria.
-  Incomplete work must stay draft or be explicitly marked incomplete with the
-  missing criteria named; do not submit an incomplete task as ready for merge.
+  Incomplete work stays draft or is explicitly marked incomplete with the
+  missing criteria named.
 - `main` is the only integration line.
 - Use isolated worktrees for parallel tasks; never switch branches in a shared
   worktree.
-- Project-level documentation, task publication, lifecycle state, and
-  execution-result reporting are owned by the main maintainer. The planner
-  supplies task content without modifying the repository. Feature pull
-  requests report documentation impact.
+- Project-level implementation reporting and final merged lifecycle state are
+  owned by the main maintainer; the planner owns proposed task content during
+  the specification phase.
 - Do not revert or overwrite changes from other branches or agents.
 - Before merging, review behavior, provenance, artifact compatibility, tests,
   and documentation impact.
