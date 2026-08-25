@@ -65,7 +65,7 @@ from sts_combat_rl.sim.oracle_teacher_scaleup import (
     dump_oracle_teacher_scaleup_manifest_json,
     validate_oracle_teacher_scaleup_budgets,
 )
-from sts_combat_rl.sim.t064_curriculum import complete_source_identity
+from sts_combat_rl.sim.source_identity import complete_source_identity
 
 
 class _ScaleupAdapter:

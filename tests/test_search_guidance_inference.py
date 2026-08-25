@@ -19,7 +19,7 @@ from sts_combat_rl.sim.search_guidance_inference import (
     SEARCH_GUIDANCE_INFERENCE_SCHEMA_ID,
     format_search_guidance_inference_result,
 )
-from sts_combat_rl.sim.t069_feature_identity import T069FeatureIdentityRecorder
+from sts_combat_rl.sim.feature_identity import FeatureIdentityRecorder
 from sts_combat_rl.sim.torch_policy_value import (
     TorchPolicyValueGuidanceScorer,
     TorchPolicyValueTrainingConfig,
@@ -172,12 +172,12 @@ def test_t069_identity_observer_records_complete_existing_scorer_input(
     checkpoint_path, dataset = _write_checkpoint(tmp_path)
     context = _first_context(dataset)
     scorer = TorchPolicyValueGuidanceScorer.from_checkpoint_path(checkpoint_path)
-    recorder = T069FeatureIdentityRecorder(arm="prior_value", projected=False)
-    scorer.set_t069_input_observer(recorder)
+    recorder = FeatureIdentityRecorder(arm="prior_value", projected=False)
+    scorer.set_input_identity_observer(recorder)
 
-    scorer.begin_t069_search_scope(context.public_run_context)
+    scorer.begin_search_scope(context.public_run_context)
     scorer.score_decision_context(context)
-    scorer.end_t069_search_scope()
+    scorer.end_search_scope()
 
     assert recorder.problems == []
     assert len(recorder.records) == 1

@@ -392,7 +392,7 @@ def build_oracle_teacher_search_guidance_dataset_from_direct_provenance(
     identity adapter is replaced by the validated T064 selected-source order.
     """
 
-    from sts_combat_rl.sim.t064_curriculum import complete_source_identity
+    from sts_combat_rl.sim.source_identity import complete_source_identity
 
     if len(teacher_dataset.records) != len(selected_sources):
         raise ValueError("T064 direct conversion teacher/source range count mismatch")

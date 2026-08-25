@@ -33,7 +33,7 @@ from sts_combat_rl.sim.search_telemetry import (
     iter_search_decision_telemetry_dicts,
     summarize_search_decision_telemetry_dicts,
 )
-from sts_combat_rl.sim.t064_curriculum import contiguous_ranges
+from sts_combat_rl.sim.sharding import contiguous_ranges
 
 
 DE_ASSISTED_FIXED_COHORT_COMPARISON_SCHEMA_ID = "de-assisted-fixed-cohort-comparison-v1"

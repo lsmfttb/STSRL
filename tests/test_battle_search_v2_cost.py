@@ -5,7 +5,7 @@ from dataclasses import replace
 import pytest
 
 from sts_combat_rl.sim.action_space import ActionSpaceConfig
-from sts_combat_rl.sim.battle_search_v2_cost import (
+from sts_combat_rl.sim.search_cost import (
     PublicNodeInferenceCache,
     public_node_cache_key,
 )
@@ -177,7 +177,7 @@ def test_digest_collision_scores_uncached_and_discards_colliding_entry(
             return "same-digest"
 
     monkeypatch.setattr(
-        "sts_combat_rl.sim.battle_search_v2_cost.hashlib.sha256",
+        "sts_combat_rl.sim.search_cost.hashlib.sha256",
         lambda payload: _ConstantDigest(),
     )
     cache = PublicNodeInferenceCache(capacity=2)

@@ -22,7 +22,8 @@ separate seeded driver.
 ## Current Main
 
 `main` contains the current battle-agent research foundation through the
-assisted source-generation and de-assisted evaluation batch. The high-level
+forward-surface maintenance gate after the assisted source-generation and
+de-assisted evaluation batch. The high-level
 shape is:
 
 ```text

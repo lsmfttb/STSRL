@@ -35,7 +35,7 @@ from sts_combat_rl.sim.search_guidance_inference import (
     search_guidance_scorer_checkpoint_provenance,
     validate_search_guidance_result,
 )
-from sts_combat_rl.sim.battle_search_v2_cost import (
+from sts_combat_rl.sim.search_cost import (
     PublicNodeInferenceCache,
     T067_COST_ATTRIBUTION_SCHEMA_ID,
     T067_COST_ATTRIBUTION_SCHEMA_VERSION,
@@ -314,8 +314,8 @@ class BattleSearchV2Controller:
             self.scorer.score_decision_context
         )
         if self.feature_identity_trace_enabled:
-            begin_scope = getattr(self.scorer, "begin_t069_search_scope", None)
-            end_scope = getattr(self.scorer, "end_t069_search_scope", None)
+            begin_scope = getattr(self.scorer, "begin_search_scope", None)
+            end_scope = getattr(self.scorer, "end_search_scope", None)
             if not callable(begin_scope) or not callable(end_scope):
                 raise ValueError(
                     "T069 feature identity trace requires an observer-aware scorer"
@@ -466,7 +466,7 @@ class BattleSearchV2Controller:
             leaf_value_callback=value_callback if self.uses_leaf_value else None,
         )
         if self.feature_identity_trace_enabled:
-            end_scope = getattr(self.scorer, "end_t069_search_scope")
+            end_scope = getattr(self.scorer, "end_search_scope")
             end_scope()
         search_elapsed = time.perf_counter() - search_start
         attribution["python_native_callback_overhead_ms"] = max(

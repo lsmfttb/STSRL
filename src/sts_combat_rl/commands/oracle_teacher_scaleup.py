@@ -50,7 +50,7 @@ from sts_combat_rl.sim.oracle_teacher_scaleup import (
     selected_natural_battle_start_pool,
     validate_oracle_teacher_scaleup_budgets,
 )
-from sts_combat_rl.sim.t064_curriculum import complete_source_identity
+from sts_combat_rl.sim.source_identity import complete_source_identity
 
 
 ORACLE_TEACHER_SCALEUP_MANIFEST_FILENAME = "oracle-teacher-scaleup-manifest.json"
