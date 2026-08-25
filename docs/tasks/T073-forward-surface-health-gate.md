@@ -330,7 +330,8 @@ T073 must not pre-decide that outcome.
   durable generic capabilities.
 - Neutral ownership for any genuinely reusable T064/T067--T070 helper that had a
   live forward caller.
-- Reduced task-numbered CLI and stale export surface.
+- Retired any task-numbered CLI routes found by the baseline inventory and
+  reduced stale export surface.
 - Corrected project-identity documentation directly affected by the cleanup.
 - Regression coverage for retained generic capabilities and moved shared
   responsibilities.
@@ -380,8 +381,12 @@ T073 must not pre-decide that outcome.
   T067--T070 execution are absent from `--help` and source routing.
 - No deprecated/no-op aliases remain for those retired paths.
 - `cli_parser.py`, `cli_validation.py`, and `lightspeed_cli.py` do not grow in
-  physical lines relative to the frozen baseline; their combined physical line
-  count must decrease materially as historical routes are removed.
+  physical lines relative to the frozen baseline. When the frozen baseline
+  contains task-only T064/T067--T070 routes, removing those routes must reduce
+  their combined physical line count materially. When the machine-assisted
+  baseline inventory proves that no such routes exist, unchanged combined size
+  is acceptable and the PR report must record that result explicitly. Do not
+  remove maintained T062 or generic Search v2 routes to manufacture a decrease.
 - `sim/__init__.py` and command exports contain no stale exports for deleted
   modules.
 
