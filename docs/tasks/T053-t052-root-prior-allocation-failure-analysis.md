@@ -199,3 +199,9 @@ source/cohort match status, disagreement counts, Boss-only and Act-2+ subset
 findings, allocation telemetry availability, failure taxonomy counts,
 recommended next task, verification commands and results, known limitations,
 and documentation impact.
+
+## Historical Executor Note
+
+T053 remains DONE and its scientific record is unchanged. Its task-specific
+executor was retired by T072; executable historical source is available at
+`09f58a7352f8dd860c2ed1d7f2b59beacb61d648`.

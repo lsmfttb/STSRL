@@ -230,3 +230,9 @@ labels, source/cohort match status, all-record results, T053 disagreement-index
 results, Boss-only and Act-2+ results, allocation telemetry availability,
 unavailable diagnostics, exactly one recommended next task, verification
 commands and results, known limitations, and documentation impact.
+
+## Historical Executor Note
+
+T054 remains DONE and its scientific record is unchanged. Its task-specific
+executor was retired by T072; executable historical source is available at
+`09f58a7352f8dd860c2ed1d7f2b59beacb61d648`.

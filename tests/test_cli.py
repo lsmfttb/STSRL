@@ -449,7 +449,6 @@ def test_cli_parser_accepts_model_guided_oracle_flags(tmp_path) -> None:
     comparison_path = tmp_path / "comparison.jsonl"
     de_assisted_path = tmp_path / "de-assisted-comparison.jsonl"
     root_prior_path = tmp_path / "root-prior-comparison.jsonl"
-    t054_path = tmp_path / "t054-comparison.jsonl"
     potion_comparison_path = tmp_path / "potion-comparison.jsonl"
 
     args = build_parser().parse_args(
@@ -564,38 +563,6 @@ def test_cli_parser_accepts_model_guided_oracle_flags(tmp_path) -> None:
     )
     assert root_prior_args.root_prior_guided_search_comparison_scale == "fixed"
     assert root_prior_args.root_prior_guided_search_comparison_task_id == "T048"
-
-    t054_args = build_parser().parse_args(
-        [
-            "--lightspeed-t054-guardrailed-root-prior-repair-comparison",
-            str(cohort_path),
-            "--model-guided-oracle-checkpoint",
-            str(checkpoint_path),
-            "--search-budget",
-            "20",
-            "--workers",
-            "16",
-            "--shards",
-            "16",
-            "--t054-guardrailed-root-prior-comparison-report",
-            str(t054_path),
-            "--t054-guardrailed-root-prior-repair-scale",
-            "fixed",
-            "--root-prior-guardrail-uniform-blend-weight",
-            "0.25",
-            "--root-prior-guardrail-max-prior-probability",
-            "0.60",
-        ]
-    )
-
-    assert (
-        t054_args.lightspeed_t054_guardrailed_root_prior_repair_comparison
-        == cohort_path
-    )
-    assert t054_args.t054_guardrailed_root_prior_comparison_report == t054_path
-    assert t054_args.t054_guardrailed_root_prior_repair_scale == "fixed"
-    assert t054_args.root_prior_guardrail_uniform_blend_weight == 0.25
-    assert t054_args.root_prior_guardrail_max_prior_probability == 0.60
 
     root_prior_merge_path = tmp_path / "root-prior-merged.jsonl"
     root_prior_shard_path = tmp_path / "root-prior-shard-0.jsonl"
@@ -829,29 +796,6 @@ def test_cli_rejects_root_prior_guided_comparison_without_checkpoint(
         main(
             [
                 "--lightspeed-root-prior-guided-search-comparison",
-                str(cohort_path),
-                "--log-file",
-                "-",
-            ]
-        )
-        == 2
-    )
-
-    captured = capsys.readouterr()
-    assert captured.out == ""
-    assert "requires --model-guided-oracle-checkpoint" in captured.err
-
-
-def test_cli_rejects_t054_guardrailed_comparison_without_checkpoint(
-    tmp_path,
-    capsys,
-) -> None:
-    cohort_path = tmp_path / "cohort.jsonl"
-
-    assert (
-        main(
-            [
-                "--lightspeed-t054-guardrailed-root-prior-repair-comparison",
                 str(cohort_path),
                 "--log-file",
                 "-",
