@@ -94,7 +94,7 @@ workflow's explicit implementation-authorization gate is satisfied.
 | T071 | DONE | [Post-T064 experiment execution simplification](T071-post-t064-experiment-execution-simplification.md) | T019, T064 | simplified T064 validation/reuse ownership and added lightweight detached long-job control before revising T065 |
 | T072 | DONE | [Retire closed root-prior experiment executors](T072-retire-closed-root-prior-experiment-executors.md) | T053, T054, T055, T056, T057, T058, T059, T071 | retired the closed T053–T059 executor chain while preserving generic root-prior/search and T052 forward surfaces |
 | T073 | DONE | [Forward surface health gate](T073-forward-surface-health-gate.md) | T019, T064, T067, T068, T069, T070, T071, T072 | PR #72 retired historical executor surfaces, restored neutral forward ownership, and requires a fresh post-merge repository quality review before T065 |
-| T074 | DRAFT | [Core decision/policy boundary repair](T074-core-policy-boundary-repair.md) | T019, T073 | remove the forward runtime policy/batching/control cycle and contract the 336-name simulator package barrel before any T065 publication decision |
+| T074 | DONE | [Core decision/policy boundary repair](T074-core-policy-boundary-repair.md) | T019, T073 | PR #73 repaired the forward runtime policy/batching/control boundary, moved non-combat and offline evaluation ownership, and contracted the simulator package barrel before any T065 publication decision |
 
 Use the table, not per-task files or roadmap prose, when deciding whether a task
 may receive a branch. Only `READY` rows should receive a new implementation
@@ -160,11 +160,15 @@ routes to remove. The mandatory post-T073 Planner review then found a separate
 forward-code defect: `controlled_run -> policy -> batching -> controlled_run`
 forms a real cycle, `policy.py` mixes low-level runtime contracts with offline
 batch evaluation and non-combat driver ownership, and `sts_combat_rl.sim`
-freezes 336 package-level compatibility exports. T074 is therefore proposed as
-a narrow core-boundary repair before any T065 publication decision. The same
-review also recorded unresolved CLI, tracked-fixture, CI/open-source packaging,
-and large-module concerns; T074 does not pre-judge those follow-ups. T065
-remains DRAFT.
+freezes 336 package-level compatibility exports. T074 was approved as the
+narrow core-boundary repair and is complete after PR #73 merged at
+`7c2dcf5d8a6d74bb03e7fda173000dad006933ce`. It established the acyclic policy
+contract, explicit non-combat/offline evaluation ownership, and a 31-name
+foundational package surface without changing schemas or scientific results.
+The same review recorded unresolved CLI, tracked-fixture, CI/open-source
+packaging, and large-module concerns; those remain inputs to the required
+post-T074 Planner review. T065 remains DRAFT and is not authorized by this
+maintenance merge.
 
 ## Task Boundary And Artifact Rules
 
@@ -207,11 +211,11 @@ and inspect again after the expected window or on request rather than continuous
 ## Published Queue
 
 The executable queue is exactly the set of `READY` rows in the Active Backlog.
-Merged `main` currently has no `READY` task. T071, T072, and T073 are `DONE`.
-The post-T073 quality review proposes T074 as `DRAFT`; it is not executable until
-Maintainer exact-head specification approval. T065 remains `DRAFT` and must not
-be published merely because T073 merged or T074 is proposed. T034 remains
-blocked on native public-consistent hidden-future sampling support.
+Merged `main` currently has no `READY` task. T071, T072, T073, and T074 are
+`DONE`. The post-T074 quality review remains required before any T065
+publication decision. T065 remains `DRAFT` and must not be published merely
+because T074 merged. T034 remains blocked on native public-consistent
+hidden-future sampling support.
 
 ## Standard Local Gates
 
@@ -231,7 +235,7 @@ requirements.
 
 ## Historical Mapping
 
-Completed and cancelled task documents through T073 remain the durable
+Completed and cancelled task documents through T074 remain the durable
 historical record. No task is currently executable. Accepted experiment details
 and artifact identities remain in individual task documents, reports, and
 `current_status.md`; this index only owns lifecycle state and the current

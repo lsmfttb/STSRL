@@ -1,6 +1,6 @@
 # Current Status
 
-Last reviewed: 2026-08-25.
+Last reviewed: 2026-08-26.
 
 This document is the main maintainer's canonical execution-result report for
 the planner and describes the latest `main` branch only. Results from local
@@ -135,6 +135,20 @@ local suite passed 729 tests. No simulator, training, evaluation, or scientific
 artifact rerun was required. The merge does not authorize or publish T065:
 the Planner must first perform the fresh repository-wide quality review
 required by T073, and T065 remains `DRAFT`.
+T074 is now complete after PR #73 merged at
+`7c2dcf5d8a6d74bb03e7fda173000dad006933ce`. It repaired the forward
+`controlled_run -> policy -> batching -> controlled_run` boundary by extracting
+the neutral policy contract, moving batch evaluation and non-combat drivers to
+explicit owners, and reducing `sts_combat_rl.sim.__all__` from 336 to 31
+foundational names. The combined policy surface decreased from 1,494 to 1,466
+physical Python lines and `sim/__init__.py` from 760 to 89. The independent
+final-head suite passed 730 tests plus the focused boundary gates, compileall,
+ruff, format, and combat/non-combat mocks; fixed-seed actions, reasons, and
+provenance matched the exact pre-T074 baseline. No simulator, training,
+evaluation, artifact-schema, checkpoint, or scientific-result rerun was
+required. T065 remains `DRAFT`; the required post-T074 Planner review must
+reassess the deferred CLI, fixture, CI/open-source, and large-module findings
+before any feature task is published.
 
 ## Implemented On Main
 
@@ -150,6 +164,12 @@ required by T073, and T065 remains `DRAFT`.
   live in focused modules under `src/sts_combat_rl/commands/`. The broad
   `sts_combat_rl.sim` export surface is explicitly audited by regression tests
   rather than silently growing.
+- T074 core decision/policy boundary repair. The low-level contract is now
+  framework-neutral and acyclic, offline batch evaluation and versioned
+  stochastic/expert non-combat drivers have explicit ownership, and the
+  package-level simulator surface is limited to 31 documented foundational
+  names. Existing controller, CLI, simulator, provenance, and artifact
+  contracts remain unchanged.
 - Live CommunicationMod runtime entry point that consumes one JSON observation,
   exposes only the sanitized public tactical contract to an `OnlineController`,
   emits at most one protocol command, and fails closed on unsupported or
@@ -198,6 +218,14 @@ required by T073, and T065 remains `DRAFT`.
   exact T070 schema-contract retention, 16,854-line `src`/`tests` reduction,
   729-test final-head suite, and the post-merge Planner quality-review gate.
   T065 remains a draft planner task.
+- T074 produced no scientific result artifact and did not rerun
+  `sts_lightspeed`, training, evaluation, or simulator-scale gates. Its
+  accepted maintenance evidence is the acyclic policy dependency guard, 31-name
+  public-surface audit, 1,494-to-1,466 combined policy-boundary line-count
+  reduction, 88.3% `sim/__init__.py` reduction, 730-test final-head suite,
+  fixed-seed provenance parity, and default-import PyTorch isolation. The
+  post-T074 Planner quality-review gate remains active, and T065 remains a
+  draft planner task.
 
 ### Battle-Agent Data Spike
 
