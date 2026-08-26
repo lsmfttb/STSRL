@@ -184,6 +184,8 @@ class T065CaseD(ValueError):
         simulator_identity: Mapping[str, Any] | None = None,
         preceding_stage_manifests: Mapping[str, Any] | None = None,
         failed_stage_artifacts: Mapping[str, Any] | None = None,
+        failure_details: Sequence[Mapping[str, Any]] = (),
+        failure_detail_counts: Mapping[str, Any] | None = None,
     ) -> None:
         self.stage = str(stage)
         self.problems = tuple(str(problem) for problem in problems)
@@ -194,6 +196,8 @@ class T065CaseD(ValueError):
         self.simulator_identity = dict(simulator_identity or {})
         self.preceding_stage_manifests = dict(preceding_stage_manifests or {})
         self.failed_stage_artifacts = dict(failed_stage_artifacts or {})
+        self.failure_details = tuple(dict(detail) for detail in failure_details)
+        self.failure_detail_counts = dict(failure_detail_counts or {})
         super().__init__(f"T065 Case D at {self.stage}: " + "; ".join(self.problems))
 
     def to_decision_report(
@@ -228,7 +232,7 @@ class T065CaseD(ValueError):
             "stage5": ("stage6",),
             "stage6": (),
         }
-        return {
+        output = {
             "schema_id": T065_DECISION_REPORT_SCHEMA_ID,
             "schema_version": 1,
             "task_id": T065_TASK_ID,
@@ -248,6 +252,16 @@ class T065CaseD(ValueError):
             "problems": list(self.problems),
             "policy_conclusion": None,
         }
+        # These are additive optional fields so legacy readers can continue to
+        # consume the version-1 report while source-selection failures expose
+        # both sides of a replay-equivalence collision.
+        if self.failure_details:
+            output["failure_details"] = [
+                _json_safe(detail) for detail in self.failure_details
+            ]
+        if self.failure_detail_counts:
+            output["failure_detail_counts"] = _json_safe(self.failure_detail_counts)
+        return output
 
 
 @dataclass(frozen=True)
@@ -1022,6 +1036,49 @@ def replay_equivalence_key(record: T065SourceState) -> tuple[Any, ...]:
     )
 
 
+def _source_candidate_provenance(candidate: Any) -> dict[str, Any]:
+    replay_identity = {
+        "family": candidate.family,
+        "public_state_identity": candidate.public_state_identity,
+        "ordered_legal_action_identities": [
+            dict(item) for item in candidate.legal_action_identities
+        ],
+    }
+    replay_identity_digest = hashlib.sha256(
+        _canonical_json_bytes(replay_identity)
+    ).hexdigest()
+    return {
+        "family": candidate.family,
+        "split": candidate.split,
+        "source_arm": candidate.source_arm,
+        "simulator_seed": candidate.simulator_seed,
+        "source_run_id": candidate.source_run_id,
+        "source_step_index": candidate.source_step_index,
+        "branch_identity": (
+            f"{candidate.source_run_id}@step{candidate.source_step_index}"
+        ),
+        "public_state_identity": candidate.public_state_identity,
+        "replay_identity_digest": replay_identity_digest,
+    }
+
+
+def _cross_split_failure_counts(
+    details: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    by_family: dict[str, int] = defaultdict(int)
+    by_split_pair: dict[str, int] = defaultdict(int)
+    for detail in details:
+        current = detail["current"]
+        by_family[str(detail["family"])] += 1
+        by_split_pair[f"{detail['previous']['split']}->{current['split']}"] += 1
+    return {
+        "total": len(details),
+        "by_type": {"replay-equivalent-cross-split": len(details)},
+        "by_family": dict(sorted(by_family.items())),
+        "by_split_pair": dict(sorted(by_split_pair.items())),
+    }
+
+
 def select_source_candidates(
     candidates: Iterable[Any],
 ) -> tuple[tuple[Any, str, bytes], ...]:
@@ -1030,6 +1087,8 @@ def select_source_candidates(
     problems: list[str] = []
     best_by_replay: dict[tuple[Any, ...], Any] = {}
     split_by_replay: dict[tuple[Any, ...], str] = {}
+    candidate_by_replay: dict[tuple[Any, ...], Any] = {}
+    failure_details: list[dict[str, Any]] = []
     for candidate in candidates:
         if candidate.family not in T065_MANDATORY_FAMILIES:
             continue
@@ -1049,11 +1108,24 @@ def select_source_candidates(
         identity = replay_equivalence_key(candidate)
         prior_split = split_by_replay.get(identity)
         if prior_split is not None and prior_split != candidate.split:
+            prior_candidate = candidate_by_replay[identity]
+            failure_details.append(
+                {
+                    "failure_type": "replay-equivalent-cross-split",
+                    "family": candidate.family,
+                    "replay_identity_digest": _source_candidate_provenance(candidate)[
+                        "replay_identity_digest"
+                    ],
+                    "previous": _source_candidate_provenance(prior_candidate),
+                    "current": _source_candidate_provenance(candidate),
+                }
+            )
             problems.append(
                 f"replay-equivalent candidate crosses splits: {candidate.source_run_id}"
             )
             continue
         split_by_replay[identity] = candidate.split
+        candidate_by_replay[identity] = candidate
         prior = best_by_replay.get(identity)
         if prior is None or canonical_source_selection_key(
             candidate
@@ -1061,7 +1133,27 @@ def select_source_candidates(
             best_by_replay[identity] = candidate
 
     if problems:
-        raise T065CaseD("source-selection", problems)
+        failure_details.sort(
+            key=lambda detail: (
+                detail["family"],
+                detail["replay_identity_digest"],
+                detail["previous"]["split"],
+                detail["previous"]["source_run_id"],
+                detail["current"]["split"],
+                detail["current"]["source_run_id"],
+            )
+        )
+        cross_split_count = len(failure_details)
+        raise T065CaseD(
+            "source-selection",
+            problems,
+            failure_counts={
+                "failure_count": len(problems),
+                "replay_equivalent_cross_split": cross_split_count,
+            },
+            failure_details=failure_details,
+            failure_detail_counts=_cross_split_failure_counts(failure_details),
+        )
 
     buckets: dict[tuple[str, str], list[Any]] = defaultdict(list)
     for candidate in best_by_replay.values():

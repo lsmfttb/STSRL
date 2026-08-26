@@ -622,6 +622,64 @@ def test_deterministic_selection_uses_family_split_quotas() -> None:
     )
 
 
+def test_cross_split_case_d_reports_sorted_candidate_provenance() -> None:
+    map_previous = _state(1, "MAP_SCREEN", "train", 650001)
+    map_current = replace(
+        map_previous,
+        simulator_seed=650155,
+        split="validation",
+        source_run_id="stochastic_non_combat_v1:650155",
+    )
+    rest_previous = _state(2, "REST_ROOM", "train", 650002)
+    rest_current = replace(
+        rest_previous,
+        simulator_seed=650156,
+        split="validation",
+        source_run_id="expert_non_combat_v1:650156",
+    )
+    candidates = [rest_previous, rest_current, map_previous, map_current]
+
+    with pytest.raises(T065CaseD) as caught:
+        select_source_states(candidates)
+
+    failure = caught.value
+    report = failure.to_decision_report()
+    details = report["failure_details"]
+    assert [detail["family"] for detail in details] == [
+        "MAP_SCREEN",
+        "REST_ROOM",
+    ]
+    assert all(
+        detail["failure_type"] == "replay-equivalent-cross-split" for detail in details
+    )
+    assert all(
+        detail["previous"]["split"] == "train"
+        and detail["current"]["split"] == "validation"
+        and detail["previous"]["public_state_identity"]
+        == detail["current"]["public_state_identity"]
+        and detail["previous"]["replay_identity_digest"]
+        == detail["current"]["replay_identity_digest"]
+        for detail in details
+    )
+    assert details[0]["previous"]["source_run_id"] == "source:1"
+    assert details[0]["current"]["source_run_id"] == ("stochastic_non_combat_v1:650155")
+    assert details[1]["current"]["source_run_id"] == ("expert_non_combat_v1:650156")
+    assert report["failure_counts"] == {
+        "failure_count": 2,
+        "replay_equivalent_cross_split": 2,
+    }
+    assert report["failure_detail_counts"] == {
+        "total": 2,
+        "by_type": {"replay-equivalent-cross-split": 2},
+        "by_family": {"MAP_SCREEN": 1, "REST_ROOM": 1},
+        "by_split_pair": {"train->validation": 2},
+    }
+
+    with pytest.raises(T065CaseD) as reversed_caught:
+        select_source_states([map_previous, map_current, rest_previous, rest_current])
+    assert reversed_caught.value.failure_details == failure.failure_details
+
+
 def test_streamed_two_arm_selection_matches_in_memory_without_json_load(
     tmp_path, monkeypatch
 ) -> None:
