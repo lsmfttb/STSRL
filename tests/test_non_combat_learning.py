@@ -12,7 +12,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from sts_combat_rl.sim.contract import SimulatorAction
+from sts_combat_rl.sim.contract import (
+    SimulatorAction,
+    SimulatorCheckpoint,
+    SimulatorSnapshot,
+)
 from sts_combat_rl.sim.non_combat_learning import (
     T065_APPROVED_SPEC_COMMIT,
     T065CounterfactualTarget,
@@ -421,6 +425,171 @@ def test_preceding_manifest_chain_keeps_manifest_identities_separate(tmp_path) -
     assert lineage["stage0_preflight"]["sha256"]
     assert lineage["stage0_preflight"]["schema_id"] == "t065-retention-manifest-v1"
     assert "selected_states" not in lineage
+
+
+def test_evaluate_preceding_training_manifest_requires_both_checkpoints(
+    tmp_path,
+) -> None:
+    from sts_combat_rl.commands.non_combat_learning import (
+        _require_preceding_manifests,
+        build_parser,
+    )
+
+    preflight = tmp_path / "preflight.json"
+    target = tmp_path / "targets.json"
+    checkpoint_directory = tmp_path / "checkpoints"
+    checkpoint_directory.mkdir()
+    preflight.write_text("{}", encoding="utf-8")
+    target.write_text("{}", encoding="utf-8")
+    checkpoint_one = checkpoint_directory / "model-653001.pt"
+    checkpoint_two = checkpoint_directory / "model-653002.pt"
+    checkpoint_one.write_bytes(b"checkpoint-one")
+    checkpoint_two.write_bytes(b"checkpoint-two")
+
+    def make_manifest(path: Path, artifacts: dict[str, Path], stage: str) -> Path:
+        write_t065_manifest(
+            path,
+            approved_spec_commit=T065_APPROVED_SPEC_COMMIT,
+            simulator_identity={},
+            artifacts=artifacts,
+            regeneration_commands=("wsl reproduction",),
+            stage_evidence={stage: {"status": "completed"}},
+        )
+        return path
+
+    preflight_manifest = make_manifest(
+        tmp_path / "preflight.retention.json",
+        {"preflight": preflight},
+        "stage0-preflight",
+    )
+    target_manifest = make_manifest(
+        tmp_path / "target.retention.json",
+        {"target": target},
+        "stage2-counterfactual-targets",
+    )
+    train_manifest = make_manifest(
+        tmp_path / "train.retention.json",
+        {
+            "checkpoint_653001": checkpoint_one,
+            "checkpoint_653002": checkpoint_two,
+        },
+        "stage4-training",
+    )
+    args = build_parser().parse_args(
+        [
+            "evaluate",
+            "--target-table",
+            str(target),
+            "--checkpoint-directory",
+            str(checkpoint_directory),
+            "--output",
+            str(tmp_path / "evaluate.json"),
+            "--preflight",
+            str(preflight),
+            "--preceding-manifest",
+            str(preflight_manifest),
+            "--preceding-manifest",
+            str(target_manifest),
+            "--preceding-manifest",
+            str(train_manifest),
+        ]
+    )
+    _require_preceding_manifests(args)
+    assert args._preceding_manifest_identities["stage4_training"]["size_bytes"]
+
+    train_payload = json.loads(train_manifest.read_text(encoding="utf-8"))
+    train_payload["artifacts"] = [
+        artifact
+        for artifact in train_payload["artifacts"]
+        if artifact["role"] == "checkpoint_653001"
+    ]
+    train_payload["stage_evidence"]["stage4-training"]["artifact_roles"] = [
+        "checkpoint_653001"
+    ]
+    train_manifest.write_text(json.dumps(train_payload), encoding="utf-8")
+    with pytest.raises(T065CaseD, match="path/hash/size/seed identity"):
+        _require_preceding_manifests(args)
+
+
+def test_retention_reader_rejects_corrupt_entries_and_unknown_stage_roles(
+    tmp_path,
+) -> None:
+    from sts_combat_rl.commands.non_combat_learning import _read_retention_manifest
+
+    artifact = tmp_path / "artifact.json"
+    manifest_path = tmp_path / "retention.json"
+
+    def write_manifest() -> dict:
+        artifact.write_text("{}", encoding="utf-8")
+        return write_t065_manifest(
+            manifest_path,
+            approved_spec_commit=T065_APPROVED_SPEC_COMMIT,
+            simulator_identity={},
+            artifacts={"current_output": artifact},
+            regeneration_commands=("wsl reproduction",),
+            stage_evidence={"stage0-preflight": {"status": "completed"}},
+        )
+
+    for field, value in (
+        ("role", ""),
+        ("path", str(tmp_path / "missing.json")),
+        ("sha256", "0" * 64),
+        ("size_bytes", 999),
+    ):
+        manifest = write_manifest()
+        manifest["artifacts"][0][field] = value
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        with pytest.raises(ValueError):
+            _read_retention_manifest(manifest_path)
+
+    manifest = write_manifest()
+    manifest["stage_evidence"]["stage0-preflight"]["artifact_roles"] = [
+        "not-an-artifact"
+    ]
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    with pytest.raises(ValueError, match="unknown artifact roles"):
+        _read_retention_manifest(manifest_path)
+
+
+def test_preflight_validator_requires_native_evidence_for_all_families(
+    tmp_path,
+) -> None:
+    report = build_t065_preflight_report().to_dict()
+    report["passed"] = True
+    path = tmp_path / "preflight.json"
+    path.write_text(json.dumps(report), encoding="utf-8")
+    with pytest.raises(T065CaseD, match="mandatory-family evidence"):
+        validate_t065_preflight(path)
+
+
+def test_runtime_family_probe_rejects_projectionless_synthetic_context(
+    monkeypatch,
+) -> None:
+    from sts_combat_rl.sim import non_combat_learning as learning
+
+    class Adapter:
+        supports_checkpoint_restore = True
+
+        def capture_checkpoint(self, snapshot):
+            return SimulatorCheckpoint("fixture", "checkpoint", snapshot)
+
+        def restore_checkpoint(self, checkpoint):
+            return checkpoint.payload
+
+        def legal_actions(self, snapshot):
+            del snapshot
+            return [SimulatorAction(action_id="map", label="map", kind="map")]
+
+        def step(self, action):  # pragma: no cover - projection check stops first
+            del action
+            raise AssertionError("projectionless probe must fail before stepping")
+
+    monkeypatch.setattr(learning, "read_native_public_projection", lambda *_: None)
+    snapshot = SimulatorSnapshot(
+        observation=(), raw={"screen_state": "MAP_SCREEN", "battle_active": False}
+    )
+    with pytest.raises(ValueError, match="native public projection"):
+        learning._probe_native_mandatory_families(Adapter(), snapshot)
 
 
 def test_regeneration_command_is_full_pinned_wsl_command(tmp_path) -> None:

@@ -82,6 +82,9 @@ from sts_combat_rl.sim.public_context_artifacts import (
     PUBLIC_CONTEXT_STATUS_VALUES,
     public_context_artifact_problems,
 )
+from sts_combat_rl.sim.native_public_projection import (
+    NATIVE_PUBLIC_PROJECTION_SCHEMA_ID,
+)
 from sts_combat_rl.sim.public_run_context import (
     append_public_history_entry,
     build_public_history_entry,
@@ -126,6 +129,20 @@ T065_LIGHTSPEED_BUILD_PYTHONPATH = (
     "/home/lsmft/stsrl-spikes/sts_lightspeed/build-py313-torch"
 )
 T065_RANKER_PARAMETER_COUNT = 325825
+T065_RANKER_PARAMETER_SHAPES = (
+    (64, NON_COMBAT_STATE_FEATURE_SIZE),
+    (64,),
+    (64, 64),
+    (64,),
+    (64, NON_COMBAT_ACTION_FEATURE_SIZE),
+    (64,),
+    (64, 64),
+    (64,),
+    (64, 128),
+    (64,),
+    (1, 64),
+    (1,),
+)
 
 T065_MANDATORY_FAMILIES = (
     "MAP_SCREEN",
@@ -3855,6 +3872,37 @@ def read_t065_preflight(path: Path) -> dict[str, Any]:
     return {str(key): item for key, item in value.items()}
 
 
+def _preflight_evidence_digest(value: Mapping[str, Any]) -> str:
+    payload = {
+        str(key): item for key, item in value.items() if key != "evidence_digest"
+    }
+    return hashlib.sha256(_canonical_json_bytes(payload)).hexdigest()
+
+
+def _is_sha256(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _parameter_shapes(value: Any) -> tuple[tuple[int, ...], ...] | None:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        return None
+    result: list[tuple[int, ...]] = []
+    for shape in value:
+        if not isinstance(shape, Sequence) or isinstance(shape, (str, bytes)):
+            return None
+        if any(
+            isinstance(dimension, bool) or not isinstance(dimension, int)
+            for dimension in shape
+        ):
+            return None
+        result.append(tuple(shape))
+    return tuple(result)
+
+
 def validate_t065_preflight(path: Path) -> dict[str, Any]:
     """Require a fully passed Stage 0 artifact for every scientific workflow."""
 
@@ -3940,6 +3988,62 @@ def validate_t065_preflight(path: Path) -> dict[str, Any]:
             simulator_check.get("observed_screen"), str
         ):
             problems.append("preflight simulator observed-screen evidence is missing")
+        if isinstance(simulator_check, Mapping) and (
+            simulator_check.get("checkpoint_restore_equal") is not True
+            or not isinstance(simulator_check.get("checkpoint_restores"), int)
+            or simulator_check.get("checkpoint_restores", 0) < 1
+            or not isinstance(simulator_check.get("nodes_examined"), int)
+            or simulator_check.get("nodes_examined", 0) < 1
+        ):
+            problems.append("preflight simulator checkpoint evidence is incomplete")
+        if isinstance(simulator_check, Mapping) and (
+            simulator_check.get("evidence_digest")
+            != _preflight_evidence_digest(simulator_check)
+        ):
+            problems.append("preflight simulator runtime evidence digest is invalid")
+        simulator_families = (
+            simulator_check.get("mandatory_families")
+            if isinstance(simulator_check, Mapping)
+            else None
+        )
+        if not isinstance(simulator_families, Mapping) or set(
+            simulator_families
+        ) != set(T065_MANDATORY_FAMILIES):
+            problems.append(
+                "preflight simulator runtime mandatory-family evidence is incomplete"
+            )
+        else:
+            for family in T065_MANDATORY_FAMILIES:
+                family_check = simulator_families[family]
+                if not isinstance(family_check, Mapping) or any(
+                    not isinstance(family_check.get(key), str)
+                    or not _is_sha256(family_check.get(key))
+                    for key in (
+                        "projection_digest",
+                        "action_identity_digest",
+                        "state_feature_digest",
+                        "public_context_digest",
+                    )
+                ):
+                    problems.append(
+                        f"preflight native projection evidence is missing for {family}"
+                    )
+                elif (
+                    family_check.get("status") != "passed"
+                    or family_check.get("screen_family") != family
+                    or family_check.get("projection_schema_id")
+                    != NATIVE_PUBLIC_PROJECTION_SCHEMA_ID
+                    or family_check.get("decision_context_schema_id")
+                    != "public-run-context-v1"
+                    or family_check.get("state_feature_size")
+                    != NON_COMBAT_STATE_FEATURE_SIZE
+                    or isinstance(family_check.get("action_count"), bool)
+                    or not isinstance(family_check.get("action_count"), int)
+                    or family_check.get("action_count", 0) < 1
+                ):
+                    problems.append(
+                        f"preflight native projection evidence is invalid for {family}"
+                    )
         torch_check = runtime_checks.get("torch_runtime")
         expected_torch_evidence = {
             "status": "passed",
@@ -3966,6 +4070,23 @@ def validate_t065_preflight(path: Path) -> dict[str, Any]:
             or not 0 <= torch_check["rng_contract"] < 2**31
         ):
             problems.append("preflight torch RNG evidence is missing")
+        if isinstance(torch_check, Mapping) and (
+            torch_check.get("evidence_digest")
+            != _preflight_evidence_digest(torch_check)
+        ):
+            problems.append("preflight torch runtime evidence digest is invalid")
+        if isinstance(torch_check, Mapping) and (
+            _parameter_shapes(torch_check.get("parameter_shapes"))
+            != T065_RANKER_PARAMETER_SHAPES
+            or torch_check.get("parameter_devices") != ["cpu"]
+            or torch_check.get("all_parameters_cpu") is not True
+            or not isinstance(torch_check.get("torch_version"), str)
+            or not torch_check.get("torch_version")
+            or not isinstance(torch_check.get("rng_state_digest"), str)
+            or not _is_sha256(torch_check.get("rng_state_digest"))
+            or not _is_sha256(torch_check.get("minibatch_rng_state_digest"))
+        ):
+            problems.append("preflight torch CPU/thread/RNG evidence is incomplete")
     if problems:
         raise T065CaseD(
             "stage0-preflight",
@@ -3975,6 +4096,120 @@ def validate_t065_preflight(path: Path) -> dict[str, Any]:
             simulator_identity=_mapping_or_empty(value.get("simulator_identity")),
         )
     return value
+
+
+def _probe_native_mandatory_families(
+    adapter: Any,
+    snapshot: SimulatorSnapshot,
+    *,
+    max_nodes: int = 64,
+    max_depth: int = 32,
+) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
+    """Walk a small real simulator frontier and audit every mandatory family."""
+
+    if not bool(getattr(adapter, "supports_checkpoint_restore", False)):
+        raise ValueError("simulator runtime lacks checkpoint capture/restore")
+    root_checkpoint = adapter.capture_checkpoint(snapshot)
+    frontier: list[tuple[SimulatorCheckpoint, int, str]] = [
+        (
+            root_checkpoint,
+            0,
+            hashlib.sha256(_canonical_json_bytes(snapshot.raw)).hexdigest(),
+        )
+    ]
+    family_evidence: dict[str, dict[str, Any]] = {}
+    nodes = 0
+    restores = 0
+    restore_mismatches = 0
+    while frontier and nodes < max_nodes:
+        checkpoint, depth, expected_snapshot_digest = frontier.pop(0)
+        current = adapter.restore_checkpoint(checkpoint)
+        restores += 1
+        current_digest = hashlib.sha256(_canonical_json_bytes(current.raw)).hexdigest()
+        if current_digest != expected_snapshot_digest:
+            restore_mismatches += 1
+        actions = tuple(adapter.legal_actions(current))
+        if not actions:
+            raise ValueError("simulator runtime returned no legal actions")
+        projection = read_native_public_projection(adapter, current)
+        if projection is None:
+            raise ValueError("simulator runtime lacks native public projection")
+        context = build_public_run_context(
+            current.raw,
+            actions,
+            projection=projection,
+        )
+        family = screen_family(context["current"]["screen"])
+        if family in T065_MANDATORY_FAMILIES and family not in family_evidence:
+            encoded = encode_non_combat_decision_context(
+                build_decision_context(
+                    current.raw,
+                    actions,
+                    frozen_action_space(),
+                    public_run_context=context,
+                ),
+                public_context_status="available",
+            )
+            _validate_mandatory_family_projection(family, encoded.state_features)
+            family_evidence[family] = {
+                "status": "passed",
+                "screen_family": family,
+                "projection_schema_id": projection.schema_id,
+                "projection_digest": hashlib.sha256(
+                    projection.canonical_payload.encode("utf-8")
+                ).hexdigest(),
+                "action_count": len(actions),
+                "action_identity_digest": hashlib.sha256(
+                    _canonical_json_bytes(action_identity_dicts_for_actions(actions))
+                ).hexdigest(),
+                "state_feature_size": len(encoded.state_features),
+                "state_feature_digest": hashlib.sha256(
+                    _canonical_json_bytes(list(encoded.state_features))
+                ).hexdigest(),
+                "public_context_digest": hashlib.sha256(
+                    _canonical_json_bytes(context)
+                ).hexdigest(),
+                "decision_context_schema_id": context["schema_id"],
+            }
+        if len(family_evidence) == len(T065_MANDATORY_FAMILIES):
+            break
+        if depth >= max_depth or bool(context["current"].get("is_battle")):
+            nodes += 1
+            continue
+        # All non-battle legal actions remain authoritative expansion choices;
+        # battle states are followed by one legal action to keep this probe cheap.
+        branch_actions = actions
+        for action in branch_actions:
+            adapter.restore_checkpoint(checkpoint)
+            transition = adapter.step(action)
+            if transition.terminal:
+                continue
+            child_checkpoint = adapter.capture_checkpoint(transition.snapshot)
+            frontier.append(
+                (
+                    child_checkpoint,
+                    depth + 1,
+                    hashlib.sha256(
+                        _canonical_json_bytes(transition.snapshot.raw)
+                    ).hexdigest(),
+                )
+            )
+            # One screen transition is sufficient for the probe frontier; the
+            # remaining actions are still checked for legality by the encoder.
+        nodes += 1
+    missing = [
+        family for family in T065_MANDATORY_FAMILIES if family not in family_evidence
+    ]
+    if missing:
+        raise ValueError(
+            "simulator runtime probe did not reach mandatory families: "
+            + ", ".join(missing)
+        )
+    return family_evidence, {
+        "nodes_examined": nodes,
+        "checkpoint_restores": restores,
+        "checkpoint_restore_equal": restore_mismatches == 0,
+    }
 
 
 def build_t065_preflight_report(
@@ -4172,24 +4407,10 @@ def build_t065_preflight_report(
             try:
                 adapter = adapter_factory()
                 snapshot = adapter.reset(seed=1)
-                actions = tuple(adapter.legal_actions(snapshot))
-                if not actions:
-                    raise ValueError("simulator runtime returned no legal actions")
-                if not bool(getattr(adapter, "supports_checkpoint_restore", False)):
-                    raise ValueError(
-                        "simulator runtime lacks checkpoint capture/restore"
-                    )
-                checkpoint = adapter.capture_checkpoint(snapshot)
-                restored = adapter.restore_checkpoint(checkpoint)
-                projection = read_native_public_projection(adapter, restored)
-                if projection is None:
-                    raise ValueError("simulator runtime lacks native public projection")
-                context = build_public_run_context(
-                    restored.raw,
-                    tuple(adapter.legal_actions(restored)),
-                    projection=projection,
+                family_evidence, probe_evidence = _probe_native_mandatory_families(
+                    adapter, snapshot
                 )
-                runtime_checks["simulator_runtime"] = {
+                simulator_evidence = {
                     "status": "passed",
                     "execution_environment": "wsl",
                     "python_interpreter": T065_TRAINING_INTERPRETER,
@@ -4202,9 +4423,19 @@ def build_t065_preflight_report(
                     "simulator_identity": dict(simulator_identity),
                     "checkpoint_restore": True,
                     "public_projection": True,
-                    "decision_context_schema_id": context["schema_id"],
-                    "observed_screen": context["current"]["screen"],
+                    "decision_context_schema_id": "public-run-context-v1",
+                    "observed_screen": snapshot.raw.get("screen_state", "UNKNOWN"),
+                    "mandatory_families": family_evidence,
+                    **probe_evidence,
                 }
+                if simulator_evidence["checkpoint_restore_equal"] is not True:
+                    raise ValueError(
+                        "simulator runtime checkpoint restore changed the public snapshot"
+                    )
+                simulator_evidence["evidence_digest"] = _preflight_evidence_digest(
+                    simulator_evidence
+                )
+                runtime_checks["simulator_runtime"] = simulator_evidence
             except (RuntimeError, ValueError, OSError) as exc:
                 runtime_checks["simulator_runtime"] = {
                     "status": "failed",
@@ -4218,6 +4449,7 @@ def build_t065_preflight_report(
             "python_interpreter": T065_TRAINING_INTERPRETER,
             "native_build_pythonpath": T065_LIGHTSPEED_BUILD_PYTHONPATH,
             "native_module": "slaythespire",
+            "mandatory_family_probe": "explicit WSL runtime only",
             "command_boundary": "preflight --simulator-runtime (WSL pinned build)",
         }
         problems.append(
@@ -4227,18 +4459,20 @@ def build_t065_preflight_report(
         try:
             torch = _require_torch()
             torch.set_num_threads(1)
+            if torch.get_num_threads() != 1:
+                raise RuntimeError("PyTorch CPU thread count could not be set to one")
             torch.manual_seed(653001)
             model = _build_ranker_module()
             generator = torch.Generator(device="cpu")
             generator.manual_seed(1_653_001)
-            runtime_checks["torch_runtime"] = {
+            torch_evidence = {
                 "status": "passed",
                 "execution_environment": "wsl",
                 "python_interpreter": T065_TRAINING_INTERPRETER,
                 "native_build_pythonpath": T065_LIGHTSPEED_BUILD_PYTHONPATH,
                 "device": "cpu",
                 "cpu": True,
-                "torch_threads": 1,
+                "torch_threads": torch.get_num_threads(),
                 "manual_seed": 653001,
                 "minibatch_rng_seed": 1_653_001,
                 "state_parameter_count": sum(
@@ -4248,7 +4482,27 @@ def build_t065_preflight_report(
                 "rng_contract": int(
                     torch.randint(0, 2**31, (1,), generator=generator).item()
                 ),
+                "minibatch_rng_state_digest": hashlib.sha256(
+                    bytes(generator.get_state().tolist())
+                ).hexdigest(),
+                "torch_version": str(torch.__version__),
+                "parameter_shapes": [
+                    list(parameter.shape) for parameter in model.parameters()
+                ],
+                "parameter_devices": sorted(
+                    {str(parameter.device) for parameter in model.parameters()}
+                ),
+                "all_parameters_cpu": all(
+                    parameter.device.type == "cpu" for parameter in model.parameters()
+                ),
+                "rng_state_digest": hashlib.sha256(
+                    bytes(torch.get_rng_state().tolist())
+                ).hexdigest(),
             }
+            torch_evidence["evidence_digest"] = _preflight_evidence_digest(
+                torch_evidence
+            )
+            runtime_checks["torch_runtime"] = torch_evidence
         except (RuntimeError, ImportError, OSError) as exc:
             runtime_checks["torch_runtime"] = {"status": "failed", "error": str(exc)}
             problems.append(f"PyTorch runtime preflight failed: {exc}")
@@ -4259,6 +4513,7 @@ def build_t065_preflight_report(
             "python_interpreter": T065_TRAINING_INTERPRETER,
             "native_build_pythonpath": T065_LIGHTSPEED_BUILD_PYTHONPATH,
             "device": "cpu",
+            "mandatory_model_probe": "explicit WSL runtime only",
             "command_boundary": "preflight --torch-runtime (optional train dependency)",
         }
         problems.append(
@@ -4493,6 +4748,8 @@ def write_t065_manifest(
     artifacts: Mapping[str, Path],
     regeneration_commands: Sequence[str],
     stage_evidence: Mapping[str, Mapping[str, Any]] | None = None,
+    preceding_stage_manifests: Mapping[str, Mapping[str, Any]] | None = None,
+    failed_stage_artifacts: Mapping[str, Mapping[str, Any]] | None = None,
     retention_reason: str = (
         "T065 compact source/target/model/gate evidence retained for exact "
         "stage-local reuse and maintainer review"
@@ -4510,14 +4767,35 @@ def write_t065_manifest(
     for role, artifact_path in sorted(artifacts.items()):
         if not artifact_path.is_file():
             raise ValueError(f"T065 retained artifact is missing: {artifact_path}")
-        entries.append(
-            {
-                "role": role,
-                "path": str(artifact_path),
-                "sha256": file_sha256(artifact_path),
-                "size_bytes": artifact_path.stat().st_size,
-            }
-        )
+        entry = {
+            "role": role,
+            "path": str(artifact_path),
+            "sha256": file_sha256(artifact_path),
+            "size_bytes": artifact_path.stat().st_size,
+        }
+        if role.startswith("checkpoint_"):
+            seed_text = role.removeprefix("checkpoint_")
+            if not seed_text.isdigit():
+                raise ValueError(f"T065 checkpoint artifact role is invalid: {role}")
+            entry["identity"] = {"model_seed": int(seed_text)}
+        entries.append(entry)
+    artifact_roles = [str(entry["role"]) for entry in entries]
+    normalized_stage_evidence: dict[str, dict[str, Any]] = {}
+    for stage, raw_evidence in (stage_evidence or {}).items():
+        if not isinstance(raw_evidence, Mapping):
+            raise ValueError(f"T065 stage evidence for {stage!r} must be an object")
+        evidence = dict(raw_evidence)
+        referenced_roles = evidence.get("artifact_roles", artifact_roles)
+        if not isinstance(referenced_roles, Sequence) or isinstance(
+            referenced_roles, (str, bytes)
+        ):
+            raise ValueError(f"T065 stage evidence for {stage!r} has invalid roles")
+        if any(role not in artifact_roles for role in referenced_roles):
+            raise ValueError(
+                f"T065 stage evidence for {stage!r} references an unknown role"
+            )
+        evidence["artifact_roles"] = list(referenced_roles)
+        normalized_stage_evidence[str(stage)] = evidence
     manifest = {
         "schema_id": "t065-retention-manifest-v1",
         "schema_version": 1,
@@ -4529,9 +4807,14 @@ def write_t065_manifest(
         "model_input_schema": non_combat_model_input_schema(),
         "artifacts": entries,
         "regeneration_commands": list(regeneration_commands),
-        "stage_evidence": {
-            str(stage): dict(evidence)
-            for stage, evidence in (stage_evidence or {}).items()
+        "stage_evidence": normalized_stage_evidence,
+        "preceding_stage_manifests": {
+            str(role): dict(identity)
+            for role, identity in (preceding_stage_manifests or {}).items()
+        },
+        "failed_stage_artifacts": {
+            str(role): dict(identity)
+            for role, identity in (failed_stage_artifacts or {}).items()
         },
         "retention_root": str(path.parent),
         "retention_reason": retention_reason,

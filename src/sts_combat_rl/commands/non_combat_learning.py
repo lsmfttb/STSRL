@@ -767,10 +767,79 @@ def _read_retention_manifest(path: Path) -> dict[str, Any]:
         raise ValueError(f"{path}: retention manifest lineage fields are missing")
     if not evidence or any(not isinstance(item, Mapping) for item in evidence.values()):
         raise ValueError(f"{path}: retention manifest stage evidence is invalid")
+
+    def validate_identity(role: str, identity: Mapping[str, Any]) -> None:
+        artifact_path = identity.get("path")
+        digest = identity.get("sha256")
+        size = identity.get("size_bytes")
+        if not isinstance(artifact_path, str) or not artifact_path:
+            raise ValueError(f"{path}: artifact {role} has an invalid path")
+        if (
+            not isinstance(digest, str)
+            or len(digest) != 64
+            or any(character not in "0123456789abcdef" for character in digest)
+        ):
+            raise ValueError(f"{path}: artifact {role} has an invalid sha256")
+        if isinstance(size, bool) or not isinstance(size, int) or size < 0:
+            raise ValueError(f"{path}: artifact {role} has an invalid size_bytes")
+        actual_path = Path(artifact_path)
+        if not actual_path.is_file():
+            raise ValueError(f"{path}: artifact {role} is missing: {artifact_path}")
+        if file_sha256(actual_path) != digest:
+            raise ValueError(f"{path}: artifact {role} sha256 does not match")
+        if actual_path.stat().st_size != size:
+            raise ValueError(f"{path}: artifact {role} size_bytes does not match")
+
+    roles: set[str] = set()
+    for index, artifact in enumerate(artifacts):
+        if not isinstance(artifact, Mapping):
+            raise ValueError(f"{path}: artifact entry {index} is not an object")
+        role = artifact.get("role")
+        if not isinstance(role, str) or not role or role in roles:
+            raise ValueError(f"{path}: artifact entry {index} has an invalid role")
+        validate_identity(role, artifact)
+        if role.startswith("checkpoint_"):
+            expected_seed = role.removeprefix("checkpoint_")
+            identity = artifact.get("identity")
+            if (
+                not expected_seed.isdigit()
+                or not isinstance(identity, Mapping)
+                or identity.get("model_seed") != int(expected_seed)
+            ):
+                raise ValueError(f"{path}: artifact {role} seed identity is invalid")
+        roles.add(role)
+    for section_name in ("preceding_stage_manifests", "failed_stage_artifacts"):
+        identities = value.get(section_name, {})
+        if not isinstance(identities, Mapping):
+            raise ValueError(f"{path}: {section_name} must be an object")
+        for role, identity in identities.items():
+            if (
+                not isinstance(role, str)
+                or not role
+                or not isinstance(identity, Mapping)
+            ):
+                raise ValueError(f"{path}: {section_name} contains an invalid entry")
+            validate_identity(role, identity)
+    for stage, stage_value in evidence.items():
+        if not isinstance(stage, str) or not stage:
+            raise ValueError(f"{path}: stage evidence has an invalid stage")
+        referenced_roles = stage_value.get("artifact_roles")
+        if not isinstance(referenced_roles, list) or any(
+            not isinstance(role, str) or role not in roles for role in referenced_roles
+        ):
+            raise ValueError(
+                f"{path}: stage evidence {stage} references unknown artifact roles"
+            )
     return value
 
 
-def _manifest_contains_artifact(manifest: Mapping[str, Any], path: Path) -> bool:
+def _manifest_contains_artifact(
+    manifest: Mapping[str, Any],
+    path: Path,
+    *,
+    expected_role: str | None = None,
+    expected_seed: int | None = None,
+) -> bool:
     if not path.is_file():
         return False
     expected_path = path.resolve()
@@ -789,7 +858,16 @@ def _manifest_contains_artifact(manifest: Mapping[str, Any], path: Path) -> bool
             artifact_path == expected_path
             and artifact.get("sha256") == expected_hash
             and artifact.get("schema_id") in {None, "t065-retention-manifest-v1"}
+            and (expected_role is None or artifact.get("role") == expected_role)
         ):
+            if expected_seed is not None:
+                identity = artifact.get("identity")
+                if (
+                    artifact.get("role") != f"checkpoint_{expected_seed}"
+                    or not isinstance(identity, Mapping)
+                    or identity.get("model_seed") != expected_seed
+                ):
+                    continue
             return True
     return False
 
@@ -798,6 +876,7 @@ def _manifest_descriptor(path: Path, manifest: Mapping[str, Any]) -> dict[str, A
     return {
         "path": str(path),
         "sha256": file_sha256(path),
+        "size_bytes": path.stat().st_size,
         "schema_id": manifest["schema_id"],
         "schema_version": manifest["schema_version"],
         "completed_stages": sorted(str(stage) for stage in manifest["stage_evidence"]),
@@ -858,7 +937,7 @@ def _require_preceding_manifests(args: argparse.Namespace) -> None:
             failure_counts={"invalid_preceding_manifests": len(problems)},
         )
 
-    relation_paths: list[Path | None] = [None] * len(manifests)
+    relation_paths: list[Path | tuple[Path, ...] | None] = [None] * len(manifests)
     if args.command == "collect":
         relation_paths[0] = args.preflight
     elif args.command == "select":
@@ -873,18 +952,39 @@ def _require_preceding_manifests(args: argparse.Namespace) -> None:
     elif args.command == "evaluate":
         relation_paths[0] = args.preflight
         relation_paths[1] = args.target_table
-        relation_paths[2] = args.checkpoint_directory / "model-653001.pt"
+        relation_paths[2] = tuple(
+            args.checkpoint_directory / f"model-{seed}.pt" for seed in (653001, 653002)
+        )
     relation_problems = []
     for index, ((path, manifest, _stage), relation_path) in enumerate(
         zip(manifests, relation_paths)
     ):
-        if relation_path is not None and not _manifest_contains_artifact(
-            manifest, relation_path
-        ):
-            relation_problems.append(
-                f"preceding manifest {index} does not contain the exact "
-                f"path/hash for {relation_path}"
+        paths = (
+            relation_path
+            if isinstance(relation_path, tuple)
+            else (relation_path,)
+            if relation_path is not None
+            else ()
+        )
+        for required_path in paths:
+            expected_seed = (
+                int(required_path.stem.removeprefix("model-"))
+                if args.command == "evaluate"
+                and required_path.name.startswith("model-")
+                else None
             )
+            if not _manifest_contains_artifact(
+                manifest,
+                required_path,
+                expected_role=(
+                    f"checkpoint_{expected_seed}" if expected_seed is not None else None
+                ),
+                expected_seed=expected_seed,
+            ):
+                relation_problems.append(
+                    f"preceding manifest {index} does not contain the exact "
+                    f"path/hash/size/seed identity for {required_path}"
+                )
     if relation_problems:
         raise T065CaseD(
             _stage_name(args.command),
@@ -965,8 +1065,6 @@ def _manifest_artifact_paths(
                 checkpoint = args.checkpoint_directory / f"model-{model_seed}.pt"
                 if checkpoint.is_file():
                     paths[f"checkpoint_{model_seed}"] = checkpoint
-    for index, path in enumerate(getattr(args, "_preceding_manifest_paths", ())):
-        paths[f"preceding_manifest_{index}"] = path
     if decision_path is not None and decision_path.is_file():
         paths["terminal_decision_report"] = decision_path
     return paths
@@ -1115,6 +1213,10 @@ def _write_workflow_manifest(
         artifacts=artifacts,
         regeneration_commands=(_regeneration_command(args),),
         stage_evidence={stage: evidence},
+        preceding_stage_manifests=_preceding_manifest_identities(args),
+        failed_stage_artifacts=(
+            dict(failure.failed_stage_artifacts) if failure is not None else {}
+        ),
     )
     print(f"T065 retention manifest: {_retention_manifest_path(args)}", file=sys.stderr)
     return manifest
