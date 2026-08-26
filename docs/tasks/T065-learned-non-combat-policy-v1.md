@@ -29,35 +29,19 @@ non-combat branch:
   policy is therefore a useful bootstrap occupancy/continuation policy, but it
   remains hand-authored and is not an intended teacher.
 - T061 found a real battle-budget effect and correctly selected T062 first.
-- T062/T067/T068/T069/T070 then exhausted the current Search-v2 cost/outcome path:
-  the 100-simulation budget was descriptively insufficient, but higher-budget
+- T062/T067/T068/T069/T070 exhausted the current Search-v2 cost/outcome path: the
+  100-simulation budget was descriptively insufficient, but higher-budget
   guidance did not produce a positive guidance signal and no Search-v2
   controller was promoted.
 - T064 tested the separate later-act curriculum hypothesis and completed valid
   negative Case B. Its terminal recommendation is T065.
 - T071--T074 removed experiment-execution duplication, retired closed executor
   surfaces, and repaired the forward decision/policy dependency boundary.
-  T074 leaves an acyclic `DecisionContext`/policy contract and explicit
-  non-combat ownership suitable for a learned policy extension.
 
-The required post-T074 quality review also found remaining engineering debt:
-legacy flat CLI/parser growth, roughly 71 MB of tracked real CommunicationMod
-captures, no repository CI/branch protection, no explicit open-source license,
-and several large generic modules. These are real findings but are not T065
-blockers:
-
-- fixture size and open-source packaging do not affect the correctness of this
-  simulator-only experiment;
-- this is a personal research repository with strong local gates, so CI/branch
-  protection is useful but not a prerequisite for the next scientific step;
-- T065 is explicitly forbidden from adding more task-shaped flags to the legacy
-  flat CLI, preventing the known CLI debt from growing during this task;
-- the T074 policy boundary is now acyclic and is the only forward ownership
-  surface T065 must extend.
-
-No additional maintenance task is required before this proposal can be reviewed.
-This document remains a planner proposal until the Main Maintainer approves the
-exact specification head.
+The required post-T074 quality review found remaining flat-CLI, tracked-fixture,
+CI/open-source-packaging, and unrelated large-module debt. Those findings are
+real but do not block this simulator-only experiment. T065 is explicitly
+forbidden from adding task-shaped routes to the legacy flat CLI.
 
 ## Dependencies
 
@@ -70,7 +54,7 @@ Required merged dependencies:
 - T033: public-context model-input encoder contract.
 - T040: `expert_non_combat_v1` bootstrap behavior/continuation policy.
 - T061: matched complete-run bottleneck evidence.
-- T064: terminal Case B recommending T065 after the curriculum path failed.
+- T064: terminal Case B recommending T065.
 - T071: detached long-job/status and stage/run-local reuse conventions.
 - T074: acyclic low-level policy contract and explicit non-combat ownership.
 
@@ -80,16 +64,114 @@ inside the authoritative simulator from exact source states; hidden future state
 may affect the training target through simulator outcomes but must never appear
 in deployable model input.
 
+## Frozen Experiment Inputs
+
+All material random seeds and baseline controller identities below are immutable
+parts of this specification. The Implementer must not choose replacements after
+seeing source coverage, targets, training metrics, held-out results, or run-level
+outcomes. Any change requires a material specification revision and Maintainer
+reapproval.
+
+### Stage 1 source seeds
+
+Use exactly the inclusive simulator-seed range:
+
+`650001..650256`
+
+There are exactly 256 Stage 1 source seeds. Every seed is used once with
+`stochastic_non_combat_v1` and once with `expert_non_combat_v1`, producing 512
+source runs when complete.
+
+### Stage 6 fresh evaluation seeds
+
+If and only if Stage 5 passes, use exactly the inclusive simulator-seed range:
+
+`651001..651256`
+
+There are exactly 256 Stage 6 seeds. This range is disjoint from Stage 1 and is
+used identically in all three Stage 6 arms.
+
+### Continuation-policy seeds
+
+These seeds control only the stochastic `expert_non_combat_v1` continuation
+after the source action has been forced from the exact restored checkpoint.
+Candidate actions from the same source state must use the same ordered seed set.
+
+- training states: `(652001, 652002)`
+- validation states: `(652101, 652102)`
+- held-out test states: `(652201, 652202, 652203, 652204)`
+
+The ordering above is part of the artifact contract.
+
+### Model seeds
+
+Train exactly two model runs:
+
+`(653001, 653002)`
+
+No extra model seed may be added because one of these performs poorly.
+
+### Frozen battle-controller identity
+
+Every Stage 1 source run, Stage 2 continuation, and Stage 6 complete-run arm uses
+exactly the current-main baseline constructor semantics:
+
+```python
+OracleSearchController(
+    simulations=20,
+    root_selection_rule="highest_mean",
+    action_space=ActionSpaceConfig.initial_no_potions(),
+)
+```
+
+Its required controller provenance is:
+
+- `kind = "oracle_battle_search"`
+- `name = "oracle_search_v1_highest_mean_s20"`
+- `controller_version = "oracle-search-controller-v1"`
+- `information_regime = "full_simulator_state_oracle_like"`
+- native simulation budget = 20 `native_random_terminal_playouts`
+- root selection = `highest_mean`
+- native rollout policy = `BattleScumSearcher2::playoutRandom`
+- native leaf value = `BattleScumSearcher2::evaluateEndState`
+- model calls = 0
+
+The shorthand `oracle_search_v1_s20` is not an accepted identity in T065 and must
+not appear in generated provenance as a replacement name.
+
+### Frozen action-space identity
+
+The source configuration is exactly `ActionSpaceConfig.initial_no_potions()`.
+Its serialized provenance must equal:
+
+```json
+{
+  "excluded_kinds": [
+    "game_potion_discard",
+    "game_potion_use",
+    "potion",
+    "potion_discard",
+    "reward_potion",
+    "shop_reward_potion"
+  ],
+  "preferred_kinds": ["card", "end_turn"],
+  "allow_excluded_fallback": true,
+  "include_non_combat_potions": true
+}
+```
+
+Current `action_space_for_screen` behavior remains authoritative: the above
+configuration suppresses potion actions for battle decisions while preserving
+legal non-combat potion actions when `include_non_combat_potions=true`. T065 must
+not define a second action-space interpretation.
+
 ## Research Question
 
 Given a public non-combat decision state, can an action-conditioned model trained
 only on simulator continuation outcomes select actions with better held-out
 long-horizon continuation value than `expert_non_combat_v1`, and does that
-improvement survive a fresh matched complete-run A20 evaluation under an
-unchanged battle controller?
-
-T065 deliberately answers this question before attempting end-to-end joint
-policy improvement.
+improvement survive a fresh matched complete-run A20 evaluation under the
+unchanged frozen battle controller?
 
 ## Information Regime And Behavior Separation
 
@@ -103,7 +185,7 @@ Every record must separately identify:
 - model-selected action, if any;
 - bootstrap/expert-selected action, for comparison only.
 
-Human trajectories, human action labels, manually annotated "correct" actions,
+Human trajectories, human action labels, manually annotated correct actions,
 and imitation loss on `expert_non_combat_v1` are forbidden.
 
 The deployable learned policy consumes only the versioned public non-combat
@@ -113,645 +195,455 @@ future fields are forbidden inputs.
 
 ## Supported Decision Scope
 
-### Mandatory learned-screen families
-
-T065 v1 must learn and evaluate exactly these four screen families:
+T065 v1 must learn and evaluate exactly these four mandatory screen families:
 
 1. `MAP_SCREEN`
 2. `REST_ROOM`
 3. `REWARDS`
 4. `TREASURE_ROOM`
 
-These families are common enough for a fixed cohort, already have stable public
-legal-action/category semantics, and cover route, sustain/upgrade, reward/card/
-resource, and treasure decisions without requiring a local reconstruction of
-game mechanics.
-
-`REWARDS` includes the legal reward actions exposed by the simulator on that
-screen, including card/relic/potion/gold/key/skip choices when present. T065 does
-not invent reward mechanics or values locally.
-
-### Optional diagnostic family
+`REWARDS` includes legal card/relic/potion/gold/key/skip actions when exposed by
+the simulator. T065 does not invent reward mechanics or strategic values
+locally.
 
 `BOSS_RELIC_REWARDS` may be included as an additional diagnostic family only if
-the source preflight finds at least 16 unique replay-valid source states without
-changing source-generation scale. It is not required for task acceptance and it
-must not be used to compensate for failure on a mandatory family.
+Stage 1 finds at least 16 unique replay-valid states without changing source
+scale. It is not required for acceptance and cannot compensate for a mandatory
+family failure.
 
-### Explicit fallback families
+The v1 learned policy does not control `SHOP_ROOM`, `EVENT_SCREEN`,
+`CARD_SELECT`, unsupported/unknown screens, or `BOSS_RELIC_REWARDS` when its
+optional coverage condition is absent. Those decisions route to an explicitly
+named `expert_non_combat_v1` fallback.
 
-The v1 learned policy does not control:
-
-- `SHOP_ROOM`;
-- `EVENT_SCREEN`;
-- `CARD_SELECT`;
-- unsupported/unknown screens;
-- `BOSS_RELIC_REWARDS` when the optional coverage condition is not met.
-
-Those states route to a clearly named `expert_non_combat_v1` fallback. Fallback
-use is behavior provenance, not a training target, and is reported by screen,
-action category, Act, and floor.
-
-A supported screen may not silently fall back because the learned model dislikes
-its legal actions. Encoder/schema/inference failure on a mandatory supported
-screen is a task error and is counted separately from intentional unsupported-
-screen fallback.
+Fallback use is behavior provenance, not a target. A mandatory supported screen
+may not silently fall back because the model dislikes its candidate actions.
+Schema/encoder/inference failure on a mandatory screen is a task error.
 
 ## Stage 0: Cheap Readiness And Source-Capability Preflight
 
-Before any expensive target generation, verify on current `main` that:
+Before expensive collection verify that:
 
 - the pinned simulator source matches the manifest;
-- the adapter supports exact process-local checkpoint capture/restore;
+- exact process-local checkpoint capture/restore is available;
 - public projection and `DecisionContext` construction succeed for all mandatory
   families on focused fixtures/smokes;
-- each legal action has a stable portable identity and public model-input
-  representation;
-- no T065 code path imports hidden simulator/native state into model features;
-- the T074 low-level dependency-direction tests remain green;
+- legal actions have stable portable identities and public model-input
+  representations;
+- T065 model features contain no hidden/native state;
+- T074 dependency-direction/import-isolation tests remain green;
+- the frozen controller/action-space configuration above can be constructed and
+  its serialized provenance matches exactly;
 - no T065 implementation change is needed in the legacy flat CLI files listed
-  under the CLI boundary below.
+  below.
 
-If any mandatory capability is missing, stop before source collection and report
-a tooling/fidelity failure rather than inventing a local workaround.
+If a mandatory capability is missing, stop before Stage 1 and report a tooling
+or fidelity failure rather than implementing a local simulator workaround.
 
 ## Stage 1: Fixed Source-State Pool
 
-### Source runs
+Run all seeds `650001..650256` twice under the same frozen battle controller:
 
-Collect one fixed source pool from **256 shared A20 simulator seeds**. Each seed
-is run twice under the same battle controller:
+- `stochastic_non_combat_v1 + oracle_search_v1_highest_mean_s20`
+- `expert_non_combat_v1 + oracle_search_v1_highest_mean_s20`
 
-- `stochastic_non_combat_v1 + oracle_search_v1_s20`;
-- `expert_non_combat_v1 + oracle_search_v1_s20`.
-
-This produces exactly **512 source runs** when complete.
+This produces exactly 512 source runs when complete.
 
 Requirements:
 
 - standard natural A20 starts only;
 - no HP/potion/encounter assistance;
-- no constructed starts;
-- no restart privilege;
-- no learned battle guidance;
-- no root-prior allocation variant;
-- battle search uses baseline `oracle_search_v1`, root rule `highest_mean`, native
-  simulation budget 20, and the same action-space configuration in both arms;
-- the same 256 simulator seeds appear in both source arms;
-- source behavior affects only which states are visited. Its chosen action is
-  never a supervised target.
+- no constructed starts or restart privilege;
+- no learned battle guidance or root-prior variant;
+- frozen battle controller/action space exactly as specified above;
+- identical 256 simulator seeds in both source arms;
+- source behavior affects only occupancy and is never a supervised target;
+- failed seeds remain visible and are never replaced by another seed.
 
-Use a task-specific documented source-seed range and freeze it before collection.
-The PR must publish that exact range. Do not substitute failed seeds silently.
+A portable source record must retain simulator seed, source behavior and routed
+controller provenance, occurrence-disambiguated public action trace, source
+step/floor/Act/screen, public schema identities, legal-action identities in exact
+order, replay-equality identity/hash, source-run identity, and split assignment.
+Native checkpoints remain process-local temporary branch handles.
 
-### Source-state identity
+Deterministically select exactly 80 unique replay-valid source states per
+mandatory family, for 320 states total. Within each family freeze 48 training,
+16 validation, and 16 held-out states. Splits are by simulator-seed group: both
+source behavior arms for the same simulator seed belong to the same partition.
+No source seed or replay-equivalent state may cross partitions.
 
-A portable non-combat source record must contain enough information to reproduce
-and verify the same decision in a fresh process without serializing native
-checkpoint payloads. At minimum retain:
-
-- simulator seed;
-- source behavior arm and controller provenance;
-- occurrence-disambiguated public action trace to the source decision;
-- source step/floor/Act/screen;
-- source public-context/schema identities;
-- legal action identities in exact order;
-- source public-state identity/hash or equivalent replay equality fields;
-- source run/scenario identity and split assignment.
-
-Native checkpoints remain process-local temporary handles used only while
-branching actions.
-
-### Fixed selected cohort
-
-From the 512 source runs, deterministically select **80 unique source states per
-mandatory family**, for **320 mandatory source states total**.
-
-Within each mandatory family freeze:
-
-- 48 training states;
-- 16 validation states;
-- 16 held-out test states.
-
-The split is by simulator seed group, not by individual decision row: both source
-behavior arms for the same simulator seed must belong to the same split. No
-source state, simulator seed, or replay-equivalent state may cross train,
-validation, and test partitions.
-
-Selection should preserve Act/floor diversity when available, but must not
-fabricate quotas for strata absent from the natural source pool.
-
-If any mandatory family cannot supply 80 replay-valid unique states from the
-frozen 512 source runs, T065 stops after Stage 1 with an explicit source-coverage
-failure. Do not increase the run count inside the task without a material spec
-revision.
+Selection may preserve available Act/floor diversity but may not fabricate
+strata or select by perceived strategic quality. If a mandatory family cannot
+supply 80 replay-valid unique states from the fixed 512 source runs, stop with a
+source-coverage failure; do not enlarge Stage 1 without a spec revision.
 
 ## Stage 2: Counterfactual Continuation Targets
 
-### Branching rule
+For every selected source state and every eligible legal action:
 
-For every selected source state and **every eligible legal action** on that
-state:
+1. replay the portable trace and verify the source public state and exact legal
+   action identities;
+2. capture one process-local native checkpoint;
+3. restore that same checkpoint before every action branch;
+4. force the candidate action exactly once;
+5. continue to terminal under the frozen continuation policy;
+6. record outcome components and compute cost.
 
-1. replay the source state from its portable trace;
-2. verify source public state and legal-action identities exactly;
-3. capture one process-local native checkpoint;
-4. restore that same checkpoint before each candidate branch;
-5. force the candidate action exactly once;
-6. continue the run to terminal under the frozen continuation policy;
-7. record all target components and compute cost.
+Do not cap or subsample candidate actions. A state for which all eligible actions
+cannot be branched safely is invalid and the failure remains visible.
 
-Do not cap or subsample candidate actions on a supported source state. If the
-simulator cannot branch all legal actions safely, the source state is invalid for
-this task and the failure remains visible.
+After the forced action use:
 
-### Frozen continuation policy
+- battle controller: `oracle_search_v1_highest_mean_s20` with the exact frozen
+  constructor/provenance/action-space contract above;
+- non-combat continuation: `expert_non_combat_v1`;
+- no assistance, construction, learned battle guidance, or root-prior variant.
 
-After the forced action, use:
+Continuation replication is fixed as follows:
 
-- battle controller: baseline `oracle_search_v1`, `highest_mean`, native budget
-  20;
-- non-combat continuation policy: `expert_non_combat_v1`;
-- no assistance, construction, learned guidance, or root-prior variant.
+- training: exactly `(652001, 652002)` per candidate action;
+- validation: exactly `(652101, 652102)` per candidate action;
+- held-out: exactly `(652201, 652202, 652203, 652204)` per candidate action.
 
-The expert continuation policy is a rollout policy used to define a first policy-
-improvement target. Its own action at the source decision is never treated as
-correct supervision.
+The checkpoint fixes the exact simulator future state at the branch point;
+replication varies the seeded stochastic continuation policy, not hidden future
+sampling. Reports must state this limitation.
 
-### Replication budget
+Retain terminal floor/Act/status, Boss and later-act reachability, terminal HP
+and visible resources, simulator/search cost, wall-clock, truncation, and error
+status for audit.
 
-For each candidate action:
-
-- training states: 2 continuation-policy seeds;
-- validation states: 2 continuation-policy seeds;
-- held-out test states: 4 continuation-policy seeds.
-
-All candidate actions from the same source state use the same ordered
-continuation-seed set. This is the paired common-random-policy contract.
-
-The simulator checkpoint fixes the exact simulator future state at the branch
-point. Replication varies the stochastic continuation policy, not hidden-future
-sampling. Reports must state this limitation explicitly.
-
-### Target definition
-
-Retain the complete terminal outcome vector for audit:
-
-- terminal floor and Act;
-- run terminal status/victory;
-- Act Boss entries and victories;
-- Act 2/3/4 entry;
-- Shield/Spear and Heart entry/outcome when reached;
-- terminal current/max HP;
-- gold, potion count/identities, relic/deck/key summaries when available;
-- simulator steps, search cost, wall-clock, truncation/error status.
-
-The v1 supervised scalar is **additional terminal floors**:
+The v1 supervised scalar is additional terminal floors:
 
 `q_floor = mean(max(0, terminal_floor - source_floor))`
 
-over the frozen continuation seeds for that candidate action.
+over the frozen continuation seeds for that action.
 
-This target is intentionally simple. It is a simulator-derived long-horizon
-progress measure, not a hand-written weighted reward over cards, relics, HP,
-gold, or other resources. Structured outcome components remain available for
-analysis but are not collapsed into a permanent strategic reward in T065.
+This is a simulator-derived long-horizon progress target, not a permanent
+hand-written weighted reward over cards, relics, HP, gold, or other resources.
 
 ## Stage 3: Public Non-Combat Model Input
 
 Define one versioned `non_combat_model_input_v1` contract that reuses existing
-public surfaces instead of creating a parallel game-state representation.
-
-The state/action input may consume only:
+public surfaces:
 
 - T074 `DecisionContext` public fields;
-- T033 public-context model features/history projection;
-- existing public tactical state/action encodings and identity vocabulary;
-- public non-combat snapshot/action metadata already exposed by the controlled-
-  run boundary;
-- explicit screen/category indicators needed to disambiguate the four supported
-  families.
+- T033 public-context/history model features;
+- existing public tactical state/action encodings and identities;
+- existing public non-combat snapshot/action metadata;
+- explicit screen/category indicators for the four mandatory families.
 
-Requirements:
+Variable legal-action counts remain native. Unknown identities require explicit
+versioned handling. The input must not contain behavior actions, targets,
+terminal outcomes, hidden future, native checkpoints, or simulator-only state.
+The same encoder is used for training, held-out scoring, and online control.
+Schema/version mismatch fails closed.
 
-- variable legal-action counts remain native; do not pad the policy contract to a
-  fixed game-wide action vocabulary;
-- unknown identities have explicit versioned handling;
-- model input contains no target/behavior action, terminal outcome, hidden future,
-  native checkpoint, or simulator-only state field;
-- the same encoder is used for training, offline held-out scoring, and online
-  complete-run control;
-- schema/version mismatch fails closed.
-
-T065 may add one narrow reusable non-combat model-input module. It must not extend
-battle-specific `torch_policy_value.py` with non-combat conditionals merely to
-avoid creating the correct owner.
+T065 may add one narrow reusable non-combat model-input module. It must not add
+non-combat conditionals to battle-specific model code merely to avoid creating
+the correct owner.
 
 ## Stage 4: Frozen Learned Ranker
 
-Train a small action-conditioned scalar value/ranker that predicts `q_floor` for
-each legal action independently from the public source context plus that action's
-public features.
+Train a small action-conditioned scalar ranker predicting `q_floor` from public
+state plus one candidate action.
 
-Freeze the first experiment configuration:
+Frozen configuration:
 
-- framework: PyTorch using the existing optional `train` dependency;
-- architecture: state encoder MLP + action encoder MLP + joint scalar head;
-- hidden width: 64;
-- hidden layers per encoder/head: at most 2;
-- activation: ReLU;
-- loss: Huber loss on `q_floor`;
-- optimizer: Adam;
-- learning rate: `1e-3`;
-- batch size: 64 candidate-action rows;
-- optimizer steps: 1500;
-- gradient clip norm: 10;
-- model seeds: exactly two frozen seeds, published before training;
-- per-run PyTorch numerical threading: `torch_threads=1`;
-- no hyperparameter sweep and no architecture search inside T065.
+- PyTorch through the existing optional `train` dependency;
+- state encoder MLP + action encoder MLP + joint scalar head;
+- hidden width 64;
+- at most 2 hidden layers per encoder/head;
+- ReLU;
+- Huber loss;
+- Adam, learning rate `1e-3`;
+- batch size 64 candidate-action rows;
+- 1500 optimizer steps;
+- gradient clip norm 10;
+- exactly model seeds `653001` and `653002`;
+- `torch_threads=1` per model run;
+- no architecture or hyperparameter sweep.
 
-The checkpoint must include model-input schema identity, training config, split
-identity, target contract, source/target artifact identities, model seed, and
+Checkpoint metadata must include model-input schema, training config, split and
+target identities, source/target artifact identities, exact model seed, and
 behavior/continuation provenance.
 
-The deployable learned policy scores all eligible actions on supported screens
-and selects the highest predicted `q_floor`, using only a deterministic stable
-index tie-break. No expert prior or behavior-action feature may be mixed into the
-model score.
+The deployable learned policy scores every eligible action on a supported screen
+and selects the highest predicted `q_floor` with deterministic stable-index tie
+break. Expert priors and behavior-action features are forbidden from model score.
 
-Checkpoint selection for Stage 5/6 is based only on validation `q_floor` MAE;
-choose the lower validation MAE of the two model seeds, breaking an exact tie by
-the lower model seed. Freeze this checkpoint before reading held-out test
-results.
+Choose the Stage 5/6 checkpoint only by validation `q_floor` MAE between seeds
+653001 and 653002. Exact MAE ties choose the lower model seed. Freeze that
+choice before reading held-out results.
 
 ## Stage 5: Held-Out Counterfactual Gate
 
-Evaluate both model seeds on the 64 mandatory held-out source states using the
-four-continuation empirical target per candidate action.
+Evaluate both models on the 64 mandatory held-out source states, using exactly
+four continuation seeds `(652201, 652202, 652203, 652204)` for every candidate.
 
-For each state report:
+Report expert/stochastic/model-selected actions, empirical `q_floor` for every
+candidate, model-minus-expert empirical delta, empirical best-action set,
+predicted values, MAE/rank correlation where defined, screen/Act/floor, source
+behavior, and public-context identity.
 
-- expert-selected legal action;
-- stochastic-selected legal action where reproducible from the source context;
-- each model's selected action;
-- empirical `q_floor` for every candidate;
-- model-selected minus expert-selected empirical `q_floor`;
-- best empirical action set and action disagreement;
-- predicted values, MAE, and rank correlation where defined;
-- screen family, Act/floor, source behavior arm, and public-context identity.
+The validation-selected checkpoint passes only if all hold:
 
-### Offline signal gate
-
-The validation-selected checkpoint passes the offline gate only when all of the
-following hold on the 64-state mandatory held-out cohort:
-
-1. aggregate mean paired empirical `q_floor(model) - q_floor(expert)` is strictly
-   positive;
-2. the median paired delta is non-negative;
-3. at least three of the four mandatory screen-family mean deltas are
-   non-negative;
-4. a paired bootstrap over source states gives at least 0.90 probability that the
+1. aggregate mean paired `q_floor(model) - q_floor(expert)` is strictly positive;
+2. median paired delta is non-negative;
+3. at least three of four mandatory family mean deltas are non-negative;
+4. paired bootstrap over source states gives at least 0.90 probability that the
    aggregate mean delta is positive;
-5. the second model seed has a non-negative aggregate mean paired delta;
-6. there are zero hidden-field, schema, legal-action, replay, or supported-screen
-   fallback violations.
+5. model seed 653001 and model seed 653002 are both evaluated, and the
+   non-selected seed has a non-negative aggregate mean paired delta;
+6. zero hidden-field, schema, legal-action, replay, or supported-screen fallback
+   violations.
 
-Matching `expert_non_combat_v1` actions is **not** a success metric. The gate is
-about simulator continuation value.
-
-If this gate fails, stop before Stage 6. Record terminal **Case C** below; do not
-spend a complete-run scale evaluation trying to rescue a model that lacks a
-held-out action-value signal.
+Matching expert actions is not a success criterion. If this gate fails with
+otherwise valid evidence, stop before Stage 6 and record Case C.
 
 ## Stage 6: Conditional Matched Complete-Run Evaluation
 
-Run this stage only after the Stage 5 offline gate passes.
+Run only after Stage 5 passes.
 
-Use **256 fresh A20 simulator seeds**, disjoint from all Stage 1 source seeds,
-with exactly three matched non-combat arms and the same battle controller:
+Use every seed in `651001..651256` in exactly three matched arms:
 
 1. `stochastic_non_combat_v1`;
 2. `expert_non_combat_v1`;
-3. validation-selected `learned_non_combat_v1` on mandatory supported screens +
-   explicitly named `expert_non_combat_v1` fallback elsewhere.
+3. validation-selected `learned_non_combat_v1` on mandatory families with
+   explicit `expert_non_combat_v1` fallback elsewhere.
 
-Battle control in all three arms is baseline `oracle_search_v1`, `highest_mean`,
-native budget 20. Use standard natural A20 starts and no assistance,
-construction, learned battle guidance, or root-prior variant.
+All arms use the exact frozen `oracle_search_v1_highest_mean_s20` battle
+controller and action-space contract. Use standard natural A20 starts with no
+assistance, construction, learned battle guidance, or root-prior variant.
 
-This stage therefore contains exactly **768 terminal runs** when complete.
+There are exactly 768 terminal runs when Stage 6 completes validly.
 
-Report matched by seed:
+Report matched terminal floor/status, Boss/later-act/Heart reachability, terminal
+visible resources, learned decision count, intentional fallback by screen,
+supported-screen failures separately, expert disagreement, simulator/search
+cost, wall-clock, truncations, and controller failures.
 
-- terminal floor/status;
-- Act 1 Boss entry/victory;
-- Act 2/3/4 entry;
-- later Boss/Heart reachability if any;
-- terminal HP/resources;
-- learned-screen decision count;
-- intentional fallback count by screen;
-- supported-screen encoder/inference fallback/errors separately;
-- action disagreement with expert on learned-controlled states;
-- simulator/search/wall-clock cost;
-- truncations and controller failures.
+The learned-control coverage gate requires:
 
-### Learned-control coverage gate
+- at least 60% of all non-combat decisions controlled by the learned policy on
+  the four mandatory families;
+- intentional unsupported-family fallback reported explicitly;
+- schema/encoder/inference fallback on mandatory families at most 1% of their
+  decisions and never hiding an illegal action;
+- no post-hoc reclassification of a mandatory action category as unsupported.
 
-For the learned arm:
-
-- at least 60% of all non-combat decisions must be controlled by the learned
-  policy on the four mandatory screen families;
-- intentional unsupported-screen fallback is allowed and reported;
-- supported-screen fallback caused by schema/encoder/inference failure must be
-  at most 1% of mandatory-family decisions and may not hide any illegal action;
-- any systematic unsupported mandatory action category is a failure, not a
-  reason to reclassify that category as fallback after seeing results.
-
-### Complete-run positive gate
-
-The learned arm passes the complete-run outcome gate against the expert arm only
-when:
+The learned arm passes the complete-run outcome gate against expert only if:
 
 1. matched mean terminal-floor delta is strictly positive;
-2. paired bootstrap probability that the mean terminal-floor delta is positive
-   is at least 0.80;
-3. Act-2 entry count is not lower than the expert arm;
+2. paired bootstrap probability that mean terminal-floor delta is positive is
+   at least 0.80;
+3. Act-2 entry count is not lower than expert;
 4. controller errors and unreported truncations are zero;
 5. the learned-control coverage gate passes; and
-6. at least one stronger signal holds:
-   - learned Act-2 entry count is strictly greater than expert, or
-   - paired bootstrap probability that mean terminal-floor delta is positive is
-     at least 0.95.
+6. at least one stronger signal holds: learned Act-2 entry count is strictly
+   higher than expert, or bootstrap probability for positive mean floor delta is
+   at least 0.95.
 
-The stochastic arm is a context baseline, not a substitute for the expert-arm
-promotion gate.
+The stochastic arm is context only and cannot substitute for the expert gate.
 
 ## Terminal Decision Table
 
-T065 must end in exactly one case and one planner-facing recommendation.
+T065 ends in exactly one case and one planner-facing recommendation.
 
 ### Case A — learned signal transfers
 
-Conditions:
-
-- Stage 5 offline gate passes; and
-- Stage 6 complete-run positive gate passes.
-
-Disposition:
-
-- accept `learned_non_combat_v1` as an **experimental** public non-combat policy;
-- retain expert fallback for unsupported families;
-- recommend planner review of T066 or a narrower joint-policy task;
-- do not claim natural A20 or live-game promotion.
+Stage 5 and Stage 6 gates both pass. Accept `learned_non_combat_v1` only as an
+experimental public non-combat policy with expert fallback for unsupported
+families; recommend planner review of T066 or a narrower joint-policy task. Do
+not claim natural A20/live-game promotion.
 
 ### Case B — offline signal does not transfer
 
-Conditions:
-
-- Stage 5 passes; but
-- Stage 6 outcome/coverage gate fails without a tooling/fidelity invalidation.
-
-Disposition:
-
-- do not promote the learned controller;
-- preserve the fixed target/checkpoint/evaluation evidence;
-- recommend exactly one narrow follow-up based on whether the failure is
-  screen-coverage, target-horizon/rollout-policy mismatch, or run-level
-  distribution shift.
-
-Do not launch a larger natural run merely because the 256-seed comparison is
-neutral.
+Stage 5 passes but Stage 6 fails validly. Do not promote the controller. Preserve
+the fixed evidence and recommend exactly one narrow follow-up based on observed
+screen coverage, target-horizon/rollout-policy mismatch, or run distribution
+shift. Do not launch a larger natural run merely because 256 seeds are neutral.
 
 ### Case C — no held-out action-value signal
 
-Condition:
-
-- Stage 5 offline gate fails with otherwise valid evidence.
-
-Disposition:
-
-- skip Stage 6;
-- do not promote the learned controller;
-- close this v1 target/model formulation and recommend at most one narrowly
-  justified target/model diagnostic.
+Stage 5 fails validly. Skip Stage 6, do not promote the controller, close this
+v1 target/model formulation, and recommend at most one narrow target/model
+diagnostic.
 
 ### Case D — invalid experiment
 
-Condition:
-
-- source replay, checkpoint restore, public-input firewall, target completeness,
-  split integrity, simulator identity, legal-action semantics, or other tooling
-  failure prevents valid attribution.
-
-Disposition:
-
-- make no scientific policy conclusion;
-- recommend only the narrow repair required to make the same frozen experiment
-  executable.
+A replay, restore, public-input, target completeness, split, simulator identity,
+legal-action, or other tooling/fidelity failure prevents valid attribution. Make
+no policy conclusion and recommend only the narrow repair required to rerun the
+same frozen experiment.
 
 ## CLI And Command-Surface Boundary
 
-T065 must **not** add task-numbered flags or new experiment branches to the
-legacy flat main CLI. In particular, avoid expanding these current debt
-surfaces solely for T065:
+T065 must not add task-numbered flags or experiment branches to:
 
 - `src/sts_combat_rl/commands/cli_parser.py`;
 - `src/sts_combat_rl/commands/lightspeed_cli.py`;
 - `src/sts_combat_rl/commands/cli_validation.py`;
 - the long dispatch chain in `src/sts_combat_rl/cli.py`.
 
-The T065 workflow may be exposed through one small neutrally named module command
-or thin script that delegates to reusable library functions, for example a
-`non_combat_learning` command surface with explicit collect/target/train/evaluate
-operations. Do not create a generic command registry/framework merely to satisfy
-this rule.
-
-Existing main CLI behavior and standard mock gates must remain unchanged.
+The workflow may use one small neutrally named module command or thin script
+that delegates to reusable library functions, e.g. a `non_combat_learning`
+collect/target/train/evaluate surface. Do not build a generic command registry or
+workflow framework. Existing main CLI behavior and mock gates remain unchanged.
 
 ## Artifact And Reuse Contract
 
-Large source runs, continuation rows, checkpoints, logs, and reports remain under
-an ignored stable root such as:
+Large source runs, continuation rows, checkpoints, logs, and reports remain
+under ignored `artifacts/t065-learned-non-combat-policy-v1/` or an explicitly
+reported equivalent stable path.
 
-`artifacts/t065-learned-non-combat-policy-v1/`
+Compact artifacts use versioned schemas and retain paths/hashes, source and
+simulator identity, exact frozen seed sets, controller/action-space provenance,
+split identity, config, counts, and reproduction commands.
 
-Compact artifacts must use versioned schemas and include paths/hashes, source
-identity, simulator identity, split identity, config, counts, and reproduction
-commands.
+Recommended compact artifacts are the source-state selection manifest,
+counterfactual target report, training/checkpoint metadata, held-out decision
+report, conditional complete-run report, and terminal decision report.
 
-Recommended compact logical artifacts:
+Do not add proof chains, dependency-hash graphs, or security-style attestation.
+Hashes identify immutable inputs/artifacts and stale-data mistakes.
 
-- source-state selection manifest;
-- counterfactual target dataset/report;
-- model-input/training manifest;
-- two checkpoint metadata reports;
-- held-out decision report;
-- conditional complete-run comparison report;
-- terminal decision report.
-
-Do not add sidecar proof chains, dependency-hash graphs, or security-style
-attestation. Hashes identify immutable inputs/artifacts and stale-data mistakes;
-they are not a distrust mechanism against repository producers.
-
-Use T071 stage/run-local reuse rules. A reviewed repair names the earliest
-affected stage or independent run; valid preceding outputs remain reusable.
-Producer Git SHA is provenance, not a global cache key.
+Use T071 stage/run-local reuse. A repair names the earliest affected stage or
+independent run; valid preceding outputs remain reusable. Producer Git SHA is
+provenance, not a global cache key.
 
 ## Parallelism And Long Jobs
 
 - Expensive simulator collection/continuation/evaluation stages target 16
-  effective orchestration workers, capped by shard count, memory, and simulator
-  constraints.
-- Training uses `torch_threads=1` per model run. Independent model seeds may run
-  concurrently when resource-safe.
+  effective orchestration workers, capped only by shard count, memory, or a
+  documented simulator constraint.
+- Training uses `torch_threads=1`; the two model seeds may run concurrently when
+  resource-safe.
 - Use the existing detached-job utility for long stages. Report PID, status/log
-  paths, command, worker count, source/cohort range, and coarse expected duration
-  once; do not keep an AI agent in a continuous polling loop.
-- Every expensive stage reports wall-clock, simulator/search cost, records/runs
-  completed, failures, and reuse decisions.
+  paths, command, worker count, seed/cohort range, and coarse expected duration
+  once rather than continuously polling.
+- Every expensive stage reports wall-clock, simulator/search cost, completed
+  records/runs, failures, and reuse decisions.
 
 ## Out Of Scope
 
-- Human trajectories, human action labels, human expert imitation, or strategy
-  annotations.
-- Imitation loss on `expert_non_combat_v1` actions.
-- Learned battle-policy/search changes, battle checkpoint refresh, or replacing
-  the battle controller.
-- T063 implementation.
-- End-to-end joint optimization or T066 implementation.
-- Public-consistent hidden-future sampling or normal-information optimal-value
-  claims.
-- Shop/event/card-select learned control in v1.
-- Broad hyperparameter search, architecture search, ensembles, or repeated
-  post-hoc gate tuning.
-- Natural 10,000-run scale-up, final A20 performance claim, or live
-  CommunicationMod deployment.
-- Refactoring the entire CLI, removing the 71 MB real fixtures, adding CI/branch
-  protection, choosing a license, or broad unrelated module cleanup.
-- Local reimplementation of Slay the Spire mechanics, event outcomes, shop
-  rules, map logic, or reward values.
+- human trajectories, labels, expert imitation, or strategy annotations;
+- learned battle/search changes or battle-controller replacement;
+- T063 or T066 implementation;
+- public-consistent hidden-future sampling or normal-information optimality;
+- learned shop/event/card-select control in v1;
+- hyperparameter/architecture sweep, ensemble, or post-hoc gate tuning;
+- 10,000-run scale-up, final A20 claim, or live CommunicationMod deployment;
+- broad CLI refactor, 71 MB fixture cleanup, CI/branch protection, license choice,
+  or unrelated module cleanup;
+- local reimplementation of Slay the Spire mechanics or strategic reward rules.
 
 ## Deliverables
 
-- Versioned public non-combat model-input contract.
-- Portable replay-valid non-combat source-state records/selection manifest.
-- Counterfactual all-eligible-action continuation target pipeline.
-- Small frozen learned non-combat action-value/ranking model and checkpoint
-  contract.
-- Learned online non-combat policy/controller integration through the T074
-  policy boundary with explicit expert fallback.
-- Held-out action-value report.
-- Conditional matched complete-run comparison report when Stage 5 passes.
-- Terminal Case A/B/C/D decision report with exactly one next recommendation.
-- Focused tests and documentation required by this task only.
+- versioned public non-combat model-input contract;
+- replay-valid source-state records/selection manifest;
+- all-eligible-action counterfactual target pipeline;
+- frozen learned ranker and checkpoint contract;
+- learned online non-combat integration through the T074 policy boundary;
+- held-out action-value report;
+- conditional matched complete-run report when Stage 5 passes;
+- terminal Case A/B/C/D decision report with exactly one recommendation;
+- focused tests and task documentation only.
 
 ## Acceptance Criteria
 
-T065 implementation may be accepted as a **completed experiment** when all
-applicable frozen stages are valid, even if the scientific result is Case B or
-Case C. Scientific promotion is separate from implementation correctness.
+T065 may be accepted as a completed experiment with Case B or C; scientific
+promotion is separate from implementation correctness.
 
-Mandatory acceptance conditions:
+Mandatory conditions:
 
-- all four mandatory screen families have exactly 80 selected replay-valid
-  source states with frozen 48/16/16 train/validation/test counts;
-- source splits are seed-group disjoint and contain no replay-equivalent duplicate
-  across splits;
-- every selected supported source state evaluates every eligible legal action;
-- training/validation candidate actions have exactly two continuation-policy
-  seeds and held-out candidates exactly four;
-- there are zero missing candidate/continuation rows in a valid target dataset;
-- model input is public-only and passes hidden-field audits;
-- expert behavior actions are not used as supervised targets/features;
-- both frozen model seeds train with the published configuration and checkpoint
-  metadata;
+- Stage 1 uses exactly source seeds `650001..650256` in both behavior arms;
+- all four mandatory families have exactly 80 selected replay-valid states with
+  48/16/16 train/validation/test counts;
+- splits are seed-group disjoint with no replay-equivalent cross-split duplicate;
+- every selected state evaluates every eligible legal action;
+- train candidates use exactly `(652001, 652002)`, validation candidates exactly
+  `(652101, 652102)`, and held-out candidates exactly
+  `(652201, 652202, 652203, 652204)`;
+- zero missing candidate/continuation rows in a valid target dataset;
+- model input is public-only and expert behavior actions are not target/features;
+- exactly models `653001` and `653002` train with the frozen configuration;
 - checkpoint selection uses validation evidence only;
-- held-out evaluation is complete before any decision to run Stage 6;
+- held-out evaluation completes before any Stage 6 decision;
 - Stage 6 is skipped automatically on valid Case C;
-- if Stage 6 runs, it contains the same 256 fresh seeds in all three arms and
-  exactly 768 terminal runs overall;
-- all fallback, controller failures, truncations, source identities, and compute
-  costs remain explicit;
-- terminal Case A/B/C/D is determined from the published gates without post-hoc
-  threshold changes;
-- no existing accepted scientific result/schema is silently reinterpreted;
-- legacy flat CLI files do not gain T065-specific routes/flags;
+- if Stage 6 runs, exactly seeds `651001..651256` occur in all three arms and
+  there are exactly 768 terminal runs;
+- every Stage 1/2/6 battle controller reports provenance name
+  `oracle_search_v1_highest_mean_s20` and the exact frozen action-space config;
+- fallback, controller failures, truncations, identities, and compute cost remain
+  explicit;
+- terminal Case A/B/C/D follows the frozen gates without threshold changes;
+- no existing scientific schema/result is silently reinterpreted;
+- legacy flat CLI files gain no T065-specific routes/flags;
 - no large generated dataset/checkpoint is committed to Git.
 
 ## Required Verification
 
-Run the standard local gates from `docs/tasks/README.md` plus focused T065 tests.
-At minimum include:
+Run standard local gates from `docs/tasks/README.md` plus focused T065 tests,
+including:
 
-- policy-boundary import/dependency regression tests from T074;
-- public/hidden-field input firewall tests;
-- supported/unsupported-screen routing tests;
-- variable legal-action masking and stable tie-break tests;
-- portable source-state replay equality tests;
-- exact checkpoint branch/restore tests;
-- all-eligible-action target completeness tests;
-- split leakage/duplicate tests;
-- deterministic paired continuation-seed tests;
-- model-input round trip/schema mismatch tests;
-- checkpoint save/load/provenance tests;
-- synthetic training sanity test proving loss/selection plumbing works without a
-  simulator-scale run;
-- held-out gate aggregation/bootstrap tests;
-- learned fallback coverage/report tests;
-- complete-run matched-seed validation tests;
-- terminal decision-table tests for Cases A/B/C/D;
+- T074 dependency/import regressions;
+- exact frozen-seed/controller/action-space configuration tests;
+- public/hidden-field input firewall;
+- supported/unsupported routing;
+- variable legal-action masking and stable tie break;
+- portable source replay equality;
+- exact checkpoint branch/restore;
+- all-eligible-action completeness;
+- split leakage/duplicate checks;
+- deterministic paired continuation-seed order;
+- model-input round trip/schema mismatch;
+- checkpoint save/load/provenance;
+- synthetic training sanity without simulator scale;
+- held-out bootstrap/gate aggregation;
+- fallback coverage/reporting;
+- complete-run matched-seed validation;
+- Case A/B/C/D decision-table tests;
 - `git diff --check`.
 
-Before simulator evidence, run the pinned source verifier:
+Before simulator evidence run the pinned source verifier:
 
 ```powershell
 wsl.exe -d Ubuntu -e bash -lc "cd /mnt/d/DeadlycatCoding/STSRL && bash scripts/verify_lightspeed_source.sh /home/lsmft/stsrl-spikes/sts_lightspeed"
 ```
 
-Use the exact current-main Python/native pairing for all simulator evidence.
-Large WSL stages must be sharded, detached where appropriate, and reported with
-full commands and artifact identities.
+Use the exact current-main Python/native pairing. Large WSL stages are sharded,
+detached where appropriate, and reported with commands and artifact identities.
 
 ## Legacy Reference
 
-Consult:
-
-- T010 for the stochastic non-combat baseline;
-- T014--T016/T033 for public information and model-input boundaries;
-- T040 for expert bootstrap behavior and non-combat action categories;
-- T061 for the matched bottleneck decomposition;
-- T064 for the terminal recommendation selecting T065;
-- T071 for reuse/long-job conventions;
-- T074 for the current acyclic policy ownership boundary;
-- `docs/training_paradigm.md` for the simulator-only/no-human-data contract.
-
-Historical experiment artifacts are not implicit inputs. Every consumed artifact
-must come from a stable documented path or be regenerated by the published
-workflow.
+Consult T010, T014--T016, T033, T040, T061, T064, T071, T074, and
+`docs/training_paradigm.md`. Historical artifacts are not implicit inputs; every
+consumed artifact comes from a stable documented path or is regenerated by the
+published workflow.
 
 ## PR Report
 
-The implementation PR must report:
+The implementation PR reports:
 
 - exact approved spec commit and baseline;
 - pinned simulator identity;
-- source seed range and both source behavior arms;
-- per-family source counts and train/validation/test identities;
-- optional Boss-relic diagnostic coverage, if used;
-- continuation controller and continuation-policy seed sets;
-- candidate/target row counts and completeness;
+- Stage 1 seed range `650001..650256` and both behavior arms;
+- per-family selected/split identities;
+- optional Boss-relic diagnostic coverage if used;
+- exact continuation seed sets;
+- exact frozen battle controller and action-space provenance;
+- candidate/target counts and completeness;
 - model-input/checkpoint schema identities;
-- both model seeds and training metrics;
-- validation-based checkpoint selection;
-- held-out per-family and aggregate action-value results;
-- bootstrap probabilities and action disagreement;
-- whether Stage 5 passed and whether Stage 6 was therefore executed;
-- complete-run three-arm results and learned-control/fallback coverage when run;
-- all commands, workers/shards, PID/status/log paths for detached stages,
-  wall-clock and simulator/search cost;
+- model seeds `653001` and `653002`, training metrics, and validation selection;
+- held-out per-family/aggregate action-value results and bootstrap probability;
+- whether Stage 5 passed and Stage 6 therefore ran;
+- Stage 6 seed range `651001..651256`, three-arm results, and learned/fallback
+  coverage when applicable;
+- commands, workers/shards, detached PID/status/log paths, wall-clock and
+  simulator/search cost;
 - failures, truncations, reuse decisions, and deviations;
-- standard/focused verification results;
-- terminal Case A/B/C/D;
-- exactly one planner-facing next recommendation;
-- explicit confirmation that T065 added no human imitation target and no
-  T065-specific route to the legacy flat CLI.
+- standard/focused verification;
+- terminal Case A/B/C/D and exactly one next recommendation;
+- confirmation of no human imitation target and no T065-specific legacy CLI
+  route.
