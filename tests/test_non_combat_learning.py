@@ -664,6 +664,8 @@ def test_cross_split_case_d_reports_sorted_candidate_provenance() -> None:
     assert details[0]["previous"]["source_run_id"] == "source:1"
     assert details[0]["current"]["source_run_id"] == ("stochastic_non_combat_v1:650155")
     assert details[1]["current"]["source_run_id"] == ("expert_non_combat_v1:650156")
+    assert report["failure_ids"] == [detail["failure_id"] for detail in details]
+    assert report["problems"] == [detail["problem"] for detail in details]
     assert report["failure_counts"] == {
         "failure_count": 2,
         "replay_equivalent_cross_split": 2,
@@ -1777,6 +1779,32 @@ def test_case_d_report_is_persisted_with_frozen_repair_contract(tmp_path) -> Non
     assert (
         report["recommendation"] == "repair the frozen fidelity failure and rerun T065"
     )
+
+
+def test_legacy_v1_terminal_report_round_trips_without_optional_details(
+    tmp_path,
+) -> None:
+    legacy_path = tmp_path / "legacy-decision.json"
+    round_trip_path = tmp_path / "round-trip-decision.json"
+    legacy_report = T065CaseD(
+        "source-selection",
+        ["legacy source failure"],
+        failure_ids=("legacy:source:1",),
+        failure_counts={"failure_count": 1},
+        simulator_identity={"integration_commit": "fixture"},
+    ).to_decision_report()
+    assert legacy_report["schema_id"] == "t065-terminal-decision-report-v1"
+    assert legacy_report["schema_version"] == 1
+    assert "failure_details" not in legacy_report
+    assert "failure_detail_counts" not in legacy_report
+
+    legacy_path.write_text(json.dumps(legacy_report), encoding="utf-8")
+    loaded_report = json.loads(legacy_path.read_text(encoding="utf-8"))
+    round_trip = write_t065_terminal_decision_report(
+        round_trip_path, report=loaded_report
+    )
+    assert round_trip == legacy_report
+    assert json.loads(round_trip_path.read_text(encoding="utf-8")) == legacy_report
 
 
 def test_legacy_public_context_is_fail_closed_and_family_projection_is_rechecked() -> (

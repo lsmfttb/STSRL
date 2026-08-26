@@ -1079,6 +1079,32 @@ def _cross_split_failure_counts(
     }
 
 
+def _cross_split_failure_sort_key(detail: Mapping[str, Any]) -> tuple[Any, ...]:
+    previous = detail["previous"]
+    current = detail["current"]
+    return (
+        str(detail["failure_type"]),
+        str(detail["family"]),
+        str(detail["replay_identity_digest"]),
+        str(previous["family"]),
+        str(previous["public_state_identity"]),
+        str(previous["split"]),
+        str(previous["source_arm"]),
+        int(previous["simulator_seed"]),
+        str(previous["source_run_id"]),
+        int(previous["source_step_index"]),
+        str(previous["branch_identity"]),
+        str(current["family"]),
+        str(current["public_state_identity"]),
+        str(current["split"]),
+        str(current["source_arm"]),
+        int(current["simulator_seed"]),
+        str(current["source_run_id"]),
+        int(current["source_step_index"]),
+        str(current["branch_identity"]),
+    )
+
+
 def select_source_candidates(
     candidates: Iterable[Any],
 ) -> tuple[tuple[Any, str, bytes], ...]:
@@ -1109,15 +1135,30 @@ def select_source_candidates(
         prior_split = split_by_replay.get(identity)
         if prior_split is not None and prior_split != candidate.split:
             prior_candidate = candidate_by_replay[identity]
+            previous = _source_candidate_provenance(prior_candidate)
+            current = _source_candidate_provenance(candidate)
+            replay_identity_digest = current["replay_identity_digest"]
             failure_details.append(
                 {
                     "failure_type": "replay-equivalent-cross-split",
                     "family": candidate.family,
-                    "replay_identity_digest": _source_candidate_provenance(candidate)[
-                        "replay_identity_digest"
-                    ],
-                    "previous": _source_candidate_provenance(prior_candidate),
-                    "current": _source_candidate_provenance(candidate),
+                    "replay_identity_digest": replay_identity_digest,
+                    "previous": previous,
+                    "current": current,
+                    "failure_id": (
+                        "replay-equivalent-cross-split:"
+                        f"{replay_identity_digest}:"
+                        f"{previous['source_run_id']}@step"
+                        f"{previous['source_step_index']}"
+                        f"[{previous['split']}]->"
+                        f"{current['source_run_id']}@step"
+                        f"{current['source_step_index']}"
+                        f"[{current['split']}]"
+                    ),
+                    "problem": (
+                        "replay-equivalent candidate crosses splits: "
+                        f"{current['source_run_id']}"
+                    ),
                 }
             )
             problems.append(
@@ -1133,22 +1174,24 @@ def select_source_candidates(
             best_by_replay[identity] = candidate
 
     if problems:
-        failure_details.sort(
-            key=lambda detail: (
-                detail["family"],
-                detail["replay_identity_digest"],
-                detail["previous"]["split"],
-                detail["previous"]["source_run_id"],
-                detail["current"]["split"],
-                detail["current"]["source_run_id"],
-            )
+        failure_details.sort(key=_cross_split_failure_sort_key)
+        cross_split_problems = [detail["problem"] for detail in failure_details]
+        non_cross_split_problems = sorted(
+            problem
+            for problem in problems
+            if not problem.startswith("replay-equivalent candidate crosses splits:")
         )
+        ordered_problems = non_cross_split_problems + cross_split_problems
+        ordered_failure_ids = non_cross_split_problems + [
+            detail["failure_id"] for detail in failure_details
+        ]
         cross_split_count = len(failure_details)
         raise T065CaseD(
             "source-selection",
-            problems,
+            ordered_problems,
+            failure_ids=ordered_failure_ids if failure_details else (),
             failure_counts={
-                "failure_count": len(problems),
+                "failure_count": len(ordered_problems),
                 "replay_equivalent_cross_split": cross_split_count,
             },
             failure_details=failure_details,
