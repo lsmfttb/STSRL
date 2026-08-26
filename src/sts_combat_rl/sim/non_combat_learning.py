@@ -4159,57 +4159,78 @@ def _probe_native_mandatory_families(
     adapter: Any,
     snapshot: SimulatorSnapshot,
     *,
-    max_nodes: int = 64,
-    max_depth: int = 32,
+    max_nodes: int = 192,
+    max_depth: int = 192,
 ) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
-    """Walk a small real simulator frontier and audit every mandatory family."""
+    """Follow a bounded real run and audit every mandatory family.
+
+    The pinned seed-1 runtime starts in an event and reaches rooms only after
+    several native battles. A broad action frontier spends its budget in
+    hidden-state battle branches, so this probe uses the frozen battle search
+    controller and seeded expert non-combat driver for one reproducible,
+    real transition path. No context is synthesized without a native
+    projection.
+    """
 
     if not bool(getattr(adapter, "supports_checkpoint_restore", False)):
         raise ValueError("simulator runtime lacks checkpoint capture/restore")
-    root_checkpoint = adapter.capture_checkpoint(snapshot)
-    frontier: list[tuple[SimulatorCheckpoint, int, str]] = [
-        (
-            root_checkpoint,
-            0,
-            hashlib.sha256(_canonical_json_bytes(snapshot.raw)).hexdigest(),
-        )
-    ]
+    if max_nodes < 1 or max_depth < 1:
+        raise ValueError("native runtime probe bounds must be positive")
+
     family_evidence: dict[str, dict[str, Any]] = {}
-    nodes = 0
-    restores = 0
+    restore_count = 0
     restore_mismatches = 0
-    while frontier and nodes < max_nodes:
-        checkpoint, depth, expected_snapshot_digest = frontier.pop(0)
-        current = adapter.restore_checkpoint(checkpoint)
-        restores += 1
-        current_digest = hashlib.sha256(_canonical_json_bytes(current.raw)).hexdigest()
-        if current_digest != expected_snapshot_digest:
-            restore_mismatches += 1
-        actions = tuple(adapter.legal_actions(current))
+    observed_nodes = 0
+
+    def snapshot_digest(value: SimulatorSnapshot) -> str:
+        # ``completed_battle_outcome`` is transition-only metadata attached by
+        # the adapter for labeling. It is not simulator state, so omitting it
+        # here matches LightSpeedAdapter's checkpoint fingerprint without
+        # dropping the outcome from the authoritative controlled-run record.
+        raw = {
+            key: item
+            for key, item in value.raw.items()
+            if key != "completed_battle_outcome"
+        }
+        return hashlib.sha256(_canonical_json_bytes(raw)).hexdigest()
+
+    def observe(
+        observed_snapshot: SimulatorSnapshot,
+        actions: Sequence[SimulatorAction],
+        decision_context: DecisionContext,
+        step_index: int,
+    ) -> None:
+        nonlocal restore_count, restore_mismatches, observed_nodes
+        observed_nodes += 1
         if not actions:
             raise ValueError("simulator runtime returned no legal actions")
-        projection = read_native_public_projection(adapter, current)
+        projection = read_native_public_projection(adapter, observed_snapshot)
         if projection is None:
             raise ValueError("simulator runtime lacks native public projection")
+        public_context = decision_context.public_run_context
+        if public_context.get("projection_status") != "available":
+            raise ValueError("native probe decision context lacks native projection")
         action_identities = tuple(
             dict(item) for item in action_identity_dicts_for_actions(actions)
         )
-        restored_for_identity = adapter.restore_checkpoint(checkpoint)
-        restored_actions = tuple(adapter.legal_actions(restored_for_identity))
-        if (
-            tuple(
-                dict(item)
-                for item in action_identity_dicts_for_actions(restored_actions)
-            )
-            != action_identities
-        ):
-            raise ValueError("simulator runtime restore changed legal action identity")
-        context = build_public_run_context(
-            current.raw,
-            actions,
-            projection=projection,
+        checkpoint = adapter.capture_checkpoint(observed_snapshot)
+        restored_snapshot = adapter.restore_checkpoint(checkpoint)
+        restore_count += 1
+        if snapshot_digest(restored_snapshot) != snapshot_digest(observed_snapshot):
+            restore_mismatches += 1
+        restored_actions = tuple(adapter.legal_actions(restored_snapshot))
+        restored_identities = tuple(
+            dict(item) for item in action_identity_dicts_for_actions(restored_actions)
         )
-        screen_field = context.get("current", {}).get("screen")
+        if restored_identities != action_identities:
+            raise ValueError("simulator runtime restore changed legal action identity")
+        restored_projection = read_native_public_projection(adapter, restored_snapshot)
+        if restored_projection is None or (
+            restored_projection.canonical_payload != projection.canonical_payload
+        ):
+            raise ValueError("simulator runtime restore changed native projection")
+
+        screen_field = public_context.get("current", {}).get("screen")
         if not isinstance(screen_field, Mapping):
             raise ValueError("native public context screen field is malformed")
         if screen_field.get("availability") != "available":
@@ -4218,81 +4239,69 @@ def _probe_native_mandatory_families(
         if not isinstance(screen_value, str) or not screen_value:
             raise ValueError("native public context screen value is missing")
         family = screen_family(screen_value)
-        if family in T065_MANDATORY_FAMILIES and family not in family_evidence:
-            encoded = encode_non_combat_decision_context(
-                build_decision_context(
-                    current.raw,
-                    actions,
-                    frozen_action_space(),
-                    public_run_context=context,
-                ),
-                public_context_status="available",
+        if family not in T065_MANDATORY_FAMILIES or family in family_evidence:
+            return
+        encoded = encode_non_combat_decision_context(
+            decision_context,
+            public_context_status="available",
+        )
+        _validate_mandatory_family_projection(family, encoded.state_features)
+        if any(
+            len(action_features) != NON_COMBAT_ACTION_FEATURE_SIZE
+            for action_features in encoded.action_features
+        ):
+            raise ValueError(
+                f"{family}: native action feature width is not "
+                f"{NON_COMBAT_ACTION_FEATURE_SIZE}"
             )
-            _validate_mandatory_family_projection(family, encoded.state_features)
-            if any(
-                len(action_features) != NON_COMBAT_ACTION_FEATURE_SIZE
-                for action_features in encoded.action_features
-            ):
-                raise ValueError(
-                    f"{family}: native action feature width is not "
-                    f"{NON_COMBAT_ACTION_FEATURE_SIZE}"
+        family_evidence[family] = {
+            "status": "passed",
+            "screen_family": family,
+            "projection_schema_id": projection.schema_id,
+            "projection_digest": hashlib.sha256(
+                projection.canonical_payload.encode("utf-8")
+            ).hexdigest(),
+            "action_count": len(actions),
+            "action_identity_digest": hashlib.sha256(
+                _canonical_json_bytes(action_identities)
+            ).hexdigest(),
+            "decision_context_screen": screen_value,
+            "projection_screen_identity": projection.screen_identity,
+            "state_feature_size": len(encoded.state_features),
+            "state_feature_digest": hashlib.sha256(
+                _canonical_json_bytes(list(encoded.state_features))
+            ).hexdigest(),
+            "action_feature_size": NON_COMBAT_ACTION_FEATURE_SIZE,
+            "action_feature_digest": hashlib.sha256(
+                _canonical_json_bytes(
+                    [list(features) for features in encoded.action_features]
                 )
-            family_evidence[family] = {
-                "status": "passed",
-                "screen_family": family,
-                "projection_schema_id": projection.schema_id,
-                "projection_digest": hashlib.sha256(
-                    projection.canonical_payload.encode("utf-8")
-                ).hexdigest(),
-                "action_count": len(actions),
-                "action_identity_digest": hashlib.sha256(
-                    _canonical_json_bytes(action_identities)
-                ).hexdigest(),
-                "decision_context_screen": screen_value,
-                "projection_screen_identity": projection.screen_identity,
-                "state_feature_size": len(encoded.state_features),
-                "state_feature_digest": hashlib.sha256(
-                    _canonical_json_bytes(list(encoded.state_features))
-                ).hexdigest(),
-                "action_feature_size": NON_COMBAT_ACTION_FEATURE_SIZE,
-                "action_feature_digest": hashlib.sha256(
-                    _canonical_json_bytes(
-                        [list(features) for features in encoded.action_features]
-                    )
-                ).hexdigest(),
-                "public_context_digest": hashlib.sha256(
-                    _canonical_json_bytes(context)
-                ).hexdigest(),
-                "decision_context_schema_id": context["schema_id"],
-            }
-        if len(family_evidence) == len(T065_MANDATORY_FAMILIES):
-            break
-        if depth >= max_depth:
-            nodes += 1
-            continue
-        # Every legal transition remains an authoritative expansion choice.
-        # This includes battle transitions because a real reset commonly starts
-        # in BATTLE and the mandatory non-combat families must be reached from
-        # that native state rather than asserted from a synthetic context.
-        branch_actions = actions
-        for action in branch_actions:
-            adapter.restore_checkpoint(checkpoint)
-            transition = adapter.step(action)
-            if transition.terminal:
-                continue
-            child_checkpoint = adapter.capture_checkpoint(transition.snapshot)
-            frontier.append(
-                (
-                    child_checkpoint,
-                    depth + 1,
-                    hashlib.sha256(
-                        _canonical_json_bytes(transition.snapshot.raw)
-                    ).hexdigest(),
-                )
-            )
-            # One screen transition is sufficient for the probe frontier; the
-            # remaining actions are still checked for legality by the encoder.
-        nodes += 1
+            ).hexdigest(),
+            "public_context_digest": hashlib.sha256(
+                _canonical_json_bytes(public_context)
+            ).hexdigest(),
+            "decision_context_schema_id": public_context["schema_id"],
+            "observed_step_index": step_index,
+        }
+
+    controller = RoutedRunController(
+        battle=build_frozen_battle_controller(),
+        non_combat=PolicyController(
+            ExpertNonCombatDriver(seed=T065_SOURCE_DRIVER_SEED)
+        ),
+    )
+    run = execute_controlled_run(
+        adapter,
+        controller,
+        seed=1,
+        max_steps=min(max_nodes, max_depth),
+        action_space=frozen_action_space(),
+        before_decision=observe,
+    )
+    if run.problems:
+        raise ValueError(
+            "native runtime probe controlled run failed: " + "; ".join(run.problems)
+        )
     missing = [
         family for family in T065_MANDATORY_FAMILIES if family not in family_evidence
     ]
@@ -4302,9 +4311,13 @@ def _probe_native_mandatory_families(
             + ", ".join(missing)
         )
     return family_evidence, {
-        "nodes_examined": nodes,
-        "checkpoint_restores": restores,
+        "nodes_examined": observed_nodes,
+        "checkpoint_restores": restore_count,
         "checkpoint_restore_equal": restore_mismatches == 0,
+        "probe_max_steps": min(max_nodes, max_depth),
+        "probe_strategy": "execute_controlled_run_before_decision_observer",
+        "battle_controller_name": T065_FROZEN_BATTLE_CONTROLLER_NAME,
+        "non_combat_driver_seed": T065_SOURCE_DRIVER_SEED,
     }
 
 

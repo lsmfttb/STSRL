@@ -18,6 +18,7 @@ from sts_combat_rl.sim.contract import (
     SimulatorSnapshot,
     SimulatorTransition,
 )
+from sts_combat_rl.sim.decision_record import action_identity_dicts_for_actions
 from sts_combat_rl.sim.non_combat_learning import (
     T065_APPROVED_SPEC_COMMIT,
     T065CounterfactualTarget,
@@ -591,6 +592,10 @@ def test_runtime_family_probe_rejects_projectionless_synthetic_context(
     class Adapter:
         supports_checkpoint_restore = True
 
+        def reset(self, seed=None):
+            del seed
+            return snapshot
+
         def capture_checkpoint(self, snapshot):
             return SimulatorCheckpoint("fixture", "checkpoint", snapshot)
 
@@ -626,22 +631,23 @@ def test_runtime_family_probe_proves_all_native_families_and_feature_shapes() ->
         supports_checkpoint_restore = True
 
         def __init__(self) -> None:
-            self.index = -1
+            self.index = 0
 
         def reset(self, seed=None):
             del seed
-            self.index = -1
+            self.index = 0
             return self._snapshot()
 
         def _snapshot(self):
-            family = "BATTLE" if self.index < 0 else T065_MANDATORY_FAMILIES[self.index]
+            family_index = min(self.index, len(T065_MANDATORY_FAMILIES) - 1)
+            family = T065_MANDATORY_FAMILIES[family_index]
             return SimulatorSnapshot(
-                observation=(self.index,),
+                observation=(family_index,),
                 raw={
                     "screen_state": family,
-                    "battle_active": self.index < 0,
+                    "battle_active": False,
                     "act": 1,
-                    "floor_num": self.index + 1,
+                    "floor_num": family_index + 1,
                     "room_type": family,
                     "cur_hp": 80,
                     "max_hp": 80,
@@ -655,7 +661,7 @@ def test_runtime_family_probe_proves_all_native_families_and_feature_shapes() ->
             family = str(snapshot.raw["screen_state"])
             return [
                 SimulatorAction(
-                    action_id=f"{family}:{index}",
+                    action_id=f"game:{index}",
                     label=f"{family} action {index}",
                     kind="game_unknown",
                     raw={
@@ -703,6 +709,18 @@ def test_runtime_family_probe_proves_all_native_families_and_feature_shapes() ->
                 }
             )
             actions = self.legal_actions(snapshot)
+            native_actions = [
+                SimulatorAction(
+                    action_id=f"{action.raw['scope']}:{action.raw['bits']}",
+                    label=action.label,
+                    kind=action.kind,
+                    raw=action.raw,
+                )
+                for action in actions
+            ]
+            assert action_identity_dicts_for_actions(actions) == (
+                action_identity_dicts_for_actions(native_actions)
+            )
             return parse_native_public_projection(
                 {
                     "schema_id": NATIVE_PUBLIC_PROJECTION_SCHEMA_ID,
@@ -760,7 +778,10 @@ def test_runtime_family_probe_proves_all_native_families_and_feature_shapes() ->
         def step(self, action):
             del action
             self.index += 1
-            return SimulatorTransition(snapshot=self._snapshot(), terminal=False)
+            return SimulatorTransition(
+                snapshot=self._snapshot(),
+                terminal=self.index >= len(T065_MANDATORY_FAMILIES),
+            )
 
     adapter = Adapter()
     evidence, probe = learning._probe_native_mandatory_families(
