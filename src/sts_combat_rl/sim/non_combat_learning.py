@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
+import ast
 from dataclasses import asdict, dataclass, field
 import hashlib
 import json
@@ -53,6 +54,7 @@ from sts_combat_rl.sim.features import (
     encode_simulator_actions,
 )
 from sts_combat_rl.sim.lightspeed_source import lightspeed_source_identity_dict
+from sts_combat_rl.sim.lightspeed_source import load_lightspeed_source_manifest
 from sts_combat_rl.sim.non_combat_model_input import (
     NON_COMBAT_ACTION_FEATURE_SIZE,
     NON_COMBAT_CONTEXT_FEATURE_SIZE,
@@ -84,6 +86,7 @@ from sts_combat_rl.sim.public_run_context import (
     append_public_history_entry,
     build_public_history_entry,
     build_public_run_context,
+    forbidden_public_context_problems,
     read_native_public_projection,
 )
 
@@ -146,10 +149,66 @@ T065_RETENTION_RELATIVE_PATH = "artifacts/t065-learned-non-combat-policy-v1"
 class T065CaseD(ValueError):
     """A frozen fidelity/completeness failure that stops downstream stages."""
 
-    def __init__(self, stage: str, problems: Sequence[str]) -> None:
+    def __init__(
+        self,
+        stage: str,
+        problems: Sequence[str],
+        *,
+        failure_ids: Sequence[str] = (),
+        failure_counts: Mapping[str, int] | None = None,
+        simulator_identity: Mapping[str, Any] | None = None,
+        preceding_stage_manifests: Mapping[str, Any] | None = None,
+    ) -> None:
         self.stage = str(stage)
         self.problems = tuple(str(problem) for problem in problems)
+        self.failure_ids = tuple(str(identifier) for identifier in failure_ids)
+        self.failure_counts = {
+            str(key): int(value) for key, value in (failure_counts or {}).items()
+        }
+        self.simulator_identity = dict(simulator_identity or {})
+        self.preceding_stage_manifests = dict(preceding_stage_manifests or {})
         super().__init__(f"T065 Case D at {self.stage}: " + "; ".join(self.problems))
+
+    def to_decision_report(
+        self,
+        *,
+        simulator_identity: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Serialize the single frozen Case-D outcome for early failures."""
+
+        identity = dict(simulator_identity or self.simulator_identity)
+        identifiers = self.failure_ids or self.problems
+        counts = dict(self.failure_counts)
+        if "failure_count" not in counts:
+            counts["failure_count"] = len(identifiers)
+        skipped_after = {
+            "stage0": ("stage1", "stage2", "stage3", "stage4", "stage5", "stage6"),
+            "stage1": ("stage2", "stage3", "stage4", "stage5", "stage6"),
+            "source-collection": ("stage2", "stage3", "stage4", "stage5", "stage6"),
+            "source-selection": ("stage2", "stage3", "stage4", "stage5", "stage6"),
+            "stage2": ("stage3", "stage4", "stage5", "stage6"),
+            "counterfactual-targets": ("stage3", "stage4", "stage5", "stage6"),
+            "target-completeness": ("stage3", "stage4", "stage5", "stage6"),
+        }
+        return {
+            "schema_id": T065_DECISION_REPORT_SCHEMA_ID,
+            "schema_version": 1,
+            "task_id": T065_TASK_ID,
+            "case": "D",
+            "stage": self.stage,
+            "approved_spec_commit": T065_APPROVED_SPEC_COMMIT,
+            "simulator_identity": identity,
+            "failure_ids": list(identifiers),
+            "failure_counts": counts,
+            "no_replacement": True,
+            "downstream_skipped": list(
+                skipped_after.get(self.stage, ("stage4", "stage5", "stage6"))
+            ),
+            "preceding_stage_manifests": dict(self.preceding_stage_manifests),
+            "recommendation": "repair the frozen fidelity failure and rerun T065",
+            "problems": list(self.problems),
+            "policy_conclusion": None,
+        }
 
 
 @dataclass(frozen=True)
@@ -438,6 +497,10 @@ class T065SourceState:
             label="T065 source state",
             require_available=self.public_context_status == "available",
         )
+        context_problems.extend(
+            f"T065 source state: {problem}"
+            for problem in forbidden_public_context_problems(self.public_run_context)
+        )
         if context_problems:
             raise ValueError("; ".join(context_problems))
         if (
@@ -457,6 +520,7 @@ class T065SourceState:
             self.snapshot_features + self.public_context_features
         ):
             raise ValueError("T065 source state is not snapshot/context concatenation")
+        _validate_mandatory_family_projection(self.family, self.state_features)
         if len(self.legal_action_features) != len(self.legal_action_kinds):
             raise ValueError("T065 source action kinds are not aligned")
         if len(self.legal_action_features) != len(self.legal_action_identities):
@@ -1366,6 +1430,8 @@ def save_non_combat_checkpoint(run: T065ModelRun, path: Path) -> None:
             "checkpoint_schema_id": T065_CHECKPOINT_SCHEMA_ID,
             "checkpoint_format_version": 1,
             "model_seed": run.model_seed,
+            "training_steps": run.training_steps,
+            "validation_q_floor_mae": run.validation_mae,
             "metadata": metadata,
             "normalizers": run.normalizers.to_dict(),
             "state_dict": run.model.state_dict(),
@@ -1394,6 +1460,16 @@ def load_non_combat_checkpoint(path: Path) -> T065ModelRun:
     schema_problems = _checkpoint_schema_problems(metadata)
     if schema_problems:
         raise ValueError("; ".join(schema_problems))
+    if raw.get("model_seed") != metadata.get("model_seed"):
+        raise ValueError("T065 checkpoint root and metadata model seeds do not match")
+    if raw.get("training_steps") != metadata.get("training_steps"):
+        raise ValueError(
+            "T065 checkpoint root and metadata training steps do not match"
+        )
+    if raw.get("validation_q_floor_mae") != metadata.get("validation_q_floor_mae"):
+        raise ValueError(
+            "T065 checkpoint root and metadata validation metrics do not match"
+        )
     if raw.get("normalizers") != metadata.get("normalizers"):
         raise ValueError("T065 checkpoint normalizer copies do not match")
     normalizers = _normalizers_from_dict(raw.get("normalizers"))
@@ -1732,6 +1808,20 @@ def collect_source_arm(
         except (RuntimeError, ValueError) as exc:
             failed_runs += 1
             problems.append(f"seed {seed}: {exc}")
+            run_summaries.append(
+                {
+                    "source_run_id": f"{source_arm}:{seed}",
+                    "simulator_seed": seed,
+                    "source_arm": source_arm,
+                    "terminal": False,
+                    "outcome": "ERROR",
+                    "step_count": None,
+                    "terminal_floor": None,
+                    "problems": [str(exc)],
+                    "controller_provenance": {},
+                    "action_space": action_space,
+                }
+            )
             continue
         if run.terminal:
             terminal_runs += 1
@@ -2293,6 +2383,8 @@ class T065HeldoutStateResult:
     delta: float
     predicted_action_values: Mapping[str, float] = field(default_factory=dict)
     empirical_best_action_indices: tuple[int, ...] = ()
+    empirical_action_values: Mapping[str, float] = field(default_factory=dict)
+    rank_correlation: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -2318,7 +2410,49 @@ class T065HeldoutStateResult:
             "delta": self.delta,
             "predicted_action_values": dict(self.predicted_action_values),
             "empirical_best_action_indices": list(self.empirical_best_action_indices),
+            "empirical_action_values": dict(self.empirical_action_values),
+            "rank_correlation": self.rank_correlation,
         }
+
+
+def _average_ranks(values: Sequence[float]) -> tuple[float, ...]:
+    """Return one-based average ranks, preserving deterministic tie handling."""
+
+    ordered = sorted(enumerate(values), key=lambda item: (item[1], item[0]))
+    ranks = [0.0] * len(values)
+    cursor = 0
+    while cursor < len(ordered):
+        end = cursor + 1
+        while end < len(ordered) and ordered[end][1] == ordered[cursor][1]:
+            end += 1
+        rank = (cursor + 1 + end) / 2.0
+        for index, _value in ordered[cursor:end]:
+            ranks[index] = rank
+        cursor = end
+    return tuple(ranks)
+
+
+def _spearman_rank_correlation(
+    predicted: Sequence[float], empirical: Sequence[float]
+) -> float | None:
+    """Compute Spearman correlation when both action rankings are defined."""
+
+    if len(predicted) != len(empirical) or len(predicted) < 2:
+        return None
+    predicted_ranks = _average_ranks(predicted)
+    empirical_ranks = _average_ranks(empirical)
+    predicted_mean = statistics.fmean(predicted_ranks)
+    empirical_mean = statistics.fmean(empirical_ranks)
+    covariance = sum(
+        (left - predicted_mean) * (right - empirical_mean)
+        for left, right in zip(predicted_ranks, empirical_ranks, strict=True)
+    )
+    predicted_ss = sum((value - predicted_mean) ** 2 for value in predicted_ranks)
+    empirical_ss = sum((value - empirical_mean) ** 2 for value in empirical_ranks)
+    if predicted_ss == 0.0 or empirical_ss == 0.0:
+        return None
+    result = covariance / math.sqrt(predicted_ss * empirical_ss)
+    return result if math.isfinite(result) else None
 
 
 @dataclass(frozen=True)
@@ -2420,6 +2554,12 @@ def evaluate_model_on_split(
             for index in state.eligible_action_indices
             if empirical_values[index] == best_value
         )
+        ordered_predicted = tuple(
+            predicted[index] for index in state.eligible_action_indices
+        )
+        ordered_empirical = tuple(
+            empirical_values[index] for index in state.eligible_action_indices
+        )
         results.append(
             T065HeldoutStateResult(
                 selected_state_index=state.selected_state_index,
@@ -2446,6 +2586,13 @@ def evaluate_model_on_split(
                     str(index): value for index, value in predicted.items()
                 },
                 empirical_best_action_indices=best_actions,
+                empirical_action_values={
+                    str(index): empirical_values[index]
+                    for index in state.eligible_action_indices
+                },
+                rank_correlation=_spearman_rank_correlation(
+                    ordered_predicted, ordered_empirical
+                ),
             )
         )
     expected = 64 if split == "heldout" else None
@@ -2721,15 +2868,81 @@ def build_stage6_report(
     if arm_reports is not None:
         expected_arm_names = {"stochastic", "expert", "learned"}
         reports_by_arm = {report.arm: report for report in arm_reports}
-        if set(reports_by_arm) != expected_arm_names or len(reports_by_arm) != 3:
+        if (
+            set(reports_by_arm) != expected_arm_names
+            or len(reports_by_arm) != 3
+            or len(reports_by_arm) != len(arm_reports)
+        ):
             problems.append("Stage 6 does not contain exactly three required arms")
         expected_arm_seeds = inclusive_range(T065_STAGE6_SEED_RANGE)
+        expected_simulator_identity = lightspeed_source_identity_dict()
+        expected_action_space = frozen_action_space().to_dict()
+        expected_battle_provenance = frozen_battle_provenance()
         for arm in sorted(expected_arm_names):
             report = reports_by_arm.get(arm)
             if report is None:
                 continue
+            if (
+                _mapping_or_empty(report.simulator_identity)
+                != expected_simulator_identity
+            ):
+                problems.append(f"Stage 6 {arm} arm simulator identity is not exact")
+            if _mapping_or_empty(report.action_space) != expected_action_space:
+                problems.append(f"Stage 6 {arm} arm action-space is not exact")
             if report.driver_seed != T065_STAGE6_DRIVER_SEED:
                 problems.append(f"Stage 6 {arm} arm driver seed is not 654002")
+            expected_driver_name = {
+                "stochastic": "stochastic_non_combat_v1",
+                "expert": "expert_non_combat_v1",
+                "learned": T065_LEARNED_POLICY_NAME,
+            }[arm]
+            driver = _mapping_or_empty(report.driver_provenance)
+            driver_config = _mapping_or_empty(driver.get("config"))
+            if (
+                driver.get("name") != expected_driver_name
+                or driver.get("version") != 1
+                or not isinstance(driver.get("config"), Mapping)
+                or driver_config.get("seed") not in {None, T065_STAGE6_DRIVER_SEED}
+            ):
+                problems.append(f"Stage 6 {arm} arm driver provenance is not frozen")
+            controller = _mapping_or_empty(report.controller_provenance)
+            controller_config = _mapping_or_empty(controller.get("config"))
+            if (
+                controller.get("kind") != "routed_run"
+                or not isinstance(controller_config, Mapping)
+                or controller_config.get("battle") != expected_battle_provenance
+            ):
+                problems.append(f"Stage 6 {arm} arm battle provenance is not exact")
+            non_combat = (
+                controller_config.get("non_combat", {})
+                if isinstance(controller_config, Mapping)
+                else {}
+            )
+            non_combat_config = (
+                non_combat.get("config", {})
+                if isinstance(non_combat, Mapping)
+                and isinstance(non_combat.get("config"), Mapping)
+                else {}
+            )
+            if (
+                not isinstance(non_combat, Mapping)
+                or non_combat.get("kind") != "decision_policy"
+                or non_combat.get("name") != expected_driver_name
+                or non_combat_config.get("information_regime") != "normal_public_policy"
+                or controller.get("name")
+                != f"{T065_FROZEN_BATTLE_CONTROLLER_NAME}+{expected_driver_name}"
+            ):
+                problems.append(
+                    f"Stage 6 {arm} arm non-combat controller provenance is not exact"
+                )
+            if non_combat_config and isinstance(driver.get("config"), Mapping):
+                comparable_config = dict(non_combat_config)
+                comparable_config.pop("policy_class", None)
+                comparable_config.pop("information_regime", None)
+                if comparable_config != driver_config:
+                    problems.append(
+                        f"Stage 6 {arm} arm driver/controller config diverges"
+                    )
             if tuple(sorted(report.requested_seeds)) != expected_arm_seeds:
                 problems.append(
                     f"Stage 6 {arm} arm does not request exactly 651001..651256"
@@ -2744,8 +2957,24 @@ def build_stage6_report(
             ):
                 problems.append(f"Stage 6 {arm} arm shard evidence is incomplete")
             problems.extend(f"{arm} arm: {problem}" for problem in report.problems)
+            row_seeds: set[int] = set()
             for row in report.rows:
+                if not isinstance(row, Mapping):
+                    problems.append(f"Stage 6 {arm} contains a non-object row")
+                    continue
                 seed = row.get("simulator_seed")
+                if isinstance(seed, bool) or not isinstance(seed, int):
+                    problems.append(f"Stage 6 {arm} row has an invalid simulator seed")
+                elif seed in row_seeds:
+                    problems.append(f"Stage 6 {arm} has duplicate row seed {seed}")
+                else:
+                    row_seeds.add(seed)
+                if _mapping_or_empty(row.get("action_space")) != expected_action_space:
+                    problems.append(f"Stage 6 {arm} seed {seed}: action-space mismatch")
+                if row.get("controller_provenance") != dict(controller):
+                    problems.append(
+                        f"Stage 6 {arm} seed {seed}: controller provenance mismatch"
+                    )
                 if not bool(row.get("terminal")):
                     problems.append(f"Stage 6 {arm} seed {seed}: run is non-terminal")
                 if bool(row.get("truncated")):
@@ -2761,6 +2990,10 @@ def build_stage6_report(
                     problems.append(
                         f"Stage 6 {arm} seed {seed}: terminal floor is invalid"
                     )
+            if row_seeds != set(expected_arm_seeds):
+                problems.append(
+                    f"Stage 6 {arm} row seed set does not match requested seeds"
+                )
     if coverage.D == 0:
         problems.append("Stage 6 learned-control denominator D is zero")
     if coverage.M == 0:
@@ -2775,6 +3008,55 @@ def build_stage6_report(
         if seed in by_seed:
             problems.append(f"Stage 6 has duplicate simulator seed {seed}")
         by_seed[seed] = row
+    if arm_reports is not None:
+        reports_by_arm = {report.arm: report for report in arm_reports}
+        expert_report = reports_by_arm.get("expert")
+        learned_report = reports_by_arm.get("learned")
+        stochastic_report = reports_by_arm.get("stochastic")
+        if expert_report is not None and learned_report is not None:
+            expected_pair_identity = dict(learned_report.simulator_identity)
+            expected_pair_action_space = dict(learned_report.action_space)
+            for seed, row in by_seed.items():
+                if row.get("simulator_identity") != expected_pair_identity:
+                    problems.append(
+                        f"Stage 6 paired seed {seed}: simulator identity mismatch"
+                    )
+                if row.get("action_space") != expected_pair_action_space:
+                    problems.append(
+                        f"Stage 6 paired seed {seed}: action-space mismatch"
+                    )
+                if row.get("learned_controller_provenance") != dict(
+                    learned_report.controller_provenance
+                ):
+                    problems.append(
+                        f"Stage 6 paired seed {seed}: learned provenance mismatch"
+                    )
+                if row.get("expert_controller_provenance") != dict(
+                    expert_report.controller_provenance
+                ):
+                    problems.append(
+                        f"Stage 6 paired seed {seed}: expert provenance mismatch"
+                    )
+                if stochastic_report is None or row.get(
+                    "stochastic_controller_provenance"
+                ) != dict(stochastic_report.controller_provenance):
+                    problems.append(
+                        f"Stage 6 paired seed {seed}: stochastic provenance mismatch"
+                    )
+                driver_provenance = row.get("driver_provenance")
+                expected_driver_provenance = {
+                    "learned": dict(learned_report.driver_provenance),
+                    "expert": dict(expert_report.driver_provenance),
+                    "stochastic": (
+                        dict(stochastic_report.driver_provenance)
+                        if stochastic_report is not None
+                        else {}
+                    ),
+                }
+                if driver_provenance != expected_driver_provenance:
+                    problems.append(
+                        f"Stage 6 paired seed {seed}: driver provenance mismatch"
+                    )
     if tuple(sorted(by_seed)) != expected_seeds:
         problems.append("Stage 6 paired cohort does not contain exactly 651001..651256")
     deltas: list[float] = []
@@ -2855,22 +3137,16 @@ def build_stage6_report(
 
 def terminal_decision_report(
     *,
-    stage5: T065HeldoutReport,
+    stage5: T065HeldoutReport | None = None,
     stage6: T065Stage6Report | None = None,
     case_d: T065CaseD | None = None,
 ) -> dict[str, Any]:
     """Return exactly one planner-facing Case A/B/C/D recommendation."""
 
     if case_d is not None:
-        return {
-            "schema_id": T065_DECISION_REPORT_SCHEMA_ID,
-            "schema_version": 1,
-            "case": "D",
-            "recommendation": "repair the frozen fidelity failure and rerun T065",
-            "stage": case_d.stage,
-            "problems": list(case_d.problems),
-            "policy_conclusion": None,
-        }
+        return case_d.to_decision_report()
+    if stage5 is None:
+        raise ValueError("T065 terminal decision requires Stage 5 or Case D")
     if not stage5.passed:
         return {
             "schema_id": T065_DECISION_REPORT_SCHEMA_ID,
@@ -2917,6 +3193,22 @@ def terminal_decision_report(
     }
 
 
+def write_t065_terminal_decision_report(
+    path: Path,
+    case_d: T065CaseD,
+    *,
+    simulator_identity: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Persist a Case-D report at the shared terminal-decision schema."""
+
+    report = case_d.to_decision_report(simulator_identity=simulator_identity)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    return report
+
+
 @dataclass(frozen=True)
 class T065CompleteRunArmReport:
     """Compact report for one complete-run arm or shard."""
@@ -2931,6 +3223,10 @@ class T065CompleteRunArmReport:
     shard_count: int = T065_STAGE6_SHARD_COUNT
     shard_specs: tuple[Mapping[str, Any], ...] = ()
     problems: tuple[str, ...] = ()
+    simulator_identity: Mapping[str, Any] = field(default_factory=dict)
+    action_space: Mapping[str, Any] = field(default_factory=dict)
+    controller_provenance: Mapping[str, Any] = field(default_factory=dict)
+    driver_provenance: Mapping[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -2946,6 +3242,10 @@ class T065CompleteRunArmReport:
             "shard_count": self.shard_count,
             "shard_specs": [dict(spec) for spec in self.shard_specs],
             "problems": list(self.problems),
+            "simulator_identity": dict(self.simulator_identity),
+            "action_space": dict(self.action_space),
+            "controller_provenance": dict(self.controller_provenance),
+            "driver_provenance": dict(self.driver_provenance),
         }
 
 
@@ -2989,6 +3289,8 @@ def run_complete_run_arm(
     rows: list[Mapping[str, Any]] = []
     events: list[Mapping[str, Any]] = []
     problems: list[str] = []
+    arm_controller_provenance: Mapping[str, Any] = {}
+    arm_driver_provenance: Mapping[str, Any] = {}
     started = time.perf_counter()
     for seed in run_seeds:
         adapter = adapter_factory()
@@ -3007,6 +3309,13 @@ def run_complete_run_arm(
             battle=build_frozen_battle_controller(),
             non_combat=PolicyController(non_combat_policy),
         )
+        if not arm_controller_provenance:
+            arm_controller_provenance = dict(controller.provenance.to_dict())
+            arm_driver_provenance = {
+                "name": non_combat_policy.name,
+                "version": non_combat_policy.version,
+                "config": dict(non_combat_policy.provenance_config),
+            }
         try:
             run = execute_controlled_run(
                 adapter,
@@ -3018,6 +3327,11 @@ def run_complete_run_arm(
         except (RuntimeError, ValueError) as exc:
             run = None
             problems.append(f"seed {seed}: {exc}")
+            if learned_policy is not None:
+                events.extend(
+                    {"simulator_seed": seed, **dict(event)}
+                    for event in learned_policy.decision_events
+                )
         if run is None:
             rows.append(
                 {
@@ -3108,6 +3422,10 @@ def run_complete_run_arm(
         worker_count=worker_count,
         shard_count=shard_count,
         problems=tuple(problems),
+        simulator_identity=lightspeed_source_identity_dict(),
+        action_space=frozen_action_space().to_dict(),
+        controller_provenance=dict(arm_controller_provenance),
+        driver_provenance=dict(arm_driver_provenance),
     )
 
 
@@ -3166,17 +3484,25 @@ def run_complete_run_arm_sharded(
         shard_count=T065_STAGE6_SHARD_COUNT,
         shard_specs=tuple(shard_evidence),
         problems=tuple(problem for report in shards for problem in report.problems),
+        simulator_identity=dict(shards[0].simulator_identity) if shards else {},
+        action_space=dict(shards[0].action_space) if shards else {},
+        controller_provenance=(dict(shards[0].controller_provenance) if shards else {}),
+        driver_provenance=(dict(shards[0].driver_provenance) if shards else {}),
     )
 
 
 def build_stage6_paired_rows(
     expert_report: T065CompleteRunArmReport,
     learned_report: T065CompleteRunArmReport,
+    *,
+    stochastic_report: T065CompleteRunArmReport | None = None,
 ) -> tuple[dict[str, Any], ...]:
     """Join complete expert and learned arms by the frozen simulator seed."""
 
     if expert_report.arm != "expert" or learned_report.arm != "learned":
         raise ValueError("Stage 6 pairing requires expert and learned reports")
+    if stochastic_report is not None and stochastic_report.arm != "stochastic":
+        raise ValueError("Stage 6 pairing received an invalid stochastic report")
     expert = {int(row["simulator_seed"]): row for row in expert_report.rows}
     learned = {int(row["simulator_seed"]): row for row in learned_report.rows}
     rows: list[dict[str, Any]] = []
@@ -3198,6 +3524,28 @@ def build_stage6_paired_rows(
                 or bool(expert_row.get("truncated")),
                 "controller_error": bool(learned_row.get("controller_error"))
                 or bool(expert_row.get("controller_error")),
+                "simulator_identity": dict(learned_report.simulator_identity),
+                "action_space": dict(learned_report.action_space),
+                "learned_controller_provenance": dict(
+                    learned_report.controller_provenance
+                ),
+                "expert_controller_provenance": dict(
+                    expert_report.controller_provenance
+                ),
+                "stochastic_controller_provenance": (
+                    dict(stochastic_report.controller_provenance)
+                    if stochastic_report is not None
+                    else {}
+                ),
+                "driver_provenance": {
+                    "learned": dict(learned_report.driver_provenance),
+                    "expert": dict(expert_report.driver_provenance),
+                    "stochastic": (
+                        dict(stochastic_report.driver_provenance)
+                        if stochastic_report is not None
+                        else {}
+                    ),
+                },
             }
         )
     return tuple(rows)
@@ -3233,7 +3581,7 @@ def run_stage6_experiment(
         worker_count=worker_count,
     )
     coverage = compute_learned_coverage(learned.decision_events)
-    paired = build_stage6_paired_rows(expert, learned)
+    paired = build_stage6_paired_rows(expert, learned, stochastic_report=stochastic)
     report = build_stage6_report(
         paired,
         coverage,
@@ -3273,6 +3621,9 @@ class T065PreflightReport:
     state_feature_size: int
     passed: bool
     problems: tuple[str, ...] = ()
+    simulator_identity: Mapping[str, Any] = field(default_factory=dict)
+    capability_checks: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
+    runtime_checks: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -3287,13 +3638,49 @@ class T065PreflightReport:
             "state_feature_size": self.state_feature_size,
             "passed": self.passed,
             "problems": list(self.problems),
+            "approved_spec_commit": T065_APPROVED_SPEC_COMMIT,
+            "simulator_identity": dict(self.simulator_identity),
+            "capability_checks": {
+                str(key): dict(value) for key, value in self.capability_checks.items()
+            },
+            "runtime_checks": {
+                str(key): dict(value) for key, value in self.runtime_checks.items()
+            },
         }
 
 
-def build_t065_preflight_report() -> T065PreflightReport:
-    """Run cheap schema/controller checks without starting the simulator."""
+def build_t065_preflight_report(
+    *,
+    adapter_factory: Callable[[], Any] | None = None,
+    check_simulator_runtime: bool = False,
+    check_torch_runtime: bool = False,
+) -> T065PreflightReport:
+    """Run explicit pure checks and optionally requested runtime checks.
+
+    Runtime checks are deliberately opt-in: importing this module and running
+    the default preflight never imports optional PyTorch or the external
+    simulator.  A deferred runtime check is reported as incomplete rather than
+    silently treated as passed.
+    """
 
     problems: list[str] = []
+    capability_checks: dict[str, dict[str, Any]] = {}
+    runtime_checks: dict[str, dict[str, Any]] = {}
+    try:
+        simulator_identity = lightspeed_source_identity_dict(
+            load_lightspeed_source_manifest()
+        )
+        capability_checks["pinned_simulator_manifest"] = {
+            "status": "passed",
+            "identity": dict(simulator_identity),
+        }
+    except (OSError, ValueError) as exc:
+        simulator_identity = {}
+        capability_checks["pinned_simulator_manifest"] = {
+            "status": "failed",
+            "error": str(exc),
+        }
+        problems.append(f"pinned simulator manifest unavailable: {exc}")
     schema = non_combat_model_input_schema()
     snapshot_size = len(encode_lightspeed_battle_snapshot({}))
     action_size = len(
@@ -3311,6 +3698,113 @@ def build_t065_preflight_report() -> T065PreflightReport:
         problems.append("public context feature size is not 103")
     if len(PUBLIC_CONTEXT_MODEL_INPUT_FEATURE_NAMES) != 103:
         problems.append("public context feature-name tuple is not 103 values")
+    capability_checks["model_input_schema"] = {
+        "status": "passed"
+        if schema.get("state_feature_size") == 4737
+        and schema.get("action_feature_size") == 92
+        else "failed",
+        "schema": dict(schema),
+    }
+    action = SimulatorAction(action_id="preflight", label="", kind="game_unknown")
+    try:
+        public_contexts: dict[str, list[float]] = {}
+        for family, raw_screen in (
+            ("MAP_SCREEN", "MAP_SCREEN"),
+            ("REST_ROOM", "REST_ROOM"),
+            ("REWARDS", "REWARDS"),
+            ("TREASURE_ROOM", "TREASURE_ROOM"),
+        ):
+            public_context = build_public_run_context(
+                {"screen_state": raw_screen, "battle_active": False},
+                [action],
+                projection=None,
+            )
+            encoded = encode_non_combat_decision_context(
+                build_decision_context(
+                    {"screen_state": raw_screen, "battle_active": False},
+                    [action],
+                    frozen_action_space(),
+                    public_run_context=public_context,
+                ),
+                public_context_status="available",
+            )
+            _validate_mandatory_family_projection(family, encoded.state_features)
+            public_contexts[family] = list(encoded.state_features[-103:])
+        capability_checks["mandatory_t033_family_positions"] = {
+            "status": "passed",
+            "families": sorted(public_contexts),
+        }
+    except (RuntimeError, ValueError, T065CaseD) as exc:
+        capability_checks["mandatory_t033_family_positions"] = {
+            "status": "failed",
+            "error": str(exc),
+        }
+        problems.append(f"mandatory T033 family projection check failed: {exc}")
+    try:
+        hidden_problems = forbidden_public_context_problems(
+            {"checkpoint": {"native_payload": "forbidden"}}
+        )
+        if not hidden_problems:
+            raise ValueError(
+                "hidden/private-field audit did not reject a forbidden field"
+            )
+        capability_checks["public_input_firewall"] = {
+            "status": "passed",
+            "audit": "hidden/private fields rejected",
+        }
+    except ValueError as exc:
+        capability_checks["public_input_firewall"] = {
+            "status": "failed",
+            "error": str(exc),
+        }
+        problems.append(str(exc))
+    legacy_cli_paths = (
+        Path(__file__).resolve().parents[1] / "commands" / "cli_parser.py",
+        Path(__file__).resolve().parents[1] / "commands" / "lightspeed_cli.py",
+        Path(__file__).resolve().parents[1] / "commands" / "cli_validation.py",
+        Path(__file__).resolve().parents[1] / "cli.py",
+    )
+    legacy_problems = []
+    for path in legacy_cli_paths:
+        try:
+            source = path.read_text(encoding="utf-8").lower()
+        except OSError as exc:
+            legacy_problems.append(f"{path}: {exc}")
+        else:
+            if "t065" in source:
+                legacy_problems.append(f"{path}: contains a T065-specific route")
+    capability_checks["legacy_cli_boundary"] = {
+        "status": "passed" if not legacy_problems else "failed",
+        "paths": [str(path) for path in legacy_cli_paths],
+    }
+    problems.extend(legacy_problems)
+    policy_contract = Path(__file__).with_name("policy_contract.py")
+    try:
+        tree = ast.parse(policy_contract.read_text(encoding="utf-8"))
+        imported = {
+            alias.name
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Import)
+            for alias in node.names
+        }
+        imported.update(
+            node.module
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom) and node.module
+        )
+        if "torch" in imported or any(
+            module.startswith("sts_combat_rl.commands") for module in imported
+        ):
+            raise ValueError(
+                "T074 policy contract imports an upward/optional dependency"
+            )
+        capability_checks["t074_import_isolation"] = {"status": "passed"}
+    except (OSError, SyntaxError, ValueError) as exc:
+        capability_checks["t074_import_isolation"] = {
+            "status": "failed",
+            "error": str(exc),
+        }
+        problems.append(f"T074 import isolation check failed: {exc}")
     controller_name: str | None = None
     try:
         controller_name = build_frozen_battle_controller().provenance.name
@@ -3330,6 +3824,94 @@ def build_t065_preflight_report() -> T065PreflightReport:
         "include_non_combat_potions": True,
     }:
         problems.append("frozen action-space dictionary does not match T065")
+    capability_checks["frozen_controller_action_space"] = {
+        "status": "passed"
+        if controller_name == T065_FROZEN_BATTLE_CONTROLLER_NAME
+        else "failed",
+        "controller_name": controller_name,
+        "action_space": frozen_action_space().to_dict(),
+    }
+    if check_simulator_runtime:
+        if adapter_factory is None:
+            runtime_checks["simulator_runtime"] = {
+                "status": "failed",
+                "error": "--simulator-runtime requires an adapter factory",
+            }
+            problems.append(
+                "simulator runtime was requested without an adapter factory"
+            )
+        else:
+            try:
+                adapter = adapter_factory()
+                snapshot = adapter.reset(seed=1)
+                actions = tuple(adapter.legal_actions(snapshot))
+                if not actions:
+                    raise ValueError("simulator runtime returned no legal actions")
+                if not bool(getattr(adapter, "supports_checkpoint_restore", False)):
+                    raise ValueError(
+                        "simulator runtime lacks checkpoint capture/restore"
+                    )
+                checkpoint = adapter.capture_checkpoint(snapshot)
+                restored = adapter.restore_checkpoint(checkpoint)
+                projection = read_native_public_projection(adapter, restored)
+                if projection is None:
+                    raise ValueError("simulator runtime lacks native public projection")
+                context = build_public_run_context(
+                    restored.raw,
+                    tuple(adapter.legal_actions(restored)),
+                    projection=projection,
+                )
+                runtime_checks["simulator_runtime"] = {
+                    "status": "passed",
+                    "checkpoint_restore": True,
+                    "public_projection": True,
+                    "decision_context": context["schema_id"],
+                    "observed_screen": context["current"]["screen"],
+                }
+            except (RuntimeError, ValueError, OSError) as exc:
+                runtime_checks["simulator_runtime"] = {
+                    "status": "failed",
+                    "error": str(exc),
+                }
+                problems.append(f"simulator runtime preflight failed: {exc}")
+    else:
+        runtime_checks["simulator_runtime"] = {
+            "status": "deferred",
+            "command_boundary": "preflight --simulator-runtime (WSL pinned build)",
+        }
+        problems.append(
+            "simulator runtime preflight is deferred; run the explicit runtime command"
+        )
+    if check_torch_runtime:
+        try:
+            torch = _require_torch()
+            torch.set_num_threads(1)
+            torch.manual_seed(653001)
+            model = _build_ranker_module()
+            generator = torch.Generator(device="cpu")
+            generator.manual_seed(1_653_001)
+            runtime_checks["torch_runtime"] = {
+                "status": "passed",
+                "cpu": True,
+                "torch_threads": 1,
+                "state_parameter_count": sum(
+                    parameter.numel() for parameter in model.parameters()
+                ),
+                "rng_contract": int(
+                    torch.randint(0, 2**31, (1,), generator=generator).item()
+                ),
+            }
+        except (RuntimeError, ImportError, OSError) as exc:
+            runtime_checks["torch_runtime"] = {"status": "failed", "error": str(exc)}
+            problems.append(f"PyTorch runtime preflight failed: {exc}")
+    else:
+        runtime_checks["torch_runtime"] = {
+            "status": "deferred",
+            "command_boundary": "preflight --torch-runtime (optional train dependency)",
+        }
+        problems.append(
+            "PyTorch runtime preflight is deferred; run the explicit runtime command"
+        )
     return T065PreflightReport(
         schema=schema,
         action_space=frozen_action_space().to_dict(),
@@ -3340,6 +3922,9 @@ def build_t065_preflight_report() -> T065PreflightReport:
         state_feature_size=snapshot_size + context_size,
         passed=not problems,
         problems=tuple(problems),
+        simulator_identity=simulator_identity,
+        capability_checks=capability_checks,
+        runtime_checks=runtime_checks,
     )
 
 

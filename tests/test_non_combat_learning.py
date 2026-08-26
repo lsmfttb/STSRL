@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from sts_combat_rl.sim.contract import SimulatorAction
 from sts_combat_rl.sim.non_combat_learning import (
+    T065CounterfactualTarget,
+    T065CompleteRunArmReport,
     T065_MANDATORY_FAMILIES,
     T065CaseD,
     T065Coverage,
@@ -17,11 +21,15 @@ from sts_combat_rl.sim.non_combat_learning import (
     continuation_seeds_for_split,
     inclusive_range,
     matched_bootstrap_probability,
+    train_frozen_model_seeds,
+    load_non_combat_checkpoint,
     screen_family,
     select_source_states,
     source_shard_ranges,
     stage6_shard_ranges,
     target_shard_ranges,
+    _spearman_rank_correlation,
+    write_t065_terminal_decision_report,
     write_source_selection_manifest,
 )
 from sts_combat_rl.sim.non_combat_model_input import (
@@ -30,9 +38,11 @@ from sts_combat_rl.sim.non_combat_model_input import (
     NON_COMBAT_MODEL_INPUT_SCHEMA_ID,
     NON_COMBAT_MODEL_INPUT_SCHEMA_VERSION,
     NON_COMBAT_SNAPSHOT_FEATURE_SIZE,
-    NON_COMBAT_STATE_FEATURE_SIZE,
     encode_non_combat_snapshot_and_actions,
     non_combat_model_input_schema,
+)
+from sts_combat_rl.sim.public_context_model_input import (
+    PUBLIC_CONTEXT_MODEL_INPUT_FEATURE_NAMES,
 )
 
 
@@ -44,6 +54,16 @@ def _state(index: int, family: str, split: str, seed: int) -> T065SourceState:
         "label": "map",
         "stable_id": f"map:{index}",
     }
+    context_features = [0.0] * NON_COMBAT_CONTEXT_FEATURE_SIZE
+    family_feature = {
+        "MAP_SCREEN": "run_position.screen.map",
+        "REST_ROOM": "run_position.screen.rest",
+        "REWARDS": "run_position.screen.rewards",
+        "TREASURE_ROOM": "run_position.screen.treasure",
+    }[family]
+    context_features[PUBLIC_CONTEXT_MODEL_INPUT_FEATURE_NAMES.index(family_feature)] = (
+        1.0
+    )
     return T065SourceState(
         selected_state_index=-1,
         family=family,
@@ -56,8 +76,9 @@ def _state(index: int, family: str, split: str, seed: int) -> T065SourceState:
         source_act=1.0,
         screen_state=family,
         snapshot_features=(0.0,) * NON_COMBAT_SNAPSHOT_FEATURE_SIZE,
-        public_context_features=(0.0,) * NON_COMBAT_CONTEXT_FEATURE_SIZE,
-        state_features=(0.0,) * NON_COMBAT_STATE_FEATURE_SIZE,
+        public_context_features=tuple(context_features),
+        state_features=(0.0,) * NON_COMBAT_SNAPSHOT_FEATURE_SIZE
+        + tuple(context_features),
         legal_action_features=((0.0,) * NON_COMBAT_ACTION_FEATURE_SIZE,),
         legal_action_kinds=("map",),
         eligible_action_indices=(0,),
@@ -218,6 +239,24 @@ def test_stage6_invalid_cohort_is_not_interpreted_as_a_gate_failure() -> None:
     assert report.problems
 
 
+def test_stage6_arm_reducer_requires_exact_simulator_identity() -> None:
+    reports = tuple(
+        T065CompleteRunArmReport(
+            arm=arm,
+            driver_seed=654002,
+            requested_seeds=(),
+            rows=(),
+            simulator_identity={"integration_commit": "not-the-pinned-build"},
+        )
+        for arm in ("stochastic", "expert", "learned")
+    )
+    report = build_stage6_report(
+        [], T065Coverage(D=1, L=1, M=1, F=0), arm_reports=reports
+    )
+    assert not report.valid
+    assert any("simulator identity" in problem for problem in report.problems)
+
+
 def test_stage6_zero_coverage_denominators_are_invalid() -> None:
     report = build_stage6_report([], T065Coverage(D=0, L=0, M=0, F=0))
     assert not report.valid
@@ -227,7 +266,113 @@ def test_stage6_zero_coverage_denominators_are_invalid() -> None:
 
 def test_preflight_and_screen_aliases() -> None:
     report = build_t065_preflight_report()
-    assert report.passed
+    assert not report.passed
+    assert report.runtime_checks["simulator_runtime"]["status"] == "deferred"
+    assert report.runtime_checks["torch_runtime"]["status"] == "deferred"
+    assert report.capability_checks["t074_import_isolation"]["status"] == "passed"
     assert screen_family("MAP") == "MAP_SCREEN"
     assert screen_family("REST_ROOM") == "REST_ROOM"
     assert inclusive_range((650001, 650003)) == (650001, 650002, 650003)
+
+
+def test_case_d_report_is_persisted_with_frozen_repair_contract(tmp_path) -> None:
+    failure = T065CaseD(
+        "counterfactual-targets",
+        ["state 7 action 2 continuation 652001 failed"],
+        failure_ids=("state:7", "action:2", "continuation:652001"),
+        failure_counts={"failed_branches": 1},
+        simulator_identity={"integration_commit": "fixture"},
+    )
+    report = write_t065_terminal_decision_report(tmp_path / "decision.json", failure)
+    assert report["case"] == "D"
+    assert report["approved_spec_commit"]
+    assert report["failure_ids"] == ["state:7", "action:2", "continuation:652001"]
+    assert report["failure_counts"]["failed_branches"] == 1
+    assert report["no_replacement"] is True
+    assert report["downstream_skipped"] == ["stage3", "stage4", "stage5", "stage6"]
+    assert (
+        report["recommendation"] == "repair the frozen fidelity failure and rerun T065"
+    )
+
+
+def test_legacy_public_context_is_fail_closed_and_family_projection_is_rechecked() -> (
+    None
+):
+    state = _state(7, "MAP_SCREEN", "train", 650001)
+    with pytest.raises(ValueError, match="forbidden"):
+        replace(state, public_run_context={"native_payload": "private"})
+    with pytest.raises(T065CaseD, match="T033"):
+        replace(
+            state,
+            public_context_features=(0.0,) * NON_COMBAT_CONTEXT_FEATURE_SIZE,
+            state_features=(0.0,) * len(state.state_features),
+        )
+
+
+def test_spearman_rank_correlation_uses_average_ties() -> None:
+    assert _spearman_rank_correlation(
+        (1.0, 2.0, 3.0), (3.0, 2.0, 1.0)
+    ) == pytest.approx(-1.0)
+    assert _spearman_rank_correlation((1.0,), (1.0,)) is None
+    assert _spearman_rank_correlation((1.0, 1.0), (1.0, 2.0)) is None
+
+
+def test_two_frozen_torch_seeds_checkpoint_and_normalizer_contract(tmp_path) -> None:
+    torch = pytest.importorskip("torch")
+    states = []
+    targets = []
+    for index in range(320):
+        split = "train" if index < 192 else "validation" if index < 256 else "heldout"
+        seed = (
+            650001 if split == "train" else 650155 if split == "validation" else 650206
+        )
+        state = replace(
+            _state(index, T065_MANDATORY_FAMILIES[index // 80], split, seed),
+            selected_state_index=index,
+        )
+        states.append(state)
+        seeds = continuation_seeds_for_split(split)
+        targets.append(
+            T065CounterfactualTarget(
+                selected_state_index=index,
+                state_identity=state.state_identity,
+                family=state.family,
+                split=split,
+                legal_action_index=0,
+                legal_action_identity=state.legal_action_identities[0],
+                continuation_seeds=seeds,
+                terminal_floors=(2.0,) * len(seeds),
+                terminal_acts=(1.0,) * len(seeds),
+                terminal_statuses=("PLAYER_VICTORY",) * len(seeds),
+                terminal_current_hps=(70.0,) * len(seeds),
+                terminal_max_hps=(80.0,) * len(seeds),
+                terminal_golds=(99.0,) * len(seeds),
+                terminal_potion_counts=(0.0,) * len(seeds),
+                q_floor=1.0,
+            )
+        )
+    runs = train_frozen_model_seeds(
+        states=states,
+        targets=targets,
+        checkpoint_directory=tmp_path,
+    )
+    assert tuple(run.model_seed for run in runs) == (653001, 653002)
+    assert all(run.training_steps == 1500 for run in runs)
+    assert runs[0].normalizers == runs[1].normalizers
+    for seed in (653001, 653002):
+        checkpoint = load_non_combat_checkpoint(tmp_path / f"model-{seed}.pt")
+        assert checkpoint.model_seed == seed
+        assert checkpoint.training_steps == 1500
+        assert checkpoint.normalizers == runs[0].normalizers
+        assert (
+            checkpoint.metadata["training_config"]["minibatch_rng_seed"]
+            == seed + 1_000_000
+        )
+        raw = torch.load(
+            tmp_path / f"model-{seed}.pt", map_location="cpu", weights_only=True
+        )
+        assert raw["model_seed"] == raw["metadata"]["model_seed"] == seed
+        assert raw["training_steps"] == raw["metadata"]["training_steps"] == 1500
+        assert (
+            raw["validation_q_floor_mae"] == raw["metadata"]["validation_q_floor_mae"]
+        )

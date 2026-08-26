@@ -23,6 +23,8 @@ from sts_combat_rl.sim.non_combat_learning import (
     collect_source_arm,
     collect_source_arm_sharded,
     file_sha256,
+    frozen_battle_provenance,
+    frozen_action_space,
     load_non_combat_checkpoint,
     read_source_states,
     read_target_table,
@@ -35,6 +37,7 @@ from sts_combat_rl.sim.non_combat_learning import (
     generate_counterfactual_targets,
     generate_counterfactual_targets_sharded,
     write_source_selection_manifest,
+    write_t065_terminal_decision_report,
 )
 from sts_combat_rl.sim.lightspeed_source import lightspeed_source_identity_dict
 
@@ -50,6 +53,18 @@ def build_parser() -> argparse.ArgumentParser:
         "preflight", help="run cheap schema readiness checks"
     )
     preflight.add_argument("--output", type=Path)
+    preflight.add_argument(
+        "--simulator-runtime",
+        action="store_true",
+        help="explicitly probe the WSL-provided simulator runtime",
+    )
+    preflight.add_argument(
+        "--torch-runtime",
+        action="store_true",
+        help="explicitly probe the optional PyTorch runtime",
+    )
+    preflight.add_argument("--sim-seed", type=int, default=1)
+    preflight.add_argument("--ascension", type=int, default=20)
 
     collect = subparsers.add_parser(
         "collect", help="collect one fixed source behavior arm"
@@ -64,6 +79,7 @@ def build_parser() -> argparse.ArgumentParser:
     collect.add_argument("--seed-end", type=int, default=T065_SOURCE_SEED_RANGE[1])
     collect.add_argument("--sim-seed", type=int, default=1)
     collect.add_argument("--ascension", type=int, default=20)
+    collect.add_argument("--decision-report", type=Path)
 
     select = subparsers.add_parser(
         "select", help="deduplicate and select the frozen cohort"
@@ -71,6 +87,7 @@ def build_parser() -> argparse.ArgumentParser:
     select.add_argument("--input", type=Path, action="append", required=True)
     select.add_argument("--output", type=Path, required=True)
     select.add_argument("--manifest", type=Path)
+    select.add_argument("--decision-report", type=Path)
 
     target = subparsers.add_parser(
         "target", help="generate all-action counterfactual targets"
@@ -79,6 +96,7 @@ def build_parser() -> argparse.ArgumentParser:
     target.add_argument("--output", type=Path, required=True)
     target.add_argument("--sim-seed", type=int, default=1)
     target.add_argument("--ascension", type=int, default=20)
+    target.add_argument("--decision-report", type=Path)
 
     train = subparsers.add_parser("train", help="train the two frozen model seeds")
     train.add_argument("--target-table", type=Path, required=True)
@@ -102,7 +120,7 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         if args.command == "preflight":
-            return _run_preflight(args.output)
+            return _run_preflight(args)
         if args.command == "collect":
             return _run_collect(args)
         if args.command == "select":
@@ -113,16 +131,70 @@ def main(argv: list[str] | None = None) -> int:
             return _run_train(args)
         if args.command == "evaluate":
             return _run_evaluate(args)
-    except (OSError, RuntimeError, ValueError, T065CaseD) as exc:
+    except T065CaseD as exc:
+        report_path = getattr(args, "decision_report", None)
+        output_path = getattr(args, "output", None)
+        if report_path is None and isinstance(output_path, Path):
+            report_path = output_path.with_name(
+                f"{output_path.stem}.t065-terminal-decision-report.json"
+            )
+        if report_path is not None and args.command in {"collect", "select", "target"}:
+            report = write_t065_terminal_decision_report(
+                report_path,
+                exc,
+                simulator_identity=lightspeed_source_identity_dict(),
+            )
+            print(f"T065 Case D decision report: {report_path}", file=sys.stderr)
+            del report
+        print(f"T065 command failed: {exc}", file=sys.stderr)
+        return 1
+    except (OSError, RuntimeError, ValueError) as exc:
+        if args.command in {"collect", "select", "target"}:
+            output_path = getattr(args, "output", None)
+            report_path = getattr(args, "decision_report", None)
+            if report_path is None and isinstance(output_path, Path):
+                report_path = output_path.with_name(
+                    f"{output_path.stem}.t065-terminal-decision-report.json"
+                )
+            if report_path is not None:
+                stage = {
+                    "collect": "source-collection",
+                    "select": "source-selection",
+                    "target": "counterfactual-targets",
+                }[args.command]
+                failure = T065CaseD(
+                    stage,
+                    [str(exc)],
+                    failure_ids=(f"command:{args.command}",),
+                    failure_counts={"failure_count": 1},
+                    simulator_identity=lightspeed_source_identity_dict(),
+                )
+                write_t065_terminal_decision_report(
+                    report_path,
+                    failure,
+                    simulator_identity=lightspeed_source_identity_dict(),
+                )
+                print(f"T065 Case D decision report: {report_path}", file=sys.stderr)
         print(f"T065 command failed: {exc}", file=sys.stderr)
         return 1
     return 2
 
 
-def _run_preflight(output: Path | None) -> int:
-    report = build_t065_preflight_report().to_dict()
-    if output is not None:
-        _write_json(output, report)
+def _run_preflight(args: argparse.Namespace) -> int:
+    factory = None
+    if args.simulator_runtime:
+        factory = lambda: LightSpeedAdapter(  # noqa: E731
+            seed=args.sim_seed,
+            ascension=args.ascension,
+            player_class="IRONCLAD",
+        )
+    report = build_t065_preflight_report(
+        adapter_factory=factory,
+        check_simulator_runtime=args.simulator_runtime,
+        check_torch_runtime=args.torch_runtime,
+    ).to_dict()
+    if args.output is not None:
+        _write_json(args.output, report)
     print(json.dumps(report, indent=2, sort_keys=True), file=sys.stderr)
     return 0 if report["passed"] else 1
 
@@ -151,7 +223,26 @@ def _run_collect(args: argparse.Namespace) -> int:
         f"truncated={report.truncated_run_count}",
         file=sys.stderr,
     )
-    return 0 if _source_report_is_complete(report) else 1
+    if not _source_report_is_complete(report):
+        failed_ids = tuple(
+            f"simulator_seed:{summary.get('simulator_seed')}"
+            for summary in report.run_summaries
+            if not summary.get("terminal") or summary.get("problems")
+        )
+        raise T065CaseD(
+            "source-collection",
+            report.problems
+            or ("one or more frozen Stage 1 source runs did not complete",),
+            failure_ids=failed_ids,
+            failure_counts={
+                "requested_runs": report.requested_seed_count,
+                "terminal_runs": report.terminal_run_count,
+                "truncated_runs": report.truncated_run_count,
+                "failed_runs": report.failed_run_count,
+            },
+            simulator_identity=report.simulator_identity,
+        )
+    return 0
 
 
 def _run_select(args: argparse.Namespace) -> int:
@@ -171,6 +262,12 @@ def _run_select(args: argparse.Namespace) -> int:
         if not isinstance(artifact_simulator_identity, Mapping):
             raise T065CaseD(
                 "source-selection", [f"{path}: simulator identity is missing"]
+            )
+        expected_simulator_identity = lightspeed_source_identity_dict()
+        if dict(artifact_simulator_identity) != expected_simulator_identity:
+            raise T065CaseD(
+                "source-selection",
+                [f"{path}: simulator identity does not match the pinned manifest"],
             )
         if simulator_identity is None:
             simulator_identity = dict(artifact_simulator_identity)
@@ -219,6 +316,14 @@ def _run_select(args: argparse.Namespace) -> int:
 def _run_target(args: argparse.Namespace) -> int:
     _require_frozen_simulator_args(args)
     states = read_source_states(args.states)
+    if len(states) != 320:
+        raise T065CaseD(
+            "counterfactual-targets",
+            [f"selected state count {len(states)} does not match frozen 320"],
+            failure_ids=(f"selected_state_count:{len(states)}",),
+            failure_counts={"selected_states": len(states), "required_states": 320},
+            simulator_identity=lightspeed_source_identity_dict(),
+        )
     source_artifact_identity = {
         "path": str(args.states),
         "sha256": file_sha256(args.states),
@@ -337,6 +442,8 @@ def _run_evaluate(args: argparse.Namespace) -> int:
         payload["decision"] = terminal_decision_report(stage5=stage5, stage6=stage6)
     else:
         if stage5.passed:
+            payload["decision_status"] = "incomplete"
+            payload["incomplete"] = True
             payload["decision_pending"] = (
                 "Stage 6 was not requested; rerun with --run-stage6 before "
                 "writing the terminal Case A/B decision"
@@ -346,7 +453,7 @@ def _run_evaluate(args: argparse.Namespace) -> int:
     _write_json(args.output, payload)
     print(json.dumps(payload, indent=2, sort_keys=True), file=sys.stderr)
     if "decision_pending" in payload:
-        return 0
+        return 1
     return 0 if payload["decision"]["case"] in {"A", "B", "C", "D"} else 1
 
 
@@ -405,31 +512,17 @@ def _validate_source_arm_artifact(value: Mapping[str, Any], path: Path) -> str:
         )
     if value.get("worker_count") != 16:
         raise T065CaseD("source-collection", [f"{path}: source worker count is not 16"])
-    if value.get("action_space") != {
-        "excluded_kinds": [
-            "game_potion_discard",
-            "game_potion_use",
-            "potion",
-            "potion_discard",
-            "reward_potion",
-            "shop_reward_potion",
-        ],
-        "preferred_kinds": ["card", "end_turn"],
-        "allow_excluded_fallback": True,
-        "include_non_combat_potions": True,
-    }:
+    if value.get("action_space") != frozen_action_space().to_dict():
         raise T065CaseD("source-collection", [f"{path}: action space is not frozen"])
     battle_provenance = value.get("battle_controller_provenance")
-    if not isinstance(battle_provenance, Mapping) or battle_provenance.get("name") != (
-        "oracle_search_v1_highest_mean_s20"
-    ):
+    if battle_provenance != frozen_battle_provenance():
         raise T065CaseD(
             "source-collection", [f"{path}: battle provenance is not frozen"]
         )
-    if not isinstance(value.get("simulator_identity"), Mapping) or not value.get(
-        "simulator_identity"
-    ):
-        raise T065CaseD("source-collection", [f"{path}: simulator identity is missing"])
+    if value.get("simulator_identity") != lightspeed_source_identity_dict():
+        raise T065CaseD(
+            "source-collection", [f"{path}: simulator identity is not pinned"]
+        )
     shard_specs = value.get("shard_specs")
     if value.get("shard_count") != 16 or not isinstance(shard_specs, list):
         raise T065CaseD(
