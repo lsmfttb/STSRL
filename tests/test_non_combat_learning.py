@@ -36,6 +36,7 @@ from sts_combat_rl.sim.non_combat_learning import (
     build_t065_preflight_report,
     canonical_source_selection_key,
     compute_learned_coverage,
+    collect_source_arm_sharded,
     collect_source_arm_sharded_to_path,
     continuation_seeds_for_split,
     file_sha256,
@@ -136,7 +137,13 @@ def _write_source_fixture(path: Path, arm: str, states: list[T065SourceState]) -
         "failed_run_count": 0,
         "selected_candidate_count": len(states),
         "run_summaries": [
-            {"simulator_seed": seed, "terminal": True, "problems": []}
+            {
+                "simulator_seed": seed,
+                "source_arm": arm,
+                "source_run_id": f"{arm}:{seed}",
+                "terminal": True,
+                "problems": [],
+            }
             for seed in range(650001, 650257)
         ],
         "problems": [],
@@ -354,6 +361,66 @@ def test_bounded_shard_writer_requires_frozen_worker_count(tmp_path) -> None:
             source_arm="stochastic_non_combat_v1",
             worker_count=8,
         )
+
+
+def test_bounded_shard_writer_checks_each_fragment_count(tmp_path, monkeypatch) -> None:
+    import sts_combat_rl.sim.non_combat_learning as learning
+
+    def fake_collect(
+        adapter_factory,
+        *,
+        source_arm,
+        seeds,
+        record_sink=None,
+    ) -> T065SourceArmReport:
+        del adapter_factory
+        seed_values = tuple(seeds)
+        shard_index = (seed_values[0] - 650001) // 16
+        actual_count = 2 if shard_index == 1 else 1
+        states = [
+            replace(
+                _state(
+                    shard_index * 10 + offset,
+                    T065_MANDATORY_FAMILIES[
+                        (shard_index + offset) % len(T065_MANDATORY_FAMILIES)
+                    ],
+                    split_for_source_seed(seed_values[0]),
+                    seed_values[0],
+                ),
+                source_arm=source_arm,
+                source_run_id=f"{source_arm}:{seed_values[0]}",
+            )
+            for offset in range(actual_count)
+        ]
+        if record_sink is not None:
+            for state in states:
+                record_sink(state)
+        reported_count = (
+            2 if shard_index == 0 else 1 if shard_index == 1 else actual_count
+        )
+        report = _fake_source_shard_report(
+            source_arm, seed_values, states[0], record_sink=None
+        )
+        return replace(
+            report,
+            records=(),
+            selected_candidate_count=reported_count,
+        )
+
+    monkeypatch.setattr(learning, "collect_source_arm", fake_collect)
+    output_path = tmp_path / "source.json"
+    with pytest.raises(ValueError, match="shard 0.*record count"):
+        collect_source_arm_sharded_to_path(
+            lambda: None, output_path, source_arm="stochastic_non_combat_v1"
+        )
+    assert not output_path.exists()
+    assert not list(tmp_path.glob(".source.json.shards-*"))
+
+
+def test_legacy_sharded_collection_api_is_documented_as_non_full_scale() -> None:
+    docstring = collect_source_arm_sharded.__doc__ or ""
+    assert "small/legacy" in docstring
+    assert "collect_source_arm_sharded_to_path" in docstring
 
 
 def test_bounded_shard_writer_cleans_fragments_on_shard_failure(
@@ -739,6 +806,33 @@ def test_streaming_source_reader_validates_report_metadata(
     path.write_text(json.dumps(payload), encoding="utf-8")
 
     with pytest.raises(T065CaseD, match=message):
+        list(command._iter_source_arm_states(path))
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("source_arm", "expert_non_combat_v1"),
+        ("source_run_id", "wrong-run-id"),
+        ("terminal", 1),
+    ],
+)
+def test_streaming_source_reader_rejects_tampered_summary_identity(
+    tmp_path, field, value
+) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command
+
+    path = tmp_path / "source.json"
+    _write_source_fixture(
+        path,
+        "stochastic_non_combat_v1",
+        [_state(1, "MAP_SCREEN", "train", 650001)],
+    )
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["run_summaries"][0][field] = value
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(T065CaseD, match="source summary is not valid"):
         list(command._iter_source_arm_states(path))
 
 

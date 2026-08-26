@@ -883,7 +883,13 @@ def _validate_source_arm_metadata(
                 "source-collection", [f"{path}: source summary seed is invalid"]
             )
         summary_seeds.add(seed)
-        if not summary.get("terminal") or summary.get("problems"):
+        if (
+            summary.get("source_arm") != arm
+            or summary.get("source_run_id") != f"{arm}:{seed}"
+            or not isinstance(summary.get("terminal"), bool)
+            or summary.get("terminal") is not True
+            or summary.get("problems")
+        ):
             raise T065CaseD(
                 "source-collection", [f"{path}: source summary is not valid"]
             )

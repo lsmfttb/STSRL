@@ -1987,7 +1987,12 @@ def collect_source_arm_sharded(
     source_arm: str,
     worker_count: int = T065_MAX_WORKERS,
 ) -> T065SourceArmReport:
-    """Collect one arm using the frozen 16 shards and bounded concurrency."""
+    """Collect a small/legacy arm using the frozen shard shape.
+
+    This compatibility API aggregates every source record in memory.  The
+    frozen full-scale T065 collection path must call
+    :func:`collect_source_arm_sharded_to_path` instead.
+    """
 
     _validate_workers(worker_count)
     shard_specs = source_shard_ranges(arm=source_arm, worker_count=worker_count)
@@ -2266,6 +2271,7 @@ def collect_source_arm_sharded_to_path(
                         with fragment.open("r", encoding="utf-8") as source:
                             expected_start = int(spec["seed_start"])
                             expected_end = int(spec["seed_end"])
+                            shard_record_count = 0
                             for line_number, line in enumerate(source, start=1):
                                 if not line.strip():
                                     raise ValueError(
@@ -2311,6 +2317,15 @@ def collect_source_arm_sharded_to_path(
                                     "  " + line.rstrip("\n").replace("\n", "\n  ")
                                 )
                                 record_index += 1
+                                shard_record_count += 1
+                            expected_record_count = fragments[
+                                int(spec["shard_index"])
+                            ].report.selected_candidate_count
+                            if shard_record_count != expected_record_count:
+                                raise ValueError(
+                                    f"T065 source shard {spec['shard_index']} "
+                                    "record count does not match shard report"
+                                )
                     if record_index != total_candidates:
                         raise ValueError(
                             "T065 source record count does not match shards"
