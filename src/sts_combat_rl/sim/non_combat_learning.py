@@ -1291,6 +1291,13 @@ def train_non_combat_ranker(
 
     if model_seed not in T065_MODEL_SEEDS:
         raise ValueError(f"T065 model seed {model_seed} is not frozen")
+    identity_problems = _checkpoint_artifact_identity_problems(
+        source_artifact_identity, "source_artifact_identity"
+    ) + _checkpoint_artifact_identity_problems(
+        target_artifact_identity, "target_artifact_identity"
+    )
+    if identity_problems:
+        raise ValueError("; ".join(identity_problems))
     selected_states = tuple(
         sorted(states, key=lambda state: state.selected_state_index)
     )
@@ -1361,6 +1368,35 @@ def train_non_combat_ranker(
         normalizers=normalizers,
         source_artifact_identity=source_artifact_identity or {},
         target_artifact_identity=target_artifact_identity or {},
+        split_provenance={
+            "train": {
+                "state_count": len(training_states),
+                "target_row_count": len(rows),
+            },
+            "validation": {
+                "state_count": len(validation_states),
+                "target_row_count": len(validation_rows),
+            },
+            "heldout": {
+                "state_count": sum(
+                    state.split == "heldout" for state in selected_states
+                ),
+                "target_row_count": sum(
+                    target.split == "heldout" for target in targets
+                ),
+            },
+        },
+        source_provenance={
+            "artifact_identity": dict(source_artifact_identity or {}),
+            "kind": "selected_public_source_states",
+            "normal_information": True,
+        },
+        target_provenance={
+            "artifact_identity": dict(target_artifact_identity or {}),
+            "kind": "counterfactual_q_floor",
+            "all_eligible_actions": True,
+            "continuation_policy": "expert_non_combat_v1",
+        },
     )
     run = T065ModelRun(
         model_seed=model_seed,
@@ -1390,6 +1426,13 @@ def train_frozen_model_seeds(
 ) -> tuple[T065ModelRun, ...]:
     """Fit exactly model seeds 653001 and 653002 from shared normalizers."""
 
+    identity_problems = _checkpoint_artifact_identity_problems(
+        source_artifact_identity, "source_artifact_identity"
+    ) + _checkpoint_artifact_identity_problems(
+        target_artifact_identity, "target_artifact_identity"
+    )
+    if identity_problems:
+        raise ValueError("; ".join(identity_problems))
     ordered_states = tuple(sorted(states, key=lambda state: state.selected_state_index))
     training_states = tuple(state for state in ordered_states if state.split == "train")
     validation_states = tuple(
@@ -1438,6 +1481,10 @@ def select_validation_checkpoint(runs: Sequence[T065ModelRun]) -> T065ModelRun:
 
     if tuple(sorted(run.model_seed for run in runs)) != tuple(sorted(T065_MODEL_SEEDS)):
         raise ValueError("T065 checkpoint selection requires both frozen model seeds")
+    for run in runs:
+        schema_problems = _checkpoint_schema_problems(run.metadata)
+        if schema_problems:
+            raise ValueError("; ".join(schema_problems))
     if any(not math.isfinite(run.validation_mae) for run in runs):
         raise ValueError("T065 validation MAE must be finite")
     return min(runs, key=lambda run: (run.validation_mae, run.model_seed))
@@ -4022,6 +4069,7 @@ def validate_t065_preflight(path: Path) -> dict[str, Any]:
                         "projection_digest",
                         "action_identity_digest",
                         "state_feature_digest",
+                        "action_feature_digest",
                         "public_context_digest",
                     )
                 ):
@@ -4037,6 +4085,15 @@ def validate_t065_preflight(path: Path) -> dict[str, Any]:
                     != "public-run-context-v1"
                     or family_check.get("state_feature_size")
                     != NON_COMBAT_STATE_FEATURE_SIZE
+                    or family_check.get("action_feature_size")
+                    != NON_COMBAT_ACTION_FEATURE_SIZE
+                    or not isinstance(family_check.get("decision_context_screen"), str)
+                    or not family_check.get("decision_context_screen")
+                    or not isinstance(
+                        family_check.get("projection_screen_identity"), str
+                    )
+                    or family_check.get("projection_screen_identity")
+                    != family_check.get("decision_context_screen")
                     or isinstance(family_check.get("action_count"), bool)
                     or not isinstance(family_check.get("action_count"), int)
                     or family_check.get("action_count", 0) < 1
@@ -4134,12 +4191,33 @@ def _probe_native_mandatory_families(
         projection = read_native_public_projection(adapter, current)
         if projection is None:
             raise ValueError("simulator runtime lacks native public projection")
+        action_identities = tuple(
+            dict(item) for item in action_identity_dicts_for_actions(actions)
+        )
+        restored_for_identity = adapter.restore_checkpoint(checkpoint)
+        restored_actions = tuple(adapter.legal_actions(restored_for_identity))
+        if (
+            tuple(
+                dict(item)
+                for item in action_identity_dicts_for_actions(restored_actions)
+            )
+            != action_identities
+        ):
+            raise ValueError("simulator runtime restore changed legal action identity")
         context = build_public_run_context(
             current.raw,
             actions,
             projection=projection,
         )
-        family = screen_family(context["current"]["screen"])
+        screen_field = context.get("current", {}).get("screen")
+        if not isinstance(screen_field, Mapping):
+            raise ValueError("native public context screen field is malformed")
+        if screen_field.get("availability") != "available":
+            raise ValueError("native public context screen is not available")
+        screen_value = screen_field.get("value")
+        if not isinstance(screen_value, str) or not screen_value:
+            raise ValueError("native public context screen value is missing")
+        family = screen_family(screen_value)
         if family in T065_MANDATORY_FAMILIES and family not in family_evidence:
             encoded = encode_non_combat_decision_context(
                 build_decision_context(
@@ -4151,6 +4229,14 @@ def _probe_native_mandatory_families(
                 public_context_status="available",
             )
             _validate_mandatory_family_projection(family, encoded.state_features)
+            if any(
+                len(action_features) != NON_COMBAT_ACTION_FEATURE_SIZE
+                for action_features in encoded.action_features
+            ):
+                raise ValueError(
+                    f"{family}: native action feature width is not "
+                    f"{NON_COMBAT_ACTION_FEATURE_SIZE}"
+                )
             family_evidence[family] = {
                 "status": "passed",
                 "screen_family": family,
@@ -4160,11 +4246,19 @@ def _probe_native_mandatory_families(
                 ).hexdigest(),
                 "action_count": len(actions),
                 "action_identity_digest": hashlib.sha256(
-                    _canonical_json_bytes(action_identity_dicts_for_actions(actions))
+                    _canonical_json_bytes(action_identities)
                 ).hexdigest(),
+                "decision_context_screen": screen_value,
+                "projection_screen_identity": projection.screen_identity,
                 "state_feature_size": len(encoded.state_features),
                 "state_feature_digest": hashlib.sha256(
                     _canonical_json_bytes(list(encoded.state_features))
+                ).hexdigest(),
+                "action_feature_size": NON_COMBAT_ACTION_FEATURE_SIZE,
+                "action_feature_digest": hashlib.sha256(
+                    _canonical_json_bytes(
+                        [list(features) for features in encoded.action_features]
+                    )
                 ).hexdigest(),
                 "public_context_digest": hashlib.sha256(
                     _canonical_json_bytes(context)
@@ -4173,11 +4267,13 @@ def _probe_native_mandatory_families(
             }
         if len(family_evidence) == len(T065_MANDATORY_FAMILIES):
             break
-        if depth >= max_depth or bool(context["current"].get("is_battle")):
+        if depth >= max_depth:
             nodes += 1
             continue
-        # All non-battle legal actions remain authoritative expansion choices;
-        # battle states are followed by one legal action to keep this probe cheap.
+        # Every legal transition remains an authoritative expansion choice.
+        # This includes battle transitions because a real reset commonly starts
+        # in BATTLE and the mandatory non-combat families must be reached from
+        # that native state rather than asserted from a synthetic context.
         branch_actions = actions
         for action in branch_actions:
             adapter.restore_checkpoint(checkpoint)
@@ -4424,7 +4520,9 @@ def build_t065_preflight_report(
                     "checkpoint_restore": True,
                     "public_projection": True,
                     "decision_context_schema_id": "public-run-context-v1",
-                    "observed_screen": snapshot.raw.get("screen_state", "UNKNOWN"),
+                    "observed_screen": next(iter(family_evidence.values()))[
+                        "decision_context_screen"
+                    ],
                     "mandatory_families": family_evidence,
                     **probe_evidence,
                 }
@@ -4701,6 +4799,11 @@ def read_target_table(path: Path) -> T065TargetTable:
     schema_problems = _schema_from_document(value.get("model_input_schema"))
     if schema_problems:
         raise ValueError("; ".join(schema_problems))
+    source_identity_problems = _checkpoint_artifact_identity_problems(
+        value.get("source_artifact_identity"), "target-table source_artifact_identity"
+    )
+    if source_identity_problems:
+        raise ValueError("; ".join(source_identity_problems))
     raw_states = value.get("states")
     raw_targets = value.get("targets")
     if not isinstance(raw_states, Sequence) or isinstance(raw_states, (str, bytes)):
@@ -5008,6 +5111,9 @@ def _checkpoint_metadata(
     normalizers: T065Normalizers,
     source_artifact_identity: Mapping[str, Any],
     target_artifact_identity: Mapping[str, Any],
+    split_provenance: Mapping[str, Mapping[str, Any]],
+    source_provenance: Mapping[str, Any],
+    target_provenance: Mapping[str, Any],
 ) -> dict[str, Any]:
     return {
         **non_combat_model_input_schema(),
@@ -5026,6 +5132,12 @@ def _checkpoint_metadata(
         "target_identity": "q_floor=mean(max(0,terminal_floor-source_floor))",
         "source_artifact_identity": dict(source_artifact_identity),
         "target_artifact_identity": dict(target_artifact_identity),
+        "split_provenance": {
+            str(split): dict(provenance)
+            for split, provenance in split_provenance.items()
+        },
+        "source_provenance": dict(source_provenance),
+        "target_provenance": dict(target_provenance),
         "behavior_provenance": {
             "source_driver_seed": T065_SOURCE_DRIVER_SEED,
             "continuation_policy": "expert_non_combat_v1",
@@ -5071,12 +5183,106 @@ def _checkpoint_schema_problems(metadata: Mapping[str, Any]) -> list[str]:
         "human_or_expert_action_supervision": False,
     }:
         problems.append("T065 checkpoint behavior provenance is not frozen")
-    for key in ("source_artifact_identity", "target_artifact_identity"):
-        if not isinstance(metadata.get(key), Mapping):
-            problems.append(f"T065 checkpoint {key} is missing")
+    problems.extend(
+        _checkpoint_artifact_identity_problems(
+            metadata.get("source_artifact_identity"), "source_artifact_identity"
+        )
+    )
+    problems.extend(
+        _checkpoint_artifact_identity_problems(
+            metadata.get("target_artifact_identity"), "target_artifact_identity"
+        )
+    )
+    split_provenance = metadata.get("split_provenance")
+    if not isinstance(split_provenance, Mapping) or set(split_provenance) != {
+        "train",
+        "validation",
+        "heldout",
+    }:
+        problems.append("T065 checkpoint split provenance is missing or incomplete")
+    else:
+        for split in ("train", "validation", "heldout"):
+            entry = split_provenance.get(split)
+            if not isinstance(entry, Mapping) or any(
+                isinstance(entry.get(key), bool)
+                or not isinstance(entry.get(key), int)
+                or entry.get(key, -1) < 0
+                for key in ("state_count", "target_row_count")
+            ):
+                problems.append(
+                    f"T065 checkpoint {split} split provenance is incomplete"
+                )
+    expected_provenance_fields = {
+        "source_provenance": ("artifact_identity", "kind", "normal_information"),
+        "target_provenance": (
+            "artifact_identity",
+            "kind",
+            "all_eligible_actions",
+            "continuation_policy",
+        ),
+    }
+    for key, required_fields in expected_provenance_fields.items():
+        value = metadata.get(key)
+        if not isinstance(value, Mapping) or not value:
+            problems.append(f"T065 checkpoint {key} is missing or empty")
+        else:
+            missing_fields = [field for field in required_fields if field not in value]
+            if missing_fields:
+                problems.append(
+                    f"T065 checkpoint {key} fields are missing: "
+                    + ", ".join(missing_fields)
+                )
+            problems.extend(
+                _checkpoint_artifact_identity_problems(
+                    value.get("artifact_identity"), f"{key}.artifact_identity"
+                )
+            )
+            if not isinstance(value.get("kind"), str) or not value.get("kind"):
+                problems.append(f"T065 checkpoint {key} kind is missing")
+            if (
+                key == "source_provenance"
+                and value.get("normal_information") is not True
+            ):
+                problems.append(
+                    "T065 checkpoint source_provenance normal_information is invalid"
+                )
+            if key == "target_provenance":
+                if value.get("all_eligible_actions") is not True:
+                    problems.append(
+                        "T065 checkpoint target_provenance all_eligible_actions "
+                        "is invalid"
+                    )
+                if not isinstance(
+                    value.get("continuation_policy"), str
+                ) or not value.get("continuation_policy"):
+                    problems.append(
+                        "T065 checkpoint target_provenance continuation_policy "
+                        "is missing"
+                    )
     normalizer = metadata.get("normalizers")
     if not isinstance(normalizer, Mapping):
         problems.append("T065 checkpoint normalizers are missing")
+    return problems
+
+
+def _checkpoint_artifact_identity_problems(
+    value: Mapping[str, Any] | None,
+    label: str,
+) -> list[str]:
+    """Require a complete, non-empty artifact identity in checkpoint metadata."""
+
+    if not isinstance(value, Mapping) or not value:
+        return [f"T065 checkpoint {label} is missing or empty"]
+    problems: list[str] = []
+    path = value.get("path")
+    if not isinstance(path, str) or not path:
+        problems.append(f"T065 checkpoint {label} path is missing")
+    if not _is_sha256(value.get("sha256")):
+        problems.append(f"T065 checkpoint {label} sha256 is invalid")
+    for identity_field in ("size_bytes", "record_count"):
+        number = value.get(identity_field)
+        if isinstance(number, bool) or not isinstance(number, int) or number < 0:
+            problems.append(f"T065 checkpoint {label} {identity_field} is invalid")
     return problems
 
 

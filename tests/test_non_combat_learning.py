@@ -16,6 +16,7 @@ from sts_combat_rl.sim.contract import (
     SimulatorAction,
     SimulatorCheckpoint,
     SimulatorSnapshot,
+    SimulatorTransition,
 )
 from sts_combat_rl.sim.non_combat_learning import (
     T065_APPROVED_SPEC_COMMIT,
@@ -31,6 +32,7 @@ from sts_combat_rl.sim.non_combat_learning import (
     canonical_source_selection_key,
     compute_learned_coverage,
     continuation_seeds_for_split,
+    file_sha256,
     inclusive_range,
     matched_bootstrap_probability,
     train_frozen_model_seeds,
@@ -350,6 +352,25 @@ def test_default_import_does_not_load_optional_torch() -> None:
     assert result.stdout.strip() == "False"
 
 
+def test_preflight_rejects_non_frozen_simulator_arguments(tmp_path) -> None:
+    from sts_combat_rl.commands.non_combat_learning import main
+
+    output = tmp_path / "preflight.json"
+    assert (
+        main(
+            [
+                "preflight",
+                "--output",
+                str(output),
+                "--sim-seed",
+                "2",
+            ]
+        )
+        == 1
+    )
+    assert not output.exists()
+
+
 def test_deferred_preflight_artifact_cannot_gate_workflow(tmp_path) -> None:
     path = tmp_path / "preflight.json"
     report = build_t065_preflight_report().to_dict()
@@ -592,6 +613,169 @@ def test_runtime_family_probe_rejects_projectionless_synthetic_context(
         learning._probe_native_mandatory_families(Adapter(), snapshot)
 
 
+def test_runtime_family_probe_proves_all_native_families_and_feature_shapes() -> None:
+    from sts_combat_rl.sim import non_combat_learning as learning
+    from sts_combat_rl.sim.native_public_projection import (
+        NATIVE_PUBLIC_PROJECTION_EXTERNAL_BASE_COMMIT,
+        NATIVE_PUBLIC_PROJECTION_PATCH_ID,
+        NATIVE_PUBLIC_PROJECTION_SCHEMA_ID,
+        parse_native_public_projection,
+    )
+
+    class Adapter:
+        supports_checkpoint_restore = True
+
+        def __init__(self) -> None:
+            self.index = -1
+
+        def reset(self, seed=None):
+            del seed
+            self.index = -1
+            return self._snapshot()
+
+        def _snapshot(self):
+            family = "BATTLE" if self.index < 0 else T065_MANDATORY_FAMILIES[self.index]
+            return SimulatorSnapshot(
+                observation=(self.index,),
+                raw={
+                    "screen_state": family,
+                    "battle_active": self.index < 0,
+                    "act": 1,
+                    "floor_num": self.index + 1,
+                    "room_type": family,
+                    "cur_hp": 80,
+                    "max_hp": 80,
+                    "gold": 100,
+                    "potion_count": 1,
+                    "potion_capacity": 3,
+                },
+            )
+
+        def legal_actions(self, snapshot):
+            family = str(snapshot.raw["screen_state"])
+            return [
+                SimulatorAction(
+                    action_id=f"{family}:{index}",
+                    label=f"{family} action {index}",
+                    kind="game_unknown",
+                    raw={
+                        "scope": "game",
+                        "bits": index,
+                        "idx1": 0,
+                        "idx2": 0,
+                        "idx3": 0,
+                    },
+                )
+                for index in (1, 2)
+            ]
+
+        def capture_checkpoint(self, snapshot):
+            return SimulatorCheckpoint("fixture", str(self.index), self.index)
+
+        def restore_checkpoint(self, checkpoint):
+            self.index = int(checkpoint.payload)
+            return self._snapshot()
+
+        def public_projection(self, snapshot):
+            resources = {
+                name: {"availability": "unavailable", "reason": "fixture"}
+                for name in (
+                    "deck",
+                    "relics",
+                    "potion_identities",
+                    "keys",
+                )
+            }
+            resources.update(
+                {
+                    name: {
+                        "availability": "available",
+                        "source": "fixture",
+                        "value": value,
+                    }
+                    for name, value in {
+                        "current_hp": 80,
+                        "max_hp": 80,
+                        "gold": 100,
+                        "potion_count": 1,
+                        "potion_capacity": 3,
+                    }.items()
+                }
+            )
+            actions = self.legal_actions(snapshot)
+            return parse_native_public_projection(
+                {
+                    "schema_id": NATIVE_PUBLIC_PROJECTION_SCHEMA_ID,
+                    "external_base_commit": NATIVE_PUBLIC_PROJECTION_EXTERNAL_BASE_COMMIT,
+                    "patch_identity": NATIVE_PUBLIC_PROJECTION_PATCH_ID,
+                    "screen_identity": {
+                        "availability": "available",
+                        "source": "fixture",
+                        "value": snapshot.raw["screen_state"],
+                    },
+                    "visible_act_boss": {
+                        "availability": "unavailable",
+                        "reason": "fixture",
+                    },
+                    "visible_map_graph": {
+                        "availability": "unavailable",
+                        "reason": "fixture",
+                    },
+                    "current_map_node": {
+                        "availability": "unavailable",
+                        "reason": "fixture",
+                    },
+                    "immediately_legal_routes": {
+                        "availability": "unavailable",
+                        "reason": "fixture",
+                    },
+                    "persistent_resources": {
+                        "availability": "available",
+                        "source": "fixture",
+                        "value": resources,
+                    },
+                    "screen_payload": {
+                        "availability": "unsupported",
+                        "reason": "fixture",
+                    },
+                    "candidate_actions": {
+                        "availability": "available",
+                        "source": "fixture",
+                        "value": [
+                            {
+                                "scope": str(action.raw["scope"]),
+                                "bits": int(action.raw["bits"]),
+                                "kind": action.kind,
+                                "label": action.label,
+                                "idx1": int(action.raw["idx1"]),
+                                "idx2": int(action.raw["idx2"]),
+                                "idx3": int(action.raw["idx3"]),
+                            }
+                            for action in actions
+                        ],
+                    },
+                }
+            )
+
+        def step(self, action):
+            del action
+            self.index += 1
+            return SimulatorTransition(snapshot=self._snapshot(), terminal=False)
+
+    adapter = Adapter()
+    evidence, probe = learning._probe_native_mandatory_families(
+        adapter, adapter.reset(seed=1)
+    )
+    assert set(evidence) == set(T065_MANDATORY_FAMILIES)
+    assert probe["checkpoint_restore_equal"] is True
+    assert all(
+        item["state_feature_size"] == 4737
+        and item["action_feature_size"] == 92
+        and item["decision_context_screen"] == item["projection_screen_identity"]
+        for item in evidence.values()
+    )
+
+
 def test_regeneration_command_is_full_pinned_wsl_command(tmp_path) -> None:
     from sts_combat_rl.commands.non_combat_learning import (
         _regeneration_command,
@@ -784,9 +968,27 @@ def test_two_frozen_torch_seeds_checkpoint_and_normalizer_contract(tmp_path) -> 
                 q_floor=1.0,
             )
         )
+    source_fixture = tmp_path / "source.fixture.jsonl"
+    target_fixture = tmp_path / "target.fixture.json"
+    source_fixture.write_text("focused fixture source\n", encoding="utf-8")
+    target_fixture.write_text("focused fixture target\n", encoding="utf-8")
+    source_identity = {
+        "path": str(source_fixture),
+        "sha256": file_sha256(source_fixture),
+        "size_bytes": source_fixture.stat().st_size,
+        "record_count": len(states),
+    }
+    target_identity = {
+        "path": str(target_fixture),
+        "sha256": file_sha256(target_fixture),
+        "size_bytes": target_fixture.stat().st_size,
+        "record_count": len(targets),
+    }
     runs = train_frozen_model_seeds(
         states=states,
         targets=targets,
+        source_artifact_identity=source_identity,
+        target_artifact_identity=target_identity,
         checkpoint_directory=tmp_path,
     )
     assert tuple(run.model_seed for run in runs) == (653001, 653002)
@@ -809,3 +1011,24 @@ def test_two_frozen_torch_seeds_checkpoint_and_normalizer_contract(tmp_path) -> 
         assert (
             raw["validation_q_floor_mae"] == raw["metadata"]["validation_q_floor_mae"]
         )
+
+
+def test_checkpoint_training_rejects_empty_artifact_identity() -> None:
+    with pytest.raises(ValueError, match="artifact_identity.*empty"):
+        train_frozen_model_seeds(
+            states=(),
+            targets=(),
+            source_artifact_identity={},
+            target_artifact_identity={},
+        )
+
+
+def test_checkpoint_selection_rejects_incomplete_metadata() -> None:
+    from sts_combat_rl.sim.non_combat_learning import select_validation_checkpoint
+
+    runs = (
+        SimpleNamespace(model_seed=653001, validation_mae=1.0, metadata={}),
+        SimpleNamespace(model_seed=653002, validation_mae=2.0, metadata={}),
+    )
+    with pytest.raises(ValueError, match="artifact_identity"):
+        select_validation_checkpoint(runs)

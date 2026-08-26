@@ -175,6 +175,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _run_preflight(args: argparse.Namespace) -> int:
+    _require_frozen_simulator_args(args)
     factory = None
     if args.simulator_runtime:
         factory = lambda: LightSpeedAdapter(  # noqa: E731
@@ -343,6 +344,7 @@ def _run_target(args: argparse.Namespace) -> int:
     source_artifact_identity = {
         "path": str(args.states),
         "sha256": file_sha256(args.states),
+        "size_bytes": args.states.stat().st_size,
         "record_count": len(states),
     }
     simulator_identity = lightspeed_source_identity_dict()
@@ -387,6 +389,8 @@ def _run_train(args: argparse.Namespace) -> int:
         target_artifact_identity={
             "path": str(args.target_table),
             "sha256": file_sha256(args.target_table),
+            "size_bytes": args.target_table.stat().st_size,
+            "record_count": len(table.targets),
         },
         checkpoint_directory=args.checkpoint_directory,
     )
@@ -401,6 +405,8 @@ def _run_train(args: argparse.Namespace) -> int:
             "target_artifact_identity": {
                 "path": str(args.target_table),
                 "sha256": file_sha256(args.target_table),
+                "size_bytes": args.target_table.stat().st_size,
+                "record_count": len(table.targets),
             },
             "model_input_schema": table.to_dict()["model_input_schema"],
             "models": [
