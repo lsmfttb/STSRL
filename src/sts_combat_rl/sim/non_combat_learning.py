@@ -119,6 +119,7 @@ T065_STAGE5_BOOTSTRAP_SEED = 655001
 T065_STAGE6_BOOTSTRAP_SEED = 655002
 T065_BOOTSTRAP_REPLICATES = 10_000
 T065_MAX_STEPS = 500
+T065_NATIVE_PROBE_MAX_STEPS = 192
 T065_BATTLE_SIMULATIONS = 20
 T065_MAX_WORKERS = 16
 T065_STAGE1_SHARD_COUNT = 16
@@ -4025,6 +4026,10 @@ def validate_t065_preflight(path: Path) -> dict[str, Any]:
             "checkpoint_restore": True,
             "public_projection": True,
             "decision_context_schema_id": "public-run-context-v1",
+            "probe_max_steps": T065_NATIVE_PROBE_MAX_STEPS,
+            "probe_strategy": "execute_controlled_run_before_decision_observer",
+            "battle_controller_name": T065_FROZEN_BATTLE_CONTROLLER_NAME,
+            "non_combat_driver_seed": T065_SOURCE_DRIVER_SEED,
         }
         if not isinstance(simulator_check, Mapping) or any(
             simulator_check.get(key) != expected
@@ -4158,9 +4163,6 @@ def validate_t065_preflight(path: Path) -> dict[str, Any]:
 def _probe_native_mandatory_families(
     adapter: Any,
     snapshot: SimulatorSnapshot,
-    *,
-    max_nodes: int = 192,
-    max_depth: int = 192,
 ) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
     """Follow a bounded real run and audit every mandatory family.
 
@@ -4174,8 +4176,17 @@ def _probe_native_mandatory_families(
 
     if not bool(getattr(adapter, "supports_checkpoint_restore", False)):
         raise ValueError("simulator runtime lacks checkpoint capture/restore")
-    if max_nodes < 1 or max_depth < 1:
-        raise ValueError("native runtime probe bounds must be positive")
+    transition_only_keys = getattr(
+        adapter, "checkpoint_fingerprint_transition_only_raw_keys", None
+    )
+    if transition_only_keys != frozenset({"completed_battle_outcome"}):
+        raise ValueError(
+            "simulator runtime lacks the pinned checkpoint fingerprint "
+            "transition-only boundary"
+        )
+    fingerprint_builder = getattr(adapter, "checkpoint_fingerprint", None)
+    if not callable(fingerprint_builder):
+        raise ValueError("simulator runtime lacks checkpoint fingerprint contract")
 
     family_evidence: dict[str, dict[str, Any]] = {}
     restore_count = 0
@@ -4183,16 +4194,35 @@ def _probe_native_mandatory_families(
     observed_nodes = 0
 
     def snapshot_digest(value: SimulatorSnapshot) -> str:
-        # ``completed_battle_outcome`` is transition-only metadata attached by
-        # the adapter for labeling. It is not simulator state, so omitting it
-        # here matches LightSpeedAdapter's checkpoint fingerprint without
-        # dropping the outcome from the authoritative controlled-run record.
-        raw = {
+        fingerprint = fingerprint_builder(value)
+        if (
+            not isinstance(fingerprint, tuple)
+            or len(fingerprint) != 2
+            or fingerprint[0] != tuple(value.observation)
+            or not isinstance(fingerprint[1], Mapping)
+        ):
+            raise ValueError(
+                "simulator runtime checkpoint fingerprint must contain "
+                "observation tuple and stateful raw"
+            )
+        expected_stateful_raw = {
             key: item
             for key, item in value.raw.items()
-            if key != "completed_battle_outcome"
+            if key not in transition_only_keys
         }
-        return hashlib.sha256(_canonical_json_bytes(raw)).hexdigest()
+        if dict(fingerprint[1]) != expected_stateful_raw:
+            raise ValueError(
+                "simulator runtime checkpoint fingerprint omitted or added "
+                "stateful snapshot data"
+            )
+        return hashlib.sha256(
+            _canonical_json_bytes(
+                {
+                    "observation": tuple(fingerprint[0]),
+                    "stateful_raw": dict(fingerprint[1]),
+                }
+            )
+        ).hexdigest()
 
     def observe(
         observed_snapshot: SimulatorSnapshot,
@@ -4294,7 +4324,7 @@ def _probe_native_mandatory_families(
         adapter,
         controller,
         seed=1,
-        max_steps=min(max_nodes, max_depth),
+        max_steps=T065_NATIVE_PROBE_MAX_STEPS,
         action_space=frozen_action_space(),
         before_decision=observe,
     )
@@ -4314,7 +4344,7 @@ def _probe_native_mandatory_families(
         "nodes_examined": observed_nodes,
         "checkpoint_restores": restore_count,
         "checkpoint_restore_equal": restore_mismatches == 0,
-        "probe_max_steps": min(max_nodes, max_depth),
+        "probe_max_steps": T065_NATIVE_PROBE_MAX_STEPS,
         "probe_strategy": "execute_controlled_run_before_decision_observer",
         "battle_controller_name": T065_FROZEN_BATTLE_CONTROLLER_NAME,
         "non_combat_driver_seed": T065_SOURCE_DRIVER_SEED,

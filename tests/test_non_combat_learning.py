@@ -25,6 +25,7 @@ from sts_combat_rl.sim.non_combat_learning import (
     T065CompleteRunArmReport,
     T065HeldoutReport,
     T065_MANDATORY_FAMILIES,
+    T065_NATIVE_PROBE_MAX_STEPS,
     T065CaseD,
     T065Coverage,
     T065SourceState,
@@ -584,6 +585,74 @@ def test_preflight_validator_requires_native_evidence_for_all_families(
         validate_t065_preflight(path)
 
 
+def test_preflight_validator_rejects_tampered_native_probe_contract(tmp_path) -> None:
+    from sts_combat_rl.sim import non_combat_learning as learning
+
+    report = build_t065_preflight_report().to_dict()
+    simulator = {
+        "status": "passed",
+        "execution_environment": "wsl",
+        "python_interpreter": learning.T065_TRAINING_INTERPRETER,
+        "native_build_pythonpath": learning.T065_LIGHTSPEED_BUILD_PYTHONPATH,
+        "native_module": "slaythespire",
+        "simulator_class": "StepSimulator",
+        "player_class": "IRONCLAD",
+        "ascension": 20,
+        "simulator_seed": 1,
+        "simulator_identity": dict(report["simulator_identity"]),
+        "checkpoint_restore": True,
+        "public_projection": True,
+        "decision_context_schema_id": "public-run-context-v1",
+        "observed_screen": "MAP_SCREEN",
+        "checkpoint_restores": 1,
+        "nodes_examined": 1,
+        "checkpoint_restore_equal": True,
+        "probe_max_steps": T065_NATIVE_PROBE_MAX_STEPS,
+        "probe_strategy": "execute_controlled_run_before_decision_observer",
+        "battle_controller_name": learning.T065_FROZEN_BATTLE_CONTROLLER_NAME,
+        "non_combat_driver_seed": learning.T065_SOURCE_DRIVER_SEED,
+        "mandatory_families": {},
+    }
+    for family in T065_MANDATORY_FAMILIES:
+        simulator["mandatory_families"][family] = {
+            "status": "passed",
+            "screen_family": family,
+            "projection_schema_id": learning.NATIVE_PUBLIC_PROJECTION_SCHEMA_ID,
+            "projection_digest": "a" * 64,
+            "action_identity_digest": "b" * 64,
+            "state_feature_digest": "c" * 64,
+            "action_feature_digest": "d" * 64,
+            "public_context_digest": "e" * 64,
+            "decision_context_schema_id": "public-run-context-v1",
+            "state_feature_size": 4737,
+            "action_feature_size": 92,
+            "decision_context_screen": family,
+            "projection_screen_identity": family,
+            "action_count": 1,
+        }
+    simulator["evidence_digest"] = learning._preflight_evidence_digest(simulator)
+    report["runtime_checks"]["simulator_runtime"] = simulator
+    report["passed"] = True
+
+    for key, tampered_value in (
+        ("probe_max_steps", T065_NATIVE_PROBE_MAX_STEPS - 1),
+        ("probe_strategy", "synthetic_frontier"),
+        ("battle_controller_name", "unfrozen_controller"),
+        ("non_combat_driver_seed", 654002),
+    ):
+        tampered = json.loads(json.dumps(report))
+        tampered["runtime_checks"]["simulator_runtime"][key] = tampered_value
+        tampered["runtime_checks"]["simulator_runtime"]["evidence_digest"] = (
+            learning._preflight_evidence_digest(
+                tampered["runtime_checks"]["simulator_runtime"]
+            )
+        )
+        path = tmp_path / f"tampered-{key}.json"
+        path.write_text(json.dumps(tampered), encoding="utf-8")
+        with pytest.raises(T065CaseD, match="simulator runtime evidence is not frozen"):
+            validate_t065_preflight(path)
+
+
 def test_runtime_family_probe_rejects_projectionless_synthetic_context(
     monkeypatch,
 ) -> None:
@@ -591,6 +660,19 @@ def test_runtime_family_probe_rejects_projectionless_synthetic_context(
 
     class Adapter:
         supports_checkpoint_restore = True
+        checkpoint_fingerprint_transition_only_raw_keys = frozenset(
+            {"completed_battle_outcome"}
+        )
+
+        def checkpoint_fingerprint(self, snapshot):
+            return (
+                tuple(snapshot.observation),
+                {
+                    key: value
+                    for key, value in snapshot.raw.items()
+                    if key not in self.checkpoint_fingerprint_transition_only_raw_keys
+                },
+            )
 
         def reset(self, seed=None):
             del seed
@@ -618,6 +700,20 @@ def test_runtime_family_probe_rejects_projectionless_synthetic_context(
         learning._probe_native_mandatory_families(Adapter(), snapshot)
 
 
+def test_runtime_family_probe_rejects_undeclared_fingerprint_boundary() -> None:
+    from sts_combat_rl.sim import non_combat_learning as learning
+
+    snapshot = SimulatorSnapshot(
+        observation=(0,), raw={"screen_state": "MAP_SCREEN", "battle_active": False}
+    )
+
+    class Adapter:
+        supports_checkpoint_restore = True
+
+    with pytest.raises(ValueError, match="transition-only boundary"):
+        learning._probe_native_mandatory_families(Adapter(), snapshot)
+
+
 def test_runtime_family_probe_proves_all_native_families_and_feature_shapes() -> None:
     from sts_combat_rl.sim import non_combat_learning as learning
     from sts_combat_rl.sim.native_public_projection import (
@@ -629,6 +725,9 @@ def test_runtime_family_probe_proves_all_native_families_and_feature_shapes() ->
 
     class Adapter:
         supports_checkpoint_restore = True
+        checkpoint_fingerprint_transition_only_raw_keys = frozenset(
+            {"completed_battle_outcome"}
+        )
 
         def __init__(self) -> None:
             self.index = 0
@@ -677,6 +776,16 @@ def test_runtime_family_probe_proves_all_native_families_and_feature_shapes() ->
 
         def capture_checkpoint(self, snapshot):
             return SimulatorCheckpoint("fixture", str(self.index), self.index)
+
+        def checkpoint_fingerprint(self, snapshot):
+            return (
+                tuple(snapshot.observation),
+                {
+                    key: value
+                    for key, value in snapshot.raw.items()
+                    if key not in self.checkpoint_fingerprint_transition_only_raw_keys
+                },
+            )
 
         def restore_checkpoint(self, checkpoint):
             self.index = int(checkpoint.payload)

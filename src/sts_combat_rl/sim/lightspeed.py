@@ -22,6 +22,11 @@ from sts_combat_rl.sim.native_public_projection import (
 )
 
 
+_CHECKPOINT_FINGERPRINT_TRANSITION_ONLY_RAW_KEYS = frozenset(
+    {"completed_battle_outcome"}
+)
+
+
 class LightSpeedAdapter:
     """Thin adapter around the external ``slaythespire.StepSimulator`` shim."""
 
@@ -107,6 +112,24 @@ class LightSpeedAdapter:
         return hasattr(self._sim, "capture_checkpoint") and hasattr(
             self._sim, "restore_checkpoint"
         )
+
+    @property
+    def checkpoint_fingerprint_transition_only_raw_keys(self) -> frozenset[str]:
+        """Declare the native transition annotation boundary explicitly."""
+
+        return _CHECKPOINT_FINGERPRINT_TRANSITION_ONLY_RAW_KEYS
+
+    def checkpoint_fingerprint(
+        self, snapshot: SimulatorSnapshot
+    ) -> tuple[tuple[ObservationValue, ...], dict[str, Any]]:
+        """Return observation and raw state without transition-only labels."""
+
+        stateful_raw = {
+            key: value
+            for key, value in snapshot.raw.items()
+            if key not in self.checkpoint_fingerprint_transition_only_raw_keys
+        }
+        return tuple(snapshot.observation), stateful_raw
 
     def capture_checkpoint(self, snapshot: SimulatorSnapshot) -> SimulatorCheckpoint:
         """Capture native simulator state without reconstructing game mechanics."""
@@ -359,12 +382,21 @@ class LightSpeedAdapter:
         # of the simulator state and disappears from the next native snapshot.
         # Do not reject a legitimate reward-screen checkpoint solely because
         # that transient label is still attached to the Python snapshot.
-        stateful_raw = {
-            key: value
-            for key, value in snapshot.raw.items()
-            if key != "completed_battle_outcome"
-        }
-        return tuple(snapshot.observation), _freeze_snapshot_value(stateful_raw)
+        observation, stateful_raw = _checkpoint_fingerprint_parts(snapshot)
+        return observation, _freeze_snapshot_value(stateful_raw)
+
+
+def _checkpoint_fingerprint_parts(
+    snapshot: SimulatorSnapshot,
+) -> tuple[tuple[ObservationValue, ...], dict[str, Any]]:
+    """Build the pinned LightSpeed state fingerprint before freezing raw data."""
+
+    stateful_raw = {
+        key: value
+        for key, value in snapshot.raw.items()
+        if key not in _CHECKPOINT_FINGERPRINT_TRANSITION_ONLY_RAW_KEYS
+    }
+    return tuple(snapshot.observation), stateful_raw
 
 
 def _import_lightspeed_module() -> Any:

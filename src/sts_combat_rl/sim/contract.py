@@ -92,3 +92,12 @@ class CheckpointingSimulatorAdapter(SimulatorAdapter, Protocol):
 
     def restore_checkpoint(self, checkpoint: SimulatorCheckpoint) -> SimulatorSnapshot:
         """Restore an opaque checkpoint created by this adapter instance."""
+
+    @property
+    def checkpoint_fingerprint_transition_only_raw_keys(self) -> frozenset[str]:
+        """Raw snapshot keys excluded from the adapter's state fingerprint."""
+
+    def checkpoint_fingerprint(
+        self, snapshot: SimulatorSnapshot
+    ) -> tuple[tuple[ObservationValue, ...], Mapping[str, Any]]:
+        """Return observation plus stateful raw data for checkpoint equality."""
