@@ -14,6 +14,7 @@ import pytest
 
 from sts_combat_rl.sim.contract import SimulatorAction
 from sts_combat_rl.sim.non_combat_learning import (
+    T065_APPROVED_SPEC_COMMIT,
     T065CounterfactualTarget,
     T065CompleteRunArmReport,
     T065HeldoutReport,
@@ -40,6 +41,7 @@ from sts_combat_rl.sim.non_combat_learning import (
     terminal_decision_report,
     validate_t065_preflight,
     write_t065_terminal_decision_report,
+    write_t065_manifest,
     write_source_selection_manifest,
 )
 from sts_combat_rl.sim.non_combat_model_input import (
@@ -215,6 +217,14 @@ def test_selection_manifest_retains_compact_identity(tmp_path) -> None:
     assert path.exists()
     assert manifest["selected_state_count"] == 320
     assert manifest["counts_by_family_split"]["MAP_SCREEN"]["train"] == 48
+    with pytest.raises(ValueError, match="frozen head"):
+        write_source_selection_manifest(
+            tmp_path / "wrong-spec.manifest.json",
+            selected_states=selected,
+            selected_artifact_identity={"path": "selected.jsonl", "sha256": "abc"},
+            source_artifacts=[],
+            approved_spec_commit="wrong-spec-commit",
+        )
 
 
 def test_selection_reports_case_d_when_a_frozen_bucket_is_short() -> None:
@@ -338,11 +348,115 @@ def test_default_import_does_not_load_optional_torch() -> None:
 
 def test_deferred_preflight_artifact_cannot_gate_workflow(tmp_path) -> None:
     path = tmp_path / "preflight.json"
-    path.write_text(
-        json.dumps(build_t065_preflight_report().to_dict()), encoding="utf-8"
-    )
+    report = build_t065_preflight_report().to_dict()
+    report["passed"] = True
+    path.write_text(json.dumps(report), encoding="utf-8")
     with pytest.raises(T065CaseD, match="preflight"):
         validate_t065_preflight(path)
+
+
+def test_retention_manifest_rejects_wrong_approved_spec_commit(tmp_path) -> None:
+    artifact = tmp_path / "artifact.json"
+    artifact.write_text("{}", encoding="utf-8")
+    with pytest.raises(ValueError, match="frozen head"):
+        write_t065_manifest(
+            tmp_path / "retention.json",
+            approved_spec_commit="wrong-spec-commit",
+            simulator_identity={},
+            artifacts={"current_output": artifact},
+            regeneration_commands=("reproduce",),
+            stage_evidence={"stage0-preflight": {"status": "completed"}},
+        )
+
+
+def test_preceding_manifest_chain_keeps_manifest_identities_separate(tmp_path) -> None:
+    from sts_combat_rl.commands.non_combat_learning import (
+        _require_preceding_manifests,
+        build_parser,
+    )
+
+    preflight = tmp_path / "preflight.json"
+    states = tmp_path / "states.jsonl"
+    preflight.write_text("{}", encoding="utf-8")
+    states.write_text("selected states", encoding="utf-8")
+
+    def make_manifest(path: Path, stage: str, artifact: Path) -> Path:
+        write_t065_manifest(
+            path,
+            approved_spec_commit=T065_APPROVED_SPEC_COMMIT,
+            simulator_identity={},
+            artifacts={"current_output": artifact},
+            regeneration_commands=("wsl reproduction",),
+            stage_evidence={stage: {"status": "completed"}},
+        )
+        return path
+
+    preflight_manifest = make_manifest(
+        tmp_path / "preflight.retention.json", "stage0-preflight", preflight
+    )
+    selection_manifest = make_manifest(
+        tmp_path / "selection.retention.json",
+        "stage1-source-selection",
+        states,
+    )
+    args = build_parser().parse_args(
+        [
+            "target",
+            "--states",
+            str(states),
+            "--output",
+            str(tmp_path / "targets.json"),
+            "--preflight",
+            str(preflight),
+            "--preceding-manifest",
+            str(preflight_manifest),
+            "--preceding-manifest",
+            str(selection_manifest),
+        ]
+    )
+    _require_preceding_manifests(args)
+    lineage = args._preceding_manifest_identities
+    assert set(lineage) == {"stage0_preflight", "stage1_source_selection"}
+    assert lineage["stage0_preflight"]["path"] == str(preflight_manifest)
+    assert lineage["stage0_preflight"]["sha256"]
+    assert lineage["stage0_preflight"]["schema_id"] == "t065-retention-manifest-v1"
+    assert "selected_states" not in lineage
+
+
+def test_regeneration_command_is_full_pinned_wsl_command(tmp_path) -> None:
+    from sts_combat_rl.commands.non_combat_learning import (
+        _regeneration_command,
+        build_parser,
+    )
+
+    args = build_parser().parse_args(
+        [
+            "evaluate",
+            "--target-table",
+            str(tmp_path / "targets.json"),
+            "--checkpoint-directory",
+            str(tmp_path / "checkpoints"),
+            "--output",
+            str(tmp_path / "evaluate.json"),
+            "--run-stage6",
+            "--preflight",
+            str(tmp_path / "preflight.json"),
+            "--preceding-manifest",
+            str(tmp_path / "preflight.retention.json"),
+            "--preceding-manifest",
+            str(tmp_path / "target.retention.json"),
+            "--preceding-manifest",
+            str(tmp_path / "train.retention.json"),
+        ]
+    )
+    command = _regeneration_command(args)
+    assert "/home/lsmft/stsrl-spikes/py313-torch/bin/python" in command
+    assert "/home/lsmft/stsrl-spikes/sts_lightspeed/build-py313-torch" in command
+    assert "/mnt/d/DeadlycatCoding/STSRL/.claude/worktrees/" in command
+    assert "651001..651256" in command
+    assert "frozen_shards=16" in command
+    assert "frozen_worker_count=16" in command
+    assert "/evaluate.json" in command
 
 
 def test_train_preflight_failure_writes_terminal_report_and_retention_manifest(
@@ -381,8 +495,11 @@ def test_train_preflight_failure_writes_terminal_report_and_retention_manifest(
     assert decision["no_replacement"] is True
     assert "stage5" in decision["downstream_skipped"]
     assert any(
-        artifact["role"] == "stage0_preflight" for artifact in manifest["artifacts"]
+        artifact["role"] == "failed_preflight_artifact"
+        for artifact in manifest["artifacts"]
     )
+    assert "failed_preflight_artifact" in decision["failed_stage_artifacts"]
+    assert decision["preceding_stage_manifests"] == {}
     assert manifest["stage_evidence"]["stage0-preflight"]["terminal"] is True
 
 

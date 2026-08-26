@@ -17,7 +17,9 @@ from typing import Any, Mapping
 from sts_combat_rl.sim.lightspeed import LightSpeedAdapter
 from sts_combat_rl.sim.non_combat_learning import (
     T065_APPROVED_SPEC_COMMIT,
+    T065_LIGHTSPEED_BUILD_PYTHONPATH,
     T065_SOURCE_SEED_RANGE,
+    T065_TRAINING_INTERPRETER,
     T065CaseD,
     build_stage5_report,
     build_t065_preflight_report,
@@ -86,6 +88,7 @@ def build_parser() -> argparse.ArgumentParser:
     collect.add_argument("--ascension", type=int, default=20)
     collect.add_argument("--decision-report", type=Path)
     collect.add_argument("--preflight", type=Path, required=True)
+    collect.add_argument("--preceding-manifest", type=Path, action="append")
     collect.add_argument("--retention-manifest", type=Path)
 
     select = subparsers.add_parser(
@@ -96,6 +99,7 @@ def build_parser() -> argparse.ArgumentParser:
     select.add_argument("--manifest", type=Path)
     select.add_argument("--decision-report", type=Path)
     select.add_argument("--preflight", type=Path, required=True)
+    select.add_argument("--preceding-manifest", type=Path, action="append")
     select.add_argument("--retention-manifest", type=Path)
 
     target = subparsers.add_parser(
@@ -107,6 +111,7 @@ def build_parser() -> argparse.ArgumentParser:
     target.add_argument("--ascension", type=int, default=20)
     target.add_argument("--decision-report", type=Path)
     target.add_argument("--preflight", type=Path, required=True)
+    target.add_argument("--preceding-manifest", type=Path, action="append")
     target.add_argument("--retention-manifest", type=Path)
 
     train = subparsers.add_parser("train", help="train the two frozen model seeds")
@@ -114,6 +119,7 @@ def build_parser() -> argparse.ArgumentParser:
     train.add_argument("--checkpoint-directory", type=Path, required=True)
     train.add_argument("--output", type=Path, required=True)
     train.add_argument("--preflight", type=Path, required=True)
+    train.add_argument("--preceding-manifest", type=Path, action="append")
     train.add_argument("--decision-report", type=Path)
     train.add_argument("--retention-manifest", type=Path)
 
@@ -127,6 +133,7 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--sim-seed", type=int, default=1)
     evaluate.add_argument("--ascension", type=int, default=20)
     evaluate.add_argument("--preflight", type=Path, required=True)
+    evaluate.add_argument("--preceding-manifest", type=Path, action="append")
     evaluate.add_argument("--decision-report", type=Path)
     evaluate.add_argument("--retention-manifest", type=Path)
 
@@ -135,6 +142,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    args._command_argv = tuple(argv if argv is not None else sys.argv[1:])
     try:
         if args.command == "preflight":
             return _run_preflight(args)
@@ -201,6 +209,7 @@ def _run_preflight(args: argparse.Namespace) -> int:
 
 def _run_collect(args: argparse.Namespace) -> int:
     _require_preflight(args)
+    _require_preceding_manifests(args)
     _require_frozen_simulator_args(args)
     seeds = tuple(range(args.seed_start, args.seed_end + 1))
     factory = lambda: LightSpeedAdapter(  # noqa: E731 - explicit per-worker factory
@@ -249,6 +258,7 @@ def _run_collect(args: argparse.Namespace) -> int:
 
 def _run_select(args: argparse.Namespace) -> int:
     _require_preflight(args)
+    _require_preceding_manifests(args)
     if len(args.input) != 2:
         raise ValueError("T065 selection requires exactly two source-arm artifacts")
     candidates = []
@@ -319,6 +329,7 @@ def _run_select(args: argparse.Namespace) -> int:
 
 def _run_target(args: argparse.Namespace) -> int:
     _require_preflight(args)
+    _require_preceding_manifests(args)
     _require_frozen_simulator_args(args)
     states = read_source_states(args.states)
     if len(states) != 320:
@@ -366,6 +377,7 @@ def _run_target(args: argparse.Namespace) -> int:
 
 def _run_train(args: argparse.Namespace) -> int:
     _require_preflight(args)
+    _require_preceding_manifests(args)
     table = read_target_table(args.target_table)
     args.checkpoint_directory.mkdir(parents=True, exist_ok=True)
     runs = train_frozen_model_seeds(
@@ -412,6 +424,7 @@ def _run_train(args: argparse.Namespace) -> int:
 
 def _run_evaluate(args: argparse.Namespace) -> int:
     _require_preflight(args)
+    _require_preceding_manifests(args)
     _require_frozen_simulator_args(args)
     table = read_target_table(args.target_table)
     model_runs = tuple(
@@ -468,9 +481,7 @@ def _run_evaluate(args: argparse.Namespace) -> int:
             stage5=stage5,
             stage6=stage6,
             simulator_identity=table.simulator_identity,
-            preceding_stage_manifests=_artifact_identities(
-                _preceding_artifact_paths(args)
-            ),
+            preceding_stage_manifests=_preceding_manifest_identities(args),
         )
     else:
         if stage5.passed:
@@ -484,9 +495,7 @@ def _run_evaluate(args: argparse.Namespace) -> int:
             payload["decision"] = terminal_decision_report(
                 stage5=stage5,
                 simulator_identity=table.simulator_identity,
-                preceding_stage_manifests=_artifact_identities(
-                    _preceding_artifact_paths(args)
-                ),
+                preceding_stage_manifests=_preceding_manifest_identities(args),
             )
     _write_json(args.output, payload)
     decision_path: Path | None = None
@@ -683,6 +692,8 @@ def _file_identity(path: Path) -> dict[str, Any]:
 
 
 def _preceding_artifact_paths(args: argparse.Namespace) -> dict[str, Path]:
+    """Return ordinary input/current artifact paths, never manifest lineage."""
+
     paths: dict[str, Path] = {}
 
     def add(role: str, path: Any) -> None:
@@ -717,14 +728,229 @@ def _artifact_identities(paths: Mapping[str, Path]) -> dict[str, Any]:
     }
 
 
+def _expected_preceding_stages(args: argparse.Namespace) -> tuple[str, ...]:
+    return {
+        "collect": ("stage0-preflight",),
+        "select": (
+            "stage0-preflight",
+            "stage1-source-collection",
+            "stage1-source-collection",
+        ),
+        "target": ("stage0-preflight", "stage1-source-selection"),
+        "train": ("stage0-preflight", "stage2-counterfactual-targets"),
+        "evaluate": (
+            "stage0-preflight",
+            "stage2-counterfactual-targets",
+            "stage4-training",
+        ),
+    }[args.command]
+
+
+def _read_retention_manifest(path: Path) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{path}: retention manifest cannot be read: {exc}") from exc
+    if not isinstance(value, dict):
+        raise ValueError(f"{path}: retention manifest root must be an object")
+    if value.get("schema_id") != "t065-retention-manifest-v1":
+        raise ValueError(f"{path}: retention manifest schema is unsupported")
+    if value.get("schema_version") != 1:
+        raise ValueError(f"{path}: retention manifest schema version is unsupported")
+    if value.get("task_id") != "T065":
+        raise ValueError(f"{path}: retention manifest task id is invalid")
+    if value.get("approved_spec_commit") != T065_APPROVED_SPEC_COMMIT:
+        raise ValueError(f"{path}: retention manifest approved spec is invalid")
+    artifacts = value.get("artifacts")
+    evidence = value.get("stage_evidence")
+    if not isinstance(artifacts, list) or not isinstance(evidence, Mapping):
+        raise ValueError(f"{path}: retention manifest lineage fields are missing")
+    if not evidence or any(not isinstance(item, Mapping) for item in evidence.values()):
+        raise ValueError(f"{path}: retention manifest stage evidence is invalid")
+    return value
+
+
+def _manifest_contains_artifact(manifest: Mapping[str, Any], path: Path) -> bool:
+    if not path.is_file():
+        return False
+    expected_path = path.resolve()
+    expected_hash = file_sha256(path)
+    artifacts = manifest.get("artifacts")
+    if not isinstance(artifacts, list):
+        return False
+    for artifact in artifacts:
+        if not isinstance(artifact, Mapping):
+            continue
+        try:
+            artifact_path = Path(str(artifact["path"])).resolve()
+        except (KeyError, OSError, ValueError):
+            continue
+        if (
+            artifact_path == expected_path
+            and artifact.get("sha256") == expected_hash
+            and artifact.get("schema_id") in {None, "t065-retention-manifest-v1"}
+        ):
+            return True
+    return False
+
+
+def _manifest_descriptor(path: Path, manifest: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "path": str(path),
+        "sha256": file_sha256(path),
+        "schema_id": manifest["schema_id"],
+        "schema_version": manifest["schema_version"],
+        "completed_stages": sorted(str(stage) for stage in manifest["stage_evidence"]),
+    }
+
+
+def _require_preceding_manifests(args: argparse.Namespace) -> None:
+    expected_stages = _expected_preceding_stages(args)
+    supplied = tuple(getattr(args, "preceding_manifest", None) or ())
+    if len(supplied) != len(expected_stages):
+        raise T065CaseD(
+            _stage_name(args.command),
+            [
+                f"expected {len(expected_stages)} explicit preceding retention "
+                f"manifests, received {len(supplied)}"
+            ],
+            failure_ids=(f"preceding-manifest-count:{len(supplied)}",),
+            failure_counts={
+                "required_manifests": len(expected_stages),
+                "supplied_manifests": len(supplied),
+            },
+        )
+    manifests: list[tuple[Path, Mapping[str, Any], str]] = []
+    problems: list[str] = []
+    for index, (path, expected_stage) in enumerate(zip(supplied, expected_stages)):
+        try:
+            manifest = _read_retention_manifest(path)
+            evidence = manifest["stage_evidence"]
+            stage_evidence = evidence.get(expected_stage)
+            if (
+                not isinstance(stage_evidence, Mapping)
+                or stage_evidence.get("status") != "completed"
+            ):
+                raise ValueError(
+                    f"{path}: completed evidence for {expected_stage} is missing"
+                )
+            manifests.append((path, manifest, expected_stage))
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            problems.append(f"preceding manifest {index}: {exc}")
+    if problems:
+        args._preceding_manifest_paths = tuple(
+            path for path, _manifest, _stage in manifests
+        )
+        args._preceding_manifest_identities = {
+            (
+                "stage1_source_collection_" + str(index - 1)
+                if stage == "stage1-source-collection"
+                else stage.replace("-", "_")
+            ): _manifest_descriptor(path, manifest)
+            for index, (path, manifest, stage) in enumerate(manifests)
+        }
+        raise T065CaseD(
+            _stage_name(args.command),
+            problems,
+            failure_ids=tuple(
+                f"preceding-manifest:{index}" for index in range(len(problems))
+            ),
+            failure_counts={"invalid_preceding_manifests": len(problems)},
+        )
+
+    relation_paths: list[Path | None] = [None] * len(manifests)
+    if args.command == "collect":
+        relation_paths[0] = args.preflight
+    elif args.command == "select":
+        relation_paths[0] = args.preflight
+        relation_paths[1:] = list(args.input)
+    elif args.command == "target":
+        relation_paths[0] = args.preflight
+        relation_paths[1] = args.states
+    elif args.command == "train":
+        relation_paths[0] = args.preflight
+        relation_paths[1] = args.target_table
+    elif args.command == "evaluate":
+        relation_paths[0] = args.preflight
+        relation_paths[1] = args.target_table
+        relation_paths[2] = args.checkpoint_directory / "model-653001.pt"
+    relation_problems = []
+    for index, ((path, manifest, _stage), relation_path) in enumerate(
+        zip(manifests, relation_paths)
+    ):
+        if relation_path is not None and not _manifest_contains_artifact(
+            manifest, relation_path
+        ):
+            relation_problems.append(
+                f"preceding manifest {index} does not contain the exact "
+                f"path/hash for {relation_path}"
+            )
+    if relation_problems:
+        raise T065CaseD(
+            _stage_name(args.command),
+            relation_problems,
+            failure_ids=tuple(
+                f"preceding-manifest-artifact:{index}"
+                for index in range(len(relation_problems))
+            ),
+            failure_counts={"manifest_artifact_mismatches": len(relation_problems)},
+        )
+
+    args._preceding_manifest_paths = tuple(
+        path for path, _manifest, _stage in manifests
+    )
+    args._preceding_manifest_identities = {
+        (
+            "stage1_source_collection_" + str(index - 1)
+            if stage == "stage1-source-collection"
+            else stage.replace("-", "_")
+        ): _manifest_descriptor(path, manifest)
+        for index, (path, manifest, stage) in enumerate(manifests)
+    }
+
+
+def _preceding_manifest_identities(args: argparse.Namespace) -> dict[str, Any]:
+    return dict(getattr(args, "_preceding_manifest_identities", {}))
+
+
+def _failed_stage_artifact_paths(
+    args: argparse.Namespace, failure: T065CaseD
+) -> dict[str, Path]:
+    paths: dict[str, Path] = {}
+    if failure.stage == "stage0-preflight":
+        candidate = (
+            args.output
+            if args.command == "preflight"
+            else getattr(args, "preflight", None)
+        )
+        if isinstance(candidate, Path) and candidate.is_file():
+            paths["failed_preflight_artifact"] = candidate
+    output_path = getattr(args, "output", None)
+    if isinstance(output_path, Path) and output_path.is_file():
+        paths["failed_current_artifact"] = output_path
+    return paths
+
+
+def _target_src_path() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+def _wsl_path(path: Path) -> str:
+    value = str(path.resolve()).replace("\\", "/")
+    if len(value) >= 2 and value[1] == ":":
+        return f"/mnt/{value[0].lower()}{value[2:]}"
+    return value
+
+
 def _manifest_artifact_paths(
     args: argparse.Namespace,
     *,
     decision_path: Path | None = None,
     case_d: bool = False,
+    failure: T065CaseD | None = None,
 ) -> dict[str, Path]:
     if case_d:
-        paths = _preceding_artifact_paths(args)
+        paths = _failed_stage_artifact_paths(args, failure or T065CaseD("unknown", ()))
     else:
         paths = _preceding_artifact_paths(args)
         output_path = getattr(args, "output", None)
@@ -739,19 +965,108 @@ def _manifest_artifact_paths(
                 checkpoint = args.checkpoint_directory / f"model-{model_seed}.pt"
                 if checkpoint.is_file():
                     paths[f"checkpoint_{model_seed}"] = checkpoint
+    for index, path in enumerate(getattr(args, "_preceding_manifest_paths", ())):
+        paths[f"preceding_manifest_{index}"] = path
     if decision_path is not None and decision_path.is_file():
         paths["terminal_decision_report"] = decision_path
     return paths
 
 
 def _regeneration_command(args: argparse.Namespace) -> str:
-    command = [
-        "python",
-        "-m",
-        "sts_combat_rl.commands.non_combat_learning",
-        *(sys.argv[1:] if sys.argv[1:] else [args.command]),
-    ]
-    return shlex.join(command)
+    command_args = _canonical_command_args(args)
+    rendered: list[str] = []
+    for token in command_args:
+        if isinstance(token, str) and ("\\" in token or ":" in token):
+            rendered.append(_wsl_path(Path(token)))
+        else:
+            rendered.append(str(token))
+    shard_count = {
+        "collect": 16,
+        "select": 0,
+        "target": 16,
+        "train": 0,
+        "evaluate": 16,
+        "preflight": 1,
+    }[args.command]
+    worker_count = 16 if shard_count else 1
+    seed_range = {
+        "collect": f"{getattr(args, 'seed_start', T065_SOURCE_SEED_RANGE[0])}.."
+        f"{getattr(args, 'seed_end', T065_SOURCE_SEED_RANGE[1])}",
+        "select": "source-artifacts-from-collect",
+        "target": "selected-state-index=0..319",
+        "train": "model-seeds=653001,653002",
+        "evaluate": "stage6-seeds=651001..651256",
+        "preflight": "simulator-seed=1;model-seed=653001",
+    }[args.command]
+    metadata = (
+        f"# frozen_shards={shard_count} frozen_worker_count={worker_count} "
+        f"frozen_seed_range={seed_range} pinned_simulator=sts_lightspeed"
+    )
+    pythonpath = f"{T065_LIGHTSPEED_BUILD_PYTHONPATH}:{_wsl_path(_target_src_path())}"
+    return "wsl.exe -d Ubuntu -e bash -lc " + shlex.quote(
+        "set -euo pipefail; "
+        f"export PYTHONPATH={shlex.quote(pythonpath)}; "
+        f"{T065_TRAINING_INTERPRETER} -m "
+        f"sts_combat_rl.commands.non_combat_learning {shlex.join(rendered)}; "
+        + metadata
+    )
+
+
+def _canonical_command_args(args: argparse.Namespace) -> list[str]:
+    """Render every relevant frozen/default argument into the replay command."""
+
+    tokens = [args.command]
+
+    def add(flag: str, value: Any) -> None:
+        if value is None:
+            return
+        tokens.extend((flag, str(value)))
+
+    add("--output", getattr(args, "output", None))
+    if args.command == "preflight":
+        if args.simulator_runtime:
+            tokens.append("--simulator-runtime")
+        if args.torch_runtime:
+            tokens.append("--torch-runtime")
+        add("--sim-seed", args.sim_seed)
+        add("--ascension", args.ascension)
+    elif args.command == "collect":
+        add("--arm", args.arm)
+        add("--seed-start", args.seed_start)
+        add("--seed-end", args.seed_end)
+        add("--sim-seed", args.sim_seed)
+        add("--ascension", args.ascension)
+        add("--preflight", args.preflight)
+    elif args.command == "select":
+        for path in args.input:
+            add("--input", path)
+        add("--manifest", args.manifest or Path(f"{args.output}.manifest.json"))
+        add("--preflight", args.preflight)
+    elif args.command == "target":
+        add("--states", args.states)
+        add("--sim-seed", args.sim_seed)
+        add("--ascension", args.ascension)
+        add("--preflight", args.preflight)
+    elif args.command == "train":
+        add("--target-table", args.target_table)
+        add("--checkpoint-directory", args.checkpoint_directory)
+        add("--preflight", args.preflight)
+    elif args.command == "evaluate":
+        add("--target-table", args.target_table)
+        add("--checkpoint-directory", args.checkpoint_directory)
+        if args.run_stage6:
+            tokens.append("--run-stage6")
+        add("--sim-seed", args.sim_seed)
+        add("--ascension", args.ascension)
+        add("--preflight", args.preflight)
+    else:  # pragma: no cover - parser restricts the command set
+        raise ValueError(f"unsupported T065 command {args.command!r}")
+
+    for path in getattr(args, "preceding_manifest", None) or ():
+        add("--preceding-manifest", path)
+    add("--decision-report", _decision_report_path(args))
+    add("--retention-manifest", _retention_manifest_path(args))
+    return tokens
 
 
 def _write_workflow_manifest(
@@ -765,13 +1080,14 @@ def _write_workflow_manifest(
     terminal_case: str | None = None,
 ) -> dict[str, Any]:
     artifacts = _manifest_artifact_paths(
-        args, decision_path=decision_path, case_d=case_d
+        args, decision_path=decision_path, case_d=case_d, failure=failure
     )
     evidence: dict[str, Any] = {
         "status": "case_d" if case_d else "completed",
         "stage": stage,
         "command": _regeneration_command(args),
         "artifact_roles": sorted(artifacts),
+        "preceding_stage_manifests": _preceding_manifest_identities(args),
         "terminal": terminal,
     }
     if terminal_case is not None:
@@ -785,6 +1101,7 @@ def _write_workflow_manifest(
                     "downstream_skipped"
                 ],
                 "no_replacement": True,
+                "failed_stage_artifacts": dict(failure.failed_stage_artifacts),
             }
         )
     manifest = write_t065_manifest(
@@ -804,8 +1121,9 @@ def _write_workflow_manifest(
 
 
 def _handle_case_d(args: argparse.Namespace, failure: T065CaseD) -> None:
-    failure.preceding_stage_manifests.update(
-        _artifact_identities(_preceding_artifact_paths(args))
+    failure.preceding_stage_manifests.update(_preceding_manifest_identities(args))
+    failure.failed_stage_artifacts.update(
+        _artifact_identities(_failed_stage_artifact_paths(args, failure))
     )
     decision_path = _decision_report_path(args)
     write_t065_terminal_decision_report(

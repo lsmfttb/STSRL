@@ -121,6 +121,11 @@ T065_MAX_WORKERS = 16
 T065_STAGE1_SHARD_COUNT = 16
 T065_STAGE2_SHARD_COUNT = 16
 T065_STAGE6_SHARD_COUNT = 16
+T065_TRAINING_INTERPRETER = "/home/lsmft/stsrl-spikes/py313-torch/bin/python"
+T065_LIGHTSPEED_BUILD_PYTHONPATH = (
+    "/home/lsmft/stsrl-spikes/sts_lightspeed/build-py313-torch"
+)
+T065_RANKER_PARAMETER_COUNT = 325825
 
 T065_MANDATORY_FAMILIES = (
     "MAP_SCREEN",
@@ -159,6 +164,7 @@ class T065CaseD(ValueError):
         failure_counts: Mapping[str, int] | None = None,
         simulator_identity: Mapping[str, Any] | None = None,
         preceding_stage_manifests: Mapping[str, Any] | None = None,
+        failed_stage_artifacts: Mapping[str, Any] | None = None,
     ) -> None:
         self.stage = str(stage)
         self.problems = tuple(str(problem) for problem in problems)
@@ -168,6 +174,7 @@ class T065CaseD(ValueError):
         }
         self.simulator_identity = dict(simulator_identity or {})
         self.preceding_stage_manifests = dict(preceding_stage_manifests or {})
+        self.failed_stage_artifacts = dict(failed_stage_artifacts or {})
         super().__init__(f"T065 Case D at {self.stage}: " + "; ".join(self.problems))
 
     def to_decision_report(
@@ -217,6 +224,7 @@ class T065CaseD(ValueError):
                 skipped_after.get(self.stage, ("stage4", "stage5", "stage6"))
             ),
             "preceding_stage_manifests": dict(self.preceding_stage_manifests),
+            "failed_stage_artifacts": dict(self.failed_stage_artifacts),
             "recommendation": "repair the frozen fidelity failure and rerun T065",
             "problems": list(self.problems),
             "policy_conclusion": None,
@@ -3908,21 +3916,56 @@ def validate_t065_preflight(path: Path) -> dict[str, Any]:
         problems.append("preflight runtime checks are missing")
     else:
         simulator_check = runtime_checks.get("simulator_runtime")
-        if (
-            not isinstance(simulator_check, Mapping)
-            or simulator_check.get("status") != "passed"
-            or simulator_check.get("checkpoint_restore") is not True
-            or simulator_check.get("public_projection") is not True
+        expected_simulator_evidence = {
+            "status": "passed",
+            "execution_environment": "wsl",
+            "python_interpreter": T065_TRAINING_INTERPRETER,
+            "native_build_pythonpath": T065_LIGHTSPEED_BUILD_PYTHONPATH,
+            "native_module": "slaythespire",
+            "simulator_class": "StepSimulator",
+            "player_class": "IRONCLAD",
+            "ascension": 20,
+            "simulator_seed": 1,
+            "simulator_identity": lightspeed_source_identity_dict(),
+            "checkpoint_restore": True,
+            "public_projection": True,
+            "decision_context_schema_id": "public-run-context-v1",
+        }
+        if not isinstance(simulator_check, Mapping) or any(
+            simulator_check.get(key) != expected
+            for key, expected in expected_simulator_evidence.items()
         ):
-            problems.append(
-                "preflight simulator runtime must pass native projection and checkpoint restore"
-            )
+            problems.append("preflight simulator runtime evidence is not frozen")
+        if not isinstance(simulator_check, Mapping) or not isinstance(
+            simulator_check.get("observed_screen"), str
+        ):
+            problems.append("preflight simulator observed-screen evidence is missing")
         torch_check = runtime_checks.get("torch_runtime")
+        expected_torch_evidence = {
+            "status": "passed",
+            "execution_environment": "wsl",
+            "python_interpreter": T065_TRAINING_INTERPRETER,
+            "native_build_pythonpath": T065_LIGHTSPEED_BUILD_PYTHONPATH,
+            "device": "cpu",
+            "cpu": True,
+            "torch_threads": 1,
+            "manual_seed": 653001,
+            "minibatch_rng_seed": 1_653_001,
+            "state_parameter_count": T065_RANKER_PARAMETER_COUNT,
+            "model_input_schema": non_combat_model_input_schema(),
+        }
+        if not isinstance(torch_check, Mapping) or any(
+            torch_check.get(key) != expected
+            for key, expected in expected_torch_evidence.items()
+        ):
+            problems.append("preflight torch runtime evidence is not frozen")
         if (
             not isinstance(torch_check, Mapping)
-            or torch_check.get("status") != "passed"
+            or isinstance(torch_check.get("rng_contract"), bool)
+            or not isinstance(torch_check.get("rng_contract"), int)
+            or not 0 <= torch_check["rng_contract"] < 2**31
         ):
-            problems.append("preflight torch runtime did not pass")
+            problems.append("preflight torch RNG evidence is missing")
     if problems:
         raise T065CaseD(
             "stage0-preflight",
@@ -4148,9 +4191,18 @@ def build_t065_preflight_report(
                 )
                 runtime_checks["simulator_runtime"] = {
                     "status": "passed",
+                    "execution_environment": "wsl",
+                    "python_interpreter": T065_TRAINING_INTERPRETER,
+                    "native_build_pythonpath": T065_LIGHTSPEED_BUILD_PYTHONPATH,
+                    "native_module": "slaythespire",
+                    "simulator_class": "StepSimulator",
+                    "player_class": "IRONCLAD",
+                    "ascension": 20,
+                    "simulator_seed": 1,
+                    "simulator_identity": dict(simulator_identity),
                     "checkpoint_restore": True,
                     "public_projection": True,
-                    "decision_context": context["schema_id"],
+                    "decision_context_schema_id": context["schema_id"],
                     "observed_screen": context["current"]["screen"],
                 }
             except (RuntimeError, ValueError, OSError) as exc:
@@ -4162,6 +4214,10 @@ def build_t065_preflight_report(
     else:
         runtime_checks["simulator_runtime"] = {
             "status": "deferred",
+            "execution_environment": "wsl",
+            "python_interpreter": T065_TRAINING_INTERPRETER,
+            "native_build_pythonpath": T065_LIGHTSPEED_BUILD_PYTHONPATH,
+            "native_module": "slaythespire",
             "command_boundary": "preflight --simulator-runtime (WSL pinned build)",
         }
         problems.append(
@@ -4177,11 +4233,18 @@ def build_t065_preflight_report(
             generator.manual_seed(1_653_001)
             runtime_checks["torch_runtime"] = {
                 "status": "passed",
+                "execution_environment": "wsl",
+                "python_interpreter": T065_TRAINING_INTERPRETER,
+                "native_build_pythonpath": T065_LIGHTSPEED_BUILD_PYTHONPATH,
+                "device": "cpu",
                 "cpu": True,
                 "torch_threads": 1,
+                "manual_seed": 653001,
+                "minibatch_rng_seed": 1_653_001,
                 "state_parameter_count": sum(
                     parameter.numel() for parameter in model.parameters()
                 ),
+                "model_input_schema": non_combat_model_input_schema(),
                 "rng_contract": int(
                     torch.randint(0, 2**31, (1,), generator=generator).item()
                 ),
@@ -4192,6 +4255,10 @@ def build_t065_preflight_report(
     else:
         runtime_checks["torch_runtime"] = {
             "status": "deferred",
+            "execution_environment": "wsl",
+            "python_interpreter": T065_TRAINING_INTERPRETER,
+            "native_build_pythonpath": T065_LIGHTSPEED_BUILD_PYTHONPATH,
+            "device": "cpu",
             "command_boundary": "preflight --torch-runtime (optional train dependency)",
         }
         problems.append(
@@ -4285,8 +4352,8 @@ def write_source_selection_manifest(
             "source-selection-manifest",
             [f"selected source quota counts are invalid: {counts!r}"],
         )
-    if not approved_spec_commit:
-        raise ValueError("approved T065 spec commit is required")
+    if approved_spec_commit != T065_APPROVED_SPEC_COMMIT:
+        raise ValueError("approved T065 spec commit does not match the frozen head")
     manifest = {
         "schema_id": T065_SELECTION_MANIFEST_SCHEMA_ID,
         "schema_version": 1,
@@ -4433,8 +4500,8 @@ def write_t065_manifest(
 ) -> dict[str, Any]:
     """Write a lightweight reproducibility/retention manifest."""
 
-    if not approved_spec_commit:
-        raise ValueError("approved T065 spec commit is required")
+    if approved_spec_commit != T065_APPROVED_SPEC_COMMIT:
+        raise ValueError("approved T065 spec commit does not match the frozen head")
     if not artifacts:
         raise ValueError("T065 retention manifest requires artifacts")
     if not regeneration_commands:
