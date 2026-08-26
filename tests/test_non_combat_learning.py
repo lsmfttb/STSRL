@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from io import StringIO
 import json
 import os
 from pathlib import Path
@@ -23,18 +24,23 @@ from sts_combat_rl.sim.non_combat_learning import (
     T065_APPROVED_SPEC_COMMIT,
     T065CounterfactualTarget,
     T065CompleteRunArmReport,
+    T065ExperimentConfig,
     T065HeldoutReport,
     T065_MANDATORY_FAMILIES,
     T065_NATIVE_PROBE_MAX_STEPS,
     T065CaseD,
     T065Coverage,
+    T065SourceArmReport,
     T065SourceState,
     build_stage6_report,
     build_t065_preflight_report,
     canonical_source_selection_key,
     compute_learned_coverage,
+    collect_source_arm_sharded_to_path,
     continuation_seeds_for_split,
     file_sha256,
+    frozen_action_space,
+    frozen_battle_provenance,
     inclusive_range,
     matched_bootstrap_probability,
     train_frozen_model_seeds,
@@ -42,6 +48,7 @@ from sts_combat_rl.sim.non_combat_learning import (
     load_non_combat_checkpoint,
     screen_family,
     select_source_states,
+    split_for_source_seed,
     source_shard_ranges,
     stage6_shard_ranges,
     target_shard_ranges,
@@ -113,6 +120,355 @@ def _state(index: int, family: str, split: str, seed: int) -> T065SourceState:
         terminal_status="PLAYER_VICTORY",
         terminal_floor=2.0,
     )
+
+
+def _write_source_fixture(path: Path, arm: str, states: list[T065SourceState]) -> None:
+    from sts_combat_rl.sim.lightspeed_source import lightspeed_source_identity_dict
+
+    payload = {
+        "schema_id": "t065-learned-non-combat-policy-v1",
+        "schema_version": 1,
+        "arm": arm,
+        "driver_seed": 654001,
+        "requested_seed_count": 256,
+        "terminal_run_count": 256,
+        "truncated_run_count": 0,
+        "failed_run_count": 0,
+        "selected_candidate_count": len(states),
+        "run_summaries": [
+            {"simulator_seed": seed, "terminal": True, "problems": []}
+            for seed in range(650001, 650257)
+        ],
+        "problems": [],
+        "approved_spec_commit": T065_APPROVED_SPEC_COMMIT,
+        "frozen_config": T065ExperimentConfig().to_dict(),
+        "simulator_identity": lightspeed_source_identity_dict(),
+        "action_space": frozen_action_space().to_dict(),
+        "battle_controller_provenance": frozen_battle_provenance(),
+        "worker_count": 16,
+        "shard_count": 16,
+        "shard_specs": [
+            {
+                **spec,
+                "requested_seed_count": 16,
+                "terminal_run_count": 16,
+                "truncated_run_count": 0,
+                "failed_run_count": 0,
+                "problems": [],
+            }
+            for spec in source_shard_ranges(arm=arm)
+        ],
+        "records": [state.to_dict() for state in states],
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _fake_source_shard_report(
+    source_arm: str,
+    seeds: tuple[int, ...],
+    record: T065SourceState,
+    record_sink,
+) -> T065SourceArmReport:
+    from sts_combat_rl.sim.lightspeed_source import lightspeed_source_identity_dict
+
+    if record_sink is not None:
+        record_sink(record)
+        records = ()
+    else:
+        records = (record,)
+    action_space = frozen_action_space().to_dict()
+    return T065SourceArmReport(
+        arm=source_arm,
+        driver_seed=654001,
+        requested_seed_count=len(seeds),
+        terminal_run_count=len(seeds),
+        truncated_run_count=0,
+        failed_run_count=0,
+        selected_candidate_count=len(records) if record_sink is None else 1,
+        records=records,
+        run_summaries=tuple(
+            {
+                "source_run_id": f"{source_arm}:{seed}",
+                "simulator_seed": seed,
+                "source_arm": source_arm,
+                "terminal": True,
+                "outcome": "PLAYER_VICTORY",
+                "step_count": 1,
+                "terminal_floor": 2.0,
+                "problems": [],
+                "controller_provenance": {},
+                "action_space": action_space,
+                "simulator_cost": {},
+            }
+            for seed in seeds
+        ),
+        problems=(),
+        simulator_identity=lightspeed_source_identity_dict(),
+        action_space=action_space,
+        battle_controller_provenance=frozen_battle_provenance(),
+        wall_clock_seconds=0.1,
+    )
+
+
+def test_bounded_shard_writer_preserves_order_and_skips_aggregate_to_dict(
+    tmp_path, monkeypatch
+) -> None:
+    import sts_combat_rl.sim.non_combat_learning as learning
+
+    expected_states = [None] * 16
+
+    def fake_collect(
+        adapter_factory,
+        *,
+        source_arm,
+        seeds,
+        record_sink=None,
+    ) -> T065SourceArmReport:
+        del adapter_factory
+        seed_values = tuple(seeds)
+        shard_index = (seed_values[0] - 650001) // 16
+        state = replace(
+            _state(
+                shard_index,
+                T065_MANDATORY_FAMILIES[shard_index % len(T065_MANDATORY_FAMILIES)],
+                split_for_source_seed(seed_values[0]),
+                seed_values[0],
+            ),
+            source_arm=source_arm,
+            source_run_id=f"{source_arm}:{seed_values[0]}",
+        )
+        expected_states[shard_index] = state
+        return _fake_source_shard_report(source_arm, seed_values, state, record_sink)
+
+    monkeypatch.setattr(learning, "collect_source_arm", fake_collect)
+
+    def aggregate_to_dict_must_not_run(self):
+        raise AssertionError("bounded writer must not call aggregate to_dict")
+
+    monkeypatch.setattr(T065SourceArmReport, "to_dict", aggregate_to_dict_must_not_run)
+    output_path = tmp_path / "source.json"
+    report = collect_source_arm_sharded_to_path(
+        lambda: None, output_path, source_arm="stochastic_non_combat_v1"
+    )
+
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert list(payload) == sorted(payload)
+    assert payload["records"] == [
+        state.to_dict() for state in expected_states if state is not None
+    ]
+    assert [row["simulator_seed"] for row in payload["run_summaries"]] == list(
+        range(650001, 650257)
+    )
+    assert report.records == ()
+    assert report.selected_candidate_count == 16
+
+
+def test_bounded_shard_writer_rejects_invalid_fragment_record(
+    tmp_path, monkeypatch
+) -> None:
+    import sts_combat_rl.sim.non_combat_learning as learning
+
+    def fake_collect(
+        adapter_factory,
+        *,
+        source_arm,
+        seeds,
+        record_sink=None,
+    ) -> T065SourceArmReport:
+        del adapter_factory
+        seed_values = tuple(seeds)
+        shard_index = (seed_values[0] - 650001) // 16
+        state = replace(
+            _state(
+                shard_index,
+                T065_MANDATORY_FAMILIES[shard_index % len(T065_MANDATORY_FAMILIES)],
+                split_for_source_seed(seed_values[0]),
+                seed_values[0],
+            ),
+            source_arm=source_arm,
+            source_run_id=f"{source_arm}:{seed_values[0]}",
+            terminal=False if shard_index == 4 else True,
+        )
+        return _fake_source_shard_report(source_arm, seed_values, state, record_sink)
+
+    monkeypatch.setattr(learning, "collect_source_arm", fake_collect)
+    output_path = tmp_path / "source.json"
+    with pytest.raises(ValueError, match="invalid source semantics"):
+        collect_source_arm_sharded_to_path(
+            lambda: None, output_path, source_arm="stochastic_non_combat_v1"
+        )
+    assert not output_path.exists()
+    assert not list(tmp_path.glob(".source.json.shards-*"))
+
+
+def test_bounded_shard_writer_rejects_truncated_fragment_json(
+    tmp_path, monkeypatch
+) -> None:
+    import sts_combat_rl.sim.non_combat_learning as learning
+
+    def fake_collect(
+        adapter_factory,
+        *,
+        source_arm,
+        seeds,
+        record_sink=None,
+    ) -> T065SourceArmReport:
+        del adapter_factory
+        seed_values = tuple(seeds)
+        shard_index = (seed_values[0] - 650001) // 16
+        state = replace(
+            _state(
+                shard_index,
+                T065_MANDATORY_FAMILIES[shard_index % len(T065_MANDATORY_FAMILIES)],
+                split_for_source_seed(seed_values[0]),
+                seed_values[0],
+            ),
+            source_arm=source_arm,
+            source_run_id=f"{source_arm}:{seed_values[0]}",
+        )
+        return _fake_source_shard_report(source_arm, seed_values, state, record_sink)
+
+    original_dumps = learning.json.dumps
+
+    def write_truncated_source_state(value, *args, **kwargs):
+        if isinstance(value, dict) and "state_features" in value:
+            return '{"truncated":'
+        return original_dumps(value, *args, **kwargs)
+
+    monkeypatch.setattr(learning, "collect_source_arm", fake_collect)
+    monkeypatch.setattr(learning.json, "dumps", write_truncated_source_state)
+    output_path = tmp_path / "source.json"
+    with pytest.raises(ValueError, match="record 1 is invalid JSON"):
+        collect_source_arm_sharded_to_path(
+            lambda: None, output_path, source_arm="stochastic_non_combat_v1"
+        )
+    assert not output_path.exists()
+    assert not list(tmp_path.glob(".source.json.shards-*"))
+
+
+def test_bounded_shard_writer_requires_frozen_worker_count(tmp_path) -> None:
+    with pytest.raises(ValueError, match="exactly 16 workers"):
+        collect_source_arm_sharded_to_path(
+            lambda: None,
+            tmp_path / "source.json",
+            source_arm="stochastic_non_combat_v1",
+            worker_count=8,
+        )
+
+
+def test_bounded_shard_writer_cleans_fragments_on_shard_failure(
+    tmp_path, monkeypatch
+) -> None:
+    import sts_combat_rl.sim.non_combat_learning as learning
+
+    def failing_collect(
+        adapter_factory,
+        *,
+        source_arm,
+        seeds,
+        record_sink=None,
+    ) -> T065SourceArmReport:
+        del adapter_factory
+        seed_values = tuple(seeds)
+        shard_index = (seed_values[0] - 650001) // 16
+        state = replace(
+            _state(
+                shard_index,
+                T065_MANDATORY_FAMILIES[shard_index % len(T065_MANDATORY_FAMILIES)],
+                split_for_source_seed(seed_values[0]),
+                seed_values[0],
+            ),
+            source_arm=source_arm,
+            source_run_id=f"{source_arm}:{seed_values[0]}",
+        )
+        if shard_index == 3:
+            # Leave one partial record in the failing shard fragment so the
+            # writer's cleanup path is exercised without duplicating records
+            # in successful shards.
+            if record_sink is not None:
+                record_sink(state)
+            raise RuntimeError("fixture shard failure")
+        return _fake_source_shard_report(source_arm, seed_values, state, record_sink)
+
+    monkeypatch.setattr(learning, "collect_source_arm", failing_collect)
+    output_path = tmp_path / "source.json"
+    with pytest.raises(RuntimeError, match="fixture shard failure"):
+        collect_source_arm_sharded_to_path(
+            lambda: None, output_path, source_arm="stochastic_non_combat_v1"
+        )
+    assert not output_path.exists()
+    assert not list(tmp_path.glob(".source.json.shards-*"))
+
+
+def test_bounded_shard_writer_rejects_existing_output(tmp_path, monkeypatch) -> None:
+    import sts_combat_rl.sim.non_combat_learning as learning
+
+    output_path = tmp_path / "source.json"
+    output_path.write_text('{"old": true}\n', encoding="utf-8")
+
+    def unexpected_collect(*args, **kwargs):
+        raise AssertionError("an existing output must be rejected before collection")
+
+    monkeypatch.setattr(learning, "collect_source_arm", unexpected_collect)
+    with pytest.raises(FileExistsError, match="already exists"):
+        collect_source_arm_sharded_to_path(
+            lambda: None,
+            output_path,
+            source_arm="stochastic_non_combat_v1",
+        )
+    assert output_path.read_text(encoding="utf-8") == '{"old": true}\n'
+    assert not list(tmp_path.glob(".source.json.shards-*"))
+
+
+def test_run_collect_full_range_dispatches_bounded_writer_without_report_to_dict(
+    tmp_path, monkeypatch
+) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command
+
+    report = T065SourceArmReport(
+        arm="stochastic_non_combat_v1",
+        driver_seed=654001,
+        requested_seed_count=256,
+        terminal_run_count=256,
+        truncated_run_count=0,
+        failed_run_count=0,
+        selected_candidate_count=0,
+    )
+    calls = []
+
+    def bounded_writer(adapter_factory, output_path, *, source_arm, worker_count):
+        calls.append((output_path, source_arm, worker_count))
+        return report
+
+    monkeypatch.setattr(command, "collect_source_arm_sharded_to_path", bounded_writer)
+    monkeypatch.setattr(command, "_require_preflight", lambda args: None)
+    monkeypatch.setattr(command, "_require_preceding_manifests", lambda args: None)
+    monkeypatch.setattr(command, "_require_frozen_simulator_args", lambda args: None)
+    monkeypatch.setattr(command, "_write_workflow_manifest", lambda args, stage: None)
+
+    def aggregate_to_dict_must_not_run(self):
+        raise AssertionError("full-range collect must not call aggregate to_dict")
+
+    monkeypatch.setattr(T065SourceArmReport, "to_dict", aggregate_to_dict_must_not_run)
+    output_path = tmp_path / "source.json"
+    assert (
+        command._run_collect(
+            SimpleNamespace(
+                command="collect",
+                arm="stochastic_non_combat_v1",
+                output=output_path,
+                seed_start=650001,
+                seed_end=650256,
+                sim_seed=1,
+                ascension=20,
+                preflight=tmp_path / "preflight.json",
+                preceding_manifest=(),
+                retention_manifest=None,
+            )
+        )
+        == 0
+    )
+    assert calls == [(output_path, "stochastic_non_combat_v1", 16)]
 
 
 def test_model_input_schema_and_composed_dimensions() -> None:
@@ -197,6 +553,235 @@ def test_deterministic_selection_uses_family_split_quotas() -> None:
     assert (
         canonical_source_selection_key(selected[0])[0] == selected[0].selection_digest
     )
+
+
+def test_streamed_two_arm_selection_matches_in_memory_without_json_load(
+    tmp_path, monkeypatch
+) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command
+
+    stochastic = []
+    for family_index, family in enumerate(T065_MANDATORY_FAMILIES):
+        for offset in range(80):
+            split = (
+                "train" if offset < 48 else "validation" if offset < 64 else "heldout"
+            )
+            seed = (
+                650001
+                if split == "train"
+                else 650155
+                if split == "validation"
+                else 650206
+            )
+            stochastic.append(_state(family_index * 100 + offset, family, split, seed))
+    expert = [replace(state, source_arm="expert_non_combat_v1") for state in stochastic]
+
+    stochastic_path = tmp_path / "stochastic.json"
+    expert_path = tmp_path / "expert.json"
+    _write_source_fixture(stochastic_path, "stochastic_non_combat_v1", stochastic)
+    _write_source_fixture(expert_path, "expert_non_combat_v1", expert)
+
+    original_json_loads = command.json.loads
+    loaded_document_sizes = []
+
+    def reject_whole_source_load(document, *args, **kwargs):
+        loaded_document_sizes.append(len(document))
+        if len(document) > 100_000:
+            raise AssertionError("streaming selection must not load a whole source")
+        return original_json_loads(document, *args, **kwargs)
+
+    monkeypatch.setattr(command.json, "loads", reject_whole_source_load)
+    expected = select_source_states(stochastic + expert)
+
+    def streamed_candidates():
+        yield from command._iter_source_arm_states(stochastic_path)
+        yield from command._iter_source_arm_states(expert_path)
+
+    actual = select_source_states(streamed_candidates())
+    assert [state.to_dict() for state in actual] == [
+        state.to_dict() for state in expected
+    ]
+    assert max(loaded_document_sizes, default=0) <= 100_000
+
+
+def test_run_select_streams_two_arms_and_records_source_sizes(
+    tmp_path, monkeypatch
+) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command
+
+    stochastic = [
+        _state(
+            family_index * 100 + offset,
+            family,
+            "train" if offset < 48 else "validation" if offset < 64 else "heldout",
+            650001 if offset < 48 else 650155 if offset < 64 else 650206,
+        )
+        for family_index, family in enumerate(T065_MANDATORY_FAMILIES)
+        for offset in range(80)
+    ]
+    expert = [replace(state, source_arm="expert_non_combat_v1") for state in stochastic]
+    stochastic_path = tmp_path / "stochastic.json"
+    expert_path = tmp_path / "expert.json"
+    _write_source_fixture(stochastic_path, "stochastic_non_combat_v1", stochastic)
+    _write_source_fixture(expert_path, "expert_non_combat_v1", expert)
+    output_path = tmp_path / "selected.jsonl"
+    manifest_path = tmp_path / "selected.manifest.json"
+
+    monkeypatch.setattr(command, "_require_preflight", lambda args: None)
+    monkeypatch.setattr(command, "_require_preceding_manifests", lambda args: None)
+    monkeypatch.setattr(command, "_write_workflow_manifest", lambda args, stage: None)
+    monkeypatch.setattr(command._StreamingJsonReader, "_CHUNK_SIZE", 4096)
+
+    assert (
+        command._run_select(
+            SimpleNamespace(
+                input=[stochastic_path, expert_path],
+                output=output_path,
+                manifest=manifest_path,
+            )
+        )
+        == 0
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["selected_state_count"] == 320
+    assert [item["size_bytes"] for item in manifest["source_artifacts"]] == [
+        stochastic_path.stat().st_size,
+        expert_path.stat().st_size,
+    ]
+    assert len(output_path.read_text(encoding="utf-8").splitlines()) == 320
+
+
+def test_run_select_rejects_source_tail_change_between_passes(
+    tmp_path, monkeypatch
+) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command
+
+    stochastic = [
+        _state(
+            family_index * 100 + offset,
+            family,
+            "train" if offset < 48 else "validation" if offset < 64 else "heldout",
+            650001 if offset < 48 else 650155 if offset < 64 else 650206,
+        )
+        for family_index, family in enumerate(T065_MANDATORY_FAMILIES)
+        for offset in range(80)
+    ]
+    expert = [replace(state, source_arm="expert_non_combat_v1") for state in stochastic]
+    stochastic_path = tmp_path / "stochastic.json"
+    expert_path = tmp_path / "expert.json"
+    _write_source_fixture(stochastic_path, "stochastic_non_combat_v1", stochastic)
+    _write_source_fixture(expert_path, "expert_non_combat_v1", expert)
+
+    original_init = command._SourceArmArtifactReader.__init__
+    init_counts: dict[Path, int] = {}
+
+    def init_with_controlled_tail_change(reader, path):
+        original_init(reader, path)
+        normalized_path = Path(path)
+        init_counts[normalized_path] = init_counts.get(normalized_path, 0) + 1
+        if normalized_path == expert_path and init_counts[normalized_path] == 2:
+            with normalized_path.open("a", encoding="utf-8") as stream:
+                stream.write("\n")
+
+    monkeypatch.setattr(
+        command._SourceArmArtifactReader, "__init__", init_with_controlled_tail_change
+    )
+    monkeypatch.setattr(command, "_require_preflight", lambda args: None)
+    monkeypatch.setattr(command, "_require_preceding_manifests", lambda args: None)
+
+    with pytest.raises(T065CaseD, match="changed between selection passes"):
+        command._run_select(
+            SimpleNamespace(
+                input=[stochastic_path, expert_path],
+                output=tmp_path / "selected.jsonl",
+                manifest=tmp_path / "selected.manifest.json",
+            )
+        )
+    assert not (tmp_path / "selected.jsonl").exists()
+    assert not (tmp_path / "selected.manifest.json").exists()
+
+
+def test_streaming_json_reader_handles_split_scalar_and_record(monkeypatch) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command
+
+    monkeypatch.setattr(command._StreamingJsonReader, "_CHUNK_SIZE", 2)
+    scalar_reader = command._StreamingJsonReader(StringIO("650001"))
+    assert scalar_reader.value() == 650001
+    record_reader = command._StreamingJsonReader(
+        StringIO('[{"simulator_seed": 650001, "source_arm": "expert"}]')
+    )
+    assert list(record_reader.array_values()) == [
+        {"simulator_seed": 650001, "source_arm": "expert"}
+    ]
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("schema_version", 999, "schema version"),
+        ("frozen_config", {}, "frozen config"),
+        ("selected_candidate_count", 0, "candidate count"),
+    ],
+)
+def test_streaming_source_reader_validates_report_metadata(
+    tmp_path, field, value, message
+) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command
+
+    path = tmp_path / "source.json"
+    _write_source_fixture(
+        path,
+        "stochastic_non_combat_v1",
+        [_state(1, "MAP_SCREEN", "train", 650001)],
+    )
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload[field] = value
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(T065CaseD, match=message):
+        list(command._iter_source_arm_states(path))
+
+
+def test_run_select_rejects_corrupt_source_tail_without_output(
+    tmp_path, monkeypatch
+) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command
+
+    states = [
+        _state(
+            family_index * 100 + offset,
+            family,
+            "train" if offset < 48 else "validation" if offset < 64 else "heldout",
+            650001 if offset < 48 else 650155 if offset < 64 else 650206,
+        )
+        for family_index, family in enumerate(T065_MANDATORY_FAMILIES)
+        for offset in range(80)
+    ]
+    valid_path = tmp_path / "stochastic.json"
+    corrupt_path = tmp_path / "expert.json"
+    _write_source_fixture(valid_path, "stochastic_non_combat_v1", states)
+    _write_source_fixture(
+        corrupt_path,
+        "expert_non_combat_v1",
+        [replace(state, source_arm="expert_non_combat_v1") for state in states],
+    )
+    corrupt_path.write_text(
+        corrupt_path.read_text(encoding="utf-8") + " trailing",
+        encoding="utf-8",
+    )
+    output_path = tmp_path / "selected.jsonl"
+    monkeypatch.setattr(command, "_require_preflight", lambda args: None)
+    monkeypatch.setattr(command, "_require_preceding_manifests", lambda args: None)
+
+    with pytest.raises(ValueError, match="trailing"):
+        command._run_select(
+            SimpleNamespace(
+                input=[valid_path, corrupt_path],
+                output=output_path,
+                manifest=tmp_path / "selected.manifest.json",
+            )
+        )
+    assert not output_path.exists()
 
 
 def test_selection_manifest_retains_compact_identity(tmp_path) -> None:

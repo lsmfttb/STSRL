@@ -8,6 +8,8 @@ seed ranges, and stage boundaries remain visible in the command itself.
 from __future__ import annotations
 
 import argparse
+from collections.abc import Iterator
+from dataclasses import dataclass, replace
 import json
 from pathlib import Path
 import shlex
@@ -17,14 +19,18 @@ from typing import Any, Mapping
 from sts_combat_rl.sim.lightspeed import LightSpeedAdapter
 from sts_combat_rl.sim.non_combat_learning import (
     T065_APPROVED_SPEC_COMMIT,
+    T065_EXPERIMENT_SCHEMA_VERSION,
+    T065ExperimentConfig,
     T065_LIGHTSPEED_BUILD_PYTHONPATH,
     T065_SOURCE_SEED_RANGE,
+    T065SourceState,
     T065_TRAINING_INTERPRETER,
     T065CaseD,
     build_stage5_report,
     build_t065_preflight_report,
+    canonical_source_selection_key,
     collect_source_arm,
-    collect_source_arm_sharded,
+    collect_source_arm_sharded_to_path,
     file_sha256,
     frozen_battle_provenance,
     frozen_action_space,
@@ -32,7 +38,7 @@ from sts_combat_rl.sim.non_combat_learning import (
     read_source_states,
     read_target_table,
     run_stage6_experiment,
-    select_source_states,
+    select_source_candidates,
     train_frozen_model_seeds,
     terminal_decision_report,
     validate_t065_preflight,
@@ -219,14 +225,15 @@ def _run_collect(args: argparse.Namespace) -> int:
         player_class="IRONCLAD",
     )
     if (args.seed_start, args.seed_end) == T065_SOURCE_SEED_RANGE:
-        report = collect_source_arm_sharded(
+        report = collect_source_arm_sharded_to_path(
             factory,
+            args.output,
             source_arm=args.arm,
             worker_count=16,
         )
     else:
         report = collect_source_arm(factory, source_arm=args.arm, seeds=seeds)
-    _write_json(args.output, report.to_dict())
+        _write_json(args.output, report.to_dict())
     print(
         f"T065 collected arm={args.arm} seeds={len(seeds)} "
         f"candidates={report.selected_candidate_count} "
@@ -262,49 +269,108 @@ def _run_select(args: argparse.Namespace) -> int:
     _require_preceding_manifests(args)
     if len(args.input) != 2:
         raise ValueError("T065 selection requires exactly two source-arm artifacts")
-    candidates = []
     source_artifacts = []
     observed_arms = set()
     simulator_identity: Mapping[str, Any] | None = None
-    for path in args.input:
-        value = _load_json_object(path)
-        arm = _validate_source_arm_artifact(value, path)
-        if arm in observed_arms:
-            raise ValueError(f"duplicate T065 source arm artifact: {arm}")
-        observed_arms.add(arm)
-        artifact_simulator_identity = value.get("simulator_identity")
-        if not isinstance(artifact_simulator_identity, Mapping):
-            raise T065CaseD(
-                "source-selection", [f"{path}: simulator identity is missing"]
+
+    def candidate_stream() -> Iterator["_SourceSelectionLocator"]:
+        nonlocal simulator_identity
+        for source_index, path in enumerate(args.input):
+            reader = _SourceArmArtifactReader(path)
+            for record_index, state in enumerate(reader.iter_states()):
+                yield _SourceSelectionLocator.from_state(
+                    state, source_index=source_index, record_index=record_index
+                )
+            arm = _validate_source_arm_metadata(
+                reader.metadata, path, record_count=reader.record_count
             )
-        expected_simulator_identity = lightspeed_source_identity_dict()
-        if dict(artifact_simulator_identity) != expected_simulator_identity:
-            raise T065CaseD(
-                "source-selection",
-                [f"{path}: simulator identity does not match the pinned manifest"],
+            if arm in observed_arms:
+                raise ValueError(f"duplicate T065 source arm artifact: {arm}")
+            observed_arms.add(arm)
+            artifact_simulator_identity = reader.metadata.get("simulator_identity")
+            if not isinstance(artifact_simulator_identity, Mapping):
+                raise T065CaseD(
+                    "source-selection", [f"{path}: simulator identity is missing"]
+                )
+            expected_simulator_identity = lightspeed_source_identity_dict()
+            if dict(artifact_simulator_identity) != expected_simulator_identity:
+                raise T065CaseD(
+                    "source-selection",
+                    [f"{path}: simulator identity does not match the pinned manifest"],
+                )
+            if simulator_identity is None:
+                simulator_identity = dict(artifact_simulator_identity)
+            elif dict(artifact_simulator_identity) != dict(simulator_identity):
+                raise T065CaseD(
+                    "source-selection", [f"{path}: simulator identities do not match"]
+                )
+            source_artifacts.append(
+                {
+                    "arm": arm,
+                    "path": str(path),
+                    "sha256": file_sha256(path),
+                    "size_bytes": path.stat().st_size,
+                    "record_count": reader.record_count,
+                }
             )
-        if simulator_identity is None:
-            simulator_identity = dict(artifact_simulator_identity)
-        elif dict(artifact_simulator_identity) != dict(simulator_identity):
-            raise T065CaseD(
-                "source-selection", [f"{path}: simulator identities do not match"]
-            )
-        rows = value["records"]
-        candidates.extend(read_source_states_from_objects(rows, path))
-        source_artifacts.append(
-            {
-                "arm": arm,
-                "path": str(path),
-                "sha256": file_sha256(path),
-                "record_count": len(rows),
-            }
-        )
+
+    selected_locators = select_source_candidates(candidate_stream())
     if observed_arms != {
         "stochastic_non_combat_v1",
         "expert_non_combat_v1",
     }:
         raise ValueError("T065 selection requires stochastic and expert source arms")
-    selected = select_source_states(candidates)
+    desired = {
+        (candidate.source_index, candidate.record_index): (digest, payload)
+        for candidate, digest, payload in selected_locators
+    }
+    selected_states_by_locator: dict[tuple[int, int], T065SourceState] = {}
+    for source_index, path in enumerate(args.input):
+        reader = _SourceArmArtifactReader(path)
+        for record_index, state in enumerate(reader.iter_states()):
+            key = (source_index, record_index)
+            expected = desired.get(key)
+            if expected is not None:
+                actual = canonical_source_selection_key(state)
+                if actual != expected:
+                    raise T065CaseD(
+                        "source-selection",
+                        [f"{path}: selected source record changed during selection"],
+                    )
+                selected_states_by_locator[key] = state
+    for source_index, path in enumerate(args.input):
+        expected_artifact = source_artifacts[source_index]
+        try:
+            actual_size = path.stat().st_size
+            actual_sha256 = file_sha256(path)
+        except OSError as exc:
+            raise T065CaseD(
+                "source-selection",
+                [f"{path}: source artifact disappeared during selection"],
+            ) from exc
+        if (
+            actual_size != expected_artifact["size_bytes"]
+            or actual_sha256 != expected_artifact["sha256"]
+        ):
+            raise T065CaseD(
+                "source-selection",
+                [f"{path}: source artifact changed between selection passes"],
+            )
+    if len(selected_states_by_locator) != len(selected_locators):
+        raise T065CaseD(
+            "source-selection", ["selected source record locator is missing"]
+        )
+    selected = tuple(
+        replace(
+            selected_states_by_locator[
+                (candidate.source_index, candidate.record_index)
+            ],
+            selected_state_index=index,
+            selection_digest=digest,
+            selection_canonical_json=payload.decode("utf-8"),
+        )
+        for index, (candidate, digest, payload) in enumerate(selected_locators)
+    )
     digest = write_source_states(args.output, selected)
     manifest_path = args.manifest or Path(f"{args.output}.manifest.json")
     write_source_selection_manifest(
@@ -535,20 +601,203 @@ def read_source_states_from_objects(rows: list[Any], path: Path) -> list[Any]:
     return result
 
 
-def _load_json_object(path: Path) -> dict[str, Any]:
-    try:
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError as exc:
-        raise ValueError(f"{path}: invalid JSON") from exc
-    if not isinstance(value, dict):
-        raise ValueError(f"{path}: JSON root must be an object")
-    return {str(key): item for key, item in value.items()}
+class _StreamingJsonReader:
+    """Decode one JSON value at a time from a bounded text buffer."""
+
+    _CHUNK_SIZE = 1024 * 1024
+
+    def __init__(self, stream: Any) -> None:
+        self._stream = stream
+        self._decoder = json.JSONDecoder()
+        self._buffer = ""
+        self._eof = False
+
+    def _read_more(self) -> bool:
+        if self._eof:
+            return False
+        chunk = self._stream.read(self._CHUNK_SIZE)
+        if chunk == "":
+            self._eof = True
+            return False
+        self._buffer += chunk
+        return True
+
+    def _skip_whitespace(self) -> None:
+        while True:
+            self._buffer = self._buffer.lstrip()
+            if self._buffer or self._eof:
+                return
+            self._read_more()
+
+    def _consume(self, expected: str) -> None:
+        self._skip_whitespace()
+        while len(self._buffer) < len(expected) and self._read_more():
+            pass
+        if not self._buffer.startswith(expected):
+            raise ValueError(f"expected JSON token {expected!r}")
+        self._buffer = self._buffer[len(expected) :]
+
+    def _consume_if(self, token: str) -> bool:
+        self._skip_whitespace()
+        while len(self._buffer) < len(token) and self._read_more():
+            pass
+        if not self._buffer.startswith(token):
+            return False
+        self._buffer = self._buffer[len(token) :]
+        return True
+
+    def value(self) -> Any:
+        self._skip_whitespace()
+        while True:
+            try:
+                value, end = self._decoder.raw_decode(self._buffer)
+            except json.JSONDecodeError:
+                if not self._read_more():
+                    raise
+                continue
+            if end == len(self._buffer) and not self._eof:
+                self._read_more()
+                continue
+            self._buffer = self._buffer[end:]
+            return value
+
+    def array_values(self) -> Iterator[Any]:
+        self._consume("[")
+        if self._consume_if("]"):
+            return
+        while True:
+            yield self.value()
+            if self._consume_if("]"):
+                return
+            self._consume(",")
+
+    def ensure_end(self) -> None:
+        self._skip_whitespace()
+        if self._buffer:
+            raise ValueError("unexpected trailing JSON data")
 
 
-def _validate_source_arm_artifact(value: Mapping[str, Any], path: Path) -> str:
+@dataclass(frozen=True)
+class _SourceSelectionLocator:
+    """Compact first-pass candidate retained until full-state reread."""
+
+    source_index: int
+    record_index: int
+    family: str
+    split: str
+    simulator_seed: int
+    source_arm: str
+    source_run_id: str
+    source_step_index: int
+    public_state_identity: str
+    legal_action_identities: tuple[Mapping[str, Any], ...]
+    action_trace: tuple[Mapping[str, Any], ...]
+    terminal: bool
+
+    @classmethod
+    def from_state(
+        cls, state: T065SourceState, *, source_index: int, record_index: int
+    ) -> "_SourceSelectionLocator":
+        return cls(
+            source_index=source_index,
+            record_index=record_index,
+            family=state.family,
+            split=state.split,
+            simulator_seed=state.simulator_seed,
+            source_arm=state.source_arm,
+            source_run_id=state.source_run_id,
+            source_step_index=state.source_step_index,
+            public_state_identity=state.public_state_identity,
+            legal_action_identities=tuple(
+                dict(identity) for identity in state.legal_action_identities
+            ),
+            action_trace=tuple(dict(item) for item in state.action_trace),
+            terminal=state.terminal,
+        )
+
+
+class _SourceArmArtifactReader:
+    """Stream source records while retaining only small source metadata."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.metadata: dict[str, Any] = {}
+        self.record_count = 0
+
+    def iter_states(self) -> Iterator[T065SourceState]:
+        first_record_arm: str | None = None
+        for row in self:
+            if not isinstance(row, dict):
+                raise ValueError(f"{self.path}: source row is not an object")
+            state = T065SourceState.from_dict(row)
+            if first_record_arm is None:
+                first_record_arm = state.source_arm
+            elif state.source_arm != first_record_arm:
+                raise ValueError(f"{self.path}: source record arms are inconsistent")
+            yield state
+        if first_record_arm != self.metadata.get("arm"):
+            raise ValueError(
+                f"{self.path}: source record arm does not match artifact arm"
+            )
+
+    def __iter__(self) -> Iterator[Any]:
+        seen_keys: set[str] = set()
+        saw_records = False
+        try:
+            with self.path.open("r", encoding="utf-8") as stream:
+                reader = _StreamingJsonReader(stream)
+                reader._consume("{")
+                if reader._consume_if("}"):
+                    raise ValueError("source artifact object is empty")
+                while True:
+                    key = reader.value()
+                    if not isinstance(key, str):
+                        raise ValueError("source artifact key is not a string")
+                    if key in seen_keys:
+                        raise ValueError(f"duplicate source artifact key {key!r}")
+                    seen_keys.add(key)
+                    reader._consume(":")
+                    if key == "records":
+                        saw_records = True
+                        for row in reader.array_values():
+                            self.record_count += 1
+                            yield row
+                    else:
+                        self.metadata[key] = reader.value()
+                    if reader._consume_if("}"):
+                        break
+                    reader._consume(",")
+                reader.ensure_end()
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ValueError(
+                f"{self.path}: invalid source artifact JSON: {exc}"
+            ) from exc
+        if not saw_records:
+            raise ValueError(f"{self.path}: source records are missing")
+        _validate_source_arm_metadata(
+            self.metadata, self.path, record_count=self.record_count
+        )
+
+
+def _iter_source_arm_states(path: Path) -> Iterator[T065SourceState]:
+    reader = _SourceArmArtifactReader(path)
+    yield from reader.iter_states()
+
+
+def _validate_source_arm_metadata(
+    value: Mapping[str, Any], path: Path, *, record_count: int
+) -> str:
     expected_seeds = set(range(650001, 650257))
     if value.get("schema_id") != "t065-learned-non-combat-policy-v1":
         raise T065CaseD("source-collection", [f"{path}: source schema is unsupported"])
+    if value.get("schema_version") != T065_EXPERIMENT_SCHEMA_VERSION:
+        raise T065CaseD(
+            "source-collection", [f"{path}: source schema version is unsupported"]
+        )
+    if value.get("frozen_config") != T065ExperimentConfig().to_dict():
+        raise T065CaseD(
+            "source-collection", [f"{path}: source frozen config is not frozen"]
+        )
     arm = value.get("arm")
     if not isinstance(arm, str) or arm not in {
         "stochastic_non_combat_v1",
@@ -570,6 +819,11 @@ def _validate_source_arm_artifact(value: Mapping[str, Any], path: Path) -> str:
     if value.get("truncated_run_count") != 0 or value.get("failed_run_count") != 0:
         raise T065CaseD(
             "source-collection", [f"{path}: source run truncation/failure reported"]
+        )
+    if value.get("selected_candidate_count") != record_count:
+        raise T065CaseD(
+            "source-collection",
+            [f"{path}: source candidate count does not match records"],
         )
     if value.get("problems") != []:
         raise T065CaseD(
@@ -610,10 +864,9 @@ def _validate_source_arm_artifact(value: Mapping[str, Any], path: Path) -> str:
         raise T065CaseD(
             "source-collection", [f"{path}: source shard ranges/evidence are invalid"]
         )
-    rows = value.get("records")
     summaries = value.get("run_summaries")
-    if not isinstance(rows, list) or not isinstance(summaries, list):
-        raise T065CaseD("source-collection", [f"{path}: source records are missing"])
+    if not isinstance(summaries, list):
+        raise T065CaseD("source-collection", [f"{path}: source summaries are missing"])
     if len(summaries) != 256:
         raise T065CaseD(
             "source-collection", [f"{path}: source run summaries are incomplete"]
@@ -634,16 +887,24 @@ def _validate_source_arm_artifact(value: Mapping[str, Any], path: Path) -> str:
             raise T065CaseD(
                 "source-collection", [f"{path}: source summary is not valid"]
             )
-    for row in rows:
-        if not isinstance(row, Mapping) or row.get("source_arm") != arm:
-            raise T065CaseD(
-                "source-collection", [f"{path}: source record arm is invalid"]
-            )
     if summary_seeds != expected_seeds:
         raise T065CaseD(
             "source-collection", [f"{path}: source summary seed set is incomplete"]
         )
     return str(arm)
+
+
+def _validate_source_arm_artifact(value: Mapping[str, Any], path: Path) -> str:
+    rows = value.get("records")
+    if not isinstance(rows, list):
+        raise T065CaseD("source-collection", [f"{path}: source records are missing"])
+    arm = _validate_source_arm_metadata(value, path, record_count=len(rows))
+    for row in rows:
+        if not isinstance(row, Mapping) or row.get("source_arm") != arm:
+            raise T065CaseD(
+                "source-collection", [f"{path}: source record arm is invalid"]
+            )
+    return arm
 
 
 def _source_report_is_complete(report: Any) -> bool:

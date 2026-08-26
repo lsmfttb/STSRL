@@ -24,9 +24,10 @@ import math
 from pathlib import Path
 import random
 import statistics
+from tempfile import TemporaryDirectory
 import time
 from typing import Any
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from sts_combat_rl.sim.action_space import ActionSpaceConfig
 from sts_combat_rl.sim.contract import (
@@ -1021,13 +1022,13 @@ def replay_equivalence_key(record: T065SourceState) -> tuple[Any, ...]:
     )
 
 
-def select_source_states(
-    candidates: Sequence[T065SourceState],
-) -> tuple[T065SourceState, ...]:
-    """Deduplicate and select exactly the frozen family/split quotas."""
+def select_source_candidates(
+    candidates: Iterable[Any],
+) -> tuple[tuple[Any, str, bytes], ...]:
+    """Select candidates while retaining only the candidate representation."""
 
     problems: list[str] = []
-    best_by_replay: dict[tuple[Any, ...], T065SourceState] = {}
+    best_by_replay: dict[tuple[Any, ...], Any] = {}
     split_by_replay: dict[tuple[Any, ...], str] = {}
     for candidate in candidates:
         if candidate.family not in T065_MANDATORY_FAMILIES:
@@ -1062,10 +1063,10 @@ def select_source_states(
     if problems:
         raise T065CaseD("source-selection", problems)
 
-    buckets: dict[tuple[str, str], list[T065SourceState]] = defaultdict(list)
+    buckets: dict[tuple[str, str], list[Any]] = defaultdict(list)
     for candidate in best_by_replay.values():
         buckets[(candidate.family, candidate.split)].append(candidate)
-    selected: list[T065SourceState] = []
+    selected: list[tuple[Any, str, bytes]] = []
     for family in T065_MANDATORY_FAMILIES:
         for split in T065_SPLITS:
             bucket = sorted(
@@ -1083,15 +1084,26 @@ def select_source_states(
                 )
             for rank, candidate in enumerate(bucket[:quota]):
                 digest, payload = canonical_source_selection_key(candidate)
-                selected.append(
-                    _replace_source_state(
-                        candidate,
-                        selected_state_index=len(selected),
-                        selection_digest=digest,
-                        selection_canonical_json=payload.decode("utf-8"),
-                    )
-                )
+                selected.append((candidate, digest, payload))
                 del rank
+    return tuple(selected)
+
+
+def select_source_states(
+    candidates: Iterable[T065SourceState],
+) -> tuple[T065SourceState, ...]:
+    """Deduplicate and select exactly the frozen family/split quotas."""
+
+    selected: list[T065SourceState] = []
+    for candidate, digest, payload in select_source_candidates(candidates):
+        selected.append(
+            _replace_source_state(
+                candidate,
+                selected_state_index=len(selected),
+                selection_digest=digest,
+                selection_canonical_json=payload.decode("utf-8"),
+            )
+        )
     return tuple(selected)
 
 
@@ -1753,6 +1765,7 @@ def collect_source_arm(
     seeds: Iterable[int] | None = None,
     driver_seed: int = T065_SOURCE_DRIVER_SEED,
     max_steps: int = T065_MAX_STEPS,
+    record_sink: Callable[[T065SourceState], None] | None = None,
 ) -> T065SourceArmReport:
     """Collect one fixed source arm through ``execute_controlled_run``.
 
@@ -1779,6 +1792,7 @@ def collect_source_arm(
     action_space = frozen_action_space().to_dict()
     battle_controller_provenance = frozen_battle_provenance()
     candidates: list[T065SourceState] = []
+    candidate_count = 0
     run_summaries: list[Mapping[str, Any]] = []
     problems: list[str] = []
     terminal_runs = 0
@@ -1919,18 +1933,21 @@ def collect_source_arm(
         terminal_floor = _raw_number(run.final_raw, "floor_num", "floor")
         terminal_status = str(run.outcome)
         for candidate in observed:
-            candidates.append(
-                _replace_source_state(
-                    candidate,
-                    terminal=run.terminal,
-                    terminal_status=terminal_status,
-                    terminal_floor=terminal_floor,
-                    source_controller_provenance=dict(run.controller_provenance),
-                    source_battle_provenance=dict(
-                        _nested_provenance(run.controller_provenance, "battle")
-                    ),
-                )
+            finalized = _replace_source_state(
+                candidate,
+                terminal=run.terminal,
+                terminal_status=terminal_status,
+                terminal_floor=terminal_floor,
+                source_controller_provenance=dict(run.controller_provenance),
+                source_battle_provenance=dict(
+                    _nested_provenance(run.controller_provenance, "battle")
+                ),
             )
+            if record_sink is None:
+                candidates.append(finalized)
+            else:
+                record_sink(finalized)
+            candidate_count += 1
         run_summaries.append(
             {
                 "source_run_id": f"{source_arm}:{seed}",
@@ -1953,7 +1970,7 @@ def collect_source_arm(
         terminal_run_count=terminal_runs,
         truncated_run_count=truncated_runs,
         failed_run_count=failed_runs,
-        selected_candidate_count=len(candidates),
+        selected_candidate_count=candidate_count,
         records=tuple(candidates),
         run_summaries=tuple(run_summaries),
         problems=tuple(problems),
@@ -2026,6 +2043,300 @@ def collect_source_arm_sharded(
         battle_controller_provenance=dict(
             shard_reports[0].battle_controller_provenance
         ),
+        wall_clock_seconds=time.perf_counter() - started,
+        worker_count=worker_count,
+        shard_count=len(shard_specs),
+        shard_specs=tuple(shard_evidence),
+    )
+
+
+@dataclass(frozen=True)
+class _T065SourceShardFragment:
+    """A bounded shard result: metadata plus a streamed record fragment."""
+
+    shard_index: int
+    report: T065SourceArmReport
+    fragment_path: Path
+
+
+def _validate_source_shard_report(
+    spec: Mapping[str, Any],
+    report: T065SourceArmReport,
+    *,
+    source_arm: str,
+    simulator_identity: Mapping[str, Any],
+    action_space: Mapping[str, Any],
+    battle_controller_provenance: Mapping[str, Any],
+) -> None:
+    expected_start = int(spec["seed_start"])
+    expected_end = int(spec["seed_end"])
+    expected_seeds = set(range(expected_start, expected_end + 1))
+    summary_seeds = {
+        summary.get("simulator_seed")
+        for summary in report.run_summaries
+        if isinstance(summary, Mapping)
+    }
+    if (
+        report.arm != source_arm
+        or report.driver_seed != T065_SOURCE_DRIVER_SEED
+        or report.requested_seed_count != 16
+        or report.terminal_run_count != 16
+        or report.truncated_run_count != 0
+        or report.failed_run_count != 0
+        or report.problems
+        or report.records
+        or len(report.run_summaries) != 16
+        or summary_seeds != expected_seeds
+        or dict(report.simulator_identity) != dict(simulator_identity)
+        or dict(report.action_space) != dict(action_space)
+        or dict(report.battle_controller_provenance)
+        != dict(battle_controller_provenance)
+    ):
+        raise ValueError(
+            f"T065 source shard {spec['shard_index']} evidence is incomplete or mismatched"
+        )
+    for summary in report.run_summaries:
+        if (
+            not isinstance(summary, Mapping)
+            or summary.get("source_arm") != source_arm
+            or not summary.get("terminal")
+            or summary.get("problems")
+        ):
+            raise ValueError(
+                f"T065 source shard {spec['shard_index']} run evidence is invalid"
+            )
+
+
+def collect_source_arm_sharded_to_path(
+    adapter_factory: Callable[[], Any],
+    output_path: Path,
+    *,
+    source_arm: str,
+    worker_count: int = T065_MAX_WORKERS,
+) -> T065SourceArmReport:
+    """Collect and atomically write a source arm without aggregate records.
+
+    Workers stream each finalized record into a private shard fragment.  The
+    returned report keeps only small summaries; the final source JSON is
+    published after every shard has passed its frozen evidence checks.
+    """
+
+    if worker_count != T065_MAX_WORKERS:
+        raise ValueError(
+            "T065 bounded source collection requires exactly "
+            f"{T065_MAX_WORKERS} workers"
+        )
+    _validate_workers(worker_count)
+    if source_arm not in {"stochastic_non_combat_v1", "expert_non_combat_v1"}:
+        raise ValueError(f"unsupported T065 source arm {source_arm!r}")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    if output_path.exists():
+        raise FileExistsError(
+            f"T065 source output already exists; refusing to reuse or overwrite: {output_path}"
+        )
+    shard_specs = source_shard_ranges(arm=source_arm, worker_count=worker_count)
+    simulator_identity = lightspeed_source_identity_dict()
+    action_space = frozen_action_space().to_dict()
+    battle_controller_provenance = frozen_battle_provenance()
+    started = time.perf_counter()
+
+    with TemporaryDirectory(
+        prefix=f".{output_path.name}.shards-", dir=output_path.parent
+    ) as temporary_directory:
+        fragment_directory = Path(temporary_directory)
+
+        def collect_shard(spec: Mapping[str, Any]) -> _T065SourceShardFragment:
+            shard_index = int(spec["shard_index"])
+            fragment_path = (
+                fragment_directory / f"shard-{shard_index:02d}.records.jsonl"
+            )
+            try:
+                with fragment_path.open("w", encoding="utf-8", newline="\n") as stream:
+
+                    def sink(record: T065SourceState) -> None:
+                        stream.write(
+                            json.dumps(record.to_dict(), sort_keys=True) + "\n"
+                        )
+
+                    report = collect_source_arm(
+                        adapter_factory,
+                        source_arm=source_arm,
+                        seeds=range(int(spec["seed_start"]), int(spec["seed_end"]) + 1),
+                        record_sink=sink,
+                    )
+                    stream.flush()
+            except BaseException:
+                fragment_path.unlink(missing_ok=True)
+                raise
+            return _T065SourceShardFragment(shard_index, report, fragment_path)
+
+        fragments: dict[int, _T065SourceShardFragment] = {}
+        futures = {}
+        try:
+            with ThreadPoolExecutor(
+                max_workers=min(worker_count, len(shard_specs))
+            ) as executor:
+                futures = {
+                    executor.submit(collect_shard, spec): spec for spec in shard_specs
+                }
+                for future in as_completed(futures):
+                    result = future.result()
+                    fragments[result.shard_index] = result
+                    del futures[future]
+        except BaseException:
+            for future in futures:
+                future.cancel()
+            raise
+        if set(fragments) != set(range(len(shard_specs))):
+            raise ValueError("T065 source shard result is missing")
+
+        shard_evidence: list[Mapping[str, Any]] = []
+        run_summaries: list[Mapping[str, Any]] = []
+        total_requested = 0
+        total_terminal = 0
+        total_truncated = 0
+        total_failed = 0
+        total_candidates = 0
+        for spec in shard_specs:
+            result = fragments[int(spec["shard_index"])]
+            report = result.report
+            _validate_source_shard_report(
+                spec,
+                report,
+                source_arm=source_arm,
+                simulator_identity=simulator_identity,
+                action_space=action_space,
+                battle_controller_provenance=battle_controller_provenance,
+            )
+            shard_evidence.append(
+                {
+                    **dict(spec),
+                    "requested_seed_count": report.requested_seed_count,
+                    "terminal_run_count": report.terminal_run_count,
+                    "truncated_run_count": report.truncated_run_count,
+                    "failed_run_count": report.failed_run_count,
+                    "candidate_count": report.selected_candidate_count,
+                    "wall_clock_seconds": report.wall_clock_seconds,
+                    "problems": list(report.problems),
+                }
+            )
+            run_summaries.extend(report.run_summaries)
+            total_requested += report.requested_seed_count
+            total_terminal += report.terminal_run_count
+            total_truncated += report.truncated_run_count
+            total_failed += report.failed_run_count
+            total_candidates += report.selected_candidate_count
+
+        final_temporary_path = fragment_directory / output_path.name
+        top_level = {
+            "action_space": action_space,
+            "approved_spec_commit": T065_APPROVED_SPEC_COMMIT,
+            "arm": source_arm,
+            "battle_controller_provenance": battle_controller_provenance,
+            "driver_seed": T065_SOURCE_DRIVER_SEED,
+            "failed_run_count": total_failed,
+            "frozen_config": T065ExperimentConfig().to_dict(),
+            "problems": [],
+            "records": None,
+            "run_summaries": None,
+            "schema_id": T065_EXPERIMENT_SCHEMA_ID,
+            "schema_version": T065_EXPERIMENT_SCHEMA_VERSION,
+            "selected_candidate_count": total_candidates,
+            "shard_count": len(shard_specs),
+            "shard_specs": shard_evidence,
+            "simulator_identity": simulator_identity,
+            "terminal_run_count": total_terminal,
+            "truncated_run_count": total_truncated,
+            "wall_clock_seconds": time.perf_counter() - started,
+            "worker_count": worker_count,
+            "requested_seed_count": total_requested,
+        }
+        with final_temporary_path.open("w", encoding="utf-8", newline="\n") as stream:
+            stream.write("{\n")
+            keys = tuple(sorted(top_level))
+            for key_index, key in enumerate(keys):
+                if key_index:
+                    stream.write(",\n")
+                stream.write(json.dumps(key) + ": ")
+                if key == "records":
+                    stream.write("[\n")
+                    record_index = 0
+                    for spec in shard_specs:
+                        fragment = fragments[int(spec["shard_index"])].fragment_path
+                        with fragment.open("r", encoding="utf-8") as source:
+                            expected_start = int(spec["seed_start"])
+                            expected_end = int(spec["seed_end"])
+                            for line_number, line in enumerate(source, start=1):
+                                if not line.strip():
+                                    raise ValueError(
+                                        f"T065 source shard {spec['shard_index']} "
+                                        f"record {line_number} is empty"
+                                    )
+                                try:
+                                    raw_record = json.loads(line)
+                                except json.JSONDecodeError as exc:
+                                    raise ValueError(
+                                        f"T065 source shard {spec['shard_index']} "
+                                        f"record {line_number} is invalid JSON"
+                                    ) from exc
+                                if not isinstance(raw_record, Mapping):
+                                    raise ValueError(
+                                        f"T065 source shard {spec['shard_index']} "
+                                        f"record {line_number} is not an object"
+                                    )
+                                try:
+                                    state = T065SourceState.from_dict(raw_record)
+                                except (TypeError, ValueError) as exc:
+                                    raise ValueError(
+                                        f"T065 source shard {spec['shard_index']} "
+                                        f"record {line_number} is invalid"
+                                    ) from exc
+                                if (
+                                    state.source_arm != source_arm
+                                    or not expected_start
+                                    <= state.simulator_seed
+                                    <= expected_end
+                                    or not state.terminal
+                                    or state.selected_state_index != -1
+                                    or not state.terminal_status
+                                    or state.terminal_status == "UNKNOWN"
+                                ):
+                                    raise ValueError(
+                                        f"T065 source shard {spec['shard_index']} "
+                                        f"record {line_number} has invalid source semantics"
+                                    )
+                                if record_index:
+                                    stream.write(",\n")
+                                stream.write(
+                                    "  " + line.rstrip("\n").replace("\n", "\n  ")
+                                )
+                                record_index += 1
+                    if record_index != total_candidates:
+                        raise ValueError(
+                            "T065 source record count does not match shards"
+                        )
+                    stream.write("\n]")
+                elif key == "run_summaries":
+                    stream.write(json.dumps(run_summaries, indent=2, sort_keys=True))
+                else:
+                    stream.write(json.dumps(top_level[key], indent=2, sort_keys=True))
+            stream.write("\n}\n")
+        final_temporary_path.replace(output_path)
+
+    return T065SourceArmReport(
+        arm=source_arm,
+        driver_seed=T065_SOURCE_DRIVER_SEED,
+        requested_seed_count=total_requested,
+        terminal_run_count=total_terminal,
+        truncated_run_count=total_truncated,
+        failed_run_count=total_failed,
+        selected_candidate_count=total_candidates,
+        records=(),
+        run_summaries=tuple(run_summaries),
+        problems=(),
+        simulator_identity=simulator_identity,
+        action_space=action_space,
+        battle_controller_provenance=battle_controller_provenance,
         wall_clock_seconds=time.perf_counter() - started,
         worker_count=worker_count,
         shard_count=len(shard_specs),
