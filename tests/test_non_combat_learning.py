@@ -896,6 +896,31 @@ def test_streaming_source_reader_rejects_tampered_summary_identity(
         list(command._iter_source_arm_states(path))
 
 
+def test_t065_source_artifact_battle_provenance_is_cwd_stable(
+    tmp_path, monkeypatch
+) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command
+
+    path = tmp_path / "source.json"
+    _write_source_fixture(
+        path,
+        "stochastic_non_combat_v1",
+        [_state(1, "MAP_SCREEN", "train", 650001)],
+    )
+    original_cwd = Path.cwd()
+    alternate_cwd = tmp_path / "other-worktree"
+    alternate_cwd.mkdir()
+    monkeypatch.chdir(alternate_cwd)
+
+    assert (
+        frozen_battle_provenance()
+        == json.loads(path.read_text(encoding="utf-8"))["battle_controller_provenance"]
+    )
+    assert len(list(command._iter_source_arm_states(path))) == 1
+    assert Path.cwd() == alternate_cwd
+    assert original_cwd != alternate_cwd
+
+
 def test_run_select_rejects_corrupt_source_tail_without_output(
     tmp_path, monkeypatch
 ) -> None:

@@ -60,6 +60,24 @@ def test_lightspeed_source_identity_is_json_safe_and_reportable() -> None:
     assert "canonical verifier: scripts/verify_lightspeed_source.sh" in text
 
 
+def test_lightspeed_source_identity_manifest_path_is_cwd_stable(
+    tmp_path, monkeypatch
+) -> None:
+    manifest = load_lightspeed_source_manifest()
+    first_cwd = tmp_path / "worktree-a"
+    second_cwd = tmp_path / "worktree-b"
+    first_cwd.mkdir()
+    second_cwd.mkdir()
+
+    monkeypatch.chdir(first_cwd)
+    first = lightspeed_source_identity_dict(manifest)
+    monkeypatch.chdir(second_cwd)
+    second = lightspeed_source_identity_dict(manifest)
+
+    assert first == second
+    assert first["manifest_path"] == "docs/sts_lightspeed_source_manifest.json"
+
+
 def test_lightspeed_source_manifest_missing_file_fails(tmp_path) -> None:
     with pytest.raises(FileNotFoundError, match="source manifest not found"):
         load_lightspeed_source_manifest(tmp_path / "missing.json")
