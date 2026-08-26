@@ -102,6 +102,7 @@ T065_STAGE5_REPORT_SCHEMA_ID = "t065-heldout-gate-report-v1"
 T065_STAGE6_REPORT_SCHEMA_ID = "t065-complete-run-report-v1"
 T065_DECISION_REPORT_SCHEMA_ID = "t065-terminal-decision-report-v1"
 T065_SELECTION_MANIFEST_SCHEMA_ID = "t065-source-selection-manifest-v1"
+T065_PREFLIGHT_SCHEMA_ID = "t065-readiness-preflight-v1"
 
 T065_SOURCE_SEED_RANGE = (650001, 650256)
 T065_STAGE6_SEED_RANGE = (651001, 651256)
@@ -183,12 +184,23 @@ class T065CaseD(ValueError):
             counts["failure_count"] = len(identifiers)
         skipped_after = {
             "stage0": ("stage1", "stage2", "stage3", "stage4", "stage5", "stage6"),
+            "stage0-preflight": (
+                "stage1",
+                "stage2",
+                "stage3",
+                "stage4",
+                "stage5",
+                "stage6",
+            ),
             "stage1": ("stage2", "stage3", "stage4", "stage5", "stage6"),
             "source-collection": ("stage2", "stage3", "stage4", "stage5", "stage6"),
             "source-selection": ("stage2", "stage3", "stage4", "stage5", "stage6"),
             "stage2": ("stage3", "stage4", "stage5", "stage6"),
             "counterfactual-targets": ("stage3", "stage4", "stage5", "stage6"),
             "target-completeness": ("stage3", "stage4", "stage5", "stage6"),
+            "stage4": ("stage5", "stage6"),
+            "stage5": ("stage6",),
+            "stage6": (),
         }
         return {
             "schema_id": T065_DECISION_REPORT_SCHEMA_ID,
@@ -1520,6 +1532,7 @@ class LearnedNonCombatPolicy:
     @property
     def provenance_config(self) -> Mapping[str, Any]:
         return {
+            "seed": T065_STAGE6_DRIVER_SEED,
             "version": self.version,
             "supported_screen_families": list(T065_MANDATORY_FAMILIES),
             "fallback_policy": self.fallback.name,
@@ -2898,11 +2911,21 @@ def build_stage6_report(
             }[arm]
             driver = _mapping_or_empty(report.driver_provenance)
             driver_config = _mapping_or_empty(driver.get("config"))
+            if arm == "learned":
+                fallback = _mapping_or_empty(driver_config.get("fallback_provenance"))
+                driver_seed_valid = (
+                    driver_config.get("seed") == T065_STAGE6_DRIVER_SEED
+                    and fallback.get("seed") == T065_STAGE6_DRIVER_SEED
+                    and fallback.get("name") == "expert_non_combat_v1"
+                    and fallback.get("version") == 1
+                )
+            else:
+                driver_seed_valid = driver_config.get("seed") == T065_STAGE6_DRIVER_SEED
             if (
                 driver.get("name") != expected_driver_name
                 or driver.get("version") != 1
                 or not isinstance(driver.get("config"), Mapping)
-                or driver_config.get("seed") not in {None, T065_STAGE6_DRIVER_SEED}
+                or not driver_seed_valid
             ):
                 problems.append(f"Stage 6 {arm} arm driver provenance is not frozen")
             controller = _mapping_or_empty(report.controller_provenance)
@@ -2954,8 +2977,104 @@ def build_stage6_report(
             if (
                 report.shard_count != T065_STAGE6_SHARD_COUNT
                 or len(report.shard_specs) != T065_STAGE6_SHARD_COUNT
+                or report.worker_count != T065_MAX_WORKERS
             ):
                 problems.append(f"Stage 6 {arm} arm shard evidence is incomplete")
+            expected_shard_specs = stage6_shard_ranges(
+                arm=arm, worker_count=T065_MAX_WORKERS
+            )
+            expected_cohort = set(expected_arm_seeds)
+            requested_union: set[int] = set()
+            completed_union: set[int] = set()
+            range_union: set[int] = set()
+            for expected_spec, actual_spec in zip(
+                expected_shard_specs, report.shard_specs, strict=False
+            ):
+                if not isinstance(actual_spec, Mapping):
+                    problems.append(f"Stage 6 {arm} shard evidence is not an object")
+                    continue
+                for key in (
+                    "arm",
+                    "shard_index",
+                    "seed_start",
+                    "seed_end",
+                    "seed_count",
+                    "worker_count",
+                ):
+                    if actual_spec.get(key) != expected_spec[key]:
+                        problems.append(
+                            f"Stage 6 {arm} shard {expected_spec['shard_index']} "
+                            f"{key} is not frozen"
+                        )
+                if (
+                    actual_spec.get("requested_seed_count") != 16
+                    or actual_spec.get("completed_row_count") != 16
+                ):
+                    problems.append(
+                        f"Stage 6 {arm} shard {expected_spec['shard_index']} "
+                        "does not cover exactly 16 requested/completed seeds"
+                    )
+                expected_seeds = set(
+                    range(
+                        int(expected_spec["seed_start"]),
+                        int(expected_spec["seed_end"]) + 1,
+                    )
+                )
+                for field_name in ("requested_seeds", "completed_seeds"):
+                    actual_seeds = actual_spec.get(field_name)
+                    if (
+                        not isinstance(actual_seeds, Sequence)
+                        or isinstance(actual_seeds, (str, bytes))
+                        or any(
+                            isinstance(seed, bool) or not isinstance(seed, int)
+                            for seed in actual_seeds
+                        )
+                        or set(actual_seeds) != expected_seeds
+                        or len(actual_seeds) != len(expected_seeds)
+                    ):
+                        problems.append(
+                            f"Stage 6 {arm} shard {expected_spec['shard_index']} "
+                            f"{field_name} does not match its frozen seed range"
+                        )
+                    elif field_name == "requested_seeds":
+                        requested_union.update(actual_seeds)
+                    else:
+                        completed_union.update(actual_seeds)
+                start = actual_spec.get("seed_start")
+                end = actual_spec.get("seed_end")
+                if (
+                    isinstance(start, int)
+                    and not isinstance(start, bool)
+                    and isinstance(end, int)
+                    and not isinstance(end, bool)
+                    and start <= end
+                ):
+                    range_union.update(range(start, end + 1))
+            if (
+                range_union != expected_cohort
+                or requested_union != expected_cohort
+                or completed_union != expected_cohort
+            ):
+                problems.append(
+                    f"Stage 6 {arm} shard seed ranges overlap or do not cover "
+                    "the complete cohort"
+                )
+            if (
+                len(report.shard_specs) == T065_STAGE6_SHARD_COUNT
+                and len(range_union) != T065_STAGE6_SHARD_COUNT * 16
+            ):
+                problems.append(
+                    f"Stage 6 {arm} shard ranges do not contain 16 distinct seeds "
+                    "per shard"
+                )
+            if (
+                len(requested_union) != T065_STAGE6_SHARD_COUNT * 16
+                or len(completed_union) != T065_STAGE6_SHARD_COUNT * 16
+            ):
+                problems.append(
+                    f"Stage 6 {arm} requested/completed shard seeds overlap or "
+                    "are incomplete"
+                )
             problems.extend(f"{arm} arm: {problem}" for problem in report.problems)
             row_seeds: set[int] = set()
             for row in report.rows:
@@ -3140,36 +3259,70 @@ def terminal_decision_report(
     stage5: T065HeldoutReport | None = None,
     stage6: T065Stage6Report | None = None,
     case_d: T065CaseD | None = None,
+    simulator_identity: Mapping[str, Any] | None = None,
+    preceding_stage_manifests: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return exactly one planner-facing Case A/B/C/D recommendation."""
 
     if case_d is not None:
-        return case_d.to_decision_report()
+        report = case_d.to_decision_report(simulator_identity=simulator_identity)
+        if preceding_stage_manifests:
+            report["preceding_stage_manifests"] = dict(preceding_stage_manifests)
+        return report
     if stage5 is None:
         raise ValueError("T065 terminal decision requires Stage 5 or Case D")
+    identity = dict(simulator_identity or {})
+    preceding = dict(preceding_stage_manifests or {})
     if not stage5.passed:
+        problems = stage5.problems or ("Stage 5 gate failed",)
+        failure_ids = [f"stage5-gate:{problem}" for problem in problems]
         return {
             "schema_id": T065_DECISION_REPORT_SCHEMA_ID,
             "schema_version": 1,
+            "task_id": T065_TASK_ID,
             "case": "C",
+            "stage": "stage5",
+            "approved_spec_commit": T065_APPROVED_SPEC_COMMIT,
+            "simulator_identity": identity,
+            "failure_ids": failure_ids,
+            "failure_counts": {
+                "failed_gate_conditions": len(failure_ids),
+                "failure_count": len(failure_ids),
+            },
+            "no_replacement": True,
+            "downstream_skipped": ["stage6"],
+            "preceding_stage_manifests": preceding,
             "recommendation": "close this v1 target/model formulation and run at most one narrow diagnostic",
             "stage5_passed": False,
             "stage6_run": False,
-            "problems": list(stage5.problems),
+            "problems": list(problems),
             "policy_conclusion": None,
         }
     if stage6 is None:
         raise ValueError("Stage 6 is required after a passing Stage 5 gate")
     if not stage6.valid:
+        problems = stage6.problems or ("Stage 6 report is invalid",)
         return {
             "schema_id": T065_DECISION_REPORT_SCHEMA_ID,
             "schema_version": 1,
+            "task_id": T065_TASK_ID,
             "case": "D",
+            "approved_spec_commit": T065_APPROVED_SPEC_COMMIT,
+            "simulator_identity": identity,
+            "failure_ids": [f"stage6:{problem}" for problem in problems],
+            "failure_counts": {
+                "failure_count": len(problems),
+                "controller_errors": stage6.controller_error_count,
+                "truncations": stage6.truncation_count,
+            },
+            "no_replacement": True,
+            "downstream_skipped": [],
+            "preceding_stage_manifests": preceding,
             "recommendation": "repair the frozen fidelity failure and rerun T065",
             "stage": "stage6",
             "stage5_passed": True,
             "stage6_run": True,
-            "problems": list(stage6.problems),
+            "problems": list(problems),
             "policy_conclusion": None,
         }
     if stage6.passed:
@@ -3183,7 +3336,11 @@ def terminal_decision_report(
     return {
         "schema_id": T065_DECISION_REPORT_SCHEMA_ID,
         "schema_version": 1,
+        "task_id": T065_TASK_ID,
         "case": case,
+        "approved_spec_commit": T065_APPROVED_SPEC_COMMIT,
+        "simulator_identity": identity,
+        "preceding_stage_manifests": preceding,
         "recommendation": recommendation,
         "stage5_passed": True,
         "stage6_run": True,
@@ -3195,18 +3352,26 @@ def terminal_decision_report(
 
 def write_t065_terminal_decision_report(
     path: Path,
-    case_d: T065CaseD,
+    case_d: T065CaseD | None = None,
     *,
+    report: Mapping[str, Any] | None = None,
     simulator_identity: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Persist a Case-D report at the shared terminal-decision schema."""
+    """Persist any terminal decision at the shared decision-report schema."""
 
-    report = case_d.to_decision_report(simulator_identity=simulator_identity)
+    if (case_d is None) == (report is None):
+        raise ValueError("provide exactly one Case-D failure or decision report")
+    if case_d is not None:
+        output = case_d.to_decision_report(simulator_identity=simulator_identity)
+    else:
+        output = dict(report or {})
+        if output.get("schema_id") != T065_DECISION_REPORT_SCHEMA_ID:
+            raise ValueError("T065 terminal decision has an unsupported schema")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        json.dumps(output, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
-    return report
+    return output
 
 
 @dataclass(frozen=True)
@@ -3457,9 +3622,18 @@ def run_complete_run_arm_sharded(
         shards = [future.result() for future in futures]
     shard_evidence: list[Mapping[str, Any]] = []
     for spec, report in zip(specs, shards, strict=True):
+        completed_seeds = tuple(
+            int(row["simulator_seed"])
+            for row in report.rows
+            if isinstance(row, Mapping)
+            and isinstance(row.get("simulator_seed"), int)
+            and not isinstance(row.get("simulator_seed"), bool)
+        )
         shard_evidence.append(
             {
                 **dict(spec),
+                "requested_seeds": list(report.requested_seeds),
+                "completed_seeds": list(completed_seeds),
                 "requested_seed_count": len(report.requested_seeds),
                 "completed_row_count": len(report.rows),
                 "decision_count": len(report.decision_events),
@@ -3568,6 +3742,8 @@ def run_stage6_experiment(
     if not stage5.passed:
         raise ValueError("T065 Stage 6 is conditionally skipped when Stage 5 fails")
     _validate_workers(worker_count)
+    if worker_count != T065_MAX_WORKERS:
+        raise ValueError("T065 Stage 6 requires exactly 16 workers")
     stochastic = run_complete_run_arm_sharded(
         adapter_factory, arm="stochastic", worker_count=worker_count
     )
@@ -3647,6 +3823,115 @@ class T065PreflightReport:
                 str(key): dict(value) for key, value in self.runtime_checks.items()
             },
         }
+
+
+def read_t065_preflight(path: Path) -> dict[str, Any]:
+    """Read the explicit Stage 0 artifact without importing optional runtimes."""
+
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise T065CaseD(
+            "stage0-preflight",
+            [f"{path}: preflight artifact cannot be read: {exc}"],
+            failure_ids=(f"preflight:{path}",),
+            failure_counts={"preflight_artifacts": 1},
+        ) from exc
+    if not isinstance(value, dict):
+        raise T065CaseD(
+            "stage0-preflight",
+            [f"{path}: preflight artifact root is not an object"],
+            failure_ids=(f"preflight:{path}",),
+            failure_counts={"preflight_artifacts": 1},
+        )
+    return {str(key): item for key, item in value.items()}
+
+
+def validate_t065_preflight(path: Path) -> dict[str, Any]:
+    """Require a fully passed Stage 0 artifact for every scientific workflow."""
+
+    value = read_t065_preflight(path)
+    problems: list[str] = []
+    if value.get("schema_id") != T065_PREFLIGHT_SCHEMA_ID:
+        problems.append("preflight schema id is unsupported")
+    if value.get("schema_version") != 1:
+        problems.append("preflight schema version is unsupported")
+    if value.get("approved_spec_commit") != T065_APPROVED_SPEC_COMMIT:
+        problems.append("preflight approved spec commit is not frozen")
+    if value.get("passed") is not True:
+        problems.append("preflight did not pass all Stage 0 checks")
+    if value.get("simulator_identity") != lightspeed_source_identity_dict():
+        problems.append("preflight simulator identity is not the pinned identity")
+    if value.get("action_space") != frozen_action_space().to_dict():
+        problems.append("preflight action space is not frozen")
+    if value.get("battle_controller_name") != T065_FROZEN_BATTLE_CONTROLLER_NAME:
+        problems.append("preflight battle controller is not frozen")
+    expected_sizes = {
+        "snapshot_feature_size": NON_COMBAT_SNAPSHOT_FEATURE_SIZE,
+        "context_feature_size": NON_COMBAT_CONTEXT_FEATURE_SIZE,
+        "state_feature_size": NON_COMBAT_STATE_FEATURE_SIZE,
+        "action_feature_size": NON_COMBAT_ACTION_FEATURE_SIZE,
+    }
+    for key, expected in expected_sizes.items():
+        if value.get(key) != expected:
+            problems.append(f"preflight {key} is not {expected}")
+    schema = value.get("schema")
+    if not isinstance(schema, Mapping):
+        problems.append("preflight model-input schema is missing")
+    else:
+        expected_schema = non_combat_model_input_schema()
+        for key, expected in expected_schema.items():
+            actual = schema.get(key)
+            if key == "public_context_feature_names" and isinstance(actual, Sequence):
+                actual = list(actual)
+            if actual != expected:
+                problems.append(f"preflight schema field {key!r} is not frozen")
+    capability_checks = value.get("capability_checks")
+    required_capabilities = (
+        "pinned_simulator_manifest",
+        "model_input_schema",
+        "mandatory_t033_family_positions",
+        "public_input_firewall",
+        "legacy_cli_boundary",
+        "t074_import_isolation",
+        "frozen_controller_action_space",
+    )
+    if not isinstance(capability_checks, Mapping):
+        problems.append("preflight capability checks are missing")
+    else:
+        for name in required_capabilities:
+            check = capability_checks.get(name)
+            if not isinstance(check, Mapping) or check.get("status") != "passed":
+                problems.append(f"preflight capability check {name} did not pass")
+    runtime_checks = value.get("runtime_checks")
+    if not isinstance(runtime_checks, Mapping):
+        problems.append("preflight runtime checks are missing")
+    else:
+        simulator_check = runtime_checks.get("simulator_runtime")
+        if (
+            not isinstance(simulator_check, Mapping)
+            or simulator_check.get("status") != "passed"
+            or simulator_check.get("checkpoint_restore") is not True
+            or simulator_check.get("public_projection") is not True
+        ):
+            problems.append(
+                "preflight simulator runtime must pass native projection and checkpoint restore"
+            )
+        torch_check = runtime_checks.get("torch_runtime")
+        if (
+            not isinstance(torch_check, Mapping)
+            or torch_check.get("status") != "passed"
+        ):
+            problems.append("preflight torch runtime did not pass")
+    if problems:
+        raise T065CaseD(
+            "stage0-preflight",
+            problems,
+            failure_ids=tuple(f"preflight:{problem}" for problem in problems),
+            failure_counts={"failed_checks": len(problems)},
+            simulator_identity=_mapping_or_empty(value.get("simulator_identity")),
+        )
+    return value
 
 
 def build_t065_preflight_report(

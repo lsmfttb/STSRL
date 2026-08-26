@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import shlex
 import sys
 from typing import Any, Mapping
 
@@ -32,11 +33,13 @@ from sts_combat_rl.sim.non_combat_learning import (
     select_source_states,
     train_frozen_model_seeds,
     terminal_decision_report,
+    validate_t065_preflight,
     write_source_states,
     write_target_table,
     generate_counterfactual_targets,
     generate_counterfactual_targets_sharded,
     write_source_selection_manifest,
+    write_t065_manifest,
     write_t065_terminal_decision_report,
 )
 from sts_combat_rl.sim.lightspeed_source import lightspeed_source_identity_dict
@@ -52,7 +55,9 @@ def build_parser() -> argparse.ArgumentParser:
     preflight = subparsers.add_parser(
         "preflight", help="run cheap schema readiness checks"
     )
-    preflight.add_argument("--output", type=Path)
+    preflight.add_argument("--output", type=Path, required=True)
+    preflight.add_argument("--decision-report", type=Path)
+    preflight.add_argument("--retention-manifest", type=Path)
     preflight.add_argument(
         "--simulator-runtime",
         action="store_true",
@@ -80,6 +85,8 @@ def build_parser() -> argparse.ArgumentParser:
     collect.add_argument("--sim-seed", type=int, default=1)
     collect.add_argument("--ascension", type=int, default=20)
     collect.add_argument("--decision-report", type=Path)
+    collect.add_argument("--preflight", type=Path, required=True)
+    collect.add_argument("--retention-manifest", type=Path)
 
     select = subparsers.add_parser(
         "select", help="deduplicate and select the frozen cohort"
@@ -88,6 +95,8 @@ def build_parser() -> argparse.ArgumentParser:
     select.add_argument("--output", type=Path, required=True)
     select.add_argument("--manifest", type=Path)
     select.add_argument("--decision-report", type=Path)
+    select.add_argument("--preflight", type=Path, required=True)
+    select.add_argument("--retention-manifest", type=Path)
 
     target = subparsers.add_parser(
         "target", help="generate all-action counterfactual targets"
@@ -97,11 +106,16 @@ def build_parser() -> argparse.ArgumentParser:
     target.add_argument("--sim-seed", type=int, default=1)
     target.add_argument("--ascension", type=int, default=20)
     target.add_argument("--decision-report", type=Path)
+    target.add_argument("--preflight", type=Path, required=True)
+    target.add_argument("--retention-manifest", type=Path)
 
     train = subparsers.add_parser("train", help="train the two frozen model seeds")
     train.add_argument("--target-table", type=Path, required=True)
     train.add_argument("--checkpoint-directory", type=Path, required=True)
     train.add_argument("--output", type=Path, required=True)
+    train.add_argument("--preflight", type=Path, required=True)
+    train.add_argument("--decision-report", type=Path)
+    train.add_argument("--retention-manifest", type=Path)
 
     evaluate = subparsers.add_parser(
         "evaluate", help="run held-out gate and conditional Stage 6"
@@ -112,6 +126,9 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--run-stage6", action="store_true")
     evaluate.add_argument("--sim-seed", type=int, default=1)
     evaluate.add_argument("--ascension", type=int, default=20)
+    evaluate.add_argument("--preflight", type=Path, required=True)
+    evaluate.add_argument("--decision-report", type=Path)
+    evaluate.add_argument("--retention-manifest", type=Path)
 
     return parser
 
@@ -132,49 +149,18 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "evaluate":
             return _run_evaluate(args)
     except T065CaseD as exc:
-        report_path = getattr(args, "decision_report", None)
-        output_path = getattr(args, "output", None)
-        if report_path is None and isinstance(output_path, Path):
-            report_path = output_path.with_name(
-                f"{output_path.stem}.t065-terminal-decision-report.json"
-            )
-        if report_path is not None and args.command in {"collect", "select", "target"}:
-            report = write_t065_terminal_decision_report(
-                report_path,
-                exc,
-                simulator_identity=lightspeed_source_identity_dict(),
-            )
-            print(f"T065 Case D decision report: {report_path}", file=sys.stderr)
-            del report
+        _handle_case_d(args, exc)
         print(f"T065 command failed: {exc}", file=sys.stderr)
         return 1
     except (OSError, RuntimeError, ValueError) as exc:
-        if args.command in {"collect", "select", "target"}:
-            output_path = getattr(args, "output", None)
-            report_path = getattr(args, "decision_report", None)
-            if report_path is None and isinstance(output_path, Path):
-                report_path = output_path.with_name(
-                    f"{output_path.stem}.t065-terminal-decision-report.json"
-                )
-            if report_path is not None:
-                stage = {
-                    "collect": "source-collection",
-                    "select": "source-selection",
-                    "target": "counterfactual-targets",
-                }[args.command]
-                failure = T065CaseD(
-                    stage,
-                    [str(exc)],
-                    failure_ids=(f"command:{args.command}",),
-                    failure_counts={"failure_count": 1},
-                    simulator_identity=lightspeed_source_identity_dict(),
-                )
-                write_t065_terminal_decision_report(
-                    report_path,
-                    failure,
-                    simulator_identity=lightspeed_source_identity_dict(),
-                )
-                print(f"T065 Case D decision report: {report_path}", file=sys.stderr)
+        failure = T065CaseD(
+            _stage_name(args.command),
+            [str(exc)],
+            failure_ids=(f"command:{args.command}",),
+            failure_counts={"failure_count": 1},
+            simulator_identity=lightspeed_source_identity_dict(),
+        )
+        _handle_case_d(args, failure)
         print(f"T065 command failed: {exc}", file=sys.stderr)
         return 1
     return 2
@@ -193,13 +179,28 @@ def _run_preflight(args: argparse.Namespace) -> int:
         check_simulator_runtime=args.simulator_runtime,
         check_torch_runtime=args.torch_runtime,
     ).to_dict()
-    if args.output is not None:
-        _write_json(args.output, report)
+    _write_json(args.output, report)
     print(json.dumps(report, indent=2, sort_keys=True), file=sys.stderr)
-    return 0 if report["passed"] else 1
+    if not report["passed"]:
+        failed_checks = tuple(
+            name
+            for section in ("capability_checks", "runtime_checks")
+            for name, check in report.get(section, {}).items()
+            if not isinstance(check, Mapping) or check.get("status") != "passed"
+        )
+        raise T065CaseD(
+            "stage0-preflight",
+            tuple(report.get("problems", ())) or ("preflight did not pass",),
+            failure_ids=tuple(f"preflight-check:{name}" for name in failed_checks),
+            failure_counts={"failed_checks": len(failed_checks)},
+            simulator_identity=report.get("simulator_identity", {}),
+        )
+    _write_workflow_manifest(args, stage="stage0-preflight")
+    return 0
 
 
 def _run_collect(args: argparse.Namespace) -> int:
+    _require_preflight(args)
     _require_frozen_simulator_args(args)
     seeds = tuple(range(args.seed_start, args.seed_end + 1))
     factory = lambda: LightSpeedAdapter(  # noqa: E731 - explicit per-worker factory
@@ -242,10 +243,12 @@ def _run_collect(args: argparse.Namespace) -> int:
             },
             simulator_identity=report.simulator_identity,
         )
+    _write_workflow_manifest(args, stage="stage1-source-collection")
     return 0
 
 
 def _run_select(args: argparse.Namespace) -> int:
+    _require_preflight(args)
     if len(args.input) != 2:
         raise ValueError("T065 selection requires exactly two source-arm artifacts")
     candidates = []
@@ -310,10 +313,12 @@ def _run_select(args: argparse.Namespace) -> int:
         f"manifest={manifest_path}",
         file=sys.stderr,
     )
+    _write_workflow_manifest(args, stage="stage1-source-selection")
     return 0
 
 
 def _run_target(args: argparse.Namespace) -> int:
+    _require_preflight(args)
     _require_frozen_simulator_args(args)
     states = read_source_states(args.states)
     if len(states) != 320:
@@ -355,10 +360,12 @@ def _run_target(args: argparse.Namespace) -> int:
     print(
         f"T065 target table rows={len(table.targets)} sha256={digest}", file=sys.stderr
     )
+    _write_workflow_manifest(args, stage="stage2-counterfactual-targets")
     return 0
 
 
 def _run_train(args: argparse.Namespace) -> int:
+    _require_preflight(args)
     table = read_target_table(args.target_table)
     args.checkpoint_directory.mkdir(parents=True, exist_ok=True)
     runs = train_frozen_model_seeds(
@@ -399,10 +406,12 @@ def _run_train(args: argparse.Namespace) -> int:
         },
     )
     print(f"T065 trained models={len(runs)}", file=sys.stderr)
+    _write_workflow_manifest(args, stage="stage4-training")
     return 0
 
 
 def _run_evaluate(args: argparse.Namespace) -> int:
+    _require_preflight(args)
     _require_frozen_simulator_args(args)
     table = read_target_table(args.target_table)
     model_runs = tuple(
@@ -439,7 +448,30 @@ def _run_evaluate(args: argparse.Namespace) -> int:
             "learned": learned.to_dict(),
         }
         payload["stage6"] = stage6.to_dict()
-        payload["decision"] = terminal_decision_report(stage5=stage5, stage6=stage6)
+        if not stage6.valid:
+            _write_json(args.output, payload)
+            raise T065CaseD(
+                "stage6",
+                stage6.problems or ("Stage 6 reducer rejected the cohort",),
+                failure_ids=tuple(
+                    f"stage6-problem:{index}"
+                    for index, _problem in enumerate(stage6.problems)
+                ),
+                failure_counts={
+                    "paired_rows": len(stage6.paired_terminal_floor_deltas),
+                    "controller_errors": stage6.controller_error_count,
+                    "truncations": stage6.truncation_count,
+                },
+                simulator_identity=table.simulator_identity,
+            )
+        payload["decision"] = terminal_decision_report(
+            stage5=stage5,
+            stage6=stage6,
+            simulator_identity=table.simulator_identity,
+            preceding_stage_manifests=_artifact_identities(
+                _preceding_artifact_paths(args)
+            ),
+        )
     else:
         if stage5.passed:
             payload["decision_status"] = "incomplete"
@@ -449,11 +481,29 @@ def _run_evaluate(args: argparse.Namespace) -> int:
                 "writing the terminal Case A/B decision"
             )
         else:
-            payload["decision"] = terminal_decision_report(stage5=stage5)
+            payload["decision"] = terminal_decision_report(
+                stage5=stage5,
+                simulator_identity=table.simulator_identity,
+                preceding_stage_manifests=_artifact_identities(
+                    _preceding_artifact_paths(args)
+                ),
+            )
     _write_json(args.output, payload)
+    decision_path: Path | None = None
+    if "decision" in payload:
+        decision_path = _decision_report_path(args)
+        _write_json(decision_path, payload["decision"])
     print(json.dumps(payload, indent=2, sort_keys=True), file=sys.stderr)
     if "decision_pending" in payload:
+        _write_workflow_manifest(args, stage="stage5-heldout-pending-stage6")
         return 1
+    _write_workflow_manifest(
+        args,
+        stage="stage5-stage6-evaluation",
+        decision_path=decision_path,
+        terminal=True,
+        terminal_case=payload["decision"]["case"],
+    )
     return 0 if payload["decision"]["case"] in {"A", "B", "C", "D"} else 1
 
 
@@ -589,6 +639,204 @@ def _source_report_is_complete(report: Any) -> bool:
         and report.truncated_run_count == 0
         and report.failed_run_count == 0
     )
+
+
+def _stage_name(command: str) -> str:
+    return {
+        "preflight": "stage0-preflight",
+        "collect": "stage1-source-collection",
+        "select": "stage1-source-selection",
+        "target": "stage2-counterfactual-targets",
+        "train": "stage4-training",
+        "evaluate": "stage5",
+    }.get(command, command)
+
+
+def _decision_report_path(args: argparse.Namespace) -> Path:
+    report_path = getattr(args, "decision_report", None)
+    if isinstance(report_path, Path):
+        return report_path
+    output_path = getattr(args, "output", None)
+    if isinstance(output_path, Path):
+        return output_path.with_name(
+            f"{output_path.stem}.t065-terminal-decision-report.json"
+        )
+    raise ValueError("T065 Case D requires an explicit output or decision-report path")
+
+
+def _retention_manifest_path(args: argparse.Namespace) -> Path:
+    manifest_path = getattr(args, "retention_manifest", None)
+    if isinstance(manifest_path, Path):
+        return manifest_path
+    output_path = getattr(args, "output", None)
+    if isinstance(output_path, Path):
+        return output_path.with_name(f"{output_path.stem}.t065-retention-manifest.json")
+    raise ValueError("T065 retention manifest requires an explicit output path")
+
+
+def _file_identity(path: Path) -> dict[str, Any]:
+    return {
+        "path": str(path),
+        "sha256": file_sha256(path),
+        "size_bytes": path.stat().st_size,
+    }
+
+
+def _preceding_artifact_paths(args: argparse.Namespace) -> dict[str, Path]:
+    paths: dict[str, Path] = {}
+
+    def add(role: str, path: Any) -> None:
+        if isinstance(path, Path) and path.is_file():
+            paths.setdefault(role, path)
+
+    if args.command == "preflight":
+        add("stage0_preflight", getattr(args, "output", None))
+    else:
+        add("stage0_preflight", getattr(args, "preflight", None))
+    if args.command == "select":
+        for index, path in enumerate(args.input):
+            add(f"source_arm_{index}", path)
+    elif args.command == "target":
+        add("selected_states", args.states)
+    elif args.command in {"train", "evaluate"}:
+        add("target_table", args.target_table)
+    if args.command == "evaluate":
+        for model_seed in (653001, 653002):
+            add(
+                f"checkpoint_{model_seed}",
+                args.checkpoint_directory / f"model-{model_seed}.pt",
+            )
+    return paths
+
+
+def _artifact_identities(paths: Mapping[str, Path]) -> dict[str, Any]:
+    """Return identities only for artifacts that actually exist."""
+
+    return {
+        role: _file_identity(path) for role, path in paths.items() if path.is_file()
+    }
+
+
+def _manifest_artifact_paths(
+    args: argparse.Namespace,
+    *,
+    decision_path: Path | None = None,
+    case_d: bool = False,
+) -> dict[str, Path]:
+    if case_d:
+        paths = _preceding_artifact_paths(args)
+    else:
+        paths = _preceding_artifact_paths(args)
+        output_path = getattr(args, "output", None)
+        if isinstance(output_path, Path) and output_path.is_file():
+            paths["current_output"] = output_path
+        if args.command == "select":
+            selection_path = args.manifest or Path(f"{args.output}.manifest.json")
+            if selection_path.is_file():
+                paths["source_selection_manifest"] = selection_path
+        if args.command == "train":
+            for model_seed in (653001, 653002):
+                checkpoint = args.checkpoint_directory / f"model-{model_seed}.pt"
+                if checkpoint.is_file():
+                    paths[f"checkpoint_{model_seed}"] = checkpoint
+    if decision_path is not None and decision_path.is_file():
+        paths["terminal_decision_report"] = decision_path
+    return paths
+
+
+def _regeneration_command(args: argparse.Namespace) -> str:
+    command = [
+        "python",
+        "-m",
+        "sts_combat_rl.commands.non_combat_learning",
+        *(sys.argv[1:] if sys.argv[1:] else [args.command]),
+    ]
+    return shlex.join(command)
+
+
+def _write_workflow_manifest(
+    args: argparse.Namespace,
+    *,
+    stage: str,
+    decision_path: Path | None = None,
+    case_d: bool = False,
+    failure: T065CaseD | None = None,
+    terminal: bool = False,
+    terminal_case: str | None = None,
+) -> dict[str, Any]:
+    artifacts = _manifest_artifact_paths(
+        args, decision_path=decision_path, case_d=case_d
+    )
+    evidence: dict[str, Any] = {
+        "status": "case_d" if case_d else "completed",
+        "stage": stage,
+        "command": _regeneration_command(args),
+        "artifact_roles": sorted(artifacts),
+        "terminal": terminal,
+    }
+    if terminal_case is not None:
+        evidence["terminal_case"] = terminal_case
+    if failure is not None:
+        evidence.update(
+            {
+                "failure_ids": list(failure.failure_ids or failure.problems),
+                "failure_counts": dict(failure.failure_counts),
+                "downstream_skipped": failure.to_decision_report()[
+                    "downstream_skipped"
+                ],
+                "no_replacement": True,
+            }
+        )
+    manifest = write_t065_manifest(
+        _retention_manifest_path(args),
+        approved_spec_commit=T065_APPROVED_SPEC_COMMIT,
+        simulator_identity=(
+            failure.simulator_identity
+            if failure is not None and failure.simulator_identity
+            else lightspeed_source_identity_dict()
+        ),
+        artifacts=artifacts,
+        regeneration_commands=(_regeneration_command(args),),
+        stage_evidence={stage: evidence},
+    )
+    print(f"T065 retention manifest: {_retention_manifest_path(args)}", file=sys.stderr)
+    return manifest
+
+
+def _handle_case_d(args: argparse.Namespace, failure: T065CaseD) -> None:
+    failure.preceding_stage_manifests.update(
+        _artifact_identities(_preceding_artifact_paths(args))
+    )
+    decision_path = _decision_report_path(args)
+    write_t065_terminal_decision_report(
+        decision_path,
+        failure,
+        simulator_identity=(
+            failure.simulator_identity or lightspeed_source_identity_dict()
+        ),
+    )
+    _write_workflow_manifest(
+        args,
+        stage=failure.stage,
+        decision_path=decision_path,
+        case_d=True,
+        failure=failure,
+        terminal=True,
+        terminal_case="D",
+    )
+    print(f"T065 Case D decision report: {decision_path}", file=sys.stderr)
+
+
+def _require_preflight(args: argparse.Namespace) -> dict[str, Any]:
+    path = getattr(args, "preflight", None)
+    if not isinstance(path, Path):
+        raise T065CaseD(
+            "stage0-preflight",
+            ["workflow command did not receive an explicit --preflight artifact"],
+            failure_ids=("preflight:missing-argument",),
+            failure_counts={"missing_preflight": 1},
+        )
+    return validate_t065_preflight(path)
 
 
 def _require_frozen_simulator_args(args: argparse.Namespace) -> None:

@@ -3,6 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import json
+import os
+from pathlib import Path
+import subprocess
+import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -10,6 +16,7 @@ from sts_combat_rl.sim.contract import SimulatorAction
 from sts_combat_rl.sim.non_combat_learning import (
     T065CounterfactualTarget,
     T065CompleteRunArmReport,
+    T065HeldoutReport,
     T065_MANDATORY_FAMILIES,
     T065CaseD,
     T065Coverage,
@@ -22,6 +29,7 @@ from sts_combat_rl.sim.non_combat_learning import (
     inclusive_range,
     matched_bootstrap_probability,
     train_frozen_model_seeds,
+    LearnedNonCombatPolicy,
     load_non_combat_checkpoint,
     screen_family,
     select_source_states,
@@ -29,6 +37,8 @@ from sts_combat_rl.sim.non_combat_learning import (
     stage6_shard_ranges,
     target_shard_ranges,
     _spearman_rank_correlation,
+    terminal_decision_report,
+    validate_t065_preflight,
     write_t065_terminal_decision_report,
     write_source_selection_manifest,
 )
@@ -257,6 +267,38 @@ def test_stage6_arm_reducer_requires_exact_simulator_identity() -> None:
     assert any("simulator identity" in problem for problem in report.problems)
 
 
+def test_stage6_reducer_requires_each_shard_seed_set_to_match_range() -> None:
+    expected_specs = []
+    for spec in stage6_shard_ranges(arm="learned"):
+        seeds = list(range(spec["seed_start"], spec["seed_end"] + 1))
+        expected_specs.append(
+            {
+                **spec,
+                "requested_seeds": seeds,
+                "completed_seeds": seeds,
+                "requested_seed_count": 16,
+                "completed_row_count": 16,
+            }
+        )
+    expected_specs[1]["completed_seeds"] = expected_specs[0]["completed_seeds"]
+    reports = tuple(
+        T065CompleteRunArmReport(
+            arm=arm,
+            driver_seed=654002,
+            requested_seeds=tuple(range(651001, 651257)),
+            rows=(),
+            simulator_identity={},
+            shard_specs=tuple({**spec, "arm": arm} for spec in expected_specs),
+        )
+        for arm in ("stochastic", "expert", "learned")
+    )
+    report = build_stage6_report(
+        [], T065Coverage(D=1, L=1, M=1, F=0), arm_reports=reports
+    )
+    assert not report.valid
+    assert any("completed_seeds" in problem for problem in report.problems)
+
+
 def test_stage6_zero_coverage_denominators_are_invalid() -> None:
     report = build_stage6_report([], T065Coverage(D=0, L=0, M=0, F=0))
     assert not report.valid
@@ -273,6 +315,111 @@ def test_preflight_and_screen_aliases() -> None:
     assert screen_family("MAP") == "MAP_SCREEN"
     assert screen_family("REST_ROOM") == "REST_ROOM"
     assert inclusive_range((650001, 650003)) == (650001, 650002, 650003)
+
+
+def test_default_import_does_not_load_optional_torch() -> None:
+    source_root = Path(__file__).resolve().parents[1] / "src"
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(source_root)
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; import sts_combat_rl.sim.non_combat_learning; "
+            "print('torch' in sys.modules)",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    assert result.stdout.strip() == "False"
+
+
+def test_deferred_preflight_artifact_cannot_gate_workflow(tmp_path) -> None:
+    path = tmp_path / "preflight.json"
+    path.write_text(
+        json.dumps(build_t065_preflight_report().to_dict()), encoding="utf-8"
+    )
+    with pytest.raises(T065CaseD, match="preflight"):
+        validate_t065_preflight(path)
+
+
+def test_train_preflight_failure_writes_terminal_report_and_retention_manifest(
+    tmp_path,
+) -> None:
+    from sts_combat_rl.commands.non_combat_learning import main
+
+    preflight = tmp_path / "preflight.json"
+    preflight.write_text(json.dumps({"schema_id": "wrong"}), encoding="utf-8")
+    output = tmp_path / "train.json"
+    assert (
+        main(
+            [
+                "train",
+                "--target-table",
+                str(tmp_path / "targets.json"),
+                "--checkpoint-directory",
+                str(tmp_path / "checkpoints"),
+                "--output",
+                str(output),
+                "--preflight",
+                str(preflight),
+            ]
+        )
+        == 1
+    )
+    decision_path = tmp_path / "train.t065-terminal-decision-report.json"
+    manifest_path = tmp_path / "train.t065-retention-manifest.json"
+    decision = json.loads(decision_path.read_text(encoding="utf-8"))
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert decision["schema_id"] == "t065-terminal-decision-report-v1"
+    assert decision["case"] == "D"
+    assert decision["approved_spec_commit"]
+    assert decision["failure_ids"]
+    assert decision["failure_counts"]["failure_count"] >= 1
+    assert decision["no_replacement"] is True
+    assert "stage5" in decision["downstream_skipped"]
+    assert any(
+        artifact["role"] == "stage0_preflight" for artifact in manifest["artifacts"]
+    )
+    assert manifest["stage_evidence"]["stage0-preflight"]["terminal"] is True
+
+
+def test_case_c_terminal_report_keeps_failure_metadata() -> None:
+    stage5 = T065HeldoutReport(
+        selected_model_seed=653001,
+        selected_validation_mae=1.0,
+        model_results={},
+        aggregate_mean_delta=-1.0,
+        median_delta=-1.0,
+        family_mean_deltas={},
+        p_positive=0.0,
+        non_selected_model_mean_delta=-1.0,
+        passed=False,
+        problems=("aggregate paired delta is not positive",),
+    )
+    decision = terminal_decision_report(
+        stage5=stage5,
+        simulator_identity={"integration_commit": "fixture"},
+        preceding_stage_manifests={"target_table": {"sha256": "abc"}},
+    )
+    assert decision["case"] == "C"
+    assert decision["approved_spec_commit"]
+    assert decision["simulator_identity"]["integration_commit"] == "fixture"
+    assert decision["failure_ids"]
+    assert decision["failure_counts"]["failure_count"] == 1
+    assert decision["no_replacement"] is True
+    assert decision["downstream_skipped"] == ["stage6"]
+
+
+def test_learned_driver_and_fallback_provenance_keep_frozen_seed() -> None:
+    policy = LearnedNonCombatPolicy(
+        SimpleNamespace(checkpoint_artifact_id="checkpoint", model_seed=653001)
+    )
+    config = policy.provenance_config
+    assert config["seed"] == 654002
+    assert config["fallback_provenance"]["seed"] == 654002
 
 
 def test_case_d_report_is_persisted_with_frozen_repair_contract(tmp_path) -> None:
