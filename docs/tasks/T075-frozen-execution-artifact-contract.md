@@ -1,6 +1,6 @@
 # T075 Normative Execution, Reuse, And Artifact Contract
 
-This file is normative together with [`T075-leakage-safe-non-combat-cohort-repair.md`](T075-leakage-safe-non-combat-cohort-repair.md). It freezes the execution checkout/runtime, retained inputs, path normalization, commands, sharding, artifact schemas, ordering, retention, and failure rules. Material changes after exact-head approval require Maintainer re-approval.
+This file is normative together with [`T075-leakage-safe-non-combat-cohort-repair.md`](T075-leakage-safe-non-combat-cohort-repair.md). It freezes the execution checkout/runtime, retained inputs, path normalization, commands, sharding, artifact schemas, ordering, retention, terminal-decision materialization, and failure rules. Material changes after exact-head approval require Maintainer re-approval.
 
 ## Code Checkout And Artifact Roots
 
@@ -62,6 +62,8 @@ terminal-decision-report.json
 t075-retention-manifest.json
 ```
 
+No command may emit or retain a task-terminal decision under another filename such as `*.t065-terminal-decision-report.json` during T075. `terminal-decision-report.json` is the only authoritative T075 terminal decision path.
+
 ## Exact Retained T065 Inputs
 
 Approved T065 specification, confirmed by PR #74 `SPEC APPROVED` and current main:
@@ -75,11 +77,10 @@ Required raw source inputs, never recollected by T075:
 | `stochastic_non_combat_v1` | `artifacts/t065-learned-non-combat-policy-v1/source-stochastic-650001-650256-c57b2ee.json` | 5,352,891,044 | `40a29e2cc8042efc15a46e9c50f6a50f889c94a1d7def24e91b62718eaaa8f61` |
 | `expert_non_combat_v1` | `artifacts/t065-learned-non-combat-policy-v1/source-expert-650001-650256-deeaa46.json` | 3,710,180,244 | `29d4155e543b024e741230b5bcefad3116c44610b370b666f46a65571348ad4c` |
 
-Accepted lineage evidence:
+Accepted final lineage evidence:
 
 ```text
-preflight_path = artifacts/t065-learned-non-combat-policy-v1/preflight-c57b2ee-20260827.json
-preflight_sha256 = a89560d037ea4555922d0e1282edb8e328ce75ab6e1d720fd05f86022b56c334
+accepted_preflight_content_sha256 = a89560d037ea4555922d0e1282edb8e328ce75ab6e1d720fd05f86022b56c334
 
 case_d_decision_path = artifacts/t065-learned-non-combat-policy-v1/source-selection-650001-650256-a69972f.t065-terminal-decision-report.json
 case_d_decision_bytes = 198842
@@ -105,9 +106,28 @@ For retained-manifest path comparisons, normalize to repository-relative POSIX p
 
 No basename-only comparison is valid.
 
+### Accepted historical preflight aliases
+
+The two retained source manifests used different historical preflight filenames. T075 accepts exactly these source-manifest provenance aliases:
+
+| Source arm | Referenced raw preflight alias | Referenced retention alias |
+|---|---|---|
+| `stochastic_non_combat_v1` | `artifacts/t065-learned-non-combat-policy-v1/preflight-c57b2ee-20260827.json` | `artifacts/t065-learned-non-combat-policy-v1/preflight-c57b2ee-20260827.retention.json` |
+| `expert_non_combat_v1` | `artifacts/t065-learned-non-combat-policy-v1/preflight-968797e-20260827.json` | `artifacts/t065-learned-non-combat-policy-v1/preflight-968797e-20260827.retention.json` |
+
+Alias acceptance is by exact validated content, not filename alone. For either arm, the referenced raw preflight must:
+
+- exist at exactly the arm-specific alias path above after path normalization;
+- have SHA-256 exactly `a89560d037ea4555922d0e1282edb8e328ce75ab6e1d720fd05f86022b56c334`;
+- parse with the accepted T065 preflight schema/version;
+- record approved T065 spec `a13c92a66b4d9ad9f6a730293cadc8d66b4a699c`;
+- record the same pinned simulator identity and frozen controller/action-space identity required by the source manifest.
+
+The corresponding arm-specific retention alias must exist, parse successfully, reference that raw preflight alias, and be internally compatible with the accepted raw content identity. T075 does not predeclare the retention-file SHA from a truncated review-comment prefix. Instead, the reuse validator computes the actual persisted retention-file SHA-256 and records both its normalized path and full computed SHA-256 in the per-source reuse evidence. Any other raw or retention alias is invalid. A c57/968 filename whose raw content hash or parsed provenance does not match is invalid.
+
 ### Source retention-manifest resolution
 
-For each raw source, inspect only `*.retention.json` directly under `T065`. Exactly one manifest must match all of:
+For each raw source, inspect only `*.retention.json` directly under `T065`. Exactly one source retention manifest must match all of:
 
 - normalized raw path, exact byte size, and exact SHA-256 above;
 - matching source arm;
@@ -117,9 +137,10 @@ For each raw source, inspect only `*.retention.json` directly under `T065`. Exac
 - battle controller `oracle_search_v1_highest_mean_s20`;
 - exact `ActionSpaceConfig.initial_no_potions()` identity;
 - 16 source shards, 16 effective workers;
-- 256 requested/terminal runs and zero truncations.
+- 256 requested/terminal runs and zero truncations;
+- the arm-specific accepted preflight raw/retention alias pair above, validated by content/provenance.
 
-Zero or multiple matches are Case D at `source-input-reuse`. Preserve matched manifests' original regeneration commands as provenance text only; T075 never executes them.
+Zero or multiple matching source manifests are Case D at `source-input-reuse`. Preserve each matched source manifest path/hash, its referenced preflight raw path/hash, its referenced preflight retention path/full computed hash, and original regeneration commands as provenance text only. T075 never executes regeneration commands.
 
 ## Candidate Domain And Ownership
 
@@ -176,7 +197,7 @@ approved_t075_spec_commit
 planner_baseline = 95ccb6b55bc7a0214b632206ae169a533289fcf2
 code_head
 pinned_simulator_identity
-accepted_t065_preflight
+accepted_t065_preflight_content_sha256
 accepted_t065_case_d
 sources
 validation
@@ -184,7 +205,7 @@ original_regeneration_commands
 problems
 ```
 
-`sources` is ordered stochastic then expert. Each entry records normalized and absolute stable paths, bytes, SHA-256, schema/version, arm, seeds, driver seed, controller/action-space provenance, terminal/truncation counts, shard/worker evidence, matched retention-manifest path/hash, and compatibility status.
+`sources` is ordered stochastic then expert. Each source entry records normalized and absolute stable raw paths, bytes, SHA-256, schema/version, arm, seeds, driver seed, controller/action-space provenance, terminal/truncation counts, shard/worker evidence, matched source-retention-manifest path/hash, referenced preflight raw alias path/hash, referenced preflight retention alias path/full computed hash, alias validation status, and compatibility status.
 
 ### `t075-replay-group-ownership-audit-v1`
 
@@ -201,6 +222,7 @@ replay_identity = t065-replay-equivalence-key-unchanged
 selection_domain = T065-source-selection-v1
 group_domain = T075-replay-group-v1
 parent_reuse_manifest_sha256
+parent_current_preflight_sha256
 candidate_domain_counts
 group_count
 singleton_group_count
@@ -225,6 +247,8 @@ Ordering and definitions:
 
 `groups` is ascending by group digest and records family, size, represented splits, cross-split flag, ordered members, owner or null, and exclusion count. Members record arm, seed, run, step, split, public-state identity, selection digest, and canonical-candidate SHA-256. Exact member-order ties use `owner=null` and Case D.
 
+The ordered parent identity list is exactly `[stage0-retained-source-reuse.json, stage0-preflight.json]`, represented by the corresponding persisted SHA-256 values. Both parents must validate before ownership begins.
+
 ### `t075-source-selection-manifest-v1`
 
 Required fields:
@@ -237,6 +261,7 @@ approved_t075_spec_commit
 code_head
 selection_strategy_id = leakage-safe-global-owner-v1
 parent_reuse_manifest_sha256
+parent_current_preflight_sha256
 parent_ownership_audit_sha256
 selected_states_path
 selected_states_sha256
@@ -252,9 +277,49 @@ replay_verification
 problems
 ```
 
+The ordered parent identity list is exactly `[stage0-retained-source-reuse.json, stage0-preflight.json, stage1-replay-group-ownership-audit.json]` by persisted SHA-256. `stage0-preflight.json` must pass strict current-runtime validation before any simulator replay starts.
+
 `stage1-selected-states.json` is the current T065 JSONL row format: UTF-8, one complete `t065-source-state-v1` JSON object per line, no wrapper array/object, selected indices `0..319` in order, one newline after every row including the last, and strict-reader round-trip for all 320 rows.
 
-`replay_verification` records the exact Stage 1 shard/worker evidence below and requires 320 attempted/restored, zero mismatch/replacement, zero selected replay duplicate, and zero selected cross-split replay overlap.
+`replay_verification` records the exact Stage 1 shard/worker evidence below and requires current-preflight validation passed, 320 attempted/restored, zero mismatch/replacement, zero selected replay duplicate, and zero selected cross-split replay overlap.
+
+### `t075-terminal-decision-report-v1`
+
+`terminal-decision-report.json` uses canonical UTF-8 JSON with sorted keys, compact separators `(',', ':')`, `ensure_ascii=False`, `allow_nan=False`, and exactly one trailing newline in persisted bytes. Required fields:
+
+```text
+schema_id = t075-terminal-decision-report-v1
+schema_version = 1
+task_id = T075
+approved_t075_spec_commit
+planner_baseline
+code_head
+terminal_case = A | B | C | D
+terminal_stage = stage0-preflight | stage0-reuse | stage1-selection-replay | stage2-target | stage4-train | stage5-gate | stage6-eval
+reason_code
+summary
+reached_stages
+skipped_stages
+parent_artifact_identities
+stage5_gate_status = passed | failed | not_reached
+stage6_status = completed | skipped | not_reached
+recommendation
+problems
+```
+
+`reached_stages` and `skipped_stages` use the frozen stage order. `parent_artifact_identities` is an ordered array of normalized path, bytes, SHA-256, schema/version, producer stage, and code head for every artifact needed to establish the terminal case. `recommendation` is exactly one string.
+
+Terminal materialization rules are fixed:
+
+- any Stage 0 preflight or reuse validation failure is Case D and that failing command atomically writes `ROOT/terminal-decision-report.json` before returning its terminal nonzero/Case-D status;
+- any Stage 1 ownership/replay failure, Stage 2 target incompleteness, Stage 4 training/schema/runtime failure is Case D and the failing command atomically writes the same path;
+- valid Stage 5 gate failure is Case C and Stage 5 atomically writes the same path;
+- valid Stage 5 pass does not create a terminal report and authorizes Stage 6;
+- Stage 6 writes the terminal report for Case A/B or any Stage-6 Case D;
+- after the first valid terminal report exists, downstream scientific stages are skipped and no later command may rewrite its semantic content;
+- `finalize` validates the existing terminal report, adds it to final retention provenance, and must not infer a different terminal case.
+
+Every scientific stage command below therefore receives the exact same `--decision-report "$ROOT/terminal-decision-report.json"` argument. This overrides legacy neutral-command default naming; T075 must not retain per-command `*.t065-terminal-decision-report.json` files.
 
 ### `t075-retention-manifest-v1`
 
@@ -278,7 +343,7 @@ deletion_condition
 problems
 ```
 
-`produced_artifacts` is stage ordered; each entry records normalized/absolute path, bytes, SHA-256, schema/version, producer stage, code head, and ordered parent identities.
+`produced_artifacts` is stage ordered; each entry records normalized/absolute path, bytes, SHA-256, schema/version, producer stage, code head, and ordered parent identities. The terminal decision report is always included.
 
 `stage_commands` has one entry, in order, for `stage0-preflight`, `stage0-reuse`, `stage1-selection-replay`, `stage2-target`, `stage4-train`, `stage5-gate`, `stage6-eval`, `terminal-finalize`. Each entry requires:
 
@@ -322,7 +387,7 @@ counts
 problems
 ```
 
-Non-sharded stages use null/empty shard fields. Skipped stages have `executed=false`, `terminal_status=skipped`, and no runtime outputs.
+For `stage1-selection-replay`, ordered parents must include the reuse manifest, fresh T075 preflight, and ownership audit exactly as frozen above. Non-sharded stages use null/empty shard fields. Skipped stages have `executed=false`, `terminal_status=skipped`, and no runtime outputs.
 
 ## Stage 1 Replay Sharding
 
@@ -335,7 +400,7 @@ After owner/quota selection assigns indices `0..319`, replay verification is exa
 03 060..079   07 140..159   11 220..239   15 300..319
 ```
 
-Requested and required actual worker count is 16, with at most 16 concurrent simulator workers. If that plan cannot be established, stop before replay and record Case D rather than silently degrading to a substantial single-worker run. Record ranges, requested/actual workers, per-shard return status, attempted/restored/mismatch counts, total wall-clock, code head, parent and output identities.
+Requested and required actual worker count is 16, with at most 16 concurrent simulator workers. If that plan cannot be established, stop before replay and record Case D rather than silently degrading to a substantial single-worker run. Record ranges, requested/actual workers, per-shard return status, attempted/restored/mismatch counts, total wall-clock, code head, ordered parents and outputs.
 
 ## Frozen Command Templates
 
@@ -370,7 +435,8 @@ Stage 0 preflight:
 $PY -m sts_combat_rl.commands.non_combat_learning preflight \
   --output "$ROOT/stage0-preflight.json" \
   --simulator-runtime --torch-runtime --sim-seed 1 --ascension 20 \
-  --retention-manifest "$ROOT/stage0-preflight.retention.json"
+  --retention-manifest "$ROOT/stage0-preflight.retention.json" \
+  --decision-report "$ROOT/terminal-decision-report.json"
 ```
 
 Neutral `validate-reuse`:
@@ -379,11 +445,16 @@ Neutral `validate-reuse`:
 $PY -m sts_combat_rl.commands.non_combat_learning validate-reuse \
   --source "$T065/source-stochastic-650001-650256-c57b2ee.json" \
   --source "$T065/source-expert-650001-650256-deeaa46.json" \
-  --accepted-preflight "$T065/preflight-c57b2ee-20260827.json" \
+  --accepted-preflight-content-sha256 a89560d037ea4555922d0e1282edb8e328ce75ab6e1d720fd05f86022b56c334 \
+  --source-preflight-alias "$T065/preflight-c57b2ee-20260827.json" \
+  --source-preflight-alias "$T065/preflight-968797e-20260827.json" \
+  --source-preflight-retention-alias "$T065/preflight-c57b2ee-20260827.retention.json" \
+  --source-preflight-retention-alias "$T065/preflight-968797e-20260827.retention.json" \
   --accepted-case-d "$T065/source-selection-650001-650256-a69972f.t065-terminal-decision-report.json" \
   --accepted-case-d-retention "$T065/source-selection-650001-650256-a69972f.retention.json" \
   --output "$ROOT/stage0-retained-source-reuse.json" \
-  --retention-manifest "$ROOT/stage0-retained-source-reuse.retention.json"
+  --retention-manifest "$ROOT/stage0-retained-source-reuse.retention.json" \
+  --decision-report "$ROOT/terminal-decision-report.json"
 ```
 
 Stage 1 selection/replay:
@@ -394,14 +465,16 @@ $PY -m sts_combat_rl.commands.non_combat_learning select \
   --input "$T065/source-expert-650001-650256-deeaa46.json" \
   --selection-strategy leakage-safe-global-owner-v1 \
   --reuse-manifest "$ROOT/stage0-retained-source-reuse.json" \
+  --preflight "$ROOT/stage0-preflight.json" \
   --output "$ROOT/stage1-selected-states.json" \
   --ownership-audit "$ROOT/stage1-replay-group-ownership-audit.json" \
   --manifest "$ROOT/stage1-selection-manifest.json" \
   --replay-verify --replay-shard-count 16 --replay-worker-count 16 \
-  --retention-manifest "$ROOT/stage1-selection.retention.json"
+  --retention-manifest "$ROOT/stage1-selection.retention.json" \
+  --decision-report "$ROOT/terminal-decision-report.json"
 ```
 
-No `collect` invocation is permitted in T075.
+The command must validate `stage0-preflight.json` before ownership/replay, include its persisted SHA-256 in the ownership/selection parent identities, and fail before simulator replay if that validation fails. No `collect` invocation is permitted in T075.
 
 Stage 2 targets, only after valid Stage 1:
 
@@ -412,7 +485,8 @@ $PY -m sts_combat_rl.commands.non_combat_learning target \
   --shard-count 16 --worker-count 16 \
   --preflight "$ROOT/stage0-preflight.json" \
   --preceding-manifest "$ROOT/stage1-selection.retention.json" \
-  --retention-manifest "$ROOT/stage2-target-table.retention.json"
+  --retention-manifest "$ROOT/stage2-target-table.retention.json" \
+  --decision-report "$ROOT/terminal-decision-report.json"
 ```
 
 Stage 2 uses the same 16 x 20 contiguous selected-index ranges and all frozen continuation actions/seeds.
@@ -426,7 +500,8 @@ $PY -m sts_combat_rl.commands.non_combat_learning train \
   --output "$ROOT/stage4-training-report.json" \
   --preflight "$ROOT/stage0-preflight.json" \
   --preceding-manifest "$ROOT/stage2-target-table.retention.json" \
-  --retention-manifest "$ROOT/stage4-training.retention.json"
+  --retention-manifest "$ROOT/stage4-training.retention.json" \
+  --decision-report "$ROOT/terminal-decision-report.json"
 ```
 
 Exactly model seeds 653001/653002 are trained; two processes may run concurrently, each with `torch_threads=1`.
@@ -440,10 +515,11 @@ $PY -m sts_combat_rl.commands.non_combat_learning evaluate \
   --output "$ROOT/stage5-heldout-report.json" \
   --preflight "$ROOT/stage0-preflight.json" \
   --preceding-manifest "$ROOT/stage4-training.retention.json" \
-  --retention-manifest "$ROOT/stage5.retention.json"
+  --retention-manifest "$ROOT/stage5.retention.json" \
+  --decision-report "$ROOT/terminal-decision-report.json"
 ```
 
-Valid Stage 5 failure is Case C and skips Stage 6.
+Valid Stage 5 failure is Case C and writes the terminal report; valid Stage 5 pass does not write a terminal report and authorizes Stage 6.
 
 Conditional Stage 6:
 
@@ -456,10 +532,11 @@ $PY -m sts_combat_rl.commands.non_combat_learning evaluate \
   --run-stage6 --stage6-shard-count 16 --stage6-worker-count 16 \
   --preflight "$ROOT/stage0-preflight.json" \
   --preceding-manifest "$ROOT/stage5.retention.json" \
-  --retention-manifest "$ROOT/stage6.retention.json"
+  --retention-manifest "$ROOT/stage6.retention.json" \
+  --decision-report "$ROOT/terminal-decision-report.json"
 ```
 
-Stage 6 remains three matched arms x 16 shards x 16 seeds, seeds `651001..651256`, at most 16 concurrent simulator workers, 768 terminal runs for a valid complete stage.
+Stage 6 remains three matched arms x 16 shards x 16 seeds, seeds `651001..651256`, at most 16 concurrent simulator workers, 768 terminal runs for a valid complete stage. Stage 6 writes the final Case A/B decision or any Stage-6 Case D.
 
 Neutral terminal finalization:
 
@@ -470,10 +547,12 @@ $PY -m sts_combat_rl.commands.non_combat_learning finalize \
   --retention-manifest "$ROOT/t075-retention-manifest.json"
 ```
 
+`finalize` requires an already valid `t075-terminal-decision-report-v1`; it validates and retains it and must not infer or replace terminal semantics.
+
 ## Retention And Failure Rules
 
 T075 owns retention of both raw T065 sources from implementation authorization until its terminal result merges. They are retained because they are the unique approved source evidence for deterministic repaired cohort construction. They may be deleted only after: a merged terminal T075 report/compact retention manifest; no open/approved task still requires them; Maintainer records no pending reproduction need; and accepted compact downstream evidence is retained. For Case D at ownership/selection, retain raw sources until that repair route is explicitly closed or superseded. T075 never deletes them during execution.
 
-Case D includes retained-input mismatch/ambiguity, path-normalization failure, wrong/dirty checkout, approved-spec ancestry failure, exact owner-key tie, insufficient owner bucket, selected replay failure, target incompleteness, schema/hidden-field failure, simulator/provenance mismatch, or forbidden truncation. T075 may not recollect sources or tune ownership to recover.
+Case D includes retained-input mismatch/ambiguity, invalid preflight alias/content/provenance, path-normalization failure, wrong/dirty checkout, approved-spec ancestry failure, fresh T075 preflight failure or missing Stage-1 preflight parent, exact owner-key tie, insufficient owner bucket, selected replay failure, target incompleteness, schema/hidden-field failure, simulator/provenance mismatch, or forbidden truncation. T075 may not recollect sources or tune ownership to recover.
 
-The implementation report must include exact approved spec, exact code head per stage, normalized/absolute input identities, ownership counts by family/split/group size, post-owner and selected counts, Stage 1 replay shard/worker/return/wall-clock evidence, reached stage commands/evidence, artifact hashes/sizes/parents, full/focused verification, costs, exactly one terminal Case A/B/C/D, and exactly one next recommendation.
+The implementation report must include exact approved spec, exact code head per stage, normalized/absolute input identities, each source's original preflight raw/retention alias and full computed hashes, fresh T075 preflight parent identity, ownership counts by family/split/group size, post-owner and selected counts, Stage 1 replay shard/worker/return/wall-clock evidence, reached/skipped stage commands/evidence, terminal-decision identity and parents, artifact hashes/sizes/parents, full/focused verification, costs, exactly one terminal Case A/B/C/D, and exactly one next recommendation.
