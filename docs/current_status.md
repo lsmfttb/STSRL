@@ -1,6 +1,6 @@
 # Current Status
 
-Last reviewed: 2026-08-26.
+Last reviewed: 2026-08-27.
 
 This document is the main maintainer's canonical execution-result report for
 the planner and describes the latest `main` branch only. Results from local
@@ -12,7 +12,9 @@ blockers; it does not itself propose or authorize a successor task.
 
 Build the foundations for an A20 battle agent. Search remains the intended
 primary battle policy, and learned policies or values are expected to guide or
-accelerate search. Non-combat decisions remain outside the trainable agent.
+accelerate search. Non-combat decisions remain outside the trainable agent;
+T065 ended as an invalid-experiment diagnostic and did not change that
+capability claim.
 
 The task index lists the canonical lifecycle state for the published backlog.
 The M1 model-guided Oracle search sandbox is complete through synthesis. It
@@ -113,7 +115,7 @@ blocked on native public-consistent hidden-future sampler support. T071 is now
 complete after PR #70 merged at `dce372b`; it reduced T064-specific validation
 duplication, established T044 validation ownership, and added the detached
 long-job/status and stage/run-local reuse conventions. No T064 scientific rerun
-was required, and T065 remains `DRAFT`.
+was required; at that point T065 remained `DRAFT`.
 T072 is now complete after PR #71 merged at `98de21b`. It retired the closed
 T053–T059 task-specific simulation/command/test executors and their CLI and
 lightspeed routing, while preserving the generic root-prior/native-search and
@@ -121,7 +123,7 @@ T052 retention surfaces. Its 21-file deletion passed the required size gate
 with 19,916 fewer tracked `src`/`tests` Python lines. T072 changed no accepted
 artifact schema or scientific result, and its historical task records point to
 the frozen pre-retirement source anchor. No simulator, training, or evaluation
-rerun was required. T065 remains `DRAFT`.
+rerun was required; at that point T065 remained `DRAFT`.
 T073 is now complete after PR #72 merged at
 `dac26774f7cc70abae6be1693772418398e1e7eb`. It removed the completed T064 and
 T067--T070 executor command modules, scripts, and executor-only tests; moved
@@ -132,9 +134,9 @@ T064/T067/T068/T069/T070 CLI routes, so no maintained T062 or generic Search v2
 route was removed. The final Git-object gate reduced tracked Python by 16,854
 lines across `src` and `tests`, including 9,634 lines under `src`; the final
 local suite passed 729 tests. No simulator, training, evaluation, or scientific
-artifact rerun was required. The merge does not authorize or publish T065:
-the Planner must first perform the fresh repository-wide quality review
-required by T073, and T065 remains `DRAFT`.
+artifact rerun was required. The merge did not authorize or publish T065 at
+that point; the required post-T074 Planner quality review then completed before
+T065 implementation.
 T074 is now complete after PR #73 merged at
 `7c2dcf5d8a6d74bb03e7fda173000dad006933ce`. It repaired the forward
 `controlled_run -> policy -> batching -> controlled_run` boundary by extracting
@@ -146,9 +148,20 @@ final-head suite passed 730 tests plus the focused boundary gates, compileall,
 ruff, format, and combat/non-combat mocks; fixed-seed actions, reasons, and
 provenance matched the exact pre-T074 baseline. No simulator, training,
 evaluation, artifact-schema, checkpoint, or scientific-result rerun was
-required. T065 remains `DRAFT`; the required post-T074 Planner review must
-reassess the deferred CLI, fixture, CI/open-source, and large-module findings
-before any feature task is published.
+required. At that point T065 remained `DRAFT`; the required post-T074 Planner
+review then completed before T065 implementation.
+
+T065 is now complete after PR #74 merged at
+`d1b8a1e2e9714d88976379ceffa04d8038151286`. Its approved implementation passed
+the final local suite (`789` tests, compileall, ruff, format, and diff checks),
+and its pinned WSL execution completed Stage 0 plus both 256-seed Stage 1
+source arms. Exact source selection then reached a valid Case D after finding
+107 replay-equivalent candidates crossing the frozen seed-group split boundary
+(`MAP_SCREEN=19`, `REWARDS=88`). The terminal report records no replacement,
+no policy conclusion, and skips Stage 2--6. This result does not promote a
+learned non-combat controller or authorize a successor experiment. Retained
+source, preflight, decision-report, and retention-manifest identities are
+recorded on PR #74 and under the stable ignored T065 artifact path.
 
 ## Implemented On Main
 
@@ -206,26 +219,33 @@ before any feature task is published.
   long jobs are reported once and rechecked after the expected window rather
   than continuously monitored.
 - T071 produced no scientific result artifact and did not rerun T064,
-  `sts_lightspeed`, teacher/training, or fixed-cohort evaluation. T065 remains
-  a draft planner task.
+  `sts_lightspeed`, teacher/training, or fixed-cohort evaluation. T065 remained
+  a draft planner task at that point.
 - T072 produced no scientific result artifact and did not rerun
   `sts_lightspeed`, training, or evaluation. Its accepted maintenance evidence
   is the 21-file deletion audit, the 19,916-line size reduction, and the local
-  regression gates; T065 remains a draft planner task.
+  regression gates; T065 was still a draft planner task at that point.
 - T073 produced no scientific result artifact and did not rerun
   `sts_lightspeed`, training, or evaluation. Its accepted maintenance evidence
   is the T064/T067--T070 executor deletion audit, neutral ownership inventory,
   exact T070 schema-contract retention, 16,854-line `src`/`tests` reduction,
   729-test final-head suite, and the post-merge Planner quality-review gate.
-  T065 remains a draft planner task.
+  T065 was still a draft planner task at that point.
 - T074 produced no scientific result artifact and did not rerun
   `sts_lightspeed`, training, evaluation, or simulator-scale gates. Its
   accepted maintenance evidence is the acyclic policy dependency guard, 31-name
   public-surface audit, 1,494-to-1,466 combined policy-boundary line-count
   reduction, 88.3% `sim/__init__.py` reduction, 730-test final-head suite,
   fixed-seed provenance parity, and default-import PyTorch isolation. The
-  post-T074 Planner quality-review gate remains active, and T065 remains a
-  draft planner task.
+  post-T074 Planner quality-review gate was active at that point and was
+  subsequently completed before T065.
+
+- T065 produced the first merged non-combat learning workflow and its retained
+  invalid-experiment evidence, but no learned controller capability. The
+  source-selection run took 681.3 seconds with no simulator worker stage; its
+  terminal Case D report and retention manifest are the accepted scientific
+  result. Stage 2 counterfactual targets, PyTorch training, Stage 5, and Stage 6
+  were correctly not run after the early frozen-fidelity failure.
 
 ### Battle-Agent Data Spike
 
