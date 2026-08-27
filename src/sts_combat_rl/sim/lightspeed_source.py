@@ -13,6 +13,7 @@ from typing import Any
 LIGHTSPEED_SOURCE_MANIFEST_SCHEMA_ID = "sts-lightspeed-source-manifest-v1"
 LIGHTSPEED_SOURCE_MANIFEST_VERSION = 1
 LIGHTSPEED_SOURCE_MANIFEST_FILENAME = "sts_lightspeed_source_manifest.json"
+LIGHTSPEED_SOURCE_MANIFEST_DISPLAY_PATH = f"docs/{LIGHTSPEED_SOURCE_MANIFEST_FILENAME}"
 REQUIRED_NATIVE_CAPABILITY_IDS = (
     "step_simulation",
     "checkpoint_capture_restore",
@@ -223,7 +224,8 @@ def lightspeed_source_identity_dict(
     return {
         "manifest_schema_id": source.schema_id,
         "manifest_version": source.manifest_version,
-        "manifest_path": _display_path(source.path),
+        # Keep provenance stable across worktrees and host path conventions.
+        "manifest_path": LIGHTSPEED_SOURCE_MANIFEST_DISPLAY_PATH,
         "upstream_repository_url": source.upstream.repository_url,
         "upstream_base_commit": source.upstream.base_commit,
         "integration_repository_url": source.integration.repository_url,
@@ -448,10 +450,3 @@ def _required_commit(data: Mapping[str, Any], key: str, label: str) -> str:
     if not _COMMIT_RE.fullmatch(value):
         raise ValueError(f"{label}.{key} must be a 40-character lowercase git commit")
     return value
-
-
-def _display_path(path: Path) -> str:
-    try:
-        return str(path.relative_to(Path.cwd()))
-    except ValueError:
-        return str(path)
