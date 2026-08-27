@@ -50,7 +50,7 @@ workflow's explicit implementation-authorization gate is satisfied.
 | T027 | DONE | [Teacher guidance calibration report](T027-teacher-guidance-calibration-report.md) | T026 | offline checkpoint-vs-teacher calibration |
 | T028 | DONE | [Model-guided Oracle search controller](T028-model-guided-oracle-search-controller.md) | T025, T026, T027 | first versioned model-guided Oracle-like search controller |
 | T029 | DONE | [Fixed-cohort model-guided search comparison](T029-fixed-cohort-model-guided-search-comparison.md) | T025, T028 | equal-source/equal-budget fixed-cohort comparison |
-| T030 | DONE | [M1 model-guided search sandbox synthesis](T030-m1-model-guided-oracle-search-sandbox-synthesis.md) | T027, T029 | milestone synthesis and next task batch |
+| T030 | DONE | [M1 model-guided search sandbox synthesis](T030-m1-model-guided-search-sandbox-synthesis.md) | T027, T029 | milestone synthesis and next task batch |
 | T031 | DONE | [A20 coverage refresh and data gap report](T031-a20-coverage-refresh-data-gap-report.md) | T030 | post-M1 A20 coverage refresh before broader teacher/checkpoint work |
 | T032 | DONE | [A20 narrow teacher and checkpoint diagnostic refresh](T032-a20-teacher-checkpoint-refresh.md) | T039 | narrow T039 source-contract teacher, trainer-input, checkpoint, and calibration diagnostic |
 | T033 | DONE | [Public context model-input encoder contract](T033-public-context-encoder-contract.md) | T016, T030, T042 | structured public history, map/route, visible-Boss encoder boundary |
