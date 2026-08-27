@@ -1,44 +1,37 @@
 # T075 Normative Execution, Reuse, And Artifact Contract
 
-This file is normative together with [`T075-leakage-safe-non-combat-cohort-repair.md`](T075-leakage-safe-non-combat-cohort-repair.md). It freezes execution checkout/runtime, retained inputs, source-manifest resolution, path normalization, commands, sharding, Stage-3 validation placement, artifact schemas, ordering, retention, terminal-decision materialization, and failure rules. Material changes after exact-head approval require Maintainer re-approval.
+This file is normative together with [`T075-leakage-safe-non-combat-cohort-repair.md`](T075-leakage-safe-non-combat-cohort-repair.md). It freezes the execution checkout/runtime, retained-input resolver, path normalization, commands, sharding, Stage-3 placement, artifact schemas, parent identities, terminal materialization, retention, and failure semantics. Material changes after exact-head approval require Maintainer re-approval.
 
-## Code Checkout And Artifact Roots
-
-Scientific execution uses exactly this isolated worktree:
+## Frozen constants
 
 ```text
+PLANNER_BASELINE = 95ccb6b55bc7a0214b632206ae169a533289fcf2
+T065_APPROVED_SPEC = a13c92a66b4d9ad9f6a730293cadc8d66b4a699c
 CODE = /mnt/d/DeadlycatCoding/STSRL/.claude/worktrees/t075-leakage-safe-non-combat-cohort-repair
 BRANCH = task/T075-leakage-safe-non-combat-cohort-repair
 PY = /home/lsmft/stsrl-spikes/py313-torch/bin/python
 NATIVE = /home/lsmft/stsrl-spikes/sts_lightspeed/build-py313-torch
-```
-
-Stable artifacts remain outside the disposable worktree:
-
-```text
 STABLE = /mnt/d/DeadlycatCoding/STSRL/artifacts
 ROOT = ${STABLE}/t075-leakage-safe-non-combat-cohort-repair
 T065 = ${STABLE}/t065-learned-non-combat-policy-v1
 ```
 
-Every scientific command runs from `CODE` with `PYTHONPATH=${NATIVE}:${CODE}/src`; importing project code from `/mnt/d/DeadlycatCoding/STSRL/src` is forbidden.
+Every scientific command runs from `CODE` with `PYTHONPATH=${NATIVE}:${CODE}/src`. Importing project code from `/mnt/d/DeadlycatCoding/STSRL/src` is forbidden.
 
-Before every scientific stage:
+Before each scientific execution stage:
 
 ```bash
 cd "$CODE"
-test "$(git branch --show-current)" = "task/T075-leakage-safe-non-combat-cohort-repair"
+test "$(git branch --show-current)" = "$BRANCH"
 test -z "$(git status --porcelain)"
 APPROVED_SPEC={APPROVED_T075_SPEC_COMMIT}
 git merge-base --is-ancestor "$APPROVED_SPEC" HEAD
 CODE_HEAD=$(git rev-parse HEAD)
 ```
 
-The placeholder is replaced only by the exact Maintainer-approved T075 spec commit. Implementation may advance `HEAD` on the same branch, but every executed stage records its exact `CODE_HEAD`. Branch switching is forbidden. Wrong branch, dirty checkout, or failed approved-spec ancestry is Case D before that stage.
+The placeholder is replaced only with the exact Maintainer-approved T075 spec commit. Each stage records its exact `CODE_HEAD`. Branch switching is forbidden.
 
-## Frozen Output Paths
-
-All produced artifacts live below `ROOT` with these exact names:
+## Frozen outputs
 
 ```text
 stage0-preflight.json
@@ -63,22 +56,18 @@ terminal-decision-report.json
 t075-retention-manifest.json
 ```
 
-`terminal-decision-report.json` is the only authoritative T075 terminal-decision path. No command may emit or retain `*.t065-terminal-decision-report.json` during T075.
+`terminal-decision-report.json` is the only authoritative T075 terminal-decision path. Per-command `*.t065-terminal-decision-report.json` files are forbidden.
 
-## Exact Retained T065 Inputs
+## Retained T065 source identities
 
-Approved T065 specification:
+T075 reuses and never recollects:
 
-`a13c92a66b4d9ad9f6a730293cadc8d66b4a699c`
-
-Required raw source inputs, never recollected by T075:
-
-| Arm | Repository-relative path | Bytes | SHA-256 |
+| Arm | Relative path | Bytes | SHA-256 |
 |---|---|---:|---|
 | `stochastic_non_combat_v1` | `artifacts/t065-learned-non-combat-policy-v1/source-stochastic-650001-650256-c57b2ee.json` | 5,352,891,044 | `40a29e2cc8042efc15a46e9c50f6a50f889c94a1d7def24e91b62718eaaa8f61` |
 | `expert_non_combat_v1` | `artifacts/t065-learned-non-combat-policy-v1/source-expert-650001-650256-deeaa46.json` | 3,710,180,244 | `29d4155e543b024e741230b5bcefad3116c44610b370b666f46a65571348ad4c` |
 
-Accepted final lineage evidence:
+Accepted T065 lineage:
 
 ```text
 accepted_preflight_content_sha256 = a89560d037ea4555922d0e1282edb8e328ce75ab6e1d720fd05f86022b56c334
@@ -90,96 +79,76 @@ case_d_retention_bytes = 36186
 case_d_retention_sha256 = fcf24bad8590dc1c74b77c6e3c9a04bdef63611182661153c9c02fc36ccd5faf
 ```
 
-The older `deeaa46-retry2` decision/retention files are not accepted final T065 Case-D evidence.
+The older `deeaa46-retry2` decision/retention files are not accepted final lineage.
 
 ### Path normalization
 
-For retained-manifest path comparisons, normalize to repository-relative POSIX paths:
-
-1. replace backslashes with `/`;
-2. strip one exact prefix if present: `D:/DeadlycatCoding/STSRL/` or `/mnt/d/DeadlycatCoding/STSRL/`;
-3. strip one leading `./`;
-4. collapse `.` and reject any `..` component;
-5. require prefix `artifacts/`;
-6. compare the case-sensitive normalized string exactly.
-
-No basename-only comparison is valid.
+All identity comparisons use repository-relative POSIX paths. Replace `\\` with `/`; strip one exact stable-root prefix (`D:/DeadlycatCoding/STSRL/` or `/mnt/d/DeadlycatCoding/STSRL/`) when present; strip one leading `./`; collapse `.`; reject `..`; require prefix `artifacts/`; then compare case-sensitively. Basename-only matching is invalid.
 
 ### Accepted historical preflight aliases
 
-The two retained source manifests used different historical preflight aliases. T075 accepts exactly:
+Exactly these source-specific pairs are accepted:
 
-| Source arm | Raw preflight alias | Retention alias |
+| Arm | Raw alias | Retention alias |
 |---|---|---|
-| `stochastic_non_combat_v1` | `artifacts/t065-learned-non-combat-policy-v1/preflight-c57b2ee-20260827.json` | `artifacts/t065-learned-non-combat-policy-v1/preflight-c57b2ee-20260827.retention.json` |
-| `expert_non_combat_v1` | `artifacts/t065-learned-non-combat-policy-v1/preflight-968797e-20260827.json` | `artifacts/t065-learned-non-combat-policy-v1/preflight-968797e-20260827.retention.json` |
+| stochastic | `artifacts/t065-learned-non-combat-policy-v1/preflight-c57b2ee-20260827.json` | `artifacts/t065-learned-non-combat-policy-v1/preflight-c57b2ee-20260827.retention.json` |
+| expert | `artifacts/t065-learned-non-combat-policy-v1/preflight-968797e-20260827.json` | `artifacts/t065-learned-non-combat-policy-v1/preflight-968797e-20260827.retention.json` |
 
-For either arm, the raw alias must exist at that exact normalized path, hash to `a89560d037ea4555922d0e1282edb8e328ce75ab6e1d720fd05f86022b56c334`, parse with the accepted T065 preflight schema/version, record approved T065 spec `a13c92a66b4d9ad9f6a730293cadc8d66b4a699c`, and match the pinned simulator/controller/action-space identity. The corresponding retention alias must parse successfully and reference that raw alias. The validator computes and records the full persisted retention-alias SHA-256; it does not guess a full hash from review-comment prefixes.
+Each raw alias must hash to `a89560d037ea4555922d0e1282edb8e328ce75ab6e1d720fd05f86022b56c334`, parse as the accepted T065 preflight schema/version, record `T065_APPROVED_SPEC`, and match the pinned simulator/controller/action-space identity. The paired retention alias must parse, reference that raw alias, and be internally compatible. T075 computes and records each retention alias's actual full SHA-256 rather than inferring it from review-comment prefixes.
 
-### Mechanically frozen source-retention resolver
+## Exact two-level source-retention resolver
 
-The resolver is exactly two-level and does not recursively scan lineage references.
+The resolver does not recursively search lineage graphs.
 
-For each required raw source independently:
+For each frozen raw source independently:
 
-1. Enumerate only files matching `T065/*.retention.json`, in normalized path order.
-2. Strict-read each candidate as `t065-retention-manifest-v1`, schema version `1`, `task_id="T065"`, approved spec `a13c92a66b4ad25a7b0bdc8097cc0cfdc26dffa`, with valid `artifacts`, `stage_evidence`, `preceding_stage_manifests`, `regeneration_commands`, `simulator_identity`, and `frozen_config` fields.
-3. A retention manifest is a candidate for this source only when `artifacts[]` contains exactly one entry whose `role == "current_output"` and whose normalized `path`, `size_bytes`, and `sha256` equal the frozen raw-source identity above. Mentions under `preceding_stage_manifests`, including the accepted final Case-D manifest's references to both source manifests, are never matching discriminators.
-4. Exactly one candidate manifest must remain. Zero or more than one is Case D at `source-input-reuse`.
-5. For that candidate manifest, require `stage_evidence["stage1-source-collection"]` with:
-   - `stage == "stage1-source-collection"`;
-   - `status == "completed"`;
-   - `terminal is false`;
-   - `artifact_roles` containing `current_output`;
-   - `preceding_stage_manifests["stage0_preflight"]` equal to the arm-specific accepted preflight-retention alias descriptor after path/hash/size validation;
-   - non-empty `command` equal to the sole entry in top-level `regeneration_commands`.
-6. The retention manifest's top-level `frozen_config` must equal the frozen `T065ExperimentConfig().to_dict()` and top-level `simulator_identity` must equal the pinned current identity. These fields prove retained workflow configuration; command text is retained as provenance and is not parsed to infer scientific counts.
-7. All source-arm/completeness predicates are proved from the referenced raw source JSON metadata, not guessed from retention-stage text. The exact authoritative top-level raw-source fields are:
+1. Enumerate only direct `T065/*.retention.json` files in normalized-path order.
+2. Strict-read candidate roots as `t065-retention-manifest-v1`, version `1`, `task_id="T065"`, `approved_spec_commit == T065_APPROVED_SPEC`, with mappings/lists required by the existing strict T065 retention reader.
+3. A root becomes a candidate only when `artifacts[]` contains exactly one entry with `role == "current_output"` whose normalized `path`, `size_bytes`, and `sha256` equal the frozen raw source. References under `preceding_stage_manifests` never count as matches. Thus the final Case-D retention manifest cannot falsely match merely because it references both source manifests.
+4. Exactly one root candidate must remain. Zero or multiple candidates are Case D at `source-input-reuse`.
+5. The candidate must contain `stage_evidence["stage1-source-collection"]` with `stage == "stage1-source-collection"`, `status == "completed"`, `terminal is false`, `artifact_roles` containing `current_output`, and `preceding_stage_manifests["stage0_preflight"]` equal to the arm-specific accepted preflight-retention descriptor after path/hash/size validation.
+6. The candidate's `regeneration_commands` must contain exactly one non-empty command and that string must equal `stage_evidence["stage1-source-collection"]["command"]`. The command is retained as provenance and is not parsed to infer scientific counts.
+7. Candidate top-level `frozen_config` must equal the frozen current `T065ExperimentConfig().to_dict()` and top-level `simulator_identity` must equal `lightspeed_source_identity_dict()`.
+8. Remaining scientific predicates are proved from the raw source JSON metadata. Exact required top-level fields are:
    - `schema_id == "t065-learned-non-combat-policy-v1"`, `schema_version == 1`;
-   - `approved_spec_commit == a13c92a66b4ad25a7b0bdc8097cc0cfdc26dffa`;
+   - `approved_spec_commit == T065_APPROVED_SPEC`;
    - `frozen_config == T065ExperimentConfig().to_dict()`;
-   - `arm` equals the expected arm;
+   - `arm` equals expected arm;
    - `driver_seed == 654001`;
-   - `requested_seed_count == 256`;
-   - `terminal_run_count == 256`;
-   - `truncated_run_count == 0`;
-   - `failed_run_count == 0`;
-   - `selected_candidate_count == len(records)`;
-   - `problems == []`;
-   - `worker_count == 16`;
-   - `shard_count == 16`;
-   - `action_space == ActionSpaceConfig.initial_no_potions().to_dict()`;
-   - `battle_controller_provenance == frozen_battle_provenance()` with name `oracle_search_v1_highest_mean_s20`;
+   - `requested_seed_count == 256`, `terminal_run_count == 256`, `truncated_run_count == 0`, `failed_run_count == 0`;
+   - `selected_candidate_count == len(records)`, `problems == []`;
+   - `worker_count == 16`, `shard_count == 16`;
+   - `action_space == frozen_action_space().to_dict()`;
+   - `battle_controller_provenance == frozen_battle_provenance()` and its name is `oracle_search_v1_highest_mean_s20`;
    - `simulator_identity == lightspeed_source_identity_dict()`;
-   - `run_summaries` contains exactly 256 terminal, problem-free summaries for simulator seeds `650001..650256`, each with matching `source_arm` and `source_run_id == f"{arm}:{seed}"`.
-8. `shard_specs` must contain exactly 16 ordered entries. For shard index `i=0..15`, require `shard_index=i`, `seed_start=650001+16*i`, `seed_end=650016+16*i`, `seed_count=16`, `worker_count=16`, `requested_seed_count=16`, `terminal_run_count=16`, `truncated_run_count=0`, `failed_run_count=0`, and empty `problems`.
-9. The candidate source manifest must point through its `stage0_preflight` lineage to the arm-specific c57/968 alias pair above. Preserve the source-manifest path/hash, raw-source path/hash/size, preflight raw path/hash, preflight retention path/full computed hash, and exact original regeneration command in T075 reuse evidence.
+   - `run_summaries` has exactly 256 problem-free terminal entries for seeds `650001..650256`, with matching `source_arm` and `source_run_id == f"{arm}:{seed}"`.
+9. Raw `shard_specs` has exactly 16 ordered entries. For `i=0..15`: `shard_index=i`, `seed_start=650001+16*i`, `seed_end=650016+16*i`, `seed_count=16`, `worker_count=16`, `requested_seed_count=16`, `terminal_run_count=16`, `truncated_run_count=0`, `failed_run_count=0`, and empty `problems`.
+10. Preserve in T075 reuse evidence: source manifest path/hash, `current_output` identity, raw source path/hash/size, raw metadata validation result, exact Stage-1 evidence, top-level config/simulator identity, referenced preflight raw/retention paths and full hashes, and original regeneration command.
 
-Any mismatch is Case D at `source-input-reuse`. T075 never recollects either source.
+Any mismatch is Case D at `source-input-reuse`.
 
-## Candidate Domain And Global Ownership
+## Candidate domain and global ownership
 
-Ownership admits only strict-reader-valid `t065-source-state-v1` rows whose source run has `terminal == true`, family is exactly one of `MAP_SCREEN`, `REST_ROOM`, `REWARDS`, `TREASURE_ROOM`, simulator seed maps to the frozen T065 split, and existing T065 public/model/action/replay/provenance checks pass. Nonterminal/truncated rows remain audited evidence but cannot become owners or selected states. Malformed/provenance-invalid rows are Case D.
+Selectable candidates must pass the strict `t065-source-state-v1` reader, come from a source run with `terminal == true`, belong to exactly `MAP_SCREEN`, `REST_ROOM`, `REWARDS`, or `TREASURE_ROOM`, retain the frozen seed split, and pass existing T065 public/model/action/replay/provenance checks. Nonterminal/truncated rows remain auditable but never selectable.
 
-Replay-equivalence key remains exactly:
+Replay equivalence remains:
 
 ```text
 (family, public_state_identity, ordered_legal_action_identities)
 ```
 
-Canonical JSON uses UTF-8, sorted keys, separators `(',', ':')`, `ensure_ascii=False`, `allow_nan=False`, with no newline in digest bytes.
+Canonical JSON is UTF-8, sorted keys, separators `(',', ':')`, `ensure_ascii=False`, `allow_nan=False`, with no digest newline.
 
 ```text
 T075_GROUP_DOMAIN = b"T075-replay-group-v1\n"
-group_payload = {
+group_digest = sha256(T075_GROUP_DOMAIN + canonical_json({
   "family": family,
   "public_state_identity": public_state_identity,
-  "ordered_legal_action_identities": ordered JSON-safe identity mappings
-}
-group_digest = sha256(T075_GROUP_DOMAIN + canonical_json(group_payload)).hexdigest()
+  "ordered_legal_action_identities": ordered_legal_action_identities
+})).hexdigest()
 ```
 
-Groups serialize ascending by `group_digest`. Member ordering remains T065:
+Member order remains exactly T065:
 
 ```text
 selection_digest = sha256(
@@ -188,115 +157,47 @@ selection_digest = sha256(
 member_order_key = (selection_digest, canonical_candidate_json_bytes)
 ```
 
-If distinct rows tie on the full pair, Case D at `cohort-ownership`; do not add another tie-break field. Otherwise the first member is the sole owner and keeps its simulator-seed split. All non-owners are excluded before quota selection. Selection strategy id is `leakage-safe-global-owner-v1`.
+Exact full-key ties between distinct source rows are Case D. Otherwise first member is the sole owner and keeps its simulator-seed split. Non-owners are excluded before the unchanged 48/16/16 quotas. Strategy id is `leakage-safe-global-owner-v1`.
 
-## Artifact Schemas
+## T075 artifact schemas
 
-Every T075 schema below has `schema_version = 1`. Missing required fields, wrong version/order, non-finite values, parent mismatch, or required file/hash mismatch fails closed.
+All have `schema_version=1`; required-field, version, ordering, parent, non-finite, or hash mismatch fails closed.
 
 ### `t075-retained-source-reuse-manifest-v1`
 
-Required fields:
+Required: `schema_id`, `schema_version`, `task_id`, `approved_t075_spec_commit`, `planner_baseline`, `code_head`, `pinned_simulator_identity`, `accepted_t065_preflight_content_sha256`, `accepted_t065_case_d`, ordered `sources`, `validation`, `original_regeneration_commands`, `problems`.
 
-```text
-schema_id
-schema_version = 1
-task_id = T075
-approved_t075_spec_commit
-planner_baseline = 95ccb6b55bc7a0214b632206ae169a533289fcf2
-code_head
-pinned_simulator_identity
-accepted_t065_preflight_content_sha256
-accepted_t065_case_d
-sources
-validation
-original_regeneration_commands
-problems
-```
-
-`sources` is ordered stochastic then expert. Each entry records raw path/size/hash, expected arm, strict raw-metadata validation result, matched source-retention path/hash, `current_output` discriminator identity, exact `stage1-source-collection` evidence, top-level frozen config/simulator identity, referenced preflight raw/retention aliases and full hashes, and compatibility status.
+Each source entry records every resolver identity/evidence item listed above. Source order is stochastic then expert.
 
 ### `t075-replay-group-ownership-audit-v1`
 
-Required fields:
+Required: `schema_id`, `schema_version`, `task_id`, `approved_t075_spec_commit`, `code_head`, `selection_strategy_id`, `replay_identity`, `selection_domain`, `group_domain`, `parent_reuse_manifest_sha256`, `parent_current_preflight_sha256`, `candidate_domain_counts`, `group_count`, `singleton_group_count`, `non_singleton_group_count`, `cross_split_group_count`, `excluded_non_owner_count`, `group_counts_by_family`, `group_counts_by_split`, `group_size_histogram`, `owner_counts_by_family_split`, `groups`, `problems`.
 
-```text
-schema_id
-schema_version = 1
-task_id = T075
-approved_t075_spec_commit
-code_head
-selection_strategy_id = leakage-safe-global-owner-v1
-replay_identity = t065-replay-equivalence-key-unchanged
-selection_domain = T065-source-selection-v1
-group_domain = T075-replay-group-v1
-parent_reuse_manifest_sha256
-parent_current_preflight_sha256
-candidate_domain_counts
-group_count
-singleton_group_count
-non_singleton_group_count
-cross_split_group_count
-excluded_non_owner_count
-group_counts_by_family
-group_counts_by_split
-group_size_histogram
-owner_counts_by_family_split
-groups
-problems
-```
-
-`candidate_domain_counts` is ordered arm -> family -> split and records raw, terminal, nonterminal-excluded, unsupported-family-excluded, and valid-terminal counts. `group_counts_by_family` uses frozen family order. `group_counts_by_split` uses train/validation/heldout order. `group_size_histogram` is ascending integer group size. `owner_counts_by_family_split` contains the 12 family-major/split-minor owner counts before quota selection. `groups` is ascending by group digest and records family, size, represented splits, cross-split flag, ordered members, owner or null, and exclusion count.
-
-Ordered parents are exactly `[stage0-retained-source-reuse.json, stage0-preflight.json]` by persisted SHA-256.
+Counts are ordered arm -> family -> split; family order is MAP/REST/REWARDS/TREASURE; split order is train/validation/heldout; histogram is ascending group size; groups are ascending group digest. Ordered parents are `[stage0-retained-source-reuse.json, stage0-preflight.json]` by persisted SHA-256.
 
 ### `t075-source-selection-manifest-v1`
 
-Required fields:
+Required: `schema_id`, `schema_version`, `task_id`, `approved_t075_spec_commit`, `code_head`, `selection_strategy_id`, `parent_reuse_manifest_sha256`, `parent_current_preflight_sha256`, `parent_ownership_audit_sha256`, `selected_states_path`, `selected_states_sha256`, `selected_state_schema_id=t065-source-state-v1`, `selected_state_file_format=t065-source-state-jsonl-v1`, frozen family/split order, quotas, `post_owner_available_counts`, `selected_counts`, `selected_replay_identity_digests`, `replay_verification`, `problems`.
 
-```text
-schema_id
-schema_version = 1
-task_id = T075
-approved_t075_spec_commit
-code_head
-selection_strategy_id = leakage-safe-global-owner-v1
-parent_reuse_manifest_sha256
-parent_current_preflight_sha256
-parent_ownership_audit_sha256
-selected_states_path
-selected_states_sha256
-selected_state_schema_id = t065-source-state-v1
-selected_state_file_format = t065-source-state-jsonl-v1
-family_order = [MAP_SCREEN, REST_ROOM, REWARDS, TREASURE_ROOM]
-split_order = [train, validation, heldout]
-quotas = {train:48, validation:16, heldout:16}
-post_owner_available_counts
-selected_counts
-selected_replay_identity_digests
-replay_verification
-problems
-```
+Ordered parents are `[stage0-retained-source-reuse.json, stage0-preflight.json, stage1-replay-group-ownership-audit.json]`. `stage1-selected-states.json` is UTF-8 JSONL, exactly one complete `t065-source-state-v1` object per line, indices `0..319`, no wrapper, final newline. Replay requires 320 attempted/restored and zero mismatch/replacement/selected duplicate/cross-split overlap.
 
-Ordered parents are `[stage0-retained-source-reuse.json, stage0-preflight.json, stage1-replay-group-ownership-audit.json]`. `stage1-selected-states.json` is UTF-8 JSONL with exactly one complete `t065-source-state-v1` object per line, selected indices `0..319` in order, no wrapper, and one final newline. Replay verification requires 320 attempted/restored, zero mismatch/replacement, zero selected replay duplicate, and zero selected cross-split replay overlap.
+## Stage 3 is a mandatory Stage-2 subphase
 
-### Stage 3 placement: mandatory validation inside Stage 2
+T075 explicitly chooses review option (a): Stage 3 is not a separate command. The Stage-2 `target` command includes a mandatory post-generation validation subphase. Execution stage name remains `stage2-target`; it is incomplete until Stage-3 validation passes.
 
-T075 chooses Maintainer option (a): there is no independent Stage-3 command or worker stage. Stage 3 is a mandatory post-generation validation subphase inside the Stage-2 `target` command. The execution stage remains `stage2-target`, but it is not complete until this subphase passes.
+After target generation and before a completed Stage-2 retention manifest, the command must:
 
-The Stage-2 command must, after writing the target table and before writing a completed Stage-2 retention manifest:
+1. reopen the persisted target table with strict `read_target_table`;
+2. apply complete-table validation equivalent to current `T065TargetTable.validate_complete()`;
+3. verify actual target-table path/hash/size and selected-state path/hash/size/record count;
+4. verify 320 selected states, indices `0..319`, and exact per-family 48/16/16 split counts;
+5. verify every eligible legal action has exactly one target, correct legal order, correct split-specific continuation seeds, finite `q_floor`, and no state/action replacement or omission;
+6. verify exact `non-combat-model-input-v1` v1, state/action dimensions 4737/92, finite features, frozen order/missing/OOV semantics;
+7. verify selection/source lineage, fresh T075 preflight identity, simulator identity, and Stage-1 retention parents;
+8. run the existing public-input firewall/strict source-model validation so behavior action, expert score/prior, target/outcome, hidden future, native checkpoint/payload, hidden RNG/draw order, or other forbidden public-context fields cannot enter deployable input;
+9. atomically write `stage2-target-validation.json` and only then mark `stage2-target` completed.
 
-1. reopen `stage2-target-table.json` through the strict current `read_target_table` reader;
-2. call the existing complete-table validation semantics equivalent to `T065TargetTable.validate_complete()`;
-3. verify the persisted target-table SHA-256/size and parent selected-state path/hash/size/record-count;
-4. verify exactly 320 selected states with family/split counts 48/16/16 and indices `0..319`;
-5. verify every eligible legal action has exactly the frozen target representation, no missing/duplicate action target, correct legal-action order, correct continuation-seed contract for the state's split, finite `q_floor`, and no dropped/replaced state/action;
-6. verify `model_input_schema` equals exact `non-combat-model-input-v1` v1 and every state/action vector has dimensions 4737/92 with finite values and frozen ordering/missing/OOV semantics;
-7. verify selected-state/selection-digest/source-artifact lineage, target-table simulator identity, fresh T075 preflight identity, and Stage-1 selection-retention identity all match their ordered parents;
-8. run the public-input firewall through the existing strict source/model-input validation: no behavior action, expert score/prior, target/outcome, hidden future, native checkpoint/payload, hidden RNG/draw order, or other forbidden public-context field may enter model input;
-9. write `stage2-target-validation.json` and only then mark `stage2-target` completed.
-
-`stage2-target-validation.json` schema is `t075-stage3-validation-report-v1` with required fields:
+`stage2-target-validation.json` schema is `t075-stage3-validation-report-v1` and requires:
 
 ```text
 schema_id = t075-stage3-validation-report-v1
@@ -321,15 +222,17 @@ passed
 problems
 ```
 
-`checks` contains, in this exact order: `strict_target_reader`, `target_completeness`, `selected_state_lineage`, `simulator_and_preflight_lineage`, `model_input_schema`, `state_action_dimensions`, `finite_numeric_values`, `legal_action_order`, `continuation_seed_contract`, `public_input_firewall`. Each has `status=passed|failed` and deterministic counts. `violation_counts` contains `missing_target_rows`, `duplicate_target_rows`, `nonfinite_targets`, `model_input_mismatches`, `lineage_mismatches`, `legal_action_mismatches`, `continuation_seed_mismatches`, and `firewall_violations`.
+`checks`, in order: `strict_target_reader`, `target_completeness`, `selected_state_lineage`, `simulator_and_preflight_lineage`, `model_input_schema`, `state_action_dimensions`, `finite_numeric_values`, `legal_action_order`, `continuation_seed_contract`, `public_input_firewall`. Each records `status=passed|failed` plus deterministic counts.
 
-Any failed check is Case D with `terminal_stage=stage2-target` and `reason_code=stage3-validation-failed`. A failed validation may retain the target table and validation report as failed-stage evidence but must not emit a completed `stage2-target-table.retention.json`. Stage 4 must not start.
+`violation_counts` requires: `missing_target_rows`, `duplicate_target_rows`, `nonfinite_targets`, `model_input_mismatches`, `lineage_mismatches`, `legal_action_mismatches`, `continuation_seed_mismatches`, `firewall_violations`.
 
-A completed `stage2-target-table.retention.json` must include both `stage2-target-table.json` and `stage2-target-validation.json` as Stage-2 outputs and must record `stage3_validation_status=passed` in `stage_evidence["stage2-target"]`.
+Any failed check is Case D with `terminal_stage=stage2-target`, `reason_code=stage3-validation-failed`. Failed validation may retain target/validation files as failed-stage evidence but may not emit a completed `stage2-target-table.retention.json`. Stage 4 cannot start.
 
-### `t075-terminal-decision-report-v1`
+A completed Stage-2 retention manifest must contain both target table and validation report as outputs and record `stage3_validation_status=passed` in `stage_evidence["stage2-target"]`.
 
-`terminal-decision-report.json` uses canonical UTF-8 JSON with sorted keys, compact separators `(',', ':')`, `ensure_ascii=False`, `allow_nan=False`, and one trailing newline. Required fields:
+## Terminal decision schema
+
+`t075-terminal-decision-report-v1` is canonical UTF-8 JSON, sorted keys, compact separators, `ensure_ascii=False`, `allow_nan=False`, one trailing newline. Required:
 
 ```text
 schema_id = t075-terminal-decision-report-v1
@@ -352,39 +255,21 @@ recommendation
 problems
 ```
 
-Stage-3 validation failure is reported under terminal stage `stage2-target`. Any Stage 0/1/2/4 fidelity/completeness failure is Case D; valid Stage-5 gate failure is Case C; valid Stage-5 pass authorizes Stage 6; Stage 6 writes Case A/B or Stage-6 Case D. After the first valid terminal report exists, downstream scientific stages are skipped and no later command may change its semantic content. Every scientific command receives the same `--decision-report "$ROOT/terminal-decision-report.json"`; `finalize` validates and retains the existing report rather than inferring another case.
+Stage-3 failure is terminal stage `stage2-target`. Stage 0/1/2/4 fidelity/completeness failures are Case D; valid Stage-5 gate failure is Case C; valid Stage-5 pass authorizes Stage 6; Stage 6 writes Case A/B or Stage-6 Case D. First valid terminal report wins; downstream scientific stages are skipped and may not rewrite semantic content. Every stage uses the same explicit `--decision-report "$ROOT/terminal-decision-report.json"`. Finalization validates/retains rather than reinterprets.
 
-### `t075-retention-manifest-v1`
+## Final retention schema
 
-Required fields:
+`t075-retention-manifest-v1` requires `schema_id`, `schema_version`, `task_id`, `approved_t075_spec_commit`, `planner_baseline`, `terminal_case`, `retention_owner=T075`, `retention_reason`, `reused_artifacts`, `produced_artifacts`, `stage_commands`, `stage_evidence`, `downstream_consumers`, `deletion_condition`, `problems`.
 
-```text
-schema_id
-schema_version = 1
-task_id = T075
-approved_t075_spec_commit
-planner_baseline
-terminal_case
-retention_owner = T075
-retention_reason
-reused_artifacts
-produced_artifacts
-stage_commands
-stage_evidence
-downstream_consumers
-deletion_condition
-problems
-```
-
-`stage_commands` and `stage_evidence` use execution-stage order:
+Execution-stage order is exactly:
 
 `stage0-preflight`, `stage0-reuse`, `stage1-selection-replay`, `stage2-target`, `stage4-train`, `stage5-gate`, `stage6-eval`, `terminal-finalize`.
 
-Stage 3 is not a separate execution entry; its passed/failed evidence is part of `stage2-target`, whose outputs include the validation report. Each stage-command entry records exact command, executed/skipped status, skip reason, code head, start/end, exit/terminal status, wall-clock, shard/worker/range evidence, parent identities, and output identities. Each stage-evidence entry records executed flag, terminal status, code head, shard/worker/ranges, per-shard return status, wall-clock, parent/output identities, counts, and problems.
+Stage 3 has no separate execution entry; its status/output is part of `stage2-target`. Each command entry records exact command, executed/skipped, skip reason, code head, start/end, exit/terminal status, wall-clock, shard/worker/ranges, parent identities, output identities. Each evidence entry records executed flag, terminal status, code head, shard/worker/ranges, per-shard return status, wall-clock, parent/output identities, counts, and problems.
 
-## Stage 1 Replay Sharding
+## Frozen sharding
 
-After owner/quota selection assigns indices `0..319`, replay verification is exactly 16 contiguous shards of 20 indices:
+Stage-1 replay and Stage-2 target generation use exactly 16 contiguous 20-state shards:
 
 ```text
 00 000..019   04 080..099   08 160..179   12 240..259
@@ -393,9 +278,9 @@ After owner/quota selection assigns indices `0..319`, replay verification is exa
 03 060..079   07 140..159   11 220..239   15 300..319
 ```
 
-Requested and required actual worker count is 16, with at most 16 concurrent simulator workers. Failure to establish that plan is Case D before replay.
+Requested/required actual worker count is 16, at most 16 concurrent simulator workers. Failure to establish this plan is Case D before the substantial run.
 
-## Frozen Command Templates
+## Frozen commands
 
 Common prefix:
 
@@ -409,7 +294,7 @@ cd "$CODE"
 export PYTHONPATH=/home/lsmft/stsrl-spikes/sts_lightspeed/build-py313-torch:$CODE/src
 ```
 
-Local/focused gates:
+Local gates:
 
 ```bash
 pytest -q tests/test_non_combat_learning.py
@@ -432,7 +317,7 @@ $PY -m sts_combat_rl.commands.non_combat_learning preflight \
   --decision-report "$ROOT/terminal-decision-report.json"
 ```
 
-Retained-source reuse validation:
+Reuse validation:
 
 ```bash
 $PY -m sts_combat_rl.commands.non_combat_learning validate-reuse \
@@ -450,7 +335,7 @@ $PY -m sts_combat_rl.commands.non_combat_learning validate-reuse \
   --decision-report "$ROOT/terminal-decision-report.json"
 ```
 
-Stage 1 selection/replay:
+Stage 1:
 
 ```bash
 $PY -m sts_combat_rl.commands.non_combat_learning select \
@@ -467,9 +352,9 @@ $PY -m sts_combat_rl.commands.non_combat_learning select \
   --decision-report "$ROOT/terminal-decision-report.json"
 ```
 
-No `collect` invocation is permitted in T075.
+No `collect` command is allowed in T075.
 
-Stage 2 target generation plus mandatory Stage-3 validation:
+Stage 2 + mandatory logical Stage 3:
 
 ```bash
 $PY -m sts_combat_rl.commands.non_combat_learning target \
@@ -484,9 +369,9 @@ $PY -m sts_combat_rl.commands.non_combat_learning target \
   --decision-report "$ROOT/terminal-decision-report.json"
 ```
 
-Stage 2 uses the same 16 x 20 selected-index ranges and frozen continuation actions/seeds. This command is successful only after `t075-stage3-validation-report-v1` passes and is persisted. There is no separate Stage-3 command.
+There is no separate Stage-3 command. This command succeeds only after `t075-stage3-validation-report-v1` passes.
 
-Stage 4 training:
+Stage 4:
 
 ```bash
 $PY -m sts_combat_rl.commands.non_combat_learning train \
@@ -500,7 +385,7 @@ $PY -m sts_combat_rl.commands.non_combat_learning train \
   --decision-report "$ROOT/terminal-decision-report.json"
 ```
 
-Stage 4 must verify the validation artifact is `passed=true`, its target-table/selected-state/preflight parent hashes match the actual inputs, and the completed Stage-2 retention manifest contains both target and validation outputs. Otherwise Case D before any optimizer step. Exactly model seeds 653001/653002 are trained; two processes may run concurrently, each with `torch_threads=1`.
+Before any optimizer step Stage 4 must validate `passed=true`, validation parent hashes, and that completed Stage-2 retention contains both target and validation artifacts. Model seeds remain exactly 653001/653002, two processes maximum, `torch_threads=1` each.
 
 Stage 5:
 
@@ -515,9 +400,9 @@ $PY -m sts_combat_rl.commands.non_combat_learning evaluate \
   --decision-report "$ROOT/terminal-decision-report.json"
 ```
 
-Valid Stage-5 failure is Case C and writes the terminal report; valid Stage-5 pass authorizes Stage 6.
+Valid Stage-5 failure is Case C; pass authorizes Stage 6.
 
-Conditional Stage 6:
+Stage 6:
 
 ```bash
 $PY -m sts_combat_rl.commands.non_combat_learning evaluate \
@@ -532,7 +417,7 @@ $PY -m sts_combat_rl.commands.non_combat_learning evaluate \
   --decision-report "$ROOT/terminal-decision-report.json"
 ```
 
-Stage 6 remains three matched arms x 16 shards x 16 seeds, fresh seeds `651001..651256`, at most 16 concurrent simulator workers, 768 terminal runs for a valid complete stage.
+Stage 6 remains three matched arms x 16 shards x 16 fresh seeds, seeds `651001..651256`, 768 terminal runs for a valid complete stage.
 
 Finalization:
 
@@ -543,12 +428,12 @@ $PY -m sts_combat_rl.commands.non_combat_learning finalize \
   --retention-manifest "$ROOT/t075-retention-manifest.json"
 ```
 
-`finalize` requires an already valid `t075-terminal-decision-report-v1`; it validates and retains it and must not infer or replace terminal semantics.
+Finalization validates/retains an existing terminal report and may not infer another case.
 
-## Retention And Failure Rules
+## Retention and failure rules
 
-T075 owns retention of both raw T065 sources from implementation authorization until its terminal result merges. They are retained because they are the unique approved source evidence for deterministic repaired cohort construction. They may be deleted only after a merged terminal T075 report/compact retention manifest, no open/approved task still requires them, Maintainer records no pending reproduction need, and accepted compact downstream evidence is retained. T075 never deletes them during execution.
+T075 owns retention of both raw T065 sources from implementation authorization until its terminal result merges. Deletion requires a merged terminal T075 report/compact retention manifest, no open/approved task requiring the inputs, no Maintainer reproduction hold, and retained compact downstream evidence. T075 never deletes sources during execution.
 
-Case D includes retained-input resolver mismatch/ambiguity, invalid preflight alias/content/provenance, path-normalization failure, wrong/dirty checkout, approved-spec ancestry failure, fresh-preflight failure, exact owner-key tie, insufficient owner bucket, selected replay failure, target incompleteness, Stage-3 validation/firewall/lineage/model-input failure, simulator/provenance mismatch, or forbidden truncation. T075 may not recollect sources or tune ownership to recover.
+Case D includes source-resolver mismatch/ambiguity, invalid preflight alias/content/provenance, path normalization failure, wrong/dirty checkout, approved-spec ancestry failure, fresh-preflight failure, owner-key tie, quota shortfall, selected replay failure, target incompleteness, logical Stage-3 model-input/lineage/firewall failure, simulator/provenance mismatch, or forbidden truncation. Source recollection or tuning the ownership rule to recover is forbidden.
 
-The implementation report must include exact approved spec, code head per stage, normalized input identities, matched source-manifest discriminator/evidence, raw-source metadata validation, preflight aliases/full hashes, fresh-preflight parent identity, ownership counts by family/split/group size, post-owner/selected counts, Stage-1 replay evidence, Stage-2 target and Stage-3 validation counts/status, reached/skipped stage commands/evidence, terminal-decision identity/parents, artifact hashes/sizes/parents, full/focused verification, costs, exactly one terminal Case A/B/C/D, and exactly one next recommendation.
+The implementation report must include exact approved spec and code head per stage, source resolver identities/evidence, raw-source metadata checks, historical preflight aliases/full hashes, fresh preflight identity, ownership/group statistics, post-owner/selected counts, Stage-1 replay evidence, Stage-2 target and logical Stage-3 validation counts/status, all reached/skipped stage commands/evidence, terminal-decision identity/parents, artifacts/hashes/sizes/parents, full/focused verification, costs, exactly one terminal Case A/B/C/D, and exactly one next recommendation.
