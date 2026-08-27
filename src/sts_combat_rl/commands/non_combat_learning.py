@@ -11,6 +11,7 @@ import argparse
 from collections.abc import Iterator
 from dataclasses import dataclass, replace
 import json
+import os
 from pathlib import Path
 import shlex
 import sys
@@ -525,6 +526,9 @@ def _code_head_for_artifact_root(args: argparse.Namespace) -> str:
     value = getattr(args, "code_head", None)
     if isinstance(value, str) and value:
         return value
+    environment_head = os.environ.get("T075_CODE_HEAD")
+    if environment_head:
+        return environment_head
     try:
         import subprocess
 
