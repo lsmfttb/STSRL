@@ -73,6 +73,13 @@ from sts_combat_rl.sim.non_combat_model_input import (
 from sts_combat_rl.sim.public_context_model_input import (
     PUBLIC_CONTEXT_MODEL_INPUT_FEATURE_NAMES,
 )
+from sts_combat_rl.commands.non_combat_learning import (
+    _portable_path,
+    _run_t075_finalize,
+    _t075_target_row_completeness,
+    _t075_write_stage3_report,
+    _write_t075_stage_retention,
+)
 
 
 def _state(index: int, family: str, split: str, seed: int) -> T065SourceState:
@@ -1991,4 +1998,163 @@ def test_t075_global_ownership_preserves_exact_family_split_quotas() -> None:
         == (48 if split == "train" else 16)
         for family in T065_MANDATORY_FAMILIES
         for split in ("train", "validation", "heldout")
+    )
+
+
+def test_t075_process_shard_plan_rejects_non_matching_worker_count() -> None:
+    from sts_combat_rl.sim.non_combat_learning import (
+        generate_counterfactual_targets_process_sharded,
+    )
+
+    with pytest.raises(ValueError, match="worker count must equal shard count"):
+        generate_counterfactual_targets_process_sharded(
+            (),
+            shard_specs=(
+                {
+                    "shard_index": 0,
+                    "selected_state_start": 0,
+                    "selected_state_end": -1,
+                },
+            ),
+            worker_count=2,
+            output_directory=Path("unused"),
+        )
+
+
+def test_t075_portable_path_converts_wsl_mount() -> None:
+    assert _portable_path("/mnt/d/DeadlycatCoding/STSRL/artifacts/x.json") == Path(
+        "D:/DeadlycatCoding/STSRL/artifacts/x.json"
+    )
+
+
+def test_t075_stage3_target_completeness_uses_exact_expected_keys() -> None:
+    states = [
+        SimpleNamespace(selected_state_index=0, eligible_action_indices=(0, 1)),
+        SimpleNamespace(selected_state_index=1, eligible_action_indices=(0, 1)),
+    ]
+    targets = [
+        SimpleNamespace(selected_state_index=0, legal_action_index=0),
+        SimpleNamespace(selected_state_index=1, legal_action_index=0),
+        SimpleNamespace(selected_state_index=1, legal_action_index=1),
+        SimpleNamespace(selected_state_index=2, legal_action_index=0),
+    ]
+
+    result = _t075_target_row_completeness(states, targets)
+
+    assert result["expected_row_count"] == 4
+    assert result["actual_row_count"] == 4
+    assert result["missing_row_count"] == 1
+    assert result["unexpected_row_count"] == 1
+    assert result["duplicate_row_count"] == 0
+    assert result["complete"] is False
+
+
+def test_t075_retention_does_not_synthesize_completed_failure(tmp_path) -> None:
+    artifact = tmp_path / "report.json"
+    artifact.write_text("{}\n", encoding="utf-8")
+    retention = tmp_path / "failed.retention.json"
+    args = SimpleNamespace(
+        retention_manifest=retention,
+        _command_argv=(),
+        code_head="test-head",
+    )
+    value = _write_t075_stage_retention(
+        args,
+        stage="stage5-gate",
+        artifacts={"stage5_report": artifact},
+        evidence={
+            "executed": True,
+            "status": "failed",
+            "terminal": False,
+            "problems": ["gate failed"],
+        },
+        terminal_case="C",
+    )
+    assert value["stage_commands"]["stage5-gate"]["status"] == "failed"
+    assert value["stage_commands"]["stage5-gate"]["terminal"] is False
+    assert value["stage_evidence"]["stage5-gate"]["problems"] == ["gate failed"]
+
+
+def test_t075_stage3_reader_failure_is_materialized_as_failed_report(
+    tmp_path, monkeypatch
+) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command_module
+
+    table_path = tmp_path / "target.json"
+    states_path = tmp_path / "states.jsonl"
+    selection_path = tmp_path / "selection.json"
+    preflight_path = tmp_path / "preflight.json"
+    report_path = tmp_path / "validation.json"
+    for path in (table_path, states_path, selection_path, preflight_path):
+        path.write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(
+        command_module,
+        "read_target_table",
+        lambda _path: (_ for _ in ()).throw(ValueError("tampered target")),
+    )
+    args = SimpleNamespace(
+        validation_report=report_path,
+        preflight=preflight_path,
+        preceding_manifest=tmp_path / "stage1.retention.json",
+        code_head="test-head",
+    )
+    with pytest.raises(Exception, match="strict target reader"):
+        _t075_write_stage3_report(args, table_path, states_path, selection_path)
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["passed"] is False
+    assert report["checks"]["strict_target_reader"]["status"] == "failed"
+    assert report["violation_counts"]["missing_target_rows"] == 1
+
+
+def test_t075_finalize_retains_exact_paths_for_duplicate_basenames(tmp_path) -> None:
+    artifact_root = tmp_path / "artifacts"
+    left = artifact_root / "left" / "report.json"
+    right = artifact_root / "right" / "report.json"
+    left.parent.mkdir(parents=True)
+    right.parent.mkdir(parents=True)
+    left.write_text("left\n", encoding="utf-8")
+    right.write_text("right\n", encoding="utf-8")
+    decision_path = artifact_root / "terminal-decision-report.json"
+    decision = {
+        "schema_id": "t075-terminal-decision-report-v1",
+        "schema_version": 1,
+        "task_id": "T075",
+        "approved_t075_spec_commit": "e204c5d28cc0bee8013853e8680e8966f5c930a8",
+        "planner_baseline": "95ccb6b55bc7a0214b632206ae169a533289fcf2",
+        "terminal_case": "D",
+        "terminal_stage": "stage0-reuse",
+        "reason_code": "test",
+        "summary": "test",
+        "reached_stages": [],
+        "skipped_stages": ["stage0-reuse"],
+        "parent_artifact_identities": {},
+        "stage3_validation_status": "not_reached",
+        "stage5_gate_status": "not_reached",
+        "stage6_status": "not_reached",
+        "recommendation": "test",
+        "problems": ["test"],
+    }
+    decision_path.write_text(json.dumps(decision), encoding="utf-8")
+    retention_path = artifact_root / "t075-retention-manifest.json"
+    args = SimpleNamespace(
+        artifact_root=artifact_root,
+        decision_report=decision_path,
+        retention_manifest=retention_path,
+        _command_argv=(),
+        code_head="test-head",
+    )
+    assert _run_t075_finalize(args) == 0
+    manifest = json.loads(retention_path.read_text(encoding="utf-8"))
+    paths = [entry["path"] for entry in manifest["produced_artifacts"]]
+    assert str(left) in paths and str(right) in paths
+    assert len([path for path in paths if path in (str(left), str(right))]) == 2
+    assert tuple(manifest["stage_commands"]) == (
+        "stage0-preflight",
+        "stage0-reuse",
+        "stage1-selection-replay",
+        "stage2-target",
+        "stage4-train",
+        "stage5-gate",
+        "stage6-eval",
+        "terminal-finalize",
     )

@@ -8,19 +8,22 @@ seed ranges, and stage boundaries remain visible in the command itself.
 from __future__ import annotations
 
 import argparse
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, replace
 import json
+import math
 import os
 from pathlib import Path
 import shlex
 import sys
 from concurrent.futures import ThreadPoolExecutor
+from tempfile import TemporaryDirectory
 from typing import Any, Mapping
 
 from sts_combat_rl.sim.lightspeed import LightSpeedAdapter
 from sts_combat_rl.sim.non_combat_learning import (
     T065_APPROVED_SPEC_COMMIT,
+    T065CounterfactualTarget,
     T065_EXPERIMENT_SCHEMA_VERSION,
     T065ExperimentConfig,
     T065_LIGHTSPEED_BUILD_PYTHONPATH,
@@ -62,11 +65,25 @@ from sts_combat_rl.sim.non_combat_learning import (
     write_target_table,
     generate_counterfactual_targets,
     generate_counterfactual_targets_sharded,
+    generate_counterfactual_targets_process_sharded,
+    target_shard_ranges,
     write_source_selection_manifest,
     write_t065_manifest,
     write_t065_terminal_decision_report,
 )
+from sts_combat_rl.sim.public_run_context import forbidden_public_context_problems
 from sts_combat_rl.sim.lightspeed_source import lightspeed_source_identity_dict
+
+T075_STAGE_ORDER = (
+    "stage0-preflight",
+    "stage0-reuse",
+    "stage1-selection-replay",
+    "stage2-target",
+    "stage4-train",
+    "stage5-gate",
+    "stage6-eval",
+    "terminal-finalize",
+)
 
 
 class T075WorkflowError(T065CaseD):
@@ -457,6 +474,157 @@ def _t075_artifact_identity(path: Path, *, role: str) -> dict[str, Any]:
     }
 
 
+def _t075_path_matches(left: str | Path, right: str | Path) -> bool:
+    try:
+        return _t075_normalize_artifact_path(
+            str(left)
+        ) == _t075_normalize_artifact_path(str(right))
+    except ValueError:
+        return Path(left).resolve() == Path(right).resolve()
+
+
+def _t075_stage_retention_records(
+    artifact_root: Path, decision: Mapping[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
+    """Read every completed stage retention without basename-based lookup."""
+
+    commands: dict[str, Any] = {}
+    evidence: dict[str, Any] = {}
+    reused: list[dict[str, Any]] = []
+    for path in sorted(artifact_root.rglob("*.retention.json")):
+        if path == artifact_root / "t075-retention-manifest.json":
+            continue
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise T075WorkflowError(
+                "terminal-finalize", [f"retention is unreadable: {path}: {exc}"]
+            ) from exc
+        if not isinstance(value, Mapping):
+            raise T075WorkflowError(
+                "terminal-finalize", [f"retention is not an object: {path}"]
+            )
+        if value.get("schema_id") != T075_RETENTION_MANIFEST_SCHEMA_ID:
+            continue
+        raw_commands = value.get("stage_commands")
+        raw_evidence = value.get("stage_evidence")
+        if not isinstance(raw_commands, Mapping) or not isinstance(
+            raw_evidence, Mapping
+        ):
+            raise T075WorkflowError(
+                "terminal-finalize", [f"retention has incomplete stage lineage: {path}"]
+            )
+        for stage, command in raw_commands.items():
+            if stage not in T075_STAGE_ORDER[:-1] or stage in commands:
+                raise T075WorkflowError(
+                    "terminal-finalize",
+                    [f"duplicate/unknown stage command {stage!r}: {path}"],
+                )
+            if not isinstance(command, Mapping):
+                raise T075WorkflowError(
+                    "terminal-finalize", [f"stage command is not an object: {path}"]
+                )
+            commands[str(stage)] = dict(command)
+        for stage, stage_value in raw_evidence.items():
+            if stage not in T075_STAGE_ORDER[:-1] or stage in evidence:
+                raise T075WorkflowError(
+                    "terminal-finalize",
+                    [f"duplicate/unknown stage evidence {stage!r}: {path}"],
+                )
+            if not isinstance(stage_value, Mapping):
+                raise T075WorkflowError(
+                    "terminal-finalize", [f"stage evidence is not an object: {path}"]
+                )
+            evidence[str(stage)] = dict(stage_value)
+        for entry in value.get("reused_artifacts", ()):
+            if isinstance(entry, Mapping):
+                reused.append(dict(entry))
+
+    reached = tuple(decision.get("reached_stages", ()))
+    for stage in reached:
+        if stage not in T075_STAGE_ORDER[:-1]:
+            raise T075WorkflowError(
+                "terminal-finalize", [f"decision reached unknown stage {stage!r}"]
+            )
+        command = commands.get(stage)
+        stage_value = evidence.get(stage)
+        if not isinstance(command, Mapping) or not isinstance(stage_value, Mapping):
+            raise T075WorkflowError(
+                "terminal-finalize", [f"completed retention for {stage} is missing"]
+            )
+        if (
+            command.get("executed") is not True
+            or stage_value.get("executed") is not True
+        ):
+            raise T075WorkflowError(
+                "terminal-finalize", [f"retention for {stage} is not executed"]
+            )
+        if (
+            command.get("status") != "completed"
+            or stage_value.get("status") != "completed"
+        ):
+            raise T075WorkflowError(
+                "terminal-finalize", [f"retention for {stage} is not completed"]
+            )
+        if (
+            command.get("terminal") is not True
+            or stage_value.get("terminal") is not True
+        ):
+            raise T075WorkflowError(
+                "terminal-finalize", [f"retention for {stage} is not terminal"]
+            )
+        if not command.get("output_identities") or not stage_value.get(
+            "output_identities"
+        ):
+            raise T075WorkflowError(
+                "terminal-finalize", [f"retention for {stage} has no outputs"]
+            )
+    return commands, evidence, reused
+
+
+def _t075_require_parent_retention(
+    path: Path, *, stage: str, required_paths: Mapping[str, Path]
+) -> dict[str, Any]:
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise T075WorkflowError(
+            "lineage", [f"parent retention is unreadable: {path}: {exc}"]
+        ) from exc
+    if (
+        not isinstance(manifest, Mapping)
+        or manifest.get("schema_id") != T075_RETENTION_MANIFEST_SCHEMA_ID
+    ):
+        raise T075WorkflowError(
+            "lineage", [f"parent retention schema is invalid: {path}"]
+        )
+    evidence = manifest.get("stage_evidence", {}).get(stage)
+    if (
+        not isinstance(evidence, Mapping)
+        or evidence.get("status") != "completed"
+        or evidence.get("terminal") is not True
+    ):
+        raise T075WorkflowError(
+            "lineage", [f"parent retention does not contain completed {stage}: {path}"]
+        )
+    outputs = evidence.get("output_identities", ())
+    for role, required_path in required_paths.items():
+        matching = [
+            entry
+            for entry in outputs
+            if isinstance(entry, Mapping)
+            and entry.get("role") == role
+            and _t075_path_matches(entry.get("path", ""), required_path)
+        ]
+        if len(matching) != 1 or not _t075_identity_matches(
+            matching[0], required_path, expected_role=role
+        ):
+            raise T075WorkflowError(
+                "lineage", [f"parent retention lacks exact {role} identity: {path}"]
+            )
+    return dict(manifest)
+
+
 def _write_t075_stage_retention(
     args: argparse.Namespace,
     *,
@@ -469,6 +637,14 @@ def _write_t075_stage_retention(
         _t075_artifact_identity(path, role=role)
         for role, path in sorted(artifacts.items())
     ]
+    status = str(evidence.get("status", "completed"))
+    terminal = bool(evidence.get("terminal", status == "completed"))
+    problems = list(evidence.get("problems", ()))
+    executed = bool(evidence.get("executed", True))
+    if status == "completed" and not terminal:
+        status = "pending"
+    if status != "completed":
+        terminal = False
     manifest = {
         "schema_id": T075_RETENTION_MANIFEST_SCHEMA_ID,
         "schema_version": 1,
@@ -485,9 +661,11 @@ def _write_t075_stage_retention(
         "stage_commands": {
             stage: {
                 "command": _t075_command_string(args),
-                "executed": True,
+                "executed": executed,
+                "status": status,
+                "skip_reason": evidence.get("skip_reason"),
                 "code_head": _code_head_for_artifact_root(args),
-                "terminal": True,
+                "terminal": terminal,
                 "wall_clock_seconds": float(evidence.get("wall_clock_seconds", 0.0)),
                 "shard_count": int(evidence.get("shard_count", 1)),
                 "worker_count": int(evidence.get("worker_count", 1)),
@@ -498,9 +676,9 @@ def _write_t075_stage_retention(
         },
         "stage_evidence": {
             stage: {
-                "executed": True,
-                "status": "completed",
-                "terminal": True,
+                "executed": executed,
+                "status": status,
+                "terminal": terminal,
                 "code_head": _code_head_for_artifact_root(args),
                 "shard_count": int(evidence.get("shard_count", 1)),
                 "worker_count": int(evidence.get("worker_count", 1)),
@@ -510,13 +688,13 @@ def _write_t075_stage_retention(
                 "output_identities": entries,
                 "parent_identities": evidence.get("parent_identities", {}),
                 "counts": evidence.get("counts", {}),
-                "problems": [],
+                "problems": problems,
                 **dict(evidence),
             }
         },
         "downstream_consumers": evidence.get("downstream_consumers", []),
         "deletion_condition": "merged T075 terminal report and no open consumer requires retained inputs",
-        "problems": [],
+        "problems": problems,
     }
     _write_canonical_json(args.retention_manifest, manifest)
     return manifest
@@ -544,8 +722,13 @@ def _portable_path(value: str | Path) -> Path:
     if path.is_file() or path.exists():
         return path
     text = str(value).replace("\\", "/")
-    if len(text) >= 6 and text.startswith("/mnt/") and text[5] == "/":
-        return Path(text[6].upper() + ":" + text[7:])
+    if (
+        len(text) >= 7
+        and text.startswith("/mnt/")
+        and text[5].isalpha()
+        and text[6] == "/"
+    ):
+        return Path(text[5].upper() + ":" + text[6:])
     return path
 
 
@@ -579,8 +762,7 @@ def _t075_identity_matches(
     try:
         return (
             (expected_role is None or identity.get("role") == expected_role)
-            and _t075_normalize_artifact_path(str(identity["path"]))
-            == _t075_normalize_artifact_path(str(path))
+            and _t075_path_matches(str(identity["path"]), path)
             and identity.get("sha256") == file_sha256(path)
             and identity.get("size_bytes") == path.stat().st_size
         )
@@ -1135,12 +1317,149 @@ def _run_t075_select(args: argparse.Namespace) -> int:
     return 0
 
 
+def _t075_target_row_completeness(
+    states: Sequence[T065SourceState],
+    targets: Sequence[T065CounterfactualTarget],
+) -> dict[str, Any]:
+    """Compare target rows with the exact eligible-action key set."""
+    expected_row_count = sum(len(state.eligible_action_indices) for state in states)
+    expected_rows = {
+        (state.selected_state_index, action_index)
+        for state in states
+        for action_index in state.eligible_action_indices
+    }
+    actual_row_list = [
+        (row.selected_state_index, row.legal_action_index) for row in targets
+    ]
+    actual_rows = set(actual_row_list)
+    duplicate_row_count = len(actual_row_list) - len(actual_rows)
+    missing_row_count = len(expected_rows - actual_rows)
+    unexpected_row_count = len(actual_rows - expected_rows)
+    return {
+        "expected_row_count": expected_row_count,
+        "actual_row_count": len(actual_row_list),
+        "missing_row_count": missing_row_count,
+        "duplicate_row_count": duplicate_row_count,
+        "unexpected_row_count": unexpected_row_count,
+        "complete": (
+            len(actual_row_list) == expected_row_count
+            and actual_rows == expected_rows
+            and duplicate_row_count == 0
+        ),
+    }
+
+
 def _t075_write_stage3_report(
     args: argparse.Namespace, table_path: Path, states_path: Path, selection_path: Path
 ) -> dict[str, Any]:
-    table = read_target_table(table_path)
-    table.validate_complete()
-    states = table.states
+    problems: list[str] = []
+    violations = {
+        "missing_target_rows": 0,
+        "duplicate_target_rows": 0,
+        "nonfinite_targets": 0,
+        "model_input_mismatches": 0,
+        "lineage_mismatches": 0,
+        "legal_action_mismatches": 0,
+        "continuation_seed_mismatches": 0,
+        "firewall_violations": 0,
+    }
+    strict_status = "passed"
+    try:
+        table = read_target_table(table_path)
+        table.validate_complete()
+        states = table.states
+    except (OSError, ValueError, T065CaseD) as exc:
+        strict_status = "failed"
+        states = ()
+        problems.append(f"strict target reader: {exc}")
+        violations["missing_target_rows"] += 1
+        table = None
+    raw_table: Mapping[str, Any] = {}
+    try:
+        raw_value = json.loads(table_path.read_text(encoding="utf-8"))
+        if isinstance(raw_value, Mapping):
+            raw_table = raw_value
+    except (OSError, json.JSONDecodeError) as exc:
+        problems.append(f"target table metadata is unreadable: {exc}")
+        violations["lineage_mismatches"] += 1
+
+    selected_state_lineage = {
+        "status": "failed",
+        "path": str(states_path),
+        "sha256": file_sha256(states_path) if states_path.is_file() else None,
+        "size_bytes": states_path.stat().st_size if states_path.is_file() else None,
+        "record_count": len(states),
+    }
+    source_identity = raw_table.get("source_artifact_identity")
+    if (
+        states_path.is_file()
+        and isinstance(source_identity, Mapping)
+        and _t075_path_matches(source_identity.get("path", ""), states_path)
+        and source_identity.get("sha256") == file_sha256(states_path)
+        and source_identity.get("size_bytes") == states_path.stat().st_size
+        and source_identity.get("record_count") == len(states)
+    ):
+        selected_state_lineage["status"] = "passed"
+    else:
+        problems.append("selected-state lineage is missing")
+        violations["lineage_mismatches"] += 1
+
+    lineage_ok = True
+    try:
+        selection = json.loads(selection_path.read_text(encoding="utf-8"))
+        if not isinstance(selection, Mapping):
+            raise ValueError("selection manifest is not an object")
+        if selection.get("schema_id") != T075_SELECTION_MANIFEST_SCHEMA_ID:
+            raise ValueError("selection manifest schema is invalid")
+        if selection.get("selected_states_sha256") != file_sha256(states_path):
+            raise ValueError("selection manifest selected-state hash is invalid")
+        if selection.get("parent_current_preflight_sha256") != file_sha256(
+            args.preflight
+        ):
+            raise ValueError("selection manifest preflight parent is invalid")
+        if not args.preceding_manifest.is_file():
+            raise ValueError("Stage-1 retention parent is missing")
+        if selection.get("parent_reuse_manifest_sha256") is None:
+            raise ValueError("selection reuse parent is missing")
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        lineage_ok = False
+        problems.append(f"selection/source lineage: {exc}")
+        violations["lineage_mismatches"] += 1
+    try:
+        _t075_require_parent_retention(
+            args.preceding_manifest,
+            stage="stage1-selection-replay",
+            required_paths={
+                "selected_states": states_path,
+                "ownership_audit": args.ownership_audit
+                if hasattr(args, "ownership_audit")
+                else selection_path.parent / "stage1-replay-group-ownership-audit.json",
+                "selection_manifest": selection_path,
+            },
+        )
+    except (OSError, ValueError, T075WorkflowError) as exc:
+        lineage_ok = False
+        problems.append(f"Stage-1 retention lineage: {exc}")
+        violations["lineage_mismatches"] += 1
+
+    simulator_ok = bool(table is not None)
+    if (
+        simulator_ok
+        and dict(table.simulator_identity) != lightspeed_source_identity_dict()
+    ):
+        simulator_ok = False
+        problems.append("target simulator identity is not the pinned identity")
+        violations["lineage_mismatches"] += 1
+    try:
+        preflight = _validate_t075_preflight(args.preflight)
+        preflight_ok = preflight.get("passed") is True
+        if not preflight_ok:
+            raise ValueError("preflight is not passed")
+    except (OSError, ValueError, T065CaseD) as exc:
+        preflight_ok = False
+        problems.append(f"preflight lineage: {exc}")
+        violations["lineage_mismatches"] += 1
+
     counts = {
         family: {
             split: sum(
@@ -1159,26 +1478,117 @@ def _t075_write_stage3_report(
         and counts == expected
         and all(state.selected_state_index == i for i, state in enumerate(states))
     )
+    if not passed:
+        problems.append("target cohort does not satisfy exact T075 counts")
+    row_completeness = _t075_target_row_completeness(
+        states, table.targets if table is not None else ()
+    )
+    expected_row_count = row_completeness["expected_row_count"]
+    completeness_ok = False
+    schema_ok = True
+    schema = raw_table.get("model_input_schema")
+    if (
+        not isinstance(schema, Mapping)
+        or schema.get("state_feature_size") != 4737
+        or schema.get("action_feature_size") != 92
+    ):
+        schema_ok = False
+        problems.append("model-input schema is not the frozen 4737/92 schema")
+        violations["model_input_mismatches"] += 1
+    finite_ok = True
+    legal_ok = True
+    seed_ok = True
+    firewall_ok = True
+    if table is not None:
+        violations["missing_target_rows"] += row_completeness["missing_row_count"]
+        violations["duplicate_target_rows"] += (
+            row_completeness["duplicate_row_count"]
+            + row_completeness["unexpected_row_count"]
+        )
+        for state in states:
+            if (
+                len(state.state_features) != 4737
+                or len(state.public_context_features) != 103
+                or len(state.snapshot_features) != 4634
+            ):
+                schema_ok = False
+                violations["model_input_mismatches"] += 1
+            if any(not math.isfinite(float(value)) for value in state.state_features):
+                finite_ok = False
+                violations["nonfinite_targets"] += 1
+            if forbidden_public_context_problems(state.public_run_context):
+                firewall_ok = False
+                violations["firewall_violations"] += 1
+            observed = tuple(
+                row.legal_action_index
+                for row in table.rows_for_state(state.selected_state_index)
+            )
+            expected_actions = tuple(state.eligible_action_indices)
+            if observed != expected_actions or any(
+                row.legal_action_identity
+                != state.legal_action_identities[row.legal_action_index]
+                for row in table.rows_for_state(state.selected_state_index)
+                if row.legal_action_index in state.eligible_action_indices
+            ):
+                legal_ok = False
+                violations["legal_action_mismatches"] += 1
+            expected_seeds = continuation_seeds_for_split(state.split)
+            for row in table.rows_for_state(state.selected_state_index):
+                if row.continuation_seeds != expected_seeds:
+                    seed_ok = False
+                    violations["continuation_seed_mismatches"] += 1
+                values = (*row.terminal_floors, row.q_floor)
+                if any(not math.isfinite(float(value)) for value in values):
+                    finite_ok = False
+                    violations["nonfinite_targets"] += 1
+        completeness_ok = passed and row_completeness["complete"]
+    else:
+        violations["missing_target_rows"] += expected_row_count
     checks = {
-        "strict_target_reader": {"status": "passed"},
+        "strict_target_reader": {"status": strict_status},
         "target_completeness": {
-            "status": "passed" if passed else "failed",
+            "status": "passed" if completeness_ok else "failed",
             "state_count": len(states),
-            "target_row_count": len(table.targets),
+            "target_row_count": len(table.targets) if table is not None else 0,
         },
-        "selected_state_lineage": {
-            "status": "passed",
-            "path": str(states_path),
-            "sha256": file_sha256(states_path),
+        "selected_state_lineage": selected_state_lineage,
+        "simulator_and_preflight_lineage": {
+            "status": "passed"
+            if simulator_ok and preflight_ok and lineage_ok
+            else "failed",
+            "simulator_identity": dict(table.simulator_identity)
+            if table is not None
+            else {},
+            "preflight_sha256": file_sha256(args.preflight)
+            if args.preflight.is_file()
+            else None,
         },
-        "simulator_and_preflight_lineage": {"status": "passed"},
-        "model_input_schema": {"status": "passed"},
-        "state_action_dimensions": {"status": "passed"},
-        "finite_numeric_values": {"status": "passed"},
-        "legal_action_order": {"status": "passed"},
-        "continuation_seed_contract": {"status": "passed"},
-        "public_input_firewall": {"status": "passed"},
+        "model_input_schema": {
+            "status": "passed" if schema_ok else "failed",
+            "state_feature_size": 4737,
+            "action_feature_size": 92,
+        },
+        "state_action_dimensions": {"status": "passed" if schema_ok else "failed"},
+        "finite_numeric_values": {
+            "status": "passed" if finite_ok else "failed",
+            "violations": violations["nonfinite_targets"],
+        },
+        "legal_action_order": {
+            "status": "passed" if legal_ok else "failed",
+            "violations": violations["legal_action_mismatches"],
+        },
+        "continuation_seed_contract": {
+            "status": "passed" if seed_ok else "failed",
+            "violations": violations["continuation_seed_mismatches"],
+        },
+        "public_input_firewall": {
+            "status": "passed" if firewall_ok else "failed",
+            "violations": violations["firewall_violations"],
+        },
     }
+    passed = passed and all(check["status"] == "passed" for check in checks.values())
+    if not passed and not problems:
+        problems.append("one or more mandatory Stage-3 validation checks failed")
     report = {
         "schema_id": T075_STAGE3_VALIDATION_SCHEMA_ID,
         "schema_version": 1,
@@ -1192,7 +1602,7 @@ def _t075_write_stage3_report(
         "parent_selection_manifest_sha256": file_sha256(selection_path),
         "parent_current_preflight_sha256": file_sha256(args.preflight),
         "selected_state_count": len(states),
-        "target_row_count": len(table.targets),
+        "target_row_count": len(table.targets) if table is not None else 0,
         "eligible_action_count": sum(
             len(state.eligible_action_indices) for state in states
         ),
@@ -1201,20 +1611,9 @@ def _t075_write_stage3_report(
             split: len(continuation_seeds_for_split(split)) for split in T065_SPLITS
         },
         "checks": checks,
-        "violation_counts": {
-            "missing_target_rows": 0,
-            "duplicate_target_rows": 0,
-            "nonfinite_targets": 0,
-            "model_input_mismatches": 0,
-            "lineage_mismatches": 0,
-            "legal_action_mismatches": 0,
-            "continuation_seed_mismatches": 0,
-            "firewall_violations": 0,
-        },
+        "violation_counts": violations,
         "passed": passed,
-        "problems": []
-        if passed
-        else ["target cohort does not satisfy exact T075 counts"],
+        "problems": [] if passed else problems,
     }
     _write_canonical_json(args.validation_report, report)
     if not passed:
@@ -1249,13 +1648,21 @@ def _run_t075_target(args: argparse.Namespace) -> int:
         "size_bytes": args.states.stat().st_size,
         "record_count": len(states),
     }
-    table = generate_counterfactual_targets_sharded(
-        lambda: LightSpeedAdapter(seed=1, ascension=20, player_class="IRONCLAD"),
-        states,
-        worker_count=16,
-        source_artifact_identity=source_identity,
-        simulator_identity=lightspeed_source_identity_dict(),
-    )
+    shard_specs = target_shard_ranges(worker_count=16)
+    with TemporaryDirectory(
+        prefix="t075-stage2-target-shards-", dir=args.output.parent
+    ) as shard_directory:
+        table = generate_counterfactual_targets_process_sharded(
+            states,
+            shard_specs=shard_specs,
+            worker_count=16,
+            output_directory=Path(shard_directory),
+            simulator_seed=1,
+            ascension=20,
+            player_class="IRONCLAD",
+            source_artifact_identity=source_identity,
+            simulator_identity=lightspeed_source_identity_dict(),
+        )
     write_target_table(args.output, table)
     raw = json.loads(args.output.read_text(encoding="utf-8"))
     raw.update(
@@ -1306,6 +1713,24 @@ def _run_t075_train(args: argparse.Namespace) -> int:
         raise T075WorkflowError(
             "stage4-train", ["Stage-3 validation is absent or failed"]
         )
+    if validation.get("parent_target_table_sha256") != file_sha256(args.target_table):
+        raise T075WorkflowError(
+            "stage4-train", ["Stage-3 target parent hash does not match"]
+        )
+    if validation.get("parent_selected_states_sha256") != file_sha256(
+        args.target_table.parent / "stage1-selected-states.json"
+    ):
+        raise T075WorkflowError(
+            "stage4-train", ["Stage-3 selected-state parent hash does not match"]
+        )
+    _t075_require_parent_retention(
+        args.preceding_manifest,
+        stage="stage2-target",
+        required_paths={
+            "target_table": args.target_table,
+            "target_validation": args.target_validation,
+        },
+    )
     table = read_target_table(args.target_table)
     table.validate_complete()
     args.checkpoint_directory.mkdir(parents=True, exist_ok=True)
@@ -1365,6 +1790,26 @@ def _run_t075_train(args: argparse.Namespace) -> int:
 
 
 def _run_t075_evaluate(args: argparse.Namespace) -> int:
+    parent_stage = "stage5-gate" if args.stage5_report else "stage4-train"
+    parent_artifacts = (
+        {"stage5_report": args.stage5_report}
+        if args.stage5_report
+        else {
+            "training_report": args.checkpoint_directory.parent
+            / "stage4-training-report.json"
+        }
+    )
+    parent_artifacts.update(
+        {
+            "checkpoint_653001": args.checkpoint_directory / "model-653001.pt",
+            "checkpoint_653002": args.checkpoint_directory / "model-653002.pt",
+        }
+    )
+    _t075_require_parent_retention(
+        args.preceding_manifest,
+        stage=parent_stage,
+        required_paths=parent_artifacts,
+    )
     table = read_target_table(args.target_table)
     model_runs = tuple(
         load_non_combat_checkpoint(args.checkpoint_directory / f"model-{seed}.pt")
@@ -1383,11 +1828,67 @@ def _run_t075_evaluate(args: argparse.Namespace) -> int:
         "problems": list(stage5.problems),
     }
     _write_canonical_json(stage5_path, stage5_payload)
+    stage5_evidence = {
+        "status": "completed",
+        "terminal": True,
+        "counts": {
+            "passed": stage5.passed,
+            "problems": len(stage5.problems),
+        },
+        "parent_identities": {
+            "target_table": _t075_parent_identity(args.target_table),
+        },
+    }
     if not stage5.passed:
-        raise T075WorkflowError(
-            "stage5-gate", stage5.problems or ("Stage 5 gate failed",)
+        decision = {
+            "schema_id": T075_TERMINAL_DECISION_SCHEMA_ID,
+            "schema_version": 1,
+            "task_id": T075_TASK_ID,
+            "approved_t075_spec_commit": T075_APPROVED_SPEC_COMMIT,
+            "planner_baseline": T075_PLANNER_BASELINE,
+            "code_head": _code_head_for_artifact_root(args),
+            "terminal_case": "C",
+            "terminal_stage": "stage5-gate",
+            "reason_code": "stage5-gate-failed",
+            "summary": "T075 held-out Stage 5 gate failed",
+            "reached_stages": [
+                "stage0-preflight",
+                "stage0-reuse",
+                "stage1-selection-replay",
+                "stage2-target",
+                "stage4-train",
+                "stage5-gate",
+            ],
+            "skipped_stages": ["stage6-eval"],
+            "parent_artifact_identities": {
+                "target_table": _t075_parent_identity(args.target_table),
+                "stage5_report": _t075_parent_identity(stage5_path),
+            },
+            "stage3_validation_status": "passed",
+            "stage5_gate_status": "failed",
+            "stage6_status": "skipped",
+            "recommendation": "close this T075 target/model formulation",
+            "problems": list(stage5.problems) or ["Stage 5 gate failed"],
+        }
+        _write_canonical_json(args.decision_report, decision)
+        _write_t075_stage_retention(
+            args,
+            stage="stage5-gate",
+            artifacts={
+                "stage5_report": stage5_path,
+                "terminal_decision_report": args.decision_report,
+            },
+            evidence=stage5_evidence,
+            terminal_case="C",
         )
+        return 0
     if not args.run_stage6:
+        _write_t075_stage_retention(
+            args,
+            stage="stage5-gate",
+            artifacts={"stage5_report": stage5_path},
+            evidence=stage5_evidence,
+        )
         print("T075 Stage 5 passed; Stage 6 remains pending", file=sys.stderr)
         return 1
     selected = next(
@@ -1488,10 +1989,91 @@ def _run_t075_finalize(args: argparse.Namespace) -> int:
             "terminal-finalize", ["terminal decision does not satisfy T075 schema"]
         )
     args.artifact_root.mkdir(parents=True, exist_ok=True)
-    produced: dict[str, dict[str, Any]] = {}
+    stage_commands, stage_evidence, reused = _t075_stage_retention_records(
+        args.artifact_root, decision
+    )
+    produced: list[dict[str, Any]] = []
+    seen_paths: set[str] = set()
     for path in sorted(args.artifact_root.rglob("*")):
         if path.is_file() and path != args.retention_manifest:
-            produced[path.name] = _t075_artifact_identity(path, role=path.stem)
+            normalized = str(path.resolve()).replace("\\", "/")
+            if normalized in seen_paths:
+                raise T075WorkflowError(
+                    "terminal-finalize", [f"duplicate artifact path: {path}"]
+                )
+            seen_paths.add(normalized)
+            relative_role = path.relative_to(args.artifact_root).as_posix()
+            produced.append(_t075_artifact_identity(path, role=relative_role))
+    skipped = {
+        stage: {
+            "command": "",
+            "executed": False,
+            "status": "skipped",
+            "skip_reason": "not reached by terminal decision",
+            "code_head": _code_head_for_artifact_root(args),
+            "terminal": False,
+            "wall_clock_seconds": 0.0,
+            "shard_count": 0,
+            "worker_count": 0,
+            "ranges": [],
+            "parent_identities": {},
+            "output_identities": [],
+        }
+        for stage in T075_STAGE_ORDER[:-1]
+        if stage not in decision.get("reached_stages", ())
+    }
+    all_commands = {**skipped, **stage_commands}
+    all_evidence = {
+        stage: {
+            "executed": False,
+            "status": "skipped",
+            "skip_reason": "not reached by terminal decision",
+            "code_head": _code_head_for_artifact_root(args),
+            "terminal": False,
+            "shard_count": 0,
+            "worker_count": 0,
+            "ranges": [],
+            "per_shard": [],
+            "output_identities": [],
+            "parent_identities": {},
+            "counts": {},
+            "problems": [],
+        }
+        for stage in T075_STAGE_ORDER[:-1]
+        if stage not in decision.get("reached_stages", ())
+    }
+    all_evidence.update(stage_evidence)
+    # The final entry is intentionally terminal only after this manifest is
+    # atomically written; its output identity is the terminal decision.
+    all_commands["terminal-finalize"] = {
+        "command": _t075_command_string(args),
+        "executed": True,
+        "status": "completed",
+        "code_head": _code_head_for_artifact_root(args),
+        "terminal": True,
+        "wall_clock_seconds": 0.0,
+        "shard_count": 1,
+        "worker_count": 1,
+        "ranges": [],
+        "parent_identities": dict(decision["parent_artifact_identities"]),
+        "output_identities": [
+            entry for entry in produced if entry["path"] == str(args.decision_report)
+        ],
+    }
+    all_evidence["terminal-finalize"] = {
+        "executed": True,
+        "status": "completed",
+        "code_head": _code_head_for_artifact_root(args),
+        "terminal": True,
+        "shard_count": 1,
+        "worker_count": 1,
+        "ranges": [],
+        "per_shard": [],
+        "output_identities": all_commands["terminal-finalize"]["output_identities"],
+        "parent_identities": dict(decision["parent_artifact_identities"]),
+        "counts": {},
+        "problems": [],
+    }
     manifest = {
         "schema_id": T075_RETENTION_MANIFEST_SCHEMA_ID,
         "schema_version": 1,
@@ -1501,10 +2083,10 @@ def _run_t075_finalize(args: argparse.Namespace) -> int:
         "terminal_case": decision["terminal_case"],
         "retention_owner": T075_TASK_ID,
         "retention_reason": "T075 final terminal evidence",
-        "reused_artifacts": [],
-        "produced_artifacts": list(produced.values()),
-        "stage_commands": {},
-        "stage_evidence": {},
+        "reused_artifacts": reused,
+        "produced_artifacts": produced,
+        "stage_commands": {stage: all_commands[stage] for stage in T075_STAGE_ORDER},
+        "stage_evidence": {stage: all_evidence[stage] for stage in T075_STAGE_ORDER},
         "downstream_consumers": [],
         "deletion_condition": "merged terminal T075 report and no open consumer requires retained inputs",
         "problems": [],

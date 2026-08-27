@@ -17,7 +17,7 @@ from __future__ import annotations
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
 import ast
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 import hashlib
 import json
 import math
@@ -27,7 +27,8 @@ import statistics
 from tempfile import TemporaryDirectory
 import time
 from typing import Any
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+import multiprocessing
 
 from sts_combat_rl.sim.action_space import ActionSpaceConfig
 from sts_combat_rl.sim.contract import (
@@ -3157,6 +3158,201 @@ def generate_counterfactual_targets_sharded(
     return merged
 
 
+def _generate_target_process_shard(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Serialize worker failures so the parent can fail closed safely."""
+
+    try:
+        return _generate_target_process_shard_impl(payload)
+    except Exception as exc:  # pragma: no cover - exercised by process smoke
+        return {
+            "shard_index": int(payload.get("shard_index", -1)),
+            "process_id": __import__("os").getpid(),
+            "status": "failed",
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+
+def _generate_target_process_shard_impl(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Run one target shard in a spawn-isolated process.
+
+    The worker deliberately imports the native adapter inside the child and
+    constructs it there.  No simulator object, checkpoint, or adapter factory
+    crosses the process boundary.
+    """
+
+    import os
+
+    os.environ["OMP_NUM_THREADS"] = "1"
+    os.environ["MKL_NUM_THREADS"] = "1"
+    os.environ["OPENBLAS_NUM_THREADS"] = "1"
+    from sts_combat_rl.sim.lightspeed import LightSpeedAdapter
+
+    shard_index = int(payload["shard_index"])
+    states = tuple(
+        T065SourceState.from_dict(value)
+        for value in payload["states"]
+        if isinstance(value, Mapping)
+    )
+    if len(states) != len(payload["states"]):
+        raise T065CaseD(
+            "target-sharding", [f"shard {shard_index} has an invalid state"]
+        )
+    started = time.perf_counter()
+    table = generate_counterfactual_targets(
+        lambda: LightSpeedAdapter(
+            seed=int(payload["simulator_seed"]),
+            ascension=int(payload["ascension"]),
+            player_class=str(payload["player_class"]),
+        ),
+        states,
+        max_steps=int(payload["max_steps"]),
+        require_contiguous_indices=False,
+        source_artifact_identity=payload.get("source_artifact_identity"),
+        simulator_identity=payload.get("simulator_identity"),
+    )
+    table.validate_complete(require_contiguous_indices=False)
+    elapsed = time.perf_counter() - started
+    usage = __import__("resource").getrusage(__import__("resource").RUSAGE_SELF)
+    table = replace(
+        table,
+        execution_evidence={
+            **dict(table.execution_evidence),
+            "shard_index": shard_index,
+            "process_id": os.getpid(),
+            "worker_kind": "spawn-process",
+            "wall_clock_seconds": elapsed,
+            "cpu_seconds": usage.ru_utime + usage.ru_stime,
+            "omp_threads": 1,
+            "mkl_threads": 1,
+        },
+    )
+    write_target_table(
+        Path(str(payload["output"])), table, require_contiguous_indices=False
+    )
+    return {
+        "shard_index": shard_index,
+        "process_id": os.getpid(),
+        "state_count": len(table.states),
+        "target_count": len(table.targets),
+        "wall_clock_seconds": elapsed,
+        "cpu_seconds": usage.ru_utime + usage.ru_stime,
+        "output": str(payload["output"]),
+        "status": "passed",
+    }
+
+
+def generate_counterfactual_targets_process_sharded(
+    states: Sequence[T065SourceState],
+    *,
+    shard_specs: Sequence[Mapping[str, Any]],
+    worker_count: int,
+    output_directory: Path,
+    simulator_seed: int = 1,
+    ascension: int = 20,
+    player_class: str = "IRONCLAD",
+    max_steps: int = T065_MAX_STEPS,
+    source_artifact_identity: Mapping[str, Any] | None = None,
+    simulator_identity: Mapping[str, Any] | None = None,
+) -> T065TargetTable:
+    """Generate deterministic target shards using independent spawn processes."""
+
+    if worker_count != len(shard_specs) or worker_count < 1:
+        raise ValueError("process target worker count must equal shard count")
+    ordered_states = tuple(sorted(states, key=lambda state: state.selected_state_index))
+    by_index = {state.selected_state_index: state for state in ordered_states}
+    payloads: list[dict[str, Any]] = []
+    output_directory.mkdir(parents=True, exist_ok=True)
+    for spec in shard_specs:
+        start = int(spec["selected_state_start"])
+        end = int(spec["selected_state_end"])
+        shard_states = tuple(
+            by_index[index] for index in range(start, end + 1) if index in by_index
+        )
+        if len(shard_states) != end - start + 1:
+            raise T065CaseD(
+                "target-sharding",
+                [
+                    f"shard {spec['shard_index']} does not own its contiguous state range"
+                ],
+            )
+        payloads.append(
+            {
+                "shard_index": int(spec["shard_index"]),
+                "states": [state.to_dict() for state in shard_states],
+                "output": str(
+                    output_directory
+                    / f"target-shard-{int(spec['shard_index']):02d}.json"
+                ),
+                "simulator_seed": simulator_seed,
+                "ascension": ascension,
+                "player_class": player_class,
+                "max_steps": max_steps,
+                "source_artifact_identity": dict(source_artifact_identity or {}),
+                "simulator_identity": dict(simulator_identity or {}),
+            }
+        )
+    started = time.perf_counter()
+    context = multiprocessing.get_context("spawn")
+    with ProcessPoolExecutor(max_workers=worker_count, mp_context=context) as executor:
+        futures = [
+            executor.submit(_generate_target_process_shard, payload)
+            for payload in payloads
+        ]
+        results = [future.result() for future in futures]
+    failures = [result for result in results if result.get("status") != "passed"]
+    if failures:
+        raise T065CaseD(
+            "target-sharding",
+            tuple(
+                f"target shard {item.get('shard_index')}: {item.get('error', 'worker failed')}"
+                for item in failures
+            ),
+        )
+    results.sort(key=lambda item: int(item["shard_index"]))
+    shards = tuple(
+        read_target_table(Path(str(result["output"])), require_contiguous_indices=False)
+        for result in results
+    )
+    targets = tuple(target for shard in shards for target in shard.targets)
+    merged = T065TargetTable(
+        states=ordered_states,
+        targets=targets,
+        source_artifact_identity=dict(source_artifact_identity or {}),
+        simulator_identity=dict(simulator_identity or {}),
+        expert_action_indices={
+            index: action
+            for shard in shards
+            for index, action in shard.expert_action_indices.items()
+        },
+        expert_action_provenance=dict(shards[0].expert_action_provenance),
+        execution_evidence={
+            "worker_count": worker_count,
+            "shard_count": len(shards),
+            "worker_kind": "spawn-process",
+            "wall_clock_seconds": time.perf_counter() - started,
+            "processes": [
+                {key: value for key, value in result.items() if key != "output"}
+                for result in results
+            ],
+            "shards": [
+                {
+                    **dict(spec),
+                    "state_count": len(shard.states),
+                    "target_count": len(shard.targets),
+                    "status": "passed",
+                }
+                for spec, shard in zip(
+                    sorted(shard_specs, key=lambda item: int(item["shard_index"])),
+                    shards,
+                    strict=True,
+                )
+            ],
+        },
+    )
+    merged.validate_complete()
+    return merged
+
+
 @dataclass(frozen=True)
 class T065HeldoutStateResult:
     """Action-value comparison for one held-out source state."""
@@ -5523,10 +5719,12 @@ def read_source_states(path: Path) -> tuple[T065SourceState, ...]:
     return tuple(rows)
 
 
-def write_target_table(path: Path, table: T065TargetTable) -> str:
+def write_target_table(
+    path: Path, table: T065TargetTable, *, require_contiguous_indices: bool = True
+) -> str:
     """Write the compact target-table document and return its SHA-256."""
 
-    table.validate_complete()
+    table.validate_complete(require_contiguous_indices=require_contiguous_indices)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         json.dumps(table.to_dict(), indent=2, sort_keys=True) + "\n",
@@ -5535,7 +5733,9 @@ def write_target_table(path: Path, table: T065TargetTable) -> str:
     return file_sha256(path)
 
 
-def read_target_table(path: Path) -> T065TargetTable:
+def read_target_table(
+    path: Path, *, require_contiguous_indices: bool = True
+) -> T065TargetTable:
     """Read a current target table; no legacy fields are guessed."""
 
     value = json.loads(path.read_text(encoding="utf-8"))
@@ -5545,10 +5745,15 @@ def read_target_table(path: Path) -> T065TargetTable:
         raise ValueError("unsupported T065 target-table schema")
     if value.get("schema_version") != 1:
         raise ValueError("unsupported T065 target-table schema version")
-    if value.get("task_id") != T065_TASK_ID:
-        raise ValueError("T065 target table task id is invalid")
-    if value.get("approved_spec_commit") != T065_APPROVED_SPEC_COMMIT:
-        raise ValueError("T065 target table approved spec commit is invalid")
+    task_id = value.get("task_id")
+    if task_id not in {T065_TASK_ID, "T075"}:
+        raise ValueError("target table task id is invalid")
+    approved_spec = value.get("approved_spec_commit")
+    if approved_spec not in {
+        T065_APPROVED_SPEC_COMMIT,
+        "e204c5d28cc0bee8013853e8680e8966f5c930a8",
+    }:
+        raise ValueError("target table approved spec commit is invalid")
     if value.get("frozen_config") != T065ExperimentConfig().to_dict():
         raise ValueError("T065 target table frozen configuration is invalid")
     schema_problems = _schema_from_document(value.get("model_input_schema"))
@@ -5594,7 +5799,7 @@ def read_target_table(path: Path) -> T065TargetTable:
             value.get("expert_action_provenance")
         ),
     )
-    table.validate_complete()
+    table.validate_complete(require_contiguous_indices=require_contiguous_indices)
     return table
 
 
