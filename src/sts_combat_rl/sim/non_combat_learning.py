@@ -170,6 +170,18 @@ T065_FROZEN_BATTLE_CONTROLLER_VERSION = "oracle-search-controller-v1"
 T065_FROZEN_BATTLE_INFORMATION_REGIME = "full_simulator_state_oracle_like"
 T065_RETENTION_RELATIVE_PATH = "artifacts/t065-learned-non-combat-policy-v1"
 
+T075_TASK_ID = "T075"
+T075_APPROVED_SPEC_COMMIT = "e204c5d28cc0bee8013853e8680e8966f5c930a8"
+T075_PLANNER_BASELINE = "95ccb6b55bc7a0214b632206ae169a533289fcf2"
+T075_GROUP_DOMAIN = b"T075-replay-group-v1\n"
+T075_SELECTION_STRATEGY_ID = "leakage-safe-global-owner-v1"
+T075_REUSE_MANIFEST_SCHEMA_ID = "t075-retained-source-reuse-manifest-v1"
+T075_OWNERSHIP_AUDIT_SCHEMA_ID = "t075-replay-group-ownership-audit-v1"
+T075_SELECTION_MANIFEST_SCHEMA_ID = "t075-source-selection-manifest-v1"
+T075_STAGE3_VALIDATION_SCHEMA_ID = "t075-stage3-validation-report-v1"
+T075_TERMINAL_DECISION_SCHEMA_ID = "t075-terminal-decision-report-v1"
+T075_RETENTION_MANIFEST_SCHEMA_ID = "t075-retention-manifest-v1"
+
 
 class T065CaseD(ValueError):
     """A frozen fidelity/completeness failure that stops downstream stages."""
@@ -1240,6 +1252,245 @@ def select_source_states(
             )
         )
     return tuple(selected)
+
+
+def _t075_group_payload(candidate: Any) -> dict[str, Any]:
+    return {
+        "family": candidate.family,
+        "public_state_identity": candidate.public_state_identity,
+        "ordered_legal_action_identities": [
+            dict(item) for item in candidate.legal_action_identities
+        ],
+    }
+
+
+def _t075_group_digest(candidate: Any) -> tuple[str, bytes]:
+    payload = _canonical_json_bytes(_t075_group_payload(candidate))
+    return hashlib.sha256(T075_GROUP_DOMAIN + payload).hexdigest(), payload
+
+
+def _t075_candidate_locator(candidate: Any) -> dict[str, Any]:
+    return {
+        "source_index": int(getattr(candidate, "source_index", -1)),
+        "record_index": int(getattr(candidate, "record_index", -1)),
+        "source_arm": str(candidate.source_arm),
+        "simulator_seed": int(candidate.simulator_seed),
+        "source_run_id": str(candidate.source_run_id),
+        "source_step_index": int(candidate.source_step_index),
+    }
+
+
+def _t075_member_provenance(
+    candidate: Any, selection_digest: str, payload: bytes
+) -> dict[str, Any]:
+    value = _source_candidate_provenance(candidate)
+    value.update(
+        {
+            "source_index": int(getattr(candidate, "source_index", -1)),
+            "record_index": int(getattr(candidate, "record_index", -1)),
+            "selection_digest": selection_digest,
+            "selection_candidate_sha256": hashlib.sha256(payload).hexdigest(),
+        }
+    )
+    return value
+
+
+def select_t075_source_candidates(
+    candidates: Iterable[Any],
+) -> tuple[tuple[tuple[Any, str, bytes], ...], dict[str, Any]]:
+    """Assign one global owner per replay group before the frozen quotas.
+
+    The input may be compact source locators as well as full
+    :class:`T065SourceState` instances.  Only candidate identity and
+    provenance are retained by the ownership audit; the caller rereads the
+    selected locators to materialize complete states.
+    """
+
+    groups: dict[str, dict[str, Any]] = {}
+    candidate_count = 0
+    by_arm: dict[str, int] = defaultdict(int)
+    by_family: dict[str, int] = defaultdict(int)
+    by_split: dict[str, int] = defaultdict(int)
+    for candidate in candidates:
+        if candidate.family not in T065_MANDATORY_FAMILIES:
+            continue
+        if not candidate.terminal:
+            continue
+        if candidate.split not in T065_SPLITS:
+            raise T065CaseD(
+                "cohort-ownership",
+                [f"unsupported candidate split {candidate.split!r}"],
+            )
+        if candidate.split != split_for_source_seed(candidate.simulator_seed):
+            raise T065CaseD(
+                "cohort-ownership",
+                [
+                    f"candidate {candidate.source_run_id}: split does not match "
+                    "seed group"
+                ],
+            )
+        selection_digest, selection_payload = canonical_source_selection_key(candidate)
+        group_digest, group_payload = _t075_group_digest(candidate)
+        group = groups.setdefault(
+            group_digest,
+            {
+                "group_digest": group_digest,
+                "group_identity": json.loads(group_payload.decode("utf-8")),
+                "members": [],
+            },
+        )
+        group["members"].append(
+            {
+                "candidate": candidate,
+                "selection_digest": selection_digest,
+                "selection_payload": selection_payload,
+                "member_key": (selection_digest, selection_payload),
+            }
+        )
+        candidate_count += 1
+        by_arm[str(candidate.source_arm)] += 1
+        by_family[str(candidate.family)] += 1
+        by_split[str(candidate.split)] += 1
+
+    audit_groups: list[dict[str, Any]] = []
+    owners: list[tuple[Any, str, bytes]] = []
+    owner_counts = {
+        family: {split: 0 for split in T065_SPLITS}
+        for family in T065_MANDATORY_FAMILIES
+    }
+    group_counts_by_family = {family: 0 for family in T065_MANDATORY_FAMILIES}
+    group_counts_by_split = {split: 0 for split in T065_SPLITS}
+    singleton_count = 0
+    non_singleton_count = 0
+    cross_split_count = 0
+    excluded_count = 0
+    group_size_histogram: dict[str, int] = defaultdict(int)
+    for group_digest in sorted(groups):
+        group = groups[group_digest]
+        members = sorted(group["members"], key=lambda item: item["member_key"])
+        distinct_keys = {item["member_key"] for item in members}
+        if len(distinct_keys) != len(members):
+            raise T065CaseD(
+                "cohort-ownership",
+                [f"exact full-key tie in replay group {group_digest}"],
+                failure_ids=(f"replay-group-tie:{group_digest}",),
+                failure_counts={"tied_groups": 1, "tied_members": len(members)},
+            )
+        family = str(members[0]["candidate"].family)
+        splits = {str(item["candidate"].split) for item in members}
+        group_counts_by_family[family] += 1
+        for split in splits:
+            group_counts_by_split[split] += 1
+        if len(members) == 1:
+            singleton_count += 1
+        else:
+            non_singleton_count += 1
+            excluded_count += len(members) - 1
+        if len(splits) > 1:
+            cross_split_count += 1
+        group_size_histogram[str(len(members))] += 1
+        owner = members[0]
+        owner_candidate = owner["candidate"]
+        owner_counts[owner_candidate.family][owner_candidate.split] += 1
+        owners.append(
+            (owner_candidate, owner["selection_digest"], owner["selection_payload"])
+        )
+        audit_groups.append(
+            {
+                "group_digest": group_digest,
+                "family": family,
+                "public_state_identity": owner_candidate.public_state_identity,
+                "ordered_legal_action_identities": [
+                    dict(item) for item in owner_candidate.legal_action_identities
+                ],
+                "member_count": len(members),
+                "cross_split": len(splits) > 1,
+                "members": [
+                    _t075_member_provenance(
+                        item["candidate"],
+                        item["selection_digest"],
+                        item["selection_payload"],
+                    )
+                    for item in members
+                ],
+                "owner": _t075_member_provenance(
+                    owner_candidate,
+                    owner["selection_digest"],
+                    owner["selection_payload"],
+                ),
+            }
+        )
+
+    buckets: dict[tuple[str, str], list[tuple[Any, str, bytes]]] = defaultdict(list)
+    for owner in owners:
+        buckets[(owner[0].family, owner[0].split)].append(owner)
+    selected: list[tuple[Any, str, bytes]] = []
+    for family in T065_MANDATORY_FAMILIES:
+        for split in T065_SPLITS:
+            bucket = sorted(
+                buckets[(family, split)], key=lambda item: (item[1], item[2])
+            )
+            quota = T065_SPLIT_QUOTAS[split]
+            if len(bucket) < quota:
+                raise T065CaseD(
+                    "cohort-ownership",
+                    [f"{family}/{split} has {len(bucket)} owners, requires {quota}"],
+                    failure_counts={
+                        "available_owners": len(bucket),
+                        "required_owners": quota,
+                    },
+                )
+            selected.extend(bucket[:quota])
+
+    return tuple(selected), {
+        "schema_id": T075_OWNERSHIP_AUDIT_SCHEMA_ID,
+        "schema_version": 1,
+        "task_id": T075_TASK_ID,
+        "selection_strategy_id": T075_SELECTION_STRATEGY_ID,
+        "replay_identity": "(family, public_state_identity, ordered_legal_action_identities)",
+        "group_domain": T075_GROUP_DOMAIN.decode("utf-8").rstrip("\n"),
+        "candidate_domain_counts": {
+            "total": candidate_count,
+            "by_arm": dict(sorted(by_arm.items())),
+            "by_family": {
+                family: by_family[family] for family in T065_MANDATORY_FAMILIES
+            },
+            "by_split": {split: by_split[split] for split in T065_SPLITS},
+        },
+        "group_count": len(audit_groups),
+        "singleton_group_count": singleton_count,
+        "non_singleton_group_count": non_singleton_count,
+        "cross_split_group_count": cross_split_count,
+        "excluded_non_owner_count": excluded_count,
+        "group_counts_by_family": group_counts_by_family,
+        "group_counts_by_split": group_counts_by_split,
+        "group_size_histogram": {
+            key: group_size_histogram[key]
+            for key in sorted(group_size_histogram, key=int)
+        },
+        "owner_counts_by_family_split": owner_counts,
+        "groups": audit_groups,
+        "selected_count": len(selected),
+        "problems": [],
+    }
+
+
+def select_t075_source_states(
+    candidates: Iterable[T065SourceState],
+) -> tuple[tuple[T065SourceState, ...], dict[str, Any]]:
+    """Select the leakage-safe T075 cohort and return its ownership audit."""
+
+    selected, audit = select_t075_source_candidates(candidates)
+    states = tuple(
+        _replace_source_state(
+            candidate,
+            selected_state_index=index,
+            selection_digest=digest,
+            selection_canonical_json=payload.decode("utf-8"),
+        )
+        for index, (candidate, digest, payload) in enumerate(selected)
+    )
+    return states, audit
 
 
 @dataclass(frozen=True)

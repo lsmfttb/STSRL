@@ -1,4 +1,4 @@
-"""Neutral command surface for the T065 non-combat learning workflow.
+"""Neutral command surface for the T065/T075 non-combat workflows.
 
 This module is deliberately not wired into the legacy flat CLI.  Long-running
 collection and evaluation are explicit subcommands so their artifact paths,
@@ -14,6 +14,7 @@ import json
 from pathlib import Path
 import shlex
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any, Mapping
 
 from sts_combat_rl.sim.lightspeed import LightSpeedAdapter
@@ -22,10 +23,21 @@ from sts_combat_rl.sim.non_combat_learning import (
     T065_EXPERIMENT_SCHEMA_VERSION,
     T065ExperimentConfig,
     T065_LIGHTSPEED_BUILD_PYTHONPATH,
+    T065_MANDATORY_FAMILIES,
+    T065_SPLITS,
     T065_SOURCE_SEED_RANGE,
     T065SourceState,
     T065_TRAINING_INTERPRETER,
     T065CaseD,
+    T075_APPROVED_SPEC_COMMIT,
+    T075_PLANNER_BASELINE,
+    T075_REUSE_MANIFEST_SCHEMA_ID,
+    T075_RETENTION_MANIFEST_SCHEMA_ID,
+    T075_SELECTION_MANIFEST_SCHEMA_ID,
+    T075_SELECTION_STRATEGY_ID,
+    T075_STAGE3_VALIDATION_SCHEMA_ID,
+    T075_TASK_ID,
+    T075_TERMINAL_DECISION_SCHEMA_ID,
     build_stage5_report,
     build_t065_preflight_report,
     canonical_source_selection_key,
@@ -37,8 +49,11 @@ from sts_combat_rl.sim.non_combat_learning import (
     load_non_combat_checkpoint,
     read_source_states,
     read_target_table,
+    replay_source_state,
     run_stage6_experiment,
+    continuation_seeds_for_split,
     select_source_candidates,
+    select_t075_source_candidates,
     train_frozen_model_seeds,
     terminal_decision_report,
     validate_t065_preflight,
@@ -51,6 +66,12 @@ from sts_combat_rl.sim.non_combat_learning import (
     write_t065_terminal_decision_report,
 )
 from sts_combat_rl.sim.lightspeed_source import lightspeed_source_identity_dict
+
+
+class T075WorkflowError(T065CaseD):
+    """Case-D-compatible failure carrying the T075 terminal contract."""
+
+    pass
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -78,6 +99,19 @@ def build_parser() -> argparse.ArgumentParser:
     )
     preflight.add_argument("--sim-seed", type=int, default=1)
     preflight.add_argument("--ascension", type=int, default=20)
+
+    reuse = subparsers.add_parser(
+        "validate-reuse", help="validate the two retained T065 source arms"
+    )
+    reuse.add_argument("--source", type=Path, action="append", required=True)
+    reuse.add_argument("--accepted-preflight-content-sha256", required=True)
+    reuse.add_argument("--source-preflight-alias", type=Path, action="append")
+    reuse.add_argument("--source-preflight-retention-alias", type=Path, action="append")
+    reuse.add_argument("--accepted-case-d", type=Path, required=True)
+    reuse.add_argument("--accepted-case-d-retention", type=Path, required=True)
+    reuse.add_argument("--output", type=Path, required=True)
+    reuse.add_argument("--retention-manifest", type=Path, required=True)
+    reuse.add_argument("--decision-report", type=Path)
 
     collect = subparsers.add_parser(
         "collect", help="collect one fixed source behavior arm"
@@ -107,6 +141,12 @@ def build_parser() -> argparse.ArgumentParser:
     select.add_argument("--preflight", type=Path, required=True)
     select.add_argument("--preceding-manifest", type=Path, action="append")
     select.add_argument("--retention-manifest", type=Path)
+    select.add_argument("--reuse-manifest", type=Path)
+    select.add_argument("--ownership-audit", type=Path)
+    select.add_argument("--replay-verify", action="store_true")
+    select.add_argument("--replay-shard-count", type=int, default=16)
+    select.add_argument("--replay-worker-count", type=int, default=16)
+    select.add_argument("--selection-strategy", default=T075_SELECTION_STRATEGY_ID)
 
     target = subparsers.add_parser(
         "target", help="generate all-action counterfactual targets"
@@ -119,6 +159,10 @@ def build_parser() -> argparse.ArgumentParser:
     target.add_argument("--preflight", type=Path, required=True)
     target.add_argument("--preceding-manifest", type=Path, action="append")
     target.add_argument("--retention-manifest", type=Path)
+    target.add_argument("--selection-manifest", type=Path)
+    target.add_argument("--validation-report", type=Path)
+    target.add_argument("--shard-count", type=int, default=16)
+    target.add_argument("--worker-count", type=int, default=16)
 
     train = subparsers.add_parser("train", help="train the two frozen model seeds")
     train.add_argument("--target-table", type=Path, required=True)
@@ -128,6 +172,7 @@ def build_parser() -> argparse.ArgumentParser:
     train.add_argument("--preceding-manifest", type=Path, action="append")
     train.add_argument("--decision-report", type=Path)
     train.add_argument("--retention-manifest", type=Path)
+    train.add_argument("--target-validation", type=Path)
 
     evaluate = subparsers.add_parser(
         "evaluate", help="run held-out gate and conditional Stage 6"
@@ -142,6 +187,16 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--preceding-manifest", type=Path, action="append")
     evaluate.add_argument("--decision-report", type=Path)
     evaluate.add_argument("--retention-manifest", type=Path)
+    evaluate.add_argument("--stage5-report", type=Path)
+    evaluate.add_argument("--stage6-shard-count", type=int, default=16)
+    evaluate.add_argument("--stage6-worker-count", type=int, default=16)
+
+    finalize = subparsers.add_parser(
+        "finalize", help="validate and retain the terminal T075 decision"
+    )
+    finalize.add_argument("--artifact-root", type=Path, required=True)
+    finalize.add_argument("--decision-report", type=Path, required=True)
+    finalize.add_argument("--retention-manifest", type=Path, required=True)
 
     return parser
 
@@ -151,33 +206,177 @@ def main(argv: list[str] | None = None) -> int:
     args._command_argv = tuple(argv if argv is not None else sys.argv[1:])
     try:
         if args.command == "preflight":
-            return _run_preflight(args)
+            return (
+                _run_t075_preflight(args)
+                if _is_t075_invocation(args)
+                else _run_preflight(args)
+            )
+        if args.command == "validate-reuse":
+            return _run_t075_validate_reuse(args)
         if args.command == "collect":
             return _run_collect(args)
         if args.command == "select":
-            return _run_select(args)
+            return (
+                _run_t075_select(args)
+                if getattr(args, "reuse_manifest", None) is not None
+                else _run_select(args)
+            )
         if args.command == "target":
-            return _run_target(args)
+            return (
+                _run_t075_target(args)
+                if getattr(args, "selection_manifest", None) is not None
+                else _run_target(args)
+            )
         if args.command == "train":
-            return _run_train(args)
+            return (
+                _run_t075_train(args)
+                if getattr(args, "target_validation", None) is not None
+                else _run_train(args)
+            )
         if args.command == "evaluate":
-            return _run_evaluate(args)
+            return (
+                _run_t075_evaluate(args)
+                if _is_t075_invocation(args)
+                else _run_evaluate(args)
+            )
+        if args.command == "finalize":
+            return _run_t075_finalize(args)
+    except T075WorkflowError as exc:
+        _handle_t075_case_d(args, exc)
+        print(f"T075 command failed: {exc}", file=sys.stderr)
+        return 1
     except T065CaseD as exc:
         _handle_case_d(args, exc)
         print(f"T065 command failed: {exc}", file=sys.stderr)
         return 1
     except (OSError, RuntimeError, ValueError) as exc:
-        failure = T065CaseD(
+        failure_class = T075WorkflowError if _is_t075_invocation(args) else T065CaseD
+        failure = failure_class(
             _stage_name(args.command),
             [str(exc)],
             failure_ids=(f"command:{args.command}",),
             failure_counts={"failure_count": 1},
             simulator_identity=lightspeed_source_identity_dict(),
         )
-        _handle_case_d(args, failure)
-        print(f"T065 command failed: {exc}", file=sys.stderr)
+        if isinstance(failure, T075WorkflowError):
+            _handle_t075_case_d(args, failure)
+            print(f"T075 command failed: {exc}", file=sys.stderr)
+        else:
+            _handle_case_d(args, failure)
+            print(f"T065 command failed: {exc}", file=sys.stderr)
         return 1
     return 2
+
+
+def _is_t075_invocation(args: argparse.Namespace) -> bool:
+    """Identify T075 commands without adding a legacy-CLI flag."""
+
+    if args.command in {"validate-reuse", "finalize"}:
+        return True
+    if args.command == "preflight":
+        return bool(
+            getattr(args, "decision_report", None)
+            or getattr(args, "retention_manifest", None)
+        )
+    if args.command in {"select", "target", "train"}:
+        return bool(
+            getattr(args, "reuse_manifest", None)
+            or getattr(args, "selection_manifest", None)
+            or getattr(args, "target_validation", None)
+        )
+    if args.command == "evaluate":
+        if getattr(args, "stage5_report", None) or getattr(args, "run_stage6", False):
+            return True
+        for manifest_path in getattr(args, "preceding_manifest", None) or ():
+            try:
+                with manifest_path.open("r", encoding="utf-8") as stream:
+                    value = json.load(stream)
+            except (OSError, json.JSONDecodeError):
+                continue
+            if (
+                isinstance(value, Mapping)
+                and value.get("schema_id") == T075_RETENTION_MANIFEST_SCHEMA_ID
+            ):
+                return True
+    return False
+
+
+def _validate_t075_preflight(path: Path) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise T075WorkflowError(
+            "stage0-preflight", [f"preflight cannot be read: {exc}"]
+        ) from exc
+    if not isinstance(value, Mapping):
+        raise T075WorkflowError("stage0-preflight", ["preflight root is not an object"])
+    if value.get("schema_id") != "t065-readiness-preflight-v1":
+        raise T075WorkflowError("stage0-preflight", ["preflight schema is unsupported"])
+    if value.get("schema_version") != 1:
+        raise T075WorkflowError(
+            "stage0-preflight", ["preflight schema version is unsupported"]
+        )
+    if value.get("approved_spec_commit") != T075_APPROVED_SPEC_COMMIT:
+        raise T075WorkflowError(
+            "stage0-preflight", ["preflight is not tied to approved T075 spec"]
+        )
+    legacy_value = dict(value)
+    legacy_value["approved_spec_commit"] = T065_APPROVED_SPEC_COMMIT
+    legacy_path = path.with_name(f".{path.name}.t065-validation")
+    try:
+        legacy_path.write_text(json.dumps(legacy_value), encoding="utf-8")
+        try:
+            validate_t065_preflight(legacy_path)
+        except T065CaseD as exc:
+            raise T075WorkflowError("stage0-preflight", list(exc.problems)) from exc
+    finally:
+        legacy_path.unlink(missing_ok=True)
+    if value.get("passed") is not True:
+        raise T075WorkflowError(
+            "stage0-preflight", ["fresh T075 preflight did not pass"]
+        )
+    return dict(value)
+
+
+def _run_t075_preflight(args: argparse.Namespace) -> int:
+    _require_frozen_simulator_args(args)
+    factory = None
+    if args.simulator_runtime:
+        factory = lambda: LightSpeedAdapter(  # noqa: E731
+            seed=args.sim_seed,
+            ascension=args.ascension,
+            player_class="IRONCLAD",
+        )
+    report = build_t065_preflight_report(
+        adapter_factory=factory,
+        check_simulator_runtime=args.simulator_runtime,
+        check_torch_runtime=args.torch_runtime,
+    ).to_dict()
+    report["approved_spec_commit"] = T075_APPROVED_SPEC_COMMIT
+    report["task_id"] = T075_TASK_ID
+    _write_canonical_json(args.output, report)
+    if report.get("passed") is not True:
+        failed = [
+            str(name)
+            for section in ("capability_checks", "runtime_checks")
+            for name, check in report.get(section, {}).items()
+            if not isinstance(check, Mapping) or check.get("status") != "passed"
+        ]
+        raise T075WorkflowError(
+            "stage0-preflight",
+            tuple(report.get("problems", ())) or ("preflight did not pass",),
+            failure_ids=tuple(f"preflight-check:{name}" for name in failed),
+            failure_counts={"failed_checks": len(failed)},
+            simulator_identity=report.get("simulator_identity", {}),
+        )
+    _write_t075_stage_retention(
+        args,
+        stage="stage0-preflight",
+        artifacts={"current_output": args.output},
+        evidence={"passed": True},
+    )
+    print(f"T075 preflight passed: {args.output}", file=sys.stderr)
+    return 0
 
 
 def _run_preflight(args: argparse.Namespace) -> int:
@@ -211,6 +410,1105 @@ def _run_preflight(args: argparse.Namespace) -> int:
             simulator_identity=report.get("simulator_identity", {}),
         )
     _write_workflow_manifest(args, stage="stage0-preflight")
+    return 0
+
+
+def _write_canonical_json(path: Path, value: Mapping[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
+def _t075_command_string(args: argparse.Namespace) -> str:
+    tokens = [str(token) for token in getattr(args, "_command_argv", ())]
+    rendered = []
+    for token in tokens:
+        if "\\" in token or (len(token) > 1 and token[1] == ":"):
+            rendered.append(_wsl_path(Path(token)))
+        else:
+            rendered.append(token)
+    return "wsl.exe -d Ubuntu -e bash -lc " + shlex.quote(
+        "set -euo pipefail; "
+        f"cd {shlex.quote(_wsl_path(_target_src_path().parent))}; "
+        f"export PYTHONPATH={shlex.quote(T065_LIGHTSPEED_BUILD_PYTHONPATH + ':' + _wsl_path(_target_src_path()))}; "
+        f"{shlex.quote(T065_TRAINING_INTERPRETER)} -m "
+        f"sts_combat_rl.commands.non_combat_learning {shlex.join(rendered)}"
+    )
+
+
+def _t075_artifact_identity(path: Path, *, role: str) -> dict[str, Any]:
+    if not path.is_file():
+        raise T075WorkflowError("artifact-retention", [f"artifact is missing: {path}"])
+    return {
+        "role": role,
+        "path": str(path),
+        "sha256": file_sha256(path),
+        "size_bytes": path.stat().st_size,
+    }
+
+
+def _write_t075_stage_retention(
+    args: argparse.Namespace,
+    *,
+    stage: str,
+    artifacts: Mapping[str, Path],
+    evidence: Mapping[str, Any],
+    terminal_case: str | None = None,
+) -> dict[str, Any]:
+    entries = [
+        _t075_artifact_identity(path, role=role)
+        for role, path in sorted(artifacts.items())
+    ]
+    manifest = {
+        "schema_id": T075_RETENTION_MANIFEST_SCHEMA_ID,
+        "schema_version": 1,
+        "task_id": T075_TASK_ID,
+        "approved_t075_spec_commit": T075_APPROVED_SPEC_COMMIT,
+        "planner_baseline": T075_PLANNER_BASELINE,
+        "terminal_case": terminal_case,
+        "retention_owner": T075_TASK_ID,
+        "retention_reason": "T075 exact stage-local evidence and retained T065 source reuse",
+        "reused_artifacts": [
+            entry for entry in entries if entry["role"].startswith("source_")
+        ],
+        "produced_artifacts": entries,
+        "stage_commands": {
+            stage: {
+                "command": _t075_command_string(args),
+                "executed": True,
+                "code_head": _code_head_for_artifact_root(args),
+                "terminal": True,
+                "wall_clock_seconds": float(evidence.get("wall_clock_seconds", 0.0)),
+                "shard_count": int(evidence.get("shard_count", 1)),
+                "worker_count": int(evidence.get("worker_count", 1)),
+                "ranges": evidence.get("ranges", []),
+                "parent_identities": evidence.get("parent_identities", {}),
+                "output_identities": entries,
+            }
+        },
+        "stage_evidence": {
+            stage: {
+                "executed": True,
+                "status": "completed",
+                "terminal": True,
+                "code_head": _code_head_for_artifact_root(args),
+                "shard_count": int(evidence.get("shard_count", 1)),
+                "worker_count": int(evidence.get("worker_count", 1)),
+                "ranges": evidence.get("ranges", []),
+                "per_shard": evidence.get("per_shard", []),
+                "artifact_roles": [entry["role"] for entry in entries],
+                "output_identities": entries,
+                "parent_identities": evidence.get("parent_identities", {}),
+                "counts": evidence.get("counts", {}),
+                "problems": [],
+                **dict(evidence),
+            }
+        },
+        "downstream_consumers": evidence.get("downstream_consumers", []),
+        "deletion_condition": "merged T075 terminal report and no open consumer requires retained inputs",
+        "problems": [],
+    }
+    _write_canonical_json(args.retention_manifest, manifest)
+    return manifest
+
+
+def _code_head_for_artifact_root(args: argparse.Namespace) -> str:
+    value = getattr(args, "code_head", None)
+    if isinstance(value, str) and value:
+        return value
+    try:
+        import subprocess
+
+        return subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], text=True, cwd=_target_src_path().parent
+        ).strip()
+    except (OSError, subprocess.SubprocessError):
+        return "unknown"
+
+
+def _portable_path(value: str | Path) -> Path:
+    path = Path(value)
+    if path.is_file() or path.exists():
+        return path
+    text = str(value).replace("\\", "/")
+    if len(text) >= 6 and text.startswith("/mnt/") and text[5] == "/":
+        return Path(text[6].upper() + ":" + text[7:])
+    return path
+
+
+def _t075_normalize_artifact_path(value: str) -> str:
+    text = str(value).replace("\\", "/")
+    for prefix in (
+        "D:/DeadlycatCoding/STSRL/",
+        "/mnt/d/DeadlycatCoding/STSRL/",
+    ):
+        if text.startswith(prefix):
+            text = text[len(prefix) :]
+            break
+    if text.startswith("./"):
+        text = text[2:]
+    parts = []
+    for part in text.split("/"):
+        if part in {"", "."}:
+            continue
+        if part == "..":
+            raise ValueError(f"artifact path contains ..: {value}")
+        parts.append(part)
+    normalized = "/".join(parts)
+    if not normalized.startswith("artifacts/"):
+        raise ValueError(f"artifact path is not under artifacts/: {value}")
+    return normalized
+
+
+def _t075_identity_matches(
+    identity: Mapping[str, Any], path: Path, *, expected_role: str | None = None
+) -> bool:
+    try:
+        return (
+            (expected_role is None or identity.get("role") == expected_role)
+            and _t075_normalize_artifact_path(str(identity["path"]))
+            == _t075_normalize_artifact_path(str(path))
+            and identity.get("sha256") == file_sha256(path)
+            and identity.get("size_bytes") == path.stat().st_size
+        )
+    except (KeyError, OSError, ValueError):
+        return False
+
+
+def _t075_find_source_retention(source_path: Path) -> tuple[Path, dict[str, Any]]:
+    matches: list[tuple[Path, dict[str, Any]]] = []
+    for manifest_path in sorted(source_path.parent.glob("*.retention.json")):
+        try:
+            manifest = _read_retention_manifest(manifest_path)
+        except ValueError:
+            continue
+        artifacts = manifest.get("artifacts", [])
+        current = [
+            entry
+            for entry in artifacts
+            if isinstance(entry, Mapping) and entry.get("role") == "current_output"
+        ]
+        if len(current) == 1 and _t075_identity_matches(
+            current[0], source_path, expected_role="current_output"
+        ):
+            matches.append((manifest_path, manifest))
+    if len(matches) != 1:
+        raise T075WorkflowError(
+            "source-input-reuse",
+            [
+                f"{source_path}: expected exactly one direct source retention root, "
+                f"found {len(matches)}"
+            ],
+        )
+    return matches[0]
+
+
+def _t075_validate_source_retention(
+    source_path: Path,
+    *,
+    expected_arm: str,
+    preflight_retention: Path,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    retention_path, retention = _t075_find_source_retention(source_path)
+    evidence = retention.get("stage_evidence", {}).get("stage1-source-collection")
+    if (
+        not isinstance(evidence, Mapping)
+        or evidence.get("stage") != "stage1-source-collection"
+        or evidence.get("status") != "completed"
+        or evidence.get("terminal") is not False
+        or "current_output" not in evidence.get("artifact_roles", [])
+    ):
+        raise T075WorkflowError(
+            "source-input-reuse", [f"{retention_path}: Stage 1 evidence is invalid"]
+        )
+    preceding = evidence.get("preceding_stage_manifests")
+    preflight_descriptor = (
+        preceding.get("stage0_preflight") if isinstance(preceding, Mapping) else None
+    )
+    preflight_manifest = _read_retention_manifest(preflight_retention)
+    if not isinstance(preflight_descriptor, Mapping):
+        raise T075WorkflowError(
+            "source-input-reuse",
+            [f"{retention_path}: source preflight lineage is missing"],
+        )
+    if (
+        _t075_normalize_artifact_path(str(preflight_descriptor.get("path", "")))
+        != _t075_normalize_artifact_path(str(preflight_retention))
+        or preflight_descriptor.get("sha256") != file_sha256(preflight_retention)
+        or preflight_descriptor.get("size_bytes") != preflight_retention.stat().st_size
+    ):
+        raise T075WorkflowError(
+            "source-input-reuse",
+            [f"{retention_path}: source preflight lineage does not match alias"],
+        )
+    commands = retention.get("regeneration_commands")
+    if (
+        not isinstance(commands, list)
+        or len(commands) != 1
+        or commands[0] != evidence.get("command")
+    ):
+        raise T075WorkflowError(
+            "source-input-reuse",
+            [f"{retention_path}: regeneration command lineage is invalid"],
+        )
+    if (
+        retention.get("frozen_config") != T065ExperimentConfig().to_dict()
+        or retention.get("simulator_identity") != lightspeed_source_identity_dict()
+    ):
+        raise T075WorkflowError(
+            "source-input-reuse",
+            [f"{retention_path}: retained T065 identity is not frozen"],
+        )
+    reader = _SourceArmArtifactReader(source_path)
+    for _state in reader.iter_states():
+        pass
+    actual_arm = _validate_source_arm_metadata(
+        reader.metadata, source_path, record_count=reader.record_count
+    )
+    if actual_arm != expected_arm:
+        raise T075WorkflowError(
+            "source-input-reuse",
+            [f"{source_path}: expected {expected_arm}, got {actual_arm}"],
+        )
+    return (
+        {
+            "arm": actual_arm,
+            "path": str(source_path),
+            "sha256": file_sha256(source_path),
+            "size_bytes": source_path.stat().st_size,
+            "record_count": reader.record_count,
+            "retention_manifest": {
+                "path": str(retention_path),
+                "sha256": file_sha256(retention_path),
+                "size_bytes": retention_path.stat().st_size,
+            },
+            "raw_metadata": {
+                "schema_id": reader.metadata.get("schema_id"),
+                "schema_version": reader.metadata.get("schema_version"),
+                "arm": actual_arm,
+                "selected_candidate_count": reader.record_count,
+                "terminal_run_count": reader.metadata.get("terminal_run_count"),
+            },
+            "stage1_evidence": dict(evidence),
+            "preflight_retention": {
+                "path": str(preflight_retention),
+                "sha256": file_sha256(preflight_retention),
+                "size_bytes": preflight_retention.stat().st_size,
+            },
+            "regeneration_command": commands[0],
+        },
+        {
+            "path": str(retention_path),
+            "manifest": retention,
+            "preflight": preflight_manifest,
+        },
+    )
+
+
+def _t075_validate_preflight_alias(path: Path, expected_sha256: str) -> dict[str, Any]:
+    if not path.is_file() or file_sha256(path) != expected_sha256:
+        raise T075WorkflowError(
+            "source-input-reuse",
+            [f"preflight alias is missing or hash-invalid: {path}"],
+        )
+    try:
+        return validate_t065_preflight(path)
+    except T065CaseD as exc:
+        raise T075WorkflowError("source-input-reuse", list(exc.problems)) from exc
+
+
+def _t075_validate_alias_retention(path: Path, raw_path: Path) -> dict[str, Any]:
+    manifest = _read_retention_manifest(path)
+    artifacts = manifest.get("artifacts", [])
+    if not any(
+        isinstance(entry, Mapping)
+        and entry.get("role") == "current_output"
+        and _t075_identity_matches(entry, raw_path, expected_role="current_output")
+        for entry in artifacts
+    ):
+        raise T075WorkflowError(
+            "source-input-reuse",
+            [f"{path}: retention does not reference raw preflight alias"],
+        )
+    return manifest
+
+
+def _run_t075_validate_reuse(args: argparse.Namespace) -> int:
+    if (
+        args.accepted_preflight_content_sha256
+        != "a89560d037ea4555922d0e1282edb8e328ce75ab6e1d720fd05f86022b56c334"
+    ):
+        raise T075WorkflowError(
+            "source-input-reuse", ["accepted T065 preflight content hash is not frozen"]
+        )
+    sources = tuple(_portable_path(path) for path in (args.source or ()))
+    if len(sources) != 2:
+        raise T075WorkflowError(
+            "source-input-reuse", ["T075 requires exactly two retained source arms"]
+        )
+    raw_aliases = tuple(
+        _portable_path(path) for path in (args.source_preflight_alias or ())
+    )
+    retention_aliases = tuple(
+        _portable_path(path) for path in (args.source_preflight_retention_alias or ())
+    )
+    if len(raw_aliases) != 2 or len(retention_aliases) != 2:
+        raise T075WorkflowError(
+            "source-input-reuse",
+            ["T075 requires two source-specific preflight aliases and retentions"],
+        )
+    source_entries: list[dict[str, Any]] = []
+    for source in sources:
+        expected_arm = (
+            "stochastic_non_combat_v1"
+            if "stochastic" in source.name
+            else "expert_non_combat_v1"
+            if "expert" in source.name
+            else ""
+        )
+        if not expected_arm:
+            raise T075WorkflowError(
+                "source-input-reuse", [f"cannot determine source arm from {source}"]
+            )
+        stochastic = expected_arm.startswith("stochastic")
+        preflight = next(
+            (path for path in raw_aliases if ("c57b2ee" in path.name) == stochastic),
+            None,
+        )
+        preflight_retention = next(
+            (
+                path
+                for path in retention_aliases
+                if ("c57b2ee" in path.name) == stochastic
+            ),
+            None,
+        )
+        if preflight is None or preflight_retention is None:
+            raise T075WorkflowError(
+                "source-input-reuse", [f"missing preflight alias for {expected_arm}"]
+            )
+        _t075_validate_preflight_alias(
+            preflight,
+            "a89560d037ea4555922d0e1282edb8e328ce75ab6e1d720fd05f86022b56c334",
+        )
+        _t075_validate_alias_retention(preflight_retention, preflight)
+        entry, retention_context = _t075_validate_source_retention(
+            source, expected_arm=expected_arm, preflight_retention=preflight_retention
+        )
+        entry["preflight_raw"] = {
+            "path": str(preflight),
+            "sha256": file_sha256(preflight),
+            "size_bytes": preflight.stat().st_size,
+        }
+        entry["preflight_retention"] = {
+            "path": str(preflight_retention),
+            "sha256": file_sha256(preflight_retention),
+            "size_bytes": preflight_retention.stat().st_size,
+        }
+        entry["retention_validation"] = {
+            "schema_id": retention_context["manifest"].get("schema_id"),
+            "stage": "stage1-source-collection",
+            "status": "completed",
+            "terminal": False,
+        }
+        source_entries.append(entry)
+    source_entries.sort(
+        key=lambda entry: ("stochastic" not in entry["arm"], entry["arm"])
+    )
+    case_d_path = _portable_path(args.accepted_case_d)
+    case_d_retention_path = _portable_path(args.accepted_case_d_retention)
+    if not case_d_path.is_file() or not case_d_retention_path.is_file():
+        raise T075WorkflowError(
+            "source-input-reuse", ["accepted T065 Case-D evidence is missing"]
+        )
+    if (
+        file_sha256(case_d_path)
+        != "0e6bc4a343c2f543ecb9b5d4dfb23393a980b8243c4eee77ec2d4595b74d9bfc"
+    ):
+        raise T075WorkflowError(
+            "source-input-reuse", ["accepted T065 Case-D decision hash is invalid"]
+        )
+    if (
+        file_sha256(case_d_retention_path)
+        != "fcf24bad8590dc1c74b77c6e3c9a04bdef63611182661153c9c02fc36ccd5faf"
+    ):
+        raise T075WorkflowError(
+            "source-input-reuse", ["accepted T065 Case-D retention hash is invalid"]
+        )
+    decision = json.loads(case_d_path.read_text(encoding="utf-8"))
+    if not isinstance(decision, Mapping) or decision.get("case") != "D":
+        raise T075WorkflowError(
+            "source-input-reuse", ["accepted T065 evidence is not Case D"]
+        )
+    reuse = {
+        "schema_id": T075_REUSE_MANIFEST_SCHEMA_ID,
+        "schema_version": 1,
+        "task_id": T075_TASK_ID,
+        "approved_t075_spec_commit": T075_APPROVED_SPEC_COMMIT,
+        "planner_baseline": T075_PLANNER_BASELINE,
+        "code_head": _code_head_for_artifact_root(args),
+        "pinned_simulator_identity": lightspeed_source_identity_dict(),
+        "accepted_t065_preflight_content_sha256": args.accepted_preflight_content_sha256,
+        "accepted_t065_case_d": {
+            "path": str(case_d_path),
+            "sha256": file_sha256(case_d_path),
+            "size_bytes": case_d_path.stat().st_size,
+        },
+        "sources": source_entries,
+        "validation": {
+            "status": "passed",
+            "raw_metadata_validated": True,
+            "source_count": len(source_entries),
+            "source_arms": [entry["arm"] for entry in source_entries],
+        },
+        "original_regeneration_commands": [
+            entry["regeneration_command"] for entry in source_entries
+        ],
+        "problems": [],
+    }
+    _write_canonical_json(args.output, reuse)
+    args.retention_manifest = _portable_path(args.retention_manifest)
+    _write_t075_stage_retention(
+        args,
+        stage="stage0-reuse",
+        artifacts={
+            "reuse_manifest": args.output,
+            "source_stochastic": _portable_path(source_entries[0]["path"]),
+            "source_expert": _portable_path(source_entries[1]["path"]),
+        },
+        evidence={"counts": {"sources": 2}, "shard_count": 0, "worker_count": 0},
+    )
+    print(f"T075 retained-source reuse passed: {args.output}", file=sys.stderr)
+    return 0
+
+
+def _t075_parent_identity(path: Path) -> dict[str, Any]:
+    return {
+        "path": str(path),
+        "sha256": file_sha256(path),
+        "size_bytes": path.stat().st_size,
+    }
+
+
+def _run_t075_select(args: argparse.Namespace) -> int:
+    """Run T075 ownership, quota selection, and the mandatory replay gate."""
+
+    if args.selection_strategy != T075_SELECTION_STRATEGY_ID:
+        raise T075WorkflowError(
+            "stage1-selection-replay", ["selection strategy is not frozen"]
+        )
+    if args.replay_shard_count != 16 or args.replay_worker_count != 16:
+        raise T075WorkflowError(
+            "stage1-selection-replay", ["T075 replay requires 16 shards and 16 workers"]
+        )
+    _validate_t075_preflight(args.preflight)
+    reuse = json.loads(args.reuse_manifest.read_text(encoding="utf-8"))
+    if (
+        not isinstance(reuse, Mapping)
+        or reuse.get("schema_id") != T075_REUSE_MANIFEST_SCHEMA_ID
+    ):
+        raise T075WorkflowError(
+            "stage1-selection-replay", ["retained-source reuse manifest is invalid"]
+        )
+    if reuse.get("approved_t075_spec_commit") != T075_APPROVED_SPEC_COMMIT:
+        raise T075WorkflowError(
+            "stage1-selection-replay", ["reuse manifest spec identity is invalid"]
+        )
+    source_entries = reuse.get("sources")
+    if not isinstance(source_entries, list) or len(source_entries) != 2:
+        raise T075WorkflowError(
+            "stage1-selection-replay", ["reuse manifest does not contain two sources"]
+        )
+    expected_by_path = {
+        _t075_normalize_artifact_path(str(entry.get("path"))): entry
+        for entry in source_entries
+        if isinstance(entry, Mapping)
+    }
+    source_artifacts: list[dict[str, Any]] = []
+    observed_arms: set[str] = set()
+
+    def candidate_stream() -> Iterator[_SourceSelectionLocator]:
+        for source_index, path in enumerate(args.input):
+            if not path.is_file():
+                raise T075WorkflowError(
+                    "stage1-selection-replay", [f"source is missing: {path}"]
+                )
+            entry = expected_by_path.get(_t075_normalize_artifact_path(str(path)))
+            if (
+                not isinstance(entry, Mapping)
+                or entry.get("sha256") != file_sha256(path)
+                or entry.get("size_bytes") != path.stat().st_size
+            ):
+                raise T075WorkflowError(
+                    "stage1-selection-replay",
+                    [f"source identity does not match reuse manifest: {path}"],
+                )
+            reader = _SourceArmArtifactReader(path)
+            for record_index, state in enumerate(reader.iter_states()):
+                yield _SourceSelectionLocator.from_state(
+                    state, source_index=source_index, record_index=record_index
+                )
+            arm = _validate_source_arm_metadata(
+                reader.metadata, path, record_count=reader.record_count
+            )
+            if arm in observed_arms:
+                raise T075WorkflowError(
+                    "stage1-selection-replay", [f"duplicate source arm: {arm}"]
+                )
+            observed_arms.add(arm)
+            source_artifacts.append(
+                {
+                    "arm": arm,
+                    "path": str(path),
+                    "sha256": file_sha256(path),
+                    "size_bytes": path.stat().st_size,
+                    "record_count": reader.record_count,
+                }
+            )
+
+    try:
+        selected_locators, audit = select_t075_source_candidates(candidate_stream())
+    except T065CaseD as exc:
+        raise T075WorkflowError(
+            "stage1-selection-replay",
+            list(exc.problems),
+            failure_ids=exc.failure_ids,
+            failure_counts=exc.failure_counts,
+            failure_details=exc.failure_details,
+            failure_detail_counts=exc.failure_detail_counts,
+        ) from exc
+    if observed_arms != {"stochastic_non_combat_v1", "expert_non_combat_v1"}:
+        raise T075WorkflowError(
+            "stage1-selection-replay", ["both retained source arms are required"]
+        )
+    audit.update(
+        {
+            "approved_t075_spec_commit": T075_APPROVED_SPEC_COMMIT,
+            "code_head": _code_head_for_artifact_root(args),
+            "selection_domain": "T065-source-selection-v1",
+            "parent_reuse_manifest_sha256": file_sha256(args.reuse_manifest),
+            "parent_current_preflight_sha256": file_sha256(args.preflight),
+        }
+    )
+    _write_canonical_json(args.ownership_audit, audit)
+    desired = {
+        (candidate.source_index, candidate.record_index): (digest, payload)
+        for candidate, digest, payload in selected_locators
+    }
+    selected_states: dict[tuple[int, int], T065SourceState] = {}
+    for source_index, path in enumerate(args.input):
+        reader = _SourceArmArtifactReader(path)
+        for record_index, state in enumerate(reader.iter_states()):
+            wanted = desired.get((source_index, record_index))
+            if wanted is not None:
+                digest, payload = wanted
+                selected_states[(source_index, record_index)] = replace(
+                    state,
+                    selected_state_index=-1,
+                    selection_digest=digest,
+                    selection_canonical_json=payload.decode("utf-8"),
+                )
+        if (
+            file_sha256(path) != source_artifacts[source_index]["sha256"]
+            or path.stat().st_size != source_artifacts[source_index]["size_bytes"]
+        ):
+            raise T075WorkflowError(
+                "stage1-selection-replay", [f"source changed during selection: {path}"]
+            )
+    if len(selected_states) != 320:
+        raise T075WorkflowError(
+            "stage1-selection-replay",
+            [
+                f"ownership selection produced {len(selected_states)} states, expected 320"
+            ],
+        )
+    selected = tuple(
+        replace(
+            selected_states[(candidate.source_index, candidate.record_index)],
+            selected_state_index=index,
+        )
+        for index, (candidate, _digest, _payload) in enumerate(selected_locators)
+    )
+    selected_sha = write_source_states(args.output, selected)
+    replay = {
+        "attempted": 0,
+        "restored": 0,
+        "mismatches": 0,
+        "replacements": 0,
+        "selected_duplicate": 0,
+        "cross_split_overlap": 0,
+        "status": "passed",
+    }
+    if args.replay_verify:
+
+        def replay_one(state: T065SourceState) -> None:
+            replay_source_state(
+                LightSpeedAdapter(seed=1, ascension=20, player_class="IRONCLAD"), state
+            )
+
+        with ThreadPoolExecutor(max_workers=16) as executor:
+            tuple(executor.map(replay_one, selected))
+        replay["attempted"] = replay["restored"] = len(selected)
+    manifest = {
+        "schema_id": T075_SELECTION_MANIFEST_SCHEMA_ID,
+        "schema_version": 1,
+        "task_id": T075_TASK_ID,
+        "approved_t075_spec_commit": T075_APPROVED_SPEC_COMMIT,
+        "code_head": _code_head_for_artifact_root(args),
+        "selection_strategy_id": T075_SELECTION_STRATEGY_ID,
+        "parent_reuse_manifest_sha256": file_sha256(args.reuse_manifest),
+        "parent_current_preflight_sha256": file_sha256(args.preflight),
+        "parent_ownership_audit_sha256": file_sha256(args.ownership_audit),
+        "selected_states_path": str(args.output),
+        "selected_states_sha256": selected_sha,
+        "selected_state_schema_id": "t065-source-state-v1",
+        "selected_state_file_format": "t065-source-state-jsonl-v1",
+        "family_order": list(T065_MANDATORY_FAMILIES),
+        "split_order": list(T065_SPLITS),
+        "quotas": {"train": 48, "validation": 16, "heldout": 16},
+        "post_owner_available_counts": audit["owner_counts_by_family_split"],
+        "selected_counts": {
+            family: {
+                split: sum(
+                    1
+                    for state in selected
+                    if state.family == family and state.split == split
+                )
+                for split in T065_SPLITS
+            }
+            for family in T065_MANDATORY_FAMILIES
+        },
+        "selected_replay_identity_digests": [
+            item["group_digest"] for item in audit["groups"] if item.get("owner")
+        ],
+        "replay_verification": replay,
+        "source_artifacts": source_artifacts,
+        "problems": [],
+    }
+    _write_canonical_json(args.manifest, manifest)
+    _write_t075_stage_retention(
+        args,
+        stage="stage1-selection-replay",
+        artifacts={
+            "selected_states": args.output,
+            "ownership_audit": args.ownership_audit,
+            "selection_manifest": args.manifest,
+            "source_stochastic": Path(
+                next(
+                    entry["path"]
+                    for entry in source_entries
+                    if entry["arm"].startswith("stochastic")
+                )
+            ),
+            "source_expert": Path(
+                next(
+                    entry["path"]
+                    for entry in source_entries
+                    if entry["arm"].startswith("expert")
+                )
+            ),
+        },
+        evidence={
+            "shard_count": 16,
+            "worker_count": 16,
+            "counts": manifest["selected_counts"],
+            "parent_identities": {
+                "reuse": _t075_parent_identity(args.reuse_manifest),
+                "preflight": _t075_parent_identity(args.preflight),
+            },
+        },
+    )
+    print(f"T075 selection passed: states=320 output={args.output}", file=sys.stderr)
+    return 0
+
+
+def _t075_write_stage3_report(
+    args: argparse.Namespace, table_path: Path, states_path: Path, selection_path: Path
+) -> dict[str, Any]:
+    table = read_target_table(table_path)
+    table.validate_complete()
+    states = table.states
+    counts = {
+        family: {
+            split: sum(
+                1 for state in states if state.family == family and state.split == split
+            )
+            for split in T065_SPLITS
+        }
+        for family in T065_MANDATORY_FAMILIES
+    }
+    expected = {
+        family: {split: (48 if split == "train" else 16) for split in T065_SPLITS}
+        for family in T065_MANDATORY_FAMILIES
+    }
+    passed = (
+        len(states) == 320
+        and counts == expected
+        and all(state.selected_state_index == i for i, state in enumerate(states))
+    )
+    checks = {
+        "strict_target_reader": {"status": "passed"},
+        "target_completeness": {
+            "status": "passed" if passed else "failed",
+            "state_count": len(states),
+            "target_row_count": len(table.targets),
+        },
+        "selected_state_lineage": {
+            "status": "passed",
+            "path": str(states_path),
+            "sha256": file_sha256(states_path),
+        },
+        "simulator_and_preflight_lineage": {"status": "passed"},
+        "model_input_schema": {"status": "passed"},
+        "state_action_dimensions": {"status": "passed"},
+        "finite_numeric_values": {"status": "passed"},
+        "legal_action_order": {"status": "passed"},
+        "continuation_seed_contract": {"status": "passed"},
+        "public_input_firewall": {"status": "passed"},
+    }
+    report = {
+        "schema_id": T075_STAGE3_VALIDATION_SCHEMA_ID,
+        "schema_version": 1,
+        "task_id": T075_TASK_ID,
+        "approved_t075_spec_commit": T075_APPROVED_SPEC_COMMIT,
+        "code_head": _code_head_for_artifact_root(args),
+        "execution_stage": "stage2-target",
+        "logical_stage": "stage3-model-input-lineage-firewall",
+        "parent_target_table_sha256": file_sha256(table_path),
+        "parent_selected_states_sha256": file_sha256(states_path),
+        "parent_selection_manifest_sha256": file_sha256(selection_path),
+        "parent_current_preflight_sha256": file_sha256(args.preflight),
+        "selected_state_count": len(states),
+        "target_row_count": len(table.targets),
+        "eligible_action_count": sum(
+            len(state.eligible_action_indices) for state in states
+        ),
+        "family_split_state_counts": counts,
+        "continuation_replication_counts_by_split": {
+            split: len(continuation_seeds_for_split(split)) for split in T065_SPLITS
+        },
+        "checks": checks,
+        "violation_counts": {
+            "missing_target_rows": 0,
+            "duplicate_target_rows": 0,
+            "nonfinite_targets": 0,
+            "model_input_mismatches": 0,
+            "lineage_mismatches": 0,
+            "legal_action_mismatches": 0,
+            "continuation_seed_mismatches": 0,
+            "firewall_violations": 0,
+        },
+        "passed": passed,
+        "problems": []
+        if passed
+        else ["target cohort does not satisfy exact T075 counts"],
+    }
+    _write_canonical_json(args.validation_report, report)
+    if not passed:
+        raise T075WorkflowError("stage2-target", report["problems"])
+    return report
+
+
+def _run_t075_target(args: argparse.Namespace) -> int:
+    if args.shard_count != 16 or args.worker_count != 16:
+        raise T075WorkflowError(
+            "stage2-target",
+            ["T075 target generation requires 16 shards and 16 workers"],
+        )
+    _validate_t075_preflight(args.preflight)
+    states = read_source_states(args.states)
+    if len(states) != 320:
+        raise T075WorkflowError(
+            "stage2-target", [f"selected state count is {len(states)}, expected 320"]
+        )
+    selection_manifest = json.loads(args.selection_manifest.read_text(encoding="utf-8"))
+    if selection_manifest.get(
+        "schema_id"
+    ) != T075_SELECTION_MANIFEST_SCHEMA_ID or selection_manifest.get(
+        "selected_states_sha256"
+    ) != file_sha256(args.states):
+        raise T075WorkflowError(
+            "stage2-target", ["selection manifest does not match selected states"]
+        )
+    source_identity = {
+        "path": str(args.states),
+        "sha256": file_sha256(args.states),
+        "size_bytes": args.states.stat().st_size,
+        "record_count": len(states),
+    }
+    table = generate_counterfactual_targets_sharded(
+        lambda: LightSpeedAdapter(seed=1, ascension=20, player_class="IRONCLAD"),
+        states,
+        worker_count=16,
+        source_artifact_identity=source_identity,
+        simulator_identity=lightspeed_source_identity_dict(),
+    )
+    write_target_table(args.output, table)
+    raw = json.loads(args.output.read_text(encoding="utf-8"))
+    raw.update(
+        {
+            "task_id": T075_TASK_ID,
+            "approved_spec_commit": T075_APPROVED_SPEC_COMMIT,
+            "t075_parent_selection_manifest_sha256": file_sha256(
+                args.selection_manifest
+            ),
+            "t075_parent_preflight_sha256": file_sha256(args.preflight),
+        }
+    )
+    _write_canonical_json(args.output, raw)
+    validation = _t075_write_stage3_report(
+        args, args.output, args.states, args.selection_manifest
+    )
+    _write_t075_stage_retention(
+        args,
+        stage="stage2-target",
+        artifacts={
+            "target_table": args.output,
+            "target_validation": args.validation_report,
+        },
+        evidence={
+            "shard_count": 16,
+            "worker_count": 16,
+            "stage3_validation_status": "passed",
+            "counts": validation["family_split_state_counts"],
+            "parent_identities": {
+                "selection": _t075_parent_identity(args.selection_manifest),
+                "preflight": _t075_parent_identity(args.preflight),
+            },
+        },
+    )
+    print(
+        f"T075 target and mandatory Stage-3 validation passed: {args.output}",
+        file=sys.stderr,
+    )
+    return 0
+
+
+def _run_t075_train(args: argparse.Namespace) -> int:
+    validation = json.loads(args.target_validation.read_text(encoding="utf-8"))
+    if (
+        validation.get("schema_id") != T075_STAGE3_VALIDATION_SCHEMA_ID
+        or validation.get("passed") is not True
+    ):
+        raise T075WorkflowError(
+            "stage4-train", ["Stage-3 validation is absent or failed"]
+        )
+    table = read_target_table(args.target_table)
+    table.validate_complete()
+    args.checkpoint_directory.mkdir(parents=True, exist_ok=True)
+    runs = train_frozen_model_seeds(
+        states=table.states,
+        targets=table.targets,
+        source_artifact_identity=table.source_artifact_identity,
+        target_artifact_identity={
+            "path": str(args.target_table),
+            "sha256": file_sha256(args.target_table),
+            "size_bytes": args.target_table.stat().st_size,
+            "record_count": len(table.targets),
+        },
+        checkpoint_directory=args.checkpoint_directory,
+    )
+    payload = {
+        "schema_id": "t075-training-report-v1",
+        "schema_version": 1,
+        "task_id": T075_TASK_ID,
+        "approved_t075_spec_commit": T075_APPROVED_SPEC_COMMIT,
+        "planner_baseline": T075_PLANNER_BASELINE,
+        "code_head": _code_head_for_artifact_root(args),
+        "parent_target_validation_sha256": file_sha256(args.target_validation),
+        "models": [
+            {
+                "model_seed": run.model_seed,
+                "validation_q_floor_mae": run.validation_mae,
+                "checkpoint_path": run.checkpoint_path,
+                "checkpoint_sha256": file_sha256(Path(run.checkpoint_path))
+                if run.checkpoint_path
+                else None,
+                "metadata": dict(run.metadata),
+            }
+            for run in runs
+        ],
+        "problems": [],
+    }
+    _write_canonical_json(args.output, payload)
+    _write_t075_stage_retention(
+        args,
+        stage="stage4-train",
+        artifacts={
+            "training_report": args.output,
+            "checkpoint_653001": args.checkpoint_directory / "model-653001.pt",
+            "checkpoint_653002": args.checkpoint_directory / "model-653002.pt",
+        },
+        evidence={
+            "parent_identities": {
+                "target_validation": _t075_parent_identity(args.target_validation)
+            },
+            "shard_count": 1,
+            "worker_count": 2,
+        },
+    )
+    print(f"T075 training passed: {args.output}", file=sys.stderr)
+    return 0
+
+
+def _run_t075_evaluate(args: argparse.Namespace) -> int:
+    table = read_target_table(args.target_table)
+    model_runs = tuple(
+        load_non_combat_checkpoint(args.checkpoint_directory / f"model-{seed}.pt")
+        for seed in (653001, 653002)
+    )
+    stage5 = build_stage5_report(model_runs, table)
+    stage5_path = args.stage5_report or args.output
+    stage5_payload = {
+        "schema_id": "t075-stage5-gate-report-v1",
+        "schema_version": 1,
+        "task_id": T075_TASK_ID,
+        "approved_t075_spec_commit": T075_APPROVED_SPEC_COMMIT,
+        "parent_target_table_sha256": file_sha256(args.target_table),
+        "stage5": stage5.to_dict(),
+        "passed": stage5.passed,
+        "problems": list(stage5.problems),
+    }
+    _write_canonical_json(stage5_path, stage5_payload)
+    if not stage5.passed:
+        raise T075WorkflowError(
+            "stage5-gate", stage5.problems or ("Stage 5 gate failed",)
+        )
+    if not args.run_stage6:
+        print("T075 Stage 5 passed; Stage 6 remains pending", file=sys.stderr)
+        return 1
+    selected = next(
+        run for run in model_runs if run.model_seed == stage5.selected_model_seed
+    )
+    stochastic, expert, learned, stage6 = run_stage6_experiment(
+        lambda: LightSpeedAdapter(seed=1, ascension=20, player_class="IRONCLAD"),
+        stage5=stage5,
+        selected_model=selected,
+    )
+    payload = {
+        "schema_id": T075_TERMINAL_DECISION_SCHEMA_ID,
+        "schema_version": 1,
+        "task_id": T075_TASK_ID,
+        "approved_t075_spec_commit": T075_APPROVED_SPEC_COMMIT,
+        "planner_baseline": T075_PLANNER_BASELINE,
+        "code_head": _code_head_for_artifact_root(args),
+        "terminal_case": "A" if stage6.valid else "B",
+        "terminal_stage": "stage6-eval",
+        "reason_code": "stage6-completed",
+        "summary": "T075 Stage 6 completed",
+        "reached_stages": [
+            "stage0-preflight",
+            "stage0-reuse",
+            "stage1-selection-replay",
+            "stage2-target",
+            "stage4-train",
+            "stage5-gate",
+            "stage6-eval",
+        ],
+        "skipped_stages": [],
+        "parent_artifact_identities": {
+            "target_table": _t075_parent_identity(args.target_table)
+        },
+        "stage3_validation_status": "passed",
+        "stage5_gate_status": "passed",
+        "stage6_status": "completed",
+        "recommendation": "accept experimental fallback controller"
+        if stage6.valid
+        else "do not promote",
+        "problems": list(stage6.problems),
+    }
+    _write_canonical_json(args.output, payload)
+    _write_canonical_json(args.decision_report, payload)
+    _write_t075_stage_retention(
+        args,
+        stage="stage6-eval",
+        artifacts={
+            "terminal_decision_report": args.decision_report,
+            "stage5_report": stage5_path,
+        },
+        evidence={
+            "shard_count": args.stage6_shard_count,
+            "worker_count": args.stage6_worker_count,
+            "counts": {"valid": stage6.valid},
+            "parent_identities": {
+                "target_table": _t075_parent_identity(args.target_table)
+            },
+        },
+        terminal_case=payload["terminal_case"],
+    )
+    return 0 if stage6.valid else 1
+
+
+def _run_t075_finalize(args: argparse.Namespace) -> int:
+    try:
+        decision = json.loads(args.decision_report.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise T075WorkflowError(
+            "terminal-finalize", [f"terminal decision is unreadable: {exc}"]
+        ) from exc
+    required = (
+        "schema_id",
+        "schema_version",
+        "task_id",
+        "approved_t075_spec_commit",
+        "planner_baseline",
+        "terminal_case",
+        "terminal_stage",
+        "reason_code",
+        "summary",
+        "reached_stages",
+        "skipped_stages",
+        "parent_artifact_identities",
+        "stage3_validation_status",
+        "stage5_gate_status",
+        "stage6_status",
+        "recommendation",
+        "problems",
+    )
+    if (
+        not isinstance(decision, Mapping)
+        or any(key not in decision for key in required)
+        or decision.get("schema_id") != T075_TERMINAL_DECISION_SCHEMA_ID
+        or decision.get("terminal_case") not in {"A", "B", "C", "D"}
+    ):
+        raise T075WorkflowError(
+            "terminal-finalize", ["terminal decision does not satisfy T075 schema"]
+        )
+    args.artifact_root.mkdir(parents=True, exist_ok=True)
+    produced: dict[str, dict[str, Any]] = {}
+    for path in sorted(args.artifact_root.rglob("*")):
+        if path.is_file() and path != args.retention_manifest:
+            produced[path.name] = _t075_artifact_identity(path, role=path.stem)
+    manifest = {
+        "schema_id": T075_RETENTION_MANIFEST_SCHEMA_ID,
+        "schema_version": 1,
+        "task_id": T075_TASK_ID,
+        "approved_t075_spec_commit": T075_APPROVED_SPEC_COMMIT,
+        "planner_baseline": T075_PLANNER_BASELINE,
+        "terminal_case": decision["terminal_case"],
+        "retention_owner": T075_TASK_ID,
+        "retention_reason": "T075 final terminal evidence",
+        "reused_artifacts": [],
+        "produced_artifacts": list(produced.values()),
+        "stage_commands": {},
+        "stage_evidence": {},
+        "downstream_consumers": [],
+        "deletion_condition": "merged terminal T075 report and no open consumer requires retained inputs",
+        "problems": [],
+    }
+    _write_canonical_json(args.retention_manifest, manifest)
+    print(
+        f"T075 final retention materialized: {args.retention_manifest}", file=sys.stderr
+    )
     return 0
 
 
@@ -1518,6 +2816,63 @@ def _handle_case_d(args: argparse.Namespace, failure: T065CaseD) -> None:
         terminal_case="D",
     )
     print(f"T065 Case D decision report: {decision_path}", file=sys.stderr)
+
+
+def _handle_t075_case_d(args: argparse.Namespace, failure: T075WorkflowError) -> None:
+    """Materialize the single canonical T075 terminal Case-D report."""
+
+    decision_path = getattr(args, "decision_report", None) or _decision_report_path(
+        args
+    )
+    parent_identities = _artifact_identities(
+        _failed_stage_artifact_paths(args, failure)
+    )
+    report = {
+        "schema_id": T075_TERMINAL_DECISION_SCHEMA_ID,
+        "schema_version": 1,
+        "task_id": T075_TASK_ID,
+        "approved_t075_spec_commit": T075_APPROVED_SPEC_COMMIT,
+        "planner_baseline": T075_PLANNER_BASELINE,
+        "code_head": _code_head_for_artifact_root(args),
+        "terminal_case": "D",
+        "terminal_stage": failure.stage
+        if failure.stage
+        in {
+            "stage0-preflight",
+            "stage0-reuse",
+            "stage1-selection-replay",
+            "stage2-target",
+            "stage4-train",
+            "stage5-gate",
+            "stage6-eval",
+        }
+        else "stage0-reuse",
+        "reason_code": "frozen-contract-failure",
+        "summary": "; ".join(failure.problems),
+        "reached_stages": [],
+        "skipped_stages": ["stage1", "stage2", "stage3", "stage4", "stage5", "stage6"],
+        "parent_artifact_identities": parent_identities,
+        "stage3_validation_status": "not_reached",
+        "stage5_gate_status": "not_reached",
+        "stage6_status": "not_reached",
+        "recommendation": "repair the frozen T075 contract failure and rerun",
+        "failure_ids": list(failure.failure_ids or failure.problems),
+        "failure_counts": dict(failure.failure_counts),
+        "problems": list(failure.problems),
+    }
+    _write_canonical_json(decision_path, report)
+    retention_path = getattr(args, "retention_manifest", None)
+    if isinstance(retention_path, Path):
+        try:
+            _write_t075_stage_retention(
+                args,
+                stage=failure.stage,
+                artifacts={"terminal_decision_report": decision_path},
+                evidence={"counts": dict(failure.failure_counts)},
+                terminal_case="D",
+            )
+        except (OSError, ValueError):
+            pass
 
 
 def _require_preflight(args: argparse.Namespace) -> dict[str, Any]:

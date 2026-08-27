@@ -49,6 +49,7 @@ from sts_combat_rl.sim.non_combat_learning import (
     load_non_combat_checkpoint,
     screen_family,
     select_source_states,
+    select_t075_source_candidates,
     split_for_source_seed,
     source_shard_ranges,
     stage6_shard_ranges,
@@ -1952,3 +1953,42 @@ def test_checkpoint_selection_rejects_incomplete_metadata() -> None:
     )
     with pytest.raises(ValueError, match="artifact_identity"):
         select_validation_checkpoint(runs)
+
+
+def test_t075_global_ownership_preserves_exact_family_split_quotas() -> None:
+    candidates = []
+    split_ranges = {
+        "train": range(650001, 650049),
+        "validation": range(650155, 650171),
+        "heldout": range(650206, 650222),
+    }
+    for family in T065_MANDATORY_FAMILIES:
+        for split, seeds in split_ranges.items():
+            for offset, seed in enumerate(seeds):
+                candidates.append(
+                    SimpleNamespace(
+                        family=family,
+                        split=split,
+                        simulator_seed=seed,
+                        source_arm="stochastic_non_combat_v1",
+                        source_run_id=f"stochastic_non_combat_v1:{seed}",
+                        source_step_index=offset,
+                        public_state_identity=f"{family}:{split}:{offset}",
+                        legal_action_identities=({"action_id": f"a:{offset}"},),
+                        action_trace=(),
+                        terminal=True,
+                    )
+                )
+    selected, audit = select_t075_source_candidates(candidates)
+    assert len(selected) == 320
+    assert audit["excluded_non_owner_count"] == 0
+    assert all(
+        sum(
+            1
+            for candidate, _digest, _payload in selected
+            if candidate.family == family and candidate.split == split
+        )
+        == (48 if split == "train" else 16)
+        for family in T065_MANDATORY_FAMILIES
+        for split in ("train", "validation", "heldout")
+    )
