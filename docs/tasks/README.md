@@ -75,10 +75,10 @@ workflow's explicit implementation-authorization gate is satisfied.
 | T052 | DONE | [T051 Boss/later-act fixed-cohort diagnostic](T052-t051-boss-later-act-fixed-cohort-diagnostic.md) | T051, T050, T048, T047, T005 | restored-battle diagnostic on T051 naturally reached Boss and later-act starts |
 | T053 | DONE | [T052 root-prior allocation failure analysis](T053-t052-root-prior-allocation-failure-analysis.md) | T052, T047, T048, T051 | offline decision-level analysis of T052 root-prior regression and tied Boss starts |
 | T054 | DONE | [Guardrailed root-prior allocation repair experiment](T054-guardrailed-root-prior-allocation-repair-experiment.md) | T053, T052, T048, T047, T046, T043 | versioned guardrailed root-prior repair experiment on the retained T052 fixed cohort |
-| T055 | DONE | [Guardrailed root-prior fixed-cohort scale validation](T055-guardrailed-root-prior-fixed-cohort-scale-validation.md) | T054, T048, T047, T046, T044, T043 | repaired guardrail scale validation on the retained T048 fixed cohorts |
+| T055 | DONE | [Guardrailed root-prior fixed-cohort scale validation](T055-guardrailed-root-prior-scale-validation.md) | T054, T048, T047, T046, T044, T043 | repaired guardrail scale validation on the retained T048 fixed cohorts |
 | T056 | DONE | [Post-T055 root-prior path selection](T056-post-t055-root-prior-path-selection.md) | T055, T054, T053, T052, T051, T050, T048 | guardrail-path closure and non-guardrail next-path selection |
-| T057 | DONE | [Existing root-prior allocation telemetry diagnostic](T057-existing-root-prior-allocation-telemetry-diagnostic.md) | T056, T055, T053, T052, T048, T046, T043 | offline existing-root-prior allocation and selected-action telemetry diagnostic |
-| T058 | DONE | [Root-prior selected-action telemetry replay diagnostic](T058-root-prior-selected-action-telemetry-replay-diagnostic.md) | T057, T052, T048, T046, T043 | instrumented or replayed selected-action identity comparison before any root-prior reachability or promotion branch |
+| T057 | DONE | [Existing root-prior allocation telemetry diagnostic](T057-existing-root-prior-telemetry-diagnostic.md) | T056, T055, T053, T052, T048, T046, T043 | offline existing-root-prior allocation and selected-action telemetry diagnostic |
+| T058 | DONE | [Root-prior selected-action telemetry replay diagnostic](T058-root-prior-selected-action-telemetry.md) | T057, T052, T048, T046, T043 | instrumented or replayed selected-action identity comparison before any root-prior reachability or promotion branch |
 | T059 | DONE | [Root-prior allocation repair experiment](T059-root-prior-allocation-repair-experiment.md) | T058, T052, T048, T046, T043 | bounded allocation repair experiment; closes the allocation-repair route after no T052/T053 improvement |
 | T060 | CANCELLED | [Expert non-combat natural source coverage scale-up](T060-expert-non-combat-natural-source-coverage-scaleup.md) | T059, T040, T050, T039 | cancelled before execution; fixed-policy 10,000-run scale-up does not address the reachability-policy bottleneck |
 | T061 | DONE | [A20 self-generated reachability bottleneck decomposition](T061-a20-self-generated-reachability-bottleneck-decomposition.md) | T059, T040, T050, T052 | battle-budget signal accepted; selects T062 as the single next task |
@@ -88,13 +88,14 @@ workflow's explicit implementation-authorization gate is satisfied.
 | T065 | DONE | [Learned non-combat policy v1](T065-learned-non-combat-policy-v1.md) | T033, T040, T061, T064, T071, T074 | valid Case D diagnostic: frozen source selection found 107 replay-equivalent cross-split duplicates; no policy conclusion or downstream scientific stages |
 | T066 | DRAFT | [Alternating joint policy improvement and natural scale gate](T066-alternating-joint-policy-improvement-and-natural-scale-gate.md) | T062, T063, T064, T065 | separate battle/non-combat policies with shared run value, followed by conditional natural scale-up |
 | T067 | DONE | [Battle Search v2 inference-cost repair](T067-battle-search-v2-inference-cost-repair.md) | T062, T061, T052, T043 | exact-cache repair preserved semantics but had 0/866 hits; cost calibration remained infeasible and selected T068 |
-| T068 | DONE | [Native-boundary batched inference feasibility](T068-native-boundary-batched-inference-feasibility.md) | T067, T062, T052, T043 | exact audit found only 207/261/398 synchronous singleton requests; batching closed and selected T069 |
+| T068 | DONE | [Native-boundary batched inference feasibility](T068-native-boundary-batching-feasibility.md) | T067, T062, T052, T043 | exact audit found only 207/261/398 synchronous singleton requests; batching closed and selected T069 |
 | T069 | DONE | [Public-node feature-encoding projection feasibility](T069-public-node-feature-encoding-projection-feasibility.md) | T068, T067, T062, T052, T043 | exact projection preserved semantics, materially reduced cost, locked all calibration families, and recommended the original outcome comparison for planner consideration |
 | T070 | DONE | [Battle Search v2 fixed-cohort outcome and budget-sufficiency audit](T070-battle-search-v2-fixed-cohort-outcome-and-budget-sufficiency-audit.md) | T069, T062, T052, T043 | fixed primary and high-budget audits complete; Case C recommends T064 to the planner without publishing a successor |
 | T071 | DONE | [Post-T064 experiment execution simplification](T071-post-t064-experiment-execution-simplification.md) | T019, T064 | simplified T064 validation/reuse ownership and added lightweight detached long-job control before revising T065 |
 | T072 | DONE | [Retire closed root-prior experiment executors](T072-retire-closed-root-prior-experiment-executors.md) | T053, T054, T055, T056, T057, T058, T059, T071 | retired the closed T053–T059 executor chain while preserving generic root-prior/search and T052 forward surfaces |
 | T073 | DONE | [Forward surface health gate](T073-forward-surface-health-gate.md) | T019, T064, T067, T068, T069, T070, T071, T072 | PR #72 retired historical executor surfaces, restored neutral forward ownership, and requires a fresh post-merge repository quality review before T065 |
 | T074 | DONE | [Core decision/policy boundary repair](T074-core-policy-boundary-repair.md) | T019, T073 | PR #73 repaired the forward runtime policy/batching/control boundary, moved non-combat and offline evaluation ownership, and contracted the simulator package barrel before any T065 publication decision |
+| T075 | DRAFT | [Leakage-safe non-combat cohort repair](T075-leakage-safe-non-combat-cohort-repair.md) | T033, T040, T061, T064, T065, T071, T074 | proposed deterministic global replay-group ownership before the frozen per-split 48/16/16 selection, reusing T065 Stage 1 evidence with no source recollection |
 
 Use the table, not per-task files or roadmap prose, when deciding whether a task
 may receive a branch. Only `READY` rows should receive a new implementation
@@ -159,8 +160,11 @@ the exact selection gate found 107 replay-equivalent candidates crossing the
 frozen seed-group split boundary. The independently audited result is a valid
 Case D diagnostic: no policy conclusion, no candidate replacement, and no Stage
 2--6 scientific execution. The retained report and source artifacts are recorded
-on PR #74; any future valid-cohort attempt requires a separately approved
-source-level repair rather than changing T065's split or replay key.
+on PR #74. The Planner has now proposed T075 as a separate DRAFT repair: retain
+the exact T065 replay identity and seed splits, assign one deterministic global
+owner per replay-equivalent group before the unchanged per-family split quotas,
+and reuse the accepted T065 Stage 1 sources without recollection. T075 remains
+unauthorized until exact-head Maintainer approval.
 
 ## Task Boundary And Artifact Rules
 
@@ -204,10 +208,10 @@ and inspect again after the expected window or on request rather than continuous
 
 The executable queue is exactly the set of `READY` rows in the Active Backlog.
 Merged `main` currently has no `READY` task. T065, T071, T072, T073, and T074 are
-`DONE`; T065 is complete as a valid Case D diagnostic and does not authorize a
-successor experiment. T034 remains blocked on native public-consistent
-hidden-future sampling support. Any successor or repair task must be proposed by
-the Planner and independently specified/approved before implementation.
+`DONE`; T075 is proposed as `DRAFT` on PR #75 and is not executable. T065 remains
+complete as a valid Case D diagnostic and does not itself authorize a successor
+experiment. T066 remains `DRAFT`. T034 remains blocked on native
+public-consistent hidden-future sampling support.
 
 ## Standard Local Gates
 
