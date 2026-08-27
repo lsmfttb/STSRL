@@ -2839,6 +2839,214 @@ def replay_source_state(
     return snapshot, actions, context, checkpoint
 
 
+def _replay_process_shard(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Replay one selected-state shard in one fresh native process."""
+    import os
+
+    try:
+        os.environ["OMP_NUM_THREADS"] = "1"
+        os.environ["MKL_NUM_THREADS"] = "1"
+        os.environ["OPENBLAS_NUM_THREADS"] = "1"
+        from sts_combat_rl.sim.lightspeed import LightSpeedAdapter
+
+        started = time.perf_counter()
+        states = tuple(
+            T065SourceState.from_dict(item)
+            for item in payload["states"]
+            if isinstance(item, Mapping)
+        )
+        if len(states) != len(payload["states"]):
+            raise T065CaseD(
+                "replay", [f"shard {payload['shard_index']} contains invalid state"]
+            )
+        restored = 0
+        for state in states:
+            adapter = LightSpeedAdapter(
+                seed=int(payload["simulator_seed"]),
+                ascension=int(payload["ascension"]),
+                player_class=str(payload["player_class"]),
+            )
+            snapshot, actions, _context, checkpoint = replay_source_state(
+                adapter, state
+            )
+            restored_snapshot = adapter.restore_checkpoint(checkpoint)
+            restored_actions = tuple(adapter.legal_actions(restored_snapshot))
+            if tuple(
+                dict(item)
+                for item in action_identity_dicts_for_actions(restored_actions)
+            ) != tuple(
+                dict(item) for item in action_identity_dicts_for_actions(actions)
+            ):
+                raise T065CaseD(
+                    "replay",
+                    [
+                        f"state {state.selected_state_index}: restored legal-action "
+                        "identity mismatch"
+                    ],
+                )
+            if tuple(encode_lightspeed_battle_snapshot(restored_snapshot.raw)) != tuple(
+                encode_lightspeed_battle_snapshot(snapshot.raw)
+            ):
+                raise T065CaseD(
+                    "replay",
+                    [
+                        f"state {state.selected_state_index}: restored snapshot "
+                        "feature mismatch"
+                    ],
+                )
+            restored += 1
+        usage = __import__("resource").getrusage(__import__("resource").RUSAGE_SELF)
+        return {
+            "shard_index": int(payload["shard_index"]),
+            "process_id": os.getpid(),
+            "state_count": len(states),
+            "attempted": len(states),
+            "restored": restored,
+            "status": "passed",
+            "exit_code": 0,
+            "wall_clock_seconds": time.perf_counter() - started,
+            "cpu_seconds": usage.ru_utime + usage.ru_stime,
+            "omp_threads": 1,
+            "mkl_threads": 1,
+        }
+    except (
+        Exception
+    ) as exc:  # pragma: no cover - native failure is environment-specific
+        return {
+            "shard_index": int(payload.get("shard_index", -1)),
+            "process_id": os.getpid(),
+            "status": "failed",
+            "exit_code": 1,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+
+def replay_source_states_process_sharded(
+    states: Sequence[T065SourceState],
+    *,
+    shard_specs: Sequence[Mapping[str, Any]],
+    worker_count: int,
+    simulator_seed: int = 1,
+    ascension: int = 20,
+    player_class: str = "IRONCLAD",
+    require_frozen_shards: bool = False,
+) -> dict[str, Any]:
+    """Replay selected states with independent spawn workers and evidence."""
+    if worker_count != len(shard_specs) or worker_count < 1:
+        raise ValueError("replay worker count must equal shard count")
+    ordered_states = tuple(sorted(states, key=lambda state: state.selected_state_index))
+    if require_frozen_shards:
+        if worker_count != T065_MAX_WORKERS or len(ordered_states) != 320:
+            raise T065CaseD(
+                "replay", ["T075 replay requires 320 states and 16 workers"]
+            )
+        expected_specs = target_shard_ranges(worker_count=T065_MAX_WORKERS)
+        actual_specs = tuple(
+            sorted(
+                (dict(spec) for spec in shard_specs),
+                key=lambda item: item["shard_index"],
+            )
+        )
+        if actual_specs != expected_specs:
+            raise T065CaseD(
+                "replay", ["T075 replay shard plan is not the frozen 16x20 plan"]
+            )
+    else:
+        actual_specs = tuple(
+            sorted(
+                (dict(spec) for spec in shard_specs),
+                key=lambda item: item["shard_index"],
+            )
+        )
+    indices = [int(spec["shard_index"]) for spec in actual_specs]
+    if indices != list(dict.fromkeys(indices)):
+        raise T065CaseD("replay", ["replay shard indices are duplicated"])
+    by_index = {state.selected_state_index: state for state in ordered_states}
+    payloads: list[dict[str, Any]] = []
+    for spec in actual_specs:
+        start = int(spec["selected_state_start"])
+        end = int(spec["selected_state_end"])
+        shard_states = tuple(
+            by_index[index] for index in range(start, end + 1) if index in by_index
+        )
+        if not shard_states or len(shard_states) != end - start + 1:
+            raise T065CaseD(
+                "replay", [f"replay shard {spec['shard_index']} range is partial"]
+            )
+        payloads.append(
+            {
+                "shard_index": int(spec["shard_index"]),
+                "states": [state.to_dict() for state in shard_states],
+                "simulator_seed": simulator_seed,
+                "ascension": ascension,
+                "player_class": player_class,
+            }
+        )
+    context = multiprocessing.get_context("spawn")
+    started = time.perf_counter()
+    with ProcessPoolExecutor(max_workers=worker_count, mp_context=context) as executor:
+        futures = [
+            executor.submit(_replay_process_shard, payload) for payload in payloads
+        ]
+        results: list[dict[str, Any]] = []
+        for future, payload in zip(futures, payloads, strict=True):
+            try:
+                results.append(future.result())
+            except Exception as exc:
+                results.append(
+                    {
+                        "shard_index": payload["shard_index"],
+                        "status": "failed",
+                        "exit_code": 1,
+                        "error": f"{type(exc).__name__}: {exc}",
+                    }
+                )
+    results.sort(key=lambda item: int(item.get("shard_index", -1)))
+    failures = [item for item in results if item.get("status") != "passed"]
+    if failures:
+        raise T065CaseD(
+            "replay",
+            tuple(
+                f"replay shard {item.get('shard_index')}: "
+                f"{item.get('error', 'worker failed')}"
+                for item in failures
+            ),
+        )
+    if any(
+        item.get("restored") != item.get("state_count") or item.get("exit_code") != 0
+        for item in results
+    ):
+        raise T065CaseD("replay", ["replay shard returned partial evidence"])
+    process_ids = [item.get("process_id") for item in results]
+    if require_frozen_shards and len(set(process_ids)) != T065_MAX_WORKERS:
+        raise T065CaseD("replay", ["replay did not use 16 unique worker processes"])
+    return {
+        "status": "passed",
+        "worker_kind": "spawn-process",
+        "worker_count": worker_count,
+        "shard_count": len(results),
+        "process_count": len(set(process_ids)),
+        "attempted": sum(int(item["attempted"]) for item in results),
+        "restored": sum(int(item["restored"]) for item in results),
+        "wall_clock_seconds": time.perf_counter() - started,
+        "processes": results,
+        "shards": [
+            {
+                **dict(spec),
+                "state_count": int(result["state_count"]),
+                "attempted": int(result["attempted"]),
+                "restored": int(result["restored"]),
+                "status": result["status"],
+                "process_id": result["process_id"],
+                "exit_code": result["exit_code"],
+                "wall_clock_seconds": result["wall_clock_seconds"],
+                "cpu_seconds": result["cpu_seconds"],
+            }
+            for spec, result in zip(actual_specs, results, strict=True)
+        ],
+    }
+
+
 def generate_counterfactual_targets(
     adapter_factory: Callable[[], CheckpointingSimulatorAdapter],
     states: Sequence[T065SourceState],
@@ -3234,6 +3442,7 @@ def _generate_target_process_shard_impl(payload: Mapping[str, Any]) -> dict[str,
         "process_id": os.getpid(),
         "state_count": len(table.states),
         "target_count": len(table.targets),
+        "exit_code": 0,
         "wall_clock_seconds": elapsed,
         "cpu_seconds": usage.ru_utime + usage.ru_stime,
         "output": str(payload["output"]),
@@ -3253,16 +3462,47 @@ def generate_counterfactual_targets_process_sharded(
     max_steps: int = T065_MAX_STEPS,
     source_artifact_identity: Mapping[str, Any] | None = None,
     simulator_identity: Mapping[str, Any] | None = None,
+    require_frozen_shards: bool = False,
 ) -> T065TargetTable:
     """Generate deterministic target shards using independent spawn processes."""
 
     if worker_count != len(shard_specs) or worker_count < 1:
         raise ValueError("process target worker count must equal shard count")
+    if require_frozen_shards:
+        expected_specs = target_shard_ranges(worker_count=T065_MAX_WORKERS)
+        actual_specs = tuple(
+            sorted(
+                (dict(spec) for spec in shard_specs),
+                key=lambda item: int(item["shard_index"]),
+            )
+        )
+        if worker_count != T065_MAX_WORKERS or actual_specs != expected_specs:
+            raise T065CaseD(
+                "target-sharding",
+                ["T075 target generation requires the frozen 16x20 shard plan"],
+            )
+    else:
+        actual_specs = tuple(
+            sorted(
+                (dict(spec) for spec in shard_specs),
+                key=lambda item: int(item["shard_index"]),
+            )
+        )
     ordered_states = tuple(sorted(states, key=lambda state: state.selected_state_index))
     by_index = {state.selected_state_index: state for state in ordered_states}
     payloads: list[dict[str, Any]] = []
     output_directory.mkdir(parents=True, exist_ok=True)
-    for spec in shard_specs:
+    output_paths = [
+        output_directory / f"target-shard-{int(spec['shard_index']):02d}.json"
+        for spec in actual_specs
+    ]
+    if len(set(output_paths)) != len(output_paths) or any(
+        path.exists() for path in output_paths
+    ):
+        raise T065CaseD(
+            "target-sharding", ["target shard output is stale or duplicated"]
+        )
+    for spec, output_path in zip(actual_specs, output_paths, strict=True):
         start = int(spec["selected_state_start"])
         end = int(spec["selected_state_end"])
         shard_states = tuple(
@@ -3279,10 +3519,7 @@ def generate_counterfactual_targets_process_sharded(
             {
                 "shard_index": int(spec["shard_index"]),
                 "states": [state.to_dict() for state in shard_states],
-                "output": str(
-                    output_directory
-                    / f"target-shard-{int(spec['shard_index']):02d}.json"
-                ),
+                "output": str(output_path),
                 "simulator_seed": simulator_seed,
                 "ascension": ascension,
                 "player_class": player_class,
@@ -3293,26 +3530,70 @@ def generate_counterfactual_targets_process_sharded(
         )
     started = time.perf_counter()
     context = multiprocessing.get_context("spawn")
-    with ProcessPoolExecutor(max_workers=worker_count, mp_context=context) as executor:
-        futures = [
-            executor.submit(_generate_target_process_shard, payload)
-            for payload in payloads
-        ]
-        results = [future.result() for future in futures]
-    failures = [result for result in results if result.get("status") != "passed"]
-    if failures:
-        raise T065CaseD(
-            "target-sharding",
-            tuple(
-                f"target shard {item.get('shard_index')}: {item.get('error', 'worker failed')}"
-                for item in failures
-            ),
-        )
+    try:
+        with ProcessPoolExecutor(
+            max_workers=worker_count, mp_context=context
+        ) as executor:
+            futures = [
+                executor.submit(_generate_target_process_shard, payload)
+                for payload in payloads
+            ]
+            results = []
+            for future, payload in zip(futures, payloads, strict=True):
+                try:
+                    results.append(future.result())
+                except Exception as exc:
+                    results.append(
+                        {
+                            "shard_index": payload["shard_index"],
+                            "status": "failed",
+                            "error": f"{type(exc).__name__}: {exc}",
+                        }
+                    )
+        failures = [result for result in results if result.get("status") != "passed"]
+        if failures:
+            raise T065CaseD(
+                "target-sharding",
+                tuple(
+                    f"target shard {item.get('shard_index')}: "
+                    f"{item.get('error', 'worker failed')}"
+                    for item in failures
+                ),
+            )
+    except Exception:
+        for path in output_paths:
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+        raise
     results.sort(key=lambda item: int(item["shard_index"]))
-    shards = tuple(
-        read_target_table(Path(str(result["output"])), require_contiguous_indices=False)
-        for result in results
-    )
+    if len({item.get("shard_index") for item in results}) != len(results):
+        for path in output_paths:
+            path.unlink(missing_ok=True)
+        raise T065CaseD("target-sharding", ["target shard result is duplicated"])
+    if require_frozen_shards:
+        process_ids = [item.get("process_id") for item in results]
+        if len(set(process_ids)) != T065_MAX_WORKERS or any(
+            item.get("state_count") != 20 for item in results
+        ):
+            for path in output_paths:
+                path.unlink(missing_ok=True)
+            raise T065CaseD(
+                "target-sharding",
+                ["target generation did not produce 16 unique 20-state processes"],
+            )
+    try:
+        shards = tuple(
+            read_target_table(
+                Path(str(result["output"])), require_contiguous_indices=False
+            )
+            for result in results
+        )
+    except Exception:
+        for path in output_paths:
+            path.unlink(missing_ok=True)
+        raise
     targets = tuple(target for shard in shards for target in shard.targets)
     merged = T065TargetTable(
         states=ordered_states,
@@ -3337,19 +3618,29 @@ def generate_counterfactual_targets_process_sharded(
             "shards": [
                 {
                     **dict(spec),
+                    "process_id": result["process_id"],
+                    "exit_code": result["exit_code"],
                     "state_count": len(shard.states),
                     "target_count": len(shard.targets),
+                    "wall_clock_seconds": result["wall_clock_seconds"],
+                    "cpu_seconds": result["cpu_seconds"],
                     "status": "passed",
                 }
-                for spec, shard in zip(
-                    sorted(shard_specs, key=lambda item: int(item["shard_index"])),
+                for spec, shard, result in zip(
+                    actual_specs,
                     shards,
+                    results,
                     strict=True,
                 )
             ],
         },
     )
-    merged.validate_complete()
+    try:
+        merged.validate_complete()
+    except Exception:
+        for path in output_paths:
+            path.unlink(missing_ok=True)
+        raise
     return merged
 
 
@@ -4745,6 +5036,7 @@ def run_stage6_experiment(
         execution_evidence={
             "worker_count": worker_count,
             "shard_count_per_arm": T065_STAGE6_SHARD_COUNT,
+            "paired_rows": [dict(row) for row in paired],
             "arms": {
                 report.arm: {
                     "requested_seed_count": len(report.requested_seeds),
@@ -4756,6 +5048,7 @@ def run_stage6_experiment(
                     "shard_specs": [dict(spec) for spec in report.shard_specs],
                     "problem_count": len(report.problems),
                     "problems": list(report.problems),
+                    "report": report.to_dict(),
                 }
                 for report in (stochastic, expert, learned)
             },

@@ -76,6 +76,7 @@ from sts_combat_rl.sim.public_context_model_input import (
 from sts_combat_rl.commands.non_combat_learning import (
     _portable_path,
     _run_t075_finalize,
+    _t075_preceding_manifest_path,
     _t075_target_row_completeness,
     _t075_write_stage3_report,
     _write_t075_stage_retention,
@@ -2021,10 +2022,59 @@ def test_t075_process_shard_plan_rejects_non_matching_worker_count() -> None:
         )
 
 
+def test_t075_process_shard_plan_rejects_non_frozen_full_plan() -> None:
+    from sts_combat_rl.sim.non_combat_learning import (
+        generate_counterfactual_targets_process_sharded,
+    )
+
+    with pytest.raises(T065CaseD, match="frozen 16x20"):
+        generate_counterfactual_targets_process_sharded(
+            (),
+            shard_specs=(
+                {
+                    "shard_index": 0,
+                    "selected_state_start": 0,
+                    "selected_state_end": 19,
+                },
+                {
+                    "shard_index": 1,
+                    "selected_state_start": 20,
+                    "selected_state_end": 39,
+                },
+            ),
+            worker_count=2,
+            output_directory=Path("unused"),
+            require_frozen_shards=True,
+        )
+
+
 def test_t075_portable_path_converts_wsl_mount() -> None:
     assert _portable_path("/mnt/d/DeadlycatCoding/STSRL/artifacts/x.json") == Path(
         "D:/DeadlycatCoding/STSRL/artifacts/x.json"
     )
+
+
+def test_t075_preceding_manifest_cli_value_is_normalized_to_one_path(tmp_path) -> None:
+    from sts_combat_rl.commands.non_combat_learning import build_parser
+
+    manifest = tmp_path / "stage1.retention.json"
+    args = build_parser().parse_args(
+        [
+            "target",
+            "--states",
+            str(tmp_path / "states.jsonl"),
+            "--output",
+            str(tmp_path / "targets.json"),
+            "--preflight",
+            str(tmp_path / "preflight.json"),
+            "--preceding-manifest",
+            str(manifest),
+        ]
+    )
+    assert _t075_preceding_manifest_path(args, stage="stage2-target") == manifest
+    args.preceding_manifest = [manifest, tmp_path / "other.retention.json"]
+    with pytest.raises(T065CaseD, match="exactly one"):
+        _t075_preceding_manifest_path(args, stage="stage2-target")
 
 
 def test_t075_stage3_target_completeness_uses_exact_expected_keys() -> None:
@@ -2103,7 +2153,21 @@ def test_t075_stage3_reader_failure_is_materialized_as_failed_report(
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert report["passed"] is False
     assert report["checks"]["strict_target_reader"]["status"] == "failed"
+    assert all(
+        report["checks"][name]["status"] == "failed"
+        for name in (
+            "target_completeness",
+            "simulator_and_preflight_lineage",
+            "model_input_schema",
+            "state_action_dimensions",
+            "finite_numeric_values",
+            "legal_action_order",
+            "continuation_seed_contract",
+            "public_input_firewall",
+        )
+    )
     assert report["violation_counts"]["missing_target_rows"] == 1
+    assert report["violation_counts"]["firewall_violations"] > 0
 
 
 def test_t075_finalize_retains_exact_paths_for_duplicate_basenames(tmp_path) -> None:
@@ -2121,12 +2185,21 @@ def test_t075_finalize_retains_exact_paths_for_duplicate_basenames(tmp_path) -> 
         "task_id": "T075",
         "approved_t075_spec_commit": "e204c5d28cc0bee8013853e8680e8966f5c930a8",
         "planner_baseline": "95ccb6b55bc7a0214b632206ae169a533289fcf2",
+        "code_head": "test-head",
         "terminal_case": "D",
         "terminal_stage": "stage0-reuse",
         "reason_code": "test",
         "summary": "test",
         "reached_stages": [],
-        "skipped_stages": ["stage0-reuse"],
+        "skipped_stages": [
+            "stage0-preflight",
+            "stage0-reuse",
+            "stage1-selection-replay",
+            "stage2-target",
+            "stage4-train",
+            "stage5-gate",
+            "stage6-eval",
+        ],
         "parent_artifact_identities": {},
         "stage3_validation_status": "not_reached",
         "stage5_gate_status": "not_reached",

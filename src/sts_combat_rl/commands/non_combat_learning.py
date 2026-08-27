@@ -16,7 +16,6 @@ import os
 from pathlib import Path
 import shlex
 import sys
-from concurrent.futures import ThreadPoolExecutor
 from tempfile import TemporaryDirectory
 from typing import Any, Mapping
 
@@ -53,7 +52,6 @@ from sts_combat_rl.sim.non_combat_learning import (
     load_non_combat_checkpoint,
     read_source_states,
     read_target_table,
-    replay_source_state,
     run_stage6_experiment,
     continuation_seeds_for_split,
     select_source_candidates,
@@ -66,6 +64,7 @@ from sts_combat_rl.sim.non_combat_learning import (
     generate_counterfactual_targets,
     generate_counterfactual_targets_sharded,
     generate_counterfactual_targets_process_sharded,
+    replay_source_states_process_sharded,
     target_shard_ranges,
     write_source_selection_manifest,
     write_t065_manifest,
@@ -85,11 +84,40 @@ T075_STAGE_ORDER = (
     "terminal-finalize",
 )
 
+T075_FROZEN_SOURCE_ARTIFACTS = {
+    "artifacts/t065-learned-non-combat-policy-v1/source-stochastic-650001-650256-c57b2ee.json": {
+        "arm": "stochastic_non_combat_v1",
+        "sha256": "40a29e2cc8042efc15a46e9c50f6a50f889c94a1d7def24e91b62718eaaa8f61",
+        "size_bytes": 5352891044,
+    },
+    "artifacts/t065-learned-non-combat-policy-v1/source-expert-650001-650256-deeaa46.json": {
+        "arm": "expert_non_combat_v1",
+        "sha256": "29d4155e543b024e741230b5bcefad3116c44610b370b666f46a65571348ad4c",
+        "size_bytes": 3710180244,
+    },
+}
+
 
 class T075WorkflowError(T065CaseD):
     """Case-D-compatible failure carrying the T075 terminal contract."""
 
     pass
+
+
+def _t075_has_terminal_decision(args: argparse.Namespace) -> bool:
+    path = getattr(args, "decision_report", None)
+    if not isinstance(path, Path) or not path.is_file():
+        return False
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+    return bool(
+        isinstance(value, Mapping)
+        and value.get("schema_id") == T075_TERMINAL_DECISION_SCHEMA_ID
+        and value.get("schema_version") == 1
+        and value.get("terminal_case") in {"A", "B", "C", "D"}
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -488,6 +516,114 @@ def _t075_stage_retention_records(
 ) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
     """Read every completed stage retention without basename-based lookup."""
 
+    def validate_stage_entry(
+        path: Path, stage: str, command: Mapping[str, Any], evidence: Mapping[str, Any]
+    ) -> None:
+        required = (
+            "executed",
+            "status",
+            "code_head",
+            "terminal",
+            "wall_clock_seconds",
+            "shard_count",
+            "worker_count",
+            "ranges",
+            "parent_identities",
+            "output_identities",
+        )
+        if any(key not in command for key in required) or any(
+            key not in evidence for key in required
+        ):
+            raise T075WorkflowError(
+                "terminal-finalize", [f"retention for {stage} is incomplete: {path}"]
+            )
+        if command.get("code_head") != evidence.get("code_head"):
+            raise T075WorkflowError(
+                "terminal-finalize",
+                [f"retention for {stage} code head diverges: {path}"],
+            )
+        if command.get("status") != evidence.get("status") or command.get(
+            "terminal"
+        ) != evidence.get("terminal"):
+            raise T075WorkflowError(
+                "terminal-finalize", [f"retention for {stage} status diverges: {path}"]
+            )
+        if command.get("status") not in {"completed", "pending", "failed", "skipped"}:
+            raise T075WorkflowError(
+                "terminal-finalize",
+                [f"retention for {stage} status is invalid: {path}"],
+            )
+        if not isinstance(command.get("executed"), bool) or not isinstance(
+            command.get("terminal"), bool
+        ):
+            raise T075WorkflowError(
+                "terminal-finalize",
+                [f"retention for {stage} flags are invalid: {path}"],
+            )
+        if command.get("status") == "completed" and command.get("terminal") is not True:
+            raise T075WorkflowError(
+                "terminal-finalize", [f"completed retention is not terminal: {path}"]
+            )
+        outputs = evidence.get("output_identities")
+        command_outputs = command.get("output_identities")
+        if not isinstance(outputs, list) or command_outputs != outputs:
+            raise T075WorkflowError(
+                "terminal-finalize", [f"retention outputs diverge: {path}"]
+            )
+        roles: list[str] = []
+        for entry in outputs:
+            if not isinstance(entry, Mapping) or not isinstance(entry.get("role"), str):
+                raise T075WorkflowError(
+                    "terminal-finalize", [f"retention output role is invalid: {path}"]
+                )
+            role = str(entry["role"])
+            if role in roles:
+                raise T075WorkflowError(
+                    "terminal-finalize",
+                    [f"retention output role is duplicated: {path}"],
+                )
+            raw_path = entry.get("path")
+            if not isinstance(raw_path, str):
+                raise T075WorkflowError(
+                    "terminal-finalize", [f"retention output path is invalid: {path}"]
+                )
+            output_path = _portable_path(raw_path)
+            if not output_path.is_file() and not Path(raw_path).is_absolute():
+                output_path = artifact_root / raw_path
+            if not _t075_identity_matches(entry, output_path, expected_role=role):
+                raise T075WorkflowError(
+                    "terminal-finalize",
+                    [f"retention output identity is invalid: {path}"],
+                )
+            roles.append(role)
+        referenced_roles = evidence.get("artifact_roles")
+        if not isinstance(referenced_roles, list) or referenced_roles != roles:
+            raise T075WorkflowError(
+                "terminal-finalize", [f"retention artifact roles diverge: {path}"]
+            )
+        parent_identities = evidence.get("parent_identities")
+        if not isinstance(parent_identities, Mapping):
+            raise T075WorkflowError(
+                "terminal-finalize",
+                [f"retention parent identities are invalid: {path}"],
+            )
+        for parent_role, identity in parent_identities.items():
+            if not isinstance(identity, Mapping) or not isinstance(
+                identity.get("path"), str
+            ):
+                raise T075WorkflowError(
+                    "terminal-finalize",
+                    [f"retention parent identity is invalid: {path}"],
+                )
+            parent_path = _portable_path(identity["path"])
+            if not parent_path.is_file() and not Path(identity["path"]).is_absolute():
+                parent_path = artifact_root / identity["path"]
+            if not _t075_identity_matches(identity, parent_path):
+                raise T075WorkflowError(
+                    "terminal-finalize",
+                    [f"retention parent {parent_role!r} is invalid: {path}"],
+                )
+
     commands: dict[str, Any] = {}
     evidence: dict[str, Any] = {}
     reused: list[dict[str, Any]] = []
@@ -506,6 +642,15 @@ def _t075_stage_retention_records(
             )
         if value.get("schema_id") != T075_RETENTION_MANIFEST_SCHEMA_ID:
             continue
+        if (
+            value.get("schema_version") != 1
+            or value.get("task_id") != T075_TASK_ID
+            or value.get("approved_t075_spec_commit") != T075_APPROVED_SPEC_COMMIT
+            or value.get("planner_baseline") != T075_PLANNER_BASELINE
+        ):
+            raise T075WorkflowError(
+                "terminal-finalize", [f"retention identity is invalid: {path}"]
+            )
         raw_commands = value.get("stage_commands")
         raw_evidence = value.get("stage_evidence")
         if not isinstance(raw_commands, Mapping) or not isinstance(
@@ -524,7 +669,14 @@ def _t075_stage_retention_records(
                 raise T075WorkflowError(
                     "terminal-finalize", [f"stage command is not an object: {path}"]
                 )
-            commands[str(stage)] = dict(command)
+            stage_name = str(stage)
+            stage_evidence = raw_evidence.get(stage_name)
+            if not isinstance(stage_evidence, Mapping):
+                raise T075WorkflowError(
+                    "terminal-finalize", [f"stage evidence is missing: {path}"]
+                )
+            validate_stage_entry(path, stage_name, command, stage_evidence)
+            commands[stage_name] = dict(command)
         for stage, stage_value in raw_evidence.items():
             if stage not in T075_STAGE_ORDER[:-1] or stage in evidence:
                 raise T075WorkflowError(
@@ -541,6 +693,7 @@ def _t075_stage_retention_records(
                 reused.append(dict(entry))
 
     reached = tuple(decision.get("reached_stages", ()))
+    terminal_stage = decision.get("terminal_stage")
     for stage in reached:
         if stage not in T075_STAGE_ORDER[:-1]:
             raise T075WorkflowError(
@@ -552,6 +705,12 @@ def _t075_stage_retention_records(
             raise T075WorkflowError(
                 "terminal-finalize", [f"completed retention for {stage} is missing"]
             )
+        failed_terminal_stage = (
+            decision.get("terminal_case") == "D"
+            and stage == terminal_stage
+            and command.get("status") == "failed"
+            and stage_value.get("status") == "failed"
+        )
         if (
             command.get("executed") is not True
             or stage_value.get("executed") is not True
@@ -559,14 +718,14 @@ def _t075_stage_retention_records(
             raise T075WorkflowError(
                 "terminal-finalize", [f"retention for {stage} is not executed"]
             )
-        if (
+        if not failed_terminal_stage and (
             command.get("status") != "completed"
             or stage_value.get("status") != "completed"
         ):
             raise T075WorkflowError(
                 "terminal-finalize", [f"retention for {stage} is not completed"]
             )
-        if (
+        if not failed_terminal_stage and (
             command.get("terminal") is not True
             or stage_value.get("terminal") is not True
         ):
@@ -594,6 +753,10 @@ def _t075_require_parent_retention(
     if (
         not isinstance(manifest, Mapping)
         or manifest.get("schema_id") != T075_RETENTION_MANIFEST_SCHEMA_ID
+        or manifest.get("schema_version") != 1
+        or manifest.get("task_id") != T075_TASK_ID
+        or manifest.get("approved_t075_spec_commit") != T075_APPROVED_SPEC_COMMIT
+        or manifest.get("planner_baseline") != T075_PLANNER_BASELINE
     ):
         raise T075WorkflowError(
             "lineage", [f"parent retention schema is invalid: {path}"]
@@ -608,6 +771,10 @@ def _t075_require_parent_retention(
             "lineage", [f"parent retention does not contain completed {stage}: {path}"]
         )
     outputs = evidence.get("output_identities", ())
+    if not isinstance(outputs, list):
+        raise T075WorkflowError(
+            "lineage", [f"parent retention outputs are invalid: {path}"]
+        )
     for role, required_path in required_paths.items():
         matching = [
             entry
@@ -622,6 +789,24 @@ def _t075_require_parent_retention(
             raise T075WorkflowError(
                 "lineage", [f"parent retention lacks exact {role} identity: {path}"]
             )
+    parent_identities = evidence.get("parent_identities", {})
+    if not isinstance(parent_identities, Mapping):
+        raise T075WorkflowError(
+            "lineage", [f"parent retention parent identities are invalid: {path}"]
+        )
+    for role, identity in parent_identities.items():
+        if not isinstance(identity, Mapping):
+            raise T075WorkflowError(
+                "lineage", [f"parent identity {role!r} is invalid: {path}"]
+            )
+        try:
+            identity_path = _portable_path(str(identity["path"]))
+            if not _t075_identity_matches(identity, identity_path):
+                raise ValueError("path/hash/size mismatch")
+        except (KeyError, OSError, ValueError) as exc:
+            raise T075WorkflowError(
+                "lineage", [f"parent identity {role!r} is invalid: {path}"]
+            ) from exc
     return dict(manifest)
 
 
@@ -804,6 +989,25 @@ def _t075_validate_source_retention(
     expected_arm: str,
     preflight_retention: Path,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
+    try:
+        frozen_identity = T075_FROZEN_SOURCE_ARTIFACTS[
+            _t075_normalize_artifact_path(str(source_path))
+        ]
+    except (KeyError, ValueError) as exc:
+        raise T075WorkflowError(
+            "source-input-reuse",
+            [f"source path is not a frozen T065 input: {source_path}"],
+        ) from exc
+    if (
+        frozen_identity["arm"] != expected_arm
+        or not source_path.is_file()
+        or file_sha256(source_path) != frozen_identity["sha256"]
+        or source_path.stat().st_size != frozen_identity["size_bytes"]
+    ):
+        raise T075WorkflowError(
+            "source-input-reuse",
+            [f"source identity is not the frozen T065 input: {source_path}"],
+        )
     retention_path, retention = _t075_find_source_retention(source_path)
     evidence = retention.get("stage_evidence", {}).get("stage1-source-collection")
     if (
@@ -840,6 +1044,8 @@ def _t075_validate_source_retention(
     if (
         not isinstance(commands, list)
         or len(commands) != 1
+        or not isinstance(commands[0], str)
+        or not commands[0].strip()
         or commands[0] != evidence.get("command")
     ):
         raise T075WorkflowError(
@@ -954,17 +1160,15 @@ def _run_t075_validate_reuse(args: argparse.Namespace) -> int:
         )
     source_entries: list[dict[str, Any]] = []
     for source in sources:
-        expected_arm = (
-            "stochastic_non_combat_v1"
-            if "stochastic" in source.name
-            else "expert_non_combat_v1"
-            if "expert" in source.name
-            else ""
-        )
-        if not expected_arm:
+        try:
+            frozen_identity = T075_FROZEN_SOURCE_ARTIFACTS[
+                _t075_normalize_artifact_path(str(source))
+            ]
+        except (KeyError, ValueError) as exc:
             raise T075WorkflowError(
-                "source-input-reuse", [f"cannot determine source arm from {source}"]
-            )
+                "source-input-reuse", [f"source is not an exact frozen input: {source}"]
+            ) from exc
+        expected_arm = str(frozen_identity["arm"])
         stochastic = expected_arm.startswith("stochastic")
         preflight = next(
             (path for path in raw_aliases if ("c57b2ee" in path.name) == stochastic),
@@ -1055,6 +1259,7 @@ def _run_t075_validate_reuse(args: argparse.Namespace) -> int:
             "raw_metadata_validated": True,
             "source_count": len(source_entries),
             "source_arms": [entry["arm"] for entry in source_entries],
+            "source_recollection_prohibited": True,
         },
         "original_regeneration_commands": [
             entry["regeneration_command"] for entry in source_entries
@@ -1085,9 +1290,26 @@ def _t075_parent_identity(path: Path) -> dict[str, Any]:
     }
 
 
+def _t075_preceding_manifest_path(args: argparse.Namespace, *, stage: str) -> Path:
+    """Normalize the repeatable CLI option to one T075 parent manifest."""
+    raw = getattr(args, "preceding_manifest", None)
+    paths = (raw,) if isinstance(raw, Path) else tuple(raw or ())
+    if len(paths) != 1 or not isinstance(paths[0], Path):
+        raise T075WorkflowError(
+            stage, ["T075 requires exactly one --preceding-manifest path"]
+        )
+    return paths[0]
+
+
 def _run_t075_select(args: argparse.Namespace) -> int:
     """Run T075 ownership, quota selection, and the mandatory replay gate."""
 
+    if _t075_has_terminal_decision(args):
+        print(
+            "T075 terminal decision already exists; selection is skipped",
+            file=sys.stderr,
+        )
+        return 0
     if args.selection_strategy != T075_SELECTION_STRATEGY_ID:
         raise T075WorkflowError(
             "stage1-selection-replay", ["selection strategy is not frozen"]
@@ -1095,6 +1317,10 @@ def _run_t075_select(args: argparse.Namespace) -> int:
     if args.replay_shard_count != 16 or args.replay_worker_count != 16:
         raise T075WorkflowError(
             "stage1-selection-replay", ["T075 replay requires 16 shards and 16 workers"]
+        )
+    if not args.replay_verify:
+        raise T075WorkflowError(
+            "stage1-selection-replay", ["T075 replay verification is mandatory"]
         )
     _validate_t075_preflight(args.preflight)
     reuse = json.loads(args.reuse_manifest.read_text(encoding="utf-8"))
@@ -1235,15 +1461,15 @@ def _run_t075_select(args: argparse.Namespace) -> int:
         "status": "passed",
     }
     if args.replay_verify:
-
-        def replay_one(state: T065SourceState) -> None:
-            replay_source_state(
-                LightSpeedAdapter(seed=1, ascension=20, player_class="IRONCLAD"), state
-            )
-
-        with ThreadPoolExecutor(max_workers=16) as executor:
-            tuple(executor.map(replay_one, selected))
-        replay["attempted"] = replay["restored"] = len(selected)
+        replay = replay_source_states_process_sharded(
+            selected,
+            shard_specs=target_shard_ranges(worker_count=16),
+            worker_count=16,
+            simulator_seed=1,
+            ascension=20,
+            player_class="IRONCLAD",
+            require_frozen_shards=True,
+        )
     manifest = {
         "schema_id": T075_SELECTION_MANIFEST_SCHEMA_ID,
         "schema_version": 1,
@@ -1304,9 +1530,18 @@ def _run_t075_select(args: argparse.Namespace) -> int:
             ),
         },
         evidence={
-            "shard_count": 16,
-            "worker_count": 16,
+            "shard_count": replay["shard_count"],
+            "worker_count": replay["worker_count"],
+            "wall_clock_seconds": replay["wall_clock_seconds"],
+            "ranges": replay["shards"],
+            "per_shard": replay["shards"],
+            "processes": replay["processes"],
             "counts": manifest["selected_counts"],
+            "replay_counts": {
+                "attempted": replay["attempted"],
+                "restored": replay["restored"],
+                "process_count": replay["process_count"],
+            },
             "parent_identities": {
                 "reuse": _t075_parent_identity(args.reuse_manifest),
                 "preflight": _t075_parent_identity(args.preflight),
@@ -1352,6 +1587,7 @@ def _t075_target_row_completeness(
 def _t075_write_stage3_report(
     args: argparse.Namespace, table_path: Path, states_path: Path, selection_path: Path
 ) -> dict[str, Any]:
+    preceding_manifest = _t075_preceding_manifest_path(args, stage="stage2-target")
     problems: list[str] = []
     violations = {
         "missing_target_rows": 0,
@@ -1389,23 +1625,40 @@ def _t075_write_stage3_report(
         "sha256": file_sha256(states_path) if states_path.is_file() else None,
         "size_bytes": states_path.stat().st_size if states_path.is_file() else None,
         "record_count": len(states),
+        "content_match": False,
     }
     source_identity = raw_table.get("source_artifact_identity")
-    if (
-        states_path.is_file()
-        and isinstance(source_identity, Mapping)
-        and _t075_path_matches(source_identity.get("path", ""), states_path)
-        and source_identity.get("sha256") == file_sha256(states_path)
-        and source_identity.get("size_bytes") == states_path.stat().st_size
-        and source_identity.get("record_count") == len(states)
-    ):
-        selected_state_lineage["status"] = "passed"
+    if strict_status == "passed":
+        try:
+            persisted_states = read_source_states(states_path)
+            content_match = tuple(
+                state.to_dict() for state in persisted_states
+            ) == tuple(state.to_dict() for state in states)
+        except (OSError, ValueError) as exc:
+            content_match = False
+            problems.append(f"selected-state content is unreadable: {exc}")
+        if (
+            states_path.is_file()
+            and isinstance(source_identity, Mapping)
+            and _t075_path_matches(source_identity.get("path", ""), states_path)
+            and source_identity.get("sha256") == file_sha256(states_path)
+            and source_identity.get("size_bytes") == states_path.stat().st_size
+            and source_identity.get("record_count") == len(states)
+            and content_match
+        ):
+            selected_state_lineage["status"] = "passed"
+            selected_state_lineage["content_match"] = True
+        else:
+            problems.append("selected-state lineage or content does not match")
+            violations["lineage_mismatches"] += 1
     else:
-        problems.append("selected-state lineage is missing")
+        problems.append("selected-state lineage was not checked after reader failure")
         violations["lineage_mismatches"] += 1
 
-    lineage_ok = True
+    lineage_ok = strict_status == "passed"
     try:
+        if strict_status != "passed":
+            raise ValueError("strict target reader failed; lineage checks not executed")
         selection = json.loads(selection_path.read_text(encoding="utf-8"))
         if not isinstance(selection, Mapping):
             raise ValueError("selection manifest is not an object")
@@ -1417,17 +1670,41 @@ def _t075_write_stage3_report(
             args.preflight
         ):
             raise ValueError("selection manifest preflight parent is invalid")
-        if not args.preceding_manifest.is_file():
+        if not preceding_manifest.is_file():
             raise ValueError("Stage-1 retention parent is missing")
         if selection.get("parent_reuse_manifest_sha256") is None:
             raise ValueError("selection reuse parent is missing")
+        if selection.get("approved_t075_spec_commit") != T075_APPROVED_SPEC_COMMIT:
+            raise ValueError("selection approved spec is invalid")
+        if selection.get("selection_strategy_id") != T075_SELECTION_STRATEGY_ID:
+            raise ValueError("selection strategy identity is invalid")
+        if selection.get("simulator_identity") != lightspeed_source_identity_dict():
+            raise ValueError("selection simulator identity is invalid")
+        source_artifacts = selection.get("source_artifacts")
+        if (
+            not isinstance(source_artifacts, list)
+            or len(source_artifacts) != 2
+            or {
+                item.get("arm")
+                for item in source_artifacts
+                if isinstance(item, Mapping)
+            }
+            != {"stochastic_non_combat_v1", "expert_non_combat_v1"}
+        ):
+            raise ValueError("selection source lineage is incomplete")
+        for source in source_artifacts:
+            if not isinstance(source, Mapping):
+                raise ValueError("selection source lineage entry is invalid")
+            source_path = _portable_path(str(source.get("path", "")))
+            if not _t075_identity_matches(source, source_path):
+                raise ValueError("selection source artifact identity is invalid")
     except (OSError, json.JSONDecodeError, ValueError) as exc:
         lineage_ok = False
         problems.append(f"selection/source lineage: {exc}")
         violations["lineage_mismatches"] += 1
     try:
         _t075_require_parent_retention(
-            args.preceding_manifest,
+            preceding_manifest,
             stage="stage1-selection-replay",
             required_paths={
                 "selected_states": states_path,
@@ -1442,7 +1719,7 @@ def _t075_write_stage3_report(
         problems.append(f"Stage-1 retention lineage: {exc}")
         violations["lineage_mismatches"] += 1
 
-    simulator_ok = bool(table is not None)
+    simulator_ok = bool(table is not None and strict_status == "passed")
     if (
         simulator_ok
         and dict(table.simulator_identity) != lightspeed_source_identity_dict()
@@ -1451,8 +1728,14 @@ def _t075_write_stage3_report(
         problems.append("target simulator identity is not the pinned identity")
         violations["lineage_mismatches"] += 1
     try:
+        if strict_status != "passed":
+            raise ValueError(
+                "strict target reader failed; preflight lineage not executed"
+            )
         preflight = _validate_t075_preflight(args.preflight)
         preflight_ok = preflight.get("passed") is True
+        if preflight.get("simulator_identity") != lightspeed_source_identity_dict():
+            raise ValueError("preflight simulator identity is invalid")
         if not preflight_ok:
             raise ValueError("preflight is not passed")
     except (OSError, ValueError, T065CaseD) as exc:
@@ -1485,7 +1768,7 @@ def _t075_write_stage3_report(
     )
     expected_row_count = row_completeness["expected_row_count"]
     completeness_ok = False
-    schema_ok = True
+    schema_ok = strict_status == "passed"
     schema = raw_table.get("model_input_schema")
     if (
         not isinstance(schema, Mapping)
@@ -1495,10 +1778,10 @@ def _t075_write_stage3_report(
         schema_ok = False
         problems.append("model-input schema is not the frozen 4737/92 schema")
         violations["model_input_mismatches"] += 1
-    finite_ok = True
-    legal_ok = True
-    seed_ok = True
-    firewall_ok = True
+    finite_ok = strict_status == "passed"
+    legal_ok = strict_status == "passed"
+    seed_ok = strict_status == "passed"
+    firewall_ok = strict_status == "passed"
     if table is not None:
         violations["missing_target_rows"] += row_completeness["missing_row_count"]
         violations["duplicate_target_rows"] += (
@@ -1544,6 +1827,11 @@ def _t075_write_stage3_report(
         completeness_ok = passed and row_completeness["complete"]
     else:
         violations["missing_target_rows"] += expected_row_count
+        violations["nonfinite_targets"] += 1
+        violations["model_input_mismatches"] += 1
+        violations["legal_action_mismatches"] += 1
+        violations["continuation_seed_mismatches"] += 1
+        violations["firewall_violations"] += 1
     checks = {
         "strict_target_reader": {"status": strict_status},
         "target_completeness": {
@@ -1622,12 +1910,18 @@ def _t075_write_stage3_report(
 
 
 def _run_t075_target(args: argparse.Namespace) -> int:
+    if _t075_has_terminal_decision(args):
+        print(
+            "T075 terminal decision already exists; target is skipped", file=sys.stderr
+        )
+        return 0
     if args.shard_count != 16 or args.worker_count != 16:
         raise T075WorkflowError(
             "stage2-target",
             ["T075 target generation requires 16 shards and 16 workers"],
         )
     _validate_t075_preflight(args.preflight)
+    preceding_manifest = _t075_preceding_manifest_path(args, stage="stage2-target")
     states = read_source_states(args.states)
     if len(states) != 320:
         raise T075WorkflowError(
@@ -1642,6 +1936,16 @@ def _run_t075_target(args: argparse.Namespace) -> int:
         raise T075WorkflowError(
             "stage2-target", ["selection manifest does not match selected states"]
         )
+    _t075_require_parent_retention(
+        preceding_manifest,
+        stage="stage1-selection-replay",
+        required_paths={
+            "selected_states": args.states,
+            "ownership_audit": args.selection_manifest.parent
+            / "stage1-replay-group-ownership-audit.json",
+            "selection_manifest": args.selection_manifest,
+        },
+    )
     source_identity = {
         "path": str(args.states),
         "sha256": file_sha256(args.states),
@@ -1662,6 +1966,7 @@ def _run_t075_target(args: argparse.Namespace) -> int:
             player_class="IRONCLAD",
             source_artifact_identity=source_identity,
             simulator_identity=lightspeed_source_identity_dict(),
+            require_frozen_shards=True,
         )
     write_target_table(args.output, table)
     raw = json.loads(args.output.read_text(encoding="utf-8"))
@@ -1689,6 +1994,12 @@ def _run_t075_target(args: argparse.Namespace) -> int:
         evidence={
             "shard_count": 16,
             "worker_count": 16,
+            "wall_clock_seconds": table.execution_evidence.get(
+                "wall_clock_seconds", 0.0
+            ),
+            "ranges": table.execution_evidence.get("shards", []),
+            "per_shard": table.execution_evidence.get("processes", []),
+            "processes": table.execution_evidence.get("processes", []),
             "stage3_validation_status": "passed",
             "counts": validation["family_split_state_counts"],
             "parent_identities": {
@@ -1705,6 +2016,13 @@ def _run_t075_target(args: argparse.Namespace) -> int:
 
 
 def _run_t075_train(args: argparse.Namespace) -> int:
+    if _t075_has_terminal_decision(args):
+        print(
+            "T075 terminal decision already exists; training is skipped",
+            file=sys.stderr,
+        )
+        return 0
+    preceding_manifest = _t075_preceding_manifest_path(args, stage="stage4-train")
     validation = json.loads(args.target_validation.read_text(encoding="utf-8"))
     if (
         validation.get("schema_id") != T075_STAGE3_VALIDATION_SCHEMA_ID
@@ -1724,7 +2042,7 @@ def _run_t075_train(args: argparse.Namespace) -> int:
             "stage4-train", ["Stage-3 selected-state parent hash does not match"]
         )
     _t075_require_parent_retention(
-        args.preceding_manifest,
+        preceding_manifest,
         stage="stage2-target",
         required_paths={
             "target_table": args.target_table,
@@ -1790,6 +2108,13 @@ def _run_t075_train(args: argparse.Namespace) -> int:
 
 
 def _run_t075_evaluate(args: argparse.Namespace) -> int:
+    if _t075_has_terminal_decision(args):
+        print(
+            "T075 terminal decision already exists; evaluation is skipped",
+            file=sys.stderr,
+        )
+        return 0
+    preceding_manifest = _t075_preceding_manifest_path(args, stage="stage5-gate")
     parent_stage = "stage5-gate" if args.stage5_report else "stage4-train"
     parent_artifacts = (
         {"stage5_report": args.stage5_report}
@@ -1806,7 +2131,7 @@ def _run_t075_evaluate(args: argparse.Namespace) -> int:
         }
     )
     _t075_require_parent_retention(
-        args.preceding_manifest,
+        preceding_manifest,
         stage=parent_stage,
         required_paths=parent_artifacts,
     )
@@ -1838,6 +2163,7 @@ def _run_t075_evaluate(args: argparse.Namespace) -> int:
         "parent_identities": {
             "target_table": _t075_parent_identity(args.target_table),
         },
+        "problems": list(stage5.problems),
     }
     if not stage5.passed:
         decision = {
@@ -1883,11 +2209,17 @@ def _run_t075_evaluate(args: argparse.Namespace) -> int:
         )
         return 0
     if not args.run_stage6:
+        pending_evidence = {
+            **stage5_evidence,
+            "status": "pending",
+            "terminal": False,
+            "skip_reason": "Stage 6 was not requested",
+        }
         _write_t075_stage_retention(
             args,
             stage="stage5-gate",
             artifacts={"stage5_report": stage5_path},
-            evidence=stage5_evidence,
+            evidence=pending_evidence,
         )
         print("T075 Stage 5 passed; Stage 6 remains pending", file=sys.stderr)
         return 1
@@ -1906,10 +2238,14 @@ def _run_t075_evaluate(args: argparse.Namespace) -> int:
         "approved_t075_spec_commit": T075_APPROVED_SPEC_COMMIT,
         "planner_baseline": T075_PLANNER_BASELINE,
         "code_head": _code_head_for_artifact_root(args),
-        "terminal_case": "A" if stage6.valid else "B",
+        "terminal_case": "A" if stage6.passed else "B" if stage6.valid else "D",
         "terminal_stage": "stage6-eval",
-        "reason_code": "stage6-completed",
-        "summary": "T075 Stage 6 completed",
+        "reason_code": "stage6-completed"
+        if stage6.valid
+        else "stage6-validation-failed",
+        "summary": "T075 Stage 6 completed"
+        if stage6.valid
+        else "T075 Stage 6 validation failed",
         "reached_stages": [
             "stage0-preflight",
             "stage0-reuse",
@@ -1930,6 +2266,13 @@ def _run_t075_evaluate(args: argparse.Namespace) -> int:
         if stage6.valid
         else "do not promote",
         "problems": list(stage6.problems),
+        "stage6_arm_reports": {
+            "stochastic": stochastic.to_dict(),
+            "expert": expert.to_dict(),
+            "learned": learned.to_dict(),
+        },
+        "stage6_paired_rows": list(stage6.execution_evidence.get("paired_rows", [])),
+        "stage6_execution_evidence": dict(stage6.execution_evidence),
     }
     _write_canonical_json(args.output, payload)
     _write_canonical_json(args.decision_report, payload)
@@ -1937,13 +2280,17 @@ def _run_t075_evaluate(args: argparse.Namespace) -> int:
         args,
         stage="stage6-eval",
         artifacts={
+            "stage6_report": args.output,
             "terminal_decision_report": args.decision_report,
             "stage5_report": stage5_path,
         },
         evidence={
             "shard_count": args.stage6_shard_count,
             "worker_count": args.stage6_worker_count,
-            "counts": {"valid": stage6.valid},
+            "status": "completed" if stage6.valid else "failed",
+            "terminal": stage6.valid,
+            "counts": {"valid": stage6.valid, "passed": stage6.passed},
+            "problems": list(stage6.problems),
             "parent_identities": {
                 "target_table": _t075_parent_identity(args.target_table)
             },
@@ -1966,6 +2313,7 @@ def _run_t075_finalize(args: argparse.Namespace) -> int:
         "task_id",
         "approved_t075_spec_commit",
         "planner_baseline",
+        "code_head",
         "terminal_case",
         "terminal_stage",
         "reason_code",
@@ -1983,11 +2331,71 @@ def _run_t075_finalize(args: argparse.Namespace) -> int:
         not isinstance(decision, Mapping)
         or any(key not in decision for key in required)
         or decision.get("schema_id") != T075_TERMINAL_DECISION_SCHEMA_ID
+        or decision.get("schema_version") != 1
+        or decision.get("task_id") != T075_TASK_ID
+        or decision.get("approved_t075_spec_commit") != T075_APPROVED_SPEC_COMMIT
+        or decision.get("planner_baseline") != T075_PLANNER_BASELINE
+        or not isinstance(decision.get("code_head"), str)
+        or not decision.get("code_head")
         or decision.get("terminal_case") not in {"A", "B", "C", "D"}
     ):
         raise T075WorkflowError(
             "terminal-finalize", ["terminal decision does not satisfy T075 schema"]
         )
+    execution_stages = T075_STAGE_ORDER[:-1]
+    reached = decision.get("reached_stages")
+    skipped = decision.get("skipped_stages")
+    if (
+        not isinstance(reached, list)
+        or not isinstance(skipped, list)
+        or len(set(reached)) != len(reached)
+        or len(set(skipped)) != len(skipped)
+        or any(stage not in execution_stages for stage in (*reached, *skipped))
+        or set(reached).intersection(skipped)
+        or set(reached).union(skipped) != set(execution_stages)
+        or tuple(reached)
+        != tuple(stage for stage in execution_stages if stage in reached)
+        or tuple(skipped)
+        != tuple(stage for stage in execution_stages if stage in skipped)
+    ):
+        raise T075WorkflowError(
+            "terminal-finalize", ["terminal decision stage reachability is invalid"]
+        )
+    if decision["terminal_case"] == "C" and (
+        decision.get("terminal_stage") != "stage5-gate"
+        or decision.get("stage5_gate_status") != "failed"
+        or decision.get("stage6_status") != "skipped"
+    ):
+        raise T075WorkflowError(
+            "terminal-finalize", ["Case C terminal semantics are invalid"]
+        )
+    if decision["terminal_case"] in {"A", "B"} and (
+        decision.get("terminal_stage") != "stage6-eval"
+        or decision.get("stage5_gate_status") != "passed"
+        or decision.get("stage6_status") != "completed"
+    ):
+        raise T075WorkflowError(
+            "terminal-finalize", ["Case A/B terminal semantics are invalid"]
+        )
+    parent_identities = decision.get("parent_artifact_identities")
+    if not isinstance(parent_identities, Mapping):
+        raise T075WorkflowError(
+            "terminal-finalize", ["terminal decision parent identities are invalid"]
+        )
+    for role, identity in parent_identities.items():
+        if not isinstance(identity, Mapping) or not isinstance(
+            identity.get("path"), str
+        ):
+            raise T075WorkflowError(
+                "terminal-finalize", [f"terminal parent {role!r} is invalid"]
+            )
+        parent_path = _portable_path(identity["path"])
+        if not parent_path.is_file() and not Path(identity["path"]).is_absolute():
+            parent_path = args.artifact_root / identity["path"]
+        if not _t075_identity_matches(identity, parent_path):
+            raise T075WorkflowError(
+                "terminal-finalize", [f"terminal parent {role!r} is not current"]
+            )
     args.artifact_root.mkdir(parents=True, exist_ok=True)
     stage_commands, stage_evidence, reused = _t075_stage_retention_records(
         args.artifact_root, decision
@@ -2019,7 +2427,7 @@ def _run_t075_finalize(args: argparse.Namespace) -> int:
             "parent_identities": {},
             "output_identities": [],
         }
-        for stage in T075_STAGE_ORDER[:-1]
+        for stage in execution_stages
         if stage not in decision.get("reached_stages", ())
     }
     all_commands = {**skipped, **stage_commands}
@@ -2039,7 +2447,7 @@ def _run_t075_finalize(args: argparse.Namespace) -> int:
             "counts": {},
             "problems": [],
         }
-        for stage in T075_STAGE_ORDER[:-1]
+        for stage in execution_stages
         if stage not in decision.get("reached_stages", ())
     }
     all_evidence.update(stage_evidence)
@@ -2057,7 +2465,9 @@ def _run_t075_finalize(args: argparse.Namespace) -> int:
         "ranges": [],
         "parent_identities": dict(decision["parent_artifact_identities"]),
         "output_identities": [
-            entry for entry in produced if entry["path"] == str(args.decision_report)
+            entry
+            for entry in produced
+            if _t075_path_matches(entry["path"], args.decision_report)
         ],
     }
     all_evidence["terminal-finalize"] = {
@@ -2080,6 +2490,7 @@ def _run_t075_finalize(args: argparse.Namespace) -> int:
         "task_id": T075_TASK_ID,
         "approved_t075_spec_commit": T075_APPROVED_SPEC_COMMIT,
         "planner_baseline": T075_PLANNER_BASELINE,
+        "code_head": decision["code_head"],
         "terminal_case": decision["terminal_case"],
         "retention_owner": T075_TASK_ID,
         "retention_reason": "T075 final terminal evidence",
@@ -3410,9 +3821,39 @@ def _handle_t075_case_d(args: argparse.Namespace, failure: T075WorkflowError) ->
     decision_path = getattr(args, "decision_report", None) or _decision_report_path(
         args
     )
+    if decision_path.is_file():
+        try:
+            existing = json.loads(decision_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            existing = None
+        if (
+            isinstance(existing, Mapping)
+            and existing.get("schema_id") == T075_TERMINAL_DECISION_SCHEMA_ID
+            and existing.get("schema_version") == 1
+            and existing.get("terminal_case") in {"A", "B", "C", "D"}
+        ):
+            print(
+                f"T075 terminal decision already exists: {decision_path}",
+                file=sys.stderr,
+            )
+            return
     parent_identities = _artifact_identities(
         _failed_stage_artifact_paths(args, failure)
     )
+    parent_identities.update(_preceding_manifest_identities(args))
+    terminal_stage = {
+        "source-input-reuse": "stage0-reuse",
+        "cohort-ownership": "stage1-selection-replay",
+        "replay": "stage1-selection-replay",
+        "target-sharding": "stage2-target",
+        "stage3-model-input-lineage-firewall": "stage2-target",
+    }.get(failure.stage, failure.stage)
+    execution_stages = T075_STAGE_ORDER[:-1]
+    if terminal_stage not in execution_stages:
+        terminal_stage = "stage0-reuse"
+    terminal_index = execution_stages.index(terminal_stage)
+    reached_stages = list(execution_stages[: terminal_index + 1])
+    skipped_stages = list(execution_stages[terminal_index + 1 :])
     report = {
         "schema_id": T075_TERMINAL_DECISION_SCHEMA_ID,
         "schema_version": 1,
@@ -3421,22 +3862,11 @@ def _handle_t075_case_d(args: argparse.Namespace, failure: T075WorkflowError) ->
         "planner_baseline": T075_PLANNER_BASELINE,
         "code_head": _code_head_for_artifact_root(args),
         "terminal_case": "D",
-        "terminal_stage": failure.stage
-        if failure.stage
-        in {
-            "stage0-preflight",
-            "stage0-reuse",
-            "stage1-selection-replay",
-            "stage2-target",
-            "stage4-train",
-            "stage5-gate",
-            "stage6-eval",
-        }
-        else "stage0-reuse",
+        "terminal_stage": terminal_stage,
         "reason_code": "frozen-contract-failure",
         "summary": "; ".join(failure.problems),
-        "reached_stages": [],
-        "skipped_stages": ["stage1", "stage2", "stage3", "stage4", "stage5", "stage6"],
+        "reached_stages": reached_stages,
+        "skipped_stages": skipped_stages,
         "parent_artifact_identities": parent_identities,
         "stage3_validation_status": "not_reached",
         "stage5_gate_status": "not_reached",
@@ -3444,6 +3874,7 @@ def _handle_t075_case_d(args: argparse.Namespace, failure: T075WorkflowError) ->
         "recommendation": "repair the frozen T075 contract failure and rerun",
         "failure_ids": list(failure.failure_ids or failure.problems),
         "failure_counts": dict(failure.failure_counts),
+        "failure_details": list(failure.failure_details),
         "problems": list(failure.problems),
     }
     _write_canonical_json(decision_path, report)
@@ -3452,9 +3883,16 @@ def _handle_t075_case_d(args: argparse.Namespace, failure: T075WorkflowError) ->
         try:
             _write_t075_stage_retention(
                 args,
-                stage=failure.stage,
+                stage=terminal_stage,
                 artifacts={"terminal_decision_report": decision_path},
-                evidence={"counts": dict(failure.failure_counts)},
+                evidence={
+                    "executed": True,
+                    "status": "failed",
+                    "terminal": False,
+                    "counts": dict(failure.failure_counts),
+                    "problems": list(failure.problems),
+                    "parent_identities": _preceding_manifest_identities(args),
+                },
                 terminal_case="D",
             )
         except (OSError, ValueError):
