@@ -85,7 +85,7 @@ workflow's explicit implementation-authorization gate is satisfied.
 | T062 | DONE | [Battle Search v2 minimal surface](T062-battle-search-v2-minimal-surface.md) | T061, T052, T043, T046 | tree-internal policy prior and learned leaf value accepted; cost calibration exited early before outcome comparison |
 | T063 | DRAFT | [Oracle-guided public battle learning](T063-oracle-guided-public-battle-learning.md) | T061, T062, T033 | simulator-only Oracle assistance with explicit public-policy transfer and no human trajectories |
 | T064 | DONE | [Simulator-generated later-act curriculum](T064-simulator-generated-later-act-curriculum.md) | T033, T042, T043, T044, T052, T069, T070 | complete valid Case B: exposure-order curriculum did not improve the frozen transfer gates; recommends T065 to the planner |
-| T065 | DRAFT | [Learned non-combat policy v1](T065-learned-non-combat-policy-v1.md) | T033, T040, T061, T064, T071, T074 | proposed bounded counterfactual action-value learning with a held-out gate before matched complete-run scale |
+| T065 | DONE | [Learned non-combat policy v1](T065-learned-non-combat-policy-v1.md) | T033, T040, T061, T064, T071, T074 | valid Case D diagnostic: frozen source selection found 107 replay-equivalent cross-split duplicates; no policy conclusion or downstream scientific stages |
 | T066 | DRAFT | [Alternating joint policy improvement and natural scale gate](T066-alternating-joint-policy-improvement-and-natural-scale-gate.md) | T062, T063, T064, T065 | separate battle/non-combat policies with shared run value, followed by conditional natural scale-up |
 | T067 | DONE | [Battle Search v2 inference-cost repair](T067-battle-search-v2-inference-cost-repair.md) | T062, T061, T052, T043 | exact-cache repair preserved semantics but had 0/866 hits; cost calibration remained infeasible and selected T068 |
 | T068 | DONE | [Native-boundary batched inference feasibility](T068-native-boundary-batched-inference-feasibility.md) | T067, T062, T052, T043 | exact audit found only 207/261/398 synchronous singleton requests; batching closed and selected T069 |
@@ -151,17 +151,16 @@ retired closed historical executor ownership, and T074 repaired the real
 separated non-combat/offline evaluation ownership, and contracted the simulator
 package barrel to 31 foundational exports.
 
-The required post-T074 Planner quality review is now complete. It reconfirmed
-that the remaining legacy flat CLI/parser, roughly 71 MB of tracked real sample
-captures, absent CI/branch protection, open-source license, and unrelated large
-module concerns are genuine but do not block the next scientific step. T065 is
-therefore the next proposed research task, with one important engineering
-boundary: it must not add T065-specific routes or flags to the legacy flat CLI.
-Its revised spec freezes a 512-run source pool, four mandatory learned screen
-families, all-eligible-action counterfactual targets, a 64-state held-out gate,
-and only conditionally a 256-seed three-arm complete-run evaluation. T065 remains
-`DRAFT` on this planner branch and implementation is unauthorized until the Main
-Maintainer independently approves the exact specification head.
+The required post-T074 Planner quality review was completed before T065
+implementation. The Main Maintainer approved the exact specification, and the
+implementation preserved its legacy-CLI boundary and frozen source/selection
+contract. T065 then completed Stage 0 and both 256-seed Stage 1 source arms, but
+the exact selection gate found 107 replay-equivalent candidates crossing the
+frozen seed-group split boundary. The independently audited result is a valid
+Case D diagnostic: no policy conclusion, no candidate replacement, and no Stage
+2--6 scientific execution. The retained report and source artifacts are recorded
+on PR #74; any future valid-cohort attempt requires a separately approved
+source-level repair rather than changing T065's split or replay key.
 
 ## Task Boundary And Artifact Rules
 
@@ -204,12 +203,11 @@ and inspect again after the expected window or on request rather than continuous
 ## Published Queue
 
 The executable queue is exactly the set of `READY` rows in the Active Backlog.
-Merged `main` currently has no `READY` task. T071, T072, T073, and T074 are
-`DONE`. The post-T074 Planner quality review is complete and the current planner
-proposal revises T065 for publication, but T065 remains `DRAFT` and is not
-executable until the Main Maintainer independently approves the exact proposal
-head and records implementation authorization. T034 remains blocked on native
-public-consistent hidden-future sampling support.
+Merged `main` currently has no `READY` task. T065, T071, T072, T073, and T074 are
+`DONE`; T065 is complete as a valid Case D diagnostic and does not authorize a
+successor experiment. T034 remains blocked on native public-consistent
+hidden-future sampling support. Any successor or repair task must be proposed by
+the Planner and independently specified/approved before implementation.
 
 ## Standard Local Gates
 
