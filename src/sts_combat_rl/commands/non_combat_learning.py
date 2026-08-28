@@ -114,6 +114,21 @@ class T075WorkflowError(T065CaseD):
     pass
 
 
+def _t075_pinned_simulator_identity() -> dict[str, Any]:
+    """Return the one simulator identity shared by T075 writers and readers."""
+
+    return dict(lightspeed_source_identity_dict())
+
+
+def _t075_require_pinned_simulator_identity(
+    value: Any, *, label: str
+) -> dict[str, Any]:
+    identity = _t075_pinned_simulator_identity()
+    if value != identity:
+        raise ValueError(f"{label} simulator identity is not the pinned identity")
+    return identity
+
+
 def _t075_has_terminal_decision(args: argparse.Namespace) -> bool:
     path = getattr(args, "decision_report", None)
     if not isinstance(path, Path) or not path.is_file():
@@ -364,6 +379,32 @@ def main(argv: list[str] | None = None) -> int:
             _handle_case_d(args, failure)
             print(f"T065 command failed: {exc}", file=sys.stderr)
         return 1
+    except Exception as exc:
+        # Process-pool failures and malformed worker payloads are not all
+        # subclasses of ValueError.  T075 must still materialize its own
+        # terminal schema instead of falling through to the legacy handler.
+        if not _is_t075_invocation(args):
+            raise
+        failure = T075WorkflowError(
+            _stage_name(args.command),
+            [f"{type(exc).__name__}: {exc}"],
+            failure_ids=(f"command:{args.command}",),
+            failure_counts={"failure_count": 1},
+            simulator_identity=_t075_pinned_simulator_identity(),
+        )
+        if args.command == "finalize":
+            print(f"T075 finalization failed: {failure}", file=sys.stderr)
+            return 1
+        try:
+            _handle_t075_case_d(args, failure)
+        except Exception as materialization_error:
+            print(
+                "T075 Case D retention materialization failed: "
+                f"{type(materialization_error).__name__}: {materialization_error}",
+                file=sys.stderr,
+            )
+        print(f"T075 command failed: {failure}", file=sys.stderr)
+        return 1
     return 2
 
 
@@ -598,6 +639,12 @@ def _t075_stage_retention_records(
             raise T075WorkflowError(
                 "terminal-finalize",
                 [f"retention for {stage} code head diverges: {path}"],
+            )
+        current_code_head = _code_head_for_artifact_root(argparse.Namespace())
+        if command.get("code_head") != current_code_head:
+            raise T075WorkflowError(
+                "terminal-finalize",
+                [f"retention for {stage} is from a different code head: {path}"],
             )
         if (
             not isinstance(command.get("command"), str)
@@ -1712,10 +1759,13 @@ def _run_t075_select(args: argparse.Namespace) -> int:
         raise T075WorkflowError(
             "stage1-selection-replay", ["T075 replay verification is mandatory"]
         )
+    reuse_manifest = getattr(args, "reuse_manifest", None)
+    if not isinstance(reuse_manifest, Path):
+        raise T075WorkflowError(
+            "stage0-reuse", ["T075 selection requires the strict reuse resolver"]
+        )
     _validate_t075_preflight(args.preflight)
-    reuse, source_entries = _t075_resolve_reuse_manifest(
-        args.reuse_manifest, args.input
-    )
+    reuse, source_entries = _t075_resolve_reuse_manifest(reuse_manifest, args.input)
     expected_by_path = {
         _t075_normalize_artifact_path(str(entry.get("path"))): entry
         for entry in source_entries
@@ -1897,7 +1947,7 @@ def _run_t075_select(args: argparse.Namespace) -> int:
             }
             for family in T065_MANDATORY_FAMILIES
         },
-        "simulator_identity": lightspeed_source_identity_dict(),
+        "simulator_identity": _t075_pinned_simulator_identity(),
         "source_artifacts": source_artifacts,
         "selected_replay_identity_digests": selected_replay_identity_digests,
         "replay_verification": replay,
@@ -2077,8 +2127,9 @@ def _t075_write_stage3_report(
             raise ValueError("selection approved spec is invalid")
         if selection.get("selection_strategy_id") != T075_SELECTION_STRATEGY_ID:
             raise ValueError("selection strategy identity is invalid")
-        if selection.get("simulator_identity") != lightspeed_source_identity_dict():
-            raise ValueError("selection simulator identity is invalid")
+        _t075_require_pinned_simulator_identity(
+            selection.get("simulator_identity"), label="selection"
+        )
         source_artifacts = selection.get("source_artifacts")
         if (
             not isinstance(source_artifacts, list)
@@ -2118,14 +2169,17 @@ def _t075_write_stage3_report(
         problems.append(f"Stage-1 retention lineage: {exc}")
         violations["lineage_mismatches"] += 1
 
-    simulator_ok = bool(table is not None and strict_status == "passed")
+    simulator_ok: bool | None = (
+        bool(table is not None) if strict_status == "passed" else None
+    )
     if (
         simulator_ok
-        and dict(table.simulator_identity) != lightspeed_source_identity_dict()
+        and dict(table.simulator_identity) != _t075_pinned_simulator_identity()
     ):
         simulator_ok = False
         problems.append("target simulator identity is not the pinned identity")
         violations["lineage_mismatches"] += 1
+    preflight_ok: bool | None = None
     try:
         if strict_status != "passed":
             raise ValueError(
@@ -2133,7 +2187,7 @@ def _t075_write_stage3_report(
             )
         preflight = _validate_t075_preflight(args.preflight)
         preflight_ok = preflight.get("passed") is True
-        if preflight.get("simulator_identity") != lightspeed_source_identity_dict():
+        if preflight.get("simulator_identity") != _t075_pinned_simulator_identity():
             raise ValueError("preflight simulator identity is invalid")
         if not preflight_ok:
             raise ValueError("preflight is not passed")
@@ -2155,32 +2209,32 @@ def _t075_write_stage3_report(
         family: {split: (48 if split == "train" else 16) for split in T065_SPLITS}
         for family in T065_MANDATORY_FAMILIES
     }
-    passed = (
+    cohort_ok = (
         len(states) == 320
         and counts == expected
         and all(state.selected_state_index == i for i, state in enumerate(states))
     )
-    if not passed:
+    if not cohort_ok:
         problems.append("target cohort does not satisfy exact T075 counts")
     row_completeness = _t075_target_row_completeness(
         states, table.targets if table is not None else ()
     )
-    expected_row_count = row_completeness["expected_row_count"]
     completeness_ok = False
-    schema_ok = strict_status == "passed"
+    schema_ok: bool | None = True if strict_status == "passed" else None
     schema = raw_table.get("model_input_schema")
     if (
         not isinstance(schema, Mapping)
         or schema.get("state_feature_size") != 4737
         or schema.get("action_feature_size") != 92
     ):
-        schema_ok = False
-        problems.append("model-input schema is not the frozen 4737/92 schema")
-        violations["model_input_mismatches"] += 1
-    finite_ok = strict_status == "passed"
-    legal_ok = strict_status == "passed"
-    seed_ok = strict_status == "passed"
-    firewall_ok = strict_status == "passed"
+        schema_ok = False if strict_status == "passed" else None
+        if strict_status == "passed":
+            problems.append("model-input schema is not the frozen 4737/92 schema")
+            violations["model_input_mismatches"] += 1
+    finite_ok: bool | None = True if strict_status == "passed" else None
+    legal_ok: bool | None = True if strict_status == "passed" else None
+    seed_ok: bool | None = True if strict_status == "passed" else None
+    firewall_ok: bool | None = True if strict_status == "passed" else None
     if table is not None:
         violations["missing_target_rows"] += row_completeness["missing_row_count"]
         violations["duplicate_target_rows"] += (
@@ -2223,55 +2277,61 @@ def _t075_write_stage3_report(
                 if any(not math.isfinite(float(value)) for value in values):
                     finite_ok = False
                     violations["nonfinite_targets"] += 1
-        completeness_ok = passed and row_completeness["complete"]
+        completeness_ok = cohort_ok and row_completeness["complete"]
     else:
-        violations["missing_target_rows"] += expected_row_count
-        violations["nonfinite_targets"] += 1
-        violations["model_input_mismatches"] += 1
-        violations["legal_action_mismatches"] += 1
-        violations["continuation_seed_mismatches"] += 1
-        violations["firewall_violations"] += 1
+        # The reader failure is already the observed failure.  Checks whose
+        # inputs were not readable remain not_run; inventing one violation per
+        # check would turn missing evidence into fabricated measurements.
+        pass
+
+    def check_status(value: bool | None) -> str:
+        if value is None:
+            return "not_run"
+        return "passed" if value else "failed"
+
     checks = {
         "strict_target_reader": {"status": strict_status},
         "target_completeness": {
-            "status": "passed" if completeness_ok else "failed",
+            "status": check_status(completeness_ok),
             "state_count": len(states),
             "target_row_count": len(table.targets) if table is not None else 0,
         },
         "selected_state_lineage": selected_state_lineage,
         "simulator_and_preflight_lineage": {
-            "status": "passed"
-            if simulator_ok and preflight_ok and lineage_ok
-            else "failed",
+            "status": (
+                "passed"
+                if simulator_ok is True and preflight_ok is True and lineage_ok
+                else "failed"
+            ),
             "simulator_identity": dict(table.simulator_identity)
             if table is not None
             else {},
             "preflight_sha256": _t075_optional_file_sha256(args.preflight),
         },
         "model_input_schema": {
-            "status": "passed" if schema_ok else "failed",
+            "status": check_status(schema_ok),
             "state_feature_size": 4737,
             "action_feature_size": 92,
         },
-        "state_action_dimensions": {"status": "passed" if schema_ok else "failed"},
+        "state_action_dimensions": {"status": check_status(schema_ok)},
         "finite_numeric_values": {
-            "status": "passed" if finite_ok else "failed",
+            "status": check_status(finite_ok),
             "violations": violations["nonfinite_targets"],
         },
         "legal_action_order": {
-            "status": "passed" if legal_ok else "failed",
+            "status": check_status(legal_ok),
             "violations": violations["legal_action_mismatches"],
         },
         "continuation_seed_contract": {
-            "status": "passed" if seed_ok else "failed",
+            "status": check_status(seed_ok),
             "violations": violations["continuation_seed_mismatches"],
         },
         "public_input_firewall": {
-            "status": "passed" if firewall_ok else "failed",
+            "status": check_status(firewall_ok),
             "violations": violations["firewall_violations"],
         },
     }
-    passed = passed and all(check["status"] == "passed" for check in checks.values())
+    passed = cohort_ok and all(check["status"] == "passed" for check in checks.values())
     if not passed and not problems:
         problems.append("one or more mandatory Stage-3 validation checks failed")
     report = {
@@ -2690,6 +2750,25 @@ def _run_t075_evaluate(args: argparse.Namespace) -> int:
         for arm, arm_value in arm_execution.items()
         if isinstance(arm_value, Mapping)
     }
+    for arm, arm_value in arm_execution.items():
+        shard_specs = (
+            arm_value.get("shard_specs") if isinstance(arm_value, Mapping) else None
+        )
+        if (
+            not isinstance(shard_specs, list)
+            or len(shard_specs) != 16
+            or any(
+                not isinstance(shard, Mapping)
+                or isinstance(shard.get("process_id"), bool)
+                or not isinstance(shard.get("process_id"), int)
+                or shard.get("exit_code") != 0
+                for shard in shard_specs
+            )
+        ):
+            raise T075WorkflowError(
+                "stage6-eval",
+                [f"Stage 6 {arm} arm lacks complete process/shard evidence"],
+            )
     stage6_report = stage6.to_dict()
     _write_canonical_json(args.output, stage6_report)
     stage6_identity = _t075_parent_identity(args.output)
@@ -2941,6 +3020,18 @@ def _run_t075_finalize(args: argparse.Namespace) -> int:
             seen_paths.add(normalized)
             relative_role = path.relative_to(args.artifact_root).as_posix()
             produced.append(_t075_artifact_identity(path, role=relative_role))
+    terminal_output_identities = [
+        entry
+        for entry in produced
+        if _t075_path_matches(entry["path"], args.decision_report)
+    ]
+    if len(terminal_output_identities) != 1 or not _t075_identity_matches(
+        terminal_output_identities[0], args.decision_report
+    ):
+        raise T075WorkflowError(
+            "terminal-finalize",
+            ["terminal decision output identity is missing or stale"],
+        )
     skipped = {
         stage: {
             "command": _t075_command_string(args),
@@ -3003,11 +3094,7 @@ def _run_t075_finalize(args: argparse.Namespace) -> int:
         "worker_count": 1,
         "ranges": [],
         "parent_identities": dict(decision["parent_artifact_identities"]),
-        "output_identities": [
-            entry
-            for entry in produced
-            if _t075_path_matches(entry["path"], args.decision_report)
-        ],
+        "output_identities": terminal_output_identities,
     }
     all_evidence["terminal-finalize"] = {
         "command": all_commands["terminal-finalize"]["command"],

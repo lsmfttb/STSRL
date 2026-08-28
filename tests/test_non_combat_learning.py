@@ -80,6 +80,10 @@ from sts_combat_rl.commands.non_combat_learning import (
     _run_t075_finalize,
     _t075_path_matches,
     _t075_preceding_manifest_path,
+    _t075_pinned_simulator_identity,
+    _t075_require_pinned_simulator_identity,
+    _t075_resolve_reuse_manifest,
+    _run_t075_select,
     _t075_target_row_completeness,
     _t075_write_stage3_report,
     _write_t075_stage_retention,
@@ -2065,6 +2069,11 @@ def test_t075_artifact_path_normalization_rejects_parent_segments() -> None:
         "artifacts/t075-learned-non-combat-policy-repair/report.json",
     )
 
+    assert not _t075_path_matches(
+        "D:/DeadlycatCoding/STSRL/artifacts/../outside/report.json",
+        "D:/DeadlycatCoding/STSRL/artifacts/outside/report.json",
+    )
+
 
 def test_t075_preceding_manifest_cli_value_is_normalized_to_one_path(tmp_path) -> None:
     from sts_combat_rl.commands.non_combat_learning import build_parser
@@ -2174,20 +2183,98 @@ def test_t075_stage3_reader_failure_is_materialized_as_failed_report(
     assert report["passed"] is False
     assert report["checks"]["strict_target_reader"]["status"] == "failed"
     assert all(
-        report["checks"][name]["status"] == "failed"
-        for name in (
-            "target_completeness",
-            "simulator_and_preflight_lineage",
-            "model_input_schema",
-            "state_action_dimensions",
-            "finite_numeric_values",
-            "legal_action_order",
-            "continuation_seed_contract",
-            "public_input_firewall",
+        report["checks"][name]["status"] == expected_status
+        for name, expected_status in (
+            ("target_completeness", "failed"),
+            ("simulator_and_preflight_lineage", "failed"),
+            ("model_input_schema", "not_run"),
+            ("state_action_dimensions", "not_run"),
+            ("finite_numeric_values", "not_run"),
+            ("legal_action_order", "not_run"),
+            ("continuation_seed_contract", "not_run"),
+            ("public_input_firewall", "not_run"),
         )
     )
     assert report["violation_counts"]["missing_target_rows"] == 1
-    assert report["violation_counts"]["firewall_violations"] > 0
+    assert report["violation_counts"]["firewall_violations"] == 0
+
+
+def test_t075_selection_and_stage3_share_pinned_simulator_identity() -> None:
+    import sts_combat_rl.commands.non_combat_learning as command_module
+
+    identity = _t075_pinned_simulator_identity()
+    assert identity == command_module._t075_pinned_simulator_identity()
+    assert identity == command_module.lightspeed_source_identity_dict()
+    tampered = dict(identity)
+    tampered["integration_commit"] = "not-pinned"
+    assert tampered != identity
+    with pytest.raises(ValueError, match="pinned identity"):
+        _t075_require_pinned_simulator_identity(tampered, label="selection")
+
+
+def test_t075_selection_invokes_strict_reuse_resolver(tmp_path, monkeypatch) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command_module
+
+    called = []
+
+    def resolve(path, source_paths):
+        called.append((path, tuple(source_paths)))
+        raise T075WorkflowError("source-input-reuse", ["fabricated reuse rejected"])
+
+    monkeypatch.setattr(command_module, "_validate_t075_preflight", lambda _path: {})
+    monkeypatch.setattr(command_module, "_t075_resolve_reuse_manifest", resolve)
+    args = SimpleNamespace(
+        decision_report=None,
+        selection_strategy=command_module.T075_SELECTION_STRATEGY_ID,
+        replay_shard_count=16,
+        replay_worker_count=16,
+        replay_verify=True,
+        preflight=tmp_path / "preflight.json",
+        reuse_manifest=tmp_path / "reuse.json",
+        input=(tmp_path / "stochastic.json", tmp_path / "expert.json"),
+    )
+    with pytest.raises(T075WorkflowError, match="fabricated reuse rejected"):
+        _run_t075_select(args)
+    assert called == [(args.reuse_manifest, args.input)]
+
+
+def test_t075_reuse_resolver_rejects_fabricated_new_source(tmp_path) -> None:
+    reuse = tmp_path / "reuse.json"
+    import sts_combat_rl.commands.non_combat_learning as command_module
+
+    reuse.write_text(
+        json.dumps(
+            {
+                "schema_id": command_module.T075_REUSE_MANIFEST_SCHEMA_ID,
+                "schema_version": 1,
+                "task_id": command_module.T075_TASK_ID,
+                "approved_t075_spec_commit": command_module.T075_APPROVED_SPEC_COMMIT,
+                "planner_baseline": command_module.T075_PLANNER_BASELINE,
+                "code_head": "real-head",
+                "pinned_simulator_identity": _t075_pinned_simulator_identity(),
+                "accepted_t065_preflight_content_sha256": "a89560d037ea4555922d0e1282edb8e328ce75ab6e1d720fd05f86022b56c334",
+                "accepted_t065_case_d": {},
+                "sources": [],
+                "validation": {
+                    "status": "passed",
+                    "raw_metadata_validated": True,
+                    "source_count": 2,
+                    "source_arms": [
+                        "stochastic_non_combat_v1",
+                        "expert_non_combat_v1",
+                    ],
+                    "source_recollection_prohibited": True,
+                },
+                "original_regeneration_commands": [],
+                "problems": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    source = tmp_path / "new-source.json"
+    source.write_text("{}\n", encoding="utf-8")
+    with pytest.raises(T075WorkflowError, match="not an exact frozen input"):
+        _t075_resolve_reuse_manifest(reuse, (source, source))
 
 
 def test_t075_stage3_missing_target_still_materializes_failed_report(tmp_path) -> None:
@@ -2213,8 +2300,9 @@ def test_t075_stage3_missing_target_still_materializes_failed_report(tmp_path) -
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert report["parent_target_table_sha256"] is None
     assert report["checks"]["strict_target_reader"]["status"] == "failed"
-    assert report["checks"]["finite_numeric_values"]["status"] == "failed"
-    assert report["checks"]["public_input_firewall"]["status"] == "failed"
+    assert report["checks"]["finite_numeric_values"]["status"] == "not_run"
+    assert report["checks"]["public_input_firewall"]["status"] == "not_run"
+    assert report["violation_counts"]["firewall_violations"] == 0
 
 
 def test_t075_first_terminal_decision_wins(tmp_path) -> None:
@@ -2272,6 +2360,41 @@ def test_t075_t065_failure_is_routed_to_t075_case_d(monkeypatch, tmp_path) -> No
     assert result == 1
     assert len(routed) == 1
     assert isinstance(routed[0], T075WorkflowError)
+
+
+def test_t075_unexpected_worker_exception_is_routed_to_t075_case_d(
+    monkeypatch, tmp_path
+) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command_module
+
+    routed = []
+
+    def fail(_args):
+        raise TypeError("worker payload was malformed")
+
+    monkeypatch.setattr(command_module, "_run_t075_target", fail)
+    monkeypatch.setattr(
+        command_module,
+        "_handle_t075_case_d",
+        lambda _args, failure: routed.append(failure),
+    )
+    result = command_module.main(
+        [
+            "target",
+            "--states",
+            str(tmp_path / "states.jsonl"),
+            "--output",
+            str(tmp_path / "target.json"),
+            "--preflight",
+            str(tmp_path / "preflight.json"),
+            "--selection-manifest",
+            str(tmp_path / "selection.json"),
+        ]
+    )
+    assert result == 1
+    assert len(routed) == 1
+    assert isinstance(routed[0], T075WorkflowError)
+    assert "malformed" in routed[0].problems[0]
 
 
 def test_t075_finalize_rejects_fabricated_case_d_reachability(tmp_path) -> None:
