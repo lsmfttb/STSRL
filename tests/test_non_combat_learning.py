@@ -31,6 +31,7 @@ from sts_combat_rl.sim.non_combat_learning import (
     T065CaseD,
     T065Coverage,
     T065SourceArmReport,
+    _validate_stage6_process_evidence,
     T065SourceState,
     build_stage6_report,
     build_t065_preflight_report,
@@ -2145,9 +2146,13 @@ def test_t075_retention_does_not_synthesize_completed_failure(tmp_path) -> None:
         stage="stage5-gate",
         artifacts={"stage5_report": artifact},
         evidence={
+            "command": "fixed test command",
             "executed": True,
             "status": "failed",
             "terminal": False,
+            "start_time_utc": "2026-08-28T00:00:00+00:00",
+            "end_time_utc": "2026-08-28T00:00:01+00:00",
+            "exit_code": 1,
             "problems": ["gate failed"],
         },
         terminal_case="C",
@@ -2163,6 +2168,22 @@ def test_t075_retention_does_not_synthesize_completed_failure(tmp_path) -> None:
         == value["stage_evidence"]["stage5-gate"]["command"]
     )
     assert value["stage_evidence"]["stage5-gate"]["problems"] == ["gate failed"]
+
+
+def test_t075_retention_rejects_missing_execution_evidence(tmp_path) -> None:
+    artifact = tmp_path / "report.json"
+    artifact.write_text("{}\n", encoding="utf-8")
+    with pytest.raises(T075WorkflowError, match="complete execution evidence"):
+        _write_t075_stage_retention(
+            SimpleNamespace(
+                retention_manifest=tmp_path / "failed.retention.json",
+                _command_argv=(),
+            ),
+            stage="stage5-gate",
+            artifacts={"stage5_report": artifact},
+            evidence={"status": "failed", "terminal": False},
+            terminal_case="C",
+        )
 
 
 def test_t075_stage3_reader_failure_is_materialized_as_failed_report(
@@ -2284,7 +2305,9 @@ def test_t075_reuse_resolver_rejects_fabricated_new_source(tmp_path) -> None:
     )
     source = tmp_path / "new-source.json"
     source.write_text("{}\n", encoding="utf-8")
-    with pytest.raises(T075WorkflowError, match="not an exact frozen input"):
+    with pytest.raises(
+        T075WorkflowError, match="frozen schema|not an exact frozen input"
+    ):
         _t075_resolve_reuse_manifest(reuse, (source, source))
 
 
@@ -2328,12 +2351,80 @@ def test_t075_first_terminal_decision_wins(tmp_path) -> None:
     args = SimpleNamespace(
         decision_report=decision_path,
         retention_manifest=tmp_path / "retention.json",
+        _t075_execution_start_utc="2026-08-28T00:00:00+00:00",
     )
     _handle_t075_case_d(
         args,
         T075WorkflowError("stage1-selection-replay", ["later failure"]),
     )
-    assert json.loads(decision_path.read_text(encoding="utf-8")) == original
+    replacement = json.loads(decision_path.read_text(encoding="utf-8"))
+    assert replacement["schema_id"] == "t075-terminal-decision-report-v1"
+    assert replacement["terminal_case"] == "D"
+    assert "marker" not in replacement
+    assert replacement["parent_artifact_identities"]
+
+
+def test_t075_stage6_process_evidence_requires_unique_real_pids() -> None:
+    results = [
+        {
+            "shard_index": index,
+            "process_id": 1000 + index,
+            "status": "passed",
+            "exit_code": 0,
+        }
+        for index in range(16)
+    ]
+    _validate_stage6_process_evidence(results)
+    results[-1] = {**results[-1], "process_id": results[0]["process_id"]}
+    with pytest.raises(T065CaseD, match="unique process"):
+        _validate_stage6_process_evidence(results)
+
+
+@pytest.mark.parametrize("preceding", ["missing", "corrupt"])
+def test_t075_evaluate_routes_without_parsing_preceding_manifest(
+    tmp_path, monkeypatch, preceding
+) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command_module
+
+    routed = []
+    preceding_path = tmp_path / "stage4.retention.json"
+    if preceding == "corrupt":
+        preceding_path.write_text("not json", encoding="utf-8")
+
+    def fail(_args):
+        raise T065CaseD("stage4-train", ["preceding manifest failure"])
+
+    monkeypatch.setattr(command_module, "_run_t075_evaluate", fail)
+    monkeypatch.setattr(
+        command_module,
+        "_handle_t075_case_d",
+        lambda _args, failure: routed.append(failure),
+    )
+    monkeypatch.setattr(
+        command_module,
+        "_handle_case_d",
+        lambda *_args: pytest.fail("T075 evaluate entered the legacy handler"),
+    )
+    result = command_module.main(
+        [
+            "evaluate",
+            "--target-table",
+            str(tmp_path / "targets.json"),
+            "--checkpoint-directory",
+            str(tmp_path / "checkpoints"),
+            "--output",
+            str(tmp_path / "stage6.json"),
+            "--preflight",
+            str(tmp_path / "preflight.json"),
+            "--preceding-manifest",
+            str(preceding_path),
+            "--retention-manifest",
+            str(tmp_path / "retention.json"),
+        ]
+    )
+    assert result == 1
+    assert len(routed) == 1
+    assert isinstance(routed[0], T075WorkflowError)
 
 
 def test_t075_t065_failure_is_routed_to_t075_case_d(monkeypatch, tmp_path) -> None:
@@ -2454,6 +2545,8 @@ def test_t075_finalize_rejects_fabricated_case_d_reachability(tmp_path) -> None:
         _command_argv=(),
         code_head="test-head",
     )
-    with pytest.raises(Exception, match="code_head|terminal prefix|reachability"):
+    with pytest.raises(
+        Exception, match="code_head|terminal prefix|reachability|first-valid"
+    ):
         _run_t075_finalize(args)
     assert not retention_path.exists()

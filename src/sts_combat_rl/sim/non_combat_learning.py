@@ -4868,6 +4868,66 @@ def run_complete_run_arm(
     )
 
 
+def _stage6_process_entry(payload: Mapping[str, Any], result_queue: Any) -> None:
+    """Run one Stage-6 shard in its own spawn-isolated simulator process."""
+
+    started = time.perf_counter()
+    try:
+        os.environ["OMP_NUM_THREADS"] = "1"
+        os.environ["MKL_NUM_THREADS"] = "1"
+        os.environ["OPENBLAS_NUM_THREADS"] = "1"
+        from sts_combat_rl.sim.lightspeed import LightSpeedAdapter
+
+        arm = str(payload["arm"])
+        model_run = None
+        if arm == "learned":
+            checkpoint_path = payload.get("model_checkpoint_path")
+            if not isinstance(checkpoint_path, str) or not checkpoint_path:
+                raise ValueError("learned Stage-6 shard has no checkpoint path")
+            model_run = load_non_combat_checkpoint(Path(checkpoint_path))
+        adapter_factory = lambda: LightSpeedAdapter(  # noqa: E731
+            seed=1, ascension=20, player_class="IRONCLAD"
+        )
+        report = run_complete_run_arm(
+            adapter_factory,
+            arm=arm,
+            seeds=tuple(int(seed) for seed in payload["seeds"]),
+            model_run=model_run,
+            worker_count=1,
+            shard_count=T065_STAGE6_SHARD_COUNT,
+        )
+        try:
+            resource = __import__("resource")
+            usage = resource.getrusage(resource.RUSAGE_SELF)
+            cpu_seconds = usage.ru_utime + usage.ru_stime
+        except (ImportError, AttributeError):
+            cpu_seconds = 0.0
+        result_queue.put(
+            {
+                "status": "passed" if not report.problems else "failed",
+                "shard_index": int(payload["shard_index"]),
+                "process_id": os.getpid(),
+                "exit_code": 0 if not report.problems else 1,
+                "cpu_seconds": cpu_seconds,
+                "wall_clock_seconds": time.perf_counter() - started,
+                "report": report,
+            }
+        )
+    except Exception as exc:
+        result_queue.put(
+            {
+                "status": "failed",
+                "shard_index": int(payload["shard_index"]),
+                "process_id": os.getpid(),
+                "exit_code": 1,
+                "cpu_seconds": 0.0,
+                "wall_clock_seconds": time.perf_counter() - started,
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+        )
+        raise
+
+
 def run_complete_run_arm_sharded(
     adapter_factory: Callable[[], Any],
     *,
@@ -4875,27 +4935,85 @@ def run_complete_run_arm_sharded(
     model_run: T065ModelRun | None = None,
     worker_count: int = T065_MAX_WORKERS,
 ) -> T065CompleteRunArmReport:
-    """Run one Stage 6 arm across the frozen 16 seed shards."""
+    """Run one Stage 6 arm across 16 spawn-isolated seed shards.
 
+    The adapter factory parameter remains for API compatibility, but Stage 6
+    is deliberately pinned to a process-local LightSpeedAdapter.  A caller
+    cannot accidentally share a simulator object or make a thread pool look
+    like 16-way execution evidence.
+    """
+
+    del adapter_factory
     _validate_workers(worker_count)
+    if worker_count != T065_MAX_WORKERS:
+        raise ValueError("T065 Stage 6 requires exactly 16 workers")
     specs = stage6_shard_ranges(arm=arm, worker_count=worker_count)
+    if arm == "learned" and (
+        model_run is None
+        or not isinstance(model_run.checkpoint_path, str)
+        or not model_run.checkpoint_path
+    ):
+        raise ValueError("learned Stage-6 process fan-out requires a checkpoint path")
 
-    def run(spec: Mapping[str, Any]) -> T065CompleteRunArmReport:
-        return run_complete_run_arm(
-            adapter_factory,
-            arm=arm,
-            seeds=range(int(spec["seed_start"]), int(spec["seed_end"]) + 1),
-            model_run=model_run,
-            worker_count=worker_count,
-            shard_count=T065_STAGE6_SHARD_COUNT,
-        )
-
+    payloads = [
+        {
+            "arm": arm,
+            "shard_index": int(spec["shard_index"]),
+            "seeds": list(range(int(spec["seed_start"]), int(spec["seed_end"]) + 1)),
+            "model_checkpoint_path": (
+                model_run.checkpoint_path if model_run is not None else None
+            ),
+        }
+        for spec in specs
+    ]
     started = time.perf_counter()
-    with ThreadPoolExecutor(max_workers=min(worker_count, len(specs))) as executor:
-        futures = [executor.submit(run, spec) for spec in specs]
-        shards = [future.result() for future in futures]
+    context = multiprocessing.get_context("spawn")
+    result_queue = context.Queue()
+    results: dict[int, dict[str, Any]] = {}
+    processes = [
+        context.Process(
+            target=_stage6_process_entry,
+            args=(payload, result_queue),
+            name=f"t075-stage6-{arm}-{payload['shard_index']:02d}",
+        )
+        for payload in payloads
+    ]
+    try:
+        for process in processes:
+            process.start()
+        for process in processes:
+            process.join()
+        for _ in processes:
+            try:
+                result = result_queue.get(timeout=1.0)
+            except __import__("queue").Empty:
+                break
+            results[int(result["shard_index"])] = result
+    finally:
+        result_queue.close()
+        result_queue.join_thread()
+
+    failures = []
+    for process, payload in zip(processes, payloads, strict=True):
+        result = results.get(int(payload["shard_index"]))
+        if (
+            process.exitcode != 0
+            or not isinstance(result, Mapping)
+            or result.get("status") != "passed"
+            or result.get("exit_code") != 0
+        ):
+            failures.append(
+                f"shard {payload['shard_index']} process failed: "
+                f"{result.get('error', 'no result') if isinstance(result, Mapping) else 'no result'}"
+            )
+    if failures:
+        raise T065CaseD("stage6", failures)
+
+    ordered_results = [results[int(payload["shard_index"])] for payload in payloads]
+    _validate_stage6_process_evidence(ordered_results)
+    shards = [result["report"] for result in ordered_results]
     shard_evidence: list[Mapping[str, Any]] = []
-    for spec, report in zip(specs, shards, strict=True):
+    for spec, result, report in zip(specs, ordered_results, shards, strict=True):
         completed_seeds = tuple(
             int(row["simulator_seed"])
             for row in report.rows
@@ -4911,9 +5029,10 @@ def run_complete_run_arm_sharded(
                 "requested_seed_count": len(report.requested_seeds),
                 "completed_row_count": len(report.rows),
                 "decision_count": len(report.decision_events),
-                "wall_clock_seconds": report.wall_clock_seconds,
-                "process_id": os.getpid(),
-                "exit_code": 0 if not report.problems else 1,
+                "wall_clock_seconds": result["wall_clock_seconds"],
+                "cpu_seconds": result["cpu_seconds"],
+                "process_id": result["process_id"],
+                "exit_code": result["exit_code"],
                 "problem_count": len(report.problems),
                 "problems": list(report.problems),
             }
@@ -4939,6 +5058,34 @@ def run_complete_run_arm_sharded(
         controller_provenance=(dict(shards[0].controller_provenance) if shards else {}),
         driver_provenance=(dict(shards[0].driver_provenance) if shards else {}),
     )
+
+
+def _validate_stage6_process_evidence(
+    results: Sequence[Mapping[str, Any]],
+) -> None:
+    """Reject synthetic or incomplete process evidence before Stage-6 merge."""
+
+    if len(results) != T065_MAX_WORKERS:
+        raise T065CaseD("stage6", ["Stage 6 did not return all 16 shard results"])
+    shard_indices = [result.get("shard_index") for result in results]
+    if set(shard_indices) != set(range(T065_MAX_WORKERS)):
+        raise T065CaseD("stage6", ["Stage 6 shard identities are incomplete"])
+    process_ids = [result.get("process_id") for result in results]
+    if (
+        any(
+            isinstance(process_id, bool) or not isinstance(process_id, int)
+            for process_id in process_ids
+        )
+        or len(set(process_ids)) != T065_MAX_WORKERS
+    ):
+        raise T065CaseD(
+            "stage6", ["Stage 6 did not produce one unique process identity per shard"]
+        )
+    if any(
+        result.get("status") != "passed" or result.get("exit_code") != 0
+        for result in results
+    ):
+        raise T065CaseD("stage6", ["Stage 6 has a failed shard process"])
 
 
 def build_stage6_paired_rows(
