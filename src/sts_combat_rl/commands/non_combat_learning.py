@@ -6075,6 +6075,8 @@ def _t075_stage6_report_is_valid(path: Path, *, artifact_root: Path) -> bool:
         or coverage["passed"] is not expected_coverage_passed
     ):
         return False
+    if value["valid"] and (coverage["D"] == 0 or coverage["M"] == 0):
+        return False
 
     execution = value["execution_evidence"]
     if not value["valid"]:
@@ -6289,7 +6291,10 @@ def _t075_stage6_report_is_valid(path: Path, *, artifact_root: Path) -> bool:
                 ):
                     return False
             elif status == "learned_failure":
-                if not isinstance(event.get("error"), str) or not event["error"]:
+                if (
+                    not isinstance(event.get("error"), str)
+                    or not event["error"].strip()
+                ):
                     return False
             else:
                 action_index = event.get("action_index")
@@ -6298,7 +6303,7 @@ def _t075_stage6_report_is_valid(path: Path, *, artifact_root: Path) -> bool:
                     or not isinstance(action_index, int)
                     or action_index < 0
                     or not isinstance(event.get("reason"), str)
-                    or not event["reason"]
+                    or not event["reason"].strip()
                 ):
                     return False
             if event.get("battle") is not None and event.get("battle") is not False:

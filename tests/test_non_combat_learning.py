@@ -3740,6 +3740,32 @@ def test_t075_stage6_validator_recomputes_semantics_and_rejects_forgery(tmp_path
     _write_valid_t075_stage6_fixture(path)
     assert _t075_stage6_report_is_valid(path, artifact_root=tmp_path)
     payload = json.loads(path.read_text(encoding="utf-8"))
+    learned_report = payload["execution_evidence"]["arms"]["learned"]["report"]
+    saved_events = learned_report["decision_events"]
+    learned_report["decision_events"] = []
+    payload["coverage"] = {
+        "D": 0,
+        "L": 0,
+        "M": 0,
+        "F": 0,
+        "learned_coverage": 0.0,
+        "mandatory_failure_rate": 0.0,
+        "passed": False,
+    }
+    payload["passed"] = False
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    assert not command_module._t075_stage6_report_is_valid(path, artifact_root=tmp_path)
+    learned_report["decision_events"] = saved_events
+    payload["coverage"] = {
+        "D": 256,
+        "L": 256,
+        "M": 256,
+        "F": 0,
+        "learned_coverage": 1.0,
+        "mandatory_failure_rate": 0.0,
+        "passed": True,
+    }
+    payload["passed"] = True
     expected = {
         "mean_terminal_floor_delta": 1.0,
         "p_positive": 1.0,
@@ -3775,11 +3801,16 @@ def test_t075_stage6_validator_recomputes_semantics_and_rejects_forgery(tmp_path
     path.write_text(json.dumps(payload), encoding="utf-8")
     assert not command_module._t075_stage6_report_is_valid(path, artifact_root=tmp_path)
     event["status"] = "learned_success"
+    event["status"] = "learned_failure"
+    event["error"] = " \t"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    assert not command_module._t075_stage6_report_is_valid(path, artifact_root=tmp_path)
+    event["status"] = "learned_success"
+    event.pop("error")
     event["screen_family"] = "OTHER_ROOM"
     event["mandatory"] = False
     event["status"] = "unsupported_fallback"
-    event["reason"] = "fallback"
-    event.pop("reason")
+    event["reason"] = " \t"
     path.write_text(json.dumps(payload), encoding="utf-8")
     assert not command_module._t075_stage6_report_is_valid(path, artifact_root=tmp_path)
     event["screen_family"] = "MAP_SCREEN"
