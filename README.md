@@ -17,7 +17,34 @@ separate seeded driver.
   pull-request, review, and merge process.
 - [`docs/project_architecture.md`](docs/project_architecture.md): authoritative
   target architecture and repository invariants.
+- [`docs/training_paradigm.md`](docs/training_paradigm.md): authoritative
+  training-signal and human-knowledge boundary.
+- [`docs/research_inspirations_and_attribution.md`](docs/research_inspirations_and_attribution.md):
+  AlphaZero/Suphx research lineage, CombatSolver attribution, and publication
+  licensing requirements.
 - [`docs/README.md`](docs/README.md): complete documentation map.
+
+## Research Lineage
+
+STSRL combines two methodological inspirations while keeping a strict final
+human-knowledge boundary:
+
+- **AlphaZero**: search-guided tabula-rasa policy/value improvement. The final
+  agent should learn from simulator rules, generated experience, and search
+  rather than human strategy labels or hand-written expert targets.
+- **Suphx**: training-time Oracle/privileged-information assistance for an
+  imperfect-information setting. Oracle information may help training and
+  diagnostics but must be removed from the final normal-public controller.
+
+The public **CombatSolver** project by Torch1230/Torch is also an explicit
+implementation reference for STSRL's research into Slay the Spire 2 combat
+search, including transposition, beam organization, route retention, and
+cross-turn search. Attribution does not grant source-code reuse rights. Until a
+compatible license or permission is verified, STSRL may study CombatSolver and
+independently implement general ideas but must not copy, port, translate, or
+mechanically adapt its source code. Exact references and the release checklist
+are maintained in
+[`docs/research_inspirations_and_attribution.md`](docs/research_inspirations_and_attribution.md).
 
 ## Current Main
 
