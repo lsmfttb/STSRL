@@ -3835,6 +3835,10 @@ def test_stage5_without_stage6_writes_completed_independent_parent(
         "_write_t075_stage_retention",
         lambda _args, **kwargs: captured.append(kwargs) or {},
     )
+    clock_values = iter((110.0, 120.0, 150.0))
+    monkeypatch.setattr(
+        command_module.time, "perf_counter", lambda: next(clock_values, 150.0)
+    )
     args = SimpleNamespace(
         target_table=target,
         checkpoint_directory=checkpoint_directory,
@@ -3847,11 +3851,16 @@ def test_stage5_without_stage6_writes_completed_independent_parent(
         preceding_manifest=None,
         _command_argv=("evaluate", "--target-table", str(target)),
         _t075_execution_start_utc="2026-08-28T00:00:00+00:00",
+        _t075_execution_start_monotonic=100.0,
     )
     assert _run_t075_evaluate(args) == 0
     assert captured[-1]["stage"] == "stage5-gate"
     assert captured[-1]["evidence"]["status"] == "completed"
     assert captured[-1]["evidence"]["terminal"] is True
+    assert captured[-1]["evidence"]["wall_clock_seconds"] == pytest.approx(50.0)
+    assert captured[-1]["evidence"]["subphase_wall_clock_seconds"] == {
+        "stage5": pytest.approx(10.0)
+    }
     assert set(captured[-1]["artifacts"]) == {
         "stage5_report",
         "checkpoint_653001",
@@ -3861,6 +3870,177 @@ def test_stage5_without_stage6_writes_completed_independent_parent(
         args, ("stage6-eval",), "stage 6 is independent"
     )
     assert "--run-stage6" in skipped_commands["stage6-eval"]
+
+
+def test_t075_target_retention_separates_command_and_generation_timing(
+    monkeypatch, tmp_path
+) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command_module
+
+    states_path = tmp_path / "stage1-selected-states.json"
+    selection_path = tmp_path / "stage1-selection-manifest.json"
+    preflight_path = tmp_path / "stage0-preflight.json"
+    preceding_path = tmp_path / "stage1-selection.retention.json"
+    output_path = tmp_path / "stage2-target-table.json"
+    validation_path = tmp_path / "stage2-target-validation.json"
+    states_path.write_text("states\n", encoding="utf-8")
+    preflight_path.write_text("preflight\n", encoding="utf-8")
+    preceding_path.write_text("preceding\n", encoding="utf-8")
+    selection_path.write_text(
+        json.dumps(
+            {
+                "schema_id": command_module.T075_SELECTION_MANIFEST_SCHEMA_ID,
+                "selected_states_sha256": file_sha256(states_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+    captured = []
+    monkeypatch.setattr(command_module, "_t075_has_terminal_decision", lambda _: False)
+    monkeypatch.setattr(command_module, "_validate_t075_preflight", lambda _: None)
+    monkeypatch.setattr(
+        command_module,
+        "_t075_preceding_manifest_path",
+        lambda *_args, **_kwargs: preceding_path,
+    )
+    monkeypatch.setattr(
+        command_module, "_t075_require_parent_retention", lambda *_args, **_kwargs: {}
+    )
+    monkeypatch.setattr(
+        command_module, "read_source_states", lambda _: tuple(range(320))
+    )
+    monkeypatch.setattr(
+        command_module,
+        "generate_counterfactual_targets_process_sharded",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            execution_evidence={
+                "wall_clock_seconds": 11.0,
+                "shards": [],
+                "processes": [],
+            }
+        ),
+    )
+    monkeypatch.setattr(
+        command_module,
+        "write_target_table",
+        lambda path, _table: path.write_text("{}", encoding="utf-8"),
+    )
+    monkeypatch.setattr(
+        command_module,
+        "_t075_write_stage3_report",
+        lambda *_args: {"family_split_state_counts": {}},
+    )
+    monkeypatch.setattr(
+        command_module,
+        "_write_t075_stage_retention",
+        lambda _args, **kwargs: captured.append(kwargs) or {},
+    )
+    monkeypatch.setattr(command_module.time, "perf_counter", lambda: 150.0)
+    args = SimpleNamespace(
+        decision_report=None,
+        shard_count=16,
+        worker_count=16,
+        preflight=preflight_path,
+        states=states_path,
+        selection_manifest=selection_path,
+        output=output_path,
+        validation_report=validation_path,
+        preceding_manifest=preceding_path,
+        _command_argv=("target",),
+        _t075_execution_start_utc="2026-08-29T00:00:00+00:00",
+        _t075_execution_start_monotonic=100.0,
+    )
+
+    assert command_module._run_t075_target(args) == 0
+    evidence = captured[-1]["evidence"]
+    assert evidence["wall_clock_seconds"] == pytest.approx(50.0)
+    assert evidence["subphase_wall_clock_seconds"] == {
+        "target_generation": pytest.approx(11.0)
+    }
+
+
+def test_t075_train_retention_separates_command_and_training_timing(
+    monkeypatch, tmp_path
+) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command_module
+
+    target_path = tmp_path / "stage2-target-table.json"
+    selected_path = tmp_path / "stage1-selected-states.json"
+    validation_path = tmp_path / "stage2-target-validation.json"
+    preceding_path = tmp_path / "stage2-target.retention.json"
+    output_path = tmp_path / "stage4-training-report.json"
+    checkpoint_directory = tmp_path / "checkpoints"
+    checkpoint_directory.mkdir()
+    target_path.write_text("target\n", encoding="utf-8")
+    selected_path.write_text("selected\n", encoding="utf-8")
+    preceding_path.write_text("preceding\n", encoding="utf-8")
+    for seed in (653001, 653002):
+        (checkpoint_directory / f"model-{seed}.pt").write_bytes(b"checkpoint")
+    validation_path.write_text(
+        json.dumps(
+            {
+                "schema_id": command_module.T075_STAGE3_VALIDATION_SCHEMA_ID,
+                "passed": True,
+                "parent_target_table_sha256": file_sha256(target_path),
+                "parent_selected_states_sha256": file_sha256(selected_path),
+            }
+        ),
+        encoding="utf-8",
+    )
+    table = SimpleNamespace(
+        states=("state",),
+        targets=("target",),
+        source_artifact_identity={},
+        validate_complete=lambda: None,
+    )
+    runs = [
+        SimpleNamespace(
+            model_seed=seed,
+            validation_mae=0.0,
+            checkpoint_path=str(checkpoint_directory / f"model-{seed}.pt"),
+            metadata={},
+        )
+        for seed in (653001, 653002)
+    ]
+    captured = []
+    monkeypatch.setattr(command_module, "_t075_has_terminal_decision", lambda _: False)
+    monkeypatch.setattr(
+        command_module,
+        "_t075_preceding_manifest_path",
+        lambda *_args, **_kwargs: preceding_path,
+    )
+    monkeypatch.setattr(
+        command_module, "_t075_require_parent_retention", lambda *_args, **_kwargs: {}
+    )
+    monkeypatch.setattr(command_module, "read_target_table", lambda _: table)
+    monkeypatch.setattr(
+        command_module, "train_frozen_model_seeds", lambda **_kwargs: runs
+    )
+    monkeypatch.setattr(
+        command_module,
+        "_write_t075_stage_retention",
+        lambda _args, **kwargs: captured.append(kwargs) or {},
+    )
+    clock_values = iter((110.0, 120.0, 150.0))
+    monkeypatch.setattr(
+        command_module.time, "perf_counter", lambda: next(clock_values, 150.0)
+    )
+    args = SimpleNamespace(
+        decision_report=None,
+        target_validation=validation_path,
+        target_table=target_path,
+        checkpoint_directory=checkpoint_directory,
+        output=output_path,
+        preceding_manifest=preceding_path,
+        _command_argv=("train",),
+        _t075_execution_start_utc="2026-08-29T00:00:00+00:00",
+        _t075_execution_start_monotonic=100.0,
+    )
+
+    assert command_module._run_t075_train(args) == 0
+    evidence = captured[-1]["evidence"]
+    assert evidence["wall_clock_seconds"] == pytest.approx(50.0)
+    assert evidence["subphase_wall_clock_seconds"] == {"training": pytest.approx(10.0)}
 
 
 def test_t075_lineage_allows_only_frozen_external_source_identity(

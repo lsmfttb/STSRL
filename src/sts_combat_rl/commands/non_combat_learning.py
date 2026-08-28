@@ -4335,6 +4335,7 @@ def _run_t075_target(args: argparse.Namespace) -> int:
         args, args.output, args.states, args.selection_manifest
     )
     target_ranges = table.execution_evidence.get("shards", [])
+    target_wall_clock = table.execution_evidence.get("wall_clock_seconds", 0.0)
     target_processes = table.execution_evidence.get("processes", [])
     process_by_index = {
         int(process["shard_index"]): dict(process)
@@ -4364,12 +4365,12 @@ def _run_t075_target(args: argparse.Namespace) -> int:
             "terminal": True,
             "shard_count": 16,
             "worker_count": 16,
-            "wall_clock_seconds": table.execution_evidence.get(
-                "wall_clock_seconds", 0.0
-            ),
             "ranges": target_ranges,
             "per_shard": target_per_shard,
             "processes": target_processes,
+            "subphase_wall_clock_seconds": {
+                "target_generation": target_wall_clock,
+            },
             "stage3_validation_status": "passed",
             "counts": validation["family_split_state_counts"],
             "parent_identities": {
@@ -4458,6 +4459,7 @@ def _run_t075_train(args: argparse.Namespace) -> int:
         "problems": [],
     }
     _write_canonical_json(args.output, payload)
+    training_wall_clock = time.perf_counter() - training_started
     _write_t075_stage_retention(
         args,
         stage="stage4-train",
@@ -4475,7 +4477,9 @@ def _run_t075_train(args: argparse.Namespace) -> int:
             "parent_identities": {
                 "target_validation": _t075_parent_identity(args.target_validation)
             },
-            "wall_clock_seconds": time.perf_counter() - training_started,
+            "subphase_wall_clock_seconds": {
+                "training": training_wall_clock,
+            },
             "shard_count": 1,
             "worker_count": 2,
             "ranges": [],
@@ -4542,6 +4546,7 @@ def _run_t075_evaluate(args: argparse.Namespace) -> int:
             "problems": list(stage5.problems),
         }
         _write_canonical_json(stage5_path, stage5_payload)
+    stage5_wall_clock = time.perf_counter() - stage5_started
     stage5_evidence = {
         **_t075_execution_evidence(
             args, status="completed", terminal=True, exit_code=0, executed=True
@@ -4555,7 +4560,9 @@ def _run_t075_evaluate(args: argparse.Namespace) -> int:
         "parent_identities": {
             "target_table": _t075_parent_identity(args.target_table),
         },
-        "wall_clock_seconds": time.perf_counter() - stage5_started,
+        "subphase_wall_clock_seconds": {
+            "stage5": stage5_wall_clock,
+        },
         "shard_count": 0,
         "worker_count": 0,
         "ranges": [],
