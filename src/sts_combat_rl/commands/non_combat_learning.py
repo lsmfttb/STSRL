@@ -6279,6 +6279,28 @@ def _t075_stage6_report_is_valid(path: Path, *, artifact_root: Path) -> bool:
                 return False
             if not mandatory and status != "unsupported_fallback":
                 return False
+            if status == "learned_success":
+                action_index = event.get("action_index")
+                if (
+                    isinstance(action_index, bool)
+                    or not isinstance(action_index, int)
+                    or action_index < 0
+                    or not finite_number(event.get("score"))
+                ):
+                    return False
+            elif status == "learned_failure":
+                if not isinstance(event.get("error"), str) or not event["error"]:
+                    return False
+            else:
+                action_index = event.get("action_index")
+                if (
+                    isinstance(action_index, bool)
+                    or not isinstance(action_index, int)
+                    or action_index < 0
+                    or not isinstance(event.get("reason"), str)
+                    or not event["reason"]
+                ):
+                    return False
             if event.get("battle") is not None and event.get("battle") is not False:
                 return False
 

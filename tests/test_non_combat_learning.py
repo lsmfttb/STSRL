@@ -3632,6 +3632,8 @@ def _write_valid_t075_stage6_fixture(path: Path) -> None:
                     "screen_family": "MAP_SCREEN",
                     "mandatory": True,
                     "status": "learned_success",
+                    "action_index": 0,
+                    "score": 0.0,
                 }
                 for seed in seeds
             ]
@@ -3757,6 +3759,14 @@ def test_t075_stage6_validator_recomputes_semantics_and_rejects_forgery(tmp_path
     event = payload["execution_evidence"]["arms"]["learned"]["report"][
         "decision_events"
     ][0]
+    event.pop("action_index")
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    assert not command_module._t075_stage6_report_is_valid(path, artifact_root=tmp_path)
+    event["action_index"] = 0
+    event["score"] = None
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    assert not command_module._t075_stage6_report_is_valid(path, artifact_root=tmp_path)
+    event["score"] = 0.0
     event["simulator_seed"] = 999999
     path.write_text(json.dumps(payload), encoding="utf-8")
     assert not command_module._t075_stage6_report_is_valid(path, artifact_root=tmp_path)
@@ -3764,6 +3774,16 @@ def test_t075_stage6_validator_recomputes_semantics_and_rejects_forgery(tmp_path
     event["status"] = "unsupported_fallback"
     path.write_text(json.dumps(payload), encoding="utf-8")
     assert not command_module._t075_stage6_report_is_valid(path, artifact_root=tmp_path)
+    event["status"] = "learned_success"
+    event["screen_family"] = "OTHER_ROOM"
+    event["mandatory"] = False
+    event["status"] = "unsupported_fallback"
+    event["reason"] = "fallback"
+    event.pop("reason")
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    assert not command_module._t075_stage6_report_is_valid(path, artifact_root=tmp_path)
+    event["screen_family"] = "MAP_SCREEN"
+    event["mandatory"] = True
     event["status"] = "learned_success"
     for malformed_status in ([], {}):
         event["status"] = malformed_status
