@@ -3637,6 +3637,9 @@ def _run_t075_evaluate(args: argparse.Namespace) -> int:
     stage6_report = stage6.to_dict()
     _write_canonical_json(args.output, stage6_report)
     stage6_identity = _t075_parent_identity(args.output)
+    stage6_problems = list(stage6.problems)
+    if not stage6.valid and not stage6_problems:
+        stage6_problems = ["Stage 6 validation failed"]
     stage6_failure_ids = [] if stage6.valid else ["stage6:validation-failed"]
     stage6_failure_details = (
         []
@@ -3645,7 +3648,7 @@ def _run_t075_evaluate(args: argparse.Namespace) -> int:
             {
                 "failure_id": "stage6:validation-failed",
                 "stage": "stage6-eval",
-                "messages": list(stage6.problems) or ["Stage 6 validation failed"],
+                "messages": stage6_problems,
             }
         ]
     )
@@ -3654,7 +3657,7 @@ def _run_t075_evaluate(args: argparse.Namespace) -> int:
         if stage6.valid
         else {
             "failure_count": len(stage6_failure_ids),
-            "problem_count": len(stage6.problems),
+            "problem_count": len(stage6_problems),
         }
     )
     payload = {
@@ -3693,7 +3696,7 @@ def _run_t075_evaluate(args: argparse.Namespace) -> int:
         "recommendation": "accept experimental fallback controller"
         if stage6.valid
         else "do not promote",
-        "problems": list(stage6.problems),
+        "problems": stage6_problems,
         "stage6_report_identity": stage6_identity,
         "stage6_arm_reports": dict(stage6_execution.get("arms", {})),
         "stage6_paired_rows": list(stage6_execution.get("paired_rows", [])),
@@ -3729,7 +3732,7 @@ def _run_t075_evaluate(args: argparse.Namespace) -> int:
             "status": "completed" if stage6.valid else "failed",
             "terminal": stage6.valid,
             "counts": {"valid": stage6.valid, "passed": stage6.passed},
-            "problems": list(stage6.problems),
+            "problems": stage6_problems,
             "parent_identities": {
                 "target_table": _t075_parent_identity(args.target_table)
             },
