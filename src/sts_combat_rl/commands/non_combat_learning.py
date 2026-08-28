@@ -2634,14 +2634,42 @@ def _write_t075_stage_retention(
 
 
 def _code_head_for_artifact_root(args: argparse.Namespace) -> str:
-    try:
-        import subprocess
+    import subprocess
 
+    worktree = _target_src_path().parent
+    try:
         return subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], text=True, cwd=_target_src_path().parent
+            ["git", "rev-parse", "HEAD"], text=True, cwd=worktree
         ).strip()
     except (OSError, subprocess.SubprocessError):
-        return "unknown"
+        # A Windows-created linked worktree stores a Windows absolute path in
+        # its .git pointer.  WSL's git cannot follow that pointer, so retry
+        # read-only with the pointer translated to the mounted path.
+        git_pointer = worktree / ".git"
+        try:
+            pointer = git_pointer.read_text(encoding="utf-8").strip()
+            prefix = "gitdir:"
+            if not pointer.lower().startswith(prefix):
+                return "unknown"
+            gitdir_text = pointer[len(prefix) :].strip()
+            if not gitdir_text:
+                return "unknown"
+            gitdir = _wsl_path(Path(gitdir_text))
+            worktree_path = _wsl_path(worktree)
+            return subprocess.check_output(
+                [
+                    "git",
+                    "--git-dir",
+                    gitdir,
+                    "--work-tree",
+                    worktree_path,
+                    "rev-parse",
+                    "HEAD",
+                ],
+                text=True,
+            ).strip()
+        except (OSError, subprocess.SubprocessError, ValueError):
+            return "unknown"
 
 
 def _portable_path(value: str | Path) -> Path:
@@ -6857,8 +6885,18 @@ def _target_src_path() -> Path:
 
 
 def _wsl_path(path: Path) -> str:
+    raw_value = str(path).replace("\\", "/")
+    if raw_value.startswith("/"):
+        return raw_value
+    if (
+        len(raw_value) >= 3
+        and raw_value[0].isalpha()
+        and raw_value[1] == ":"
+        and raw_value[2] == "/"
+    ):
+        return f"/mnt/{raw_value[0].lower()}{raw_value[2:]}"
     value = str(path.resolve()).replace("\\", "/")
-    if len(value) >= 2 and value[1] == ":":
+    if len(value) >= 3 and value[1] == ":" and value[2] == "/":
         return f"/mnt/{value[0].lower()}{value[2:]}"
     return value
 

@@ -80,6 +80,7 @@ from sts_combat_rl.sim.public_context_model_input import (
 from sts_combat_rl.commands.non_combat_learning import (
     T075WorkflowError,
     _portable_path,
+    _wsl_path,
     _handle_t075_case_d,
     _t075_terminal_decision_is_valid,
     _code_head_for_artifact_root,
@@ -2086,6 +2087,51 @@ def test_t075_portable_path_converts_wsl_mount() -> None:
     assert _portable_path("/mnt/d/DeadlycatCoding/STSRL/artifacts/x.json") == Path(
         "D:/DeadlycatCoding/STSRL/artifacts/x.json"
     )
+
+
+def test_t075_wsl_path_converts_drive_paths_before_resolve() -> None:
+    assert _wsl_path(Path("D:/DeadlycatCoding/STSRL/src")) == (
+        "/mnt/d/DeadlycatCoding/STSRL/src"
+    )
+    assert _wsl_path(Path("/mnt/d/DeadlycatCoding/STSRL/src")) == (
+        "/mnt/d/DeadlycatCoding/STSRL/src"
+    )
+    assert _wsl_path(Path("/home/lsmft/stsrl-spikes/py313-torch/bin/python")) == (
+        "/home/lsmft/stsrl-spikes/py313-torch/bin/python"
+    )
+
+
+def test_t075_code_head_reads_windows_linked_worktree_pointer_under_wsl(
+    tmp_path, monkeypatch
+) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command_module
+
+    worktree = tmp_path / "linked-worktree"
+    (worktree / "src").mkdir(parents=True)
+    (worktree / ".git").write_text(
+        "gitdir: D:/DeadlycatCoding/STSRL/.git/worktrees/t075-linked\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(command_module, "_target_src_path", lambda: worktree / "src")
+    calls = []
+
+    def read_head(command, **kwargs):
+        calls.append((command, kwargs))
+        if len(calls) == 1:
+            raise subprocess.CalledProcessError(128, command)
+        return "linked-head\n"
+
+    monkeypatch.setattr(subprocess, "check_output", read_head)
+    assert _code_head_for_artifact_root(SimpleNamespace()) == "linked-head"
+    assert calls[1][0] == [
+        "git",
+        "--git-dir",
+        "/mnt/d/DeadlycatCoding/STSRL/.git/worktrees/t075-linked",
+        "--work-tree",
+        _wsl_path(worktree),
+        "rev-parse",
+        "HEAD",
+    ]
 
 
 def test_t075_artifact_path_normalization_rejects_parent_segments() -> None:
