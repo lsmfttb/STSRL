@@ -69,6 +69,7 @@ from sts_combat_rl.sim.non_combat_learning import (
     read_target_table,
     run_stage6_experiment,
     continuation_seeds_for_split,
+    decision_record_digest,
     select_source_candidates,
     select_t075_source_candidates,
     train_frozen_model_seeds,
@@ -103,6 +104,9 @@ T075_STAGE6_SHARD_COUNT = T065_STAGE6_SHARD_COUNT
 T075_STAGE6_SEEDS_PER_SHARD = (
     T065_STAGE6_SEED_RANGE[1] - T065_STAGE6_SEED_RANGE[0] + 1
 ) // T075_STAGE6_SHARD_COUNT
+T075_STABLE_ARTIFACT_ROOT = Path(
+    "D:/DeadlycatCoding/STSRL/artifacts/t075-leakage-safe-non-combat-cohort-repair"
+)
 
 T075_FROZEN_SOURCE_ARTIFACTS = {
     "artifacts/t065-learned-non-combat-policy-v1/source-stochastic-650001-650256-c57b2ee.json": {
@@ -334,6 +338,7 @@ def _t075_validate_process_shards(
     per_shard: Any,
     status: str,
     ranges: Any = None,
+    allow_partial_failure: bool = False,
 ) -> None:
     """Validate observed process evidence, including its frozen shard plan.
 
@@ -362,14 +367,20 @@ def _t075_validate_process_shards(
             )
         expected_count = shard_count
         expected_arms = None
-    if worker_count != T065_MAX_WORKERS or len(per_shard) != expected_count:
+    if worker_count != T065_MAX_WORKERS or (
+        len(per_shard) != expected_count
+        and not (allow_partial_failure and status == "failed")
+    ):
         raise T075WorkflowError(
             "artifact-retention",
             [f"{stage}: observed worker/shard count is incomplete"],
         )
     expected_noncombat: dict[int, dict[str, Any]] = {}
     if stage in {"stage1-selection-replay", "stage2-target"}:
-        if not isinstance(ranges, list) or len(ranges) != expected_count:
+        if not isinstance(ranges, list) or (
+            len(ranges) != expected_count
+            and not (allow_partial_failure and status == "failed")
+        ):
             raise T075WorkflowError(
                 "artifact-retention",
                 [f"{stage}: frozen 16x20 range evidence is incomplete"],
@@ -405,13 +416,16 @@ def _t075_validate_process_shards(
                     "artifact-retention",
                     [f"{stage}: range does not match frozen 16x20 plan"],
                 )
-        if seen_noncombat != set(expected_noncombat):
+        if not allow_partial_failure and seen_noncombat != set(expected_noncombat):
             raise T075WorkflowError(
                 "artifact-retention", [f"{stage}: frozen 16x20 plan is incomplete"]
             )
     expected_stage6: dict[tuple[str, int], dict[str, Any]] = {}
     if stage == "stage6-eval":
-        if not isinstance(ranges, list) or len(ranges) != expected_count:
+        if not isinstance(ranges, list) or (
+            len(ranges) != expected_count
+            and not (allow_partial_failure and status == "failed")
+        ):
             raise T075WorkflowError(
                 "artifact-retention",
                 [f"{stage}: frozen range evidence is incomplete"],
@@ -449,7 +463,7 @@ def _t075_validate_process_shards(
                     "artifact-retention",
                     [f"{stage}: range does not match frozen seed plan"],
                 )
-        if seen_ranges != set(expected_stage6):
+        if not allow_partial_failure and seen_ranges != set(expected_stage6):
             raise T075WorkflowError(
                 "artifact-retention", [f"{stage}: frozen range plan is incomplete"]
             )
@@ -472,20 +486,30 @@ def _t075_validate_process_shards(
             )
         index = entry.get("shard_index")
         process_id = entry.get("process_id")
+        started = entry.get("started", True)
         if (
             isinstance(index, bool)
             or not isinstance(index, int)
             or not 0 <= index < shard_count
-            or isinstance(process_id, bool)
-            or not isinstance(process_id, int)
+            or not isinstance(started, bool)
             or entry.get("worker_kind") != "spawn-process"
         ):
             raise T075WorkflowError(
                 "artifact-retention", [f"{stage}: shard process evidence is invalid"]
             )
         key = (str(arm) if arm is not None else None, index)
+        if started:
+            if isinstance(process_id, bool) or not isinstance(process_id, int):
+                raise T075WorkflowError(
+                    "artifact-retention",
+                    [f"{stage}: started shard has invalid process identity"],
+                )
+        elif not (allow_partial_failure and status == "failed" and process_id is None):
+            raise T075WorkflowError(
+                "artifact-retention", [f"{stage}: unstarted shard evidence is invalid"]
+            )
         arm_process_ids = process_ids_by_arm.setdefault(str(arm), set())
-        duplicate_process = (
+        duplicate_process = started and (
             process_id in arm_process_ids
             if expected_arms is not None
             else process_id in process_ids
@@ -495,12 +519,15 @@ def _t075_validate_process_shards(
                 "artifact-retention", [f"{stage}: duplicate shard/process identity"]
             )
         seen.add(key)
-        if expected_arms is not None:
+        if expected_arms is not None and started:
             arm_process_ids.add(process_id)
-        else:
+        elif started:
             process_ids.add(process_id)
         exit_code = entry.get("exit_code")
-        if isinstance(exit_code, bool) or not isinstance(exit_code, int):
+        if isinstance(exit_code, bool) or (
+            not isinstance(exit_code, int)
+            and not (allow_partial_failure and status == "failed" and exit_code is None)
+        ):
             raise T075WorkflowError(
                 "artifact-retention", [f"{stage}: shard exit evidence is invalid"]
             )
@@ -582,7 +609,7 @@ def _t075_validate_process_shards(
                 raise T075WorkflowError(
                     "artifact-retention", [f"{stage}: completed seed range is partial"]
                 )
-    if expected_arms is not None:
+    if expected_arms is not None and not allow_partial_failure:
         counts = {arm: 0 for arm in expected_arms}
         for arm, _index in seen:
             counts[str(arm)] += 1
@@ -1044,6 +1071,7 @@ def main(argv: list[str] | None = None) -> int:
                 failure_details=exc.failure_details,
                 failure_detail_counts=exc.failure_detail_counts,
                 simulator_identity=exc.simulator_identity,
+                execution_evidence=exc.execution_evidence,
             )
             try:
                 _handle_t075_case_d(args, failure)
@@ -1366,13 +1394,7 @@ def _t075_standalone_stage6_argv(args: argparse.Namespace) -> tuple[str, ...]:
 def _t075_frozen_stage_argv(args: argparse.Namespace, stage: str) -> tuple[str, ...]:
     """Build the exact argv prescribed for a stage, including skipped stages."""
 
-    decision = getattr(args, "decision_report", None)
-    output = getattr(args, "output", None)
-    root = decision.parent if isinstance(decision, Path) else None
-    if root is None and isinstance(output, Path):
-        root = output.parent
-    if root is None:
-        raise T075WorkflowError(stage, ["frozen command lacks artifact root"])
+    root = T075_STABLE_ARTIFACT_ROOT
     t065 = Path("D:/DeadlycatCoding/STSRL/artifacts/t065-learned-non-combat-policy-v1")
     if stage == "stage0-preflight":
         return (
@@ -1545,9 +1567,7 @@ def _t075_command_tokens_match_frozen(
 ) -> bool:
     """Compare argv token-by-token after canonical artifact-path normalization."""
 
-    root = Path(
-        "D:/DeadlycatCoding/STSRL/artifacts/t075-leakage-safe-non-combat-cohort-repair"
-    )
+    root = T075_STABLE_ARTIFACT_ROOT
     expected = _t075_frozen_stage_argv(
         argparse.Namespace(decision_report=root / "terminal-decision-report.json"),
         stage,
@@ -1574,11 +1594,11 @@ def _t075_command_matches_contract(
     del skipped
     if not isinstance(command, str) or not command.strip():
         return False
+    if stage == "terminal-finalize":
+        return command == _t075_terminal_finalize_command()
     if stage not in T075_STAGE_ORDER[:-1]:
         return False
-    stable_root = Path(
-        "D:/DeadlycatCoding/STSRL/artifacts/t075-leakage-safe-non-combat-cohort-repair"
-    )
+    stable_root = T075_STABLE_ARTIFACT_ROOT
     expected_args = argparse.Namespace(
         decision_report=stable_root / "terminal-decision-report.json"
     )
@@ -1589,6 +1609,44 @@ def _t075_command_matches_contract(
     # The outer WSL launcher, shell preamble, checkout, PYTHONPATH, pinned
     # interpreter, module, and argv are all part of the frozen evidence.
     return command == expected
+
+
+def _t075_terminal_finalize_argv() -> tuple[str, ...]:
+    root = T075_STABLE_ARTIFACT_ROOT
+    return (
+        "finalize",
+        "--artifact-root",
+        str(root),
+        "--decision-report",
+        str(root / "terminal-decision-report.json"),
+        "--retention-manifest",
+        str(root / "t075-retention-manifest.json"),
+    )
+
+
+def _t075_terminal_finalize_command() -> str:
+    return _t075_command_string(
+        argparse.Namespace(), command_argv=_t075_terminal_finalize_argv()
+    )
+
+
+def _t075_cli_argv_matches(actual: Any, expected: Sequence[str]) -> bool:
+    if not isinstance(actual, (tuple, list)) or len(actual) != len(expected):
+        return False
+    for observed, wanted in zip(actual, expected, strict=True):
+        if not isinstance(observed, str):
+            return False
+        if "/" in wanted or "\\" in wanted or (len(wanted) > 1 and wanted[1] == ":"):
+            try:
+                if _t075_normalize_artifact_path(
+                    observed
+                ) != _t075_normalize_artifact_path(wanted):
+                    return False
+            except (OSError, TypeError, ValueError):
+                return False
+        elif observed != wanted:
+            return False
+    return True
 
 
 def _t075_execution_evidence(
@@ -1794,6 +1852,7 @@ def _t075_stage_retention_records(
                 per_shard=evidence.get("per_shard"),
                 status=str(evidence.get("status")),
                 ranges=evidence.get("ranges"),
+                allow_partial_failure=evidence.get("partial_spawn_failure") is True,
             )
         outputs = evidence.get("output_identities")
         command_outputs = command.get("output_identities")
@@ -1922,6 +1981,23 @@ def _t075_stage_retention_records(
         for entry in value.get("reused_artifacts", ()):
             if isinstance(entry, Mapping):
                 reused.append(dict(entry))
+
+    skipped_stages = decision.get("skipped_stages", ())
+    if not isinstance(skipped_stages, list):
+        raise T075WorkflowError(
+            "terminal-finalize", ["decision skipped stages are not a list"]
+        )
+    stale_skipped = sorted(
+        stage for stage in skipped_stages if stage in commands or stage in evidence
+    )
+    if stale_skipped:
+        raise T075WorkflowError(
+            "terminal-finalize",
+            [
+                "retention exists for decision-skipped stage(s): "
+                + ", ".join(stale_skipped)
+            ],
+        )
 
     reached = tuple(decision.get("reached_stages", ()))
     terminal_stage = decision.get("terminal_stage")
@@ -2257,6 +2333,7 @@ def _write_t075_stage_retention(
             per_shard=evidence["per_shard"],
             status=status,
             ranges=evidence["ranges"],
+            allow_partial_failure=evidence.get("partial_spawn_failure") is True,
         )
     if not isinstance(evidence["parent_identities"], Mapping):
         raise T075WorkflowError(
@@ -2358,6 +2435,17 @@ def _portable_path(value: str | Path) -> Path:
 
 def _t075_normalize_artifact_path(value: str) -> str:
     text = str(value).replace("\\", "/")
+    frozen_root_prefix = (
+        str(T075_STABLE_ARTIFACT_ROOT).replace("\\", "/").rstrip("/") + "/"
+    )
+    frozen_root = frozen_root_prefix.rstrip("/")
+    if text == frozen_root:
+        text = "artifacts/t075-leakage-safe-non-combat-cohort-repair"
+    elif text.startswith(frozen_root_prefix):
+        text = (
+            "artifacts/t075-leakage-safe-non-combat-cohort-repair/"
+            + text[len(frozen_root_prefix) :]
+        )
     for prefix in (
         "D:/DeadlycatCoding/STSRL/",
         "/mnt/d/DeadlycatCoding/STSRL/",
@@ -2378,6 +2466,17 @@ def _t075_normalize_artifact_path(value: str) -> str:
     if not normalized.startswith("artifacts/"):
         raise ValueError(f"artifact path is not under artifacts/: {value}")
     return normalized
+
+
+def _t075_artifact_root_matches(path: Any) -> bool:
+    if not isinstance(path, Path):
+        return False
+    try:
+        return _t075_normalize_artifact_path(
+            str(path)
+        ) == _t075_normalize_artifact_path(str(T075_STABLE_ARTIFACT_ROOT))
+    except (OSError, TypeError, ValueError):
+        return False
 
 
 def _t075_identity_matches(
@@ -4495,6 +4594,31 @@ def _run_t075_evaluate(args: argparse.Namespace) -> int:
 
 
 def _run_t075_finalize(args: argparse.Namespace) -> int:
+    expected_root = T075_STABLE_ARTIFACT_ROOT
+    if not _t075_artifact_root_matches(getattr(args, "artifact_root", None)):
+        raise T075WorkflowError(
+            "terminal-finalize",
+            ["finalizer artifact root is not the frozen stable root"],
+        )
+    expected_paths = {
+        "decision_report": expected_root / "terminal-decision-report.json",
+        "retention_manifest": expected_root / "t075-retention-manifest.json",
+    }
+    for name, expected_path in expected_paths.items():
+        supplied = getattr(args, name, None)
+        if not isinstance(supplied, Path) or not _t075_path_matches(
+            supplied, expected_path
+        ):
+            raise T075WorkflowError(
+                "terminal-finalize", [f"finalizer {name} is not the frozen path"]
+            )
+    supplied_argv = getattr(args, "_command_argv", ())
+    if supplied_argv and not _t075_cli_argv_matches(
+        supplied_argv, _t075_terminal_finalize_argv()
+    ):
+        raise T075WorkflowError(
+            "terminal-finalize", ["finalizer argv is not the frozen command"]
+        )
     try:
         decision = json.loads(args.decision_report.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
@@ -4536,11 +4660,7 @@ def _run_t075_finalize(args: argparse.Namespace) -> int:
         raise T075WorkflowError(
             "terminal-finalize", ["terminal decision does not satisfy T075 schema"]
         )
-    validation_retention_path = (
-        args.retention_manifest
-        if args.retention_manifest.is_file()
-        else next(iter(sorted(args.artifact_root.rglob("*.retention.json"))), None)
-    )
+    validation_retention_path = args.retention_manifest
     if not _t075_terminal_decision_is_valid(
         decision,
         artifact_root=args.artifact_root,
@@ -4763,7 +4883,7 @@ def _run_t075_finalize(args: argparse.Namespace) -> int:
     # The final entry is intentionally terminal only after this manifest is
     # atomically written; its output identity is the terminal decision.
     all_commands["terminal-finalize"] = {
-        "command": _t075_command_string(args),
+        "command": _t075_terminal_finalize_command(),
         "executed": True,
         "status": "completed",
         "code_head": _code_head_for_artifact_root(args),
@@ -5914,6 +6034,15 @@ def _t075_write_stage6_failure_report(path: Path, failure: T075WorkflowError) ->
         **dict(failure.failure_counts),
         "failure_count": len(failure_ids),
     }
+    execution_evidence = {
+        **dict(getattr(failure, "execution_evidence", {})),
+        "status": "failed",
+        "terminal": False,
+        "failure_stage": failure.stage,
+        "failure_ids": failure_ids,
+        "failure_counts": failure_counts,
+        "failure_details": failure_details,
+    }
     _write_canonical_json(
         path,
         {
@@ -5943,14 +6072,7 @@ def _t075_write_stage6_failure_report(path: Path, failure: T075WorkflowError) ->
             "failure_ids": failure_ids,
             "failure_counts": failure_counts,
             "failure_details": failure_details,
-            "execution_evidence": {
-                "status": "failed",
-                "terminal": False,
-                "failure_stage": failure.stage,
-                "failure_ids": failure_ids,
-                "failure_counts": failure_counts,
-                "failure_details": failure_details,
-            },
+            "execution_evidence": execution_evidence,
         },
     )
 
@@ -6333,6 +6455,23 @@ def _t075_stage6_report_is_valid(path: Path, *, artifact_root: Path) -> bool:
                 counts["intentional_unsupported_fallback_count"] += 1
             if status == "learned_failure":
                 counts["supported_failure_count"] += 1
+        events_by_seed: dict[int, list[Mapping[str, Any]]] = {}
+        for event in events:
+            event_seed = event.get("simulator_seed")
+            if isinstance(event_seed, int) and not isinstance(event_seed, bool):
+                events_by_seed.setdefault(event_seed, []).append(event)
+        for event_seed, row in arm_rows_by_seed[arm].items():
+            record_digest = row.get("decision_record_digest")
+            if (
+                not isinstance(record_digest, str)
+                or len(record_digest) != 64
+                or any(
+                    character not in "0123456789abcdef" for character in record_digest
+                )
+                or record_digest
+                != decision_record_digest(events_by_seed.get(event_seed, []))
+            ):
+                return False
         if arm == "learned":
             for event_seed, row in arm_rows_by_seed[arm].items():
                 row_counts = {}
@@ -6902,6 +7041,8 @@ def _handle_t075_case_d(args: argparse.Namespace, failure: T075WorkflowError) ->
     _write_canonical_json(decision_path, report)
     retention_path = getattr(args, "retention_manifest", None)
     if isinstance(retention_path, Path):
+        partial_execution = dict(getattr(failure, "execution_evidence", {}))
+        stage6_partial = partial_execution if terminal_stage == "stage6-eval" else {}
         _write_t075_stage_retention(
             args,
             stage=terminal_stage,
@@ -6918,10 +7059,13 @@ def _handle_t075_case_d(args: argparse.Namespace, failure: T075WorkflowError) ->
                 "problems": problems,
                 "parent_identities": _preceding_manifest_identities(args),
                 "wall_clock_seconds": 0.0,
-                "shard_count": 0,
-                "worker_count": 0,
-                "ranges": [],
-                "per_shard": [],
+                "shard_count": stage6_partial.get("shard_count", 0),
+                "worker_count": stage6_partial.get("worker_count", 0),
+                "ranges": stage6_partial.get("ranges", []),
+                "per_shard": stage6_partial.get("per_shard", []),
+                "partial_spawn_failure": stage6_partial.get(
+                    "partial_spawn_failure", False
+                ),
             },
             terminal_case="D",
         )

@@ -2959,7 +2959,8 @@ def test_t075_finalize_rejects_fabricated_case_d_reachability(tmp_path) -> None:
         code_head="test-head",
     )
     with pytest.raises(
-        Exception, match="code_head|terminal prefix|reachability|first-valid"
+        Exception,
+        match="stable root|code_head|terminal prefix|reachability|first-valid",
     ):
         _run_t075_finalize(args)
     assert not retention_path.exists()
@@ -2969,6 +2970,7 @@ def test_t075_finalize_accepts_valid_case_d_json_lists(tmp_path, monkeypatch) ->
     import sts_combat_rl.commands.non_combat_learning as command_module
 
     artifact_root = tmp_path / "artifacts"
+    monkeypatch.setattr(command_module, "T075_STABLE_ARTIFACT_ROOT", artifact_root)
     parent_path = artifact_root / "failure-evidence.json"
     parent_path.parent.mkdir(parents=True)
     parent_path.write_text("failure evidence\n", encoding="utf-8")
@@ -2983,9 +2985,7 @@ def test_t075_finalize_accepts_valid_case_d_json_lists(tmp_path, monkeypatch) ->
     stages = command_module.T075_STAGE_ORDER[:-1]
     reached = [stages[0]]
     skipped = list(stages[1:])
-    frozen_root = Path(
-        "D:/DeadlycatCoding/STSRL/artifacts/t075-leakage-safe-non-combat-cohort-repair"
-    )
+    frozen_root = artifact_root
     stage6_args = SimpleNamespace(
         target_table=frozen_root / "stage2-target-table.json",
         checkpoint_directory=frozen_root / "stage4-checkpoints",
@@ -3090,6 +3090,59 @@ def test_t075_finalize_accepts_valid_case_d_json_lists(tmp_path, monkeypatch) ->
     )
 
 
+def test_t075_retention_rejects_decision_skipped_stage(tmp_path, monkeypatch) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command_module
+
+    artifact_root = tmp_path / "artifacts"
+    monkeypatch.setattr(command_module, "T075_STABLE_ARTIFACT_ROOT", artifact_root)
+    args = SimpleNamespace()
+    stage = "stage0-preflight"
+    command = command_module._t075_command_string(
+        args,
+        command_argv=command_module._t075_frozen_stage_argv(args, stage),
+    )
+    code_head = _code_head_for_artifact_root(args)
+    stage_record = {
+        "command": command,
+        "executed": False,
+        "status": "skipped",
+        "code_head": code_head,
+        "start_time_utc": "2026-08-28T00:00:00+00:00",
+        "end_time_utc": "2026-08-28T00:00:00+00:00",
+        "exit_code": None,
+        "terminal": False,
+        "wall_clock_seconds": 0.0,
+        "shard_count": 0,
+        "worker_count": 0,
+        "ranges": [],
+        "parent_identities": {},
+        "output_identities": [],
+        "artifact_roles": [],
+        "skip_reason": "decision skipped this stage",
+    }
+    retention_path = artifact_root / "stage0-preflight.retention.json"
+    retention_path.parent.mkdir(parents=True)
+    retention_path.write_text(
+        json.dumps(
+            {
+                "schema_id": command_module.T075_RETENTION_MANIFEST_SCHEMA_ID,
+                "schema_version": 1,
+                "task_id": command_module.T075_TASK_ID,
+                "approved_t075_spec_commit": command_module.T075_APPROVED_SPEC_COMMIT,
+                "planner_baseline": command_module.T075_PLANNER_BASELINE,
+                "stage_commands": {stage: stage_record},
+                "stage_evidence": {stage: stage_record},
+                "reused_artifacts": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(T075WorkflowError, match="decision-skipped"):
+        command_module._t075_stage_retention_records(
+            artifact_root, {"skipped_stages": [stage]}
+        )
+
+
 def test_t075_case_d_stage6_failure_maps_to_stage6_eval(tmp_path) -> None:
     decision_path = tmp_path / "terminal-decision-report.json"
     args = SimpleNamespace(
@@ -3110,6 +3163,49 @@ def test_t075_case_d_stage6_failure_maps_to_stage6_eval(tmp_path) -> None:
     stage6_payload = json.loads(stage6_report.read_text(encoding="utf-8"))
     assert stage6_payload["valid"] is False
     assert stage6_payload["execution_evidence"]["status"] == "failed"
+
+
+def test_t075_stage6_failure_report_retains_partial_spawn_evidence(tmp_path) -> None:
+    partial = []
+    for index, spec in enumerate(stage6_shard_ranges(arm="stochastic")):
+        seeds = list(range(spec["seed_start"], spec["seed_end"] + 1))
+        partial.append(
+            {
+                **spec,
+                "requested_seeds": seeds,
+                "completed_seeds": seeds if index == 0 else [],
+                "process_id": 9100 + index,
+                "worker_kind": "spawn-process",
+                "started": True,
+                "status": "passed" if index == 0 else "failed",
+                "exit_code": 0 if index == 0 else 1,
+            }
+        )
+    failure = T075WorkflowError(
+        "stage6",
+        ["shard 1 process failed"],
+        failure_ids=("stage6:worker-failure",),
+        failure_counts={"shards_started": 16, "shards_returned": 1},
+        execution_evidence={
+            "partial_spawn_failure": True,
+            "shard_count": 16,
+            "worker_count": 16,
+            "ranges": partial,
+            "per_shard": partial,
+        },
+    )
+    report_path = tmp_path / "stage6-complete-run-report.json"
+    _t075_write_stage6_failure_report(report_path, failure)
+    payload = json.loads(report_path.read_text(encoding="utf-8"))
+    evidence = payload["execution_evidence"]
+    assert evidence["partial_spawn_failure"] is True
+    assert evidence["shard_count"] == 16
+    assert evidence["worker_count"] == 16
+    assert len(evidence["per_shard"]) == 16
+    assert {entry["status"] for entry in evidence["per_shard"]} == {
+        "passed",
+        "failed",
+    }
 
 
 def test_replay_success_worker_schema_is_merged_with_worker_kind(monkeypatch) -> None:
@@ -3649,6 +3745,11 @@ def _write_valid_t075_stage6_fixture(path: Path) -> None:
             if arm == "learned"
             else []
         )
+        events_by_seed = {int(event["simulator_seed"]): [event] for event in events}
+        for row in rows:
+            row["decision_record_digest"] = command_module.decision_record_digest(
+                events_by_seed.get(row["simulator_seed"], [])
+            )
         specs = [
             {
                 **spec,
@@ -3770,7 +3871,7 @@ def test_t075_stage6_validator_recomputes_semantics_and_rejects_forgery(tmp_path
     payload["execution_evidence"]["arms"]["learned"]["decision_count"] = 255
     payload["coverage"].update({"D": 255, "L": 255, "M": 255})
     path.write_text(json.dumps(payload), encoding="utf-8")
-    assert _t075_stage6_report_is_valid(path, artifact_root=tmp_path)
+    assert not _t075_stage6_report_is_valid(path, artifact_root=tmp_path)
     learned_report["decision_events"].insert(0, zero_event)
     for field in (
         "learned_decision_count",
@@ -3778,6 +3879,24 @@ def test_t075_stage6_validator_recomputes_semantics_and_rejects_forgery(tmp_path
         "supported_failure_count",
     ):
         zero_row[field] = 1 if field == "learned_decision_count" else 0
+    payload["execution_evidence"]["arms"]["learned"]["decision_count"] = 256
+    payload["coverage"].update({"D": 256, "L": 256, "M": 256})
+    learned_report["decision_events"].pop(0)
+    for field in (
+        "learned_decision_count",
+        "intentional_unsupported_fallback_count",
+        "supported_failure_count",
+    ):
+        zero_row[field] = 0
+    zero_row["decision_record_digest"] = command_module.decision_record_digest([])
+    payload["execution_evidence"]["arms"]["learned"]["decision_count"] = 255
+    payload["coverage"].update({"D": 255, "L": 255, "M": 255})
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    assert _t075_stage6_report_is_valid(path, artifact_root=tmp_path)
+    learned_report["decision_events"].insert(0, zero_event)
+    zero_row["decision_record_digest"] = command_module.decision_record_digest(
+        [zero_event]
+    )
     payload["execution_evidence"]["arms"]["learned"]["decision_count"] = 256
     payload["coverage"].update({"D": 256, "L": 256, "M": 256})
     saved_events = learned_report["decision_events"]

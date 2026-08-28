@@ -200,6 +200,7 @@ class T065CaseD(ValueError):
         failed_stage_artifacts: Mapping[str, Any] | None = None,
         failure_details: Sequence[Mapping[str, Any]] = (),
         failure_detail_counts: Mapping[str, Any] | None = None,
+        execution_evidence: Mapping[str, Any] | None = None,
     ) -> None:
         self.stage = str(stage)
         self.problems = tuple(str(problem) for problem in problems)
@@ -212,6 +213,7 @@ class T065CaseD(ValueError):
         self.failed_stage_artifacts = dict(failed_stage_artifacts or {})
         self.failure_details = tuple(dict(detail) for detail in failure_details)
         self.failure_detail_counts = dict(failure_detail_counts or {})
+        self.execution_evidence = dict(execution_evidence or {})
         super().__init__(f"T065 Case D at {self.stage}: " + "; ".join(self.problems))
 
     def to_decision_report(
@@ -3052,7 +3054,53 @@ def _run_spawn_process_batch(
         result_queue.close()
         result_queue.join_thread()
     if problems:
-        raise T065CaseD(stage, tuple(problems))
+        partial_shards = []
+        for payload, process in zip(payloads, processes, strict=True):
+            shard_index = int(payload["shard_index"])
+            result = results.get(shard_index)
+            seeds = [int(seed) for seed in payload.get("seeds", ())]
+            partial = {
+                "shard_index": shard_index,
+                "seed_start": seeds[0] if seeds else None,
+                "seed_end": seeds[-1] if seeds else None,
+                "seed_count": len(seeds),
+                "requested_seeds": seeds,
+                "completed_seeds": [],
+                "process_id": process.pid,
+                "worker_kind": "spawn-process",
+                "started": process.pid is not None,
+                "status": result.get("status", "missing") if result else "missing",
+                "exit_code": (
+                    process.exitcode
+                    if process.exitcode is not None
+                    else result.get("exit_code")
+                    if result
+                    else None
+                ),
+            }
+            if isinstance(payload.get("arm"), str):
+                partial["arm"] = payload["arm"]
+            if result and result.get("error"):
+                partial["error"] = str(result["error"])
+            partial_shards.append(partial)
+        failure = T065CaseD(
+            stage,
+            tuple(problems),
+            failure_counts={
+                "failure_count": len(problems),
+                "shards_planned": len(payloads),
+                "shards_started": sum(process.pid is not None for process in processes),
+                "shards_returned": len(results),
+            },
+            execution_evidence={
+                "partial_spawn_failure": True,
+                "shard_count": len(payloads),
+                "worker_count": worker_count,
+                "ranges": [dict(item) for item in partial_shards],
+                "per_shard": partial_shards,
+            },
+        )
+        raise failure
     return [results[int(payload["shard_index"])] for payload in payloads]
 
 
@@ -4915,6 +4963,14 @@ def run_complete_run_arm(
             )
         )
         act2_entry = _run_entered_act2(run)
+        run_events = (
+            [
+                {"simulator_seed": seed, **dict(event)}
+                for event in learned_policy.decision_events
+            ]
+            if learned_policy is not None
+            else []
+        )
         row = {
             "simulator_seed": seed,
             "arm": arm,
@@ -4930,6 +4986,7 @@ def run_complete_run_arm(
             "truncated": truncated,
             "controller_error": bool(run_problems) and not truncated,
             "problems": run_problems,
+            "decision_record_digest": decision_record_digest(run_events),
             "learned_decision_count": (
                 sum(
                     event.get("status") in {"learned_success", "learned_failure"}
@@ -4945,10 +5002,6 @@ def run_complete_run_arm(
             "simulator_cost": _controlled_run_cost(run),
         }
         if learned_policy is not None:
-            run_events = [
-                {"simulator_seed": seed, **dict(event)}
-                for event in learned_policy.decision_events
-            ]
             events.extend(run_events)
             row["intentional_unsupported_fallback_count"] = sum(
                 event.get("status") == "unsupported_fallback"
@@ -6947,6 +7000,12 @@ def _canonical_json_bytes(value: Any) -> bytes:
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")
+
+
+def decision_record_digest(events: Sequence[Mapping[str, Any]]) -> str:
+    """Hash one run's complete ordered decision-record sequence."""
+
+    return hashlib.sha256(_canonical_json_bytes(list(events))).hexdigest()
 
 
 def _json_safe(value: Any) -> Any:
