@@ -89,6 +89,8 @@ from sts_combat_rl.commands.non_combat_learning import (
     _t075_normalize_artifact_path,
     _t075_command_matches_contract,
     _t075_require_pinned_simulator_identity,
+    _t075_require_parent_retention,
+    _t075_resolve_lineage_identity_path,
     _t075_resolve_reuse_manifest,
     _t075_validate_accepted_case_d_files,
     _run_t075_select,
@@ -3495,3 +3497,355 @@ def test_stage5_without_stage6_writes_completed_independent_parent(
         args, ("stage6-eval",), "stage 6 is independent"
     )
     assert "--run-stage6" in skipped_commands["stage6-eval"]
+
+
+def test_t075_lineage_allows_only_frozen_external_source_identity(
+    tmp_path, monkeypatch
+):
+    import sts_combat_rl.commands.non_combat_learning as command_module
+
+    source = tmp_path / "source.json"
+    source.write_bytes(b"bounded frozen source fixture\n")
+    normalized = (
+        "artifacts/t065-learned-non-combat-policy-v1/source-stochastic-fixture.json"
+    )
+    monkeypatch.setitem(
+        command_module.T075_FROZEN_SOURCE_ARTIFACTS,
+        normalized,
+        {
+            "arm": "stochastic_non_combat_v1",
+            "sha256": file_sha256(source),
+            "size_bytes": source.stat().st_size,
+            "actual_path": str(source),
+        },
+    )
+    identity = {
+        "role": "source_stochastic",
+        "path": normalized,
+        "sha256": file_sha256(source),
+        "size_bytes": source.stat().st_size,
+    }
+    assert (
+        _t075_resolve_lineage_identity_path(identity, artifact_root=tmp_path / "t075")
+        == source
+    )
+    identity["path"] = normalized.replace("source-stochastic", "other")
+    assert (
+        _t075_resolve_lineage_identity_path(identity, artifact_root=tmp_path / "t075")
+        is None
+    )
+
+
+def _write_valid_t075_stage6_fixture(path: Path) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command_module
+    from sts_combat_rl.sim.non_combat_policy import (
+        ExpertNonCombatDriver,
+        StochasticNonCombatDriver,
+    )
+    from sts_combat_rl.sim.online_controller import (
+        PolicyController,
+        RoutedRunController,
+    )
+    from sts_combat_rl.sim.non_combat_learning import build_frozen_battle_controller
+
+    seeds = list(range(651001, 651257))
+    action_space = frozen_action_space().to_dict()
+    battle = frozen_battle_provenance()
+    controllers = {}
+    drivers = {}
+    for arm, driver in (
+        ("stochastic", StochasticNonCombatDriver(seed=654002)),
+        ("expert", ExpertNonCombatDriver(seed=654002)),
+    ):
+        drivers[arm] = {
+            "name": driver.name,
+            "version": driver.version,
+            "config": dict(driver.provenance_config),
+        }
+        controllers[arm] = RoutedRunController(
+            battle=build_frozen_battle_controller(),
+            non_combat=PolicyController(driver),
+        ).provenance.to_dict()
+    learned_config = {
+        "seed": 654002,
+        "version": 1,
+        "supported_screen_families": list(T065_MANDATORY_FAMILIES),
+        "fallback_policy": "expert_non_combat_v1",
+        "fallback_provenance": {
+            "name": "expert_non_combat_v1",
+            "version": 1,
+            "seed": 654002,
+        },
+        "checkpoint_schema_id": "t065-non-combat-ranker-checkpoint-v1",
+        "checkpoint_artifact_id": "a" * 64,
+        "model_seed": 653001,
+        "model_input_schema": command_module.non_combat_model_input_schema(),
+        "information_regime": "normal_public_policy",
+        "expert_action_or_score_is_model_input": False,
+    }
+    drivers["learned"] = {
+        "name": "learned_non_combat_v1",
+        "version": 1,
+        "config": learned_config,
+    }
+    controllers["learned"] = {
+        "kind": "routed_run",
+        "name": f"{battle['name']}+learned_non_combat_v1",
+        "config": {
+            "battle": battle,
+            "non_combat": {
+                "kind": "decision_policy",
+                "name": "learned_non_combat_v1",
+                "config": {
+                    **learned_config,
+                    "policy_class": "LearnedNonCombatPolicy",
+                    "information_regime": "normal_public_policy",
+                },
+                "schema_version": 1,
+            },
+            "reproducible": True,
+        },
+        "schema_version": 1,
+    }
+    execution_arms = {}
+    for arm in ("stochastic", "expert", "learned"):
+        floor = 3.0 if arm == "learned" else 2.0
+        rows = [
+            {
+                "simulator_seed": seed,
+                "terminal": True,
+                "terminal_floor": floor,
+                "act2_entry": False,
+                "truncated": False,
+                "controller_error": False,
+                "problems": [],
+                "action_space": action_space,
+                "controller_provenance": controllers[arm],
+            }
+            for seed in seeds
+        ]
+        events = (
+            [
+                {
+                    "simulator_seed": seed,
+                    "battle": False,
+                    "screen_family": "MAP_SCREEN",
+                    "status": "learned_success",
+                }
+                for seed in seeds
+            ]
+            if arm == "learned"
+            else []
+        )
+        specs = [
+            {
+                **spec,
+                "requested_seeds": list(
+                    range(spec["seed_start"], spec["seed_end"] + 1)
+                ),
+                "completed_seeds": list(
+                    range(spec["seed_start"], spec["seed_end"] + 1)
+                ),
+                "requested_seed_count": 16,
+                "completed_row_count": 16,
+                "worker_kind": "spawn-process",
+                "process_id": 10000 + index,
+                "exit_code": 0,
+            }
+            for index, spec in enumerate(stage6_shard_ranges(arm=arm))
+        ]
+        report = {
+            "schema_id": "t065-complete-run-report-v1",
+            "schema_version": 1,
+            "arm": arm,
+            "driver_seed": 654002,
+            "requested_seeds": seeds,
+            "rows": rows,
+            "decision_events": events,
+            "worker_count": 16,
+            "shard_count": 16,
+            "shard_specs": specs,
+            "problems": [],
+            "simulator_identity": command_module._t075_pinned_simulator_identity(),
+            "action_space": action_space,
+            "controller_provenance": controllers[arm],
+            "driver_provenance": drivers[arm],
+        }
+        execution_arms[arm] = {
+            "requested_seed_count": 256,
+            "completed_row_count": 256,
+            "decision_count": len(events),
+            "wall_clock_seconds": 1.0,
+            "worker_count": 16,
+            "shard_count": 16,
+            "shard_specs": specs,
+            "problem_count": 0,
+            "problems": [],
+            "report": report,
+        }
+    payload = {
+        "schema_id": "t065-complete-run-report-v1",
+        "schema_version": 1,
+        "paired_terminal_floor_deltas": [1.0] * 256,
+        "learned_terminal_floor_mean": 3.0,
+        "expert_terminal_floor_mean": 2.0,
+        "mean_terminal_floor_delta": 1.0,
+        "p_positive": 1.0,
+        "coverage": {
+            "D": 256,
+            "L": 256,
+            "M": 256,
+            "F": 0,
+            "learned_coverage": 1.0,
+            "mandatory_failure_rate": 0.0,
+            "passed": True,
+        },
+        "learned_act2_entry_count": 0,
+        "expert_act2_entry_count": 0,
+        "controller_error_count": 0,
+        "truncation_count": 0,
+        "valid": True,
+        "passed": True,
+        "problems": [],
+        "execution_evidence": {
+            "worker_count": 16,
+            "shard_count_per_arm": 16,
+            "arms": execution_arms,
+            "paired_rows": [
+                {
+                    "simulator_seed": seed,
+                    "learned_terminal_floor": 3.0,
+                    "expert_terminal_floor": 2.0,
+                    "learned_terminal": True,
+                    "expert_terminal": True,
+                    "learned_act2_entry": False,
+                    "expert_act2_entry": False,
+                    "truncated": False,
+                    "controller_error": False,
+                }
+                for seed in seeds
+            ],
+        },
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def test_t075_stage6_validator_recomputes_semantics_and_rejects_forgery(tmp_path):
+    import sts_combat_rl.commands.non_combat_learning as command_module
+
+    path = tmp_path / "stage6-complete-run-report.json"
+    _write_valid_t075_stage6_fixture(path)
+    assert _t075_stage6_report_is_valid(path, artifact_root=tmp_path)
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    expected = {
+        "mean_terminal_floor_delta": 1.0,
+        "p_positive": 1.0,
+        "learned_act2_entry_count": 0,
+    }
+    for field, forged in (
+        ("mean_terminal_floor_delta", 2.0),
+        ("p_positive", 0.5),
+        ("learned_act2_entry_count", 1),
+    ):
+        payload[field] = forged
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        assert not command_module._t075_stage6_report_is_valid(
+            path, artifact_root=tmp_path
+        )
+        payload[field] = expected[field]
+    payload["execution_evidence"]["arms"]["learned"]["report"]["simulator_identity"][
+        "code_head"
+    ] = "forged"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    assert not command_module._t075_stage6_report_is_valid(path, artifact_root=tmp_path)
+
+
+def test_t075_stage1_parent_accepts_explicit_frozen_external_source(
+    tmp_path, monkeypatch
+):
+    import sts_combat_rl.commands.non_combat_learning as command_module
+
+    source = tmp_path / "source.json"
+    source.write_bytes(b"bounded frozen source fixture\n")
+    normalized = (
+        "artifacts/t065-learned-non-combat-policy-v1/source-stochastic-fixture.json"
+    )
+    identity = {
+        "role": "source_stochastic",
+        "path": normalized,
+        "sha256": file_sha256(source),
+        "size_bytes": source.stat().st_size,
+    }
+    monkeypatch.setitem(
+        command_module.T075_FROZEN_SOURCE_ARTIFACTS,
+        normalized,
+        {
+            "arm": "stochastic_non_combat_v1",
+            "sha256": identity["sha256"],
+            "size_bytes": identity["size_bytes"],
+            "actual_path": str(source),
+        },
+    )
+    expected_args = SimpleNamespace(
+        decision_report=Path(
+            "D:/DeadlycatCoding/STSRL/artifacts/"
+            "t075-leakage-safe-non-combat-cohort-repair/terminal.json"
+        )
+    )
+    specs = target_shard_ranges(worker_count=16)
+    per_shard = [
+        {
+            **spec,
+            "process_id": 20000 + index,
+            "worker_kind": "spawn-process",
+            "exit_code": 0,
+            "state_count": 20,
+            "selected_state_count": 20,
+        }
+        for index, spec in enumerate(specs)
+    ]
+    command = command_module._t075_command_string(
+        expected_args,
+        command_argv=command_module._t075_frozen_stage_argv(
+            expected_args, "stage1-selection-replay"
+        ),
+    )
+    manifest_path = tmp_path / "stage1.retention.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "schema_id": command_module.T075_RETENTION_MANIFEST_SCHEMA_ID,
+                "schema_version": 1,
+                "task_id": "T075",
+                "approved_t075_spec_commit": command_module.T075_APPROVED_SPEC_COMMIT,
+                "planner_baseline": command_module.T075_PLANNER_BASELINE,
+                "stage_evidence": {
+                    "stage1-selection-replay": {
+                        "status": "completed",
+                        "terminal": True,
+                        "command": command,
+                        "executed": True,
+                        "exit_code": 0,
+                        "code_head": command_module._code_head_for_artifact_root(
+                            SimpleNamespace()
+                        ),
+                        "start_time_utc": "2026-08-28T00:00:00+00:00",
+                        "end_time_utc": "2026-08-28T00:00:01+00:00",
+                        "shard_count": 16,
+                        "worker_count": 16,
+                        "ranges": [dict(spec) for spec in specs],
+                        "per_shard": per_shard,
+                        "output_identities": [identity],
+                        "parent_identities": {},
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert (
+        _t075_require_parent_retention(
+            manifest_path, stage="stage1-selection-replay", required_paths={}
+        )["schema_id"]
+        == command_module.T075_RETENTION_MANIFEST_SCHEMA_ID
+    )

@@ -16,6 +16,7 @@ import math
 import os
 from pathlib import Path
 import shlex
+import statistics
 import sys
 import time
 from tempfile import TemporaryDirectory
@@ -28,17 +29,21 @@ from sts_combat_rl.sim.non_combat_learning import (
     T065_EXPERIMENT_SCHEMA_ID,
     T065_EXPERIMENT_SCHEMA_VERSION,
     T065ExperimentConfig,
+    T065_CHECKPOINT_SCHEMA_ID,
     T065_MAX_WORKERS,
     T065_LIGHTSPEED_BUILD_PYTHONPATH,
     T065_MANDATORY_FAMILIES,
     T065_SPLITS,
     T065_SOURCE_SEED_RANGE,
+    T065_STAGE6_DRIVER_SEED,
     T065_STAGE6_SEED_RANGE,
     T065_STAGE6_REPORT_SCHEMA_ID,
     T065_STAGE6_SHARD_COUNT,
     T065SourceState,
     T065_TRAINING_INTERPRETER,
     T065CaseD,
+    ExpertNonCombatDriver,
+    StochasticNonCombatDriver,
     T075_APPROVED_SPEC_COMMIT,
     T075_PLANNER_BASELINE,
     T075_REUSE_MANIFEST_SCHEMA_ID,
@@ -58,6 +63,8 @@ from sts_combat_rl.sim.non_combat_learning import (
     frozen_battle_provenance,
     frozen_action_space,
     load_non_combat_checkpoint,
+    matched_bootstrap_probability,
+    non_combat_model_input_schema,
     read_source_states,
     read_target_table,
     run_stage6_experiment,
@@ -149,6 +156,109 @@ def _t075_require_pinned_simulator_identity(
     if value != identity:
         raise ValueError(f"{label} simulator identity is not the pinned identity")
     return identity
+
+
+def _t075_expected_stage6_driver(
+    arm: str, report: Mapping[str, Any]
+) -> Mapping[str, Any] | None:
+    """Return the exact frozen driver provenance for one Stage-6 arm."""
+
+    if arm == "stochastic":
+        driver = StochasticNonCombatDriver(seed=T065_STAGE6_DRIVER_SEED)
+    elif arm == "expert":
+        driver = ExpertNonCombatDriver(seed=T065_STAGE6_DRIVER_SEED)
+    elif arm == "learned":
+        raw = report.get("driver_provenance")
+        if not isinstance(raw, Mapping):
+            return None
+        config = raw.get("config")
+        if (
+            raw.get("name") != "learned_non_combat_v1"
+            or raw.get("version") != 1
+            or not isinstance(config, Mapping)
+            or set(config)
+            != {
+                "seed",
+                "version",
+                "supported_screen_families",
+                "fallback_policy",
+                "fallback_provenance",
+                "checkpoint_schema_id",
+                "checkpoint_artifact_id",
+                "model_seed",
+                "model_input_schema",
+                "information_regime",
+                "expert_action_or_score_is_model_input",
+            }
+            or config.get("seed") != T065_STAGE6_DRIVER_SEED
+            or config.get("version") != 1
+            or config.get("supported_screen_families") != list(T065_MANDATORY_FAMILIES)
+            or config.get("fallback_policy") != "expert_non_combat_v1"
+            or config.get("fallback_provenance")
+            != {
+                "name": "expert_non_combat_v1",
+                "version": 1,
+                "seed": T065_STAGE6_DRIVER_SEED,
+            }
+            or config.get("checkpoint_schema_id") != T065_CHECKPOINT_SCHEMA_ID
+            or not isinstance(config.get("checkpoint_artifact_id"), str)
+            or len(config["checkpoint_artifact_id"]) != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in config["checkpoint_artifact_id"].lower()
+            )
+            or config.get("model_seed") not in (653001, 653002)
+            or config.get("model_input_schema") != non_combat_model_input_schema()
+            or config.get("information_regime") != "normal_public_policy"
+            or config.get("expert_action_or_score_is_model_input") is not False
+        ):
+            return None
+        return dict(raw)
+    else:
+        return None
+    return {
+        "name": driver.name,
+        "version": driver.version,
+        "config": dict(driver.provenance_config),
+    }
+
+
+def _t075_stage6_arm_provenance_is_frozen(arm: str, report: Mapping[str, Any]) -> bool:
+    expected_driver = _t075_expected_stage6_driver(arm, report)
+    if expected_driver is None or report.get("driver_provenance") != expected_driver:
+        return False
+    driver_config = expected_driver["config"]
+    controller = report.get("controller_provenance")
+    if not isinstance(controller, Mapping):
+        return False
+    expected_battle = frozen_battle_provenance()
+    non_combat_name = str(expected_driver["name"])
+    policy_class = {
+        "stochastic": "StochasticNonCombatDriver",
+        "expert": "ExpertNonCombatDriver",
+        "learned": "LearnedNonCombatPolicy",
+    }[arm]
+    expected_non_combat = {
+        "kind": "decision_policy",
+        "name": non_combat_name,
+        "config": {
+            **dict(driver_config),
+            "policy_class": policy_class,
+            "information_regime": "normal_public_policy",
+        },
+        "schema_version": 1,
+    }
+    expected_controller = {
+        "kind": "routed_run",
+        "name": f"{expected_battle['name']}+{non_combat_name}",
+        "config": {
+            "battle": expected_battle,
+            "non_combat": expected_non_combat,
+            "reproducible": True,
+        },
+        "schema_version": 1,
+    }
+    return controller == expected_controller
 
 
 def _t075_parse_utc_timestamp(value: Any) -> datetime | None:
@@ -1986,12 +2096,10 @@ def _t075_require_parent_retention(
             raise T075WorkflowError(
                 "lineage", [f"parent retention output role is invalid: {path}"]
             )
-        output_path = _t075_resolve_identity_path(
-            str(output.get("path", "")), artifact_root=path.parent
+        output_path = _t075_resolve_lineage_identity_path(
+            output, artifact_root=path.parent
         )
-        if output_path is None or not _t075_identity_matches(
-            output, output_path, expected_role=output["role"]
-        ):
+        if output_path is None:
             raise T075WorkflowError(
                 "lineage", [f"parent retention output identity is invalid: {path}"]
             )
@@ -2006,12 +2114,10 @@ def _t075_require_parent_retention(
                 "lineage", [f"parent identity {role!r} is invalid: {path}"]
             )
         try:
-            identity_path = _t075_resolve_identity_path(
-                str(identity["path"]), artifact_root=path.parent
+            identity_path = _t075_resolve_lineage_identity_path(
+                identity, artifact_root=path.parent
             )
-            if identity_path is None or not _t075_identity_matches(
-                identity, identity_path
-            ):
+            if identity_path is None:
                 raise ValueError("path/hash/size mismatch")
         except (KeyError, OSError, ValueError) as exc:
             raise T075WorkflowError(
@@ -2286,6 +2392,61 @@ def _t075_identity_matches(
         )
     except (KeyError, OSError, ValueError):
         return False
+
+
+def _t075_resolve_lineage_identity_path(
+    identity: Mapping[str, Any], *, artifact_root: Path
+) -> Path | None:
+    """Resolve local outputs or the two explicitly frozen T065 source inputs.
+
+    A T075 retention file is rooted in the T075 stable directory, while its
+    Stage-1 output identities legitimately include the retained T065 source
+    files from the sibling T065 artifact directory.  The external exception
+    is deliberately keyed by the frozen normalized path and frozen digest/
+    size; it is not a general external-artifact escape hatch.
+    """
+
+    raw_path = identity.get("path")
+    if not isinstance(raw_path, str) or not raw_path:
+        return None
+    local = _t075_resolve_identity_path(raw_path, artifact_root=artifact_root)
+    if local is not None and _t075_identity_matches(identity, local):
+        return local
+    try:
+        normalized = _t075_normalize_artifact_path(raw_path)
+    except (OSError, TypeError, ValueError):
+        return None
+    frozen = T075_FROZEN_SOURCE_ARTIFACTS.get(normalized)
+    if not isinstance(frozen, Mapping):
+        return None
+    expected_role = {
+        "stochastic_non_combat_v1": "source_stochastic",
+        "expert_non_combat_v1": "source_expert",
+    }.get(str(frozen.get("arm")))
+    if identity.get("role") != expected_role:
+        return None
+    if identity.get("sha256") != frozen.get("sha256") or identity.get(
+        "size_bytes"
+    ) != frozen.get("size_bytes"):
+        return None
+    # The optional actual_path exists only for bounded fixture tests.  The
+    # production mapping resolves to the immutable stable artifact location.
+    actual_path_value = frozen.get("actual_path")
+    actual_path = (
+        Path(actual_path_value)
+        if isinstance(actual_path_value, str)
+        else _portable_path(f"/mnt/d/DeadlycatCoding/STSRL/{normalized}")
+    )
+    try:
+        if (
+            not actual_path.is_file()
+            or file_sha256(actual_path) != frozen.get("sha256")
+            or actual_path.stat().st_size != frozen.get("size_bytes")
+        ):
+            return None
+    except OSError:
+        return None
+    return actual_path
 
 
 def _t075_find_source_retention(source_path: Path) -> tuple[Path, dict[str, Any]]:
@@ -4205,9 +4366,6 @@ def _run_t075_evaluate(args: argparse.Namespace) -> int:
         status="completed" if stage6.valid else "failed",
         ranges=actual_ranges,
     )
-    stage6_report = stage6.to_dict()
-    _write_canonical_json(args.output, stage6_report)
-    stage6_identity = _t075_parent_identity(args.output)
     stage6_problems = list(stage6.problems)
     if not stage6.valid and not stage6_problems:
         stage6_problems = ["Stage 6 validation failed"]
@@ -4231,6 +4389,29 @@ def _run_t075_evaluate(args: argparse.Namespace) -> int:
             "problem_count": len(stage6_problems),
         }
     )
+    stage6_report = stage6.to_dict()
+    if not stage6.valid:
+        failure_execution = dict(stage6_report["execution_evidence"])
+        failure_execution.update(
+            {
+                "status": "failed",
+                "terminal": False,
+                "failure_stage": "stage6-eval",
+                "failure_ids": stage6_failure_ids,
+                "failure_counts": stage6_failure_counts,
+                "failure_details": stage6_failure_details,
+            }
+        )
+        stage6_report.update(
+            {
+                "failure_ids": stage6_failure_ids,
+                "failure_counts": stage6_failure_counts,
+                "failure_details": stage6_failure_details,
+                "execution_evidence": failure_execution,
+            }
+        )
+    _write_canonical_json(args.output, stage6_report)
+    stage6_identity = _t075_parent_identity(args.output)
     payload = {
         "schema_id": T075_TERMINAL_DECISION_SCHEMA_ID,
         "schema_version": 1,
@@ -5719,6 +5900,20 @@ def _t075_write_stage6_failure_report(path: Path, failure: T075WorkflowError) ->
     if not failure_ids:
         failure_ids = ["stage6:worker-failure"]
     problems = list(failure.problems) or ["Stage 6 did not complete"]
+    failure_details = [dict(detail) for detail in failure.failure_details]
+    if not failure_details:
+        failure_details = [
+            {
+                "failure_id": identifier,
+                "stage": failure.stage,
+                "messages": list(problems),
+            }
+            for identifier in failure_ids
+        ]
+    failure_counts = {
+        **dict(failure.failure_counts),
+        "failure_count": len(failure_ids),
+    }
     _write_canonical_json(
         path,
         {
@@ -5745,15 +5940,16 @@ def _t075_write_stage6_failure_report(path: Path, failure: T075WorkflowError) ->
             "valid": False,
             "passed": False,
             "problems": problems,
+            "failure_ids": failure_ids,
+            "failure_counts": failure_counts,
+            "failure_details": failure_details,
             "execution_evidence": {
                 "status": "failed",
                 "terminal": False,
                 "failure_stage": failure.stage,
                 "failure_ids": failure_ids,
-                "failure_counts": {
-                    **dict(failure.failure_counts),
-                    "failure_count": len(failure_ids),
-                },
+                "failure_counts": failure_counts,
+                "failure_details": failure_details,
             },
         },
     )
@@ -5882,7 +6078,11 @@ def _t075_stage6_report_is_valid(path: Path, *, artifact_root: Path) -> bool:
 
     execution = value["execution_evidence"]
     if not value["valid"]:
+        top_failure_ids = value.get("failure_ids")
+        top_failure_counts = value.get("failure_counts")
+        top_failure_details = value.get("failure_details")
         failure_ids = execution.get("failure_ids")
+        failure_counts = execution.get("failure_counts")
         return (
             value["passed"] is False
             and bool(value["problems"])
@@ -5892,6 +6092,27 @@ def _t075_stage6_report_is_valid(path: Path, *, artifact_root: Path) -> bool:
             and bool(execution["failure_stage"])
             and isinstance(failure_ids, list)
             and bool(failure_ids)
+            and all(isinstance(item, str) and item for item in failure_ids)
+            and isinstance(failure_counts, Mapping)
+            and all(
+                isinstance(item, int) and not isinstance(item, bool) and item >= 0
+                for item in failure_counts.values()
+            )
+            and failure_counts.get("failure_count") == len(failure_ids)
+            and top_failure_ids == failure_ids
+            and isinstance(top_failure_counts, Mapping)
+            and top_failure_counts == failure_counts
+            and isinstance(top_failure_details, list)
+            and len(top_failure_details) == len(failure_ids)
+            and all(
+                isinstance(detail, Mapping)
+                and detail.get("failure_id") in failure_ids
+                and isinstance(detail.get("stage"), str)
+                and isinstance(detail.get("messages"), list)
+                and bool(detail.get("messages"))
+                for detail in top_failure_details
+            )
+            and execution.get("failure_details") == top_failure_details
         )
 
     if (
@@ -5907,9 +6128,20 @@ def _t075_stage6_report_is_valid(path: Path, *, artifact_root: Path) -> bool:
         return False
 
     arm_reports: dict[str, Mapping[str, Any]] = {}
+    arm_rows_by_seed: dict[str, dict[int, Mapping[str, Any]]] = {}
     for arm in ("stochastic", "expert", "learned"):
         arm_execution = execution["arms"].get(arm)
         if not isinstance(arm_execution, Mapping):
+            return False
+        if (
+            arm_execution.get("requested_seed_count") != 256
+            or arm_execution.get("completed_row_count") != 256
+            or arm_execution.get("worker_count") != T065_MAX_WORKERS
+            or arm_execution.get("shard_count") != T075_STAGE6_SHARD_COUNT
+            or arm_execution.get("problem_count") != 0
+            or arm_execution.get("problems") != []
+            or not finite_number(arm_execution.get("wall_clock_seconds"))
+        ):
             return False
         report = arm_execution.get("report")
         if not isinstance(report, Mapping):
@@ -5918,6 +6150,7 @@ def _t075_stage6_report_is_valid(path: Path, *, artifact_root: Path) -> bool:
             "schema_id",
             "schema_version",
             "arm",
+            "driver_seed",
             "requested_seeds",
             "rows",
             "decision_events",
@@ -5936,7 +6169,10 @@ def _t075_stage6_report_is_valid(path: Path, *, artifact_root: Path) -> bool:
             or report.get("arm") != arm
             or report.get("worker_count") != T065_MAX_WORKERS
             or report.get("shard_count") != T075_STAGE6_SHARD_COUNT
+            or report.get("driver_seed") != T065_STAGE6_DRIVER_SEED
             or not isinstance(report.get("requested_seeds"), list)
+            or not isinstance(report.get("problems"), list)
+            or report.get("problems") != []
         ):
             return False
         # The explicit list comparison avoids accepting a report whose range
@@ -5951,6 +6187,10 @@ def _t075_stage6_report_is_valid(path: Path, *, artifact_root: Path) -> bool:
             not isinstance(rows, list)
             or len(rows) != 256
             or not isinstance(specs, list)
+            or not isinstance(report.get("decision_events"), list)
+            or any(
+                not isinstance(event, Mapping) for event in report["decision_events"]
+            )
         ):
             return False
         if [
@@ -5961,6 +6201,12 @@ def _t075_stage6_report_is_valid(path: Path, *, artifact_root: Path) -> bool:
             not isinstance(row, Mapping)
             or not finite_number(row.get("terminal_floor"))
             or not isinstance(row.get("terminal"), bool)
+            or row.get("terminal") is not True
+            or row.get("truncated") is not False
+            or row.get("controller_error") is not False
+            or not isinstance(row.get("act2_entry"), bool)
+            or not isinstance(row.get("problems"), list)
+            or row.get("problems") != []
             for row in rows
         ):
             return False
@@ -5996,15 +6242,18 @@ def _t075_stage6_report_is_valid(path: Path, *, artifact_root: Path) -> bool:
             pids.add(observed["process_id"])
         if len(pids) != 16:
             return False
-        for field in (
-            "simulator_identity",
-            "action_space",
-            "controller_provenance",
-            "driver_provenance",
-        ):
-            if not isinstance(report.get(field), Mapping) or not report[field]:
-                return False
+        if arm_execution.get("shard_specs") != specs:
+            return False
+        if report.get("simulator_identity") != _t075_pinned_simulator_identity():
+            return False
+        if report.get("action_space") != frozen_action_space().to_dict():
+            return False
+        if not _t075_stage6_arm_provenance_is_frozen(arm, report):
+            return False
         arm_reports[arm] = report
+        arm_rows_by_seed[arm] = {
+            int(row["simulator_seed"]): row for row in rows if isinstance(row, Mapping)
+        }
 
     paired_rows = execution["paired_rows"]
     if [
@@ -6016,13 +6265,78 @@ def _t075_stage6_report_is_valid(path: Path, *, artifact_root: Path) -> bool:
         for row in paired_rows
     ):
         return False
-    expected_deltas = [
-        float(row["learned_terminal_floor"] - row["expert_terminal_floor"])
-        for row in paired_rows
-    ]
+    expected_deltas: list[float] = []
+    for row in paired_rows:
+        seed = int(row["simulator_seed"])
+        learned_row = arm_rows_by_seed["learned"].get(seed)
+        expert_row = arm_rows_by_seed["expert"].get(seed)
+        if learned_row is None or expert_row is None:
+            return False
+        if (
+            row.get("learned_terminal") is not learned_row.get("terminal")
+            or row.get("expert_terminal") is not expert_row.get("terminal")
+            or row.get("learned_act2_entry") is not learned_row.get("act2_entry")
+            or row.get("expert_act2_entry") is not expert_row.get("act2_entry")
+            or row.get("truncated")
+            is not (learned_row.get("truncated") or expert_row.get("truncated"))
+            or row.get("controller_error")
+            is not (
+                learned_row.get("controller_error")
+                or expert_row.get("controller_error")
+            )
+            or row.get("learned_terminal_floor") != learned_row.get("terminal_floor")
+            or row.get("expert_terminal_floor") != expert_row.get("terminal_floor")
+        ):
+            return False
+        expected_deltas.append(
+            float(learned_row["terminal_floor"] - expert_row["terminal_floor"])
+        )
     if any(
         not math.isclose(float(actual), expected)
         for actual, expected in zip(deltas, expected_deltas, strict=True)
+    ):
+        return False
+    expected_learned_mean = statistics.fmean(
+        arm_rows_by_seed["learned"][seed]["terminal_floor"]
+        for seed in sorted(arm_rows_by_seed["learned"])
+    )
+    expected_expert_mean = statistics.fmean(
+        arm_rows_by_seed["expert"][seed]["terminal_floor"]
+        for seed in sorted(arm_rows_by_seed["expert"])
+    )
+    expected_delta_mean = statistics.fmean(expected_deltas)
+    expected_p_positive = matched_bootstrap_probability(
+        expected_deltas, replicates=10000, seed=655002
+    )
+    if any(
+        not math.isclose(float(value[field]), expected, rel_tol=0.0, abs_tol=1e-12)
+        for field, expected in (
+            ("learned_terminal_floor_mean", expected_learned_mean),
+            ("expert_terminal_floor_mean", expected_expert_mean),
+            ("mean_terminal_floor_delta", expected_delta_mean),
+            ("p_positive", expected_p_positive),
+        )
+    ):
+        return False
+    expected_learned_act2 = sum(
+        row["act2_entry"] for row in arm_rows_by_seed["learned"].values()
+    )
+    expected_expert_act2 = sum(
+        row["act2_entry"] for row in arm_rows_by_seed["expert"].values()
+    )
+    expected_errors = sum(
+        row["controller_error"] or arm_rows_by_seed["expert"][seed]["controller_error"]
+        for seed, row in arm_rows_by_seed["learned"].items()
+    )
+    expected_truncation = sum(
+        row["truncated"] or arm_rows_by_seed["expert"][seed]["truncated"]
+        for seed, row in arm_rows_by_seed["learned"].items()
+    )
+    if (
+        value["learned_act2_entry_count"] != expected_learned_act2
+        or value["expert_act2_entry_count"] != expected_expert_act2
+        or value["controller_error_count"] != expected_errors
+        or value["truncation_count"] != expected_truncation
     ):
         return False
     learned_coverage = compute_learned_coverage(
