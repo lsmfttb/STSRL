@@ -5955,6 +5955,14 @@ def write_source_selection_manifest(
         )
     if approved_spec_commit != T065_APPROVED_SPEC_COMMIT:
         raise ValueError("approved T065 spec commit does not match the frozen head")
+    expected_simulator_identity = lightspeed_source_identity_dict()
+    if simulator_identity is None:
+        simulator_identity = expected_simulator_identity
+    elif dict(simulator_identity) != expected_simulator_identity:
+        raise T065CaseD(
+            "source-selection-manifest",
+            ["source-selection simulator identity is not the pinned identity"],
+        )
     manifest = {
         "schema_id": T065_SELECTION_MANIFEST_SCHEMA_ID,
         "schema_version": 1,
@@ -5970,7 +5978,7 @@ def write_source_selection_manifest(
             "replacement": False,
         },
         "source_artifacts": [dict(item) for item in source_artifacts],
-        "simulator_identity": dict(simulator_identity or {}),
+        "simulator_identity": dict(simulator_identity),
         "selected_artifact": dict(selected_artifact_identity),
         "selected_state_count": len(states),
         "counts_by_family_split": counts,

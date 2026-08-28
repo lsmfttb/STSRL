@@ -980,6 +980,8 @@ def test_run_select_rejects_corrupt_source_tail_without_output(
 
 
 def test_selection_manifest_retains_compact_identity(tmp_path) -> None:
+    from sts_combat_rl.sim.lightspeed_source import lightspeed_source_identity_dict
+
     candidates = []
     for family_index, family in enumerate(T065_MANDATORY_FAMILIES):
         for offset in range(80):
@@ -1005,6 +1007,15 @@ def test_selection_manifest_retains_compact_identity(tmp_path) -> None:
     assert path.exists()
     assert manifest["selected_state_count"] == 320
     assert manifest["counts_by_family_split"]["MAP_SCREEN"]["train"] == 48
+    assert manifest["simulator_identity"] == lightspeed_source_identity_dict()
+    with pytest.raises(T065CaseD, match="simulator identity"):
+        write_source_selection_manifest(
+            tmp_path / "wrong-identity.manifest.json",
+            selected_states=selected,
+            selected_artifact_identity={"path": "selected.jsonl", "sha256": "abc"},
+            source_artifacts=[],
+            simulator_identity={"integration_commit": "not-pinned"},
+        )
     with pytest.raises(ValueError, match="frozen head"):
         write_source_selection_manifest(
             tmp_path / "wrong-spec.manifest.json",
