@@ -74,8 +74,11 @@ from sts_combat_rl.sim.public_context_model_input import (
     PUBLIC_CONTEXT_MODEL_INPUT_FEATURE_NAMES,
 )
 from sts_combat_rl.commands.non_combat_learning import (
+    T075WorkflowError,
     _portable_path,
+    _handle_t075_case_d,
     _run_t075_finalize,
+    _t075_path_matches,
     _t075_preceding_manifest_path,
     _t075_target_row_completeness,
     _t075_write_stage3_report,
@@ -2054,6 +2057,15 @@ def test_t075_portable_path_converts_wsl_mount() -> None:
     )
 
 
+def test_t075_artifact_path_normalization_rejects_parent_segments() -> None:
+    with pytest.raises(ValueError, match=r"contains \.\."):
+        _portable_path("/mnt/d/DeadlycatCoding/STSRL/artifacts/../secret.json")
+    assert not _t075_path_matches(
+        "artifacts/../t075-learned-non-combat-policy-v1/report.json",
+        "artifacts/t075-learned-non-combat-policy-repair/report.json",
+    )
+
+
 def test_t075_preceding_manifest_cli_value_is_normalized_to_one_path(tmp_path) -> None:
     from sts_combat_rl.commands.non_combat_learning import build_parser
 
@@ -2122,6 +2134,14 @@ def test_t075_retention_does_not_synthesize_completed_failure(tmp_path) -> None:
     )
     assert value["stage_commands"]["stage5-gate"]["status"] == "failed"
     assert value["stage_commands"]["stage5-gate"]["terminal"] is False
+    assert value["stage_commands"]["stage5-gate"]["command"]
+    assert value["stage_commands"]["stage5-gate"]["start_time_utc"]
+    assert value["stage_commands"]["stage5-gate"]["end_time_utc"]
+    assert value["stage_commands"]["stage5-gate"]["exit_code"] == 1
+    assert (
+        value["stage_commands"]["stage5-gate"]["command"]
+        == value["stage_evidence"]["stage5-gate"]["command"]
+    )
     assert value["stage_evidence"]["stage5-gate"]["problems"] == ["gate failed"]
 
 
@@ -2170,7 +2190,91 @@ def test_t075_stage3_reader_failure_is_materialized_as_failed_report(
     assert report["violation_counts"]["firewall_violations"] > 0
 
 
-def test_t075_finalize_retains_exact_paths_for_duplicate_basenames(tmp_path) -> None:
+def test_t075_stage3_missing_target_still_materializes_failed_report(tmp_path) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command_module
+
+    table_path = tmp_path / "missing-target.json"
+    states_path = tmp_path / "states.jsonl"
+    selection_path = tmp_path / "selection.json"
+    preflight_path = tmp_path / "preflight.json"
+    report_path = tmp_path / "validation.json"
+    for path in (states_path, selection_path, preflight_path):
+        path.write_text("{}\n", encoding="utf-8")
+    args = SimpleNamespace(
+        validation_report=report_path,
+        preflight=preflight_path,
+        preceding_manifest=tmp_path / "stage1.retention.json",
+        code_head="test-head",
+    )
+    with pytest.raises(Exception, match="strict target reader"):
+        command_module._t075_write_stage3_report(
+            args, table_path, states_path, selection_path
+        )
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["parent_target_table_sha256"] is None
+    assert report["checks"]["strict_target_reader"]["status"] == "failed"
+    assert report["checks"]["finite_numeric_values"]["status"] == "failed"
+    assert report["checks"]["public_input_firewall"]["status"] == "failed"
+
+
+def test_t075_first_terminal_decision_wins(tmp_path) -> None:
+    decision_path = tmp_path / "terminal-decision-report.json"
+    original = {
+        "schema_id": "t075-terminal-decision-report-v1",
+        "schema_version": 1,
+        "terminal_case": "D",
+        "marker": "first",
+    }
+    decision_path.write_text(json.dumps(original), encoding="utf-8")
+    args = SimpleNamespace(
+        decision_report=decision_path,
+        retention_manifest=tmp_path / "retention.json",
+    )
+    _handle_t075_case_d(
+        args,
+        T075WorkflowError("stage1-selection-replay", ["later failure"]),
+    )
+    assert json.loads(decision_path.read_text(encoding="utf-8")) == original
+
+
+def test_t075_t065_failure_is_routed_to_t075_case_d(monkeypatch, tmp_path) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command_module
+
+    routed = []
+
+    def fail(_args):
+        raise T065CaseD("target-sharding", ["worker crashed"])
+
+    monkeypatch.setattr(command_module, "_run_t075_target", fail)
+    monkeypatch.setattr(
+        command_module,
+        "_handle_t075_case_d",
+        lambda _args, failure: routed.append(failure),
+    )
+    monkeypatch.setattr(
+        command_module,
+        "_handle_case_d",
+        lambda *_args: pytest.fail("T075 failure entered the legacy handler"),
+    )
+    result = command_module.main(
+        [
+            "target",
+            "--states",
+            str(tmp_path / "states.jsonl"),
+            "--output",
+            str(tmp_path / "target.json"),
+            "--preflight",
+            str(tmp_path / "preflight.json"),
+            "--selection-manifest",
+            str(tmp_path / "selection.json"),
+        ]
+    )
+    assert result == 1
+    assert len(routed) == 1
+    assert isinstance(routed[0], T075WorkflowError)
+
+
+def test_t075_finalize_rejects_fabricated_case_d_reachability(tmp_path) -> None:
     artifact_root = tmp_path / "artifacts"
     left = artifact_root / "left" / "report.json"
     right = artifact_root / "right" / "report.json"
@@ -2216,18 +2320,6 @@ def test_t075_finalize_retains_exact_paths_for_duplicate_basenames(tmp_path) -> 
         _command_argv=(),
         code_head="test-head",
     )
-    assert _run_t075_finalize(args) == 0
-    manifest = json.loads(retention_path.read_text(encoding="utf-8"))
-    paths = [entry["path"] for entry in manifest["produced_artifacts"]]
-    assert str(left) in paths and str(right) in paths
-    assert len([path for path in paths if path in (str(left), str(right))]) == 2
-    assert tuple(manifest["stage_commands"]) == (
-        "stage0-preflight",
-        "stage0-reuse",
-        "stage1-selection-replay",
-        "stage2-target",
-        "stage4-train",
-        "stage5-gate",
-        "stage6-eval",
-        "terminal-finalize",
-    )
+    with pytest.raises(Exception, match="code_head|terminal prefix|reachability"):
+        _run_t075_finalize(args)
+    assert not retention_path.exists()

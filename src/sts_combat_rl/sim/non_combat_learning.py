@@ -21,6 +21,7 @@ from dataclasses import asdict, dataclass, field, replace
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
 import random
 import statistics
@@ -3376,6 +3377,7 @@ def _generate_target_process_shard(payload: Mapping[str, Any]) -> dict[str, Any]
             "shard_index": int(payload.get("shard_index", -1)),
             "process_id": __import__("os").getpid(),
             "status": "failed",
+            "exit_code": 1,
             "error": f"{type(exc).__name__}: {exc}",
         }
 
@@ -4910,6 +4912,8 @@ def run_complete_run_arm_sharded(
                 "completed_row_count": len(report.rows),
                 "decision_count": len(report.decision_events),
                 "wall_clock_seconds": report.wall_clock_seconds,
+                "process_id": os.getpid(),
+                "exit_code": 0 if not report.problems else 1,
                 "problem_count": len(report.problems),
                 "problems": list(report.problems),
             }
