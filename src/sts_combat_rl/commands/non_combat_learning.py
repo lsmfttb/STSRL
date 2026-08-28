@@ -2021,6 +2021,7 @@ def _run_t075_select(args: argparse.Namespace) -> int:
                     "sha256": file_sha256(path),
                     "size_bytes": path.stat().st_size,
                     "record_count": reader.record_count,
+                    "retention_manifest": dict(entry["retention_manifest"]),
                 }
             )
 
@@ -2320,8 +2321,6 @@ def _t075_write_stage3_report(
 
     lineage_ok = strict_status == "passed"
     try:
-        if strict_status != "passed":
-            raise ValueError("strict target reader failed; lineage checks not executed")
         selection = json.loads(selection_path.read_text(encoding="utf-8"))
         if not isinstance(selection, Mapping):
             raise ValueError("selection manifest is not an object")
@@ -2376,6 +2375,18 @@ def _t075_write_stage3_report(
                 or not _t075_identity_matches(source, source_path)
             ):
                 raise ValueError("selection source artifact identity is invalid")
+            retention_identity = source.get("retention_manifest")
+            if not isinstance(retention_identity, Mapping):
+                raise ValueError("selection source retention identity is missing")
+            retention_path, _retention = _t075_find_source_retention(source_path)
+            if (
+                not _t075_path_matches(
+                    retention_identity.get("path", ""), retention_path
+                )
+                or retention_identity.get("sha256") != file_sha256(retention_path)
+                or retention_identity.get("size_bytes") != retention_path.stat().st_size
+            ):
+                raise ValueError("selection source retention identity is invalid")
     except (OSError, json.JSONDecodeError, ValueError) as exc:
         lineage_ok = False
         problems.append(f"selection/source lineage: {exc}")
@@ -3308,13 +3319,44 @@ def _run_t075_finalize(args: argparse.Namespace) -> int:
                 [f"missing exact skipped evidence for {stage}"],
             )
         evidence = dict(skipped_stage_evidence[stage])
+        required_skipped_fields = {
+            "command",
+            "executed",
+            "status",
+            "code_head",
+            "start_time_utc",
+            "end_time_utc",
+            "exit_code",
+            "terminal",
+            "wall_clock_seconds",
+            "shard_count",
+            "worker_count",
+            "ranges",
+            "parent_identities",
+            "output_identities",
+        }
         if (
-            evidence.get("command") != skipped_stage_commands[stage]
+            not required_skipped_fields.issubset(evidence)
+            or evidence.get("command") != skipped_stage_commands[stage]
             or evidence.get("executed") is not False
             or evidence.get("status") != "skipped"
+            or evidence.get("code_head") != actual_code_head
+            or not isinstance(evidence.get("start_time_utc"), str)
+            or not evidence["start_time_utc"].strip()
+            or not isinstance(evidence.get("end_time_utc"), str)
+            or not evidence["end_time_utc"].strip()
+            or evidence.get("exit_code") is not None
             or evidence.get("terminal") is not False
             or not isinstance(evidence.get("skip_reason"), str)
             or not evidence["skip_reason"].strip()
+            or isinstance(evidence.get("wall_clock_seconds"), bool)
+            or not isinstance(evidence.get("wall_clock_seconds"), (int, float))
+            or evidence.get("wall_clock_seconds") < 0
+            or evidence.get("shard_count") != 0
+            or evidence.get("worker_count") != 0
+            or evidence.get("ranges") != []
+            or evidence.get("parent_identities") != {}
+            or evidence.get("output_identities") != []
         ):
             raise T075WorkflowError(
                 "terminal-finalize",

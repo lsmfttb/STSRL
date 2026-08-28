@@ -2231,6 +2231,118 @@ def test_t075_stage3_reader_failure_is_materialized_as_failed_report(
     assert report["violation_counts"]["firewall_violations"] == 0
 
 
+def test_t075_stage3_requires_both_frozen_source_retention_identities(
+    tmp_path, monkeypatch
+) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command_module
+
+    table_path = tmp_path / "target.json"
+    states_path = tmp_path / "states.jsonl"
+    preflight_path = tmp_path / "preflight.json"
+    selection_path = tmp_path / "selection.json"
+    report_path = tmp_path / "validation.json"
+    preceding_path = tmp_path / "stage1.retention.json"
+    table_path.write_text("{}\n", encoding="utf-8")
+    states_path.write_text("{}\n", encoding="utf-8")
+    preflight_path.write_text("{}\n", encoding="utf-8")
+    preceding_path.write_text("{}\n", encoding="utf-8")
+    source_paths = [
+        tmp_path / "source-stochastic.json",
+        tmp_path / "source-expert.json",
+    ]
+    retention_paths = [
+        tmp_path / "source-stochastic.retention.json",
+        tmp_path / "source-expert.retention.json",
+    ]
+    for source_path, retention_path in zip(source_paths, retention_paths, strict=True):
+        source_path.write_text("source\n", encoding="utf-8")
+        retention_path.write_text("retention\n", encoding="utf-8")
+    frozen = {
+        str(path): {
+            "arm": arm,
+            "sha256": file_sha256(path),
+            "size_bytes": path.stat().st_size,
+        }
+        for path, arm in zip(
+            source_paths,
+            ("stochastic_non_combat_v1", "expert_non_combat_v1"),
+            strict=True,
+        )
+    }
+    retention_identities = [
+        {
+            "path": str(path),
+            "sha256": file_sha256(path),
+            "size_bytes": path.stat().st_size,
+        }
+        for path in retention_paths
+    ]
+    monkeypatch.setattr(command_module, "T075_FROZEN_SOURCE_ARTIFACTS", frozen)
+    monkeypatch.setattr(
+        command_module, "_t075_normalize_artifact_path", lambda value: str(value)
+    )
+    monkeypatch.setattr(
+        command_module,
+        "_t075_find_source_retention",
+        lambda path: (retention_paths[source_paths.index(path)], {}),
+    )
+    monkeypatch.setattr(
+        command_module,
+        "_validate_t075_preflight",
+        lambda _path: {
+            "passed": True,
+            "simulator_identity": _t075_pinned_simulator_identity(),
+        },
+    )
+    monkeypatch.setattr(
+        command_module, "_t075_require_parent_retention", lambda *a, **k: {}
+    )
+    selection = {
+        "schema_id": command_module.T075_SELECTION_MANIFEST_SCHEMA_ID,
+        "schema_version": 1,
+        "task_id": "T075",
+        "approved_t075_spec_commit": command_module.T075_APPROVED_SPEC_COMMIT,
+        "selection_strategy_id": command_module.T075_SELECTION_STRATEGY_ID,
+        "selected_states_sha256": file_sha256(states_path),
+        "parent_current_preflight_sha256": file_sha256(preflight_path),
+        "parent_reuse_manifest_sha256": "reuse-parent",
+        "simulator_identity": _t075_pinned_simulator_identity(),
+        "source_artifacts": [
+            {
+                **frozen[str(source_path)],
+                "path": str(source_path),
+                "retention_manifest": retention_identity,
+            }
+            for source_path, retention_identity in zip(
+                source_paths, retention_identities, strict=True
+            )
+        ],
+    }
+    selection_path.write_text(json.dumps(selection), encoding="utf-8")
+    args = SimpleNamespace(
+        validation_report=report_path,
+        preflight=preflight_path,
+        preceding_manifest=preceding_path,
+        ownership_audit=tmp_path / "ownership.json",
+    )
+    with pytest.raises(Exception, match="strict target reader"):
+        _t075_write_stage3_report(args, table_path, states_path, selection_path)
+    valid_report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert not any(
+        "source retention identity" in problem for problem in valid_report["problems"]
+    )
+
+    selection["source_artifacts"][1]["retention_manifest"]["sha256"] = "0" * 64
+    selection_path.write_text(json.dumps(selection), encoding="utf-8")
+    with pytest.raises(Exception, match="strict target reader"):
+        _t075_write_stage3_report(args, table_path, states_path, selection_path)
+    tampered_report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert any(
+        "source retention identity is invalid" in problem
+        for problem in tampered_report["problems"]
+    )
+
+
 def test_t075_selection_and_stage3_share_pinned_simulator_identity() -> None:
     import sts_combat_rl.commands.non_combat_learning as command_module
 

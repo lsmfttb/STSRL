@@ -4981,14 +4981,25 @@ def run_complete_run_arm_sharded(
     try:
         for process in processes:
             process.start()
+        # Drain results while children are still running.  A complete shard
+        # report can be much larger than a pipe buffer; joining all children
+        # before draining can therefore deadlock a successful worker on its
+        # queue write and make a partial run look hung.
+        queue_module = __import__("queue")
+        while len(results) < len(processes):
+            try:
+                result = result_queue.get(timeout=0.25)
+            except queue_module.Empty:
+                if all(not process.is_alive() for process in processes):
+                    break
+                continue
+            shard_index = (
+                result.get("shard_index") if isinstance(result, Mapping) else None
+            )
+            if isinstance(shard_index, int) and not isinstance(shard_index, bool):
+                results.setdefault(shard_index, dict(result))
         for process in processes:
             process.join()
-        for _ in processes:
-            try:
-                result = result_queue.get(timeout=1.0)
-            except __import__("queue").Empty:
-                break
-            results[int(result["shard_index"])] = result
     finally:
         result_queue.close()
         result_queue.join_thread()
