@@ -25,6 +25,7 @@ from sts_combat_rl.commands.non_combat_learning import (
     _run_t075_finalize,
     _run_t075_evaluate,
     _t075_command_matches_contract,
+    _t075_has_terminal_decision,
     _t075_normalize_artifact_path,
     _t075_stage_retention_records,
     _t075_stage6_report_is_valid,
@@ -421,6 +422,24 @@ def test_t075_case_d_fixture_finalizes_and_first_valid_wins(
     assert _t075_terminal_decision_is_valid(
         decision, artifact_root=root, retention_path=root / "stage0.retention.json"
     )
+    assert _t075_has_terminal_decision(
+        SimpleNamespace(
+            decision_report=decision_path,
+            retention_manifest=retention_path,
+        )
+    )
+    original_before_finalize = decision_path.read_bytes()
+    _handle_t075_case_d(
+        SimpleNamespace(
+            command="evaluate",
+            decision_report=decision_path,
+            retention_manifest=retention_path,
+            _command_argv=(),
+            _t075_execution_start_utc="2026-08-28T00:00:00+00:00",
+        ),
+        T075WorkflowError("stage5-gate", ["later failure"]),
+    )
+    assert decision_path.read_bytes() == original_before_finalize
     assert not retention_path.exists()
     assert _run_t075_finalize(args) == 0
     original = decision_path.read_bytes()
@@ -523,6 +542,48 @@ def test_t075_case_d_preserves_non_stage6_worker_evidence(
     assert retained_failure["per_shard"][0]["error"].startswith(
         "RuntimeError: worker failed"
     )
+    _, retained_evidence, _ = command_module._t075_stage_retention_records(
+        root,
+        {
+            "terminal_case": "D",
+            "terminal_stage": "stage2-target",
+            "reached_stages": ["stage2-target"],
+            "skipped_stages": [],
+        },
+    )
+    retained_stage = retained_evidence["stage2-target"]
+    assert retained_stage["shard_count"] == 16
+    assert retained_stage["worker_count"] == 16
+    assert len(retained_stage["ranges"]) == 16
+    assert retained_stage["ranges"][3] == {
+        "shard_index": 3,
+        "selected_state_start": 60,
+        "selected_state_end": 79,
+        "selected_state_count": 20,
+        "worker_count": 16,
+    }
+    assert len(retained_stage["per_shard"]) == 16
+    assert retained_stage["per_shard"][3]["process_id"] == 12345
+    assert retained_stage["per_shard"][3]["started"] is True
+    assert retained_stage["per_shard"][3]["returned"] is True
+    assert retained_stage["per_shard"][3]["status"] == "failed"
+    assert retained_stage["per_shard"][3]["error"].startswith(
+        "RuntimeError: worker failed"
+    )
+
+    tampered = json.loads(retention_path.read_text(encoding="utf-8"))
+    tampered["stage_evidence"]["stage2-target"]["shard_count"] = 0
+    retention_path.write_text(json.dumps(tampered), encoding="utf-8")
+    with pytest.raises(T075WorkflowError):
+        command_module._t075_stage_retention_records(
+            root,
+            {
+                "terminal_case": "D",
+                "terminal_stage": "stage2-target",
+                "reached_stages": ["stage2-target"],
+                "skipped_stages": [],
+            },
+        )
 
 
 @pytest.mark.parametrize(

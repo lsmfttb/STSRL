@@ -351,6 +351,11 @@ def _t075_validate_process_shards(
     """
 
     if shard_count == 0:
+        if allow_partial_failure:
+            raise T075WorkflowError(
+                "artifact-retention",
+                [f"{stage}: partial failure cannot use zero-shard evidence"],
+            )
         if per_shard != []:
             raise T075WorkflowError(
                 "artifact-retention", [f"{stage}: zero-shard evidence is not empty"]
@@ -538,13 +543,27 @@ def _t075_validate_process_shards(
             raise T075WorkflowError(
                 "artifact-retention", [f"{stage}: completed shard has nonzero exit"]
             )
-        if stage in {"stage1-selection-replay", "stage2-target"} and (
-            entry.get("state_count") != 20 or entry.get("selected_state_count") != 20
-        ):
-            raise T075WorkflowError(
-                "artifact-retention", [f"{stage}: shard state count is not frozen"]
-            )
         if stage in {"stage1-selection-replay", "stage2-target"}:
+            if entry.get("selected_state_count") != 20:
+                raise T075WorkflowError(
+                    "artifact-retention",
+                    [f"{stage}: shard selected-state count is not frozen"],
+                )
+            state_count = entry.get("state_count")
+            if allow_partial_failure and status == "failed":
+                if state_count is not None and (
+                    isinstance(state_count, bool)
+                    or not isinstance(state_count, int)
+                    or not 0 <= state_count <= 20
+                ):
+                    raise T075WorkflowError(
+                        "artifact-retention",
+                        [f"{stage}: partial shard state count is invalid"],
+                    )
+            elif state_count != 20:
+                raise T075WorkflowError(
+                    "artifact-retention", [f"{stage}: shard state count is not frozen"]
+                )
             expected = expected_noncombat.get(index)
             if expected is None or any(
                 entry.get(field) != expected.get(field)
@@ -559,13 +578,18 @@ def _t075_validate_process_shards(
                 raise T075WorkflowError(
                     "artifact-retention", [f"{stage}: shard range is forged"]
                 )
-            if status == "completed" and any(
-                entry.get(field) != 20
-                for field in ("state_count", "selected_state_count")
-            ):
-                raise T075WorkflowError(
-                    "artifact-retention", [f"{stage}: completed shard is partial"]
-                )
+            if allow_partial_failure and status == "failed":
+                returned = entry.get("returned")
+                if not isinstance(returned, bool):
+                    raise T075WorkflowError(
+                        "artifact-retention",
+                        [f"{stage}: partial shard return evidence is invalid"],
+                    )
+                if not entry.get("started", False) and returned:
+                    raise T075WorkflowError(
+                        "artifact-retention",
+                        [f"{stage}: unstarted shard cannot have returned"],
+                    )
         if (
             stage == "stage6-eval"
             and entry.get("requested_seed_count") != T075_STAGE6_SEEDS_PER_SHARD
@@ -622,6 +646,41 @@ def _t075_validate_process_shards(
             raise T075WorkflowError(
                 "artifact-retention", [f"{stage}: per-arm shard plan is incomplete"]
             )
+
+
+def _t075_validation_retention_path(
+    artifact_root: Path,
+    decision: Any,
+    canonical_path: Path | None,
+) -> Path | None:
+    """Select a stage retention for validation before final output exists."""
+
+    if not isinstance(canonical_path, Path):
+        return None
+    if canonical_path.is_file():
+        return canonical_path
+    retention_names = {
+        "stage0-preflight": "stage0-preflight.retention.json",
+        "stage0-reuse": "stage0-retained-source-reuse.retention.json",
+        "stage1-selection-replay": "stage1-selection.retention.json",
+        "stage2-target": "stage2-target-table.retention.json",
+        "stage4-train": "stage4-training.retention.json",
+        "stage5-gate": "stage5.retention.json",
+        "stage6-eval": "stage6.retention.json",
+    }
+    terminal_stage = (
+        decision.get("terminal_stage") if isinstance(decision, Mapping) else None
+    )
+    preferred_name = retention_names.get(terminal_stage)
+    candidates = []
+    if preferred_name is not None:
+        candidates.append(artifact_root / preferred_name)
+    candidates.extend(
+        path
+        for path in sorted(artifact_root.glob("*.retention.json"))
+        if path != canonical_path and path not in candidates
+    )
+    return next((path for path in candidates if path.is_file()), canonical_path)
 
 
 def _t075_terminal_decision_is_valid(
@@ -877,7 +936,9 @@ def _t075_has_terminal_decision(args: argparse.Namespace) -> bool:
     return _t075_terminal_decision_is_valid(
         value,
         artifact_root=path.parent,
-        retention_path=getattr(args, "retention_manifest", None),
+        retention_path=_t075_validation_retention_path(
+            path.parent, value, getattr(args, "retention_manifest", None)
+        ),
     )
 
 
@@ -2063,6 +2124,14 @@ def _t075_stage_retention_records(
             raise T075WorkflowError(
                 "terminal-finalize", [f"retention for {stage} status diverges: {path}"]
             )
+        if any(
+            command.get(field) != evidence.get(field)
+            for field in ("shard_count", "worker_count", "ranges")
+        ):
+            raise T075WorkflowError(
+                "terminal-finalize",
+                [f"retention shard evidence diverges: {path}"],
+            )
         if command.get("status") not in {"completed", "pending", "failed", "skipped"}:
             raise T075WorkflowError(
                 "terminal-finalize",
@@ -2084,6 +2153,20 @@ def _t075_stage_retention_records(
                 "terminal-finalize", [f"skipped retention has no reason: {path}"]
             )
         if stage in {"stage1-selection-replay", "stage2-target", "stage6-eval"}:
+            nested_failure = evidence.get("failure_execution_evidence")
+            if (
+                stage in {"stage1-selection-replay", "stage2-target"}
+                and evidence.get("status") == "failed"
+                and isinstance(nested_failure, Mapping)
+                and nested_failure.get("partial_spawn_failure") is True
+                and evidence.get("shard_count") == 0
+            ):
+                raise T075WorkflowError(
+                    "terminal-finalize",
+                    [
+                        f"{stage}: partial spawn evidence must be retained at the top level"
+                    ],
+                )
             _t075_validate_process_shards(
                 stage,
                 shard_count=evidence["shard_count"],
@@ -4942,19 +5025,9 @@ def _run_t075_finalize(args: argparse.Namespace) -> int:
         raise T075WorkflowError(
             "terminal-finalize", ["terminal decision does not satisfy T075 schema"]
         )
-    validation_retention_path = args.retention_manifest
-    if not validation_retention_path.is_file():
-        # The canonical final manifest is the output of this command.  During
-        # first finalization, validate against an existing stage retention;
-        # never require a fake pre-existing canonical placeholder.
-        validation_retention_path = next(
-            (
-                path
-                for path in sorted(args.artifact_root.glob("*.retention.json"))
-                if path != args.retention_manifest
-            ),
-            validation_retention_path,
-        )
+    validation_retention_path = _t075_validation_retention_path(
+        args.artifact_root, decision, args.retention_manifest
+    )
     if not _t075_terminal_decision_is_valid(
         decision,
         artifact_root=args.artifact_root,
@@ -6427,6 +6500,58 @@ def _t075_case_d_failure_details(
     ]
 
 
+def _t075_stage_partial_process_evidence(
+    stage: str, execution_evidence: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Align spawn observations with the frozen Stage 1/2 shard contract."""
+
+    if stage not in {"stage1-selection-replay", "stage2-target"}:
+        return {}
+    expected_ranges = tuple(target_shard_ranges(worker_count=T065_MAX_WORKERS))
+    raw_entries = execution_evidence.get("per_shard", [])
+    raw_by_index = {
+        int(entry["shard_index"]): entry
+        for entry in raw_entries
+        if isinstance(entry, Mapping) and isinstance(entry.get("shard_index"), int)
+    }
+    per_shard: list[dict[str, Any]] = []
+    for expected in expected_ranges:
+        index = int(expected["shard_index"])
+        raw = raw_by_index.get(index)
+        if raw is None:
+            observed = {
+                "process_id": None,
+                "worker_kind": "spawn-process",
+                "started": False,
+                "returned": False,
+                "status": "not-started",
+                "exit_code": None,
+            }
+        else:
+            observed = {
+                **dict(raw),
+                "started": bool(raw.get("started", raw.get("process_id") is not None)),
+                "returned": bool(raw.get("returned", True)),
+                "status": raw.get("status", "missing"),
+                "exit_code": raw.get("exit_code"),
+            }
+        state_count = observed.get("state_count")
+        per_shard.append(
+            {
+                **observed,
+                **dict(expected),
+                "state_count": state_count,
+            }
+        )
+    return {
+        "shard_count": T065_MAX_WORKERS,
+        "worker_count": T065_MAX_WORKERS,
+        "ranges": [dict(item) for item in expected_ranges],
+        "per_shard": per_shard,
+        "partial_spawn_failure": True,
+    }
+
+
 def _t075_stage6_report_is_valid(path: Path, *, artifact_root: Path) -> bool:
     """Validate the content contract for a retained Stage-6 report."""
 
@@ -7232,13 +7357,15 @@ def _handle_t075_case_d(args: argparse.Namespace, failure: T075WorkflowError) ->
             existing = json.loads(decision_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
             existing = None
-        existing_retention = getattr(args, "retention_manifest", None)
+        existing_retention = _t075_validation_retention_path(
+            decision_path.parent,
+            existing,
+            getattr(args, "retention_manifest", None),
+        )
         if _t075_terminal_decision_is_valid(
             existing,
             artifact_root=decision_path.parent,
-            retention_path=(
-                existing_retention if isinstance(existing_retention, Path) else None
-            ),
+            retention_path=existing_retention,
         ):
             print(
                 f"T075 terminal decision already exists: {decision_path}",
@@ -7393,9 +7520,11 @@ def _handle_t075_case_d(args: argparse.Namespace, failure: T075WorkflowError) ->
     _write_canonical_json(decision_path, report)
     retention_path = getattr(args, "retention_manifest", None)
     if isinstance(retention_path, Path):
-        stage6_partial = (
-            failure_execution_evidence if terminal_stage == "stage6-eval" else {}
+        stage_partial = _t075_stage_partial_process_evidence(
+            terminal_stage, failure_execution_evidence
         )
+        if terminal_stage == "stage6-eval":
+            stage_partial = failure_execution_evidence
         _write_t075_stage_retention(
             args,
             stage=terminal_stage,
@@ -7411,11 +7540,11 @@ def _handle_t075_case_d(args: argparse.Namespace, failure: T075WorkflowError) ->
                 "counts": failure_counts,
                 "problems": problems,
                 "parent_identities": _preceding_manifest_identities(args),
-                "shard_count": stage6_partial.get("shard_count", 0),
-                "worker_count": stage6_partial.get("worker_count", 0),
-                "ranges": stage6_partial.get("ranges", []),
-                "per_shard": stage6_partial.get("per_shard", []),
-                "partial_spawn_failure": stage6_partial.get(
+                "shard_count": stage_partial.get("shard_count", 0),
+                "worker_count": stage_partial.get("worker_count", 0),
+                "ranges": stage_partial.get("ranges", []),
+                "per_shard": stage_partial.get("per_shard", []),
+                "partial_spawn_failure": stage_partial.get(
                     "partial_spawn_failure", False
                 ),
                 "failure_execution_evidence": failure_execution_evidence,
