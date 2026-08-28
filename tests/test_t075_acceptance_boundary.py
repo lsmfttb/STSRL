@@ -421,7 +421,7 @@ def test_t075_case_d_fixture_finalizes_and_first_valid_wins(
     assert _t075_terminal_decision_is_valid(
         decision, artifact_root=root, retention_path=root / "stage0.retention.json"
     )
-    retention_path.write_text("{}\n", encoding="utf-8")
+    assert not retention_path.exists()
     assert _run_t075_finalize(args) == 0
     original = decision_path.read_bytes()
     _handle_t075_case_d(
@@ -435,6 +435,94 @@ def test_t075_case_d_fixture_finalizes_and_first_valid_wins(
         T075WorkflowError("stage0-preflight", ["later failure"]),
     )
     assert decision_path.read_bytes() == original
+
+
+def test_t075_case_d_preserves_non_stage6_worker_evidence(
+    tmp_path, monkeypatch
+) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command_module
+
+    root = tmp_path / "artifacts"
+    root.mkdir()
+    monkeypatch.setattr(command_module, "T075_STABLE_ARTIFACT_ROOT", root)
+    decision_path = root / "terminal-decision-report.json"
+    retention_path = root / "stage2-target-table.retention.json"
+    frozen_argv = command_module._t075_frozen_stage_argv(
+        SimpleNamespace(), "stage2-target"
+    )
+    per_shard = [
+        {
+            "shard_index": 3,
+            "seed_start": 61,
+            "seed_end": 80,
+            "seed_count": 20,
+            "requested_seeds": list(range(61, 81)),
+            "completed_seeds": [],
+            "process_id": 12345,
+            "worker_kind": "spawn-process",
+            "started": True,
+            "returned": True,
+            "status": "failed",
+            "exit_code": 1,
+            "error": "RuntimeError: worker failed while building target shard",
+        }
+    ]
+    failure = T075WorkflowError(
+        "target-sharding",
+        ["shard 3 returned worker status 'failed'"],
+        failure_ids=("shard 3 returned worker status 'failed'",),
+        failure_counts={
+            "failure_count": 1,
+            "shards_planned": 16,
+            "shards_started": 16,
+            "shards_returned": 16,
+        },
+        execution_evidence={
+            "partial_spawn_failure": True,
+            "shard_count": 16,
+            "worker_count": 16,
+            "shards_planned": 16,
+            "shards_started": 16,
+            "shards_returned": 16,
+            "ranges": per_shard,
+            "per_shard": per_shard,
+        },
+    )
+    _handle_t075_case_d(
+        SimpleNamespace(
+            command="target",
+            decision_report=decision_path,
+            retention_manifest=retention_path,
+            _command_argv=frozen_argv,
+            _t075_execution_start_utc="2026-08-28T00:00:00+00:00",
+        ),
+        failure,
+    )
+
+    failure_evidence = json.loads(
+        (root / ".terminal-decision-report.failure-evidence.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    report = json.loads(decision_path.read_text(encoding="utf-8"))
+    stage_retention = json.loads(retention_path.read_text(encoding="utf-8"))
+    for value in (failure_evidence, report):
+        assert value["failure_details"][0]["worker"]["error"].startswith(
+            "RuntimeError: worker failed"
+        )
+        assert value["execution_evidence"]["partial_spawn_failure"] is True
+        assert value["execution_evidence"]["shards_planned"] == 16
+        assert value["execution_evidence"]["shards_started"] == 16
+        assert value["execution_evidence"]["shards_returned"] == 16
+        assert value["execution_evidence"]["shard_count"] == 16
+        assert value["execution_evidence"]["worker_count"] == 16
+        assert value["execution_evidence"]["per_shard"][0]["shard_index"] == 3
+    retained_failure = stage_retention["stage_evidence"]["stage2-target"][
+        "failure_execution_evidence"
+    ]
+    assert retained_failure["per_shard"][0]["error"].startswith(
+        "RuntimeError: worker failed"
+    )
 
 
 @pytest.mark.parametrize(

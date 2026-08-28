@@ -4943,6 +4943,18 @@ def _run_t075_finalize(args: argparse.Namespace) -> int:
             "terminal-finalize", ["terminal decision does not satisfy T075 schema"]
         )
     validation_retention_path = args.retention_manifest
+    if not validation_retention_path.is_file():
+        # The canonical final manifest is the output of this command.  During
+        # first finalization, validate against an existing stage retention;
+        # never require a fake pre-existing canonical placeholder.
+        validation_retention_path = next(
+            (
+                path
+                for path in sorted(args.artifact_root.glob("*.retention.json"))
+                if path != args.retention_manifest
+            ),
+            validation_retention_path,
+        )
     if not _t075_terminal_decision_is_valid(
         decision,
         artifact_root=args.artifact_root,
@@ -6359,6 +6371,62 @@ def _t075_write_stage6_failure_report(path: Path, failure: T075WorkflowError) ->
     )
 
 
+def _t075_case_d_failure_details(
+    failure: T075WorkflowError,
+    *,
+    failure_ids: Sequence[str],
+    problems: Sequence[str],
+    terminal_stage: str,
+) -> list[dict[str, Any]]:
+    """Preserve exact worker context when a spawn failure has no details."""
+
+    details = [dict(detail) for detail in failure.failure_details]
+    if details:
+        return details
+
+    execution = getattr(failure, "execution_evidence", {})
+    per_shard = execution.get("per_shard") if isinstance(execution, Mapping) else None
+    if isinstance(per_shard, list):
+        for entry in per_shard:
+            if not isinstance(entry, Mapping):
+                continue
+            if not (
+                entry.get("error")
+                or entry.get("status") not in {None, "passed"}
+                or entry.get("exit_code") not in {None, 0}
+            ):
+                continue
+            shard_index = entry.get("shard_index")
+            matching_ids = [
+                identifier
+                for identifier in failure_ids
+                if isinstance(shard_index, int)
+                and f"shard {shard_index} " in identifier
+            ]
+            identifier = matching_ids[0] if matching_ids else failure_ids[0]
+            messages = list(matching_ids) or [str(identifier)]
+            if entry.get("error"):
+                messages.append(str(entry["error"]))
+            details.append(
+                {
+                    "failure_id": identifier,
+                    "stage": failure.stage or terminal_stage,
+                    "messages": messages,
+                    "worker": dict(entry),
+                }
+            )
+    if details:
+        return details
+    return [
+        {
+            "failure_id": identifier,
+            "stage": failure.stage or terminal_stage,
+            "messages": list(problems),
+        }
+        for identifier in failure_ids
+    ]
+
+
 def _t075_stage6_report_is_valid(path: Path, *, artifact_root: Path) -> bool:
     """Validate the content contract for a retained Stage-6 report."""
 
@@ -7203,15 +7271,21 @@ def _handle_t075_case_d(args: argparse.Namespace, failure: T075WorkflowError) ->
         **dict(failure.failure_counts),
         "failure_count": len(failure_ids),
     }
-    failure_details = list(failure.failure_details)
-    if not failure_details:
-        failure_details = [
-            {
-                "failure_id": failure_ids[0],
-                "stage": terminal_stage,
-                "messages": problems,
-            }
-        ]
+    failure_details = _t075_case_d_failure_details(
+        failure,
+        failure_ids=failure_ids,
+        problems=problems,
+        terminal_stage=terminal_stage,
+    )
+    failure_execution_evidence = {
+        **dict(getattr(failure, "execution_evidence", {})),
+        "status": "failed",
+        "terminal": False,
+        "failure_stage": failure.stage,
+        "failure_ids": failure_ids,
+        "failure_counts": failure_counts,
+        "failure_details": failure_details,
+    }
     _write_canonical_json(
         failure_evidence_path,
         {
@@ -7224,6 +7298,8 @@ def _handle_t075_case_d(args: argparse.Namespace, failure: T075WorkflowError) ->
             "problems": problems,
             "failure_ids": failure_ids,
             "failure_counts": failure_counts,
+            "failure_details": failure_details,
+            "execution_evidence": failure_execution_evidence,
         },
     )
     failed_artifacts = _failed_stage_artifact_paths(args, failure)
@@ -7311,13 +7387,15 @@ def _handle_t075_case_d(args: argparse.Namespace, failure: T075WorkflowError) ->
         "failure_ids": failure_ids,
         "failure_counts": failure_counts,
         "failure_details": failure_details,
+        "execution_evidence": failure_execution_evidence,
         "problems": problems,
     }
     _write_canonical_json(decision_path, report)
     retention_path = getattr(args, "retention_manifest", None)
     if isinstance(retention_path, Path):
-        partial_execution = dict(getattr(failure, "execution_evidence", {}))
-        stage6_partial = partial_execution if terminal_stage == "stage6-eval" else {}
+        stage6_partial = (
+            failure_execution_evidence if terminal_stage == "stage6-eval" else {}
+        )
         _write_t075_stage_retention(
             args,
             stage=terminal_stage,
@@ -7340,6 +7418,7 @@ def _handle_t075_case_d(args: argparse.Namespace, failure: T075WorkflowError) ->
                 "partial_spawn_failure": stage6_partial.get(
                     "partial_spawn_failure", False
                 ),
+                "failure_execution_evidence": failure_execution_evidence,
             },
             terminal_case="D",
         )
