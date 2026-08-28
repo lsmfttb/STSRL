@@ -6254,6 +6254,33 @@ def _t075_stage6_report_is_valid(path: Path, *, artifact_root: Path) -> bool:
         arm_rows_by_seed[arm] = {
             int(row["simulator_seed"]): row for row in rows if isinstance(row, Mapping)
         }
+        events = report["decision_events"]
+        if arm != "learned" and events:
+            return False
+        for event in events:
+            event_seed = event.get("simulator_seed")
+            family = event.get("screen_family")
+            mandatory = event.get("mandatory")
+            status = event.get("status")
+            expected_mandatory = family in T065_MANDATORY_FAMILIES
+            if (
+                isinstance(event_seed, bool)
+                or not isinstance(event_seed, int)
+                or event_seed not in arm_rows_by_seed[arm]
+                or not isinstance(family, str)
+                or not family
+                or not isinstance(mandatory, bool)
+                or not isinstance(status, str)
+                or not status
+                or mandatory != expected_mandatory
+            ):
+                return False
+            if mandatory and status not in {"learned_success", "learned_failure"}:
+                return False
+            if not mandatory and status != "unsupported_fallback":
+                return False
+            if event.get("battle") is not None and event.get("battle") is not False:
+                return False
 
     paired_rows = execution["paired_rows"]
     if [

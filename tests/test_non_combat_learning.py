@@ -3630,6 +3630,7 @@ def _write_valid_t075_stage6_fixture(path: Path) -> None:
                     "simulator_seed": seed,
                     "battle": False,
                     "screen_family": "MAP_SCREEN",
+                    "mandatory": True,
                     "status": "learned_success",
                 }
                 for seed in seeds
@@ -3753,6 +3754,24 @@ def test_t075_stage6_validator_recomputes_semantics_and_rejects_forgery(tmp_path
             path, artifact_root=tmp_path
         )
         payload[field] = expected[field]
+    event = payload["execution_evidence"]["arms"]["learned"]["report"][
+        "decision_events"
+    ][0]
+    event["simulator_seed"] = 999999
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    assert not command_module._t075_stage6_report_is_valid(path, artifact_root=tmp_path)
+    event["simulator_seed"] = 651001
+    event["status"] = "unsupported_fallback"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    assert not command_module._t075_stage6_report_is_valid(path, artifact_root=tmp_path)
+    event["status"] = "learned_success"
+    for malformed_status in ([], {}):
+        event["status"] = malformed_status
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        assert not command_module._t075_stage6_report_is_valid(
+            path, artifact_root=tmp_path
+        )
+    event["status"] = "learned_success"
     payload["execution_evidence"]["arms"]["learned"]["report"]["simulator_identity"][
         "code_head"
     ] = "forged"
