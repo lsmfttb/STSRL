@@ -2319,6 +2319,17 @@ def test_t075_stage3_requires_both_frozen_source_retention_identities(
         ],
     }
     selection_path.write_text(json.dumps(selection), encoding="utf-8")
+    table_path.write_text(
+        json.dumps(
+            {
+                "task_id": "T075",
+                "approved_spec_commit": command_module.T075_APPROVED_SPEC_COMMIT,
+                "t075_parent_selection_manifest_sha256": file_sha256(selection_path),
+                "t075_parent_preflight_sha256": file_sha256(preflight_path),
+            }
+        ),
+        encoding="utf-8",
+    )
     args = SimpleNamespace(
         validation_report=report_path,
         preflight=preflight_path,
@@ -2334,13 +2345,24 @@ def test_t075_stage3_requires_both_frozen_source_retention_identities(
 
     selection["source_artifacts"][1]["retention_manifest"]["sha256"] = "0" * 64
     selection_path.write_text(json.dumps(selection), encoding="utf-8")
+    table_path.write_text(
+        json.dumps(
+            {
+                "task_id": "T075",
+                "approved_spec_commit": command_module.T075_APPROVED_SPEC_COMMIT,
+                "t075_parent_selection_manifest_sha256": file_sha256(selection_path),
+                "t075_parent_preflight_sha256": file_sha256(preflight_path),
+            }
+        ),
+        encoding="utf-8",
+    )
     with pytest.raises(Exception, match="strict target reader"):
         _t075_write_stage3_report(args, table_path, states_path, selection_path)
     tampered_report = json.loads(report_path.read_text(encoding="utf-8"))
     assert any(
         "source retention identity is invalid" in problem
         for problem in tampered_report["problems"]
-    )
+    ), tampered_report["problems"]
 
 
 def test_t075_selection_and_stage3_share_pinned_simulator_identity() -> None:
@@ -2537,6 +2559,50 @@ def test_t075_evaluate_routes_without_parsing_preceding_manifest(
     assert result == 1
     assert len(routed) == 1
     assert isinstance(routed[0], T075WorkflowError)
+
+
+def test_t075_stage5_shape_routes_missing_preceding_to_t075(
+    monkeypatch, tmp_path
+) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command_module
+
+    routed = []
+    legacy_handler_calls = 0
+
+    def fail(_args):
+        raise T065CaseD("stage4-train", ["missing preceding manifest"])
+
+    monkeypatch.setattr(command_module, "_run_t075_evaluate", fail)
+    monkeypatch.setattr(
+        command_module,
+        "_handle_t075_case_d",
+        lambda _args, failure: routed.append(failure),
+    )
+
+    def legacy_handler(*_args):
+        nonlocal legacy_handler_calls
+        legacy_handler_calls += 1
+
+    monkeypatch.setattr(command_module, "_handle_case_d", legacy_handler)
+    result = command_module.main(
+        [
+            "evaluate",
+            "--target-table",
+            str(tmp_path / "targets.json"),
+            "--checkpoint-directory",
+            str(tmp_path / "checkpoints"),
+            "--output",
+            str(tmp_path / "stage5.json"),
+            "--preflight",
+            str(tmp_path / "preflight.json"),
+            "--preceding-manifest",
+            str(tmp_path / "missing-stage4.retention.json"),
+        ]
+    )
+    assert result == 1
+    assert len(routed) == 1
+    assert isinstance(routed[0], T075WorkflowError)
+    assert legacy_handler_calls == 0
 
 
 def test_t075_t065_failure_is_routed_to_t075_case_d(monkeypatch, tmp_path) -> None:

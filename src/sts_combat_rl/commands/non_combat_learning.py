@@ -527,6 +527,17 @@ def _is_t075_invocation(args: argparse.Namespace) -> bool:
             or getattr(args, "retention_manifest", None)
         ):
             return True
+        # T075 Stage 5 has one preceding Stage-4 retention manifest.  Use the
+        # CLI shape only as the discriminator; never read or parse that path
+        # while deciding whether a failure belongs to T075.  Legacy T065
+        # evaluate uses the complete multi-parent chain instead.
+        raw_preceding = getattr(args, "preceding_manifest", None)
+        preceding = (
+            (raw_preceding,)
+            if isinstance(raw_preceding, Path)
+            else tuple(raw_preceding or ())
+        )
+        return len(preceding) == 1
     return False
 
 
@@ -1555,6 +1566,18 @@ def _t075_resolve_reuse_manifest(
         raise T075WorkflowError(
             "source-input-reuse", [f"reuse manifest is not the frozen schema: {path}"]
         )
+    accepted_case_d = value["accepted_t065_case_d"]
+    if (
+        not isinstance(accepted_case_d, Mapping)
+        or _t075_normalize_artifact_path(str(accepted_case_d.get("path", "")))
+        != T075_ACCEPTED_T065_CASE_D["path"]
+        or accepted_case_d.get("sha256") != T075_ACCEPTED_T065_CASE_D["sha256"]
+        or accepted_case_d.get("size_bytes") != T075_ACCEPTED_T065_CASE_D["size_bytes"]
+    ):
+        raise T075WorkflowError(
+            "source-input-reuse",
+            [f"reuse accepted Case-D identity is not frozen: {path}"],
+        )
     validation = value["validation"]
     if (
         not isinstance(validation, Mapping)
@@ -2332,6 +2355,15 @@ def _t075_write_stage3_report(
             or selection.get("approved_t075_spec_commit") != T075_APPROVED_SPEC_COMMIT
         ):
             raise ValueError("selection manifest T075 identity is invalid")
+        if (
+            raw_table.get("task_id") != T075_TASK_ID
+            or raw_table.get("approved_spec_commit") != T075_APPROVED_SPEC_COMMIT
+            or raw_table.get("t075_parent_selection_manifest_sha256")
+            != file_sha256(selection_path)
+            or raw_table.get("t075_parent_preflight_sha256")
+            != file_sha256(args.preflight)
+        ):
+            raise ValueError("target table T075 parent lineage is invalid")
         if selection.get("selected_states_sha256") != file_sha256(states_path):
             raise ValueError("selection manifest selected-state hash is invalid")
         if selection.get("parent_current_preflight_sha256") != file_sha256(
