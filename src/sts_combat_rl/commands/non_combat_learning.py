@@ -301,7 +301,7 @@ def _t075_validate_process_shards(
             raise T075WorkflowError(
                 "artifact-retention", [f"{stage}: shard state count is not frozen"]
             )
-        if stage == "stage6-eval" and entry.get("requested_seed_count") != 20:
+        if stage == "stage6-eval" and entry.get("requested_seed_count") != 16:
             raise T075WorkflowError(
                 "artifact-retention", [f"{stage}: shard seed range is not frozen"]
             )
@@ -329,6 +329,8 @@ def _t075_terminal_decision_is_valid(
     # accepting an arbitrary absolute path here would let a source/current
     # worktree file impersonate a retained T075 parent.
     if artifact_root is None:
+        return False
+    if retention_path is None or not isinstance(retention_path, Path):
         return False
     required = (
         "schema_id",
@@ -400,7 +402,7 @@ def _t075_terminal_decision_is_valid(
             or not command.strip()
             or not isinstance(evidence, Mapping)
             or evidence.get("command") != command
-            or not _t075_command_matches_contract(command, stage)
+            or not _t075_command_matches_contract(command, stage, skipped=True)
             or evidence.get("executed") is not False
             or evidence.get("status") != "skipped"
             or evidence.get("code_head") != value.get("code_head")
@@ -436,14 +438,38 @@ def _t075_terminal_decision_is_valid(
             and failure_stage not in execution_stages
         ) or failure_stage_map.get(failure_stage, failure_stage) != terminal_stage:
             return False
-    if retention_path is not None:
-        if not isinstance(retention_path, Path):
+    if not retention_path.is_file():
+        return False
+    try:
+        _commands, retained_evidence, _reused = _t075_stage_retention_records(
+            retention_path.parent, value
+        )
+    except (OSError, ValueError, T075WorkflowError):
+        return False
+    retained_outputs = [
+        entry
+        for stage_value in retained_evidence.values()
+        for entry in stage_value.get("output_identities", [])
+        if isinstance(entry, Mapping)
+    ]
+    for identity in value["parent_artifact_identities"].values():
+        if not any(
+            entry.get("path") == identity.get("path")
+            and entry.get("sha256") == identity.get("sha256")
+            and entry.get("size_bytes") == identity.get("size_bytes")
+            for entry in retained_outputs
+        ):
             return False
-        if not retention_path.is_file():
-            return False
-        try:
-            _t075_stage_retention_records(retention_path.parent, value)
-        except (OSError, ValueError, T075WorkflowError):
+    if value["terminal_case"] in {"A", "B"} or (
+        value["terminal_case"] == "D" and value.get("terminal_stage") == "stage6-eval"
+    ):
+        stage6_identity = value.get("stage6_report_identity")
+        if not isinstance(stage6_identity, Mapping) or not any(
+            entry.get("path") == stage6_identity.get("path")
+            and entry.get("sha256") == stage6_identity.get("sha256")
+            and entry.get("size_bytes") == stage6_identity.get("size_bytes")
+            for entry in retained_outputs
+        ):
             return False
     case = value["terminal_case"]
     if case == "D":
@@ -943,8 +969,15 @@ def _write_canonical_json(path: Path, value: Mapping[str, Any]) -> None:
         raise
 
 
-def _t075_command_string(args: argparse.Namespace) -> str:
-    tokens = [str(token) for token in getattr(args, "_command_argv", ())]
+def _t075_command_string(
+    args: argparse.Namespace, *, command_argv: Sequence[str] | None = None
+) -> str:
+    tokens = [
+        str(token)
+        for token in (
+            getattr(args, "_command_argv", ()) if command_argv is None else command_argv
+        )
+    ]
     rendered = []
     for token in tokens:
         if "\\" in token or (len(token) > 1 and token[1] == ":"):
@@ -960,7 +993,9 @@ def _t075_command_string(args: argparse.Namespace) -> str:
     )
 
 
-def _t075_command_matches_contract(command: Any, stage: str) -> bool:
+def _t075_command_matches_contract(
+    command: Any, stage: str, *, skipped: bool = False
+) -> bool:
     if not isinstance(command, str) or not command.strip():
         return False
     required = (
@@ -978,9 +1013,38 @@ def _t075_command_matches_contract(command: Any, stage: str) -> bool:
         "stage5-gate": " evaluate ",
         "stage6-eval": " evaluate ",
     }.get(stage)
-    return all(fragment in command for fragment in required) and (
-        stage_command is None or stage_command in command
-    )
+    if not all(fragment in command for fragment in required):
+        return False
+    try:
+        payload = shlex.split(command, posix=True)
+        shell_command = payload[-1]
+        module_index = shell_command.index("sts_combat_rl.commands.non_combat_learning")
+        command_tokens = shlex.split(shell_command[module_index:], posix=True)
+    except (ValueError, IndexError):
+        return False
+    if len(command_tokens) < 2 or command_tokens[0] != (
+        "sts_combat_rl.commands.non_combat_learning"
+    ):
+        return False
+    if stage_command is not None and command_tokens[1] != stage_command.strip():
+        return False
+    # Stage 6 is an independent invocation.  A skipped Stage-6 contract must
+    # still describe the frozen Stage-6 command, rather than inheriting a
+    # Stage-5 evaluate command which omitted --run-stage6.
+    if stage == "stage6-eval" and "--run-stage6" not in command_tokens:
+        return False
+    if skipped and stage == "stage6-eval":
+        try:
+            shard_flag = command_tokens.index("--stage6-shard-count")
+            worker_flag = command_tokens.index("--stage6-worker-count")
+            if (
+                command_tokens[shard_flag + 1] != "16"
+                or command_tokens[worker_flag + 1] != "16"
+            ):
+                return False
+        except (ValueError, IndexError):
+            return False
+    return True
 
 
 def _t075_execution_evidence(
@@ -1021,6 +1085,16 @@ def _t075_skipped_stage_contract(
 
     contracts: dict[str, dict[str, Any]] = {}
     for stage in stages:
+        command_argv = tuple(str(token) for token in getattr(args, "_command_argv", ()))
+        if stage == "stage6-eval" and "--run-stage6" not in command_argv:
+            command_argv += (
+                "--run-stage6",
+                "--stage6-shard-count",
+                "16",
+                "--stage6-worker-count",
+                "16",
+            )
+        command = _t075_command_string(args, command_argv=command_argv)
         contracts[stage] = {
             **_t075_execution_evidence(
                 args, status="skipped", terminal=False, exit_code=None, executed=False
@@ -1037,6 +1111,7 @@ def _t075_skipped_stage_contract(
             "counts": {},
             "problems": [],
         }
+        contracts[stage]["command"] = command
     return (
         {stage: str(value["command"]) for stage, value in contracts.items()},
         contracts,
@@ -1120,7 +1195,9 @@ def _t075_stage_retention_records(
                 "terminal-finalize",
                 [f"retention execution evidence diverges: {path}"],
             )
-        if not _t075_command_matches_contract(command["command"], stage):
+        if not _t075_command_matches_contract(
+            command["command"], stage, skipped=command.get("status") == "skipped"
+        ):
             raise T075WorkflowError(
                 "terminal-finalize",
                 [f"retention command is not the frozen runtime command: {path}"],
@@ -3474,6 +3551,20 @@ def _run_t075_evaluate(args: argparse.Namespace) -> int:
         "per_shard": [],
         "problems": list(stage5.problems),
     }
+    stage5_artifacts = {
+        "stage5_report": stage5_path,
+        "checkpoint_653001": args.checkpoint_directory / "model-653001.pt",
+        "checkpoint_653002": args.checkpoint_directory / "model-653002.pt",
+    }
+    stage5_evidence["parent_identities"] = {
+        "target_table": _t075_parent_identity(args.target_table),
+        "checkpoint_653001": _t075_parent_identity(
+            args.checkpoint_directory / "model-653001.pt"
+        ),
+        "checkpoint_653002": _t075_parent_identity(
+            args.checkpoint_directory / "model-653002.pt"
+        ),
+    }
     if not stage5.passed:
         skipped_commands, skipped_evidence = _t075_skipped_stage_contract(
             args, ("stage6-eval",), "Stage 5 gate failed"
@@ -3515,7 +3606,7 @@ def _run_t075_evaluate(args: argparse.Namespace) -> int:
             args,
             stage="stage5-gate",
             artifacts={
-                "stage5_report": stage5_path,
+                **stage5_artifacts,
                 "terminal_decision_report": args.decision_report,
             },
             evidence=stage5_evidence,
@@ -3531,7 +3622,7 @@ def _run_t075_evaluate(args: argparse.Namespace) -> int:
         _write_t075_stage_retention(
             args,
             stage="stage5-gate",
-            artifacts={"stage5_report": stage5_path},
+            artifacts=stage5_artifacts,
             evidence=completed_stage5_evidence,
         )
         print(
@@ -3784,7 +3875,16 @@ def _run_t075_finalize(args: argparse.Namespace) -> int:
         raise T075WorkflowError(
             "terminal-finalize", ["terminal decision does not satisfy T075 schema"]
         )
-    if not _t075_terminal_decision_is_valid(decision, artifact_root=args.artifact_root):
+    validation_retention_path = (
+        args.retention_manifest
+        if args.retention_manifest.is_file()
+        else next(iter(sorted(args.artifact_root.rglob("*.retention.json"))), None)
+    )
+    if not _t075_terminal_decision_is_valid(
+        decision,
+        artifact_root=args.artifact_root,
+        retention_path=validation_retention_path,
+    ):
         raise T075WorkflowError(
             "terminal-finalize",
             ["terminal decision is not a complete first-valid report"],

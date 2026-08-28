@@ -2965,7 +2965,16 @@ def test_t075_finalize_accepts_valid_case_d_json_lists(tmp_path, monkeypatch) ->
         "stage2-target": ("target", "--states", "states.json"),
         "stage4-train": ("train", "--target-table", "targets.json"),
         "stage5-gate": ("evaluate", "--target-table", "targets.json"),
-        "stage6-eval": ("evaluate", "--target-table", "targets.json"),
+        "stage6-eval": (
+            "evaluate",
+            "--target-table",
+            "targets.json",
+            "--run-stage6",
+            "--stage6-shard-count",
+            "16",
+            "--stage6-worker-count",
+            "16",
+        ),
     }
     skipped_commands = {
         stage: command_module._t075_command_string(
@@ -3048,7 +3057,11 @@ def test_t075_finalize_accepts_valid_case_d_json_lists(tmp_path, monkeypatch) ->
         retention_manifest=retention_path,
         _command_argv=(),
     )
-    assert _t075_terminal_decision_is_valid(decision, artifact_root=artifact_root)
+    retention_path.write_text("{}\n", encoding="utf-8")
+    assert not _t075_terminal_decision_is_valid(decision, artifact_root=artifact_root)
+    assert _t075_terminal_decision_is_valid(
+        decision, artifact_root=artifact_root, retention_path=retention_path
+    )
     assert _run_t075_finalize(args) == 0
     assert (
         json.loads(retention_path.read_text(encoding="utf-8"))["terminal_case"] == "D"
@@ -3141,7 +3154,7 @@ def test_stage6_retention_evidence_is_flat_per_arm_and_shard() -> None:
             "process_id": 1000 + arm_index * 16 + shard_index,
             "worker_kind": "spawn-process",
             "exit_code": 0,
-            "requested_seed_count": 20,
+            "requested_seed_count": 16,
         }
         for arm_index, arm in enumerate(("expert", "learned", "stochastic"))
         for shard_index in range(16)
@@ -3172,6 +3185,10 @@ def test_stage5_without_stage6_writes_completed_independent_parent(
     target.write_text("{}\n", encoding="utf-8")
     output = tmp_path / "stage5.json"
     retention = tmp_path / "stage5.retention.json"
+    checkpoint_directory = tmp_path / "checkpoints"
+    checkpoint_directory.mkdir()
+    for seed in (653001, 653002):
+        (checkpoint_directory / f"model-{seed}.pt").write_bytes(b"fixture")
     captured = []
     stage5 = SimpleNamespace(
         passed=True,
@@ -3206,7 +3223,7 @@ def test_stage5_without_stage6_writes_completed_independent_parent(
     )
     args = SimpleNamespace(
         target_table=target,
-        checkpoint_directory=tmp_path / "checkpoints",
+        checkpoint_directory=checkpoint_directory,
         output=output,
         stage5_report=None,
         run_stage6=False,
@@ -3219,3 +3236,12 @@ def test_stage5_without_stage6_writes_completed_independent_parent(
     assert captured[-1]["stage"] == "stage5-gate"
     assert captured[-1]["evidence"]["status"] == "completed"
     assert captured[-1]["evidence"]["terminal"] is True
+    assert set(captured[-1]["artifacts"]) == {
+        "stage5_report",
+        "checkpoint_653001",
+        "checkpoint_653002",
+    }
+    skipped_commands, _skipped_evidence = command_module._t075_skipped_stage_contract(
+        args, ("stage6-eval",), "stage 6 is independent"
+    )
+    assert "--run-stage6" in skipped_commands["stage6-eval"]
