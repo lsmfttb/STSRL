@@ -3621,6 +3621,15 @@ def _write_valid_t075_stage6_fixture(path: Path) -> None:
                 "problems": [],
                 "action_space": action_space,
                 "controller_provenance": controllers[arm],
+                **(
+                    {
+                        "learned_decision_count": 1,
+                        "intentional_unsupported_fallback_count": 0,
+                        "supported_failure_count": 0,
+                    }
+                    if arm == "learned"
+                    else {}
+                ),
             }
             for seed in seeds
         ]
@@ -3741,7 +3750,42 @@ def test_t075_stage6_validator_recomputes_semantics_and_rejects_forgery(tmp_path
     assert _t075_stage6_report_is_valid(path, artifact_root=tmp_path)
     payload = json.loads(path.read_text(encoding="utf-8"))
     learned_report = payload["execution_evidence"]["arms"]["learned"]["report"]
+    learned_execution = payload["execution_evidence"]["arms"]["learned"]
+    learned_execution["decision_count"] = False
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    assert not _t075_stage6_report_is_valid(path, artifact_root=tmp_path)
+    learned_execution["decision_count"] = 256
+    learned_execution["problem_count"] = False
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    assert not _t075_stage6_report_is_valid(path, artifact_root=tmp_path)
+    learned_execution["problem_count"] = 0
+    zero_row = learned_report["rows"][0]
+    zero_event = learned_report["decision_events"].pop(0)
+    for field in (
+        "learned_decision_count",
+        "intentional_unsupported_fallback_count",
+        "supported_failure_count",
+    ):
+        zero_row[field] = 0
+    payload["execution_evidence"]["arms"]["learned"]["decision_count"] = 255
+    payload["coverage"].update({"D": 255, "L": 255, "M": 255})
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    assert _t075_stage6_report_is_valid(path, artifact_root=tmp_path)
+    learned_report["decision_events"].insert(0, zero_event)
+    for field in (
+        "learned_decision_count",
+        "intentional_unsupported_fallback_count",
+        "supported_failure_count",
+    ):
+        zero_row[field] = 1 if field == "learned_decision_count" else 0
+    payload["execution_evidence"]["arms"]["learned"]["decision_count"] = 256
+    payload["coverage"].update({"D": 256, "L": 256, "M": 256})
     saved_events = learned_report["decision_events"]
+    saved_second_event = saved_events[1]
+    saved_events[1] = dict(saved_events[0])
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    assert not command_module._t075_stage6_report_is_valid(path, artifact_root=tmp_path)
+    saved_events[1] = saved_second_event
     learned_report["decision_events"] = []
     payload["coverage"] = {
         "D": 0,

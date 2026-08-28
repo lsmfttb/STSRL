@@ -6140,7 +6140,6 @@ def _t075_stage6_report_is_valid(path: Path, *, artifact_root: Path) -> bool:
             or arm_execution.get("completed_row_count") != 256
             or arm_execution.get("worker_count") != T065_MAX_WORKERS
             or arm_execution.get("shard_count") != T075_STAGE6_SHARD_COUNT
-            or arm_execution.get("problem_count") != 0
             or arm_execution.get("problems") != []
             or not finite_number(arm_execution.get("wall_clock_seconds"))
         ):
@@ -6175,6 +6174,17 @@ def _t075_stage6_report_is_valid(path: Path, *, artifact_root: Path) -> bool:
             or not isinstance(report.get("requested_seeds"), list)
             or not isinstance(report.get("problems"), list)
             or report.get("problems") != []
+        ):
+            return False
+        decision_count = arm_execution.get("decision_count")
+        problem_count = arm_execution.get("problem_count")
+        if (
+            isinstance(decision_count, bool)
+            or not isinstance(decision_count, int)
+            or decision_count != len(report["decision_events"])
+            or isinstance(problem_count, bool)
+            or not isinstance(problem_count, int)
+            or problem_count != 0
         ):
             return False
         # The explicit list comparison avoids accepting a report whose range
@@ -6259,6 +6269,7 @@ def _t075_stage6_report_is_valid(path: Path, *, artifact_root: Path) -> bool:
         events = report["decision_events"]
         if arm != "learned" and events:
             return False
+        event_counts: dict[int, dict[str, int]] = {}
         for event in events:
             event_seed = event.get("simulator_seed")
             family = event.get("screen_family")
@@ -6308,6 +6319,45 @@ def _t075_stage6_report_is_valid(path: Path, *, artifact_root: Path) -> bool:
                     return False
             if event.get("battle") is not None and event.get("battle") is not False:
                 return False
+            counts = event_counts.setdefault(
+                event_seed,
+                {
+                    "learned_decision_count": 0,
+                    "intentional_unsupported_fallback_count": 0,
+                    "supported_failure_count": 0,
+                },
+            )
+            if status in {"learned_success", "learned_failure"}:
+                counts["learned_decision_count"] += 1
+            elif status == "unsupported_fallback":
+                counts["intentional_unsupported_fallback_count"] += 1
+            if status == "learned_failure":
+                counts["supported_failure_count"] += 1
+        if arm == "learned":
+            for event_seed, row in arm_rows_by_seed[arm].items():
+                row_counts = {}
+                for field in (
+                    "learned_decision_count",
+                    "intentional_unsupported_fallback_count",
+                    "supported_failure_count",
+                ):
+                    count = row.get(field)
+                    if (
+                        isinstance(count, bool)
+                        or not isinstance(count, int)
+                        or count < 0
+                    ):
+                        return False
+                    row_counts[field] = count
+                if row_counts != event_counts.get(
+                    event_seed,
+                    {
+                        "learned_decision_count": 0,
+                        "intentional_unsupported_fallback_count": 0,
+                        "supported_failure_count": 0,
+                    },
+                ):
+                    return False
 
     paired_rows = execution["paired_rows"]
     if [
