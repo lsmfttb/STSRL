@@ -2146,11 +2146,16 @@ def test_t075_retention_does_not_synthesize_completed_failure(tmp_path) -> None:
     artifact = tmp_path / "report.json"
     artifact.write_text("{}\n", encoding="utf-8")
     retention = tmp_path / "failed.retention.json"
+    frozen_root = Path(
+        "D:/DeadlycatCoding/STSRL/artifacts/t075-leakage-safe-non-combat-cohort-repair"
+    )
     args = SimpleNamespace(
         retention_manifest=retention,
+        decision_report=frozen_root / "terminal-decision-report.json",
         _command_argv=(),
         code_head="test-head",
     )
+    args._command_argv = command_module._t075_frozen_stage_argv(args, "stage5-gate")
     value = _write_t075_stage_retention(
         args,
         stage="stage5-gate",
@@ -2238,9 +2243,14 @@ def test_t075_retention_rejects_unfrozen_command_and_timestamp(tmp_path) -> None
     artifact.write_text("{}\n", encoding="utf-8")
     args = SimpleNamespace(
         retention_manifest=tmp_path / "failed.retention.json",
+        decision_report=Path(
+            "D:/DeadlycatCoding/STSRL/artifacts/"
+            "t075-leakage-safe-non-combat-cohort-repair/terminal-decision-report.json"
+        ),
         _command_argv=(),
         _t075_execution_start_utc="2026-08-28T00:00:00+00:00",
     )
+    args._command_argv = command_module._t075_frozen_stage_argv(args, "stage5-gate")
     evidence = {
         **command_module._t075_execution_evidence(
             args, status="failed", terminal=False, exit_code=1, executed=True
@@ -2660,7 +2670,7 @@ def test_t075_first_terminal_decision_wins(tmp_path) -> None:
     decision_path.write_text(json.dumps(original), encoding="utf-8")
     args = SimpleNamespace(
         decision_report=decision_path,
-        retention_manifest=tmp_path / "retention.json",
+        retention_manifest=None,
         output=tmp_path / "stage5-heldout-report.json",
         target_table=tmp_path / "stage2-target-table.json",
         checkpoint_directory=tmp_path / "stage4-checkpoints",
@@ -2967,29 +2977,6 @@ def test_t075_finalize_accepts_valid_case_d_json_lists(tmp_path, monkeypatch) ->
     stages = command_module.T075_STAGE_ORDER[:-1]
     reached = [stages[0]]
     skipped = list(stages[1:])
-    command_args = {
-        "stage0-reuse": ("validate-reuse", "--source", "source.json"),
-        "stage1-selection-replay": ("select", "--input", "states.json"),
-        "stage2-target": ("target", "--states", "states.json"),
-        "stage4-train": ("train", "--target-table", "targets.json"),
-        "stage5-gate": ("evaluate", "--target-table", "targets.json"),
-        "stage6-eval": (
-            "evaluate",
-            "--target-table",
-            "targets.json",
-            "--run-stage6",
-            "--stage6-shard-count",
-            "16",
-            "--stage6-worker-count",
-            "16",
-        ),
-    }
-    skipped_commands = {
-        stage: command_module._t075_command_string(
-            SimpleNamespace(_command_argv=command_args[stage])
-        )
-        for stage in skipped
-    }
     frozen_root = Path(
         "D:/DeadlycatCoding/STSRL/artifacts/t075-leakage-safe-non-combat-cohort-repair"
     )
@@ -3004,10 +2991,13 @@ def test_t075_finalize_accepts_valid_case_d_json_lists(tmp_path, monkeypatch) ->
         retention_manifest=frozen_root / "stage5.retention.json",
         decision_report=frozen_root / "terminal-decision-report.json",
     )
-    skipped_commands["stage6-eval"] = command_module._t075_command_string(
-        stage6_args,
-        command_argv=command_module._t075_standalone_stage6_argv(stage6_args),
-    )
+    skipped_commands = {
+        stage: command_module._t075_command_string(
+            stage6_args,
+            command_argv=command_module._t075_frozen_stage_argv(stage6_args, stage),
+        )
+        for stage in skipped
+    }
     skipped_evidence = {
         stage: {
             "command": skipped_commands[stage],
@@ -3107,8 +3097,13 @@ def test_t075_case_d_stage6_failure_maps_to_stage6_eval(tmp_path) -> None:
     assert report["terminal_stage"] == "stage6-eval"
     assert report["reached_stages"][-1] == "stage6-eval"
     assert report["skipped_stages"] == []
-    assert report["stage6_status"] == "completed"
+    assert report["stage6_status"] == "failed"
     assert report["terminal_case"] == "D"
+    stage6_report = tmp_path / "stage6-complete-run-report.json"
+    assert report["stage6_report_identity"]["path"] == str(stage6_report)
+    stage6_payload = json.loads(stage6_report.read_text(encoding="utf-8"))
+    assert stage6_payload["valid"] is False
+    assert stage6_payload["execution_evidence"]["status"] == "failed"
 
 
 def test_replay_success_worker_schema_is_merged_with_worker_kind(monkeypatch) -> None:
@@ -3218,6 +3213,39 @@ def test_stage6_retention_evidence_is_flat_per_arm_and_shard() -> None:
         )
 
 
+def test_stage1_and_stage2_retention_evidence_requires_frozen_16x20_ranges() -> None:
+    entries = [
+        {
+            **spec,
+            "process_id": 2000 + spec["shard_index"],
+            "worker_kind": "spawn-process",
+            "exit_code": 0,
+            "state_count": 20,
+        }
+        for spec in target_shard_ranges()
+    ]
+    for stage in ("stage1-selection-replay", "stage2-target"):
+        _t075_validate_process_shards(
+            stage,
+            shard_count=16,
+            worker_count=16,
+            per_shard=entries,
+            status="completed",
+            ranges=entries,
+        )
+        forged = [dict(entry) for entry in entries]
+        forged[3]["selected_state_end"] += 1
+        with pytest.raises(T075WorkflowError, match="frozen 16x20 plan"):
+            _t075_validate_process_shards(
+                stage,
+                shard_count=16,
+                worker_count=16,
+                per_shard=entries,
+                status="completed",
+                ranges=forged,
+            )
+
+
 def test_stage6_skipped_contract_is_standalone_and_exact() -> None:
     import sts_combat_rl.commands.non_combat_learning as command_module
 
@@ -3260,6 +3288,52 @@ def test_stage6_skipped_contract_is_standalone_and_exact() -> None:
         command.replace("stage5-heldout-report.json", "wrong-report.json"),
         "stage6-eval",
         skipped=True,
+    )
+
+
+@pytest.mark.parametrize(
+    "stage",
+    (
+        "stage0-preflight",
+        "stage0-reuse",
+        "stage1-selection-replay",
+        "stage2-target",
+        "stage4-train",
+        "stage5-gate",
+        "stage6-eval",
+    ),
+)
+def test_all_frozen_stage_commands_reject_extra_missing_and_alternate_root(
+    stage,
+) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command_module
+
+    root = Path(
+        "D:/DeadlycatCoding/STSRL/artifacts/t075-leakage-safe-non-combat-cohort-repair"
+    )
+    args = SimpleNamespace(decision_report=root / "terminal-decision-report.json")
+    argv = command_module._t075_frozen_stage_argv(args, stage)
+    command = command_module._t075_command_string(args, command_argv=argv)
+    assert command_module._t075_command_matches_contract(command, stage)
+    assert not command_module._t075_command_matches_contract(
+        command_module._t075_command_string(
+            args, command_argv=argv + ("--unexpected",)
+        ),
+        stage,
+    )
+    output_index = argv.index("--output")
+    missing = argv[:output_index] + argv[output_index + 2 :]
+    assert not command_module._t075_command_matches_contract(
+        command_module._t075_command_string(args, command_argv=missing), stage
+    )
+    alternate = tuple(
+        token.replace(
+            "t075-leakage-safe-non-combat-cohort-repair", "t075-alternate-root"
+        )
+        for token in argv
+    )
+    assert not command_module._t075_command_matches_contract(
+        command_module._t075_command_string(args, command_argv=alternate), stage
     )
 
 
