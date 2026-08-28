@@ -28,7 +28,7 @@ import statistics
 from tempfile import TemporaryDirectory
 import time
 from typing import Any
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import multiprocessing
 
 from sts_combat_rl.sim.action_space import ActionSpaceConfig
@@ -2924,6 +2924,138 @@ def _replay_process_shard(payload: Mapping[str, Any]) -> dict[str, Any]:
         }
 
 
+def _spawn_process_entry(
+    worker: Callable[[Mapping[str, Any]], Mapping[str, Any]],
+    payload: Mapping[str, Any],
+    result_queue: Any,
+) -> None:
+    """Run one picklable shard worker and publish exactly one result."""
+
+    try:
+        result_queue.put(dict(worker(payload)))
+    except (
+        BaseException
+    ) as exc:  # pragma: no cover - hard crash is environment-specific
+        result_queue.put(
+            {
+                "shard_index": int(payload.get("shard_index", -1)),
+                "process_id": os.getpid(),
+                "worker_kind": "spawn-process",
+                "status": "failed",
+                "exit_code": 1,
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+        )
+
+
+def _validate_spawn_process_bindings(
+    processes: Sequence[Any],
+    payloads: Sequence[Mapping[str, Any]],
+    results: Mapping[int, Mapping[str, Any]],
+    *,
+    stage: str,
+) -> None:
+    """Require each result PID to be its owning child process PID."""
+
+    problems: list[str] = []
+    expected_processes = {
+        int(payload["shard_index"]): process
+        for payload, process in zip(payloads, processes, strict=True)
+    }
+    for shard_index, process in expected_processes.items():
+        result = results.get(shard_index)
+        if result is None:
+            problems.append(
+                f"shard {shard_index} has no result (exit={process.exitcode})"
+            )
+            continue
+        if result.get("process_id") != process.pid:
+            problems.append(
+                f"shard {shard_index} returned process_id "
+                f"{result.get('process_id')!r}, expected child PID {process.pid}"
+            )
+        if process.exitcode not in (0, None) and result.get("status") == "passed":
+            problems.append(
+                f"shard {shard_index} exited {process.exitcode} after passed result"
+            )
+    if problems:
+        raise T065CaseD(stage, tuple(problems))
+
+
+def _run_spawn_process_batch(
+    worker: Callable[[Mapping[str, Any]], Mapping[str, Any]],
+    payloads: Sequence[Mapping[str, Any]],
+    *,
+    stage: str,
+    worker_count: int,
+) -> list[dict[str, Any]]:
+    """Run shard workers and bind every returned identity to its child PID.
+
+    The parent owns the process-to-shard map.  A result with a duplicate,
+    unknown, missing, or forged ``process_id`` is a hard failure; no result is
+    silently replaced or discarded.
+    """
+
+    if worker_count != len(payloads) or worker_count < 1:
+        raise ValueError(f"{stage} worker count must equal shard count")
+    payload_indices = [payload.get("shard_index") for payload in payloads]
+    if any(
+        isinstance(index, bool) or not isinstance(index, int)
+        for index in payload_indices
+    ) or len(set(payload_indices)) != len(payload_indices):
+        raise T065CaseD(stage, ["shard plan contains duplicate or invalid indices"])
+    context = multiprocessing.get_context("spawn")
+    result_queue = context.Queue()
+    processes = [
+        context.Process(
+            target=_spawn_process_entry,
+            args=(worker, payload, result_queue),
+            name=f"t065-{stage}-{int(payload['shard_index']):02d}",
+        )
+        for payload in payloads
+    ]
+    results: dict[int, dict[str, Any]] = {}
+    problems: list[str] = []
+    try:
+        for process in processes:
+            process.start()
+        queue_module = __import__("queue")
+        while len(results) < len(processes):
+            try:
+                result = result_queue.get(timeout=0.25)
+            except queue_module.Empty:
+                if all(not process.is_alive() for process in processes):
+                    break
+                continue
+            if not isinstance(result, Mapping):
+                problems.append("worker returned a non-object result")
+                continue
+            shard_index = result.get("shard_index")
+            if (
+                isinstance(shard_index, bool)
+                or not isinstance(shard_index, int)
+                or shard_index not in set(payload_indices)
+            ):
+                problems.append("worker returned an unknown shard identity")
+                continue
+            if shard_index in results:
+                problems.append(f"worker returned duplicate shard {shard_index}")
+                continue
+            results[shard_index] = dict(result)
+        for process in processes:
+            process.join()
+        try:
+            _validate_spawn_process_bindings(processes, payloads, results, stage=stage)
+        except T065CaseD as exc:
+            problems.extend(exc.problems)
+    finally:
+        result_queue.close()
+        result_queue.join_thread()
+    if problems:
+        raise T065CaseD(stage, tuple(problems))
+    return [results[int(payload["shard_index"])] for payload in payloads]
+
+
 def replay_source_states_process_sharded(
     states: Sequence[T065SourceState],
     *,
@@ -2985,27 +3117,10 @@ def replay_source_states_process_sharded(
                 "player_class": player_class,
             }
         )
-    context = multiprocessing.get_context("spawn")
     started = time.perf_counter()
-    with ProcessPoolExecutor(max_workers=worker_count, mp_context=context) as executor:
-        futures = [
-            executor.submit(_replay_process_shard, payload) for payload in payloads
-        ]
-        results: list[dict[str, Any]] = []
-        for future, payload in zip(futures, payloads, strict=True):
-            try:
-                results.append(future.result())
-            except Exception as exc:
-                results.append(
-                    {
-                        "shard_index": payload["shard_index"],
-                        "worker_kind": "spawn-process",
-                        "status": "failed",
-                        "exit_code": 1,
-                        "error": f"{type(exc).__name__}: {exc}",
-                    }
-                )
-    results.sort(key=lambda item: int(item.get("shard_index", -1)))
+    results = _run_spawn_process_batch(
+        _replay_process_shard, payloads, stage="replay", worker_count=worker_count
+    )
     failures = [item for item in results if item.get("status") != "passed"]
     if failures:
         raise T065CaseD(
@@ -3537,29 +3652,13 @@ def generate_counterfactual_targets_process_sharded(
             }
         )
     started = time.perf_counter()
-    context = multiprocessing.get_context("spawn")
     try:
-        with ProcessPoolExecutor(
-            max_workers=worker_count, mp_context=context
-        ) as executor:
-            futures = [
-                executor.submit(_generate_target_process_shard, payload)
-                for payload in payloads
-            ]
-            results = []
-            for future, payload in zip(futures, payloads, strict=True):
-                try:
-                    results.append(future.result())
-                except Exception as exc:
-                    results.append(
-                        {
-                            "shard_index": payload["shard_index"],
-                            "process_id": -1,
-                            "worker_kind": "spawn-process",
-                            "status": "failed",
-                            "error": f"{type(exc).__name__}: {exc}",
-                        }
-                    )
+        results = _run_spawn_process_batch(
+            _generate_target_process_shard,
+            payloads,
+            stage="target-sharding",
+            worker_count=worker_count,
+        )
         failures = [result for result in results if result.get("status") != "passed"]
         if failures:
             raise T065CaseD(
@@ -4877,7 +4976,7 @@ def run_complete_run_arm(
     )
 
 
-def _stage6_process_entry(payload: Mapping[str, Any], result_queue: Any) -> None:
+def _stage6_process_result(payload: Mapping[str, Any]) -> dict[str, Any]:
     """Run one Stage-6 shard in its own spawn-isolated simulator process."""
 
     started = time.perf_counter()
@@ -4911,32 +5010,27 @@ def _stage6_process_entry(payload: Mapping[str, Any], result_queue: Any) -> None
             cpu_seconds = usage.ru_utime + usage.ru_stime
         except (ImportError, AttributeError):
             cpu_seconds = 0.0
-        result_queue.put(
-            {
-                "status": "passed" if not report.problems else "failed",
-                "shard_index": int(payload["shard_index"]),
-                "process_id": os.getpid(),
-                "worker_kind": "spawn-process",
-                "exit_code": 0 if not report.problems else 1,
-                "cpu_seconds": cpu_seconds,
-                "wall_clock_seconds": time.perf_counter() - started,
-                "report": report,
-            }
-        )
+        return {
+            "status": "passed" if not report.problems else "failed",
+            "shard_index": int(payload["shard_index"]),
+            "process_id": os.getpid(),
+            "worker_kind": "spawn-process",
+            "exit_code": 0 if not report.problems else 1,
+            "cpu_seconds": cpu_seconds,
+            "wall_clock_seconds": time.perf_counter() - started,
+            "report": report,
+        }
     except Exception as exc:
-        result_queue.put(
-            {
-                "status": "failed",
-                "shard_index": int(payload["shard_index"]),
-                "process_id": os.getpid(),
-                "worker_kind": "spawn-process",
-                "exit_code": 1,
-                "cpu_seconds": 0.0,
-                "wall_clock_seconds": time.perf_counter() - started,
-                "error": f"{type(exc).__name__}: {exc}",
-            }
-        )
-        raise
+        return {
+            "status": "failed",
+            "shard_index": int(payload["shard_index"]),
+            "process_id": os.getpid(),
+            "worker_kind": "spawn-process",
+            "exit_code": 1,
+            "cpu_seconds": 0.0,
+            "wall_clock_seconds": time.perf_counter() - started,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
 
 
 def run_complete_run_arm_sharded(
@@ -4978,60 +5072,20 @@ def run_complete_run_arm_sharded(
         for spec in specs
     ]
     started = time.perf_counter()
-    context = multiprocessing.get_context("spawn")
-    result_queue = context.Queue()
-    results: dict[int, dict[str, Any]] = {}
-    processes = [
-        context.Process(
-            target=_stage6_process_entry,
-            args=(payload, result_queue),
-            name=f"t075-stage6-{arm}-{payload['shard_index']:02d}",
-        )
-        for payload in payloads
+    ordered_results = _run_spawn_process_batch(
+        _stage6_process_result,
+        payloads,
+        stage="stage6",
+        worker_count=worker_count,
+    )
+    failures = [
+        f"shard {result.get('shard_index')} process failed: "
+        f"{result.get('error', 'worker failed')}"
+        for result in ordered_results
+        if result.get("status") != "passed" or result.get("exit_code") != 0
     ]
-    try:
-        for process in processes:
-            process.start()
-        # Drain results while children are still running.  A complete shard
-        # report can be much larger than a pipe buffer; joining all children
-        # before draining can therefore deadlock a successful worker on its
-        # queue write and make a partial run look hung.
-        queue_module = __import__("queue")
-        while len(results) < len(processes):
-            try:
-                result = result_queue.get(timeout=0.25)
-            except queue_module.Empty:
-                if all(not process.is_alive() for process in processes):
-                    break
-                continue
-            shard_index = (
-                result.get("shard_index") if isinstance(result, Mapping) else None
-            )
-            if isinstance(shard_index, int) and not isinstance(shard_index, bool):
-                results.setdefault(shard_index, dict(result))
-        for process in processes:
-            process.join()
-    finally:
-        result_queue.close()
-        result_queue.join_thread()
-
-    failures = []
-    for process, payload in zip(processes, payloads, strict=True):
-        result = results.get(int(payload["shard_index"]))
-        if (
-            process.exitcode != 0
-            or not isinstance(result, Mapping)
-            or result.get("status") != "passed"
-            or result.get("exit_code") != 0
-        ):
-            failures.append(
-                f"shard {payload['shard_index']} process failed: "
-                f"{result.get('error', 'no result') if isinstance(result, Mapping) else 'no result'}"
-            )
     if failures:
         raise T065CaseD("stage6", failures)
-
-    ordered_results = [results[int(payload["shard_index"])] for payload in payloads]
     _validate_stage6_process_evidence(ordered_results)
     shards = [result["report"] for result in ordered_results]
     shard_evidence: list[Mapping[str, Any]] = []

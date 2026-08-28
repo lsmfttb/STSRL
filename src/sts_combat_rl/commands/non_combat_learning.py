@@ -71,6 +71,7 @@ from sts_combat_rl.sim.non_combat_learning import (
     generate_counterfactual_targets_sharded,
     generate_counterfactual_targets_process_sharded,
     replay_source_states_process_sharded,
+    stage6_shard_ranges,
     target_shard_ranges,
     write_source_selection_manifest,
     write_t065_manifest,
@@ -220,6 +221,7 @@ def _t075_validate_process_shards(
     worker_count: int,
     per_shard: Any,
     status: str,
+    ranges: Any = None,
 ) -> None:
     """Validate observed process evidence, including its frozen shard plan.
 
@@ -253,6 +255,50 @@ def _t075_validate_process_shards(
             "artifact-retention",
             [f"{stage}: observed worker/shard count is incomplete"],
         )
+    expected_stage6: dict[tuple[str, int], dict[str, Any]] = {}
+    if stage == "stage6-eval":
+        if not isinstance(ranges, list) or len(ranges) != expected_count:
+            raise T075WorkflowError(
+                "artifact-retention",
+                [f"{stage}: frozen range evidence is incomplete"],
+            )
+        for expected_arm in sorted(expected_arms):
+            for spec in stage6_shard_ranges(
+                arm=expected_arm, worker_count=T065_MAX_WORKERS
+            ):
+                expected_stage6[(expected_arm, int(spec["shard_index"]))] = dict(spec)
+        seen_ranges: set[tuple[Any, Any]] = set()
+        for range_entry in ranges:
+            if not isinstance(range_entry, Mapping):
+                raise T075WorkflowError(
+                    "artifact-retention", [f"{stage}: range evidence is not an object"]
+                )
+            range_key = (range_entry.get("arm"), range_entry.get("shard_index"))
+            if range_key in seen_ranges:
+                raise T075WorkflowError(
+                    "artifact-retention", [f"{stage}: range identity is duplicated"]
+                )
+            seen_ranges.add(range_key)
+            expected = expected_stage6.get(range_key)
+            if expected is None or any(
+                range_entry.get(field) != expected.get(field)
+                for field in (
+                    "arm",
+                    "shard_index",
+                    "seed_start",
+                    "seed_end",
+                    "seed_count",
+                    "worker_count",
+                )
+            ):
+                raise T075WorkflowError(
+                    "artifact-retention",
+                    [f"{stage}: range does not match frozen seed plan"],
+                )
+        if seen_ranges != set(expected_stage6):
+            raise T075WorkflowError(
+                "artifact-retention", [f"{stage}: frozen range plan is incomplete"]
+            )
     seen: set[tuple[str | None, int]] = set()
     process_ids: set[int] = set()
     process_ids_by_arm: dict[str, set[int]] = {}
@@ -322,6 +368,45 @@ def _t075_validate_process_shards(
             raise T075WorkflowError(
                 "artifact-retention", [f"{stage}: shard seed range is not frozen"]
             )
+        if stage == "stage6-eval":
+            expected = expected_stage6.get((str(arm), index))
+            requested_seeds = (
+                list(range(int(expected["seed_start"]), int(expected["seed_end"]) + 1))
+                if expected is not None
+                else None
+            )
+            if (
+                expected is None
+                or any(
+                    entry.get(field) != expected.get(field)
+                    for field in (
+                        "arm",
+                        "shard_index",
+                        "seed_start",
+                        "seed_end",
+                        "seed_count",
+                        "worker_count",
+                    )
+                )
+                or entry.get("requested_seeds") != requested_seeds
+            ):
+                raise T075WorkflowError(
+                    "artifact-retention", [f"{stage}: shard seed range is forged"]
+                )
+            completed_seeds = entry.get("completed_seeds")
+            if (
+                not isinstance(completed_seeds, list)
+                or any(seed not in requested_seeds for seed in completed_seeds)
+                or len(set(completed_seeds)) != len(completed_seeds)
+            ):
+                raise T075WorkflowError(
+                    "artifact-retention",
+                    [f"{stage}: completed seed evidence is invalid"],
+                )
+            if status == "completed" and completed_seeds != requested_seeds:
+                raise T075WorkflowError(
+                    "artifact-retention", [f"{stage}: completed seed range is partial"]
+                )
     if expected_arms is not None:
         counts = {arm: 0 for arm in expected_arms}
         for arm, _index in seen:
@@ -1010,6 +1095,63 @@ def _t075_command_string(
     )
 
 
+def _t075_standalone_stage6_argv(args: argparse.Namespace) -> tuple[str, ...]:
+    """Build the frozen independent Stage-6 command from observed paths."""
+
+    output = getattr(args, "output", None)
+    retention = getattr(args, "retention_manifest", None)
+    if not isinstance(output, Path) or not isinstance(retention, Path):
+        raise T075WorkflowError(
+            "stage6-eval", ["independent Stage-6 command lacks output/retention paths"]
+        )
+    run_stage6 = bool(getattr(args, "run_stage6", False))
+    stage5_report = getattr(args, "stage5_report", None) or output
+    stage5_parent = getattr(args, "preceding_manifest", None)
+    if not run_stage6:
+        stage5_parent = retention
+    if not isinstance(stage5_report, Path) or not isinstance(stage5_parent, Path):
+        raise T075WorkflowError(
+            "stage6-eval", ["independent Stage-6 command lacks Stage-5 parent paths"]
+        )
+    stage6_output = (
+        output if run_stage6 else output.with_name("stage6-complete-run-report.json")
+    )
+    stage6_retention = (
+        retention if run_stage6 else retention.with_name("stage6.retention.json")
+    )
+    preflight = getattr(args, "preflight", None)
+    decision_report = getattr(args, "decision_report", None)
+    if not isinstance(preflight, Path) or not isinstance(decision_report, Path):
+        raise T075WorkflowError(
+            "stage6-eval",
+            ["independent Stage-6 command lacks preflight/decision paths"],
+        )
+    return (
+        "evaluate",
+        "--target-table",
+        str(args.target_table),
+        "--checkpoint-directory",
+        str(args.checkpoint_directory),
+        "--stage5-report",
+        str(stage5_report),
+        "--output",
+        str(stage6_output),
+        "--run-stage6",
+        "--stage6-shard-count",
+        str(T075_STAGE6_SHARD_COUNT),
+        "--stage6-worker-count",
+        str(T065_MAX_WORKERS),
+        "--preflight",
+        str(preflight),
+        "--preceding-manifest",
+        str(stage5_parent),
+        "--retention-manifest",
+        str(stage6_retention),
+        "--decision-report",
+        str(decision_report),
+    )
+
+
 def _t075_command_matches_contract(
     command: Any, stage: str, *, skipped: bool = False
 ) -> bool:
@@ -1045,20 +1187,69 @@ def _t075_command_matches_contract(
         return False
     if stage_command is not None and command_tokens[1] != stage_command.strip():
         return False
-    # Stage 6 is an independent invocation.  A skipped Stage-6 contract must
-    # still describe the frozen Stage-6 command, rather than inheriting a
-    # Stage-5 evaluate command which omitted --run-stage6.
-    if stage == "stage6-eval" and "--run-stage6" not in command_tokens:
-        return False
-    if skipped and stage == "stage6-eval":
-        try:
-            shard_flag = command_tokens.index("--stage6-shard-count")
-            worker_flag = command_tokens.index("--stage6-worker-count")
-            if command_tokens[shard_flag + 1] != str(
-                T075_STAGE6_SHARD_COUNT
-            ) or command_tokens[worker_flag + 1] != str(T065_MAX_WORKERS):
+    # Stage 6 is an independent invocation.  Require the complete frozen
+    # argv, including the Stage-5 parent and the separate Stage-6 outputs.
+    if stage == "stage6-eval":
+        options: dict[str, list[str]] = {}
+        index = 2
+        while index < len(command_tokens):
+            token = command_tokens[index]
+            if token == "--run-stage6":
+                if token in options:
+                    return False
+                options[token] = [""]
+                index += 1
+            elif token.startswith("--") and index + 1 < len(command_tokens):
+                if token in options:
+                    return False
+                options[token] = [command_tokens[index + 1]]
+                index += 2
+            else:
                 return False
-        except (ValueError, IndexError):
+        required_options = {
+            "--target-table",
+            "--checkpoint-directory",
+            "--stage5-report",
+            "--output",
+            "--preflight",
+            "--preceding-manifest",
+            "--retention-manifest",
+            "--decision-report",
+            "--stage6-shard-count",
+            "--stage6-worker-count",
+        }
+        if not required_options.issubset(options) or options.get("--run-stage6") != [
+            ""
+        ]:
+            return False
+        if options["--stage6-shard-count"] != [str(T075_STAGE6_SHARD_COUNT)] or (
+            options["--stage6-worker-count"] != [str(T065_MAX_WORKERS)]
+        ):
+            return False
+        expected_names = {
+            "--target-table": "stage2-target-table.json",
+            "--checkpoint-directory": "stage4-checkpoints",
+            "--stage5-report": "stage5-heldout-report.json",
+            "--output": "stage6-complete-run-report.json",
+            "--preflight": "stage0-preflight.json",
+            "--preceding-manifest": "stage5.retention.json",
+            "--retention-manifest": "stage6.retention.json",
+            "--decision-report": "terminal-decision-report.json",
+        }
+        normalized_paths: dict[str, str] = {}
+        try:
+            for option, basename in expected_names.items():
+                normalized = _t075_normalize_artifact_path(options[option][0])
+                if not normalized.endswith("/" + basename):
+                    return False
+                normalized_paths[option] = normalized
+        except (OSError, TypeError, ValueError):
+            return False
+        roots = {
+            normalized.removesuffix("/" + expected_names[option])
+            for option, normalized in normalized_paths.items()
+        }
+        if len(roots) != 1:
             return False
     return True
 
@@ -1101,15 +1292,11 @@ def _t075_skipped_stage_contract(
 
     contracts: dict[str, dict[str, Any]] = {}
     for stage in stages:
-        command_argv = tuple(str(token) for token in getattr(args, "_command_argv", ()))
-        if stage == "stage6-eval" and "--run-stage6" not in command_argv:
-            command_argv += (
-                "--run-stage6",
-                "--stage6-shard-count",
-                str(T075_STAGE6_SHARD_COUNT),
-                "--stage6-worker-count",
-                str(T065_MAX_WORKERS),
-            )
+        command_argv = (
+            _t075_standalone_stage6_argv(args)
+            if stage == "stage6-eval"
+            else tuple(str(token) for token in getattr(args, "_command_argv", ()))
+        )
         command = _t075_command_string(args, command_argv=command_argv)
         contracts[stage] = {
             **_t075_execution_evidence(
@@ -1273,6 +1460,7 @@ def _t075_stage_retention_records(
                 worker_count=evidence["worker_count"],
                 per_shard=evidence.get("per_shard"),
                 status=str(evidence.get("status")),
+                ranges=evidence.get("ranges"),
             )
         outputs = evidence.get("output_identities")
         command_outputs = command.get("output_identities")
@@ -1706,6 +1894,7 @@ def _write_t075_stage_retention(
             worker_count=evidence["worker_count"],
             per_shard=evidence["per_shard"],
             status=status,
+            ranges=evidence["ranges"],
         )
     if not isinstance(evidence["parent_identities"], Mapping):
         raise T075WorkflowError(
@@ -3743,6 +3932,7 @@ def _run_t075_evaluate(args: argparse.Namespace) -> int:
         worker_count=actual_worker_count,
         per_shard=actual_per_shard,
         status="completed" if stage6.valid else "failed",
+        ranges=actual_ranges,
     )
     stage6_report = stage6.to_dict()
     _write_canonical_json(args.output, stage6_report)

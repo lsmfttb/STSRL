@@ -32,6 +32,7 @@ from sts_combat_rl.sim.non_combat_learning import (
     T065CaseD,
     T065Coverage,
     T065SourceArmReport,
+    _validate_spawn_process_bindings,
     _validate_stage6_process_evidence,
     T065SourceState,
     build_stage6_report,
@@ -2660,6 +2661,13 @@ def test_t075_first_terminal_decision_wins(tmp_path) -> None:
     args = SimpleNamespace(
         decision_report=decision_path,
         retention_manifest=tmp_path / "retention.json",
+        output=tmp_path / "stage5-heldout-report.json",
+        target_table=tmp_path / "stage2-target-table.json",
+        checkpoint_directory=tmp_path / "stage4-checkpoints",
+        stage5_report=None,
+        run_stage6=False,
+        preflight=tmp_path / "stage0-preflight.json",
+        preceding_manifest=None,
         _t075_execution_start_utc="2026-08-28T00:00:00+00:00",
     )
     _handle_t075_case_d(
@@ -2982,6 +2990,24 @@ def test_t075_finalize_accepts_valid_case_d_json_lists(tmp_path, monkeypatch) ->
         )
         for stage in skipped
     }
+    frozen_root = Path(
+        "D:/DeadlycatCoding/STSRL/artifacts/t075-leakage-safe-non-combat-cohort-repair"
+    )
+    stage6_args = SimpleNamespace(
+        target_table=frozen_root / "stage2-target-table.json",
+        checkpoint_directory=frozen_root / "stage4-checkpoints",
+        output=frozen_root / "stage5-heldout-report.json",
+        stage5_report=None,
+        run_stage6=False,
+        preflight=frozen_root / "stage0-preflight.json",
+        preceding_manifest=None,
+        retention_manifest=frozen_root / "stage5.retention.json",
+        decision_report=frozen_root / "terminal-decision-report.json",
+    )
+    skipped_commands["stage6-eval"] = command_module._t075_command_string(
+        stage6_args,
+        command_argv=command_module._t075_standalone_stage6_argv(stage6_args),
+    )
     skipped_evidence = {
         stage: {
             "command": skipped_commands[stage],
@@ -3147,25 +3173,40 @@ def test_replay_success_worker_schema_is_merged_with_worker_kind(monkeypatch) ->
 
 
 def test_stage6_retention_evidence_is_flat_per_arm_and_shard() -> None:
-    entries = [
-        {
-            "arm": arm,
-            "shard_index": shard_index,
-            "process_id": 1000 + arm_index * 16 + shard_index,
-            "worker_kind": "spawn-process",
-            "exit_code": 0,
-            "requested_seed_count": 16,
-        }
-        for arm_index, arm in enumerate(("expert", "learned", "stochastic"))
-        for shard_index in range(16)
-    ]
+    entries = []
+    for arm_index, arm in enumerate(("expert", "learned", "stochastic")):
+        for shard_index, spec in enumerate(stage6_shard_ranges(arm=arm)):
+            seeds = list(range(spec["seed_start"], spec["seed_end"] + 1))
+            entries.append(
+                {
+                    **spec,
+                    "process_id": 1000 + arm_index * 16 + shard_index,
+                    "worker_kind": "spawn-process",
+                    "exit_code": 0,
+                    "requested_seeds": seeds,
+                    "completed_seeds": seeds,
+                    "requested_seed_count": 16,
+                }
+            )
     _t075_validate_process_shards(
         "stage6-eval",
         shard_count=16,
         worker_count=16,
         per_shard=entries,
         status="completed",
+        ranges=entries,
     )
+    forged = [dict(entry) for entry in entries]
+    forged[0]["seed_start"] += 1
+    with pytest.raises(T075WorkflowError, match="frozen seed plan"):
+        _t075_validate_process_shards(
+            "stage6-eval",
+            shard_count=16,
+            worker_count=16,
+            per_shard=entries,
+            status="completed",
+            ranges=forged,
+        )
     with pytest.raises(T075WorkflowError, match="shard"):
         _t075_validate_process_shards(
             "stage6-eval",
@@ -3173,7 +3214,69 @@ def test_stage6_retention_evidence_is_flat_per_arm_and_shard() -> None:
             worker_count=16,
             per_shard={"expert": entries[:16]},
             status="completed",
+            ranges=entries,
         )
+
+
+def test_stage6_skipped_contract_is_standalone_and_exact() -> None:
+    import sts_combat_rl.commands.non_combat_learning as command_module
+
+    root = Path(
+        "D:/DeadlycatCoding/STSRL/artifacts/t075-leakage-safe-non-combat-cohort-repair"
+    )
+    args = SimpleNamespace(
+        target_table=root / "stage2-target-table.json",
+        checkpoint_directory=root / "stage4-checkpoints",
+        output=root / "stage5-heldout-report.json",
+        stage5_report=None,
+        run_stage6=False,
+        preflight=root / "stage0-preflight.json",
+        preceding_manifest=None,
+        retention_manifest=root / "stage5.retention.json",
+        decision_report=root / "terminal-decision-report.json",
+        _command_argv=(
+            "evaluate",
+            "--target-table",
+            str(root / "stage2-target-table.json"),
+        ),
+        _t075_execution_start_utc="2026-08-28T00:00:00+00:00",
+    )
+    commands, _evidence = command_module._t075_skipped_stage_contract(
+        args, ("stage6-eval",), "stage 6 is independent"
+    )
+    command = commands["stage6-eval"]
+    assert command_module._t075_command_matches_contract(
+        command, "stage6-eval", skipped=True
+    )
+    assert "--stage5-report" in command
+    assert "--preceding-manifest" in command
+    assert "--output" in command
+    assert not command_module._t075_command_matches_contract(
+        command.replace("--stage5-report", "--missing-stage5-report"),
+        "stage6-eval",
+        skipped=True,
+    )
+    assert not command_module._t075_command_matches_contract(
+        command.replace("stage5-heldout-report.json", "wrong-report.json"),
+        "stage6-eval",
+        skipped=True,
+    )
+
+
+def test_spawn_parent_rejects_forged_child_pid() -> None:
+    processes = [
+        SimpleNamespace(pid=4101, exitcode=0),
+        SimpleNamespace(pid=4102, exitcode=0),
+    ]
+    payloads = ({"shard_index": 0}, {"shard_index": 1})
+    results = {
+        0: {"process_id": 4101, "status": "passed"},
+        1: {"process_id": 4102, "status": "passed"},
+    }
+    _validate_spawn_process_bindings(processes, payloads, results, stage="stage6")
+    results[1] = {"process_id": 9999, "status": "passed"}
+    with pytest.raises(T065CaseD, match="expected child PID"):
+        _validate_spawn_process_bindings(processes, payloads, results, stage="stage6")
 
 
 def test_stage5_without_stage6_writes_completed_independent_parent(
@@ -3227,8 +3330,10 @@ def test_stage5_without_stage6_writes_completed_independent_parent(
         output=output,
         stage5_report=None,
         run_stage6=False,
-        decision_report=None,
+        decision_report=tmp_path / "terminal-decision-report.json",
         retention_manifest=retention,
+        preflight=tmp_path / "preflight.json",
+        preceding_manifest=None,
         _command_argv=("evaluate", "--target-table", str(target)),
         _t075_execution_start_utc="2026-08-28T00:00:00+00:00",
     )
