@@ -2593,6 +2593,171 @@ def test_t075_selection_invokes_strict_reuse_resolver(tmp_path, monkeypatch) -> 
     assert called == [(args.reuse_manifest, args.input)]
 
 
+def test_t075_select_retention_uses_whole_command_wall_clock(
+    tmp_path, monkeypatch
+) -> None:
+    """Stage-1 retention keeps command and replay timing in separate fields."""
+
+    import sts_combat_rl.commands.non_combat_learning as command_module
+
+    stochastic_states = [
+        _state(
+            family_index * 100 + offset,
+            family,
+            "train" if offset < 48 else "validation" if offset < 64 else "heldout",
+            650001 if offset < 48 else 650155 if offset < 64 else 650206,
+        )
+        for family_index, family in enumerate(T065_MANDATORY_FAMILIES)
+        for offset in range(80)
+    ]
+    expert_states = [
+        replace(
+            state,
+            source_arm="expert_non_combat_v1",
+            source_run_id=f"expert:{index}",
+            public_state_identity=f"expert-state:{index}",
+        )
+        for index, state in enumerate(stochastic_states)
+    ]
+    source_paths = (tmp_path / "stochastic.json", tmp_path / "expert.json")
+    source_states = (stochastic_states, expert_states)
+    for path, arm, states in zip(
+        source_paths,
+        ("stochastic_non_combat_v1", "expert_non_combat_v1"),
+        source_states,
+        strict=True,
+    ):
+        _write_source_fixture(path, arm, states)
+    reuse_path = tmp_path / "reuse.json"
+    preflight_path = tmp_path / "preflight.json"
+    reuse_path.write_text("reuse", encoding="utf-8")
+    preflight_path.write_text("preflight", encoding="utf-8")
+
+    class FakeReader:
+        def __init__(self, path):
+            index = source_paths.index(Path(path))
+            self.metadata = {
+                "arm": (
+                    "stochastic_non_combat_v1",
+                    "expert_non_combat_v1",
+                )[index]
+            }
+            self.record_count = len(source_states[index])
+            self.states = source_states[index]
+
+        def iter_states(self):
+            yield from self.states
+
+    source_entries = [
+        {
+            "arm": arm,
+            "path": str(path),
+            "sha256": file_sha256(path),
+            "size_bytes": path.stat().st_size,
+            "record_count": len(states),
+            "retention_manifest": {},
+        }
+        for path, arm, states in zip(
+            source_paths,
+            ("stochastic_non_combat_v1", "expert_non_combat_v1"),
+            source_states,
+            strict=True,
+        )
+    ]
+
+    def select(candidates):
+        locators = list(candidates)
+        selected = tuple(
+            (locator, f"{index:064x}", b'{"candidate":true}')
+            for index, locator in enumerate(locators[:320])
+        )
+        return selected, {
+            "groups": [
+                {
+                    "group_digest": f"{index:064x}",
+                    "owner": {
+                        "source_index": locator.source_index,
+                        "record_index": locator.record_index,
+                    },
+                }
+                for index, (locator, _digest, _payload) in enumerate(selected)
+            ],
+            "owner_counts_by_family_split": {},
+        }
+
+    replay_shards = [
+        {
+            "shard_index": index,
+            "wall_clock_seconds": 0.25,
+        }
+        for index in range(16)
+    ]
+    captured = {}
+    monkeypatch.setattr(command_module, "_SourceArmArtifactReader", FakeReader)
+    monkeypatch.setattr(
+        command_module,
+        "_validate_source_arm_metadata",
+        lambda metadata, _path, record_count: metadata["arm"],
+    )
+    monkeypatch.setattr(
+        command_module,
+        "_t075_resolve_reuse_manifest",
+        lambda _path, _source_paths: ({}, source_entries),
+    )
+    monkeypatch.setattr(
+        command_module, "_t075_normalize_artifact_path", lambda value: str(value)
+    )
+    monkeypatch.setattr(command_module, "_validate_t075_preflight", lambda _path: {})
+    monkeypatch.setattr(command_module, "select_t075_source_candidates", select)
+    monkeypatch.setattr(
+        command_module,
+        "replay_source_states_process_sharded",
+        lambda *args, **kwargs: {
+            "status": "passed",
+            "worker_count": 16,
+            "shard_count": 16,
+            "process_count": 16,
+            "attempted": 320,
+            "restored": 320,
+            "mismatches": 0,
+            "replacements": 0,
+            "selected_duplicate": 0,
+            "cross_split_overlap": 0,
+            "wall_clock_seconds": 7.25,
+            "shards": replay_shards,
+            "processes": [{"process_id": 9000 + index} for index in range(16)],
+        },
+    )
+    monkeypatch.setattr(command_module.time, "perf_counter", lambda: 150.0)
+    monkeypatch.setattr(
+        command_module,
+        "_write_t075_stage_retention",
+        lambda _args, **kwargs: captured.update(kwargs["evidence"]),
+    )
+
+    args = SimpleNamespace(
+        decision_report=None,
+        selection_strategy=command_module.T075_SELECTION_STRATEGY_ID,
+        replay_shard_count=16,
+        replay_worker_count=16,
+        replay_verify=True,
+        preflight=preflight_path,
+        reuse_manifest=reuse_path,
+        input=list(source_paths),
+        output=tmp_path / "selected.jsonl",
+        ownership_audit=tmp_path / "ownership.json",
+        manifest=tmp_path / "selection.json",
+        _t075_execution_start_utc="2026-08-29T00:00:00+00:00",
+        _t075_execution_start_monotonic=100.0,
+        _command_argv=("select",),
+    )
+
+    assert command_module._run_t075_select(args) == 0
+    assert captured["wall_clock_seconds"] == pytest.approx(50.0)
+    assert captured["replay_counts"]["wall_clock_seconds"] == pytest.approx(7.25)
+    assert [item["wall_clock_seconds"] for item in captured["per_shard"]] == [0.25] * 16
+
+
 def test_t075_reuse_resolver_rejects_fabricated_new_source(tmp_path) -> None:
     reuse = tmp_path / "reuse.json"
     import sts_combat_rl.commands.non_combat_learning as command_module

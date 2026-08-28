@@ -3788,7 +3788,6 @@ def _run_t075_select(args: argparse.Namespace) -> int:
             "terminal": True,
             "shard_count": replay["shard_count"],
             "worker_count": replay["worker_count"],
-            "wall_clock_seconds": replay["wall_clock_seconds"],
             "ranges": replay["shards"],
             "per_shard": replay["shards"],
             "processes": replay["processes"],
@@ -3797,6 +3796,7 @@ def _run_t075_select(args: argparse.Namespace) -> int:
                 "attempted": replay["attempted"],
                 "restored": replay["restored"],
                 "process_count": replay["process_count"],
+                "wall_clock_seconds": replay["wall_clock_seconds"],
             },
             "parent_identities": {
                 "reuse": _t075_parent_identity(args.reuse_manifest),
