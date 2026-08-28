@@ -74,6 +74,19 @@ def _acceptance_worker_with_one_crash(payload):
     }
 
 
+def _acceptance_worker_returns_failed(payload):
+    """Pickleable process worker returning an ordinary failed result."""
+
+    return {
+        "shard_index": payload["shard_index"],
+        "process_id": os.getpid(),
+        "worker_kind": "spawn-process",
+        "status": "failed",
+        "exit_code": 1,
+        "error": "worker reported a bounded failure",
+    }
+
+
 def _frozen_stage6_records() -> tuple[list[dict[str, int]], list[dict[str, int]]]:
     """Return ordinary per-run rows/events, including one valid zero row."""
 
@@ -89,6 +102,165 @@ def _frozen_stage6_records() -> tuple[list[dict[str, int]], list[dict[str, int]]
         for seed in range(651002, 651257)
     ]
     return rows, events
+
+
+def _write_independent_stage6_report(path, *, missing_seed: int | None = None) -> None:
+    """Write a schema-complete-shaped report without non-contract identity data."""
+
+    seeds = list(range(651001, 651257))
+    action_space = {
+        "excluded_kinds": [
+            "game_potion_discard",
+            "game_potion_use",
+            "potion",
+            "potion_discard",
+            "reward_potion",
+            "shop_reward_potion",
+        ],
+        "preferred_kinds": ["card", "end_turn"],
+        "allow_excluded_fallback": True,
+        "include_non_combat_potions": True,
+    }
+    arms = {}
+    for arm_index, arm in enumerate(("stochastic", "expert", "learned")):
+        rows = []
+        for seed in seeds:
+            row = {
+                "simulator_seed": seed,
+                "terminal": True,
+                "terminal_floor": 2.0 if arm != "learned" else 3.0,
+                "act2_entry": False,
+                "truncated": False,
+                "controller_error": False,
+                "problems": [],
+                "action_space": action_space,
+                "controller_provenance": {},
+            }
+            if arm == "learned":
+                row.update(
+                    {
+                        "learned_decision_count": 0 if seed == 651001 else 1,
+                        "intentional_unsupported_fallback_count": 0,
+                        "supported_failure_count": 0,
+                    }
+                )
+                if seed == missing_seed:
+                    row["learned_decision_count"] = 1
+            rows.append(row)
+        events = (
+            [
+                {
+                    "simulator_seed": seed,
+                    "battle": False,
+                    "screen_family": "MAP_SCREEN",
+                    "mandatory": True,
+                    "status": "learned_success",
+                    "action_index": 0,
+                    "score": 0.0,
+                }
+                for seed in seeds
+                if seed != 651001 and seed != missing_seed
+            ]
+            if arm == "learned"
+            else []
+        )
+        specs = [
+            {
+                "arm": arm,
+                "shard_index": index,
+                "seed_start": start,
+                "seed_end": end,
+                "seed_count": 16,
+                "worker_count": 16,
+                "requested_seeds": list(range(start, end + 1)),
+                "completed_seeds": list(range(start, end + 1)),
+                "requested_seed_count": 16,
+                "completed_row_count": 16,
+                "worker_kind": "spawn-process",
+                "process_id": 20000 + arm_index * 16 + index,
+                "exit_code": 0,
+            }
+            for index, start, end in FROZEN_STAGE6_SHARDS
+        ]
+        arms[arm] = {
+            "requested_seed_count": 256,
+            "completed_row_count": 256,
+            "decision_count": len(events),
+            "wall_clock_seconds": 1.0,
+            "worker_count": 16,
+            "shard_count": 16,
+            "shard_specs": specs,
+            "problem_count": 0,
+            "problems": [],
+            "report": {
+                "schema_id": "t065-complete-run-report-v1",
+                "schema_version": 1,
+                "arm": arm,
+                "driver_seed": 654002,
+                "requested_seeds": seeds,
+                "rows": rows,
+                "decision_events": events,
+                "worker_count": 16,
+                "shard_count": 16,
+                "shard_specs": specs,
+                "problems": [],
+                "simulator_identity": {},
+                "action_space": action_space,
+                "controller_provenance": {},
+                "driver_provenance": {},
+            },
+        }
+    paired_rows = [
+        {
+            "simulator_seed": seed,
+            "learned_terminal_floor": 3.0,
+            "expert_terminal_floor": 2.0,
+            "learned_terminal": True,
+            "expert_terminal": True,
+            "learned_act2_entry": False,
+            "expert_act2_entry": False,
+            "truncated": False,
+            "controller_error": False,
+        }
+        for seed in seeds
+    ]
+    denominator = 255 if missing_seed is not None else 256
+    path.write_text(
+        json.dumps(
+            {
+                "schema_id": "t065-complete-run-report-v1",
+                "schema_version": 1,
+                "paired_terminal_floor_deltas": [1.0] * 256,
+                "learned_terminal_floor_mean": 3.0,
+                "expert_terminal_floor_mean": 2.0,
+                "mean_terminal_floor_delta": 1.0,
+                "p_positive": 1.0,
+                "coverage": {
+                    "D": denominator,
+                    "L": denominator,
+                    "M": denominator,
+                    "F": 0,
+                    "learned_coverage": 1.0,
+                    "mandatory_failure_rate": 0.0,
+                    "passed": True,
+                },
+                "learned_act2_entry_count": 0,
+                "expert_act2_entry_count": 0,
+                "controller_error_count": 0,
+                "truncation_count": 0,
+                "valid": True,
+                "passed": True,
+                "problems": [],
+                "execution_evidence": {
+                    "worker_count": 16,
+                    "shard_count_per_arm": 16,
+                    "arms": arms,
+                    "paired_rows": paired_rows,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
 
 
 def test_t075_case_d_writes_exact_reached_skipped_prefix(tmp_path) -> None:
@@ -473,36 +645,10 @@ def test_t075_stage6_literal_ranges_and_per_run_missing_record_boundary(
 
 
 def test_t075_stage6_validator_rejects_truncated_decision_record(tmp_path) -> None:
-    """Exercise the complete report reader without adding a new identity field."""
-
-    import importlib.util
-
-    fixture_path = (
-        __file__[: -len("test_t075_acceptance_boundary.py")]
-        + "test_non_combat_learning.py"
-    )
-    fixture_spec = importlib.util.spec_from_file_location(
-        "t075_existing_test_fixture", fixture_path
-    )
-    assert fixture_spec is not None and fixture_spec.loader is not None
-    fixture_module = importlib.util.module_from_spec(fixture_spec)
-    fixture_spec.loader.exec_module(fixture_module)
+    """A missing nonzero run record fails the actual Stage-6 reader."""
 
     path = tmp_path / "stage6-complete-run-report.json"
-    fixture_module._write_valid_t075_stage6_fixture(path)
-    assert _t075_stage6_report_is_valid(path, artifact_root=tmp_path)
-    report = json.loads(path.read_text(encoding="utf-8"))
-    learned = report["execution_evidence"]["arms"]["learned"]
-    learned_report = learned["report"]
-    removed = learned_report["decision_events"].pop()
-    removed_seed = removed["simulator_seed"]
-    removed_row = next(
-        row for row in learned_report["rows"] if row["simulator_seed"] == removed_seed
-    )
-    removed_row["learned_decision_count"] = 0
-    learned["decision_count"] -= 1
-    report["coverage"].update({"D": 255, "L": 255, "M": 255})
-    path.write_text(json.dumps(report), encoding="utf-8")
+    _write_independent_stage6_report(path, missing_seed=651256)
     assert not _t075_stage6_report_is_valid(path, artifact_root=tmp_path)
 
     # The independent ordinary-record fixture has one legitimate zero-learned
@@ -590,6 +736,30 @@ def test_t075_spawn_batch_failure_carries_actual_partial_process_evidence() -> N
     assert per_shard[0]["requested_seeds"] == list(range(651001, 651017))
     assert per_shard[1]["requested_seeds"] == list(range(651017, 651033))
     assert raised.value.failure_counts["shards_returned"] == 1
+
+
+def test_t075_spawn_batch_graceful_failed_result_carries_partial_evidence() -> None:
+    payloads = [
+        {"shard_index": 0, "seeds": list(range(651001, 651017))},
+        {"shard_index": 1, "seeds": list(range(651017, 651033))},
+    ]
+    with pytest.raises(T065CaseD) as raised:
+        _run_spawn_process_batch(
+            _acceptance_worker_returns_failed,
+            payloads,
+            stage="stage6-eval",
+            worker_count=2,
+        )
+    evidence = raised.value.execution_evidence
+    assert len(evidence["per_shard"]) == 2
+    assert all(item["started"] is True for item in evidence["per_shard"])
+    assert all(isinstance(item["process_id"], int) for item in evidence["per_shard"])
+    assert all(item["status"] == "failed" for item in evidence["per_shard"])
+    assert all(item["exit_code"] == 0 for item in evidence["per_shard"])
+    assert [item["requested_seeds"] for item in evidence["per_shard"]] == [
+        list(range(651001, 651017)),
+        list(range(651017, 651033)),
+    ]
 
 
 def test_t075_stage6_does_not_rewrite_supplied_stage5_parent(
