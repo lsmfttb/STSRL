@@ -2153,6 +2153,12 @@ def test_t075_retention_does_not_synthesize_completed_failure(tmp_path) -> None:
             "start_time_utc": "2026-08-28T00:00:00+00:00",
             "end_time_utc": "2026-08-28T00:00:01+00:00",
             "exit_code": 1,
+            "wall_clock_seconds": 1.0,
+            "shard_count": 0,
+            "worker_count": 0,
+            "ranges": [],
+            "per_shard": [],
+            "parent_identities": {},
             "problems": ["gate failed"],
         },
         terminal_case="C",
@@ -2183,6 +2189,35 @@ def test_t075_retention_rejects_missing_execution_evidence(tmp_path) -> None:
             artifacts={"stage5_report": artifact},
             evidence={"status": "failed", "terminal": False},
             terminal_case="C",
+        )
+
+
+def test_t075_retention_rejects_missing_observed_shard_evidence(tmp_path) -> None:
+    artifact = tmp_path / "report.json"
+    artifact.write_text("{}\n", encoding="utf-8")
+    with pytest.raises(T075WorkflowError, match="complete execution evidence"):
+        _write_t075_stage_retention(
+            SimpleNamespace(
+                retention_manifest=tmp_path / "failed.retention.json",
+                _command_argv=(),
+            ),
+            stage="stage6-eval",
+            artifacts={"stage6_report": artifact},
+            evidence={
+                "command": "fixed test command",
+                "executed": True,
+                "status": "failed",
+                "terminal": False,
+                "start_time_utc": "2026-08-28T00:00:00+00:00",
+                "end_time_utc": "2026-08-28T00:00:01+00:00",
+                "exit_code": 1,
+                "wall_clock_seconds": 1.0,
+                "shard_count": 16,
+                "worker_count": 16,
+                "ranges": [],
+                "parent_identities": {},
+                "problems": ["worker crashed"],
+            },
         )
 
 
@@ -2503,6 +2538,7 @@ def test_t075_stage6_process_evidence_requires_unique_real_pids() -> None:
         {
             "shard_index": index,
             "process_id": 1000 + index,
+            "worker_kind": "spawn-process",
             "status": "passed",
             "exit_code": 0,
         }
@@ -2511,6 +2547,13 @@ def test_t075_stage6_process_evidence_requires_unique_real_pids() -> None:
     _validate_stage6_process_evidence(results)
     results[-1] = {**results[-1], "process_id": results[0]["process_id"]}
     with pytest.raises(T065CaseD, match="unique process"):
+        _validate_stage6_process_evidence(results)
+    results[-1] = {
+        **results[-1],
+        "process_id": 2000,
+        "worker_kind": "thread",
+    }
+    with pytest.raises(T065CaseD, match="spawn-process"):
         _validate_stage6_process_evidence(results)
 
 

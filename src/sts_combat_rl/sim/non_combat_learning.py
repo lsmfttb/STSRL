@@ -4907,6 +4907,7 @@ def _stage6_process_entry(payload: Mapping[str, Any], result_queue: Any) -> None
                 "status": "passed" if not report.problems else "failed",
                 "shard_index": int(payload["shard_index"]),
                 "process_id": os.getpid(),
+                "worker_kind": "spawn-process",
                 "exit_code": 0 if not report.problems else 1,
                 "cpu_seconds": cpu_seconds,
                 "wall_clock_seconds": time.perf_counter() - started,
@@ -4919,6 +4920,7 @@ def _stage6_process_entry(payload: Mapping[str, Any], result_queue: Any) -> None
                 "status": "failed",
                 "shard_index": int(payload["shard_index"]),
                 "process_id": os.getpid(),
+                "worker_kind": "spawn-process",
                 "exit_code": 1,
                 "cpu_seconds": 0.0,
                 "wall_clock_seconds": time.perf_counter() - started,
@@ -5043,6 +5045,7 @@ def run_complete_run_arm_sharded(
                 "wall_clock_seconds": result["wall_clock_seconds"],
                 "cpu_seconds": result["cpu_seconds"],
                 "process_id": result["process_id"],
+                "worker_kind": result["worker_kind"],
                 "exit_code": result["exit_code"],
                 "problem_count": len(report.problems),
                 "problems": list(report.problems),
@@ -5097,6 +5100,10 @@ def _validate_stage6_process_evidence(
         for result in results
     ):
         raise T065CaseD("stage6", ["Stage 6 has a failed shard process"])
+    if any(result.get("worker_kind") != "spawn-process" for result in results):
+        raise T065CaseD(
+            "stage6", ["Stage 6 shard evidence is not spawn-process evidence"]
+        )
 
 
 def build_stage6_paired_rows(

@@ -618,6 +618,12 @@ def _run_t075_preflight(args: argparse.Namespace) -> int:
                 args, status="completed", terminal=True, exit_code=0, executed=True
             ),
             "passed": True,
+            "wall_clock_seconds": 0.0,
+            "shard_count": 0,
+            "worker_count": 0,
+            "ranges": [],
+            "per_shard": [],
+            "parent_identities": {},
         },
     )
     print(f"T075 preflight passed: {args.output}", file=sys.stderr)
@@ -1172,6 +1178,12 @@ def _write_t075_stage_retention(
         "start_time_utc",
         "end_time_utc",
         "exit_code",
+        "wall_clock_seconds",
+        "shard_count",
+        "worker_count",
+        "ranges",
+        "per_shard",
+        "parent_identities",
     )
     if any(key not in evidence for key in execution_keys):
         raise T075WorkflowError(
@@ -1212,6 +1224,32 @@ def _write_t075_stage_retention(
         raise T075WorkflowError(
             "artifact-retention", [f"{stage}: exit code is invalid"]
         )
+    wall_clock_seconds = evidence["wall_clock_seconds"]
+    if (
+        isinstance(wall_clock_seconds, bool)
+        or not isinstance(wall_clock_seconds, (int, float))
+        or not math.isfinite(float(wall_clock_seconds))
+        or wall_clock_seconds < 0
+    ):
+        raise T075WorkflowError(
+            "artifact-retention", [f"{stage}: wall-clock evidence is invalid"]
+        )
+    for field in ("shard_count", "worker_count"):
+        value = evidence[field]
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            raise T075WorkflowError(
+                "artifact-retention", [f"{stage}: {field} evidence is invalid"]
+            )
+    if not isinstance(evidence["ranges"], list) or not isinstance(
+        evidence["per_shard"], list
+    ):
+        raise T075WorkflowError(
+            "artifact-retention", [f"{stage}: shard evidence is invalid"]
+        )
+    if not isinstance(evidence["parent_identities"], Mapping):
+        raise T075WorkflowError(
+            "artifact-retention", [f"{stage}: parent evidence is invalid"]
+        )
     if status == "completed" and not terminal:
         status = "pending"
     if status != "completed":
@@ -1240,11 +1278,11 @@ def _write_t075_stage_retention(
                 "end_time_utc": end_time,
                 "exit_code": raw_exit_code,
                 "terminal": terminal,
-                "wall_clock_seconds": float(evidence.get("wall_clock_seconds", 0.0)),
-                "shard_count": int(evidence.get("shard_count", 1)),
-                "worker_count": int(evidence.get("worker_count", 1)),
-                "ranges": evidence.get("ranges", []),
-                "parent_identities": evidence.get("parent_identities", {}),
+                "wall_clock_seconds": float(wall_clock_seconds),
+                "shard_count": evidence["shard_count"],
+                "worker_count": evidence["worker_count"],
+                "ranges": evidence["ranges"],
+                "parent_identities": evidence["parent_identities"],
                 "output_identities": entries,
             }
         },
@@ -1259,10 +1297,10 @@ def _write_t075_stage_retention(
                 "start_time_utc": start_time,
                 "end_time_utc": end_time,
                 "exit_code": raw_exit_code,
-                "shard_count": int(evidence.get("shard_count", 1)),
-                "worker_count": int(evidence.get("worker_count", 1)),
-                "ranges": evidence.get("ranges", []),
-                "per_shard": evidence.get("per_shard", []),
+                "shard_count": evidence["shard_count"],
+                "worker_count": evidence["worker_count"],
+                "ranges": evidence["ranges"],
+                "per_shard": evidence["per_shard"],
                 "artifact_roles": [entry["role"] for entry in entries],
                 "output_identities": entries,
                 "parent_identities": evidence.get("parent_identities", {}),
@@ -1941,8 +1979,12 @@ def _run_t075_validate_reuse(args: argparse.Namespace) -> int:
             "status": "completed",
             "terminal": True,
             "counts": {"sources": 2},
+            "wall_clock_seconds": 0.0,
             "shard_count": 0,
             "worker_count": 0,
+            "ranges": [],
+            "per_shard": [],
+            "parent_identities": {},
         },
     )
     print(f"T075 retained-source reuse passed: {args.output}", file=sys.stderr)
@@ -2842,8 +2884,11 @@ def _run_t075_train(args: argparse.Namespace) -> int:
             "parent_identities": {
                 "target_validation": _t075_parent_identity(args.target_validation)
             },
+            "wall_clock_seconds": 0.0,
             "shard_count": 1,
             "worker_count": 2,
+            "ranges": [],
+            "per_shard": [],
         },
     )
     print(f"T075 training passed: {args.output}", file=sys.stderr)
@@ -2909,6 +2954,11 @@ def _run_t075_evaluate(args: argparse.Namespace) -> int:
         "parent_identities": {
             "target_table": _t075_parent_identity(args.target_table),
         },
+        "wall_clock_seconds": 0.0,
+        "shard_count": 0,
+        "worker_count": 0,
+        "ranges": [],
+        "per_shard": [],
         "problems": list(stage5.problems),
     }
     if not stage5.passed:
@@ -3029,6 +3079,7 @@ def _run_t075_evaluate(args: argparse.Namespace) -> int:
         arm: [
             {
                 "process_id": shard.get("process_id"),
+                "worker_kind": shard.get("worker_kind"),
                 "exit_code": shard.get("exit_code"),
                 "shard_index": shard.get("shard_index"),
             }
@@ -3049,6 +3100,7 @@ def _run_t075_evaluate(args: argparse.Namespace) -> int:
                 not isinstance(shard, Mapping)
                 or isinstance(shard.get("process_id"), bool)
                 or not isinstance(shard.get("process_id"), int)
+                or shard.get("worker_kind") != "spawn-process"
                 or shard.get("exit_code") != 0
                 for shard in shard_specs
             )
@@ -4880,6 +4932,11 @@ def _handle_t075_case_d(args: argparse.Namespace, failure: T075WorkflowError) ->
                 "counts": dict(failure.failure_counts),
                 "problems": list(failure.problems),
                 "parent_identities": _preceding_manifest_identities(args),
+                "wall_clock_seconds": 0.0,
+                "shard_count": 0,
+                "worker_count": 0,
+                "ranges": [],
+                "per_shard": [],
             },
             terminal_case="D",
         )
