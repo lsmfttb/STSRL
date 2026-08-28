@@ -2916,6 +2916,7 @@ def _replay_process_shard(payload: Mapping[str, Any]) -> dict[str, Any]:
         return {
             "shard_index": int(payload.get("shard_index", -1)),
             "process_id": os.getpid(),
+            "worker_kind": "spawn-process",
             "status": "failed",
             "exit_code": 1,
             "error": f"{type(exc).__name__}: {exc}",
@@ -2997,6 +2998,7 @@ def replay_source_states_process_sharded(
                 results.append(
                     {
                         "shard_index": payload["shard_index"],
+                        "worker_kind": "spawn-process",
                         "status": "failed",
                         "exit_code": 1,
                         "error": f"{type(exc).__name__}: {exc}",
@@ -3039,6 +3041,7 @@ def replay_source_states_process_sharded(
                 "restored": int(result["restored"]),
                 "status": result["status"],
                 "process_id": result["process_id"],
+                "worker_kind": result["worker_kind"],
                 "exit_code": result["exit_code"],
                 "wall_clock_seconds": result["wall_clock_seconds"],
                 "cpu_seconds": result["cpu_seconds"],
@@ -3376,6 +3379,7 @@ def _generate_target_process_shard(payload: Mapping[str, Any]) -> dict[str, Any]
         return {
             "shard_index": int(payload.get("shard_index", -1)),
             "process_id": __import__("os").getpid(),
+            "worker_kind": "spawn-process",
             "status": "failed",
             "exit_code": 1,
             "error": f"{type(exc).__name__}: {exc}",
@@ -3442,6 +3446,7 @@ def _generate_target_process_shard_impl(payload: Mapping[str, Any]) -> dict[str,
     return {
         "shard_index": shard_index,
         "process_id": os.getpid(),
+        "worker_kind": "spawn-process",
         "state_count": len(table.states),
         "target_count": len(table.targets),
         "exit_code": 0,
@@ -3548,6 +3553,8 @@ def generate_counterfactual_targets_process_sharded(
                     results.append(
                         {
                             "shard_index": payload["shard_index"],
+                            "process_id": -1,
+                            "worker_kind": "spawn-process",
                             "status": "failed",
                             "error": f"{type(exc).__name__}: {exc}",
                         }
@@ -3621,6 +3628,7 @@ def generate_counterfactual_targets_process_sharded(
                 {
                     **dict(spec),
                     "process_id": result["process_id"],
+                    "worker_kind": result["worker_kind"],
                     "exit_code": result["exit_code"],
                     "state_count": len(shard.states),
                     "target_count": len(shard.targets),

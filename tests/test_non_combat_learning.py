@@ -27,6 +27,7 @@ from sts_combat_rl.sim.non_combat_learning import (
     T065ExperimentConfig,
     T065HeldoutReport,
     T065_MANDATORY_FAMILIES,
+    T065_SPLITS,
     T065_NATIVE_PROBE_MAX_STEPS,
     T065CaseD,
     T065Coverage,
@@ -78,12 +79,15 @@ from sts_combat_rl.commands.non_combat_learning import (
     T075WorkflowError,
     _portable_path,
     _handle_t075_case_d,
+    _t075_terminal_decision_is_valid,
+    _code_head_for_artifact_root,
     _run_t075_finalize,
     _t075_path_matches,
     _t075_preceding_manifest_path,
     _t075_pinned_simulator_identity,
     _t075_require_pinned_simulator_identity,
     _t075_resolve_reuse_manifest,
+    _t075_validate_accepted_case_d_files,
     _run_t075_select,
     _is_t075_invocation,
     _t075_target_row_completeness,
@@ -2134,6 +2138,8 @@ def test_t075_stage3_target_completeness_uses_exact_expected_keys() -> None:
 
 
 def test_t075_retention_does_not_synthesize_completed_failure(tmp_path) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command_module
+
     artifact = tmp_path / "report.json"
     artifact.write_text("{}\n", encoding="utf-8")
     retention = tmp_path / "failed.retention.json"
@@ -2147,7 +2153,7 @@ def test_t075_retention_does_not_synthesize_completed_failure(tmp_path) -> None:
         stage="stage5-gate",
         artifacts={"stage5_report": artifact},
         evidence={
-            "command": "fixed test command",
+            "command": command_module._t075_command_string(args),
             "executed": True,
             "status": "failed",
             "terminal": False,
@@ -2222,6 +2228,48 @@ def test_t075_retention_rejects_missing_observed_shard_evidence(tmp_path) -> Non
         )
 
 
+def test_t075_retention_rejects_unfrozen_command_and_timestamp(tmp_path) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command_module
+
+    artifact = tmp_path / "report.json"
+    artifact.write_text("{}\n", encoding="utf-8")
+    args = SimpleNamespace(
+        retention_manifest=tmp_path / "failed.retention.json",
+        _command_argv=(),
+        _t075_execution_start_utc="2026-08-28T00:00:00+00:00",
+    )
+    evidence = {
+        **command_module._t075_execution_evidence(
+            args, status="failed", terminal=False, exit_code=1, executed=True
+        ),
+        "status": "failed",
+        "terminal": False,
+        "wall_clock_seconds": 1.0,
+        "shard_count": 0,
+        "worker_count": 0,
+        "ranges": [],
+        "per_shard": [],
+        "parent_identities": {},
+    }
+    evidence["command"] = "arbitrary command"
+    with pytest.raises(T075WorkflowError, match="frozen invocation"):
+        _write_t075_stage_retention(
+            args,
+            stage="stage5-gate",
+            artifacts={"stage5_report": artifact},
+            evidence=evidence,
+        )
+    evidence["command"] = command_module._t075_command_string(args)
+    evidence["start_time_utc"] = "not-a-timestamp"
+    with pytest.raises(T075WorkflowError, match="ISO-UTC"):
+        _write_t075_stage_retention(
+            args,
+            stage="stage5-gate",
+            artifacts={"stage5_report": artifact},
+            evidence=evidence,
+        )
+
+
 def test_t075_stage3_reader_failure_is_materialized_as_failed_report(
     tmp_path, monkeypatch
 ) -> None:
@@ -2293,6 +2341,8 @@ def test_t075_stage3_requires_both_frozen_source_retention_identities(
     for source_path, retention_path in zip(source_paths, retention_paths, strict=True):
         source_path.write_text("source\n", encoding="utf-8")
         retention_path.write_text("retention\n", encoding="utf-8")
+    ownership_path = tmp_path / "ownership.json"
+    ownership_path.write_text("ownership\n", encoding="utf-8")
     frozen = {
         str(path): {
             "arm": arm,
@@ -2342,6 +2392,25 @@ def test_t075_stage3_requires_both_frozen_source_retention_identities(
         "selected_states_sha256": file_sha256(states_path),
         "parent_current_preflight_sha256": file_sha256(preflight_path),
         "parent_reuse_manifest_sha256": "reuse-parent",
+        "code_head": _code_head_for_artifact_root(SimpleNamespace()),
+        "selected_replay_identity_digests": [f"{index:064x}" for index in range(320)],
+        "selected_counts": {
+            family: {split: (48 if split == "train" else 16) for split in T065_SPLITS}
+            for family in T065_MANDATORY_FAMILIES
+        },
+        "replay_verification": {
+            "status": "passed",
+            "attempted": 320,
+            "restored": 320,
+            "mismatches": 0,
+            "replacements": 0,
+            "selected_duplicate": 0,
+            "cross_split_overlap": 0,
+            "worker_count": 16,
+            "shard_count": 16,
+            "process_count": 16,
+        },
+        "parent_ownership_audit_sha256": file_sha256(ownership_path),
         "simulator_identity": _t075_pinned_simulator_identity(),
         "source_artifacts": [
             {
@@ -2370,7 +2439,7 @@ def test_t075_stage3_requires_both_frozen_source_retention_identities(
         validation_report=report_path,
         preflight=preflight_path,
         preceding_manifest=preceding_path,
-        ownership_audit=tmp_path / "ownership.json",
+        ownership_audit=ownership_path,
     )
     with pytest.raises(Exception, match="strict target reader"):
         _t075_write_stage3_report(args, table_path, states_path, selection_path)
@@ -2479,6 +2548,74 @@ def test_t075_reuse_resolver_rejects_fabricated_new_source(tmp_path) -> None:
         T075WorkflowError, match="frozen schema|not an exact frozen input"
     ):
         _t075_resolve_reuse_manifest(reuse, (source, source))
+
+
+def test_t075_accepted_case_d_files_are_revalidated(tmp_path, monkeypatch) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command_module
+
+    decision_path = tmp_path / "case-d.json"
+    retention_path = tmp_path / "case-d.retention.json"
+    decision = {
+        "schema_id": "t065-terminal-decision-report-v1",
+        "schema_version": 1,
+        "task_id": "T065",
+        "approved_spec_commit": T065_APPROVED_SPEC_COMMIT,
+        "case": "D",
+        "stage": "source-selection",
+        "terminal": True,
+    }
+    decision_path.write_text(json.dumps(decision), encoding="utf-8")
+    retention = {
+        "schema_id": "t065-retention-manifest-v1",
+        "schema_version": 1,
+        "task_id": "T065",
+        "approved_spec_commit": T065_APPROVED_SPEC_COMMIT,
+        "experiment_schema_id": "t065-learned-non-combat-policy-v1",
+        "frozen_config": T065ExperimentConfig().to_dict(),
+        "simulator_identity": _t075_pinned_simulator_identity(),
+        "artifacts": [
+            {
+                "role": "terminal_decision_report",
+                "path": str(decision_path),
+                "sha256": file_sha256(decision_path),
+                "size_bytes": decision_path.stat().st_size,
+            }
+        ],
+        "stage_evidence": {
+            "source-selection": {
+                "stage": "source-selection",
+                "status": "case_d",
+                "terminal": True,
+                "terminal_case": "D",
+            }
+        },
+    }
+    retention_path.write_text(json.dumps(retention), encoding="utf-8")
+    monkeypatch.setattr(
+        command_module,
+        "T075_ACCEPTED_T065_CASE_D",
+        {
+            "path": str(decision_path),
+            "sha256": file_sha256(decision_path),
+            "size_bytes": decision_path.stat().st_size,
+        },
+    )
+    monkeypatch.setattr(
+        command_module,
+        "T075_ACCEPTED_T065_CASE_D_RETENTION",
+        {
+            "path": str(retention_path),
+            "sha256": file_sha256(retention_path),
+            "size_bytes": retention_path.stat().st_size,
+        },
+    )
+    monkeypatch.setattr(
+        command_module, "_t075_normalize_artifact_path", lambda value: str(value)
+    )
+    _t075_validate_accepted_case_d_files(decision_path, retention_path)
+    decision_path.write_text(json.dumps({**decision, "case": "A"}), encoding="utf-8")
+    with pytest.raises(T075WorkflowError, match="stale or missing"):
+        _t075_validate_accepted_case_d_files(decision_path, retention_path)
 
 
 def test_t075_stage3_missing_target_still_materializes_failed_report(tmp_path) -> None:
@@ -2661,6 +2798,22 @@ def test_t075_routing_treats_string_preceding_as_one_unread_path(tmp_path) -> No
     )
 
 
+def test_t075_evaluate_without_preceding_still_routes_by_command_shape(
+    tmp_path,
+) -> None:
+    assert _is_t075_invocation(
+        SimpleNamespace(
+            command="evaluate",
+            target_table=tmp_path / "target.json",
+            checkpoint_directory=tmp_path / "checkpoints",
+            preceding_manifest=None,
+            stage5_report=None,
+            run_stage6=False,
+            retention_manifest=None,
+        )
+    )
+
+
 def test_t075_t065_failure_is_routed_to_t075_case_d(monkeypatch, tmp_path) -> None:
     import sts_combat_rl.commands.non_combat_learning as command_module
 
@@ -2784,3 +2937,121 @@ def test_t075_finalize_rejects_fabricated_case_d_reachability(tmp_path) -> None:
     ):
         _run_t075_finalize(args)
     assert not retention_path.exists()
+
+
+def test_t075_finalize_accepts_valid_case_d_json_lists(tmp_path, monkeypatch) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command_module
+
+    artifact_root = tmp_path / "artifacts"
+    parent_path = artifact_root / "failure-evidence.json"
+    parent_path.parent.mkdir(parents=True)
+    parent_path.write_text("failure evidence\n", encoding="utf-8")
+    decision_path = artifact_root / "terminal-decision-report.json"
+    retention_path = artifact_root / "t075-retention-manifest.json"
+    code_head = _code_head_for_artifact_root(SimpleNamespace())
+    parent = {
+        "path": str(parent_path),
+        "sha256": file_sha256(parent_path),
+        "size_bytes": parent_path.stat().st_size,
+    }
+    stages = command_module.T075_STAGE_ORDER[:-1]
+    reached = [stages[0]]
+    skipped = list(stages[1:])
+    skipped_commands = {stage: f"frozen-{stage}" for stage in skipped}
+    skipped_evidence = {
+        stage: {
+            "command": skipped_commands[stage],
+            "executed": False,
+            "status": "skipped",
+            "code_head": code_head,
+            "start_time_utc": "2026-08-28T00:00:00+00:00",
+            "end_time_utc": "2026-08-28T00:00:00+00:00",
+            "exit_code": None,
+            "terminal": False,
+            "wall_clock_seconds": 0.0,
+            "shard_count": 0,
+            "worker_count": 0,
+            "ranges": [],
+            "parent_identities": {},
+            "output_identities": [],
+            "skip_reason": "not reached",
+        }
+        for stage in skipped
+    }
+    decision = {
+        "schema_id": command_module.T075_TERMINAL_DECISION_SCHEMA_ID,
+        "schema_version": 1,
+        "task_id": command_module.T075_TASK_ID,
+        "approved_t075_spec_commit": command_module.T075_APPROVED_SPEC_COMMIT,
+        "planner_baseline": command_module.T075_PLANNER_BASELINE,
+        "code_head": code_head,
+        "terminal_case": "D",
+        "terminal_stage": stages[0],
+        "failure_stage": "stage0-preflight",
+        "reason_code": "frozen-contract-failure",
+        "summary": "preflight failed",
+        "reached_stages": reached,
+        "skipped_stages": skipped,
+        "skipped_stage_commands": skipped_commands,
+        "skipped_stage_evidence": skipped_evidence,
+        "parent_artifact_identities": {"failure_evidence": parent},
+        "stage3_validation_status": "not_reached",
+        "stage5_gate_status": "not_reached",
+        "stage6_status": "not_reached",
+        "recommendation": "repair",
+        "failure_ids": ["preflight-failed"],
+        "failure_counts": {"failure_count": 1},
+        "failure_details": [],
+        "problems": ["preflight failed"],
+    }
+    decision_path.write_text(json.dumps(decision), encoding="utf-8")
+    stage_command = {
+        "command": "frozen-stage0",
+        "executed": True,
+        "status": "failed",
+        "code_head": code_head,
+        "start_time_utc": "2026-08-28T00:00:00+00:00",
+        "end_time_utc": "2026-08-28T00:00:01+00:00",
+        "exit_code": 1,
+        "terminal": False,
+        "wall_clock_seconds": 1.0,
+        "shard_count": 0,
+        "worker_count": 0,
+        "ranges": [],
+        "parent_identities": {},
+        "output_identities": [parent],
+    }
+    stage_evidence = {**stage_command, "artifact_roles": ["failure_evidence"]}
+    monkeypatch.setattr(
+        command_module,
+        "_t075_stage_retention_records",
+        lambda *_args: ({stages[0]: stage_command}, {stages[0]: stage_evidence}, []),
+    )
+    args = SimpleNamespace(
+        artifact_root=artifact_root,
+        decision_report=decision_path,
+        retention_manifest=retention_path,
+        _command_argv=(),
+    )
+    assert _t075_terminal_decision_is_valid(decision)
+    assert _run_t075_finalize(args) == 0
+    assert (
+        json.loads(retention_path.read_text(encoding="utf-8"))["terminal_case"] == "D"
+    )
+
+
+def test_t075_case_d_stage6_failure_maps_to_stage6_eval(tmp_path) -> None:
+    decision_path = tmp_path / "terminal-decision-report.json"
+    args = SimpleNamespace(
+        decision_report=decision_path,
+        retention_manifest=None,
+        _command_argv=(),
+        _t075_execution_start_utc="2026-08-28T00:00:00+00:00",
+    )
+    _handle_t075_case_d(args, T075WorkflowError("stage6", ["worker crashed"]))
+    report = json.loads(decision_path.read_text(encoding="utf-8"))
+    assert report["terminal_stage"] == "stage6-eval"
+    assert report["reached_stages"][-1] == "stage6-eval"
+    assert report["skipped_stages"] == []
+    assert report["stage6_status"] == "completed"
+    assert report["terminal_case"] == "D"
