@@ -86,6 +86,8 @@ from sts_combat_rl.commands.non_combat_learning import (
     _t075_path_matches,
     _t075_preceding_manifest_path,
     _t075_pinned_simulator_identity,
+    _t075_normalize_artifact_path,
+    _t075_command_matches_contract,
     _t075_require_pinned_simulator_identity,
     _t075_resolve_reuse_manifest,
     _t075_validate_accepted_case_d_files,
@@ -96,6 +98,8 @@ from sts_combat_rl.commands.non_combat_learning import (
     _t075_write_stage3_report,
     _write_t075_stage_retention,
     _t075_validate_process_shards,
+    _t075_stage6_report_is_valid,
+    _t075_write_stage6_failure_report,
 )
 
 
@@ -3289,6 +3293,73 @@ def test_stage6_skipped_contract_is_standalone_and_exact() -> None:
         "stage6-eval",
         skipped=True,
     )
+
+
+def test_t075_command_contract_rejects_wrong_full_wsl_preamble() -> None:
+    import sts_combat_rl.commands.non_combat_learning as command_module
+
+    root = Path(
+        "D:/DeadlycatCoding/STSRL/artifacts/t075-leakage-safe-non-combat-cohort-repair"
+    )
+    args = SimpleNamespace(decision_report=root / "terminal-decision-report.json")
+    argv = command_module._t075_frozen_stage_argv(args, "stage6-eval")
+    command = command_module._t075_command_string(args, command_argv=argv)
+    assert _t075_command_matches_contract(command, "stage6-eval")
+    assert not _t075_command_matches_contract(
+        command.replace(
+            "cd /mnt/d/DeadlycatCoding/STSRL/.claude/worktrees/"
+            "t075-leakage-safe-non-combat-cohort-repair",
+            "cd /mnt/d/other",
+        ),
+        "stage6-eval",
+    )
+    assert not _t075_command_matches_contract(
+        command.replace("py313-torch/bin/python", "py313/bin/python"),
+        "stage6-eval",
+    )
+
+
+def test_t075_artifact_path_normalization_is_case_sensitive() -> None:
+    assert (
+        _t075_normalize_artifact_path("D:/DeadlycatCoding/STSRL/artifacts/example.json")
+        == "artifacts/example.json"
+    )
+    with pytest.raises(ValueError, match="artifacts"):
+        _t075_normalize_artifact_path("d:/deadlycatcoding/stsrl/artifacts/example.json")
+    with pytest.raises(ValueError, match="artifacts"):
+        _t075_normalize_artifact_path(
+            "D:/DeadlycatCoding/STSRL-other/artifacts/example.json"
+        )
+
+
+def test_t075_stage6_report_validator_rejects_minimal_and_accepts_failure_report(
+    tmp_path,
+) -> None:
+    report_path = tmp_path / "stage6.json"
+    report_path.write_text(
+        json.dumps(
+            {
+                "schema_id": "t065-complete-run-report-v1",
+                "schema_version": 1,
+                "paired_terminal_floor_deltas": [],
+                "coverage": {},
+                "valid": True,
+                "passed": False,
+                "problems": [],
+                "execution_evidence": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert not _t075_stage6_report_is_valid(report_path, artifact_root=tmp_path)
+
+    failure = T075WorkflowError("stage6", ["worker crashed"])
+    _t075_write_stage6_failure_report(report_path, failure)
+    assert _t075_stage6_report_is_valid(report_path, artifact_root=tmp_path)
+    payload = json.loads(report_path.read_text(encoding="utf-8"))
+    assert payload["valid"] is False
+    assert payload["execution_evidence"]["status"] == "failed"
+    assert payload["execution_evidence"]["terminal"] is False
 
 
 @pytest.mark.parametrize(

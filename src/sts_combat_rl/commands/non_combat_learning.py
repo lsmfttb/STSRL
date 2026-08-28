@@ -50,6 +50,7 @@ from sts_combat_rl.sim.non_combat_learning import (
     T075_TERMINAL_DECISION_SCHEMA_ID,
     build_stage5_report,
     build_t065_preflight_report,
+    compute_learned_coverage,
     canonical_source_selection_key,
     collect_source_arm,
     collect_source_arm_sharded_to_path,
@@ -583,6 +584,7 @@ def _t075_terminal_decision_is_valid(
         ):
             return False
     stage6_identity = value.get("stage6_report_identity")
+    stage6_report: Mapping[str, Any] | None = None
     if stage6_identity is not None and not _t075_actual_identity(
         stage6_identity, artifact_root=artifact_root
     ):
@@ -595,6 +597,13 @@ def _t075_terminal_decision_is_valid(
             stage6_path, artifact_root=artifact_root
         ):
             return False
+        try:
+            loaded_stage6 = json.loads(stage6_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return False
+        if not isinstance(loaded_stage6, Mapping):
+            return False
+        stage6_report = loaded_stage6
     failure_stage = value.get("failure_stage")
     failure_stage_map = {
         "source-input-reuse": "stage0-reuse",
@@ -646,6 +655,26 @@ def _t075_terminal_decision_is_valid(
         ):
             return False
     case = value["terminal_case"]
+    if case in {"A", "B"}:
+        if (
+            not isinstance(stage6_report, Mapping)
+            or stage6_report.get("valid") is not True
+        ):
+            return False
+        if case == "A" and stage6_report.get("passed") is not True:
+            return False
+        if case == "B" and stage6_report.get("passed") is not False:
+            return False
+    if case == "D" and terminal_stage == "stage6-eval":
+        if (
+            not isinstance(stage6_report, Mapping)
+            or stage6_report.get("valid") is not False
+            or stage6_report.get("passed") is not False
+            or not isinstance(stage6_report.get("problems"), list)
+            or not stage6_report["problems"]
+            or stage6_report.get("execution_evidence", {}).get("status") != "failed"
+        ):
+            return False
     if case == "D":
         failure_ids = value.get("failure_ids")
         failure_counts = value.get("failure_counts")
@@ -1432,43 +1461,24 @@ def _t075_command_tokens_match_frozen(
 def _t075_command_matches_contract(
     command: Any, stage: str, *, skipped: bool = False
 ) -> bool:
+    del skipped
     if not isinstance(command, str) or not command.strip():
         return False
-    required = (
-        "wsl.exe -d Ubuntu -e bash -lc ",
-        "set -euo pipefail",
-        T065_TRAINING_INTERPRETER,
-        "sts_combat_rl.commands.non_combat_learning",
+    if stage not in T075_STAGE_ORDER[:-1]:
+        return False
+    stable_root = Path(
+        "D:/DeadlycatCoding/STSRL/artifacts/t075-leakage-safe-non-combat-cohort-repair"
     )
-    stage_command = {
-        "stage0-preflight": " preflight ",
-        "stage0-reuse": " validate-reuse ",
-        "stage1-selection-replay": " select ",
-        "stage2-target": " target ",
-        "stage4-train": " train ",
-        "stage5-gate": " evaluate ",
-        "stage6-eval": " evaluate ",
-    }.get(stage)
-    if not all(fragment in command for fragment in required):
-        return False
-    try:
-        payload = shlex.split(command, posix=True)
-        shell_command = payload[-1]
-        module_index = shell_command.index("sts_combat_rl.commands.non_combat_learning")
-        command_tokens = shlex.split(shell_command[module_index:], posix=True)
-    except (ValueError, IndexError):
-        return False
-    if len(command_tokens) < 2 or command_tokens[0] != (
-        "sts_combat_rl.commands.non_combat_learning"
-    ):
-        return False
-    if stage_command is not None and command_tokens[1] != stage_command.strip():
-        return False
-    return (
-        _t075_command_tokens_match_frozen(stage, command_tokens)
-        if stage_command is not None
-        else False
+    expected_args = argparse.Namespace(
+        decision_report=stable_root / "terminal-decision-report.json"
     )
+    expected = _t075_command_string(
+        expected_args,
+        command_argv=_t075_frozen_stage_argv(expected_args, stage),
+    )
+    # The outer WSL launcher, shell preamble, checkout, PYTHONPATH, pinned
+    # interpreter, module, and argv are all part of the frozen evidence.
+    return command == expected
 
 
 def _t075_execution_evidence(
@@ -1943,6 +1953,15 @@ def _t075_require_parent_retention(
             raise T075WorkflowError(
                 "lineage", [f"parent retention shard evidence is incomplete: {path}"]
             )
+    if stage in {"stage1-selection-replay", "stage2-target", "stage6-eval"}:
+        _t075_validate_process_shards(
+            stage,
+            shard_count=shard_count,
+            worker_count=worker_count,
+            per_shard=per_shard,
+            status="completed",
+            ranges=evidence.get("ranges"),
+        )
     outputs = evidence.get("output_identities", ())
     if not isinstance(outputs, list):
         raise T075WorkflowError(
@@ -1962,6 +1981,20 @@ def _t075_require_parent_retention(
             raise T075WorkflowError(
                 "lineage", [f"parent retention lacks exact {role} identity: {path}"]
             )
+    for output in outputs:
+        if not isinstance(output, Mapping) or not isinstance(output.get("role"), str):
+            raise T075WorkflowError(
+                "lineage", [f"parent retention output role is invalid: {path}"]
+            )
+        output_path = _t075_resolve_identity_path(
+            str(output.get("path", "")), artifact_root=path.parent
+        )
+        if output_path is None or not _t075_identity_matches(
+            output, output_path, expected_role=output["role"]
+        ):
+            raise T075WorkflowError(
+                "lineage", [f"parent retention output identity is invalid: {path}"]
+            )
     parent_identities = evidence.get("parent_identities", {})
     if not isinstance(parent_identities, Mapping):
         raise T075WorkflowError(
@@ -1973,8 +2006,12 @@ def _t075_require_parent_retention(
                 "lineage", [f"parent identity {role!r} is invalid: {path}"]
             )
         try:
-            identity_path = _portable_path(str(identity["path"]))
-            if not _t075_identity_matches(identity, identity_path):
+            identity_path = _t075_resolve_identity_path(
+                str(identity["path"]), artifact_root=path.parent
+            )
+            if identity_path is None or not _t075_identity_matches(
+                identity, identity_path
+            ):
                 raise ValueError("path/hash/size mismatch")
         except (KeyError, OSError, ValueError) as exc:
             raise T075WorkflowError(
@@ -2219,7 +2256,7 @@ def _t075_normalize_artifact_path(value: str) -> str:
         "D:/DeadlycatCoding/STSRL/",
         "/mnt/d/DeadlycatCoding/STSRL/",
     ):
-        if text.casefold().startswith(prefix.casefold()):
+        if text.startswith(prefix):
             text = text[len(prefix) :]
             break
     if text.startswith("./"):
@@ -5742,32 +5779,278 @@ def _t075_stage6_report_is_valid(path: Path, *, artifact_root: Path) -> bool:
         "schema_id",
         "schema_version",
         "paired_terminal_floor_deltas",
+        "learned_terminal_floor_mean",
+        "expert_terminal_floor_mean",
+        "mean_terminal_floor_delta",
+        "p_positive",
         "coverage",
+        "learned_act2_entry_count",
+        "expert_act2_entry_count",
+        "controller_error_count",
+        "truncation_count",
         "valid",
         "passed",
         "problems",
         "execution_evidence",
     }
-    return (
-        isinstance(value, Mapping)
-        and required.issubset(value)
-        and value.get("schema_id") == T065_STAGE6_REPORT_SCHEMA_ID
-        and value.get("schema_version") == 1
-        and isinstance(value.get("paired_terminal_floor_deltas"), list)
-        and isinstance(value.get("coverage"), Mapping)
-        and isinstance(value.get("valid"), bool)
-        and isinstance(value.get("passed"), bool)
-        and isinstance(value.get("problems"), list)
-        and isinstance(value.get("execution_evidence"), Mapping)
-        and (
-            value.get("valid") is True
-            or (
-                bool(value.get("problems"))
-                and value["execution_evidence"].get("status") == "failed"
-                and value["execution_evidence"].get("terminal") is False
+    if (
+        not isinstance(value, Mapping)
+        or not required.issubset(value)
+        or value.get("schema_id") != T065_STAGE6_REPORT_SCHEMA_ID
+        or value.get("schema_version") != 1
+        or not isinstance(value.get("valid"), bool)
+        or not isinstance(value.get("passed"), bool)
+        or not isinstance(value.get("problems"), list)
+        or not isinstance(value.get("execution_evidence"), Mapping)
+    ):
+        return False
+
+    def finite_number(item: Any) -> bool:
+        return (
+            isinstance(item, (int, float))
+            and not isinstance(item, bool)
+            and math.isfinite(float(item))
+        )
+
+    deltas = value["paired_terminal_floor_deltas"]
+    if not isinstance(deltas, list) or any(not finite_number(item) for item in deltas):
+        return False
+    if (
+        any(
+            not finite_number(value[field])
+            for field in (
+                "learned_terminal_floor_mean",
+                "expert_terminal_floor_mean",
+                "mean_terminal_floor_delta",
+                "p_positive",
             )
         )
+        or not 0.0 <= float(value["p_positive"]) <= 1.0
+    ):
+        return False
+    if any(
+        isinstance(value[field], bool)
+        or not isinstance(value[field], int)
+        or value[field] < 0
+        for field in (
+            "learned_act2_entry_count",
+            "expert_act2_entry_count",
+            "controller_error_count",
+            "truncation_count",
+        )
+    ):
+        return False
+
+    coverage = value["coverage"]
+    coverage_fields = {
+        "D",
+        "L",
+        "M",
+        "F",
+        "learned_coverage",
+        "mandatory_failure_rate",
+        "passed",
+    }
+    if not isinstance(coverage, Mapping) or set(coverage) != coverage_fields:
+        return False
+    if any(
+        isinstance(coverage[field], bool)
+        or not isinstance(coverage[field], int)
+        or coverage[field] < 0
+        for field in ("D", "L", "M", "F")
+    ) or any(
+        not finite_number(coverage[field])
+        for field in ("learned_coverage", "mandatory_failure_rate")
+    ):
+        return False
+    expected_learned_coverage = coverage["L"] / coverage["D"] if coverage["D"] else 0.0
+    expected_failure_rate = coverage["F"] / coverage["M"] if coverage["M"] else 0.0
+    expected_coverage_passed = (
+        coverage["D"] > 0
+        and coverage["M"] > 0
+        and expected_learned_coverage >= 0.60
+        and expected_failure_rate <= 0.01
     )
+    if (
+        not math.isclose(float(coverage["learned_coverage"]), expected_learned_coverage)
+        or not math.isclose(
+            float(coverage["mandatory_failure_rate"]), expected_failure_rate
+        )
+        or coverage["passed"] is not expected_coverage_passed
+    ):
+        return False
+
+    execution = value["execution_evidence"]
+    if not value["valid"]:
+        failure_ids = execution.get("failure_ids")
+        return (
+            value["passed"] is False
+            and bool(value["problems"])
+            and execution.get("status") == "failed"
+            and execution.get("terminal") is False
+            and isinstance(execution.get("failure_stage"), str)
+            and bool(execution["failure_stage"])
+            and isinstance(failure_ids, list)
+            and bool(failure_ids)
+        )
+
+    if (
+        not isinstance(execution, Mapping)
+        or execution.get("worker_count") != T065_MAX_WORKERS
+        or execution.get("shard_count_per_arm") != T075_STAGE6_SHARD_COUNT
+        or not isinstance(execution.get("arms"), Mapping)
+        or set(execution["arms"]) != {"stochastic", "expert", "learned"}
+        or not isinstance(execution.get("paired_rows"), list)
+        or len(execution["paired_rows"]) != 256
+        or len(deltas) != 256
+    ):
+        return False
+
+    arm_reports: dict[str, Mapping[str, Any]] = {}
+    for arm in ("stochastic", "expert", "learned"):
+        arm_execution = execution["arms"].get(arm)
+        if not isinstance(arm_execution, Mapping):
+            return False
+        report = arm_execution.get("report")
+        if not isinstance(report, Mapping):
+            return False
+        required_report = {
+            "schema_id",
+            "schema_version",
+            "arm",
+            "requested_seeds",
+            "rows",
+            "decision_events",
+            "worker_count",
+            "shard_count",
+            "shard_specs",
+            "simulator_identity",
+            "action_space",
+            "controller_provenance",
+            "driver_provenance",
+        }
+        if (
+            not required_report.issubset(report)
+            or report.get("schema_id") != T065_STAGE6_REPORT_SCHEMA_ID
+            or report.get("schema_version") != 1
+            or report.get("arm") != arm
+            or report.get("worker_count") != T065_MAX_WORKERS
+            or report.get("shard_count") != T075_STAGE6_SHARD_COUNT
+            or not isinstance(report.get("requested_seeds"), list)
+        ):
+            return False
+        # The explicit list comparison avoids accepting a report whose range
+        # is merely the right length.
+        if report["requested_seeds"] != list(
+            range(T065_STAGE6_SEED_RANGE[0], T065_STAGE6_SEED_RANGE[1] + 1)
+        ):
+            return False
+        rows = report.get("rows")
+        specs = report.get("shard_specs")
+        if (
+            not isinstance(rows, list)
+            or len(rows) != 256
+            or not isinstance(specs, list)
+        ):
+            return False
+        if [
+            row.get("simulator_seed") for row in rows if isinstance(row, Mapping)
+        ] != list(range(T065_STAGE6_SEED_RANGE[0], T065_STAGE6_SEED_RANGE[1] + 1)):
+            return False
+        if any(
+            not isinstance(row, Mapping)
+            or not finite_number(row.get("terminal_floor"))
+            or not isinstance(row.get("terminal"), bool)
+            for row in rows
+        ):
+            return False
+        expected_specs = stage6_shard_ranges(arm=arm, worker_count=T065_MAX_WORKERS)
+        if len(specs) != len(expected_specs):
+            return False
+        pids: set[int] = set()
+        for expected, observed in zip(expected_specs, specs, strict=True):
+            if not isinstance(observed, Mapping) or any(
+                observed.get(field) != expected.get(field)
+                for field in (
+                    "arm",
+                    "shard_index",
+                    "seed_start",
+                    "seed_end",
+                    "seed_count",
+                    "worker_count",
+                )
+            ):
+                return False
+            if (
+                observed.get("requested_seeds")
+                != list(range(expected["seed_start"], expected["seed_end"] + 1))
+                or observed.get("completed_seeds") != observed.get("requested_seeds")
+                or observed.get("requested_seed_count") != 16
+                or observed.get("completed_row_count") != 16
+                or observed.get("worker_kind") != "spawn-process"
+                or observed.get("exit_code") != 0
+                or not isinstance(observed.get("process_id"), int)
+                or isinstance(observed.get("process_id"), bool)
+            ):
+                return False
+            pids.add(observed["process_id"])
+        if len(pids) != 16:
+            return False
+        for field in (
+            "simulator_identity",
+            "action_space",
+            "controller_provenance",
+            "driver_provenance",
+        ):
+            if not isinstance(report.get(field), Mapping) or not report[field]:
+                return False
+        arm_reports[arm] = report
+
+    paired_rows = execution["paired_rows"]
+    if [
+        row.get("simulator_seed") for row in paired_rows if isinstance(row, Mapping)
+    ] != list(range(T065_STAGE6_SEED_RANGE[0], T065_STAGE6_SEED_RANGE[1] + 1)) or any(
+        not isinstance(row, Mapping)
+        or not finite_number(row.get("learned_terminal_floor"))
+        or not finite_number(row.get("expert_terminal_floor"))
+        for row in paired_rows
+    ):
+        return False
+    expected_deltas = [
+        float(row["learned_terminal_floor"] - row["expert_terminal_floor"])
+        for row in paired_rows
+    ]
+    if any(
+        not math.isclose(float(actual), expected)
+        for actual, expected in zip(deltas, expected_deltas, strict=True)
+    ):
+        return False
+    learned_coverage = compute_learned_coverage(
+        arm_reports["learned"]["decision_events"]
+    ).to_dict()
+    if any(
+        coverage[field] != learned_coverage[field]
+        for field in ("D", "L", "M", "F", "passed")
+    ):
+        return False
+    if any(
+        not math.isclose(float(coverage[field]), float(learned_coverage[field]))
+        for field in ("learned_coverage", "mandatory_failure_rate")
+    ):
+        return False
+    expected_passed = (
+        float(value["mean_terminal_floor_delta"]) > 0.0
+        and float(value["p_positive"]) >= 0.80
+        and value["learned_act2_entry_count"] >= value["expert_act2_entry_count"]
+        and value["controller_error_count"] == 0
+        and value["truncation_count"] == 0
+        and coverage["passed"]
+        and (
+            value["learned_act2_entry_count"] > value["expert_act2_entry_count"]
+            or float(value["p_positive"]) >= 0.95
+        )
+    )
+    return value["passed"] is expected_passed
 
 
 def _failed_stage_artifact_paths(
