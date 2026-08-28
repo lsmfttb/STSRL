@@ -217,9 +217,6 @@ def _t075_terminal_decision_is_valid(
         "stage5_gate_status",
         "stage6_status",
         "recommendation",
-        "failure_ids",
-        "failure_counts",
-        "failure_details",
         "problems",
     )
     if (
@@ -236,9 +233,6 @@ def _t075_terminal_decision_is_valid(
         or value.get("terminal_case") not in {"A", "B", "C", "D"}
         or not isinstance(value.get("parent_artifact_identities"), Mapping)
         or not value.get("parent_artifact_identities")
-        or not isinstance(value.get("failure_ids"), list)
-        or not isinstance(value.get("failure_counts"), Mapping)
-        or not isinstance(value.get("failure_details"), list)
         or not isinstance(value.get("problems"), list)
     ):
         return False
@@ -323,6 +317,9 @@ def _t075_terminal_decision_is_valid(
     if case == "D":
         return (
             bool(value["problems"])
+            and isinstance(value.get("failure_ids"), list)
+            and isinstance(value.get("failure_counts"), Mapping)
+            and isinstance(value.get("failure_details"), list)
             and isinstance(value.get("failure_stage"), str)
             and bool(value["failure_stage"])
             and (
