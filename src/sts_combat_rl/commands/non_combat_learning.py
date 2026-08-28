@@ -1011,6 +1011,7 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     args._command_argv = tuple(argv if argv is not None else sys.argv[1:])
+    args._t075_execution_start_monotonic = time.perf_counter()
     args._t075_execution_start_utc = datetime.now(timezone.utc).isoformat()
     try:
         if args.command == "preflight":
@@ -1246,7 +1247,6 @@ def _run_t075_preflight(args: argparse.Namespace) -> int:
                 args, status="completed", terminal=True, exit_code=0, executed=True
             ),
             "passed": True,
-            "wall_clock_seconds": 0.0,
             "shard_count": 0,
             "worker_count": 0,
             "ranges": [],
@@ -1897,6 +1897,16 @@ def _t075_execution_evidence(
         raise T075WorkflowError(
             "artifact-retention", ["T075 command has no execution start evidence"]
         )
+    start_monotonic = getattr(args, "_t075_execution_start_monotonic", None)
+    if (
+        isinstance(start_monotonic, bool)
+        or not isinstance(start_monotonic, (int, float))
+        or not math.isfinite(float(start_monotonic))
+    ):
+        # Direct library-level callers do not pass through main; capture a
+        # local bounded interval for those calls instead of inventing zero.
+        start_monotonic = time.perf_counter()
+    elapsed = max(0.0, time.perf_counter() - float(start_monotonic))
     return {
         "command": _t075_command_string(args),
         "executed": executed,
@@ -1905,6 +1915,7 @@ def _t075_execution_evidence(
         "exit_code": exit_code,
         "status": status,
         "terminal": terminal,
+        "wall_clock_seconds": elapsed,
     }
 
 
@@ -3491,7 +3502,6 @@ def _run_t075_validate_reuse(args: argparse.Namespace) -> int:
             "status": "completed",
             "terminal": True,
             "counts": {"sources": 2},
-            "wall_clock_seconds": 0.0,
             "shard_count": 0,
             "worker_count": 0,
             "ranges": [],
@@ -7316,7 +7326,6 @@ def _handle_t075_case_d(args: argparse.Namespace, failure: T075WorkflowError) ->
                 "counts": failure_counts,
                 "problems": problems,
                 "parent_identities": _preceding_manifest_identities(args),
-                "wall_clock_seconds": 0.0,
                 "shard_count": stage6_partial.get("shard_count", 0),
                 "worker_count": stage6_partial.get("worker_count", 0),
                 "ranges": stage6_partial.get("ranges", []),

@@ -100,6 +100,7 @@ from sts_combat_rl.commands.non_combat_learning import (
     _is_t075_invocation,
     _t075_target_row_completeness,
     _t075_write_stage3_report,
+    _t075_execution_evidence,
     _write_t075_stage_retention,
     _t075_validate_process_shards,
     _t075_stage6_report_is_valid,
@@ -2087,6 +2088,23 @@ def test_t075_portable_path_converts_wsl_mount() -> None:
     assert _portable_path("/mnt/d/DeadlycatCoding/STSRL/artifacts/x.json") == Path(
         "D:/DeadlycatCoding/STSRL/artifacts/x.json"
     )
+
+
+def test_t075_execution_evidence_records_observed_elapsed_seconds(
+    monkeypatch,
+) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command_module
+
+    args = SimpleNamespace(
+        _command_argv=("preflight",),
+        _t075_execution_start_utc="2026-08-29T00:00:00+00:00",
+        _t075_execution_start_monotonic=100.0,
+    )
+    monkeypatch.setattr(command_module.time, "perf_counter", lambda: 103.25)
+    evidence = _t075_execution_evidence(
+        args, status="failed", terminal=False, exit_code=1, executed=True
+    )
+    assert evidence["wall_clock_seconds"] == pytest.approx(3.25)
 
 
 def test_t075_wsl_path_converts_drive_paths_before_resolve() -> None:
