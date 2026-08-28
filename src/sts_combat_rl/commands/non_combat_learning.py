@@ -534,7 +534,7 @@ def _is_t075_invocation(args: argparse.Namespace) -> bool:
         raw_preceding = getattr(args, "preceding_manifest", None)
         preceding = (
             (raw_preceding,)
-            if isinstance(raw_preceding, Path)
+            if isinstance(raw_preceding, (Path, str))
             else tuple(raw_preceding or ())
         )
         return len(preceding) == 1
@@ -2006,12 +2006,12 @@ def _t075_optional_file_sha256(path: Path) -> str | None:
 def _t075_preceding_manifest_path(args: argparse.Namespace, *, stage: str) -> Path:
     """Normalize the repeatable CLI option to one T075 parent manifest."""
     raw = getattr(args, "preceding_manifest", None)
-    paths = (raw,) if isinstance(raw, Path) else tuple(raw or ())
-    if len(paths) != 1 or not isinstance(paths[0], Path):
+    paths = (raw,) if isinstance(raw, (Path, str)) else tuple(raw or ())
+    if len(paths) != 1 or not isinstance(paths[0], (Path, str)):
         raise T075WorkflowError(
             stage, ["T075 requires exactly one --preceding-manifest path"]
         )
-    return paths[0]
+    return Path(paths[0])
 
 
 def _run_t075_select(args: argparse.Namespace) -> int:

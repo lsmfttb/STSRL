@@ -85,6 +85,7 @@ from sts_combat_rl.commands.non_combat_learning import (
     _t075_require_pinned_simulator_identity,
     _t075_resolve_reuse_manifest,
     _run_t075_select,
+    _is_t075_invocation,
     _t075_target_row_completeness,
     _t075_write_stage3_report,
     _write_t075_stage_retention,
@@ -2646,6 +2647,18 @@ def test_t075_stage5_shape_routes_missing_preceding_to_t075(
     assert len(routed) == 1
     assert isinstance(routed[0], T075WorkflowError)
     assert legacy_handler_calls == 0
+
+
+def test_t075_routing_treats_string_preceding_as_one_unread_path(tmp_path) -> None:
+    assert _is_t075_invocation(
+        SimpleNamespace(
+            command="evaluate",
+            preceding_manifest=str(tmp_path / "missing-stage4.retention.json"),
+            stage5_report=None,
+            run_stage6=False,
+            retention_manifest=None,
+        )
+    )
 
 
 def test_t075_t065_failure_is_routed_to_t075_case_d(monkeypatch, tmp_path) -> None:
