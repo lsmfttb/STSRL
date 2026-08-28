@@ -3,7 +3,9 @@
 This document is the authoritative planning contract for how STSRL may acquire
 training signal. It supplements [`project_architecture.md`](project_architecture.md),
 which remains authoritative for simulator, runtime, information-regime, data,
-and controller boundaries.
+and controller boundaries. External research lineage and publication attribution
+requirements are recorded in
+[`research_inspirations_and_attribution.md`](research_inspirations_and_attribution.md).
 
 ## Objective
 
@@ -11,10 +13,15 @@ The final objective is the probability of defeating the Heart at Ascension 20
 from a standard game start under the normal public information available to a
 player.
 
-The project pursues simulator-only self-generated policy improvement. It is
-inspired by search-guided zero-human-trajectory training and by training-time
-Oracle assistance, adapted to a single-agent stochastic game with hidden future
-information and long-horizon resource planning.
+The project pursues simulator-only self-generated policy improvement. Its primary
+methodological inspirations are AlphaZero's search-guided tabula-rasa
+policy/value improvement and Suphx's training-time Oracle-guiding approach for
+imperfect-information learning. STSRL adapts those ideas to a single-agent
+stochastic game with hidden future information and long-horizon resource
+planning. The citations and the exact boundary between conceptual inspiration
+and external implementation reuse are part of the repository's publication
+contract; see
+[`research_inspirations_and_attribution.md`](research_inspirations_and_attribution.md).
 
 ## Human-Knowledge Boundary
 
