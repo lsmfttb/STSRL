@@ -48,6 +48,9 @@ The main maintainer:
 - records the exact approved specification commit on the pull request;
 - dispatches and manages the task implementer on the same branch and pull
   request after specification approval;
+- freezes the task's acceptance boundary before production implementation,
+  including its invariant matrix, implementation-independent fixtures/oracles,
+  required normal and realistic failure cases, and explicit out-of-scope cases;
 - selects the implementer's model and reasoning effort with cost-effectiveness
   as the default: prefer the least expensive current option that is still
   reasonably expected to complete the task correctly and safely, including a
@@ -97,8 +100,14 @@ The task implementer is a sub-agent of the main maintainer. The implementer:
 - responds to review findings on the same pull request.
 
 The implementer does not choose its own model or reasoning effort and does not
-merge the pull request. The main maintainer remains the independent reviewer and
-merge owner; it does not edit feature code on the task branch.
+merge the pull request. The main maintainer is the required independent
+acceptance reviewer and merge owner; "independent" means independent from the
+implementer, not a requirement for a second review agent. A separate review
+agent is not part of the default workflow and may be used only when the task
+specification or the user explicitly requests it. If used, it is advisory, may
+not introduce new acceptance requirements, and may not block the maintainer's
+review or merge decision. The maintainer does not edit feature code on the task
+branch.
 
 ## Source Of Truth And Execution Authorization
 
@@ -250,6 +259,46 @@ intervening merges affect dependencies or acceptance assumptions. If a material
 `main` change occurs after approval, the maintainer pauses the task, updates or
 rebases the branch as appropriate, and reapproves the resulting specification
 before work continues.
+
+## Acceptance-First Implementation Gate
+
+Specification approval freezes more than the task objective. For every task,
+the approved specification must define the acceptance boundary: the invariants,
+observable outputs, expected state transitions, required verification, and the
+cases that are explicitly out of scope. The expected outcomes must be stated
+independently of the implementation; a production helper under test must not
+be used as the oracle for its own acceptance test.
+
+For tasks with coupled state transitions, artifact/retention contracts,
+parallel-worker evidence, or numerical/statistical acceptance, the maintainer
+must freeze an executable acceptance matrix before production implementation
+starts. The matrix may be a test-only commit on the task pull request or
+fixtures/tests supplied with the approved task contract. It must cover:
+
+- the normal success path and every documented terminal decision;
+- realistic incomplete, stale, mismatched, truncated, and partial-failure
+  cases named by the task contract;
+- exact counts, identities, ranges, provenance, and state-transition rules that
+  cannot be inferred from a successful fixture alone; and
+- explicit out-of-scope behavior so the tests do not silently become a new
+  security or product requirement.
+
+The implementer first runs or lands the test-only acceptance boundary and
+records its baseline result, then implements production behavior against that
+boundary. The implementer may add focused regression tests, but may not weaken,
+remove, or redefine the frozen acceptance tests. A material change to the test
+oracle, fixture meaning, required failure case, or out-of-scope boundary
+requires maintainer reapproval of the exact new head before implementation
+continues.
+
+This gate protects reproducibility, artifact compatibility, experiment fidelity,
+and realistic failure semantics. It is not an adversarial-input or trusted-
+producer attestation framework. Do not add proof chains, dependency graphs,
+signatures, generic anti-tampering checks, or other security-style machinery
+solely to prove that a trusted repository producer was not malicious. Hashes,
+identities, and fail-closed checks remain appropriate only where the approved
+task uses them to detect stale data, ordinary mismatch, incomplete execution,
+information-regime violations, or other stated scientific/design errors.
 
 Final review must compare the approved specification commit with the final head
 and identify every task-document change made after approval. Undisclosed material
@@ -434,6 +483,12 @@ The main maintainer reviews:
 - worker and shard evidence for substantial stages;
 - unnecessary scope, duplication, or hidden defaults;
 - documentation and lifecycle impact.
+
+This maintainer review is the required acceptance review. No separate review
+Agent, second model, or independent sub-agent is required. If an explicitly
+requested advisory reviewer is used, its report is additional input only; the
+maintainer still owns the exact-head decision, and the advisory review must not
+delay acceptance or expand the approved contract.
 
 ### Review Finding Delivery
 
