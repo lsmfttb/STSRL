@@ -550,6 +550,11 @@ def _t075_validate_process_shards(
                     [f"{stage}: shard selected-state count is not frozen"],
                 )
             state_count = entry.get("state_count")
+            if entry.get("status") == "passed" and state_count != 20:
+                raise T075WorkflowError(
+                    "artifact-retention",
+                    [f"{stage}: successful shard lacks state_count=20"],
+                )
             if allow_partial_failure and status == "failed":
                 if state_count is not None and (
                     isinstance(state_count, bool)
@@ -2779,7 +2784,17 @@ def _portable_path(value: str | Path) -> Path:
         and text[5].isalpha()
         and text[6] == "/"
     ):
-        return Path(text[5].upper() + ":" + text[6:])
+        if os.name == "nt":
+            return Path(text[5].upper() + ":" + text[6:])
+        return Path(text)
+    if (
+        len(text) >= 3
+        and text[0].isalpha()
+        and text[1] == ":"
+        and text[2] == "/"
+        and os.name != "nt"
+    ):
+        return Path("/mnt/" + text[0].lower() + text[2:])
     return path
 
 
@@ -6505,15 +6520,62 @@ def _t075_stage_partial_process_evidence(
 ) -> dict[str, Any]:
     """Align spawn observations with the frozen Stage 1/2 shard contract."""
 
-    if stage not in {"stage1-selection-replay", "stage2-target"}:
+    if (
+        stage not in {"stage1-selection-replay", "stage2-target"}
+        or execution_evidence.get("partial_spawn_failure") is not True
+        or execution_evidence.get("shard_count") != T065_MAX_WORKERS
+        or execution_evidence.get("worker_count") != T065_MAX_WORKERS
+    ):
         return {}
     expected_ranges = tuple(target_shard_ranges(worker_count=T065_MAX_WORKERS))
     raw_entries = execution_evidence.get("per_shard", [])
-    raw_by_index = {
-        int(entry["shard_index"]): entry
-        for entry in raw_entries
-        if isinstance(entry, Mapping) and isinstance(entry.get("shard_index"), int)
-    }
+    raw_events = execution_evidence.get("raw_result_events", [])
+    if not isinstance(raw_entries, list) or not isinstance(raw_events, list):
+        return {}
+    if raw_events:
+        return {}
+    raw_by_index: dict[int, Mapping[str, Any]] = {}
+    for entry in raw_entries:
+        if not isinstance(entry, Mapping):
+            return {}
+        index = entry.get("shard_index")
+        if (
+            isinstance(index, bool)
+            or not isinstance(index, int)
+            or not 0 <= index < T065_MAX_WORKERS
+            or index in raw_by_index
+            or entry.get("worker_kind") != "spawn-process"
+            or not isinstance(entry.get("started"), bool)
+            or not isinstance(entry.get("returned"), bool)
+        ):
+            return {}
+        process_id = entry.get("process_id")
+        if entry["started"]:
+            if isinstance(process_id, bool) or not isinstance(process_id, int):
+                return {}
+        elif process_id is not None:
+            return {}
+        exit_code = entry.get("exit_code")
+        if exit_code is not None and (
+            isinstance(exit_code, bool) or not isinstance(exit_code, int)
+        ):
+            return {}
+        if not isinstance(entry.get("status"), str) or not entry["status"]:
+            return {}
+        if not entry["started"] and entry["returned"]:
+            return {}
+        expected = expected_ranges[index]
+        if any(
+            field in entry and entry.get(field) != expected.get(field)
+            for field in (
+                "selected_state_start",
+                "selected_state_end",
+                "selected_state_count",
+                "worker_count",
+            )
+        ):
+            return {}
+        raw_by_index[index] = entry
     per_shard: list[dict[str, Any]] = []
     for expected in expected_ranges:
         index = int(expected["shard_index"])
@@ -7523,6 +7585,16 @@ def _handle_t075_case_d(args: argparse.Namespace, failure: T075WorkflowError) ->
         stage_partial = _t075_stage_partial_process_evidence(
             terminal_stage, failure_execution_evidence
         )
+        if (
+            terminal_stage in {"stage1-selection-replay", "stage2-target"}
+            and failure_execution_evidence.get("partial_spawn_failure") is True
+            and not stage_partial
+        ):
+            # Do not synthesize a shard plan from malformed/duplicate raw
+            # observations.  The retention writer will fail closed on the
+            # explicit partial flag, while the failure-evidence artifact keeps
+            # the raw observations for diagnosis.
+            stage_partial = {"partial_spawn_failure": True}
         if terminal_stage == "stage6-eval":
             stage_partial = failure_execution_evidence
         _write_t075_stage_retention(

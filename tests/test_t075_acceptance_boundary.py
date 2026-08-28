@@ -27,12 +27,14 @@ from sts_combat_rl.commands.non_combat_learning import (
     _t075_command_matches_contract,
     _t075_has_terminal_decision,
     _t075_normalize_artifact_path,
+    _t075_stage_partial_process_evidence,
     _t075_stage_retention_records,
     _t075_stage6_report_is_valid,
     _t075_terminal_decision_is_valid,
     _t075_terminal_finalize_argv,
     _t075_terminal_finalize_command,
     _t075_write_stage6_failure_report,
+    _portable_path,
 )
 from sts_combat_rl.sim.non_combat_learning import (
     T065_STAGE6_SEED_RANGE,
@@ -85,6 +87,56 @@ def _acceptance_worker_returns_failed(payload):
         "status": "failed",
         "exit_code": 1,
         "error": "worker reported a bounded failure",
+    }
+
+
+def _acceptance_worker_returns_success_metrics(payload):
+    """Return one complete worker result and one bounded worker failure."""
+
+    if payload["shard_index"] == 1:
+        return {
+            "shard_index": 1,
+            "process_id": os.getpid(),
+            "worker_kind": "spawn-process",
+            "status": "failed",
+            "exit_code": 1,
+            "error": "worker failed after the sibling completed",
+        }
+    return {
+        "shard_index": payload["shard_index"],
+        "process_id": os.getpid(),
+        "worker_kind": "spawn-process",
+        "status": "passed",
+        "exit_code": 0,
+        "state_count": 20,
+        "attempted": 20,
+        "restored": 20,
+        "wall_clock_seconds": 1.25,
+        "cpu_seconds": 0.75,
+    }
+
+
+def _acceptance_worker_returns_duplicate(payload):
+    """Return shard zero for every payload to exercise duplicate detection."""
+
+    return {
+        "shard_index": 0,
+        "process_id": os.getpid(),
+        "worker_kind": "spawn-process",
+        "status": "passed",
+        "exit_code": 0,
+    }
+
+
+def _acceptance_worker_returns_unknown(payload):
+    """Return a shard identity outside the requested payload plan."""
+
+    return {
+        "shard_index": 99,
+        "process_id": os.getpid(),
+        "worker_kind": "spawn-process",
+        "status": "passed",
+        "exit_code": 0,
     }
 
 
@@ -909,6 +961,140 @@ def test_t075_spawn_batch_graceful_failed_result_carries_partial_evidence() -> N
         list(range(651001, 651017)),
         list(range(651017, 651033)),
     ]
+
+
+def test_t075_spawn_batch_partial_preserves_success_result_metrics() -> None:
+    payloads = [
+        {"shard_index": 0, "seeds": list(range(651001, 651017))},
+        {"shard_index": 1, "seeds": list(range(651017, 651033))},
+    ]
+    with pytest.raises(T065CaseD) as raised:
+        _run_spawn_process_batch(
+            _acceptance_worker_returns_success_metrics,
+            payloads,
+            stage="stage6-eval",
+            worker_count=2,
+        )
+    per_shard = raised.value.execution_evidence["per_shard"]
+    successful = per_shard[0]
+    assert successful["status"] == "passed"
+    assert successful["state_count"] == 20
+    assert successful["attempted"] == 20
+    assert successful["restored"] == 20
+    assert successful["wall_clock_seconds"] == 1.25
+    assert successful["cpu_seconds"] == 0.75
+    assert successful["result_exit_code"] == 0
+
+
+def test_t075_spawn_batch_preserves_duplicate_raw_result_event() -> None:
+    payloads = [
+        {"shard_index": 0, "seeds": list(range(651001, 651017))},
+        {"shard_index": 1, "seeds": list(range(651017, 651033))},
+    ]
+    with pytest.raises(T065CaseD) as raised:
+        _run_spawn_process_batch(
+            _acceptance_worker_returns_duplicate,
+            payloads,
+            stage="stage2-target",
+            worker_count=2,
+        )
+    events = raised.value.execution_evidence["raw_result_events"]
+    assert len(events) == 1
+    assert events[0]["kind"] == "duplicate-shard"
+    assert events[0]["result"]["shard_index"] == 0
+
+
+def test_t075_spawn_batch_preserves_unknown_raw_result_event() -> None:
+    payloads = [
+        {"shard_index": 0, "seeds": list(range(651001, 651017))},
+        {"shard_index": 1, "seeds": list(range(651017, 651033))},
+    ]
+    with pytest.raises(T065CaseD) as raised:
+        _run_spawn_process_batch(
+            _acceptance_worker_returns_unknown,
+            payloads,
+            stage="stage2-target",
+            worker_count=2,
+        )
+    events = raised.value.execution_evidence["raw_result_events"]
+    assert len(events) == 2
+    assert all(event["kind"] == "unknown-shard" for event in events)
+    assert all(event["result"]["shard_index"] == 99 for event in events)
+
+
+def test_t075_stage_partial_helper_does_not_invent_logical_stage3_workers() -> None:
+    assert (
+        _t075_stage_partial_process_evidence(
+            "stage2-target",
+            {"status": "failed", "problems": ["logical Stage-3 failure"]},
+        )
+        == {}
+    )
+
+
+def test_t075_stage_partial_helper_rejects_duplicate_raw_shard() -> None:
+    raw = {
+        "shard_index": 0,
+        "process_id": 123,
+        "worker_kind": "spawn-process",
+        "started": True,
+        "returned": True,
+        "status": "failed",
+        "exit_code": 1,
+    }
+    assert (
+        _t075_stage_partial_process_evidence(
+            "stage2-target",
+            {
+                "partial_spawn_failure": True,
+                "per_shard": [raw, dict(raw)],
+                "raw_result_events": [],
+            },
+        )
+        == {}
+    )
+
+
+@pytest.mark.parametrize(
+    "raw_entry",
+    (
+        "malformed raw result",
+        {
+            "shard_index": 99,
+            "process_id": 123,
+            "worker_kind": "spawn-process",
+            "started": True,
+            "returned": True,
+            "status": "failed",
+            "exit_code": 1,
+        },
+    ),
+)
+def test_t075_stage_partial_helper_rejects_malformed_or_unknown_raw_shard(
+    raw_entry,
+) -> None:
+    assert (
+        _t075_stage_partial_process_evidence(
+            "stage2-target",
+            {
+                "partial_spawn_failure": True,
+                "per_shard": [raw_entry],
+                "raw_result_events": [],
+            },
+        )
+        == {}
+    )
+
+
+def test_t075_portable_path_keeps_nonexistent_wsl_output_on_host_mount() -> None:
+    raw = "/mnt/d/DeadlycatCoding/STSRL/artifacts/t075-new.retention.json"
+    resolved = _portable_path(raw)
+    if os.name == "nt":
+        assert str(resolved).replace("\\", "/") == (
+            "D:/DeadlycatCoding/STSRL/artifacts/t075-new.retention.json"
+        )
+    else:
+        assert str(resolved) == raw
 
 
 def test_t075_stage6_does_not_rewrite_supplied_stage5_parent(

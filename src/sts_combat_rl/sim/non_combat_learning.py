@@ -3032,6 +3032,7 @@ def _run_spawn_process_batch(
     results: dict[int, dict[str, Any]] = {}
     problems: list[str] = []
     start_errors: dict[int, str] = {}
+    raw_result_events: list[dict[str, Any]] = []
     try:
         for payload, process in zip(payloads, processes, strict=True):
             shard_index = int(payload["shard_index"])
@@ -3053,17 +3054,32 @@ def _run_spawn_process_batch(
                     break
                 continue
             if not isinstance(result, Mapping):
+                raw_result_events.append(
+                    {
+                        "kind": "malformed",
+                        "value_type": type(result).__name__,
+                        "value": _json_safe(result),
+                    }
+                )
                 problems.append("worker returned a non-object result")
                 continue
             shard_index = result.get("shard_index")
-            if (
-                isinstance(shard_index, bool)
-                or not isinstance(shard_index, int)
-                or shard_index not in set(payload_indices)
-            ):
+            if isinstance(shard_index, bool) or not isinstance(shard_index, int):
+                raw_result_events.append(
+                    {"kind": "unknown-shard", "result": _json_safe(dict(result))}
+                )
+                problems.append("worker returned an unknown shard identity")
+                continue
+            if shard_index not in payload_indices:
+                raw_result_events.append(
+                    {"kind": "unknown-shard", "result": _json_safe(dict(result))}
+                )
                 problems.append("worker returned an unknown shard identity")
                 continue
             if shard_index in results:
+                raw_result_events.append(
+                    {"kind": "duplicate-shard", "result": _json_safe(dict(result))}
+                )
                 problems.append(f"worker returned duplicate shard {shard_index}")
                 continue
             results[shard_index] = dict(result)
@@ -3105,6 +3121,19 @@ def _run_spawn_process_batch(
             }
             if isinstance(payload.get("arm"), str):
                 partial["arm"] = payload["arm"]
+            if result:
+                for key, value in result.items():
+                    if key not in {
+                        "shard_index",
+                        "process_id",
+                        "worker_kind",
+                        "status",
+                        "exit_code",
+                        "started",
+                        "returned",
+                    }:
+                        partial[key] = _json_safe(value)
+                partial["result_exit_code"] = result.get("exit_code")
             if result and result.get("error"):
                 partial["error"] = str(result["error"])
             elif shard_index in start_errors:
@@ -3128,6 +3157,7 @@ def _run_spawn_process_batch(
                 "shards_returned": len(results),
                 "ranges": [dict(item) for item in partial_shards],
                 "per_shard": partial_shards,
+                "raw_result_events": raw_result_events,
             },
         )
         raise failure
