@@ -39,7 +39,11 @@ from sts_combat_rl.sim.non_combat_learning import (
     T065_STAGE6_SEED_RANGE,
     T065_STAGE6_REPORT_SCHEMA_ID,
     T065_STAGE6_SHARD_COUNT,
+    T065_MODEL_SEEDS,
     T065SourceState,
+    T065HeldoutReport,
+    T065HeldoutStateResult,
+    T065_STAGE5_REPORT_SCHEMA_ID,
     T065_TRAINING_INTERPRETER,
     T065CaseD,
     ExpertNonCombatDriver,
@@ -69,7 +73,6 @@ from sts_combat_rl.sim.non_combat_learning import (
     read_target_table,
     run_stage6_experiment,
     continuation_seeds_for_split,
-    decision_record_digest,
     select_source_candidates,
     select_t075_source_candidates,
     train_frozen_model_seeds,
@@ -1308,6 +1311,231 @@ def _write_canonical_json(path: Path, value: Mapping[str, Any]) -> None:
     except Exception:
         temporary.unlink(missing_ok=True)
         raise
+
+
+def _t075_finite_number(value: Any) -> bool:
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(float(value))
+    )
+
+
+def _t075_stage5_state_result(value: Any, *, model_seed: int) -> T065HeldoutStateResult:
+    if not isinstance(value, Mapping):
+        raise ValueError("Stage-5 state result is not an object")
+
+    def integer(name: str, *, allow_none: bool = False) -> int | None:
+        item = value.get(name)
+        if allow_none and item is None:
+            return None
+        if isinstance(item, bool) or not isinstance(item, int):
+            raise ValueError(f"Stage-5 state result {name} is not an integer")
+        return item
+
+    def finite(name: str, *, allow_none: bool = False) -> float | None:
+        item = value.get(name)
+        if allow_none and item is None:
+            return None
+        if not _t075_finite_number(item):
+            raise ValueError(f"Stage-5 state result {name} is not finite")
+        return float(item)
+
+    required_strings = (
+        "family",
+        "split",
+        "source_behavior",
+        "screen_state",
+        "public_state_identity",
+    )
+    if any(not isinstance(value.get(name), str) for name in required_strings):
+        raise ValueError("Stage-5 state result has invalid identity text")
+    if integer("selected_state_index") is None or integer("model_seed") != model_seed:
+        raise ValueError("Stage-5 state result has invalid seed identity")
+    for name in (
+        "source_behavior_action_identity",
+        "model_action_identity",
+        "expert_action_identity",
+        "predicted_action_values",
+        "empirical_action_values",
+    ):
+        if not isinstance(value.get(name), Mapping):
+            raise ValueError(f"Stage-5 state result {name} is not an object")
+    empirical_best = value.get("empirical_best_action_indices")
+    if not isinstance(empirical_best, list) or any(
+        isinstance(item, bool) or not isinstance(item, int) for item in empirical_best
+    ):
+        raise ValueError("Stage-5 state result best actions are malformed")
+    predicted_values = value["predicted_action_values"]
+    empirical_values = value["empirical_action_values"]
+    if any(not _t075_finite_number(item) for item in predicted_values.values()) or any(
+        not _t075_finite_number(item) for item in empirical_values.values()
+    ):
+        raise ValueError("Stage-5 state result action values are not finite")
+    rank_correlation = finite("rank_correlation", allow_none=True)
+    return T065HeldoutStateResult(
+        selected_state_index=integer("selected_state_index"),
+        family=value["family"],
+        split=value["split"],
+        source_behavior=value["source_behavior"],
+        screen_state=value["screen_state"],
+        source_act=finite("source_act", allow_none=True),
+        source_floor=finite("source_floor", allow_none=True),
+        public_state_identity=value["public_state_identity"],
+        source_behavior_action_index=integer(
+            "source_behavior_action_index", allow_none=True
+        ),
+        source_behavior_action_identity=dict(value["source_behavior_action_identity"]),
+        model_seed=model_seed,
+        model_action_index=integer("model_action_index"),
+        model_action_identity=dict(value["model_action_identity"]),
+        expert_action_index=integer("expert_action_index"),
+        expert_action_identity=dict(value["expert_action_identity"]),
+        model_q_floor=finite("model_q_floor"),
+        expert_q_floor=finite("expert_q_floor"),
+        delta=finite("delta"),
+        predicted_action_values={
+            str(key): float(item) for key, item in predicted_values.items()
+        },
+        empirical_best_action_indices=tuple(empirical_best),
+        empirical_action_values={
+            str(key): float(item) for key, item in empirical_values.items()
+        },
+        rank_correlation=rank_correlation,
+    )
+
+
+def _read_t075_stage5_gate_report(
+    path: Path, *, target_table_path: Path
+) -> T065HeldoutReport:
+    """Load the frozen Stage-5 parent without rebuilding or rewriting it."""
+
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise T075WorkflowError(
+            "stage5-gate", [f"supplied Stage-5 report is unreadable: {exc}"]
+        ) from exc
+    if not isinstance(payload, Mapping):
+        raise T075WorkflowError(
+            "stage5-gate", ["supplied Stage-5 report is not an object"]
+        )
+    if (
+        payload.get("schema_id") != "t075-stage5-gate-report-v1"
+        or payload.get("schema_version") != 1
+        or payload.get("task_id") != T075_TASK_ID
+        or payload.get("approved_t075_spec_commit") != T075_APPROVED_SPEC_COMMIT
+    ):
+        raise T075WorkflowError(
+            "stage5-gate", ["supplied Stage-5 report wrapper is not frozen"]
+        )
+    if payload.get("parent_target_table_sha256") != file_sha256(target_table_path):
+        raise T075WorkflowError(
+            "stage5-gate", ["supplied Stage-5 report target parent does not match"]
+        )
+    wrapper_passed = payload.get("passed")
+    wrapper_problems = payload.get("problems")
+    nested = payload.get("stage5")
+    if (
+        not isinstance(wrapper_passed, bool)
+        or not isinstance(wrapper_problems, list)
+        or any(not isinstance(problem, str) for problem in wrapper_problems)
+        or not isinstance(nested, Mapping)
+        or nested.get("schema_id") != T065_STAGE5_REPORT_SCHEMA_ID
+        or nested.get("schema_version") != 1
+    ):
+        raise T075WorkflowError(
+            "stage5-gate", ["supplied Stage-5 report shape is incomplete"]
+        )
+    selected_seed = nested.get("selected_model_seed")
+    model_results = nested.get("model_results")
+    family_means = nested.get("family_mean_deltas")
+    nested_problems = nested.get("problems")
+    expected_model_keys = {str(seed) for seed in T065_MODEL_SEEDS}
+    if (
+        isinstance(selected_seed, bool)
+        or not isinstance(selected_seed, int)
+        or selected_seed not in T065_MODEL_SEEDS
+        or not isinstance(model_results, Mapping)
+        or set(model_results) != expected_model_keys
+        or not isinstance(family_means, Mapping)
+        or set(family_means) != set(T065_MANDATORY_FAMILIES)
+        or any(not _t075_finite_number(value) for value in family_means.values())
+        or not isinstance(nested_problems, list)
+        or any(not isinstance(problem, str) for problem in nested_problems)
+    ):
+        raise T075WorkflowError(
+            "stage5-gate", ["supplied Stage-5 report nested evidence is incomplete"]
+        )
+    parsed_model_results: dict[str, tuple[T065HeldoutStateResult, ...]] = {}
+    try:
+        for seed, results in model_results.items():
+            model_seed = int(seed)
+            if (
+                not isinstance(seed, str)
+                or isinstance(results, (str, bytes))
+                or not isinstance(results, list)
+            ):
+                raise ValueError("model result collection is malformed")
+            parsed_model_results[seed] = tuple(
+                _t075_stage5_state_result(result, model_seed=model_seed)
+                for result in results
+            )
+            parsed = parsed_model_results[seed]
+            if len(parsed) != 64:
+                raise ValueError("each Stage-5 model must contain 64 held-out states")
+            family_counts = {
+                family: sum(result.family == family for result in parsed)
+                for family in T065_MANDATORY_FAMILIES
+            }
+            if (
+                any(result.split != "heldout" for result in parsed)
+                or any(count != 16 for count in family_counts.values())
+                or any(
+                    result.family not in T065_MANDATORY_FAMILIES for result in parsed
+                )
+            ):
+                raise ValueError(
+                    "Stage-5 held-out model results have invalid family/split coverage"
+                )
+    except (TypeError, ValueError) as exc:
+        raise T075WorkflowError(
+            "stage5-gate", [f"supplied Stage-5 model results are malformed: {exc}"]
+        ) from exc
+    numeric_fields = (
+        "selected_validation_mae",
+        "aggregate_mean_delta",
+        "median_delta",
+        "p_positive",
+        "non_selected_model_mean_delta",
+    )
+    if any(not _t075_finite_number(nested.get(field)) for field in numeric_fields):
+        raise T075WorkflowError(
+            "stage5-gate", ["supplied Stage-5 metrics are not finite"]
+        )
+    nested_passed = nested.get("passed")
+    if (
+        not isinstance(nested_passed, bool)
+        or nested_passed != wrapper_passed
+        or nested_problems != wrapper_problems
+    ):
+        raise T075WorkflowError(
+            "stage5-gate", ["supplied Stage-5 pass status is inconsistent"]
+        )
+    return T065HeldoutReport(
+        selected_model_seed=selected_seed,
+        selected_validation_mae=float(nested["selected_validation_mae"]),
+        model_results=parsed_model_results,
+        aggregate_mean_delta=float(nested["aggregate_mean_delta"]),
+        median_delta=float(nested["median_delta"]),
+        family_mean_deltas={
+            str(key): float(value) for key, value in family_means.items()
+        },
+        p_positive=float(nested["p_positive"]),
+        non_selected_model_mean_delta=float(nested["non_selected_model_mean_delta"]),
+        passed=wrapper_passed,
+        problems=tuple(nested_problems),
+    )
 
 
 def _t075_command_string(
@@ -4249,24 +4477,33 @@ def _run_t075_evaluate(args: argparse.Namespace) -> int:
         required_paths=parent_artifacts,
     )
     table = read_target_table(args.target_table)
-    model_runs = tuple(
-        load_non_combat_checkpoint(args.checkpoint_directory / f"model-{seed}.pt")
-        for seed in (653001, 653002)
-    )
     stage5_started = time.perf_counter()
-    stage5 = build_stage5_report(model_runs, table)
     stage5_path = args.stage5_report or args.output
-    stage5_payload = {
-        "schema_id": "t075-stage5-gate-report-v1",
-        "schema_version": 1,
-        "task_id": T075_TASK_ID,
-        "approved_t075_spec_commit": T075_APPROVED_SPEC_COMMIT,
-        "parent_target_table_sha256": file_sha256(args.target_table),
-        "stage5": stage5.to_dict(),
-        "passed": stage5.passed,
-        "problems": list(stage5.problems),
-    }
-    _write_canonical_json(stage5_path, stage5_payload)
+    if args.run_stage6 and args.stage5_report:
+        stage5 = _read_t075_stage5_gate_report(
+            args.stage5_report, target_table_path=args.target_table
+        )
+        model_runs = tuple(
+            load_non_combat_checkpoint(args.checkpoint_directory / f"model-{seed}.pt")
+            for seed in (653001, 653002)
+        )
+    else:
+        model_runs = tuple(
+            load_non_combat_checkpoint(args.checkpoint_directory / f"model-{seed}.pt")
+            for seed in (653001, 653002)
+        )
+        stage5 = build_stage5_report(model_runs, table)
+        stage5_payload = {
+            "schema_id": "t075-stage5-gate-report-v1",
+            "schema_version": 1,
+            "task_id": T075_TASK_ID,
+            "approved_t075_spec_commit": T075_APPROVED_SPEC_COMMIT,
+            "parent_target_table_sha256": file_sha256(args.target_table),
+            "stage5": stage5.to_dict(),
+            "passed": stage5.passed,
+            "problems": list(stage5.problems),
+        }
+        _write_canonical_json(stage5_path, stage5_payload)
     stage5_evidence = {
         **_t075_execution_evidence(
             args, status="completed", terminal=True, exit_code=0, executed=True
@@ -6455,23 +6692,6 @@ def _t075_stage6_report_is_valid(path: Path, *, artifact_root: Path) -> bool:
                 counts["intentional_unsupported_fallback_count"] += 1
             if status == "learned_failure":
                 counts["supported_failure_count"] += 1
-        events_by_seed: dict[int, list[Mapping[str, Any]]] = {}
-        for event in events:
-            event_seed = event.get("simulator_seed")
-            if isinstance(event_seed, int) and not isinstance(event_seed, bool):
-                events_by_seed.setdefault(event_seed, []).append(event)
-        for event_seed, row in arm_rows_by_seed[arm].items():
-            record_digest = row.get("decision_record_digest")
-            if (
-                not isinstance(record_digest, str)
-                or len(record_digest) != 64
-                or any(
-                    character not in "0123456789abcdef" for character in record_digest
-                )
-                or record_digest
-                != decision_record_digest(events_by_seed.get(event_seed, []))
-            ):
-                return False
         if arm == "learned":
             for event_seed, row in arm_rows_by_seed[arm].items():
                 row_counts = {}

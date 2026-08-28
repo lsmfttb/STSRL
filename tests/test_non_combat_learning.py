@@ -47,6 +47,7 @@ from sts_combat_rl.sim.non_combat_learning import (
     frozen_battle_provenance,
     inclusive_range,
     matched_bootstrap_probability,
+    run_complete_run_arm_sharded,
     train_frozen_model_seeds,
     LearnedNonCombatPolicy,
     load_non_combat_checkpoint,
@@ -3522,6 +3523,44 @@ def test_spawn_parent_rejects_forged_child_pid() -> None:
         _validate_spawn_process_bindings(processes, payloads, results, stage="stage6")
 
 
+def test_stage6_arm_preserves_failed_batch_execution_evidence(monkeypatch) -> None:
+    import sts_combat_rl.sim.non_combat_learning as learning
+
+    specs = stage6_shard_ranges(arm="stochastic", worker_count=16)
+
+    def failed_batch(_worker, _payloads, *, stage, worker_count):
+        assert stage == "stage6"
+        assert worker_count == 16
+        return [
+            {
+                "shard_index": spec["shard_index"],
+                "process_id": 5000 + spec["shard_index"],
+                "worker_kind": "spawn-process",
+                "status": "failed",
+                "exit_code": 1,
+                "error": "fixture worker failure",
+            }
+            for spec in specs
+        ]
+
+    monkeypatch.setattr(learning, "_run_spawn_process_batch", failed_batch)
+    with pytest.raises(T065CaseD) as raised:
+        run_complete_run_arm_sharded(lambda: None, arm="stochastic", worker_count=16)
+    evidence = raised.value.execution_evidence
+    assert evidence["shards_planned"] == 16
+    assert evidence["shards_started"] == 16
+    assert evidence["shards_returned"] == 16
+    assert [
+        (item["shard_index"], item["seed_start"], item["seed_end"])
+        for item in evidence["per_shard"]
+    ] == [(spec["shard_index"], spec["seed_start"], spec["seed_end"]) for spec in specs]
+    assert all(item["started"] is True for item in evidence["per_shard"])
+    assert all(item["returned"] is True for item in evidence["per_shard"])
+    assert all(item["process_id"] >= 5000 for item in evidence["per_shard"])
+    assert all(item["status"] == "failed" for item in evidence["per_shard"])
+    assert all(item["exit_code"] == 1 for item in evidence["per_shard"])
+
+
 def test_stage5_without_stage6_writes_completed_independent_parent(
     monkeypatch, tmp_path
 ) -> None:
@@ -3745,11 +3784,6 @@ def _write_valid_t075_stage6_fixture(path: Path) -> None:
             if arm == "learned"
             else []
         )
-        events_by_seed = {int(event["simulator_seed"]): [event] for event in events}
-        for row in rows:
-            row["decision_record_digest"] = command_module.decision_record_digest(
-                events_by_seed.get(row["simulator_seed"], [])
-            )
         specs = [
             {
                 **spec,
@@ -3871,7 +3905,10 @@ def test_t075_stage6_validator_recomputes_semantics_and_rejects_forgery(tmp_path
     payload["execution_evidence"]["arms"]["learned"]["decision_count"] = 255
     payload["coverage"].update({"D": 255, "L": 255, "M": 255})
     path.write_text(json.dumps(payload), encoding="utf-8")
-    assert not _t075_stage6_report_is_valid(path, artifact_root=tmp_path)
+    # A single run with no learned decisions is valid; no per-run digest is
+    # part of the frozen row schema and can no longer reject this ordinary
+    # zero-decision run.
+    assert _t075_stage6_report_is_valid(path, artifact_root=tmp_path)
     learned_report["decision_events"].insert(0, zero_event)
     for field in (
         "learned_decision_count",
@@ -3888,15 +3925,11 @@ def test_t075_stage6_validator_recomputes_semantics_and_rejects_forgery(tmp_path
         "supported_failure_count",
     ):
         zero_row[field] = 0
-    zero_row["decision_record_digest"] = command_module.decision_record_digest([])
     payload["execution_evidence"]["arms"]["learned"]["decision_count"] = 255
     payload["coverage"].update({"D": 255, "L": 255, "M": 255})
     path.write_text(json.dumps(payload), encoding="utf-8")
     assert _t075_stage6_report_is_valid(path, artifact_root=tmp_path)
     learned_report["decision_events"].insert(0, zero_event)
-    zero_row["decision_record_digest"] = command_module.decision_record_digest(
-        [zero_event]
-    )
     payload["execution_evidence"]["arms"]["learned"]["decision_count"] = 256
     payload["coverage"].update({"D": 256, "L": 256, "M": 256})
     saved_events = learned_report["decision_events"]

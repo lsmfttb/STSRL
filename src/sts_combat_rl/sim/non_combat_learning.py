@@ -2976,6 +2976,19 @@ def _validate_spawn_process_bindings(
                 f"shard {shard_index} returned process_id "
                 f"{result.get('process_id')!r}, expected child PID {process.pid}"
             )
+        if result.get("status") != "passed":
+            problems.append(
+                f"shard {shard_index} returned worker status {result.get('status')!r}"
+            )
+        result_exit_code = result.get("exit_code")
+        if result_exit_code is not None and (
+            isinstance(result_exit_code, bool)
+            or not isinstance(result_exit_code, int)
+            or result_exit_code != 0
+        ):
+            problems.append(
+                f"shard {shard_index} returned worker exit_code {result_exit_code!r}"
+            )
         if process.exitcode not in (0, None) and result.get("status") == "passed":
             problems.append(
                 f"shard {shard_index} exited {process.exitcode} after passed result"
@@ -3018,11 +3031,21 @@ def _run_spawn_process_batch(
     ]
     results: dict[int, dict[str, Any]] = {}
     problems: list[str] = []
+    start_errors: dict[int, str] = {}
     try:
-        for process in processes:
-            process.start()
+        for payload, process in zip(payloads, processes, strict=True):
+            shard_index = int(payload["shard_index"])
+            try:
+                process.start()
+            except Exception as exc:
+                start_errors[shard_index] = f"{type(exc).__name__}: {exc}"
+                problems.append(
+                    f"shard {shard_index} could not start: {start_errors[shard_index]}"
+                )
+                break
         queue_module = __import__("queue")
-        while len(results) < len(processes):
+        started_count = sum(process.pid is not None for process in processes)
+        while len(results) < started_count:
             try:
                 result = result_queue.get(timeout=0.25)
             except queue_module.Empty:
@@ -3045,7 +3068,8 @@ def _run_spawn_process_batch(
                 continue
             results[shard_index] = dict(result)
         for process in processes:
-            process.join()
+            if process.pid is not None:
+                process.join()
         try:
             _validate_spawn_process_bindings(processes, payloads, results, stage=stage)
         except T065CaseD as exc:
@@ -3069,6 +3093,7 @@ def _run_spawn_process_batch(
                 "process_id": process.pid,
                 "worker_kind": "spawn-process",
                 "started": process.pid is not None,
+                "returned": result is not None,
                 "status": result.get("status", "missing") if result else "missing",
                 "exit_code": (
                     process.exitcode
@@ -3082,6 +3107,8 @@ def _run_spawn_process_batch(
                 partial["arm"] = payload["arm"]
             if result and result.get("error"):
                 partial["error"] = str(result["error"])
+            elif shard_index in start_errors:
+                partial["error"] = start_errors[shard_index]
             partial_shards.append(partial)
         failure = T065CaseD(
             stage,
@@ -3096,6 +3123,9 @@ def _run_spawn_process_batch(
                 "partial_spawn_failure": True,
                 "shard_count": len(payloads),
                 "worker_count": worker_count,
+                "shards_planned": len(payloads),
+                "shards_started": sum(process.pid is not None for process in processes),
+                "shards_returned": len(results),
                 "ranges": [dict(item) for item in partial_shards],
                 "per_shard": partial_shards,
             },
@@ -4986,7 +5016,6 @@ def run_complete_run_arm(
             "truncated": truncated,
             "controller_error": bool(run_problems) and not truncated,
             "problems": run_problems,
-            "decision_record_digest": decision_record_digest(run_events),
             "learned_decision_count": (
                 sum(
                     event.get("status") in {"learned_success", "learned_failure"}
@@ -5138,7 +5167,43 @@ def run_complete_run_arm_sharded(
         if result.get("status") != "passed" or result.get("exit_code") != 0
     ]
     if failures:
-        raise T065CaseD("stage6", failures)
+        partial_shards = []
+        for spec, result in zip(specs, ordered_results, strict=True):
+            seeds = list(range(int(spec["seed_start"]), int(spec["seed_end"]) + 1))
+            partial = {
+                **dict(spec),
+                "requested_seeds": seeds,
+                "completed_seeds": [],
+                "process_id": result.get("process_id"),
+                "worker_kind": result.get("worker_kind"),
+                "started": result.get("process_id") is not None,
+                "returned": True,
+                "status": result.get("status", "failed"),
+                "exit_code": result.get("exit_code"),
+            }
+            if result.get("error"):
+                partial["error"] = str(result["error"])
+            partial_shards.append(partial)
+        raise T065CaseD(
+            "stage6",
+            failures,
+            failure_counts={
+                "failure_count": len(failures),
+                "shards_planned": len(payloads),
+                "shards_started": sum(item["started"] for item in partial_shards),
+                "shards_returned": len(ordered_results),
+            },
+            execution_evidence={
+                "partial_spawn_failure": True,
+                "shard_count": len(payloads),
+                "worker_count": worker_count,
+                "shards_planned": len(payloads),
+                "shards_started": sum(item["started"] for item in partial_shards),
+                "shards_returned": len(ordered_results),
+                "ranges": [dict(item) for item in partial_shards],
+                "per_shard": partial_shards,
+            },
+        )
     _validate_stage6_process_evidence(ordered_results)
     shards = [result["report"] for result in ordered_results]
     shard_evidence: list[Mapping[str, Any]] = []
@@ -7000,12 +7065,6 @@ def _canonical_json_bytes(value: Any) -> bytes:
         sort_keys=True,
         separators=(",", ":"),
     ).encode("utf-8")
-
-
-def decision_record_digest(events: Sequence[Mapping[str, Any]]) -> str:
-    """Hash one run's complete ordered decision-record sequence."""
-
-    return hashlib.sha256(_canonical_json_bytes(list(events))).hexdigest()
 
 
 def _json_safe(value: Any) -> Any:

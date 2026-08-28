@@ -772,6 +772,39 @@ def test_t075_stage6_does_not_rewrite_supplied_stage5_parent(
     root = tmp_path / "artifacts"
     root.mkdir()
     stage5_path = root / "stage5-heldout-report.json"
+    target_table = root / "stage2-target-table.json"
+    target_table.write_text("target fixture\n", encoding="utf-8")
+
+    def heldout_results(model_seed):
+        families = ("MAP_SCREEN", "REST_ROOM", "REWARDS", "TREASURE_ROOM")
+        return [
+            {
+                "selected_state_index": index,
+                "family": families[index // 16],
+                "split": "heldout",
+                "source_behavior": "expert_non_combat_v1",
+                "screen_state": families[index // 16],
+                "source_act": 1.0,
+                "source_floor": 1.0,
+                "public_state_identity": f"fixture-state-{index}",
+                "source_behavior_action_index": 0,
+                "source_behavior_action_identity": {"action_index": 0},
+                "model_seed": model_seed,
+                "model_action_index": 0,
+                "model_action_identity": {"action_index": 0},
+                "expert_action_index": 0,
+                "expert_action_identity": {"action_index": 0},
+                "model_q_floor": 3.0,
+                "expert_q_floor": 2.0,
+                "delta": 1.0,
+                "predicted_action_values": {"0": 3.0},
+                "empirical_best_action_indices": [0],
+                "empirical_action_values": {"0": 2.0},
+                "rank_correlation": 1.0,
+            }
+            for index in range(64)
+        ]
+
     stage5_path.write_text(
         json.dumps(
             {
@@ -779,8 +812,29 @@ def test_t075_stage6_does_not_rewrite_supplied_stage5_parent(
                 "schema_version": 1,
                 "task_id": "T075",
                 "approved_t075_spec_commit": "e204c5d28cc0bee8013853e8680e8966f5c930a8",
-                "parent_target_table_sha256": "literal-parent",
-                "stage5": {"passed": True, "marker": "supplied-stage5"},
+                "parent_target_table_sha256": file_sha256(target_table),
+                "stage5": {
+                    "schema_id": "t065-heldout-gate-report-v1",
+                    "schema_version": 1,
+                    "selected_model_seed": 653001,
+                    "selected_validation_mae": 0.0,
+                    "model_results": {
+                        "653001": heldout_results(653001),
+                        "653002": heldout_results(653002),
+                    },
+                    "aggregate_mean_delta": 1.0,
+                    "median_delta": 1.0,
+                    "family_mean_deltas": {
+                        "MAP_SCREEN": 1.0,
+                        "REST_ROOM": 1.0,
+                        "REWARDS": 1.0,
+                        "TREASURE_ROOM": 1.0,
+                    },
+                    "p_positive": 1.0,
+                    "non_selected_model_mean_delta": 1.0,
+                    "passed": True,
+                    "problems": [],
+                },
                 "passed": True,
                 "problems": [],
             }
@@ -788,8 +842,6 @@ def test_t075_stage6_does_not_rewrite_supplied_stage5_parent(
         encoding="utf-8",
     )
     before = stage5_path.read_bytes()
-    target_table = root / "stage2-target-table.json"
-    target_table.write_text("target fixture\n", encoding="utf-8")
     checkpoint_directory = root / "stage4-checkpoints"
     checkpoint_directory.mkdir()
     (checkpoint_directory / "model-653001.pt").write_bytes(b"model 653001\n")
