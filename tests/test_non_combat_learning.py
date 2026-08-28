@@ -89,10 +89,12 @@ from sts_combat_rl.commands.non_combat_learning import (
     _t075_resolve_reuse_manifest,
     _t075_validate_accepted_case_d_files,
     _run_t075_select,
+    _run_t075_evaluate,
     _is_t075_invocation,
     _t075_target_row_completeness,
     _t075_write_stage3_report,
     _write_t075_stage_retention,
+    _t075_validate_process_shards,
 )
 
 
@@ -2957,7 +2959,20 @@ def test_t075_finalize_accepts_valid_case_d_json_lists(tmp_path, monkeypatch) ->
     stages = command_module.T075_STAGE_ORDER[:-1]
     reached = [stages[0]]
     skipped = list(stages[1:])
-    skipped_commands = {stage: f"frozen-{stage}" for stage in skipped}
+    command_args = {
+        "stage0-reuse": ("validate-reuse", "--source", "source.json"),
+        "stage1-selection-replay": ("select", "--input", "states.json"),
+        "stage2-target": ("target", "--states", "states.json"),
+        "stage4-train": ("train", "--target-table", "targets.json"),
+        "stage5-gate": ("evaluate", "--target-table", "targets.json"),
+        "stage6-eval": ("evaluate", "--target-table", "targets.json"),
+    }
+    skipped_commands = {
+        stage: command_module._t075_command_string(
+            SimpleNamespace(_command_argv=command_args[stage])
+        )
+        for stage in skipped
+    }
     skipped_evidence = {
         stage: {
             "command": skipped_commands[stage],
@@ -3033,7 +3048,7 @@ def test_t075_finalize_accepts_valid_case_d_json_lists(tmp_path, monkeypatch) ->
         retention_manifest=retention_path,
         _command_argv=(),
     )
-    assert _t075_terminal_decision_is_valid(decision)
+    assert _t075_terminal_decision_is_valid(decision, artifact_root=artifact_root)
     assert _run_t075_finalize(args) == 0
     assert (
         json.loads(retention_path.read_text(encoding="utf-8"))["terminal_case"] == "D"
@@ -3055,3 +3070,152 @@ def test_t075_case_d_stage6_failure_maps_to_stage6_eval(tmp_path) -> None:
     assert report["skipped_stages"] == []
     assert report["stage6_status"] == "completed"
     assert report["terminal_case"] == "D"
+
+
+def test_replay_success_worker_schema_is_merged_with_worker_kind(monkeypatch) -> None:
+    import builtins
+
+    from sts_combat_rl.sim import lightspeed as lightspeed_module
+    from sts_combat_rl.sim import non_combat_learning as learning
+
+    snapshot = SimulatorSnapshot(
+        observation=(1,), raw={"screen_state": "MAP_SCREEN", "battle_active": False}
+    )
+    action = SimulatorAction(action_id="map", label="map", kind="map")
+    checkpoint = SimulatorCheckpoint("fixture", "checkpoint", snapshot)
+
+    class FakeAdapter:
+        def __init__(self, **_kwargs):
+            pass
+
+        def legal_actions(self, _snapshot):
+            return [action]
+
+        def restore_checkpoint(self, value):
+            return value.payload
+
+    monkeypatch.setattr(lightspeed_module, "LightSpeedAdapter", FakeAdapter)
+    monkeypatch.setattr(
+        learning,
+        "replay_source_state",
+        lambda *_args: (snapshot, (action,), None, checkpoint),
+    )
+    monkeypatch.setattr(
+        learning, "encode_lightspeed_battle_snapshot", lambda raw: (raw,)
+    )
+    real_import = builtins.__import__
+
+    def import_resource(name, *args, **kwargs):
+        if name == "resource":
+            return SimpleNamespace(
+                RUSAGE_SELF=1,
+                getrusage=lambda _kind: SimpleNamespace(ru_utime=0.0, ru_stime=0.0),
+            )
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", import_resource)
+    state = replace(
+        _state(0, "MAP_SCREEN", "train", 650001),
+        legal_action_identities=tuple(action_identity_dicts_for_actions((action,))),
+        behavior_action_identity=action_identity_dicts_for_actions((action,))[0],
+    )
+    result = learning._replay_process_shard(
+        {
+            "shard_index": 0,
+            "states": [state.to_dict()],
+            "simulator_seed": 1,
+            "ascension": 20,
+            "player_class": "IRONCLAD",
+        }
+    )
+    assert result["status"] == "passed", result
+    assert result["worker_kind"] == "spawn-process"
+    assert isinstance(result["process_id"], int)
+
+
+def test_stage6_retention_evidence_is_flat_per_arm_and_shard() -> None:
+    entries = [
+        {
+            "arm": arm,
+            "shard_index": shard_index,
+            "process_id": 1000 + arm_index * 16 + shard_index,
+            "worker_kind": "spawn-process",
+            "exit_code": 0,
+            "requested_seed_count": 20,
+        }
+        for arm_index, arm in enumerate(("expert", "learned", "stochastic"))
+        for shard_index in range(16)
+    ]
+    _t075_validate_process_shards(
+        "stage6-eval",
+        shard_count=16,
+        worker_count=16,
+        per_shard=entries,
+        status="completed",
+    )
+    with pytest.raises(T075WorkflowError, match="shard"):
+        _t075_validate_process_shards(
+            "stage6-eval",
+            shard_count=16,
+            worker_count=16,
+            per_shard={"expert": entries[:16]},
+            status="completed",
+        )
+
+
+def test_stage5_without_stage6_writes_completed_independent_parent(
+    monkeypatch, tmp_path
+) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command_module
+
+    target = tmp_path / "targets.json"
+    target.write_text("{}\n", encoding="utf-8")
+    output = tmp_path / "stage5.json"
+    retention = tmp_path / "stage5.retention.json"
+    captured = []
+    stage5 = SimpleNamespace(
+        passed=True,
+        problems=(),
+        selected_model_seed=653001,
+        to_dict=lambda: {"passed": True},
+    )
+    monkeypatch.setattr(
+        command_module, "_t075_has_terminal_decision", lambda _args: False
+    )
+    monkeypatch.setattr(
+        command_module,
+        "_t075_preceding_manifest_path",
+        lambda _args, stage: tmp_path / f"{stage}.retention.json",
+    )
+    monkeypatch.setattr(
+        command_module, "_t075_require_parent_retention", lambda *a, **k: {}
+    )
+    monkeypatch.setattr(
+        command_module, "read_target_table", lambda _path: SimpleNamespace()
+    )
+    monkeypatch.setattr(
+        command_module,
+        "load_non_combat_checkpoint",
+        lambda _path: SimpleNamespace(model_seed=653001),
+    )
+    monkeypatch.setattr(command_module, "build_stage5_report", lambda *_a: stage5)
+    monkeypatch.setattr(
+        command_module,
+        "_write_t075_stage_retention",
+        lambda _args, **kwargs: captured.append(kwargs) or {},
+    )
+    args = SimpleNamespace(
+        target_table=target,
+        checkpoint_directory=tmp_path / "checkpoints",
+        output=output,
+        stage5_report=None,
+        run_stage6=False,
+        decision_report=None,
+        retention_manifest=retention,
+        _command_argv=("evaluate", "--target-table", str(target)),
+        _t075_execution_start_utc="2026-08-28T00:00:00+00:00",
+    )
+    assert _run_t075_evaluate(args) == 0
+    assert captured[-1]["stage"] == "stage5-gate"
+    assert captured[-1]["evidence"]["status"] == "completed"
+    assert captured[-1]["evidence"]["terminal"] is True

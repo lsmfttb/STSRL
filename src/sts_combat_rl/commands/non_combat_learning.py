@@ -17,6 +17,7 @@ import os
 from pathlib import Path
 import shlex
 import sys
+import time
 from tempfile import TemporaryDirectory
 from typing import Any, Mapping
 
@@ -165,7 +166,22 @@ def _t075_resolve_identity_path(
         if artifact_root is not None:
             candidates.append(artifact_root / path)
         candidates.append(_target_src_path().parent / path)
-    return next((candidate for candidate in candidates if candidate.is_file()), None)
+    root = None
+    if artifact_root is not None:
+        try:
+            root = artifact_root.resolve()
+        except OSError:
+            return None
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+            if root is not None:
+                resolved.relative_to(root)
+            if resolved.is_file():
+                return resolved
+        except (OSError, ValueError):
+            continue
+    return None
 
 
 def _t075_actual_identity(identity: Any, *, artifact_root: Path | None = None) -> bool:
@@ -191,6 +207,116 @@ def _t075_actual_identity(identity: Any, *, artifact_root: Path | None = None) -
     )
 
 
+def _t075_validate_process_shards(
+    stage: str,
+    *,
+    shard_count: int,
+    worker_count: int,
+    per_shard: Any,
+    status: str,
+) -> None:
+    """Validate observed process evidence, including its frozen shard plan.
+
+    Stage-6 retention is one list containing all three arms.  The arm label is
+    deliberately retained on every row so a dict keyed by arm cannot be
+    mistaken for observed per-shard evidence.
+    """
+
+    if shard_count == 0:
+        if per_shard != []:
+            raise T075WorkflowError(
+                "artifact-retention", [f"{stage}: zero-shard evidence is not empty"]
+            )
+        return
+    if stage == "stage6-eval":
+        expected_count = shard_count * 3
+        expected_arms = {"stochastic", "expert", "learned"}
+    else:
+        expected_count = shard_count
+        expected_arms = None
+    if worker_count != T065_MAX_WORKERS or len(per_shard) != expected_count:
+        raise T075WorkflowError(
+            "artifact-retention",
+            [f"{stage}: observed worker/shard count is incomplete"],
+        )
+    seen: set[tuple[str | None, int]] = set()
+    process_ids: set[int] = set()
+    process_ids_by_arm: dict[str, set[int]] = {}
+    for entry in per_shard:
+        if not isinstance(entry, Mapping):
+            raise T075WorkflowError(
+                "artifact-retention", [f"{stage}: shard evidence is not an object"]
+            )
+        arm = entry.get("arm")
+        if expected_arms is not None and arm not in expected_arms:
+            raise T075WorkflowError(
+                "artifact-retention", [f"{stage}: shard arm identity is invalid"]
+            )
+        if expected_arms is None and arm is not None:
+            raise T075WorkflowError(
+                "artifact-retention", [f"{stage}: unexpected arm identity"]
+            )
+        index = entry.get("shard_index")
+        process_id = entry.get("process_id")
+        if (
+            isinstance(index, bool)
+            or not isinstance(index, int)
+            or not 0 <= index < shard_count
+            or isinstance(process_id, bool)
+            or not isinstance(process_id, int)
+            or entry.get("worker_kind") != "spawn-process"
+        ):
+            raise T075WorkflowError(
+                "artifact-retention", [f"{stage}: shard process evidence is invalid"]
+            )
+        key = (str(arm) if arm is not None else None, index)
+        arm_process_ids = process_ids_by_arm.setdefault(str(arm), set())
+        duplicate_process = (
+            process_id in arm_process_ids
+            if expected_arms is not None
+            else process_id in process_ids
+        )
+        if key in seen or duplicate_process:
+            raise T075WorkflowError(
+                "artifact-retention", [f"{stage}: duplicate shard/process identity"]
+            )
+        seen.add(key)
+        if expected_arms is not None:
+            arm_process_ids.add(process_id)
+        else:
+            process_ids.add(process_id)
+        exit_code = entry.get("exit_code")
+        if isinstance(exit_code, bool) or not isinstance(exit_code, int):
+            raise T075WorkflowError(
+                "artifact-retention", [f"{stage}: shard exit evidence is invalid"]
+            )
+        if status == "completed" and exit_code != 0:
+            raise T075WorkflowError(
+                "artifact-retention", [f"{stage}: completed shard has nonzero exit"]
+            )
+        if (
+            stage in {"stage1-selection-replay", "stage2-target"}
+            and entry.get("state_count") != 20
+        ):
+            raise T075WorkflowError(
+                "artifact-retention", [f"{stage}: shard state count is not frozen"]
+            )
+        if stage == "stage6-eval" and entry.get("requested_seed_count") != 20:
+            raise T075WorkflowError(
+                "artifact-retention", [f"{stage}: shard seed range is not frozen"]
+            )
+    if expected_arms is not None:
+        counts = {arm: 0 for arm in expected_arms}
+        for arm, _index in seen:
+            counts[str(arm)] += 1
+        if set(counts) != expected_arms or any(
+            count != shard_count for count in counts.values()
+        ):
+            raise T075WorkflowError(
+                "artifact-retention", [f"{stage}: per-arm shard plan is incomplete"]
+            )
+
+
 def _t075_terminal_decision_is_valid(
     value: Any,
     *,
@@ -199,6 +325,11 @@ def _t075_terminal_decision_is_valid(
 ) -> bool:
     """Return whether a terminal report is complete enough to win first-valid."""
 
+    # A terminal report is only authoritative in the stable artifact root;
+    # accepting an arbitrary absolute path here would let a source/current
+    # worktree file impersonate a retained T075 parent.
+    if artifact_root is None:
+        return False
     required = (
         "schema_id",
         "schema_version",
@@ -269,6 +400,7 @@ def _t075_terminal_decision_is_valid(
             or not command.strip()
             or not isinstance(evidence, Mapping)
             or evidence.get("command") != command
+            or not _t075_command_matches_contract(command, stage)
             or evidence.get("executed") is not False
             or evidence.get("status") != "skipped"
             or evidence.get("code_head") != value.get("code_head")
@@ -315,11 +447,35 @@ def _t075_terminal_decision_is_valid(
             return False
     case = value["terminal_case"]
     if case == "D":
+        failure_ids = value.get("failure_ids")
+        failure_counts = value.get("failure_counts")
+        failure_details = value.get("failure_details")
+        if (
+            not isinstance(failure_ids, list)
+            or not failure_ids
+            or any(
+                not isinstance(item, str) or not item.strip() for item in failure_ids
+            )
+            or len(set(failure_ids)) != len(failure_ids)
+            or not isinstance(failure_counts, Mapping)
+            or any(
+                isinstance(count, bool) or not isinstance(count, int) or count < 0
+                for count in failure_counts.values()
+            )
+            or not isinstance(failure_details, list)
+        ):
+            return False
+        declared_failure_count = failure_counts.get("failure_count")
+        if declared_failure_count is not None and declared_failure_count != len(
+            failure_ids
+        ):
+            return False
+        for detail in failure_details:
+            if isinstance(detail, Mapping) and "failure_id" in detail:
+                if detail["failure_id"] not in failure_ids:
+                    return False
         return (
             bool(value["problems"])
-            and isinstance(value.get("failure_ids"), list)
-            and isinstance(value.get("failure_counts"), Mapping)
-            and isinstance(value.get("failure_details"), list)
             and isinstance(value.get("failure_stage"), str)
             and bool(value["failure_stage"])
             and (
@@ -636,30 +792,10 @@ def _is_t075_invocation(args: argparse.Namespace) -> bool:
             or getattr(args, "retention_manifest", None)
         )
     if args.command == "evaluate":
-        if (
-            getattr(args, "stage5_report", None)
-            or getattr(args, "run_stage6", False)
-            or getattr(args, "retention_manifest", None)
-        ):
-            return True
-        # A T075-shaped evaluate invocation remains T075 even when its
-        # required predecessor is absent or unreadable.  Routing must be
-        # decided from the command contract, never from input validity.
-        if getattr(args, "target_table", None) and getattr(
-            args, "checkpoint_directory", None
-        ):
-            return True
-        # T075 Stage 5 has one preceding Stage-4 retention manifest.  Use the
-        # CLI shape only as the discriminator; never read or parse that path
-        # while deciding whether a failure belongs to T075.  Legacy T065
-        # evaluate uses the complete multi-parent chain instead.
-        raw_preceding = getattr(args, "preceding_manifest", None)
-        preceding = (
-            (raw_preceding,)
-            if isinstance(raw_preceding, (Path, str))
-            else tuple(raw_preceding or ())
-        )
-        return len(preceding) == 1
+        # This command surface is T075-only.  In particular, missing or
+        # corrupt preceding retention is an input failure, never a routing
+        # signal that may fall through to the legacy T065 handler.
+        return True
     return False
 
 
@@ -1036,6 +1172,14 @@ def _t075_stage_retention_records(
         if command.get("status") == "skipped" and not evidence.get("skip_reason"):
             raise T075WorkflowError(
                 "terminal-finalize", [f"skipped retention has no reason: {path}"]
+            )
+        if stage in {"stage1-selection-replay", "stage2-target", "stage6-eval"}:
+            _t075_validate_process_shards(
+                stage,
+                shard_count=evidence["shard_count"],
+                worker_count=evidence["worker_count"],
+                per_shard=evidence.get("per_shard"),
+                status=str(evidence.get("status")),
             )
         outputs = evidence.get("output_identities")
         command_outputs = command.get("output_identities")
@@ -1461,6 +1605,14 @@ def _write_t075_stage_retention(
     ):
         raise T075WorkflowError(
             "artifact-retention", [f"{stage}: shard evidence is invalid"]
+        )
+    if stage in {"stage1-selection-replay", "stage2-target", "stage6-eval"}:
+        _t075_validate_process_shards(
+            stage,
+            shard_count=evidence["shard_count"],
+            worker_count=evidence["worker_count"],
+            per_shard=evidence["per_shard"],
+            status=status,
         )
     if not isinstance(evidence["parent_identities"], Mapping):
         raise T075WorkflowError(
@@ -2333,9 +2485,14 @@ def _run_t075_select(args: argparse.Namespace) -> int:
         raise T075WorkflowError(
             "stage1-selection-replay", ["selection strategy is not frozen"]
         )
-    if args.replay_shard_count != 16 or args.replay_worker_count != 16:
+    if (
+        not args.replay_verify
+        or args.replay_shard_count != 16
+        or args.replay_worker_count != 16
+    ):
         raise T075WorkflowError(
-            "stage1-selection-replay", ["T075 replay requires 16 shards and 16 workers"]
+            "stage1-selection-replay",
+            ["T075 replay verification requires the frozen 16 shards and workers"],
         )
     if not args.replay_verify:
         raise T075WorkflowError(
@@ -3186,6 +3343,7 @@ def _run_t075_train(args: argparse.Namespace) -> int:
     table = read_target_table(args.target_table)
     table.validate_complete()
     args.checkpoint_directory.mkdir(parents=True, exist_ok=True)
+    training_started = time.perf_counter()
     runs = train_frozen_model_seeds(
         states=table.states,
         targets=table.targets,
@@ -3238,7 +3396,7 @@ def _run_t075_train(args: argparse.Namespace) -> int:
             "parent_identities": {
                 "target_validation": _t075_parent_identity(args.target_validation)
             },
-            "wall_clock_seconds": 0.0,
+            "wall_clock_seconds": time.perf_counter() - training_started,
             "shard_count": 1,
             "worker_count": 2,
             "ranges": [],
@@ -3282,6 +3440,7 @@ def _run_t075_evaluate(args: argparse.Namespace) -> int:
         load_non_combat_checkpoint(args.checkpoint_directory / f"model-{seed}.pt")
         for seed in (653001, 653002)
     )
+    stage5_started = time.perf_counter()
     stage5 = build_stage5_report(model_runs, table)
     stage5_path = args.stage5_report or args.output
     stage5_payload = {
@@ -3308,7 +3467,7 @@ def _run_t075_evaluate(args: argparse.Namespace) -> int:
         "parent_identities": {
             "target_table": _t075_parent_identity(args.target_table),
         },
-        "wall_clock_seconds": 0.0,
+        "wall_clock_seconds": time.perf_counter() - stage5_started,
         "shard_count": 0,
         "worker_count": 0,
         "ranges": [],
@@ -3364,23 +3523,22 @@ def _run_t075_evaluate(args: argparse.Namespace) -> int:
         )
         return 0
     if not args.run_stage6:
-        pending_evidence = {
-            **stage5_evidence,
-            **_t075_execution_evidence(
-                args, status="pending", terminal=False, exit_code=None, executed=True
-            ),
-            "status": "pending",
-            "terminal": False,
-            "skip_reason": "Stage 6 was not requested",
-        }
+        # Stage 5 is an independently completed gate.  Stage 6 is a separate
+        # frozen command, so its absence must not downgrade the completed
+        # Stage-5 parent to pending (which would make standalone Stage 6
+        # impossible to validate).
+        completed_stage5_evidence = dict(stage5_evidence)
         _write_t075_stage_retention(
             args,
             stage="stage5-gate",
             artifacts={"stage5_report": stage5_path},
-            evidence=pending_evidence,
+            evidence=completed_stage5_evidence,
         )
-        print("T075 Stage 5 passed; Stage 6 remains pending", file=sys.stderr)
-        return 1
+        print(
+            "T075 Stage 5 passed; Stage 6 remains an independent command",
+            file=sys.stderr,
+        )
+        return 0
     if args.stage6_shard_count != 16 or args.stage6_worker_count != T065_MAX_WORKERS:
         raise T075WorkflowError(
             "stage6-eval", ["T075 Stage 6 requires the frozen 16x16 worker plan"]
@@ -3424,25 +3582,31 @@ def _run_t075_evaluate(args: argparse.Namespace) -> int:
         raise T075WorkflowError(
             "stage6-eval", ["Stage 6 execution did not use the frozen worker plan"]
         )
-    actual_ranges = {
-        arm: arm_value.get("shard_specs")
-        for arm, arm_value in arm_execution.items()
-        if isinstance(arm_value, Mapping)
-    }
-    actual_processes = {
-        arm: [
-            {
-                "process_id": shard.get("process_id"),
-                "worker_kind": shard.get("worker_kind"),
-                "exit_code": shard.get("exit_code"),
-                "shard_index": shard.get("shard_index"),
-            }
-            for shard in arm_value.get("shard_specs", [])
-            if isinstance(shard, Mapping)
-        ]
-        for arm, arm_value in arm_execution.items()
-        if isinstance(arm_value, Mapping)
-    }
+    actual_ranges: list[dict[str, Any]] = []
+    actual_per_shard: list[dict[str, Any]] = []
+    actual_processes: dict[str, list[dict[str, Any]]] = {}
+    for arm in sorted(arm_execution):
+        arm_value = arm_execution[arm]
+        shard_specs = (
+            arm_value.get("shard_specs") if isinstance(arm_value, Mapping) else None
+        )
+        if isinstance(shard_specs, list):
+            ordered_specs = sorted(
+                shard_specs, key=lambda item: item.get("shard_index", -1)
+            )
+            actual_ranges.extend({"arm": arm, **dict(shard)} for shard in ordered_specs)
+            actual_per_shard.extend(
+                {"arm": arm, **dict(shard)} for shard in ordered_specs
+            )
+            actual_processes[arm] = [
+                {
+                    "process_id": shard.get("process_id"),
+                    "worker_kind": shard.get("worker_kind"),
+                    "exit_code": shard.get("exit_code"),
+                    "shard_index": shard.get("shard_index"),
+                }
+                for shard in ordered_specs
+            ]
     for arm, arm_value in arm_execution.items():
         shard_specs = (
             arm_value.get("shard_specs") if isinstance(arm_value, Mapping) else None
@@ -3463,9 +3627,36 @@ def _run_t075_evaluate(args: argparse.Namespace) -> int:
                 "stage6-eval",
                 [f"Stage 6 {arm} arm lacks complete process/shard evidence"],
             )
+    _t075_validate_process_shards(
+        "stage6-eval",
+        shard_count=actual_shard_count,
+        worker_count=actual_worker_count,
+        per_shard=actual_per_shard,
+        status="completed" if stage6.valid else "failed",
+    )
     stage6_report = stage6.to_dict()
     _write_canonical_json(args.output, stage6_report)
     stage6_identity = _t075_parent_identity(args.output)
+    stage6_failure_ids = [] if stage6.valid else ["stage6:validation-failed"]
+    stage6_failure_details = (
+        []
+        if stage6.valid
+        else [
+            {
+                "failure_id": "stage6:validation-failed",
+                "stage": "stage6-eval",
+                "messages": list(stage6.problems) or ["Stage 6 validation failed"],
+            }
+        ]
+    )
+    stage6_failure_counts = (
+        {}
+        if stage6.valid
+        else {
+            "failure_count": len(stage6_failure_ids),
+            "problem_count": len(stage6.problems),
+        }
+    )
     payload = {
         "schema_id": T075_TERMINAL_DECISION_SCHEMA_ID,
         "schema_version": 1,
@@ -3507,6 +3698,10 @@ def _run_t075_evaluate(args: argparse.Namespace) -> int:
         "stage6_arm_reports": dict(stage6_execution.get("arms", {})),
         "stage6_paired_rows": list(stage6_execution.get("paired_rows", [])),
         "stage6_execution_evidence": dict(stage6_execution),
+        "failure_stage": "stage6" if not stage6.valid else None,
+        "failure_ids": stage6_failure_ids,
+        "failure_counts": stage6_failure_counts,
+        "failure_details": stage6_failure_details,
     }
     _write_canonical_json(args.decision_report, payload)
     _write_t075_stage_retention(
@@ -3528,7 +3723,7 @@ def _run_t075_evaluate(args: argparse.Namespace) -> int:
             "shard_count": actual_shard_count,
             "worker_count": actual_worker_count,
             "ranges": actual_ranges,
-            "per_shard": actual_ranges,
+            "per_shard": actual_per_shard,
             "processes": actual_processes,
             "execution_evidence": dict(stage6_execution),
             "status": "completed" if stage6.valid else "failed",
@@ -3586,7 +3781,7 @@ def _run_t075_finalize(args: argparse.Namespace) -> int:
         raise T075WorkflowError(
             "terminal-finalize", ["terminal decision does not satisfy T075 schema"]
         )
-    if not _t075_terminal_decision_is_valid(decision):
+    if not _t075_terminal_decision_is_valid(decision, artifact_root=args.artifact_root):
         raise T075WorkflowError(
             "terminal-finalize",
             ["terminal decision is not a complete first-valid report"],
@@ -5247,6 +5442,22 @@ def _handle_t075_case_d(args: argparse.Namespace, failure: T075WorkflowError) ->
     failed_artifacts["failure_evidence"] = failure_evidence_path
     parent_identities = _artifact_identities(failed_artifacts)
     parent_identities.update(_preceding_manifest_identities(args))
+    # A Case-D retention must retain the exact inputs which made the failure
+    # auditable.  Listing them only as decision parents is insufficient: the
+    # finalizer also requires every parent identity to occur in stage output
+    # identities.  Add the same files as stage-local outputs, preserving their
+    # content identity rather than inventing a placeholder artifact.
+    retention_artifacts = dict(failed_artifacts)
+    for role, identity in parent_identities.items():
+        if not isinstance(identity, Mapping) or not isinstance(
+            identity.get("path"), str
+        ):
+            continue
+        parent_path = _t075_resolve_identity_path(
+            identity["path"], artifact_root=decision_path.parent
+        )
+        if parent_path is not None and parent_path not in retention_artifacts.values():
+            retention_artifacts[f"parent_{role}"] = parent_path
     terminal_stage = _t075_failure_terminal_stage(args, failure.stage)
     execution_stages = T075_STAGE_ORDER[:-1]
     terminal_index = execution_stages.index(terminal_stage)
@@ -5310,10 +5521,7 @@ def _handle_t075_case_d(args: argparse.Namespace, failure: T075WorkflowError) ->
         _write_t075_stage_retention(
             args,
             stage=terminal_stage,
-            artifacts={
-                "terminal_decision_report": decision_path,
-                "failure_evidence": failure_evidence_path,
-            },
+            artifacts=retention_artifacts,
             evidence={
                 **_t075_execution_evidence(
                     args, status="failed", terminal=False, exit_code=1, executed=True

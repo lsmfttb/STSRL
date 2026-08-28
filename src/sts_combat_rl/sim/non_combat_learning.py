@@ -2900,6 +2900,7 @@ def _replay_process_shard(payload: Mapping[str, Any]) -> dict[str, Any]:
         return {
             "shard_index": int(payload["shard_index"]),
             "process_id": os.getpid(),
+            "worker_kind": "spawn-process",
             "state_count": len(states),
             "attempted": len(states),
             "restored": restored,
