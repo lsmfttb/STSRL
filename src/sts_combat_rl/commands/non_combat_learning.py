@@ -33,6 +33,8 @@ from sts_combat_rl.sim.non_combat_learning import (
     T065_MANDATORY_FAMILIES,
     T065_SPLITS,
     T065_SOURCE_SEED_RANGE,
+    T065_STAGE6_SEED_RANGE,
+    T065_STAGE6_SHARD_COUNT,
     T065SourceState,
     T065_TRAINING_INTERPRETER,
     T065CaseD,
@@ -87,6 +89,10 @@ T075_STAGE_ORDER = (
     "stage6-eval",
     "terminal-finalize",
 )
+T075_STAGE6_SHARD_COUNT = T065_STAGE6_SHARD_COUNT
+T075_STAGE6_SEEDS_PER_SHARD = (
+    T065_STAGE6_SEED_RANGE[1] - T065_STAGE6_SEED_RANGE[0] + 1
+) // T075_STAGE6_SHARD_COUNT
 
 T075_FROZEN_SOURCE_ARTIFACTS = {
     "artifacts/t065-learned-non-combat-policy-v1/source-stochastic-650001-650256-c57b2ee.json": {
@@ -229,9 +235,17 @@ def _t075_validate_process_shards(
             )
         return
     if stage == "stage6-eval":
+        if shard_count != T075_STAGE6_SHARD_COUNT:
+            raise T075WorkflowError(
+                "artifact-retention", [f"{stage}: shard count is not frozen"]
+            )
         expected_count = shard_count * 3
         expected_arms = {"stochastic", "expert", "learned"}
     else:
+        if shard_count != T065_MAX_WORKERS:
+            raise T075WorkflowError(
+                "artifact-retention", [f"{stage}: shard count is not frozen"]
+            )
         expected_count = shard_count
         expected_arms = None
     if worker_count != T065_MAX_WORKERS or len(per_shard) != expected_count:
@@ -301,7 +315,10 @@ def _t075_validate_process_shards(
             raise T075WorkflowError(
                 "artifact-retention", [f"{stage}: shard state count is not frozen"]
             )
-        if stage == "stage6-eval" and entry.get("requested_seed_count") != 16:
+        if (
+            stage == "stage6-eval"
+            and entry.get("requested_seed_count") != T075_STAGE6_SEEDS_PER_SHARD
+        ):
             raise T075WorkflowError(
                 "artifact-retention", [f"{stage}: shard seed range is not frozen"]
             )
@@ -1037,10 +1054,9 @@ def _t075_command_matches_contract(
         try:
             shard_flag = command_tokens.index("--stage6-shard-count")
             worker_flag = command_tokens.index("--stage6-worker-count")
-            if (
-                command_tokens[shard_flag + 1] != "16"
-                or command_tokens[worker_flag + 1] != "16"
-            ):
+            if command_tokens[shard_flag + 1] != str(
+                T075_STAGE6_SHARD_COUNT
+            ) or command_tokens[worker_flag + 1] != str(T065_MAX_WORKERS):
                 return False
         except (ValueError, IndexError):
             return False
@@ -1090,9 +1106,9 @@ def _t075_skipped_stage_contract(
             command_argv += (
                 "--run-stage6",
                 "--stage6-shard-count",
-                "16",
+                str(T075_STAGE6_SHARD_COUNT),
                 "--stage6-worker-count",
-                "16",
+                str(T065_MAX_WORKERS),
             )
         command = _t075_command_string(args, command_argv=command_argv)
         contracts[stage] = {
@@ -3630,7 +3646,10 @@ def _run_t075_evaluate(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
         return 0
-    if args.stage6_shard_count != 16 or args.stage6_worker_count != T065_MAX_WORKERS:
+    if (
+        args.stage6_shard_count != T075_STAGE6_SHARD_COUNT
+        or args.stage6_worker_count != T065_MAX_WORKERS
+    ):
         raise T075WorkflowError(
             "stage6-eval", ["T075 Stage 6 requires the frozen 16x16 worker plan"]
         )
