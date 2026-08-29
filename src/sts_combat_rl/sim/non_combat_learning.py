@@ -2934,7 +2934,11 @@ def _spawn_process_entry(
     """Run one picklable shard worker and publish exactly one result."""
 
     try:
-        result_queue.put(dict(worker(payload)))
+        result = worker(payload)
+        # Preserve malformed worker returns as-is.  Coercing a string/None
+        # through dict() raises in the child and hides the original payload
+        # from the parent's raw-result audit trail.
+        result_queue.put(dict(result) if isinstance(result, Mapping) else result)
     except (
         BaseException
     ) as exc:  # pragma: no cover - hard crash is environment-specific

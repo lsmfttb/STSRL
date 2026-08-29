@@ -33,6 +33,7 @@ from sts_combat_rl.commands.non_combat_learning import (
     _t075_terminal_decision_is_valid,
     _t075_terminal_finalize_argv,
     _t075_terminal_finalize_command,
+    _t075_validation_retention_path,
     _t075_write_stage6_failure_report,
     _portable_path,
 )
@@ -43,6 +44,7 @@ from sts_combat_rl.sim.non_combat_learning import (
     file_sha256,
     _run_spawn_process_batch,
     stage6_shard_ranges,
+    target_shard_ranges,
 )
 
 
@@ -138,6 +140,12 @@ def _acceptance_worker_returns_unknown(payload):
         "status": "passed",
         "exit_code": 0,
     }
+
+
+def _acceptance_worker_returns_malformed(payload):
+    """Return a non-mapping value that must survive the spawn boundary."""
+
+    return None
 
 
 def _frozen_stage6_records() -> tuple[list[dict[str, int]], list[dict[str, int]]]:
@@ -508,6 +516,28 @@ def test_t075_case_d_fixture_finalizes_and_first_valid_wins(
     assert decision_path.read_bytes() == original
 
 
+def test_t075_existing_external_canonical_retention_cannot_win_first_valid(
+    tmp_path, monkeypatch
+) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command_module
+
+    root = tmp_path / "artifacts"
+    root.mkdir()
+    monkeypatch.setattr(command_module, "T075_STABLE_ARTIFACT_ROOT", root)
+    decision_path = root / "terminal-decision-report.json"
+    external_retention = tmp_path / "outside" / "t075-retention-manifest.json"
+    external_retention.parent.mkdir()
+    _write_independent_case_d_fixture(root, decision_path, external_retention)
+    decision = json.loads(decision_path.read_text(encoding="utf-8"))
+    assert _t075_validation_retention_path(root, decision, external_retention) is None
+    assert not _t075_has_terminal_decision(
+        SimpleNamespace(
+            decision_report=decision_path,
+            retention_manifest=external_retention,
+        )
+    )
+
+
 def test_t075_case_d_preserves_non_stage6_worker_evidence(
     tmp_path, monkeypatch
 ) -> None:
@@ -523,21 +553,24 @@ def test_t075_case_d_preserves_non_stage6_worker_evidence(
     )
     per_shard = [
         {
-            "shard_index": 3,
-            "seed_start": 61,
-            "seed_end": 80,
-            "seed_count": 20,
-            "requested_seeds": list(range(61, 81)),
-            "completed_seeds": [],
+            **dict(spec),
             "process_id": 12345,
             "worker_kind": "spawn-process",
             "started": True,
             "returned": True,
-            "status": "failed",
-            "exit_code": 1,
-            "error": "RuntimeError: worker failed while building target shard",
+            "status": "failed" if spec["shard_index"] == 3 else "passed",
+            "exit_code": 1 if spec["shard_index"] == 3 else 0,
+            "state_count": 7 if spec["shard_index"] == 3 else 20,
+            "error": (
+                "RuntimeError: worker failed while building target shard"
+                if spec["shard_index"] == 3
+                else None
+            ),
         }
+        for spec in target_shard_ranges(worker_count=T065_MAX_WORKERS)
     ]
+    for index, entry in enumerate(per_shard):
+        entry["process_id"] = 12000 + index
     failure = T075WorkflowError(
         "target-sharding",
         ["shard 3 returned worker status 'failed'"],
@@ -555,8 +588,9 @@ def test_t075_case_d_preserves_non_stage6_worker_evidence(
             "shards_planned": 16,
             "shards_started": 16,
             "shards_returned": 16,
-            "ranges": per_shard,
+            "ranges": [dict(entry) for entry in per_shard],
             "per_shard": per_shard,
+            "raw_result_events": [],
         },
     )
     _handle_t075_case_d(
@@ -587,11 +621,11 @@ def test_t075_case_d_preserves_non_stage6_worker_evidence(
         assert value["execution_evidence"]["shards_returned"] == 16
         assert value["execution_evidence"]["shard_count"] == 16
         assert value["execution_evidence"]["worker_count"] == 16
-        assert value["execution_evidence"]["per_shard"][0]["shard_index"] == 3
+        assert value["execution_evidence"]["per_shard"][3]["shard_index"] == 3
     retained_failure = stage_retention["stage_evidence"]["stage2-target"][
         "failure_execution_evidence"
     ]
-    assert retained_failure["per_shard"][0]["error"].startswith(
+    assert retained_failure["per_shard"][3]["error"].startswith(
         "RuntimeError: worker failed"
     )
     _, retained_evidence, _ = command_module._t075_stage_retention_records(
@@ -615,7 +649,7 @@ def test_t075_case_d_preserves_non_stage6_worker_evidence(
         "worker_count": 16,
     }
     assert len(retained_stage["per_shard"]) == 16
-    assert retained_stage["per_shard"][3]["process_id"] == 12345
+    assert retained_stage["per_shard"][3]["process_id"] == 12003
     assert retained_stage["per_shard"][3]["started"] is True
     assert retained_stage["per_shard"][3]["returned"] is True
     assert retained_stage["per_shard"][3]["status"] == "failed"
@@ -636,6 +670,51 @@ def test_t075_case_d_preserves_non_stage6_worker_evidence(
                 "skipped_stages": [],
             },
         )
+
+
+def _valid_stage2_partial_evidence() -> dict:
+    entries = [
+        {
+            **dict(spec),
+            "process_id": 12000 + spec["shard_index"],
+            "worker_kind": "spawn-process",
+            "started": True,
+            "returned": True,
+            "status": "passed",
+            "exit_code": 0,
+            "state_count": 20,
+        }
+        for spec in target_shard_ranges(worker_count=T065_MAX_WORKERS)
+    ]
+    evidence = {
+        "partial_spawn_failure": True,
+        "shard_count": 16,
+        "worker_count": 16,
+        "shards_planned": 16,
+        "shards_started": 16,
+        "shards_returned": 16,
+        "per_shard": entries,
+        "raw_result_events": [],
+    }
+    return evidence
+
+
+def test_t075_stage_partial_helper_requires_complete_counts_and_coverage() -> None:
+    evidence = _valid_stage2_partial_evidence()
+    expanded = _t075_stage_partial_process_evidence("stage2-target", evidence)
+    assert {entry["shard_index"] for entry in expanded["per_shard"]} == set(range(16))
+    assert len(expanded["per_shard"]) == 16
+
+    missing = {**evidence, "per_shard": evidence["per_shard"][:-1]}
+    assert _t075_stage_partial_process_evidence("stage2-target", missing) == {}
+
+    inconsistent_count = {
+        **evidence,
+        "shards_returned": 15,
+    }
+    assert (
+        _t075_stage_partial_process_evidence("stage2-target", inconsistent_count) == {}
+    )
 
 
 @pytest.mark.parametrize(
@@ -1022,6 +1101,25 @@ def test_t075_spawn_batch_preserves_unknown_raw_result_event() -> None:
     assert all(event["result"]["shard_index"] == 99 for event in events)
 
 
+def test_t075_spawn_batch_preserves_malformed_raw_result_event() -> None:
+    payloads = [
+        {"shard_index": 0, "seeds": list(range(651001, 651017))},
+        {"shard_index": 1, "seeds": list(range(651017, 651033))},
+    ]
+    with pytest.raises(T065CaseD) as raised:
+        _run_spawn_process_batch(
+            _acceptance_worker_returns_malformed,
+            payloads,
+            stage="stage2-target",
+            worker_count=2,
+        )
+    events = raised.value.execution_evidence["raw_result_events"]
+    assert len(events) == 2
+    assert all(event["kind"] == "malformed" for event in events)
+    assert all(event["value_type"] == "NoneType" for event in events)
+    assert all(event["value"] is None for event in events)
+
+
 def test_t075_stage_partial_helper_does_not_invent_logical_stage3_workers() -> None:
     assert (
         _t075_stage_partial_process_evidence(
@@ -1033,23 +1131,12 @@ def test_t075_stage_partial_helper_does_not_invent_logical_stage3_workers() -> N
 
 
 def test_t075_stage_partial_helper_rejects_duplicate_raw_shard() -> None:
-    raw = {
-        "shard_index": 0,
-        "process_id": 123,
-        "worker_kind": "spawn-process",
-        "started": True,
-        "returned": True,
-        "status": "failed",
-        "exit_code": 1,
-    }
+    evidence = _valid_stage2_partial_evidence()
+    evidence["per_shard"][1] = dict(evidence["per_shard"][0])
     assert (
         _t075_stage_partial_process_evidence(
             "stage2-target",
-            {
-                "partial_spawn_failure": True,
-                "per_shard": [raw, dict(raw)],
-                "raw_result_events": [],
-            },
+            evidence,
         )
         == {}
     )
@@ -1073,14 +1160,18 @@ def test_t075_stage_partial_helper_rejects_duplicate_raw_shard() -> None:
 def test_t075_stage_partial_helper_rejects_malformed_or_unknown_raw_shard(
     raw_entry,
 ) -> None:
+    evidence = _valid_stage2_partial_evidence()
+    if isinstance(raw_entry, str):
+        evidence["per_shard"][0] = raw_entry
+    else:
+        evidence["per_shard"][0] = {
+            **evidence["per_shard"][0],
+            **raw_entry,
+        }
     assert (
         _t075_stage_partial_process_evidence(
             "stage2-target",
-            {
-                "partial_spawn_failure": True,
-                "per_shard": [raw_entry],
-                "raw_result_events": [],
-            },
+            evidence,
         )
         == {}
     )
@@ -1095,6 +1186,37 @@ def test_t075_portable_path_keeps_nonexistent_wsl_output_on_host_mount() -> None
         )
     else:
         assert str(resolved) == raw
+
+
+def test_t075_validate_reuse_resolves_all_write_paths_before_artifact_write(
+    tmp_path,
+) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command_module
+
+    def wsl_alias(path):
+        text = str(path).replace("\\", "/")
+        if os.name == "nt" and len(text) >= 3 and text[1] == ":":
+            return f"/mnt/{text[0].lower()}{text[2:]}"
+        return text
+
+    output = tmp_path / "artifacts" / "stage0-retained-source-reuse.json"
+    retention = tmp_path / "artifacts" / "stage0-retained-source-reuse.retention.json"
+    decision = tmp_path / "artifacts" / "terminal-decision-report.json"
+    args = SimpleNamespace(
+        accepted_preflight_content_sha256="not-the-frozen-hash",
+        output=type(output)(wsl_alias(output)),
+        retention_manifest=type(retention)(wsl_alias(retention)),
+        decision_report=type(decision)(wsl_alias(decision)),
+    )
+    with pytest.raises(T075WorkflowError):
+        command_module._run_t075_validate_reuse(args)
+    assert args.output == output
+    assert args.retention_manifest == retention
+    assert args.decision_report == decision
+
+    for path in (args.output, args.retention_manifest, args.decision_report):
+        command_module._write_canonical_json(path, {"written": True})
+        assert path.is_file()
 
 
 def test_t075_stage6_does_not_rewrite_supplied_stage5_parent(

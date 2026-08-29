@@ -375,20 +375,14 @@ def _t075_validate_process_shards(
             )
         expected_count = shard_count
         expected_arms = None
-    if worker_count != T065_MAX_WORKERS or (
-        len(per_shard) != expected_count
-        and not (allow_partial_failure and status == "failed")
-    ):
+    if worker_count != T065_MAX_WORKERS or len(per_shard) != expected_count:
         raise T075WorkflowError(
             "artifact-retention",
             [f"{stage}: observed worker/shard count is incomplete"],
         )
     expected_noncombat: dict[int, dict[str, Any]] = {}
     if stage in {"stage1-selection-replay", "stage2-target"}:
-        if not isinstance(ranges, list) or (
-            len(ranges) != expected_count
-            and not (allow_partial_failure and status == "failed")
-        ):
+        if not isinstance(ranges, list) or len(ranges) != expected_count:
             raise T075WorkflowError(
                 "artifact-retention",
                 [f"{stage}: frozen 16x20 range evidence is incomplete"],
@@ -430,10 +424,7 @@ def _t075_validate_process_shards(
             )
     expected_stage6: dict[tuple[str, int], dict[str, Any]] = {}
     if stage == "stage6-eval":
-        if not isinstance(ranges, list) or (
-            len(ranges) != expected_count
-            and not (allow_partial_failure and status == "failed")
-        ):
+        if not isinstance(ranges, list) or len(ranges) != expected_count:
             raise T075WorkflowError(
                 "artifact-retention",
                 [f"{stage}: frozen range evidence is incomplete"],
@@ -661,6 +652,11 @@ def _t075_validation_retention_path(
     """Select a stage retention for validation before final output exists."""
 
     if not isinstance(canonical_path, Path):
+        return None
+    try:
+        canonical_path = _portable_path(canonical_path)
+        canonical_path.resolve().relative_to(artifact_root.resolve())
+    except (OSError, ValueError):
         return None
     if canonical_path.is_file():
         return canonical_path
@@ -2775,9 +2771,6 @@ def _portable_path(value: str | Path) -> Path:
     text = str(value).replace("\\", "/")
     if any(part == ".." for part in text.split("/")):
         raise ValueError(f"artifact path contains ..: {value}")
-    path = Path(value)
-    if path.is_file() or path.exists():
-        return path
     if (
         len(text) >= 7
         and text.startswith("/mnt/")
@@ -2795,7 +2788,19 @@ def _portable_path(value: str | Path) -> Path:
         and os.name != "nt"
     ):
         return Path("/mnt/" + text[0].lower() + text[2:])
+    path = Path(value)
+    if path.is_file() or path.exists():
+        return path
     return path
+
+
+def _normalize_t075_validate_reuse_paths(args: argparse.Namespace) -> None:
+    """Resolve every Stage-0 reuse output before any artifact is written."""
+
+    for name in ("output", "retention_manifest", "decision_report"):
+        value = getattr(args, name, None)
+        if isinstance(value, (Path, str)):
+            setattr(args, name, _portable_path(value))
 
 
 def _t075_normalize_artifact_path(value: str) -> str:
@@ -3401,6 +3406,7 @@ def _t075_resolve_reuse_manifest(
 
 
 def _run_t075_validate_reuse(args: argparse.Namespace) -> int:
+    _normalize_t075_validate_reuse_paths(args)
     if (
         args.accepted_preflight_content_sha256
         != "a89560d037ea4555922d0e1282edb8e328ce75ab6e1d720fd05f86022b56c334"
@@ -6530,7 +6536,18 @@ def _t075_stage_partial_process_evidence(
     expected_ranges = tuple(target_shard_ranges(worker_count=T065_MAX_WORKERS))
     raw_entries = execution_evidence.get("per_shard", [])
     raw_events = execution_evidence.get("raw_result_events", [])
-    if not isinstance(raw_entries, list) or not isinstance(raw_events, list):
+    if (
+        not isinstance(raw_entries, list)
+        or len(raw_entries) != T065_MAX_WORKERS
+        or not isinstance(raw_events, list)
+        or isinstance(execution_evidence.get("shards_planned"), bool)
+        or not isinstance(execution_evidence.get("shards_planned"), int)
+        or execution_evidence.get("shards_planned") != T065_MAX_WORKERS
+        or isinstance(execution_evidence.get("shards_started"), bool)
+        or not isinstance(execution_evidence.get("shards_started"), int)
+        or isinstance(execution_evidence.get("shards_returned"), bool)
+        or not isinstance(execution_evidence.get("shards_returned"), int)
+    ):
         return {}
     if raw_events:
         return {}
@@ -6576,27 +6593,19 @@ def _t075_stage_partial_process_evidence(
         ):
             return {}
         raw_by_index[index] = entry
+    started_count = sum(entry["started"] for entry in raw_by_index.values())
+    returned_count = sum(entry["returned"] for entry in raw_by_index.values())
+    if (
+        started_count != execution_evidence["shards_started"]
+        or returned_count != execution_evidence["shards_returned"]
+        or returned_count > started_count
+    ):
+        return {}
     per_shard: list[dict[str, Any]] = []
     for expected in expected_ranges:
         index = int(expected["shard_index"])
-        raw = raw_by_index.get(index)
-        if raw is None:
-            observed = {
-                "process_id": None,
-                "worker_kind": "spawn-process",
-                "started": False,
-                "returned": False,
-                "status": "not-started",
-                "exit_code": None,
-            }
-        else:
-            observed = {
-                **dict(raw),
-                "started": bool(raw.get("started", raw.get("process_id") is not None)),
-                "returned": bool(raw.get("returned", True)),
-                "status": raw.get("status", "missing"),
-                "exit_code": raw.get("exit_code"),
-            }
+        raw = raw_by_index[index]
+        observed = {**dict(raw)}
         state_count = observed.get("state_count")
         per_shard.append(
             {
