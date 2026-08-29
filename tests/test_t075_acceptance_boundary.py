@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -1179,14 +1180,27 @@ def test_t075_stage_partial_helper_rejects_malformed_or_unknown_raw_shard(
 
 
 def test_t075_portable_path_keeps_nonexistent_wsl_output_on_host_mount() -> None:
-    raw = "/mnt/d/DeadlycatCoding/STSRL/artifacts/t075-new.retention.json"
-    resolved = _portable_path(raw)
-    if os.name == "nt":
-        assert str(resolved).replace("\\", "/") == (
-            "D:/DeadlycatCoding/STSRL/artifacts/t075-new.retention.json"
-        )
-    else:
-        assert str(resolved) == raw
+    expected = (
+        "D:/DeadlycatCoding/STSRL/artifacts/t075-new.retention.json"
+        if os.name == "nt"
+        else "/mnt/d/DeadlycatCoding/STSRL/artifacts/t075-new.retention.json"
+    )
+    for raw in (
+        "D:/DeadlycatCoding/STSRL/artifacts/t075-new.retention.json",
+        "/mnt/d/DeadlycatCoding/STSRL/artifacts/t075-new.retention.json",
+    ):
+        # These expected values are the frozen host/WSL path mapping, not
+        # values obtained by calling the resolver under test.
+        assert str(_portable_path(raw)).replace("\\", "/") == expected
+
+
+def _t075_runtime_path_input(path) -> Path:
+    """Return an input alias that resolves to the explicit host path fixture."""
+
+    text = str(path).replace("\\", "/")
+    if os.name == "nt" and len(text) >= 3 and text[1] == ":":
+        return Path(f"/mnt/{text[0].lower()}{text[2:]}")
+    return Path(text)
 
 
 def test_t075_preflight_writes_resolved_output_and_retention_paths(
@@ -1197,12 +1211,6 @@ def test_t075_preflight_writes_resolved_output_and_retention_paths(
     root = tmp_path / "artifacts"
     output = root / "stage0-preflight.json"
     retention = root / "stage0-preflight.retention.json"
-
-    def wsl_alias(path):
-        text = str(path).replace("\\", "/")
-        if os.name == "nt" and len(text) >= 3 and text[1] == ":":
-            return f"/mnt/{text[0].lower()}{text[2:]}"
-        return text
 
     monkeypatch.setattr(command_module, "T075_STABLE_ARTIFACT_ROOT", root)
     monkeypatch.setattr(
@@ -1218,8 +1226,11 @@ def test_t075_preflight_writes_resolved_output_and_retention_paths(
         torch_runtime=False,
         sim_seed=1,
         ascension=20,
-        output=type(output)(wsl_alias(output)),
-        retention_manifest=type(retention)(wsl_alias(retention)),
+        output=_t075_runtime_path_input(output),
+        retention_manifest=_t075_runtime_path_input(retention),
+        decision_report=_t075_runtime_path_input(
+            root / "terminal-decision-report.json"
+        ),
         _t075_execution_start_utc="2026-08-29T00:00:00+00:00",
         _t075_execution_start_monotonic=0.0,
     )
@@ -1230,11 +1241,90 @@ def test_t075_preflight_writes_resolved_output_and_retention_paths(
     assert _run_t075_preflight(args) == 0
     assert args.output == output
     assert args.retention_manifest == retention
+    assert args.decision_report == root / "terminal-decision-report.json"
     assert json.loads(output.read_text(encoding="utf-8"))["passed"] is True
     retained = json.loads(retention.read_text(encoding="utf-8"))
     assert retained["stage_evidence"]["stage0-preflight"]["output_identities"][0][
         "path"
     ] == str(output)
+
+
+def test_t075_failed_preflight_case_d_writes_resolved_decision_path(
+    tmp_path, monkeypatch
+) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command_module
+
+    root = tmp_path / "artifacts"
+    output = root / "stage0-preflight.json"
+    retention = root / "stage0-preflight.retention.json"
+    decision = root / "terminal-decision-report.json"
+
+    monkeypatch.setattr(command_module, "T075_STABLE_ARTIFACT_ROOT", root)
+    monkeypatch.setattr(
+        command_module, "_require_frozen_simulator_args", lambda args: None
+    )
+    monkeypatch.setattr(
+        command_module,
+        "build_t065_preflight_report",
+        lambda **kwargs: SimpleNamespace(
+            to_dict=lambda: {"passed": False, "problems": ["mock failure"]}
+        ),
+    )
+    args = SimpleNamespace(
+        command="preflight",
+        simulator_runtime=False,
+        torch_runtime=False,
+        sim_seed=1,
+        ascension=20,
+        output=_t075_runtime_path_input(output),
+        retention_manifest=_t075_runtime_path_input(retention),
+        decision_report=_t075_runtime_path_input(decision),
+        _t075_execution_start_utc="2026-08-29T00:00:00+00:00",
+        _t075_execution_start_monotonic=0.0,
+    )
+    args._command_argv = command_module._t075_frozen_stage_argv(
+        args, "stage0-preflight"
+    )
+
+    with pytest.raises(T075WorkflowError) as raised:
+        _run_t075_preflight(args)
+    _handle_t075_case_d(args, raised.value)
+
+    assert args.output == output
+    assert args.retention_manifest == retention
+    assert args.decision_report == decision
+    assert output.is_file()
+    assert retention.is_file()
+    report = json.loads(decision.read_text(encoding="utf-8"))
+    assert report["schema_id"] == T075_TERMINAL_DECISION_SCHEMA_ID
+    assert report["schema_version"] == 1
+    assert report["task_id"] == T075_TASK_ID
+    assert report["terminal_case"] == "D"
+    assert report["terminal_stage"] == "stage0-preflight"
+    assert (
+        report["approved_t075_spec_commit"] == command_module.T075_APPROVED_SPEC_COMMIT
+    )
+    assert report["parent_artifact_identities"]
+
+    retained = json.loads(retention.read_text(encoding="utf-8"))
+    assert retained["schema_id"] == T075_RETENTION_MANIFEST_SCHEMA_ID
+    assert retained["schema_version"] == 1
+    assert retained["task_id"] == T075_TASK_ID
+    evidence = retained["stage_evidence"]["stage0-preflight"]
+    assert evidence["status"] == "failed"
+    assert evidence["terminal"] is False
+    identities = {
+        identity["role"]: identity for identity in evidence["output_identities"]
+    }
+    preflight_identity = identities["failed_preflight_artifact"]
+    assert preflight_identity["path"] == str(output)
+    assert preflight_identity["size_bytes"] == output.stat().st_size
+    assert preflight_identity["sha256"] == file_sha256(output)
+    failure_identity = identities["failure_evidence"]
+    failure_path = root / ".terminal-decision-report.failure-evidence.json"
+    assert failure_identity["path"] == str(failure_path)
+    assert failure_identity["size_bytes"] == failure_path.stat().st_size
+    assert failure_identity["sha256"] == file_sha256(failure_path)
 
 
 def test_t075_validate_reuse_resolves_all_write_paths_before_artifact_write(

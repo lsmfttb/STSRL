@@ -1270,7 +1270,7 @@ def _validate_t075_preflight(path: Path) -> dict[str, Any]:
 
 
 def _run_t075_preflight(args: argparse.Namespace) -> int:
-    for name in ("output", "retention_manifest"):
+    for name in ("output", "retention_manifest", "decision_report"):
         value = getattr(args, name, None)
         if isinstance(value, (Path, str)):
             setattr(args, name, _portable_path(value))
