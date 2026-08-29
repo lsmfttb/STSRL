@@ -160,7 +160,7 @@ following frozen metadata:
 - exact current `T065ExperimentConfig().to_dict()`;
 - expected source arm;
 - source driver seed `654001`;
-- requested seeds exactly `650001..650256`;
+- source seeds exactly `650001..650256`;
 - requested/terminal run count `256`;
 - truncated run count `0`;
 - failed run count `0`;
@@ -639,7 +639,7 @@ Every committed stage report has schema version `1` and these required fields:
 ```text
 schema_id
 schema_version
- task_id = T075
+task_id = T075
 run_head
 stage
 valid
@@ -678,11 +678,18 @@ model_input_schema
 checks
 ```
 
-`checks` must cover runtime/import capability, simulator identity, checkpoint
-capture/restore capability, frozen controller/action-space construction, exact
-model-input dimensions, public-input firewall capability, and Torch runtime.
-Check entries are ordered by their declared check name tuple in the implementation
-and must be deterministic.
+`checks` is an ordered list with exactly these names:
+
+1. `runtime_imports`;
+2. `simulator_identity`;
+3. `checkpoint_roundtrip`;
+4. `frozen_controller_action_space`;
+5. `model_input_schema_dimensions`;
+6. `public_input_firewall_capability`;
+7. `torch_runtime`.
+
+Each check records `status=passed|failed` and deterministic evidence/counts
+needed to explain a failure. Any failed required check makes PREFLIGHT invalid.
 
 ### SOURCE_REUSE — `t075-source-reuse-report-v1`
 
@@ -796,7 +803,7 @@ part of this schema.
 Path: `stage2-target-table.json`.
 
 The payload uses the unchanged strict T065 scientific target-table contract
-` t065-counterfactual-target-table-v1` version `1` and existing T065 target
+`t065-counterfactual-target-table-v1` version `1` and existing T065 target
 semantics. T075 does not add model features or target fields to that scientific
 payload. Its physical identity and T075 lineage are committed by the TARGET
 validation report below.
@@ -1058,12 +1065,9 @@ Exactly 16 contiguous selected-state shards:
 ```text
 00 000..019   04 080..099   08 160..179   12 240..259
 01 020..039   05 100..119   09 180..199   13 260..279
-02 040..059   06 120..139   10 200..219   14 240..259
+02 040..059   06 120..139   10 200..219   14 280..299
 03 060..079   07 140..159   11 220..239   15 300..319
 ```
-
-Correction to the displayed grid is normative by formula, not column typography:
-for shard `i=0..15`, start=`20*i`, end=`20*i+19`. Thus shard 14 is `280..299`.
 
 Requested and required actual worker count: `16`.
 
