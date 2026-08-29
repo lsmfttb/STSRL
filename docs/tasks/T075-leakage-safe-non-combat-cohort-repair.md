@@ -601,7 +601,7 @@ terminal_report: ArtifactIdentity
 retention_owner: "T075"
 retention_reason: non-empty string
 possible_downstream_consumers: [non-empty string]
-delection_condition_code: "after_merge_no_consumer_or_reproduction_hold"
+deletion_condition_code: "after_merge_no_consumer_or_reproduction_hold"
 entries: [RetentionEntry]
 
 RetentionEntry = {
