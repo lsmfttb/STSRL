@@ -1344,6 +1344,7 @@ def run_t075_train(
     valid: bool = True,
     failure_code: str | None = None,
 ) -> AcceptanceState:
+    parents = (_committed_output(state, "target_table", "target-table.json"),)
     if not valid:
         if failure_code != "TRAIN_INVALID":
             raise T075OperationalError(
@@ -1353,39 +1354,105 @@ def run_t075_train(
             state,
             repository_root,
             stage="TRAIN",
-            parents=(_committed_output(state, "target_table", "target-table.json"),),
+            parents=parents,
             payloads=(),
             valid=False,
             passed=False,
             failure_code=failure_code,
         )
+    if failure_code is not None:
+        raise T075OperationalError("valid T075 train cannot carry a failure code")
     if checkpoint_payloads is None or training_selection is None:
-        raise T075OperationalError(
-            "valid T075 train requires checkpoints and training selection"
+        return _invalid_t075_evidence(
+            state,
+            repository_root,
+            stage="TRAIN",
+            parents=parents,
+            failure_code="TRAIN_INVALID",
         )
-    validate_t075_training_selection(training_selection)
-    _require_matching_run_head(training_selection, state, "training-selection summary")
-    if len(checkpoint_payloads) != 2:
-        raise T075OperationalError("TRAIN requires exactly two checkpoint payloads")
-    expected_checkpoints = tuple(
-        _t075_payload_identity("checkpoint", filename, payload)
-        for (_, filename), payload in zip(
-            T075_OUTPUT_LAYOUT["TRAIN"][:2], checkpoint_payloads, strict=True
+    try:
+        if len(checkpoint_payloads) != 2:
+            raise ValueError("TRAIN requires exactly two checkpoint payloads")
+        from sts_combat_rl.sim.non_combat_learning import (
+            T065_MODEL_SEEDS,
+            load_non_combat_checkpoint,
+            select_validation_checkpoint,
         )
-    )
-    if _identity_tuple(training_selection["checkpoints"]) != expected_checkpoints:
-        raise T075OperationalError(
-            "training-selection checkpoints do not match checkpoint payload identities"
+
+        expected_checkpoints = tuple(
+            _t075_payload_identity("checkpoint", filename, payload)
+            for (_, filename), payload in zip(
+                T075_OUTPUT_LAYOUT["TRAIN"][:2], checkpoint_payloads, strict=True
+            )
+        )
+        loaded_runs = tuple(
+            _read_t065_payload(
+                payload,
+                load_non_combat_checkpoint,
+                f"T065 checkpoint {model_seed}",
+            )
+            for model_seed, payload in zip(
+                T065_MODEL_SEEDS, checkpoint_payloads, strict=True
+            )
+        )
+        if tuple(run.model_seed for run in loaded_runs) != T065_MODEL_SEEDS:
+            raise ValueError("TRAIN checkpoints must use both frozen T065 model seeds")
+        if any(
+            run.checkpoint_artifact_id != identity.sha256
+            for run, identity in zip(loaded_runs, expected_checkpoints, strict=True)
+        ):
+            raise ValueError("T065 checkpoint loader identity does not match payload")
+        selected_run = select_validation_checkpoint(loaded_runs)
+        selection = validate_t075_training_selection(training_selection)
+        _require_matching_run_head(selection, state, "training-selection summary")
+        if _identity_tuple(selection["checkpoints"]) != expected_checkpoints:
+            raise ValueError(
+                "training-selection checkpoints do not match checkpoint payload identities"
+            )
+        expected_validation_mae = [run.validation_mae for run in loaded_runs]
+        if selection["validation_mae"] != expected_validation_mae:
+            raise ValueError(
+                "training-selection validation MAE does not match T065 checkpoints"
+            )
+        if selection["selected_model_seed"] != selected_run.model_seed:
+            raise ValueError(
+                "training-selection selected model does not match T065 selection"
+            )
+        selected_index = T065_MODEL_SEEDS.index(selected_run.model_seed)
+        expected_selected_checkpoint = expected_checkpoints[selected_index]
+        if (
+            _identity_tuple((selection["selected_checkpoint"],))[0]
+            != expected_selected_checkpoint
+        ):
+            raise ValueError(
+                "training-selection selected checkpoint does not match T065 selection"
+            )
+        derived_selection = dict(selection)
+        derived_selection.update(
+            {
+                "validation_mae": expected_validation_mae,
+                "selected_model_seed": selected_run.model_seed,
+                "selected_checkpoint": expected_selected_checkpoint.to_dict(),
+            }
+        )
+        validate_t075_training_selection(derived_selection)
+    except Exception:
+        return _invalid_t075_evidence(
+            state,
+            repository_root,
+            stage="TRAIN",
+            parents=parents,
+            failure_code="TRAIN_INVALID",
         )
     return _stage_payload_outcome(
         state,
         repository_root,
         stage="TRAIN",
-        parents=(_committed_output(state, "target_table", "target-table.json"),),
+        parents=parents,
         payloads=(
             ("checkpoint", checkpoint_payloads[0]),
             ("checkpoint", checkpoint_payloads[1]),
-            ("training_selection", canonical_json_document(training_selection)),
+            ("training_selection", canonical_json_document(derived_selection)),
         ),
     )
 

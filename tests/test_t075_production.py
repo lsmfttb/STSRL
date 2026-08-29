@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -26,6 +28,43 @@ def _identity(role: str, filename: str) -> acceptance.ArtifactIdentity:
         sha256="a" * 64,
         size_bytes=1,
     )
+
+
+def _checkpoint_identity(payload: bytes, model_seed: int) -> dict[str, Any]:
+    return {
+        "role": "checkpoint",
+        "path": (
+            "artifacts/t075-leakage-safe-non-combat-cohort-repair/"
+            f"checkpoints/{model_seed}.pt"
+        ),
+        "sha256": hashlib.sha256(payload).hexdigest(),
+        "size_bytes": len(payload),
+    }
+
+
+def _training_selection(
+    checkpoint_payloads: tuple[bytes, bytes],
+    *,
+    validation_mae: tuple[float, float] = (0.25, 0.5),
+    selected_model_seed: int = 653001,
+) -> dict[str, Any]:
+    checkpoints = [
+        _checkpoint_identity(payload, model_seed)
+        for payload, model_seed in zip(checkpoint_payloads, (653001, 653002))
+    ]
+    return {
+        "schema_id": "t075-training-selection-v1",
+        "schema_version": 1,
+        "task_id": "T075",
+        "run_head": RUN_HEAD,
+        "model_seeds": [653001, 653002],
+        "checkpoints": checkpoints,
+        "validation_mae": list(validation_mae),
+        "selected_model_seed": selected_model_seed,
+        "selected_checkpoint": checkpoints[0]
+        if selected_model_seed == 653001
+        else checkpoints[1],
+    }
 
 
 def _patch_stage_capture(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
@@ -201,6 +240,75 @@ def test_target_rejects_malformed_t065_payload_as_case_d(
         "passed": False,
         "failure_code": "TARGET_INVALID",
     }
+
+
+def test_train_rejects_malformed_t065_checkpoint_as_case_d(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = _patch_stage_capture(monkeypatch)
+    checkpoint_payloads = (b"not a T065 checkpoint", b"second checkpoint")
+    state = acceptance.initial_acceptance_state(RUN_HEAD)
+
+    acceptance.run_t075_train(
+        state,
+        checkpoint_payloads,
+        _training_selection(checkpoint_payloads),
+        tmp_path,
+    )
+
+    assert calls[-1] == {
+        "stage": "TRAIN",
+        "parents": (_identity("target_table", "target-table.json"),),
+        "payloads": (),
+        "valid": False,
+        "passed": False,
+        "failure_code": "TRAIN_INVALID",
+    }
+
+
+def test_train_rejects_selection_mae_disagreement_with_t065_checkpoints(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sts_combat_rl.sim.non_combat_learning as t065
+
+    calls = _patch_stage_capture(monkeypatch)
+    checkpoint_payloads = (b"checkpoint 653001", b"checkpoint 653002")
+    loaded_runs = (
+        SimpleNamespace(
+            model_seed=653001,
+            validation_mae=0.25,
+            checkpoint_artifact_id=hashlib.sha256(checkpoint_payloads[0]).hexdigest(),
+        ),
+        SimpleNamespace(
+            model_seed=653002,
+            validation_mae=0.5,
+            checkpoint_artifact_id=hashlib.sha256(checkpoint_payloads[1]).hexdigest(),
+        ),
+    )
+    loaded_payloads: list[bytes] = []
+    selected_inputs: list[tuple[object, ...]] = []
+
+    def fake_loader(path: Path) -> object:
+        loaded_payloads.append(path.read_bytes())
+        return loaded_runs[len(loaded_payloads) - 1]
+
+    def fake_select(runs: object) -> object:
+        selected_inputs.append(tuple(runs))
+        return tuple(runs)[0]
+
+    monkeypatch.setattr(t065, "load_non_combat_checkpoint", fake_loader)
+    monkeypatch.setattr(t065, "select_validation_checkpoint", fake_select)
+    selection = _training_selection(checkpoint_payloads, validation_mae=(9.0, 10.0))
+    state = acceptance.initial_acceptance_state(RUN_HEAD)
+
+    acceptance.run_t075_train(state, checkpoint_payloads, selection, tmp_path)
+
+    assert loaded_payloads == list(checkpoint_payloads)
+    assert selected_inputs == [loaded_runs]
+    assert calls[-1]["valid"] is False
+    assert calls[-1]["passed"] is False
+    assert calls[-1]["failure_code"] == "TRAIN_INVALID"
+    assert calls[-1]["payloads"] == ()
 
 
 @pytest.mark.parametrize("operation", ["target", "gate", "eval"])

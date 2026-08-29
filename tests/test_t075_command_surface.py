@@ -666,3 +666,48 @@ def test_t075_invalid_command_cannot_carry_passed_assertion(
             valid=False,
             failure_code="GATE_EVIDENCE_INVALID",
         )
+
+
+def test_t075_train_selection_read_failure_commits_invalid(
+    tmp_path, monkeypatch
+) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command
+
+    checkpoint_653001 = tmp_path / "653001.pt"
+    checkpoint_653002 = tmp_path / "653002.pt"
+    selection = tmp_path / "training-selection.json"
+    checkpoint_653001.write_bytes(b"checkpoint 653001")
+    checkpoint_653002.write_bytes(b"checkpoint 653002")
+    selection.write_bytes(b"not canonical JSON")
+    state = SimpleNamespace(run_head=RUN_HEAD)
+    calls = []
+
+    def fake_train(received_state, payloads, received_selection, root, **kwargs):
+        calls.append((received_state, payloads, received_selection, root, kwargs))
+        return "invalid"
+
+    monkeypatch.setattr(command, "_validate_t075_checkout", lambda *_args: None)
+    monkeypatch.setattr(command, "reconstruct_t075_state", lambda *_args: state)
+    monkeypatch.setattr(command, "run_t075_train", fake_train)
+
+    assert (
+        command.run_t075_operation(
+            "train",
+            repository_root=tmp_path,
+            run_head=RUN_HEAD,
+            checkpoint_653001=checkpoint_653001,
+            checkpoint_653002=checkpoint_653002,
+            training_selection=selection,
+            valid=True,
+        )
+        == "invalid"
+    )
+    assert calls == [
+        (
+            state,
+            None,
+            None,
+            tmp_path,
+            {"valid": False, "failure_code": "TRAIN_INVALID"},
+        )
+    ]

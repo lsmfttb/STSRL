@@ -561,26 +561,47 @@ def run_t075_operation(
             failure_code=failure_code,
         )
     if operation == "train":
+        if valid:
+            checkpoint_653001_path = _required_t075_path(
+                checkpoint_653001, "checkpoint-653001"
+            )
+            checkpoint_653002_path = _required_t075_path(
+                checkpoint_653002, "checkpoint-653002"
+            )
+            training_selection_path = _required_t075_path(
+                training_selection, "training-selection"
+            )
+            try:
+                checkpoint_payloads = (
+                    _read_t075_bytes(
+                        checkpoint_653001_path,
+                        "checkpoint 653001",
+                    ),
+                    _read_t075_bytes(
+                        checkpoint_653002_path,
+                        "checkpoint 653002",
+                    ),
+                )
+                selection = _read_t075_mapping(
+                    training_selection_path,
+                    "training-selection summary",
+                )
+            except T075OperationalError:
+                return run_t075_train(
+                    state,
+                    None,
+                    None,
+                    root,
+                    valid=False,
+                    failure_code="TRAIN_INVALID",
+                )
+        else:
+            checkpoint_payloads = None
+            selection = None
         return run_t075_train(
             state,
-            (
-                _read_t075_bytes(
-                    _required_t075_path(checkpoint_653001, "checkpoint-653001"),
-                    "checkpoint 653001",
-                ),
-                _read_t075_bytes(
-                    _required_t075_path(checkpoint_653002, "checkpoint-653002"),
-                    "checkpoint 653002",
-                ),
-            )
-            if valid
-            else None,
-            _read_t075_mapping(
-                _required_t075_path(training_selection, "training-selection"),
-                "training-selection summary",
-            )
-            if valid
-            else None,
+            checkpoint_payloads,
+            selection,
             root,
             valid=valid,
             failure_code=failure_code,
