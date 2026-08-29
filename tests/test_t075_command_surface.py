@@ -81,10 +81,12 @@ def _operation_argv(tmp_path, operation: str) -> list[str]:
         args += ["--audit", str(tmp_path / f"{operation}.json")]
     elif operation == "select":
         args += [
-            "--ownership-audit",
-            str(tmp_path / "ownership.json"),
-            "--selected-states",
-            str(tmp_path / "selected-states.jsonl"),
+            "--source-stochastic",
+            str(tmp_path / "source-stochastic.json"),
+            "--source-expert",
+            str(tmp_path / "source-expert.json"),
+            "--source-reuse-audit",
+            str(tmp_path / "source-reuse-audit.json"),
         ]
     elif operation == "target":
         args += ["--target-table", str(tmp_path / "target-table.json")]
@@ -140,10 +142,15 @@ def test_t075_main_dispatches_each_operation_without_running_science(
                 "audit": tmp_path / f"{operation}.json"
                 if operation in {"preflight", "validate-reuse"}
                 else None,
-                "ownership_audit": tmp_path / "ownership.json"
+                "ownership_audit": None,
+                "selected_states": None,
+                "source_stochastic": tmp_path / "source-stochastic.json"
                 if operation == "select"
                 else None,
-                "selected_states": tmp_path / "selected-states.jsonl"
+                "source_expert": tmp_path / "source-expert.json"
+                if operation == "select"
+                else None,
+                "source_reuse_audit": tmp_path / "source-reuse-audit.json"
                 if operation == "select"
                 else None,
                 "target_table": tmp_path / "target-table.json"
@@ -234,6 +241,9 @@ def test_t075_invalid_dispatch_omits_normative_payload_paths(
         "audit",
         "ownership_audit",
         "selected_states",
+        "source_stochastic",
+        "source_expert",
+        "source_reuse_audit",
         "target_table",
         "checkpoint_653001",
         "checkpoint_653002",

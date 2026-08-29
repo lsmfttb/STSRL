@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import hashlib
 from io import StringIO
 import json
 import os
@@ -619,6 +620,85 @@ def test_deterministic_selection_uses_family_split_quotas() -> None:
     assert all(state.selection_digest for state in selected)
     assert (
         canonical_source_selection_key(selected[0])[0] == selected[0].selection_digest
+    )
+
+
+def test_t075_selection_uses_global_owner_before_split_quota() -> None:
+    from sts_combat_rl.sim.non_combat_acceptance import (
+        select_t075_source_candidates,
+    )
+
+    candidates = []
+    for family_index, family in enumerate(T065_MANDATORY_FAMILIES):
+        for offset in range(81):
+            split = (
+                "train" if offset < 49 else "validation" if offset < 65 else "heldout"
+            )
+            seed = (
+                650001
+                if split == "train"
+                else 650155
+                if split == "validation"
+                else 650206
+            )
+            candidates.append(_state(family_index * 100 + offset, family, split, seed))
+    cross_split_train = candidates[0]
+    cross_split_expert = replace(
+        cross_split_train,
+        source_arm="expert_non_combat_v1",
+        simulator_seed=650155,
+        split="validation",
+        source_run_id="expert_non_combat_v1:650155",
+    )
+
+    selected, audit = select_t075_source_candidates(
+        [*candidates, cross_split_expert], run_head="1" * 40
+    )
+
+    def member_key(state: T065SourceState) -> tuple[str, bytes]:
+        candidate = {
+            "screen_family": state.family,
+            "simulator_seed": state.simulator_seed,
+            "source_behavior_arm": state.source_arm,
+            "public_action_trace": [dict(item) for item in state.action_trace],
+            "source_decision_step_index": state.source_step_index,
+            "public_state_identity": state.public_state_identity,
+            "ordered_legal_action_identities": [
+                dict(item) for item in state.legal_action_identities
+            ],
+        }
+        payload = json.dumps(
+            candidate,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8")
+        return hashlib.sha256(
+            b"T065-source-selection-v1\n" + payload
+        ).hexdigest(), payload
+
+    expected_owner = min((cross_split_train, cross_split_expert), key=member_key)
+    group = next(group for group in audit["groups"] if len(group["members"]) == 2)
+    owner_rows = [member for member in group["members"] if member["owner"]]
+    assert len(owner_rows) == 1
+    assert owner_rows[0]["source_arm"] == expected_owner.source_arm
+    assert owner_rows[0]["split"] == expected_owner.split
+    assert audit["cross_split_group_count"] == 1
+    assert audit["excluded_non_owner_count"] == 1
+
+    counts = {
+        (state.family, state.split): sum(
+            1
+            for selected_state in selected
+            if (selected_state.family, selected_state.split)
+            == (state.family, state.split)
+        )
+        for state in selected
+    }
+    assert all(
+        counts[(family, split)] == quota
+        for family in T065_MANDATORY_FAMILIES
+        for split, quota in (("train", 48), ("validation", 16), ("heldout", 16))
     )
 
 

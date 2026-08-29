@@ -14,7 +14,7 @@ import math
 import os
 import re
 import tempfile
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -69,6 +69,32 @@ T075_SOURCE_IDENTITIES = (
         "size_bytes": 3710180244,
     },
 )
+T075_REUSED_T065_RETENTION = {
+    T075_SOURCE_IDENTITIES[0]["path"]: {
+        "source_kind": "reused_t065",
+        "producer_task": "T065",
+        "producer_stage": "stage1-source-collection",
+        "producer_git_commit": "c57b2eef8615df2f43fb4dcf52af19ff44fe6108",
+        "regeneration_commands": [
+            "$PY -m sts_combat_rl.commands.non_combat_learning collect "
+            "--arm stochastic_non_combat_v1 --output <stable-source-path> "
+            "--seed-start 650001 --seed-end 650256 --sim-seed 1 "
+            "--ascension 20 --preflight <validated-t065-preflight>"
+        ],
+    },
+    T075_SOURCE_IDENTITIES[1]["path"]: {
+        "source_kind": "reused_t065",
+        "producer_task": "T065",
+        "producer_stage": "stage1-source-collection",
+        "producer_git_commit": "deeaa461c138db80f4393310d97d5d44d5fa8fd3",
+        "regeneration_commands": [
+            "$PY -m sts_combat_rl.commands.non_combat_learning collect "
+            "--arm expert_non_combat_v1 --output <stable-source-path> "
+            "--seed-start 650001 --seed-end 650256 --sim-seed 1 "
+            "--ascension 20 --preflight <validated-t065-preflight>"
+        ],
+    },
+}
 T075_OUTCOME_FILENAMES = {
     stage: f"{index:02d}-{stage.lower()}.json"
     for index, stage in enumerate(T075_STAGES)
@@ -857,7 +883,7 @@ def _stage_payload_outcome(
 
 
 def select_t075_source_candidates(
-    candidates: Sequence[Any],
+    candidates: Iterable[Any],
     *,
     run_head: str,
 ) -> tuple[tuple[Any, ...], dict[str, Any]]:
@@ -1371,13 +1397,17 @@ def validate_t075_preflight_audit(value: Mapping[str, Any]) -> dict[str, Any]:
         raise ValueError("T075 preflight audit schema is invalid")
     if value["task_id"] != T075_TASK_ID:
         raise ValueError("T075 preflight audit task id is invalid")
-    for field_name in (
-        "run_head",
-        "recovery_base",
-        "t065_approved_spec",
-        "sts_lightspeed_integration",
-    ):
-        _git_commit(value[field_name], f"T075 preflight audit {field_name}")
+    _git_commit(value["run_head"], "T075 preflight audit run_head")
+    expected_identities = {
+        "recovery_base": T075_RECOVERY_BASE,
+        "t065_approved_spec": T075_APPROVED_SPEC_COMMIT,
+        "sts_lightspeed_integration": T075_STS_LIGHTSPEED_INTEGRATION,
+    }
+    for field_name, expected in expected_identities.items():
+        if value[field_name] != expected:
+            raise ValueError(
+                f"T075 preflight audit {field_name} does not match the frozen identity"
+            )
     if value["model_input_schema_id"] != "non-combat-model-input-v1":
         raise ValueError("T075 preflight model-input schema is invalid")
     if value["state_dim"] != 4737 or value["action_dim"] != 92:
@@ -1816,6 +1846,31 @@ def validate_t075_retention_manifest(
                 raise ValueError(f"T075 retention {field_name} is invalid")
         _nonempty_string(entry["retention_reason"], "T075 entry retention reason")
         observed.append(artifact)
+        frozen_source = T075_REUSED_T065_RETENTION.get(artifact.path)
+        if frozen_source is not None:
+            for field_name in (
+                "source_kind",
+                "producer_task",
+                "producer_stage",
+                "producer_git_commit",
+            ):
+                if provenance[field_name] != frozen_source[field_name]:
+                    raise ValueError(
+                        f"T075 reused T065 provenance {field_name} is not frozen"
+                    )
+            if entry["regeneration_commands"] != frozen_source["regeneration_commands"]:
+                raise ValueError(
+                    "T075 reused T065 regeneration commands are not frozen"
+                )
+        elif provenance["source_kind"] != "t075_committed_output":
+            raise ValueError(
+                "T075-produced retention entries must use t075_committed_output"
+            )
+    frozen_sources = tuple(_identity_tuple(T075_SOURCE_IDENTITIES))
+    if tuple(observed[: len(frozen_sources)]) != frozen_sources:
+        raise ValueError("T075 retention entries must begin with exact T065 sources")
+    if any(artifact in frozen_sources for artifact in observed[len(frozen_sources) :]):
+        raise ValueError("T075 frozen T065 source is duplicated in retention entries")
     if expected_artifacts is not None and tuple(observed) != tuple(expected_artifacts):
         raise ValueError("T075 retention entries do not match committed lineage order")
     return dict(value)
@@ -1837,16 +1892,38 @@ def build_t075_retention_manifest(
             raise T075OperationalError(
                 f"retention metadata is missing for {artifact.path}"
             )
-        source_kind = metadata.get(
-            "source_kind",
-            "reused_t065"
-            if artifact in _identity_tuple(T075_SOURCE_IDENTITIES)
-            else "t075_committed_output",
-        )
-        producer_task = metadata.get("producer_task")
-        producer_stage = metadata.get("producer_stage")
-        producer_git_commit = metadata.get("producer_git_commit")
-        regeneration_commands = metadata.get("regeneration_commands")
+        frozen_source = T075_REUSED_T065_RETENTION.get(artifact.path)
+        if frozen_source is not None:
+            for field_name in (
+                "source_kind",
+                "producer_task",
+                "producer_stage",
+                "producer_git_commit",
+                "regeneration_commands",
+            ):
+                if (
+                    field_name in metadata
+                    and metadata[field_name] != frozen_source[field_name]
+                ):
+                    raise T075OperationalError(
+                        f"retention metadata for {artifact.path} changes frozen "
+                        f"T065 {field_name}"
+                    )
+            source_kind = frozen_source["source_kind"]
+            producer_task = frozen_source["producer_task"]
+            producer_stage = frozen_source["producer_stage"]
+            producer_git_commit = frozen_source["producer_git_commit"]
+            regeneration_commands = frozen_source["regeneration_commands"]
+        else:
+            source_kind = metadata.get("source_kind", "t075_committed_output")
+            if source_kind != "t075_committed_output":
+                raise T075OperationalError(
+                    f"T075 output {artifact.path} must use t075_committed_output"
+                )
+            producer_task = metadata.get("producer_task")
+            producer_stage = metadata.get("producer_stage")
+            producer_git_commit = metadata.get("producer_git_commit")
+            regeneration_commands = metadata.get("regeneration_commands")
         compatibility_requirements = metadata.get("compatibility_requirements")
         entry_reason = metadata.get("retention_reason", retention_reason)
         entry_consumers = metadata.get(

@@ -13,19 +13,24 @@ import json
 import shlex
 import subprocess
 import sys
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any
 
 from sts_combat_rl.sim.lightspeed import LightSpeedAdapter
 from sts_combat_rl.sim.lightspeed_source import lightspeed_source_identity_dict
 from sts_combat_rl.sim.non_combat_acceptance import (
+    T075_ROOT_RELATIVE,
+    T075_SOURCE_IDENTITIES,
     T075OperationalError,
     T075StageClassificationError,
     canonical_json_document,
     finalize_t075,
     reconstruct_t075_state,
+    select_t075_source_candidates,
+    validate_t075_source_reuse_audit,
 )
 from sts_combat_rl.sim.non_combat_acceptance import (
     run_t075_eval as commit_t075_eval,
@@ -238,8 +243,9 @@ def build_parser() -> argparse.ArgumentParser:
         "select", help="commit global replay ownership and selected states"
     )
     _add_t075_common_arguments(t075_select)
-    t075_select.add_argument("--ownership-audit", type=Path)
-    t075_select.add_argument("--selected-states", type=Path)
+    t075_select.add_argument("--source-stochastic", type=Path)
+    t075_select.add_argument("--source-expert", type=Path)
+    t075_select.add_argument("--source-reuse-audit", type=Path)
     _add_t075_validity_arguments(
         t075_select,
         failure_codes=(
@@ -413,6 +419,9 @@ def run_t075_operation(
     audit: Path | None = None,
     ownership_audit: Path | None = None,
     selected_states: Path | None = None,
+    source_stochastic: Path | None = None,
+    source_expert: Path | None = None,
+    source_reuse_audit: Path | None = None,
     target_table: Path | None = None,
     checkpoint_653001: Path | None = None,
     checkpoint_653002: Path | None = None,
@@ -438,6 +447,9 @@ def run_t075_operation(
             ("audit", audit),
             ("ownership-audit", ownership_audit),
             ("selected-states", selected_states),
+            ("source-stochastic", source_stochastic),
+            ("source-expert", source_expert),
+            ("source-reuse-audit", source_reuse_audit),
             ("target-table", target_table),
             ("checkpoint-653001", checkpoint_653001),
             ("checkpoint-653002", checkpoint_653002),
@@ -471,23 +483,26 @@ def run_t075_operation(
             failure_code=failure_code,
         )
     if operation == "select":
-        return run_t075_selection(
+        if not valid:
+            return run_t075_selection(
+                state,
+                None,
+                None,
+                root,
+                valid=False,
+                failure_code=failure_code,
+            )
+        if ownership_audit is not None or selected_states is not None:
+            raise T075OperationalError(
+                "T075 select accepts source artifacts, not caller-selected states"
+            )
+        return _run_t075_source_selection(
             state,
-            _read_t075_mapping(
-                _required_t075_path(ownership_audit, "ownership-audit"),
-                "ownership audit",
-            )
-            if valid
-            else None,
-            _read_t075_bytes(
-                _required_t075_path(selected_states, "selected-states"),
-                "selected states",
-            )
-            if valid
-            else None,
             root,
-            valid=valid,
-            failure_code=failure_code,
+            source_stochastic=source_stochastic,
+            source_expert=source_expert,
+            source_reuse_audit=source_reuse_audit,
+            run_head=run_head,
         )
     if operation == "target":
         if not valid and failure_code != "TARGET_INVALID":
@@ -593,6 +608,9 @@ def _run_t075(args: argparse.Namespace) -> int:
         audit=getattr(args, "audit", None),
         ownership_audit=getattr(args, "ownership_audit", None),
         selected_states=getattr(args, "selected_states", None),
+        source_stochastic=getattr(args, "source_stochastic", None),
+        source_expert=getattr(args, "source_expert", None),
+        source_reuse_audit=getattr(args, "source_reuse_audit", None),
         target_table=getattr(args, "target_table", None),
         checkpoint_653001=getattr(args, "checkpoint_653001", None),
         checkpoint_653002=getattr(args, "checkpoint_653002", None),
@@ -627,11 +645,14 @@ def _run_preflight(args: argparse.Namespace) -> int:
     _require_frozen_simulator_args(args)
     factory = None
     if args.simulator_runtime:
-        factory = lambda: LightSpeedAdapter(
-            seed=args.sim_seed,
-            ascension=args.ascension,
-            player_class="IRONCLAD",
-        )
+
+        def factory() -> LightSpeedAdapter:
+            return LightSpeedAdapter(
+                seed=args.sim_seed,
+                ascension=args.ascension,
+                player_class="IRONCLAD",
+            )
+
     report = build_t065_preflight_report(
         adapter_factory=factory,
         check_simulator_runtime=args.simulator_runtime,
@@ -662,11 +683,14 @@ def _run_collect(args: argparse.Namespace) -> int:
     _require_preceding_manifests(args)
     _require_frozen_simulator_args(args)
     seeds = tuple(range(args.seed_start, args.seed_end + 1))
-    factory = lambda: LightSpeedAdapter(
-        seed=args.sim_seed,
-        ascension=args.ascension,
-        player_class="IRONCLAD",
-    )
+
+    def factory() -> LightSpeedAdapter:
+        return LightSpeedAdapter(
+            seed=args.sim_seed,
+            ascension=args.ascension,
+            player_class="IRONCLAD",
+        )
+
     if (args.seed_start, args.seed_end) == T065_SOURCE_SEED_RANGE:
         report = collect_source_arm_sharded_to_path(
             factory,
@@ -857,11 +881,14 @@ def _run_target(args: argparse.Namespace) -> int:
         "record_count": len(states),
     }
     simulator_identity = lightspeed_source_identity_dict()
-    factory = lambda: LightSpeedAdapter(
-        seed=args.sim_seed,
-        ascension=args.ascension,
-        player_class="IRONCLAD",
-    )
+
+    def factory() -> LightSpeedAdapter:
+        return LightSpeedAdapter(
+            seed=args.sim_seed,
+            ascension=args.ascension,
+            player_class="IRONCLAD",
+        )
+
     table = (
         generate_counterfactual_targets_sharded(
             factory,
@@ -1136,6 +1163,9 @@ class _SourceSelectionLocator:
     legal_action_identities: tuple[Mapping[str, Any], ...]
     action_trace: tuple[Mapping[str, Any], ...]
     terminal: bool
+    selected_state_index: int = -1
+    selection_digest: str = ""
+    selection_canonical_json: str = ""
 
     @classmethod
     def from_state(
@@ -1225,6 +1255,167 @@ class _SourceArmArtifactReader:
 def _iter_source_arm_states(path: Path) -> Iterator[T065SourceState]:
     reader = _SourceArmArtifactReader(path)
     yield from reader.iter_states()
+
+
+def _iter_t075_selection_locators(
+    source_paths: Sequence[Path],
+) -> Iterator[_SourceSelectionLocator]:
+    for source_index, path in enumerate(source_paths):
+        for record_index, state in enumerate(_iter_source_arm_states(path)):
+            yield _SourceSelectionLocator.from_state(
+                state, source_index=source_index, record_index=record_index
+            )
+
+
+def _materialize_t075_selected_states(
+    source_paths: Sequence[Path],
+    selected_locators: Sequence[_SourceSelectionLocator],
+) -> tuple[T065SourceState, ...]:
+    by_locator = {
+        (locator.source_index, locator.record_index): locator
+        for locator in selected_locators
+    }
+    materialized: dict[int, T065SourceState] = {}
+    for source_index, path in enumerate(source_paths):
+        for record_index, state in enumerate(_iter_source_arm_states(path)):
+            locator = by_locator.get((source_index, record_index))
+            if locator is None:
+                continue
+            materialized[locator.selected_state_index] = replace(
+                state,
+                selected_state_index=locator.selected_state_index,
+                selection_digest=locator.selection_digest,
+                selection_canonical_json=locator.selection_canonical_json,
+            )
+    expected_indices = set(range(len(selected_locators)))
+    if set(materialized) != expected_indices:
+        raise T075OperationalError(
+            "T075 selected source locators could not be reread completely"
+        )
+    return tuple(materialized[index] for index in sorted(materialized))
+
+
+def _serialize_t075_selected_states(
+    repository_root: Path, states: Sequence[T065SourceState]
+) -> bytes:
+    temporary_root = repository_root / T075_ROOT_RELATIVE / ".tmp"
+    temporary_root.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(dir=temporary_root) as directory:
+        path = Path(directory) / "selected-states.jsonl"
+        write_source_states(path, states)
+        return path.read_bytes()
+
+
+def _validate_t075_frozen_source(
+    repository_root: Path,
+    path: Path,
+    expected_identity: Mapping[str, Any],
+) -> None:
+    expected_path = repository_root.joinpath(*str(expected_identity["path"]).split("/"))
+    if path.resolve() != expected_path.resolve():
+        raise T075OperationalError(
+            f"T075 source path is not the frozen artifact path: {path}"
+        )
+    try:
+        actual_size = path.stat().st_size
+        actual_sha256 = file_sha256(path)
+    except OSError as exc:
+        raise T075OperationalError(f"T075 frozen source is unreadable: {path}") from exc
+    if (
+        actual_size != expected_identity["size_bytes"]
+        or actual_sha256 != expected_identity["sha256"]
+    ):
+        raise T075OperationalError(
+            f"T075 frozen source identity does not match: {path}"
+        )
+
+
+def _validate_t075_source_reuse_parent(
+    repository_root: Path, state: Any, path: Path
+) -> Mapping[str, Any]:
+    identity = next(
+        (
+            output
+            for committed in state.committed_outcomes
+            for output in committed.outcome.outputs
+            if output.role == "source_reuse_audit"
+        ),
+        None,
+    )
+    if identity is None:
+        raise T075OperationalError(
+            "T075 select requires a committed source-reuse audit"
+        )
+    expected_path = repository_root.joinpath(*identity.path.split("/"))
+    if path.resolve() != expected_path.resolve():
+        raise T075OperationalError(
+            "T075 source-reuse parent path does not match committed output"
+        )
+    try:
+        actual_size = path.stat().st_size
+        actual_sha256 = file_sha256(path)
+    except OSError as exc:
+        raise T075OperationalError(
+            "T075 committed source-reuse parent is unreadable"
+        ) from exc
+    if actual_size != identity.size_bytes or actual_sha256 != identity.sha256:
+        raise T075OperationalError("T075 source-reuse parent identity is stale")
+    audit = _read_t075_mapping(path, "source-reuse audit")
+    try:
+        validate_t075_source_reuse_audit(audit)
+    except (TypeError, ValueError) as exc:
+        raise T075OperationalError(
+            "T075 committed source-reuse audit is invalid"
+        ) from exc
+    if audit["run_head"] != state.run_head:
+        raise T075OperationalError(
+            "T075 committed source-reuse audit run_head does not match state"
+        )
+    return audit
+
+
+def _run_t075_source_selection(
+    state: Any,
+    repository_root: Path,
+    *,
+    source_stochastic: Path | None,
+    source_expert: Path | None,
+    source_reuse_audit: Path | None,
+    run_head: str,
+) -> Any:
+    source_paths = (
+        _required_t075_path(source_stochastic, "stochastic source"),
+        _required_t075_path(source_expert, "expert source"),
+    )
+    source_reuse_path = _required_t075_path(source_reuse_audit, "source-reuse audit")
+    _validate_t075_source_reuse_parent(repository_root, state, source_reuse_path)
+    for path, expected_identity in zip(
+        source_paths, T075_SOURCE_IDENTITIES, strict=True
+    ):
+        _validate_t075_frozen_source(repository_root, path, expected_identity)
+    try:
+        selected_locators, ownership_audit = select_t075_source_candidates(
+            _iter_t075_selection_locators(source_paths), run_head=run_head
+        )
+        selected_states = _materialize_t075_selected_states(
+            source_paths, selected_locators
+        )
+    except T075StageClassificationError:
+        raise
+    except (OSError, T065CaseD, UnicodeDecodeError, ValueError) as exc:
+        raise T075OperationalError(
+            "T075 frozen source failed the strict T065 reader"
+        ) from exc
+    for path, expected_identity in zip(
+        source_paths, T075_SOURCE_IDENTITIES, strict=True
+    ):
+        _validate_t075_frozen_source(repository_root, path, expected_identity)
+    return run_t075_selection(
+        state,
+        ownership_audit,
+        _serialize_t075_selected_states(repository_root, selected_states),
+        repository_root,
+    )
 
 
 def _validate_source_arm_metadata(
