@@ -738,6 +738,12 @@ problems: [string]
 be obtained. Metadata fields are populated when derivable from readable content and
 are otherwise `null`; a valid source record has no null metadata fields.
 
+For every failed `SourceRecord`, booleans are total rather than nullable:
+`strict_reader_passed=false` whenever the strict reader was not reached or did not
+pass, and `metadata_passed=false` whenever full frozen metadata validation was not
+reached or did not pass. These false values do not imply the later check actually
+ran; `failure_class` gives the first failed phase.
+
 `failure_class` is deterministic with this precedence:
 
 1. `missing` when the frozen path does not exist;
