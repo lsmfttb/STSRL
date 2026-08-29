@@ -10,7 +10,6 @@ import pytest
 
 from sts_combat_rl.sim import non_combat_acceptance as acceptance
 
-
 RUN_HEAD = "1" * 40
 HELDOUT_FAMILIES = (
     "MAP_SCREEN",
