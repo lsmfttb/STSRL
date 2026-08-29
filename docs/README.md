@@ -15,8 +15,8 @@ several files:
 3. [`training_paradigm.md`](training_paradigm.md): authoritative training-signal
    and human-knowledge boundary.
 4. [`collaboration_workflow.md`](collaboration_workflow.md): authoritative task
-   roles, branch/PR workflow, specification approval, execution reuse, and
-   review/merge process.
+   roles, Planner-owned design/acceptance semantics, branch/PR workflow,
+   execution authorization, escalation, and review/merge process.
 5. [`research_inspirations_and_attribution.md`](research_inspirations_and_attribution.md):
    research lineage, attribution, and publication-time third-party licensing
    requirements.
@@ -59,8 +59,9 @@ several files:
 ### Collaboration
 
 - [`collaboration_workflow.md`](collaboration_workflow.md): authoritative
-  roles, one-task-one-branch workflow, task specification contract, execution
-  reuse, review, and merge process.
+  Planner/Maintainer/Implementer responsibility split, one-task-one-branch
+  workflow, acceptance-first contract, contract-gap escalation, architecture
+  recovery, dual final acceptance, and merge process.
 - [`sts_lightspeed_maintainer_role.md`](sts_lightspeed_maintainer_role.md):
   operating contract for the external `sts_lightspeed` fork maintainer role,
   branch policy, cross-repository handoff, and review evidence.
@@ -106,13 +107,18 @@ several files:
 
 ## Branch Workflow
 
-`main` is the only integration line. For a new task, the planner creates one
-fresh branch and one draft pull request from current `main`, writes the task
-specification and proposed lifecycle changes there, and responds to
-specification review on that same PR. The main maintainer independently approves
-an exact specification commit, dispatches the implementer on the same branch/PR,
-reviews the implementation, and owns merge plus the `current_status.md` result
-report. Merged task lifecycle remains authoritative in `tasks/README.md`.
+`main` is the only integration line. For a new task, the Planner creates one
+fresh branch and one draft pull request from current `main`, writes an
+implementer-ready contract including the scientific/architectural design and
+normative acceptance boundary, and owns any later contract-gap resolution. The
+Main Maintainer checks repository/execution readiness, authorizes and coordinates
+the bounded implementation, classifies review findings, and returns semantic or
+architectural gaps to the Planner instead of inventing local rules. The Task
+Implementer performs the mechanical implementation against the frozen contract.
+Before merge, the exact final head requires Planner scientific/architectural
+acceptance plus Maintainer implementation/operational acceptance; the Maintainer
+then owns merge and the `current_status.md` result report. Merged task lifecycle
+remains authoritative in `tasks/README.md`.
 
 See `collaboration_workflow.md` for the complete contract; do not infer workflow
 from old branch names, historical documents, or stale role summaries.
