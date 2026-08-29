@@ -918,8 +918,8 @@ validation_passed: bool
 ```
 
 `validation_passed=true` iff both source records pass all frozen identity,
-strict-reader, and metadata checks. It must equal the StageOutcome `valid/passed`
-value for SOURCE_REUSE.
+strict-reader, and metadata checks. For SOURCE_REUSE it must equal both
+StageOutcome booleans: `validation_passed == valid == passed`.
 
 ### Ownership Audit Data Artifact
 
