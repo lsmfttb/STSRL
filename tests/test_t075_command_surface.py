@@ -381,6 +381,80 @@ def test_t075_validate_reuse_checks_frozen_sources_before_public_adapter(
     assert calls == [(state, audit, tmp_path, {"valid": True, "failure_code": None})]
 
 
+def test_t075_validate_reuse_source_failure_commits_invalid_outcome(
+    tmp_path, monkeypatch
+) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command
+
+    source_paths = tuple(
+        tmp_path / identity["path"] for identity in command.T075_SOURCE_IDENTITIES
+    )
+    audit = {
+        "schema_id": "t075-source-reuse-audit-v1",
+        "schema_version": 1,
+        "task_id": "T075",
+        "run_head": RUN_HEAD,
+        "sources": [dict(identity) for identity in command.T075_SOURCE_IDENTITIES],
+        "strict_reader_passed": True,
+        "metadata_passed": True,
+    }
+    audit_path = tmp_path / "source-reuse.json"
+    audit_path.write_bytes(command.canonical_json_document(audit))
+    state = SimpleNamespace(run_head=RUN_HEAD)
+    calls: list[tuple[object, object, object, dict[str, object]]] = []
+
+    def fake_source_identity_check(*_args):
+        raise command.T075OperationalError("frozen source identity mismatch")
+
+    def fake_reuse(received_state, received_audit, root, **kwargs):
+        calls.append((received_state, received_audit, root, kwargs))
+        return "committed-invalid"
+
+    monkeypatch.setattr(command, "_validate_t075_checkout", lambda *_args: None)
+    monkeypatch.setattr(command, "reconstruct_t075_state", lambda *_args: state)
+    monkeypatch.setattr(
+        command, "_validate_t075_frozen_source", fake_source_identity_check
+    )
+    monkeypatch.setattr(command, "run_t075_validate_reuse", fake_reuse)
+    assert (
+        command.run_t075_operation(
+            "validate-reuse",
+            repository_root=tmp_path,
+            run_head=RUN_HEAD,
+            audit=audit_path,
+            source_stochastic=source_paths[0],
+            source_expert=source_paths[1],
+        )
+        == "committed-invalid"
+    )
+    assert calls == [
+        (
+            state,
+            None,
+            tmp_path,
+            {"valid": False, "failure_code": "SOURCE_REUSE_INVALID"},
+        )
+    ]
+
+
+def test_t075_validate_reuse_missing_source_path_is_control_error(
+    tmp_path, monkeypatch
+) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command
+
+    state = SimpleNamespace(run_head=RUN_HEAD)
+    monkeypatch.setattr(command, "_validate_t075_checkout", lambda *_args: None)
+    monkeypatch.setattr(command, "reconstruct_t075_state", lambda *_args: state)
+    with pytest.raises(command.T075OperationalError, match="stochastic source path"):
+        command.run_t075_operation(
+            "validate-reuse",
+            repository_root=tmp_path,
+            run_head=RUN_HEAD,
+            source_expert=tmp_path / "expert.json",
+            valid=True,
+        )
+
+
 @pytest.mark.parametrize(
     "failure_code",
     [

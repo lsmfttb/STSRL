@@ -481,7 +481,16 @@ def run_t075_operation(
             source_audit = _read_t075_mapping(
                 _required_t075_path(audit, "audit"), "source-reuse audit"
             )
-            _validate_t075_source_reuse_inputs(root, source_paths, source_audit)
+            try:
+                _validate_t075_source_reuse_inputs(root, source_paths, source_audit)
+            except T075OperationalError:
+                return run_t075_validate_reuse(
+                    state,
+                    None,
+                    root,
+                    valid=False,
+                    failure_code="SOURCE_REUSE_INVALID",
+                )
         return run_t075_validate_reuse(
             state,
             source_audit if valid else None,
