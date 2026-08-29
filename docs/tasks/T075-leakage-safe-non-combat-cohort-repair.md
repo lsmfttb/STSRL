@@ -8,7 +8,7 @@ on PR #75. PR #75 remains an audit record only; its task-specific orchestration,
 validator graph, retention discovery, command-token proof, PID/process proof, and
 runtime artifacts are not T075 recovery state.
 
-Recovery baseline and frozen upstream identities:
+Frozen upstream identities:
 
 ```text
 RECOVERY_BASE = bc9a6790f36ff036f90dc7f03ba0ff026a16788d
@@ -39,16 +39,16 @@ or terminal scientific meaning.
 
 ## Normative Inheritance From T065
 
-The following merged contracts at `RECOVERY_BASE` remain normative for all
-unchanged downstream science:
+The following merged contracts at `RECOVERY_BASE` remain normative for unchanged
+science:
 
 - `docs/tasks/T065-learned-non-combat-policy-v1.md`;
 - `docs/tasks/T065-frozen-execution-statistics-contract.md`;
 - `docs/tasks/T065-non-combat-model-input-v1.md`;
-- the strict T065 serializers/readers in
+- strict T065 serializers/readers in
   `src/sts_combat_rl/sim/non_combat_learning.py`.
 
-In particular, T075 reuses the existing schema contracts:
+T075 reuses these existing schema contracts:
 
 ```text
 t065-source-state-v1
@@ -70,23 +70,23 @@ T075 remains simulator-generated and public-deployment-safe:
 - no human trajectories, human action labels, or strategy annotations;
 - no expert-policy imitation target;
 - no hidden/future feature in deployable non-combat model input;
-- `expert_non_combat_v1` remains a frozen bootstrap/continuation/fallback
-  controller, not a ground-truth label source;
+- `expert_non_combat_v1` remains bootstrap/continuation/fallback, not a
+  ground-truth label source;
 - battle control remains `oracle_search_v1_highest_mean_s20` where T065 requires
   it;
 - source collection is not rerun.
 
 Out of scope:
 
-- changing source scale, split assignment, replay key, quotas, or seed sets;
-- changing target definition, model topology, optimizer, bootstrap, or gates;
+- changing source scale, split assignment, replay key, quotas, seed sets;
+- changing target definition, model topology, optimizer, bootstrap, gates;
 - changing supported screen families or action-space semantics;
 - natural-A20 or live-game promotion claims;
 - generic workflow frameworks or task-numbered production packages;
 - recursive provenance/retention discovery or per-stage retention manifests;
 - exact shell-token hashes, PID identity, queue identity, or process binding as
   scientific evidence;
-- using PR #75 runtime artifacts as authoritative evidence.
+- using PR #75 runtime artifacts as authoritative state.
 
 ## Frozen T065 Inputs
 
@@ -109,7 +109,7 @@ allowed.
 
 ## Frozen Cohort Rule
 
-Canonical families, in order:
+Canonical family order:
 
 1. `MAP_SCREEN`
 2. `REST_ROOM`
@@ -159,7 +159,7 @@ group_digest = sha256(
 
 Selection algorithm:
 
-1. admit every strict, selectable mandatory-family candidate from both retained
+1. admit every strict selectable mandatory-family candidate from both retained
    source arms and all frozen splits;
 2. group globally by the unchanged replay-equivalence key;
 3. sort each group by complete `member_order_key`;
@@ -177,8 +177,7 @@ states. Replay mismatch is Case D and never triggers replacement.
 
 ## Frozen Downstream Science
 
-All downstream rules are inherited unchanged from T065. For avoidance of doubt,
-the key frozen identities are:
+All downstream rules are inherited unchanged from T065. Key frozen identities:
 
 ```text
 model input: 4634 snapshot + 103 public context = 4737 state; 92 action
@@ -214,10 +213,10 @@ T065 = ${STABLE}/t065-learned-non-combat-policy-v1
 Every authoritative command runs from `CODE`, with `PYTHONPATH="$NATIVE:$CODE/src"`,
 a clean checkout, and exact `HEAD == RUN_HEAD`.
 
-`RUN_HEAD` is frozen only after implementation and the executable A01-A24 suite
-pass. No scientific Stage 0-6 execution occurs before `RUN_HEAD` is frozen.
+`RUN_HEAD` is frozen only after implementation and executable A01-A24 pass. No
+scientific Stage 0-6 execution occurs before `RUN_HEAD` is frozen.
 
-Parallelism remains:
+Parallelism:
 
 - `SELECTION_REPLAY`: 16 contiguous shards x 20 selected states, 16 workers;
 - `TARGET`: 16 contiguous shards x 20 selected states, 16 workers;
@@ -227,7 +226,7 @@ Parallelism remains:
   concurrently.
 
 If required resources cannot be established before a stage starts, no stage
-outcome is committed. Do not silently reduce the frozen worker topology.
+outcome is committed. Do not silently reduce the frozen topology.
 
 ## Canonical Artifact Identity
 
@@ -264,7 +263,7 @@ Terminal cases are `A|B|C|D`.
 
 ### StageOutcome
 
-Every committed stage writes one small control record. Exact top-level schema:
+Every committed stage writes one small control record:
 
 ```text
 schema_id: "t075-stage-outcome-v1"
@@ -279,11 +278,11 @@ outputs: [ArtifactIdentity]
 failure_code: FailureCode | null
 ```
 
-Unknown top-level keys are rejected. Arrays preserve the frozen order below.
-Canonical JSON is UTF-8, sorted keys, compact separators, `ensure_ascii=False`,
+Unknown top-level keys are rejected. Arrays preserve frozen order. Canonical JSON
+is UTF-8, sorted keys, compact separators, `ensure_ascii=False`,
 `allow_nan=False`, with one trailing newline.
 
-Invariant:
+Invariants:
 
 - `valid=true` => `failure_code=null`;
 - `valid=false` => `passed=false`, `outputs=[]`, `failure_code!=null`;
@@ -310,8 +309,6 @@ another workflow schema.
 
 ### AcceptanceState
 
-The state stores the complete committed core, not only a digest:
-
 ```text
 CommittedOutcome = {
   outcome: StageOutcome,
@@ -327,19 +324,14 @@ AcceptanceState = {
 }
 ```
 
-`artifact_index(state)` is deterministic and contains:
+`artifact_index(state)` contains every committed report identity and every output
+identity from every committed valid outcome. No filesystem lookup, hidden registry,
+or second lineage validator is required by `advance()`.
 
-- every committed `report_identity`;
-- every `ArtifactIdentity` in every committed valid outcome's `outputs`.
-
-No filesystem lookup, hidden registry, or second lineage validator is required by
-`advance()`. Restart reconstructs state by reading stage-outcome files in canonical
-stage order and replaying their full `StageOutcome` values through the same
-`advance()` function. Thus reconstruction and live execution use one authority.
+Restart reconstructs state by reading stage-outcome files in canonical stage order
+and replaying their full StageOutcome values through the same `advance()`.
 
 ### Parent And Output Table
-
-Frozen semantic lineage is:
 
 | Stage/result | parents | outputs |
 |---|---|---|
@@ -356,14 +348,13 @@ Frozen semantic lineage is:
 | GATE valid/invalid | target table + training-selection summary + selected checkpoint | Stage-5 report if valid, else `[]` |
 | EVAL valid/invalid | Stage-5 report + training-selection summary + selected checkpoint | Stage-6 report if valid, else `[]` |
 
-Except for the two frozen T065 source artifacts in valid SOURCE_REUSE, every
-parent must exist in `artifact_index(state)` in the exact row order. The two
-external sources are legal only in valid SOURCE_REUSE and must equal the frozen
-four-field identities above.
+Except for the two frozen T065 sources in valid SOURCE_REUSE, every parent must
+exist in `artifact_index(state)` in exact row order. Those external sources are
+legal only in valid SOURCE_REUSE and must equal the frozen four-field identities.
 
-The GATE/EVAL classifier verifies that the checkpoint parent is exactly the
-checkpoint selected by the training-selection summary. `advance()` verifies that
-it is a committed TRAIN checkpoint output; it does not interpret validation MAE.
+The GATE/EVAL classifier verifies that checkpoint parent is exactly the checkpoint
+selected by the training-selection summary. `advance()` verifies it is a committed
+TRAIN checkpoint output; it does not interpret validation MAE.
 
 ### Legal Transitions
 
@@ -386,9 +377,7 @@ EVAL valid+fail             -> B at EVAL
 EVAL invalid                -> D at EVAL
 ```
 
-### `advance()` Precedence
-
-Conceptually:
+### `advance()` Precedence And Lineage Boundary
 
 ```text
 advance(state, outcome, report_identity) -> state
@@ -397,53 +386,59 @@ advance(state, outcome, report_identity) -> state
 Apply exactly:
 
 1. reject wrong `run_head`;
-2. if that stage is already committed, identical canonical outcome bytes and
-   identical report identity are idempotent; otherwise reject as conflicting
-   duplicate;
+2. if stage already committed, identical canonical outcome bytes and identical
+   report identity are idempotent; otherwise reject conflicting duplicate;
 3. reject any new stage after terminal;
 4. require `outcome.stage == current_stage`;
-5. require the legal valid/passed/failure combination;
-6. require frozen report role/path and the exact parent/output shape;
+5. require legal valid/passed/failure combination;
+6. require frozen report role/path and exact parent/output shape;
 7. require every non-external parent to resolve through `artifact_index(state)`;
-8. append the full outcome + report identity;
-9. apply the transition table and set next stage or terminal state.
+8. append full outcome + report identity;
+9. apply transition table and set next stage or terminal state.
 
-Wrong RUN_HEAD, out-of-order stage, malformed candidate outcome, or conflicting
-duplicate is an operational rejection and does not create Case D. A fidelity
-failure discovered by the legitimate stage classifier is represented by that
-stage's committed invalid StageOutcome and therefore produces Case D normally.
+Structural caller-supplied lineage errors are operational rejections before stage
+classification. They include wrong/missing/out-of-order parent identities, parent
+identity not resolving through `artifact_index(state)`, wrong external-source
+identity in a purported valid SOURCE_REUSE outcome, wrong RUN_HEAD, out-of-order
+stage, malformed outcome shape, and conflicting duplicate. They are A20 and leave
+state unchanged.
+
+Scientific lineage/fidelity failures are different. Once the legitimate TARGET
+validator has received structurally valid committed parents, it may discover that
+the resolved scientific content violates inherited provenance/schema/public-input
+or other frozen T065/T075 fidelity rules. That is A10: commit invalid TARGET with
+`failure_code=TARGET_INVALID`, produce Case D, and do not reach TRAIN.
+
+The same distinction applies elsewhere: malformed control identity is operational;
+a fidelity failure discovered by the legitimate reached-stage validator is the
+stage's committed invalid outcome.
 
 ## Transaction And Retry
 
 For a legitimately reached stage:
 
-1. reconstruct canonical state and validate already-committed parents;
+1. reconstruct canonical state and validate committed structural parents;
 2. perform stage work in `ROOT/.tmp/`;
-3. validate/classify the result using the frozen T075/T065 rules;
-4. on valid result, atomically promote all normative outputs and compute their
-   final ArtifactIdentity values; on invalid result, promote no normative output;
+3. validate/classify result using frozen T075/T065 scientific rules;
+4. on valid result, atomically promote normative outputs and compute final
+   ArtifactIdentity values; on invalid result, promote no normative output;
 5. construct final StageOutcome;
-6. compute the prospective stage-outcome report identity and call `advance()` as
-   a pure check;
-7. atomically write the StageOutcome file; this file write is the only stage
-   commit marker;
+6. compute prospective stage-outcome report identity and call `advance()` as a
+   pure check;
+7. atomically write StageOutcome file; this write is the sole stage commit marker;
 8. reconstruct state through the same `advance()` authority;
-9. if terminal, materialize the terminal report.
+9. if terminal, materialize terminal report.
 
 If output promotion succeeds but StageOutcome commit does not, those files are
 uncommitted and ignored by `artifact_index`; retry from the same committed state
-may overwrite them deterministically. A successfully committed StageOutcome is
-immutable and is not rerun for a more favorable result.
+may overwrite them deterministically. A committed StageOutcome is immutable and
+is not rerun for a more favorable result.
 
 ## Normative Scientific Output Schemas
 
-StageOutcome is the control record. Scientific/fidelity payloads are separate
-artifacts.
+StageOutcome is the control record. Scientific/fidelity payloads are separate.
 
 ### Existing T065 payloads
-
-These use the exact merged T065 serializers/readers at `RECOVERY_BASE`, including
-schema ID/version, field types, ordering rules, and strict validation:
 
 | T075 output | inherited schema |
 |---|---|
@@ -453,13 +448,10 @@ schema ID/version, field types, ordering rules, and strict validation:
 | Stage-5 report | `t065-heldout-gate-report-v1` |
 | Stage-6 report | `t065-complete-run-report-v1` |
 
-The task must call the merged T065 strict reader/serializer where one exists and
-must preserve the merged T065 `to_dict()` contract otherwise. No T075 duplicate
-schema is permitted for these payloads.
+Use exact merged T065 serializers/readers at `RECOVERY_BASE`; do not duplicate
+those schemas.
 
 ### T075 preflight audit
-
-Exact schema:
 
 ```text
 schema_id: "t075-preflight-audit-v1"
@@ -483,11 +475,9 @@ checks_passed: [
 ]
 ```
 
-Unknown keys rejected. It exists only for valid PREFLIGHT.
+Unknown keys rejected. Exists only for valid PREFLIGHT.
 
 ### T075 source-reuse audit
-
-Exact schema:
 
 ```text
 schema_id: "t075-source-reuse-audit-v1"
@@ -499,11 +489,9 @@ strict_reader_passed: true
 metadata_passed: true
 ```
 
-Unknown keys rejected. It exists only for valid SOURCE_REUSE.
+Unknown keys rejected. Exists only for valid SOURCE_REUSE.
 
 ### T075 ownership audit
-
-Exact top-level schema:
 
 ```text
 schema_id: "t075-ownership-audit-v1"
@@ -518,12 +506,12 @@ cross_split_group_count: nonneg_int
 excluded_non_owner_count: nonneg_int
 available_after_ownership: [FamilySplitCount]
 groups: [OwnershipGroup]
-```
 
-Exact records:
-
-```text
-FamilySplitCount = {family: Family, split: train|validation|heldout, count: nonneg_int}
+FamilySplitCount = {
+  family: Family,
+  split: train|validation|heldout,
+  count: nonneg_int
+}
 OwnershipGroup = {
   group_digest: sha256,
   family: Family,
@@ -539,14 +527,11 @@ OwnershipMember = {
 }
 ```
 
-`available_after_ownership` is ordered family then train/validation/heldout.
-`groups` sort by `group_digest`; members sort by the frozen complete member-order
-key. Valid groups have exactly one owner. Unknown keys at every T075-owned record
-level are rejected.
+`available_after_ownership` is family order then train/validation/heldout. Groups
+sort by `group_digest`; members sort by complete member-order key. Valid groups
+have exactly one owner. Unknown keys at every T075-owned record level rejected.
 
 ### T075 training-selection summary
-
-Exact schema:
 
 ```text
 schema_id: "t075-training-selection-v1"
@@ -560,15 +545,13 @@ selected_model_seed: 653001|653002
 selected_checkpoint: ArtifactIdentity
 ```
 
-Checkpoint arrays are model-seed order. The selected checkpoint is the lower
-validation-MAE checkpoint, exact tie to seed 653001. Unknown keys rejected.
+Checkpoint arrays are model-seed order. Lower validation MAE wins; exact tie to
+seed 653001. Unknown keys rejected.
 
 ## Terminal Decision
 
 Terminal report is derived only from canonical AcceptanceState, never recomputed
 from raw metrics.
-
-Exact schema:
 
 ```text
 schema_id: "t075-terminal-decision-v1"
@@ -582,7 +565,7 @@ promotion: "experimental_public_with_expert_fallback"|"no_promotion"
 recommendation_code: "review_joint_policy"|"narrow_transfer_followup"|"close_v1"|"repair_same_experiment"
 ```
 
-Unknown keys rejected. `stage_outcomes` are the committed StageOutcome report
+Unknown keys rejected. `stage_outcomes` are committed StageOutcome report
 identities in canonical order.
 
 Mapping:
@@ -590,19 +573,23 @@ Mapping:
 - A: experimental public learned controller with expert fallback;
   `review_joint_policy`; no natural-A20/live promotion claim.
 - B: no promotion; `narrow_transfer_followup`.
-- C: no promotion; Stage 6 absent; `close_v1`. A later Planner may separately
-  propose at most one target/model diagnostic, preserving the T065 boundary.
+- C: no promotion; Stage 6 absent; `close_v1`; a later Planner may separately
+  propose at most one target/model diagnostic.
 - D: no promotion/policy conclusion; `repair_same_experiment`; all later
   scientific stages absent.
 
-First valid terminal state is immutable. If terminal materialization is
-interrupted after the terminal-producing StageOutcome commit, restart reconstructs
-state and writes the same terminal report. A conflicting existing terminal report
-is an operational integrity failure and cannot reinterpret science.
+The first committed terminal state, including Case D produced by an invalid
+StageOutcome, is immutable. If terminal materialization is interrupted after the
+terminal-producing StageOutcome commit, restart reconstructs state and writes the
+same terminal report. A conflicting existing terminal report is an operational
+integrity failure and cannot reinterpret science.
 
 ## Final Retention
 
-Exact retention schema:
+T075 uses exactly one lightweight final retention manifest. It is not a per-stage
+manifest graph and performs no recursive discovery.
+
+Exact schema:
 
 ```text
 schema_id: "t075-retention-v1"
@@ -611,19 +598,72 @@ task_id: "T075"
 run_head: git_commit
 terminal_case: A|B|C|D
 terminal_report: ArtifactIdentity
-reused_artifacts: [ArtifactIdentity, ArtifactIdentity]
-produced_artifacts: [ArtifactIdentity]
-deletion_condition_code: "after_merge_no_consumer_or_reproduction_hold"
+retention_owner: "T075"
+retention_reason: non-empty string
+possible_downstream_consumers: [non-empty string]
+delection_condition_code: "after_merge_no_consumer_or_reproduction_hold"
+entries: [RetentionEntry]
+
+RetentionEntry = {
+  artifact: ArtifactIdentity,
+  provenance: {
+    source_kind: "reused_t065"|"t075_committed_output",
+    producer_task: non-empty string,
+    producer_stage: non-empty string,
+    producer_git_commit: git_commit
+  },
+  regeneration_commands: [non-empty string],
+  compatibility_requirements: [non-empty string],
+  retention_reason: non-empty string,
+  possible_downstream_consumers: [non-empty string]
+}
 ```
 
-Unknown keys rejected. Reused artifacts are the two exact T065 sources in
-stochastic/expert order. Produced artifacts contain every committed StageOutcome
-report and every normative output from committed valid stages, in stage order then
-output order. No recursive discovery is permitted.
+Unknown keys are rejected at both manifest and entry/provenance levels. `entries`
+contains, in order:
 
-Large T075 outputs may be deleted only after terminal/retention merge, no approved
-consumer remains, and no reproduction hold remains. Compact outcome, terminal,
-and retention records remain.
+1. exact stochastic T065 source;
+2. exact expert T065 source;
+3. every committed T075 StageOutcome report in stage order;
+4. every normative output from committed valid T075 stages in stage/output order;
+5. terminal report.
+
+For the two reused T065 sources, `producer_task="T065"`, producer commit is the
+validated T065 producer provenance, and `regeneration_commands` records the
+historical T065 Stage-1 producer commands. The command forms are the merged T065
+neutral command surface:
+
+```text
+$PY -m sts_combat_rl.commands.non_combat_learning collect \
+  --arm stochastic_non_combat_v1 --output <stable-source-path> \
+  --seed-start 650001 --seed-end 650256 --sim-seed 1 --ascension 20 \
+  --preflight <validated-t065-preflight>
+
+$PY -m sts_combat_rl.commands.non_combat_learning collect \
+  --arm expert_non_combat_v1 --output <stable-source-path> \
+  --seed-start 650001 --seed-end 650256 --sim-seed 1 --ascension 20 \
+  --preflight <validated-t065-preflight>
+```
+
+These commands are provenance only. T075 never executes them and never authorizes
+source recollection.
+
+For T075-produced entries, `regeneration_commands` records the exact command(s)
+actually used on `RUN_HEAD`; command strings are provenance, not scientific
+identity, so shell-token equality is not an acceptance check. Compatibility
+requirements must state the relevant T065/T075 schema IDs, `RUN_HEAD`,
+`STS_LIGHTSPEED_INTEGRATION` where simulator-dependent, and pinned model-input
+contract where applicable.
+
+`possible_downstream_consumers` must explicitly name known consumers or contain
+exactly `"none currently approved"`; it must not be omitted. Large T075 outputs
+may be deleted only after terminal/retention merge, no approved consumer remains,
+and no reproduction hold remains. Compact outcome, terminal, and retention
+records remain.
+
+The first committed terminal state is immutable even if retention materialization
+or deletion bookkeeping later fails. Such a finalization failure is operational
+and cannot rewrite A/B/C/D.
 
 ## Durable Paths
 
@@ -655,11 +695,11 @@ Normative paths are fixed. Temporary files are never semantic parents.
 
 ## Command Surface
 
-Use the neutral `sts_combat_rl.commands.non_combat_learning` surface. T075 may add
-bounded stage adapters there but no T075-numbered package, workflow framework, or
-legacy flat-CLI route.
+Use neutral `sts_combat_rl.commands.non_combat_learning`. T075 may add bounded
+stage adapters there but no T075-numbered package, workflow framework, or legacy
+flat-CLI route.
 
-Reference semantic operations are:
+Reference semantic operations:
 
 | stage | operation | required semantic inputs |
 |---|---|---|
@@ -672,11 +712,11 @@ Reference semantic operations are:
 | EVAL | `eval` | valid Stage-5 report, selected checkpoint, 16x16-per-arm plan |
 | finalization | `finalize` | committed outcome files, terminal report, retention output |
 
-Exact shell quoting/token text is not semantic identity. Each operation must expose
-explicit paths and RUN_HEAD and must fail before stage work for wrong checkout,
+Exact shell quoting/token text is not semantic identity. Each operation exposes
+explicit paths and RUN_HEAD and fails before stage work for wrong checkout,
 wrong RUN_HEAD, or arbitrary input path.
 
-Required local gates use the pinned interpreter:
+Required local gates use pinned interpreter:
 
 ```bash
 $PY -m pytest -q tests/test_t075_acceptance.py
@@ -690,7 +730,7 @@ $PY -m sts_combat_rl.cli --mock tests/fixtures/non_combat.json
 git diff --check
 ```
 
-Before real simulator evidence, run the repository's pinned
+Before real simulator evidence, run repository pinned
 `verify_lightspeed_source.sh` gate.
 
 ## Normative Acceptance Matrix
@@ -707,9 +747,9 @@ mechanical encoding after `SPEC APPROVED`.
 | A05 | post-owner family/split bucket below quota | invalid SELECTION_REPLAY with `SELECTION_OWNER_QUOTA_SHORTAGE`; D |
 | A06 | provisional selected duplicate/cross-split replay overlap | invalid SELECTION_REPLAY with `SELECTION_REPLAY_INVALID`; D |
 | A07 | exact 320 cohort, ownership audit, exact replay under 16x20/16-worker plan | valid SELECTION_REPLAY; ownership audit + selected states committed |
-| A08 | one selected replay mismatch | invalid SELECTION_REPLAY; D; no replacement/output promotion |
+| A08 | one selected replay mismatch | invalid SELECTION_REPLAY with `SELECTION_REPLAY_INVALID`; D; no replacement/output promotion |
 | A09 | target missing/duplicate/nonfinite/wrong action order/continuation seed | invalid TARGET with `TARGET_INVALID`; D; no target table |
-| A10 | target public-input firewall or scientific lineage/fidelity failure | invalid TARGET; D; TRAIN absent |
+| A10 | structurally valid TARGET parents resolve, then legitimate TARGET validator discovers scientific provenance/schema/public-input/fidelity mismatch | invalid TARGET with `TARGET_INVALID`; D; TRAIN absent |
 | A11 | prospective data exists but StageOutcome commit interrupted | stage uncommitted; same stage retryable; no terminal |
 | A12 | valid TARGET and valid TRAIN | GATE reached; two checkpoints + training-selection committed |
 | A13 | valid Stage-5 pass | GATE valid+pass; EVAL reached |
@@ -719,18 +759,16 @@ mechanical encoding after `SPEC APPROVED`.
 | A17 | valid Stage-6 fail | EVAL valid+fail; terminal B |
 | A18 | missing/truncated/controller/schema/nonfinite Stage-6 evidence | EVAL invalid with `EVAL_EVIDENCE_INVALID`; D |
 | A19 | initial state | PREFLIGHT current; empty committed list; no terminal |
-| A20 | wrong RUN_HEAD/out-of-order/malformed-parent/conflicting duplicate candidate outcome | operational reject; state unchanged |
+| A20 | wrong RUN_HEAD/out-of-order/malformed control shape, structurally wrong/missing/unresolved/out-of-order parent identity, or conflicting duplicate | operational reject before stage classification; state unchanged |
 | A21 | interruption before StageOutcome atomic commit | no committed stage/terminal; retry from same state |
-| A22 | identical already-committed StageOutcome/report retried or terminal already materialized | idempotent state; no science rerun; terminal immutable |
-| A23 | deployable input includes behavior/expert/target/hidden/future information | invalid TARGET; D |
-| A24 | helper/finalizer disagrees with canonical state, or retention fails after terminal | `IMPLEMENTATION_BUG`/operational failure; scientific terminal unchanged |
+| A22 | identical already-committed StageOutcome/report retried or first committed terminal (including D) already materialized | idempotent state; no science rerun; terminal immutable |
+| A23 | deployable input includes behavior/expert/target/hidden/future information | invalid TARGET with `TARGET_INVALID`; D |
+| A24 | helper/finalizer disagrees with canonical state, or retention fails after terminal | `IMPLEMENTATION_BUG`/operational failure; first committed scientific terminal unchanged |
 
 Any materially new semantic scenario not uniquely resolved by this contract is a
 `CONTRACT_GAP`. Do not create A25 locally.
 
 ## Authorization And Implementation Order
-
-The order follows `docs/collaboration_workflow.md` exactly:
 
 1. Planner freezes this normative contract and A01-A24 matrix.
 2. Maintainer performs execution-readiness review.
@@ -738,11 +776,11 @@ The order follows `docs/collaboration_workflow.md` exactly:
    `implementation_authorized=true`.
 4. Implementer first writes the implementation-independent executable A01-A24
    suite and fixtures. Production helpers must not generate expected values.
-5. If test encoding exposes a semantic ambiguity, stop as `CONTRACT_GAP`; Planner
-   revises the contract and Maintainer reauthorizes the new exact head.
-6. If the matrix encodes without semantic invention, Implementer performs one
-   bounded production pass against it.
-7. Maintainer runs A01-A24 and the required local gates and fixes only
+5. If test encoding exposes semantic ambiguity, stop as `CONTRACT_GAP`; Planner
+   revises contract and Maintainer reauthorizes new exact head.
+6. If matrix encodes without semantic invention, Implementer performs one bounded
+   production pass against it.
+7. Maintainer runs A01-A24 and required local gates and fixes only
    `IMPLEMENTATION_BUG` findings.
 8. Maintainer freezes one clean exact implementation `RUN_HEAD`.
 9. Authoritative T075 scientific stages execute only on that RUN_HEAD.
@@ -751,89 +789,77 @@ The order follows `docs/collaboration_workflow.md` exactly:
 12. Maintainer performs exact-head implementation/operational acceptance and
     merges only when both pass.
 
-`SPEC APPROVED` authorizes implementation work; it does not mean production code
-must precede the test-only boundary. The test-only boundary is the first
+`SPEC APPROVED` authorizes implementation work; test-only A01-A24 is the first
 implementation step.
 
 ## Required PR Evidence
 
-Before final acceptance, PR #77 must report:
+Before final acceptance PR #77 must report:
 
-- recovery base, approved contract head, and final RUN_HEAD;
-- explicit statement that PR #75 runtime artifacts were not authoritative inputs;
-- exact two T065 source identities and strict validation result;
-- raw candidate count, replay-group count, cross-split group count, excluded
-  non-owner count, and post-owner family/split availability;
-- selected count/quotas and 320-state exact replay result;
-- reached target/training/Stage-5/Stage-6 artifact identities and frozen metrics;
-- shard ranges, requested/actual workers, completion counts, and wall-clock for
-  substantial stages;
-- A01-A24, focused/full test, compile/lint/format/mock/diff, and native-source
-  verification results;
-- any deviation or retry and whether it occurred before or after a stage commit;
-- terminal case/stage, promotion/disposition code, and skipped downstream stages;
-- terminal/retention identities and deletion condition;
-- every `IMPLEMENTATION_BUG`, `CONTRACT_GAP`, or `ARCHITECTURE_ESCALATION` raised
-  after authorization.
+1. exact recovery base, approved contract head, implementation RUN_HEAD, and
+   `STS_LIGHTSPEED_INTEGRATION`;
+2. proof PR #75 runtime artifacts were not used as authoritative state;
+3. exact two T065 source identities plus strict reader/metadata result;
+4. raw candidate/group/cross-split/non-owner counts and post-owner availability;
+5. selected count/quotas/replay result and ownership-audit identity;
+6. TARGET completeness/fidelity result and target-table identity if valid;
+7. TRAIN model seeds, validation MAEs, checkpoint identities, selected checkpoint;
+8. Stage-5 predicates/result and Stage-6 evidence/result if reached;
+9. shard/worker/range/wall-clock evidence for expensive stages;
+10. required local/simulator verification results and any deviation;
+11. terminal case/stage/promotion/recommendation and terminal identity;
+12. final retention-manifest identity, retention owner/reason, every retained
+    artifact hash/size, regeneration commands, compatibility requirements,
+    possible downstream consumers, and deletion condition;
+13. every `IMPLEMENTATION_BUG`, `CONTRACT_GAP`, or `ARCHITECTURE_ESCALATION`
+    encountered and its disposition.
 
-PR evidence is reporting scope, not a second acceptance state machine.
+This is reporting scope, not a second scientific gate.
 
-## Allowed Implementation Freedom
+## Salvage And Architecture Guardrails
 
-Allowed:
+May be reused from merged main / T065:
 
-- Python class/function names for the frozen concepts;
-- atomic-write and process-pool implementation details;
-- temporary filenames under `.tmp/`;
-- bounded reuse of neutral merged helpers;
-- non-semantic diagnostic logs.
+- strict T065 serializers/readers and scientific reducers;
+- source replay/target/training/Stage-5/Stage-6 primitives that preserve frozen
+  T065 semantics;
+- generic spawn/process batching primitives if independent of PR #75 control
+  plane;
+- independent fixtures that encode frozen science rather than private helper
+  behavior.
 
-Forbidden:
+Do not mechanically cherry-pick PR #75 task-specific orchestration, validator
+registries, recursive retention/provenance discovery, command-token proof,
+PID/process proof, or tests that reconstruct contract semantics from private
+helpers.
 
-- a second transition/terminal authority;
-- interpreting scientific metrics inside `advance()`;
-- recursive provenance/retention discovery;
-- per-stage retention manifests;
-- command-token hashes or PID/process identity as acceptance science;
-- result-aware cohort repair or scientific-constant changes;
-- acceptance expected values generated by production code under test;
-- cherry-picking PR #75 orchestration as the recovery implementation.
+One canonical `advance()` owns transition/terminal semantics. One
+`artifact_index(state)` owns committed T075 artifact lookup. Stage validators own
+scientific classification only. Finalization derives terminal/retention from
+canonical state and does not recompute scientific gates.
 
-## Escalation Rules
+## Escalation And Final Acceptance
 
-`IMPLEMENTATION_BUG`: this frozen contract uniquely defines the correct result and
-code violates it. Maintainer -> Implementer fix; no Planner redesign.
+Classification:
 
-`CONTRACT_GAP`: an acceptance row, scientific meaning, lineage rule, information
-regime, or terminal outcome cannot be derived uniquely from this contract. Stop
-implementation and return to Planner.
+- `IMPLEMENTATION_BUG`: frozen contract uniquely determines correct behavior;
+- `CONTRACT_GAP`: meaningful case is not uniquely determined here;
+- `ARCHITECTURE_ESCALATION`: repeated/new cross-module semantic classes,
+  duplicated acceptance authority, private-helper-coupled acceptance, or a new
+  generic control plane appears.
 
-`ARCHITECTURE_ESCALATION`: repeated new cross-module semantic classes, duplicated
-transition authorities, or growing task-specific workflow machinery indicate the
-abstraction is wrong. Stop patching and return to Planner.
+After one corrective implementation pass, another new cross-module problem class
+is presumed escalation unless it is clearly an ordinary A01-A24 violation.
 
-The contract itself must remain smaller than the implementation problem it is
-controlling. Requests for process-manager internals, arbitrary logging schema, or
-security-style proof machinery are not readiness blockers unless they change an
-A01-A24 result or a mandatory repository workflow item.
+Planner final acceptance checks exact RUN_HEAD for:
 
-## Final Planner Checklist
+- only global replay ownership changed scientifically;
+- T065 information regime and downstream science remain frozen;
+- A/B/C/D retain T065 meaning;
+- state/lineage/terminal semantics have one authority;
+- invalid science is not confused with valid negative science;
+- no PR #75 control-plane architecture was recreated.
 
-Planner final acceptance requires:
-
-- global ownership before unchanged quotas is the only T075 scientific delta;
-- downstream T065 science/information regime is unchanged;
-- one canonical `advance()` authority and a state that stores full committed
-  StageOutcomes, so lineage is closed without hidden lookup;
-- StageOutcome is a small control record and scientific payloads are separate;
-- existing T065 payload contracts are reused rather than duplicated;
-- T075-owned audit/selection/terminal/retention schemas are exact and bounded;
-- invalid outcomes never require fabricated success metrics/artifacts;
-- B/C remain valid negative science and D remains invalid experiment;
-- Stage 3 remains the TARGET validation/commit barrier rather than a separate
-  scientific stage;
-- one RUN_HEAD owns authoritative execution;
-- fixed 16-worker substantial-stage topology is respected;
-- no human/hidden information enters deployable model input;
-- PR #75 control-plane/runtime state is not reused;
-- no new workflow framework or acceptance ceremony has been introduced.
+Maintainer final acceptance separately checks exact RUN_HEAD implementation,
+A01-A24, required gates, runtime artifacts, retention completeness, branch hygiene,
+and merge readiness. Both acceptances are required.
