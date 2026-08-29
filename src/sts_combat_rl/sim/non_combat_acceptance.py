@@ -12,6 +12,7 @@ import hashlib
 import json
 import math
 import os
+import pickle
 import re
 import tempfile
 from collections.abc import Iterable, Mapping, Sequence
@@ -1440,7 +1441,19 @@ def run_t075_train(
             }
         )
         validate_t075_training_selection(derived_selection)
-    except Exception:
+    except (
+        AttributeError,
+        EOFError,
+        IndexError,
+        KeyError,
+        ModuleNotFoundError,
+        OSError,
+        OverflowError,
+        pickle.UnpicklingError,
+        RuntimeError,
+        TypeError,
+        ValueError,
+    ):
         return _invalid_t075_evidence(
             state,
             repository_root,

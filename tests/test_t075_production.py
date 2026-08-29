@@ -292,9 +292,9 @@ def test_train_rejects_selection_mae_disagreement_with_t065_checkpoints(
         loaded_payloads.append(path.read_bytes())
         return loaded_runs[len(loaded_payloads) - 1]
 
-    def fake_select(runs: object) -> object:
+    def fake_select(runs: tuple[object, ...]) -> object:
         selected_inputs.append(tuple(runs))
-        return tuple(runs)[0]
+        return next(iter(runs))
 
     monkeypatch.setattr(t065, "load_non_combat_checkpoint", fake_loader)
     monkeypatch.setattr(t065, "select_validation_checkpoint", fake_select)
