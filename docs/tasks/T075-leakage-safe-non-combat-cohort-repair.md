@@ -6,11 +6,16 @@ This document is the single normative Planner contract for the T075 recovery lin
 It supersedes the unmerged T075 specification/implementation history on PR #75 for
 all future implementation and acceptance decisions.
 
-PR #75 is retained only as an architecture-failure audit record. Its production
-orchestration, task-specific lifecycle validators, exact-command matching,
-per-stage retention machinery, acceptance helpers, and runtime artifacts are not
-accepted project state and must not be used as the recovery implementation
-baseline.
+PR #75 remains only an architecture-failure audit record. Its task-specific
+orchestration, command-token matching, recursive retention discovery, per-stage
+retention machinery, duplicated validators, terminal helpers, PID/process proof,
+and runtime artifacts are not accepted project state and must not be used as the
+T075 implementation baseline.
+
+The recovery preserves the T075 scientific experiment and replaces the rejected
+control plane with one canonical acceptance model, transactional stage commits,
+minimal explicit lineage, one frozen scientific RUN_HEAD, and a bounded command
+surface.
 
 Architecture recovery base:
 
@@ -22,12 +27,7 @@ Historical references:
 - rejected T075 implementation/audit line: PR #75;
 - previously approved T075 proposal: `e204c5d28cc0bee8013853e8680e8966f5c930a8`.
 
-The recovery keeps the T075 scientific experiment and replaces the rejected
-control-plane architecture with one canonical acceptance authority, transactional
-stage commits, a small typed serialization contract, minimal semantic lineage,
-and one frozen scientific `RUN_HEAD`.
-
-## Objective
+## Objective And Scientific Boundary
 
 Repair the single cohort-partition defect exposed by T065 Case D and, only if the
 repaired cohort is valid, continue the otherwise unchanged T065 learned
@@ -52,29 +52,29 @@ T075 depends on:
 - T040 `expert_non_combat_v1`;
 - T061 reachability-bottleneck evidence;
 - T064 simulator-generated later-act curriculum result;
-- T065 learned non-combat workflow, strict readers, retained Stage-1 evidence, and
-  valid Case-D result;
+- T065 learned non-combat workflow, readers, retained Stage-1 evidence, and valid
+  Case-D result;
 - T071 simplified experiment execution/reuse convention;
 - T074 core decision/policy boundary repair.
 
-The proposed lifecycle entry is `T075 | DRAFT` until the Main Maintainer publishes
-exact-head `SPEC APPROVED` with `implementation_authorized=true`.
+The authoritative task index contains `T075 | DRAFT`. It remains DRAFT until the
+Main Maintainer publishes exact-head `SPEC APPROVED` with
+`implementation_authorized=true`.
 
-Frozen upstream identities:
+Frozen upstream Git identities:
 
 ```text
+RECOVERY_BASE = bc9a6790f36ff036f90dc7f03ba0ff026a16788d
 T065_APPROVED_SPEC = a13c92a66b4d9ad9f6a730293cadc8d66b4a699c
 STS_LIGHTSPEED_INTEGRATION = fee272f1ae21c283ad2161f55293cfe6d714134a
 ```
 
-A mismatch in the current T065 scientific contract or pinned `sts_lightspeed`
-integration blocks readiness. If such a mismatch is observed by the frozen T075
-PREFLIGHT under the correct `RUN_HEAD`, PREFLIGHT commits an invalid outcome and
-T075 ends Case D.
+All three values above use the `git_commit` type defined below, not the `sha256`
+content-digest type.
 
-T034, T063, and T066 are outside T075.
+T034, T063, and T066 remain outside T075.
 
-## Scientific And Information-Regime Boundary
+## Information-Regime Boundary
 
 T075 remains inside the repository training paradigm:
 
@@ -93,7 +93,7 @@ fix.
 
 ## Frozen Runtime And Execution Checkout
 
-The recovery implementation and authoritative scientific execution use exactly:
+Authoritative implementation and scientific execution use:
 
 ```text
 BRANCH = task/T075-architecture-recovery
@@ -112,42 +112,38 @@ cd "$CODE"
 export PYTHONPATH="$NATIVE:$CODE/src"
 test "$(git branch --show-current)" = "$BRANCH"
 test -z "$(git status --porcelain)"
-```
-
-No authoritative scientific stage runs until production implementation and the
-implementation-independent A01--A24 acceptance boundary pass and the Maintainer
-freezes one exact implementation commit as `RUN_HEAD`.
-
-For every authoritative stage:
-
-```bash
 test "$(git rev-parse HEAD)" = "$RUN_HEAD"
-test -z "$(git status --porcelain)"
 ```
 
-Wrong branch, dirty checkout, missing `RUN_HEAD`, or `HEAD != RUN_HEAD` is an
-invocation failure before scientific execution. No StageOutcome is committed and
-no Case A/B/C/D is created.
+No authoritative Stage 0-6 execution begins until bounded production
+implementation and the implementation-independent A01-A24 suite pass and the
+Maintainer freezes one exact implementation commit as `RUN_HEAD`.
 
-If production code changes after authoritative execution starts, the old
-`RUN_HEAD` is retired. The Maintainer identifies the earliest semantically
-affected stage, refreezes a new `RUN_HEAD` only after the acceptance boundary
-passes again, and reruns the affected stage and all downstream stages. PR #75
-runtime outputs are never authoritative recovery evidence.
+A wrong branch, dirty checkout, absent RUN_HEAD, HEAD mismatch, malformed CLI
+invocation, or arbitrary wrong input path rejected before a legitimate stage
+adapter begins is an operational invocation failure. It commits no StageOutcome
+and creates no A/B/C/D result.
 
-## Frozen T065 Scientific Inputs
+If production code changes after authoritative scientific execution starts, the
+old RUN_HEAD is retired. The Maintainer identifies the earliest semantically
+affected stage, reruns the acceptance suite, freezes a new RUN_HEAD, and reruns
+that stage plus downstream stages. PR #75 runtime outputs are never authoritative
+recovery evidence.
 
-T075 reuses exactly these two retained T065 raw source files and never recollects
-them:
+## Frozen T065 Source Inputs
 
-| Arm | Relative path | Bytes | SHA-256 |
-|---|---|---:|---|
-| `stochastic_non_combat_v1` | `artifacts/t065-learned-non-combat-policy-v1/source-stochastic-650001-650256-c57b2ee.json` | 5,352,891,044 | `40a29e2cc8042efc15a46e9c50f6a50f889c94a1d7def24e91b62718eaaa8f61` |
-| `expert_non_combat_v1` | `artifacts/t065-learned-non-combat-policy-v1/source-expert-650001-650256-deeaa46.json` | 3,710,180,244 | `29d4155e543b024e741230b5bcefad3116c44610b370b666f46a65571348ad4c` |
+T075 reuses exactly two retained T065 raw source files and never recollects them.
+Their T075 `ArtifactIdentity.role` is frozen to `current_output`, matching the
+retained T065 artifact role.
 
-Each file must pass the current strict T065 source reader and match:
+| Arm | role | Relative path | Bytes | SHA-256 |
+|---|---|---|---:|---|
+| stochastic | `current_output` | `artifacts/t065-learned-non-combat-policy-v1/source-stochastic-650001-650256-c57b2ee.json` | 5,352,891,044 | `40a29e2cc8042efc15a46e9c50f6a50f889c94a1d7def24e91b62718eaaa8f61` |
+| expert | `current_output` | `artifacts/t065-learned-non-combat-policy-v1/source-expert-650001-650256-deeaa46.json` | 3,710,180,244 | `29d4155e543b024e741230b5bcefad3116c44610b370b666f46a65571348ad4c` |
 
-- source schema/version required by merged T065;
+Both files must pass the current strict T065 source reader and match:
+
+- schema `t065-learned-non-combat-policy-v1`, version `1`;
 - `approved_spec_commit == T065_APPROVED_SPEC`;
 - exact current `T065ExperimentConfig().to_dict()`;
 - expected source arm;
@@ -156,40 +152,32 @@ Each file must pass the current strict T065 source reader and match:
 - requested/terminal run count `256`;
 - truncated run count `0`;
 - failed run count `0`;
-- 16 ordered shards x 16 seeds and effective worker count 16;
+- original topology 16 ordered shards x 16 seeds and effective worker count 16;
 - frozen action space;
 - battle provenance `oracle_search_v1_highest_mean_s20`;
-- simulator integration `STS_LIGHTSPEED_INTEGRATION`;
+- simulator identity backed by `STS_LIGHTSPEED_INTEGRATION`;
 - no source-level problems.
 
-The exact file identities above are sufficient T075 input identity. T075 must not
-rediscover them through retention manifests, historical aliases, basename search,
-or recursive provenance traversal.
+Missing, unreadable, hash/size-invalid, or metadata-invalid exact input makes
+SOURCE_REUSE invalid and therefore Case D at SOURCE_REUSE. Recollection,
+alternate aliases, basename search, recursive manifest discovery, and replacement
+are forbidden.
 
-If either file is missing, unreadable, hash/size invalid, or fails strict metadata
-validation, SOURCE_REUSE commits invalid and T075 ends Case D.
+## Frozen Source And Split Constants
 
-Source recollection, source replacement, alternate aliases, and best-effort input
-discovery are forbidden.
-
-### Source and split constants
-
-```text
-player = IRONCLAD
-ascension = 20
-source seeds = 650001..650256
-source driver seed = 654001
-source arms = stochastic_non_combat_v1, expert_non_combat_v1
-battle controller = oracle_search_v1_highest_mean_s20
-```
+- player: `IRONCLAD`;
+- ascension: `20`;
+- standard natural start;
+- source seeds: `650001..650256`;
+- source driver seed: `654001`;
+- source arms: stochastic and expert retained files above;
+- battle controller provenance: `oracle_search_v1_highest_mean_s20`.
 
 Seed-derived splits:
 
-```text
-train      = 650001..650154
-validation = 650155..650205
-heldout    = 650206..650256
-```
+- train: `650001..650154`;
+- validation: `650155..650205`;
+- heldout: `650206..650256`.
 
 No simulator seed may change split.
 
@@ -202,50 +190,48 @@ Canonical family order:
 
 Per-family quotas:
 
-```text
-train = 48
-validation = 16
-heldout = 16
-```
+- train: 48;
+- validation: 16;
+- heldout: 16.
 
-A valid cohort has exactly 320 selected states. Other screens remain fallback-only
-and are not selectable training states.
+A valid cohort contains exactly 320 selected states.
 
-### Public model input
+## Public Model Input
 
 Use `non-combat-model-input-v1` exactly:
 
-```text
-tactical snapshot dimension = 4634
-public context dimension = 103
-state dimension = 4737
-legal-action dimension = 92
-```
+- tactical snapshot dimension: 4634;
+- public context dimension: 103;
+- state dimension: 4737;
+- legal-action dimension: 92;
+- no behavior/expert/target/outcome/hidden/future feature;
+- training-split-only CPU float32 population normalization;
+- population std clamped to at least 1.0 and checkpointed unchanged.
 
-No expert/behavior/target/outcome/hidden/future feature is permitted. Population
-normalization is training-split-only CPU float32; std is clamped to at least 1.0
-and checkpointed unchanged.
-
-## T075 Scientific Primitive: Global Ownership
+## T075 Scientific Primitive: Global Replay Ownership
 
 Selectable candidates must:
 
 - pass the strict `t065-source-state-v1` reader;
 - come from a problem-free terminal source run;
 - belong to a mandatory family;
-- retain their simulator-seed-derived split and source provenance;
+- retain the split implied by simulator seed;
+- retain source provenance;
 - pass existing T065 public/model/action/replay validation.
 
-Malformed or provenance-invalid rows fail closed. Nonterminal or truncated rows
-remain source evidence but are not selectable.
+Malformed/provenance-invalid rows fail closed. Nonterminal/truncated rows remain
+source evidence but are not selectable.
 
-Replay equivalence remains exactly:
+Replay equivalence is unchanged:
 
 ```text
 (family, public_state_identity, ordered_legal_action_identities)
 ```
 
-Canonical candidate member order remains T065:
+Canonical candidate bytes use UTF-8 canonical JSON with sorted keys, compact
+separators, `ensure_ascii=False`, and `allow_nan=False`.
+
+Member order is unchanged T065:
 
 ```text
 selection_digest = sha256(
@@ -254,7 +240,7 @@ selection_digest = sha256(
 member_order_key = (selection_digest, canonical_candidate_json_bytes)
 ```
 
-Replay-group audit identity:
+Replay-group digest:
 
 ```text
 T075_GROUP_DOMAIN = b"T075-replay-group-v1\n"
@@ -267,52 +253,49 @@ group_digest = sha256(
 ).hexdigest()
 ```
 
-Scientific digest JSON uses UTF-8, sorted keys, compact separators `(',', ':')`,
-`ensure_ascii=False`, and `allow_nan=False`.
+Algorithm:
 
-Ownership algorithm:
-
-1. admit all selectable candidates from both source arms and every frozen split;
-2. group globally by the unchanged replay-equivalence key;
-3. sort each group by `member_order_key`;
-4. if two distinct source rows have an identical complete `member_order_key`,
-   fail Case D at SELECTION_REPLAY; do not invent another tie breaker;
+1. admit all selectable candidates across both retained arms and all frozen splits;
+2. group globally by unchanged replay equivalence;
+3. sort each group by complete `member_order_key`;
+4. if distinct source rows have identical complete member-order keys, fail D at
+   SELECTION_REPLAY; no extra tie breaker is allowed;
 5. otherwise the first member is the sole owner;
 6. exclude all non-owners before quota selection;
-7. keep the owner's seed-derived split;
-8. inside each `(family, split)` owner bucket, sort by the same member order and
-   take exactly 48/16/16.
+7. retain the owner's seed-derived split;
+8. within each `(family, split)` owner bucket, sort by the same order and take
+   exactly 48/16/16.
 
-If any owner bucket is below quota, T075 ends Case D. There is no recollection,
-scale increase, split reassignment, balancing, target-aware selection, strategic
-quality filter, manual replacement, or replay-key change.
+If any owner bucket is below quota, fail D at SELECTION_REPLAY. There is no
+recollection, scale increase, split reassignment, balancing, target-aware
+selection, manual replacement, or replay-key change.
 
-A valid selected cohort has exactly 320 states, exact family/split quotas,
-globally unique replay-equivalence keys, zero cross-split replay overlap, zero
-seed-split leakage, exact replay of all selected public/model states and ordered
-legal actions, and zero replacement after replay failure.
+A valid selected cohort has exactly 320 states, exact family/split quotas, unique
+selected replay keys, zero cross-split replay overlap, zero seed split leakage,
+exact replay of every selected public/model state and ordered legal actions, and
+zero replacement after replay failure.
 
 ## Unchanged Downstream Science
 
-### Counterfactual targets
+### Counterfactual Targets
 
 Every selected state evaluates every eligible legal action from the same restored
-checkpoint. Continuation controller is `expert_non_combat_v1`.
+checkpoint.
+
+Continuation controller: `expert_non_combat_v1`.
 
 Continuation seeds:
 
-```text
-train      = (652001, 652002)
-validation = (652101, 652102)
-heldout    = (652201, 652202, 652203, 652204)
-```
+- train: `(652001, 652002)`;
+- validation: `(652101, 652102)`;
+- heldout: `(652201, 652202, 652203, 652204)`.
 
 Target:
 
 `q_floor = mean(max(0, terminal_floor - source_floor))`
 
 No action subsampling, replacement, alternate reward, failed-branch dropping, or
-hidden-future resampling is allowed.
+hidden-future resampling.
 
 ### Ranker
 
@@ -337,115 +320,155 @@ Training remains T065:
 - gradient clip 10;
 - `torch_threads=1`;
 - no early stopping or architecture sweep;
-- validation `q_floor` MAE selects the checkpoint;
-- exact MAE tie chooses the lower model seed.
+- validation q_floor MAE selects checkpoint;
+- exact MAE tie selects lower seed.
 
-### Stage-5 held-out gate
+### Stage-5 Gate
 
-Use the 64 heldout states. A valid Stage-5 report passes only if all are true:
+Use 64 heldout states. A valid Stage-5 report passes iff all hold:
 
 1. aggregate mean paired `q_floor(model)-q_floor(expert) > 0`;
 2. median paired delta `>= 0`;
-3. at least 3 of 4 family mean deltas `>= 0`;
+3. at least 3/4 family means `>= 0`;
 4. 10,000-stratified-bootstrap `p_positive >= 0.90` using
    `random.Random(655001)`;
 5. non-selected model-seed aggregate mean paired delta `>= 0`;
 6. zero hidden/schema/legal/replay/supported-screen-fallback violation.
 
-A valid failure is Case C and EVAL is skipped.
+Valid failure is Case C and EVAL is skipped. Invalid evidence is D at GATE.
 
-### Conditional Stage-6 complete-run gate
+### Stage-6 Gate
 
-Run only after a valid Stage-5 pass.
+Run only after valid Stage-5 pass.
 
-```text
-fresh seeds = 651001..651256
-driver/fallback seed = 654002
-arm order = stochastic, expert, learned
-shards = 16 x 16 seeds per arm
-required terminal runs = 768
-bootstrap = 10,000 matched-seed resamples, random.Random(655002)
-coverage = L/D >= 0.60 and F/M <= 0.01 with D != 0 and M != 0
-```
+- fresh seeds `651001..651256`;
+- driver/fallback seed `654002`;
+- arm order: stochastic, expert, learned-with-expert-fallback;
+- 16 fixed shards x 16 seeds per arm;
+- 768 valid terminal runs required;
+- bootstrap 10,000 matched-seed resamples with `random.Random(655002)`;
+- coverage `L/D >= 0.60`, `F/M <= 0.01`, `D != 0`, `M != 0` using unchanged
+  T065 D/L/M/F definitions.
 
-The learned arm uses learned policy on mandatory families and expert fallback
-elsewhere. T065 D/L/M/F definitions are unchanged.
-
-A valid Stage-6 report passes only if:
+Valid Stage-6 passes iff all hold:
 
 1. matched mean terminal-floor delta `> 0`;
 2. bootstrap `p_positive >= 0.80`;
 3. learned Act-2 entry count `>=` expert;
 4. zero controller errors and unreported truncations;
 5. coverage passes;
-6. learned Act-2 count `>` expert or `p_positive >= 0.95`.
+6. stronger signal: learned Act-2 count `>` expert OR `p_positive >= 0.95`.
+
+Valid pass -> A. Valid fail -> B. Invalid Stage-6 evidence -> D at EVAL.
+
+## Canonical Type System
+
+The contract distinguishes Git object identity from content digest identity.
+
+```text
+git_commit = lowercase hexadecimal string of exactly 40 characters
+sha256 = lowercase hexadecimal string of exactly 64 characters
+string = JSON string
+bool = JSON true|false
+int = JSON integer, not bool
+nonneg_int = int >= 0
+number = finite JSON integer or float
+Stage = PREFLIGHT | SOURCE_REUSE | SELECTION_REPLAY | TARGET | TRAIN | GATE | EVAL
+TerminalCase = A | B | C | D
+Family = MAP_SCREEN | REST_ROOM | REWARDS | TREASURE_ROOM
+Split = train | validation | heldout
+Status = passed | failed
+```
+
+`RUN_HEAD`, `RECOVERY_BASE`, `T065_APPROVED_SPEC`, and
+`STS_LIGHTSPEED_INTEGRATION` are `git_commit`.
+
+Selection digests, replay-group digests, candidate-content digests, and artifact
+content hashes are `sha256`.
+
+## ArtifactIdentity
+
+Serialized exactly as:
+
+```json
+{"role":"string","path":"string","sha256":"<64hex>","size_bytes":0}
+```
+
+Rules:
+
+- `role` is a non-empty string frozen by the producing/consuming schema;
+- `path` is repository-relative POSIX under `artifacts/`;
+- normalize backslashes to `/`, remove `.` components and one leading `./`;
+- reject `..`;
+- case-sensitive comparison;
+- basename-only matching forbidden;
+- `size_bytes` is `nonneg_int`.
+
+Frozen role names:
+
+```text
+current_output             # both reused T065 raw source parents
+preflight_report
+source_reuse_report
+ownership_audit
+selected_states
+target_table
+target_validation_report
+checkpoint
+training_report
+gate_report
+eval_report
+terminal_report
+retention_manifest
+```
+
+ArtifactIdentity equality compares all four fields.
 
 ## Canonical Acceptance Model
 
-T075 has exactly one production-side acceptance authority. CLI handlers, artifact
-readers, stage adapters, persistence code, and finalization code must not
-implement independent transition predicates.
+T075 has one production-side acceptance authority. CLI handlers, readers,
+validators, persistence, and finalization must not implement independent transition
+logic.
 
-### Canonical types
+Conceptual model:
 
 ```text
-Stage =
-  PREFLIGHT
-  SOURCE_REUSE
-  SELECTION_REPLAY
-  TARGET
-  TRAIN
-  GATE
-  EVAL
-
-TerminalCase = A | B | C | D
-
-ArtifactIdentity =
-  role
-  path
-  sha256
-  size_bytes
-
 StageOutcome =
   schema_id
   schema_version
   task_id
-  run_head
-  stage
-  valid
-  passed
-  parents
-  outputs
-  evidence
-  problems
+  run_head: git_commit
+  stage: Stage
+  valid: bool
+  passed: bool
+  parents: tuple[ArtifactIdentity]
+  outputs: tuple[ArtifactIdentity]
+  evidence: exact stage-specific object
+  problems: tuple[string]
 
 CommittedOutcome =
-  stage
-  report_identity
+  stage: Stage
+  report_identity: ArtifactIdentity
 
 AcceptanceState =
-  run_head
-  committed_outcomes
-  current_stage or none
-  terminal_case or none
-  terminal_stage or none
+  run_head: git_commit
+  committed_outcomes: ordered tuple[CommittedOutcome]
+  current_stage: Stage | None
+  terminal_case: TerminalCase | None
+  terminal_stage: Stage | None
 ```
 
-`committed_outcomes` is the ordered ledger of committed StageOutcome report
-identities. It is derived from durable stage-report files; there is no separate
-mutable workflow-state file.
-
-There must be one pure or effectively pure transition authority equivalent to:
+There is one pure/effectively pure transition authority:
 
 ```text
 advance(AcceptanceState, StageOutcome) -> AcceptanceState
 ```
 
-`outcome_identity(outcome)` is the deterministic `ArtifactIdentity` obtained by
-canonical serialization of the outcome at that stage's frozen report path. Its
-`sha256` is therefore the identity used for duplicate comparison.
+`outcome_identity(outcome)` is the ArtifactIdentity of the canonical serialized
+StageOutcome bytes at that stage's frozen report path and frozen report role.
+The report does not contain its own identity, so there is no self-reference.
 
-### Initial state
+Initial state:
 
 ```text
 run_head = RUN_HEAD
@@ -455,128 +478,97 @@ terminal_case = None
 terminal_stage = None
 ```
 
-### Legal scientific transitions
+Durable state is reconstructed only by reading committed StageOutcome report files
+in canonical stage order, computing each exact report identity, and replaying them
+through `advance`. There is no mutable workflow-state file and no second transition
+authority.
+
+### Legal Scientific Transitions
 
 ```text
 PREFLIGHT valid+pass        -> SOURCE_REUSE
 PREFLIGHT invalid           -> D at PREFLIGHT
-
 SOURCE_REUSE valid+pass     -> SELECTION_REPLAY
 SOURCE_REUSE invalid        -> D at SOURCE_REUSE
-
 SELECTION_REPLAY valid+pass -> TARGET
 SELECTION_REPLAY invalid    -> D at SELECTION_REPLAY
-
 TARGET valid+pass           -> TRAIN
 TARGET invalid              -> D at TARGET
-
 TRAIN valid+pass            -> GATE
 TRAIN invalid               -> D at TRAIN
-
 GATE valid+pass             -> EVAL
 GATE valid+fail             -> C at GATE
 GATE invalid                -> D at GATE
-
 EVAL valid+pass             -> A at EVAL
 EVAL valid+fail             -> B at EVAL
 EVAL invalid                -> D at EVAL
 ```
 
-For PREFLIGHT, SOURCE_REUSE, SELECTION_REPLAY, TARGET, and TRAIN,
+For PREFLIGHT, SOURCE_REUSE, SELECTION_REPLAY, TARGET, TRAIN,
 `valid=true, passed=false` is illegal.
 
-Terminal meanings:
+Poor learned-policy performance alone may produce B or C, never D.
 
-```text
-A = valid positive Stage-6 transfer result
-B = valid Stage-6 negative result
-C = valid Stage-5 negative result
-D = invalid experiment / frozen-fidelity failure
-```
+### Transition Precedence
 
-Poor learned-policy performance alone produces B or C, never D.
+For every candidate StageOutcome, `advance` applies exactly:
 
-### Transition precedence and duplicate semantics
+1. reject if `outcome.run_head != state.run_head`;
+2. compute candidate report identity from the final canonical StageOutcome;
+3. if ledger already contains `outcome.stage`, handle duplicate before terminal or
+   current-stage checks:
+   - identical report identity -> idempotent existing state;
+   - different report identity -> operational conflicting duplicate, state unchanged;
+4. if terminal already exists, reject any new uncommitted stage, state unchanged;
+5. require `outcome.stage == state.current_stage`;
+6. require exact legal `(valid, passed)` combination and exact committed parents;
+7. apply the transition table;
+8. append the candidate report identity to the ledger;
+9. if terminal, set `terminal_case`, `terminal_stage`, `current_stage=None`; else
+   advance to next stage.
 
-For every candidate StageOutcome, canonical `advance` applies this order:
-
-1. `outcome.run_head` must equal `state.run_head`; otherwise reject
-   operationally with state unchanged.
-2. Compute `candidate_identity = outcome_identity(outcome)`. If the ledger already
-   contains the same `outcome.stage`, perform duplicate handling **before** any
-   current-stage or terminal rejection:
-   - if `candidate_identity == committed.report_identity`, return the existing
-     state idempotently and do not rerun science;
-   - otherwise reject as a conflicting duplicate; state and terminal are
-     unchanged.
-3. If `state.terminal_case` is not null, reject any new uncommitted stage;
-   terminal state is immutable.
-4. `outcome.stage` must equal `state.current_stage`; otherwise reject as
-   out-of-order with state unchanged.
-5. Validate the stage's legal `(valid, passed)` combination and exact parent
-   identities. Invocation mistakes that never reach a legitimate stage adapter
-   do not become StageOutcomes.
-6. Apply exactly the legal transition table above. Append the committed outcome
-   identity to the ledger. If terminal, set both `terminal_case` and
-   `terminal_stage` and set `current_stage=None`; otherwise advance to the next
-   stage.
-
-This precedence makes idempotent retry distinguishable from an out-of-order or
-conflicting duplicate after `current_stage` has advanced.
-
-### Edge and restart semantics
-
-- Wrong branch, dirty checkout, wrong `RUN_HEAD`, malformed CLI invocation, or an
-  arbitrary wrong input path rejected before a legitimate stage begins is an
-  operational invocation error: no StageOutcome and no scientific terminal.
-- Interruption before atomic StageOutcome report commit leaves the stage
-  uncommitted and retryable from the same committed parents and `RUN_HEAD`.
-- Once an invalid StageOutcome is atomically committed, it is scientific/fidelity
-  evidence. `advance` yields Case D and that stage is not rerun to seek a better
-  result.
-- A legitimately reached stage whose canonical parent artifact no longer matches
-  its recorded `ArtifactIdentity`, or whose required scientific lineage fails,
-  commits invalid and therefore D at that stage.
-- If a terminal-producing StageOutcome is committed but terminal-report writing is
-  interrupted, restart reconstructs state by replaying the committed ledger and
-  materializes exactly the same A/B/C/D and `terminal_stage`; no science reruns.
-- A terminal report inconsistent with the committed outcome ledger is an
-  operational integrity failure. It must not overwrite or reinterpret the
-  canonical terminal state.
-- Final retention failure after terminal commit is operational failure; terminal
-  A/B/C/D is unchanged.
+Out-of-order/wrong-RUN_HEAD/conflicting duplicate are operational rejection, not D.
 
 ## Transactional Stage Commit
 
-Every stage follows one transaction shape:
+This ordering is normative and resolves report/output identity causality.
 
-1. validate canonical state, checkout, `RUN_HEAD`, and committed parents;
-2. write expensive/intermediate data only under `ROOT/.tmp/` or an equivalent
-   non-committed location;
-3. run stage-specific completeness/fidelity validation;
-4. construct a complete valid or invalid StageOutcome;
-5. validate the prospective transition through canonical `advance`;
-6. for a successful stage, promote validated durable data to frozen paths and
-   compute output identities;
-7. atomically write the StageOutcome report last at its frozen report path;
-8. reconstruct/advance durable state from the committed report;
-9. if the transition is terminal, atomically materialize the single terminal
-   report from that canonical state.
+For a legitimately reached stage:
 
-The StageOutcome report is the stage commit marker. Durable-looking data without a
-matching committed StageOutcome is uncommitted and cannot be a parent.
+1. validate checkout, RUN_HEAD, current canonical state, and all previously
+   committed parent identities;
+2. write expensive/intermediate prospective outputs under `ROOT/.tmp/`;
+3. run all stage-specific completeness/fidelity checks;
+4. if the stage is successful, atomically promote each validated output to its
+   deterministic frozen final path and compute its final ArtifactIdentity;
+   if the stage is invalid, promote no successful data output and use `outputs=[]`;
+5. construct the **final** StageOutcome including final parent/output identities and
+   final evidence/problems;
+6. canonical-serialize that final StageOutcome for its frozen report path, compute
+   the prospective report ArtifactIdentity, and call canonical `advance` on the
+   final outcome; this is a pure prospective check and creates no durable state;
+7. atomically write exactly those canonical StageOutcome bytes to the frozen report
+   path; the StageOutcome report write is the stage commit marker;
+8. only after successful report write, reconstruct/advance durable state from the
+   committed report identity;
+9. if terminal, atomically materialize the unique terminal report from canonical
+   state.
 
-A process interruption before step 7 is operationally incomplete and retryable.
-Do not preserve every partial PID, worker return, queue message, or temporary file
-as scientific evidence.
+There is no provisional StageOutcome identity and no second transition path.
 
-### TARGET / logical Stage-3 barrier
+If output promotion in step 4 succeeds but report commit in step 7 is interrupted,
+those final-path outputs are uncommitted. They are ignored as parents and may be
+deterministically overwritten on retry. No scientific terminal result exists.
 
-Logical Stage 3 is a mandatory commit barrier inside TARGET; it is not a separate
-execution stage.
+If the report bytes successfully commit, that outcome is immutable scientific /
+fidelity evidence and is not rerun to obtain a more favorable result.
 
-Target generation remains under a temporary path until the persisted target
-payload is reopened and these checks run in this exact order:
+## TARGET / Logical Stage-3 Barrier
+
+Logical Stage 3 is inside TARGET, not a separate execution stage.
+
+The prospective target payload remains temporary until reopened and checked in
+exact order:
 
 1. `strict_target_reader`
 2. `target_completeness`
@@ -589,37 +581,65 @@ payload is reopened and these checks run in this exact order:
 9. `continuation_seed_contract`
 10. `public_input_firewall`
 
-If all checks pass, the target table is promoted to its frozen path and TARGET
-atomically commits `valid=true, passed=true` with the target-table identity in
-`outputs`.
+If all pass, promote target table, compute target-table identity, and commit TARGET
+`valid=true, passed=true` with that identity in outputs.
 
-If any completed check fails, TARGET constructs and atomically writes the same
-`stage2-validation.json` StageOutcome with:
+If any completed check fails, promote no target table and atomically commit the
+TARGET report with:
 
 ```text
-valid = false
-passed = false
-outputs = []
-stage3_barrier_passed = false
-problems = non-empty
+valid=false
+passed=false
+outputs=[]
+stage3_barrier_passed=false
+problems=non-empty
 ```
 
-That invalid report is a committed StageOutcome; canonical `advance` yields Case D
-at TARGET and TRAIN is forbidden. The failed target payload remains only under the
-uncommitted temporary area and is not a canonical parent.
+Canonical advance then yields D at TARGET and TRAIN is forbidden.
 
-If execution is interrupted before the invalid or valid `stage2-validation.json`
-atomic commit, TARGET remains uncommitted, no terminal exists, and retry is
-allowed. This is distinct from a completed barrier failure.
+Interruption before the StageOutcome report commit is distinct: TARGET is
+uncommitted, no terminal exists, and retry from the same committed parents is
+allowed.
 
-## Exact Serialization Contract
+## Selection Same-Stage Derivation And Lineage
 
-This section freezes only data that A01--A24 or artifact lineage actually depend
-on. Process-manager internals and arbitrary diagnostic decoration are deliberately
-excluded. Adding a new acceptance-relevant field or meaning is a `CONTRACT_GAP`;
-adding non-normative logs outside these artifacts is implementation freedom.
+Ownership audit and selected-state JSONL are sibling outputs of one
+SELECTION_REPLAY transaction. The ownership audit is **not** a committed parent of
+the selected-state file and is not a separate StageOutcome.
 
-### JSON scalar rules
+Within the stage transaction:
+
+```text
+committed parents:
+  PREFLIGHT report
+  SOURCE_REUSE report
+       |
+       v
+candidate domain -> ownership computation -> ownership audit
+                                      |
+                                      v
+                              quota selection -> selected states -> replay checks
+```
+
+Only after both prospective sibling outputs and all replay checks are valid are
+they promoted and their final identities inserted into the single
+SELECTION_REPLAY StageOutcome.
+
+Therefore the SELECTION_REPLAY StageOutcome parents are exactly:
+
+1. PREFLIGHT report identity;
+2. SOURCE_REUSE report identity.
+
+Its outputs are exactly:
+
+1. ownership audit identity;
+2. selected-state JSONL identity.
+
+The selected-state derivation from the ownership computation is scientific
+same-stage evidence, not ArtifactIdentity parentage. No prior ownership commit
+boundary is created.
+
+## Canonical JSON And Exact Shared Records
 
 All T075 JSON control/report artifacts use UTF-8 canonical JSON:
 
@@ -631,658 +651,448 @@ allow_nan=False
 one trailing newline
 ```
 
-Types:
+Unknown top-level keys in T075 v1 report schemas are rejected. Existing unchanged
+T065 scientific payloads retain their merged strict T065 schemas.
+
+Shared records:
 
 ```text
-string = JSON string
-bool = true | false
-int = JSON integer (not bool)
-nonneg_int = int >= 0
-number = finite JSON integer or float
-sha256 = lowercase 64-character hexadecimal string
-StageName = PREFLIGHT | SOURCE_REUSE | SELECTION_REPLAY | TARGET | TRAIN | GATE | EVAL
-Family = MAP_SCREEN | REST_ROOM | REWARDS | TREASURE_ROOM
-Split = train | validation | heldout
-Arm = stochastic | expert | learned
-SourceArm = stochastic_non_combat_v1 | expert_non_combat_v1
-Status = passed | failed
+CheckRecord = {name:string,status:Status,counts:{string:nonneg_int},problems:[string]}
+RangeRecord = {shard_index:nonneg_int,start:int,end:int,count:nonneg_int,wall_clock_seconds:number}
+PredicateRecord = {name:string,passed:bool}
+FamilyValue = {family:Family,value:number}
+FamilySplitCount = {family:Family,split:Split,count:nonneg_int}
+SplitCount = {split:Split,count:nonneg_int}
+HistogramBin = {group_size:nonneg_int,group_count:nonneg_int}
 ```
 
-Unknown top-level keys in the v1 T075 report schemas below are rejected. Evidence
-objects have exactly the fields frozen for that stage. Existing unchanged T065
-scientific payloads keep their merged strict T065 schemas and are not duplicated
-inside T075 reports.
+SourceRecord serialized keys exactly:
 
-### Shared serialized records
-
-`ArtifactIdentity` has exactly:
-
-```json
-{"role":"string","path":"string","sha256":"sha256","size_bytes":0}
+```text
+arm: stochastic_non_combat_v1 | expert_non_combat_v1
+artifact: ArtifactIdentity
+strict_reader_passed: bool
+metadata_passed: bool
+seed_start: int
+seed_end: int
+requested_run_count: nonneg_int
+terminal_run_count: nonneg_int
+truncated_run_count: nonneg_int
+failed_run_count: nonneg_int
+shard_count: nonneg_int
+worker_count: nonneg_int
+controller: string
+approved_spec_commit: git_commit
+sts_lightspeed_commit: git_commit
 ```
 
-Constraints:
+OwnershipMember keys exactly:
 
-- `path` is repository-relative POSIX under `artifacts/`;
-- normalize backslashes to `/`, remove `.` and one leading `./`, reject `..`;
-- paths are case-sensitive;
-- basename-only matching is forbidden;
-- `size_bytes` is `nonneg_int`.
-
-`CheckRecord`:
-
-```json
-{"name":"string","status":"passed|failed","counts":{"key":0},"problems":["string"]}
+```text
+source_arm: stochastic_non_combat_v1 | expert_non_combat_v1
+simulator_seed: int
+split: Split
+family: Family
+selection_digest: sha256
+candidate_sha256: sha256
+owner: bool
 ```
 
-`counts` is a JSON object from string to `nonneg_int`; its keys are diagnostic and
-not transition predicates unless a stage schema below names them explicitly.
+`candidate_sha256 = sha256(canonical_candidate_json_bytes)` is audit identity only,
+never a tie breaker.
 
-`RangeRecord`:
+OwnershipGroup keys exactly:
 
-```json
-{"shard_index":0,"start":0,"end":19,"count":20,"wall_clock_seconds":0.0}
+```text
+group_digest: sha256
+family: Family
+member_count: nonneg_int
+cross_split: bool
+members: [OwnershipMember]
 ```
 
-`PredicateRecord`:
+Members are ordered by complete frozen `member_order_key`; a valid non-tie group
+has exactly one owner.
 
-```json
-{"name":"string","passed":true}
+PerSeedMetric:
+
+```text
+model_seed: 653001 | 653002
+validation_mae: number
+checkpoint: ArtifactIdentity(role=checkpoint)
 ```
 
-`FamilyValue`:
+EvalShardRecord:
 
-```json
-{"family":"MAP_SCREEN","value":0.0}
+```text
+arm: stochastic | expert | learned
+shard_index: 0..15
+seed_start: int
+seed_end: int
+seed_count: 16
+terminal_run_count: nonneg_int
+status: Status
+wall_clock_seconds: number
 ```
 
-`FamilySplitCount`:
+CoverageRecord:
 
-```json
-{"family":"MAP_SCREEN","split":"train","count":0}
+```text
+D: nonneg_int
+L: nonneg_int
+M: nonneg_int
+F: nonneg_int
+L_over_D: number
+F_over_M: number
+passed: bool
 ```
 
-`SplitCount`:
+All numeric metrics are finite.
 
-```json
-{"split":"train","count":0}
+## Common StageOutcome Envelope
+
+Every committed stage report has exactly:
+
+```text
+schema_id: string
+schema_version: 1
+task_id: T075
+run_head: git_commit
+stage: Stage
+valid: bool
+passed: bool
+parents: [ArtifactIdentity]
+outputs: [ArtifactIdentity]
+evidence: exact stage object
+problems: [string]
 ```
 
-`HistogramBin`:
+Successful pre-gate stage: `valid=true`, `passed=true`, `problems=[]`.
+Invalid stage: `valid=false`, `passed=false`, `problems` non-empty.
+Valid GATE/EVAL negative: `valid=true`, `passed=false` and therefore C/B.
 
-```json
-{"group_size":1,"group_count":0}
+Frozen report path/role/schema mapping:
+
+| Stage | Path | role | schema_id |
+|---|---|---|---|
+| PREFLIGHT | `stage0-preflight.json` | `preflight_report` | `t075-preflight-report-v1` |
+| SOURCE_REUSE | `stage0-source-reuse.json` | `source_reuse_report` | `t075-source-reuse-report-v1` |
+| SELECTION_REPLAY | `stage1-selection-report.json` | `selected_states` is not report role; report role is `selection_report` | `t075-selection-report-v1` |
+| TARGET | `stage2-validation.json` | `target_validation_report` | `t075-target-validation-report-v1` |
+| TRAIN | `stage4-training-report.json` | `training_report` | `t075-training-report-v1` |
+| GATE | `stage5-heldout-report.json` | `gate_report` | `t075-stage5-report-v1` |
+| EVAL | `stage6-complete-run-report.json` | `eval_report` | `t075-stage6-report-v1` |
+
+`selection_report` is additionally a frozen valid ArtifactIdentity role for the
+SELECTION_REPLAY report.
+
+## Stage Schemas And Parent/Output Contracts
+
+### PREFLIGHT
+
+Parents `[]`; outputs `[]`.
+
+Evidence exact keys:
+
+```text
+recovery_base: git_commit
+t065_approved_spec_commit: git_commit
+sts_lightspeed_integration_commit: git_commit
+simulator_identity: string
+model_input_schema: string
+checks: [CheckRecord]
 ```
 
-`SourceRecord`:
+Check order:
 
-```json
-{
-  "arm":"stochastic_non_combat_v1",
-  "artifact":{"role":"string","path":"string","sha256":"sha256","size_bytes":0},
-  "strict_reader_passed":true,
-  "metadata_passed":true,
-  "seed_start":650001,
-  "seed_end":650256,
-  "requested_run_count":256,
-  "terminal_run_count":256,
-  "truncated_run_count":0,
-  "failed_run_count":0,
-  "shard_count":16,
-  "worker_count":16,
-  "controller":"oracle_search_v1_highest_mean_s20",
-  "approved_spec_commit":"sha256",
-  "sts_lightspeed_commit":"sha256"
-}
+1. runtime_imports
+2. simulator_identity
+3. checkpoint_roundtrip
+4. frozen_controller_action_space
+5. model_input_schema_dimensions
+6. public_input_firewall_capability
+7. torch_runtime
+
+### SOURCE_REUSE
+
+Parents exact order:
+
+1. PREFLIGHT report;
+2. frozen stochastic T065 source with role `current_output`;
+3. frozen expert T065 source with role `current_output`.
+
+Outputs `[]`.
+
+Evidence:
+
+```text
+sources: [SourceRecord]  # stochastic then expert
+validation_passed: bool
 ```
 
-`OwnershipMember`:
+### Ownership Audit Data Artifact
 
-```json
-{
-  "source_arm":"stochastic_non_combat_v1",
-  "simulator_seed":650001,
-  "split":"train",
-  "family":"MAP_SCREEN",
-  "selection_digest":"sha256",
-  "candidate_sha256":"sha256",
-  "owner":true
-}
-```
+Path `stage1-ownership-audit.json`, role `ownership_audit`, schema
+`t075-ownership-audit-v1`.
 
-`candidate_sha256 = sha256(canonical_candidate_json_bytes)` is audit identity only
-and is never an ownership tie breaker.
-
-`OwnershipGroup`:
-
-```json
-{
-  "group_digest":"sha256",
-  "family":"MAP_SCREEN",
-  "member_count":1,
-  "cross_split":false,
-  "members":[OwnershipMember]
-}
-```
-
-Members are ordered by the complete frozen `member_order_key`; exactly one member
-has `owner=true` for a valid non-tie group.
-
-`PerSeedMetric`:
-
-```json
-{
-  "model_seed":653001,
-  "validation_mae":0.0,
-  "checkpoint":{"role":"string","path":"string","sha256":"sha256","size_bytes":0}
-}
-```
-
-`EvalShardRecord`:
-
-```json
-{
-  "arm":"stochastic",
-  "shard_index":0,
-  "seed_start":651001,
-  "seed_end":651016,
-  "seed_count":16,
-  "terminal_run_count":16,
-  "status":"passed|failed",
-  "wall_clock_seconds":0.0
-}
-```
-
-`CoverageRecord`:
-
-```json
-{
-  "D":1,
-  "L":1,
-  "M":1,
-  "F":0,
-  "L_over_D":1.0,
-  "F_over_M":0.0,
-  "passed":true
-}
-```
-
-All numeric metrics are finite. Arrays use the ordering frozen below.
-
-### Common StageOutcome envelope
-
-Every committed stage report has exactly these top-level keys:
-
-```json
-{
-  "schema_id":"string",
-  "schema_version":1,
-  "task_id":"T075",
-  "run_head":"sha256",
-  "stage":"StageName",
-  "valid":true,
-  "passed":true,
-  "parents":[ArtifactIdentity],
-  "outputs":[ArtifactIdentity],
-  "evidence":{},
-  "problems":["string"]
-}
-```
-
-Rules:
-
-- valid successful pre-gate stage: `valid=true`, `passed=true`, `problems=[]`;
-- invalid stage: `valid=false`, `passed=false`, `problems` non-empty;
-- GATE/EVAL valid negative: `valid=true`, `passed=false`;
-- report identity uses role `stage_outcome:<StageName>`;
-- fixed report path is specified below.
-
-## Stage Report Schemas
-
-### PREFLIGHT — `t075-preflight-report-v1`
-
-Path: `stage0-preflight.json`.
-
-Parents: `[]`. Outputs: `[]`.
-
-Evidence has exactly:
-
-```json
-{
-  "recovery_base":"sha256",
-  "t065_approved_spec_commit":"sha256",
-  "sts_lightspeed_integration_commit":"sha256",
-  "model_input_schema_id":"non-combat-model-input-v1",
-  "state_dimension":4737,
-  "action_dimension":92,
-  "checks":[CheckRecord]
-}
-```
-
-`checks` order and names are exactly:
-
-1. `runtime_imports`
-2. `simulator_identity`
-3. `checkpoint_roundtrip`
-4. `frozen_controller_action_space`
-5. `model_input_schema_dimensions`
-6. `public_input_firewall_capability`
-7. `torch_runtime`
-
-Any failed check makes PREFLIGHT invalid.
-
-### SOURCE_REUSE — `t075-source-reuse-report-v1`
-
-Path: `stage0-source-reuse.json`.
-
-Parents, exact order:
-
-1. PREFLIGHT report identity;
-2. frozen stochastic source identity;
-3. frozen expert source identity.
-
-Outputs: `[]`.
-
-Evidence has exactly:
-
-```json
-{"sources":[SourceRecord],"all_sources_valid":true}
-```
-
-Source order is stochastic then expert. `all_sources_valid=true` only when both
-exact sources pass every frozen predicate.
-
-### Ownership audit — `t075-ownership-audit-v1`
-
-Path: `stage1-ownership-audit.json`. This is a data artifact, not a StageOutcome.
-
-Top-level keys are exactly:
+It is a same-stage data output, not a StageOutcome. It has exact top-level keys:
 
 ```text
 schema_id
-schema_version
-task_id
-run_head
-parents
-selection_strategy_id
-replay_identity
- group_domain
-candidate_domain_counts
-group_count
-singleton_group_count
-non_singleton_group_count
-cross_split_group_count
-excluded_non_owner_count
-group_counts_by_family
-group_counts_by_split
-group_size_histogram
-owner_counts_by_family_split
-groups
-problems
+schema_version=1
+task_id=T075
+run_head: git_commit
+preflight_report: ArtifactIdentity
+source_reuse_report: ArtifactIdentity
+selection_strategy_id=leakage-safe-global-owner-v1
+replay_identity: string
+group_domain=T075-replay-group-v1
+candidate_domain_counts: [FamilySplitCount]
+group_count: nonneg_int
+singleton_group_count: nonneg_int
+non_singleton_group_count: nonneg_int
+cross_split_group_count: nonneg_int
+excluded_non_owner_count: nonneg_int
+group_size_histogram: [HistogramBin]
+owner_counts_by_family_split: [FamilySplitCount]
+groups: [OwnershipGroup]
+problems: [string]
 ```
 
-With exact types:
+This artifact records provenance references but does not create a prior committed
+parent boundary.
+
+Ordering: canonical family order, split train/validation/heldout, histogram by
+ascending group size, groups by ascending group_digest, members by member order.
+
+### SELECTION_REPLAY
+
+Parents exact order: PREFLIGHT report, SOURCE_REUSE report.
+
+Outputs exact order:
+
+1. ownership audit (`ownership_audit`);
+2. selected states JSONL (`selected_states`).
+
+Selected-state JSONL contains exactly one complete strict current
+`t065-source-state-v1` object per line, selected-state indices 0..319, final newline,
+no wrapper.
+
+Evidence:
 
 ```text
-schema_id = "t075-ownership-audit-v1"
-schema_version = 1
-task_id = "T075"
-run_head = sha256
-parents = [ArtifactIdentity] exactly PREFLIGHT, SOURCE_REUSE
-selection_strategy_id = "leakage-safe-global-owner-v1"
-replay_identity = "(family,public_state_identity,ordered_legal_action_identities)"
-group_domain = "T075-replay-group-v1"
-candidate_domain_counts = [FamilySplitCount]
-group_count = nonneg_int
-singleton_group_count = nonneg_int
-non_singleton_group_count = nonneg_int
-cross_split_group_count = nonneg_int
-excluded_non_owner_count = nonneg_int
-group_counts_by_family = [{"family":Family,"count":nonneg_int}]
-group_counts_by_split = [SplitCount]
-group_size_histogram = [HistogramBin]
-owner_counts_by_family_split = [FamilySplitCount]
-groups = [OwnershipGroup]
-problems = [string]
+post_owner_available_counts: [FamilySplitCount]
+selected_count: 320
+selected_counts_by_family_split: [FamilySplitCount]
+selected_replay_identity_digests: [sha256]
+replay:
+  shard_count: 16
+  requested_worker_count: 16
+  actual_worker_count: 16
+  ranges: [RangeRecord]
+  attempted: 320
+  restored: 320
+  mismatch_count: 0
+  replacement_count: 0
+  duplicate_count: 0
+  cross_split_overlap_count: 0
+  wall_clock_seconds: number
 ```
 
-Ordering:
+Range order shard 0..15.
 
-- family order: MAP_SCREEN, REST_ROOM, REWARDS, TREASURE_ROOM;
-- split order: train, validation, heldout;
-- family/split arrays use nested family then split order;
-- histogram ascending `group_size`;
-- groups ascending `group_digest`;
-- members frozen `member_order_key` order.
+### TARGET
 
-### SELECTION_REPLAY — `t075-selection-report-v1`
+Target table path `stage2-target-table.json`, role `target_table`, unchanged strict
+T065 schema `t065-counterfactual-target-table-v1` version 1.
 
-Path: `stage1-selection-report.json`.
+TARGET report parents exact order:
 
-Parents, exact order: PREFLIGHT report, SOURCE_REUSE report.
+1. PREFLIGHT report;
+2. SELECTION_REPLAY report;
+3. selected-state JSONL output.
 
-Outputs, exact order:
+Successful outputs: target table only. Invalid outputs: `[]`.
 
-1. `role=ownership_audit` identity;
-2. `role=selected_states` identity for `stage1-selected-states.jsonl`.
+Evidence:
 
-Evidence has exactly:
-
-```json
-{
-  "post_owner_available_counts":[FamilySplitCount],
-  "selected_count":320,
-  "selected_counts_by_family_split":[FamilySplitCount],
-  "selected_replay_identity_digests":["sha256"],
-  "replay":{
-    "shard_count":16,
-    "requested_worker_count":16,
-    "actual_worker_count":16,
-    "ranges":[RangeRecord],
-    "attempted":320,
-    "restored":320,
-    "mismatch_count":0,
-    "replacement_count":0,
-    "duplicate_count":0,
-    "cross_split_overlap_count":0,
-    "wall_clock_seconds":0.0
-  }
-}
+```text
+selected_state_count: 320
+target_row_count: nonneg_int
+eligible_action_count: nonneg_int
+family_split_state_counts: [FamilySplitCount]
+continuation_replication_counts_by_split: [SplitCount]
+shard_count: 16
+requested_worker_count: 16
+actual_worker_count: 16
+ranges: [RangeRecord]
+checks: [CheckRecord]  # exact 10 barrier names/order
+violation_counts: {string:nonneg_int}
+stage3_barrier_passed: bool
+wall_clock_seconds: number
 ```
 
-Family/split arrays use canonical nested order. `ranges` are shard index 0..15.
-The digest list is selected-state index order 0..319.
+### TRAIN
 
-Selected states are JSONL: exactly one strict current `t065-source-state-v1`
-object per line, selected-state index order 0..319, final newline, no wrapper.
+Parents exact order: TARGET validation report, target table.
 
-### TARGET scientific payload
-
-Path: `stage2-target-table.json`.
-
-Payload uses unchanged strict `t065-counterfactual-target-table-v1` version 1 and
-existing T065 semantics. T075 does not add scientific payload fields.
-
-### TARGET — `t075-target-validation-report-v1`
-
-Path: `stage2-validation.json`.
-
-Parents, exact order: PREFLIGHT report, SELECTION_REPLAY report, selected states.
-
-Success outputs: exactly `role=target_table` identity. Invalid TARGET outputs:
+Successful outputs: two checkpoint identities ordered model seed 653001 then
+653002, each role `checkpoint`. Invalid TRAIN promotes no checkpoints and outputs
 `[]`.
 
-Evidence has exactly:
+Evidence:
 
-```json
-{
-  "selected_state_count":320,
-  "target_row_count":0,
-  "eligible_action_count":0,
-  "family_split_state_counts":[FamilySplitCount],
-  "continuation_replication_counts_by_split":[SplitCount],
-  "shard_count":16,
-  "requested_worker_count":16,
-  "actual_worker_count":16,
-  "ranges":[RangeRecord],
-  "checks":[CheckRecord],
-  "violation_counts":{
-    "missing_rows":0,
-    "duplicate_rows":0,
-    "nonfinite_targets":0,
-    "model_input_mismatches":0,
-    "lineage_mismatches":0,
-    "legal_action_mismatches":0,
-    "continuation_seed_mismatches":0,
-    "firewall_violations":0
-  },
-  "stage3_barrier_passed":true,
-  "wall_clock_seconds":0.0
-}
+```text
+model_seeds: [653001,653002]
+training_config: object equal to frozen T065 training config
+normalizer_provenance: string
+per_seed_metrics: [PerSeedMetric]  # seed order
+selected_model_seed: 653001|653002
+selected_checkpoint: ArtifactIdentity(role=checkpoint)
+wall_clock_seconds: number
 ```
 
-`checks` is exactly the ten TARGET-barrier names in the order frozen above.
-`ranges` are shard 0..15. On a completed barrier failure, evidence retains the
-observed counts, `stage3_barrier_passed=false`, report is invalid, and outputs are
-empty.
+### GATE
 
-### TRAIN — `t075-training-report-v1`
+Parents exact order: TRAIN report, selected checkpoint, target table. Outputs `[]`.
 
-Path: `stage4-training-report.json`.
+Evidence:
 
-Parents, exact order: TARGET validation report, target table.
-
-Outputs: checkpoint identities ordered seed 653001 then 653002 with roles
-`checkpoint:653001`, `checkpoint:653002`.
-
-Evidence has exactly:
-
-```json
-{
-  "model_seeds":[653001,653002],
-  "training_config":{
-    "device":"cpu",
-    "huber_delta":1.0,
-    "optimizer":"Adam",
-    "learning_rate":0.001,
-    "steps":1500,
-    "minibatch_size":64,
-    "sample_with_replacement":true,
-    "gradient_clip":10.0,
-    "torch_threads":1,
-    "early_stopping":false
-  },
-  "normalizer":{
-    "fit_split":"train",
-    "dtype":"float32",
-    "state_dimension":4737,
-    "std_floor":1.0,
-    "sha256":"sha256"
-  },
-  "per_seed_metrics":[PerSeedMetric],
-  "selected_model_seed":653001,
-  "selected_checkpoint":{"role":"string","path":"string","sha256":"sha256","size_bytes":0},
-  "wall_clock_seconds":0.0
-}
+```text
+heldout_state_count: 64
+selected_model_seed: 653001|653002
+non_selected_model_seed: 653001|653002
+mean_paired_delta: number
+median_paired_delta: number
+family_mean_deltas: [FamilyValue]
+p_positive: number
+non_selected_mean_paired_delta: number
+violation_counts: {string:nonneg_int}
+gate_predicates: [PredicateRecord]
+wall_clock_seconds: number
 ```
 
-`per_seed_metrics` order is 653001, 653002. `selected_model_seed` is whichever
-frozen MAE rule selects; the example value above is a type example, not a frozen
-winner.
+Predicate order is the six Stage-5 conditions above.
 
-### GATE — `t075-stage5-report-v1`
+### EVAL
 
-Path: `stage5-heldout-report.json`.
+Exists only after valid GATE pass.
 
-Parents, exact order: TRAIN report, selected checkpoint, target table.
+Parents exact order: GATE report, selected checkpoint. Outputs `[]`.
 
-Outputs: `[]`.
+Evidence:
 
-Evidence has exactly:
-
-```json
-{
-  "heldout_state_count":64,
-  "selected_model_seed":653001,
-  "non_selected_model_seed":653002,
-  "mean_paired_delta":0.0,
-  "median_paired_delta":0.0,
-  "family_mean_deltas":[FamilyValue],
-  "p_positive":0.0,
-  "non_selected_mean_paired_delta":0.0,
-  "violation_counts":{
-    "hidden":0,
-    "schema":0,
-    "legal":0,
-    "replay":0,
-    "supported_screen_fallback":0
-  },
-  "gate_predicates":[PredicateRecord],
-  "wall_clock_seconds":0.0
-}
+```text
+fresh_seed_start: 651001
+fresh_seed_end: 651256
+arm_order: [stochastic,expert,learned]
+requested_run_count: 768
+terminal_run_count: 768
+shard_count_per_arm: 16
+requested_worker_count: 16
+actual_worker_count: 16
+shards: [EvalShardRecord]
+coverage: CoverageRecord
+mean_terminal_floor_delta: number
+p_positive: number
+learned_act2_entry_count: nonneg_int
+expert_act2_entry_count: nonneg_int
+controller_error_count: nonneg_int
+truncation_count: nonneg_int
+gate_predicates: [PredicateRecord]
+wall_clock_seconds: number
 ```
 
-Family values use canonical family order. Gate predicate names/order are exactly:
+Shard order arm order then shard index. Predicate order is the six Stage-6
+conditions above.
 
-1. `aggregate_mean_positive`
-2. `median_nonnegative`
-3. `three_of_four_family_means_nonnegative`
-4. `bootstrap_p_positive_ge_0_90`
-5. `non_selected_seed_mean_nonnegative`
-6. `zero_violations`
+## Terminal Decision
 
-A complete valid report may have `passed=false`, producing Case C.
+Single path `terminal-decision-report.json`, role `terminal_report`, schema
+`t075-terminal-decision-report-v1`.
 
-### EVAL — `t075-stage6-report-v1`
-
-Path: `stage6-complete-run-report.json`, present only after valid GATE pass.
-
-Parents, exact order: GATE report, selected checkpoint.
-
-Outputs: `[]`.
-
-Evidence has exactly:
-
-```json
-{
-  "fresh_seed_start":651001,
-  "fresh_seed_end":651256,
-  "arm_order":["stochastic","expert","learned"],
-  "requested_run_count":768,
-  "terminal_run_count":768,
-  "shard_count_per_arm":16,
-  "requested_worker_count":16,
-  "actual_worker_count":16,
-  "shards":[EvalShardRecord],
-  "coverage":CoverageRecord,
-  "mean_terminal_floor_delta":0.0,
-  "p_positive":0.0,
-  "learned_act2_entry_count":0,
-  "expert_act2_entry_count":0,
-  "controller_error_count":0,
-  "truncation_count":0,
-  "gate_predicates":[PredicateRecord],
-  "wall_clock_seconds":0.0
-}
-```
-
-Shards order: stochastic 0..15, expert 0..15, learned 0..15. Gate predicate
-names/order are exactly:
-
-1. `mean_terminal_floor_delta_positive`
-2. `bootstrap_p_positive_ge_0_80`
-3. `learned_act2_ge_expert`
-4. `zero_controller_errors_and_truncations`
-5. `coverage_pass`
-6. `stronger_signal`
-
-A complete valid report may have `passed=false`, producing Case B.
-
-### Terminal decision — `t075-terminal-decision-report-v1`
-
-Path: `terminal-decision-report.json`.
-
-Top-level keys exactly:
+Exact keys:
 
 ```text
 schema_id
-schema_version
-task_id
-run_head
-terminal_case
-terminal_stage
-reached_stages
-skipped_stages
-stage_report_identities
-recommendation
-problems
+schema_version=1
+task_id=T075
+run_head: git_commit
+terminal_case: A|B|C|D
+terminal_stage: Stage
+reached_stages: [Stage]
+skipped_stages: [Stage]
+stage_report_identities: [ArtifactIdentity]
+recommendation: string
+problems: [string]
 ```
 
-Types/rules:
+Reached stages are canonical prefix through terminal_stage; skipped stages are
+remaining suffix; report identities follow reached-stage order.
 
-```text
-schema_id = "t075-terminal-decision-report-v1"
-schema_version = 1
-task_id = "T075"
-run_head = sha256
-terminal_case = A | B | C | D
-terminal_stage = StageName
-reached_stages = [StageName] canonical prefix through terminal_stage
-skipped_stages = [StageName] remaining suffix
-stage_report_identities = [ArtifactIdentity] canonical reached-stage order
-recommendation = string
-problems = [string]
-```
+A/B terminal_stage EVAL; C terminal_stage GATE; D terminal_stage first invalid
+reached stage.
 
-For A/B terminal stage is EVAL; C is GATE; D is the first invalid stage. The
-terminal report is derived only from canonical AcceptanceState and committed
-ledger. `recommendation` contains exactly one planner-facing recommendation; for
-D it is limited to repairing the same frozen experiment.
+The first valid terminal state implied by committed StageOutcome ledger is
+immutable. If terminal report write is interrupted after terminal-producing stage
+commit, restart reconstructs exact state and materializes the same report. A
+conflicting terminal file is operational integrity failure and cannot reinterpret
+science.
 
-### Final retention — `t075-retention-manifest-v1`
+## Final Retention
 
-Path: `t075-retention-manifest.json`.
+Path `t075-retention-manifest.json`, role `retention_manifest`, schema
+`t075-retention-manifest-v1`.
 
-Top-level keys exactly:
+Exact keys:
 
 ```text
 schema_id
-schema_version
-task_id
-run_head
-terminal_case
-retention_owner
-retention_reason
-terminal_report_identity
-reused_artifacts
-produced_artifacts
-downstream_consumers
-deletion_condition
-problems
+schema_version=1
+task_id=T075
+run_head: git_commit
+terminal_case: A|B|C|D
+retention_owner=T075
+retention_reason: string
+terminal_report_identity: ArtifactIdentity(role=terminal_report)
+reused_artifacts: [ArtifactIdentity]
+produced_artifacts: [ArtifactIdentity]
+downstream_consumers: [string]
+deletion_condition: [string]
+problems: [string]
 ```
 
-Types/rules:
+Reused artifacts are the exact two T065 sources in stochastic/expert order with
+role `current_output`. Produced artifacts contain every committed reached-stage
+report and durable data output in canonical stage order, then role/path order.
+No recursive provenance discovery.
 
-```text
-schema_id = "t075-retention-manifest-v1"
-schema_version = 1
-task_id = "T075"
-run_head = sha256
-terminal_case = A | B | C | D
-retention_owner = "T075"
-retention_reason = string
-terminal_report_identity = ArtifactIdentity
-reused_artifacts = [ArtifactIdentity]
-produced_artifacts = [ArtifactIdentity]
-downstream_consumers = [string]
-deletion_condition = string
-problems = [string]
-```
-
-`reused_artifacts` is stochastic source then expert source. `produced_artifacts`
-contains every committed reached-stage report and durable data output in canonical
-stage order, then role/path order within stage. There is no recursive lineage
-rediscovery.
+T075 holds reused T065 sources until terminal result/manifest merge or formal T075
+abandonment, no open/approved consumer remains, and no Maintainer reproduction hold
+remains. T075-produced large payloads may be deleted only after terminal merge,
+compact reports/retention manifest remain, no downstream consumer remains, and no
+reproduction hold remains. Historical identities are never rewritten.
 
 ## Minimal Semantic Lineage
 
-Required relationships are exactly:
+Only **previously committed** stage artifacts may be ArtifactIdentity parents.
+Same-stage sibling outputs may refer to one another only as internal derivation /
+evidence, never as committed parents.
 
-| Output | Required semantic parents |
+| Output | Committed semantic parents |
 |---|---|
-| SOURCE_REUSE report | PREFLIGHT + exact two frozen T065 sources |
-| ownership audit | PREFLIGHT + SOURCE_REUSE |
-| selected states / SELECTION_REPLAY report | PREFLIGHT + SOURCE_REUSE + ownership audit |
-| TARGET table / validation | PREFLIGHT + SELECTION_REPLAY + selected states |
-| TRAIN report/checkpoints | valid committed TARGET + target table |
-| GATE report | TRAIN + selected checkpoint + target table |
-| EVAL report | valid GATE pass + selected checkpoint + frozen fresh seed set |
-| terminal report | canonical AcceptanceState + committed stage reports |
-| final retention manifest | terminal report + committed reached-stage artifacts |
+| SOURCE_REUSE report | PREFLIGHT + exact two frozen T065 source identities |
+| SELECTION_REPLAY report | PREFLIGHT + SOURCE_REUSE report |
+| ownership audit + selected states | produced atomically inside SELECTION_REPLAY; no parent relation between siblings |
+| TARGET report/table | PREFLIGHT + committed SELECTION_REPLAY report + committed selected-states output |
+| TRAIN report/checkpoints | committed valid TARGET report + target table |
+| GATE report | TRAIN report + selected checkpoint + target table |
+| EVAL report | valid GATE pass report + selected checkpoint |
+| terminal report | canonical committed StageOutcome ledger |
+| final retention | terminal report + identities of committed reached-stage artifacts |
 
-Parent comparison uses exact `ArtifactIdentity`. There is no per-stage retention
-manifest, recursive proof graph, historical alias resolver, exact command-token
-identity, or task-specific PID proof.
+No per-stage retention manifest, recursive proof graph, historical alias resolver,
+exact command-token identity, or task-specific PID proof.
 
 ## Frozen Durable Output Surface
 
@@ -1304,83 +1114,48 @@ terminal-decision-report.json
 t075-retention-manifest.json
 ```
 
-Temporary data is not canonical and lives under `ROOT/.tmp/` or an equivalent
-explicitly uncommitted subpath.
-
-## Retention Ownership And Deletion Conditions
-
-T075 owns produced durable outputs from the first committed StageOutcome until the
-terminal result is merged or the recovery line is formally abandoned.
-
-T075 places a consumer hold on the two T065 raw sources. It never deletes or
-rewrites them. The T075 hold is released only after:
-
-1. terminal T075 result and final retention manifest are merged, or Planner
-   formally closes T075 without scientific execution;
-2. no open/approved task names the sources as required inputs;
-3. no Maintainer reproduction hold remains.
-
-T075-produced large payloads/checkpoints may be deleted only after:
-
-1. terminal T075 result is merged;
-2. final retention manifest and compact reached-stage reports are retained;
-3. no open/approved downstream task consumes the payload;
-4. no reproduction hold remains.
-
-Deletion never changes recorded historical identities.
+Temporary data belongs under `ROOT/.tmp/` and is never a canonical parent.
 
 ## Frozen Shard And Worker Plan
 
-The authoritative run uses the repository's 16-logical-core Maintainer resource
-assumption.
+Authoritative execution uses the repository's 16-logical-core resource assumption.
 
-### SELECTION_REPLAY and TARGET
-
-Exactly 16 contiguous 20-state shards. For shard `i=0..15`:
+SELECTION_REPLAY and TARGET use exactly 16 contiguous 20-state shards:
 
 ```text
-start = 20*i
-end = 20*i + 19
-count = 20
+00 000..019   04 080..099   08 160..179   12 240..259
+01 020..039   05 100..119   09 180..199   13 260..279
+02 040..059   06 120..139   10 200..219   14 280..299
+03 060..079   07 140..159   11 220..239   15 300..319
 ```
 
-Requested and required actual worker count: 16.
+Requested and actual worker count: 16.
 
-### EVAL
-
-For each arm, exactly 16 contiguous 16-seed shards over `651001..651256`. For
-shard `i=0..15`:
+EVAL uses, per arm, 16 contiguous 16-seed shards over 651001..651256:
 
 ```text
-start = 651001 + 16*i
-end = 651016 + 16*i
-count = 16
+start(i)=651001+16*i
+end(i)=651016+16*i
 ```
 
-Arm order: stochastic, expert, learned. Requested and required actual worker count
-per active arm batch: 16; at most 16 concurrent simulator workers.
+Arm order stochastic, expert, learned. Requested/actual worker count per active arm
+batch 16; at most 16 concurrent simulator workers.
 
-If the host cannot establish the required worker plan before a substantial stage,
-the stage does not start and no StageOutcome is committed. This is operationally
-incomplete, not Case D. The Maintainer resolves the resource constraint or returns
-a resource/contract gap; implementation must not silently downgrade authoritative
-execution.
-
-Each substantial stage records exact shard ranges, requested/actual workers,
-completion counts, and wall-clock seconds. PID, queue mechanics, and process
-binding are non-semantic.
+If the host cannot establish required worker plan before substantial stage work,
+stage does not start and commits no StageOutcome. This is operationally incomplete,
+not Case D. Do not silently downgrade workers. Record exact ranges, requested/
+actual workers, completion counts, and wall clock. PID/queue/process binding is
+non-semantic.
 
 ## Exact Reproduction Commands
 
-The implementation extends the neutral
-`sts_combat_rl.commands.non_combat_learning` module. It does not add T075 routes to
-the legacy flat CLI and does not create a task-numbered production package.
+The recovery extends neutral `sts_combat_rl.commands.non_combat_learning`; no
+T075-numbered production package or generic workflow framework.
 
-Semantic arguments, inputs, outputs, and executable paths below are normative.
-Shell quoting, literal token sequence, launcher formatting, and command-text hash
-are not scientific evidence and must not be validated by string equality.
+Reference commands freeze semantic inputs/outputs/arguments. Shell quoting,
+literal token strings, and command-text hashes are not acceptance evidence.
 
-Common setup:
+Common environment:
 
 ```bash
 CODE=/mnt/d/DeadlycatCoding/STSRL/.claude/worktrees/t075-architecture-recovery
@@ -1397,10 +1172,7 @@ test -z "$(git status --porcelain)"
 test "$(git rev-parse HEAD)" = "$RUN_HEAD"
 ```
 
-### Local and acceptance gates
-
-All Python-owned gates use the same pinned `$PY`; unqualified `python`, `pytest`,
-and `ruff` are not part of the T075 reproduction contract.
+Local/acceptance gates all use pinned interpreter:
 
 ```bash
 $PY -m pytest -q tests/test_t075_acceptance.py
@@ -1414,10 +1186,10 @@ $PY -m sts_combat_rl.cli --mock tests/fixtures/non_combat.json
 git diff --check
 ```
 
-If the pinned `$PY` lacks a required development module, execution readiness is
-not satisfied; do not silently substitute another interpreter.
+If pinned PY lacks a required module, readiness fails; do not substitute another
+interpreter.
 
-### PREFLIGHT
+PREFLIGHT:
 
 ```bash
 $PY -m sts_combat_rl.commands.non_combat_learning preflight \
@@ -1427,7 +1199,7 @@ $PY -m sts_combat_rl.commands.non_combat_learning preflight \
   --terminal-report "$ROOT/terminal-decision-report.json"
 ```
 
-### SOURCE_REUSE
+SOURCE_REUSE:
 
 ```bash
 $PY -m sts_combat_rl.commands.non_combat_learning validate-reuse \
@@ -1439,9 +1211,9 @@ $PY -m sts_combat_rl.commands.non_combat_learning validate-reuse \
   --terminal-report "$ROOT/terminal-decision-report.json"
 ```
 
-There is no T075 `collect` invocation.
+No T075 collect command exists.
 
-### SELECTION_REPLAY
+SELECTION_REPLAY:
 
 ```bash
 $PY -m sts_combat_rl.commands.non_combat_learning select \
@@ -1458,7 +1230,7 @@ $PY -m sts_combat_rl.commands.non_combat_learning select \
   --terminal-report "$ROOT/terminal-decision-report.json"
 ```
 
-### TARGET + logical Stage 3
+TARGET:
 
 ```bash
 $PY -m sts_combat_rl.commands.non_combat_learning target \
@@ -1472,7 +1244,7 @@ $PY -m sts_combat_rl.commands.non_combat_learning target \
   --terminal-report "$ROOT/terminal-decision-report.json"
 ```
 
-### TRAIN
+TRAIN:
 
 ```bash
 $PY -m sts_combat_rl.commands.non_combat_learning train \
@@ -1484,7 +1256,7 @@ $PY -m sts_combat_rl.commands.non_combat_learning train \
   --terminal-report "$ROOT/terminal-decision-report.json"
 ```
 
-### GATE
+GATE:
 
 ```bash
 $PY -m sts_combat_rl.commands.non_combat_learning gate \
@@ -1496,9 +1268,7 @@ $PY -m sts_combat_rl.commands.non_combat_learning gate \
   --terminal-report "$ROOT/terminal-decision-report.json"
 ```
 
-A valid GATE failure atomically commits Case C and EVAL does not run.
-
-### EVAL
+EVAL:
 
 ```bash
 $PY -m sts_combat_rl.commands.non_combat_learning eval \
@@ -1511,7 +1281,7 @@ $PY -m sts_combat_rl.commands.non_combat_learning eval \
   --terminal-report "$ROOT/terminal-decision-report.json"
 ```
 
-### Finalization
+Finalization:
 
 ```bash
 $PY -m sts_combat_rl.commands.non_combat_learning finalize \
@@ -1521,191 +1291,117 @@ $PY -m sts_combat_rl.commands.non_combat_learning finalize \
   --run-head "$RUN_HEAD"
 ```
 
-`finalize` validates and retains existing canonical terminal state. It never
-recomputes A/B/C/D.
+Finalize validates/retains existing canonical terminal state and never recomputes
+A/B/C/D.
 
 ## Allowed Implementation Freedom
 
-The Implementer may choose:
+Allowed:
 
-- exact Python class/function names for the frozen types;
-- atomic-write helper details;
-- process-pool/queue implementation;
-- temporary file naming under the uncommitted area;
-- non-normative logs outside the frozen artifacts;
-- reuse of small generic execution helpers already on `main`.
+- exact Python class/function names implementing canonical types;
+- atomic-write helper details consistent with the transaction ordering above;
+- multiprocessing/process-pool implementation;
+- temporary filenames under uncommitted area;
+- bounded reuse of neutral merged helpers.
 
-The command layer must remain thin: parse frozen stage arguments, load strict
-parents, invoke one stage adapter, use canonical transition authority, and persist
-artifacts. It must not become a second workflow engine.
+Not allowed:
 
-## Explicitly Forbidden Recovery Work
-
-Do not:
-
-- cherry-pick or mechanically port rejected PR #75 orchestration;
-- preserve its large task-specific `_t075_*` lifecycle-validator cluster;
-- derive acceptance expected values from production helpers under test;
-- add per-stage retention manifests;
-- recursively search lineage to rediscover exact inputs;
-- search historical aliases for frozen sources;
-- require exact command-string/token equality as scientific evidence;
-- treat worker PID/process-binding details as scientific acceptance;
-- add acceptance-relevant schema fields outside this contract without Planner
-  revision;
-- create a generic workflow framework or task-numbered production package;
-- change T075 science to simplify implementation;
-- recollect Stage-1 sources;
-- reuse PR #75 runtime outputs as authoritative recovery evidence;
-- run Stage 0--6 before implementation, A01--A24, and exact `RUN_HEAD` are frozen.
-
-## Selective Salvage Boundary
-
-Safe to consider for salvage:
-
-1. global-ownership scientific primitive and canonical ordering helpers;
-2. merged T065 strict readers, model-input, target, training, evaluation
-   primitives;
-3. implementation-independent fixtures encoding literal frozen facts;
-4. generic spawn/process primitive only if it contains no T075 acceptance,
-   artifact, terminal, or command semantics.
-
-Default rewrite boundary:
-
-- T075 command/orchestration layer;
-- T075 terminal/finalization validators;
-- T075 command matching;
-- T075 path/retention traversal specific to PR #75;
-- T075 partial-process/PID evidence machinery;
-- acceptance tests coupled to private production helpers.
-
-Anything outside the safe list requires Maintainer proof that it implements an
-already-frozen contract row; otherwise report `ARCHITECTURE_ESCALATION`.
+- another workflow/transition authority;
+- task-specific command-token equality;
+- PID/process binding as acceptance science;
+- recursive retention/provenance discovery;
+- per-stage retention manifests;
+- task-numbered production package or generic workflow framework;
+- PR #75 orchestration/runtime outputs as authoritative state;
+- recollection or scientific-constant changes;
+- acceptance expected values generated by production helpers under test.
 
 ## Normative Acceptance Matrix
 
-Before production implementation, the Maintainer translates A01--A24 into an
+Before production implementation, the Maintainer translates A01-A24 into an
 implementation-independent executable test-only boundary. Expected literals and
 fixtures must not be generated by production code under test.
 
 | ID | Scenario | Required result |
 |---|---|---|
-| A01 | exact frozen source files and metadata | SOURCE_REUSE pass |
-| A02 | missing/hash-invalid/metadata-invalid frozen source | D at SOURCE_REUSE |
-| A03 | cross-split replay-equivalent raw candidates | deterministic global owner; not itself an error |
+| A01 | exact frozen source identities/roles/metadata | SOURCE_REUSE pass |
+| A02 | missing/hash/size/role/metadata-invalid frozen source | D at SOURCE_REUSE |
+| A03 | cross-split replay-equivalent raw candidates | deterministic global owner; not itself error |
 | A04 | exact full member-order tie between distinct rows | D at SELECTION_REPLAY |
-| A05 | owner bucket below 48/16/16 quota | D at SELECTION_REPLAY |
+| A05 | owner bucket below quota | D at SELECTION_REPLAY |
 | A06 | selected duplicate/cross-split replay overlap | D at SELECTION_REPLAY |
-| A07 | all 320 selected states replay exactly under 16x20/16-worker plan | SELECTION_REPLAY pass |
+| A07 | all 320 selected states replay exactly under fixed 16x20/16-worker plan | SELECTION_REPLAY pass |
 | A08 | one selected replay mismatch | D; no replacement |
-| A09 | TARGET missing/duplicate/nonfinite/wrong action order/continuation seed | committed invalid TARGET; D at TARGET |
-| A10 | TARGET public-input firewall or semantic lineage failure | committed invalid TARGET; D; TRAIN forbidden |
-| A11 | target work exists but StageOutcome commit absent due interruption | TARGET uncommitted; no terminal; retry allowed |
+| A09 | TARGET missing/duplicate/nonfinite/wrong action order/continuation seed | D at TARGET |
+| A10 | TARGET public-input firewall or committed semantic lineage failure | D at TARGET; TRAIN forbidden |
+| A11 | target/intermediate data exists but TARGET StageOutcome report did not commit | TARGET incomplete; retry allowed; no terminal |
 | A12 | valid committed TARGET + valid training | GATE reached |
 | A13 | valid Stage-5 pass | EVAL reached |
-| A14 | valid Stage-5 fail | terminal C at GATE; EVAL absent |
-| A15 | invalid Stage-5 evidence | terminal D at GATE |
-| A16 | valid Stage-6 pass | terminal A at EVAL |
-| A17 | valid Stage-6 fail | terminal B at EVAL |
-| A18 | invalid/missing/truncated/controller-invalid Stage-6 evidence | terminal D at EVAL |
-| A19 | initial state | empty ledger; current PREFLIGHT; terminal_case/stage null |
-| A20 | wrong RUN_HEAD, out-of-order, or conflicting duplicate | reject operationally; ledger/state/terminal unchanged |
-| A21 | interruption before any StageOutcome atomic commit | no scientific terminal; same stage retryable |
-| A22 | exact committed StageOutcome retry, including after current stage advanced or terminal committed | duplicate check precedes current-stage/terminal rejection; identity match is idempotent and science does not rerun |
-| A23 | deployable public input contains behavior/expert/target/hidden/future field | committed invalid TARGET; D at TARGET |
-| A24 | command/helper/finalizer disagrees with canonical `advance`, terminal report conflicts with ledger, or final retention fails after terminal | disagreement/conflict is IMPLEMENTATION_BUG or operational integrity failure; retention failure is operational; terminal unchanged |
+| A14 | valid Stage-5 fail | terminal C; EVAL absent |
+| A15 | invalid Stage-5 evidence | D at GATE |
+| A16 | valid Stage-6 pass | terminal A |
+| A17 | valid Stage-6 fail | terminal B |
+| A18 | invalid/missing/truncated/controller-invalid Stage-6 evidence | D at EVAL |
+| A19 | initial state | current stage PREFLIGHT; empty ledger; no terminal |
+| A20 | out-of-order, wrong RUN_HEAD, or conflicting duplicate report | operational reject; state/terminal unchanged |
+| A21 | interruption before StageOutcome atomic commit | no terminal; same stage retryable with same RUN_HEAD/parents |
+| A22 | identical committed StageOutcome retried or terminal already committed | no science rerun; idempotent existing state; terminal immutable |
+| A23 | deployable model input includes behavior/expert/target/hidden/future | D at TARGET |
+| A24 | helper/finalizer disagrees with canonical advance, or retention fails after terminal | disagreement IMPLEMENTATION_BUG; retention operational; terminal unchanged |
 
-A focused implementation regression may be added without changing semantics. A
-new semantic scenario or outcome not unambiguously covered above is a
-`CONTRACT_GAP`; production changes stop and return to Planner.
+A new semantic scenario not unambiguously covered here is a `CONTRACT_GAP` and
+returns to Planner. An implementation bug already covered by these rules is fixed
+without changing the contract. Repeated new cross-module semantic classes or
+loss of one canonical authority is `ARCHITECTURE_ESCALATION` and stops incremental
+patching.
 
 ## Verification Sequence
 
 1. Planner contract only; no production code.
-2. Maintainer execution-readiness review of exact contract.
-3. Test-only executable A01--A24 boundary.
-4. Baseline A01--A24 against clean pre-implementation `main` where meaningful.
-5. Maintainer publishes exact-head `SPEC APPROVED` /
-   `implementation_authorized=true`.
+2. Maintainer execution-readiness review of exact contract head.
+3. Test-only executable A01-A24 boundary.
+4. Baseline boundary behavior against clean pre-implementation main where meaningful.
+5. Maintainer exact-head `SPEC APPROVED` / `implementation_authorized=true`.
 6. One bounded production implementation pass.
-7. Run A01--A24, focused tests, full tests, compile/lint/format/mock gates.
-8. Maintainer reviews full matrix and architecture as one unit.
-9. Freeze exact implementation `RUN_HEAD`.
+7. Run A01-A24, focused tests, full tests, compile/lint/format/mock/diff gates.
+8. Maintainer reviews matrix and architecture as one unit.
+9. Freeze exact implementation RUN_HEAD.
 10. Run authoritative T075 stages from that clean head only.
 11. Materialize exactly one terminal A/B/C/D and final retention manifest.
 12. Planner exact-head scientific/architecture acceptance.
 13. Maintainer exact-head implementation/operational acceptance and merge.
 
-No scientific Stage 0--6 execution begins before step 9.
-
-## Review Finding Classification
-
-After implementation starts:
-
-- contract defines correct behavior and code violates it: `IMPLEMENTATION_BUG`;
-- correct behavior is not unambiguously defined: `CONTRACT_GAP`; stop and return
-  to Planner;
-- successive passes reveal a new cross-module semantic class, duplicated lifecycle
-  logic, growing validator glue, or loss of one canonical authority:
-  `ARCHITECTURE_ESCALATION`; stop incremental patching.
-
-A corrective pass followed by another newly identified cross-module semantic
-class is presumed architecture escalation unless the Maintainer can point to an
-existing acceptance row that already defines both behaviors.
-
-## Required PR Evidence
-
-The recovery PR must report:
-
-- exact approved contract commit and implementation `RUN_HEAD`;
-- proof PR #75 orchestration/runtime artifacts were not authoritative recovery
-  state;
-- T065 approved-spec and `sts_lightspeed` integration identities;
-- retained source identities and strict validation result;
-- raw candidate/group/owner counts and post-owner family/split availability;
-- selected 320-state counts and replay result;
-- all reached target/training/gate/evaluation metrics;
-- shard/worker/range and wall-clock evidence for substantial stages;
-- exact terminal A/B/C/D and terminal stage;
-- final artifact identities in `t075-retention-manifest.json`;
-- any `IMPLEMENTATION_BUG`, `CONTRACT_GAP`, or `ARCHITECTURE_ESCALATION`;
-- one next scientific recommendation only after a valid terminal result.
+No scientific Stage 0-6 execution begins before step 9.
 
 ## Final Planner Review Checklist
 
-The Planner will not provide scientific/architectural acceptance unless the exact
-final head satisfies all of the following:
+Planner acceptance requires:
 
-- T075 remains only the global-ownership cohort-partition repair scientifically;
-- one canonical acceptance transition authority exists in production;
-- AcceptanceState contains the committed-outcome ledger and terminal stage;
-- duplicate identity is checked before current-stage/terminal rejection;
-- invalid TARGET barrier failures atomically commit invalid StageOutcome while
-  interruptions remain retryable and non-terminal;
-- terminal A/B/C/D semantics are not duplicated across CLI, validators, and
-  finalization helpers;
-- B/C remain valid negative science and D remains invalid experiment;
-- artifact serialization implements the shared exact types and stage evidence
-  schemas above, without process-manager ceremony;
-- lineage is explicit and minimal rather than recursive proof machinery;
-- one exact `RUN_HEAD` owns authoritative scientific execution;
-- acceptance expected values are implementation independent;
-- pinned `$PY` owns Python/test/lint/format/mock gates;
-- command code remains thin and does not become a hidden workflow engine;
-- frozen 16-shard/16-worker operational protocol is followed and reported;
-- PID/queue/process-binding details are not scientific semantics;
-- no hidden/human-policy information enters the deployable model;
-- no frozen T065 scientific constant changed;
-- no authoritative runtime artifact from rejected PR #75 is reused;
-- no unreviewed semantic case is patched locally.
+- only scientific change is global ownership before unchanged quotas;
+- one canonical acceptance transition authority;
+- git_commit and sha256 types never conflated;
+- committed-outcome ledger and terminal_stage make retry/duplicate semantics exact;
+- transaction computes final output identities before final StageOutcome identity;
+- StageOutcome report write is the sole stage commit marker;
+- TARGET failed barrier commits invalid outcome; interruption before commit remains retryable;
+- ownership audit/selected states are same-stage sibling outputs, not parent/child commits;
+- exact T065 source roles are `current_output`;
+- B/C are valid negative science; D is invalid experiment;
+- logical Stage 3 is atomic TARGET barrier;
+- lineage is explicit/minimal and only previously committed artifacts are parents;
+- one exact RUN_HEAD owns authoritative execution;
+- fixed 16-shard/16-worker protocol is followed and reported;
+- command layer remains thin;
+- PID/queue/process binding is non-semantic;
+- no hidden/human-policy information enters deployable model;
+- no frozen T065 science changes;
+- no PR #75 runtime artifact becomes authoritative;
+- no local semantic invention beyond this contract.
 
 ## Lifecycle
 
-This recovery contract remains `DRAFT` until the Main Maintainer performs
-execution-readiness review and posts exact-head `SPEC APPROVED` /
-`implementation_authorized=true`.
+This recovery contract remains `DRAFT` until Main Maintainer posts exact-head
+`SPEC APPROVED` / `implementation_authorized=true`.
 
 That approval authorizes only bounded implementation against this contract. It
-does not authorize the Maintainer or Implementer to redesign T075 semantics.
-
-PR #75 remains the linked unmerged audit record of the rejected architecture.
+does not authorize redesign of T075 science or acceptance semantics.
