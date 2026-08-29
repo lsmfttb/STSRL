@@ -358,6 +358,15 @@ def _read_t075_bytes(path: Path, label: str) -> bytes:
         raise T075OperationalError(f"{label} is not readable") from exc
 
 
+def _read_t075_optional_evidence(path: Path | None, label: str) -> bytes | None:
+    if path is None:
+        return None
+    try:
+        return _read_t075_bytes(path, label)
+    except T075OperationalError:
+        return None
+
+
 def _required_t075_path(path: Path | None, label: str) -> Path:
     if path is None:
         raise T075OperationalError(f"T075 {label} path is required")
@@ -540,9 +549,7 @@ def run_t075_operation(
             )
         return run_t075_target(
             state,
-            _read_t075_bytes(
-                _required_t075_path(target_table, "target-table"), "target table"
-            )
+            _read_t075_optional_evidence(target_table, "target table")
             if valid
             else None,
             root,
@@ -575,18 +582,13 @@ def run_t075_operation(
             failure_code=failure_code,
         )
     if operation == "gate":
-        if valid and passed is None:
-            raise T075OperationalError("T075 gate result is required")
         if not valid and failure_code != "GATE_EVIDENCE_INVALID":
             raise T075OperationalError(
                 "invalid T075 gate requires GATE_EVIDENCE_INVALID failure code"
             )
         return run_t075_gate(
             state,
-            _read_t075_bytes(
-                _required_t075_path(stage5_report, "stage5-report"),
-                "Stage-5 report",
-            )
+            _read_t075_optional_evidence(stage5_report, "Stage-5 report")
             if valid
             else None,
             root,
@@ -595,18 +597,13 @@ def run_t075_operation(
             failure_code=failure_code,
         )
     if operation == "eval":
-        if valid and passed is None:
-            raise T075OperationalError("T075 eval result is required")
         if not valid and failure_code != "EVAL_EVIDENCE_INVALID":
             raise T075OperationalError(
                 "invalid T075 eval requires EVAL_EVIDENCE_INVALID failure code"
             )
         return run_t075_eval(
             state,
-            _read_t075_bytes(
-                _required_t075_path(stage6_report, "stage6-report"),
-                "Stage-6 report",
-            )
+            _read_t075_optional_evidence(stage6_report, "Stage-6 report")
             if valid
             else None,
             root,

@@ -3039,6 +3039,449 @@ class T065HeldoutReport:
         }
 
 
+_T065_HELDOUT_RESULT_KEYS = frozenset(
+    {
+        "selected_state_index",
+        "family",
+        "split",
+        "source_behavior",
+        "screen_state",
+        "source_act",
+        "source_floor",
+        "public_state_identity",
+        "source_behavior_action_index",
+        "source_behavior_action_identity",
+        "model_seed",
+        "model_action_index",
+        "model_action_identity",
+        "expert_action_index",
+        "expert_action_identity",
+        "model_q_floor",
+        "expert_q_floor",
+        "delta",
+        "predicted_action_values",
+        "empirical_best_action_indices",
+        "empirical_action_values",
+        "rank_correlation",
+    }
+)
+_T065_HELDOUT_REPORT_KEYS = frozenset(
+    {
+        "schema_id",
+        "schema_version",
+        "selected_model_seed",
+        "selected_validation_mae",
+        "model_results",
+        "aggregate_mean_delta",
+        "median_delta",
+        "family_mean_deltas",
+        "p_positive",
+        "non_selected_model_mean_delta",
+        "passed",
+        "problems",
+    }
+)
+
+
+def _t065_require_exact_keys(
+    value: Mapping[str, Any], expected: frozenset[str], label: str
+) -> None:
+    if set(value) != expected:
+        missing = sorted(expected - set(value))
+        extra = sorted(set(value) - expected)
+        raise ValueError(
+            f"{label} keys are not exact: missing={missing}, extra={extra}"
+        )
+
+
+def _t065_require_finite_number(value: Any, label: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise TypeError(f"{label} must be a number")
+    result = float(value)
+    if not math.isfinite(result):
+        raise ValueError(f"{label} must be finite")
+    return result
+
+
+def _t065_require_nonnegative_int(value: Any, label: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise TypeError(f"{label} must be an integer")
+    if value < 0:
+        raise ValueError(f"{label} must be non-negative")
+    return value
+
+
+def _t065_require_mapping(value: Any, label: str) -> Mapping[str, Any]:
+    if not isinstance(value, Mapping):
+        raise TypeError(f"{label} must be an object")
+    return value
+
+
+def _t065_require_string(value: Any, label: str) -> str:
+    if not isinstance(value, str):
+        raise TypeError(f"{label} must be a string")
+    return value
+
+
+def _t065_require_string_list(value: Any, label: str) -> tuple[str, ...]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        raise TypeError(f"{label} must be an array")
+    if any(not isinstance(item, str) for item in value):
+        raise TypeError(f"{label} must contain only strings")
+    return tuple(value)
+
+
+def _t065_require_finite_mapping(value: Any, label: str) -> dict[str, float]:
+    mapping = _t065_require_mapping(value, label)
+    if any(not isinstance(key, str) for key in mapping):
+        raise TypeError(f"{label} keys must be strings")
+    return {
+        key: _t065_require_finite_number(item, f"{label}[{key!r}]")
+        for key, item in mapping.items()
+    }
+
+
+def _t065_require_action_values(value: Any, label: str) -> dict[str, float]:
+    result = _t065_require_finite_mapping(value, label)
+    for key in result:
+        try:
+            index = int(key)
+        except ValueError as exc:
+            raise ValueError(f"{label} contains a non-index key") from exc
+        if index < 0 or str(index) != key:
+            raise ValueError(f"{label} contains an invalid action index")
+    return result
+
+
+def _t065_optional_finite_number(value: Any, label: str) -> float | None:
+    if value is None:
+        return None
+    return _t065_require_finite_number(value, label)
+
+
+def _t065_heldout_result_from_dict(
+    value: Mapping[str, Any], *, expected_model_seed: int
+) -> T065HeldoutStateResult:
+    _t065_require_exact_keys(value, _T065_HELDOUT_RESULT_KEYS, "T065 Stage-5 row")
+    selected_state_index = _t065_require_nonnegative_int(
+        value["selected_state_index"], "T065 Stage-5 selected_state_index"
+    )
+    family = _t065_require_string(value["family"], "T065 Stage-5 family")
+    if family not in T065_MANDATORY_FAMILIES:
+        raise ValueError("T065 Stage-5 family is not mandatory")
+    split = _t065_require_string(value["split"], "T065 Stage-5 split")
+    if split != "heldout":
+        raise ValueError("T065 Stage-5 split is not heldout")
+    source_behavior = _t065_require_string(
+        value["source_behavior"], "T065 Stage-5 source_behavior"
+    )
+    screen_state = _t065_require_string(
+        value["screen_state"], "T065 Stage-5 screen_state"
+    )
+    public_state_identity = _t065_require_string(
+        value["public_state_identity"], "T065 Stage-5 public_state_identity"
+    )
+    source_behavior_action_index = value["source_behavior_action_index"]
+    if source_behavior_action_index is not None:
+        source_behavior_action_index = _t065_require_nonnegative_int(
+            source_behavior_action_index,
+            "T065 Stage-5 source_behavior_action_index",
+        )
+    action_identity_fields = (
+        "source_behavior_action_identity",
+        "model_action_identity",
+        "expert_action_identity",
+    )
+    action_identities = {
+        field: dict(_t065_require_mapping(value[field], f"T065 Stage-5 {field}"))
+        for field in action_identity_fields
+    }
+    model_seed = _t065_require_nonnegative_int(
+        value["model_seed"], "T065 Stage-5 model_seed"
+    )
+    if model_seed != expected_model_seed:
+        raise ValueError("T065 Stage-5 row model seed does not match its result set")
+    model_action_index = _t065_require_nonnegative_int(
+        value["model_action_index"], "T065 Stage-5 model_action_index"
+    )
+    expert_action_index = _t065_require_nonnegative_int(
+        value["expert_action_index"], "T065 Stage-5 expert_action_index"
+    )
+    empirical_action_values = _t065_require_action_values(
+        value["empirical_action_values"], "T065 Stage-5 empirical_action_values"
+    )
+    if not empirical_action_values:
+        raise ValueError("T065 Stage-5 empirical action values are empty")
+    for action_index in (model_action_index, expert_action_index):
+        if str(action_index) not in empirical_action_values:
+            raise ValueError("T065 Stage-5 action is absent from empirical values")
+    empirical_best_raw = value["empirical_best_action_indices"]
+    if not isinstance(empirical_best_raw, Sequence) or isinstance(
+        empirical_best_raw, (str, bytes)
+    ):
+        raise TypeError("T065 Stage-5 empirical best actions must be an array")
+    empirical_best = tuple(
+        _t065_require_nonnegative_int(item, "T065 Stage-5 empirical best action")
+        for item in empirical_best_raw
+    )
+    if len(set(empirical_best)) != len(empirical_best):
+        raise ValueError("T065 Stage-5 empirical best actions contain duplicates")
+    best_value = max(empirical_action_values.values())
+    expected_best = tuple(
+        int(action_index)
+        for action_index in sorted(empirical_action_values, key=int)
+        if empirical_action_values[action_index] == best_value
+    )
+    if set(empirical_best) != set(expected_best):
+        raise ValueError("T065 Stage-5 empirical best actions are inconsistent")
+    predicted_action_values = _t065_require_action_values(
+        value["predicted_action_values"], "T065 Stage-5 predicted_action_values"
+    )
+    if not predicted_action_values:
+        raise ValueError("T065 Stage-5 predicted action values are empty")
+    if str(model_action_index) not in predicted_action_values:
+        raise ValueError("T065 Stage-5 model action is absent from predictions")
+    model_prediction = predicted_action_values[str(model_action_index)]
+    max_prediction = max(predicted_action_values.values())
+    expected_model_action = min(
+        int(action_index)
+        for action_index, candidate in predicted_action_values.items()
+        if candidate == max_prediction
+    )
+    if (
+        model_prediction != max_prediction
+        or model_action_index != expected_model_action
+    ):
+        raise ValueError("T065 Stage-5 model action is not the predicted maximum")
+    model_q_floor = _t065_require_finite_number(
+        value["model_q_floor"], "T065 Stage-5 model_q_floor"
+    )
+    expert_q_floor = _t065_require_finite_number(
+        value["expert_q_floor"], "T065 Stage-5 expert_q_floor"
+    )
+    delta = _t065_require_finite_number(value["delta"], "T065 Stage-5 delta")
+    if not math.isclose(
+        model_q_floor, empirical_action_values[str(model_action_index)]
+    ) or not math.isclose(
+        expert_q_floor, empirical_action_values[str(expert_action_index)]
+    ):
+        raise ValueError("T065 Stage-5 q floors are inconsistent with empirical values")
+    if not math.isclose(delta, model_q_floor - expert_q_floor):
+        raise ValueError("T065 Stage-5 delta is inconsistent with q floors")
+    rank_correlation = _t065_optional_finite_number(
+        value["rank_correlation"], "T065 Stage-5 rank_correlation"
+    )
+    if rank_correlation is not None and not -1.0 <= rank_correlation <= 1.0:
+        raise ValueError("T065 Stage-5 rank correlation is outside [-1, 1]")
+    return T065HeldoutStateResult(
+        selected_state_index=selected_state_index,
+        family=family,
+        split=split,
+        source_behavior=source_behavior,
+        screen_state=screen_state,
+        source_act=_t065_optional_finite_number(
+            value["source_act"], "T065 Stage-5 source_act"
+        ),
+        source_floor=_t065_optional_finite_number(
+            value["source_floor"], "T065 Stage-5 source_floor"
+        ),
+        public_state_identity=public_state_identity,
+        source_behavior_action_index=source_behavior_action_index,
+        source_behavior_action_identity=action_identities[
+            "source_behavior_action_identity"
+        ],
+        model_seed=model_seed,
+        model_action_index=model_action_index,
+        model_action_identity=action_identities["model_action_identity"],
+        expert_action_index=expert_action_index,
+        expert_action_identity=action_identities["expert_action_identity"],
+        model_q_floor=model_q_floor,
+        expert_q_floor=expert_q_floor,
+        delta=delta,
+        predicted_action_values=predicted_action_values,
+        empirical_best_action_indices=empirical_best,
+        empirical_action_values=empirical_action_values,
+        rank_correlation=rank_correlation,
+    )
+
+
+def t065_stage5_report_from_dict(value: Mapping[str, Any]) -> T065HeldoutReport:
+    """Read and validate one current-schema serialized Stage-5 report."""
+
+    if not isinstance(value, Mapping):
+        raise TypeError("T065 Stage-5 report must be an object")
+    _t065_require_exact_keys(value, _T065_HELDOUT_REPORT_KEYS, "T065 Stage-5 report")
+    if value["schema_id"] != T065_STAGE5_REPORT_SCHEMA_ID:
+        raise ValueError("unsupported T065 Stage-5 report schema")
+    if value["schema_version"] != 1:
+        raise ValueError("unsupported T065 Stage-5 report schema version")
+    selected_model_seed = _t065_require_nonnegative_int(
+        value["selected_model_seed"], "T065 Stage-5 selected_model_seed"
+    )
+    if selected_model_seed not in T065_MODEL_SEEDS:
+        raise ValueError("T065 Stage-5 selected model seed is not frozen")
+    selected_validation_mae = _t065_require_finite_number(
+        value["selected_validation_mae"], "T065 Stage-5 selected_validation_mae"
+    )
+    if selected_validation_mae < 0.0:
+        raise ValueError("T065 Stage-5 selected validation MAE is negative")
+    raw_model_results = _t065_require_mapping(
+        value["model_results"], "T065 Stage-5 model_results"
+    )
+    expected_result_keys = {str(seed) for seed in T065_MODEL_SEEDS}
+    if set(raw_model_results) != expected_result_keys:
+        raise ValueError("T065 Stage-5 model result seed set is not frozen")
+    model_results: dict[str, tuple[T065HeldoutStateResult, ...]] = {}
+    for seed in T065_MODEL_SEEDS:
+        raw_results = raw_model_results[str(seed)]
+        if not isinstance(raw_results, Sequence) or isinstance(
+            raw_results, (str, bytes)
+        ):
+            raise TypeError("T065 Stage-5 model result set must be an array")
+        if len(raw_results) != 64:
+            raise ValueError("T065 Stage-5 model result set must contain 64 rows")
+        parsed = tuple(
+            _t065_heldout_result_from_dict(row, expected_model_seed=seed)
+            for row in raw_results
+            if isinstance(row, Mapping)
+        )
+        if len(parsed) != len(raw_results):
+            raise TypeError("T065 Stage-5 result is not an object")
+        if len({result.selected_state_index for result in parsed}) != 64:
+            raise ValueError("T065 Stage-5 result state indices are duplicated")
+        family_counts = {
+            family: sum(result.family == family for result in parsed)
+            for family in T065_MANDATORY_FAMILIES
+        }
+        if any(count != 16 for count in family_counts.values()):
+            raise ValueError("T065 Stage-5 result family counts are not 16 each")
+        model_results[str(seed)] = parsed
+    selected_results = model_results[str(selected_model_seed)]
+    other_seed = next(seed for seed in T065_MODEL_SEEDS if seed != selected_model_seed)
+    non_selected_results = model_results[str(other_seed)]
+    selected_by_index = {
+        result.selected_state_index: result for result in selected_results
+    }
+    other_by_index = {
+        result.selected_state_index: result for result in non_selected_results
+    }
+    if set(selected_by_index) != set(other_by_index):
+        raise ValueError("T065 Stage-5 model result state sets differ")
+    for index, selected in selected_by_index.items():
+        other = other_by_index[index]
+        if (
+            selected.family,
+            selected.split,
+            selected.public_state_identity,
+            selected.expert_action_index,
+            selected.expert_action_identity,
+            selected.empirical_action_values,
+            selected.empirical_best_action_indices,
+        ) != (
+            other.family,
+            other.split,
+            other.public_state_identity,
+            other.expert_action_index,
+            other.expert_action_identity,
+            other.empirical_action_values,
+            other.empirical_best_action_indices,
+        ):
+            raise ValueError(
+                f"T065 Stage-5 state {index} differs between model results"
+            )
+    deltas = tuple(result.delta for result in selected_results)
+    aggregate_mean_delta = _t065_require_finite_number(
+        value["aggregate_mean_delta"], "T065 Stage-5 aggregate_mean_delta"
+    )
+    median_delta = _t065_require_finite_number(
+        value["median_delta"], "T065 Stage-5 median_delta"
+    )
+    family_mean_deltas = _t065_require_finite_mapping(
+        value["family_mean_deltas"], "T065 Stage-5 family_mean_deltas"
+    )
+    if set(family_mean_deltas) != set(T065_MANDATORY_FAMILIES):
+        raise ValueError("T065 Stage-5 family means are not in frozen order")
+    expected_aggregate = statistics.fmean(deltas)
+    expected_median = statistics.median(deltas)
+    expected_family_means = {
+        family: statistics.fmean(
+            result.delta for result in selected_results if result.family == family
+        )
+        for family in T065_MANDATORY_FAMILIES
+    }
+    if not math.isclose(aggregate_mean_delta, expected_aggregate):
+        raise ValueError("T065 Stage-5 aggregate mean is inconsistent")
+    if not math.isclose(median_delta, expected_median):
+        raise ValueError("T065 Stage-5 median is inconsistent")
+    if any(
+        not math.isclose(family_mean_deltas[family], expected_family_means[family])
+        for family in T065_MANDATORY_FAMILIES
+    ):
+        raise ValueError("T065 Stage-5 family means are inconsistent")
+    p_positive = _t065_require_finite_number(
+        value["p_positive"], "T065 Stage-5 p_positive"
+    )
+    expected_p_positive = heldout_bootstrap_probability(selected_results)
+    if not math.isclose(p_positive, expected_p_positive):
+        raise ValueError("T065 Stage-5 bootstrap probability is inconsistent")
+    non_selected_mean = _t065_require_finite_number(
+        value["non_selected_model_mean_delta"],
+        "T065 Stage-5 non_selected_model_mean_delta",
+    )
+    expected_non_selected_mean = statistics.fmean(
+        result.delta for result in non_selected_results
+    )
+    if not math.isclose(non_selected_mean, expected_non_selected_mean):
+        raise ValueError("T065 Stage-5 non-selected mean is inconsistent")
+    conditions = (
+        (aggregate_mean_delta > 0.0, "aggregate mean delta is not positive"),
+        (median_delta >= 0.0, "median delta is negative"),
+        (
+            sum(family_mean_deltas[family] >= 0.0 for family in T065_MANDATORY_FAMILIES)
+            >= 3,
+            "fewer than three family mean deltas are non-negative",
+        ),
+        (p_positive >= 0.90, "Stage 5 bootstrap probability is below 0.90"),
+        (
+            non_selected_mean >= 0.0,
+            "non-selected model seed has a negative aggregate delta",
+        ),
+    )
+    expected_problems = tuple(
+        message for condition, message in conditions if not condition
+    )
+    problems = _t065_require_string_list(value["problems"], "T065 Stage-5 problems")
+    if problems != expected_problems:
+        raise ValueError("T065 Stage-5 problems do not match frozen gate conditions")
+    passed = value["passed"]
+    if not isinstance(passed, bool):
+        raise TypeError("T065 Stage-5 passed must be a boolean")
+    if passed != (not expected_problems):
+        raise ValueError("T065 Stage-5 passed flag is inconsistent")
+    return T065HeldoutReport(
+        selected_model_seed=selected_model_seed,
+        selected_validation_mae=selected_validation_mae,
+        model_results=model_results,
+        aggregate_mean_delta=aggregate_mean_delta,
+        median_delta=median_delta,
+        family_mean_deltas=family_mean_deltas,
+        p_positive=p_positive,
+        non_selected_model_mean_delta=non_selected_mean,
+        passed=passed,
+        problems=problems,
+    )
+
+
+def read_t065_stage5_report(path: Path) -> T065HeldoutReport:
+    """Read and validate a current-schema serialized Stage-5 report."""
+
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"T065 Stage-5 report cannot be read: {path}") from exc
+    return t065_stage5_report_from_dict(value)
+
+
 def evaluate_model_on_split(
     model_run: T065ModelRun,
     table: T065TargetTable,
@@ -3400,6 +3843,181 @@ class T065Stage6Report:
             "problems": list(self.problems),
             "execution_evidence": dict(self.execution_evidence),
         }
+
+
+_T065_COVERAGE_KEYS = frozenset(
+    {
+        "D",
+        "L",
+        "M",
+        "F",
+        "learned_coverage",
+        "mandatory_failure_rate",
+        "passed",
+    }
+)
+_T065_STAGE6_REPORT_KEYS = frozenset(
+    {
+        "schema_id",
+        "schema_version",
+        "paired_terminal_floor_deltas",
+        "learned_terminal_floor_mean",
+        "expert_terminal_floor_mean",
+        "mean_terminal_floor_delta",
+        "p_positive",
+        "coverage",
+        "learned_act2_entry_count",
+        "expert_act2_entry_count",
+        "controller_error_count",
+        "truncation_count",
+        "valid",
+        "passed",
+        "problems",
+        "execution_evidence",
+    }
+)
+
+
+def t065_stage6_report_from_dict(value: Mapping[str, Any]) -> T065Stage6Report:
+    """Read and validate one current-schema serialized Stage-6 report."""
+
+    if not isinstance(value, Mapping):
+        raise TypeError("T065 Stage-6 report must be an object")
+    _t065_require_exact_keys(value, _T065_STAGE6_REPORT_KEYS, "T065 Stage-6 report")
+    if value["schema_id"] != T065_STAGE6_REPORT_SCHEMA_ID:
+        raise ValueError("unsupported T065 Stage-6 report schema")
+    if value["schema_version"] != 1:
+        raise ValueError("unsupported T065 Stage-6 report schema version")
+    raw_deltas = value["paired_terminal_floor_deltas"]
+    if not isinstance(raw_deltas, Sequence) or isinstance(raw_deltas, (str, bytes)):
+        raise TypeError("T065 Stage-6 paired deltas must be an array")
+    if len(raw_deltas) != 256:
+        raise ValueError("T065 Stage-6 paired deltas must contain 256 rows")
+    deltas = tuple(
+        _t065_require_finite_number(item, "T065 Stage-6 paired delta")
+        for item in raw_deltas
+    )
+    learned_mean = _t065_require_finite_number(
+        value["learned_terminal_floor_mean"],
+        "T065 Stage-6 learned_terminal_floor_mean",
+    )
+    expert_mean = _t065_require_finite_number(
+        value["expert_terminal_floor_mean"],
+        "T065 Stage-6 expert_terminal_floor_mean",
+    )
+    mean_delta = _t065_require_finite_number(
+        value["mean_terminal_floor_delta"],
+        "T065 Stage-6 mean_terminal_floor_delta",
+    )
+    expected_mean_delta = statistics.fmean(deltas)
+    if not math.isclose(mean_delta, expected_mean_delta):
+        raise ValueError("T065 Stage-6 mean delta is inconsistent")
+    if not math.isclose(learned_mean - expert_mean, mean_delta):
+        raise ValueError("T065 Stage-6 terminal means are inconsistent")
+    p_positive = _t065_require_finite_number(
+        value["p_positive"], "T065 Stage-6 p_positive"
+    )
+    if not 0.0 <= p_positive <= 1.0:
+        raise ValueError("T065 Stage-6 p_positive is outside [0, 1]")
+    expected_p_positive = matched_bootstrap_probability(deltas)
+    if not math.isclose(p_positive, expected_p_positive):
+        raise ValueError("T065 Stage-6 bootstrap probability is inconsistent")
+    raw_coverage = _t065_require_mapping(value["coverage"], "T065 Stage-6 coverage")
+    _t065_require_exact_keys(raw_coverage, _T065_COVERAGE_KEYS, "T065 coverage")
+    coverage = T065Coverage(
+        D=_t065_require_nonnegative_int(raw_coverage["D"], "T065 coverage D"),
+        L=_t065_require_nonnegative_int(raw_coverage["L"], "T065 coverage L"),
+        M=_t065_require_nonnegative_int(raw_coverage["M"], "T065 coverage M"),
+        F=_t065_require_nonnegative_int(raw_coverage["F"], "T065 coverage F"),
+    )
+    learned_coverage = _t065_require_finite_number(
+        raw_coverage["learned_coverage"], "T065 coverage learned_coverage"
+    )
+    mandatory_failure_rate = _t065_require_finite_number(
+        raw_coverage["mandatory_failure_rate"],
+        "T065 coverage mandatory_failure_rate",
+    )
+    if not math.isclose(learned_coverage, coverage.learned_coverage):
+        raise ValueError("T065 learned coverage is inconsistent")
+    if not math.isclose(mandatory_failure_rate, coverage.mandatory_failure_rate):
+        raise ValueError("T065 mandatory failure rate is inconsistent")
+    coverage_passed = raw_coverage["passed"]
+    if not isinstance(coverage_passed, bool):
+        raise TypeError("T065 coverage passed must be a boolean")
+    if coverage_passed != coverage.passed:
+        raise ValueError("T065 coverage passed flag is inconsistent")
+    counts = {}
+    for field_name in (
+        "learned_act2_entry_count",
+        "expert_act2_entry_count",
+        "controller_error_count",
+        "truncation_count",
+    ):
+        count = _t065_require_nonnegative_int(
+            value[field_name], f"T065 Stage-6 {field_name}"
+        )
+        if count > 256:
+            raise ValueError(f"T065 Stage-6 {field_name} exceeds the cohort")
+        counts[field_name] = count
+    valid = value["valid"]
+    if not isinstance(valid, bool):
+        raise TypeError("T065 Stage-6 valid must be a boolean")
+    if not valid:
+        raise ValueError("T065 Stage-6 report is not a valid comparison")
+    if counts["controller_error_count"] or counts["truncation_count"]:
+        raise ValueError("T065 Stage-6 valid report contains failed runs")
+    passed = (
+        mean_delta > 0.0
+        and p_positive >= 0.80
+        and counts["learned_act2_entry_count"] >= counts["expert_act2_entry_count"]
+        and coverage.passed
+        and (
+            counts["learned_act2_entry_count"] > counts["expert_act2_entry_count"]
+            or p_positive >= 0.95
+        )
+    )
+    expected_problems = (
+        ("one or more frozen Stage 6 gate conditions failed",) if not passed else ()
+    )
+    problems = _t065_require_string_list(value["problems"], "T065 Stage-6 problems")
+    if problems != expected_problems:
+        raise ValueError("T065 Stage-6 problems do not match frozen gate conditions")
+    supplied_passed = value["passed"]
+    if not isinstance(supplied_passed, bool):
+        raise TypeError("T065 Stage-6 passed must be a boolean")
+    if supplied_passed != passed:
+        raise ValueError("T065 Stage-6 passed flag is inconsistent")
+    execution_evidence = dict(
+        _t065_require_mapping(
+            value["execution_evidence"], "T065 Stage-6 execution_evidence"
+        )
+    )
+    return T065Stage6Report(
+        paired_terminal_floor_deltas=deltas,
+        learned_terminal_floor_mean=learned_mean,
+        expert_terminal_floor_mean=expert_mean,
+        mean_terminal_floor_delta=mean_delta,
+        p_positive=p_positive,
+        coverage=coverage,
+        learned_act2_entry_count=counts["learned_act2_entry_count"],
+        expert_act2_entry_count=counts["expert_act2_entry_count"],
+        controller_error_count=counts["controller_error_count"],
+        truncation_count=counts["truncation_count"],
+        valid=True,
+        passed=passed,
+        problems=problems,
+        execution_evidence=execution_evidence,
+    )
+
+
+def read_t065_stage6_report(path: Path) -> T065Stage6Report:
+    """Read and validate a current-schema serialized Stage-6 report."""
+
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"T065 Stage-6 report cannot be read: {path}") from exc
+    return t065_stage6_report_from_dict(value)
 
 
 def build_stage6_report(

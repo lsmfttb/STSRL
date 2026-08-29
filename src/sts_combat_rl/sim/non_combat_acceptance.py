@@ -1113,6 +1113,37 @@ def _selected_training_checkpoint(
     return selection_identity, selected_checkpoint
 
 
+def _read_t065_payload(payload: bytes, reader: Any, label: str) -> Any:
+    """Run an existing T065 path reader against an in-memory command payload."""
+
+    if not isinstance(payload, bytes):
+        raise TypeError(f"{label} payload must be bytes")
+    with tempfile.TemporaryDirectory(prefix="t075-t065-") as temporary_directory:
+        path = Path(temporary_directory) / "payload.json"
+        path.write_bytes(payload)
+        return reader(path)
+
+
+def _invalid_t075_evidence(
+    state: AcceptanceState,
+    repository_root: Path,
+    *,
+    stage: str,
+    parents: Sequence[ArtifactIdentity],
+    failure_code: str,
+) -> AcceptanceState:
+    return _stage_payload_outcome(
+        state,
+        repository_root,
+        stage=stage,
+        parents=parents,
+        payloads=(),
+        valid=False,
+        passed=False,
+        failure_code=failure_code,
+    )
+
+
 def run_t075_preflight(
     state: AcceptanceState,
     audit: Mapping[str, Any] | None,
@@ -1250,21 +1281,52 @@ def run_t075_target(
     valid: bool = True,
     failure_code: str | None = None,
 ) -> AcceptanceState:
-    if valid and target_table_payload is None:
-        raise T075OperationalError("valid T075 target requires a target table")
-    if valid and failure_code is not None:
+    parents = (
+        _committed_output(state, "preflight_audit", "preflight-audit.json"),
+        _committed_output(state, "selected_states", "selected-states.jsonl"),
+    )
+    if not valid:
+        if failure_code != "TARGET_INVALID":
+            raise T075OperationalError(
+                "invalid T075 target requires TARGET_INVALID failure code"
+            )
+        return _invalid_t075_evidence(
+            state,
+            repository_root,
+            stage="TARGET",
+            parents=parents,
+            failure_code=failure_code,
+        )
+    if failure_code is not None:
         raise T075OperationalError("valid target adapter cannot carry a failure code")
+    if target_table_payload is None:
+        return _invalid_t075_evidence(
+            state,
+            repository_root,
+            stage="TARGET",
+            parents=parents,
+            failure_code="TARGET_INVALID",
+        )
+    try:
+        from sts_combat_rl.sim.non_combat_learning import read_target_table
+
+        _read_t065_payload(target_table_payload, read_target_table, "T065 target table")
+    except (AttributeError, IndexError, KeyError, OSError, TypeError, ValueError):
+        return _invalid_t075_evidence(
+            state,
+            repository_root,
+            stage="TARGET",
+            parents=parents,
+            failure_code="TARGET_INVALID",
+        )
     return _stage_payload_outcome(
         state,
         repository_root,
         stage="TARGET",
-        parents=(
-            _committed_output(state, "preflight_audit", "preflight-audit.json"),
-            _committed_output(state, "selected_states", "selected-states.jsonl"),
-        ),
-        payloads=(("target_table", target_table_payload),) if valid else (),
-        valid=valid,
-        passed=valid,
+        parents=parents,
+        payloads=(("target_table", target_table_payload),),
+        valid=True,
+        passed=True,
         failure_code=failure_code,
     )
 
@@ -1329,25 +1391,63 @@ def run_t075_gate(
     stage5_report_payload: bytes | None,
     repository_root: Path,
     *,
-    passed: bool,
+    passed: bool | None = None,
     valid: bool = True,
     failure_code: str | None = None,
 ) -> AcceptanceState:
-    if valid and stage5_report_payload is None:
-        raise T075OperationalError("valid T075 gate requires a Stage-5 report")
+    if not valid:
+        if failure_code != "GATE_EVIDENCE_INVALID":
+            raise T075OperationalError(
+                "invalid T075 gate requires GATE_EVIDENCE_INVALID failure code"
+            )
+    elif failure_code is not None:
+        raise T075OperationalError("valid gate adapter cannot carry a failure code")
     _, selected_checkpoint = _selected_training_checkpoint(state, repository_root)
+    parents = (
+        _committed_output(state, "target_table", "target-table.json"),
+        _committed_output(state, "training_selection", "training-selection.json"),
+        selected_checkpoint,
+    )
+    if not valid:
+        return _invalid_t075_evidence(
+            state,
+            repository_root,
+            stage="GATE",
+            parents=parents,
+            failure_code=failure_code,
+        )
+    if stage5_report_payload is None:
+        return _invalid_t075_evidence(
+            state,
+            repository_root,
+            stage="GATE",
+            parents=parents,
+            failure_code="GATE_EVIDENCE_INVALID",
+        )
+    try:
+        from sts_combat_rl.sim.non_combat_learning import read_t065_stage5_report
+
+        stage5_report = _read_t065_payload(
+            stage5_report_payload,
+            read_t065_stage5_report,
+            "T065 Stage-5 report",
+        )
+    except (AttributeError, IndexError, KeyError, OSError, TypeError, ValueError):
+        return _invalid_t075_evidence(
+            state,
+            repository_root,
+            stage="GATE",
+            parents=parents,
+            failure_code="GATE_EVIDENCE_INVALID",
+        )
     return _stage_payload_outcome(
         state,
         repository_root,
         stage="GATE",
-        parents=(
-            _committed_output(state, "target_table", "target-table.json"),
-            _committed_output(state, "training_selection", "training-selection.json"),
-            selected_checkpoint,
-        ),
-        payloads=(("stage5_report", stage5_report_payload),) if valid else (),
-        valid=valid,
-        passed=passed,
+        parents=parents,
+        payloads=(("stage5_report", stage5_report_payload),),
+        valid=True,
+        passed=stage5_report.passed,
         failure_code=failure_code,
     )
 
@@ -1357,25 +1457,63 @@ def run_t075_eval(
     stage6_report_payload: bytes | None,
     repository_root: Path,
     *,
-    passed: bool,
+    passed: bool | None = None,
     valid: bool = True,
     failure_code: str | None = None,
 ) -> AcceptanceState:
-    if valid and stage6_report_payload is None:
-        raise T075OperationalError("valid T075 eval requires a Stage-6 report")
+    if not valid:
+        if failure_code != "EVAL_EVIDENCE_INVALID":
+            raise T075OperationalError(
+                "invalid T075 eval requires EVAL_EVIDENCE_INVALID failure code"
+            )
+    elif failure_code is not None:
+        raise T075OperationalError("valid eval adapter cannot carry a failure code")
     _, selected_checkpoint = _selected_training_checkpoint(state, repository_root)
+    parents = (
+        _committed_output(state, "stage5_report", "heldout-gate-report.json"),
+        _committed_output(state, "training_selection", "training-selection.json"),
+        selected_checkpoint,
+    )
+    if not valid:
+        return _invalid_t075_evidence(
+            state,
+            repository_root,
+            stage="EVAL",
+            parents=parents,
+            failure_code=failure_code,
+        )
+    if stage6_report_payload is None:
+        return _invalid_t075_evidence(
+            state,
+            repository_root,
+            stage="EVAL",
+            parents=parents,
+            failure_code="EVAL_EVIDENCE_INVALID",
+        )
+    try:
+        from sts_combat_rl.sim.non_combat_learning import read_t065_stage6_report
+
+        stage6_report = _read_t065_payload(
+            stage6_report_payload,
+            read_t065_stage6_report,
+            "T065 Stage-6 report",
+        )
+    except (AttributeError, IndexError, KeyError, OSError, TypeError, ValueError):
+        return _invalid_t075_evidence(
+            state,
+            repository_root,
+            stage="EVAL",
+            parents=parents,
+            failure_code="EVAL_EVIDENCE_INVALID",
+        )
     return _stage_payload_outcome(
         state,
         repository_root,
         stage="EVAL",
-        parents=(
-            _committed_output(state, "stage5_report", "heldout-gate-report.json"),
-            _committed_output(state, "training_selection", "training-selection.json"),
-            selected_checkpoint,
-        ),
-        payloads=(("stage6_report", stage6_report_payload),) if valid else (),
-        valid=valid,
-        passed=passed,
+        parents=parents,
+        payloads=(("stage6_report", stage6_report_payload),),
+        valid=True,
+        passed=stage6_report.passed,
         failure_code=failure_code,
     )
 
