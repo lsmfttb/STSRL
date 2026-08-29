@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import shlex
+import subprocess
 import sys
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, replace
@@ -105,14 +106,22 @@ def _add_t075_common_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--run-head", required=True)
 
 
+def _add_t075_validity_arguments(
+    parser: argparse.ArgumentParser, *, failure_codes: tuple[str, ...]
+) -> None:
+    validity = parser.add_mutually_exclusive_group(required=True)
+    validity.add_argument("--valid", action="store_true")
+    validity.add_argument("--invalid", action="store_true")
+    parser.add_argument("--failure-code", choices=failure_codes)
+
+
 def _add_t075_result_arguments(
     parser: argparse.ArgumentParser, *, failure_code: str
 ) -> None:
-    result = parser.add_mutually_exclusive_group(required=True)
+    _add_t075_validity_arguments(parser, failure_codes=(failure_code,))
+    result = parser.add_mutually_exclusive_group()
     result.add_argument("--passed", action="store_true")
     result.add_argument("--failed", action="store_true")
-    result.add_argument("--invalid", action="store_true")
-    parser.add_argument("--failure-code", choices=(failure_code,))
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -215,49 +224,59 @@ def build_parser() -> argparse.ArgumentParser:
         "preflight", help="commit the T075 preflight audit"
     )
     _add_t075_common_arguments(t075_preflight)
-    t075_preflight.add_argument("--audit", type=Path, required=True)
+    t075_preflight.add_argument("--audit", type=Path)
+    _add_t075_validity_arguments(t075_preflight, failure_codes=("PREFLIGHT_INVALID",))
 
     t075_reuse = t075_operations.add_parser(
         "validate-reuse", help="commit validation of the two frozen T065 sources"
     )
     _add_t075_common_arguments(t075_reuse)
-    t075_reuse.add_argument("--audit", type=Path, required=True)
+    t075_reuse.add_argument("--audit", type=Path)
+    _add_t075_validity_arguments(t075_reuse, failure_codes=("SOURCE_REUSE_INVALID",))
 
     t075_select = t075_operations.add_parser(
         "select", help="commit global replay ownership and selected states"
     )
     _add_t075_common_arguments(t075_select)
-    t075_select.add_argument("--ownership-audit", type=Path, required=True)
-    t075_select.add_argument("--selected-states", type=Path, required=True)
+    t075_select.add_argument("--ownership-audit", type=Path)
+    t075_select.add_argument("--selected-states", type=Path)
+    _add_t075_validity_arguments(
+        t075_select,
+        failure_codes=(
+            "SELECTION_MEMBER_ORDER_TIE",
+            "SELECTION_OWNER_QUOTA_SHORTAGE",
+            "SELECTION_REPLAY_INVALID",
+        ),
+    )
 
     t075_target = t075_operations.add_parser(
         "target", help="commit the inherited T065 target table"
     )
     _add_t075_common_arguments(t075_target)
-    t075_target.add_argument("--target-table", type=Path, required=True)
-    t075_target.add_argument("--invalid", action="store_true")
-    t075_target.add_argument("--failure-code", choices=("TARGET_INVALID",))
+    t075_target.add_argument("--target-table", type=Path)
+    _add_t075_validity_arguments(t075_target, failure_codes=("TARGET_INVALID",))
 
     t075_train = t075_operations.add_parser(
         "train", help="commit the two inherited T065 checkpoints and selection"
     )
     _add_t075_common_arguments(t075_train)
-    t075_train.add_argument("--checkpoint-653001", type=Path, required=True)
-    t075_train.add_argument("--checkpoint-653002", type=Path, required=True)
-    t075_train.add_argument("--training-selection", type=Path, required=True)
+    t075_train.add_argument("--checkpoint-653001", type=Path)
+    t075_train.add_argument("--checkpoint-653002", type=Path)
+    t075_train.add_argument("--training-selection", type=Path)
+    _add_t075_validity_arguments(t075_train, failure_codes=("TRAIN_INVALID",))
 
     t075_gate = t075_operations.add_parser(
         "gate", help="commit valid Stage-5 evidence or a Stage-5 evidence failure"
     )
     _add_t075_common_arguments(t075_gate)
-    t075_gate.add_argument("--stage5-report", type=Path, required=True)
+    t075_gate.add_argument("--stage5-report", type=Path)
     _add_t075_result_arguments(t075_gate, failure_code="GATE_EVIDENCE_INVALID")
 
     t075_eval = t075_operations.add_parser(
         "eval", help="commit valid Stage-6 evidence or a Stage-6 evidence failure"
     )
     _add_t075_common_arguments(t075_eval)
-    t075_eval.add_argument("--stage6-report", type=Path, required=True)
+    t075_eval.add_argument("--stage6-report", type=Path)
     _add_t075_result_arguments(t075_eval, failure_code="EVAL_EVIDENCE_INVALID")
 
     t075_finalize = t075_operations.add_parser(
@@ -334,6 +353,58 @@ def _required_t075_path(path: Path | None, label: str) -> Path:
     return path
 
 
+def _t075_git_output(repository_root: Path, *arguments: str) -> str:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repository_root), *arguments],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise T075OperationalError(
+            f"repository_root is not a usable git checkout: {repository_root}"
+        ) from exc
+    return result.stdout.strip()
+
+
+def _validate_t075_checkout(repository_root: Path, run_head: str) -> None:
+    repository_root = repository_root.resolve()
+    if not repository_root.is_dir():
+        raise T075OperationalError(
+            f"repository_root is not a directory: {repository_root}"
+        )
+    checkout_root = Path(
+        _t075_git_output(repository_root, "rev-parse", "--show-toplevel")
+    ).resolve()
+    if checkout_root != repository_root:
+        raise T075OperationalError(
+            "repository_root must be the top-level directory of the git checkout"
+        )
+    status = _t075_git_output(repository_root, "status", "--porcelain")
+    if status:
+        raise T075OperationalError("T075 commands require a clean git checkout")
+    actual_head = _t075_git_output(repository_root, "rev-parse", "HEAD")
+    if actual_head != run_head:
+        raise T075OperationalError(
+            f"T075 run_head does not match checkout HEAD: {run_head} != {actual_head}"
+        )
+
+
+def _validate_t075_input_paths(
+    repository_root: Path,
+    paths: tuple[tuple[str, Path | None], ...],
+) -> None:
+    for label, path in paths:
+        if path is None:
+            continue
+        resolved_path = path.resolve()
+        if repository_root not in resolved_path.parents:
+            raise T075OperationalError(
+                f"T075 {label} path must be within repository_root: {path}"
+            )
+
+
 def run_t075_operation(
     operation: str,
     *,
@@ -359,21 +430,45 @@ def run_t075_operation(
 
     if operation not in T075_COMMAND_OPERATIONS:
         raise T075OperationalError(f"unsupported T075 operation: {operation!r}")
-    root = Path(repository_root)
+    root = Path(repository_root).resolve()
+    _validate_t075_checkout(root, run_head)
+    _validate_t075_input_paths(
+        root,
+        (
+            ("audit", audit),
+            ("ownership-audit", ownership_audit),
+            ("selected-states", selected_states),
+            ("target-table", target_table),
+            ("checkpoint-653001", checkpoint_653001),
+            ("checkpoint-653002", checkpoint_653002),
+            ("training-selection", training_selection),
+            ("stage5-report", stage5_report),
+            ("stage6-report", stage6_report),
+            ("entry-metadata", entry_metadata),
+        ),
+    )
     state = reconstruct_t075_state(root, run_head)
     if operation == "preflight":
         return run_t075_preflight(
             state,
-            _read_t075_mapping(_required_t075_path(audit, "audit"), "preflight audit"),
+            _read_t075_mapping(_required_t075_path(audit, "audit"), "preflight audit")
+            if valid
+            else None,
             root,
+            valid=valid,
+            failure_code=failure_code,
         )
     if operation == "validate-reuse":
         return run_t075_validate_reuse(
             state,
             _read_t075_mapping(
                 _required_t075_path(audit, "audit"), "source-reuse audit"
-            ),
+            )
+            if valid
+            else None,
             root,
+            valid=valid,
+            failure_code=failure_code,
         )
     if operation == "select":
         return run_t075_selection(
@@ -381,12 +476,18 @@ def run_t075_operation(
             _read_t075_mapping(
                 _required_t075_path(ownership_audit, "ownership-audit"),
                 "ownership audit",
-            ),
+            )
+            if valid
+            else None,
             _read_t075_bytes(
                 _required_t075_path(selected_states, "selected-states"),
                 "selected states",
-            ),
+            )
+            if valid
+            else None,
             root,
+            valid=valid,
+            failure_code=failure_code,
         )
     if operation == "target":
         if not valid and failure_code != "TARGET_INVALID":
@@ -399,7 +500,7 @@ def run_t075_operation(
                 _required_t075_path(target_table, "target-table"), "target table"
             )
             if valid
-            else b"",
+            else None,
             root,
             valid=valid,
             failure_code=failure_code,
@@ -416,12 +517,18 @@ def run_t075_operation(
                     _required_t075_path(checkpoint_653002, "checkpoint-653002"),
                     "checkpoint 653002",
                 ),
-            ),
+            )
+            if valid
+            else None,
             _read_t075_mapping(
                 _required_t075_path(training_selection, "training-selection"),
                 "training-selection summary",
-            ),
+            )
+            if valid
+            else None,
             root,
+            valid=valid,
+            failure_code=failure_code,
         )
     if operation == "gate":
         if valid and passed is None:
@@ -437,7 +544,7 @@ def run_t075_operation(
                 "Stage-5 report",
             )
             if valid
-            else b"",
+            else None,
             root,
             passed=bool(passed) if valid else False,
             valid=valid,
@@ -457,7 +564,7 @@ def run_t075_operation(
                 "Stage-6 report",
             )
             if valid
-            else b"",
+            else None,
             root,
             passed=bool(passed) if valid else False,
             valid=valid,
@@ -495,7 +602,7 @@ def _run_t075(args: argparse.Namespace) -> int:
         entry_metadata=getattr(args, "entry_metadata", None),
         retention_reason=getattr(args, "retention_reason", None),
         downstream_consumers=tuple(getattr(args, "downstream_consumer", ()) or ()),
-        valid=not getattr(args, "invalid", False),
+        valid=getattr(args, "valid", True),
         passed=(
             True
             if getattr(args, "passed", False)

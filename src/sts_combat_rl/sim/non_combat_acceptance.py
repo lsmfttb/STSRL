@@ -1085,9 +1085,29 @@ def _selected_training_checkpoint(
 
 def run_t075_preflight(
     state: AcceptanceState,
-    audit: Mapping[str, Any],
+    audit: Mapping[str, Any] | None,
     repository_root: Path,
+    *,
+    valid: bool = True,
+    failure_code: str | None = None,
 ) -> AcceptanceState:
+    if not valid:
+        if failure_code != "PREFLIGHT_INVALID":
+            raise T075OperationalError(
+                "invalid T075 preflight requires PREFLIGHT_INVALID failure code"
+            )
+        return _stage_payload_outcome(
+            state,
+            repository_root,
+            stage="PREFLIGHT",
+            parents=(),
+            payloads=(),
+            valid=False,
+            passed=False,
+            failure_code=failure_code,
+        )
+    if audit is None:
+        raise T075OperationalError("valid T075 preflight requires an audit")
     validate_t075_preflight_audit(audit)
     _require_matching_run_head(audit, state, "preflight audit")
     return _stage_payload_outcome(
@@ -1101,9 +1121,31 @@ def run_t075_preflight(
 
 def run_t075_validate_reuse(
     state: AcceptanceState,
-    audit: Mapping[str, Any],
+    audit: Mapping[str, Any] | None,
     repository_root: Path,
+    *,
+    valid: bool = True,
+    failure_code: str | None = None,
 ) -> AcceptanceState:
+    if not valid:
+        if failure_code != "SOURCE_REUSE_INVALID":
+            raise T075OperationalError(
+                "invalid T075 source reuse requires SOURCE_REUSE_INVALID failure code"
+            )
+        return _stage_payload_outcome(
+            state,
+            repository_root,
+            stage="SOURCE_REUSE",
+            parents=(
+                _committed_output(state, "preflight_audit", "preflight-audit.json"),
+            ),
+            payloads=(),
+            valid=False,
+            passed=False,
+            failure_code=failure_code,
+        )
+    if audit is None:
+        raise T075OperationalError("valid T075 source reuse requires an audit")
     validate_t075_source_reuse_audit(audit)
     _require_matching_run_head(audit, state, "source-reuse audit")
     return _stage_payload_outcome(
@@ -1120,10 +1162,40 @@ def run_t075_validate_reuse(
 
 def run_t075_selection(
     state: AcceptanceState,
-    ownership_audit: Mapping[str, Any],
-    selected_states_payload: bytes,
+    ownership_audit: Mapping[str, Any] | None,
+    selected_states_payload: bytes | None,
     repository_root: Path,
+    *,
+    valid: bool = True,
+    failure_code: str | None = None,
 ) -> AcceptanceState:
+    if not valid:
+        if failure_code not in {
+            "SELECTION_MEMBER_ORDER_TIE",
+            "SELECTION_OWNER_QUOTA_SHORTAGE",
+            "SELECTION_REPLAY_INVALID",
+        }:
+            raise T075OperationalError(
+                "invalid T075 selection requires a selection failure code"
+            )
+        return _stage_payload_outcome(
+            state,
+            repository_root,
+            stage="SELECTION_REPLAY",
+            parents=(
+                _committed_output(
+                    state, "source_reuse_audit", "source-reuse-audit.json"
+                ),
+            ),
+            payloads=(),
+            valid=False,
+            passed=False,
+            failure_code=failure_code,
+        )
+    if ownership_audit is None or selected_states_payload is None:
+        raise T075OperationalError(
+            "valid T075 selection requires audit and selected states"
+        )
     validate_t075_ownership_audit(ownership_audit)
     _require_matching_run_head(ownership_audit, state, "ownership audit")
     return _stage_payload_outcome(
@@ -1142,12 +1214,14 @@ def run_t075_selection(
 
 def run_t075_target(
     state: AcceptanceState,
-    target_table_payload: bytes,
+    target_table_payload: bytes | None,
     repository_root: Path,
     *,
     valid: bool = True,
     failure_code: str | None = None,
 ) -> AcceptanceState:
+    if valid and target_table_payload is None:
+        raise T075OperationalError("valid T075 target requires a target table")
     if valid and failure_code is not None:
         raise T075OperationalError("valid target adapter cannot carry a failure code")
     return _stage_payload_outcome(
@@ -1167,10 +1241,32 @@ def run_t075_target(
 
 def run_t075_train(
     state: AcceptanceState,
-    checkpoint_payloads: tuple[bytes, bytes],
-    training_selection: Mapping[str, Any],
+    checkpoint_payloads: tuple[bytes, bytes] | None,
+    training_selection: Mapping[str, Any] | None,
     repository_root: Path,
+    *,
+    valid: bool = True,
+    failure_code: str | None = None,
 ) -> AcceptanceState:
+    if not valid:
+        if failure_code != "TRAIN_INVALID":
+            raise T075OperationalError(
+                "invalid T075 train requires TRAIN_INVALID failure code"
+            )
+        return _stage_payload_outcome(
+            state,
+            repository_root,
+            stage="TRAIN",
+            parents=(_committed_output(state, "target_table", "target-table.json"),),
+            payloads=(),
+            valid=False,
+            passed=False,
+            failure_code=failure_code,
+        )
+    if checkpoint_payloads is None or training_selection is None:
+        raise T075OperationalError(
+            "valid T075 train requires checkpoints and training selection"
+        )
     validate_t075_training_selection(training_selection)
     _require_matching_run_head(training_selection, state, "training-selection summary")
     if len(checkpoint_payloads) != 2:
@@ -1200,13 +1296,15 @@ def run_t075_train(
 
 def run_t075_gate(
     state: AcceptanceState,
-    stage5_report_payload: bytes,
+    stage5_report_payload: bytes | None,
     repository_root: Path,
     *,
     passed: bool,
     valid: bool = True,
     failure_code: str | None = None,
 ) -> AcceptanceState:
+    if valid and stage5_report_payload is None:
+        raise T075OperationalError("valid T075 gate requires a Stage-5 report")
     _, selected_checkpoint = _selected_training_checkpoint(state, repository_root)
     return _stage_payload_outcome(
         state,
@@ -1226,13 +1324,15 @@ def run_t075_gate(
 
 def run_t075_eval(
     state: AcceptanceState,
-    stage6_report_payload: bytes,
+    stage6_report_payload: bytes | None,
     repository_root: Path,
     *,
     passed: bool,
     valid: bool = True,
     failure_code: str | None = None,
 ) -> AcceptanceState:
+    if valid and stage6_report_payload is None:
+        raise T075OperationalError("valid T075 eval requires a Stage-6 report")
     _, selected_checkpoint = _selected_training_checkpoint(state, repository_root)
     return _stage_payload_outcome(
         state,

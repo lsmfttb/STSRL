@@ -44,6 +44,7 @@ def test_t075_parser_is_nested_and_legacy_t065_select_remains_flat(tmp_path) -> 
             RUN_HEAD,
             "--audit",
             str(tmp_path / "preflight-audit.json"),
+            "--valid",
         ]
     )
     assert t075_args.command == "t075"
@@ -109,6 +110,8 @@ def _operation_argv(tmp_path, operation: str) -> list[str]:
             "--downstream-consumer",
             "none currently approved",
         ]
+    if operation != "finalize":
+        args += ["--valid"]
     return args
 
 
@@ -182,6 +185,65 @@ def test_t075_main_dispatches_each_operation_without_running_science(
     ]
 
 
+def _invalid_operation_argv(tmp_path, operation: str, failure_code: str) -> list[str]:
+    return [
+        "t075",
+        operation,
+        "--repository-root",
+        str(tmp_path),
+        "--run-head",
+        RUN_HEAD,
+        "--invalid",
+        "--failure-code",
+        failure_code,
+    ]
+
+
+@pytest.mark.parametrize(
+    ("operation", "failure_code"),
+    [
+        ("preflight", "PREFLIGHT_INVALID"),
+        ("validate-reuse", "SOURCE_REUSE_INVALID"),
+        ("select", "SELECTION_MEMBER_ORDER_TIE"),
+        ("target", "TARGET_INVALID"),
+        ("train", "TRAIN_INVALID"),
+        ("gate", "GATE_EVIDENCE_INVALID"),
+        ("eval", "EVAL_EVIDENCE_INVALID"),
+    ],
+)
+def test_t075_invalid_dispatch_omits_normative_payload_paths(
+    tmp_path, monkeypatch, operation: str, failure_code: str
+) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command
+
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    def fake_operation(name: str, **kwargs: object) -> object:
+        calls.append((name, kwargs))
+        return SimpleNamespace(current_stage=operation, terminal_case="D")
+
+    monkeypatch.setattr(command, "run_t075_operation", fake_operation)
+    assert command.main(_invalid_operation_argv(tmp_path, operation, failure_code)) == 0
+    assert len(calls) == 1
+    name, kwargs = calls[0]
+    assert name == operation
+    assert kwargs["valid"] is False
+    assert kwargs["failure_code"] == failure_code
+    assert kwargs["passed"] is None
+    for path_name in (
+        "audit",
+        "ownership_audit",
+        "selected_states",
+        "target_table",
+        "checkpoint_653001",
+        "checkpoint_653002",
+        "training_selection",
+        "stage5_report",
+        "stage6_report",
+    ):
+        assert kwargs[path_name] is None
+
+
 def test_t075_operation_reads_canonical_input_before_public_adapter(
     tmp_path, monkeypatch
 ) -> None:
@@ -197,11 +259,13 @@ def test_t075_operation_reads_canonical_input_before_public_adapter(
         assert run_head == RUN_HEAD
         return committed_state
 
-    def fake_preflight(state, audit, root):
+    def fake_preflight(state, audit, root, **kwargs):
         calls.append((state, audit, root))
+        assert kwargs == {"valid": True, "failure_code": None}
         return "committed"
 
     monkeypatch.setattr(command, "reconstruct_t075_state", fake_reconstruct)
+    monkeypatch.setattr(command, "_validate_t075_checkout", lambda *_args: None)
     monkeypatch.setattr(command, "run_t075_preflight", fake_preflight)
     assert (
         command.run_t075_operation(
@@ -213,3 +277,80 @@ def test_t075_operation_reads_canonical_input_before_public_adapter(
         == "committed"
     )
     assert calls == [(committed_state, {"audit": True}, tmp_path)]
+
+
+def test_t075_operation_rejects_a_wrong_checkout_head_before_stage_work(
+    tmp_path, monkeypatch
+) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command
+
+    def fake_git_output(_root, *arguments):
+        if arguments == ("rev-parse", "--show-toplevel"):
+            return str(tmp_path)
+        if arguments == ("status", "--porcelain"):
+            return ""
+        if arguments == ("rev-parse", "HEAD"):
+            return "2" * 40
+        raise AssertionError(arguments)
+
+    monkeypatch.setattr(command, "_t075_git_output", fake_git_output)
+    monkeypatch.setattr(
+        command,
+        "reconstruct_t075_state",
+        lambda *_args: pytest.fail("state reconstruction must not start"),
+    )
+    with pytest.raises(command.T075OperationalError, match="run_head"):
+        command.run_t075_operation(
+            "preflight",
+            repository_root=tmp_path,
+            run_head=RUN_HEAD,
+            valid=False,
+            failure_code="PREFLIGHT_INVALID",
+        )
+
+
+def test_t075_operation_rejects_a_dirty_checkout_before_stage_work(
+    tmp_path, monkeypatch
+) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command
+
+    def fake_git_output(_root, *arguments):
+        if arguments == ("rev-parse", "--show-toplevel"):
+            return str(tmp_path)
+        if arguments == ("status", "--porcelain"):
+            return " M pending.py"
+        raise AssertionError(arguments)
+
+    monkeypatch.setattr(command, "_t075_git_output", fake_git_output)
+    with pytest.raises(command.T075OperationalError, match="clean"):
+        command.run_t075_operation(
+            "preflight",
+            repository_root=tmp_path,
+            run_head=RUN_HEAD,
+            valid=False,
+            failure_code="PREFLIGHT_INVALID",
+        )
+
+
+def test_t075_operation_rejects_external_input_before_stage_work(
+    tmp_path, monkeypatch
+) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command
+
+    repository_root = tmp_path / "repo"
+    repository_root.mkdir()
+    external_audit = tmp_path / "outside-audit.json"
+    monkeypatch.setattr(command, "_validate_t075_checkout", lambda *_args: None)
+    monkeypatch.setattr(
+        command,
+        "reconstruct_t075_state",
+        lambda *_args: pytest.fail("state reconstruction must not start"),
+    )
+    with pytest.raises(command.T075OperationalError, match="within repository_root"):
+        command.run_t075_operation(
+            "preflight",
+            repository_root=repository_root,
+            run_head=RUN_HEAD,
+            audit=external_audit,
+            valid=True,
+        )
