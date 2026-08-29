@@ -1062,7 +1062,7 @@ def read_source_states_from_objects(rows: list[Any], path: Path) -> list[Any]:
     result = []
     for index, row in enumerate(rows):
         if not isinstance(row, dict):
-            raise ValueError(f"{path}: source row {index} is not an object")
+            raise TypeError(f"{path}: source row {index} is not an object")
         # Reuse the strict current-schema reader without inventing a second
         # deserialization path.
         from sts_combat_rl.sim.non_combat_learning import T065SourceState
@@ -1201,7 +1201,7 @@ class _SourceArmArtifactReader:
         first_record_arm: str | None = None
         for row in self:
             if not isinstance(row, dict):
-                raise ValueError(f"{self.path}: source row is not an object")
+                raise TypeError(f"{self.path}: source row is not an object")
             state = T065SourceState.from_dict(row)
             if first_record_arm is None:
                 first_record_arm = state.source_arm
@@ -1225,7 +1225,7 @@ class _SourceArmArtifactReader:
                 while True:
                     key = reader.value()
                     if not isinstance(key, str):
-                        raise ValueError("source artifact key is not a string")
+                        raise TypeError("source artifact key is not a string")
                     if key in seen_keys:
                         raise ValueError(f"duplicate source artifact key {key!r}")
                     seen_keys.add(key)

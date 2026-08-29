@@ -76,10 +76,12 @@ T075_REUSED_T065_RETENTION = {
         "producer_stage": "stage1-source-collection",
         "producer_git_commit": "c57b2eef8615df2f43fb4dcf52af19ff44fe6108",
         "regeneration_commands": [
-            "$PY -m sts_combat_rl.commands.non_combat_learning collect "
-            "--arm stochastic_non_combat_v1 --output <stable-source-path> "
-            "--seed-start 650001 --seed-end 650256 --sim-seed 1 "
-            "--ascension 20 --preflight <validated-t065-preflight>"
+            (
+                "$PY -m sts_combat_rl.commands.non_combat_learning collect "
+                "--arm stochastic_non_combat_v1 --output <stable-source-path> "
+                "--seed-start 650001 --seed-end 650256 --sim-seed 1 "
+                "--ascension 20 --preflight <validated-t065-preflight>"
+            )
         ],
     },
     T075_SOURCE_IDENTITIES[1]["path"]: {
@@ -88,10 +90,12 @@ T075_REUSED_T065_RETENTION = {
         "producer_stage": "stage1-source-collection",
         "producer_git_commit": "deeaa461c138db80f4393310d97d5d44d5fa8fd3",
         "regeneration_commands": [
-            "$PY -m sts_combat_rl.commands.non_combat_learning collect "
-            "--arm expert_non_combat_v1 --output <stable-source-path> "
-            "--seed-start 650001 --seed-end 650256 --sim-seed 1 "
-            "--ascension 20 --preflight <validated-t065-preflight>"
+            (
+                "$PY -m sts_combat_rl.commands.non_combat_learning collect "
+                "--arm expert_non_combat_v1 --output <stable-source-path> "
+                "--seed-start 650001 --seed-end 650256 --sim-seed 1 "
+                "--ascension 20 --preflight <validated-t065-preflight>"
+            )
         ],
     },
 }
