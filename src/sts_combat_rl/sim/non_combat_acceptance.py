@@ -395,9 +395,9 @@ class AcceptanceState:
         ):
             raise ValueError("committed outcome run_head does not match state")
         if self.terminal_case is None:
-            expected_current = (
-                T075_STAGES[len(stages)] if len(stages) < len(T075_STAGES) else None
-            )
+            if len(stages) == len(T075_STAGES):
+                raise ValueError("seven committed stages must be terminal")
+            expected_current = T075_STAGES[len(stages)]
             if self.current_stage != expected_current:
                 raise ValueError("acceptance state current_stage is inconsistent")
         else:
@@ -875,6 +875,7 @@ def select_t075_source_candidates(
         T065_SPLIT_QUOTAS,
         T065_SPLITS,
         canonical_source_candidate,
+        replay_equivalence_key,
         split_for_source_seed,
     )
 
@@ -894,13 +895,7 @@ def select_t075_source_candidates(
         candidate_json = canonical_source_candidate(candidate)
         payload = canonical_json_bytes(candidate_json)
         selection_digest = hashlib.sha256(T065_SELECTION_DOMAIN + payload).hexdigest()
-        replay_key = (
-            candidate.family,
-            candidate.public_state_identity,
-            tuple(
-                canonical_json_bytes(item) for item in candidate.legal_action_identities
-            ),
-        )
+        replay_key = replay_equivalence_key(candidate)
         group_key = {
             "family": candidate.family,
             "public_state_identity": candidate.public_state_identity,
@@ -1031,6 +1026,63 @@ def _committed_report(state: AcceptanceState, stage: str) -> ArtifactIdentity:
     )
 
 
+def _read_committed_json(
+    repository_root: Path, identity: ArtifactIdentity, label: str
+) -> Mapping[str, Any]:
+    path = _repository_path(repository_root, identity)
+    try:
+        payload = path.read_bytes()
+    except OSError as exc:
+        raise T075OperationalError(f"{label} committed payload is unreadable") from exc
+    if (
+        len(payload) != identity.size_bytes
+        or hashlib.sha256(payload).hexdigest() != identity.sha256
+    ):
+        raise T075OperationalError(f"{label} committed payload identity is stale")
+    try:
+        value = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise T075OperationalError(
+            f"{label} committed payload is invalid JSON"
+        ) from exc
+    if not isinstance(value, Mapping) or canonical_json_document(value) != payload:
+        raise T075OperationalError(f"{label} committed payload is not canonical JSON")
+    return value
+
+
+def _selected_training_checkpoint(
+    state: AcceptanceState, repository_root: Path
+) -> tuple[ArtifactIdentity, ArtifactIdentity]:
+    selection_identity = _committed_output(
+        state, "training_selection", "training-selection.json"
+    )
+    selection = validate_t075_training_selection(
+        _read_committed_json(
+            repository_root, selection_identity, "training-selection summary"
+        )
+    )
+    _require_matching_run_head(selection, state, "training-selection summary")
+    selected_checkpoint = _identity_tuple((selection["selected_checkpoint"],))[0]
+    train = next(
+        committed
+        for committed in state.committed_outcomes
+        if committed.outcome.stage == "TRAIN"
+    )
+    committed_checkpoints = tuple(
+        identity for identity in train.outcome.outputs if identity.role == "checkpoint"
+    )
+    summary_checkpoints = _identity_tuple(selection["checkpoints"])
+    if summary_checkpoints != committed_checkpoints:
+        raise T075OperationalError(
+            "training-selection checkpoints do not match committed TRAIN outputs"
+        )
+    if selected_checkpoint not in committed_checkpoints:
+        raise T075OperationalError(
+            "selected training checkpoint is not a committed TRAIN output"
+        )
+    return selection_identity, selected_checkpoint
+
+
 def run_t075_preflight(
     state: AcceptanceState,
     audit: Mapping[str, Any],
@@ -1120,6 +1172,19 @@ def run_t075_train(
     repository_root: Path,
 ) -> AcceptanceState:
     validate_t075_training_selection(training_selection)
+    _require_matching_run_head(training_selection, state, "training-selection summary")
+    if len(checkpoint_payloads) != 2:
+        raise T075OperationalError("TRAIN requires exactly two checkpoint payloads")
+    expected_checkpoints = tuple(
+        _t075_payload_identity("checkpoint", filename, payload)
+        for (_, filename), payload in zip(
+            T075_OUTPUT_LAYOUT["TRAIN"][:2], checkpoint_payloads, strict=True
+        )
+    )
+    if _identity_tuple(training_selection["checkpoints"]) != expected_checkpoints:
+        raise T075OperationalError(
+            "training-selection checkpoints do not match checkpoint payload identities"
+        )
     return _stage_payload_outcome(
         state,
         repository_root,
@@ -1142,6 +1207,7 @@ def run_t075_gate(
     valid: bool = True,
     failure_code: str | None = None,
 ) -> AcceptanceState:
+    _, selected_checkpoint = _selected_training_checkpoint(state, repository_root)
     return _stage_payload_outcome(
         state,
         repository_root,
@@ -1149,7 +1215,7 @@ def run_t075_gate(
         parents=(
             _committed_output(state, "target_table", "target-table.json"),
             _committed_output(state, "training_selection", "training-selection.json"),
-            _committed_output(state, "checkpoint", "checkpoints/653001.pt"),
+            selected_checkpoint,
         ),
         payloads=(("stage5_report", stage5_report_payload),) if valid else (),
         valid=valid,
@@ -1167,6 +1233,7 @@ def run_t075_eval(
     valid: bool = True,
     failure_code: str | None = None,
 ) -> AcceptanceState:
+    _, selected_checkpoint = _selected_training_checkpoint(state, repository_root)
     return _stage_payload_outcome(
         state,
         repository_root,
@@ -1174,7 +1241,7 @@ def run_t075_eval(
         parents=(
             _committed_output(state, "stage5_report", "heldout-gate-report.json"),
             _committed_output(state, "training_selection", "training-selection.json"),
-            _committed_output(state, "checkpoint", "checkpoints/653001.pt"),
+            selected_checkpoint,
         ),
         payloads=(("stage6_report", stage6_report_payload),) if valid else (),
         valid=valid,
@@ -1446,7 +1513,11 @@ def validate_t075_training_selection(value: Mapping[str, Any]) -> dict[str, Any]
     return dict(value)
 
 
-def validate_t075_terminal_decision(value: Mapping[str, Any]) -> dict[str, Any]:
+def validate_t075_terminal_decision(
+    value: Mapping[str, Any],
+    *,
+    expected_stage_outcomes: Sequence[ArtifactIdentity] | None = None,
+) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         raise TypeError("T075 terminal decision must be an object")
     _strict_keys(
@@ -1480,8 +1551,25 @@ def validate_t075_terminal_decision(value: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(value["stage_outcomes"], list):
         raise TypeError("T075 terminal stage_outcomes must be an array")
     stage_outcomes = _identity_tuple(value["stage_outcomes"])
+    if not stage_outcomes or len(stage_outcomes) > len(T075_STAGES):
+        raise ValueError("T075 terminal stage_outcomes must be a non-empty prefix")
+    expected_paths = tuple(
+        _expected_report_path(stage) for stage in T075_STAGES[: len(stage_outcomes)]
+    )
+    if tuple(identity.path for identity in stage_outcomes) != expected_paths:
+        raise ValueError("T075 terminal stage_outcomes are not a canonical prefix")
     if any(identity.role != "stage_outcome" for identity in stage_outcomes):
         raise ValueError("T075 terminal stage outcome roles are invalid")
+    if value["terminal_stage"] != T075_STAGES[len(stage_outcomes) - 1]:
+        raise ValueError("T075 terminal stage does not match stage_outcomes prefix")
+    if value["terminal_case"] in {"A", "B"} and value["terminal_stage"] != "EVAL":
+        raise ValueError("A/B terminal decisions must terminate at EVAL")
+    if value["terminal_case"] == "C" and value["terminal_stage"] != "GATE":
+        raise ValueError("C terminal decisions must terminate at GATE")
+    if expected_stage_outcomes is not None and stage_outcomes != tuple(
+        expected_stage_outcomes
+    ):
+        raise ValueError("T075 terminal stage_outcomes do not match committed state")
     promotion, recommendation = T075_TERMINAL_MAPPING[value["terminal_case"]]
     if (
         value["promotion"] != promotion
@@ -1715,7 +1803,12 @@ def finalize_t075(
         "terminal_report", terminal_path, terminal_payload
     )
     terminal = terminal_decision_from_state(state, terminal_identity)
-    validate_t075_terminal_decision(terminal)
+    validate_t075_terminal_decision(
+        terminal,
+        expected_stage_outcomes=tuple(
+            committed.report_identity for committed in state.committed_outcomes
+        ),
+    )
     terminal_payload = canonical_json_document(terminal)
     terminal_identity = _artifact_identity_for_bytes(
         "terminal_report", terminal_path, terminal_payload
