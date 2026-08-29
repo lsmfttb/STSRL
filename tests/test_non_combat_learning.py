@@ -2085,9 +2085,13 @@ def test_t075_process_shard_plan_rejects_non_frozen_full_plan() -> None:
 
 
 def test_t075_portable_path_converts_wsl_mount() -> None:
-    assert _portable_path("/mnt/d/DeadlycatCoding/STSRL/artifacts/x.json") == Path(
-        "D:/DeadlycatCoding/STSRL/artifacts/x.json"
+    raw = "/mnt/d/DeadlycatCoding/STSRL/artifacts/x.json"
+    expected = (
+        Path("D:/DeadlycatCoding/STSRL/artifacts/x.json")
+        if os.name == "nt"
+        else Path(raw)
     )
+    assert _portable_path(raw) == expected
 
 
 def test_t075_execution_evidence_records_observed_elapsed_seconds(

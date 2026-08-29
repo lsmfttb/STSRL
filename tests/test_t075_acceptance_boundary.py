@@ -23,6 +23,7 @@ from sts_combat_rl.commands.non_combat_learning import (
     _code_head_for_artifact_root,
     _handle_t075_case_d,
     _run_t075_finalize,
+    _run_t075_preflight,
     _run_t075_evaluate,
     _t075_command_matches_contract,
     _t075_has_terminal_decision,
@@ -1186,6 +1187,54 @@ def test_t075_portable_path_keeps_nonexistent_wsl_output_on_host_mount() -> None
         )
     else:
         assert str(resolved) == raw
+
+
+def test_t075_preflight_writes_resolved_output_and_retention_paths(
+    tmp_path, monkeypatch
+) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command_module
+
+    root = tmp_path / "artifacts"
+    output = root / "stage0-preflight.json"
+    retention = root / "stage0-preflight.retention.json"
+
+    def wsl_alias(path):
+        text = str(path).replace("\\", "/")
+        if os.name == "nt" and len(text) >= 3 and text[1] == ":":
+            return f"/mnt/{text[0].lower()}{text[2:]}"
+        return text
+
+    monkeypatch.setattr(command_module, "T075_STABLE_ARTIFACT_ROOT", root)
+    monkeypatch.setattr(
+        command_module, "_require_frozen_simulator_args", lambda args: None
+    )
+    monkeypatch.setattr(
+        command_module,
+        "build_t065_preflight_report",
+        lambda **kwargs: SimpleNamespace(to_dict=lambda: {"passed": True}),
+    )
+    args = SimpleNamespace(
+        simulator_runtime=False,
+        torch_runtime=False,
+        sim_seed=1,
+        ascension=20,
+        output=type(output)(wsl_alias(output)),
+        retention_manifest=type(retention)(wsl_alias(retention)),
+        _t075_execution_start_utc="2026-08-29T00:00:00+00:00",
+        _t075_execution_start_monotonic=0.0,
+    )
+    args._command_argv = command_module._t075_frozen_stage_argv(
+        args, "stage0-preflight"
+    )
+
+    assert _run_t075_preflight(args) == 0
+    assert args.output == output
+    assert args.retention_manifest == retention
+    assert json.loads(output.read_text(encoding="utf-8"))["passed"] is True
+    retained = json.loads(retention.read_text(encoding="utf-8"))
+    assert retained["stage_evidence"]["stage0-preflight"]["output_identities"][0][
+        "path"
+    ] == str(output)
 
 
 def test_t075_validate_reuse_resolves_all_write_paths_before_artifact_write(
