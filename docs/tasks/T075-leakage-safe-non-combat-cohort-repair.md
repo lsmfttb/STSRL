@@ -388,10 +388,6 @@ SourceFailureClass = none | missing | unreadable | identity_mismatch | strict_re
 `RUN_HEAD`, `RECOVERY_BASE`, `T065_APPROVED_SPEC`, and
 `STS_LIGHTSPEED_INTEGRATION` are `git_commit`.
 
-`no_promotion` is the sole serialized no-promotion value in the T075 terminal
-schema. It is a representation label for the unchanged T065 no-promotion outcome,
-not a new promotion category or scientific rule.
-
 Selection digests, replay-group digests, candidate-content digests, and artifact
 content hashes are `sha256`.
 
