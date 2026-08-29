@@ -240,21 +240,23 @@ Use `non-combat-model-input-v1` exactly:
 
 ## Scientific Primitive: Global Replay Ownership
 
-Selectable candidates must:
+A source row is admitted to the selectable-candidate domain only if it:
 
-- pass the strict `t065-source-state-v1` reader;
-- come from a problem-free terminal source run;
-- belong to a mandatory family;
-- retain the split implied by simulator seed;
-- retain source provenance;
-- pass existing T065 public/model/action/replay-input validation.
+- passes the strict `t065-source-state-v1` reader;
+- comes from a problem-free terminal source run;
+- belongs to a mandatory family;
+- retains the split implied by simulator seed;
+- retains source provenance;
+- passes existing T065 public/model/action/replay-input validation.
 
-Malformed/provenance-invalid selectable rows fail closed at SELECTION_REPLAY. They
-use `SOURCE_REUSE_FIDELITY` only when the defect is source-file-level; otherwise a
-row-level defect that prevents candidate admission makes SELECTION_REPLAY invalid
-under `SELECTION_OWNER_QUOTA_SHORTAGE` if the resulting frozen owner bucket misses
-quota, or returns as a `CONTRACT_GAP` if it exposes a distinct acceptance meaning.
-No additional selection failure taxonomy is created locally.
+Rows that do not satisfy those admission conditions are non-selectable source
+evidence; they do not create a separate terminal failure merely by existing. The
+frozen terminal selection failures begin after the selectable-candidate domain is
+formed: full member-order tie, owner-bucket quota shortage, selected duplicate or
+cross-split overlap, or selected replay mismatch. If rejected rows leave an owner
+bucket below quota, the frozen outcome is `SELECTION_OWNER_QUOTA_SHORTAGE`. If a
+future row defect requires a distinct terminal meaning not covered by these rules,
+it is a `CONTRACT_GAP`; no new failure code is invented locally.
 
 Replay equivalence is unchanged:
 
@@ -754,11 +756,15 @@ CheckRecord =
 
 Invalid-evidence rules:
 
-- `failed_check` must be one of the frozen check names for that stage;
-- `completed_checks` is exactly the deterministic checked prefix through the first
-  failing check;
+- `failed_check` must be one of the frozen terminal classifier check names for that
+  stage;
+- `completed_checks` is exactly the deterministic checked prefix through that first
+  terminal failing check;
 - all records before the final record have `status=passed`;
 - the final record name equals `failed_check` and has `status=failed`;
+- non-terminal admission/filtering work may occur before this prefix and is reported
+  only through actually available counts/diagnostics; it is not itself an invalid
+  StageOutcome;
 - `observed_counts` contains only counts actually known at failure time;
 - absent scientific metrics are absent, not fake zero, NaN, null, or success
   placeholders;
@@ -775,7 +781,7 @@ scientific metrics may yield `passed=false` while `valid=true`.
 
 ### PREFLIGHT
 
-Frozen ordered checks:
+Frozen ordered terminal classifier checks:
 
 1. `runtime_imports`
 2. `simulator_identity`
@@ -847,14 +853,15 @@ include both validated sources. Any record fails -> invalid core,
 
 ### SELECTION_REPLAY
 
-Frozen ordered classifier checks:
+Candidate-domain formation is the non-terminal admission/filtering operation frozen
+in `Scientific Primitive: Global Replay Ownership`. After that domain is formed,
+the ordered terminal classifier checks are:
 
-1. `candidate_domain`
-2. `member_order_uniqueness`
-3. `owner_quota_availability`
-4. `selected_uniqueness`
-5. `selected_cross_split_overlap`
-6. `selected_replay`
+1. `member_order_uniqueness`
+2. `owner_quota_availability`
+3. `selected_uniqueness`
+4. `selected_cross_split_overlap`
+5. `selected_replay`
 
 Failure mapping:
 
@@ -864,16 +871,9 @@ Failure mapping:
   `SELECTION_DUPLICATE_OR_OVERLAP`;
 - `selected_replay` -> `SELECTION_REPLAY_MISMATCH`.
 
-`candidate_domain` is a prerequisite admission check rather than a separate new
-acceptance category. Malformed/provenance-invalid rows are excluded exactly under
-the frozen selectable-candidate rule. If that leaves an owner bucket below quota,
-`owner_quota_availability` fails with `SELECTION_OWNER_QUOTA_SHORTAGE`. If a
-candidate-domain defect exposes a meaning not reducible to the frozen source
-fidelity or quota semantics, classification stops as `CONTRACT_GAP`; the
-Implementer must not invent a new failure code.
-
 Complete valid evidence requires:
 
+- raw/admitted candidate counts;
 - post-owner family/split availability;
 - `selected_count=320`;
 - exact selected family/split quotas;
