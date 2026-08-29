@@ -158,10 +158,12 @@ Both files must pass the current strict T065 source reader and match:
 - simulator identity backed by `STS_LIGHTSPEED_INTEGRATION`;
 - no source-level problems.
 
-Missing, unreadable, hash/size-invalid, or metadata-invalid exact input makes
-SOURCE_REUSE invalid and therefore Case D at SOURCE_REUSE. Recollection,
-alternate aliases, basename search, recursive manifest discovery, and replacement
-are forbidden.
+Missing, unreadable, hash/size/role-invalid, strict-reader-invalid, or
+metadata-invalid exact input makes SOURCE_REUSE invalid and therefore Case D at
+SOURCE_REUSE. Such a failure is represented by the frozen SOURCE_REUSE source-check
+records below; it is not converted into a pre-stage invocation rejection.
+Recollection, alternate aliases, basename search, recursive manifest discovery,
+and replacement are forbidden.
 
 ## Frozen Source And Split Constants
 
@@ -378,8 +380,9 @@ TerminalCase = A | B | C | D
 Family = MAP_SCREEN | REST_ROOM | REWARDS | TREASURE_ROOM
 Split = train | validation | heldout
 Status = passed | failed
-Promotion = experimental_public_with_expert_fallback | none
-RecommendationCode = review_joint_policy_next_step | narrow_transfer_followup | narrow_target_model_diagnostic | rerun_same_experiment_after_narrow_repair
+Promotion = experimental_public_with_expert_fallback | no_promotion
+RecommendationCode = review_joint_policy_next_step | narrow_transfer_followup | close_v1_no_followup | narrow_target_model_diagnostic | rerun_same_experiment_after_narrow_repair
+SourceFailureClass = none | missing | unreadable | identity_mismatch | strict_reader_invalid | metadata_invalid
 ```
 
 `RUN_HEAD`, `RECOVERY_BASE`, `T065_APPROVED_SPEC`, and
@@ -534,33 +537,38 @@ Out-of-order/wrong-RUN_HEAD/conflicting duplicate are operational rejection, not
 
 ### Canonical Parent Validation
 
-An `ArtifactIdentity` parent is legal only when it is either:
+For every stage, previously committed StageOutcome report/output parents must match
+the canonical ledger in the exact frozen order. Same-stage sibling outputs are
+never parents.
 
-1. an explicitly enumerated frozen external input named by this contract; or
-2. an output/report identity from a previously committed T075 StageOutcome in the
-   canonical ledger.
+SOURCE_REUSE has one closed-world special rule because it validates two frozen
+external inputs whose failure must itself be representable as scientific/fidelity
+evidence:
 
-`SOURCE_REUSE` is the **only** T075 stage allowed external-input parents. Its
-ordered parents are exactly:
+1. before SOURCE_REUSE work begins, the only already-committed parent that must
+   validate is the committed PREFLIGHT report;
+2. the two T065 source identities in `Frozen T065 Source Inputs` are frozen
+   **expected external inputs**, not automatically accepted semantic parents;
+3. SOURCE_REUSE inspects exactly those two expected paths, in stochastic/expert
+   order, and emits exactly two `SourceRecord` checks;
+4. for `SOURCE_REUSE valid=true, passed=true`, both observed artifacts must equal
+   the corresponding expected identities in all four fields and all strict-reader
+   and metadata checks must pass; only then are the two validated source identities
+   legal StageOutcome parents, with parents exactly `[PREFLIGHT, stochastic source,
+   expert source]`;
+5. for `SOURCE_REUSE valid=false, passed=false`, parents are exactly `[PREFLIGHT]`;
+   at least one `SourceRecord` must fail, and the failed expected external inputs
+   remain evidence only rather than semantic parents;
+6. canonical `advance` must accept that invalid SOURCE_REUSE parent shape and apply
+   the normal `SOURCE_REUSE invalid -> D at SOURCE_REUSE` transition.
 
-1. the committed PREFLIGHT report identity;
-2. the frozen stochastic T065 source `current_output` identity;
-3. the frozen expert T065 source `current_output` identity.
+No alias, alternate path, basename match, manifest discovery, replacement source,
+or arbitrary external parent is legal. The two frozen expected T065 identities are
+the complete external-input universe for SOURCE_REUSE.
 
-For SOURCE_REUSE, canonical `advance` validates each external source parent by
-exact four-field `ArtifactIdentity` equality `(role,path,sha256,size_bytes)` against
-the frozen literals in `Frozen T065 Source Inputs` **and** requires the associated
-`SourceRecord` evidence to show successful strict T065 reader and metadata
-validation. No alias, alternate path, basename match, or discovered manifest entry
-is accepted.
-
-For every other stage, every parent must resolve in the exact frozen order to a
-report/output identity already present in the previously committed T075 ledger.
-Same-stage sibling outputs remain derivation evidence and are never parent/child
-commits.
-
-The two frozen T065 source inputs above are the complete external-parent exception;
-this rule is not a generic external-parent mechanism.
+For every stage after SOURCE_REUSE, every parent must resolve in the exact frozen
+order to a report/output identity already present in the previously committed T075
+ledger.
 
 ## Transactional Stage Commit
 
@@ -568,10 +576,13 @@ This ordering is normative and resolves report/output identity causality.
 
 For a legitimately reached stage:
 
-1. validate checkout, RUN_HEAD, current canonical state, and all legal parent
-   identities under `Canonical Parent Validation`;
+1. validate checkout, RUN_HEAD, current canonical state, and all already-committed
+   parents required to begin that stage; SOURCE_REUSE begins with PREFLIGHT only
+   and validates its two frozen expected external inputs during stage work;
 2. write expensive/intermediate prospective outputs under `ROOT/.tmp/`;
-3. run all stage-specific completeness/fidelity checks;
+3. run all stage-specific completeness/fidelity checks and determine the final
+   stage-specific parent shape, including SOURCE_REUSE's conditional valid/invalid
+   parent rule;
 4. if the stage is successful, atomically promote each validated output to its
    deterministic frozen final path and compute its final ArtifactIdentity;
    if the stage is invalid, promote no successful data output and use `outputs=[]`;
@@ -703,21 +714,45 @@ SourceRecord serialized keys exactly:
 
 ```text
 arm: stochastic_non_combat_v1 | expert_non_combat_v1
-artifact: ArtifactIdentity
+expected_artifact: ArtifactIdentity
+observed_artifact: ArtifactIdentity | null
 strict_reader_passed: bool
 metadata_passed: bool
-seed_start: int
-seed_end: int
-requested_run_count: nonneg_int
-terminal_run_count: nonneg_int
-truncated_run_count: nonneg_int
-failed_run_count: nonneg_int
-shard_count: nonneg_int
-worker_count: nonneg_int
-controller: string
-approved_spec_commit: git_commit
-sts_lightspeed_commit: git_commit
+failure_class: SourceFailureClass
+seed_start: int | null
+seed_end: int | null
+requested_run_count: nonneg_int | null
+terminal_run_count: nonneg_int | null
+truncated_run_count: nonneg_int | null
+failed_run_count: nonneg_int | null
+shard_count: nonneg_int | null
+worker_count: nonneg_int | null
+controller: string | null
+approved_spec_commit: git_commit | null
+sts_lightspeed_commit: git_commit | null
+problems: [string]
 ```
+
+`expected_artifact` is always the exact frozen literal for that arm.
+`observed_artifact=null` is allowed only when a readable artifact identity cannot
+be obtained. Metadata fields are populated when derivable from readable content and
+are otherwise `null`; a valid source record has no null metadata fields.
+
+`failure_class` is deterministic with this precedence:
+
+1. `missing` when the frozen path does not exist;
+2. `unreadable` when the path exists but a complete readable artifact identity
+   cannot be obtained;
+3. `identity_mismatch` when the observed four-field identity differs from the
+   expected literal;
+4. `strict_reader_invalid` when identity matches but the strict T065 reader fails;
+5. `metadata_invalid` when identity/strict reader pass but any frozen metadata
+   check fails;
+6. `none` only when all identity, strict-reader, and metadata checks pass.
+
+The two SOURCE_REUSE records are always present in stochastic/expert order, even
+when one or both sources fail. A failed record has non-empty `problems`; a passing
+record has `problems=[]`.
 
 OwnershipMember keys exactly:
 
@@ -848,24 +883,43 @@ Check order:
 
 ### SOURCE_REUSE
 
-Parents exact order:
+Before source inspection, the only committed parent is the PREFLIGHT report.
+Evidence always contains exactly two `SourceRecord` values in stochastic/expert
+order, each anchored to its exact frozen `expected_artifact` literal.
+
+For `valid=true, passed=true`, parents exact order is:
 
 1. PREFLIGHT report;
-2. frozen stochastic T065 source with role `current_output`;
-3. frozen expert T065 source with role `current_output`.
+2. validated stochastic T065 source, whose observed identity equals its expected
+   `current_output` identity;
+3. validated expert T065 source, whose observed identity equals its expected
+   `current_output` identity.
 
-The two source parents are the explicitly frozen external-parent exception defined
-by `Canonical Parent Validation`; they are not required to appear in the T075
-committed ledger.
+Both records must have `failure_class=none`, `strict_reader_passed=true`,
+`metadata_passed=true`, exact observed/expected identity equality, and complete
+non-null frozen metadata.
 
-Outputs `[]`.
+For `valid=false, passed=false` / A02, parents are exactly:
 
-Evidence:
+1. PREFLIGHT report.
+
+At least one of the two records must have `failure_class != none`; failed expected
+sources remain source-check evidence only and are not StageOutcome parents. This
+invalid outcome is a normal committed SOURCE_REUSE StageOutcome and transitions to
+D at SOURCE_REUSE.
+
+Outputs `[]` in both forms.
+
+Evidence exact keys:
 
 ```text
-sources: [SourceRecord]  # stochastic then expert
+sources: [SourceRecord]  # exactly stochastic then expert
 validation_passed: bool
 ```
+
+`validation_passed=true` iff both source records pass all frozen identity,
+strict-reader, and metadata checks. It must equal the StageOutcome `valid/passed`
+value for SOURCE_REUSE.
 
 ### Ownership Audit Data Artifact
 
@@ -1072,30 +1126,35 @@ remaining suffix; report identities follow reached-stage order.
 A/B terminal_stage EVAL; C terminal_stage GATE; D terminal_stage first invalid
 reached stage.
 
-Terminal promotion/recommendation semantics are frozen to the existing T065
-Terminal Decision Table:
+Terminal promotion/recommendation semantics preserve the frozen T065 successor
+boundary. Every terminal report contains exactly one planner-facing **disposition**;
+the disposition may explicitly close a line with no successor task.
 
 - **A / EVAL**: `promotion=experimental_public_with_expert_fallback`;
-  `recommendation_code=review_joint_policy_next_step`; exactly one planner-facing
-  recommendation to review T066 or one narrower joint-policy task. This is not a
-  natural-A20 or live-game promotion claim.
-- **B / EVAL**: `promotion=none`;
-  `recommendation_code=narrow_transfer_followup`; exactly one narrow follow-up
-  selected from observed screen coverage, target-horizon/rollout-policy mismatch,
-  or run-distribution shift. Do not authorize a larger natural run merely because
-  the 256 fresh seeds are neutral.
-- **C / GATE**: `promotion=none`;
-  `recommendation_code=narrow_target_model_diagnostic`; EVAL/Stage 6 is skipped;
-  exactly one narrow target/model diagnostic is recommended and the v1 formulation
-  is closed.
-- **D / first invalid reached stage**: `promotion=none`;
+  `recommendation_code=review_joint_policy_next_step`; the disposition is to review
+  T066 or one narrower joint-policy task. This is not a natural-A20 or live-game
+  promotion claim.
+- **B / EVAL**: `promotion=no_promotion`;
+  `recommendation_code=narrow_transfer_followup`; one narrow follow-up is selected
+  from observed screen coverage, target-horizon/rollout-policy mismatch, or
+  run-distribution shift. Do not authorize a larger natural run merely because the
+  256 fresh seeds are neutral.
+- **C / GATE**: `promotion=no_promotion`; EVAL/Stage 6 is skipped and the v1
+  formulation is closed. `recommendation_code` is exactly one of:
+  - `close_v1_no_followup`: close v1 with no successor diagnostic; or
+  - `narrow_target_model_diagnostic`: recommend one narrow target/model diagnostic
+    justified by the observed valid Stage-5 failure.
+  There may never be more than one follow-up diagnostic. This preserves T065's
+  **at most one** diagnostic boundary rather than requiring a successor task.
+- **D / first invalid reached stage**: `promotion=no_promotion`;
   `recommendation_code=rerun_same_experiment_after_narrow_repair`; no policy
-  conclusion is allowed; exactly one narrow repair necessary to rerun the same
-  frozen experiment is recommended; every downstream scientific stage is skipped.
+  conclusion is allowed; the disposition names one narrow repair necessary to
+  rerun the same frozen experiment; every downstream scientific stage is skipped.
 
 `recommendation` is descriptive text constrained by the terminal case and
-`recommendation_code`; it is not a second decision authority. Exactly one
-planner-facing next recommendation is reported for every terminal case.
+`recommendation_code`; it is not a second decision authority. For
+`close_v1_no_followup`, it describes closure/no follow-up rather than inventing a
+successor diagnostic.
 
 The first valid terminal state implied by committed StageOutcome ledger is
 immutable. If terminal report write is interrupted after terminal-producing stage
@@ -1139,21 +1198,16 @@ reproduction hold remains. Historical identities are never rewritten.
 
 ## Minimal Semantic Lineage
 
-An `ArtifactIdentity` parent may be either:
-
-1. an explicitly enumerated frozen external input named by this contract; or
-2. a report/output identity from a previously committed T075 StageOutcome in the
-   canonical ledger.
-
-The only external-input parents are the two frozen T065 `current_output` source
-identities, and they are legal only for SOURCE_REUSE. All other parents must be
-previously committed ledger report/output identities in the exact frozen order.
+Previously committed T075 report/output identities are the normal semantic-parent
+source. SOURCE_REUSE has the one closed-world external-input exception defined
+above, and its parent shape depends on whether those expected inputs validate.
 Same-stage sibling outputs may refer to one another only as internal derivation /
 evidence, never as committed parents.
 
 | Output | Committed semantic parents |
 |---|---|
-| SOURCE_REUSE report | committed PREFLIGHT + exact two frozen external T065 source identities |
+| SOURCE_REUSE valid report | committed PREFLIGHT + exact two successfully validated frozen T065 source identities |
+| SOURCE_REUSE invalid/A02 report | committed PREFLIGHT only; failed expected source identities remain evidence |
 | SELECTION_REPLAY report | PREFLIGHT + SOURCE_REUSE report |
 | ownership audit + selected states | produced atomically inside SELECTION_REPLAY; no parent relation between siblings |
 | TARGET report/table | PREFLIGHT + committed SELECTION_REPLAY report + committed selected-states output |
@@ -1163,9 +1217,11 @@ evidence, never as committed parents.
 | terminal report | canonical committed StageOutcome ledger |
 | final retention | terminal report + identities of committed reached-stage artifacts |
 
-SOURCE_REUSE external parents are validated by exact four-field identity equality
-against the frozen source table plus strict T065 source-reader/metadata success in
-its SourceRecord evidence. No other external parent is legal.
+The two T065 expected identities are never discovered or substituted. On successful
+SOURCE_REUSE they become exact semantic parents only after observed identity,
+strict-reader, and metadata validation succeeds. On A02 they remain evidence only,
+allowing the invalid StageOutcome to commit D without opening a generic external
+parent mechanism.
 
 No per-stage retention manifest, recursive proof graph, historical alias resolver,
 exact command-token identity, or task-specific PID proof.
@@ -1400,8 +1456,8 @@ fixtures must not be generated by production code under test.
 
 | ID | Scenario | Required result |
 |---|---|---|
-| A01 | exact frozen source identities/roles/metadata | SOURCE_REUSE pass |
-| A02 | missing/hash/size/role/metadata-invalid frozen source | D at SOURCE_REUSE |
+| A01 | exact frozen expected/observed source identities/roles/metadata | SOURCE_REUSE pass; parents `[PREFLIGHT, stochastic source, expert source]` |
+| A02 | missing/unreadable/hash/size/role/strict-reader/metadata-invalid frozen source | committed D at SOURCE_REUSE; parents `[PREFLIGHT]`; exactly two source-check records retained; at least one failure |
 | A03 | cross-split replay-equivalent raw candidates | deterministic global owner; not itself error |
 | A04 | exact full member-order tie between distinct rows | D at SELECTION_REPLAY |
 | A05 | owner bucket below quota | D at SELECTION_REPLAY |
@@ -1413,7 +1469,7 @@ fixtures must not be generated by production code under test.
 | A11 | target/intermediate data exists but TARGET StageOutcome report did not commit | TARGET incomplete; retry allowed; no terminal |
 | A12 | valid committed TARGET + valid training | GATE reached |
 | A13 | valid Stage-5 pass | EVAL reached |
-| A14 | valid Stage-5 fail | terminal C; EVAL absent |
+| A14 | valid Stage-5 fail | terminal C; EVAL absent; close v1 with no promotion and at most one narrow diagnostic |
 | A15 | invalid Stage-5 evidence | D at GATE |
 | A16 | valid Stage-6 pass | terminal A |
 | A17 | valid Stage-6 fail | terminal B |
@@ -1457,8 +1513,8 @@ The final T075 pull request must report, at minimum:
    `RUN_HEAD`, and final merge head when applicable;
 2. an explicit statement that PR #75 runtime artifacts were not used as
    authoritative recovery evidence;
-3. the exact two retained T065 source ArtifactIdentity values and their strict T065
-   validation result;
+3. the exact two frozen expected T065 source identities, both observed identities
+   when obtainable, and the two ordered strict validation/source-check results;
 4. raw candidate/group/owner counts, cross-split group count,
    excluded-non-owner count, and post-owner family/split availability;
 5. selected 320-state family/split counts and the exact replay result;
@@ -1469,8 +1525,8 @@ The final T075 pull request must report, at minimum:
 8. local, focused, and full verification results plus any deviation and its
    disposition;
 9. terminal case, terminal stage, `promotion`, `recommendation_code`, and exactly
-   one planner-facing recommendation consistent with the frozen Terminal Decision
-   table above;
+   one planner-facing disposition consistent with the frozen Terminal Decision
+   table above; Case C may explicitly be `close_v1_no_followup`;
 10. final retention-manifest identity, retained artifact identities, retention
     owner/reason, downstream consumers, and deletion conditions;
 11. every `IMPLEMENTATION_BUG`, `CONTRACT_GAP`, or `ARCHITECTURE_ESCALATION`
@@ -1491,10 +1547,13 @@ Planner acceptance requires:
 - StageOutcome report write is the sole stage commit marker;
 - TARGET failed barrier commits invalid outcome; interruption before commit remains retryable;
 - ownership audit/selected states are same-stage sibling outputs, not parent/child commits;
-- exact T065 source roles are `current_output`;
-- SOURCE_REUSE is the only stage permitted the two explicitly frozen external
-  parents; all other parents come from the previously committed T075 ledger;
+- exact T065 expected source roles are `current_output`;
+- SOURCE_REUSE begins from committed PREFLIGHT only; valid source identities become
+  parents only after successful source checks, while A02 commits with PREFLIGHT-only
+  parents and failed expected inputs represented in evidence;
 - B/C are valid negative science; D is invalid experiment;
+- Case C preserves T065's close-v1/no-promotion/Stage-6-skipped and at-most-one
+  narrow diagnostic successor boundary;
 - terminal promotion/recommendation fields match the frozen A/B/C/D decision table;
 - logical Stage 3 is atomic TARGET barrier;
 - lineage is explicit/minimal and contains no implicit external-parent mechanism;
