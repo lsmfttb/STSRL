@@ -543,6 +543,10 @@ def run_t075_operation(
                 failure_code=exc.failure_code,
             )
     if operation == "target":
+        if not valid and target_table is not None:
+            raise T075OperationalError(
+                "T075 target --invalid cannot be combined with scientific evidence"
+            )
         if not valid and failure_code != "TARGET_INVALID":
             raise T075OperationalError(
                 "invalid T075 target requires TARGET_INVALID failure code"
@@ -582,6 +586,14 @@ def run_t075_operation(
             failure_code=failure_code,
         )
     if operation == "gate":
+        if not valid and stage5_report is not None:
+            raise T075OperationalError(
+                "T075 gate --invalid cannot be combined with scientific evidence"
+            )
+        if not valid and passed is not None:
+            raise T075OperationalError(
+                "T075 gate --invalid cannot carry a passed/failed assertion"
+            )
         if not valid and failure_code != "GATE_EVIDENCE_INVALID":
             raise T075OperationalError(
                 "invalid T075 gate requires GATE_EVIDENCE_INVALID failure code"
@@ -597,6 +609,14 @@ def run_t075_operation(
             failure_code=failure_code,
         )
     if operation == "eval":
+        if not valid and stage6_report is not None:
+            raise T075OperationalError(
+                "T075 eval --invalid cannot be combined with scientific evidence"
+            )
+        if not valid and passed is not None:
+            raise T075OperationalError(
+                "T075 eval --invalid cannot carry a passed/failed assertion"
+            )
         if not valid and failure_code != "EVAL_EVIDENCE_INVALID":
             raise T075OperationalError(
                 "invalid T075 eval requires EVAL_EVIDENCE_INVALID failure code"

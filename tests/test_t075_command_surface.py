@@ -624,3 +624,45 @@ def test_t075_operation_rejects_external_input_before_stage_work(
             audit=external_audit,
             valid=True,
         )
+
+
+def test_t075_invalid_command_cannot_hide_target_evidence(
+    tmp_path, monkeypatch
+) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command
+
+    target_path = tmp_path / "target-table.json"
+    target_path.write_bytes(b"{}")
+    state = SimpleNamespace(run_head=RUN_HEAD)
+    monkeypatch.setattr(command, "_validate_t075_checkout", lambda *_args: None)
+    monkeypatch.setattr(command, "reconstruct_t075_state", lambda *_args: state)
+
+    with pytest.raises(command.T075OperationalError, match="scientific evidence"):
+        command.run_t075_operation(
+            "target",
+            repository_root=tmp_path,
+            run_head=RUN_HEAD,
+            target_table=target_path,
+            valid=False,
+            failure_code="TARGET_INVALID",
+        )
+
+
+def test_t075_invalid_command_cannot_carry_passed_assertion(
+    tmp_path, monkeypatch
+) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command
+
+    state = SimpleNamespace(run_head=RUN_HEAD)
+    monkeypatch.setattr(command, "_validate_t075_checkout", lambda *_args: None)
+    monkeypatch.setattr(command, "reconstruct_t075_state", lambda *_args: state)
+
+    with pytest.raises(command.T075OperationalError, match="passed/failed"):
+        command.run_t075_operation(
+            "gate",
+            repository_root=tmp_path,
+            run_head=RUN_HEAD,
+            passed=True,
+            valid=False,
+            failure_code="GATE_EVIDENCE_INVALID",
+        )

@@ -204,6 +204,48 @@ def test_target_rejects_malformed_t065_payload_as_case_d(
     }
 
 
+@pytest.mark.parametrize("operation", ["target", "gate", "eval"])
+def test_invalid_adapter_cannot_classify_supplied_scientific_payload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str
+) -> None:
+    calls = _patch_stage_capture(monkeypatch)
+    state = acceptance.initial_acceptance_state(RUN_HEAD)
+    payload = {
+        "target": b"{}",
+        "gate": _stage5_payload(positive=True),
+        "eval": _stage6_payload(positive=True),
+    }[operation]
+
+    with pytest.raises(acceptance.T075OperationalError, match="scientific evidence"):
+        if operation == "target":
+            acceptance.run_t075_target(
+                state,
+                payload,
+                tmp_path,
+                valid=False,
+                failure_code="TARGET_INVALID",
+            )
+        elif operation == "gate":
+            acceptance.run_t075_gate(
+                state,
+                payload,
+                tmp_path,
+                passed=True,
+                valid=False,
+                failure_code="GATE_EVIDENCE_INVALID",
+            )
+        else:
+            acceptance.run_t075_eval(
+                state,
+                payload,
+                tmp_path,
+                passed=True,
+                valid=False,
+                failure_code="EVAL_EVIDENCE_INVALID",
+            )
+    assert calls == []
+
+
 @pytest.mark.parametrize("positive", [True, False])
 def test_gate_derives_t065_pass_result_from_report(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, positive: bool

@@ -1286,6 +1286,10 @@ def run_t075_target(
         _committed_output(state, "selected_states", "selected-states.jsonl"),
     )
     if not valid:
+        if target_table_payload is not None:
+            raise T075OperationalError(
+                "invalid target adapter cannot carry scientific evidence"
+            )
         if failure_code != "TARGET_INVALID":
             raise T075OperationalError(
                 "invalid T075 target requires TARGET_INVALID failure code"
@@ -1396,6 +1400,14 @@ def run_t075_gate(
     failure_code: str | None = None,
 ) -> AcceptanceState:
     if not valid:
+        if stage5_report_payload is not None:
+            raise T075OperationalError(
+                "invalid gate adapter cannot carry scientific evidence"
+            )
+        if passed is not None:
+            raise T075OperationalError(
+                "invalid gate adapter cannot carry a passed/failed assertion"
+            )
         if failure_code != "GATE_EVIDENCE_INVALID":
             raise T075OperationalError(
                 "invalid T075 gate requires GATE_EVIDENCE_INVALID failure code"
@@ -1462,6 +1474,14 @@ def run_t075_eval(
     failure_code: str | None = None,
 ) -> AcceptanceState:
     if not valid:
+        if stage6_report_payload is not None:
+            raise T075OperationalError(
+                "invalid eval adapter cannot carry scientific evidence"
+            )
+        if passed is not None:
+            raise T075OperationalError(
+                "invalid eval adapter cannot carry a passed/failed assertion"
+            )
         if failure_code != "EVAL_EVIDENCE_INVALID":
             raise T075OperationalError(
                 "invalid T075 eval requires EVAL_EVIDENCE_INVALID failure code"
