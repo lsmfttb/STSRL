@@ -405,7 +405,7 @@ Split = train | validation | heldout
 Status = passed | failed
 Promotion = experimental_public_with_expert_fallback | no_promotion
 RecommendationCode = review_joint_policy_next_step | narrow_transfer_followup | close_v1_no_followup | narrow_target_model_diagnostic | rerun_same_experiment_after_narrow_repair
-StageFailureCode = PREFLIGHT_FIDELITY | SOURCE_REUSE_FIDELITY | SELECTION_MEMBER_ORDER_TIE | SELECTION_OWNER_QUOTA_SHORTAGE | SELECTION_DUPLICATE_OR_OVERLAP | SELECTION_REPLAY_MISMATCH | TARGET_STAGE3_VALIDATION | TRAIN_FIDELITY | GATE_EVIDENCE_INVALID | EVAL_EVIDENCE_INVALID
+StageFailureCode = PREFLIGHT_FIDELITY | SOURCE_REUSE_FIDELITY | SELECTION_CANDIDATE_FIDELITY | SELECTION_MEMBER_ORDER_TIE | SELECTION_OWNER_QUOTA_SHORTAGE | SELECTION_DUPLICATE_OR_OVERLAP | SELECTION_REPLAY_MISMATCH | TARGET_STAGE3_VALIDATION | TRAIN_FIDELITY | GATE_EVIDENCE_INVALID | EVAL_EVIDENCE_INVALID
 ```
 
 `RUN_HEAD`, `RECOVERY_BASE`, `T065_APPROVED_SPEC`, and
@@ -459,8 +459,12 @@ from workflow state transition.
 raw stage result
     -> frozen stage-specific validation/classification
     -> StageReport(StageOutcomeCore + evidence)
-    -> advance(StageOutcomeCore)
+    -> compute prospective StageReport ArtifactIdentity
+    -> advance(state, StageOutcomeCore, report_identity)
 ```
+
+The prospective `report_identity` is commit metadata derived from final report
+bytes; it is not scientific evidence and `advance()` never inspects evidence.
 
 Stage validators may classify only their own stage result as:
 
@@ -492,6 +496,24 @@ StageOutcomeCore =
   problems: tuple[string]
 ```
 
+Its exact canonical JSON object contains only these keys:
+
+```text
+task_id
+run_head
+stage
+valid
+passed
+parents
+outputs
+failure_code
+problems
+```
+
+`parents`, `outputs`, and `problems` serialize as JSON arrays in their frozen order.
+`failure_code` serializes as JSON null only for valid cores. Canonical JSON settings
+are defined below.
+
 Core invariants:
 
 - `valid=true` -> `failure_code=null`;
@@ -503,10 +525,11 @@ Core invariants:
 - a frozen external source may appear as a successful SOURCE_REUSE parent but is
   never a stage output;
 - `advance()` validates only core fields, canonical parent/output rules, legal
-  transition, RUN_HEAD, duplicate/retry semantics, and terminal semantics.
+  transition, RUN_HEAD, duplicate/retry semantics, terminal semantics, and the
+  supplied prospective report identity.
 
-`core_digest(core)` is SHA-256 over canonical JSON serialization of the core only.
-Evidence bytes do not alter core semantics.
+`core_digest(core)` is SHA-256 over canonical JSON serialization of the exact core
+object above. Evidence bytes do not alter core semantics.
 
 ## AcceptanceState And Committed Ledger
 
@@ -536,8 +559,8 @@ terminal_stage = None
 
 Durable state is reconstructed only by reading committed stage reports in canonical
 stage order, extracting their cores, computing each core digest and report
-ArtifactIdentity, and replaying cores through `advance`. There is no mutable
-workflow-state file or second transition authority.
+ArtifactIdentity, and replaying them through the same `advance` authority. There is
+no mutable workflow-state file and no second transition authority.
 
 ## Legal Transitions
 
@@ -564,31 +587,45 @@ Poor learned-policy performance alone produces B or C, never D.
 
 ## Transition Precedence And Retry Semantics
 
-For a candidate core, `advance` applies exactly:
+The single transition signature is conceptually:
+
+```text
+advance(state: AcceptanceState,
+        core: StageOutcomeCore,
+        report_identity: ArtifactIdentity) -> AcceptanceState
+```
+
+`report_identity` must use the frozen report role/path for `core.stage` and the
+SHA-256/size of the exact final StageReport bytes that are proposed for atomic
+commit.
+
+For a candidate core/report identity, `advance` applies exactly:
 
 1. reject if `core.run_head != state.run_head`;
 2. compute `core_digest(core)`;
 3. if the ledger already contains `core.stage`, handle duplicate before terminal
    or current-stage checks:
-   - identical core digest -> idempotent existing state;
+   - identical core digest and identical committed report identity -> idempotent
+     existing state;
+   - identical core digest but different report identity -> operational evidence/
+     persistence conflict; state unchanged and existing report is not overwritten;
    - different core digest -> operational conflicting duplicate; state unchanged;
 4. if terminal already exists, reject any new uncommitted stage; state unchanged;
 5. require `core.stage == state.current_stage`;
 6. require the exact legal `(valid, passed, failure_code)` combination;
-7. validate the frozen parent/output shape for that stage and result class;
-8. apply the transition table;
-9. append the new committed outcome after report commit supplies its report
-   identity;
+7. require `report_identity` role/path to equal the frozen report role/path for the
+   stage;
+8. validate the frozen parent/output shape for that stage/result class;
+9. apply the transition table and append
+   `CommittedOutcome(stage, core_digest, report_identity)`;
 10. if terminal, set `terminal_case`, `terminal_stage`, `current_stage=None`;
     otherwise advance to the next stage.
 
-Out-of-order stage, wrong RUN_HEAD, or conflicting duplicate is an operational
-rejection, not Case D.
+Out-of-order stage, wrong RUN_HEAD, report-role/path mismatch, or conflicting
+duplicate is an operational rejection, not Case D.
 
-An already committed identical core is never re-executed for science. The caller
-returns/validates the existing committed report. If a caller presents the same core
-with different evidence after commit, persistence must not overwrite the existing
-report; that is an operational integrity conflict, not a new scientific outcome.
+An already committed identical core/report identity is never re-executed for
+science. The caller returns/validates the existing committed report.
 
 ## Canonical Parent And Output Rules
 
@@ -626,6 +663,12 @@ Other frozen parent/output shapes:
 Ownership audit and selected states are same-stage sibling outputs of one valid
 SELECTION_REPLAY transaction. Neither is a committed parent of the other.
 
+The GATE/EVAL stage classifier, not `advance`, validates that the selected checkpoint
+parent is the checkpoint selected by the frozen TRAIN rule. `advance` checks only
+that the checkpoint identity is one of the committed TRAIN checkpoint outputs and
+that all other parent identities/order match the frozen lineage. This keeps model-
+selection science out of workflow transition logic.
+
 ## StageReport And Canonical JSON
 
 Every persisted T075 stage report contains the core plus evidence with exact
@@ -646,7 +689,8 @@ problems: [string]
 evidence: Evidence
 ```
 
-The top-level semantic fields are the serialized `StageOutcomeCore`.
+The top-level semantic fields from `task_id` through `problems` serialize the exact
+`StageOutcomeCore` object used for `core_digest`.
 
 All T075 control/report JSON uses UTF-8 canonical JSON:
 
@@ -807,15 +851,16 @@ Frozen ordered classifier checks:
 
 Failure mapping:
 
+- `candidate_domain` -> `SELECTION_CANDIDATE_FIDELITY`;
 - `member_order_uniqueness` -> `SELECTION_MEMBER_ORDER_TIE`;
 - `owner_quota_availability` -> `SELECTION_OWNER_QUOTA_SHORTAGE`;
 - `selected_uniqueness` or `selected_cross_split_overlap` ->
   `SELECTION_DUPLICATE_OR_OVERLAP`;
-- `selected_replay` -> `SELECTION_REPLAY_MISMATCH`;
-- a failure in `candidate_domain` that prevents the frozen experiment from being
-  valid is classified under the first applicable frozen selection failure meaning;
-  if no listed meaning applies, that is a `CONTRACT_GAP`, not a locally invented
-  failure code.
+- `selected_replay` -> `SELECTION_REPLAY_MISMATCH`.
+
+`SELECTION_CANDIDATE_FIDELITY` is not new science: it is the existing fail-closed
+meaning for a malformed/provenance-invalid selectable candidate that survives
+source-file validation. It does not add an acceptance row or alter ownership logic.
 
 Complete valid evidence requires:
 
@@ -976,14 +1021,20 @@ For a legitimately reached stage:
 5. for a complete valid stage, atomically promote validated data outputs to frozen
    final paths and compute their final ArtifactIdentity values before finalizing
    the core;
-6. construct the final StageReport from core + evidence;
-7. call canonical `advance(core)` prospectively; this is pure and creates no
-   durable state;
-8. atomically write exactly the final canonical StageReport bytes to the frozen
-   report path; this report write is the sole stage commit marker;
-9. after successful report write, reconstruct/advance durable state and record the
-   committed report identity;
-10. if terminal, materialize the unique terminal report from canonical state.
+6. construct the final StageReport from core + evidence and canonical-serialize it;
+7. compute the prospective StageReport ArtifactIdentity from its exact final bytes,
+   frozen role, and frozen path;
+8. call the single canonical `advance(state, core, prospective_report_identity)`;
+   this is a pure prospective check and creates no durable state;
+9. atomically write exactly those final StageReport bytes to the frozen report path;
+   this write is the sole stage commit marker;
+10. after successful report write, durable state is the state already determined by
+    the same `advance` call and may be reconstructed from committed reports;
+11. if terminal, materialize the case-constrained terminal report from canonical
+    state and the frozen terminal decision table.
+
+There is no provisional core identity, provisional report identity, or second
+transition path.
 
 If data promotion succeeds but stage-report commit is interrupted, those data files
 are uncommitted and ignored as parents; retry may deterministically overwrite them.
@@ -1048,9 +1099,9 @@ decision authority.
 
 The first terminal state implied by committed cores is immutable. If terminal-file
 materialization is interrupted after the terminal stage report committed, restart
-reconstructs the same state and materializes the same terminal decision. A
-conflicting terminal file is an operational integrity failure and cannot reinterpret
-science.
+reconstructs the same state and materializes a terminal report constrained to the
+same case/table. A conflicting terminal case/stage/promotion outside the frozen
+mapping is an operational integrity failure and cannot reinterpret science.
 
 ## Final Retention
 
@@ -1354,9 +1405,9 @@ must not be generated by production code under test.
 | A17 | complete valid Stage-6 evidence but one or more scientific predicates fail | valid EVAL fail -> B |
 | A18 | missing/incomplete/truncated/controller-invalid/nonfinite Stage-6 evidence | invalid EVAL / `EVAL_EVIDENCE_INVALID` -> D; no fake 768/metric placeholders |
 | A19 | initial state | current stage PREFLIGHT; empty ledger; no terminal |
-| A20 | out-of-order stage, wrong RUN_HEAD, or conflicting duplicate core | operational reject; state/terminal unchanged |
+| A20 | out-of-order stage, wrong RUN_HEAD, or conflicting duplicate core/report | operational reject; state/terminal unchanged |
 | A21 | interruption before StageReport atomic commit | no committed core/report; same stage retryable with same RUN_HEAD/parents |
-| A22 | identical committed core retried, or terminal already committed | no science rerun; existing report/state returned; terminal immutable |
+| A22 | identical committed core+report identity retried, or terminal already committed | no science rerun; existing report/state returned; terminal immutable |
 | A23 | deployable model input includes behavior/expert/target/hidden/future | invalid TARGET / `TARGET_STAGE3_VALIDATION` at `public_input_firewall` -> D |
 | A24 | helper/finalizer disagrees with canonical advance, or retention fails after terminal | disagreement `IMPLEMENTATION_BUG`; retention failure operational; terminal unchanged |
 
@@ -1429,14 +1480,16 @@ Planner semantic/architecture acceptance requires:
 
 - only scientific change is global ownership before unchanged quotas;
 - stage classification and workflow transition are separate layers;
-- `advance()` consumes only `StageOutcomeCore`, not scientific evidence;
+- `advance()` consumes only `StageOutcomeCore` plus prospective report identity,
+  never scientific evidence;
 - one canonical `advance()` authority owns stage/terminal/retry semantics;
 - fixed `StageFailureCode` meanings cover A01-A24 invalid outcomes without an open
   validator taxonomy;
 - invalid evidence omits unavailable metrics rather than fabricating success-shaped
   placeholders;
 - valid GATE/EVAL negative science remains C/B, distinct from invalid D;
-- committed-outcome ledger/core digest makes A20/A22 duplicate semantics exact;
+- committed-outcome ledger/core+report identity makes A20/A22 duplicate semantics
+  exact;
 - StageReport write is the sole stage commit marker;
 - TARGET failed barrier commits invalid outcome; interruption remains retryable;
 - SOURCE_REUSE invalid path uses PREFLIGHT-only parents and expected-source evidence;
