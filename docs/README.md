@@ -12,14 +12,19 @@ several files:
 1. [`../AGENTS.md`](../AGENTS.md): concise repository-wide contributor rules.
 2. [`project_architecture.md`](project_architecture.md): runtime, model, data,
    information-regime, and code-ownership architecture.
-3. [`collaboration_workflow.md`](collaboration_workflow.md): authoritative task
+3. [`training_paradigm.md`](training_paradigm.md): authoritative training-signal
+   and human-knowledge boundary.
+4. [`collaboration_workflow.md`](collaboration_workflow.md): authoritative task
    roles, branch/PR workflow, specification approval, execution reuse, and
    review/merge process.
-4. [`current_status.md`](current_status.md): implemented capabilities, known
+5. [`research_inspirations_and_attribution.md`](research_inspirations_and_attribution.md):
+   research lineage, attribution, and publication-time third-party licensing
+   requirements.
+6. [`current_status.md`](current_status.md): implemented capabilities, known
    gaps, and current priorities.
-5. Active roadmap documents: intended future work within the architecture.
-6. Operational guides: commands and environment details.
-7. [`history/`](history/README.md): past investigations and superseded plans.
+7. Active roadmap documents: intended future work within the architecture.
+8. Operational guides: commands and environment details.
+9. [`history/`](history/README.md): past investigations and superseded plans.
 
 `README.md` is the project entry point, not an exhaustive specification.
 
@@ -30,6 +35,12 @@ several files:
 - [`project_architecture.md`](project_architecture.md): controller boundaries,
   information regimes, data provenance, objectives, artifact migration, and
   code ownership.
+- [`training_paradigm.md`](training_paradigm.md): simulator-only self-generated
+  improvement, Oracle-assistance rules, final human-knowledge boundary, and
+  distribution contract.
+- [`research_inspirations_and_attribution.md`](research_inspirations_and_attribution.md):
+  explicit AlphaZero/Suphx citations, CombatSolver attribution, source-use
+  boundary, and public-release checklist.
 - [`a20_later_act_boss_source_coverage_contract.md`](a20_later_act_boss_source_coverage_contract.md):
   accepted T037 source-coverage boundary for narrow Boss/later-act follow-up
   work.
@@ -77,6 +88,9 @@ several files:
 
 - Put repository-wide runtime/design invariants in `project_architecture.md` and
   summarize the most important ones in `AGENTS.md`.
+- Put training-signal and human-knowledge rules in `training_paradigm.md`.
+- Keep research citations, attribution, and publication-time source-use checks
+  in `research_inspirations_and_attribution.md`.
 - Put task ownership and execution/review workflow in
   `collaboration_workflow.md`; keep other summaries short and consistent with
   it.
