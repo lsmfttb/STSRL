@@ -77,8 +77,17 @@ def _operation_argv(tmp_path, operation: str) -> list[str]:
         "--run-head",
         RUN_HEAD,
     ]
-    if operation in {"preflight", "validate-reuse"}:
+    if operation == "preflight":
         args += ["--audit", str(tmp_path / f"{operation}.json")]
+    elif operation == "validate-reuse":
+        args += [
+            "--audit",
+            str(tmp_path / f"{operation}.json"),
+            "--source-stochastic",
+            str(tmp_path / "source-stochastic.json"),
+            "--source-expert",
+            str(tmp_path / "source-expert.json"),
+        ]
     elif operation == "select":
         args += [
             "--source-stochastic",
@@ -145,10 +154,10 @@ def test_t075_main_dispatches_each_operation_without_running_science(
                 "ownership_audit": None,
                 "selected_states": None,
                 "source_stochastic": tmp_path / "source-stochastic.json"
-                if operation == "select"
+                if operation in {"select", "validate-reuse"}
                 else None,
                 "source_expert": tmp_path / "source-expert.json"
-                if operation == "select"
+                if operation in {"select", "validate-reuse"}
                 else None,
                 "source_reuse_audit": tmp_path / "source-reuse-audit.json"
                 if operation == "select"
@@ -287,6 +296,149 @@ def test_t075_operation_reads_canonical_input_before_public_adapter(
         == "committed"
     )
     assert calls == [(committed_state, {"audit": True}, tmp_path)]
+
+
+def test_t075_validate_reuse_checks_frozen_sources_before_public_adapter(
+    tmp_path, monkeypatch
+) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command
+
+    source_paths = (
+        tmp_path / "artifacts/t065-learned-non-combat-policy-v1/"
+        "source-stochastic-650001-650256-c57b2ee.json",
+        tmp_path / "artifacts/t065-learned-non-combat-policy-v1/"
+        "source-expert-650001-650256-deeaa46.json",
+    )
+    audit = {
+        "schema_id": "t075-source-reuse-audit-v1",
+        "schema_version": 1,
+        "task_id": "T075",
+        "run_head": RUN_HEAD,
+        "sources": [
+            {
+                "role": "current_output",
+                "path": "artifacts/t065-learned-non-combat-policy-v1/"
+                "source-stochastic-650001-650256-c57b2ee.json",
+                "sha256": "40a29e2cc8042efc15a46e9c50f6a50f889c94a1d7def24e91b62718eaaa8f61",
+                "size_bytes": 5352891044,
+            },
+            {
+                "role": "current_output",
+                "path": "artifacts/t065-learned-non-combat-policy-v1/"
+                "source-expert-650001-650256-deeaa46.json",
+                "sha256": "29d4155e543b024e741230b5bcefad3116c44610b370b666f46a65571348ad4c",
+                "size_bytes": 3710180244,
+            },
+        ],
+        "strict_reader_passed": True,
+        "metadata_passed": True,
+    }
+    audit_path = tmp_path / "source-reuse.json"
+    audit_path.write_bytes(command.canonical_json_document(audit))
+    state = SimpleNamespace(run_head=RUN_HEAD)
+    checked: list[tuple[object, object]] = []
+    calls: list[tuple[object, object, object, dict[str, object]]] = []
+
+    def fake_source_check(root, path, identity):
+        checked.append((path, identity))
+
+    def fake_reader_check(root, paths, source_audit):
+        assert root == tmp_path
+        assert paths == source_paths
+        assert source_audit == audit
+        for path, identity in zip(paths, command.T075_SOURCE_IDENTITIES, strict=True):
+            fake_source_check(root, path, identity)
+
+    def fake_reconstruct(root, run_head):
+        assert root == tmp_path
+        assert run_head == RUN_HEAD
+        return state
+
+    def fake_reuse(received_state, received_audit, root, **kwargs):
+        calls.append((received_state, received_audit, root, kwargs))
+        return "committed"
+
+    monkeypatch.setattr(command, "_validate_t075_checkout", lambda *_args: None)
+    monkeypatch.setattr(
+        command, "_validate_t075_source_reuse_inputs", fake_reader_check
+    )
+    monkeypatch.setattr(command, "reconstruct_t075_state", fake_reconstruct)
+    monkeypatch.setattr(command, "run_t075_validate_reuse", fake_reuse)
+    assert (
+        command.run_t075_operation(
+            "validate-reuse",
+            repository_root=tmp_path,
+            run_head=RUN_HEAD,
+            audit=audit_path,
+            source_stochastic=source_paths[0],
+            source_expert=source_paths[1],
+        )
+        == "committed"
+    )
+    assert checked == list(
+        zip(source_paths, command.T075_SOURCE_IDENTITIES, strict=True)
+    )
+    assert calls == [(state, audit, tmp_path, {"valid": True, "failure_code": None})]
+
+
+@pytest.mark.parametrize(
+    "failure_code",
+    [
+        "SELECTION_MEMBER_ORDER_TIE",
+        "SELECTION_OWNER_QUOTA_SHORTAGE",
+        "SELECTION_REPLAY_INVALID",
+    ],
+)
+def test_t075_select_classification_commits_invalid_outcome(
+    tmp_path, monkeypatch, failure_code: str
+) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command
+
+    state = SimpleNamespace(run_head=RUN_HEAD)
+    calls: list[dict[str, object]] = []
+
+    def fake_classified_selection(*_args, **_kwargs):
+        raise command.T075StageClassificationError(failure_code, "classified")
+
+    def fake_invalid_adapter(received_state, audit, selected, root, **kwargs):
+        calls.append(
+            {
+                "state": received_state,
+                "audit": audit,
+                "selected": selected,
+                "root": root,
+                **kwargs,
+            }
+        )
+        return "committed-invalid"
+
+    monkeypatch.setattr(command, "_validate_t075_checkout", lambda *_args: None)
+    monkeypatch.setattr(command, "reconstruct_t075_state", lambda *_args: state)
+    monkeypatch.setattr(
+        command, "_run_t075_source_selection", fake_classified_selection
+    )
+    monkeypatch.setattr(command, "run_t075_selection", fake_invalid_adapter)
+    assert (
+        command.run_t075_operation(
+            "select",
+            repository_root=tmp_path,
+            run_head=RUN_HEAD,
+            source_stochastic=tmp_path / "stochastic.json",
+            source_expert=tmp_path / "expert.json",
+            source_reuse_audit=tmp_path / "reuse.json",
+        )
+        == "committed-invalid"
+    )
+    assert calls == [
+        {
+            "state": state,
+            "audit": None,
+            "selected": None,
+            "root": tmp_path,
+            "valid": False,
+            "failure_code": failure_code,
+        }
+    ]
 
 
 def test_t075_operation_rejects_a_wrong_checkout_head_before_stage_work(

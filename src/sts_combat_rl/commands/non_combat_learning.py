@@ -237,6 +237,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_t075_common_arguments(t075_reuse)
     t075_reuse.add_argument("--audit", type=Path)
+    t075_reuse.add_argument("--source-stochastic", type=Path)
+    t075_reuse.add_argument("--source-expert", type=Path)
     _add_t075_validity_arguments(t075_reuse, failure_codes=("SOURCE_REUSE_INVALID",))
 
     t075_select = t075_operations.add_parser(
@@ -471,13 +473,18 @@ def run_t075_operation(
             failure_code=failure_code,
         )
     if operation == "validate-reuse":
-        return run_t075_validate_reuse(
-            state,
-            _read_t075_mapping(
+        if valid:
+            source_paths = (
+                _required_t075_path(source_stochastic, "stochastic source"),
+                _required_t075_path(source_expert, "expert source"),
+            )
+            source_audit = _read_t075_mapping(
                 _required_t075_path(audit, "audit"), "source-reuse audit"
             )
-            if valid
-            else None,
+            _validate_t075_source_reuse_inputs(root, source_paths, source_audit)
+        return run_t075_validate_reuse(
+            state,
+            source_audit if valid else None,
             root,
             valid=valid,
             failure_code=failure_code,
@@ -496,14 +503,24 @@ def run_t075_operation(
             raise T075OperationalError(
                 "T075 select accepts source artifacts, not caller-selected states"
             )
-        return _run_t075_source_selection(
-            state,
-            root,
-            source_stochastic=source_stochastic,
-            source_expert=source_expert,
-            source_reuse_audit=source_reuse_audit,
-            run_head=run_head,
-        )
+        try:
+            return _run_t075_source_selection(
+                state,
+                root,
+                source_stochastic=source_stochastic,
+                source_expert=source_expert,
+                source_reuse_audit=source_reuse_audit,
+                run_head=run_head,
+            )
+        except T075StageClassificationError as exc:
+            return run_t075_selection(
+                state,
+                None,
+                None,
+                root,
+                valid=False,
+                failure_code=exc.failure_code,
+            )
     if operation == "target":
         if not valid and failure_code != "TARGET_INVALID":
             raise T075OperationalError(
@@ -1328,6 +1345,36 @@ def _validate_t075_frozen_source(
         raise T075OperationalError(
             f"T075 frozen source identity does not match: {path}"
         )
+
+
+def _validate_t075_source_reuse_inputs(
+    repository_root: Path,
+    source_paths: tuple[Path, Path],
+    source_audit: Mapping[str, Any],
+) -> None:
+    validate_t075_source_reuse_audit(source_audit)
+    expected_sources = tuple(dict(identity) for identity in T075_SOURCE_IDENTITIES)
+    if source_audit["sources"] != list(expected_sources):
+        raise T075OperationalError(
+            "T075 source-reuse audit is not aligned with frozen source identities"
+        )
+    expected_arms = ("stochastic_non_combat_v1", "expert_non_combat_v1")
+    for path, expected_identity, expected_arm in zip(
+        source_paths, T075_SOURCE_IDENTITIES, expected_arms, strict=True
+    ):
+        _validate_t075_frozen_source(repository_root, path, expected_identity)
+        reader = _SourceArmArtifactReader(path)
+        try:
+            for _state in reader.iter_states():
+                pass
+        except (OSError, T065CaseD, TypeError, ValueError) as exc:
+            raise T075OperationalError(
+                f"T075 frozen source failed the strict T065 reader: {path}"
+            ) from exc
+        if reader.metadata.get("arm") != expected_arm:
+            raise T075OperationalError(
+                f"T075 frozen source arm does not match its frozen path: {path}"
+            )
 
 
 def _validate_t075_source_reuse_parent(
