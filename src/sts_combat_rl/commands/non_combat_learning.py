@@ -324,6 +324,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"T065 command failed: {exc}", file=sys.stderr)
         return 1
     except (OSError, RuntimeError, ValueError) as exc:
+        if args.command == "t075":
+            print(f"T075 command failed: {exc}", file=sys.stderr)
+            return 1
         failure = T065CaseD(
             _stage_name(args.command),
             [str(exc)],

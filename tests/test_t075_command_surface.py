@@ -30,6 +30,40 @@ def test_t075_help_lists_only_the_explicit_nested_operations(capsys) -> None:
     assert "workflow framework" not in help_text
 
 
+def test_t075_malformed_input_does_not_enter_legacy_case_d_handler(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command
+
+    audit_path = tmp_path / "malformed-preflight.json"
+    audit_path.write_bytes(command.canonical_json_document({"malformed": True}))
+    monkeypatch.setattr(command, "_validate_t075_checkout", lambda *_args: None)
+    monkeypatch.setattr(command, "reconstruct_t075_state", lambda *_args: object())
+    monkeypatch.setattr(
+        command,
+        "_handle_case_d",
+        lambda *_args: pytest.fail("T075 must not use the legacy Case-D handler"),
+    )
+
+    assert (
+        command.main(
+            [
+                "t075",
+                "preflight",
+                "--repository-root",
+                str(tmp_path),
+                "--run-head",
+                RUN_HEAD,
+                "--audit",
+                str(audit_path),
+                "--valid",
+            ]
+        )
+        == 1
+    )
+    assert "T075 command failed" in capsys.readouterr().err
+
+
 def test_t075_parser_is_nested_and_legacy_t065_select_remains_flat(tmp_path) -> None:
     from sts_combat_rl.commands.non_combat_learning import build_parser
 
