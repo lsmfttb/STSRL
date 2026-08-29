@@ -561,7 +561,33 @@ def run_t075_operation(
             failure_code=failure_code,
         )
     if operation == "train":
-        if valid:
+        if not valid:
+            if any(
+                path is not None
+                for path in (
+                    checkpoint_653001,
+                    checkpoint_653002,
+                    training_selection,
+                )
+            ):
+                raise T075OperationalError(
+                    "invalid T075 train cannot carry checkpoint or selection evidence"
+                )
+            checkpoint_payloads = None
+            selection = None
+        elif any(
+            path is None
+            for path in (checkpoint_653001, checkpoint_653002, training_selection)
+        ):
+            return run_t075_train(
+                state,
+                None,
+                None,
+                root,
+                valid=True,
+                failure_code=failure_code,
+            )
+        else:
             checkpoint_653001_path = _required_t075_path(
                 checkpoint_653001, "checkpoint-653001"
             )
@@ -595,9 +621,6 @@ def run_t075_operation(
                     valid=False,
                     failure_code="TRAIN_INVALID",
                 )
-        else:
-            checkpoint_payloads = None
-            selection = None
         return run_t075_train(
             state,
             checkpoint_payloads,

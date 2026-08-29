@@ -711,3 +711,68 @@ def test_t075_train_selection_read_failure_commits_invalid(
             {"valid": False, "failure_code": "TRAIN_INVALID"},
         )
     ]
+
+
+@pytest.mark.parametrize("evidence", ["checkpoint", "selection"])
+def test_t075_invalid_train_command_rejects_supplied_evidence(
+    tmp_path, monkeypatch, evidence
+) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command
+
+    state = SimpleNamespace(run_head=RUN_HEAD)
+    monkeypatch.setattr(command, "_validate_t075_checkout", lambda *_args: None)
+    monkeypatch.setattr(command, "reconstruct_t075_state", lambda *_args: state)
+    kwargs = {
+        "checkpoint_653001": tmp_path / "653001.pt"
+        if evidence == "checkpoint"
+        else None,
+        "training_selection": tmp_path / "training-selection.json"
+        if evidence == "selection"
+        else None,
+    }
+
+    with pytest.raises(command.T075OperationalError, match="evidence"):
+        command.run_t075_operation(
+            "train",
+            repository_root=tmp_path,
+            run_head=RUN_HEAD,
+            valid=False,
+            failure_code="TRAIN_INVALID",
+            **kwargs,
+        )
+
+
+def test_t075_missing_valid_train_command_evidence_commits_invalid(
+    tmp_path, monkeypatch
+) -> None:
+    import sts_combat_rl.commands.non_combat_learning as command
+
+    state = SimpleNamespace(run_head=RUN_HEAD)
+    calls = []
+
+    def fake_train(received_state, payloads, selection, root, **kwargs):
+        calls.append((received_state, payloads, selection, root, kwargs))
+        return "invalid"
+
+    monkeypatch.setattr(command, "_validate_t075_checkout", lambda *_args: None)
+    monkeypatch.setattr(command, "reconstruct_t075_state", lambda *_args: state)
+    monkeypatch.setattr(command, "run_t075_train", fake_train)
+
+    assert (
+        command.run_t075_operation(
+            "train",
+            repository_root=tmp_path,
+            run_head=RUN_HEAD,
+            valid=True,
+        )
+        == "invalid"
+    )
+    assert calls == [
+        (
+            state,
+            None,
+            None,
+            tmp_path,
+            {"valid": True, "failure_code": None},
+        )
+    ]

@@ -311,6 +311,49 @@ def test_train_rejects_selection_mae_disagreement_with_t065_checkpoints(
     assert calls[-1]["payloads"] == ()
 
 
+def test_invalid_train_adapter_rejects_checkpoint_or_selection_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = _patch_stage_capture(monkeypatch)
+    state = acceptance.initial_acceptance_state(RUN_HEAD)
+    checkpoint_payloads = (b"checkpoint 653001", b"checkpoint 653002")
+
+    with pytest.raises(acceptance.T075OperationalError, match="evidence"):
+        acceptance.run_t075_train(
+            state,
+            checkpoint_payloads,
+            None,
+            tmp_path,
+            valid=False,
+            failure_code="TRAIN_INVALID",
+        )
+    with pytest.raises(acceptance.T075OperationalError, match="evidence"):
+        acceptance.run_t075_train(
+            state,
+            None,
+            _training_selection(checkpoint_payloads),
+            tmp_path,
+            valid=False,
+            failure_code="TRAIN_INVALID",
+        )
+
+    assert calls == []
+
+
+def test_train_missing_valid_evidence_commits_invalid_case_d(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = _patch_stage_capture(monkeypatch)
+    state = acceptance.initial_acceptance_state(RUN_HEAD)
+
+    acceptance.run_t075_train(state, None, None, tmp_path, valid=True)
+
+    assert calls[-1]["valid"] is False
+    assert calls[-1]["passed"] is False
+    assert calls[-1]["failure_code"] == "TRAIN_INVALID"
+    assert calls[-1]["payloads"] == ()
+
+
 @pytest.mark.parametrize("operation", ["target", "gate", "eval"])
 def test_invalid_adapter_cannot_classify_supplied_scientific_payload(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, operation: str

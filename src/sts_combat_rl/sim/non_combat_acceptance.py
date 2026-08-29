@@ -1346,6 +1346,10 @@ def run_t075_train(
 ) -> AcceptanceState:
     parents = (_committed_output(state, "target_table", "target-table.json"),)
     if not valid:
+        if checkpoint_payloads is not None or training_selection is not None:
+            raise T075OperationalError(
+                "invalid train adapter cannot carry checkpoint or selection evidence"
+            )
         if failure_code != "TRAIN_INVALID":
             raise T075OperationalError(
                 "invalid T075 train requires TRAIN_INVALID failure code"
