@@ -378,6 +378,8 @@ TerminalCase = A | B | C | D
 Family = MAP_SCREEN | REST_ROOM | REWARDS | TREASURE_ROOM
 Split = train | validation | heldout
 Status = passed | failed
+Promotion = experimental_public_with_expert_fallback | none
+RecommendationCode = review_joint_policy_next_step | narrow_transfer_followup | narrow_target_model_diagnostic | rerun_same_experiment_after_narrow_repair
 ```
 
 `RUN_HEAD`, `RECOVERY_BASE`, `T065_APPROVED_SPEC`, and
@@ -521,7 +523,8 @@ For every candidate StageOutcome, `advance` applies exactly:
    - different report identity -> operational conflicting duplicate, state unchanged;
 4. if terminal already exists, reject any new uncommitted stage, state unchanged;
 5. require `outcome.stage == state.current_stage`;
-6. require exact legal `(valid, passed)` combination and exact committed parents;
+6. require exact legal `(valid, passed)` combination and validate parents by the
+   canonical parent rule below;
 7. apply the transition table;
 8. append the candidate report identity to the ledger;
 9. if terminal, set `terminal_case`, `terminal_stage`, `current_stage=None`; else
@@ -529,14 +532,44 @@ For every candidate StageOutcome, `advance` applies exactly:
 
 Out-of-order/wrong-RUN_HEAD/conflicting duplicate are operational rejection, not D.
 
+### Canonical Parent Validation
+
+An `ArtifactIdentity` parent is legal only when it is either:
+
+1. an explicitly enumerated frozen external input named by this contract; or
+2. an output/report identity from a previously committed T075 StageOutcome in the
+   canonical ledger.
+
+`SOURCE_REUSE` is the **only** T075 stage allowed external-input parents. Its
+ordered parents are exactly:
+
+1. the committed PREFLIGHT report identity;
+2. the frozen stochastic T065 source `current_output` identity;
+3. the frozen expert T065 source `current_output` identity.
+
+For SOURCE_REUSE, canonical `advance` validates each external source parent by
+exact four-field `ArtifactIdentity` equality `(role,path,sha256,size_bytes)` against
+the frozen literals in `Frozen T065 Source Inputs` **and** requires the associated
+`SourceRecord` evidence to show successful strict T065 reader and metadata
+validation. No alias, alternate path, basename match, or discovered manifest entry
+is accepted.
+
+For every other stage, every parent must resolve in the exact frozen order to a
+report/output identity already present in the previously committed T075 ledger.
+Same-stage sibling outputs remain derivation evidence and are never parent/child
+commits.
+
+The two frozen T065 source inputs above are the complete external-parent exception;
+this rule is not a generic external-parent mechanism.
+
 ## Transactional Stage Commit
 
 This ordering is normative and resolves report/output identity causality.
 
 For a legitimately reached stage:
 
-1. validate checkout, RUN_HEAD, current canonical state, and all previously
-   committed parent identities;
+1. validate checkout, RUN_HEAD, current canonical state, and all legal parent
+   identities under `Canonical Parent Validation`;
 2. write expensive/intermediate prospective outputs under `ROOT/.tmp/`;
 3. run all stage-specific completeness/fidelity checks;
 4. if the stage is successful, atomically promote each validated output to its
@@ -821,6 +854,10 @@ Parents exact order:
 2. frozen stochastic T065 source with role `current_output`;
 3. frozen expert T065 source with role `current_output`.
 
+The two source parents are the explicitly frozen external-parent exception defined
+by `Canonical Parent Validation`; they are not required to appear in the T075
+committed ledger.
+
 Outputs `[]`.
 
 Evidence:
@@ -1023,6 +1060,8 @@ terminal_stage: Stage
 reached_stages: [Stage]
 skipped_stages: [Stage]
 stage_report_identities: [ArtifactIdentity]
+promotion: Promotion
+recommendation_code: RecommendationCode
 recommendation: string
 problems: [string]
 ```
@@ -1032,6 +1071,31 @@ remaining suffix; report identities follow reached-stage order.
 
 A/B terminal_stage EVAL; C terminal_stage GATE; D terminal_stage first invalid
 reached stage.
+
+Terminal promotion/recommendation semantics are frozen to the existing T065
+Terminal Decision Table:
+
+- **A / EVAL**: `promotion=experimental_public_with_expert_fallback`;
+  `recommendation_code=review_joint_policy_next_step`; exactly one planner-facing
+  recommendation to review T066 or one narrower joint-policy task. This is not a
+  natural-A20 or live-game promotion claim.
+- **B / EVAL**: `promotion=none`;
+  `recommendation_code=narrow_transfer_followup`; exactly one narrow follow-up
+  selected from observed screen coverage, target-horizon/rollout-policy mismatch,
+  or run-distribution shift. Do not authorize a larger natural run merely because
+  the 256 fresh seeds are neutral.
+- **C / GATE**: `promotion=none`;
+  `recommendation_code=narrow_target_model_diagnostic`; EVAL/Stage 6 is skipped;
+  exactly one narrow target/model diagnostic is recommended and the v1 formulation
+  is closed.
+- **D / first invalid reached stage**: `promotion=none`;
+  `recommendation_code=rerun_same_experiment_after_narrow_repair`; no policy
+  conclusion is allowed; exactly one narrow repair necessary to rerun the same
+  frozen experiment is recommended; every downstream scientific stage is skipped.
+
+`recommendation` is descriptive text constrained by the terminal case and
+`recommendation_code`; it is not a second decision authority. Exactly one
+planner-facing next recommendation is reported for every terminal case.
 
 The first valid terminal state implied by committed StageOutcome ledger is
 immutable. If terminal report write is interrupted after terminal-producing stage
@@ -1075,13 +1139,21 @@ reproduction hold remains. Historical identities are never rewritten.
 
 ## Minimal Semantic Lineage
 
-Only **previously committed** stage artifacts may be ArtifactIdentity parents.
+An `ArtifactIdentity` parent may be either:
+
+1. an explicitly enumerated frozen external input named by this contract; or
+2. a report/output identity from a previously committed T075 StageOutcome in the
+   canonical ledger.
+
+The only external-input parents are the two frozen T065 `current_output` source
+identities, and they are legal only for SOURCE_REUSE. All other parents must be
+previously committed ledger report/output identities in the exact frozen order.
 Same-stage sibling outputs may refer to one another only as internal derivation /
 evidence, never as committed parents.
 
 | Output | Committed semantic parents |
 |---|---|
-| SOURCE_REUSE report | PREFLIGHT + exact two frozen T065 source identities |
+| SOURCE_REUSE report | committed PREFLIGHT + exact two frozen external T065 source identities |
 | SELECTION_REPLAY report | PREFLIGHT + SOURCE_REUSE report |
 | ownership audit + selected states | produced atomically inside SELECTION_REPLAY; no parent relation between siblings |
 | TARGET report/table | PREFLIGHT + committed SELECTION_REPLAY report + committed selected-states output |
@@ -1090,6 +1162,10 @@ evidence, never as committed parents.
 | EVAL report | valid GATE pass report + selected checkpoint |
 | terminal report | canonical committed StageOutcome ledger |
 | final retention | terminal report + identities of committed reached-stage artifacts |
+
+SOURCE_REUSE external parents are validated by exact four-field identity equality
+against the frozen source table plus strict T065 source-reader/metadata success in
+its SourceRecord evidence. No other external parent is legal.
 
 No per-stage retention manifest, recursive proof graph, historical alias resolver,
 exact command-token identity, or task-specific PID proof.
@@ -1373,6 +1449,36 @@ patching.
 
 No scientific Stage 0-6 execution begins before step 9.
 
+## Required PR Evidence
+
+The final T075 pull request must report, at minimum:
+
+1. recovery base, approved Planner contract commit, final implementation
+   `RUN_HEAD`, and final merge head when applicable;
+2. an explicit statement that PR #75 runtime artifacts were not used as
+   authoritative recovery evidence;
+3. the exact two retained T065 source ArtifactIdentity values and their strict T065
+   validation result;
+4. raw candidate/group/owner counts, cross-split group count,
+   excluded-non-owner count, and post-owner family/split availability;
+5. selected 320-state family/split counts and the exact replay result;
+6. every reached TARGET/TRAIN/GATE/EVAL metric and reached durable artifact
+   identity;
+7. for each substantial simulator stage: shard count, requested/actual worker
+   count, exact ranges, completion counts, and wall-clock evidence;
+8. local, focused, and full verification results plus any deviation and its
+   disposition;
+9. terminal case, terminal stage, `promotion`, `recommendation_code`, and exactly
+   one planner-facing recommendation consistent with the frozen Terminal Decision
+   table above;
+10. final retention-manifest identity, retained artifact identities, retention
+    owner/reason, downstream consumers, and deletion conditions;
+11. every `IMPLEMENTATION_BUG`, `CONTRACT_GAP`, or `ARCHITECTURE_ESCALATION`
+    raised during recovery and its disposition.
+
+This is a reporting/evidence contract only. It does not add scientific acceptance
+criteria beyond the frozen experiment and A01-A24 semantics.
+
 ## Final Planner Review Checklist
 
 Planner acceptance requires:
@@ -1386,9 +1492,12 @@ Planner acceptance requires:
 - TARGET failed barrier commits invalid outcome; interruption before commit remains retryable;
 - ownership audit/selected states are same-stage sibling outputs, not parent/child commits;
 - exact T065 source roles are `current_output`;
+- SOURCE_REUSE is the only stage permitted the two explicitly frozen external
+  parents; all other parents come from the previously committed T075 ledger;
 - B/C are valid negative science; D is invalid experiment;
+- terminal promotion/recommendation fields match the frozen A/B/C/D decision table;
 - logical Stage 3 is atomic TARGET barrier;
-- lineage is explicit/minimal and only previously committed artifacts are parents;
+- lineage is explicit/minimal and contains no implicit external-parent mechanism;
 - one exact RUN_HEAD owns authoritative execution;
 - fixed 16-shard/16-worker protocol is followed and reported;
 - command layer remains thin;
@@ -1396,6 +1505,7 @@ Planner acceptance requires:
 - no hidden/human-policy information enters deployable model;
 - no frozen T065 science changes;
 - no PR #75 runtime artifact becomes authoritative;
+- required PR evidence is complete without becoming a second acceptance authority;
 - no local semantic invention beyond this contract.
 
 ## Lifecycle
