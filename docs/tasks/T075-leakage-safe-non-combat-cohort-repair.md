@@ -249,6 +249,13 @@ Selectable candidates must:
 - retain source provenance;
 - pass existing T065 public/model/action/replay-input validation.
 
+Malformed/provenance-invalid selectable rows fail closed at SELECTION_REPLAY. They
+use `SOURCE_REUSE_FIDELITY` only when the defect is source-file-level; otherwise a
+row-level defect that prevents candidate admission makes SELECTION_REPLAY invalid
+under `SELECTION_OWNER_QUOTA_SHORTAGE` if the resulting frozen owner bucket misses
+quota, or returns as a `CONTRACT_GAP` if it exposes a distinct acceptance meaning.
+No additional selection failure taxonomy is created locally.
+
 Replay equivalence is unchanged:
 
 ```text
@@ -405,7 +412,7 @@ Split = train | validation | heldout
 Status = passed | failed
 Promotion = experimental_public_with_expert_fallback | no_promotion
 RecommendationCode = review_joint_policy_next_step | narrow_transfer_followup | close_v1_no_followup | narrow_target_model_diagnostic | rerun_same_experiment_after_narrow_repair
-StageFailureCode = PREFLIGHT_FIDELITY | SOURCE_REUSE_FIDELITY | SELECTION_CANDIDATE_FIDELITY | SELECTION_MEMBER_ORDER_TIE | SELECTION_OWNER_QUOTA_SHORTAGE | SELECTION_DUPLICATE_OR_OVERLAP | SELECTION_REPLAY_MISMATCH | TARGET_STAGE3_VALIDATION | TRAIN_FIDELITY | GATE_EVIDENCE_INVALID | EVAL_EVIDENCE_INVALID
+StageFailureCode = PREFLIGHT_FIDELITY | SOURCE_REUSE_FIDELITY | SELECTION_MEMBER_ORDER_TIE | SELECTION_OWNER_QUOTA_SHORTAGE | SELECTION_DUPLICATE_OR_OVERLAP | SELECTION_REPLAY_MISMATCH | TARGET_STAGE3_VALIDATION | TRAIN_FIDELITY | GATE_EVIDENCE_INVALID | EVAL_EVIDENCE_INVALID
 ```
 
 `RUN_HEAD`, `RECOVERY_BASE`, `T065_APPROVED_SPEC`, and
@@ -851,16 +858,19 @@ Frozen ordered classifier checks:
 
 Failure mapping:
 
-- `candidate_domain` -> `SELECTION_CANDIDATE_FIDELITY`;
 - `member_order_uniqueness` -> `SELECTION_MEMBER_ORDER_TIE`;
 - `owner_quota_availability` -> `SELECTION_OWNER_QUOTA_SHORTAGE`;
 - `selected_uniqueness` or `selected_cross_split_overlap` ->
   `SELECTION_DUPLICATE_OR_OVERLAP`;
 - `selected_replay` -> `SELECTION_REPLAY_MISMATCH`.
 
-`SELECTION_CANDIDATE_FIDELITY` is not new science: it is the existing fail-closed
-meaning for a malformed/provenance-invalid selectable candidate that survives
-source-file validation. It does not add an acceptance row or alter ownership logic.
+`candidate_domain` is a prerequisite admission check rather than a separate new
+acceptance category. Malformed/provenance-invalid rows are excluded exactly under
+the frozen selectable-candidate rule. If that leaves an owner bucket below quota,
+`owner_quota_availability` fails with `SELECTION_OWNER_QUOTA_SHORTAGE`. If a
+candidate-domain defect exposes a meaning not reducible to the frozen source
+fidelity or quota semantics, classification stops as `CONTRACT_GAP`; the
+Implementer must not invent a new failure code.
 
 Complete valid evidence requires:
 
