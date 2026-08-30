@@ -98,6 +98,7 @@ workflow's explicit implementation-authorization gate is satisfied.
 | T075 | DONE | [Leakage-safe non-combat cohort repair](T075-leakage-safe-non-combat-cohort-repair.md) | T033, T040, T061, T064, T065, T071, T074 | PR #77 merged at c0cace6; global replay-group ownership passed exact selection, then the frozen target boundary produced a valid Case D diagnostic with no policy conclusion |
 | T076 | DONE | [Checkpoint restore branch-isolation repair](T076-checkpoint-restore-branch-isolation-repair.md) | T075, T017, T020 | PR #79 merged at 3cd3f30; native checkpoint map aliasing was repaired and the retained state-67 regression passed without changing T075 science |
 | T077 | DONE | [T075 same-experiment continuation](T077-t075-same-experiment-continuation.md) | T075, T076 | PR #81 merged at 3db86dd; exact T075 continuation reached the inherited TARGET Case D without downstream promotion |
+| T078 | READY | [Restored public-context fidelity repair](T078-restored-public-context-fidelity-repair.md) | T077, T076, T015, T016, T017, T020, T033 | repair state-160 restore/public-context fidelity and audit the exact retained 320-state restore boundary before further restored-state research |
 
 Use the table, not per-task files or roadmap prose, when deciding whether a task
 may receive a branch. Only `READY` rows should receive a new implementation
@@ -202,6 +203,17 @@ environment failures. The durable worker-count rule is recorded once in
 `docs/project_architecture.md`: reported simulator `worker_count` denotes
 effective concurrent execution, not merely a configured thread count.
 
+T078 is the sole published successor. It does not resume T077 science. It first
+repairs the state-160 restore/public-context fidelity failure and requires a
+restore-only audit of the exact retained 320-state cohort, while preserving the
+accepted T076 state-67 semantics. This repair is deliberately sequenced before
+new restored-state research because the planned Battle Search representation
+question depends on trustworthy restored states. After T078 acceptance, the
+intended research priority is to measure unique combat-state utilization and
+path-equivalent duplication at fixed search budgets before deciding whether to
+implement state transposition or another search topology. T063 and T066 remain
+DRAFT and are not implicitly promoted by this recovery work.
+
 ## Task Boundary And Artifact Rules
 
 Each task must have explicit, reviewable inputs and outputs. A prerequisite may
@@ -242,11 +254,11 @@ and inspect again after the expected window or on request rather than continuous
 
 ## Published Queue
 
-The executable queue is exactly the set of `READY` rows in the Active Backlog;
-it is currently empty. T063 and T066 remain `DRAFT`; T075, T076, T077, T065,
-T071, T072, T073, and T074 are `DONE`. T065, T075, and T077 are complete as
-valid Case D diagnostics. T034 remains blocked on native public-consistent hidden-future
-sampling support.
+The executable queue is exactly the set of `READY` rows in the Active Backlog.
+T078 is the only `READY` task. T063 and T066 remain `DRAFT`; T075, T076, T077,
+T065, T071, T072, T073, and T074 are `DONE`. T065, T075, and T077 are complete
+as valid Case D diagnostics. T034 remains blocked on native public-consistent
+hidden-future sampling support.
 
 ## Standard Local Gates
 
@@ -266,7 +278,7 @@ requirements.
 
 ## Historical Mapping
 
-Completed and cancelled task documents through T076 remain the durable
+Completed and cancelled task documents through T077 remain the durable
 historical record. Accepted experiment details and artifact identities remain in
 individual task documents, reports, and `current_status.md`; this index only owns
 lifecycle state and the current executable queue.

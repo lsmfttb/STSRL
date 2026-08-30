@@ -6,6 +6,7 @@ runtime-provided module exposing the spike ``StepSimulator`` interface.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from importlib import import_module
 from typing import Any
 
@@ -21,10 +22,10 @@ from sts_combat_rl.sim.native_public_projection import (
     parse_native_public_projection,
 )
 
-
 _CHECKPOINT_FINGERPRINT_TRANSITION_ONLY_RAW_KEYS = frozenset(
     {"completed_battle_outcome"}
 )
+_CHECKPOINT_TRANSITION_ONLY_METADATA_KEY = "transition_only_raw"
 
 
 class LightSpeedAdapter:
@@ -132,7 +133,15 @@ class LightSpeedAdapter:
         return tuple(snapshot.observation), stateful_raw
 
     def capture_checkpoint(self, snapshot: SimulatorSnapshot) -> SimulatorCheckpoint:
-        """Capture native simulator state without reconstructing game mechanics."""
+        """Capture native state and adapter-owned transition annotations.
+
+        ``StepSimulator`` checkpoints own mechanics state.  A snapshot returned
+        directly by ``step`` may additionally carry a one-transition public
+        annotation (currently ``completed_battle_outcome``), which the next
+        native ``snapshot`` and ``restore_checkpoint`` intentionally omit.
+        Preserve that declared adapter-layer annotation with the opaque handle
+        so an immediate restore recreates the same public decision snapshot.
+        """
 
         if not self.supports_checkpoint_restore:
             raise RuntimeError(
@@ -149,6 +158,11 @@ class LightSpeedAdapter:
                 "seed": self._active_seed,
                 "ascension": snapshot.raw.get("ascension", self._ascension),
                 "screen_state": snapshot.raw.get("screen_state"),
+                _CHECKPOINT_TRANSITION_ONLY_METADATA_KEY: {
+                    key: snapshot.raw[key]
+                    for key in _CHECKPOINT_FINGERPRINT_TRANSITION_ONLY_RAW_KEYS
+                    if key in snapshot.raw
+                },
             },
         )
 
@@ -166,7 +180,24 @@ class LightSpeedAdapter:
         seed = checkpoint.metadata.get("seed")
         if isinstance(seed, int) and not isinstance(seed, bool):
             self._active_seed = seed
-        raw = dict(raw_snapshot) if raw_snapshot is not None else None
+        raw = dict(raw_snapshot) if raw_snapshot is not None else {}
+        transition_only = checkpoint.metadata.get(
+            _CHECKPOINT_TRANSITION_ONLY_METADATA_KEY, {}
+        )
+        if not isinstance(transition_only, Mapping):
+            raise TypeError("checkpoint transition-only metadata is malformed")
+        unexpected = (
+            set(transition_only) - _CHECKPOINT_FINGERPRINT_TRANSITION_ONLY_RAW_KEYS
+        )
+        if unexpected:
+            raise ValueError("checkpoint transition-only metadata has unknown keys")
+        for key, value in transition_only.items():
+            if key in raw and raw[key] != value:
+                raise RuntimeError(
+                    "native restore disagrees with captured transition-only "
+                    f"annotation {key!r}"
+                )
+            raw[key] = value
         return self._snapshot(raw)
 
     def public_projection(self, snapshot: SimulatorSnapshot) -> NativePublicProjection:
