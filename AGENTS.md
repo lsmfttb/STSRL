@@ -58,15 +58,6 @@ current contracts.
   for source-generation, restore, coverage, teacher-collection,
   restored-evaluation, and comparison stages unless the PR documents why a
   lower number was required.
-- A reported simulator worker is an effective execution unit, not merely a
-  configured thread count. For expensive WSL stages, Python thread pools do
-  not satisfy the scale-worker requirement unless the PR supplies independent
-  evidence that the native work is concurrently executing across the claimed
-  CPUs. Prefer one top-level, process-safe worker per shard; record the
-  executor kind, requested and observed process/worker counts, host logical CPU
-  count, shard ranges, and wall-clock cost. A run that reports 16 threads but
-  measures about one CPU of aggregate work is not 16-worker evidence and must
-  be treated as invalid for scale acceptance.
 - Simulator-only training is allowed, but any trained or search controller
   claimed live-game runnable must pass the CommunicationMod runtime adapter and
   share the same public decision/action contract.

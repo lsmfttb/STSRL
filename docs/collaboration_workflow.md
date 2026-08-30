@@ -145,18 +145,6 @@ or safely reuse them: location, meaning/schema, identity when exact reuse matter
 producer/regeneration path, compatibility, retention reason/owner, real downstream
 consumers, and deletion condition.
 
-For expensive simulator stages, `worker_count` is a claim about effective
-parallel execution. Implementers must not satisfy it by changing a thread-pool
-size or by writing the requested number into an evidence record. The stage
-must use independently runnable process-safe shard workers, or provide
-independent evidence of an equivalent native topology. Before accepting scale
-evidence, Maintainer checks the executor kind and observed process/worker
-topology (including a short `ps`/equivalent sample), as well as shard ranges,
-host CPU count, and wall-clock cost. A nominal 16-thread run whose aggregate
-CPU use is approximately one core is invalid and is rerun before scientific
-acceptance. For learned evaluation, non-picklable model objects are not passed
-through worker queues; workers load the frozen checkpoint locally.
-
 Reuse follows semantic impact: unaffected validated outputs may remain reusable;
 affected outputs must be rerun. Architecture-rejected runtime artifacts are
 non-authoritative unless a recovery contract establishes compatibility.
