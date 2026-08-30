@@ -96,7 +96,7 @@ workflow's explicit implementation-authorization gate is satisfied.
 | T073 | DONE | [Forward surface health gate](T073-forward-surface-health-gate.md) | T019, T064, T067, T068, T069, T070, T071, T072 | PR #72 retired historical executor surfaces, restored neutral forward ownership, and requires a fresh post-merge repository quality review before T065 |
 | T074 | DONE | [Core decision/policy boundary repair](T074-core-policy-boundary-repair.md) | T019, T073 | PR #73 repaired the forward runtime policy/batching/control boundary, moved non-combat and offline evaluation ownership, and contracted the simulator package barrel before any T065 publication decision |
 | T075 | DONE | [Leakage-safe non-combat cohort repair](T075-leakage-safe-non-combat-cohort-repair.md) | T033, T040, T061, T064, T065, T071, T074 | PR #77 merged at c0cace6; global replay-group ownership passed exact selection, then the frozen target boundary produced a valid Case D diagnostic with no policy conclusion |
-| T076 | READY | [Checkpoint restore branch-isolation repair](T076-checkpoint-restore-branch-isolation-repair.md) | T075, T017, T020 | repair the reproducible T075 state-67 restore contamination before any scientific continuation |
+| T076 | DONE | [Checkpoint restore branch-isolation repair](T076-checkpoint-restore-branch-isolation-repair.md) | T075, T017, T020 | PR #79 merged at 3cd3f30; native checkpoint map aliasing was repaired and the retained state-67 regression passed without changing T075 science |
 
 Use the table, not per-task files or roadmap prose, when deciding whether a task
 may receive a branch. Only `READY` rows should receive a new implementation
@@ -170,6 +170,16 @@ training, gate, evaluation, policy conclusion, or promotion was produced. The
 final retention manifest and all large outputs remain under the stable ignored
 T075 artifact root recorded in the PR evidence.
 
+T076 then repaired the native checkpoint boundary on PR #79. The root cause was
+the shallow copy of `GameContext::map` (`shared_ptr<Map>`) inside
+`StepSimulatorCheckpoint`; a later map branch could mutate the captured map and
+change restored legal routes. The accepted native integration is pinned at
+`cc40c8cc51cc3f1e5ccb9d67bc4bccdf635ba083` on `stsrl/main`, and the exact
+state-67 pre-repair failure and post-repair branch-isolation regression both
+remain recorded in PR #79. T075's Case D result and retention are unchanged.
+T077 remains a DRAFT intent lock until Planner binds its simulator identity and
+earliest reusable T075 stage.
+
 ## Task Boundary And Artifact Rules
 
 Each task must have explicit, reviewable inputs and outputs. A prerequisite may
@@ -211,10 +221,10 @@ and inspect again after the expected window or on request rather than continuous
 ## Published Queue
 
 The executable queue is exactly the set of `READY` rows in the Active Backlog.
-T076 is the only `READY` task. T063 and T066 remain `DRAFT`; T075, T065, T071,
-T072, T073, and T074 are `DONE`. T065 and T075 are complete as valid Case D
-diagnostics. T034 remains blocked on native public-consistent hidden-future
-sampling support.
+There are currently no `READY` tasks. T063, T066, and T077 remain `DRAFT`; T075,
+T076, T065, T071, T072, T073, and T074 are `DONE`. T065 and T075 are complete
+as valid Case D diagnostics. T034 remains blocked on native public-consistent
+hidden-future sampling support.
 
 ## Standard Local Gates
 
@@ -234,7 +244,7 @@ requirements.
 
 ## Historical Mapping
 
-Completed and cancelled task documents through T075 remain the durable
+Completed and cancelled task documents through T076 remain the durable
 historical record. Accepted experiment details and artifact identities remain in
 individual task documents, reports, and `current_status.md`; this index only owns
 lifecycle state and the current executable queue.

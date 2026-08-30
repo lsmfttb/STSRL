@@ -182,6 +182,31 @@ compatibility requirements, and the immutable terminal report under the stable
 ignored artifact root. Focused T075 checks passed; the full-head test and Ruff
 deviations are recovery-base/environment baseline findings documented on PR #77.
 
+T076 is now complete after PR #79 merged at
+`3cd3f30b9f792807f62d01df016982cc212e730e`, with implementation head
+`e37a2bb9a37ba93bfd1ccfc7170b14d9006acfdf`. The retained state-67 failure was
+reproduced on the prior pinned integration and repaired at the canonical native
+checkpoint owner: `GameContext::map` is a `shared_ptr<Map>`, so the default
+checkpoint copy aliased the mutable map and allowed later map/Act transitions
+to change restored legal routes. The accepted integration is
+`cc40c8cc51cc3f1e5ccb9d67bc4bccdf635ba083` on
+`https://github.com/lsmfttb/sts_lightspeed` ref `refs/heads/stsrl/main`, and
+`docs/sts_lightspeed_source_manifest.json` pins that identity.
+
+The exact pre-repair state-67 regression failed with two restored actions
+instead of four after the `game_potion_discard` / `652201` continuation; the
+post-repair regression passed across the original public state, ordered legal
+actions, all four root branches, and the subsequent restore. The pinned source
+verifier, native A20 smoke, battle-readiness smoke, focused tests, compileall,
+format, changed-file Ruff, mock fixtures, and diff checks passed. The full local
+baseline remained `887 passed, 1 skipped, 2 failed` for two unrelated path
+assumptions, and full Ruff remained at 498 baseline diagnostics on both base and
+head. No T075 artifact, cohort/replay/target/model/seed/gate rule, Case D
+classification, or policy claim changed; T075 scientific stages were not rerun.
+Planner scientific/architecture acceptance and Maintainer operational acceptance
+both passed on the exact implementation head. T077 remains a DRAFT intent lock
+pending Planner's post-T076 binding of the simulator identity and reuse boundary.
+
 ## Implemented On Main
 
 ### Runtime
