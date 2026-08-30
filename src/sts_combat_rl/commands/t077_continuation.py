@@ -176,7 +176,14 @@ def _t077_eval_process_reports(
     with ProcessPoolExecutor(
         max_workers=T065_MAX_WORKERS, mp_context=mp.get_context("spawn")
     ) as executor:
-        return tuple(executor.map(_t077_eval_process_worker, payloads))
+        results = tuple(executor.map(_t077_eval_process_worker, payloads))
+    observed = {pid for pid, _report, _cpu in results}
+    if len(observed) != T065_MAX_WORKERS:
+        raise T077OperationalError(
+            f"{arm} EVAL observed {len(observed)} worker processes; "
+            f"expected {T065_MAX_WORKERS}"
+        )
+    return results
 
 
 @dataclass(frozen=True)
@@ -320,6 +327,7 @@ def _default_target(repository_root: Path, run_root: Path) -> StageResult:
         )
 
     source_identity = {**T075_SELECTED_STATES.to_dict(), "record_count": 320}
+    started = time.perf_counter()
     try:
         shard_results = _t077_target_process_tables(
             states,
@@ -363,6 +371,7 @@ def _default_target(repository_root: Path, run_root: Path) -> StageResult:
                 ],
                 "state_count": 320,
                 "target_count": sum(len(shard.targets) for shard in shards),
+                "parent_wall_clock_seconds": time.perf_counter() - started,
             },
         )
         table.validate_complete()
@@ -479,16 +488,32 @@ def _merge_t077_eval_reports(
         shard_count=T065_STAGE6_SHARD_COUNT,
         shard_specs=tuple(
             {
-                "shard_index": index,
-                "seed_start": report.requested_seeds[0],
-                "seed_end": report.requested_seeds[-1],
+                **dict(spec),
+                "requested_seeds": list(report.requested_seeds),
+                "completed_seeds": [
+                    int(row["simulator_seed"])
+                    for row in report.rows
+                    if isinstance(row, Mapping)
+                    and isinstance(row.get("simulator_seed"), int)
+                    and not isinstance(row.get("simulator_seed"), bool)
+                ],
                 "requested_seed_count": len(report.requested_seeds),
                 "completed_row_count": len(report.rows),
-                "executor_kind": "ProcessPoolExecutor",
+                "decision_count": len(report.decision_events),
+                "wall_clock_seconds": report.wall_clock_seconds,
+                "problem_count": len(report.problems),
+                "problems": list(report.problems),
                 "worker_process_id": ordered_results[index][0],
+                "executor_kind": "ProcessPoolExecutor",
                 "worker_cpu_seconds": ordered_results[index][2],
             }
-            for index, report in enumerate(ordered)
+            for index, (spec, report) in enumerate(
+                zip(
+                    stage6_shard_ranges(arm=arm, worker_count=T065_MAX_WORKERS),
+                    ordered,
+                    strict=True,
+                )
+            )
         ),
         problems=tuple(problem for report in ordered for problem in report.problems),
         simulator_identity=dict(first.simulator_identity),
@@ -503,14 +528,25 @@ def _run_t077_stage6_processes(
 ) -> tuple[
     T065CompleteRunArmReport, T065CompleteRunArmReport, T065CompleteRunArmReport, Any
 ]:
-    started = time.perf_counter()
-    stochastic_results = _t077_eval_process_reports("stochastic", None)
-    expert_results = _t077_eval_process_reports("expert", None)
-    learned_results = _t077_eval_process_reports("learned", selected_checkpoint)
-    elapsed = time.perf_counter() - started
-    stochastic = _merge_t077_eval_reports(stochastic_results, "stochastic", elapsed)
-    expert = _merge_t077_eval_reports(expert_results, "expert", elapsed)
-    learned = _merge_t077_eval_reports(learned_results, "learned", elapsed)
+    arm_results: dict[
+        str, tuple[tuple[int, T065CompleteRunArmReport, float], float]
+    ] = {}
+    for arm, checkpoint in (
+        ("stochastic", None),
+        ("expert", None),
+        ("learned", selected_checkpoint),
+    ):
+        started = time.perf_counter()
+        results = _t077_eval_process_reports(arm, checkpoint)
+        arm_results[arm] = (results, time.perf_counter() - started)
+    stochastic_results, stochastic_elapsed = arm_results["stochastic"]
+    expert_results, expert_elapsed = arm_results["expert"]
+    learned_results, learned_elapsed = arm_results["learned"]
+    stochastic = _merge_t077_eval_reports(
+        stochastic_results, "stochastic", stochastic_elapsed
+    )
+    expert = _merge_t077_eval_reports(expert_results, "expert", expert_elapsed)
+    learned = _merge_t077_eval_reports(learned_results, "learned", learned_elapsed)
     coverage = compute_learned_coverage(learned.decision_events)
     paired = build_stage6_paired_rows(expert, learned, stochastic_report=stochastic)
     report = build_stage6_report(
@@ -522,13 +558,8 @@ def _run_t077_stage6_processes(
             "executor_kind": "ProcessPoolExecutor",
             "worker_topology": "16 spawned OS processes per arm, one contiguous 16-seed shard each",
             "requested_process_count": T065_MAX_WORKERS,
-            "observed_process_count": len(
-                {
-                    pid
-                    for results in (stochastic_results, expert_results, learned_results)
-                    for pid, _report, _cpu in results
-                }
-            ),
+            "max_concurrent_observed_process_count": T065_MAX_WORKERS,
+            "total_process_launches": T065_MAX_WORKERS * 3,
             "host_logical_cpu_count": os.cpu_count(),
             "arms": {
                 arm: {
@@ -543,6 +574,11 @@ def _run_t077_stage6_processes(
                         }
                         for _pid, report, _cpu in results
                     ],
+                    "parent_wall_clock_seconds": {
+                        "stochastic": stochastic_elapsed,
+                        "expert": expert_elapsed,
+                        "learned": learned_elapsed,
+                    }[arm],
                 }
                 for arm, results in (
                     ("stochastic", stochastic_results),

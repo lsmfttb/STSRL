@@ -217,6 +217,7 @@ def test_t077_eval_merge_preserves_pid_ranges_and_parent_elapsed() -> None:
                 driver_seed=654002,
                 rows=(),
                 decision_events=(),
+                wall_clock_seconds=0.5,
                 simulator_identity={},
                 action_space={},
                 controller_provenance={},
