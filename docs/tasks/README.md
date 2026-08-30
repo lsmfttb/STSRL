@@ -97,7 +97,7 @@ workflow's explicit implementation-authorization gate is satisfied.
 | T074 | DONE | [Core decision/policy boundary repair](T074-core-policy-boundary-repair.md) | T019, T073 | PR #73 repaired the forward runtime policy/batching/control boundary, moved non-combat and offline evaluation ownership, and contracted the simulator package barrel before any T065 publication decision |
 | T075 | DONE | [Leakage-safe non-combat cohort repair](T075-leakage-safe-non-combat-cohort-repair.md) | T033, T040, T061, T064, T065, T071, T074 | PR #77 merged at c0cace6; global replay-group ownership passed exact selection, then the frozen target boundary produced a valid Case D diagnostic with no policy conclusion |
 | T076 | DONE | [Checkpoint restore branch-isolation repair](T076-checkpoint-restore-branch-isolation-repair.md) | T075, T017, T020 | PR #79 merged at 3cd3f30; native checkpoint map aliasing was repaired and the retained state-67 regression passed without changing T075 science |
-| T077 | READY | [T075 same-experiment continuation](T077-t075-same-experiment-continuation.md) | T075, T076 | reuse accepted T075 source/selection evidence and restart unchanged science at TARGET under the T076 integration |
+| T077 | DONE | [T075 same-experiment continuation](T077-t075-same-experiment-continuation.md) | T075, T076 | PR #81 merged at 3db86dd; exact T075 continuation reached the inherited TARGET Case D without downstream promotion |
 
 Use the table, not per-task files or roadmap prose, when deciding whether a task
 may receive a branch. Only `READY` rows should receive a new implementation
@@ -178,9 +178,29 @@ change restored legal routes. The accepted native integration is pinned at
 `cc40c8cc51cc3f1e5ccb9d67bc4bccdf635ba083` on `stsrl/main`, and the exact
 state-67 pre-repair failure and post-repair branch-isolation regression both
 remain recorded in PR #79. T075's Case D result and retention are unchanged.
-T077 now binds that accepted integration, reuses the valid T075
-SOURCE_REUSE/SELECTION_REPLAY evidence, and restarts the unchanged experiment at
-TARGET under a new run identity.
+T077 is now complete after PR #81 merged at
+`3db86dddb9685df00b197bf3d5a8e4bae4357c84`. Its final documentation head is
+`bc23cb7b68c58c175818da820194137b588c91b2`, while the frozen scientific run
+head is `b00e33ff8a150b3ad1b5b4c0cb8048d258ae621a`. It bound the accepted T076
+integration `cc40c8cc51cc3f1e5ccb9d67bc4bccdf635ba083`, reused the exact T075
+source/selection identities and 320-state cohort (selection SHA-256
+`94857d0e310f34cdd2780920ec81f9dc60e179c94244b9e231952a43a5f4e8b8`), and did
+not recollect or reselect. The corrected TARGET used 16 spawned process
+shards with observed effective concurrency; the earlier nominal 16-thread
+attempt was abandoned and is non-authoritative. TARGET reached the inherited
+Case D at state 160 (`restore public context mismatch`), independently
+reproduced in a single-state debug. No replacement, TRAIN/GATE/EVAL, policy
+conclusion, or promotion was produced. Retained T077 evidence remains under
+`/mnt/d/DeadlycatCoding/STSRL/artifacts/t077-t075-same-experiment-continuation`:
+reuse-boundary `4c70f3369ccc839e09482957cb8382cdbbdd05b6a45bc0b0469853e74bd46607`,
+target outcome `e84eb0e4b5628771ea861c342a2e7540acb626797bf8c756f7c1c0172887218f`,
+terminal `7ac65901f3bbbae586e4efdeb992afe03510de5bc7f74e0e0892b84ba5a3d4cf`,
+and retention `c5fa6bfc467f8d2b624d8e0c3d8f488ed6b6e15d9f612d2e70eacb17383d387f`.
+The focused T077 checks and final documentation checks passed; the full suite
+at the frozen run head was `896 passed, 1 skipped, 2` known baseline or
+environment failures. The durable worker-count rule is recorded once in
+`docs/project_architecture.md`: reported simulator `worker_count` denotes
+effective concurrent execution, not merely a configured thread count.
 
 ## Task Boundary And Artifact Rules
 
@@ -222,10 +242,10 @@ and inspect again after the expected window or on request rather than continuous
 
 ## Published Queue
 
-The executable queue is exactly the set of `READY` rows in the Active Backlog.
-T077 is the only `READY` task. T063 and T066 remain `DRAFT`; T075, T076, T065,
-T071, T072, T073, and T074 are `DONE`. T065 and T075 are complete as valid Case D
-diagnostics. T034 remains blocked on native public-consistent hidden-future
+The executable queue is exactly the set of `READY` rows in the Active Backlog;
+it is currently empty. T063 and T066 remain `DRAFT`; T075, T076, T077, T065,
+T071, T072, T073, and T074 are `DONE`. T065, T075, and T077 are complete as
+valid Case D diagnostics. T034 remains blocked on native public-consistent hidden-future
 sampling support.
 
 ## Standard Local Gates

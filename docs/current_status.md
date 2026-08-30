@@ -204,8 +204,30 @@ assumptions, and full Ruff remained at 498 baseline diagnostics on both base and
 head. No T075 artifact, cohort/replay/target/model/seed/gate rule, Case D
 classification, or policy claim changed; T075 scientific stages were not rerun.
 Planner scientific/architecture acceptance and Maintainer operational acceptance
-both passed on the exact implementation head. T077 remains a DRAFT intent lock
-pending Planner's post-T076 binding of the simulator identity and reuse boundary.
+both passed on the exact implementation head. T077 is now complete after PR #81
+merged at `3db86dddb9685df00b197bf3d5a8e4bae4357c84`. Its final documentation
+head is `bc23cb7b68c58c175818da820194137b588c91b2`, while the frozen scientific
+run head is `b00e33ff8a150b3ad1b5b4c0cb8048d258ae621a`. It bound the accepted
+T076 integration `cc40c8cc51cc3f1e5ccb9d67bc4bccdf635ba083`, reused the exact
+T075 source/selection identities and 320-state cohort (selection SHA-256
+`94857d0e310f34cdd2780920ec81f9dc60e179c94244b9e231952a43a5f4e8b8`), and did
+not recollect or reselect. The corrected TARGET used 16 spawned process shards
+with observed effective concurrency; the earlier nominal 16-thread attempt was
+abandoned and is non-authoritative. TARGET reached the inherited Case D at
+state 160 (`restore public context mismatch`), independently reproduced in a
+single-state debug. No replacement, TRAIN/GATE/EVAL, policy conclusion, or
+promotion was produced. Retained T077 evidence remains under
+`/mnt/d/DeadlycatCoding/STSRL/artifacts/t077-t075-same-experiment-continuation`:
+reuse-boundary `4c70f3369ccc839e09482957cb8382cdbbdd05b6a45bc0b0469853e74bd46607`,
+target outcome `e84eb0e4b5628771ea861c342a2e7540acb626797bf8c756f7c1c0172887218f`,
+terminal `7ac65901f3bbbae586e4efdeb992afe03510de5bc7f74e0e0892b84ba5a3d4cf`,
+and retention `c5fa6bfc467f8d2b624d8e0c3d8f488ed6b6e15d9f612d2e70eacb17383d387f`.
+The focused T077 checks and final documentation checks passed; the full suite
+at the frozen run head was `896 passed, 1 skipped, 2` known baseline or
+environment failures. The durable worker-count rule is recorded once in
+`docs/project_architecture.md`: reported simulator `worker_count` denotes
+effective concurrent execution, not merely a configured thread count. The
+documentation-only correction did not require another simulator run.
 
 ## Implemented On Main
 
