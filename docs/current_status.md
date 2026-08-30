@@ -1,6 +1,6 @@
 # Current Status
 
-Last reviewed: 2026-08-27.
+Last reviewed: 2026-08-30.
 
 This document is the main maintainer's canonical execution-result report for
 the planner and describes the latest `main` branch only. Results from local
@@ -162,6 +162,25 @@ no policy conclusion, and skips Stage 2--6. This result does not promote a
 learned non-combat controller or authorize a successor experiment. Retained
 source, preflight, decision-report, and retention-manifest identities are
 recorded on PR #74 and under the stable ignored T065 artifact path.
+
+T075 is now complete after PR #77 merged at
+`c0cace6b00f58ac901b5e9a44368d0ef6c951d93`. Its exact implementation head was
+`cb54e368c4f099ae828c2b863f4db07b4f3fcb5f`, based on recovery base
+`bc9a6790f36ff036f90dc7f03ba0ff026a16788d` and approved contract
+`66e6f7aabb8176eebf05013992d4ec0840809860`, with pinned
+`sts_lightspeed` integration `fee272f1ae21c283ad2161f55293cfe6d714134a`.
+The repaired global replay-group ownership produced an exact 320-state cohort
+with the frozen per-family/per-split quotas and passed the 16-worker selection
+replay. The canonical target run then found the reproducible state-67 restore
+legal-action identity mismatch, which is the contract-defined A10
+`TARGET_INVALID` Case D boundary. No target table, training, Stage-5 gate,
+Stage-6 evaluation, learned policy conclusion, or promotion was produced.
+Planner scientific acceptance and Maintainer operational acceptance both passed.
+The single `t075-retention-v1` manifest contains the exact reused T065 sources,
+all committed T075 control/output identities, hashes, sizes, regeneration and
+compatibility requirements, and the immutable terminal report under the stable
+ignored artifact root. Focused T075 checks passed; the full-head test and Ruff
+deviations are recovery-base/environment baseline findings documented on PR #77.
 
 ## Implemented On Main
 

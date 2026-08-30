@@ -95,7 +95,7 @@ workflow's explicit implementation-authorization gate is satisfied.
 | T072 | DONE | [Retire closed root-prior experiment executors](T072-retire-closed-root-prior-experiment-executors.md) | T053, T054, T055, T056, T057, T058, T059, T071 | retired the closed T053–T059 executor chain while preserving generic root-prior/search and T052 forward surfaces |
 | T073 | DONE | [Forward surface health gate](T073-forward-surface-health-gate.md) | T019, T064, T067, T068, T069, T070, T071, T072 | PR #72 retired historical executor surfaces, restored neutral forward ownership, and requires a fresh post-merge repository quality review before T065 |
 | T074 | DONE | [Core decision/policy boundary repair](T074-core-policy-boundary-repair.md) | T019, T073 | PR #73 repaired the forward runtime policy/batching/control boundary, moved non-combat and offline evaluation ownership, and contracted the simulator package barrel before any T065 publication decision |
-| T075 | DRAFT | [Leakage-safe non-combat cohort repair](T075-leakage-safe-non-combat-cohort-repair.md) | T033, T040, T061, T064, T065, T071, T074 | PR #77 architecture-recovery contract; PR #75 retained only as rejected implementation audit; global replay-group ownership precedes unchanged quotas |
+| T075 | DONE | [Leakage-safe non-combat cohort repair](T075-leakage-safe-non-combat-cohort-repair.md) | T033, T040, T061, T064, T065, T071, T074 | PR #77 merged at c0cace6; global replay-group ownership passed exact selection, then the frozen target boundary produced a valid Case D diagnostic with no policy conclusion |
 
 Use the table, not per-task files or roadmap prose, when deciding whether a task
 may receive a branch. Only `READY` rows should receive a new implementation
@@ -160,10 +160,14 @@ the exact selection gate found 107 replay-equivalent candidates crossing the
 frozen seed-group split boundary. The independently audited result is a valid
 Case D diagnostic: no policy conclusion, no candidate replacement, and no Stage
 2--6 scientific execution. The retained report and source artifacts are recorded
-on PR #74. T075 is the Planner-proposed architecture-recovery repair: it keeps
-those exact retained sources and unchanged replay identity, assigns global replay
-group ownership before the frozen quotas, and remains DRAFT until its recovery
-contract receives exact-head execution authorization.
+on PR #74. T075 was the Planner-proposed architecture-recovery repair: it kept
+those exact retained sources and unchanged replay identity, assigned global
+replay-group ownership before the frozen quotas, and completed on PR #77. Its
+exact 320-state selection passed; the frozen target validator then produced the
+accepted A10/TARGET_INVALID Case D diagnostic at state 67. No target table,
+training, gate, evaluation, policy conclusion, or promotion was produced. The
+final retention manifest and all large outputs remain under the stable ignored
+T075 artifact root recorded in the PR evidence.
 
 ## Task Boundary And Artifact Rules
 
@@ -206,11 +210,10 @@ and inspect again after the expected window or on request rather than continuous
 ## Published Queue
 
 The executable queue is exactly the set of `READY` rows in the Active Backlog.
-Merged `main` currently has no `READY` task. T075 is a proposed `DRAFT`
-architecture-recovery task and is not executable until its exact recovery
-contract receives Maintainer authorization. T065, T071, T072, T073, and T074 are
-`DONE`; T065 is complete as a valid Case D diagnostic. T034 remains blocked on
-native public-consistent hidden-future sampling support.
+Merged `main` currently has no `READY` task. T063 and T066 remain `DRAFT`; T075,
+T065, T071, T072, T073, and T074 are `DONE`. T065 and T075 are complete as valid
+Case D diagnostics. T034 remains blocked on native public-consistent
+hidden-future sampling support.
 
 ## Standard Local Gates
 
