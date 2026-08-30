@@ -5,9 +5,9 @@ from dataclasses import dataclass
 import pytest
 
 from sts_combat_rl.sim.action_space import ActionSpaceConfig
+from sts_combat_rl.sim.contract import SimulatorSnapshot
 from sts_combat_rl.sim.controlled_run import build_decision_context
 from sts_combat_rl.sim.lightspeed import LightSpeedAdapter
-from sts_combat_rl.sim.contract import SimulatorSnapshot
 
 
 class FakeCharacterClass:
@@ -177,6 +177,21 @@ def test_lightspeed_adapter_wraps_native_checkpoint_restore() -> None:
     assert checkpoint.metadata["seed"] == 11
     assert restored.observation == initial.observation
     assert restored.raw == initial.raw
+
+
+def test_lightspeed_checkpoint_preserves_transition_annotation() -> None:
+    """The adapter owns transient public annotations absent from native restore."""
+
+    adapter = LightSpeedAdapter(seed=7, ascension=20, module=FakeModule)
+    initial = adapter.reset(seed=11)
+    transition = adapter.step(adapter.legal_actions(initial)[0])
+    checkpoint = adapter.capture_checkpoint(transition.snapshot)
+    restored = adapter.restore_checkpoint(checkpoint)
+
+    assert checkpoint.metadata["transition_only_raw"] == {
+        "completed_battle_outcome": "PLAYER_LOSS"
+    }
+    assert restored.raw == transition.snapshot.raw
 
 
 def test_lightspeed_adapter_rejects_bad_root_prior_before_native_call() -> None:
