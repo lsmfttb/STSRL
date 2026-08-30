@@ -229,6 +229,33 @@ environment failures. The durable worker-count rule is recorded once in
 effective concurrent execution, not merely a configured thread count. The
 documentation-only correction did not require another simulator run.
 
+T078 is now complete after PR #82 merged at
+`d61be1d70e404f8fbaa4de04e8a1643385051cce`. The exact implementation head was
+`7326bf9022eeb1745469f100e05f5a65d27d339f`, based on approved specification
+`727023c6bc90e0e49538534f9758e466f6becf7b`; the accepted native integration
+remained `cc40c8cc51cc3f1e5ccb9d67bc4bccdf635ba083`. The retained state-160
+failure was field-localized to `$.current.result.battle_outcome.availability`:
+native restore dropped the transition-only `completed_battle_outcome` annotation
+that made the retained source context available / `PLAYER_VICTORY`. The
+canonical `LightSpeedAdapter` checkpoint boundary now round-trips that declared
+adapter annotation with strict metadata validation, without weakening the
+validator or special-casing state 160. State 160 passed immediate and
+branch-then-restore checks, and the accepted T076 state-67 regression remained
+passing.
+
+The restore-only audit used the exact retained 320-state / 320-replay-key T075
+cohort with 16 effective spawned processes over contiguous 20-state shards. It
+completed with `mismatch_count=0`, `candidate_replacement_performed=false`, and
+`counterfactual_continuation_executed=false` in 207.776636015 seconds. The
+retained report is
+`/mnt/d/DeadlyCatCoding/STSRL/artifacts/t078-restored-public-context-fidelity-repair/restore-only-audit.json`
+with SHA-256
+`9abb6e76c7fe271884a37394b31058406ad0591b9949b7c109671d6d2ae539b1`. T075 and
+T077 science, artifacts, and terminal classifications were not rerun,
+reclassified, or changed. Focused T078/T076/adapter tests passed (`9`), as did
+compileall, Ruff, format, and diff checks; the full suite was `897 passed,
+2 skipped, 2` known baseline or environment failures.
+
 ## Implemented On Main
 
 ### Runtime
