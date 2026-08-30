@@ -1,56 +1,132 @@
-"""Neutral command surface for the T065 non-combat learning workflow.
+"""Neutral command surface for T065 learning and T075 acceptance stages.
 
-This module is deliberately not wired into the legacy flat CLI.  Long-running
-collection and evaluation are explicit subcommands so their artifact paths,
-seed ranges, and stage boundaries remain visible in the command itself.
+The bounded T075 operations live below a nested command group so the legacy
+T065 command meanings remain unchanged.  Long-running collection and
+evaluation are explicit subcommands so their artifact paths, seed ranges, and
+stage boundaries remain visible in the command itself.
 """
 
 from __future__ import annotations
 
 import argparse
-from collections.abc import Iterator
-from dataclasses import dataclass, replace
 import json
-from pathlib import Path
 import shlex
+import subprocess
 import sys
-from typing import Any, Mapping
+from collections.abc import Iterator, Mapping, Sequence
+from dataclasses import dataclass, replace
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from typing import Any
 
 from sts_combat_rl.sim.lightspeed import LightSpeedAdapter
+from sts_combat_rl.sim.lightspeed_source import lightspeed_source_identity_dict
+from sts_combat_rl.sim.non_combat_acceptance import (
+    T075_ROOT_RELATIVE,
+    T075_SOURCE_IDENTITIES,
+    T075OperationalError,
+    T075StageClassificationError,
+    canonical_json_document,
+    finalize_t075,
+    reconstruct_t075_state,
+    select_t075_source_candidates,
+    validate_t075_source_reuse_audit,
+)
+from sts_combat_rl.sim.non_combat_acceptance import (
+    run_t075_eval as commit_t075_eval,
+)
+from sts_combat_rl.sim.non_combat_acceptance import (
+    run_t075_gate as commit_t075_gate,
+)
+from sts_combat_rl.sim.non_combat_acceptance import (
+    run_t075_preflight as commit_t075_preflight,
+)
+from sts_combat_rl.sim.non_combat_acceptance import (
+    run_t075_selection as commit_t075_selection,
+)
+from sts_combat_rl.sim.non_combat_acceptance import (
+    run_t075_target as commit_t075_target,
+)
+from sts_combat_rl.sim.non_combat_acceptance import (
+    run_t075_train as commit_t075_train,
+)
+from sts_combat_rl.sim.non_combat_acceptance import (
+    run_t075_validate_reuse as commit_t075_validate_reuse,
+)
 from sts_combat_rl.sim.non_combat_learning import (
     T065_APPROVED_SPEC_COMMIT,
     T065_EXPERIMENT_SCHEMA_VERSION,
-    T065ExperimentConfig,
     T065_LIGHTSPEED_BUILD_PYTHONPATH,
     T065_SOURCE_SEED_RANGE,
-    T065SourceState,
     T065_TRAINING_INTERPRETER,
     T065CaseD,
+    T065ExperimentConfig,
+    T065SourceState,
     build_stage5_report,
     build_t065_preflight_report,
     canonical_source_selection_key,
     collect_source_arm,
     collect_source_arm_sharded_to_path,
     file_sha256,
-    frozen_battle_provenance,
     frozen_action_space,
+    frozen_battle_provenance,
+    generate_counterfactual_targets,
+    generate_counterfactual_targets_sharded,
     load_non_combat_checkpoint,
     read_source_states,
     read_target_table,
     run_stage6_experiment,
     select_source_candidates,
-    train_frozen_model_seeds,
     terminal_decision_report,
+    train_frozen_model_seeds,
     validate_t065_preflight,
-    write_source_states,
-    write_target_table,
-    generate_counterfactual_targets,
-    generate_counterfactual_targets_sharded,
     write_source_selection_manifest,
+    write_source_states,
     write_t065_manifest,
     write_t065_terminal_decision_report,
+    write_target_table,
 )
-from sts_combat_rl.sim.lightspeed_source import lightspeed_source_identity_dict
+
+T075_COMMAND_OPERATIONS = (
+    "preflight",
+    "validate-reuse",
+    "select",
+    "target",
+    "train",
+    "gate",
+    "eval",
+    "finalize",
+)
+run_t075_preflight = commit_t075_preflight
+run_t075_validate_reuse = commit_t075_validate_reuse
+run_t075_selection = commit_t075_selection
+run_t075_target = commit_t075_target
+run_t075_train = commit_t075_train
+run_t075_gate = commit_t075_gate
+run_t075_eval = commit_t075_eval
+
+
+def _add_t075_common_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--repository-root", type=Path, required=True)
+    parser.add_argument("--run-head", required=True)
+
+
+def _add_t075_validity_arguments(
+    parser: argparse.ArgumentParser, *, failure_codes: tuple[str, ...]
+) -> None:
+    validity = parser.add_mutually_exclusive_group(required=True)
+    validity.add_argument("--valid", action="store_true")
+    validity.add_argument("--invalid", action="store_true")
+    parser.add_argument("--failure-code", choices=failure_codes)
+
+
+def _add_t075_result_arguments(
+    parser: argparse.ArgumentParser, *, failure_code: str
+) -> None:
+    _add_t075_validity_arguments(parser, failure_codes=(failure_code,))
+    result = parser.add_mutually_exclusive_group()
+    result.add_argument("--passed", action="store_true")
+    result.add_argument("--failed", action="store_true")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -143,6 +219,82 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument("--decision-report", type=Path)
     evaluate.add_argument("--retention-manifest", type=Path)
 
+    t075 = subparsers.add_parser(
+        "t075",
+        help="run explicit T075 acceptance stages on the durable neutral surface",
+    )
+    t075_operations = t075.add_subparsers(dest="t075_operation", required=True)
+
+    t075_preflight = t075_operations.add_parser(
+        "preflight", help="commit the T075 preflight audit"
+    )
+    _add_t075_common_arguments(t075_preflight)
+    t075_preflight.add_argument("--audit", type=Path)
+    _add_t075_validity_arguments(t075_preflight, failure_codes=("PREFLIGHT_INVALID",))
+
+    t075_reuse = t075_operations.add_parser(
+        "validate-reuse", help="commit validation of the two frozen T065 sources"
+    )
+    _add_t075_common_arguments(t075_reuse)
+    t075_reuse.add_argument("--audit", type=Path)
+    t075_reuse.add_argument("--source-stochastic", type=Path)
+    t075_reuse.add_argument("--source-expert", type=Path)
+    _add_t075_validity_arguments(t075_reuse, failure_codes=("SOURCE_REUSE_INVALID",))
+
+    t075_select = t075_operations.add_parser(
+        "select", help="commit global replay ownership and selected states"
+    )
+    _add_t075_common_arguments(t075_select)
+    t075_select.add_argument("--source-stochastic", type=Path)
+    t075_select.add_argument("--source-expert", type=Path)
+    t075_select.add_argument("--source-reuse-audit", type=Path)
+    _add_t075_validity_arguments(
+        t075_select,
+        failure_codes=(
+            "SELECTION_MEMBER_ORDER_TIE",
+            "SELECTION_OWNER_QUOTA_SHORTAGE",
+            "SELECTION_REPLAY_INVALID",
+        ),
+    )
+
+    t075_target = t075_operations.add_parser(
+        "target", help="commit the inherited T065 target table"
+    )
+    _add_t075_common_arguments(t075_target)
+    t075_target.add_argument("--target-table", type=Path)
+    _add_t075_validity_arguments(t075_target, failure_codes=("TARGET_INVALID",))
+
+    t075_train = t075_operations.add_parser(
+        "train", help="commit the two inherited T065 checkpoints and selection"
+    )
+    _add_t075_common_arguments(t075_train)
+    t075_train.add_argument("--checkpoint-653001", type=Path)
+    t075_train.add_argument("--checkpoint-653002", type=Path)
+    t075_train.add_argument("--training-selection", type=Path)
+    _add_t075_validity_arguments(t075_train, failure_codes=("TRAIN_INVALID",))
+
+    t075_gate = t075_operations.add_parser(
+        "gate", help="commit valid Stage-5 evidence or a Stage-5 evidence failure"
+    )
+    _add_t075_common_arguments(t075_gate)
+    t075_gate.add_argument("--stage5-report", type=Path)
+    _add_t075_result_arguments(t075_gate, failure_code="GATE_EVIDENCE_INVALID")
+
+    t075_eval = t075_operations.add_parser(
+        "eval", help="commit valid Stage-6 evidence or a Stage-6 evidence failure"
+    )
+    _add_t075_common_arguments(t075_eval)
+    t075_eval.add_argument("--stage6-report", type=Path)
+    _add_t075_result_arguments(t075_eval, failure_code="EVAL_EVIDENCE_INVALID")
+
+    t075_finalize = t075_operations.add_parser(
+        "finalize", help="materialize the terminal report and final retention record"
+    )
+    _add_t075_common_arguments(t075_finalize)
+    t075_finalize.add_argument("--entry-metadata", type=Path, required=True)
+    t075_finalize.add_argument("--retention-reason", required=True)
+    t075_finalize.add_argument("--downstream-consumer", action="append", required=True)
+
     return parser
 
 
@@ -162,11 +314,19 @@ def main(argv: list[str] | None = None) -> int:
             return _run_train(args)
         if args.command == "evaluate":
             return _run_evaluate(args)
+        if args.command == "t075":
+            return _run_t075(args)
+    except (T075OperationalError, T075StageClassificationError) as exc:
+        print(f"T075 command failed: {exc}", file=sys.stderr)
+        return 1
     except T065CaseD as exc:
         _handle_case_d(args, exc)
         print(f"T065 command failed: {exc}", file=sys.stderr)
         return 1
     except (OSError, RuntimeError, ValueError) as exc:
+        if args.command == "t075":
+            print(f"T075 command failed: {exc}", file=sys.stderr)
+            return 1
         failure = T065CaseD(
             _stage_name(args.command),
             [str(exc)],
@@ -180,15 +340,409 @@ def main(argv: list[str] | None = None) -> int:
     return 2
 
 
+def _read_t075_mapping(path: Path, label: str) -> Mapping[str, Any]:
+    try:
+        payload = path.read_bytes()
+        value = json.loads(payload.decode("utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise T075OperationalError(f"{label} is not readable canonical JSON") from exc
+    if not isinstance(value, Mapping) or canonical_json_document(value) != payload:
+        raise T075OperationalError(f"{label} is not a canonical JSON object")
+    return value
+
+
+def _read_t075_bytes(path: Path, label: str) -> bytes:
+    try:
+        return path.read_bytes()
+    except OSError as exc:
+        raise T075OperationalError(f"{label} is not readable") from exc
+
+
+def _read_t075_optional_evidence(path: Path | None, label: str) -> bytes | None:
+    if path is None:
+        return None
+    try:
+        return _read_t075_bytes(path, label)
+    except T075OperationalError:
+        return None
+
+
+def _required_t075_path(path: Path | None, label: str) -> Path:
+    if path is None:
+        raise T075OperationalError(f"T075 {label} path is required")
+    return path
+
+
+def _t075_git_output(repository_root: Path, *arguments: str) -> str:
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(repository_root), *arguments],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise T075OperationalError(
+            f"repository_root is not a usable git checkout: {repository_root}"
+        ) from exc
+    return result.stdout.strip()
+
+
+def _validate_t075_checkout(repository_root: Path, run_head: str) -> None:
+    repository_root = repository_root.resolve()
+    if not repository_root.is_dir():
+        raise T075OperationalError(
+            f"repository_root is not a directory: {repository_root}"
+        )
+    checkout_root = Path(
+        _t075_git_output(repository_root, "rev-parse", "--show-toplevel")
+    ).resolve()
+    if checkout_root != repository_root:
+        raise T075OperationalError(
+            "repository_root must be the top-level directory of the git checkout"
+        )
+    status = _t075_git_output(repository_root, "status", "--porcelain")
+    if status:
+        raise T075OperationalError("T075 commands require a clean git checkout")
+    actual_head = _t075_git_output(repository_root, "rev-parse", "HEAD")
+    if actual_head != run_head:
+        raise T075OperationalError(
+            f"T075 run_head does not match checkout HEAD: {run_head} != {actual_head}"
+        )
+
+
+def _validate_t075_input_paths(
+    repository_root: Path,
+    paths: tuple[tuple[str, Path | None], ...],
+) -> None:
+    for label, path in paths:
+        if path is None:
+            continue
+        resolved_path = path.resolve()
+        if repository_root not in resolved_path.parents:
+            raise T075OperationalError(
+                f"T075 {label} path must be within repository_root: {path}"
+            )
+
+
+def run_t075_operation(
+    operation: str,
+    *,
+    repository_root: Path,
+    run_head: str,
+    audit: Path | None = None,
+    ownership_audit: Path | None = None,
+    selected_states: Path | None = None,
+    source_stochastic: Path | None = None,
+    source_expert: Path | None = None,
+    source_reuse_audit: Path | None = None,
+    target_table: Path | None = None,
+    checkpoint_653001: Path | None = None,
+    checkpoint_653002: Path | None = None,
+    training_selection: Path | None = None,
+    stage5_report: Path | None = None,
+    stage6_report: Path | None = None,
+    entry_metadata: Path | None = None,
+    retention_reason: str | None = None,
+    downstream_consumers: tuple[str, ...] = (),
+    valid: bool = True,
+    passed: bool | None = None,
+    failure_code: str | None = None,
+) -> Any:
+    """Route one explicit T075 operation to the public acceptance adapters."""
+
+    if operation not in T075_COMMAND_OPERATIONS:
+        raise T075OperationalError(f"unsupported T075 operation: {operation!r}")
+    root = Path(repository_root).resolve()
+    _validate_t075_checkout(root, run_head)
+    _validate_t075_input_paths(
+        root,
+        (
+            ("audit", audit),
+            ("ownership-audit", ownership_audit),
+            ("selected-states", selected_states),
+            ("source-stochastic", source_stochastic),
+            ("source-expert", source_expert),
+            ("source-reuse-audit", source_reuse_audit),
+            ("target-table", target_table),
+            ("checkpoint-653001", checkpoint_653001),
+            ("checkpoint-653002", checkpoint_653002),
+            ("training-selection", training_selection),
+            ("stage5-report", stage5_report),
+            ("stage6-report", stage6_report),
+            ("entry-metadata", entry_metadata),
+        ),
+    )
+    state = reconstruct_t075_state(root, run_head)
+    if operation == "preflight":
+        return run_t075_preflight(
+            state,
+            _read_t075_mapping(_required_t075_path(audit, "audit"), "preflight audit")
+            if valid
+            else None,
+            root,
+            valid=valid,
+            failure_code=failure_code,
+        )
+    if operation == "validate-reuse":
+        if valid:
+            source_paths = (
+                _required_t075_path(source_stochastic, "stochastic source"),
+                _required_t075_path(source_expert, "expert source"),
+            )
+            source_audit = _read_t075_mapping(
+                _required_t075_path(audit, "audit"), "source-reuse audit"
+            )
+            try:
+                _validate_t075_source_reuse_inputs(root, source_paths, source_audit)
+            except T075OperationalError:
+                return run_t075_validate_reuse(
+                    state,
+                    None,
+                    root,
+                    valid=False,
+                    failure_code="SOURCE_REUSE_INVALID",
+                )
+        return run_t075_validate_reuse(
+            state,
+            source_audit if valid else None,
+            root,
+            valid=valid,
+            failure_code=failure_code,
+        )
+    if operation == "select":
+        if not valid:
+            return run_t075_selection(
+                state,
+                None,
+                None,
+                root,
+                valid=False,
+                failure_code=failure_code,
+            )
+        if ownership_audit is not None or selected_states is not None:
+            raise T075OperationalError(
+                "T075 select accepts source artifacts, not caller-selected states"
+            )
+        try:
+            return _run_t075_source_selection(
+                state,
+                root,
+                source_stochastic=source_stochastic,
+                source_expert=source_expert,
+                source_reuse_audit=source_reuse_audit,
+                run_head=run_head,
+            )
+        except T075StageClassificationError as exc:
+            return run_t075_selection(
+                state,
+                None,
+                None,
+                root,
+                valid=False,
+                failure_code=exc.failure_code,
+            )
+    if operation == "target":
+        if not valid and target_table is not None:
+            raise T075OperationalError(
+                "T075 target --invalid cannot be combined with scientific evidence"
+            )
+        if not valid and failure_code != "TARGET_INVALID":
+            raise T075OperationalError(
+                "invalid T075 target requires TARGET_INVALID failure code"
+            )
+        return run_t075_target(
+            state,
+            _read_t075_optional_evidence(target_table, "target table")
+            if valid
+            else None,
+            root,
+            valid=valid,
+            failure_code=failure_code,
+        )
+    if operation == "train":
+        if not valid:
+            if any(
+                path is not None
+                for path in (
+                    checkpoint_653001,
+                    checkpoint_653002,
+                    training_selection,
+                )
+            ):
+                raise T075OperationalError(
+                    "invalid T075 train cannot carry checkpoint or selection evidence"
+                )
+            checkpoint_payloads = None
+            selection = None
+        elif any(
+            path is None
+            for path in (checkpoint_653001, checkpoint_653002, training_selection)
+        ):
+            return run_t075_train(
+                state,
+                None,
+                None,
+                root,
+                valid=True,
+                failure_code=failure_code,
+            )
+        else:
+            checkpoint_653001_path = _required_t075_path(
+                checkpoint_653001, "checkpoint-653001"
+            )
+            checkpoint_653002_path = _required_t075_path(
+                checkpoint_653002, "checkpoint-653002"
+            )
+            training_selection_path = _required_t075_path(
+                training_selection, "training-selection"
+            )
+            try:
+                checkpoint_payloads = (
+                    _read_t075_bytes(
+                        checkpoint_653001_path,
+                        "checkpoint 653001",
+                    ),
+                    _read_t075_bytes(
+                        checkpoint_653002_path,
+                        "checkpoint 653002",
+                    ),
+                )
+                selection = _read_t075_mapping(
+                    training_selection_path,
+                    "training-selection summary",
+                )
+            except T075OperationalError:
+                return run_t075_train(
+                    state,
+                    None,
+                    None,
+                    root,
+                    valid=False,
+                    failure_code="TRAIN_INVALID",
+                )
+        return run_t075_train(
+            state,
+            checkpoint_payloads,
+            selection,
+            root,
+            valid=valid,
+            failure_code=failure_code,
+        )
+    if operation == "gate":
+        if not valid and stage5_report is not None:
+            raise T075OperationalError(
+                "T075 gate --invalid cannot be combined with scientific evidence"
+            )
+        if not valid and passed is not None:
+            raise T075OperationalError(
+                "T075 gate --invalid cannot carry a passed/failed assertion"
+            )
+        if not valid and failure_code != "GATE_EVIDENCE_INVALID":
+            raise T075OperationalError(
+                "invalid T075 gate requires GATE_EVIDENCE_INVALID failure code"
+            )
+        return run_t075_gate(
+            state,
+            _read_t075_optional_evidence(stage5_report, "Stage-5 report")
+            if valid
+            else None,
+            root,
+            passed=bool(passed) if valid else False,
+            valid=valid,
+            failure_code=failure_code,
+        )
+    if operation == "eval":
+        if not valid and stage6_report is not None:
+            raise T075OperationalError(
+                "T075 eval --invalid cannot be combined with scientific evidence"
+            )
+        if not valid and passed is not None:
+            raise T075OperationalError(
+                "T075 eval --invalid cannot carry a passed/failed assertion"
+            )
+        if not valid and failure_code != "EVAL_EVIDENCE_INVALID":
+            raise T075OperationalError(
+                "invalid T075 eval requires EVAL_EVIDENCE_INVALID failure code"
+            )
+        return run_t075_eval(
+            state,
+            _read_t075_optional_evidence(stage6_report, "Stage-6 report")
+            if valid
+            else None,
+            root,
+            passed=bool(passed) if valid else False,
+            valid=valid,
+            failure_code=failure_code,
+        )
+    metadata_path = _required_t075_path(entry_metadata, "entry-metadata")
+    if retention_reason is None or not retention_reason:
+        raise T075OperationalError("T075 retention reason is required")
+    if not downstream_consumers:
+        raise T075OperationalError("T075 downstream consumer is required")
+    return finalize_t075(
+        state,
+        root,
+        entry_metadata=_read_t075_mapping(metadata_path, "retention entry metadata"),
+        retention_reason=retention_reason,
+        possible_downstream_consumers=downstream_consumers,
+    )
+
+
+def _run_t075(args: argparse.Namespace) -> int:
+    operation = args.t075_operation
+    result = run_t075_operation(
+        operation,
+        repository_root=args.repository_root,
+        run_head=args.run_head,
+        audit=getattr(args, "audit", None),
+        ownership_audit=getattr(args, "ownership_audit", None),
+        selected_states=getattr(args, "selected_states", None),
+        source_stochastic=getattr(args, "source_stochastic", None),
+        source_expert=getattr(args, "source_expert", None),
+        source_reuse_audit=getattr(args, "source_reuse_audit", None),
+        target_table=getattr(args, "target_table", None),
+        checkpoint_653001=getattr(args, "checkpoint_653001", None),
+        checkpoint_653002=getattr(args, "checkpoint_653002", None),
+        training_selection=getattr(args, "training_selection", None),
+        stage5_report=getattr(args, "stage5_report", None),
+        stage6_report=getattr(args, "stage6_report", None),
+        entry_metadata=getattr(args, "entry_metadata", None),
+        retention_reason=getattr(args, "retention_reason", None),
+        downstream_consumers=tuple(getattr(args, "downstream_consumer", ()) or ()),
+        valid=getattr(args, "valid", True),
+        passed=(
+            True
+            if getattr(args, "passed", False)
+            else False
+            if getattr(args, "failed", False)
+            else None
+        ),
+        failure_code=getattr(args, "failure_code", None),
+    )
+    if isinstance(result, tuple):
+        print(f"T075 {operation} finalized", file=sys.stderr)
+    else:
+        print(
+            f"T075 {operation} committed current_stage={result.current_stage} "
+            f"terminal_case={result.terminal_case}",
+            file=sys.stderr,
+        )
+    return 0
+
+
 def _run_preflight(args: argparse.Namespace) -> int:
     _require_frozen_simulator_args(args)
     factory = None
     if args.simulator_runtime:
-        factory = lambda: LightSpeedAdapter(  # noqa: E731
-            seed=args.sim_seed,
-            ascension=args.ascension,
-            player_class="IRONCLAD",
-        )
+
+        def factory() -> LightSpeedAdapter:
+            return LightSpeedAdapter(
+                seed=args.sim_seed,
+                ascension=args.ascension,
+                player_class="IRONCLAD",
+            )
+
     report = build_t065_preflight_report(
         adapter_factory=factory,
         check_simulator_runtime=args.simulator_runtime,
@@ -219,11 +773,14 @@ def _run_collect(args: argparse.Namespace) -> int:
     _require_preceding_manifests(args)
     _require_frozen_simulator_args(args)
     seeds = tuple(range(args.seed_start, args.seed_end + 1))
-    factory = lambda: LightSpeedAdapter(  # noqa: E731 - explicit per-worker factory
-        seed=args.sim_seed,
-        ascension=args.ascension,
-        player_class="IRONCLAD",
-    )
+
+    def factory() -> LightSpeedAdapter:
+        return LightSpeedAdapter(
+            seed=args.sim_seed,
+            ascension=args.ascension,
+            player_class="IRONCLAD",
+        )
+
     if (args.seed_start, args.seed_end) == T065_SOURCE_SEED_RANGE:
         report = collect_source_arm_sharded_to_path(
             factory,
@@ -273,7 +830,7 @@ def _run_select(args: argparse.Namespace) -> int:
     observed_arms = set()
     simulator_identity: Mapping[str, Any] | None = None
 
-    def candidate_stream() -> Iterator["_SourceSelectionLocator"]:
+    def candidate_stream() -> Iterator[_SourceSelectionLocator]:
         nonlocal simulator_identity
         for source_index, path in enumerate(args.input):
             reader = _SourceArmArtifactReader(path)
@@ -414,11 +971,14 @@ def _run_target(args: argparse.Namespace) -> int:
         "record_count": len(states),
     }
     simulator_identity = lightspeed_source_identity_dict()
-    factory = lambda: LightSpeedAdapter(  # noqa: E731 - explicit per-worker factory
-        seed=args.sim_seed,
-        ascension=args.ascension,
-        player_class="IRONCLAD",
-    )
+
+    def factory() -> LightSpeedAdapter:
+        return LightSpeedAdapter(
+            seed=args.sim_seed,
+            ascension=args.ascension,
+            player_class="IRONCLAD",
+        )
+
     table = (
         generate_counterfactual_targets_sharded(
             factory,
@@ -592,7 +1152,7 @@ def read_source_states_from_objects(rows: list[Any], path: Path) -> list[Any]:
     result = []
     for index, row in enumerate(rows):
         if not isinstance(row, dict):
-            raise ValueError(f"{path}: source row {index} is not an object")
+            raise TypeError(f"{path}: source row {index} is not an object")
         # Reuse the strict current-schema reader without inventing a second
         # deserialization path.
         from sts_combat_rl.sim.non_combat_learning import T065SourceState
@@ -693,11 +1253,14 @@ class _SourceSelectionLocator:
     legal_action_identities: tuple[Mapping[str, Any], ...]
     action_trace: tuple[Mapping[str, Any], ...]
     terminal: bool
+    selected_state_index: int = -1
+    selection_digest: str = ""
+    selection_canonical_json: str = ""
 
     @classmethod
     def from_state(
         cls, state: T065SourceState, *, source_index: int, record_index: int
-    ) -> "_SourceSelectionLocator":
+    ) -> _SourceSelectionLocator:
         return cls(
             source_index=source_index,
             record_index=record_index,
@@ -728,7 +1291,7 @@ class _SourceArmArtifactReader:
         first_record_arm: str | None = None
         for row in self:
             if not isinstance(row, dict):
-                raise ValueError(f"{self.path}: source row is not an object")
+                raise TypeError(f"{self.path}: source row is not an object")
             state = T065SourceState.from_dict(row)
             if first_record_arm is None:
                 first_record_arm = state.source_arm
@@ -752,7 +1315,7 @@ class _SourceArmArtifactReader:
                 while True:
                     key = reader.value()
                     if not isinstance(key, str):
-                        raise ValueError("source artifact key is not a string")
+                        raise TypeError("source artifact key is not a string")
                     if key in seen_keys:
                         raise ValueError(f"duplicate source artifact key {key!r}")
                     seen_keys.add(key)
@@ -782,6 +1345,197 @@ class _SourceArmArtifactReader:
 def _iter_source_arm_states(path: Path) -> Iterator[T065SourceState]:
     reader = _SourceArmArtifactReader(path)
     yield from reader.iter_states()
+
+
+def _iter_t075_selection_locators(
+    source_paths: Sequence[Path],
+) -> Iterator[_SourceSelectionLocator]:
+    for source_index, path in enumerate(source_paths):
+        for record_index, state in enumerate(_iter_source_arm_states(path)):
+            yield _SourceSelectionLocator.from_state(
+                state, source_index=source_index, record_index=record_index
+            )
+
+
+def _materialize_t075_selected_states(
+    source_paths: Sequence[Path],
+    selected_locators: Sequence[_SourceSelectionLocator],
+) -> tuple[T065SourceState, ...]:
+    by_locator = {
+        (locator.source_index, locator.record_index): locator
+        for locator in selected_locators
+    }
+    materialized: dict[int, T065SourceState] = {}
+    for source_index, path in enumerate(source_paths):
+        for record_index, state in enumerate(_iter_source_arm_states(path)):
+            locator = by_locator.get((source_index, record_index))
+            if locator is None:
+                continue
+            materialized[locator.selected_state_index] = replace(
+                state,
+                selected_state_index=locator.selected_state_index,
+                selection_digest=locator.selection_digest,
+                selection_canonical_json=locator.selection_canonical_json,
+            )
+    expected_indices = set(range(len(selected_locators)))
+    if set(materialized) != expected_indices:
+        raise T075OperationalError(
+            "T075 selected source locators could not be reread completely"
+        )
+    return tuple(materialized[index] for index in sorted(materialized))
+
+
+def _serialize_t075_selected_states(
+    repository_root: Path, states: Sequence[T065SourceState]
+) -> bytes:
+    temporary_root = repository_root / T075_ROOT_RELATIVE / ".tmp"
+    temporary_root.mkdir(parents=True, exist_ok=True)
+    with TemporaryDirectory(dir=temporary_root) as directory:
+        path = Path(directory) / "selected-states.jsonl"
+        write_source_states(path, states)
+        return path.read_bytes()
+
+
+def _validate_t075_frozen_source(
+    repository_root: Path,
+    path: Path,
+    expected_identity: Mapping[str, Any],
+) -> None:
+    expected_path = repository_root.joinpath(*str(expected_identity["path"]).split("/"))
+    if path.resolve() != expected_path.resolve():
+        raise T075OperationalError(
+            f"T075 source path is not the frozen artifact path: {path}"
+        )
+    try:
+        actual_size = path.stat().st_size
+        actual_sha256 = file_sha256(path)
+    except OSError as exc:
+        raise T075OperationalError(f"T075 frozen source is unreadable: {path}") from exc
+    if (
+        actual_size != expected_identity["size_bytes"]
+        or actual_sha256 != expected_identity["sha256"]
+    ):
+        raise T075OperationalError(
+            f"T075 frozen source identity does not match: {path}"
+        )
+
+
+def _validate_t075_source_reuse_inputs(
+    repository_root: Path,
+    source_paths: tuple[Path, Path],
+    source_audit: Mapping[str, Any],
+) -> None:
+    validate_t075_source_reuse_audit(source_audit)
+    expected_sources = tuple(dict(identity) for identity in T075_SOURCE_IDENTITIES)
+    if source_audit["sources"] != list(expected_sources):
+        raise T075OperationalError(
+            "T075 source-reuse audit is not aligned with frozen source identities"
+        )
+    expected_arms = ("stochastic_non_combat_v1", "expert_non_combat_v1")
+    for path, expected_identity, expected_arm in zip(
+        source_paths, T075_SOURCE_IDENTITIES, expected_arms, strict=True
+    ):
+        _validate_t075_frozen_source(repository_root, path, expected_identity)
+        reader = _SourceArmArtifactReader(path)
+        try:
+            for _state in reader.iter_states():
+                pass
+        except (OSError, T065CaseD, TypeError, ValueError) as exc:
+            raise T075OperationalError(
+                f"T075 frozen source failed the strict T065 reader: {path}"
+            ) from exc
+        if reader.metadata.get("arm") != expected_arm:
+            raise T075OperationalError(
+                f"T075 frozen source arm does not match its frozen path: {path}"
+            )
+
+
+def _validate_t075_source_reuse_parent(
+    repository_root: Path, state: Any, path: Path
+) -> Mapping[str, Any]:
+    identity = next(
+        (
+            output
+            for committed in state.committed_outcomes
+            for output in committed.outcome.outputs
+            if output.role == "source_reuse_audit"
+        ),
+        None,
+    )
+    if identity is None:
+        raise T075OperationalError(
+            "T075 select requires a committed source-reuse audit"
+        )
+    expected_path = repository_root.joinpath(*identity.path.split("/"))
+    if path.resolve() != expected_path.resolve():
+        raise T075OperationalError(
+            "T075 source-reuse parent path does not match committed output"
+        )
+    try:
+        actual_size = path.stat().st_size
+        actual_sha256 = file_sha256(path)
+    except OSError as exc:
+        raise T075OperationalError(
+            "T075 committed source-reuse parent is unreadable"
+        ) from exc
+    if actual_size != identity.size_bytes or actual_sha256 != identity.sha256:
+        raise T075OperationalError("T075 source-reuse parent identity is stale")
+    audit = _read_t075_mapping(path, "source-reuse audit")
+    try:
+        validate_t075_source_reuse_audit(audit)
+    except (TypeError, ValueError) as exc:
+        raise T075OperationalError(
+            "T075 committed source-reuse audit is invalid"
+        ) from exc
+    if audit["run_head"] != state.run_head:
+        raise T075OperationalError(
+            "T075 committed source-reuse audit run_head does not match state"
+        )
+    return audit
+
+
+def _run_t075_source_selection(
+    state: Any,
+    repository_root: Path,
+    *,
+    source_stochastic: Path | None,
+    source_expert: Path | None,
+    source_reuse_audit: Path | None,
+    run_head: str,
+) -> Any:
+    source_paths = (
+        _required_t075_path(source_stochastic, "stochastic source"),
+        _required_t075_path(source_expert, "expert source"),
+    )
+    source_reuse_path = _required_t075_path(source_reuse_audit, "source-reuse audit")
+    _validate_t075_source_reuse_parent(repository_root, state, source_reuse_path)
+    for path, expected_identity in zip(
+        source_paths, T075_SOURCE_IDENTITIES, strict=True
+    ):
+        _validate_t075_frozen_source(repository_root, path, expected_identity)
+    try:
+        selected_locators, ownership_audit = select_t075_source_candidates(
+            _iter_t075_selection_locators(source_paths), run_head=run_head
+        )
+        selected_states = _materialize_t075_selected_states(
+            source_paths, selected_locators
+        )
+    except T075StageClassificationError:
+        raise
+    except (OSError, T065CaseD, UnicodeDecodeError, ValueError) as exc:
+        raise T075OperationalError(
+            "T075 frozen source failed the strict T065 reader"
+        ) from exc
+    for path, expected_identity in zip(
+        source_paths, T075_SOURCE_IDENTITIES, strict=True
+    ):
+        _validate_t075_frozen_source(repository_root, path, expected_identity)
+    return run_t075_selection(
+        state,
+        ownership_audit,
+        _serialize_t075_selected_states(repository_root, selected_states),
+        repository_root,
+    )
 
 
 def _validate_source_arm_metadata(

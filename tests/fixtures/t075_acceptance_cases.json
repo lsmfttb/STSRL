@@ -1,0 +1,30 @@
+{
+  "contract_commit": "66e6f7aabb8176eebf05013992d4ec0840809860",
+  "run_head": "1111111111111111111111111111111111111111",
+  "cases": [
+    {"id": "A01", "stage": "SOURCE_REUSE", "valid": true, "passed": true, "failure_code": null, "terminal_case": null},
+    {"id": "A02", "stage": "SOURCE_REUSE", "valid": false, "passed": false, "failure_code": "SOURCE_REUSE_INVALID", "terminal_case": "D"},
+    {"id": "A03", "stage": "SELECTION_REPLAY", "valid": true, "passed": true, "failure_code": null, "terminal_case": null},
+    {"id": "A04", "stage": "SELECTION_REPLAY", "valid": false, "passed": false, "failure_code": "SELECTION_MEMBER_ORDER_TIE", "terminal_case": "D"},
+    {"id": "A05", "stage": "SELECTION_REPLAY", "valid": false, "passed": false, "failure_code": "SELECTION_OWNER_QUOTA_SHORTAGE", "terminal_case": "D"},
+    {"id": "A06", "stage": "SELECTION_REPLAY", "valid": false, "passed": false, "failure_code": "SELECTION_REPLAY_INVALID", "terminal_case": "D"},
+    {"id": "A07", "stage": "SELECTION_REPLAY", "valid": true, "passed": true, "failure_code": null, "terminal_case": null},
+    {"id": "A08", "stage": "SELECTION_REPLAY", "valid": false, "passed": false, "failure_code": "SELECTION_REPLAY_INVALID", "terminal_case": "D"},
+    {"id": "A09", "stage": "TARGET", "valid": false, "passed": false, "failure_code": "TARGET_INVALID", "terminal_case": "D"},
+    {"id": "A10", "stage": "TARGET", "valid": false, "passed": false, "failure_code": "TARGET_INVALID", "terminal_case": "D"},
+    {"id": "A11", "stage": "TARGET", "valid": true, "passed": true, "failure_code": null, "terminal_case": null},
+    {"id": "A12", "stage": "TRAIN", "valid": true, "passed": true, "failure_code": null, "terminal_case": null},
+    {"id": "A13", "stage": "GATE", "valid": true, "passed": true, "failure_code": null, "terminal_case": null},
+    {"id": "A14", "stage": "GATE", "valid": true, "passed": false, "failure_code": null, "terminal_case": "C"},
+    {"id": "A15", "stage": "GATE", "valid": false, "passed": false, "failure_code": "GATE_EVIDENCE_INVALID", "terminal_case": "D"},
+    {"id": "A16", "stage": "EVAL", "valid": true, "passed": true, "failure_code": null, "terminal_case": "A"},
+    {"id": "A17", "stage": "EVAL", "valid": true, "passed": false, "failure_code": null, "terminal_case": "B"},
+    {"id": "A18", "stage": "EVAL", "valid": false, "passed": false, "failure_code": "EVAL_EVIDENCE_INVALID", "terminal_case": "D"},
+    {"id": "A19", "stage": "PREFLIGHT", "valid": null, "passed": null, "failure_code": null, "terminal_case": null},
+    {"id": "A20", "stage": null, "valid": null, "passed": null, "failure_code": "OPERATIONAL_REJECT", "terminal_case": null},
+    {"id": "A21", "stage": "TARGET", "valid": true, "passed": true, "failure_code": null, "terminal_case": null},
+    {"id": "A22", "stage": "GATE", "valid": true, "passed": false, "failure_code": null, "terminal_case": "C"},
+    {"id": "A23", "stage": "TARGET", "valid": false, "passed": false, "failure_code": "TARGET_INVALID", "terminal_case": "D"},
+    {"id": "A24", "stage": "FINALIZE", "valid": null, "passed": null, "failure_code": "OPERATIONAL_REJECT", "terminal_case": "C"}
+  ]
+}
