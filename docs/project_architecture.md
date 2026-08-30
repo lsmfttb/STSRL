@@ -64,6 +64,9 @@ stage of the execution plan, including shard identity, worker count,
 seed/source-run or cohort-record ranges, wall-clock cost, and any explicit
 reason a stage used one worker.
 
+Reported simulator `worker_count` denotes effective concurrent execution, not
+merely a configured thread count.
+
 ## Real Game Runtime Boundary
 
 Training and evaluation may run entirely in `sts_lightspeed`, but a controller
