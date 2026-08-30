@@ -97,6 +97,7 @@ workflow's explicit implementation-authorization gate is satisfied.
 | T074 | DONE | [Core decision/policy boundary repair](T074-core-policy-boundary-repair.md) | T019, T073 | PR #73 repaired the forward runtime policy/batching/control boundary, moved non-combat and offline evaluation ownership, and contracted the simulator package barrel before any T065 publication decision |
 | T075 | DONE | [Leakage-safe non-combat cohort repair](T075-leakage-safe-non-combat-cohort-repair.md) | T033, T040, T061, T064, T065, T071, T074 | PR #77 merged at c0cace6; global replay-group ownership passed exact selection, then the frozen target boundary produced a valid Case D diagnostic with no policy conclusion |
 | T076 | READY | [Checkpoint restore branch-isolation repair](T076-checkpoint-restore-branch-isolation-repair.md) | T075, T017, T020 | repair the reproducible T075 state-67 restore contamination before any scientific continuation |
+| T077 | DRAFT | [T075 same-experiment continuation](T077-t075-same-experiment-continuation.md) | T075, T076 | reserve the unchanged T075 scientific continuation; exact integration/reuse boundary binds only after T076 |
 
 Use the table, not per-task files or roadmap prose, when deciding whether a task
 may receive a branch. Only `READY` rows should receive a new implementation
@@ -211,8 +212,8 @@ and inspect again after the expected window or on request rather than continuous
 ## Published Queue
 
 The executable queue is exactly the set of `READY` rows in the Active Backlog.
-T076 is the only `READY` task. T063 and T066 remain `DRAFT`; T075, T065, T071,
-T072, T073, and T074 are `DONE`. T065 and T075 are complete as valid Case D
+T076 is the only `READY` task. T063, T066, and T077 remain `DRAFT`; T075, T065,
+T071, T072, T073, and T074 are `DONE`. T065 and T075 are complete as valid Case D
 diagnostics. T034 remains blocked on native public-consistent hidden-future
 sampling support.
 
