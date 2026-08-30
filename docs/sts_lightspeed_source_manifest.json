@@ -9,7 +9,7 @@
     "repository_url": "https://github.com/lsmfttb/sts_lightspeed.git",
     "branch": "stsrl/main",
     "ref": "refs/heads/stsrl/main",
-    "commit": "fee272f1ae21c283ad2161f55293cfe6d714134a"
+    "commit": "cc40c8cc51cc3f1e5ccb9d67bc4bccdf635ba083"
   },
   "python_module": {
     "name": "slaythespire",
