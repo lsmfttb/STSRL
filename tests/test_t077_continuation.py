@@ -10,6 +10,8 @@ from sts_combat_rl.commands.t077_continuation import (
     StageResult,
     T077ScientificFailure,
     _merge_t077_eval_reports,
+    _t077_failure_envelope,
+    _t077_raise_failure_envelope,
     _t077_target_process_tables,
     run_t077_workflow,
 )
@@ -17,6 +19,7 @@ from sts_combat_rl.sim.non_combat_acceptance import (
     T075_SOURCE_IDENTITIES,
     ArtifactIdentity,
 )
+from sts_combat_rl.sim.non_combat_learning import T065CaseD
 from sts_combat_rl.sim.t077_continuation import (
     T077_ACCEPTED_T076_INTEGRATION,
     T077_EARLIEST_STAGE,
@@ -234,3 +237,18 @@ def test_t077_eval_merge_preserves_pid_ranges_and_parent_elapsed() -> None:
     assert merged.shard_specs[0]["worker_process_id"] == 1000
     assert merged.shard_specs[-1]["worker_process_id"] == 1015
     assert merged.shard_specs[0]["executor_kind"] == "ProcessPoolExecutor"
+
+
+def test_t077_worker_failure_envelope_round_trips_case_d() -> None:
+    original = T065CaseD(
+        "counterfactual-targets",
+        ("state 67 restore mismatch",),
+        failure_ids=("state-67",),
+        failure_counts={"restore": 1},
+        simulator_identity={"integration_commit": "cc40c8c"},
+    )
+
+    envelope = _t077_failure_envelope(original)
+    assert envelope["kind"] == "scientific_failure"
+    with pytest.raises(T065CaseD, match="state 67 restore mismatch"):
+        _t077_raise_failure_envelope(envelope)

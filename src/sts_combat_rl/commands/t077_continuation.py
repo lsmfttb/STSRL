@@ -11,6 +11,7 @@ import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -77,27 +78,69 @@ def _t077_adapter() -> LightSpeedAdapter:
     return LightSpeedAdapter(seed=1, ascension=20, player_class="IRONCLAD")
 
 
+def _t077_failure_envelope(exc: Exception) -> dict[str, Any]:
+    if isinstance(exc, T065CaseD):
+        return {
+            "kind": "scientific_failure",
+            "stage": exc.stage,
+            "problems": list(exc.problems),
+            "failure_ids": list(exc.failure_ids),
+            "failure_counts": dict(exc.failure_counts),
+            "simulator_identity": dict(exc.simulator_identity),
+        }
+    return {
+        "kind": "operational_failure",
+        "error_type": type(exc).__name__,
+        "message": str(exc),
+    }
+
+
+def _t077_raise_failure_envelope(value: Any) -> Any:
+    if not isinstance(value, Mapping) or value.get("kind") not in {
+        "scientific_failure",
+        "operational_failure",
+    }:
+        return value
+    if value["kind"] == "scientific_failure":
+        raise T065CaseD(
+            str(value.get("stage", "T077")),
+            tuple(str(item) for item in value.get("problems", ())),
+            failure_ids=tuple(str(item) for item in value.get("failure_ids", ())),
+            failure_counts=value.get("failure_counts", {}),
+            simulator_identity=value.get("simulator_identity", {}),
+        )
+    raise T077OperationalError(
+        f"worker {value.get('error_type', 'error')}: {value.get('message', '')}"
+    )
+
+
 def _t077_target_process_worker(payload: tuple[Any, ...]):
     """Spawn-safe TARGET worker; only simple config and source rows cross IPC."""
     states, source_identity, simulator_identity, start, end, max_steps = payload
     shard_states = tuple(
         state for state in states if start <= state.selected_state_index <= end
     )
-    if len(shard_states) != 20:
-        raise T065CaseD(
-            "target-sharding", [f"TARGET shard {start}..{end} is not 20 states"]
+    try:
+        if len(shard_states) != 20:
+            raise T065CaseD(
+                "target-sharding", [f"TARGET shard {start}..{end} is not 20 states"]
+            )
+        started = time.process_time()
+        table = generate_counterfactual_targets(
+            _t077_adapter,
+            shard_states,
+            max_steps=max_steps,
+            require_contiguous_indices=False,
+            source_artifact_identity=source_identity,
+            simulator_identity=simulator_identity,
         )
-    started = time.process_time()
-    table = generate_counterfactual_targets(
-        _t077_adapter,
-        shard_states,
-        max_steps=max_steps,
-        require_contiguous_indices=False,
-        source_artifact_identity=source_identity,
-        simulator_identity=simulator_identity,
-    )
-    table.validate_complete(require_contiguous_indices=False)
-    return os.getpid(), table, time.process_time() - started
+        table.validate_complete(require_contiguous_indices=False)
+        return {
+            "kind": "success",
+            "result": (os.getpid(), table, time.process_time() - started),
+        }
+    except (T065CaseD, ValueError, RuntimeError) as exc:
+        return _t077_failure_envelope(exc)
 
 
 def _t077_eval_process_worker(
@@ -108,20 +151,26 @@ def _t077_eval_process_worker(
     import torch
 
     torch.set_num_threads(1)
-    model_run = (
-        load_non_combat_checkpoint(Path(checkpoint_path))
-        if checkpoint_path is not None
-        else None
-    )
-    started = time.process_time()
-    report = run_complete_run_arm(
-        _t077_adapter,
-        arm=arm,
-        seeds=range(seed_start, seed_end + 1),
-        model_run=model_run,
-        worker_count=1,
-    )
-    return os.getpid(), report, time.process_time() - started
+    try:
+        model_run = (
+            load_non_combat_checkpoint(Path(checkpoint_path))
+            if checkpoint_path is not None
+            else None
+        )
+        started = time.process_time()
+        report = run_complete_run_arm(
+            _t077_adapter,
+            arm=arm,
+            seeds=range(seed_start, seed_end + 1),
+            model_run=model_run,
+            worker_count=1,
+        )
+        return {
+            "kind": "success",
+            "result": (os.getpid(), report, time.process_time() - started),
+        }
+    except (T065CaseD, ValueError, RuntimeError) as exc:
+        return _t077_failure_envelope(exc)
 
 
 def _t077_process_pool(
@@ -129,10 +178,18 @@ def _t077_process_pool(
 ) -> list[Any]:
     if not payloads:
         return []
-    with ProcessPoolExecutor(
-        max_workers=len(payloads), mp_context=mp.get_context("spawn")
-    ) as executor:
-        return list(executor.map(worker, payloads))
+    try:
+        with ProcessPoolExecutor(
+            max_workers=len(payloads), mp_context=mp.get_context("spawn")
+        ) as executor:
+            return [
+                _t077_raise_failure_envelope(value)["result"]
+                for value in executor.map(worker, payloads)
+            ]
+    except BrokenProcessPool as exc:
+        raise T077OperationalError(
+            "worker process crashed before returning an envelope"
+        ) from exc
 
 
 def _t077_target_process_tables(
@@ -176,10 +233,7 @@ def _t077_eval_process_reports(
         )
         for spec in specs
     )
-    with ProcessPoolExecutor(
-        max_workers=T065_MAX_WORKERS, mp_context=mp.get_context("spawn")
-    ) as executor:
-        results = tuple(executor.map(_t077_eval_process_worker, payloads))
+    results = tuple(_t077_process_pool(_t077_eval_process_worker, payloads))
     observed = {pid for pid, _report, _cpu in results}
     if len(observed) != T065_MAX_WORKERS:
         raise T077OperationalError(
