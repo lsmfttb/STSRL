@@ -9,6 +9,8 @@ import pytest
 from sts_combat_rl.commands.t077_continuation import (
     StageResult,
     T077ScientificFailure,
+    _merge_t077_eval_reports,
+    _t077_target_process_tables,
     run_t077_workflow,
 )
 from sts_combat_rl.sim.non_combat_acceptance import (
@@ -181,3 +183,53 @@ def test_target_scientific_failure_is_case_d_without_replacement(
     ).read_text(encoding="utf-8")
     assert '"failure_code":"TARGET_INVALID"' in outcome
     assert '"no_replacement":true' in outcome
+
+
+def test_t077_target_payloads_are_one_contiguous_shard_each(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    states = tuple(SimpleNamespace(selected_state_index=index) for index in range(320))
+    captured = []
+
+    def fake_pool(_worker, payloads):
+        captured.extend(payloads)
+        return tuple((index, SimpleNamespace(), 0.01) for index in range(16))
+
+    monkeypatch.setattr(
+        "sts_combat_rl.commands.t077_continuation._t077_process_pool", fake_pool
+    )
+    _t077_target_process_tables(states, {"source": 1}, {"sim": 1}, 500)
+
+    assert len(captured) == 16
+    assert [len(payload[0]) for payload in captured] == [20] * 16
+    assert [
+        (payload[0][0].selected_state_index, payload[0][-1].selected_state_index)
+        for payload in captured
+    ] == [(20 * index, 20 * index + 19) for index in range(16)]
+
+
+def test_t077_eval_merge_preserves_pid_ranges_and_parent_elapsed() -> None:
+    reports = tuple(
+        (
+            1000 + index,
+            SimpleNamespace(
+                requested_seeds=(651001 + 16 * index, 651016 + 16 * index),
+                driver_seed=654002,
+                rows=(),
+                decision_events=(),
+                simulator_identity={},
+                action_space={},
+                controller_provenance={},
+                driver_provenance={},
+                problems=(),
+            ),
+            0.5,
+        )
+        for index in range(16)
+    )
+    merged = _merge_t077_eval_reports(reports, "expert", 12.5)
+
+    assert merged.wall_clock_seconds == 12.5
+    assert merged.shard_specs[0]["worker_process_id"] == 1000
+    assert merged.shard_specs[-1]["worker_process_id"] == 1015
+    assert merged.shard_specs[0]["executor_kind"] == "ProcessPoolExecutor"

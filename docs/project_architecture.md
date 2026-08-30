@@ -64,6 +64,21 @@ stage of the execution plan, including shard identity, worker count,
 seed/source-run or cohort-record ranges, wall-clock cost, and any explicit
 reason a stage used one worker.
 
+Worker count is an effective-topology claim, not a nominal configuration
+field. For an expensive simulator-bound stage, a Python thread-pool size does
+not establish independent simulator workers: the implementation must use
+process-safe shard workers (or document and independently demonstrate an
+equivalent native execution topology that actually runs concurrently across
+the claimed CPUs). Runtime evidence must identify the executor kind and both
+requested and observed worker/process counts; a short topology probe or
+process listing should be retained alongside the stage evidence. If a job
+configured with 16 threads measures only about one CPU of aggregate work, it
+is not acceptable 16-worker scale evidence and must be invalidated or rerun
+with a real parallel topology. Process workers must receive only picklable
+configuration/identities and load non-picklable simulator/model state inside
+the worker from the frozen artifact/runtime, so the topology check does not
+silently fall back to threads or fail to launch the claimed workers.
+
 ## Real Game Runtime Boundary
 
 Training and evaluation may run entirely in `sts_lightspeed`, but a controller

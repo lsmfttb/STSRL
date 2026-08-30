@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import multiprocessing as mp
+import os
 import subprocess
 import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -16,15 +19,25 @@ from sts_combat_rl.sim.lightspeed import LightSpeedAdapter
 from sts_combat_rl.sim.lightspeed_source import lightspeed_source_identity_dict
 from sts_combat_rl.sim.non_combat_acceptance import ArtifactIdentity
 from sts_combat_rl.sim.non_combat_learning import (
+    T065_MAX_STEPS,
     T065_MAX_WORKERS,
+    T065_STAGE2_SHARD_COUNT,
+    T065_STAGE6_SHARD_COUNT,
     T065CaseD,
+    T065CompleteRunArmReport,
+    T065TargetTable,
     build_stage5_report,
-    generate_counterfactual_targets_sharded,
+    build_stage6_paired_rows,
+    build_stage6_report,
+    compute_learned_coverage,
+    generate_counterfactual_targets,
     load_non_combat_checkpoint,
     read_source_states,
     read_target_table,
-    run_stage6_experiment,
+    run_complete_run_arm,
     select_validation_checkpoint,
+    stage6_shard_ranges,
+    target_shard_ranges,
     train_frozen_model_seeds,
     write_target_table,
 )
@@ -58,6 +71,112 @@ class T077ScientificFailure(RuntimeError):
         super().__init__("; ".join(problems))
         self.stage = stage
         self.problems = tuple(str(problem) for problem in problems)
+
+
+def _t077_adapter() -> LightSpeedAdapter:
+    return LightSpeedAdapter(seed=1, ascension=20, player_class="IRONCLAD")
+
+
+def _t077_target_process_worker(payload: tuple[Any, ...]):
+    """Spawn-safe TARGET worker; only simple config and source rows cross IPC."""
+    states, source_identity, simulator_identity, start, end, max_steps = payload
+    shard_states = tuple(
+        state for state in states if start <= state.selected_state_index <= end
+    )
+    if len(shard_states) != 20:
+        raise T065CaseD(
+            "target-sharding", [f"TARGET shard {start}..{end} is not 20 states"]
+        )
+    started = time.process_time()
+    table = generate_counterfactual_targets(
+        _t077_adapter,
+        shard_states,
+        max_steps=max_steps,
+        require_contiguous_indices=False,
+        source_artifact_identity=source_identity,
+        simulator_identity=simulator_identity,
+    )
+    table.validate_complete(require_contiguous_indices=False)
+    return os.getpid(), table, time.process_time() - started
+
+
+def _t077_eval_process_worker(
+    payload: tuple[Any, ...],
+) -> tuple[int, T065CompleteRunArmReport, float]:
+    """Spawn-safe Stage-6 worker; load the checkpoint inside each child."""
+    arm, seed_start, seed_end, checkpoint_path = payload
+    model_run = (
+        load_non_combat_checkpoint(Path(checkpoint_path))
+        if checkpoint_path is not None
+        else None
+    )
+    started = time.process_time()
+    report = run_complete_run_arm(
+        _t077_adapter,
+        arm=arm,
+        seeds=range(seed_start, seed_end + 1),
+        model_run=model_run,
+        worker_count=1,
+    )
+    return os.getpid(), report, time.process_time() - started
+
+
+def _t077_process_pool(
+    worker: Callable[[tuple[Any, ...]], Any], payloads: Sequence[tuple[Any, ...]]
+) -> list[Any]:
+    if not payloads:
+        return []
+    with ProcessPoolExecutor(
+        max_workers=len(payloads), mp_context=mp.get_context("spawn")
+    ) as executor:
+        return list(executor.map(worker, payloads))
+
+
+def _t077_target_process_tables(
+    states: Sequence[Any],
+    source_identity: Mapping[str, Any],
+    simulator_identity: Mapping[str, Any],
+    max_steps: int,
+) -> tuple[tuple[int, Any, float], ...]:
+    ordered_states = tuple(sorted(states, key=lambda state: state.selected_state_index))
+    specs = target_shard_ranges(worker_count=T065_MAX_WORKERS)
+    payloads = tuple(
+        (
+            tuple(
+                state
+                for state in ordered_states
+                if int(spec["selected_state_start"])
+                <= state.selected_state_index
+                <= int(spec["selected_state_end"])
+            ),
+            dict(source_identity),
+            dict(simulator_identity),
+            int(spec["selected_state_start"]),
+            int(spec["selected_state_end"]),
+            max_steps,
+        )
+        for spec in specs
+    )
+    return tuple(_t077_process_pool(_t077_target_process_worker, payloads))
+
+
+def _t077_eval_process_reports(
+    arm: str, checkpoint_path: Path | None
+) -> tuple[tuple[int, T065CompleteRunArmReport, float], ...]:
+    specs = stage6_shard_ranges(arm=arm, worker_count=T065_MAX_WORKERS)
+    payloads = tuple(
+        (
+            arm,
+            int(spec["seed_start"]),
+            int(spec["seed_end"]),
+            str(checkpoint_path) if checkpoint_path else None,
+        )
+        for spec in specs
+    )
+    with ProcessPoolExecutor(
+        max_workers=T065_MAX_WORKERS, mp_context=mp.get_context("spawn")
+    ) as executor:
+        return tuple(executor.map(_t077_eval_process_worker, payloads))
 
 
 @dataclass(frozen=True)
@@ -200,18 +319,53 @@ def _default_target(repository_root: Path, run_root: Path) -> StageResult:
             "TARGET", (f"selected state count is {len(states)}, expected 320",)
         )
 
-    def factory() -> LightSpeedAdapter:
-        return LightSpeedAdapter(seed=1, ascension=20, player_class="IRONCLAD")
-
     source_identity = {**T075_SELECTED_STATES.to_dict(), "record_count": 320}
     try:
-        table = generate_counterfactual_targets_sharded(
-            factory,
+        shard_results = _t077_target_process_tables(
             states,
-            worker_count=T065_MAX_WORKERS,
+            source_identity,
+            lightspeed_source_identity_dict(),
+            T065_MAX_STEPS,
+        )
+        worker_process_ids = tuple(pid for pid, _table, _cpu in shard_results)
+        if len(set(worker_process_ids)) != T065_STAGE2_SHARD_COUNT:
+            raise T077OperationalError("TARGET did not observe one process per shard")
+        shards = tuple(table for _pid, table, _cpu in shard_results)
+        table = T065TargetTable(
+            states=tuple(states),
+            targets=tuple(row for shard in shards for row in shard.targets),
             source_artifact_identity=source_identity,
             simulator_identity=lightspeed_source_identity_dict(),
+            expert_action_indices={
+                index: action
+                for shard in shards
+                for index, action in shard.expert_action_indices.items()
+            },
+            expert_action_provenance=dict(shards[0].expert_action_provenance),
+            execution_evidence={
+                "worker_count": T065_MAX_WORKERS,
+                "shard_count": T065_STAGE2_SHARD_COUNT,
+                "executor_kind": "ProcessPoolExecutor",
+                "worker_topology": "16 spawned OS processes, one contiguous 20-state shard each",
+                "requested_process_count": T065_STAGE2_SHARD_COUNT,
+                "observed_process_count": len(set(worker_process_ids)),
+                "worker_process_ids": list(worker_process_ids),
+                "host_logical_cpu_count": os.cpu_count(),
+                "worker_process_cpu_seconds": [
+                    cpu for _pid, _table, cpu in shard_results
+                ],
+                "shard_ranges": [
+                    {
+                        "start": int(spec["selected_state_start"]),
+                        "end": int(spec["selected_state_end"]),
+                    }
+                    for spec in target_shard_ranges(worker_count=T065_MAX_WORKERS)
+                ],
+                "state_count": 320,
+                "target_count": sum(len(shard.targets) for shard in shards),
+            },
         )
+        table.validate_complete()
         output = run_root / "target-table.json"
         write_target_table(output, table)
     except T065CaseD as exc:
@@ -222,9 +376,18 @@ def _default_target(repository_root: Path, run_root: Path) -> StageResult:
     return StageResult(
         outputs=(target_identity,),
         details={
-            "worker_count": 16,
-            "shard_count": 16,
-            "selected_state_ranges": [f"{20 * i}..{20 * i + 19}" for i in range(16)],
+            "worker_count": T065_MAX_WORKERS,
+            "shard_count": T065_STAGE2_SHARD_COUNT,
+            "executor_kind": "ProcessPoolExecutor",
+            "worker_topology": "16 spawned OS processes, one contiguous 20-state shard each",
+            "requested_process_count": T065_STAGE2_SHARD_COUNT,
+            "observed_process_count": len(set(worker_process_ids)),
+            "worker_process_ids": list(worker_process_ids),
+            "host_logical_cpu_count": os.cpu_count(),
+            "selected_state_ranges": [
+                f"{spec['selected_state_start']}..{spec['selected_state_end']}"
+                for spec in target_shard_ranges(worker_count=T065_MAX_WORKERS)
+            ],
             "selected_state_count": 320,
         },
         next_parents=(target_identity,),
@@ -291,10 +454,106 @@ def _default_train(repository_root: Path, run_root: Path) -> StageResult:
     )
 
 
-def _load_selected_model(repository_root: Path):
-    selection = _json(_run_root(repository_root) / "training-selection.json")
-    checkpoint = ArtifactIdentity.from_mapping(selection["selected_checkpoint"])
-    return load_non_combat_checkpoint(artifact_path(repository_root, checkpoint))
+def _merge_t077_eval_reports(
+    results: Sequence[tuple[int, T065CompleteRunArmReport, float]],
+    arm: str,
+    parent_elapsed_seconds: float,
+) -> T065CompleteRunArmReport:
+    ordered_results = tuple(
+        sorted(results, key=lambda item: item[1].requested_seeds[0])
+    )
+    ordered = tuple(report for _pid, report, _cpu in ordered_results)
+    first = ordered[0]
+    return T065CompleteRunArmReport(
+        arm=arm,
+        driver_seed=first.driver_seed,
+        requested_seeds=tuple(
+            seed for report in ordered for seed in report.requested_seeds
+        ),
+        rows=tuple(row for report in ordered for row in report.rows),
+        decision_events=tuple(
+            event for report in ordered for event in report.decision_events
+        ),
+        wall_clock_seconds=parent_elapsed_seconds,
+        worker_count=T065_MAX_WORKERS,
+        shard_count=T065_STAGE6_SHARD_COUNT,
+        shard_specs=tuple(
+            {
+                "shard_index": index,
+                "seed_start": report.requested_seeds[0],
+                "seed_end": report.requested_seeds[-1],
+                "requested_seed_count": len(report.requested_seeds),
+                "completed_row_count": len(report.rows),
+                "executor_kind": "ProcessPoolExecutor",
+                "worker_process_id": ordered_results[index][0],
+                "worker_cpu_seconds": ordered_results[index][2],
+            }
+            for index, report in enumerate(ordered)
+        ),
+        problems=tuple(problem for report in ordered for problem in report.problems),
+        simulator_identity=dict(first.simulator_identity),
+        action_space=dict(first.action_space),
+        controller_provenance=dict(first.controller_provenance),
+        driver_provenance=dict(first.driver_provenance),
+    )
+
+
+def _run_t077_stage6_processes(
+    selected_checkpoint: Path,
+) -> tuple[
+    T065CompleteRunArmReport, T065CompleteRunArmReport, T065CompleteRunArmReport, Any
+]:
+    started = time.perf_counter()
+    stochastic_results = _t077_eval_process_reports("stochastic", None)
+    expert_results = _t077_eval_process_reports("expert", None)
+    learned_results = _t077_eval_process_reports("learned", selected_checkpoint)
+    elapsed = time.perf_counter() - started
+    stochastic = _merge_t077_eval_reports(stochastic_results, "stochastic", elapsed)
+    expert = _merge_t077_eval_reports(expert_results, "expert", elapsed)
+    learned = _merge_t077_eval_reports(learned_results, "learned", elapsed)
+    coverage = compute_learned_coverage(learned.decision_events)
+    paired = build_stage6_paired_rows(expert, learned, stochastic_report=stochastic)
+    report = build_stage6_report(
+        paired,
+        coverage,
+        execution_evidence={
+            "worker_count": T065_MAX_WORKERS,
+            "shard_count_per_arm": T065_STAGE6_SHARD_COUNT,
+            "executor_kind": "ProcessPoolExecutor",
+            "worker_topology": "16 spawned OS processes per arm, one contiguous 16-seed shard each",
+            "requested_process_count": T065_MAX_WORKERS,
+            "observed_process_count": len(
+                {
+                    pid
+                    for results in (stochastic_results, expert_results, learned_results)
+                    for pid, _report, _cpu in results
+                }
+            ),
+            "host_logical_cpu_count": os.cpu_count(),
+            "arms": {
+                arm: {
+                    "worker_process_ids": [pid for pid, _report, _cpu in results],
+                    "observed_process_count": len(
+                        {pid for pid, _report, _cpu in results}
+                    ),
+                    "shard_ranges": [
+                        {
+                            "start": report.requested_seeds[0],
+                            "end": report.requested_seeds[-1],
+                        }
+                        for _pid, report, _cpu in results
+                    ],
+                }
+                for arm, results in (
+                    ("stochastic", stochastic_results),
+                    ("expert", expert_results),
+                    ("learned", learned_results),
+                )
+            },
+        },
+        arm_reports=(stochastic, expert, learned),
+    )
+    return stochastic, expert, learned, report
 
 
 def _default_gate(repository_root: Path, run_root: Path) -> StageResult:
@@ -339,17 +598,15 @@ def _default_eval(repository_root: Path, run_root: Path) -> StageResult:
     from sts_combat_rl.sim.non_combat_learning import t065_stage5_report_from_dict
 
     stage5 = t065_stage5_report_from_dict(stage5_payload)
-    selected_model = _load_selected_model(repository_root)
-
-    def factory() -> LightSpeedAdapter:
-        return LightSpeedAdapter(seed=1, ascension=20, player_class="IRONCLAD")
+    if not stage5.passed:
+        raise ValueError("T065 Stage 6 is conditionally skipped when Stage 5 fails")
+    selected_checkpoint = ArtifactIdentity.from_mapping(
+        _json(run_root / "training-selection.json")["selected_checkpoint"]
+    )
 
     try:
-        stochastic, expert, learned, report = run_stage6_experiment(
-            factory,
-            stage5=stage5,
-            selected_model=selected_model,
-            worker_count=T065_MAX_WORKERS,
+        stochastic, expert, learned, report = _run_t077_stage6_processes(
+            artifact_path(repository_root, selected_checkpoint)
         )
     except (T065CaseD, ValueError) as exc:
         problems = exc.problems if isinstance(exc, T065CaseD) else (str(exc),)
