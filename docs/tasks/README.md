@@ -42,7 +42,7 @@ workflow's explicit implementation-authorization gate is satisfied.
 | T019 | DONE | [Codebase mechanical refactor](T019-codebase-mechanical-refactor.md) | T001--T018 except cancelled T007 | CLI decomposition and export cleanup |
 | T020 | DONE | [sts_lightspeed fork maintenance line](T020-sts-lightspeed-fork-maintenance.md) | T017 | single active fork integration branch |
 | T021 | DONE | [A20 battle-start coverage measurement](T021-a20-battle-start-coverage-measurement.md) | T004, T005, T008, T009, T010, T012, T016, T017, T018, T020 | A20 natural/constructed coverage and broad-training gate gaps |
-| T022 | DONE | [A20 Oracle teacher dataset report](T022-a20-oracle-teacher-dataset-report.md) | T004, T005, T006, T009, T012, T016, T017, T018, T020, T021 | Oracle-like teacher dataset coverage and source linkage |
+| T022 | DONE | [A20 Oracle teacher dataset report](T022-a20-oracle-teacher-dataset-report.md) | T004, T005, T006, T009, T012, T016, T017, T018, T020, T021 | A20 Oracle-like teacher dataset coverage and source linkage |
 | T023 | DONE | [A20 Oracle teacher dataset scale-up](T023-a20-oracle-teacher-dataset-scale-up.md) | T004, T005, T006, T009, T012, T016, T017, T018, T020, T021, T022 | structured Oracle-like teacher scale-up and budget stability |
 | T024 | DONE | [Oracle teacher search-guidance training bridge](T024-oracle-teacher-search-guidance-training-bridge.md) | T003, T004, T006, T009, T011, T012, T016, T017, T018, T020, T021, T022, T023 | teacher-targeted trainer input and diagnostic checkpoint |
 | T025 | DONE | [Search telemetry baseline](T025-search-telemetry-baseline.md) | T005, T006, T009, T017, T020, T024 | shared search telemetry and baseline cost reporting |
@@ -89,7 +89,7 @@ workflow's explicit implementation-authorization gate is satisfied.
 | T066 | DRAFT | [Alternating joint policy improvement and natural scale gate](T066-alternating-joint-policy-improvement-and-natural-scale-gate.md) | T062, T063, T064, T065 | separate battle/non-combat policies with shared run value, followed by conditional natural scale-up |
 | T067 | DONE | [Battle Search v2 inference-cost repair](T067-battle-search-v2-inference-cost-repair.md) | T062, T061, T052, T043 | exact-cache repair preserved semantics but had 0/866 hits; cost calibration remained infeasible and selected T068 |
 | T068 | DONE | [Native-boundary batched inference feasibility](T068-native-boundary-batched-inference-feasibility.md) | T067, T062, T052, T043 | exact audit found only 207/261/398 synchronous singleton requests; batching closed and selected T069 |
-| T069 | DONE | [Public-node feature-encoding projection feasibility](T069-public-node-feature-encoding-projection-feasibility.md) | T068, T067, T062, T052, T043 | exact projection preserved semantics, materially reduced cost, locked all calibration families, and recommended the original outcome comparison for planner consideration |
+| T069 | DONE | [Public-node feature-encoding projection feasibility](T069-public-node-feature-encoding-projection-feasibility.md) | T068, T067, T062, T052, T043 | exact projection preserved semantics, materially reduced cost, locked all wall-clock and simulator-step calibration arms |
 | T070 | DONE | [Battle Search v2 fixed-cohort outcome and budget-sufficiency audit](T070-battle-search-v2-fixed-cohort-outcome-and-budget-sufficiency-audit.md) | T069, T062, T052, T043 | fixed primary and high-budget audits complete; Case C recommends T064 to the planner without publishing a successor |
 | T071 | DONE | [Post-T064 experiment execution simplification](T071-post-t064-experiment-execution-simplification.md) | T019, T064 | simplified T064 validation/reuse ownership and added lightweight detached long-job control before revising T065 |
 | T072 | DONE | [Retire closed root-prior experiment executors](T072-retire-closed-root-prior-experiment-executors.md) | T053, T054, T055, T056, T057, T058, T059, T071 | retired the closed T053–T059 executor chain while preserving generic root-prior/search and T052 forward surfaces |
@@ -97,6 +97,7 @@ workflow's explicit implementation-authorization gate is satisfied.
 | T074 | DONE | [Core decision/policy boundary repair](T074-core-policy-boundary-repair.md) | T019, T073 | PR #73 repaired the forward runtime policy/batching/control boundary, moved non-combat and offline evaluation ownership, and contracted the simulator package barrel before any T065 publication decision |
 | T075 | DONE | [Leakage-safe non-combat cohort repair](T075-leakage-safe-non-combat-cohort-repair.md) | T033, T040, T061, T064, T065, T071, T074 | PR #77 merged at c0cace6; global replay-group ownership passed exact selection, then the frozen target boundary produced a valid Case D diagnostic with no policy conclusion |
 | T076 | DONE | [Checkpoint restore branch-isolation repair](T076-checkpoint-restore-branch-isolation-repair.md) | T075, T017, T020 | PR #79 merged at 3cd3f30; native checkpoint map aliasing was repaired and the retained state-67 regression passed without changing T075 science |
+| T077 | READY | [T075 same-experiment continuation](T077-t075-same-experiment-continuation.md) | T075, T076 | reuse accepted T075 source/selection evidence and restart unchanged science at TARGET under the T076 integration |
 
 Use the table, not per-task files or roadmap prose, when deciding whether a task
 may receive a branch. Only `READY` rows should receive a new implementation
@@ -177,8 +178,9 @@ change restored legal routes. The accepted native integration is pinned at
 `cc40c8cc51cc3f1e5ccb9d67bc4bccdf635ba083` on `stsrl/main`, and the exact
 state-67 pre-repair failure and post-repair branch-isolation regression both
 remain recorded in PR #79. T075's Case D result and retention are unchanged.
-T077 remains a DRAFT intent lock until Planner binds its simulator identity and
-earliest reusable T075 stage.
+T077 now binds that accepted integration, reuses the valid T075
+SOURCE_REUSE/SELECTION_REPLAY evidence, and restarts the unchanged experiment at
+TARGET under a new run identity.
 
 ## Task Boundary And Artifact Rules
 
@@ -221,10 +223,10 @@ and inspect again after the expected window or on request rather than continuous
 ## Published Queue
 
 The executable queue is exactly the set of `READY` rows in the Active Backlog.
-There are currently no `READY` tasks. T063, T066, and T077 remain `DRAFT`; T075,
-T076, T065, T071, T072, T073, and T074 are `DONE`. T065 and T075 are complete
-as valid Case D diagnostics. T034 remains blocked on native public-consistent
-hidden-future sampling support.
+T077 is the only `READY` task. T063 and T066 remain `DRAFT`; T075, T076, T065,
+T071, T072, T073, and T074 are `DONE`. T065 and T075 are complete as valid Case D
+diagnostics. T034 remains blocked on native public-consistent hidden-future
+sampling support.
 
 ## Standard Local Gates
 
