@@ -64,11 +64,8 @@ stage of the execution plan, including shard identity, worker count,
 seed/source-run or cohort-record ranges, wall-clock cost, and any explicit
 reason a stage used one worker.
 
-Worker count is an effective-topology claim, not a nominal configuration
-field: for an expensive simulator-bound stage it must denote effective
-concurrent execution, not merely a configured thread count or evidence field.
-The implementation and PR evidence may use any valid topology under the
-semantic-equivalence rule, but must substantiate the claimed worker count.
+Reported simulator `worker_count` denotes effective concurrent execution, not
+merely a configured thread count.
 
 ## Real Game Runtime Boundary
 
