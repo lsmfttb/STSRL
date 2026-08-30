@@ -105,6 +105,9 @@ def _t077_eval_process_worker(
 ) -> tuple[int, T065CompleteRunArmReport, float]:
     """Spawn-safe Stage-6 worker; load the checkpoint inside each child."""
     arm, seed_start, seed_end, checkpoint_path = payload
+    import torch
+
+    torch.set_num_threads(1)
     model_run = (
         load_non_combat_checkpoint(Path(checkpoint_path))
         if checkpoint_path is not None
@@ -506,6 +509,7 @@ def _merge_t077_eval_reports(
                 "worker_process_id": ordered_results[index][0],
                 "executor_kind": "ProcessPoolExecutor",
                 "worker_cpu_seconds": ordered_results[index][2],
+                "torch_threads": 1,
             }
             for index, (spec, report) in enumerate(
                 zip(
@@ -561,6 +565,7 @@ def _run_t077_stage6_processes(
             "max_concurrent_observed_process_count": T065_MAX_WORKERS,
             "total_process_launches": T065_MAX_WORKERS * 3,
             "host_logical_cpu_count": os.cpu_count(),
+            "torch_threads": 1,
             "arms": {
                 arm: {
                     "worker_process_ids": [pid for pid, _report, _cpu in results],
@@ -579,6 +584,7 @@ def _run_t077_stage6_processes(
                         "expert": expert_elapsed,
                         "learned": learned_elapsed,
                     }[arm],
+                    "torch_threads": 1,
                 }
                 for arm, results in (
                     ("stochastic", stochastic_results),
