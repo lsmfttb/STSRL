@@ -29,11 +29,19 @@ telemetry publishes this component list and the adapter requires it, so the
 identity claim is checked against the implementation rather than inferred
 from normal decision-node shape.
 
+All runtime examples below use a clean checkout/build of the active native
+integration `refs/heads/stsrl/main @
+1555348535d66e3035aac80933a60949d4bd850f`. The temporary native work branch
+`work/T079-state-utilization-cc40` is historical development provenance only;
+it is never a manifest or build input. Each S100/S400/S1600 stage uses 16
+one-record shards and 16 forked WSL workers, with effective worker PIDs and
+measured peak overlap retained as evidence.
+
 The reproducible runner is:
 
 ```text
 PYTHONPATH=src python3 scripts/run_t079_state_utilization.py \
-  --native-build /home/lsmft/stsrl-spikes/sts_lightspeed-t079-native/build-t079-py313b \
+  --native-build /home/lsmft/stsrl-spikes/sts_lightspeed-t079-active1555/build-t079-py313-active1555 \
   --cohort artifacts/t070-search-v2-outcome-budget-sufficiency/reproduction-ca8da8e4183798daf3c310566ede74daf90822aa/budget-subset/t070-budget-subset-cohort.jsonl \
   --subset-manifest artifacts/t070-search-v2-outcome-budget-sufficiency/reproduction-ca8da8e4183798daf3c310566ede74daf90822aa/budget-subset/t070-budget-subset-manifest.json \
   --checkpoint artifacts/t044-de-assisted-comparison-pr/t043-assist_0-smoke/t043-assist_0-smoke-checkpoint.pt \
@@ -50,9 +58,9 @@ simulator steps, policy/value callback counts, and geometry. The same artifact
 records the T078 restore fingerprint result for those 16 records.
 
 ```text
-PYTHONPATH=/home/lsmft/stsrl-spikes/sts_lightspeed-t079-native/build-t079-py313b:src \
+PYTHONPATH=/home/lsmft/stsrl-spikes/sts_lightspeed-t079-active1555/build-t079-py313-active1555:src \
   /home/lsmft/stsrl-spikes/py313-torch/bin/python scripts/run_t079_preflight.py \
-  --native-build /home/lsmft/stsrl-spikes/sts_lightspeed-t079-native/build-t079-py313b \
+  --native-build /home/lsmft/stsrl-spikes/sts_lightspeed-t079-active1555/build-t079-py313-active1555 \
   --cohort artifacts/t070-search-v2-outcome-budget-sufficiency/reproduction-ca8da8e4183798daf3c310566ede74daf90822aa/budget-subset/t070-budget-subset-cohort.jsonl \
   --subset-manifest artifacts/t070-search-v2-outcome-budget-sufficiency/reproduction-ca8da8e4183798daf3c310566ede74daf90822aa/budget-subset/t070-budget-subset-manifest.json \
   --checkpoint artifacts/t044-de-assisted-comparison-pr/t043-assist_0-smoke/t043-assist_0-smoke-checkpoint.pt \
