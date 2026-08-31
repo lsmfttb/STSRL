@@ -178,6 +178,7 @@ for method_name in (
     "battle_search_with_root_priors",
     "battle_search_v2",
     "battle_search_v2_with_tree_geometry",
+    "battle_search_v2_with_state_utilization",
     "legal_battle_start_encounters",
     "rebuild_battle_start",
 ):
@@ -494,6 +495,7 @@ observed_capabilities = {
     "native_root_prior_allocation",
     "native_battle_search_v2_tree_internal",
     "native_battle_search_v2_tree_geometry",
+    "native_battle_search_v2_state_utilization",
     "native_terminal_resource_identity",
     "constructed_battle_start_transforms",
 }

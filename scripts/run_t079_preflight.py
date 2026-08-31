@@ -1,0 +1,748 @@
+#!/usr/bin/env python3
+"""Run the real native T079 parity and restore-fidelity preflight.
+
+This gate deliberately exercises three independent native calls on the frozen
+sixteen-record cohort.  A fake adapter is not sufficient evidence: the
+telemetry-off, T070 geometry, and T079 state-utilization controllers each
+restore and play the records through the configured ``sts_lightspeed`` module.
+"""
+
+from __future__ import annotations
+
+import argparse
+import importlib
+import json
+import multiprocessing
+import os
+import platform
+import queue
+import subprocess
+import sys
+import time
+from collections.abc import Mapping, Sequence
+from dataclasses import asdict
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
+
+from sts_combat_rl.sim.action_space import ActionSpaceConfig
+from sts_combat_rl.sim.battle_search_v2 import BattleSearchV2Controller
+from sts_combat_rl.sim.fixed_battle_evaluation import evaluate_fixed_cohort
+from sts_combat_rl.sim.fixed_evaluation_set import load_fixed_cohort_jsonl
+from sts_combat_rl.sim.lightspeed import LightSpeedAdapter
+from sts_combat_rl.sim.lightspeed_source import lightspeed_source_identity_dict
+from sts_combat_rl.sim.search_telemetry import iter_search_decision_telemetry_dicts
+from sts_combat_rl.sim.t079_state_utilization import sha256_file, write_json
+
+T079_EXPECTED_NATIVE_COMMIT = "1555348535d66e3035aac80933a60949d4bd850f"
+T079_RECORD_COUNT = 16
+T079_PREFLIGHT_SCHEMA_ID = "t079-preflight-v1"
+T079_WORKER_COUNT = 16
+
+T070_GEOMETRY_FIELDS = (
+    "native_geometry",
+    "root_actions",
+    "root_visits",
+    "root_legal_action_count",
+    "selected_action_identity",
+    "selected_legal_action_index",
+    "native_simulator_steps",
+    "model_calls",
+)
+SEARCH_PARITY_FIELDS = (
+    "selected_action_identity",
+    "selected_legal_action_index",
+    "selected_visits",
+    "selected_mean_value",
+    "selection_rule",
+    "root_visits",
+    "root_actions",
+    "soft_visit_target",
+    "soft_visit_denominator",
+    "root_row_count",
+    "search_edge_count",
+    "unsearched_legal_action_count",
+    "unmapped_search_edge_count",
+    "native_simulator_steps",
+    "model_calls",
+    "legal_action_count",
+    "eligible_action_count",
+)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--cohort", type=Path, required=True)
+    parser.add_argument("--subset-manifest", type=Path, required=True)
+    parser.add_argument("--checkpoint", type=Path, required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--native-build",
+        type=Path,
+        required=True,
+        help="build directory containing the exact active sts_lightspeed module",
+    )
+    parser.add_argument("--max-battle-steps", type=int, default=200)
+    parser.add_argument("--sim-seed", type=int, default=1)
+    args = parser.parse_args()
+
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    artifact: dict[str, Any] = {
+        "schema_id": T079_PREFLIGHT_SCHEMA_ID,
+        "task_id": "T079",
+        "passed": False,
+        "parity": {"passed": False},
+        "t078_restore_fidelity": {"passed": False},
+    }
+    try:
+        cohort, source_identity = _validate_inputs(args)
+        artifact.update(
+            {
+                "code_identity": _code_identity(),
+                "native_runtime_identity": _native_runtime_identity(args.native_build),
+                "native_source_identity": source_identity,
+                "inputs": {
+                    "subset_manifest": {
+                        "path": str(args.subset_manifest.resolve()),
+                        "sha256": sha256_file(args.subset_manifest),
+                    },
+                    "subset_cohort": {
+                        "path": str(args.cohort.resolve()),
+                        "sha256": sha256_file(args.cohort),
+                    },
+                    "checkpoint": {
+                        "path": str(args.checkpoint.resolve()),
+                        "sha256": sha256_file(args.checkpoint),
+                    },
+                    "cohort_identity": cohort.identity,
+                    "record_indices": [r.cohort_index for r in cohort.records],
+                },
+                "configuration": {
+                    "sim_seed": args.sim_seed,
+                    "ascension": 20,
+                    "max_battle_steps": args.max_battle_steps,
+                    "simulations": 100,
+                    "ablation": "prior_value",
+                    "root_selection_rule": "highest_mean",
+                    "action_space": ActionSpaceConfig.initial_no_potions().to_dict(),
+                    "inference_cache_enabled": True,
+                    "public_context_projection_enabled": True,
+                },
+            }
+        )
+        _require_active_native_identity(source_identity)
+        started = time.monotonic()
+        reports = _run_real_modes(args, cohort, source_identity)
+        artifact["mode_worker_evidence"] = {
+            name: report.worker_evidence for name, report in reports.items()
+        }
+        artifact["wall_clock_seconds"] = time.monotonic() - started
+        artifact["t078_restore_fidelity"] = _restore_fidelity_report(
+            cohort, reports["telemetry_off"]
+        )
+        artifact["parity"] = _parity_report(reports)
+        if not artifact["t078_restore_fidelity"]["passed"]:
+            raise RuntimeError("T079 preflight T078 restore-fidelity check failed")
+        if not artifact["parity"]["passed"]:
+            raise RuntimeError("T079 native deterministic parity check failed")
+        artifact["passed"] = True
+    except Exception as exc:  # noqa: BLE001
+        artifact["failure"] = f"{type(exc).__name__}: {exc}"
+        write_json(args.output, artifact)
+        print(json.dumps(artifact, indent=2, sort_keys=True))
+        return 1
+
+    write_json(args.output, artifact)
+    print(json.dumps(artifact, indent=2, sort_keys=True))
+    return 0
+
+
+def _validate_inputs(args: argparse.Namespace) -> tuple[Any, dict[str, Any]]:
+    expected = {
+        "subset_manifest": (
+            args.subset_manifest,
+            "ec9201b87abb9921decdc337689b7a08e84899d4f01fd8b04172d21c9db8207c",
+        ),
+        "subset_cohort": (
+            args.cohort,
+            "2d21a79dcbb393e4691e5aaf15f66c87fa20ba3e274bfa19baa30693cb2f029d",
+        ),
+        "checkpoint": (
+            args.checkpoint,
+            "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+        ),
+    }
+    for label, (path, digest) in expected.items():
+        actual = sha256_file(path)
+        if actual != digest:
+            raise RuntimeError(f"frozen {label} hash mismatch: {actual}")
+    with args.cohort.open("r", encoding="utf-8") as stream:
+        cohort = load_fixed_cohort_jsonl(stream)
+    if len(cohort.records) != T079_RECORD_COUNT:
+        raise RuntimeError("T079 preflight requires exactly 16 cohort records")
+    if [r.cohort_index for r in cohort.records] != list(range(T079_RECORD_COUNT)):
+        raise RuntimeError("T079 cohort indices are not the exact ordered 16 records")
+    return cohort, lightspeed_source_identity_dict()
+
+
+def _require_active_native_identity(identity: Mapping[str, Any]) -> None:
+    if identity.get("integration_branch") != "stsrl/main":
+        raise RuntimeError("native input branch is not active stsrl/main")
+    if identity.get("integration_ref") != "refs/heads/stsrl/main":
+        raise RuntimeError("native input ref is not refs/heads/stsrl/main")
+    if identity.get("integration_commit") != T079_EXPECTED_NATIVE_COMMIT:
+        raise RuntimeError(
+            "native active commit mismatch: "
+            f"{identity.get('integration_commit')} != {T079_EXPECTED_NATIVE_COMMIT}"
+        )
+    required = "native_battle_search_v2_state_utilization"
+    if required not in identity.get("native_capabilities", []):
+        raise RuntimeError(f"native capability missing: {required}")
+
+
+def _code_identity() -> dict[str, Any]:
+    root = Path(__file__).resolve().parents[1]
+    head = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    status = subprocess.run(
+        ["git", "-C", str(root), "status", "--porcelain"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.splitlines()
+    return {
+        "repository": "STSRL",
+        "head": head,
+        "worktree_clean": not status,
+        "status_lines": status,
+        "script": str(Path(__file__).resolve()),
+        "script_sha256": sha256_file(Path(__file__)),
+    }
+
+
+def _native_runtime_identity(native_build: Path) -> dict[str, Any]:
+    native_build = native_build.resolve()
+    if not native_build.is_dir():
+        raise RuntimeError(f"native build directory is unavailable: {native_build}")
+    candidates = sorted(native_build.glob("slaythespire*.so"))
+    if len(candidates) != 1:
+        raise RuntimeError(
+            "native build must contain exactly one slaythespire*.so module: "
+            f"{[str(path) for path in candidates]}"
+        )
+    if str(native_build) not in sys.path:
+        sys.path.insert(0, str(native_build))
+    module = importlib.import_module("slaythespire")
+    module_path = Path(str(module.__file__)).resolve()
+    if module_path != candidates[0].resolve():
+        raise RuntimeError(
+            f"imported native module is not from --native-build: {module_path}"
+        )
+    return {
+        "python_executable": sys.executable,
+        "python_version": platform.python_version(),
+        "platform": platform.platform(),
+        "module": "slaythespire",
+        "native_build_directory": str(native_build),
+        "module_file": str(module_path),
+        "module_sha256": sha256_file(module_path),
+        "step_simulator": getattr(module, "StepSimulator", None).__name__,
+    }
+
+
+def _run_real_modes(
+    args: argparse.Namespace, cohort: Any, identity: Mapping[str, Any]
+) -> dict[str, Any]:
+    action_space = ActionSpaceConfig.initial_no_potions()
+
+    return {
+        "telemetry_off": _run_real_mode_parallel(
+            "telemetry_off",
+            args,
+            cohort,
+            identity,
+            action_space,
+            geometry=False,
+            state=False,
+        ),
+        "t070_geometry": _run_real_mode_parallel(
+            "t070_geometry",
+            args,
+            cohort,
+            identity,
+            action_space,
+            geometry=True,
+            state=False,
+        ),
+        "t079_state_utilization": _run_real_mode_parallel(
+            "t079_state_utilization",
+            args,
+            cohort,
+            identity,
+            action_space,
+            geometry=False,
+            state=True,
+        ),
+    }
+
+
+_PREFLIGHT_WORK_ITEM: tuple[Any, ...] | None = None
+
+
+def _run_real_mode_parallel(
+    name: str,
+    args: argparse.Namespace,
+    cohort: Any,
+    identity: Mapping[str, Any],
+    action_space: ActionSpaceConfig,
+    *,
+    geometry: bool,
+    state: bool,
+) -> Any:
+    """Evaluate one preflight mode with one forked worker per record."""
+
+    context = multiprocessing.get_context("fork")
+    result_queue: Any = context.Queue()
+    processes: list[Any] = []
+    global _PREFLIGHT_WORK_ITEM
+    for record in cohort.records:
+        _PREFLIGHT_WORK_ITEM = (
+            record,
+            args.checkpoint,
+            args.sim_seed,
+            args.max_battle_steps,
+            cohort.identity,
+            cohort.source_pool_format_version,
+            cohort.selection_config.to_dict(),
+            action_space,
+            dict(identity),
+            geometry,
+            state,
+            result_queue,
+        )
+        process = context.Process(target=_run_real_mode_record)
+        process.start()
+        processes.append(process)
+    _PREFLIGHT_WORK_ITEM = None
+
+    payloads: dict[int, dict[str, Any]] = {}
+    while len(payloads) < len(processes):
+        try:
+            payload = result_queue.get(timeout=0.5)
+        except queue.Empty:
+            if all(process.exitcode is not None for process in processes):
+                break
+            continue
+        if not isinstance(payload, dict) or not isinstance(
+            payload.get("record_index"), int
+        ):
+            raise TypeError("T079 preflight worker payload is malformed")
+        index = payload["record_index"]
+        if index in payloads:
+            raise RuntimeError(f"T079 preflight returned duplicate record {index}")
+        payloads[index] = payload
+
+    for process in processes:
+        process.join()
+    exit_codes = {
+        str(index): process.exitcode for index, process in enumerate(processes)
+    }
+    if sorted(payloads) != list(range(T079_RECORD_COUNT)):
+        raise RuntimeError(
+            "T079 preflight worker results are incomplete: "
+            f"returned={sorted(payloads)} exit_codes={exit_codes}"
+        )
+
+    rows = [payloads[index] for index in range(T079_RECORD_COUNT)]
+    evidence_rows: list[dict[str, Any]] = []
+    results: list[Any] = []
+    problems: list[str] = []
+    for index, row in enumerate(rows):
+        process = processes[index]
+        if row.get("worker_pid") != process.pid:
+            raise RuntimeError(
+                "T079 preflight worker PID mismatch: "
+                f"record={index} returned={row.get('worker_pid')} spawned={process.pid}"
+            )
+        if process.exitcode != 0:
+            raise RuntimeError(
+                f"T079 preflight worker {index} exited with {process.exitcode}"
+            )
+        evidence_rows.append(
+            {
+                key: row[key]
+                for key in (
+                    "record_index",
+                    "worker_pid",
+                    "worker_started_monotonic",
+                    "worker_finished_monotonic",
+                    "worker_logical_cpu_count",
+                    "worker_cpu_affinity",
+                )
+            }
+            | {
+                "spawned_process_pid": process.pid,
+                "worker_exit_code": process.exitcode,
+            }
+        )
+        if row.get("report_problems"):
+            problems.extend(str(problem) for problem in row["report_problems"])
+        result = row.get("result")
+        if not isinstance(result, Mapping):
+            problems.append(f"record {index}: worker returned no battle result")
+        else:
+            results.append(SimpleNamespace(**result))
+    if len(results) != T079_RECORD_COUNT:
+        raise RuntimeError(
+            f"{name} returned incomplete battle results: "
+            f"{len(results)}/{T079_RECORD_COUNT}; problems={problems}"
+        )
+    worker_evidence = _validate_preflight_worker_evidence(evidence_rows)
+    return SimpleNamespace(
+        battle_results=results,
+        problems=problems,
+        worker_evidence=worker_evidence,
+    )
+
+
+def _run_real_mode_record() -> None:
+    if _PREFLIGHT_WORK_ITEM is None:
+        raise RuntimeError("T079 preflight worker configuration was not inherited")
+    (
+        record,
+        checkpoint,
+        sim_seed,
+        max_battle_steps,
+        cohort_identity,
+        source_pool_format_version,
+        selection_config,
+        action_space,
+        identity,
+        geometry,
+        state,
+        result_queue,
+    ) = _PREFLIGHT_WORK_ITEM
+    started = time.monotonic()
+    try:
+        from sts_combat_rl.sim.torch_policy_value import TorchPolicyValueGuidanceScorer
+
+        scorer = TorchPolicyValueGuidanceScorer.from_checkpoint_path(checkpoint)
+        controller = BattleSearchV2Controller(
+            simulations=100,
+            scorer=scorer,
+            ablation="prior_value",
+            root_selection_rule="highest_mean",
+            action_space=action_space,
+            inference_cache_enabled=True,
+            public_context_projection_enabled=True,
+            tree_geometry_enabled=geometry,
+            state_utilization_enabled=state,
+            native_source_identity=identity,
+        )
+        report = evaluate_fixed_cohort(
+            adapter_factory=lambda: LightSpeedAdapter(seed=sim_seed, ascension=20),
+            cohort_records=[record],
+            controller=controller,
+            cohort_identity=cohort_identity,
+            source_pool_format_version=source_pool_format_version,
+            selection_config=selection_config,
+            action_space=action_space,
+            max_battle_steps=max_battle_steps,
+        )
+        if len(report.battle_results) != 1:
+            raise RuntimeError("T079 preflight worker returned the wrong result count")
+        result = asdict(report.battle_results[0])
+        report_problems = list(report.problems)
+    except Exception as exc:  # noqa: BLE001
+        result = None
+        report_problems = [f"{type(exc).__name__}: {exc}"]
+    result_queue.put(
+        {
+            "record_index": record.cohort_index,
+            "worker_pid": os.getpid(),
+            "worker_started_monotonic": started,
+            "worker_finished_monotonic": time.monotonic(),
+            "worker_logical_cpu_count": os.cpu_count(),
+            "worker_cpu_affinity": _cpu_affinity(os.getpid()),
+            "result": result,
+            "report_problems": report_problems,
+        }
+    )
+
+
+def _cpu_affinity(pid: int) -> list[int] | None:
+    getter = getattr(os, "sched_getaffinity", None)
+    if getter is None:
+        return None
+    return sorted(int(cpu) for cpu in getter(pid))
+
+
+def _interval_peak(starts: Sequence[float], ends: Sequence[float]) -> int:
+    events = sorted(
+        [(float(start), 1) for start in starts] + [(float(end), -1) for end in ends]
+    )
+    active = peak = 0
+    for _, delta in events:
+        active += delta
+        peak = max(peak, active)
+    return peak
+
+
+def _validate_preflight_worker_evidence(
+    rows: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    if len(rows) != T079_WORKER_COUNT:
+        raise ValueError("T079 preflight requires 16 worker rows")
+    ordered = sorted(rows, key=lambda row: row.get("record_index", -1))
+    if [row.get("record_index") for row in ordered] != list(range(T079_WORKER_COUNT)):
+        raise ValueError("T079 preflight worker records are not the ordered 16 shards")
+    pids = {row.get("worker_pid") for row in ordered}
+    if len(pids) != T079_WORKER_COUNT or any(
+        row.get("worker_pid") != row.get("spawned_process_pid") for row in ordered
+    ):
+        raise ValueError("T079 preflight did not prove distinct matching worker PIDs")
+    if any(row.get("worker_exit_code") != 0 for row in ordered):
+        raise ValueError("T079 preflight has a nonzero worker exit code")
+    starts = [row["worker_started_monotonic"] for row in ordered]
+    ends = [row["worker_finished_monotonic"] for row in ordered]
+    peak = _interval_peak(starts, ends)
+    if peak != T079_WORKER_COUNT:
+        raise ValueError(f"T079 preflight peak concurrency is {peak}, expected 16")
+    host_count = os.cpu_count()
+    return {
+        "worker_count": T079_WORKER_COUNT,
+        "shard_count": T079_WORKER_COUNT,
+        "effective_worker_count": len(pids),
+        "observed_peak_concurrency": peak,
+        "host_logical_cpu_count": host_count,
+        "host_cpu_affinity": _cpu_affinity(os.getpid()),
+        "worker_pid_map": {
+            str(row["record_index"]): {
+                "worker_pid": row["worker_pid"],
+                "spawned_process_pid": row["spawned_process_pid"],
+                "worker_logical_cpu_count": row["worker_logical_cpu_count"],
+                "worker_cpu_affinity": row["worker_cpu_affinity"],
+                "worker_exit_code": row["worker_exit_code"],
+            }
+            for row in ordered
+        },
+    }
+
+
+def _restore_fidelity_report(cohort: Any, report: Any) -> dict[str, Any]:
+    rows = []
+    for result in report.battle_results:
+        restore_problem = [
+            problem
+            for problem in result.problems
+            if "restore" in problem.lower() or "fingerprint" in problem.lower()
+        ]
+        rows.append(
+            {
+                "record_index": result.cohort_index,
+                "restoration_method": result.restoration_method,
+                "restore_problems": restore_problem,
+                "fingerprint_checked_by_fixed_evaluation": True,
+            }
+        )
+    passed = (
+        len(rows) == T079_RECORD_COUNT
+        and all(row["restoration_method"] != "failed" for row in rows)
+        and all(not row["restore_problems"] for row in rows)
+    )
+    return {
+        "kind": "T078_exact_fixed_cohort_restore_boundary",
+        "cohort_identity": cohort.identity,
+        "record_count": len(rows),
+        "passed": passed,
+        "records": rows,
+    }
+
+
+def _parity_report(reports: Mapping[str, Any]) -> dict[str, Any]:
+    off = reports["telemetry_off"]
+    geometry = reports["t070_geometry"]
+    state = reports["t079_state_utilization"]
+    rows: list[dict[str, Any]] = []
+    for index in range(T079_RECORD_COUNT):
+        off_result = off.battle_results[index]
+        geometry_result = geometry.battle_results[index]
+        state_result = state.battle_results[index]
+        mismatches: list[str] = []
+        off_search = _search_rows(off_result)
+        state_search = _search_rows(state_result)
+        if off_search != state_search:
+            mismatches.append("selected action/root stats/search status")
+        off_eval = _evaluation_signature(off_result)
+        state_eval = _evaluation_signature(state_result)
+        if off_eval != state_eval:
+            mismatches.append("terminal/evaluation/simulator steps")
+        off_callbacks = _callback_signature(off_result)
+        state_callbacks = _callback_signature(state_result)
+        if off_callbacks != state_callbacks:
+            mismatches.append("policy/value callback counts")
+        geometry_rows = _geometry_rows(geometry_result)
+        state_geometry_rows = _state_geometry_rows(state_result)
+        if geometry_rows != state_geometry_rows:
+            mismatches.append("T070 geometry")
+        rows.append(
+            {
+                "record_index": index,
+                "passed": not mismatches,
+                "mismatches": mismatches,
+                "telemetry_off": {
+                    "search": off_search,
+                    "evaluation": off_eval,
+                    "callbacks": off_callbacks,
+                },
+                "state_utilization_on": {
+                    "search": state_search,
+                    "evaluation": state_eval,
+                    "callbacks": state_callbacks,
+                },
+                "t070_geometry_matches_state_on": not ("T070 geometry" in mismatches),
+            }
+        )
+    return {
+        "kind": "real_native_deterministic_telemetry_off_vs_state_utilization_on",
+        "record_count": len(rows),
+        "passed": len(rows) == T079_RECORD_COUNT and all(row["passed"] for row in rows),
+        "compared": [
+            "selected action",
+            "root stats/evaluation",
+            "T070 geometry",
+            "policy/value callback counts",
+            "terminal/search status",
+            "simulator steps",
+        ],
+        "records": rows,
+    }
+
+
+def _search_rows(result: Any) -> list[dict[str, Any]]:
+    telemetry = result.controller_compute_telemetry
+    if not isinstance(telemetry, Mapping):
+        raise TypeError("real parity result has no controller telemetry")
+    search = iter_search_decision_telemetry_dicts(telemetry)
+    reports = _selected_search_reports(telemetry)
+    if len(search) != result.decision_count or len(reports) != result.decision_count:
+        raise RuntimeError(
+            "real parity search telemetry count does not match decisions"
+        )
+    output = []
+    for telemetry_row, report in zip(search, reports):
+        row = {
+            key: telemetry_row.get(key)
+            for key in SEARCH_PARITY_FIELDS
+            if key != "root_actions"
+        }
+        row["root_actions"] = report.get("root_actions")
+        row["selected_action_identity"] = report.get("selected_action_identity")
+        output.append(row)
+    return output
+
+
+def _selected_search_reports(telemetry: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    found: list[Mapping[str, Any]] = []
+
+    def visit(value: Any) -> None:
+        if isinstance(value, Mapping):
+            if "root_actions" in value and "selected_action_identity" in value:
+                found.append(value)
+                return
+            for nested in value.values():
+                visit(nested)
+        elif isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+            for nested in value:
+                visit(nested)
+
+    visit(telemetry.get("oracle_search_decision_reports"))
+    return found
+
+
+def _evaluation_signature(result: Any) -> dict[str, Any]:
+    return {
+        "restoration_method": result.restoration_method,
+        "termination_status": result.termination_status,
+        "terminal_absolute_hp": result.terminal_absolute_hp,
+        "hp_loss": result.hp_loss,
+        "decision_count": result.decision_count,
+        "simulator_step_count": result.simulator_step_count,
+        "structured_battle_outcome_status": result.structured_battle_outcome_status,
+        "structured_battle_outcome": result.structured_battle_outcome,
+        "problems": result.problems,
+    }
+
+
+def _callback_signature(result: Any) -> dict[str, Any]:
+    telemetry = result.controller_compute_telemetry
+    if not isinstance(telemetry, Mapping):
+        raise TypeError("real parity result has no callback telemetry")
+    costs = telemetry.get("t067_cost_attribution")
+    if not isinstance(costs, Mapping):
+        raise TypeError("real parity result has no T067 callback attribution")
+    return {
+        key: costs.get(key)
+        for key in ("policy_callback_count", "value_callback_count", "model_call_count")
+    }
+
+
+def _geometry_rows(result: Any) -> list[dict[str, Any]]:
+    telemetry = result.controller_compute_telemetry
+    if not isinstance(telemetry, Mapping):
+        raise TypeError("T070 geometry result has no telemetry")
+    rows = _find_records(telemetry.get("t070_tree_geometry_records"))
+    return [{key: row.get(key) for key in T070_GEOMETRY_FIELDS} for row in rows]
+
+
+def _state_geometry_rows(result: Any) -> list[dict[str, Any]]:
+    telemetry = result.controller_compute_telemetry
+    if not isinstance(telemetry, Mapping):
+        raise TypeError("T079 state result has no telemetry")
+    rows = _find_records(telemetry.get("t079_state_utilization_records"))
+    output = []
+    for row in rows:
+        native_geometry = row.get("native_geometry")
+        output.append(
+            {
+                "native_geometry": native_geometry,
+                "root_actions": row.get("root_actions"),
+                "root_visits": row.get("root_visits"),
+                "root_legal_action_count": row.get("root_legal_action_count"),
+                "selected_action_identity": row.get("selected_action_identity"),
+                "selected_legal_action_index": row.get("selected_legal_action_index"),
+                "native_simulator_steps": row.get("native_simulator_steps"),
+                "model_calls": row.get("model_calls"),
+            }
+        )
+    # T079 stores selected index in the native geometry payload; retain the
+    # exact geometry dict as the comparison authority when present.
+    return output
+
+
+def _find_records(value: Any) -> list[Mapping[str, Any]]:
+    found: list[Mapping[str, Any]] = []
+
+    def visit(item: Any) -> None:
+        if isinstance(item, Mapping):
+            if "decision_step_index" in item and (
+                "native_geometry" in item or "native_state_utilization" in item
+            ):
+                found.append(item)
+                return
+            for nested in item.values():
+                visit(nested)
+        elif isinstance(item, Sequence) and not isinstance(item, (str, bytes)):
+            for nested in item:
+                visit(nested)
+
+    visit(value)
+    return found
+
+
+if __name__ == "__main__":
+    sys.exit(main())

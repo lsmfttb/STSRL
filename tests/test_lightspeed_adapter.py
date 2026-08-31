@@ -34,6 +34,7 @@ class FakeStepSimulator:
         self.outcome = "UNDECIDED"
         self.root_prior_calls = 0
         self.geometry_calls = 0
+        self.state_utilization_calls = 0
 
     def reset(self, character_class: str, seed: int, ascension: int) -> None:
         self.character_class = character_class
@@ -122,6 +123,21 @@ class FakeStepSimulator:
         leaf_value_callback,
     ) -> dict[str, object]:
         self.geometry_calls += 1
+        return {
+            "simulations": simulations,
+            "include_potions": include_potions,
+            "policy_enabled": policy_prior_callback is not None,
+            "value_enabled": leaf_value_callback is not None,
+        }
+
+    def battle_search_v2_with_state_utilization(
+        self,
+        simulations: int,
+        include_potions: bool,
+        policy_prior_callback,
+        leaf_value_callback,
+    ) -> dict[str, object]:
+        self.state_utilization_calls += 1
         return {
             "simulations": simulations,
             "include_potions": include_potions,
@@ -233,6 +249,22 @@ def test_lightspeed_adapter_wraps_tree_geometry_companion() -> None:
         "value_enabled": True,
     }
     assert adapter._sim.geometry_calls == 1
+
+
+def test_lightspeed_adapter_wraps_state_utilization_companion() -> None:
+    adapter = LightSpeedAdapter(seed=7, ascension=20, module=FakeModule)
+    snapshot = adapter.reset(seed=11)
+    report = adapter.battle_search_v2_with_state_utilization(
+        snapshot,
+        simulations=1600,
+        policy_prior_callback=lambda *_: [1.0],
+        leaf_value_callback=lambda *_: 0.5,
+    )
+
+    assert report["simulations"] == 1600
+    assert report["policy_enabled"] is True
+    assert report["value_enabled"] is True
+    assert adapter._sim.state_utilization_calls == 1
 
 
 def test_lightspeed_snapshot_fingerprint_ignores_transition_only_battle_outcome() -> (
