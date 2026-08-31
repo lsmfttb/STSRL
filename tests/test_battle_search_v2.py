@@ -762,6 +762,21 @@ def test_t079_identity_component_audit_is_required() -> None:
         _validate_t079_state_utilization(raw, telemetry)
 
 
+def test_t079_identity_failure_preserves_native_unavailable_reason() -> None:
+    raw = _Adapter().battle_search_v2_with_state_utilization(
+        SimulatorSnapshot(observation=[], raw=_node_raw()),
+        policy_prior_callback=None,
+        leaf_value_callback=None,
+    )
+    telemetry = raw["tree_internal_telemetry"]
+    telemetry["state_utilization"]["identity_complete"] = False
+    telemetry["state_utilization"][
+        "identity_unavailable_reason"
+    ] = "native ActionQueue contains opaque std::function entries"
+    with pytest.raises(ValueError, match="ActionQueue contains opaque"):
+        _validate_t079_state_utilization(raw, telemetry)
+
+
 def test_t068_trace_survives_fixed_evaluation_telemetry_aggregation() -> None:
     from sts_combat_rl.sim.fixed_battle_evaluation import (
         _append_controller_telemetry_value,

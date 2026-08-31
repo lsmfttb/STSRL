@@ -128,6 +128,10 @@ def main() -> int:
         started = time.monotonic()
         reports = _run_real_modes(args, cohort, source_identity)
         artifact["wall_clock_seconds"] = time.monotonic() - started
+        artifact["real_mode_diagnostics"] = {
+            name: [_result_diagnostic(result) for result in report.battle_results]
+            for name, report in reports.items()
+        }
         artifact["t078_restore_fidelity"] = _restore_fidelity_report(
             cohort, reports["telemetry_off"]
         )
@@ -332,21 +336,49 @@ def _parity_report(reports: Mapping[str, Any]) -> dict[str, Any]:
         geometry_result = geometry.battle_results[index]
         state_result = state.battle_results[index]
         mismatches: list[str] = []
-        off_search = _search_rows(off_result)
-        state_search = _search_rows(state_result)
-        if off_search != state_search:
+        off_search, off_search_problem = _safe_search_rows(off_result, "telemetry_off")
+        state_search, state_search_problem = _safe_search_rows(
+            state_result, "state_utilization"
+        )
+        if off_search_problem is not None:
+            mismatches.append(off_search_problem)
+        if state_search_problem is not None:
+            mismatches.append(state_search_problem)
+        if off_search_problem is None and state_search_problem is None and off_search != state_search:
             mismatches.append("selected action/root stats/search status")
         off_eval = _evaluation_signature(off_result)
         state_eval = _evaluation_signature(state_result)
         if off_eval != state_eval:
             mismatches.append("terminal/evaluation/simulator steps")
-        off_callbacks = _callback_signature(off_result)
-        state_callbacks = _callback_signature(state_result)
-        if off_callbacks != state_callbacks:
+        off_callbacks, off_callback_problem = _safe_callback_signature(
+            off_result, "telemetry_off"
+        )
+        state_callbacks, state_callback_problem = _safe_callback_signature(
+            state_result, "state_utilization"
+        )
+        if off_callback_problem is not None:
+            mismatches.append(off_callback_problem)
+        if state_callback_problem is not None:
+            mismatches.append(state_callback_problem)
+        if (
+            off_callback_problem is None
+            and state_callback_problem is None
+            and off_callbacks != state_callbacks
+        ):
             mismatches.append("policy/value callback counts")
-        geometry_rows = _geometry_rows(geometry_result)
-        state_geometry_rows = _state_geometry_rows(state_result)
-        if geometry_rows != state_geometry_rows:
+        geometry_rows, geometry_problem = _safe_geometry_rows(geometry_result, "t070_geometry")
+        state_geometry_rows, state_geometry_problem = _safe_state_geometry_rows(
+            state_result, "state_utilization"
+        )
+        if geometry_problem is not None:
+            mismatches.append(geometry_problem)
+        if state_geometry_problem is not None:
+            mismatches.append(state_geometry_problem)
+        if (
+            geometry_problem is None
+            and state_geometry_problem is None
+            and geometry_rows != state_geometry_rows
+        ):
             mismatches.append("T070 geometry")
         rows.append(
             {
@@ -380,6 +412,68 @@ def _parity_report(reports: Mapping[str, Any]) -> dict[str, Any]:
         ],
         "records": rows,
     }
+
+
+def _result_diagnostic(result: Any) -> dict[str, Any]:
+    """Retain the failure boundary when a real result has no telemetry.
+
+    A missing telemetry mapping is not a valid parity result and must never be
+    converted into a pass by this diagnostic path.  Keeping the result shape
+    and fixed-evaluation problems in the artifact makes native fail-closed
+    identity failures actionable instead of hiding them behind a generic
+    extraction exception.
+    """
+
+    telemetry = result.controller_compute_telemetry
+    return {
+        "record_index": result.cohort_index,
+        "restoration_method": result.restoration_method,
+        "termination_status": result.termination_status,
+        "decision_count": result.decision_count,
+        "simulator_step_count": result.simulator_step_count,
+        "problems": list(result.problems),
+        "controller_telemetry_type": type(telemetry).__name__,
+        "controller_telemetry_present": telemetry is not None,
+        "controller_telemetry_keys": (
+            sorted(telemetry) if isinstance(telemetry, Mapping) else []
+        ),
+    }
+
+
+def _safe_search_rows(
+    result: Any, mode: str
+) -> tuple[list[dict[str, Any]], str | None]:
+    try:
+        return _search_rows(result), None
+    except (TypeError, RuntimeError, ValueError) as exc:
+        return [], f"{mode} record {result.cohort_index}: search telemetry invalid: {exc}"
+
+
+def _safe_callback_signature(
+    result: Any, mode: str
+) -> tuple[dict[str, Any], str | None]:
+    try:
+        return _callback_signature(result), None
+    except (TypeError, RuntimeError, ValueError) as exc:
+        return {}, f"{mode} record {result.cohort_index}: callback telemetry invalid: {exc}"
+
+
+def _safe_geometry_rows(
+    result: Any, mode: str
+) -> tuple[list[dict[str, Any]], str | None]:
+    try:
+        return _geometry_rows(result), None
+    except (TypeError, RuntimeError, ValueError) as exc:
+        return [], f"{mode} record {result.cohort_index}: geometry telemetry invalid: {exc}"
+
+
+def _safe_state_geometry_rows(
+    result: Any, mode: str
+) -> tuple[list[dict[str, Any]], str | None]:
+    try:
+        return _state_geometry_rows(result), None
+    except (TypeError, RuntimeError, ValueError) as exc:
+        return [], f"{mode} record {result.cohort_index}: geometry telemetry invalid: {exc}"
 
 
 def _search_rows(result: Any) -> list[dict[str, Any]]:

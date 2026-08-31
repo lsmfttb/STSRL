@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
+from scripts.run_t079_preflight import _parity_report, _result_diagnostic
 from scripts.run_t079_state_utilization import _population_aggregate
 from sts_combat_rl.sim.t079_state_utilization import (
     build_search_call_identity,
@@ -24,6 +27,77 @@ def test_t079_rejects_incomplete_restored_battle(termination: str) -> None:
 def test_t079_accepts_only_clean_terminal_battle() -> None:
     assert t079_result_is_complete("win", [], [])
     assert t079_result_is_complete("loss", [], [])
+
+
+def test_preflight_retains_native_identity_failure_in_result_diagnostics() -> None:
+    result = SimpleNamespace(
+        cohort_index=0,
+        restoration_method="seed_action_trace",
+        termination_status="error",
+        decision_count=0,
+        simulator_step_count=0,
+        problems=[
+            (
+                "controller error at step 0: native T079 exact-state identity "
+                "is incomplete or collided: native ActionQueue contains opaque "
+                "std::function entries"
+            )
+        ],
+        controller_compute_telemetry=None,
+    )
+    diagnostic = _result_diagnostic(result)
+    assert diagnostic["controller_telemetry_present"] is False
+    assert diagnostic["controller_telemetry_type"] == "NoneType"
+    assert "ActionQueue" in diagnostic["problems"][0]
+
+
+def test_preflight_parity_rejects_and_localizes_missing_real_telemetry() -> None:
+    def result(index: int, *, state_failure: bool = False) -> SimpleNamespace:
+        return SimpleNamespace(
+            cohort_index=index,
+            restoration_method="seed_action_trace",
+            termination_status="error" if state_failure else "win",
+            terminal_absolute_hp=None,
+            hp_loss=None,
+            decision_count=0,
+            simulator_step_count=0,
+            structured_battle_outcome_status="unavailable",
+            structured_battle_outcome=None,
+            problems=(
+                [
+                    (
+                        "controller error at step 0: native T079 exact-state identity "
+                        "is incomplete or collided"
+                    )
+                ]
+                if state_failure
+                else []
+            ),
+            controller_compute_telemetry=None,
+        )
+
+    report = _parity_report(
+        {
+            "telemetry_off": SimpleNamespace(
+                battle_results=[result(index) for index in range(16)]
+            ),
+            "t070_geometry": SimpleNamespace(
+                battle_results=[result(index) for index in range(16)]
+            ),
+            "t079_state_utilization": SimpleNamespace(
+                battle_results=[
+                    result(index, state_failure=index == 0) for index in range(16)
+                ]
+            ),
+        }
+    )
+    assert report["passed"] is False
+    assert report["records"][0]["passed"] is False
+    assert any(
+        "state_utilization record 0" in mismatch
+        and "no controller telemetry" in mismatch
+        for mismatch in report["records"][0]["mismatches"]
+    )
 
 
 def test_search_call_identity_uses_controller_emission_and_adds_cohort_key() -> None:

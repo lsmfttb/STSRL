@@ -29,6 +29,18 @@ telemetry publishes this component list and the adapter requires it, so the
 identity claim is checked against the implementation rather than inferred
 from normal decision-node shape.
 
+The authoritative real-native preflight currently reaches this documented
+failure boundary: the first-record T079 search expands 100 path nodes and
+reports `identity_complete=false` with
+`identity_unavailable_reason="native ActionQueue contains opaque std::function
+entries"`. The fixed-evaluation result is therefore an error with no controller
+telemetry, and the preflight diagnostic retains that mode/record/problem while
+remaining failed. This is not a schema compatibility waiver: until native can
+represent the queued function bodies (or otherwise prove their future
+irrelevance without changing search semantics), no T079 classification or
+science stage is permitted. The current implementation does not claim that
+boundary is solved.
+
 All runtime examples below use a clean checkout/build of the active native
 integration `refs/heads/stsrl/main @
 1555348535d66e3035aac80933a60949d4bd850f`. The temporary native work branch

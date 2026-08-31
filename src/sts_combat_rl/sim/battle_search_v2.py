@@ -1079,7 +1079,11 @@ def _validate_t079_state_utilization(
         != "canonical_payload_equality_within_digest_bucket"
         or value.get("digest_collision_count") != 0
     ):
-        raise ValueError("native T079 exact-state identity is incomplete or collided")
+        reason = value.get("identity_unavailable_reason")
+        detail = f": {reason}" if isinstance(reason, str) and reason else ""
+        raise ValueError(
+            "native T079 exact-state identity is incomplete or collided" + detail
+        )
     components = value.get("identity_components")
     if (
         not isinstance(components, list)
