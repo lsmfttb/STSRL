@@ -13,6 +13,9 @@ from sts_combat_rl.sim.battle_search_v2 import (
     BattleSearchV2Controller,
     _validate_t079_state_utilization,
 )
+from sts_combat_rl.sim.t079_state_utilization import (
+    T079_ACTIVE_QUEUE_NORMALIZATION_PROOF,
+)
 from sts_combat_rl.sim.contract import SimulatorAction, SimulatorSnapshot
 from sts_combat_rl.sim.online_controller import NATIVE_SEARCH_INFORMATION_REGIME
 from sts_combat_rl.sim.oracle_search import (
@@ -341,6 +344,7 @@ class _Adapter:
             "identity_schema_id": "native-battle-search-v2-exact-state-v1",
             "identity_semantics": T079_IDENTITY_SEMANTICS,
             "identity_components": list(T079_IDENTITY_COMPONENTS),
+            "active_queue_normalization": dict(T079_ACTIVE_QUEUE_NORMALIZATION_PROOF),
             "identity_complete": True,
             "identity_unavailable_reason": None,
             "digest_algorithm": "fnv1a128-v1",
@@ -783,6 +787,27 @@ def test_t079_incomplete_native_identity_is_explicitly_opaque() -> None:
         row["identity_evidence_class"] == "opaque" and row["exact_state_digest"] is None
         for row in validated["expanded_states"]
     )
+
+
+def test_t079_complete_claim_without_active_queue_proof_is_opaque() -> None:
+    raw = _Adapter().battle_search_v2_with_state_utilization(
+        SimulatorSnapshot(observation=[], raw=_node_raw()),
+        policy_prior_callback=None,
+        leaf_value_callback=None,
+    )
+    telemetry = raw["tree_internal_telemetry"]
+    del telemetry["state_utilization"]["active_queue_normalization"]
+
+    validated = _validate_t079_state_utilization(raw, telemetry)
+
+    assert validated["identity_complete"] is False
+    assert validated["identity_unavailable_reason"] == (
+        "native identity does not prove active-slot/stale-slot queue normalization"
+    )
+    assert validated["identity_evidence_class_counts"] == {
+        "exact_comparable": 0,
+        "opaque": 5,
+    }
 
 
 def test_t068_trace_survives_fixed_evaluation_telemetry_aggregation() -> None:

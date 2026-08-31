@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
+import json
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-import json
 from pathlib import Path
-import re
 from typing import Any
-
 
 LIGHTSPEED_SOURCE_MANIFEST_SCHEMA_ID = "sts-lightspeed-source-manifest-v1"
 LIGHTSPEED_SOURCE_MANIFEST_VERSION = 1
@@ -26,6 +25,7 @@ REQUIRED_NATIVE_CAPABILITY_IDS = (
     "native_root_prior_allocation",
     "native_battle_search_v2_tree_internal",
     "native_battle_search_v2_tree_geometry",
+    "native_battle_search_v2_state_utilization",
     "native_terminal_resource_identity",
     "constructed_battle_start_transforms",
 )

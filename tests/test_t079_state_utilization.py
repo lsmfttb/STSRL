@@ -8,6 +8,7 @@ from sts_combat_rl.sim.t079_state_utilization import (
     classify_t079,
     compare_prefix_sequences,
     flatten_t079_call_records,
+    normalize_native_state_utilization,
     summarize_state_utilization,
     t079_result_is_complete,
     validate_stage_inventory,
@@ -84,11 +85,42 @@ def _telemetry(digests: list[str]) -> dict[str, object]:
         )
     return {
         "identity_complete": True,
+        "active_queue_normalization": {
+            "schema_id": "native-battle-search-v2-active-queue-semantics-v1",
+            "card_queue": "active_slots_only_execution_order;inactive_stale_slots_ignored",
+            "action_queue": "active_entries_only;empty_queue_stale_storage_ignored",
+        },
         "digest_collision_count": 0,
         "collision_check": "canonical_payload_equality_within_digest_bucket",
         "expanded_path_node_count": len(rows),
         "expanded_states": rows,
     }
+
+
+def _assert_unproven_queue_identity_is_opaque(component: str) -> None:
+    telemetry = _telemetry(["a", "a"])
+    del telemetry["active_queue_normalization"]
+    telemetry["identity_components"] = [component]
+
+    rows, identity_class = normalize_native_state_utilization(telemetry)
+
+    assert identity_class == "opaque"
+    assert all(
+        row["identity_evidence_class"] == "opaque"
+        and row["exact_state_digest"] is None
+        and row["first_seen"] is None
+        and row["first_seen_expansion_ordinal"] is None
+        and row["first_seen_depth"] is None
+        for row in rows
+    )
+
+
+def test_inactive_card_queue_slots_are_not_exact_identity() -> None:
+    _assert_unproven_queue_identity_is_opaque("CardQueue.all_slots_and_indices")
+
+
+def test_empty_action_queue_stale_storage_is_not_exact_identity() -> None:
+    _assert_unproven_queue_identity_is_opaque("ActionQueue.indices_size_and_clear_bits")
 
 
 def test_summarize_reports_exact_duplicates_and_distinct_paths() -> None:

@@ -23,6 +23,7 @@ from sts_combat_rl.sim.non_combat_learning import T065CaseD
 from sts_combat_rl.sim.t077_continuation import (
     T077_ACCEPTED_T076_INTEGRATION,
     T077_EARLIEST_STAGE,
+    T079_ACTIVE_NATIVE_INTEGRATION,
     artifact_identity,
     build_t077_continuation_plan,
     validate_selected_states_320,
@@ -108,7 +109,8 @@ def test_selected_cohort_validation_is_streaming_and_exact(tmp_path: Path) -> No
 def test_source_manifest_binds_t076_integration() -> None:
     manifest = verify_t076_source_manifest(Path(__file__).parents[1])
 
-    assert manifest["integration_commit"] == T077_ACCEPTED_T076_INTEGRATION
+    assert manifest["integration_commit"] == T079_ACTIVE_NATIVE_INTEGRATION
+    assert manifest["t076_lineage_anchor"] == T077_ACCEPTED_T076_INTEGRATION
     assert manifest["integration_branch"] == "stsrl/main"
 
 

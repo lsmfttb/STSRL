@@ -20,6 +20,11 @@ T079_RECORD_COUNT = 16
 T079_WORKER_COUNT = 16
 T079_PATH_FINGERPRINT_SCHEMA = "occurrence_safe_action_path_v1"
 T079_IDENTITY_CLASSES = ("exact_comparable", "opaque")
+T079_ACTIVE_QUEUE_NORMALIZATION_PROOF = {
+    "schema_id": "native-battle-search-v2-active-queue-semantics-v1",
+    "card_queue": "active_slots_only_execution_order;inactive_stale_slots_ignored",
+    "action_queue": "active_entries_only;empty_queue_stale_storage_ignored",
+}
 
 
 def flatten_t079_call_records(value: object) -> list[Mapping[str, Any]]:
@@ -223,10 +228,12 @@ def normalize_native_state_utilization(
 ) -> tuple[list[dict[str, Any]], str]:
     """Partition native rows without inventing identity for opaque nodes.
 
-    Native v1 exposes completeness at the telemetry-call level.  If that gate
-    is false, no per-row claim can be recovered from the payload, so all rows
-    are conservatively classified opaque.  Their native digest and first-seen
-    fields are deliberately discarded rather than reused as equality evidence.
+    Native v1 exposes completeness at the telemetry-call level.  That claim is
+    not sufficient when its canonical payload may include inactive CardQueue
+    slots or stale empty-ActionQueue storage.  Exact rows therefore require an
+    explicit active-queue normalization proof.  Without it, all rows are
+    conservatively classified opaque and native digest/first-seen fields are
+    discarded rather than reused as equality evidence.
     """
 
     rows = native_state_utilization.get("expanded_states")
@@ -239,9 +246,39 @@ def normalize_native_state_utilization(
     if not isinstance(complete, bool):
         raise TypeError("T079 identity completeness flag is invalid")
     reason = native_state_utilization.get("identity_unavailable_reason")
+
+    def opaque_rows(opaque_reason: str) -> tuple[list[dict[str, Any]], str]:
+        normalized = []
+        for row in rows:
+            if not isinstance(row, Mapping):
+                raise TypeError("T079 expanded-state row is malformed")
+            item = dict(row)
+            item.update(
+                {
+                    "identity_evidence_class": "opaque",
+                    "opaque_reason": opaque_reason,
+                    "exact_state_digest": None,
+                    "first_seen": None,
+                    "first_seen_expansion_ordinal": None,
+                    "first_seen_depth": None,
+                }
+            )
+            normalized.append(item)
+        return validate_occurrence_rows(normalized, count=count), "opaque"
+
     if complete:
         if reason not in (None, ""):
             raise ValueError("T079 complete identity has an unavailable reason")
+        proof = native_state_utilization.get("active_queue_normalization")
+        if proof is None:
+            return opaque_rows(
+                "native identity does not prove active-slot/stale-slot queue normalization"
+            )
+        if (
+            not isinstance(proof, Mapping)
+            or dict(proof) != T079_ACTIVE_QUEUE_NORMALIZATION_PROOF
+        ):
+            raise ValueError("T079 active queue normalization proof is invalid")
         normalized = []
         for row in rows:
             if not isinstance(row, Mapping):
@@ -253,23 +290,7 @@ def normalize_native_state_utilization(
         return validate_occurrence_rows(normalized, count=count), "exact_comparable"
     if not isinstance(reason, str) or not reason:
         raise ValueError("T079 incomplete identity has no reason")
-    normalized = []
-    for row in rows:
-        if not isinstance(row, Mapping):
-            raise TypeError("T079 expanded-state row is malformed")
-        item = dict(row)
-        item.update(
-            {
-                "identity_evidence_class": "opaque",
-                "opaque_reason": reason,
-                "exact_state_digest": None,
-                "first_seen": None,
-                "first_seen_expansion_ordinal": None,
-                "first_seen_depth": None,
-            }
-        )
-        normalized.append(item)
-    return validate_occurrence_rows(normalized, count=count), "opaque"
+    return opaque_rows(reason)
 
 
 def _p90(values: Sequence[int]) -> float:

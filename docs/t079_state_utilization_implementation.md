@@ -9,16 +9,21 @@ selection.
 ## Identity evidence
 
 Native state-utilization v1 reports canonical identity completeness at call
-scope.  A complete call is normalized into `exact_comparable` rows and its
-canonical digest/equality evidence is validated.  If native reports an
-incomplete identity, every row in that call is conservatively normalized to
-`opaque`; its native digest and first-seen fields are discarded.  Opaque rows
-retain only ordinal, depth, path traversal evidence, and the native reason.
+scope.  The `identity_complete` flag alone is not sufficient: the canonical
+payload must also carry the structured
+`native-battle-search-v2-active-queue-semantics-v1` proof that CardQueue uses
+active slots in execution order and that empty ActionQueue stale storage is
+ignored.  Without that proof, including the current active native integration,
+every row is conservatively normalized to `opaque`; its native digest and
+first-seen fields are discarded.  Opaque rows retain only ordinal, depth, path
+traversal evidence, and the reason.
 
 This is deliberate: the active native model stores queued actions as opaque
-`std::function<void(BattleContext&)>` values.  T079 recovery does not
-semanticize those continuations and never uses function addresses,
-`target_type`, queue position, or path identity as state equality.
+`std::function<void(BattleContext&)>` values and serializes stale queue storage
+in its current canonical payload.  T079 recovery does not semanticize those
+continuations and never uses function addresses, `target_type`, queue position,
+or path identity as state equality.  The active native output is therefore
+opaque until it independently proves the active-slot normalization boundary.
 
 ## Bounds
 

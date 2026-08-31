@@ -45,9 +45,7 @@ from sts_combat_rl.sim.search_guidance_inference import (
     search_guidance_scorer_checkpoint_provenance,
     validate_search_guidance_result,
 )
-from sts_combat_rl.sim.t079_state_utilization import (
-    normalize_native_state_utilization,
-)
+from sts_combat_rl.sim.t079_state_utilization import normalize_native_state_utilization
 
 BATTLE_SEARCH_V2_CONTROLLER_NAME = "battle_search_v2_oracle_like_v1"
 BATTLE_SEARCH_V2_CONTROLLER_VERSION = "battle-search-v2-oracle-like-v1"
@@ -1072,7 +1070,8 @@ def _validate_t079_state_utilization(
         "expanded_path_node_count",
         "expanded_states",
     }
-    if set(value) != expected:
+    allowed = expected | {"active_queue_normalization"}
+    if not expected.issubset(value) or set(value) - allowed:
         if "identity_components" not in value:
             raise ValueError("native T079 identity component audit is missing")
         raise ValueError("native T079 state-utilization fields mismatch")
@@ -1104,6 +1103,9 @@ def _validate_t079_state_utilization(
     )
     result = dict(value)
     result["expanded_states"] = rows
+    if rows[0]["identity_evidence_class"] == "opaque":
+        result["identity_complete"] = False
+        result["identity_unavailable_reason"] = rows[0]["opaque_reason"]
     result["identity_evidence_class_counts"] = {
         "exact_comparable": comparable_count,
         "opaque": len(rows) - comparable_count,
