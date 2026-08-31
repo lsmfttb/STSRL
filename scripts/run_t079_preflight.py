@@ -29,7 +29,7 @@ from sts_combat_rl.sim.lightspeed_source import lightspeed_source_identity_dict
 from sts_combat_rl.sim.search_telemetry import iter_search_decision_telemetry_dicts
 from sts_combat_rl.sim.t079_state_utilization import sha256_file, write_json
 
-T079_EXPECTED_NATIVE_COMMIT = "ae294471ae4e52f9c5d2d578ed8b22f0fa6b2ae0"
+T079_EXPECTED_NATIVE_COMMIT = "1555348535d66e3035aac80933a60949d4bd850f"
 T079_RECORD_COUNT = 16
 T079_PREFLIGHT_SCHEMA_ID = "t079-preflight-v1"
 
