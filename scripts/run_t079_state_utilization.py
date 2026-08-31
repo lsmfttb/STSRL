@@ -7,10 +7,12 @@ import argparse
 import json
 import os
 import shlex
+import subprocess
 import sys
 import time
 from collections.abc import Mapping
 from pathlib import Path
+from typing import Any
 
 from sts_combat_rl.commands.t079_state_utilization import run_t079_stage
 from sts_combat_rl.sim.action_space import ActionSpaceConfig
@@ -19,6 +21,7 @@ from sts_combat_rl.sim.lightspeed import LightSpeedAdapter
 from sts_combat_rl.sim.lightspeed_source import lightspeed_source_identity_dict
 from sts_combat_rl.sim.t079_state_utilization import (
     T079_BUDGETS,
+    build_search_call_identity,
     classify_t079,
     compare_prefix_sequences,
     sha256_file,
@@ -43,6 +46,7 @@ def main() -> int:
     parser.add_argument("--subset-manifest", type=Path, required=True)
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--output-root", type=Path, required=True)
+    parser.add_argument("--native-build", type=Path, required=True)
     parser.add_argument(
         "--preflight",
         type=Path,
@@ -54,13 +58,27 @@ def main() -> int:
 
     _verify_inputs(args.cohort, args.subset_manifest, args.checkpoint)
     args.output_root.mkdir(parents=True, exist_ok=True)
-    _verify_preflight(
-        args.preflight or args.output_root / "preflight.json",
+    preflight_path = args.preflight or args.output_root / "preflight.json"
+    preflight = _verify_preflight(
+        preflight_path,
         cohort=args.cohort,
         subset_manifest=args.subset_manifest,
         checkpoint=args.checkpoint,
+        native_build=args.native_build,
     )
+    if str(args.native_build.resolve()) not in sys.path:
+        sys.path.insert(0, str(args.native_build.resolve()))
     source_identity = lightspeed_source_identity_dict()
+    stage_command = shlex.join(
+        [sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]]
+    )
+    execution_identity = {
+        "preflight": _preflight_identity(preflight_path, preflight),
+        "native_source_identity": source_identity,
+        "native_build_directory": str(args.native_build.resolve()),
+        "native_runtime_identity": preflight["native_runtime_identity"],
+        "stage_command": stage_command,
+    }
     experiment = {
         "schema_id": "t079-experiment-manifest-v1",
         "task_id": "T079",
@@ -68,6 +86,10 @@ def main() -> int:
         "subset_cohort_sha256": sha256_file(args.cohort),
         "checkpoint_sha256": sha256_file(args.checkpoint),
         "native_source_identity": source_identity,
+        "native_build_directory": str(args.native_build.resolve()),
+        "native_runtime_identity": preflight["native_runtime_identity"],
+        "preflight_identity": execution_identity["preflight"],
+        "stage_command": stage_command,
         "information_regime": "full_simulator_state_oracle_like",
         "action_space": ActionSpaceConfig.initial_no_potions().to_dict(),
         "root_selection": "highest_mean",
@@ -120,31 +142,51 @@ def main() -> int:
             max_battle_steps=args.max_battle_steps,
         )
         stage["wall_clock_seconds"] = time.monotonic() - started
+        stage["execution_identity"] = execution_identity
         stage["first_root"] = _first_root_summary(stage)
         stage["all_search_calls"] = _all_call_summary(stage)
         stages[budget] = stage
         write_json(args.output_root / f"stage-s{budget}.json", stage)
 
     prefix = _prefix_report(stages)
-    first_root = {str(budget): stages[budget]["first_root"] for budget in T079_BUDGETS}
     terminal = _terminal_classification(stages, prefix)
     write_json(args.output_root / "first-root-prefix-comparison.json", prefix)
     write_json(
         args.output_root / "aggregate-state-utilization.json",
         {
             "schema_id": "t079-aggregate-state-utilization-v1",
+            "execution_identity": execution_identity,
             "budgets": {
-                str(budget): stages[budget]["all_search_calls"]
+                str(budget): {
+                    "first_root": {
+                        "aggregate": _population_aggregate(
+                            stages[budget]["first_root"]
+                        ),
+                        "per_record": stages[budget]["first_root"],
+                    },
+                    "all_calls": {
+                        "aggregate": _population_aggregate(
+                            stages[budget]["all_search_calls"]["per_call"]
+                        ),
+                        "per_call": stages[budget]["all_search_calls"]["per_call"],
+                        "failure_aggregate": stages[budget]["all_search_calls"][
+                            "failure_aggregate"
+                        ],
+                    },
+                }
                 for budget in T079_BUDGETS
             },
-            "first_root": first_root,
         },
     )
+    prefix["execution_identity"] = execution_identity
+    terminal["execution_identity"] = execution_identity
+    write_json(args.output_root / "first-root-prefix-comparison.json", prefix)
     write_json(args.output_root / "terminal-classification.json", terminal)
     retention = {
         "schema_id": "t079-retention-manifest-v1",
         "task_id": "T079",
         "retention_root": str(args.output_root),
+        "execution_identity": execution_identity,
         "inputs": {
             "subset_manifest": {
                 "path": str(args.subset_manifest),
@@ -158,6 +200,7 @@ def main() -> int:
                 "path": str(args.checkpoint),
                 "sha256": sha256_file(args.checkpoint),
             },
+            "preflight": _preflight_identity(preflight_path, preflight),
         },
         "outputs": {
             path.name: {"path": str(path), "sha256": sha256_file(path)}
@@ -180,6 +223,10 @@ def main() -> int:
                 str(args.checkpoint.resolve()),
                 "--output-root",
                 str(args.output_root.resolve()),
+                "--native-build",
+                str(args.native_build.resolve()),
+                "--preflight",
+                str(preflight_path.resolve()),
             ]
         ),
         "raw_hidden_state_payloads_retained": False,
@@ -202,8 +249,13 @@ def _verify_inputs(cohort: Path, manifest: Path, checkpoint: Path) -> None:
 
 
 def _verify_preflight(
-    path: Path, *, cohort: Path, subset_manifest: Path, checkpoint: Path
-) -> None:
+    path: Path,
+    *,
+    cohort: Path,
+    subset_manifest: Path,
+    checkpoint: Path,
+    native_build: Path,
+) -> Mapping[str, Any]:
     """Require the real native parity/restore gate before any stage starts."""
 
     try:
@@ -219,6 +271,15 @@ def _verify_preflight(
         raise SystemExit("T079 science requires schema t079-preflight-v1")
     if artifact.get("passed") is not True:
         raise SystemExit("T079 science requires a passing real-native preflight")
+    runtime = artifact.get("native_runtime_identity")
+    if not isinstance(runtime, Mapping):
+        raise SystemExit("T079 preflight has no native runtime identity")
+    if runtime.get("native_build_directory") != str(native_build.resolve()):
+        raise SystemExit("T079 preflight native build does not match stage input")
+    if not isinstance(runtime.get("module_file"), str) or not isinstance(
+        runtime.get("module_sha256"), str
+    ):
+        raise SystemExit("T079 preflight has no exact native module identity")
     source = artifact.get("native_source_identity")
     if not isinstance(source, Mapping):
         raise SystemExit("T079 preflight has no native source identity")
@@ -226,7 +287,7 @@ def _verify_preflight(
         source.get("integration_branch") != "stsrl/main"
         or source.get("integration_ref") != "refs/heads/stsrl/main"
         or source.get("integration_commit")
-        != "ae294471ae4e52f9c5d2d578ed8b22f0fa6b2ae0"
+        != "1555348535d66e3035aac80933a60949d4bd850f"
     ):
         raise SystemExit(
             "T079 preflight native source identity is not the active final ref"
@@ -251,6 +312,38 @@ def _verify_preflight(
         raise SystemExit("T079 preflight parity did not pass")
     if not isinstance(restore, Mapping) or restore.get("passed") is not True:
         raise SystemExit("T079 preflight T078 restore fidelity did not pass")
+    code = artifact.get("code_identity")
+    if not isinstance(code, Mapping):
+        raise SystemExit("T079 preflight has no code identity")
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    if code.get("head") != head or code.get("worktree_clean") is not True:
+        raise SystemExit("T079 preflight code identity is stale or dirty")
+    return artifact
+
+
+def _preflight_identity(path: Path, artifact: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "path": str(path.resolve()),
+        "sha256": sha256_file(path),
+        "schema_id": artifact.get("schema_id"),
+        "code_identity": artifact.get("code_identity"),
+        "native_source_identity": artifact.get("native_source_identity"),
+        "native_runtime_identity": artifact.get("native_runtime_identity"),
+        "inputs": artifact.get("inputs"),
+        "parity_passed": artifact.get("parity", {}).get("passed")
+        if isinstance(artifact.get("parity"), Mapping)
+        else False,
+        "restore_fidelity_passed": artifact.get("t078_restore_fidelity", {}).get(
+            "passed"
+        )
+        if isinstance(artifact.get("t078_restore_fidelity"), Mapping)
+        else False,
+    }
 
 
 def _record_payloads(stage: Mapping[str, object]) -> list[Mapping[str, object]]:
@@ -301,8 +394,18 @@ def _first_root_summary(stage: Mapping[str, object]) -> list[dict[str, object]]:
         reduced["record_index"] = row["record_index"]
         reduced["decision_step_index"] = 0
         reduced["call_role"] = "first_root"
+        raw_identity = call.get("search_call_identity")
+        if not isinstance(raw_identity, Mapping):
+            raise TypeError("T079 first-root search-call identity is missing")
+        reduced["search_call_identity"] = build_search_call_identity(
+            raw_identity,
+            cohort_identity=str(stage["cohort_identity"]),
+            record_index=int(row["record_index"]),
+            decision_step_index=0,
+        )
         reduced["native_state_utilization"] = dict(native)
         reduced["native_geometry"] = call.get("native_geometry")
+        _add_call_evidence(reduced, call)
         reduced["controller_provenance"] = (
             row.get("result", {}).get("controller_provenance")
             if isinstance(row.get("result"), Mapping)
@@ -356,7 +459,25 @@ def _all_call_summary(stage: Mapping[str, object]) -> dict[str, object]:
                     "selected_action_identity": call.get("selected_action_identity"),
                 }
             )
+            raw_identity = call.get("search_call_identity")
+            if not isinstance(raw_identity, Mapping):
+                raise TypeError("T079 search-call identity is missing")
+            reduced["search_call_identity"] = build_search_call_identity(
+                raw_identity,
+                cohort_identity=str(stage["cohort_identity"]),
+                record_index=int(row["record_index"]),
+                decision_step_index=decision_step_index,
+            )
+            _add_call_evidence(reduced, call)
             calls.append(reduced)
+    failure_status_counts: dict[str, int] = {}
+    failure_count = 0
+    for call in calls:
+        count = int(call["failure_count"])
+        failure_count += count
+        status = str(call["search_status"])
+        if count:
+            failure_status_counts[status] = failure_status_counts.get(status, 0) + count
     return {
         "call_count": len(calls),
         "expanded_path_nodes": sum(int(call["expanded_path_nodes"]) for call in calls),
@@ -364,7 +485,100 @@ def _all_call_summary(stage: Mapping[str, object]) -> dict[str, object]:
         "exact_duplicate_path_nodes": sum(
             int(call["exact_duplicate_path_nodes"]) for call in calls
         ),
+        "failure_aggregate": {
+            "failure_count": failure_count,
+            "failure_status_counts": failure_status_counts,
+        },
         "per_call": calls,
+    }
+
+
+def _add_call_evidence(target: dict[str, object], call: Mapping[str, object]) -> None:
+    required = (
+        "native_simulator_steps",
+        "model_calls",
+        "wall_clock_seconds",
+        "search_status",
+        "search_failure_count",
+    )
+    if any(key not in call for key in required):
+        raise ValueError("T079 search-call evidence is incomplete")
+    steps = call["native_simulator_steps"]
+    models = call["model_calls"]
+    failures = call["search_failure_count"]
+    wall = call["wall_clock_seconds"]
+    if (
+        isinstance(steps, bool)
+        or not isinstance(steps, int)
+        or steps < 0
+        or isinstance(models, bool)
+        or not isinstance(models, int)
+        or models < 0
+        or isinstance(failures, bool)
+        or not isinstance(failures, int)
+        or failures < 0
+        or not isinstance(call["search_status"], str)
+        or not isinstance(wall, (int, float))
+        or isinstance(wall, bool)
+        or wall < 0
+    ):
+        raise ValueError("T079 search-call evidence has invalid values")
+    target.update(
+        {
+            "native_simulator_steps": steps,
+            "model_calls": models,
+            "wall_clock_seconds": wall,
+            "search_status": call["search_status"],
+            "failure_count": failures,
+        }
+    )
+
+
+def _population_aggregate(rows: object) -> dict[str, object]:
+    if not isinstance(rows, list) or not rows:
+        raise ValueError("T079 aggregate population is empty")
+    mappings = [row for row in rows if isinstance(row, Mapping)]
+    if len(mappings) != len(rows):
+        raise TypeError("T079 aggregate population contains a malformed row")
+    duplicate_fractions = [float(row["exact_duplicate_fraction"]) for row in mappings]
+    yields = [float(row["unique_state_yield"]) for row in mappings]
+    return {
+        "row_count": len(mappings),
+        "record_count": len({row["record_index"] for row in mappings}),
+        "expanded_path_nodes": sum(int(row["expanded_path_nodes"]) for row in mappings),
+        "unique_exact_states": sum(int(row["unique_exact_states"]) for row in mappings),
+        "exact_duplicate_path_nodes": sum(
+            int(row["exact_duplicate_path_nodes"]) for row in mappings
+        ),
+        "mean_exact_duplicate_fraction": sum(duplicate_fractions) / len(mappings),
+        "mean_unique_state_yield": sum(yields) / len(mappings),
+        "native_simulator_steps": sum(
+            int(
+                row.get(
+                    "native_simulator_steps",
+                    row.get("compute", {}).get("native_simulator_steps", 0),
+                )
+            )
+            for row in mappings
+        ),
+        "model_calls": sum(
+            int(row.get("model_calls", row.get("compute", {}).get("model_calls", 0)))
+            for row in mappings
+        ),
+        "wall_clock_seconds": sum(
+            float(
+                row.get(
+                    "wall_clock_seconds",
+                    row.get("compute", {}).get("wall_clock_seconds", 0.0),
+                )
+            )
+            for row in mappings
+        ),
+        "failure_count": sum(int(row.get("failure_count", 0)) for row in mappings),
+        "search_status_counts": {
+            status: sum(1 for row in mappings if row.get("search_status") == status)
+            for status in sorted({str(row.get("search_status")) for row in mappings})
+        },
     }
 
 

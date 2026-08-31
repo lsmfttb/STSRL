@@ -100,28 +100,51 @@ def run_t079_stage(
         processes.append(process)
     _WORK_ITEM = None
 
+    # Drain while children are running.  Full 1600-node telemetry can exceed a
+    # multiprocessing feeder pipe; joining first would deadlock a child before
+    # its result reaches this queue.
     payloads: dict[int, dict[str, Any]] = {}
-    for process in processes:
-        process.join()
-    for _ in processes:
+    while len(payloads) < len(processes):
         try:
-            payload = result_queue.get(timeout=10)
-        except queue.Empty as exc:
-            raise RuntimeError(
-                "T079 worker exited without an evidence payload"
-            ) from exc
+            payload = result_queue.get(timeout=0.5)
+        except queue.Empty:
+            if all(process.exitcode is not None for process in processes):
+                break
+            continue
         if not isinstance(payload, dict) or not isinstance(
             payload.get("record_index"), int
         ):
             raise TypeError("T079 worker evidence payload is malformed")
+        if payload["record_index"] in payloads:
+            raise RuntimeError("T079 worker returned a duplicate record payload")
         payloads[payload["record_index"]] = payload
 
+    for process in processes:
+        process.join()
+
+    exit_codes = {
+        str(index): process.exitcode for index, process in enumerate(processes)
+    }
     if sorted(payloads) != list(range(T079_RECORD_COUNT)):
-        raise RuntimeError("T079 stage did not return every ordered cohort record")
+        raise RuntimeError(
+            "T079 worker exited without every evidence payload; "
+            f"exit_codes={exit_codes}, returned={sorted(payloads)}"
+        )
+
     stage_rows = [payloads[index] for index in range(T079_RECORD_COUNT)]
-    for row in stage_rows:
+    for index, row in enumerate(stage_rows):
+        spawned_pid = processes[index].pid
+        if row.get("worker_pid") != spawned_pid:
+            raise RuntimeError(
+                "T079 returned worker PID does not match spawned Process.pid: "
+                f"record={index}, returned={row.get('worker_pid')}, spawned={spawned_pid}"
+            )
         row.update(
             {
+                "spawned_process_pid": spawned_pid,
+                "worker_exit_code": processes[index].exitcode,
+                "host_logical_cpu_count": os.cpu_count(),
+                "host_cpu_affinity": _cpu_affinity(os.getpid()),
                 "worker_count": worker_count,
                 "effective_worker_count": len(
                     {item["worker_pid"] for item in stage_rows}
@@ -147,6 +170,18 @@ def run_t079_stage(
         "shard_count": shard_count,
         "effective_worker_count": len({row["worker_pid"] for row in stage_rows}),
         "observed_peak_concurrency": peak,
+        "worker_exit_codes": exit_codes,
+        "host_logical_cpu_count": os.cpu_count(),
+        "host_cpu_affinity": _cpu_affinity(os.getpid()),
+        "worker_pid_map": {
+            str(row["record_index"]): {
+                "worker_pid": row["worker_pid"],
+                "spawned_process_pid": row["spawned_process_pid"],
+                "cpu_count": row["worker_logical_cpu_count"],
+                "cpu_affinity": row["worker_cpu_affinity"],
+            }
+            for row in stage_rows
+        },
         "records": stage_rows,
     }
 
@@ -187,6 +222,8 @@ def _run_one_record() -> None:
             "worker_pid": os.getpid(),
             "worker_started_monotonic": started,
             "worker_finished_monotonic": time.monotonic(),
+            "worker_logical_cpu_count": os.cpu_count(),
+            "worker_cpu_affinity": _cpu_affinity(os.getpid()),
             "status": "completed" if result.termination_status != "error" else "error",
             "result": asdict(result),
             "problems": list(report.problems),
@@ -197,11 +234,20 @@ def _run_one_record() -> None:
             "worker_pid": os.getpid(),
             "worker_started_monotonic": started,
             "worker_finished_monotonic": time.monotonic(),
+            "worker_logical_cpu_count": os.cpu_count(),
+            "worker_cpu_affinity": _cpu_affinity(os.getpid()),
             "status": "error",
             "result": None,
             "problems": [f"{type(exc).__name__}: {exc}"],
         }
     result_queue.put(payload)
+
+
+def _cpu_affinity(pid: int) -> list[int] | None:
+    getter = getattr(os, "sched_getaffinity", None)
+    if getter is None:
+        return None
+    return sorted(int(cpu) for cpu in getter(pid))
 
 
 def _interval_peak(starts: list[float], ends: list[float]) -> int:

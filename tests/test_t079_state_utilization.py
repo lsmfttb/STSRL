@@ -3,11 +3,46 @@ from __future__ import annotations
 import pytest
 
 from sts_combat_rl.sim.t079_state_utilization import (
+    build_search_call_identity,
     classify_t079,
     compare_prefix_sequences,
     summarize_state_utilization,
     validate_stage_inventory,
 )
+
+
+def test_search_call_identity_uses_controller_emission_and_adds_cohort_key() -> None:
+    identity = build_search_call_identity(
+        {
+            "schema_id": "t079-search-call-identity-v1",
+            "controller_identity": "battle_search_v2_oracle_like_t079_state_utilization_v1",
+            "decision_step_index": 3,
+        },
+        cohort_identity="cohort-sha256",
+        record_index=5,
+        decision_step_index=3,
+    )
+    assert identity == {
+        "schema_id": "t079-search-call-identity-v1",
+        "cohort_identity": "cohort-sha256",
+        "record_index": 5,
+        "decision_step_index": 3,
+        "controller_identity": "battle_search_v2_oracle_like_t079_state_utilization_v1",
+    }
+
+
+def test_search_call_identity_rejects_missing_controller_identity() -> None:
+    with pytest.raises(ValueError, match="controller identity"):
+        build_search_call_identity(
+            {
+                "schema_id": "t079-search-call-identity-v1",
+                "controller_identity": "",
+                "decision_step_index": 0,
+            },
+            cohort_identity="cohort-sha256",
+            record_index=0,
+            decision_step_index=0,
+        )
 
 
 def _telemetry(digests: list[str]) -> dict[str, object]:
@@ -85,9 +120,15 @@ def test_stage_inventory_requires_effective_sixteen_workers() -> None:
             "shard_index": index,
             "shard_range": [index, index + 1],
             "worker_pid": 1000 + index,
+            "spawned_process_pid": 1000 + index,
             "worker_started_monotonic": 0.0,
             "worker_finished_monotonic": 10.0,
             "observed_peak_concurrency": 16,
+            "worker_exit_code": 0,
+            "worker_logical_cpu_count": 16,
+            "worker_cpu_affinity": list(range(16)),
+            "host_logical_cpu_count": 16,
+            "host_cpu_affinity": list(range(16)),
             "status": "completed",
         }
         for index in range(16)
@@ -210,4 +251,32 @@ def test_stage_inventory_rejects_configured_workers_without_effective_topology()
         for index in range(16)
     ]
     with pytest.raises(ValueError, match="effective workers"):
+        validate_stage_inventory(rows)
+
+
+def test_stage_inventory_rejects_nonzero_worker_exit_code() -> None:
+    rows = [
+        {
+            "record_index": index,
+            "worker_count": 16,
+            "effective_worker_count": 16,
+            "shard_count": 16,
+            "shard_index": index,
+            "shard_range": [index, index + 1],
+            "worker_pid": 2000 + index,
+            "spawned_process_pid": 2000 + index,
+            "worker_started_monotonic": 0.0,
+            "worker_finished_monotonic": 10.0,
+            "observed_peak_concurrency": 16,
+            "worker_exit_code": 0,
+            "worker_logical_cpu_count": 16,
+            "worker_cpu_affinity": list(range(16)),
+            "host_logical_cpu_count": 16,
+            "host_cpu_affinity": list(range(16)),
+            "status": "completed",
+        }
+        for index in range(16)
+    ]
+    rows[3] = dict(rows[3], worker_exit_code=7)
+    with pytest.raises(ValueError, match="nonzero"):
         validate_stage_inventory(rows)

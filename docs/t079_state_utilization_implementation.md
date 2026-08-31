@@ -33,6 +33,7 @@ The reproducible runner is:
 
 ```text
 PYTHONPATH=src python3 scripts/run_t079_state_utilization.py \
+  --native-build /home/lsmft/stsrl-spikes/sts_lightspeed-t079-native/build-t079-py313b \
   --cohort artifacts/t070-search-v2-outcome-budget-sufficiency/reproduction-ca8da8e4183798daf3c310566ede74daf90822aa/budget-subset/t070-budget-subset-cohort.jsonl \
   --subset-manifest artifacts/t070-search-v2-outcome-budget-sufficiency/reproduction-ca8da8e4183798daf3c310566ede74daf90822aa/budget-subset/t070-budget-subset-manifest.json \
   --checkpoint artifacts/t044-de-assisted-comparison-pr/t043-assist_0-smoke/t043-assist_0-smoke-checkpoint.pt \
@@ -79,7 +80,7 @@ rebased onto it as `c740aea2d4def6887d62461e721c8d184bc259c9`. It was promoted
 to the active integration ref, not retained as a build input on a temporary
 work branch. The remote `lsmfttb/sts_lightspeed` ref
 `refs/heads/stsrl/main` resolves to
-`ae294471ae4e52f9c5d2d578ed8b22f0fa6b2ae0`; that merge has `ffb6891...`,
+`1555348535d66e3035aac80933a60949d4bd850f`; that merge has `2c75d34...`,
 `c740aea2...`, and `cc40c8cc...` as ancestors and is the commit recorded by the
 STSRL source manifest. The earlier active merge `7b82d2ce...` is superseded by
 this completeness descendant. The earlier incorrect attempt `cc8977f5d897093a63cf77df8c04aac3b24d0461`

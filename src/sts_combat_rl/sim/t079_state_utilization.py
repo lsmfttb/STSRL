@@ -21,6 +21,42 @@ T079_WORKER_COUNT = 16
 T079_PATH_FINGERPRINT_SCHEMA = "occurrence_safe_action_path_v1"
 
 
+def build_search_call_identity(
+    raw_identity: Mapping[str, Any],
+    *,
+    cohort_identity: str,
+    record_index: int,
+    decision_step_index: int,
+) -> dict[str, Any]:
+    """Validate and complete the controller-emitted stable call identity."""
+
+    expected = {"schema_id", "controller_identity", "decision_step_index"}
+    if set(raw_identity) != expected:
+        raise ValueError("T079 search-call identity fields are incomplete")
+    if raw_identity["schema_id"] != "t079-search-call-identity-v1":
+        raise ValueError("T079 search-call identity schema is invalid")
+    controller_identity = raw_identity["controller_identity"]
+    if not isinstance(controller_identity, str) or not controller_identity:
+        raise ValueError("T079 search-call controller identity is missing")
+    if raw_identity["decision_step_index"] != decision_step_index:
+        raise ValueError("T079 search-call decision step identity disagrees")
+    if not isinstance(cohort_identity, str) or not cohort_identity:
+        raise ValueError("T079 cohort identity is missing")
+    if (
+        isinstance(record_index, bool)
+        or not isinstance(record_index, int)
+        or record_index < 0
+    ):
+        raise ValueError("T079 search-call record identity is invalid")
+    return {
+        "schema_id": raw_identity["schema_id"],
+        "cohort_identity": cohort_identity,
+        "record_index": record_index,
+        "decision_step_index": decision_step_index,
+        "controller_identity": controller_identity,
+    }
+
+
 def _median_16(values: Sequence[float]) -> float:
     """Return the literal median of the frozen 16-record cohort."""
 
@@ -334,9 +370,34 @@ def validate_stage_inventory(
             )
         if row.get("status") not in {"completed", "success"}:
             raise ValueError("T079 stage contains an incomplete record")
+        exit_code = row.get("worker_exit_code")
+        if exit_code != 0:
+            raise ValueError(f"T079 worker exited nonzero: {exit_code!r}")
         pid = row.get("worker_pid")
         if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
             raise ValueError("T079 stage worker PID evidence is invalid")
+        if row.get("spawned_process_pid") != pid:
+            raise ValueError("T079 worker PID does not match spawned Process.pid")
+        cpu_count = row.get("worker_logical_cpu_count")
+        if (
+            isinstance(cpu_count, bool)
+            or not isinstance(cpu_count, int)
+            or cpu_count < worker_count
+        ):
+            raise ValueError("T079 worker logical CPU evidence is invalid")
+        affinity = row.get("worker_cpu_affinity")
+        if not isinstance(affinity, list) or not affinity:
+            raise ValueError("T079 worker CPU affinity evidence is missing")
+        host_cpu_count = row.get("host_logical_cpu_count")
+        if (
+            isinstance(host_cpu_count, bool)
+            or not isinstance(host_cpu_count, int)
+            or host_cpu_count < worker_count
+        ):
+            raise ValueError("T079 host logical CPU evidence is invalid")
+        host_affinity = row.get("host_cpu_affinity")
+        if not isinstance(host_affinity, list) or not host_affinity:
+            raise ValueError("T079 host CPU affinity evidence is missing")
         start = row.get("worker_started_monotonic")
         end = row.get("worker_finished_monotonic")
         if (
