@@ -1050,7 +1050,7 @@ def _validate_t079_state_utilization(
 
     value = telemetry.get("state_utilization")
     if not isinstance(value, Mapping):
-        raise ValueError("native battle search v2 omitted T079 state utilization")
+        raise TypeError("native battle search v2 omitted T079 state utilization")
     expected = {
         "schema_id",
         "schema_version",
