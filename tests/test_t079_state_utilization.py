@@ -7,8 +7,21 @@ from sts_combat_rl.sim.t079_state_utilization import (
     classify_t079,
     compare_prefix_sequences,
     summarize_state_utilization,
+    t079_result_is_complete,
     validate_stage_inventory,
 )
+
+
+@pytest.mark.parametrize("termination", ["truncated", "error", "unknown"])
+def test_t079_rejects_incomplete_restored_battle(termination: str) -> None:
+    assert not t079_result_is_complete(termination, [], [])
+    assert not t079_result_is_complete("win", ["battle problem"], [])
+    assert not t079_result_is_complete("loss", [], ["report problem"])
+
+
+def test_t079_accepts_only_clean_terminal_battle() -> None:
+    assert t079_result_is_complete("win", [], [])
+    assert t079_result_is_complete("loss", [], [])
 
 
 def test_search_call_identity_uses_controller_emission_and_adds_cohort_key() -> None:
@@ -130,6 +143,8 @@ def test_stage_inventory_requires_effective_sixteen_workers() -> None:
             "host_logical_cpu_count": 16,
             "host_cpu_affinity": list(range(16)),
             "status": "completed",
+            "result": {"termination_status": "win", "problems": []},
+            "problems": [],
         }
         for index in range(16)
     ]
@@ -274,6 +289,8 @@ def test_stage_inventory_rejects_nonzero_worker_exit_code() -> None:
             "host_logical_cpu_count": 16,
             "host_cpu_affinity": list(range(16)),
             "status": "completed",
+            "result": {"termination_status": "loss", "problems": []},
+            "problems": [],
         }
         for index in range(16)
     ]

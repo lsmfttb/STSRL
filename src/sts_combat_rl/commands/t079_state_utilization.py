@@ -24,6 +24,7 @@ from sts_combat_rl.sim.t079_state_utilization import (
     T079_BUDGETS,
     T079_RECORD_COUNT,
     T079_WORKER_COUNT,
+    t079_result_is_complete,
     validate_stage_inventory,
 )
 
@@ -224,7 +225,15 @@ def _run_one_record() -> None:
             "worker_finished_monotonic": time.monotonic(),
             "worker_logical_cpu_count": os.cpu_count(),
             "worker_cpu_affinity": _cpu_affinity(os.getpid()),
-            "status": "completed" if result.termination_status != "error" else "error",
+            "status": (
+                "completed"
+                if t079_result_is_complete(
+                    result.termination_status,
+                    result.problems,
+                    report.problems,
+                )
+                else "error"
+            ),
             "result": asdict(result),
             "problems": list(report.problems),
         }

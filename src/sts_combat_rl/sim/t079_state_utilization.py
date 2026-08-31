@@ -21,6 +21,22 @@ T079_WORKER_COUNT = 16
 T079_PATH_FINGERPRINT_SCHEMA = "occurrence_safe_action_path_v1"
 
 
+def t079_result_is_complete(
+    termination_status: object,
+    result_problems: object,
+    report_problems: object,
+) -> bool:
+    """Return whether one restored battle is safe for T079 science."""
+
+    return (
+        termination_status in {"win", "loss"}
+        and isinstance(result_problems, list)
+        and not result_problems
+        and isinstance(report_problems, list)
+        and not report_problems
+    )
+
+
 def build_search_call_identity(
     raw_identity: Mapping[str, Any],
     *,
@@ -370,6 +386,13 @@ def validate_stage_inventory(
             )
         if row.get("status") not in {"completed", "success"}:
             raise ValueError("T079 stage contains an incomplete record")
+        result = row.get("result")
+        if not isinstance(result, Mapping) or not t079_result_is_complete(
+            result.get("termination_status"),
+            result.get("problems"),
+            row.get("problems"),
+        ):
+            raise ValueError("T079 stage contains an incomplete restored battle")
         exit_code = row.get("worker_exit_code")
         if exit_code != 0:
             raise ValueError(f"T079 worker exited nonzero: {exit_code!r}")
