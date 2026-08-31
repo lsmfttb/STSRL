@@ -12,12 +12,17 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
+import multiprocessing
+import os
 import platform
+import queue
 import subprocess
 import sys
 import time
 from collections.abc import Mapping, Sequence
+from dataclasses import asdict
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 from sts_combat_rl.sim.action_space import ActionSpaceConfig
@@ -32,6 +37,7 @@ from sts_combat_rl.sim.t079_state_utilization import sha256_file, write_json
 T079_EXPECTED_NATIVE_COMMIT = "1555348535d66e3035aac80933a60949d4bd850f"
 T079_RECORD_COUNT = 16
 T079_PREFLIGHT_SCHEMA_ID = "t079-preflight-v1"
+T079_WORKER_COUNT = 16
 
 T070_GEOMETRY_FIELDS = (
     "native_geometry",
@@ -127,6 +133,9 @@ def main() -> int:
         _require_active_native_identity(source_identity)
         started = time.monotonic()
         reports = _run_real_modes(args, cohort, source_identity)
+        artifact["mode_worker_evidence"] = {
+            name: report.worker_evidence for name, report in reports.items()
+        }
         artifact["wall_clock_seconds"] = time.monotonic() - started
         artifact["t078_restore_fidelity"] = _restore_fidelity_report(
             cohort, reports["telemetry_off"]
@@ -250,13 +259,178 @@ def _run_real_modes(
 ) -> dict[str, Any]:
     action_space = ActionSpaceConfig.initial_no_potions()
 
-    def adapter_factory() -> LightSpeedAdapter:
-        return LightSpeedAdapter(seed=args.sim_seed, ascension=20)
+    return {
+        "telemetry_off": _run_real_mode_parallel(
+            "telemetry_off",
+            args,
+            cohort,
+            identity,
+            action_space,
+            geometry=False,
+            state=False,
+        ),
+        "t070_geometry": _run_real_mode_parallel(
+            "t070_geometry",
+            args,
+            cohort,
+            identity,
+            action_space,
+            geometry=True,
+            state=False,
+        ),
+        "t079_state_utilization": _run_real_mode_parallel(
+            "t079_state_utilization",
+            args,
+            cohort,
+            identity,
+            action_space,
+            geometry=False,
+            state=True,
+        ),
+    }
 
-    def run_mode(name: str, *, geometry: bool, state: bool) -> Any:
+
+_PREFLIGHT_WORK_ITEM: tuple[Any, ...] | None = None
+
+
+def _run_real_mode_parallel(
+    name: str,
+    args: argparse.Namespace,
+    cohort: Any,
+    identity: Mapping[str, Any],
+    action_space: ActionSpaceConfig,
+    *,
+    geometry: bool,
+    state: bool,
+) -> Any:
+    """Evaluate one preflight mode with one forked worker per record."""
+
+    context = multiprocessing.get_context("fork")
+    result_queue: Any = context.Queue()
+    processes: list[Any] = []
+    global _PREFLIGHT_WORK_ITEM
+    for record in cohort.records:
+        _PREFLIGHT_WORK_ITEM = (
+            record,
+            args.checkpoint,
+            args.sim_seed,
+            args.max_battle_steps,
+            cohort.identity,
+            cohort.source_pool_format_version,
+            cohort.selection_config.to_dict(),
+            action_space,
+            dict(identity),
+            geometry,
+            state,
+            result_queue,
+        )
+        process = context.Process(target=_run_real_mode_record)
+        process.start()
+        processes.append(process)
+    _PREFLIGHT_WORK_ITEM = None
+
+    payloads: dict[int, dict[str, Any]] = {}
+    while len(payloads) < len(processes):
+        try:
+            payload = result_queue.get(timeout=0.5)
+        except queue.Empty:
+            if all(process.exitcode is not None for process in processes):
+                break
+            continue
+        if not isinstance(payload, dict) or not isinstance(
+            payload.get("record_index"), int
+        ):
+            raise TypeError("T079 preflight worker payload is malformed")
+        index = payload["record_index"]
+        if index in payloads:
+            raise RuntimeError(f"T079 preflight returned duplicate record {index}")
+        payloads[index] = payload
+
+    for process in processes:
+        process.join()
+    exit_codes = {
+        str(index): process.exitcode for index, process in enumerate(processes)
+    }
+    if sorted(payloads) != list(range(T079_RECORD_COUNT)):
+        raise RuntimeError(
+            "T079 preflight worker results are incomplete: "
+            f"returned={sorted(payloads)} exit_codes={exit_codes}"
+        )
+
+    rows = [payloads[index] for index in range(T079_RECORD_COUNT)]
+    evidence_rows: list[dict[str, Any]] = []
+    results: list[Any] = []
+    problems: list[str] = []
+    for index, row in enumerate(rows):
+        process = processes[index]
+        if row.get("worker_pid") != process.pid:
+            raise RuntimeError(
+                "T079 preflight worker PID mismatch: "
+                f"record={index} returned={row.get('worker_pid')} spawned={process.pid}"
+            )
+        if process.exitcode != 0:
+            raise RuntimeError(
+                f"T079 preflight worker {index} exited with {process.exitcode}"
+            )
+        evidence_rows.append(
+            {
+                key: row[key]
+                for key in (
+                    "record_index",
+                    "worker_pid",
+                    "worker_started_monotonic",
+                    "worker_finished_monotonic",
+                    "worker_logical_cpu_count",
+                    "worker_cpu_affinity",
+                )
+            }
+            | {
+                "spawned_process_pid": process.pid,
+                "worker_exit_code": process.exitcode,
+            }
+        )
+        if row.get("report_problems"):
+            problems.extend(str(problem) for problem in row["report_problems"])
+        result = row.get("result")
+        if not isinstance(result, Mapping):
+            problems.append(f"record {index}: worker returned no battle result")
+        else:
+            results.append(SimpleNamespace(**result))
+    if len(results) != T079_RECORD_COUNT:
+        raise RuntimeError(
+            f"{name} returned incomplete battle results: "
+            f"{len(results)}/{T079_RECORD_COUNT}; problems={problems}"
+        )
+    worker_evidence = _validate_preflight_worker_evidence(evidence_rows)
+    return SimpleNamespace(
+        battle_results=results,
+        problems=problems,
+        worker_evidence=worker_evidence,
+    )
+
+
+def _run_real_mode_record() -> None:
+    if _PREFLIGHT_WORK_ITEM is None:
+        raise RuntimeError("T079 preflight worker configuration was not inherited")
+    (
+        record,
+        checkpoint,
+        sim_seed,
+        max_battle_steps,
+        cohort_identity,
+        source_pool_format_version,
+        selection_config,
+        action_space,
+        identity,
+        geometry,
+        state,
+        result_queue,
+    ) = _PREFLIGHT_WORK_ITEM
+    started = time.monotonic()
+    try:
         from sts_combat_rl.sim.torch_policy_value import TorchPolicyValueGuidanceScorer
 
-        scorer = TorchPolicyValueGuidanceScorer.from_checkpoint_path(args.checkpoint)
+        scorer = TorchPolicyValueGuidanceScorer.from_checkpoint_path(checkpoint)
         controller = BattleSearchV2Controller(
             simulations=100,
             scorer=scorer,
@@ -270,25 +444,92 @@ def _run_real_modes(
             native_source_identity=identity,
         )
         report = evaluate_fixed_cohort(
-            adapter_factory=adapter_factory,
-            cohort_records=cohort.records,
+            adapter_factory=lambda: LightSpeedAdapter(seed=sim_seed, ascension=20),
+            cohort_records=[record],
             controller=controller,
-            cohort_identity=cohort.identity,
-            source_pool_format_version=cohort.source_pool_format_version,
-            selection_config=cohort.selection_config.to_dict(),
+            cohort_identity=cohort_identity,
+            source_pool_format_version=source_pool_format_version,
+            selection_config=selection_config,
             action_space=action_space,
-            max_battle_steps=args.max_battle_steps,
+            max_battle_steps=max_battle_steps,
         )
-        if len(report.battle_results) != T079_RECORD_COUNT:
-            raise RuntimeError(f"{name} returned the wrong record count")
-        return report
+        if len(report.battle_results) != 1:
+            raise RuntimeError("T079 preflight worker returned the wrong result count")
+        result = asdict(report.battle_results[0])
+        report_problems = list(report.problems)
+    except Exception as exc:  # noqa: BLE001
+        result = None
+        report_problems = [f"{type(exc).__name__}: {exc}"]
+    result_queue.put(
+        {
+            "record_index": record.cohort_index,
+            "worker_pid": os.getpid(),
+            "worker_started_monotonic": started,
+            "worker_finished_monotonic": time.monotonic(),
+            "worker_logical_cpu_count": os.cpu_count(),
+            "worker_cpu_affinity": _cpu_affinity(os.getpid()),
+            "result": result,
+            "report_problems": report_problems,
+        }
+    )
 
+
+def _cpu_affinity(pid: int) -> list[int] | None:
+    getter = getattr(os, "sched_getaffinity", None)
+    if getter is None:
+        return None
+    return sorted(int(cpu) for cpu in getter(pid))
+
+
+def _interval_peak(starts: Sequence[float], ends: Sequence[float]) -> int:
+    events = sorted(
+        [(float(start), 1) for start in starts] + [(float(end), -1) for end in ends]
+    )
+    active = peak = 0
+    for _, delta in events:
+        active += delta
+        peak = max(peak, active)
+    return peak
+
+
+def _validate_preflight_worker_evidence(
+    rows: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    if len(rows) != T079_WORKER_COUNT:
+        raise ValueError("T079 preflight requires 16 worker rows")
+    ordered = sorted(rows, key=lambda row: row.get("record_index", -1))
+    if [row.get("record_index") for row in ordered] != list(range(T079_WORKER_COUNT)):
+        raise ValueError("T079 preflight worker records are not the ordered 16 shards")
+    pids = {row.get("worker_pid") for row in ordered}
+    if len(pids) != T079_WORKER_COUNT or any(
+        row.get("worker_pid") != row.get("spawned_process_pid") for row in ordered
+    ):
+        raise ValueError("T079 preflight did not prove distinct matching worker PIDs")
+    if any(row.get("worker_exit_code") != 0 for row in ordered):
+        raise ValueError("T079 preflight has a nonzero worker exit code")
+    starts = [row["worker_started_monotonic"] for row in ordered]
+    ends = [row["worker_finished_monotonic"] for row in ordered]
+    peak = _interval_peak(starts, ends)
+    if peak != T079_WORKER_COUNT:
+        raise ValueError(f"T079 preflight peak concurrency is {peak}, expected 16")
+    host_count = os.cpu_count()
     return {
-        "telemetry_off": run_mode("telemetry_off", geometry=False, state=False),
-        "t070_geometry": run_mode("t070_geometry", geometry=True, state=False),
-        "t079_state_utilization": run_mode(
-            "t079_state_utilization", geometry=False, state=True
-        ),
+        "worker_count": T079_WORKER_COUNT,
+        "shard_count": T079_WORKER_COUNT,
+        "effective_worker_count": len(pids),
+        "observed_peak_concurrency": peak,
+        "host_logical_cpu_count": host_count,
+        "host_cpu_affinity": _cpu_affinity(os.getpid()),
+        "worker_pid_map": {
+            str(row["record_index"]): {
+                "worker_pid": row["worker_pid"],
+                "spawned_process_pid": row["spawned_process_pid"],
+                "worker_logical_cpu_count": row["worker_logical_cpu_count"],
+                "worker_cpu_affinity": row["worker_cpu_affinity"],
+                "worker_exit_code": row["worker_exit_code"],
+            }
+            for row in ordered
+        },
     }
 
 
