@@ -13,9 +13,6 @@ from sts_combat_rl.sim.battle_search_v2 import (
     BattleSearchV2Controller,
     _validate_t079_state_utilization,
 )
-from sts_combat_rl.sim.t079_state_utilization import (
-    T079_ACTIVE_QUEUE_NORMALIZATION_PROOF,
-)
 from sts_combat_rl.sim.contract import SimulatorAction, SimulatorSnapshot
 from sts_combat_rl.sim.online_controller import NATIVE_SEARCH_INFORMATION_REGIME
 from sts_combat_rl.sim.oracle_search import (
@@ -29,6 +26,9 @@ from sts_combat_rl.sim.search_guidance_inference import (
     SearchGuidanceCheckpointProvenance,
     SearchGuidanceInferenceResult,
     SearchGuidanceValuePrediction,
+)
+from sts_combat_rl.sim.t079_state_utilization import (
+    T079_ACTIVE_QUEUE_NORMALIZATION_PROOF,
 )
 
 
