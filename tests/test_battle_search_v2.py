@@ -8,7 +8,10 @@ import pytest
 from sts_combat_rl.sim.battle_search_v2 import (
     BATTLE_SEARCH_V2_NATIVE_API,
     BATTLE_SEARCH_V2_PATCH_IDENTITY,
+    T079_IDENTITY_COMPONENTS,
+    T079_IDENTITY_SEMANTICS,
     BattleSearchV2Controller,
+    _validate_t079_state_utilization,
 )
 from sts_combat_rl.sim.contract import SimulatorAction, SimulatorSnapshot
 from sts_combat_rl.sim.online_controller import NATIVE_SEARCH_INFORMATION_REGIME
@@ -299,6 +302,64 @@ class _Adapter:
         self, snapshot: SimulatorSnapshot, **kwargs: Any
     ) -> dict[str, Any]:
         raw = self.battle_search_v2(snapshot, **kwargs)
+        raw["tree_internal_telemetry"]["tree_geometry"] = {
+            "schema_id": "native-battle-search-v2-tree-geometry-v1",
+            "schema_version": 1,
+            "root_depth": 0,
+            "total_expanded_node_count": 5,
+            "total_discovered_child_edge_count": 6,
+            "total_visited_child_edge_count": 4,
+            "max_expanded_depth": 1,
+            "depth_rows": [
+                {
+                    "depth": 0,
+                    "expanded_node_count": 1,
+                    "discovered_child_edge_count": 2,
+                    "visited_child_edge_count": 2,
+                    "branching_histogram": [{"child_count": 2, "node_count": 1}],
+                },
+                {
+                    "depth": 1,
+                    "expanded_node_count": 4,
+                    "discovered_child_edge_count": 4,
+                    "visited_child_edge_count": 2,
+                    "branching_histogram": [{"child_count": 1, "node_count": 4}],
+                },
+            ],
+        }
+        return raw
+
+    def battle_search_v2_with_state_utilization(
+        self, snapshot: SimulatorSnapshot, **kwargs: Any
+    ) -> dict[str, Any]:
+        raw = self.battle_search_v2(snapshot, **kwargs)
+        raw["native_api"] = "StepSimulator.battle_search_v2_with_state_utilization.v1"
+        raw["patch_identity"] = "sts_lightspeed_battle_search_v2_state_utilization_v1"
+        raw["tree_internal_telemetry"]["state_utilization"] = {
+            "schema_id": "native-battle-search-v2-state-utilization-v1",
+            "schema_version": 1,
+            "identity_schema_id": "native-battle-search-v2-exact-state-v1",
+            "identity_semantics": T079_IDENTITY_SEMANTICS,
+            "identity_components": list(T079_IDENTITY_COMPONENTS),
+            "identity_complete": True,
+            "identity_unavailable_reason": None,
+            "digest_algorithm": "fnv1a128-v1",
+            "digest_collision_count": 0,
+            "collision_check": "canonical_payload_equality_within_digest_bucket",
+            "expanded_path_node_count": 5,
+            "expanded_states": [
+                {
+                    "expansion_ordinal": ordinal,
+                    "depth": 0 if ordinal == 1 else 1,
+                    "exact_state_digest": f"{ordinal:032x}",
+                    "first_seen": True,
+                    "first_seen_expansion_ordinal": ordinal,
+                    "first_seen_depth": 0 if ordinal == 1 else 1,
+                    "path_fingerprint": f"p{ordinal}",
+                }
+                for ordinal in range(1, 6)
+            ],
+        }
         raw["tree_internal_telemetry"]["tree_geometry"] = {
             "schema_id": "native-battle-search-v2-tree-geometry-v1",
             "schema_version": 1,
@@ -646,6 +707,82 @@ def test_t070_geometry_rejects_non_prior_value_arm() -> None:
             ablation="prior_only",
             tree_geometry_enabled=True,
         )
+
+
+def test_t079_state_utilization_is_read_only_and_preserves_search_outputs() -> None:
+    common = {
+        "simulations": 10,
+        "scorer": _ProjectionScorer(_checkpoint()),
+        "ablation": "prior_value",
+        "inference_cache_enabled": True,
+        "public_context_projection_enabled": True,
+        "native_source_identity": {"integration_commit": "t079"},
+    }
+    normal = BattleSearchV2Controller(**common).select_action(
+        _Adapter(),
+        SimulatorSnapshot(observation=[], raw=_node_raw()),
+        _actions(),
+        _context(),
+        0,
+    )
+    instrumented = BattleSearchV2Controller(
+        **common, state_utilization_enabled=True
+    ).select_action(
+        _Adapter(),
+        SimulatorSnapshot(observation=[], raw=_node_raw()),
+        _actions(),
+        _context(),
+        0,
+    )
+    assert instrumented.selected_index == normal.selected_index
+    assert instrumented.score == pytest.approx(normal.score, rel=0.0, abs=1e-12)
+    for key in (
+        "oracle_search_root_visits",
+        "oracle_search_native_simulator_steps",
+        "oracle_search_selected_index",
+        "oracle_search_selected_mean_value",
+    ):
+        assert instrumented.metadata[key] == normal.metadata[key]
+    telemetry = instrumented.metadata["t079_state_utilization_records"][0][
+        "native_state_utilization"
+    ]
+    assert telemetry["unique_exact_state_count"] == 5
+    assert telemetry["exact_duplicate_path_node_count"] == 0
+
+
+def test_t079_identity_component_audit_is_required() -> None:
+    raw = _Adapter().battle_search_v2_with_state_utilization(
+        SimulatorSnapshot(observation=[], raw=_node_raw()),
+        policy_prior_callback=None,
+        leaf_value_callback=None,
+    )
+    telemetry = raw["tree_internal_telemetry"]
+    del telemetry["state_utilization"]["identity_components"]
+    with pytest.raises(ValueError, match="component audit"):
+        _validate_t079_state_utilization(raw, telemetry)
+
+
+def test_t079_incomplete_native_identity_is_explicitly_opaque() -> None:
+    raw = _Adapter().battle_search_v2_with_state_utilization(
+        SimulatorSnapshot(observation=[], raw=_node_raw()),
+        policy_prior_callback=None,
+        leaf_value_callback=None,
+    )
+    telemetry = raw["tree_internal_telemetry"]
+    state = telemetry["state_utilization"]
+    state["identity_complete"] = False
+    state["identity_unavailable_reason"] = (
+        "native ActionQueue contains opaque std::function entries"
+    )
+    validated = _validate_t079_state_utilization(raw, telemetry)
+    assert validated["identity_evidence_class_counts"] == {
+        "exact_comparable": 0,
+        "opaque": 5,
+    }
+    assert all(
+        row["identity_evidence_class"] == "opaque" and row["exact_state_digest"] is None
+        for row in validated["expanded_states"]
+    )
 
 
 def test_t068_trace_survives_fixed_evaluation_telemetry_aggregation() -> None:
