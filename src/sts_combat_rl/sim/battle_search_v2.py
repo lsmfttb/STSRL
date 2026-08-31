@@ -659,11 +659,6 @@ class BattleSearchV2Controller:
                 {
                     "schema_id": "t070-search-tree-geometry-decision-v1",
                     "schema_version": 1,
-                    "search_call_identity": {
-                        "schema_id": "t070-search-call-identity-v1",
-                        "controller_identity": self.provenance.identity,
-                        "decision_step_index": step_index,
-                    },
                     "decision_step_index": step_index,
                     "native_geometry": geometry,
                     "root_actions": [
@@ -676,8 +671,6 @@ class BattleSearchV2Controller:
                     "native_simulator_steps": report.native_simulator_steps,
                     "model_calls": int(attribution["model_call_count"]),
                     "wall_clock_seconds": search_elapsed,
-                    "search_status": "completed",
-                    "search_failure_count": len(report.problems),
                 }
             ]
         if state_utilization is not None:
