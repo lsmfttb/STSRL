@@ -21,6 +21,27 @@ T079_WORKER_COUNT = 16
 T079_PATH_FINGERPRINT_SCHEMA = "occurrence_safe_action_path_v1"
 
 
+def flatten_t079_call_records(value: object) -> list[Mapping[str, Any]]:
+    """Flatten fixed-evaluation telemetry lists without accepting malformed rows."""
+
+    flattened: list[Mapping[str, Any]] = []
+
+    def flatten(item: object) -> None:
+        if isinstance(item, Mapping):
+            flattened.append(item)
+            return
+        if isinstance(item, Sequence) and not isinstance(item, (str, bytes)):
+            for nested in item:
+                flatten(nested)
+            return
+        raise TypeError("T079 state-utilization call row is malformed")
+
+    flatten(value)
+    if not flattened:
+        raise ValueError("T079 state-utilization call records are empty")
+    return flattened
+
+
 def t079_result_is_complete(
     termination_status: object,
     result_problems: object,
@@ -301,8 +322,13 @@ def compare_prefix_sequences(
         }
         if comparable:
             interval = right[shorter:longer]
-            prior = set(right[:shorter])
-            unique_yield = sum(identity not in prior for identity in interval) / width
+            seen = set(right[:shorter])
+            first_appearing_unique = 0
+            for identity in interval:
+                if identity not in seen:
+                    first_appearing_unique += 1
+                    seen.add(identity)
+            unique_yield = first_appearing_unique / width
             entry["marginal_unique_yield"] = unique_yield
             entry["marginal_duplicate_fraction"] = 1.0 - unique_yield
         else:

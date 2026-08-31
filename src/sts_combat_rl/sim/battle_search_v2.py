@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
 import math
 import time
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
 from typing import Any, Callable, Literal
 
 from sts_combat_rl.sim.action_space import ActionSpaceConfig
@@ -28,6 +28,16 @@ from sts_combat_rl.sim.oracle_search import (
     select_oracle_root_action,
 )
 from sts_combat_rl.sim.policy_contract import DecisionContext
+from sts_combat_rl.sim.public_context_feature_projection import (
+    T069_PROJECTION_IMPLEMENTATION_ID,
+)
+from sts_combat_rl.sim.search_cost import (
+    T067_COST_ATTRIBUTION_SCHEMA_ID,
+    T067_COST_ATTRIBUTION_SCHEMA_VERSION,
+    T067_REPAIR_IDENTITY,
+    PublicNodeInferenceCache,
+    public_node_cache_key,
+)
 from sts_combat_rl.sim.search_guidance_inference import (
     SearchGuidanceCheckpointProvenance,
     SearchGuidanceInferenceResult,
@@ -35,18 +45,7 @@ from sts_combat_rl.sim.search_guidance_inference import (
     search_guidance_scorer_checkpoint_provenance,
     validate_search_guidance_result,
 )
-from sts_combat_rl.sim.search_cost import (
-    PublicNodeInferenceCache,
-    T067_COST_ATTRIBUTION_SCHEMA_ID,
-    T067_COST_ATTRIBUTION_SCHEMA_VERSION,
-    T067_REPAIR_IDENTITY,
-    public_node_cache_key,
-)
-from sts_combat_rl.sim.public_context_feature_projection import (
-    T069_PROJECTION_IMPLEMENTATION_ID,
-)
 from sts_combat_rl.sim.t079_state_utilization import validate_occurrence_rows
-
 
 BATTLE_SEARCH_V2_CONTROLLER_NAME = "battle_search_v2_oracle_like_v1"
 BATTLE_SEARCH_V2_CONTROLLER_VERSION = "battle-search-v2-oracle-like-v1"

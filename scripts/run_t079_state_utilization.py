@@ -24,6 +24,7 @@ from sts_combat_rl.sim.t079_state_utilization import (
     build_search_call_identity,
     classify_t079,
     compare_prefix_sequences,
+    flatten_t079_call_records,
     sha256_file,
     summarize_state_utilization,
     write_json,
@@ -367,9 +368,7 @@ def _telemetry_calls(stage_row: Mapping[str, object]) -> list[Mapping[str, objec
     calls = telemetry.get("t079_state_utilization_records")
     if not isinstance(calls, list) or not calls:
         raise ValueError("T079 state-utilization call records are missing")
-    if any(not isinstance(call, Mapping) for call in calls):
-        raise TypeError("T079 state-utilization call row is malformed")
-    return list(calls)
+    return flatten_t079_call_records(calls)
 
 
 def _first_root_call(stage_row: Mapping[str, object]) -> Mapping[str, object]:
@@ -390,7 +389,20 @@ def _first_root_summary(stage: Mapping[str, object]) -> list[dict[str, object]]:
         native = call.get("native_state_utilization")
         if not isinstance(native, Mapping):
             raise TypeError("T079 first-root native telemetry is missing")
-        reduced = summarize_state_utilization(native)
+        geometry = call.get("native_geometry")
+        reduced = summarize_state_utilization(
+            native,
+            geometry=geometry if isinstance(geometry, Mapping) else None,
+            compute={
+                key: call[key]
+                for key in (
+                    "native_simulator_steps",
+                    "model_calls",
+                    "wall_clock_seconds",
+                )
+                if key in call
+            },
+        )
         reduced["record_index"] = row["record_index"]
         reduced["decision_step_index"] = 0
         reduced["call_role"] = "first_root"
@@ -404,7 +416,7 @@ def _first_root_summary(stage: Mapping[str, object]) -> list[dict[str, object]]:
             decision_step_index=0,
         )
         reduced["native_state_utilization"] = dict(native)
-        reduced["native_geometry"] = call.get("native_geometry")
+        reduced["native_geometry"] = geometry
         _add_call_evidence(reduced, call)
         reduced["controller_provenance"] = (
             row.get("result", {}).get("controller_provenance")
@@ -542,6 +554,26 @@ def _population_aggregate(rows: object) -> dict[str, object]:
         raise TypeError("T079 aggregate population contains a malformed row")
     duplicate_fractions = [float(row["exact_duplicate_fraction"]) for row in mappings]
     yields = [float(row["unique_state_yield"]) for row in mappings]
+    duplicate_groups = [int(row["duplicate_group_count"]) for row in mappings]
+    distinct_groups = [
+        int(row["distinct_path_duplicate_group_count"]) for row in mappings
+    ]
+    distinct_fractions = [
+        float(row["distinct_path_duplicate_group_fraction"]) for row in mappings
+    ]
+    multiplicities = {
+        metric: [float(row["paths_per_exact_state"][metric]) for row in mappings]
+        for metric in ("mean", "median", "p90", "max")
+    }
+    depth_totals = {
+        field: _sum_depth_distributions(mappings, field)
+        for field in (
+            "duplicate_expansions_by_depth",
+            "first_seen_depth",
+            "duplicate_depth",
+        )
+    }
+    geometry = _geometry_aggregate(mappings)
     return {
         "row_count": len(mappings),
         "record_count": len({row["record_index"] for row in mappings}),
@@ -552,6 +584,17 @@ def _population_aggregate(rows: object) -> dict[str, object]:
         ),
         "mean_exact_duplicate_fraction": sum(duplicate_fractions) / len(mappings),
         "mean_unique_state_yield": sum(yields) / len(mappings),
+        "duplicate_group_count": _numeric_aggregate(duplicate_groups),
+        "paths_per_exact_state": {
+            metric: _numeric_aggregate(values)
+            for metric, values in multiplicities.items()
+        },
+        "distinct_path_duplicate_group_count": _numeric_aggregate(distinct_groups),
+        "distinct_path_duplicate_group_fraction": _numeric_aggregate(
+            distinct_fractions
+        ),
+        "depth_distributions": depth_totals,
+        "t070_geometry": geometry,
         "native_simulator_steps": sum(
             int(
                 row.get(
@@ -579,6 +622,106 @@ def _population_aggregate(rows: object) -> dict[str, object]:
             status: sum(1 for row in mappings if row.get("search_status") == status)
             for status in sorted({str(row.get("search_status")) for row in mappings})
         },
+    }
+
+
+def _numeric_aggregate(values: list[float | int]) -> dict[str, float | int]:
+    if not values:
+        raise ValueError("T079 numeric aggregate cannot be empty")
+    ordered = sorted(float(value) for value in values)
+    middle = len(ordered) // 2
+    median = (
+        ordered[middle]
+        if len(ordered) % 2
+        else (ordered[middle - 1] + ordered[middle]) / 2.0
+    )
+    p90_index = max(0, (9 * len(ordered) + 9) // 10 - 1)
+    return {
+        "count": len(ordered),
+        "total": sum(ordered),
+        "mean": sum(ordered) / len(ordered),
+        "median": median,
+        "p90": ordered[p90_index],
+        "max": max(ordered),
+    }
+
+
+def _sum_depth_distributions(
+    rows: list[Mapping[str, object]], field: str
+) -> dict[str, int]:
+    totals: dict[str, int] = {}
+    for row in rows:
+        distribution = row.get(field)
+        if not isinstance(distribution, Mapping):
+            raise TypeError(f"T079 {field} distribution is missing")
+        for depth, count in distribution.items():
+            if (
+                not isinstance(depth, str)
+                or isinstance(count, bool)
+                or not isinstance(count, int)
+            ):
+                raise TypeError(f"T079 {field} distribution is malformed")
+            totals[depth] = totals.get(depth, 0) + count
+    return dict(sorted(totals.items()))
+
+
+def _geometry_aggregate(rows: list[Mapping[str, object]]) -> dict[str, object]:
+    geometry_rows = []
+    for row in rows:
+        geometry = row.get("tree_geometry")
+        if not isinstance(geometry, Mapping):
+            geometry = row.get("native_geometry")
+        if not isinstance(geometry, Mapping):
+            continue
+        geometry_rows.append(geometry)
+    numeric_fields = (
+        "root_depth",
+        "total_expanded_node_count",
+        "total_discovered_child_edge_count",
+        "total_visited_child_edge_count",
+        "max_expanded_depth",
+    )
+    numeric: dict[str, dict[str, float | int]] = {}
+    for field in numeric_fields:
+        values = [geometry[field] for geometry in geometry_rows if field in geometry]
+        if values:
+            if any(
+                isinstance(value, bool) or not isinstance(value, (int, float))
+                for value in values
+            ):
+                raise ValueError(f"T079 T070 geometry field is malformed: {field}")
+            numeric[field] = _numeric_aggregate(values)
+    depth_rows: dict[str, dict[str, int]] = {}
+    for geometry in geometry_rows:
+        rows_at_depth = geometry.get("depth_rows", [])
+        if not isinstance(rows_at_depth, list):
+            raise TypeError("T079 T070 geometry depth rows are malformed")
+        for depth_row in rows_at_depth:
+            if not isinstance(depth_row, Mapping):
+                raise TypeError("T079 T070 geometry depth row is malformed")
+            depth = str(depth_row.get("depth"))
+            aggregate = depth_rows.setdefault(
+                depth,
+                {
+                    "expanded_node_count": 0,
+                    "discovered_child_edge_count": 0,
+                    "visited_child_edge_count": 0,
+                },
+            )
+            for field in aggregate:
+                value = depth_row.get(field)
+                if isinstance(value, bool) or not isinstance(value, int):
+                    raise TypeError("T079 T070 geometry depth count is malformed")
+                aggregate[field] += value
+    return {
+        "available_count": len(geometry_rows),
+        "missing_count": len(rows) - len(geometry_rows),
+        "schema_id_counts": {
+            schema: sum(1 for row in geometry_rows if row.get("schema_id") == schema)
+            for schema in sorted({str(row.get("schema_id")) for row in geometry_rows})
+        },
+        "numeric": numeric,
+        "depth_rows": dict(sorted(depth_rows.items())),
     }
 
 
@@ -623,6 +766,7 @@ def _terminal_classification(
                 ],
             }
         )
+    threshold_summary = _threshold_summary(rows, comparable)
     if comparable < 12 or any(
         row["marginal_unique_yield_400_1600"] is None for row in rows
     ):
@@ -632,10 +776,74 @@ def _terminal_classification(
             "comparable_first_root_count": comparable,
             "reason": "literal 16-sample threshold inputs are incomplete",
             "threshold_inputs": rows,
+            "threshold_summary": threshold_summary,
         }
     report = classify_t079(rows, comparable_count=comparable)
     report["threshold_inputs"] = rows
+    report["threshold_summary"] = threshold_summary
     return report
+
+
+def _threshold_summary(
+    rows: list[Mapping[str, object]], comparable_count: int
+) -> dict[str, object]:
+    fractions = [float(row["exact_duplicate_fraction"]) for row in rows]
+    marginals = [
+        row["marginal_unique_yield_400_1600"]
+        for row in rows
+        if row["marginal_unique_yield_400_1600"] is not None
+    ]
+    distinct_count = sum(
+        int(row["distinct_path_duplicate_group_count"]) > 0 for row in rows
+    )
+    complete = len(rows) == 16 and len(marginals) == 16
+    median_fraction = _literal_median(fractions) if len(fractions) == 16 else None
+    median_marginal = _literal_median(marginals) if complete else None
+    fraction_ge_015 = sum(value >= 0.15 for value in fractions)
+    fraction_le_010 = sum(value <= 0.10 for value in fractions)
+    fraction_gt_020 = sum(value > 0.20 for value in fractions)
+    material = {
+        "median_duplicate_fraction_ge_0.20": (
+            None if median_fraction is None else median_fraction >= 0.20
+        ),
+        "median_marginal_unique_yield_le_0.80": (
+            None if median_marginal is None else median_marginal <= 0.80
+        ),
+        "duplicate_fraction_ge_0.15_count_ge_8": fraction_ge_015 >= 8,
+        "distinct_path_group_count_ge_8": distinct_count >= 8,
+    }
+    weak = {
+        "median_duplicate_fraction_le_0.05": (
+            None if median_fraction is None else median_fraction <= 0.05
+        ),
+        "duplicate_fraction_le_0.10_count_ge_12": fraction_le_010 >= 12,
+        "median_marginal_unique_yield_ge_0.90": (
+            None if median_marginal is None else median_marginal >= 0.90
+        ),
+        "duplicate_fraction_gt_0.20_count_le_2": fraction_gt_020 <= 2,
+    }
+    return {
+        "comparable_first_root_count": comparable_count,
+        "comparable_minimum": 12,
+        "comparable_pass": comparable_count >= 12,
+        "sample_count": len(rows),
+        "median_duplicate_fraction": median_fraction,
+        "median_marginal_unique_yield_400_1600": median_marginal,
+        "duplicate_fraction_ge_0.15_count": fraction_ge_015,
+        "duplicate_fraction_le_0.10_count": fraction_le_010,
+        "duplicate_fraction_gt_0.20_count": fraction_gt_020,
+        "distinct_path_duplicate_group_count": distinct_count,
+        "material_band": material,
+        "material_band_pass": complete
+        and all(value is True for value in material.values()),
+        "weak_band": weak,
+        "weak_band_pass": complete and all(value is True for value in weak.values()),
+    }
+
+
+def _literal_median(values: list[float]) -> float:
+    ordered = sorted(values)
+    return (ordered[7] + ordered[8]) / 2.0
 
 
 if __name__ == "__main__":

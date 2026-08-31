@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import pytest
 
+from scripts.run_t079_state_utilization import _population_aggregate
 from sts_combat_rl.sim.t079_state_utilization import (
     build_search_call_identity,
     classify_t079,
     compare_prefix_sequences,
+    flatten_t079_call_records,
     summarize_state_utilization,
     t079_result_is_complete,
     validate_stage_inventory,
@@ -107,6 +109,72 @@ def test_prefix_metrics_are_missing_when_sequences_are_not_prefixes() -> None:
     assert result["100_400"]["prefix_comparable"] is False
     assert result["100_400"]["marginal_unique_yield"] is None
     assert result["400_1600"]["prefix_comparable"] is False
+
+
+def test_prefix_marginal_yield_counts_first_appearance_only() -> None:
+    result = compare_prefix_sequences(
+        {
+            100: ["a"] * 100,
+            400: ["a"] * 400,
+            1600: ["a"] * 400 + ["b", "b"] + ["c"] * 1198,
+        }
+    )
+    assert result["400_1600"]["marginal_unique_yield"] == pytest.approx(2 / 1200)
+
+
+def test_telemetry_calls_flattens_fixed_evaluation_nested_lists() -> None:
+    calls = [{"decision_step_index": 0}, [{"decision_step_index": 1}]]
+    assert [
+        call["decision_step_index"] for call in flatten_t079_call_records(calls)
+    ] == [
+        0,
+        1,
+    ]
+
+
+def test_population_aggregate_retains_required_state_and_geometry_metrics() -> None:
+    geometry = {
+        "schema_id": "native-battle-search-v2-tree-geometry-v1",
+        "root_depth": 0,
+        "total_expanded_node_count": 3,
+        "total_discovered_child_edge_count": 4,
+        "total_visited_child_edge_count": 2,
+        "max_expanded_depth": 1,
+        "depth_rows": [
+            {
+                "depth": 0,
+                "expanded_node_count": 1,
+                "discovered_child_edge_count": 2,
+                "visited_child_edge_count": 1,
+            }
+        ],
+    }
+    row = {
+        "record_index": 0,
+        "expanded_path_nodes": 4,
+        "unique_exact_states": 2,
+        "exact_duplicate_path_nodes": 2,
+        "exact_duplicate_fraction": 0.5,
+        "unique_state_yield": 0.5,
+        "duplicate_group_count": 1,
+        "paths_per_exact_state": {"mean": 2.0, "median": 1.5, "p90": 2.0, "max": 3.0},
+        "distinct_path_duplicate_group_count": 1,
+        "distinct_path_duplicate_group_fraction": 1.0,
+        "duplicate_expansions_by_depth": {"1": 2},
+        "first_seen_depth": {"0": 1, "1": 1},
+        "duplicate_depth": {"1": 2},
+        "tree_geometry": geometry,
+        "native_simulator_steps": 5,
+        "model_calls": 6,
+        "wall_clock_seconds": 0.1,
+        "failure_count": 0,
+        "search_status": "completed",
+    }
+    aggregate = _population_aggregate([row, dict(row, record_index=1)])
+    assert aggregate["duplicate_group_count"]["max"] == 1.0
+    assert aggregate["paths_per_exact_state"]["max"]["max"] == 3.0
+    assert aggregate["depth_distributions"]["duplicate_depth"] == {"1": 4}
+    assert aggregate["t070_geometry"]["available_count"] == 2
 
 
 def test_classification_ambiguous_when_support_is_below_frozen_minimum() -> None:
