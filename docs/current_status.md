@@ -1,6 +1,6 @@
 # Current Status
 
-Last reviewed: 2026-08-30.
+Last reviewed: 2026-09-01.
 
 This document is the main maintainer's canonical execution-result report for
 the planner and describes the latest `main` branch only. Results from local
@@ -255,6 +255,50 @@ T077 science, artifacts, and terminal classifications were not rerun,
 reclassified, or changed. Focused T078/T076/adapter tests passed (`9`), as did
 compileall, Ruff, format, and diff checks; the full suite was `897 passed,
 2 skipped, 2` known baseline or environment failures.
+
+T079 is now complete after PR #84 merged at
+`dbee0532f3b7c0ee2490714a62dfabc12752d00d`. Its approved specification commit
+was `aff21fed2bab80c90f79a9d8e2a6e7465aa97b7a`, and its exact implementation
+and run head was `63fba68d0a02e7c5fb01a77a3965e408789de28e`. The recovery kept
+the T070 16-record subset and T043 checkpoint unchanged, used the accepted
+`prior_value` Search v2 arm with budgets 100/400/1600, and used the active
+native integration `refs/heads/stsrl/main` at
+`1555348535d66e3035aac80933a60949d4bd850f`; the pre-task lineage anchor
+`cc40c8cc51cc3f1e5ccb9d67bc4bccdf635ba083` remains recorded separately.
+
+The exact-head real-native preflight passed with SHA-256
+`089bf16d01baa07af507fdba4f47030774d2316d0c5303579c2e8b58fce94977`, including
+16/16 telemetry parity and T078 restore fidelity. Each of S100, S400, and
+S1600 covered all 16 ordered records with 16 effective workers, peak
+concurrency 16, and zero worker failures; wall times were 624.657s, 2917.877s,
+and 4116.248s. Two earlier standard runs were interrupted by WSL instance
+restarts after S100/S400; the final recovery reused the validated S100/S400
+artifacts byte-for-byte (`rerun: false`) and ran only the missing S1600 stage.
+
+All expanded nodes were conservatively classified as opaque under the current
+native queue identity, so no exact equality or deduplication claim was made.
+The all-call bounds were duplicate fraction `[0.0, 1.0]` and unique-state yield
+`[0.0, 1.0]` for each budget. Only 3/16 first-root prefixes were exactly
+comparable; their 400-to-1600 marginal evidence had duplicate fraction 1.0 and
+unique-state yield bounds `[0.0, 1.0]`. The precommitted terminal
+classification is `AMBIGUOUS` because the required 12 comparable first roots
+were not available; this is a representation-evidence boundary, not an
+execution failure. No ActionQueue semantic rewrite, transposition,
+search-semantic, model/training, promotion, or successor task was published.
+
+Retained evidence is under
+`/mnt/d/deadlycatcoding/stsrl/artifacts/t079-state-utilization-bounds-recovery`.
+The stage SHA-256 values are `81130e5579919c28bc1176fdc731656e49130081a818ceeed7637b7240f6f23b`
+(S100), `012d787342523656c7722985905d1ddf191b31c0f56be19c6a82a73bacf14602`
+(S400), and
+`a01b925ba38045ad9e320b07f5af15115d7b17570dbf3bd33567f628fa719353`
+(S1600). The prefix, aggregate, terminal, and retention reports are
+`46a80e12d5a42f8d360db0e78ce868575244b74c2bf9170e129f24872c5ce2bf`,
+`4a8d2ae853217bbae97fd31ec604ccd95f2b8170715d7ef529cecf1b1fd8c05f`,
+`dfcec1d267dbf9a334753b97048496b259ce55c7f663d3b281f4a109efc1bff0`, and
+`0ced234f30cbe5b6dd1916282c06870d280104e1eaf526a4e09cfd6e5b5d2005`.
+Planner scientific/architecture acceptance and Maintainer operational
+acceptance both passed; T079 does not publish a successor.
 
 ## Implemented On Main
 

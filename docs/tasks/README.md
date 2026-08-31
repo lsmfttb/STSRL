@@ -99,6 +99,7 @@ workflow's explicit implementation-authorization gate is satisfied.
 | T076 | DONE | [Checkpoint restore branch-isolation repair](T076-checkpoint-restore-branch-isolation-repair.md) | T075, T017, T020 | PR #79 merged at 3cd3f30; native checkpoint map aliasing was repaired and the retained state-67 regression passed without changing T075 science |
 | T077 | DONE | [T075 same-experiment continuation](T077-t075-same-experiment-continuation.md) | T075, T076 | PR #81 merged at 3db86dd; exact T075 continuation reached the inherited TARGET Case D without downstream promotion |
 | T078 | DONE | [Restored public-context fidelity repair](T078-restored-public-context-fidelity-repair.md) | T077, T076, T015, T016, T017, T020, T033 | PR #82 merged at d61be1d; state-160 restore fidelity repaired and the exact 320-state restore-only audit passed |
+| T079 | DONE | [Battle Search state-utilization bounds recovery](T079-battle-search-state-utilization-diagnostic.md) | T078, T070, T069, T062, T052, T043, T017, T020 | PR #84 merged at dbee053; conservative exact-state bounds completed with an AMBIGUOUS terminal classification |
 
 Use the table, not per-task files or roadmap prose, when deciding whether a task
 may receive a branch. Only `READY` rows should receive a new implementation
@@ -263,8 +264,8 @@ and inspect again after the expected window or on request rather than continuous
 
 The executable queue is exactly the set of `READY` rows in the Active Backlog;
 it is currently empty. T063 and T066 remain `DRAFT`; T075, T076, T077, T078,
-T065, T071, T072, T073, and T074 are `DONE`. T065, T075, T077, and T078 are
-complete with their recorded diagnostic or repair outcomes. T034 remains
+T079, T065, T071, T072, T073, and T074 are `DONE`. T065, T075, T077, T078,
+and T079 are complete with their recorded diagnostic or repair outcomes. T034 remains
 blocked on native public-consistent hidden-future sampling support.
 
 ## Standard Local Gates
