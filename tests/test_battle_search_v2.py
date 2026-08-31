@@ -770,9 +770,9 @@ def test_t079_identity_failure_preserves_native_unavailable_reason() -> None:
     )
     telemetry = raw["tree_internal_telemetry"]
     telemetry["state_utilization"]["identity_complete"] = False
-    telemetry["state_utilization"][
-        "identity_unavailable_reason"
-    ] = "native ActionQueue contains opaque std::function entries"
+    telemetry["state_utilization"]["identity_unavailable_reason"] = (
+        "native ActionQueue contains opaque std::function entries"
+    )
     with pytest.raises(ValueError, match="ActionQueue contains opaque"):
         _validate_t079_state_utilization(raw, telemetry)
 

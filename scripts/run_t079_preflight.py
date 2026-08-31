@@ -344,7 +344,11 @@ def _parity_report(reports: Mapping[str, Any]) -> dict[str, Any]:
             mismatches.append(off_search_problem)
         if state_search_problem is not None:
             mismatches.append(state_search_problem)
-        if off_search_problem is None and state_search_problem is None and off_search != state_search:
+        if (
+            off_search_problem is None
+            and state_search_problem is None
+            and off_search != state_search
+        ):
             mismatches.append("selected action/root stats/search status")
         off_eval = _evaluation_signature(off_result)
         state_eval = _evaluation_signature(state_result)
@@ -366,7 +370,9 @@ def _parity_report(reports: Mapping[str, Any]) -> dict[str, Any]:
             and off_callbacks != state_callbacks
         ):
             mismatches.append("policy/value callback counts")
-        geometry_rows, geometry_problem = _safe_geometry_rows(geometry_result, "t070_geometry")
+        geometry_rows, geometry_problem = _safe_geometry_rows(
+            geometry_result, "t070_geometry"
+        )
         state_geometry_rows, state_geometry_problem = _safe_state_geometry_rows(
             state_result, "state_utilization"
         )
@@ -446,7 +452,10 @@ def _safe_search_rows(
     try:
         return _search_rows(result), None
     except (TypeError, RuntimeError, ValueError) as exc:
-        return [], f"{mode} record {result.cohort_index}: search telemetry invalid: {exc}"
+        return (
+            [],
+            f"{mode} record {result.cohort_index}: search telemetry invalid: {exc}",
+        )
 
 
 def _safe_callback_signature(
@@ -455,7 +464,10 @@ def _safe_callback_signature(
     try:
         return _callback_signature(result), None
     except (TypeError, RuntimeError, ValueError) as exc:
-        return {}, f"{mode} record {result.cohort_index}: callback telemetry invalid: {exc}"
+        return (
+            {},
+            f"{mode} record {result.cohort_index}: callback telemetry invalid: {exc}",
+        )
 
 
 def _safe_geometry_rows(
@@ -464,7 +476,10 @@ def _safe_geometry_rows(
     try:
         return _geometry_rows(result), None
     except (TypeError, RuntimeError, ValueError) as exc:
-        return [], f"{mode} record {result.cohort_index}: geometry telemetry invalid: {exc}"
+        return (
+            [],
+            f"{mode} record {result.cohort_index}: geometry telemetry invalid: {exc}",
+        )
 
 
 def _safe_state_geometry_rows(
@@ -473,7 +488,10 @@ def _safe_state_geometry_rows(
     try:
         return _state_geometry_rows(result), None
     except (TypeError, RuntimeError, ValueError) as exc:
-        return [], f"{mode} record {result.cohort_index}: geometry telemetry invalid: {exc}"
+        return (
+            [],
+            f"{mode} record {result.cohort_index}: geometry telemetry invalid: {exc}",
+        )
 
 
 def _search_rows(result: Any) -> list[dict[str, Any]]:
