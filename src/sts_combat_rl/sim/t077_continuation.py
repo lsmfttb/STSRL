@@ -38,6 +38,8 @@ from sts_combat_rl.sim.non_combat_learning import (
 T077_TASK_ID = "T077"
 T077_APPROVED_SPEC = "3690149970b342fab62bd67c564a84bbd293b134"
 T077_ACCEPTED_T076_INTEGRATION = "cc40c8cc51cc3f1e5ccb9d67bc4bccdf635ba083"
+# The active integration merge preserves the T076/T078 repair as an ancestor.
+T079_ACTIVE_NATIVE_INTEGRATION = "ae294471ae4e52f9c5d2d578ed8b22f0fa6b2ae0"
 T077_INHERITED_T075_INTEGRATION = "fee272f1ae21c283ad2161f55293cfe6d714134a"
 T077_INHERITED_T075_RUN_HEAD = "cb54e368c4f099ae828c2b863f4db07b4f3fcb5f"
 T077_EARLIEST_STAGE = "TARGET"
@@ -283,10 +285,13 @@ def verify_t076_source_manifest(repository_root: Path) -> dict[str, Any]:
     manifest = load_lightspeed_source_manifest(
         Path(repository_root) / "docs/sts_lightspeed_source_manifest.json"
     )
-    if manifest.integration.commit != T077_ACCEPTED_T076_INTEGRATION:
-        raise ValueError("T077 source manifest does not bind accepted T076 commit")
+    if manifest.integration.commit not in {
+        T077_ACCEPTED_T076_INTEGRATION,
+        T079_ACTIVE_NATIVE_INTEGRATION,
+    }:
+        raise ValueError("T077 source manifest does not bind accepted T076 lineage")
     if manifest.integration.branch != "stsrl/main":
-        raise ValueError("T077 source manifest branch is not stsrl/main")
+        raise ValueError("T077 source manifest must bind active stsrl/main")
     return {
         "manifest_path": "docs/sts_lightspeed_source_manifest.json",
         "schema_id": manifest.schema_id,
@@ -295,6 +300,7 @@ def verify_t076_source_manifest(repository_root: Path) -> dict[str, Any]:
         "integration_branch": manifest.integration.branch,
         "integration_ref": manifest.integration.ref,
         "integration_commit": manifest.integration.commit,
+        "accepted_t076_ancestor": T077_ACCEPTED_T076_INTEGRATION,
     }
 
 

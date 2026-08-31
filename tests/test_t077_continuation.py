@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -23,6 +24,7 @@ from sts_combat_rl.sim.non_combat_learning import T065CaseD
 from sts_combat_rl.sim.t077_continuation import (
     T077_ACCEPTED_T076_INTEGRATION,
     T077_EARLIEST_STAGE,
+    T079_ACTIVE_NATIVE_INTEGRATION,
     artifact_identity,
     build_t077_continuation_plan,
     validate_selected_states_320,
@@ -108,8 +110,26 @@ def test_selected_cohort_validation_is_streaming_and_exact(tmp_path: Path) -> No
 def test_source_manifest_binds_t076_integration() -> None:
     manifest = verify_t076_source_manifest(Path(__file__).parents[1])
 
-    assert manifest["integration_commit"] == T077_ACCEPTED_T076_INTEGRATION
+    assert manifest["integration_commit"] == T079_ACTIVE_NATIVE_INTEGRATION
+    assert manifest["accepted_t076_ancestor"] == T077_ACCEPTED_T076_INTEGRATION
     assert manifest["integration_branch"] == "stsrl/main"
+    assert manifest["integration_ref"] == "refs/heads/stsrl/main"
+
+
+def test_source_manifest_rejects_temporary_integration_branch(tmp_path: Path) -> None:
+    payload = json.loads(
+        (
+            Path(__file__).parents[1] / "docs/sts_lightspeed_source_manifest.json"
+        ).read_text(encoding="utf-8")
+    )
+    payload["integration"]["branch"] = "work/T079-state-utilization-cc40"
+    payload["integration"]["ref"] = "refs/heads/work/T079-state-utilization-cc40"
+    manifest_path = tmp_path / "docs" / "sts_lightspeed_source_manifest.json"
+    manifest_path.parent.mkdir()
+    manifest_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="active stsrl/main"):
+        verify_t076_source_manifest(tmp_path)
 
 
 def test_callable_workflow_stops_at_valid_gate_failure_with_t077_lineage(

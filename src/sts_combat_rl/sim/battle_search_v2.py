@@ -45,6 +45,7 @@ from sts_combat_rl.sim.search_cost import (
 from sts_combat_rl.sim.public_context_feature_projection import (
     T069_PROJECTION_IMPLEMENTATION_ID,
 )
+from sts_combat_rl.sim.t079_state_utilization import validate_occurrence_rows
 
 
 BATTLE_SEARCH_V2_CONTROLLER_NAME = "battle_search_v2_oracle_like_v1"
@@ -63,7 +64,29 @@ BATTLE_SEARCH_V2_T070_GEOMETRY_CONTROLLER_NAME = (
 BATTLE_SEARCH_V2_T070_GEOMETRY_CONTROLLER_VERSION = (
     "battle-search-v2-oracle-like-t070-tree-geometry-v1"
 )
+BATTLE_SEARCH_V2_T079_STATE_UTILIZATION_CONTROLLER_NAME = (
+    "battle_search_v2_oracle_like_t079_state_utilization_v1"
+)
+BATTLE_SEARCH_V2_T079_STATE_UTILIZATION_CONTROLLER_VERSION = (
+    "battle-search-v2-oracle-like-t079-state-utilization-v1"
+)
 T070_TREE_GEOMETRY_SCHEMA_ID = "native-battle-search-v2-tree-geometry-v1"
+T079_STATE_UTILIZATION_SCHEMA_ID = "native-battle-search-v2-state-utilization-v1"
+T079_IDENTITY_SEMANTICS = (
+    "all future-dynamics BattleContext values including curCardQueueItem, "
+    "ordered card/pile state, all combat RNG state, and collision-checked canonical equality"
+)
+T079_IDENTITY_COMPONENTS = (
+    "BattleContext.scalar_control_flags",
+    "BattleContext.all_six_rng_states",
+    "BattleContext.potions_and_card_select",
+    "Player.all_fields_and_status_map",
+    "MonsterGroup.all_fields_and_monster_state",
+    "CardManager.all_counters_and_ordered_piles",
+    "CardQueue.all_slots_and_indices",
+    "BattleContext.curCardQueueItem.all_fields",
+    "ActionQueue.indices_size_and_clear_bits",
+)
 T069_COST_ATTRIBUTION_SCHEMA_ID = "t069-public-context-projection-cost-attribution-v1"
 T069_COST_ATTRIBUTION_SCHEMA_VERSION = 1
 BATTLE_SEARCH_V2_NATIVE_API = "StepSimulator.battle_search_v2.v1"
@@ -107,6 +130,8 @@ class BattleSearchV2Controller:
     # T070-only, explicitly requested read-only native telemetry. Primary T070
     # stages leave this disabled so the accepted T069 calibration applies.
     tree_geometry_enabled: bool = False
+    # T079-only read-only native exact-state and path-utilization telemetry.
+    state_utilization_enabled: bool = False
     provenance: ControllerProvenance = field(init=False)  # type: ignore[assignment]
     checkpoint_provenance: SearchGuidanceCheckpointProvenance = field(init=False)
     _baseline: OracleSearchController = field(init=False, repr=False)
@@ -126,6 +151,10 @@ class BattleSearchV2Controller:
             raise ValueError(
                 "T070 tree geometry is defined only for the prior_value arm"
             )
+        if self.state_utilization_enabled and self.ablation != "prior_value":
+            raise ValueError(
+                "T079 state utilization is defined only for the prior_value arm"
+            )
         checkpoint = search_guidance_scorer_checkpoint_provenance(self.scorer)
         object.__setattr__(self, "checkpoint_provenance", checkpoint)
         source_identity = (
@@ -141,40 +170,52 @@ class BattleSearchV2Controller:
         )
         object.__setattr__(self, "_baseline", baseline)
         controller_name = (
-            BATTLE_SEARCH_V2_T070_GEOMETRY_CONTROLLER_NAME
-            if self.tree_geometry_enabled
+            BATTLE_SEARCH_V2_T079_STATE_UTILIZATION_CONTROLLER_NAME
+            if self.state_utilization_enabled
             else (
-                BATTLE_SEARCH_V2_T069_CONTROLLER_NAME
-                if self.public_context_projection_enabled
+                BATTLE_SEARCH_V2_T070_GEOMETRY_CONTROLLER_NAME
+                if self.tree_geometry_enabled
                 else (
-                    BATTLE_SEARCH_V2_T067_CONTROLLER_NAME
-                    if self.inference_cache_enabled
-                    else BATTLE_SEARCH_V2_CONTROLLER_NAME
+                    BATTLE_SEARCH_V2_T069_CONTROLLER_NAME
+                    if self.public_context_projection_enabled
+                    else (
+                        BATTLE_SEARCH_V2_T067_CONTROLLER_NAME
+                        if self.inference_cache_enabled
+                        else BATTLE_SEARCH_V2_CONTROLLER_NAME
+                    )
                 )
             )
         )
         controller_version = (
-            BATTLE_SEARCH_V2_T070_GEOMETRY_CONTROLLER_VERSION
-            if self.tree_geometry_enabled
+            BATTLE_SEARCH_V2_T079_STATE_UTILIZATION_CONTROLLER_VERSION
+            if self.state_utilization_enabled
             else (
-                BATTLE_SEARCH_V2_T069_CONTROLLER_VERSION
-                if self.public_context_projection_enabled
+                BATTLE_SEARCH_V2_T070_GEOMETRY_CONTROLLER_VERSION
+                if self.tree_geometry_enabled
                 else (
-                    BATTLE_SEARCH_V2_T067_CONTROLLER_VERSION
-                    if self.inference_cache_enabled
-                    else BATTLE_SEARCH_V2_CONTROLLER_VERSION
+                    BATTLE_SEARCH_V2_T069_CONTROLLER_VERSION
+                    if self.public_context_projection_enabled
+                    else (
+                        BATTLE_SEARCH_V2_T067_CONTROLLER_VERSION
+                        if self.inference_cache_enabled
+                        else BATTLE_SEARCH_V2_CONTROLLER_VERSION
+                    )
                 )
             )
         )
         provenance_config: dict[str, Any] = {
             "controller_version": controller_version,
             "task_id": (
-                "T070"
-                if self.tree_geometry_enabled
+                "T079"
+                if self.state_utilization_enabled
                 else (
-                    "T069"
-                    if self.public_context_projection_enabled
-                    else ("T067" if self.inference_cache_enabled else "T062")
+                    "T070"
+                    if self.tree_geometry_enabled
+                    else (
+                        "T069"
+                        if self.public_context_projection_enabled
+                        else ("T067" if self.inference_cache_enabled else "T062")
+                    )
                 )
             ),
             "information_regime": NATIVE_SEARCH_INFORMATION_REGIME,
@@ -231,6 +272,16 @@ class BattleSearchV2Controller:
                 "native_api": "StepSimulator.battle_search_v2_with_tree_geometry",
                 "schema_id": T070_TREE_GEOMETRY_SCHEMA_ID,
                 "semantic_effect": "read_only_post_search_aggregation",
+            }
+        if self.state_utilization_enabled:
+            provenance_config["state_utilization"] = {
+                "task_id": "T079",
+                "enabled": True,
+                "native_api": ("StepSimulator.battle_search_v2_with_state_utilization"),
+                "schema_id": T079_STATE_UTILIZATION_SCHEMA_ID,
+                "identity_regime": "full_simulator_state_oracle_like",
+                "semantic_effect": "read_only_observation_only",
+                "transposition_or_merge": False,
             }
         if self.feature_identity_trace_enabled:
             provenance_config["diagnostic_instrumentation"] = {
@@ -450,9 +501,13 @@ class BattleSearchV2Controller:
 
         search_start = time.perf_counter()
         method_name = (
-            "battle_search_v2_with_tree_geometry"
-            if self.tree_geometry_enabled
-            else "battle_search_v2"
+            "battle_search_v2_with_state_utilization"
+            if self.state_utilization_enabled
+            else (
+                "battle_search_v2_with_tree_geometry"
+                if self.tree_geometry_enabled
+                else "battle_search_v2"
+            )
         )
         if not hasattr(adapter, method_name):
             raise ValueError(
@@ -483,8 +538,16 @@ class BattleSearchV2Controller:
             raw_search,
             actions,
             context,
-            expected_native_api=BATTLE_SEARCH_V2_NATIVE_API,
-            expected_patch_identity=BATTLE_SEARCH_V2_PATCH_IDENTITY,
+            expected_native_api=(
+                "StepSimulator.battle_search_v2_with_state_utilization.v1"
+                if self.state_utilization_enabled
+                else BATTLE_SEARCH_V2_NATIVE_API
+            ),
+            expected_patch_identity=(
+                "sts_lightspeed_battle_search_v2_state_utilization_v1"
+                if self.state_utilization_enabled
+                else BATTLE_SEARCH_V2_PATCH_IDENTITY
+            ),
             wall_clock_time_s=search_elapsed,
         )
         if not report.search_ok:
@@ -493,7 +556,11 @@ class BattleSearchV2Controller:
             )
         telemetry = _require_tree_internal_telemetry(raw_search)
         geometry: dict[str, Any] | None = None
-        if self.tree_geometry_enabled:
+        state_utilization: dict[str, Any] | None = None
+        if self.state_utilization_enabled:
+            state_utilization = _validate_t079_state_utilization(raw_search, telemetry)
+            geometry = _validate_t070_tree_geometry(raw_search, telemetry)
+        elif self.tree_geometry_enabled:
             geometry = _validate_t070_tree_geometry(raw_search, telemetry)
         elif "tree_geometry" in telemetry:
             raise ValueError(
@@ -604,6 +671,26 @@ class BattleSearchV2Controller:
                     "native_simulator_steps": report.native_simulator_steps,
                     "model_calls": int(attribution["model_call_count"]),
                     "wall_clock_seconds": search_elapsed,
+                }
+            ]
+        if state_utilization is not None:
+            metadata["t079_state_utilization_records"] = [
+                {
+                    "schema_id": "t079-search-state-utilization-decision-v1",
+                    "schema_version": 1,
+                    "decision_step_index": step_index,
+                    "native_state_utilization": state_utilization,
+                    "native_geometry": geometry,
+                    "root_actions": [
+                        action.to_dict() for action in report.root_actions
+                    ],
+                    "root_visits": report.root_visits,
+                    "root_legal_action_count": report.legal_action_count,
+                    "native_simulator_steps": report.native_simulator_steps,
+                    "model_calls": int(attribution["model_call_count"]),
+                    "wall_clock_seconds": search_elapsed,
+                    "selected_action_identity": dict(target.action_identity),
+                    "selected_legal_action_index": target.legal_action_index,
                 }
             ]
         return ControllerDecision(
@@ -948,3 +1035,65 @@ def _validate_mechanism_telemetry(
             raise ValueError(
                 f"native battle search v2 unexpectedly used {telemetry_field}"
             )
+
+
+def _validate_t079_state_utilization(
+    raw_search: Mapping[str, Any], telemetry: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Validate T079 native identity completeness and occurrence evidence."""
+
+    value = telemetry.get("state_utilization")
+    if not isinstance(value, Mapping):
+        raise ValueError("native battle search v2 omitted T079 state utilization")
+    expected = {
+        "schema_id",
+        "schema_version",
+        "identity_schema_id",
+        "identity_semantics",
+        "identity_components",
+        "identity_complete",
+        "identity_unavailable_reason",
+        "digest_algorithm",
+        "digest_collision_count",
+        "collision_check",
+        "expanded_path_node_count",
+        "expanded_states",
+    }
+    if set(value) != expected:
+        if "identity_components" not in value:
+            raise ValueError("native T079 identity component audit is missing")
+        raise ValueError("native T079 state-utilization fields mismatch")
+    if (
+        value.get("schema_id") != T079_STATE_UTILIZATION_SCHEMA_ID
+        or value.get("schema_version") != 1
+        or value.get("identity_schema_id") != "native-battle-search-v2-exact-state-v1"
+        or value.get("identity_semantics") != T079_IDENTITY_SEMANTICS
+        or value.get("identity_complete") is not True
+        or value.get("collision_check")
+        != "canonical_payload_equality_within_digest_bucket"
+        or value.get("digest_collision_count") != 0
+    ):
+        raise ValueError("native T079 exact-state identity is incomplete or collided")
+    components = value.get("identity_components")
+    if (
+        not isinstance(components, list)
+        or tuple(components) != T079_IDENTITY_COMPONENTS
+    ):
+        raise ValueError("native T079 identity component audit is incomplete")
+    rows = value.get("expanded_states")
+    count = value.get("expanded_path_node_count")
+    if isinstance(count, bool) or not isinstance(count, int) or count < 1:
+        raise ValueError("native T079 expanded path-node count is invalid")
+    if (
+        not isinstance(rows, Sequence)
+        or isinstance(rows, (str, bytes))
+        or len(rows) != count
+    ):
+        raise ValueError("native T079 expanded-state rows do not cover every node")
+    normalized = validate_occurrence_rows(rows, count=count)
+    seen = {row["exact_state_digest"] for row in normalized}
+    result = dict(value)
+    result["expanded_states"] = normalized
+    result["unique_exact_state_count"] = len(seen)
+    result["exact_duplicate_path_node_count"] = count - len(seen)
+    return result

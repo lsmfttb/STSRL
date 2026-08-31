@@ -9,7 +9,7 @@
     "repository_url": "https://github.com/lsmfttb/sts_lightspeed.git",
     "branch": "stsrl/main",
     "ref": "refs/heads/stsrl/main",
-    "commit": "cc40c8cc51cc3f1e5ccb9d67bc4bccdf635ba083"
+    "commit": "ae294471ae4e52f9c5d2d578ed8b22f0fa6b2ae0"
   },
   "python_module": {
     "name": "slaythespire",
@@ -174,6 +174,19 @@
         "StepSimulator.battle_search_v2_with_tree_geometry.tree_internal_telemetry.tree_geometry",
         "StepSimulator.battle_search_v2_with_tree_geometry.tree_internal_telemetry.tree_geometry.schema_id",
         "StepSimulator.battle_search_v2_with_tree_geometry.tree_internal_telemetry.tree_geometry.depth_rows"
+      ]
+    },
+    {
+      "id": "native_battle_search_v2_state_utilization",
+      "description": "Read-only exact native future-dynamics state identity and path-tree utilization telemetry companion for Battle Search v2.",
+      "task_provenance": [
+        "T079"
+      ],
+      "required_python_api": [
+        "StepSimulator.battle_search_v2_with_state_utilization",
+        "StepSimulator.battle_search_v2_with_state_utilization.tree_internal_telemetry.state_utilization",
+        "StepSimulator.battle_search_v2_with_state_utilization.tree_internal_telemetry.state_utilization.identity_complete",
+        "StepSimulator.battle_search_v2_with_state_utilization.tree_internal_telemetry.state_utilization.expanded_states"
       ]
     },
     {

@@ -1,0 +1,428 @@
+#!/usr/bin/env python3
+"""Run the retained T079 three-budget diagnostic and write compact evidence."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shlex
+import sys
+import time
+from collections.abc import Mapping
+from pathlib import Path
+
+from sts_combat_rl.commands.t079_state_utilization import run_t079_stage
+from sts_combat_rl.sim.action_space import ActionSpaceConfig
+from sts_combat_rl.sim.battle_search_v2 import BattleSearchV2Controller
+from sts_combat_rl.sim.lightspeed import LightSpeedAdapter
+from sts_combat_rl.sim.lightspeed_source import lightspeed_source_identity_dict
+from sts_combat_rl.sim.t079_state_utilization import (
+    T079_BUDGETS,
+    classify_t079,
+    compare_prefix_sequences,
+    sha256_file,
+    summarize_state_utilization,
+    write_json,
+)
+
+T070_SUBSET_MANIFEST_SHA256 = (
+    "ec9201b87abb9921decdc337689b7a08e84899d4f01fd8b04172d21c9db8207c"
+)
+T070_SUBSET_COHORT_SHA256 = (
+    "2d21a79dcbb393e4691e5aaf15f66c87fa20ba3e274bfa19baa30693cb2f029d"
+)
+T043_CHECKPOINT_SHA256 = (
+    "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
+)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--cohort", type=Path, required=True)
+    parser.add_argument("--subset-manifest", type=Path, required=True)
+    parser.add_argument("--checkpoint", type=Path, required=True)
+    parser.add_argument("--output-root", type=Path, required=True)
+    parser.add_argument(
+        "--preflight",
+        type=Path,
+        help="passing T079 real-native preflight artifact (default: output-root/preflight.json)",
+    )
+    parser.add_argument("--max-battle-steps", type=int, default=200)
+    parser.add_argument("--sim-seed", type=int, default=1)
+    args = parser.parse_args()
+
+    _verify_inputs(args.cohort, args.subset_manifest, args.checkpoint)
+    args.output_root.mkdir(parents=True, exist_ok=True)
+    _verify_preflight(
+        args.preflight or args.output_root / "preflight.json",
+        cohort=args.cohort,
+        subset_manifest=args.subset_manifest,
+        checkpoint=args.checkpoint,
+    )
+    source_identity = lightspeed_source_identity_dict()
+    experiment = {
+        "schema_id": "t079-experiment-manifest-v1",
+        "task_id": "T079",
+        "subset_manifest_sha256": sha256_file(args.subset_manifest),
+        "subset_cohort_sha256": sha256_file(args.cohort),
+        "checkpoint_sha256": sha256_file(args.checkpoint),
+        "native_source_identity": source_identity,
+        "information_regime": "full_simulator_state_oracle_like",
+        "action_space": ActionSpaceConfig.initial_no_potions().to_dict(),
+        "root_selection": "highest_mean",
+        "arm": "prior_value",
+        "budgets": list(T079_BUDGETS),
+        "worker_count": 16,
+        "shard_count": 16,
+        "topology": "forked WSL process per one-record shard",
+        "telemetry_mode": "read_only_exact_state_observation",
+        "thresholds": {
+            "median_definition": "average of sorted sample indices 7 and 8",
+            "material_duplicate_fraction_median": 0.20,
+            "material_marginal_unique_yield_median_max": 0.80,
+            "weak_duplicate_fraction_median_max": 0.05,
+            "weak_marginal_unique_yield_median_min": 0.90,
+        },
+    }
+    write_json(args.output_root / "experiment-manifest.json", experiment)
+
+    stages: dict[int, dict[str, object]] = {}
+    action_space = ActionSpaceConfig.initial_no_potions()
+
+    def adapter_factory() -> LightSpeedAdapter:
+        return LightSpeedAdapter(seed=args.sim_seed, ascension=20)
+
+    def controller_factory(budget: int) -> BattleSearchV2Controller:
+        from sts_combat_rl.sim.torch_policy_value import TorchPolicyValueGuidanceScorer
+
+        scorer = TorchPolicyValueGuidanceScorer.from_checkpoint_path(args.checkpoint)
+        return BattleSearchV2Controller(
+            simulations=budget,
+            scorer=scorer,
+            ablation="prior_value",
+            root_selection_rule="highest_mean",
+            action_space=action_space,
+            inference_cache_enabled=True,
+            public_context_projection_enabled=True,
+            state_utilization_enabled=True,
+            native_source_identity=source_identity,
+        )
+
+    for budget in T079_BUDGETS:
+        started = time.monotonic()
+        stage = run_t079_stage(
+            cohort_path=args.cohort,
+            budget=budget,
+            controller_factory=controller_factory,
+            adapter_factory=adapter_factory,
+            action_space=action_space,
+            max_battle_steps=args.max_battle_steps,
+        )
+        stage["wall_clock_seconds"] = time.monotonic() - started
+        stage["first_root"] = _first_root_summary(stage)
+        stage["all_search_calls"] = _all_call_summary(stage)
+        stages[budget] = stage
+        write_json(args.output_root / f"stage-s{budget}.json", stage)
+
+    prefix = _prefix_report(stages)
+    first_root = {str(budget): stages[budget]["first_root"] for budget in T079_BUDGETS}
+    terminal = _terminal_classification(stages, prefix)
+    write_json(args.output_root / "first-root-prefix-comparison.json", prefix)
+    write_json(
+        args.output_root / "aggregate-state-utilization.json",
+        {
+            "schema_id": "t079-aggregate-state-utilization-v1",
+            "budgets": {
+                str(budget): stages[budget]["all_search_calls"]
+                for budget in T079_BUDGETS
+            },
+            "first_root": first_root,
+        },
+    )
+    write_json(args.output_root / "terminal-classification.json", terminal)
+    retention = {
+        "schema_id": "t079-retention-manifest-v1",
+        "task_id": "T079",
+        "retention_root": str(args.output_root),
+        "inputs": {
+            "subset_manifest": {
+                "path": str(args.subset_manifest),
+                "sha256": sha256_file(args.subset_manifest),
+            },
+            "subset_cohort": {
+                "path": str(args.cohort),
+                "sha256": sha256_file(args.cohort),
+            },
+            "checkpoint": {
+                "path": str(args.checkpoint),
+                "sha256": sha256_file(args.checkpoint),
+            },
+        },
+        "outputs": {
+            path.name: {"path": str(path), "sha256": sha256_file(path)}
+            for path in sorted(args.output_root.glob("*.json"))
+        },
+        "regeneration_command": shlex.join(
+            [
+                "env",
+                f"PYTHONPATH={os.environ.get('PYTHONPATH', '')}",
+                "TMP=/tmp",
+                "TEMP=/tmp",
+                "TMPDIR=/tmp",
+                sys.executable,
+                str(Path(__file__).resolve()),
+                "--cohort",
+                str(args.cohort.resolve()),
+                "--subset-manifest",
+                str(args.subset_manifest.resolve()),
+                "--checkpoint",
+                str(args.checkpoint.resolve()),
+                "--output-root",
+                str(args.output_root.resolve()),
+            ]
+        ),
+        "raw_hidden_state_payloads_retained": False,
+    }
+    write_json(args.output_root / "retention-manifest.json", retention)
+    print(json.dumps({"classification": terminal, "retention": retention}, indent=2))
+    return 0
+
+
+def _verify_inputs(cohort: Path, manifest: Path, checkpoint: Path) -> None:
+    expected = (
+        (manifest, T070_SUBSET_MANIFEST_SHA256),
+        (cohort, T070_SUBSET_COHORT_SHA256),
+        (checkpoint, T043_CHECKPOINT_SHA256),
+    )
+    for path, digest in expected:
+        actual = sha256_file(path)
+        if actual != digest:
+            raise SystemExit(f"T079 frozen input hash mismatch: {path}: {actual}")
+
+
+def _verify_preflight(
+    path: Path, *, cohort: Path, subset_manifest: Path, checkpoint: Path
+) -> None:
+    """Require the real native parity/restore gate before any stage starts."""
+
+    try:
+        artifact = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(
+            f"T079 preflight artifact is unavailable or invalid: {path}"
+        ) from exc
+    if (
+        not isinstance(artifact, Mapping)
+        or artifact.get("schema_id") != "t079-preflight-v1"
+    ):
+        raise SystemExit("T079 science requires schema t079-preflight-v1")
+    if artifact.get("passed") is not True:
+        raise SystemExit("T079 science requires a passing real-native preflight")
+    source = artifact.get("native_source_identity")
+    if not isinstance(source, Mapping):
+        raise SystemExit("T079 preflight has no native source identity")
+    if (
+        source.get("integration_branch") != "stsrl/main"
+        or source.get("integration_ref") != "refs/heads/stsrl/main"
+        or source.get("integration_commit")
+        != "ae294471ae4e52f9c5d2d578ed8b22f0fa6b2ae0"
+    ):
+        raise SystemExit(
+            "T079 preflight native source identity is not the active final ref"
+        )
+    inputs = artifact.get("inputs")
+    if not isinstance(inputs, Mapping):
+        raise SystemExit("T079 preflight has no frozen input identity")
+    expected_inputs = {
+        "subset_manifest": (subset_manifest, T070_SUBSET_MANIFEST_SHA256),
+        "subset_cohort": (cohort, T070_SUBSET_COHORT_SHA256),
+        "checkpoint": (checkpoint, T043_CHECKPOINT_SHA256),
+    }
+    for key, (input_path, digest) in expected_inputs.items():
+        entry = inputs.get(key)
+        if not isinstance(entry, Mapping) or entry.get("sha256") != digest:
+            raise SystemExit(f"T079 preflight frozen input identity is invalid: {key}")
+        if sha256_file(input_path) != digest:
+            raise SystemExit(f"T079 preflight input changed since gate: {input_path}")
+    parity = artifact.get("parity")
+    restore = artifact.get("t078_restore_fidelity")
+    if not isinstance(parity, Mapping) or parity.get("passed") is not True:
+        raise SystemExit("T079 preflight parity did not pass")
+    if not isinstance(restore, Mapping) or restore.get("passed") is not True:
+        raise SystemExit("T079 preflight T078 restore fidelity did not pass")
+
+
+def _record_payloads(stage: Mapping[str, object]) -> list[Mapping[str, object]]:
+    rows = stage.get("records")
+    if not isinstance(rows, list):
+        raise TypeError("T079 stage records are missing")
+    if len(rows) != 16:
+        raise ValueError("T079 stage must retain exactly 16 record rows")
+    if any(not isinstance(row, Mapping) for row in rows):
+        raise TypeError("T079 stage contains a malformed record row")
+    return list(rows)
+
+
+def _telemetry_calls(stage_row: Mapping[str, object]) -> list[Mapping[str, object]]:
+    result = stage_row.get("result")
+    if not isinstance(result, Mapping):
+        raise TypeError("T079 stage result is missing")
+    telemetry = result.get("controller_compute_telemetry")
+    if not isinstance(telemetry, Mapping):
+        raise TypeError("T079 controller telemetry is missing")
+    calls = telemetry.get("t079_state_utilization_records")
+    if not isinstance(calls, list) or not calls:
+        raise ValueError("T079 state-utilization call records are missing")
+    if any(not isinstance(call, Mapping) for call in calls):
+        raise TypeError("T079 state-utilization call row is malformed")
+    return list(calls)
+
+
+def _first_root_call(stage_row: Mapping[str, object]) -> Mapping[str, object]:
+    calls = _telemetry_calls(stage_row)
+    roots = [call for call in calls if call.get("decision_step_index") == 0]
+    if len(roots) != 1:
+        raise ValueError(
+            "T079 stage must contain exactly one explicitly identified first-root "
+            f"call, found {len(roots)}"
+        )
+    return roots[0]
+
+
+def _first_root_summary(stage: Mapping[str, object]) -> list[dict[str, object]]:
+    summary: list[dict[str, object]] = []
+    for row in _record_payloads(stage):
+        call = _first_root_call(row)
+        native = call.get("native_state_utilization")
+        if not isinstance(native, Mapping):
+            raise TypeError("T079 first-root native telemetry is missing")
+        reduced = summarize_state_utilization(native)
+        reduced["record_index"] = row["record_index"]
+        reduced["decision_step_index"] = 0
+        reduced["call_role"] = "first_root"
+        reduced["native_state_utilization"] = dict(native)
+        reduced["native_geometry"] = call.get("native_geometry")
+        reduced["controller_provenance"] = (
+            row.get("result", {}).get("controller_provenance")
+            if isinstance(row.get("result"), Mapping)
+            else None
+        )
+        summary.append(reduced)
+    return summary
+
+
+def _all_call_summary(stage: Mapping[str, object]) -> dict[str, object]:
+    calls: list[dict[str, object]] = []
+    for row in _record_payloads(stage):
+        result = row.get("result")
+        if not isinstance(result, Mapping):
+            raise TypeError("T079 stage result is missing")
+        for call in _telemetry_calls(row):
+            native = call.get("native_state_utilization")
+            if not isinstance(native, Mapping):
+                raise TypeError("T079 native telemetry is missing")
+            geometry = call.get("native_geometry")
+            reduced = summarize_state_utilization(
+                native,
+                geometry=geometry if isinstance(geometry, Mapping) else None,
+                compute={
+                    key: call[key]
+                    for key in (
+                        "native_simulator_steps",
+                        "model_calls",
+                        "wall_clock_seconds",
+                    )
+                    if key in call
+                },
+            )
+            decision_step_index = call.get("decision_step_index")
+            if (
+                isinstance(decision_step_index, bool)
+                or not isinstance(decision_step_index, int)
+                or decision_step_index < 0
+            ):
+                raise ValueError("T079 call decision_step_index is invalid")
+            reduced.update(
+                {
+                    "record_index": row["record_index"],
+                    "decision_step_index": decision_step_index,
+                    "call_role": (
+                        "first_root" if decision_step_index == 0 else "continuation"
+                    ),
+                    "native_state_utilization": dict(native),
+                    "native_geometry": geometry,
+                    "controller_provenance": result.get("controller_provenance"),
+                    "selected_action_identity": call.get("selected_action_identity"),
+                }
+            )
+            calls.append(reduced)
+    return {
+        "call_count": len(calls),
+        "expanded_path_nodes": sum(int(call["expanded_path_nodes"]) for call in calls),
+        "unique_exact_states": sum(int(call["unique_exact_states"]) for call in calls),
+        "exact_duplicate_path_nodes": sum(
+            int(call["exact_duplicate_path_nodes"]) for call in calls
+        ),
+        "per_call": calls,
+    }
+
+
+def _prefix_report(stages: Mapping[int, Mapping[str, object]]) -> dict[str, object]:
+    by_record: list[dict[str, object]] = []
+    for index in range(16):
+        sequences: dict[int, list[str]] = {}
+        for budget in T079_BUDGETS:
+            stage_row = _record_payloads(stages[budget])[index]
+            call = _first_root_call(stage_row)
+            native = call["native_state_utilization"]
+            sequences[budget] = [
+                row["exact_state_digest"] for row in native["expanded_states"]
+            ]
+        comparison = compare_prefix_sequences(sequences)
+        comparison["record_index"] = index
+        by_record.append(comparison)
+    return {
+        "schema_id": "t079-first-root-prefix-comparison-v1",
+        "records": by_record,
+        "comparable_first_root_count": sum(
+            1 for row in by_record if row["prefix_comparable"]
+        ),
+    }
+
+
+def _terminal_classification(
+    stages: Mapping[int, Mapping[str, object]], prefix: Mapping[str, object]
+) -> dict[str, object]:
+    comparable = int(prefix["comparable_first_root_count"])
+    rows: list[dict[str, object]] = []
+    prefix_rows = prefix["records"]
+    for index, root in enumerate(stages[1600]["first_root"]):
+        comparison = prefix_rows[index]
+        marginal = comparison["400_1600"]["marginal_unique_yield"]
+        rows.append(
+            {
+                "exact_duplicate_fraction": root["exact_duplicate_fraction"],
+                "marginal_unique_yield_400_1600": marginal,
+                "distinct_path_duplicate_group_count": root[
+                    "distinct_path_duplicate_group_count"
+                ],
+            }
+        )
+    if comparable < 12 or any(
+        row["marginal_unique_yield_400_1600"] is None for row in rows
+    ):
+        return {
+            "schema_id": "t079-terminal-diagnostic-classification-v1",
+            "classification": "AMBIGUOUS",
+            "comparable_first_root_count": comparable,
+            "reason": "literal 16-sample threshold inputs are incomplete",
+            "threshold_inputs": rows,
+        }
+    report = classify_t079(rows, comparable_count=comparable)
+    report["threshold_inputs"] = rows
+    return report
+
+
+if __name__ == "__main__":
+    sys.exit(main())
