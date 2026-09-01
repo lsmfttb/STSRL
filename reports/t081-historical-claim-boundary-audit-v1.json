@@ -1,0 +1,105 @@
+{
+  "claims": [
+    {
+      "checkpoint_sha256": "ab68439df429f603816f30064484cc99f33611a196ba456103397fc7ef8ed5f3",
+      "historical_use": "diagnostic_mechanism",
+      "limitations": "historical T044 numerical outcomes remain unchanged; four trainer rows",
+      "maximum_justified_claim": "checkpoint-conditional evaluation; no generalized model-quality claim",
+      "qualification": {
+        "override_kind": "smoke",
+        "trainer_record_count": 4,
+        "upstream_source_pool": "unavailable"
+      },
+      "task": "T044"
+    },
+    {
+      "checkpoint_sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+      "historical_use": "diagnostic_mechanism",
+      "limitations": "trainer scale and broad coverage unavailable; exact historical result only",
+      "maximum_justified_claim": "checkpoint-conditional search-mechanism result",
+      "qualification": {
+        "override_kind": "smoke",
+        "trainer_record_count": 4,
+        "upstream_source_pool": "unavailable"
+      },
+      "task": "T047"
+    },
+    {
+      "checkpoint_sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+      "historical_use": "diagnostic_mechanism",
+      "limitations": "trainer scale and broad coverage unavailable",
+      "maximum_justified_claim": "checkpoint-conditional search-mechanism result",
+      "qualification": {
+        "override_kind": "smoke",
+        "trainer_record_count": 4,
+        "upstream_source_pool": "unavailable"
+      },
+      "task": "T048"
+    },
+    {
+      "checkpoint_sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+      "historical_use": "diagnostic_mechanism",
+      "limitations": "no generalized learned-quality claim",
+      "maximum_justified_claim": "checkpoint-conditional complete-run mechanism evidence",
+      "qualification": {
+        "override_kind": "smoke",
+        "trainer_record_count": 4,
+        "upstream_source_pool": "unavailable"
+      },
+      "task": "T050"
+    },
+    {
+      "checkpoint_sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+      "historical_use": "diagnostic_mechanism",
+      "limitations": "upstream run count is not trainer scale",
+      "maximum_justified_claim": "checkpoint-conditional source/reachability evidence",
+      "qualification": {
+        "override_kind": "smoke",
+        "trainer_record_count": 4,
+        "upstream_source_pool": "runs1000"
+      },
+      "task": "T051"
+    },
+    {
+      "checkpoint_sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+      "historical_use": "diagnostic_mechanism",
+      "limitations": "historical numerical result is retained; model-quality generalization unavailable",
+      "maximum_justified_claim": "checkpoint-conditional fixed-cohort comparison",
+      "qualification": {
+        "override_kind": "smoke",
+        "trainer_record_count": 4,
+        "upstream_source_pool": "unavailable"
+      },
+      "task": "T052"
+    },
+    {
+      "checkpoint_sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+      "historical_use": "historical_reproduction",
+      "limitations": "no retained evidence of scale-qualified T043 training",
+      "maximum_justified_claim": "reproduce/audit the exact historical dependency only",
+      "qualification": {
+        "override_kind": "smoke",
+        "trainer_record_count": 4,
+        "upstream_source_pool": "unavailable"
+      },
+      "task": "T062"
+    },
+    {
+      "checkpoint_sha256": "ab68439df429f603816f30064484cc99f33611a196ba456103397fc7ef8ed5f3",
+      "historical_use": "diagnostic_mechanism",
+      "limitations": "four trainer rows; runs1000 names upstream pool only",
+      "maximum_justified_claim": "checkpoint-conditional Search v2 audit; not learned-quality evidence",
+      "qualification": {
+        "override_kind": "smoke",
+        "trainer_record_count": 4,
+        "upstream_source_pool": "runs1000"
+      },
+      "task": "T070"
+    }
+  ],
+  "inputs": {
+    "missing_facts": "reported as unavailable; no filename inference",
+    "source": "retained T043/T044/T047-T070 task and PR records"
+  },
+  "schema_version": "t081-historical-claim-boundary-audit-v1"
+}

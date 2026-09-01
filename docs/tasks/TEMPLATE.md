@@ -23,6 +23,14 @@ or external artifacts.
 Do not rely on another task's temporary smoke output or local worktree file as
 an implicit input.
 
+## Artifact Eligibility Contract
+
+If this task consumes a learned checkpoint, teacher/trainer dataset, or
+generated learning-source artifact, name the inputs, intended reuse mode,
+scientific claim boundary, required qualification predicates, and what happens
+when a required fact is unavailable. Tasks with no such dependency may state
+`none` and are exempt from this contract.
+
 ## Scope
 
 Define required behavior, ownership boundaries, and public interfaces.
