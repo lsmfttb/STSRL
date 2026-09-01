@@ -157,7 +157,11 @@ def _validate_pool(path: Path, expected: Mapping[str, Any], component: str) -> d
             if item.get("type") == "metadata":
                 metadata = dict(item.get("metadata", {})); schema = metadata.get("schema_id")
                 continue
-            row = item.get("record", item); index = row.get("record_index")
+            row = item.get("record", item)
+            if not isinstance(row, Mapping) or not isinstance(row.get("structural_metadata"), Mapping) or row["structural_metadata"].get("assistance_level") != component:
+                duplicate = True
+                continue
+            index = row.get("record_index")
             if not isinstance(index, int) or index <= previous: duplicate = True
             previous = index if isinstance(index, int) else previous; count += 1
             if row.get("structural_metadata", {}).get("assistance_level", component) != component:
@@ -167,7 +171,8 @@ def _validate_pool(path: Path, expected: Mapping[str, Any], component: str) -> d
 
 def _record_identity(row: Mapping[str, Any], component: str) -> tuple[dict[str, Any], str]:
     metadata = dict(row.get("structural_metadata", {}))
-    metadata.setdefault("assistance_level", component)
+    if metadata.get("assistance_level") != component:
+        raise ValueError("source assistance_level is missing or does not match component")
     obj = SimpleNamespace(
         structural_metadata=metadata,
         action_trace=tuple(row.get("action_trace", ())),
@@ -182,13 +187,14 @@ def _record_identity(row: Mapping[str, Any], component: str) -> tuple[dict[str, 
 
 def _linkage_ok(item: Mapping[str, Any], teacher: Mapping[str, Any], trainer: Mapping[str, Any], index: int, record_index: int) -> tuple[bool, list[str]]:
     identity = item.get("complete_identity", {})
-    teacher = teacher.get("source_metadata", teacher.get("structural_metadata", {}))
+    teacher_metadata = teacher.get("structural_metadata", {})
     metadata = trainer.get("source_metadata", {})
     checks = {
-        "teacher_index": teacher.get("row_index", index) == index,
+        "teacher_index": teacher.get("row_index") == index,
         "trainer_index": trainer.get("example_index") == index,
-        "teacher_source": all(teacher.get(key) == identity.get(key) for key in ("source_checkpoint_id", "source_run_id", "source_seed", "source_battle_index")) and teacher.get("source_pool_record_index") == record_index and teacher.get("t064_complete_identity_sha256", identity.get("complete_identity_sha256")) == identity.get("complete_identity_sha256"),
-        "trainer_source": all(metadata.get(key) == identity.get(key) for key in ("source_checkpoint_id", "source_run_id", "source_seed", "source_battle_index")) and metadata.get("t064_complete_identity_sha256", identity.get("complete_identity_sha256")) == identity.get("complete_identity_sha256"),
+        "teacher_source": all(teacher.get(key) == identity.get(key) for key in ("source_checkpoint_id", "source_run_id", "source_seed", "source_battle_index")) and teacher.get("source_pool_record_index") == record_index,
+        "teacher_shape": all(isinstance(teacher_metadata, Mapping) and teacher_metadata.get(key) == item.get(key) for key in ("act", "room_type", "encounter_id", "assistance_level")),
+        "trainer_source": all(metadata.get(key) == identity.get(key) for key in ("source_checkpoint_id", "source_run_id", "source_seed", "source_battle_index")) and metadata.get("source_pool_record_index") == record_index,
         "policy_lineage": trainer.get("policy_target_kind") == "oracle_soft_visit_distribution" and trainer.get("policy_target_source") == "oracle_teacher_row.soft_visit_target",
     }
     return all(checks.values()), [name for name, valid in checks.items() if not valid]
@@ -274,7 +280,7 @@ def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460) -
         {"name": "trainer", "sha256": sha256(trainer_path), "expected_sha256": EXPECTED_TRAINER_SHA, "schema": trainer_meta.get("format_version"), "record_count": trainer_meta.get("record_count"), "policy_target_kind": trainer_meta.get("policy_target_kind"), "structured_outcome_schema": trainer_meta.get("structured_battle_outcome_schema"), "expected_policy_target_kind": "oracle_soft_visit_distribution", "expected_structured_outcome_schema": "structured-battle-outcome-v1", "valid": (expected_rows != 460 or sha256(trainer_path) == EXPECTED_TRAINER_SHA) and trainer_meta.get("record_count") == expected_rows and trainer_meta.get("format_version") in (6, "6") and trainer_meta.get("policy_target_kind") == "oracle_soft_visit_distribution" and trainer_meta.get("structured_battle_outcome_schema") == "structured-battle-outcome-v1"},
     ])
     if len(teachers) != expected_rows or len(trainers) != expected_rows:
-        return {"schema_version": SCHEMA, "classification": "INCOMPLETE", "integrity": {"valid": False, "problems": ["teacher/trainer row count mismatch"]}, "rows": []}
+        return incomplete("teacher/trainer row count mismatch")
     by_component: defaultdict[str, set[int]] = defaultdict(set)
     for index, item in enumerate(selected): by_component[item["component"]].add(item["source_record_index"])
     pool_checks = []
