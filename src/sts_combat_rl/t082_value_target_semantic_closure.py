@@ -175,7 +175,7 @@ def _validate_pool(path: Path, expected: Mapping[str, Any], component: str) -> d
             previous = index if isinstance(index, int) else previous; count += 1
             if row.get("structural_metadata", {}).get("assistance_level", component) != component:
                 duplicate = True
-    valid = (schema == expected.get("schema_id", "assisted-run-source-pool-v1") and isinstance(metadata, Mapping) and metadata.get("record_count") == count and metadata.get("format_version") == expected.get("format_version", metadata.get("format_version")) and count == expected.get("record_count") and size == expected.get("bytes") and digest.hexdigest() == expected.get("sha256") and not duplicate)
+    valid = (schema == expected.get("schema_id") and isinstance(metadata, Mapping) and metadata.get("record_count") == count and metadata.get("format_version") == expected.get("format_version") and metadata.get("assistance_level") == component and count == expected.get("record_count") and size == expected.get("bytes") and digest.hexdigest() == expected.get("sha256") and not duplicate)
     return {"path": str(path), "component": component, "schema": schema, "metadata": metadata, "record_count": count, "bytes": size, "sha256": digest.hexdigest(), "expected": dict(expected), "valid": valid, "ordering_valid": not duplicate}
 
 def _record_identity(row: Mapping[str, Any], component: str) -> tuple[dict[str, Any], str]:
@@ -195,9 +195,13 @@ def _record_identity(row: Mapping[str, Any], component: str) -> tuple[dict[str, 
     return identity, identity["complete_identity_sha256"]
 
 def _linkage_ok(item: Mapping[str, Any], teacher: Mapping[str, Any], trainer: Mapping[str, Any], index: int, record_index: int) -> tuple[bool, list[str]]:
+    if not isinstance(item, Mapping) or not isinstance(teacher, Mapping) or not isinstance(trainer, Mapping):
+        return False, ["non_mapping_linkage_record"]
     identity = item.get("complete_identity", {})
     teacher_metadata = teacher.get("structural_metadata", {})
     metadata = trainer.get("source_metadata", {})
+    if not isinstance(identity, Mapping) or not isinstance(teacher_metadata, Mapping) or not isinstance(metadata, Mapping):
+        return False, ["non_mapping_linkage_metadata"]
     checks = {
         "teacher_index": teacher.get("row_index") == index,
         "trainer_index": trainer.get("example_index") == index,
@@ -352,11 +356,12 @@ def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460) -
         try: derived, derived_sha = _record_identity(source, component)
         except (ValueError, KeyError, TypeError, AttributeError) as exc: derived, derived_sha = {}, None; source_error = str(exc)
         else: source_error = None
-        identity_ok = derived_sha == item.get("complete_identity_sha256")
+        selected_identity = item.get("complete_identity")
+        identity_ok = isinstance(selected_identity, Mapping) and selected_identity == derived and item.get("complete_identity_sha256") == derived_sha and selected_identity.get("complete_identity_sha256") == item.get("complete_identity_sha256")
         source_meta = source.get("structural_metadata", {}) if isinstance(source, Mapping) else {}
         selected_source_path = item.get("source_path")
         expected_path = str(manifest["input_artifacts"].get(component, {}).get("path", ""))
-        path_ok = selected_source_path is None or selected_source_path == expected_path
+        path_ok = isinstance(selected_source_path, str) and selected_source_path == expected_path
         shape_ok = isinstance(source_meta, Mapping) and all(source_meta.get(key) == item.get(key) for key in ("act", "room_type", "encounter_id", "assistance_level"))
         behavior = recover_behavior(source, successor) if source else {"status": "unavailable", "reason": "source record missing"}
         teacher_action = _identity(teachers[index].get("teacher_action", {}).get("action_identity"))
@@ -399,6 +404,7 @@ def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460) -
             "value_target_source": "trainer_input_record.structured_battle_outcome.battle_survived",
             "raw_reward_components_battle_outcome": trainers[index].get("raw_reward_components", {}).get("battle_outcome"),
         })
+        rows[-1].pop("trainer_value_lineage", None)
         if not path_ok: row_problems.append(f"row {index}: selected source_path does not match pool path")
         if not shape_ok: row_problems.append(f"row {index}: source structural metadata does not match selected metadata")
         if teacher_action is None: row_problems.append(f"row {index}: teacher action identity missing or malformed")

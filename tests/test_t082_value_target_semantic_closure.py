@@ -43,7 +43,7 @@ def test_compact_production_audit_fixture_valid_mutation_and_determinism(tmp_pat
     source = {"source_checkpoint_id": "ckpt", "source_run_id": "run", "source_seed": 1, "source_battle_index": 0, "source_pool_record_index": 0}
     _envelope(teacher, [{"row_index": 0, **source, "teacher_action": {"action_identity": action(2)}, "structural_metadata": meta}], artifact_schema_id="oracle-search-teacher-v1", format_version=1, controller_provenance={"name": "oracle", "config": {"information_regime": "full_simulator_state_oracle_like", "search_budget": {"simulations": 100}, "root_selection_rule": "highest_mean", "include_potions": False, "target": "soft_visit_distribution"}})
     _envelope(trainer, [{"example_index": 0, "policy_target_kind": "oracle_soft_visit_distribution", "policy_target_source": "oracle_teacher_row.soft_visit_target", "source_metadata": source | {"t064_complete_identity_sha256": identity_sha, **meta}, "structured_battle_outcome": {"battle_survived": {"status": "available", "value": True}}}], format_version=6, policy_target_schema_id="trainer-policy-target-v1", policy_target_schema_version=1, structured_battle_outcome_schema_id="structured-battle-outcome-v1", structured_battle_outcome_schema_version=1)
-    manifest = root / "manifest.json"; manifest.write_text(json.dumps({"selected_sources": [{"component": "assist_0", "source_record_index": 0, "source_path": str(pool), **meta, "complete_identity": identity, "complete_identity_sha256": identity_sha}], "input_artifacts": {"assist_0": {"path": str(pool), "record_count": 2, "bytes": pool.stat().st_size, "sha256": sha256(pool)}}}, sort_keys=True))
+    manifest = root / "manifest.json"; manifest.write_text(json.dumps({"selected_sources": [{"component": "assist_0", "source_record_index": 0, "source_path": str(pool), **meta, "complete_identity": identity, "complete_identity_sha256": identity_sha}], "input_artifacts": {"assist_0": {"path": str(pool), "record_count": 2, "bytes": pool.stat().st_size, "sha256": sha256(pool), "schema_id": "assisted-run-source-pool-v1", "format_version": 1}}}, sort_keys=True))
     (root / "t064-transfer-decision.json").write_text(json.dumps({"experiment_complete": True, "source_adequacy": True, "source_integrity_valid": True, "terminal_case": "Case B"}))
     control = root / "control.json"; control.write_text(json.dumps({"schema_id": "synthetic-control-v1", "value": "frozen"}, sort_keys=True) + "\n")
     expected_inputs = {"control.json": (sha256(control), "synthetic-control-v1")}
@@ -113,7 +113,7 @@ def test_successor_reason_categories_and_deterministic_pool_fixture(tmp_path: Pa
     assert recover_behavior(current, bad)["reason"] == "non-prefix"
     pool = tmp_path / "pool.jsonl"
     _envelope(pool, [{"record_index": 0, "structural_metadata": {"assistance_level": "assist_0"}}], schema_id="assisted-run-source-pool-v1")
-    expected = {"record_count": 1, "bytes": pool.stat().st_size, "sha256": sha256(pool)}
+    expected = {"record_count": 1, "bytes": pool.stat().st_size, "sha256": sha256(pool), "schema_id": "assisted-run-source-pool-v1", "format_version": 1}
     assert _validate_pool(pool, expected, "assist_0")["valid"]
     assert _validate_pool(pool, expected, "assist_0")["metadata"]["schema_id"] == "assisted-run-source-pool-v1"
 
