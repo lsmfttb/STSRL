@@ -161,6 +161,8 @@ def _validate_pool(path: Path, expected: Mapping[str, Any], component: str) -> d
         for raw in iter(lambda: stream.readline(), b""):
             digest.update(raw); size += len(raw)
             item = json.loads(raw)
+            if not isinstance(item, Mapping):
+                raise ValueError(f"malformed pool envelope row in {path}")
             if item.get("type") == "metadata":
                 metadata = dict(item.get("metadata", {})); schema = metadata.get("schema_id")
                 continue
@@ -344,7 +346,7 @@ def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460) -
         component, record_index = item["component"], item["source_record_index"]
         source, successor = found.get((component, record_index), ({}, None))
         try: derived, derived_sha = _record_identity(source, component)
-        except (ValueError, KeyError) as exc: derived, derived_sha = {}, None; source_error = str(exc)
+        except (ValueError, KeyError, TypeError, AttributeError) as exc: derived, derived_sha = {}, None; source_error = str(exc)
         else: source_error = None
         identity_ok = derived_sha == item.get("complete_identity_sha256")
         behavior = recover_behavior(source, successor) if source else {"status": "unavailable", "reason": "source record missing"}
