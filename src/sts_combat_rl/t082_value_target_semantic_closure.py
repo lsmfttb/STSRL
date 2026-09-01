@@ -225,29 +225,37 @@ def _controller_key(value: Any) -> str:
 
 def _load_envelope(path: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     metadata: dict[str, Any] | None = None
+    metadata_count = 0
     rows: list[dict[str, Any]] = []
     with path.open(encoding="utf-8") as stream:
         for number, line in enumerate(stream, 1):
             item = json.loads(line)
+            if not isinstance(item, Mapping): raise ValueError(f"envelope row is not an object: {path}:{number}")
             if item.get("type") == "metadata":
-                metadata = dict(item.get("metadata", {}))
+                metadata_count += 1
+                if not isinstance(item.get("metadata"), Mapping): raise ValueError(f"metadata is not an object: {path}:{number}")
+                metadata = dict(item["metadata"])
             elif item.get("type") == "record":
                 rows.append(dict(item["record"]))
             else:
                 raise ValueError(f"invalid envelope row {number}")
-    if metadata is None:
+    if metadata is None or metadata_count != 1:
         raise ValueError(f"missing metadata envelope: {path}")
     return metadata, rows
 
 def _load_selected_envelope(path: Path, expected: int, index_field: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     metadata: dict[str, Any] | None = None
+    metadata_count = 0
     rows: dict[int, dict[str, Any]] = {}
     expected_next = 0
     with path.open(encoding="utf-8") as stream:
         for number, line in enumerate(stream, 1):
             item = json.loads(line)
+            if not isinstance(item, Mapping): raise ValueError(f"envelope row is not an object: {path}:{number}")
             if item.get("type") == "metadata":
-                metadata = dict(item.get("metadata", {}))
+                metadata_count += 1
+                if not isinstance(item.get("metadata"), Mapping): raise ValueError(f"metadata is not an object: {path}:{number}")
+                metadata = dict(item["metadata"])
             elif item.get("type") == "record":
                 raw = item["record"]
                 if not isinstance(raw, Mapping):
@@ -263,7 +271,7 @@ def _load_selected_envelope(path: Path, expected: int, index_field: str) -> tupl
                     expected_next += 1
             else:
                 raise ValueError(f"invalid envelope row {number}")
-    if metadata is None or len(rows) != expected:
+    if metadata is None or metadata_count != 1 or len(rows) != expected:
         raise ValueError(f"{path} does not contain exactly {expected} indexed rows")
     if metadata.get("record_count") != expected:
         raise ValueError(f"{path} metadata record_count is not {expected}")
