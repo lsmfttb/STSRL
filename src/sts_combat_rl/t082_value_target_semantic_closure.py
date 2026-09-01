@@ -214,6 +214,10 @@ def audit_t064(manifest_path: Path, output: Path) -> dict[str, Any]:
         identity_ok = derived_sha == item.get("complete_identity_sha256")
         behavior = recover_behavior(source, successor) if source else {"status": "unavailable", "reason": "source record missing"}
         teacher_action = _identity(teachers[index].get("teacher_action", {}).get("action_identity"))
+        teacher_source = teachers[index].get("source_metadata", teachers[index].get("structural_metadata", {}))
+        teacher_for_link = dict(teachers[index])
+        teacher_for_link.update(teacher_source)
+        linkage_valid, linkage_problems = _linkage_ok(item, teacher_for_link, trainers[index], index, record_index)
         trainer_meta = trainers[index].get("source_metadata", {})
         trainer_action = _identity(trainers[index].get("policy_target_action_identity"))
         trainer_action = _identity(trainers[index].get("policy_target_action_identity"))
@@ -222,7 +226,8 @@ def audit_t064(manifest_path: Path, output: Path) -> dict[str, Any]:
         outcome = source.get("battle_outcome")
         outcome_status = "available" if outcome in ("PLAYER_VICTORY", "PLAYER_DEFEAT") else "unavailable"
         rows.append({"index": index, "selected_identity": item["complete_identity"], "selected_identity_sha256": item.get("complete_identity_sha256"), "derived_identity_sha256": derived_sha, "identity_valid": identity_ok, "identity_error": source_error, "component": component, "source_record_index": record_index, "source_checkpoint_id": source.get("source_checkpoint_id"), "source_run_id": source.get("source_run_id"), "source_seed": source.get("source_seed"), "source_battle_index": source.get("source_battle_index"), "act": item.get("act"), "room_type": item.get("room_type"), "trace_length": len(source.get("action_trace", ())), "successor": {"record_index": successor.get("record_index"), "trace_length": len(successor.get("action_trace", ())), "battle_index": successor.get("source_battle_index")} if successor else None, "behavior": behavior, "teacher_action": teacher_action, "trainer_policy_action": trainer_action, "comparison": comparison, "outcome": outcome_status, "source_battle_outcome": outcome if isinstance(outcome, str) else None, "trainer_value_lineage": trainers[index].get("raw_reward_components", {}).get("battle_outcome"), "source_controller": source.get("source_battle_controller_provenance"), "teacher_controller": teachers[index].get("controller_provenance"), "policy_target_source": trainers[index].get("policy_target_source"), "value_target_source": "trainer_input_record.raw_reward_components.battle_outcome"})
-    all_integrity = all(row["identity_valid"] for row in rows) and all(item["valid"] for item in input_checks) and all(item["valid"] for item in pool_checks) and terminal_valid
+        rows[-1].update({"linkage_valid": linkage_valid, "linkage_problems": linkage_problems})
+    all_integrity = all(row["identity_valid"] and row["linkage_valid"] for row in rows) and all(item["valid"] for item in input_checks) and all(item["valid"] for item in pool_checks) and terminal_valid
     observed_acts = Counter(item.get("act") for item in selected)
     observed_components = Counter(item.get("component") for item in selected)
     coverage_valid = observed_acts == Counter({1: 256, 2: 204}) and observed_components == Counter({"assist_0": 256, "assist_hp50": 12, "assist_hp50_potion_elite_boss": 32, "assist_hp75_potion": 160})
