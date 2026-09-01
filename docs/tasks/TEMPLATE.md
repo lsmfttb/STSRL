@@ -1,5 +1,7 @@
 # TXXX: Task Name
 
+Artifact Eligibility Required: true
+
 ## Objective
 
 State one concrete result and why it matters.
@@ -22,6 +24,14 @@ or external artifacts.
 
 Do not rely on another task's temporary smoke output or local worktree file as
 an implicit input.
+
+## Artifact Eligibility Contract
+
+If this task consumes a learned checkpoint, teacher/trainer dataset, or
+generated learning-source artifact, name the inputs, intended reuse mode,
+scientific claim boundary, required predicates, and unavailable-fact behavior
+(what happens when a required fact is unavailable). Tasks with no such dependency may state
+`none` and are exempt from this contract.
 
 ## Scope
 

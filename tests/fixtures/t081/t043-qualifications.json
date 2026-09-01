@@ -1,0 +1,7 @@
+{
+  "schema_version": "artifact-eligibility-v1",
+  "fixtures": [
+    {"id": "t043-assist_0-smoke", "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4", "trainer_record_count": 4, "override_kind": "smoke", "claim_scope": "diagnostic"},
+    {"id": "t043-main-runs1000-assist_0-s4", "sha256": "ab68439df429f603816f30064484cc99f33611a196ba456103397fc7ef8ed5f3", "path": "retained/runs1000/checkpoint.pt", "upstream_source_runs": 1000, "trainer_record_count": 4, "override_kind": "smoke", "claim_scope": "diagnostic"}
+  ]
+}
