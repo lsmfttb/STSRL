@@ -154,29 +154,31 @@ def _safe_source_rows(path: Path) -> Iterable[dict[str, Any]]:
         yield {"_audit_source_error": str(exc)}
 
 def _validate_pool(path: Path, expected: Mapping[str, Any], component: str) -> dict[str, Any]:
-    digest = hashlib.sha256(); size = 0; count = 0; previous = -1; duplicate = False; schema = None; metadata = {}
+    digest = hashlib.sha256(); size = 0; count = 0; previous = -1; duplicate = False; schema = None; metadata = {}; metadata_count = 0; reason = None
     if not path.exists():
         return {"path": str(path), "component": component, "schema": None, "metadata": {}, "record_count": 0, "bytes": 0, "sha256": None, "expected": dict(expected), "valid": False, "ordering_valid": False, "reason": "missing artifact"}
     with path.open("rb") as stream:
         for raw in iter(lambda: stream.readline(), b""):
             digest.update(raw); size += len(raw)
-            item = json.loads(raw)
-            if not isinstance(item, Mapping):
-                raise ValueError(f"malformed pool envelope row in {path}")
+            try: item = json.loads(raw)
+            except (TypeError, ValueError, json.JSONDecodeError) as exc: reason = f"malformed JSON: {exc}"; continue
+            if not isinstance(item, Mapping): reason = "pool envelope row is not an object"; continue
             if item.get("type") == "metadata":
-                metadata = dict(item.get("metadata", {})); schema = metadata.get("schema_id")
+                metadata_count += 1
+                if not isinstance(item.get("metadata"), Mapping): reason = "metadata is not an object"
+                else: metadata = dict(item["metadata"]); schema = metadata.get("schema_id")
                 continue
             row = item.get("record", item)
             if not isinstance(row, Mapping) or not isinstance(row.get("structural_metadata"), Mapping) or row["structural_metadata"].get("assistance_level") != component:
                 duplicate = True
                 continue
             index = row.get("record_index")
-            if not isinstance(index, int) or index <= previous: duplicate = True
+            if isinstance(index, bool) or not isinstance(index, int) or index <= previous: duplicate = True
             previous = index if isinstance(index, int) else previous; count += 1
             if row.get("structural_metadata", {}).get("assistance_level", component) != component:
                 duplicate = True
-    valid = (schema == expected.get("schema_id") and isinstance(metadata, Mapping) and metadata.get("record_count") == count and metadata.get("format_version") == expected.get("format_version") and metadata.get("assistance_level") == component and count == expected.get("record_count") and size == expected.get("bytes") and digest.hexdigest() == expected.get("sha256") and not duplicate)
-    return {"path": str(path), "component": component, "schema": schema, "metadata": metadata, "record_count": count, "bytes": size, "sha256": digest.hexdigest(), "expected": dict(expected), "valid": valid, "ordering_valid": not duplicate}
+    valid = (reason is None and metadata_count == 1 and schema == expected.get("schema_id") and metadata.get("format_version") == expected.get("format_version") and metadata.get("record_count") == count and metadata.get("assistance_level") == component and count == expected.get("record_count") and size == expected.get("bytes") and digest.hexdigest() == expected.get("sha256") and not duplicate)
+    return {"path": str(path), "component": component, "schema": schema, "metadata": metadata, "record_count": count, "bytes": size, "sha256": digest.hexdigest(), "expected": dict(expected), "valid": valid, "ordering_valid": not duplicate, "metadata_count": metadata_count, "reason": reason}
 
 def _record_identity(row: Mapping[str, Any], component: str) -> tuple[dict[str, Any], str]:
     metadata = dict(row.get("structural_metadata", {}))
@@ -430,7 +432,7 @@ def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460) -
     report["counts"]["trainer_value_labels"] = dict(trainer_outcomes)
     report["counts"]["divergent_trainer_value_labels"] = dict(divergent_trainer_outcomes)
     rendered = json.dumps(report, indent=2, sort_keys=True) + "\n"
-    report["regeneration"].update({"output_sha256": hashlib.sha256(rendered.encode()).hexdigest(), "output_size": len(rendered.encode())})
+    report["regeneration"].update({"rendered_report_size": len(rendered.encode()), "hash_convention": "hash the committed output bytes externally; no self-referential hash is embedded"})
     output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return report
 
