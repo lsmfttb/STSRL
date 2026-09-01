@@ -182,7 +182,7 @@ def _linkage_ok(item: Mapping[str, Any], teacher: Mapping[str, Any], trainer: Ma
         "trainer_index": trainer.get("example_index") == index,
         "teacher_source": all(teacher.get(key) == identity.get(key) for key in ("source_checkpoint_id", "source_run_id", "source_seed", "source_battle_index")) and teacher.get("source_pool_record_index") == record_index and teacher.get("t064_complete_identity_sha256", identity.get("complete_identity_sha256")) == identity.get("complete_identity_sha256"),
         "trainer_source": all(metadata.get(key) == identity.get(key) for key in ("source_checkpoint_id", "source_run_id", "source_seed", "source_battle_index")) and metadata.get("t064_complete_identity_sha256", identity.get("complete_identity_sha256")) == identity.get("complete_identity_sha256"),
-        "policy_lineage": trainer.get("policy_target_kind") == "oracle_teacher_action" and trainer.get("policy_target_source") == "oracle_teacher_row.teacher_action",
+        "policy_lineage": trainer.get("policy_target_kind") == "oracle_soft_visit_distribution" and trainer.get("policy_target_source") == "oracle_teacher_row.soft_visit_target",
     }
     return all(checks.values()), [name for name, valid in checks.items() if not valid]
 
@@ -212,7 +212,7 @@ def _load_selected_envelope(path: Path, expected: int, index_field: str) -> tupl
                 metadata = dict(item.get("metadata", {}))
             elif item.get("type") == "record":
                 raw = item["record"]
-                keep = {"row_index", "example_index", "teacher_action", "policy_target_action_identity", "policy_target_kind", "policy_target_source", "source_metadata", "controller_provenance", "raw_reward_components", "structured_battle_outcome", "behavior_action", "behavior_action_status"}
+                keep = {"row_index", "example_index", "source_checkpoint_id", "source_run_id", "source_seed", "source_battle_index", "source_pool_record_index", "teacher_action", "policy_target_action_identity", "policy_target_kind", "policy_target_source", "source_metadata", "controller_provenance", "raw_reward_components", "structured_battle_outcome", "behavior_action", "behavior_action_status"}
                 row = {key: raw[key] for key in keep if key in raw}
                 index = row.get(index_field)
                 if not isinstance(index, int) or not 0 <= index < expected:
