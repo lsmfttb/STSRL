@@ -170,8 +170,9 @@ def audit_t064(manifest_path: Path, output: Path) -> dict[str, Any]:
         behavior = recover_behavior(source, successor) if source else {"status": "unavailable", "reason": "source record missing"}
         teacher_action = _identity(teachers[index].get("teacher_action", {}).get("action_identity"))
         trainer_meta = trainers[index].get("source_metadata", {})
-        same = teacher_action == _identity(trainers[index].get("policy_target_action_identity"))
-        comparison = "unavailable" if behavior.get("status") != "available" or teacher_action is None else "same" if tuple(behavior["identity"]) == teacher_action else "different"
+        trainer_action = _identity(trainers[index].get("policy_target_action_identity"))
+        same = teacher_action == trainer_action
+        comparison = "unavailable" if behavior.get("status") != "available" or teacher_action is None else "same" if behavior["identity"] == teacher_action else "different"
         outcome = source.get("battle_outcome")
         rows.append({"index": index, "selected_identity": item["complete_identity"], "selected_identity_sha256": item.get("complete_identity_sha256"), "derived_identity_sha256": derived_sha, "identity_valid": identity_ok, "identity_error": source_error, "component": component, "source_record_index": record_index, "source_checkpoint_id": source.get("source_checkpoint_id"), "source_run_id": source.get("source_run_id"), "source_seed": source.get("source_seed"), "source_battle_index": source.get("source_battle_index"), "act": item.get("act"), "room_type": item.get("room_type"), "trace_length": len(source.get("action_trace", ())), "successor": {"record_index": successor.get("record_index"), "trace_length": len(successor.get("action_trace", ())), "battle_index": successor.get("source_battle_index")} if successor else None, "behavior": behavior, "teacher_action": teacher_action, "trainer_policy_action": _identity(trainers[index].get("policy_target_action_identity")), "comparison": comparison, "source_battle_outcome": outcome if isinstance(outcome, str) else None, "trainer_value_lineage": trainers[index].get("raw_reward_components", {}).get("battle_outcome"), "source_controller": source.get("source_battle_controller_provenance"), "teacher_controller": teachers[index].get("controller_provenance"), "policy_target_source": trainers[index].get("policy_target_source"), "value_target_source": "trainer_input_record.raw_reward_components.battle_outcome"})
     all_integrity = all(row["identity_valid"] for row in rows) and all(item["valid"] for item in input_checks) and terminal_valid
@@ -192,14 +193,14 @@ def _join_successors(path: Path, selected: set[tuple[Any, ...]]) -> dict[tuple[A
         previous[key] = row
     return found
 
-def classify(*, integrity_valid: bool, rows: list[dict[str, Any]], source_outcome_proven: bool = True, search_leaf_proven: bool = True) -> str:
+def classify(*, integrity_valid: bool, rows: list[dict[str, Any]], source_outcome_proven: bool = False, search_leaf_proven: bool = False, oracle_policy_proven: bool = False, no_alignment_contract: bool = False) -> str:
     if not integrity_valid:
         return "INCOMPLETE"
     divergent = [row for row in rows if row.get("comparison") == "different"]
-    if source_outcome_proven and search_leaf_proven and divergent:
+    if source_outcome_proven and search_leaf_proven and oracle_policy_proven and no_alignment_contract and divergent and any(row.get("outcome") != "unavailable" for row in divergent):
         return "VALUE_TARGET_SEMANTIC_MISMATCH_CONFIRMED"
-    if not divergent and source_outcome_proven and search_leaf_proven:
-        return "VALUE_TARGET_SEMANTICS_ALIGNED"
+    if not divergent and source_outcome_proven and search_leaf_proven and oracle_policy_proven and no_alignment_contract:
+        return "VALUE_TARGET_SEMANTICS_UNRESOLVED"
     return "VALUE_TARGET_SEMANTICS_UNRESOLVED"
 
 def audit(selected: list[Mapping[str, Any]], teacher: list[Mapping[str, Any]], trainer: list[Mapping[str, Any]], source_path: Path, *, expected_rows: int = 460) -> dict[str, Any]:
