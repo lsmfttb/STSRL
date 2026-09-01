@@ -267,7 +267,7 @@ def audit_t064(manifest_path: Path, output: Path) -> dict[str, Any]:
             record_index = record.get("record_index")
             if record_index in indexes:
                 found[(component, record_index)] = (record, None)
-            if previous is not None and previous.get("record_index") in indexes and record.get("source_run_id") == previous.get("source_run_id") and record.get("source_seed") == previous.get("source_seed") and record.get("source_battle_index") == previous.get("source_battle_index", -1) + 1:
+            if previous is not None and previous.get("record_index") in indexes:
                 key = (component, previous["record_index"])
                 if key in found: found[key] = (previous, record)
             previous = record
