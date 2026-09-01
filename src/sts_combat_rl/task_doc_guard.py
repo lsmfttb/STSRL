@@ -3,7 +3,10 @@
 import re
 from pathlib import Path
 
-LEARNING_ARTIFACT = re.compile(r"\b(checkpoint|teacher|trainer|dataset|source artifact)\b", re.I)
+LEARNING_ARTIFACT = re.compile(
+    r"\b(checkpoint|teacher|trainer|dataset|source[- ]artifact|learning[- ]source[- ]artifacts?)\b",
+    re.I,
+)
 CONTRACT = "## Artifact Eligibility Contract"
 REQUIRED_MARKER = "Artifact Eligibility Required: true"
 

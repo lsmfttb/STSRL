@@ -36,4 +36,26 @@ def test_status_field_is_reserved_for_task_index() -> None:
 
 
 def test_published_learning_artifact_docs_have_eligibility_contract() -> None:
-    assert check_published_task_doc(ROOT / "docs/tasks/T081-scientific-artifact-eligibility-gate.md") == []
+    offenders = {
+        str(path.relative_to(ROOT)): check_published_task_doc(path)
+        for path in sorted((ROOT / "docs" / "tasks").glob("T*.md"))
+        if check_published_task_doc(path)
+    }
+    assert "docs/tasks/T081-scientific-artifact-eligibility-gate.md" not in offenders
+    assert offenders == {}
+
+
+def test_published_task_doc_scan_detects_learning_source_omission() -> None:
+    from sts_combat_rl.task_doc_guard import check_published_task_doc
+
+    synthetic = ROOT / "tests" / ".task-doc-learning-source-omission.md"
+    synthetic.write_text(
+        "Artifact Eligibility Required: true\n\nConsumes a learning-source artifact.\n",
+        encoding="utf-8",
+    )
+    try:
+        assert check_published_task_doc(synthetic) == [
+            "missing Artifact Eligibility Contract section"
+        ]
+    finally:
+        synthetic.unlink()
