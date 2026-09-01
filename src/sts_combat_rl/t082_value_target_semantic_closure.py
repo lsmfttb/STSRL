@@ -234,6 +234,7 @@ def _load_envelope(path: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
 def _load_selected_envelope(path: Path, expected: int, index_field: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     metadata: dict[str, Any] | None = None
     rows: dict[int, dict[str, Any]] = {}
+    expected_next = 0
     with path.open(encoding="utf-8") as stream:
         for number, line in enumerate(stream, 1):
             item = json.loads(line)
@@ -244,11 +245,12 @@ def _load_selected_envelope(path: Path, expected: int, index_field: str) -> tupl
                 keep = {"row_index", "example_index", "source_checkpoint_id", "source_run_id", "source_seed", "source_battle_index", "source_pool_record_index", "teacher_action", "policy_target_action_identity", "policy_target_kind", "policy_target_source", "source_metadata", "structural_metadata", "controller_provenance", "raw_reward_components", "structured_battle_outcome", "behavior_action", "behavior_action_status"}
                 row = {key: raw[key] for key in keep if key in raw}
                 index = row.get(index_field)
-                if not isinstance(index, int) or not 0 <= index < expected:
+                if not isinstance(index, int) or index != expected_next:
                     raise ValueError(f"missing or invalid {index_field}: row {number}")
                 if isinstance(index, int) and 0 <= index < expected:
                     if index in rows: raise ValueError(f"duplicate {index_field}: {index}")
                     rows[index] = row
+                    expected_next += 1
             else:
                 raise ValueError(f"invalid envelope row {number}")
     if metadata is None or len(rows) != expected:
