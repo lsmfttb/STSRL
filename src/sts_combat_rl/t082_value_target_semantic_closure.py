@@ -125,11 +125,16 @@ def _rows(path: Path) -> Iterable[dict[str, Any]]:
 
 def _source_rows(path: Path) -> Iterable[dict[str, Any]]:
     """Stream only fields needed for T082, excluding raw snapshots/features."""
+    if not path.exists():
+        return
     keep = {"record_index", "source_checkpoint_id", "source_run_id", "source_seed", "source_battle_index", "action_trace", "battle_outcome", "checkpoint_information_regime", "distribution_kind", "structural_metadata", "source_battle_controller_provenance", "source_controller_provenance"}
     previous_index = -1
     with path.open(encoding="utf-8") as stream:
         for number, line in enumerate(stream, 1):
-            item = json.loads(line)
+            try:
+                item = json.loads(line)
+            except json.JSONDecodeError:
+                return
             if item.get("type") == "metadata":
                 continue
             row = item.get("record", item)
@@ -256,7 +261,7 @@ def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460) -
     terminal_valid = all(decision.get(key) is True for key in ("experiment_complete", "source_adequacy", "source_integrity_valid")) and decision.get("terminal_case") == "Case B"
     selected = manifest.get("selected_sources", [])
     if len(selected) != expected_rows or any(item.get("complete_identity", {}).get("schema_id") != "t064-complete-source-identity-v1" for item in selected):
-        return {"schema_version": SCHEMA, "classification": "INCOMPLETE", "integrity": {"valid": False, "problems": [f"selected inventory does not contain exactly {expected_rows} valid rows"]}, "rows": []}
+        return incomplete(f"selected inventory does not contain exactly {expected_rows} valid rows")
     root = manifest_path.parent
     teacher_path, trainer_path = root / "teacher/merged.jsonl", root / "trainer/trainer-input.jsonl"
     try:
@@ -266,7 +271,7 @@ def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460) -
         return incomplete(f"teacher/trainer artifact unavailable or malformed: {exc}")
     input_checks.extend([
         {"name": "teacher", "sha256": sha256(teacher_path), "expected_sha256": EXPECTED_TEACHER_SHA, "schema": teacher_meta.get("artifact_schema_id"), "record_count": teacher_meta.get("record_count"), "valid": (expected_rows != 460 or sha256(teacher_path) == EXPECTED_TEACHER_SHA) and teacher_meta.get("artifact_schema_id") == "oracle-search-teacher-v1" and teacher_meta.get("record_count") == expected_rows},
-        {"name": "trainer", "sha256": sha256(trainer_path), "expected_sha256": EXPECTED_TRAINER_SHA, "schema": trainer_meta.get("format_version"), "record_count": trainer_meta.get("record_count"), "policy_target_kind": trainer_meta.get("policy_target_kind"), "structured_outcome_schema": trainer_meta.get("structured_battle_outcome_schema"), "valid": (expected_rows != 460 or sha256(trainer_path) == EXPECTED_TRAINER_SHA) and trainer_meta.get("record_count") == expected_rows and trainer_meta.get("format_version") in (6, "6") and trainer_meta.get("policy_target_kind", "oracle_soft_visit_distribution") == "oracle_soft_visit_distribution"},
+        {"name": "trainer", "sha256": sha256(trainer_path), "expected_sha256": EXPECTED_TRAINER_SHA, "schema": trainer_meta.get("format_version"), "record_count": trainer_meta.get("record_count"), "policy_target_kind": trainer_meta.get("policy_target_kind"), "structured_outcome_schema": trainer_meta.get("structured_battle_outcome_schema"), "expected_policy_target_kind": "oracle_soft_visit_distribution", "expected_structured_outcome_schema": "structured-battle-outcome-v1", "valid": (expected_rows != 460 or sha256(trainer_path) == EXPECTED_TRAINER_SHA) and trainer_meta.get("record_count") == expected_rows and trainer_meta.get("format_version") in (6, "6") and trainer_meta.get("policy_target_kind") == "oracle_soft_visit_distribution" and trainer_meta.get("structured_battle_outcome_schema") == "structured-battle-outcome-v1"},
     ])
     if len(teachers) != expected_rows or len(trainers) != expected_rows:
         return {"schema_version": SCHEMA, "classification": "INCOMPLETE", "integrity": {"valid": False, "problems": ["teacher/trainer row count mismatch"]}, "rows": []}
@@ -276,7 +281,10 @@ def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460) -
     for component, spec in manifest["input_artifacts"].items():
         if component in by_component:
             pool = Path(spec["path"].replace("D:\\", "/mnt/d/").replace("\\", "/"))
-            pool_checks.append(_validate_pool(pool, spec, component))
+            try:
+                pool_checks.append(_validate_pool(pool, spec, component))
+            except (OSError, ValueError, json.JSONDecodeError) as exc:
+                pool_checks.append({"path": str(pool), "component": component, "valid": False, "reason": f"malformed artifact: {exc}"})
     coverage = Counter((item.get("act"), item.get("component")) for item in selected)
     found: dict[tuple[str, int], tuple[dict[str, Any], dict[str, Any] | None]] = {}
     for component, indexes in by_component.items():
