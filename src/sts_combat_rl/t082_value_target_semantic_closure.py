@@ -22,6 +22,49 @@ CLASSIFICATIONS = {"VALUE_TARGET_SEMANTIC_MISMATCH_CONFIRMED", "VALUE_TARGET_SEM
 EXPECTED_TEACHER_SHA = "1352eb301509f258ae92509b804125d59d2da17ef5f7f6e5b81131f11e1d0d72"
 EXPECTED_TRAINER_SHA = "aae847505ece7c4d535d08cffc9e24bc2aaead334234332f41c69f0b2c99bada"
 
+
+def semantic_proof() -> dict[str, Any]:
+    """Return repository-backed proof of the three target consumers.
+
+    Text checks are intentional: they keep this offline audit deterministic and
+    make a semantic change visible without importing or executing training.
+    """
+    checks = {
+        "policy_target_from_oracle": (
+            Path(__file__).parent / "sim/oracle_teacher_search_guidance.py",
+            "_trainer_record_from_teacher_row",
+            "_policy_target_from_teacher_row",
+        ),
+        "value_target_from_source_outcome": (
+            Path(__file__).parent / "sim/oracle_teacher_search_guidance.py",
+            "_battle_survived",
+            "source.battle_outcome",
+        ),
+        "search_v2_leaf_survival_consumer": (
+            Path(__file__).parent / "sim/battle_search_v2.py",
+            "value_callback",
+            "battle_survival_probability",
+        ),
+    }
+    proof: dict[str, Any] = {}
+    for name, (module, symbol, evidence) in checks.items():
+        path = module
+        source = path.read_text(encoding="utf-8")
+        verified = f"def {symbol}" in source and evidence in source
+        proof[name] = {
+            "verified": verified,
+            "file": str(path),
+            "symbol": symbol,
+            "evidence": evidence,
+            "source_sha256": hashlib.sha256(source.encode()).hexdigest(),
+        }
+    proof["continuation_alignment"] = {
+        "verified": False,
+        "status": "unavailable",
+        "reason": "retained T064 provenance contains no same-continuation proof",
+    }
+    return proof
+
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -239,7 +282,8 @@ def audit_t064(manifest_path: Path, output: Path) -> dict[str, Any]:
     coverage_valid = observed_acts == Counter({1: 256, 2: 204}) and observed_components == Counter({"assist_0": 256, "assist_hp50": 12, "assist_hp50_potion_elite_boss": 32, "assist_hp75_potion": 160})
     all_integrity = all_integrity and coverage_valid
     divergent = [row for row in rows if row["comparison"] == "different"]
-    report = {"schema_version": SCHEMA, "inputs": {"manifest": str(manifest_path), "manifest_sha256": sha256(manifest_path), "control_artifacts": input_checks, "terminal_case_valid": terminal_valid, "teacher": {"path": str(teacher_path), "sha256": sha256(teacher_path)}, "trainer": {"path": str(trainer_path), "sha256": sha256(trainer_path)}, "source_components": {component: {"path": str(manifest["input_artifacts"][component]["path"]), "expected_sha256": manifest["input_artifacts"][component]["sha256"]} for component in sorted(by_component)}}, "coverage": {"observed": {str(key): value for key, value in sorted(coverage.items())}, "expected_acts": {"1": 256, "2": 204}, "expected_components": {"assist_0": 256, "assist_hp50": 12, "assist_hp50_potion_elite_boss": 32, "assist_hp75_potion": 160}, "valid": coverage_valid}, "integrity": {"valid": all_integrity, "selected_teacher_trainer_counts": len(rows) == 460, "source_identity_valid": all(row["identity_valid"] for row in rows), "problems": [] if all_integrity else ["one or more identity, coverage, control-artifact, or terminal predicates failed"]}, "counts": {"total_rows": len(rows), "comparison_denominator": sum(row["comparison"] != "unavailable" for row in rows), "divergence_rate": len(divergent) / max(1, sum(row["comparison"] != "unavailable" for row in rows)), "behavior_recoverable": sum(row["behavior"]["status"] == "available" for row in rows), "behavior_unavailable": sum(row["behavior"]["status"] != "available" for row in rows), "comparisons": dict(Counter(row["comparison"] for row in rows)), "outcomes": dict(Counter(row["outcome"] for row in rows)), "divergent_outcomes": dict(Counter(row["outcome"] for row in divergent)), "divergent_with_outcome": sum(row["outcome"] == "available" for row in divergent)}, "strata": {"act": dict(Counter((row["act"], row["comparison"]) for row in rows)), "room_type": dict(Counter((row["room_type"], row["comparison"]) for row in rows)), "component": dict(Counter((row["component"], row["comparison"]) for row in rows)), "source_controller": dict(Counter((str(row["source_controller"]), row["comparison"]) for row in rows))}, "classification": classify(integrity_valid=all_integrity, rows=rows, source_outcome_proven=True, search_leaf_proven=True, oracle_policy_proven=True, no_alignment_contract=True), "rows": rows, "semantic_call_chain": {"policy_target": "oracle teacher action", "value_target": "realized source battle outcome", "search_v2_leaf": "battle_survival_probability at hypothetical leaf", "continuation_alignment_proof": "unavailable"}}
+    proof = semantic_proof()
+    report = {"schema_version": SCHEMA, "inputs": {"manifest": str(manifest_path), "manifest_sha256": sha256(manifest_path), "control_artifacts": input_checks, "terminal_case_valid": terminal_valid, "teacher": {"path": str(teacher_path), "sha256": sha256(teacher_path)}, "trainer": {"path": str(trainer_path), "sha256": sha256(trainer_path)}, "source_components": {component: {"path": str(manifest["input_artifacts"][component]["path"]), "expected_sha256": manifest["input_artifacts"][component]["sha256"]} for component in sorted(by_component)}}, "coverage": {"observed": {str(key): value for key, value in sorted(coverage.items())}, "expected_acts": {"1": 256, "2": 204}, "expected_components": {"assist_0": 256, "assist_hp50": 12, "assist_hp50_potion_elite_boss": 32, "assist_hp75_potion": 160}, "valid": coverage_valid}, "integrity": {"valid": all_integrity, "selected_teacher_trainer_counts": len(rows) == 460, "source_identity_valid": all(row["identity_valid"] for row in rows), "problems": [] if all_integrity else ["one or more identity, coverage, control-artifact, or terminal predicates failed"]}, "counts": {"total_rows": len(rows), "comparison_denominator": sum(row["comparison"] != "unavailable" for row in rows), "divergence_rate": len(divergent) / max(1, sum(row["comparison"] != "unavailable" for row in rows)), "behavior_recoverable": sum(row["behavior"]["status"] == "available" for row in rows), "behavior_unavailable": sum(row["behavior"]["status"] != "available" for row in rows), "comparisons": dict(Counter(row["comparison"] for row in rows)), "outcomes": dict(Counter(row["outcome"] for row in rows)), "divergent_outcomes": dict(Counter(row["outcome"] for row in divergent)), "divergent_with_outcome": sum(row["outcome"] == "available" for row in divergent)}, "strata": {"act": dict(Counter((row["act"], row["comparison"]) for row in rows)), "room_type": dict(Counter((row["room_type"], row["comparison"]) for row in rows)), "component": dict(Counter((row["component"], row["comparison"]) for row in rows)), "source_controller": dict(Counter((str(row["source_controller"]), row["comparison"]) for row in rows))}, "classification": classify(integrity_valid=all_integrity, rows=rows, proof=proof), "rows": rows, "semantic_proof": proof}
     output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return report
 
@@ -259,14 +303,25 @@ def _join_successors(path: Path, selected: set[tuple[Any, ...]]) -> dict[tuple[A
         previous[key] = row
     return found
 
-def classify(*, integrity_valid: bool, rows: list[dict[str, Any]], source_outcome_proven: bool = False, search_leaf_proven: bool = False, oracle_policy_proven: bool = False, no_alignment_contract: bool = False) -> str:
+def classify(*, integrity_valid: bool, rows: list[dict[str, Any]], proof: Mapping[str, Any]) -> str:
     if not integrity_valid:
         return "INCOMPLETE"
     divergent = [row for row in rows if row.get("comparison") == "different"]
-    if source_outcome_proven and search_leaf_proven and oracle_policy_proven and no_alignment_contract and divergent and any(row.get("outcome") != "unavailable" for row in divergent):
+    semantic = all(
+        proof.get(key, {}).get("verified") is True
+        for key in (
+            "policy_target_from_oracle",
+            "value_target_from_source_outcome",
+            "search_v2_leaf_survival_consumer",
+        )
+    )
+    aligned = proof.get("continuation_alignment", {}).get("verified") is True
+    if semantic and not aligned and divergent and any(
+        row.get("outcome") != "unavailable" for row in divergent
+    ):
         return "VALUE_TARGET_SEMANTIC_MISMATCH_CONFIRMED"
-    if not divergent and source_outcome_proven and search_leaf_proven and oracle_policy_proven and no_alignment_contract:
-        return "VALUE_TARGET_SEMANTICS_UNRESOLVED"
+    if semantic and aligned and not divergent:
+        return "VALUE_TARGET_SEMANTICS_ALIGNED"
     return "VALUE_TARGET_SEMANTICS_UNRESOLVED"
 
 def audit(selected: list[Mapping[str, Any]], teacher: list[Mapping[str, Any]], trainer: list[Mapping[str, Any]], source_path: Path, *, expected_rows: int = 460) -> dict[str, Any]:
@@ -291,7 +346,7 @@ def audit(selected: list[Mapping[str, Any]], teacher: list[Mapping[str, Any]], t
         rows.append(row)
         for key in ("act", "room_type", "assistance_level", "source_battle_controller"):
             strata[f"{key}={row.get(key, 'unavailable')}"][comparison] += 1
-    classification = classify(integrity_valid=integrity, rows=rows)
+    classification = classify(integrity_valid=integrity, rows=rows, proof=semantic_proof())
     return {"schema_version": SCHEMA, "classification": classification, "integrity": {"valid": integrity, "problems": problems}, "counts": {"total_rows": len(rows), "behavior_recoverable": sum(row["behavior"]["status"] == "available" for row in rows), "behavior_unavailable": sum(row["behavior"]["status"] != "available" for row in rows), "comparisons": dict(Counter(row["comparison"] for row in rows)), "outcomes": dict(Counter(row["outcome"] for row in rows))}, "strata": {key: dict(sorted(value.items())) for key, value in sorted(strata.items())}, "rows": rows}
 
 def main() -> None:

@@ -6,6 +6,18 @@ from sts_combat_rl.t082_value_target_semantic_closure import audit, classify, re
 def action(number, occurrence=0):
     return {"action_id": number, "occurrence": occurrence, "kind": "card", "label": f"Card {number}", "stable_id": f"card:{number}"}
 
+
+def proof(*, alignment=False, missing=()):
+    result = {
+        "policy_target_from_oracle": {"verified": True},
+        "value_target_from_source_outcome": {"verified": True},
+        "search_v2_leaf_survival_consumer": {"verified": True},
+        "continuation_alignment": {"verified": alignment},
+    }
+    for key in missing:
+        result[key] = {"verified": False}
+    return result
+
 def test_recovery_requires_immediate_strict_occurrence_safe_successor():
     current = {"action_trace": [action(1)]}
     successor = {"action_trace": [action(1), action(2)]}
@@ -30,9 +42,11 @@ def test_bounded_audit_counts_and_incomplete_classification(tmp_path: Path):
 
 def test_classification_requires_explicit_proof_and_outcome():
     divergent = [{"comparison": "different", "outcome": "available"}]
-    assert classify(integrity_valid=True, rows=divergent) == "VALUE_TARGET_SEMANTICS_UNRESOLVED"
-    assert classify(integrity_valid=True, rows=divergent, source_outcome_proven=True, search_leaf_proven=True, oracle_policy_proven=True, no_alignment_contract=True) == "VALUE_TARGET_SEMANTIC_MISMATCH_CONFIRMED"
-    assert classify(integrity_valid=True, rows=[], source_outcome_proven=True, search_leaf_proven=True, oracle_policy_proven=True, no_alignment_contract=True) == "VALUE_TARGET_SEMANTICS_UNRESOLVED"
+    assert classify(integrity_valid=True, rows=divergent, proof=proof(missing=("value_target_from_source_outcome",))) == "VALUE_TARGET_SEMANTICS_UNRESOLVED"
+    assert classify(integrity_valid=True, rows=divergent, proof=proof()) == "VALUE_TARGET_SEMANTIC_MISMATCH_CONFIRMED"
+    assert classify(integrity_valid=True, rows=[{"comparison": "different", "outcome": "unavailable"}], proof=proof()) == "VALUE_TARGET_SEMANTICS_UNRESOLVED"
+    assert classify(integrity_valid=True, rows=[], proof=proof(alignment=True)) == "VALUE_TARGET_SEMANTICS_ALIGNED"
+    assert classify(integrity_valid=True, rows=[], proof=proof()) == "VALUE_TARGET_SEMANTICS_UNRESOLVED"
 
 def test_pool_validator_rejects_mutated_metadata_hash_and_order(tmp_path: Path):
     pool = tmp_path / "pool.jsonl"
