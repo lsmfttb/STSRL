@@ -260,6 +260,11 @@ def classify(
     divergent = sum(
         item["behavior_action"]["comparison"] == "different" for item in comparisons
     )
+    divergent_with_available_outcome_rows = sum(
+        item["behavior_action"]["comparison"] == "different"
+        and item["outcome"]["status"] == "available"
+        for item in comparisons
+    )
     behavior_available = sum(
         item["behavior_action"]["status"] == "available" for item in comparisons
     )
@@ -285,6 +290,9 @@ def classify(
             "continuation_policy_proof_available": proof_available,
             "behavior_available_rows": behavior_available,
             "divergent_rows": divergent,
+            "divergent_with_available_outcome_rows": (
+                divergent_with_available_outcome_rows
+            ),
             "outcome_available_rows": outcome_available,
             "all_behavior_unavailable": behavior_available == 0,
         },
@@ -303,8 +311,7 @@ def classify(
         and search_leaf_chain_verified
         and not proof_available
         and behavior_available > 0
-        and divergent > 0
-        and outcome_available > 0
+        and divergent_with_available_outcome_rows > 0
     ):
         return "VALUE_TARGET_SEMANTIC_MISMATCH_CONFIRMED", evidence
     return "VALUE_TARGET_SEMANTICS_UNRESOLVED", evidence

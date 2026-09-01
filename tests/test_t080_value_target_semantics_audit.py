@@ -204,6 +204,60 @@ def test_classification_requires_evidence_and_reports_criteria(tmp_path, monkeyp
     } <= {key.split("=", 1)[0] for key in report["strata"]}
 
 
+def test_classification_requires_divergence_and_outcome_on_same_row():
+    common = {
+        "status": "available",
+        "action_identity": {"stable_id": "x"},
+    }
+    split_rows = [
+        {
+            "behavior_action": {
+                "status": "available",
+                "action_identity": {"stable_id": "behavior"},
+                "comparison": "different",
+            },
+            "outcome": {"status": "unavailable", "value": None},
+        },
+        {
+            "behavior_action": {
+                "status": "unavailable",
+                "action_identity": None,
+                "comparison": "unavailable",
+            },
+            "outcome": {"status": "available", "value": True},
+        },
+    ]
+    classification, evidence = t080.classify(
+        provenance={},
+        rows=[],
+        comparisons=split_rows,
+        exact_lineage_verified=True,
+        explicit_source_outcome=True,
+        search_leaf_chain_verified=True,
+    )
+    assert classification == "VALUE_TARGET_SEMANTICS_UNRESOLVED"
+    assert evidence["evidence"]["divergent_with_available_outcome_rows"] == 0
+
+    same_row = {
+        "behavior_action": {
+            "status": "available",
+            "action_identity": common["action_identity"],
+            "comparison": "different",
+        },
+        "outcome": {"status": "available", "value": False},
+    }
+    classification, evidence = t080.classify(
+        provenance={},
+        rows=[],
+        comparisons=[same_row],
+        exact_lineage_verified=True,
+        explicit_source_outcome=True,
+        search_leaf_chain_verified=True,
+    )
+    assert classification == "VALUE_TARGET_SEMANTIC_MISMATCH_CONFIRMED"
+    assert evidence["evidence"]["divergent_with_available_outcome_rows"] == 1
+
+
 def test_report_and_manifest_are_deterministic_and_json_safe(tmp_path, monkeypatch):
     report, _, _ = _fake_audit(tmp_path, monkeypatch)
     first_report, first_manifest = t080.write_outputs(report, tmp_path / "out", "audit")
