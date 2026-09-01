@@ -889,7 +889,15 @@ def audit_t064(
     row_problems: list[str] = []
     for index, item in enumerate(selected):
         component, record_index = item["component"], item["source_record_index"]
-        source, successor = found.get((component, record_index), ({}, None))
+        source, physical_successor = found.get((component, record_index), ({}, None))
+        successor = physical_successor
+        if successor is not None and (
+            successor.get("source_run_id") != source.get("source_run_id")
+            or successor.get("source_seed") != source.get("source_seed")
+            or successor.get("source_battle_index")
+            != source.get("source_battle_index", -1) + 1
+        ):
+            successor = None
         try:
             derived, derived_sha = _record_identity(source, component)
         except (ValueError, KeyError, TypeError, AttributeError) as exc:
@@ -925,6 +933,12 @@ def audit_t064(
             if source
             else {"status": "unavailable", "reason": "source record missing"}
         )
+        if source and physical_successor is not None and successor is None:
+            behavior = {
+                "status": "unavailable",
+                "reason": "run boundary/no exact successor",
+                "successor_exists": False,
+            }
         teacher_payload = teachers[index].get("teacher_action")
         teacher_action = (
             _identity(teacher_payload.get("action_identity"))
@@ -1039,6 +1053,7 @@ def audit_t064(
                         "successor_exists", successor is not None
                     ),
                 },
+                "physical_successor_candidate": physical_successor is not None,
                 "linkage_valid": linkage_valid,
                 "linkage_problems": linkage_problems,
                 "source_pool": {
