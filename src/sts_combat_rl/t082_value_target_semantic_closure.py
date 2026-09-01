@@ -231,19 +231,28 @@ def _load_selected_envelope(path: Path, expected: int, index_field: str) -> tupl
     return metadata, [rows[index] for index in range(expected)]
 
 def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460) -> dict[str, Any]:
+    def incomplete(problem: str) -> dict[str, Any]:
+        report = {"schema_version": SCHEMA, "classification": "INCOMPLETE", "integrity": {"valid": False, "problems": [problem]}, "rows": []}
+        output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        return report
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        report = {"schema_version": SCHEMA, "classification": "INCOMPLETE", "integrity": {"valid": False, "problems": [f"manifest unavailable: {exc}"]}, "rows": []}
-        output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        return report
+        return incomplete(f"manifest unavailable: {exc}")
     input_checks = []
     for name, (expected_hash, schema) in EXPECTED_INPUTS.items():
         path = manifest_path.parent / name
         actual = sha256(path) if path.exists() else None
-        document = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        try:
+            document = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        except (OSError, json.JSONDecodeError) as exc:
+            document = {"parse_error": str(exc)}
         input_checks.append({"name": name, "path": str(path), "expected_sha256": expected_hash, "sha256": actual, "schema": document.get("schema_id"), "expected_schema": schema, "valid": actual == expected_hash and document.get("schema_id") == schema})
-    decision = json.loads((manifest_path.parent / "t064-transfer-decision.json").read_text(encoding="utf-8"))
+    decision_path = manifest_path.parent / "t064-transfer-decision.json"
+    try:
+        decision = json.loads(decision_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        decision = {}
     terminal_valid = all(decision.get(key) is True for key in ("experiment_complete", "source_adequacy", "source_integrity_valid")) and decision.get("terminal_case") == "Case B"
     selected = manifest.get("selected_sources", [])
     if len(selected) != expected_rows or any(item.get("complete_identity", {}).get("schema_id") != "t064-complete-source-identity-v1" for item in selected):
@@ -254,12 +263,10 @@ def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460) -
         teacher_meta, teachers = _load_selected_envelope(teacher_path, expected_rows, "row_index")
         trainer_meta, trainers = _load_selected_envelope(trainer_path, expected_rows, "example_index")
     except (OSError, ValueError, json.JSONDecodeError) as exc:
-        report = {"schema_version": SCHEMA, "classification": "INCOMPLETE", "integrity": {"valid": False, "problems": [f"teacher/trainer artifact unavailable or malformed: {exc}"]}, "rows": []}
-        output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-        return report
+        return incomplete(f"teacher/trainer artifact unavailable or malformed: {exc}")
     input_checks.extend([
         {"name": "teacher", "sha256": sha256(teacher_path), "expected_sha256": EXPECTED_TEACHER_SHA, "schema": teacher_meta.get("artifact_schema_id"), "record_count": teacher_meta.get("record_count"), "valid": (expected_rows != 460 or sha256(teacher_path) == EXPECTED_TEACHER_SHA) and teacher_meta.get("artifact_schema_id") == "oracle-search-teacher-v1" and teacher_meta.get("record_count") == expected_rows},
-        {"name": "trainer", "sha256": sha256(trainer_path), "expected_sha256": EXPECTED_TRAINER_SHA, "schema": trainer_meta.get("format_version"), "record_count": trainer_meta.get("record_count"), "valid": (expected_rows != 460 or sha256(trainer_path) == EXPECTED_TRAINER_SHA) and teacher_meta.get("record_count") == expected_rows},
+        {"name": "trainer", "sha256": sha256(trainer_path), "expected_sha256": EXPECTED_TRAINER_SHA, "schema": trainer_meta.get("format_version"), "record_count": trainer_meta.get("record_count"), "policy_target_kind": trainer_meta.get("policy_target_kind"), "structured_outcome_schema": trainer_meta.get("structured_battle_outcome_schema"), "valid": (expected_rows != 460 or sha256(trainer_path) == EXPECTED_TRAINER_SHA) and trainer_meta.get("record_count") == expected_rows and trainer_meta.get("format_version") in (6, "6") and trainer_meta.get("policy_target_kind", "oracle_soft_visit_distribution") == "oracle_soft_visit_distribution"},
     ])
     if len(teachers) != expected_rows or len(trainers) != expected_rows:
         return {"schema_version": SCHEMA, "classification": "INCOMPLETE", "integrity": {"valid": False, "problems": ["teacher/trainer row count mismatch"]}, "rows": []}
