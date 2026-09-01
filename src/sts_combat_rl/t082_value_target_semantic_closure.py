@@ -65,6 +65,7 @@ def _rows(path: Path) -> Iterable[dict[str, Any]]:
 def _source_rows(path: Path) -> Iterable[dict[str, Any]]:
     """Stream only fields needed for T082, excluding raw snapshots/features."""
     keep = {"record_index", "source_checkpoint_id", "source_run_id", "source_seed", "source_battle_index", "action_trace", "battle_outcome", "checkpoint_information_regime", "distribution_kind", "structural_metadata", "source_battle_controller_provenance", "source_controller_provenance"}
+    previous_index = -1
     with path.open(encoding="utf-8") as stream:
         for number, line in enumerate(stream, 1):
             item = json.loads(line)
@@ -73,6 +74,10 @@ def _source_rows(path: Path) -> Iterable[dict[str, Any]]:
             row = item.get("record", item)
             if not isinstance(row, Mapping):
                 raise ValueError(f"invalid source row {number}")
+            index = row.get("record_index")
+            if not isinstance(index, int) or index <= previous_index:
+                raise ValueError(f"malformed or duplicate source record_index in {path}")
+            previous_index = index
             yield {key: row[key] for key in keep if key in row}
 
 def _validate_pool(path: Path, expected: Mapping[str, Any], component: str) -> dict[str, Any]:
