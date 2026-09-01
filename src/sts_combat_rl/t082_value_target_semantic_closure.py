@@ -72,13 +72,14 @@ def sha256(path: Path) -> str:
             digest.update(block)
     return digest.hexdigest()
 
-def _identity(action: Any) -> tuple[Any, ...] | None:
+def _identity(action: Any) -> dict[str, Any] | None:
     if not isinstance(action, Mapping):
         return None
-    fields = ("action_id", "occurrence", "kind", "label", "stable_id")
-    if any(action.get(field) is None for field in fields):
+    if not isinstance(action.get("stable_id"), str) or not action["stable_id"]:
         return None
-    return tuple(action[field] for field in fields)
+    if isinstance(action.get("occurrence"), bool) or not isinstance(action.get("occurrence"), int) or action["occurrence"] < 0:
+        return None
+    return dict(action)
 
 def recover_behavior(current: Mapping[str, Any], successor: Mapping[str, Any] | None) -> dict[str, Any]:
     if successor is None:
@@ -87,13 +88,25 @@ def recover_behavior(current: Mapping[str, Any], successor: Mapping[str, Any] | 
     after = successor.get("action_trace", ())
     if not isinstance(before, list | tuple) or not isinstance(after, list | tuple):
         return {"status": "unavailable", "reason": "action trace unavailable"}
+    for key in ("source_run_id", "source_seed"):
+        if key in current or key in successor:
+            if successor.get(key) != current.get(key):
+                return {"status": "unavailable", "reason": f"successor {key} linkage mismatch"}
+    if "source_battle_index" in current or "source_battle_index" in successor:
+        if successor.get("source_battle_index") != current.get("source_battle_index", -1) + 1:
+            return {"status": "unavailable", "reason": "successor is not the physically immediate battle"}
+    current_meta = current.get("structural_metadata", {})
+    successor_meta = successor.get("structural_metadata", {})
+    if isinstance(current_meta, Mapping) and isinstance(successor_meta, Mapping):
+        if current_meta.get("assistance_level") != successor_meta.get("assistance_level"):
+            return {"status": "unavailable", "reason": "successor assistance/component mismatch"}
     before_ids = [_identity(item) for item in before]
     after_ids = [_identity(item) for item in after]
     if None in before_ids or None in after_ids:
         return {"status": "unavailable", "reason": "unstable action identity"}
     if len(after_ids) <= len(before_ids) or after_ids[: len(before_ids)] != before_ids:
         return {"status": "unavailable", "reason": "successor is not a strict trace prefix"}
-    return {"status": "available", "identity": after_ids[len(before_ids)]}
+    return {"status": "available", "identity": after_ids[len(before_ids)], "source_link_valid": True}
 
 def _rows(path: Path) -> Iterable[dict[str, Any]]:
     with path.open(encoding="utf-8") as stream:
