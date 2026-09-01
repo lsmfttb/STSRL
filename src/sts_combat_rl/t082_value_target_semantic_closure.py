@@ -83,7 +83,7 @@ def _identity(action: Any) -> dict[str, Any] | None:
 
 def recover_behavior(current: Mapping[str, Any], successor: Mapping[str, Any] | None) -> dict[str, Any]:
     if successor is None:
-        return {"status": "unavailable", "reason": "no immediate successor"}
+        return {"status": "unavailable", "reason": "final/no immediate record", "successor_exists": False}
     before = current.get("action_trace", ())
     after = successor.get("action_trace", ())
     if not isinstance(before, list | tuple) or not isinstance(after, list | tuple):
@@ -91,21 +91,21 @@ def recover_behavior(current: Mapping[str, Any], successor: Mapping[str, Any] | 
     for key in ("source_run_id", "source_seed"):
         if key in current or key in successor:
             if successor.get(key) != current.get(key):
-                return {"status": "unavailable", "reason": f"successor {key} linkage mismatch"}
+                return {"status": "unavailable", "reason": f"malformed/{key} linkage mismatch", "successor_exists": True}
     if "source_battle_index" in current or "source_battle_index" in successor:
         if successor.get("source_battle_index") != current.get("source_battle_index", -1) + 1:
-            return {"status": "unavailable", "reason": "successor is not the physically immediate battle"}
+            return {"status": "unavailable", "reason": "non-adjacent battle", "successor_exists": True}
     current_meta = current.get("structural_metadata", {})
     successor_meta = successor.get("structural_metadata", {})
     if isinstance(current_meta, Mapping) and isinstance(successor_meta, Mapping):
         if current_meta.get("assistance_level") != successor_meta.get("assistance_level"):
-            return {"status": "unavailable", "reason": "successor assistance/component mismatch"}
+            return {"status": "unavailable", "reason": "malformed/component linkage mismatch", "successor_exists": True}
     before_ids = [_identity(item) for item in before]
     after_ids = [_identity(item) for item in after]
     if None in before_ids or None in after_ids:
-        return {"status": "unavailable", "reason": "unstable action identity"}
+        return {"status": "unavailable", "reason": "unstable identity", "successor_exists": True}
     if len(after_ids) <= len(before_ids) or after_ids[: len(before_ids)] != before_ids:
-        return {"status": "unavailable", "reason": "successor is not a strict trace prefix"}
+        return {"status": "unavailable", "reason": "non-prefix", "successor_exists": True}
     return {"status": "available", "identity": after_ids[len(before_ids)], "source_link_valid": True}
 
 def _rows(path: Path) -> Iterable[dict[str, Any]]:
@@ -288,15 +288,32 @@ def audit_t064(manifest_path: Path, output: Path) -> dict[str, Any]:
         outcome = source.get("battle_outcome")
         outcome_status = "available" if outcome in ("PLAYER_VICTORY", "PLAYER_DEFEAT") else "unavailable"
         rows.append({"index": index, "selected_identity": item["complete_identity"], "selected_identity_sha256": item.get("complete_identity_sha256"), "derived_identity_sha256": derived_sha, "identity_valid": identity_ok, "identity_error": source_error, "component": component, "source_record_index": record_index, "source_checkpoint_id": source.get("source_checkpoint_id"), "source_run_id": source.get("source_run_id"), "source_seed": source.get("source_seed"), "source_battle_index": source.get("source_battle_index"), "act": item.get("act"), "room_type": item.get("room_type"), "trace_length": len(source.get("action_trace", ())), "successor": {"record_index": successor.get("record_index"), "trace_length": len(successor.get("action_trace", ())), "battle_index": successor.get("source_battle_index")} if successor else None, "behavior": behavior, "teacher_action": teacher_action, "trainer_policy_action": trainer_action, "comparison": comparison, "outcome": outcome_status, "source_battle_outcome": outcome if isinstance(outcome, str) else None, "trainer_value_lineage": trainers[index].get("raw_reward_components", {}).get("battle_outcome"), "source_controller": source.get("source_battle_controller_provenance"), "teacher_controller": teachers[index].get("controller_provenance"), "policy_target_source": trainers[index].get("policy_target_source"), "value_target_source": "trainer_input_record.raw_reward_components.battle_outcome"})
-        rows[-1].update({"linkage_valid": linkage_valid, "linkage_problems": linkage_problems})
+        trainer_outcome = trainers[index].get("structured_battle_outcome", {}).get("battle_survived", {})
+        rows[-1].update({
+            "linkage_valid": linkage_valid, "linkage_problems": linkage_problems,
+            "source_pool": {"component": component, "path": str(manifest["input_artifacts"][component]["path"]), "sha256": manifest["input_artifacts"][component].get("sha256")},
+            "current_complete_identity": derived,
+            "successor_complete_identity": (_record_identity(successor, component)[0] if successor else None),
+            "successor_exists": successor is not None,
+            "successor_reason": behavior.get("reason"),
+            "source_act": source.get("structural_metadata", {}).get("act"),
+            "source_encounter": source.get("structural_metadata", {}).get("encounter_id"),
+            "source_controller_provenance": source.get("source_controller_provenance"),
+            "source_battle_controller_provenance": source.get("source_battle_controller_provenance"),
+            "source_battle_outcome": outcome if isinstance(outcome, str) else "unavailable",
+            "trainer_battle_survived": {"status": "available" if isinstance(trainer_outcome, Mapping) and "value" in trainer_outcome else "unavailable", "value": trainer_outcome.get("value") if isinstance(trainer_outcome, Mapping) else None},
+            "value_target_source": "trainer_input_record.structured_battle_outcome.battle_survived",
+        })
     all_integrity = all(row["identity_valid"] and row["linkage_valid"] for row in rows) and all(item["valid"] for item in input_checks) and all(item["valid"] for item in pool_checks) and terminal_valid
     observed_acts = Counter(item.get("act") for item in selected)
     observed_components = Counter(item.get("component") for item in selected)
     coverage_valid = observed_acts == Counter({1: 256, 2: 204}) and observed_components == Counter({"assist_0": 256, "assist_hp50": 12, "assist_hp50_potion_elite_boss": 32, "assist_hp75_potion": 160})
     all_integrity = all_integrity and coverage_valid
     divergent = [row for row in rows if row["comparison"] == "different"]
+    row_problems = [f"row {row['index']}: {row['successor_reason']}" for row in rows if row.get("successor_reason")]
+    row_problems.extend(f"row {row['index']}: outcome lineage mismatch" for row in rows if row.get("source_battle_outcome") not in ("unavailable", None) and row.get("trainer_battle_survived", {}).get("status") == "available" and ((row["source_battle_outcome"] == "PLAYER_VICTORY") != bool(row["trainer_battle_survived"].get("value"))))
     proof = semantic_proof()
-    report = {"schema_version": SCHEMA, "inputs": {"manifest": str(manifest_path), "manifest_sha256": sha256(manifest_path), "control_artifacts": input_checks, "terminal_case_valid": terminal_valid, "teacher": {"path": str(teacher_path), "sha256": sha256(teacher_path)}, "trainer": {"path": str(trainer_path), "sha256": sha256(trainer_path)}, "source_components": {component: {"path": str(manifest["input_artifacts"][component]["path"]), "expected_sha256": manifest["input_artifacts"][component]["sha256"]} for component in sorted(by_component)}}, "coverage": {"observed": {str(key): value for key, value in sorted(coverage.items())}, "expected_acts": {"1": 256, "2": 204}, "expected_components": {"assist_0": 256, "assist_hp50": 12, "assist_hp50_potion_elite_boss": 32, "assist_hp75_potion": 160}, "valid": coverage_valid}, "integrity": {"valid": all_integrity, "selected_teacher_trainer_counts": len(rows) == 460, "source_identity_valid": all(row["identity_valid"] for row in rows), "problems": [] if all_integrity else ["one or more identity, coverage, control-artifact, or terminal predicates failed"]}, "counts": {"total_rows": len(rows), "comparison_denominator": sum(row["comparison"] != "unavailable" for row in rows), "divergence_rate": len(divergent) / max(1, sum(row["comparison"] != "unavailable" for row in rows)), "behavior_recoverable": sum(row["behavior"]["status"] == "available" for row in rows), "behavior_unavailable": sum(row["behavior"]["status"] != "available" for row in rows), "comparisons": dict(Counter(row["comparison"] for row in rows)), "outcomes": dict(Counter(row["outcome"] for row in rows)), "divergent_outcomes": dict(Counter(row["outcome"] for row in divergent)), "divergent_with_outcome": sum(row["outcome"] == "available" for row in divergent)}, "strata": {"act": dict(Counter((row["act"], row["comparison"]) for row in rows)), "room_type": dict(Counter((row["room_type"], row["comparison"]) for row in rows)), "component": dict(Counter((row["component"], row["comparison"]) for row in rows)), "source_controller": dict(Counter((str(row["source_controller"]), row["comparison"]) for row in rows))}, "classification": classify(integrity_valid=all_integrity, rows=rows, proof=proof), "rows": rows, "semantic_proof": proof}
+    report = {"schema_version": SCHEMA, "inputs": {"manifest": str(manifest_path), "manifest_sha256": sha256(manifest_path), "control_artifacts": input_checks, "terminal_case_valid": terminal_valid, "teacher": {"path": str(teacher_path), "sha256": sha256(teacher_path)}, "trainer": {"path": str(trainer_path), "sha256": sha256(trainer_path)}, "source_components": {component: {"path": str(manifest["input_artifacts"][component]["path"]), "expected_sha256": manifest["input_artifacts"][component]["sha256"]} for component in sorted(by_component)}}, "coverage": {"observed": {str(key): value for key, value in sorted(coverage.items())}, "expected_acts": {"1": 256, "2": 204}, "expected_components": {"assist_0": 256, "assist_hp50": 12, "assist_hp50_potion_elite_boss": 32, "assist_hp75_potion": 160}, "valid": coverage_valid}, "integrity": {"valid": all_integrity and not row_problems, "selected_teacher_trainer_counts": len(rows) == 460, "source_identity_valid": all(row["identity_valid"] for row in rows), "problems": row_problems + ([] if all_integrity else ["one or more identity, coverage, control-artifact, or terminal predicates failed"])}, "counts": {"total_rows": len(rows), "comparison_denominator": sum(row["comparison"] != "unavailable" for row in rows), "divergence_rate": len(divergent) / max(1, sum(row["comparison"] != "unavailable" for row in rows)), "behavior_recoverable": sum(row["behavior"]["status"] == "available" for row in rows), "behavior_unavailable": sum(row["behavior"]["status"] != "available" for row in rows), "comparisons": dict(Counter(row["comparison"] for row in rows)), "outcomes": dict(Counter(row["outcome"] for row in rows)), "divergent_outcomes": dict(Counter(row["outcome"] for row in divergent)), "divergent_with_outcome": sum(row["outcome"] == "available" for row in divergent)}, "strata": {"act": dict(Counter((row["act"], row["comparison"]) for row in rows)), "room_type": dict(Counter((row["room_type"], row["comparison"]) for row in rows)), "component": dict(Counter((row["component"], row["comparison"]) for row in rows)), "source_controller": dict(Counter((str(row["source_controller"]), row["comparison"]) for row in rows))}, "classification": classify(integrity_valid=all_integrity and not row_problems, rows=rows, proof=proof), "rows": rows, "semantic_proof": proof}
     output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return report
 
