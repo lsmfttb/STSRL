@@ -300,6 +300,35 @@ The stage SHA-256 values are `81130e5579919c28bc1176fdc731656e49130081a818ceeed7
 Planner scientific/architecture acceptance and Maintainer operational
 acceptance both passed; T079 does not publish a successor.
 
+T080 is now complete after PR #86 merged at
+`1771203234f35ee16ba4edb663692dfabf90caa5`. Its approved specification commit
+was `f1252e641c09e34bbdc90f3b77519a9c889e40e5`, and its accepted exact
+implementation head was `d70e2f595e409247e3fb49c397115ae400de89ca`. The
+offline audit used the exact T043 checkpoint
+`a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4` and exact
+trainer input
+`0b5bb0c9e591f7a7cc1afc1cacd76891eb2c216231bc13a6c76bfe76f3451520`, with
+four trainer records: all four policy targets were Oracle-teacher targets,
+behavior actions were unavailable on all four rows, and all four source
+outcomes were available (three survived, one lost). The retained evidence is
+under
+`/mnt/d/DeadlyCatCoding/STSRL/artifacts/t080-battle-value-target-semantics-audit`:
+the report is 47,150 bytes with SHA-256
+`d630549878639c06f7634370b8aed6f2d8cc05d12c8a0d01756d49f8df298452`, and the
+2,121-byte retention manifest's actual SHA-256 is
+`68a4b46adb6dac0dfda45b79306e0b18682c918913ae7751b157ab6a39dfe4dc`.
+Independent report-entry, manifest self-hash, and byte-count checks passed.
+The corrected row-level mismatch classifier reported zero divergent rows and
+zero divergent-with-available-outcome rows; the accepted classification is
+`VALUE_TARGET_SEMANTICS_UNRESOLVED`. Planner scientific and Maintainer
+operational acceptance both passed. Focused T080 tests passed (`12`), and the
+full suite was `946 passed, 2 skipped, 2` known pre-existing unrelated failures;
+changed-file Ruff, format, compile, and diff checks passed. No simulator run,
+training, feature/model/Search/native change, controller promotion, or
+automatic successor was authorized. Research ledger #85 records the accepted
+interpretation and the need to compare a minimal counterfactual continuation
+experiment against the feature/encoding audit before publishing any successor.
+
 ## Implemented On Main
 
 ### Runtime
