@@ -208,10 +208,12 @@
               "result": true
             },
             {
-              "fact": "trainer_record_count",
-              "observed": 4,
-              "reason": "observed fact does not satisfy requirement",
-              "required": 1000,
+              "fact": "__explicit_scale_predicate_required",
+              "observed": {
+                "status": "unavailable"
+              },
+              "reason": "required fact unavailable",
+              "required": true,
               "result": false
             },
             {
@@ -235,13 +237,7 @@
             "artifact_id": "t043-main-runs1000-assist_0-s4",
             "artifact_kind": "checkpoint",
             "claim_boundary": "new generalized model-quality claim",
-            "predicates": [
-              {
-                "fact": "trainer_record_count",
-                "operator": "min",
-                "required": 1000
-              }
-            ],
+            "predicates": [],
             "reuse_mode": "scientific_quality_claim",
             "sha256": "ab68439df429f603816f30064484cc99f33611a196ba456103397fc7ef8ed5f3"
           },
@@ -485,10 +481,12 @@
               "result": true
             },
             {
-              "fact": "trainer_record_count",
-              "observed": 4,
-              "reason": "observed fact does not satisfy requirement",
-              "required": 1000,
+              "fact": "__explicit_scale_predicate_required",
+              "observed": {
+                "status": "unavailable"
+              },
+              "reason": "required fact unavailable",
+              "required": true,
               "result": false
             },
             {
@@ -512,13 +510,7 @@
             "artifact_id": "t043-assist_0-smoke",
             "artifact_kind": "checkpoint",
             "claim_boundary": "new generalized model-quality claim",
-            "predicates": [
-              {
-                "fact": "trainer_record_count",
-                "operator": "min",
-                "required": 1000
-              }
-            ],
+            "predicates": [],
             "reuse_mode": "scientific_quality_claim",
             "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
           },
@@ -762,10 +754,12 @@
               "result": true
             },
             {
-              "fact": "trainer_record_count",
-              "observed": 4,
-              "reason": "observed fact does not satisfy requirement",
-              "required": 1000,
+              "fact": "__explicit_scale_predicate_required",
+              "observed": {
+                "status": "unavailable"
+              },
+              "reason": "required fact unavailable",
+              "required": true,
               "result": false
             },
             {
@@ -789,13 +783,7 @@
             "artifact_id": "t043-assist_0-smoke",
             "artifact_kind": "checkpoint",
             "claim_boundary": "new generalized model-quality claim",
-            "predicates": [
-              {
-                "fact": "trainer_record_count",
-                "operator": "min",
-                "required": 1000
-              }
-            ],
+            "predicates": [],
             "reuse_mode": "scientific_quality_claim",
             "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
           },
@@ -1039,10 +1027,12 @@
               "result": true
             },
             {
-              "fact": "trainer_record_count",
-              "observed": 4,
-              "reason": "observed fact does not satisfy requirement",
-              "required": 1000,
+              "fact": "__explicit_scale_predicate_required",
+              "observed": {
+                "status": "unavailable"
+              },
+              "reason": "required fact unavailable",
+              "required": true,
               "result": false
             },
             {
@@ -1066,13 +1056,7 @@
             "artifact_id": "t043-main-runs1000-assist_0-s4",
             "artifact_kind": "checkpoint",
             "claim_boundary": "new generalized model-quality claim",
-            "predicates": [
-              {
-                "fact": "trainer_record_count",
-                "operator": "min",
-                "required": 1000
-              }
-            ],
+            "predicates": [],
             "reuse_mode": "scientific_quality_claim",
             "sha256": "ab68439df429f603816f30064484cc99f33611a196ba456103397fc7ef8ed5f3"
           },
@@ -1316,10 +1300,12 @@
               "result": true
             },
             {
-              "fact": "trainer_record_count",
-              "observed": 4,
-              "reason": "observed fact does not satisfy requirement",
-              "required": 1000,
+              "fact": "__explicit_scale_predicate_required",
+              "observed": {
+                "status": "unavailable"
+              },
+              "reason": "required fact unavailable",
+              "required": true,
               "result": false
             },
             {
@@ -1343,13 +1329,7 @@
             "artifact_id": "t043-assist_0-smoke",
             "artifact_kind": "checkpoint",
             "claim_boundary": "new generalized model-quality claim",
-            "predicates": [
-              {
-                "fact": "trainer_record_count",
-                "operator": "min",
-                "required": 1000
-              }
-            ],
+            "predicates": [],
             "reuse_mode": "scientific_quality_claim",
             "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
           },
@@ -1593,10 +1573,12 @@
               "result": true
             },
             {
-              "fact": "trainer_record_count",
-              "observed": 4,
-              "reason": "observed fact does not satisfy requirement",
-              "required": 1000,
+              "fact": "__explicit_scale_predicate_required",
+              "observed": {
+                "status": "unavailable"
+              },
+              "reason": "required fact unavailable",
+              "required": true,
               "result": false
             },
             {
@@ -1620,13 +1602,7 @@
             "artifact_id": "t043-assist_0-smoke",
             "artifact_kind": "checkpoint",
             "claim_boundary": "new generalized model-quality claim",
-            "predicates": [
-              {
-                "fact": "trainer_record_count",
-                "operator": "min",
-                "required": 1000
-              }
-            ],
+            "predicates": [],
             "reuse_mode": "scientific_quality_claim",
             "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
           },
@@ -1870,10 +1846,12 @@
               "result": true
             },
             {
-              "fact": "trainer_record_count",
-              "observed": 4,
-              "reason": "observed fact does not satisfy requirement",
-              "required": 1000,
+              "fact": "__explicit_scale_predicate_required",
+              "observed": {
+                "status": "unavailable"
+              },
+              "reason": "required fact unavailable",
+              "required": true,
               "result": false
             },
             {
@@ -1897,13 +1875,7 @@
             "artifact_id": "t043-assist_0-smoke",
             "artifact_kind": "checkpoint",
             "claim_boundary": "new generalized model-quality claim",
-            "predicates": [
-              {
-                "fact": "trainer_record_count",
-                "operator": "min",
-                "required": 1000
-              }
-            ],
+            "predicates": [],
             "reuse_mode": "scientific_quality_claim",
             "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
           },
@@ -2147,10 +2119,12 @@
               "result": true
             },
             {
-              "fact": "trainer_record_count",
-              "observed": 4,
-              "reason": "observed fact does not satisfy requirement",
-              "required": 1000,
+              "fact": "__explicit_scale_predicate_required",
+              "observed": {
+                "status": "unavailable"
+              },
+              "reason": "required fact unavailable",
+              "required": true,
               "result": false
             },
             {
@@ -2174,13 +2148,7 @@
             "artifact_id": "t043-assist_0-smoke",
             "artifact_kind": "checkpoint",
             "claim_boundary": "new generalized model-quality claim",
-            "predicates": [
-              {
-                "fact": "trainer_record_count",
-                "operator": "min",
-                "required": 1000
-              }
-            ],
+            "predicates": [],
             "reuse_mode": "scientific_quality_claim",
             "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
           },
@@ -2424,10 +2392,12 @@
               "result": true
             },
             {
-              "fact": "trainer_record_count",
-              "observed": 4,
-              "reason": "observed fact does not satisfy requirement",
-              "required": 1000,
+              "fact": "__explicit_scale_predicate_required",
+              "observed": {
+                "status": "unavailable"
+              },
+              "reason": "required fact unavailable",
+              "required": true,
               "result": false
             },
             {
@@ -2451,13 +2421,7 @@
             "artifact_id": "t043-assist_0-smoke",
             "artifact_kind": "checkpoint",
             "claim_boundary": "new generalized model-quality claim",
-            "predicates": [
-              {
-                "fact": "trainer_record_count",
-                "operator": "min",
-                "required": 1000
-              }
-            ],
+            "predicates": [],
             "reuse_mode": "scientific_quality_claim",
             "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
           },

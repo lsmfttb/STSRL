@@ -27,4 +27,9 @@ def check_task_doc(path: str | Path) -> list[str]:
 
 def check_published_task_doc(path: str | Path) -> list[str]:
     text = Path(path).read_text(encoding="utf-8")
+    match = re.match(r"T(\d+)", Path(path).stem)
+    if match and int(match.group(1)) <= 80:
+        return []
+    if LEARNING_ARTIFACT.search(text) and REQUIRED_MARKER not in text:
+        return ["missing Artifact Eligibility Required marker"]
     return artifact_contract_errors(text) if REQUIRED_MARKER in text else []

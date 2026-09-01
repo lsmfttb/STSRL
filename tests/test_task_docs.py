@@ -59,3 +59,12 @@ def test_published_task_doc_scan_detects_learning_source_omission() -> None:
         ]
     finally:
         synthetic.unlink()
+
+
+def test_legacy_task_is_explicitly_exempt():
+    synthetic = ROOT / "tests" / ".task-doc-legacy.md"
+    synthetic.write_text("# T080\nConsumes a checkpoint.\n", encoding="utf-8")
+    try:
+        assert check_published_task_doc(synthetic) == []
+    finally:
+        synthetic.unlink()

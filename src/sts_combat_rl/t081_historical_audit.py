@@ -21,7 +21,7 @@ _ROWS = (
 
 
 def build_audit() -> dict[str, Any]:
-    quality = (Predicate("trainer_record_count", "min", 1000),)
+    quality = ()
     rows = []
     for task, sha, evidence_family, mode, claim, limitations in _ROWS:
         facts = {

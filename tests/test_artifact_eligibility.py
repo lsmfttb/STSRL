@@ -124,3 +124,12 @@ def test_malformed_mode_fails_clearly():
         evaluate_eligibility(
             qualification(), EligibilityRequirements("other", "none", ())
         )
+
+
+def test_historical_identity_is_required_and_mismatch_fails_closed():
+    q = qualification()
+    missing = evaluate_eligibility(q, EligibilityRequirements("historical_reproduction", "original", ()))
+    assert not missing["eligible"]
+    wrong_sha = evaluate_eligibility(q, EligibilityRequirements("historical_reproduction", "original", (), "/retained/checkpoint-runs1000.pt", "checkpoint", "wrong"))
+    wrong_kind = evaluate_eligibility(q, EligibilityRequirements("historical_reproduction", "original", (), "/retained/checkpoint-runs1000.pt", "dataset", q.integrity["sha256"]))
+    assert not wrong_sha["eligible"] and not wrong_kind["eligible"]

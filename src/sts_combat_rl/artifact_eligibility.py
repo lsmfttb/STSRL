@@ -116,6 +116,10 @@ def evaluate_eligibility(
         raise ValueError(f"unknown reuse mode: {requirements.reuse_mode}")
     predicates = []
     requested = requirements.predicates
+    if requirements.reuse_mode in {"historical_reproduction", "scientific_quality_claim"} and (
+        requirements.artifact_id is None or requirements.artifact_kind is None or requirements.sha256 is None
+    ):
+        requested = requested + (Predicate("__artifact_identity_requirements", "equals", True),)
     identity = (("artifact.id", qualification.artifact.get("id"), requirements.artifact_id),
                 ("artifact.kind", qualification.artifact.get("kind"), requirements.artifact_kind),
                 ("integrity.sha256", qualification.integrity.get("sha256"), requirements.sha256))
