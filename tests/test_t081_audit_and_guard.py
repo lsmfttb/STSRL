@@ -47,7 +47,12 @@ def test_task_guard_exempts_non_artifact_and_checks_contract_fields():
     assert errors == ["missing Artifact Eligibility Contract section"]
     complete = """Consumes a learned checkpoint\n## Artifact Eligibility Contract\ninputs; reuse mode; claim boundary; required predicates; unavailable fact behavior\n## Scope\nsmall"""
     assert artifact_contract_errors(complete) == []
-    assert check_published_task_doc(__file__) == []
+    legacy = Path(__file__).with_name("T080-guard-exempt.md")
+    legacy.write_text("Consumes a checkpoint without a contract.\n", encoding="utf-8")
+    try:
+        assert check_published_task_doc(legacy) == []
+    finally:
+        legacy.unlink()
 
 
 def test_both_t043_fixtures_are_reproduction_diagnostic_only():
@@ -60,7 +65,7 @@ def test_both_t043_fixtures_are_reproduction_diagnostic_only():
         assert record["trainer_record_count"] == 4
         assert record["override_kind"] == "smoke"
         qualification = ArtifactQualification(
-            {"id": artifact_id, "path": record.get("path", "retained/checkpoint.pt")},
+            {"id": artifact_id, "kind": "checkpoint", "path": record.get("path", "retained/checkpoint.pt")},
             {
                 "trainer_record_count": Fact(record["trainer_record_count"]),
                 "override_kind": Fact(record["override_kind"]),
