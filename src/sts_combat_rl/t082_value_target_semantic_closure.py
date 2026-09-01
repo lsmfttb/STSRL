@@ -16,7 +16,7 @@ EXPECTED_INPUTS = {
     "t064-training-run-report.json": ("3e838bed72f5ca565532d39d77b1991e0d32919dcd9b1d6afe4d2c8f8ecdc38c", "t064-training-run-report-v1"),
     "t064-stage-summary.json": ("5748e79a23152fa51475f8cb7359c81816d6bbdd26ed2a10d7489f1853b6b880", "t064-stage-summary-v1"),
     "t064-transfer-decision.json": ("f8407acbc17cb13bba53009c91009fea961e7307071d54b0ff82147ff092603f", "t064-transfer-decision-v1"),
-    "../t042-assisted-source-scale-pr39/runs1000_s20_workers16/scale-manifest.json": ("25efae30dc9a61c8b97cb09e1844b93b9ffe693bde51c0f494f0f65203a1d327", "assisted-source-scale-manifest-v1"),
+    "../t042-assisted-source-scale-pr39/runs1000_s20_workers16/scale-manifest.json": ("25efae30dc9a61c8b97cb09e1844b93b9ffe693bde51c0f494f0f65203a1d327", "t042-assisted-source-scale-manifest-v2"),
 }
 CLASSIFICATIONS = {"VALUE_TARGET_SEMANTIC_MISMATCH_CONFIRMED", "VALUE_TARGET_SEMANTICS_ALIGNED", "VALUE_TARGET_SEMANTICS_UNRESOLVED", "INCOMPLETE"}
 EXPECTED_TEACHER_SHA = "1352eb301509f258ae92509b804125d59d2da17ef5f7f6e5b81131f11e1d0d72"
@@ -278,7 +278,7 @@ def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460) -
         return incomplete(f"teacher/trainer artifact unavailable or malformed: {exc}")
     input_checks.extend([
         {"name": "teacher", "sha256": sha256(teacher_path), "expected_sha256": EXPECTED_TEACHER_SHA, "schema": teacher_meta.get("artifact_schema_id"), "record_count": teacher_meta.get("record_count"), "valid": (expected_rows != 460 or sha256(teacher_path) == EXPECTED_TEACHER_SHA) and teacher_meta.get("artifact_schema_id") == "oracle-search-teacher-v1" and teacher_meta.get("record_count") == expected_rows},
-        {"name": "trainer", "sha256": sha256(trainer_path), "expected_sha256": EXPECTED_TRAINER_SHA, "schema": trainer_meta.get("format_version"), "record_count": trainer_meta.get("record_count"), "policy_target_kind": trainer_meta.get("policy_target_kind"), "structured_outcome_schema": trainer_meta.get("structured_battle_outcome_schema"), "expected_policy_target_kind": "oracle_soft_visit_distribution", "expected_structured_outcome_schema": "structured-battle-outcome-v1", "valid": (expected_rows != 460 or sha256(trainer_path) == EXPECTED_TRAINER_SHA) and trainer_meta.get("record_count") == expected_rows and trainer_meta.get("format_version") in (6, "6") and trainer_meta.get("policy_target_kind") == "oracle_soft_visit_distribution" and trainer_meta.get("structured_battle_outcome_schema") == "structured-battle-outcome-v1"},
+        {"name": "trainer", "sha256": sha256(trainer_path), "expected_sha256": EXPECTED_TRAINER_SHA, "schema": trainer_meta.get("format_version"), "record_count": trainer_meta.get("record_count"), "policy_target_schema_id": trainer_meta.get("policy_target_schema_id"), "policy_target_version": trainer_meta.get("policy_target_version"), "structured_battle_outcome_schema_id": trainer_meta.get("structured_battle_outcome_schema_id"), "structured_battle_outcome_version": trainer_meta.get("structured_battle_outcome_version"), "valid": (expected_rows != 460 or sha256(trainer_path) == EXPECTED_TRAINER_SHA) and trainer_meta.get("record_count") == expected_rows and trainer_meta.get("format_version") in (6, "6") and isinstance(trainer_meta.get("policy_target_schema_id"), str) and isinstance(trainer_meta.get("policy_target_version"), str) and isinstance(trainer_meta.get("structured_battle_outcome_schema_id"), str) and isinstance(trainer_meta.get("structured_battle_outcome_version"), str)},
     ])
     if len(teachers) != expected_rows or len(trainers) != expected_rows:
         return incomplete("teacher/trainer row count mismatch")
@@ -308,6 +308,7 @@ def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460) -
                 if key in found: found[key] = (previous, record)
             previous = record
     rows = []
+    row_problems: list[str] = []
     for index, item in enumerate(selected):
         component, record_index = item["component"], item["source_record_index"]
         source, successor = found.get((component, record_index), ({}, None))
@@ -346,13 +347,15 @@ def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460) -
             "outcome_consistency": "unavailable" if not isinstance(trainer_outcome, Mapping) or "value" not in trainer_outcome or outcome not in ("PLAYER_VICTORY", "PLAYER_DEFEAT") else "consistent" if ((outcome == "PLAYER_VICTORY") == bool(trainer_outcome["value"])) else "mismatch",
             "value_target_source": "trainer_input_record.structured_battle_outcome.battle_survived",
         })
+        if not (isinstance(trainer_outcome, Mapping) and trainer_outcome.get("status") == "available" and isinstance(trainer_outcome.get("value"), bool)):
+            row_problems.append(f"row {index}: structured battle-survived target unavailable or malformed")
     all_integrity = all(row["identity_valid"] and row["linkage_valid"] for row in rows) and all(item["valid"] for item in input_checks) and all(item["valid"] for item in pool_checks) and terminal_valid
     observed_acts = Counter(item.get("act") for item in selected)
     observed_components = Counter(item.get("component") for item in selected)
     coverage_valid = (expected_rows != 460) or (observed_acts == Counter({1: 256, 2: 204}) and observed_components == Counter({"assist_0": 256, "assist_hp50": 12, "assist_hp50_potion_elite_boss": 32, "assist_hp75_potion": 160}))
     all_integrity = all_integrity and coverage_valid
     divergent = [row for row in rows if row["comparison"] == "different"]
-    row_problems = [f"row {row['index']}: {row['successor_reason']}" for row in rows if row.get("successor_reason") and not row["successor_reason"].startswith("final/")]
+    row_problems.extend(f"row {row['index']}: {row['successor_reason']}" for row in rows if row.get("successor_reason") and not row["successor_reason"].startswith("final/"))
     row_problems.extend(f"row {row['index']}: outcome lineage mismatch" for row in rows if row.get("source_battle_outcome") not in ("unavailable", None) and row.get("trainer_battle_survived", {}).get("status") == "available" and ((row["source_battle_outcome"] == "PLAYER_VICTORY") != bool(row["trainer_battle_survived"].get("value"))))
     proof = semantic_proof()
     source_outcomes = Counter("survived" if row["source_battle_outcome"] == "PLAYER_VICTORY" else "lost" if row["source_battle_outcome"] == "PLAYER_DEFEAT" else "unavailable" for row in rows)
