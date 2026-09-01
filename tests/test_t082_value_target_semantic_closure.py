@@ -1,7 +1,8 @@
 import json
 from pathlib import Path
 
-from sts_combat_rl.t082_value_target_semantic_closure import audit, classify, recover_behavior, _validate_pool, _load_selected_envelope, sha256, _linkage_ok
+import sts_combat_rl.t082_value_target_semantic_closure as audit_module
+from sts_combat_rl.t082_value_target_semantic_closure import classify, recover_behavior, _validate_pool, _load_selected_envelope, sha256, _linkage_ok, _record_identity
 
 def action(number, occurrence=0):
     return {"action_id": number, "occurrence": occurrence, "kind": "card", "label": f"Card {number}", "stable_id": f"card:{number}"}
@@ -30,15 +31,28 @@ def test_duplicate_actions_use_occurrence_identity():
     successor = {"action_trace": [action(1, 0), action(1, 1)]}
     assert recover_behavior(current, successor)["identity"]["occurrence"] == 1
 
-def test_bounded_audit_counts_and_incomplete_classification(tmp_path: Path):
-    source = tmp_path / "sources.jsonl"
-    source.write_text(json.dumps({"complete_identity": ["s"], "source_run_id": "r", "source_seed": 1, "source_battle_index": 0, "action_trace": [action(1)]}) + "\n" + json.dumps({"complete_identity": ["n"], "source_run_id": "r", "source_seed": 1, "source_battle_index": 1, "action_trace": [action(1), action(2)]}) + "\n")
-    selected = [{"complete_identity": ["s"], "source_run_id": "r", "source_seed": 1, "source_battle_index": 0, "action_trace": [action(1)]}]
-    teacher = [{"teacher_action": action(2)}]
-    trainer = [{"battle_survived": True}]
-    report = audit(selected, teacher, trainer, source, expected_rows=1)
-    assert report["counts"]["behavior_recoverable"] == 1
-    assert classify(integrity_valid=False, rows=[], proof=proof()) == "INCOMPLETE"
+def test_compact_production_audit_fixture_valid_mutation_and_determinism(tmp_path: Path, monkeypatch):
+    root = tmp_path; pool = root / "pool.jsonl"; teacher = root / "teacher/merged.jsonl"; trainer = root / "trainer/trainer-input.jsonl"
+    teacher.parent.mkdir(); trainer.parent.mkdir()
+    meta = {"act": 1, "room_type": "monster", "encounter_id": "jaw_worm", "assistance_level": "assist_0"}
+    current = {"record_index": 0, "source_checkpoint_id": "ckpt", "source_run_id": "run", "source_seed": 1, "source_battle_index": 0, "action_trace": [action(1)], "battle_outcome": "PLAYER_VICTORY", "checkpoint_information_regime": "full_simulator_state_oracle_like", "distribution_kind": "constructed", "structural_metadata": meta}
+    successor = current | {"record_index": 1, "source_battle_index": 1, "action_trace": [action(1), action(2)], "battle_outcome": "PLAYER_VICTORY"}
+    identity, identity_sha = _record_identity(current, "assist_0")
+    pool_lines = [{"type": "metadata", "metadata": {"schema_id": "assisted-run-source-pool-v1", "format_version": 1, "record_count": 2, "assistance_level": "assist_0"}}] + [{"type": "record", "record": row} for row in (current, successor)]
+    pool.write_text("\n".join(json.dumps(row, sort_keys=True) for row in pool_lines) + "\n")
+    source = {"source_checkpoint_id": "ckpt", "source_run_id": "run", "source_seed": 1, "source_battle_index": 0, "source_pool_record_index": 0}
+    _envelope(teacher, [{"row_index": 0, **source, "teacher_action": action(2), "structural_metadata": meta}], artifact_schema_id="oracle-search-teacher-v1", format_version=1, controller_kind="full_simulator_state_oracle_like", selection_budget=100, selection_objective="highest_mean", initial_potions="none", target_kind="soft_visit_distribution")
+    _envelope(trainer, [{"example_index": 0, "policy_target_kind": "oracle_soft_visit_distribution", "policy_target_source": "oracle_teacher_row.soft_visit_target", "source_metadata": source | {"t064_complete_identity_sha256": identity_sha, **meta}, "structured_battle_outcome": {"battle_survived": {"status": "available", "value": True}}}], format_version=6, policy_target_schema_id="oracle-soft-visit-target-v1", structured_battle_outcome_schema="structured-battle-outcome-v1")
+    manifest = root / "manifest.json"; manifest.write_text(json.dumps({"selected_sources": [{"component": "assist_0", "source_record_index": 0, "source_path": str(pool), **meta, "complete_identity": identity, "complete_identity_sha256": identity_sha}], "input_artifacts": {"assist_0": {"path": str(pool), "record_count": 2, "bytes": pool.stat().st_size, "sha256": sha256(pool)}}}, sort_keys=True))
+    (root / "t064-transfer-decision.json").write_text(json.dumps({"experiment_complete": True, "source_adequacy": True, "source_integrity_valid": True, "terminal_case": "Case B"}))
+    monkeypatch.setattr(audit_module, "EXPECTED_INPUTS", {})
+    out1 = root / "report1.json"; out2 = root / "report2.json"
+    first = audit_module.audit_t064(manifest, out1, expected_rows=1); second = audit_module.audit_t064(manifest, out2, expected_rows=1)
+    assert first["integrity"]["valid"] and first["counts"]["total_rows"] == 1
+    assert first["rows"][0]["linkage_valid"] and first["rows"][0]["behavior"]["status"] == "available"
+    assert out1.read_bytes() == out2.read_bytes()
+    mutated = json.loads(manifest.read_text()); mutated["input_artifacts"]["assist_0"]["sha256"] = "wrong"; manifest.write_text(json.dumps(mutated))
+    assert audit_module.audit_t064(manifest, root / "bad.json", expected_rows=1)["classification"] == "INCOMPLETE"
 
 def test_classification_requires_explicit_proof_and_outcome():
     divergent = [{"comparison": "different", "outcome": "available"}]
