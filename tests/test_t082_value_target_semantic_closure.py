@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from sts_combat_rl.t082_value_target_semantic_closure import audit, classify, recover_behavior, _validate_pool, _load_selected_envelope, sha256
+from sts_combat_rl.t082_value_target_semantic_closure import audit, classify, recover_behavior, _validate_pool, _load_selected_envelope, sha256, _linkage_ok
 
 def action(number, occurrence=0):
     return {"action_id": number, "occurrence": occurrence, "kind": "card", "label": f"Card {number}", "stable_id": f"card:{number}"}
@@ -73,6 +73,16 @@ def test_actual_shaped_reader_preserves_teacher_and_trainer_provenance(tmp_path:
     assert trainer_meta["format_version"] == 6
     assert trainer_rows[0]["policy_target_kind"] == "oracle_soft_visit_distribution"
     assert trainer_rows[0]["structured_battle_outcome"]["battle_survived"]["value"] is True
+
+
+def test_actual_trainer_linkage_uses_complete_identity_hash_not_pool_index():
+    identity = {"source_checkpoint_id": "ckpt", "source_run_id": "run", "source_seed": 3, "source_battle_index": 7, "complete_identity_sha256": "identity"}
+    selected = {"complete_identity": identity, "act": 1, "room_type": "monster", "encounter_id": "jaw_worm", "assistance_level": "assist_0"}
+    teacher = {"row_index": 0, "source_checkpoint_id": "ckpt", "source_run_id": "run", "source_seed": 3, "source_battle_index": 7, "source_pool_record_index": 11, "structural_metadata": {"act": 1, "room_type": "monster", "encounter_id": "jaw_worm", "assistance_level": "assist_0"}}
+    trainer = {"example_index": 0, "policy_target_kind": "oracle_soft_visit_distribution", "policy_target_source": "oracle_teacher_row.soft_visit_target", "source_metadata": identity | {"act": 1, "room_type": "monster", "encounter_id": "jaw_worm", "assistance_level": "assist_0"}}
+    assert _linkage_ok(selected, teacher, trainer, 0, 11)[0]
+    trainer["source_metadata"] = trainer["source_metadata"] | {"t064_complete_identity_sha256": "wrong"}
+    assert not _linkage_ok(selected, teacher, trainer, 0, 11)[0]
 
 
 def test_successor_reason_categories_and_deterministic_pool_fixture(tmp_path: Path):
