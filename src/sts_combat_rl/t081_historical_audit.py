@@ -14,7 +14,7 @@ _ROWS = (
     ("T050", "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4", "diagnostic_mechanism", "checkpoint-conditional complete-run mechanism evidence", "no generalized learned-quality claim"),
     ("T051", "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4", "diagnostic_mechanism", "checkpoint-conditional source/reachability evidence", "upstream run count is not trainer scale"),
     ("T052", "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4", "diagnostic_mechanism", "checkpoint-conditional fixed-cohort comparison", "historical numerical result is retained; model-quality generalization unavailable"),
-    ("T062", "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4", "historical_reproduction", "reproduce/audit the exact historical dependency only", "no retained evidence of scale-qualified T043 training"),
+    ("T062", "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4", "diagnostic_mechanism", "checkpoint-conditional tree-internal Search v2 mechanism evidence", "full_simulator_state_oracle_like diagnostic only; not learned-quality or generalized evidence"),
     ("T070", "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4", "diagnostic_mechanism", "checkpoint-conditional Search v2 audit; not learned-quality evidence", "four trainer rows; filename naming is not evidence of scale"),
 )
 

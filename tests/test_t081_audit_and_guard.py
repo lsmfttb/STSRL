@@ -23,6 +23,9 @@ def test_audit_is_deterministic_and_covers_required_tasks():
     assert audit["claims"][0]["qualification"]["teacher_record_count"]["status"] == "unavailable"
     assert "integrity" in audit["claims"][0]
     assert all(set(row["consumer_decisions"]) == {"historical_reproduction", "diagnostic_mechanism", "scientific_quality_claim"} for row in audit["claims"])
+    t062 = next(row for row in audit["claims"] if row["task"] == "T062")
+    assert t062["historical_use"] == "diagnostic_mechanism"
+    assert "tree-internal Search v2" in t062["maximum_justified_claim"]
     assert {row["task"]: row["integrity"]["sha256"] for row in audit["claims"]} == {
         "T044": "ab68439df429f603816f30064484cc99f33611a196ba456103397fc7ef8ed5f3",
         "T047": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",

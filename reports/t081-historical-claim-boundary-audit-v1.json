@@ -1198,7 +1198,7 @@
             "producer_scope": null,
             "schema_version": "artifact-eligibility-v1"
           },
-          "claim_boundary": "reproduce/audit the exact historical dependency only",
+          "claim_boundary": "checkpoint-conditional tree-internal Search v2 mechanism evidence",
           "eligible": true,
           "predicates": [
             {
@@ -1210,7 +1210,7 @@
             }
           ],
           "requirements": {
-            "claim_boundary": "reproduce/audit the exact historical dependency only",
+            "claim_boundary": "checkpoint-conditional tree-internal Search v2 mechanism evidence",
             "predicates": [
               {
                 "fact": "trainer_record_count",
@@ -1331,13 +1331,13 @@
           "schema_version": "artifact-eligibility-v1"
         }
       },
-      "historical_use": "historical_reproduction",
+      "historical_use": "diagnostic_mechanism",
       "integrity": {
         "identity_source": "retained task contract / PR record",
         "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
       },
-      "limitations": "no retained evidence of scale-qualified T043 training",
-      "maximum_justified_claim": "reproduce/audit the exact historical dependency only",
+      "limitations": "full_simulator_state_oracle_like diagnostic only; not learned-quality or generalized evidence",
+      "maximum_justified_claim": "checkpoint-conditional tree-internal Search v2 mechanism evidence",
       "qualification": {
         "override_kind": {
           "status": "known",
