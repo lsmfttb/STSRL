@@ -1,5 +1,7 @@
 # T081: Scientific Artifact Eligibility Gate
 
+Artifact Eligibility Required: true
+
 ## Objective
 
 Prevent a reproducible but scientifically underqualified artifact from becoming a de facto canonical dependency merely because downstream tasks can verify its SHA, schema, and provenance.

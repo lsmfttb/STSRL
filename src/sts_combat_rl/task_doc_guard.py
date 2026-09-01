@@ -5,6 +5,7 @@ from pathlib import Path
 
 LEARNING_ARTIFACT = re.compile(r"\b(checkpoint|teacher|trainer|dataset|source artifact)\b", re.I)
 CONTRACT = "## Artifact Eligibility Contract"
+REQUIRED_MARKER = "Artifact Eligibility Required: true"
 
 
 def artifact_contract_errors(text: str) -> list[str]:
@@ -19,3 +20,8 @@ def artifact_contract_errors(text: str) -> list[str]:
 
 def check_task_doc(path: str | Path) -> list[str]:
     return artifact_contract_errors(Path(path).read_text(encoding="utf-8"))
+
+
+def check_published_task_doc(path: str | Path) -> list[str]:
+    text = Path(path).read_text(encoding="utf-8")
+    return artifact_contract_errors(text) if REQUIRED_MARKER in text else []

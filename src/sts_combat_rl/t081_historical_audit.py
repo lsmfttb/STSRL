@@ -3,6 +3,7 @@
 import json
 from pathlib import Path
 from typing import Any
+from sts_combat_rl.artifact_eligibility import ArtifactQualification, EligibilityRequirements, Fact, Predicate, evaluate_eligibility
 
 SCHEMA_VERSION = "t081-historical-claim-boundary-audit-v1"
 
@@ -14,20 +15,46 @@ _ROWS = (
     ("T051", "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4", "diagnostic_mechanism", "checkpoint-conditional source/reachability evidence", "upstream run count is not trainer scale"),
     ("T052", "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4", "diagnostic_mechanism", "checkpoint-conditional fixed-cohort comparison", "historical numerical result is retained; model-quality generalization unavailable"),
     ("T062", "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4", "historical_reproduction", "reproduce/audit the exact historical dependency only", "no retained evidence of scale-qualified T043 training"),
-    ("T070", "ab68439df429f603816f30064484cc99f33611a196ba456103397fc7ef8ed5f3", "diagnostic_mechanism", "checkpoint-conditional Search v2 audit; not learned-quality evidence", "four trainer rows; runs1000 names upstream pool only"),
+    ("T070", "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4", "diagnostic_mechanism", "checkpoint-conditional Search v2 audit; not learned-quality evidence", "four trainer rows; filename naming is not evidence of scale"),
 )
 
 
 def build_audit() -> dict[str, Any]:
+    quality = (Predicate("trainer_record_count", "min", 1000),)
+    rows = []
+    for task, sha, mode, claim, limitations in _ROWS:
+        facts = {
+            "trainer_record_count": Fact(4),
+            "teacher_record_count": Fact.unavailable("not retained in the cited task/PR records"),
+            "override_kind": Fact("smoke"),
+            "source_pool_runs": Fact.unavailable("upstream run count is not a trainer fact"),
+        }
+        artifact = ArtifactQualification(
+            {"id": "t043-assist_0-smoke" if sha.startswith("a231") else "t043-main-runs1000-assist_0-s4", "kind": "checkpoint", "schema": "unavailable"},
+            facts,
+            {"sha256": sha, "identity_source": "retained task contract / PR record"},
+        )
+        decisions = {}
+        for reuse, boundary, predicates in (
+            ("historical_reproduction", "exact historical dependency", ()),
+            ("diagnostic_mechanism", claim, (Predicate("trainer_record_count", "min", 1),)),
+            ("scientific_quality_claim", "new generalized model-quality claim", quality),
+        ):
+            decisions[reuse] = evaluate_eligibility(artifact, EligibilityRequirements(reuse, boundary, predicates))
+        rows.append({"task": task, "historical_use": mode, "maximum_justified_claim": claim, "limitations": limitations, "integrity": artifact.integrity, "qualification": artifact.to_dict()["facts"], "consumer_decisions": decisions})
     return {
         "schema_version": SCHEMA_VERSION,
-        "inputs": {"source": "retained T043/T044/T047-T070 task and PR records", "missing_facts": "reported as unavailable; no filename inference"},
-        "claims": [
-            {"task": task, "checkpoint_sha256": sha, "qualification": {"trainer_record_count": 4, "override_kind": "smoke", "upstream_source_pool": "unavailable" if task in {"T047", "T048", "T050"} else "runs1000" if task in {"T051", "T070"} else "unavailable"}, "historical_use": mode, "maximum_justified_claim": claim, "limitations": limitations}
-            for task, sha, mode, claim, limitations in _ROWS
-        ],
+        "inputs": {"source": "retained T043/T044/T047-T070 task and PR records", "missing_facts": "unavailable facts remain explicit; filenames never substitute for provenance"},
+        "claims": rows,
     }
 
 
 def write_audit(path: str | Path) -> None:
     Path(path).write_text(json.dumps(build_audit(), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("path")
+    write_audit(parser.parse_args().path)

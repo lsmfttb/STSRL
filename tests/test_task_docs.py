@@ -1,4 +1,5 @@
 from pathlib import Path
+from sts_combat_rl.task_doc_guard import check_published_task_doc
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,3 +33,7 @@ def test_status_field_is_reserved_for_task_index() -> None:
                 offenders.append(f"{path.relative_to(ROOT)}:{line_number}")
 
     assert offenders == []
+
+
+def test_published_learning_artifact_docs_have_eligibility_contract() -> None:
+    assert check_published_task_doc(ROOT / "docs/tasks/T081-scientific-artifact-eligibility-gate.md") == []

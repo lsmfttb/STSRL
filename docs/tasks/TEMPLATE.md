@@ -1,5 +1,7 @@
 # TXXX: Task Name
 
+Artifact Eligibility Required: true
+
 ## Objective
 
 State one concrete result and why it matters.

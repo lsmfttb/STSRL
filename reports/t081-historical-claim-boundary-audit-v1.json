@@ -1,104 +1,1560 @@
 {
   "claims": [
     {
-      "checkpoint_sha256": "ab68439df429f603816f30064484cc99f33611a196ba456103397fc7ef8ed5f3",
+      "consumer_decisions": {
+        "diagnostic_mechanism": {
+          "artifact": {
+            "artifact": {
+              "id": "t043-main-runs1000-assist_0-s4",
+              "kind": "checkpoint",
+              "schema": "unavailable"
+            },
+            "facts": {
+              "override_kind": {
+                "status": "known",
+                "value": "smoke"
+              },
+              "source_pool_runs": {
+                "reason": "upstream run count is not a trainer fact",
+                "status": "unavailable"
+              },
+              "teacher_record_count": {
+                "reason": "not retained in the cited task/PR records",
+                "status": "unavailable"
+              },
+              "trainer_record_count": {
+                "status": "known",
+                "value": 4
+              }
+            },
+            "integrity": {
+              "identity_source": "retained task contract / PR record",
+              "sha256": "ab68439df429f603816f30064484cc99f33611a196ba456103397fc7ef8ed5f3"
+            },
+            "producer_scope": null,
+            "schema_version": "artifact-eligibility-v1"
+          },
+          "claim_boundary": "checkpoint-conditional evaluation; no generalized model-quality claim",
+          "eligible": true,
+          "predicates": [
+            {
+              "fact": "trainer_record_count",
+              "observed": 4,
+              "reason": "satisfied",
+              "required": 1,
+              "result": true
+            }
+          ],
+          "requirements": {
+            "claim_boundary": "checkpoint-conditional evaluation; no generalized model-quality claim",
+            "predicates": [
+              {
+                "fact": "trainer_record_count",
+                "operator": "min",
+                "required": 1
+              }
+            ],
+            "reuse_mode": "diagnostic_mechanism"
+          },
+          "reuse_mode": "diagnostic_mechanism",
+          "schema_version": "artifact-eligibility-v1"
+        },
+        "historical_reproduction": {
+          "artifact": {
+            "artifact": {
+              "id": "t043-main-runs1000-assist_0-s4",
+              "kind": "checkpoint",
+              "schema": "unavailable"
+            },
+            "facts": {
+              "override_kind": {
+                "status": "known",
+                "value": "smoke"
+              },
+              "source_pool_runs": {
+                "reason": "upstream run count is not a trainer fact",
+                "status": "unavailable"
+              },
+              "teacher_record_count": {
+                "reason": "not retained in the cited task/PR records",
+                "status": "unavailable"
+              },
+              "trainer_record_count": {
+                "status": "known",
+                "value": 4
+              }
+            },
+            "integrity": {
+              "identity_source": "retained task contract / PR record",
+              "sha256": "ab68439df429f603816f30064484cc99f33611a196ba456103397fc7ef8ed5f3"
+            },
+            "producer_scope": null,
+            "schema_version": "artifact-eligibility-v1"
+          },
+          "claim_boundary": "exact historical dependency",
+          "eligible": true,
+          "predicates": [],
+          "requirements": {
+            "claim_boundary": "exact historical dependency",
+            "predicates": [],
+            "reuse_mode": "historical_reproduction"
+          },
+          "reuse_mode": "historical_reproduction",
+          "schema_version": "artifact-eligibility-v1"
+        },
+        "scientific_quality_claim": {
+          "artifact": {
+            "artifact": {
+              "id": "t043-main-runs1000-assist_0-s4",
+              "kind": "checkpoint",
+              "schema": "unavailable"
+            },
+            "facts": {
+              "override_kind": {
+                "status": "known",
+                "value": "smoke"
+              },
+              "source_pool_runs": {
+                "reason": "upstream run count is not a trainer fact",
+                "status": "unavailable"
+              },
+              "teacher_record_count": {
+                "reason": "not retained in the cited task/PR records",
+                "status": "unavailable"
+              },
+              "trainer_record_count": {
+                "status": "known",
+                "value": 4
+              }
+            },
+            "integrity": {
+              "identity_source": "retained task contract / PR record",
+              "sha256": "ab68439df429f603816f30064484cc99f33611a196ba456103397fc7ef8ed5f3"
+            },
+            "producer_scope": null,
+            "schema_version": "artifact-eligibility-v1"
+          },
+          "claim_boundary": "new generalized model-quality claim",
+          "eligible": false,
+          "predicates": [
+            {
+              "fact": "trainer_record_count",
+              "observed": 4,
+              "reason": "observed fact does not satisfy requirement",
+              "required": 1000,
+              "result": false
+            },
+            {
+              "fact": "override_kind",
+              "observed": "smoke",
+              "reason": "observed fact does not satisfy requirement",
+              "required": "smoke",
+              "result": false
+            }
+          ],
+          "requirements": {
+            "claim_boundary": "new generalized model-quality claim",
+            "predicates": [
+              {
+                "fact": "trainer_record_count",
+                "operator": "min",
+                "required": 1000
+              }
+            ],
+            "reuse_mode": "scientific_quality_claim"
+          },
+          "reuse_mode": "scientific_quality_claim",
+          "schema_version": "artifact-eligibility-v1"
+        }
+      },
       "historical_use": "diagnostic_mechanism",
+      "integrity": {
+        "identity_source": "retained task contract / PR record",
+        "sha256": "ab68439df429f603816f30064484cc99f33611a196ba456103397fc7ef8ed5f3"
+      },
       "limitations": "historical T044 numerical outcomes remain unchanged; four trainer rows",
       "maximum_justified_claim": "checkpoint-conditional evaluation; no generalized model-quality claim",
       "qualification": {
-        "override_kind": "smoke",
-        "trainer_record_count": 4,
-        "upstream_source_pool": "unavailable"
+        "override_kind": {
+          "status": "known",
+          "value": "smoke"
+        },
+        "source_pool_runs": {
+          "reason": "upstream run count is not a trainer fact",
+          "status": "unavailable"
+        },
+        "teacher_record_count": {
+          "reason": "not retained in the cited task/PR records",
+          "status": "unavailable"
+        },
+        "trainer_record_count": {
+          "status": "known",
+          "value": 4
+        }
       },
       "task": "T044"
     },
     {
-      "checkpoint_sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+      "consumer_decisions": {
+        "diagnostic_mechanism": {
+          "artifact": {
+            "artifact": {
+              "id": "t043-assist_0-smoke",
+              "kind": "checkpoint",
+              "schema": "unavailable"
+            },
+            "facts": {
+              "override_kind": {
+                "status": "known",
+                "value": "smoke"
+              },
+              "source_pool_runs": {
+                "reason": "upstream run count is not a trainer fact",
+                "status": "unavailable"
+              },
+              "teacher_record_count": {
+                "reason": "not retained in the cited task/PR records",
+                "status": "unavailable"
+              },
+              "trainer_record_count": {
+                "status": "known",
+                "value": 4
+              }
+            },
+            "integrity": {
+              "identity_source": "retained task contract / PR record",
+              "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
+            },
+            "producer_scope": null,
+            "schema_version": "artifact-eligibility-v1"
+          },
+          "claim_boundary": "checkpoint-conditional search-mechanism result",
+          "eligible": true,
+          "predicates": [
+            {
+              "fact": "trainer_record_count",
+              "observed": 4,
+              "reason": "satisfied",
+              "required": 1,
+              "result": true
+            }
+          ],
+          "requirements": {
+            "claim_boundary": "checkpoint-conditional search-mechanism result",
+            "predicates": [
+              {
+                "fact": "trainer_record_count",
+                "operator": "min",
+                "required": 1
+              }
+            ],
+            "reuse_mode": "diagnostic_mechanism"
+          },
+          "reuse_mode": "diagnostic_mechanism",
+          "schema_version": "artifact-eligibility-v1"
+        },
+        "historical_reproduction": {
+          "artifact": {
+            "artifact": {
+              "id": "t043-assist_0-smoke",
+              "kind": "checkpoint",
+              "schema": "unavailable"
+            },
+            "facts": {
+              "override_kind": {
+                "status": "known",
+                "value": "smoke"
+              },
+              "source_pool_runs": {
+                "reason": "upstream run count is not a trainer fact",
+                "status": "unavailable"
+              },
+              "teacher_record_count": {
+                "reason": "not retained in the cited task/PR records",
+                "status": "unavailable"
+              },
+              "trainer_record_count": {
+                "status": "known",
+                "value": 4
+              }
+            },
+            "integrity": {
+              "identity_source": "retained task contract / PR record",
+              "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
+            },
+            "producer_scope": null,
+            "schema_version": "artifact-eligibility-v1"
+          },
+          "claim_boundary": "exact historical dependency",
+          "eligible": true,
+          "predicates": [],
+          "requirements": {
+            "claim_boundary": "exact historical dependency",
+            "predicates": [],
+            "reuse_mode": "historical_reproduction"
+          },
+          "reuse_mode": "historical_reproduction",
+          "schema_version": "artifact-eligibility-v1"
+        },
+        "scientific_quality_claim": {
+          "artifact": {
+            "artifact": {
+              "id": "t043-assist_0-smoke",
+              "kind": "checkpoint",
+              "schema": "unavailable"
+            },
+            "facts": {
+              "override_kind": {
+                "status": "known",
+                "value": "smoke"
+              },
+              "source_pool_runs": {
+                "reason": "upstream run count is not a trainer fact",
+                "status": "unavailable"
+              },
+              "teacher_record_count": {
+                "reason": "not retained in the cited task/PR records",
+                "status": "unavailable"
+              },
+              "trainer_record_count": {
+                "status": "known",
+                "value": 4
+              }
+            },
+            "integrity": {
+              "identity_source": "retained task contract / PR record",
+              "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
+            },
+            "producer_scope": null,
+            "schema_version": "artifact-eligibility-v1"
+          },
+          "claim_boundary": "new generalized model-quality claim",
+          "eligible": false,
+          "predicates": [
+            {
+              "fact": "trainer_record_count",
+              "observed": 4,
+              "reason": "observed fact does not satisfy requirement",
+              "required": 1000,
+              "result": false
+            },
+            {
+              "fact": "override_kind",
+              "observed": "smoke",
+              "reason": "observed fact does not satisfy requirement",
+              "required": "smoke",
+              "result": false
+            }
+          ],
+          "requirements": {
+            "claim_boundary": "new generalized model-quality claim",
+            "predicates": [
+              {
+                "fact": "trainer_record_count",
+                "operator": "min",
+                "required": 1000
+              }
+            ],
+            "reuse_mode": "scientific_quality_claim"
+          },
+          "reuse_mode": "scientific_quality_claim",
+          "schema_version": "artifact-eligibility-v1"
+        }
+      },
       "historical_use": "diagnostic_mechanism",
+      "integrity": {
+        "identity_source": "retained task contract / PR record",
+        "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
+      },
       "limitations": "trainer scale and broad coverage unavailable; exact historical result only",
       "maximum_justified_claim": "checkpoint-conditional search-mechanism result",
       "qualification": {
-        "override_kind": "smoke",
-        "trainer_record_count": 4,
-        "upstream_source_pool": "unavailable"
+        "override_kind": {
+          "status": "known",
+          "value": "smoke"
+        },
+        "source_pool_runs": {
+          "reason": "upstream run count is not a trainer fact",
+          "status": "unavailable"
+        },
+        "teacher_record_count": {
+          "reason": "not retained in the cited task/PR records",
+          "status": "unavailable"
+        },
+        "trainer_record_count": {
+          "status": "known",
+          "value": 4
+        }
       },
       "task": "T047"
     },
     {
-      "checkpoint_sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+      "consumer_decisions": {
+        "diagnostic_mechanism": {
+          "artifact": {
+            "artifact": {
+              "id": "t043-assist_0-smoke",
+              "kind": "checkpoint",
+              "schema": "unavailable"
+            },
+            "facts": {
+              "override_kind": {
+                "status": "known",
+                "value": "smoke"
+              },
+              "source_pool_runs": {
+                "reason": "upstream run count is not a trainer fact",
+                "status": "unavailable"
+              },
+              "teacher_record_count": {
+                "reason": "not retained in the cited task/PR records",
+                "status": "unavailable"
+              },
+              "trainer_record_count": {
+                "status": "known",
+                "value": 4
+              }
+            },
+            "integrity": {
+              "identity_source": "retained task contract / PR record",
+              "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
+            },
+            "producer_scope": null,
+            "schema_version": "artifact-eligibility-v1"
+          },
+          "claim_boundary": "checkpoint-conditional search-mechanism result",
+          "eligible": true,
+          "predicates": [
+            {
+              "fact": "trainer_record_count",
+              "observed": 4,
+              "reason": "satisfied",
+              "required": 1,
+              "result": true
+            }
+          ],
+          "requirements": {
+            "claim_boundary": "checkpoint-conditional search-mechanism result",
+            "predicates": [
+              {
+                "fact": "trainer_record_count",
+                "operator": "min",
+                "required": 1
+              }
+            ],
+            "reuse_mode": "diagnostic_mechanism"
+          },
+          "reuse_mode": "diagnostic_mechanism",
+          "schema_version": "artifact-eligibility-v1"
+        },
+        "historical_reproduction": {
+          "artifact": {
+            "artifact": {
+              "id": "t043-assist_0-smoke",
+              "kind": "checkpoint",
+              "schema": "unavailable"
+            },
+            "facts": {
+              "override_kind": {
+                "status": "known",
+                "value": "smoke"
+              },
+              "source_pool_runs": {
+                "reason": "upstream run count is not a trainer fact",
+                "status": "unavailable"
+              },
+              "teacher_record_count": {
+                "reason": "not retained in the cited task/PR records",
+                "status": "unavailable"
+              },
+              "trainer_record_count": {
+                "status": "known",
+                "value": 4
+              }
+            },
+            "integrity": {
+              "identity_source": "retained task contract / PR record",
+              "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
+            },
+            "producer_scope": null,
+            "schema_version": "artifact-eligibility-v1"
+          },
+          "claim_boundary": "exact historical dependency",
+          "eligible": true,
+          "predicates": [],
+          "requirements": {
+            "claim_boundary": "exact historical dependency",
+            "predicates": [],
+            "reuse_mode": "historical_reproduction"
+          },
+          "reuse_mode": "historical_reproduction",
+          "schema_version": "artifact-eligibility-v1"
+        },
+        "scientific_quality_claim": {
+          "artifact": {
+            "artifact": {
+              "id": "t043-assist_0-smoke",
+              "kind": "checkpoint",
+              "schema": "unavailable"
+            },
+            "facts": {
+              "override_kind": {
+                "status": "known",
+                "value": "smoke"
+              },
+              "source_pool_runs": {
+                "reason": "upstream run count is not a trainer fact",
+                "status": "unavailable"
+              },
+              "teacher_record_count": {
+                "reason": "not retained in the cited task/PR records",
+                "status": "unavailable"
+              },
+              "trainer_record_count": {
+                "status": "known",
+                "value": 4
+              }
+            },
+            "integrity": {
+              "identity_source": "retained task contract / PR record",
+              "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
+            },
+            "producer_scope": null,
+            "schema_version": "artifact-eligibility-v1"
+          },
+          "claim_boundary": "new generalized model-quality claim",
+          "eligible": false,
+          "predicates": [
+            {
+              "fact": "trainer_record_count",
+              "observed": 4,
+              "reason": "observed fact does not satisfy requirement",
+              "required": 1000,
+              "result": false
+            },
+            {
+              "fact": "override_kind",
+              "observed": "smoke",
+              "reason": "observed fact does not satisfy requirement",
+              "required": "smoke",
+              "result": false
+            }
+          ],
+          "requirements": {
+            "claim_boundary": "new generalized model-quality claim",
+            "predicates": [
+              {
+                "fact": "trainer_record_count",
+                "operator": "min",
+                "required": 1000
+              }
+            ],
+            "reuse_mode": "scientific_quality_claim"
+          },
+          "reuse_mode": "scientific_quality_claim",
+          "schema_version": "artifact-eligibility-v1"
+        }
+      },
       "historical_use": "diagnostic_mechanism",
+      "integrity": {
+        "identity_source": "retained task contract / PR record",
+        "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
+      },
       "limitations": "trainer scale and broad coverage unavailable",
       "maximum_justified_claim": "checkpoint-conditional search-mechanism result",
       "qualification": {
-        "override_kind": "smoke",
-        "trainer_record_count": 4,
-        "upstream_source_pool": "unavailable"
+        "override_kind": {
+          "status": "known",
+          "value": "smoke"
+        },
+        "source_pool_runs": {
+          "reason": "upstream run count is not a trainer fact",
+          "status": "unavailable"
+        },
+        "teacher_record_count": {
+          "reason": "not retained in the cited task/PR records",
+          "status": "unavailable"
+        },
+        "trainer_record_count": {
+          "status": "known",
+          "value": 4
+        }
       },
       "task": "T048"
     },
     {
-      "checkpoint_sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+      "consumer_decisions": {
+        "diagnostic_mechanism": {
+          "artifact": {
+            "artifact": {
+              "id": "t043-assist_0-smoke",
+              "kind": "checkpoint",
+              "schema": "unavailable"
+            },
+            "facts": {
+              "override_kind": {
+                "status": "known",
+                "value": "smoke"
+              },
+              "source_pool_runs": {
+                "reason": "upstream run count is not a trainer fact",
+                "status": "unavailable"
+              },
+              "teacher_record_count": {
+                "reason": "not retained in the cited task/PR records",
+                "status": "unavailable"
+              },
+              "trainer_record_count": {
+                "status": "known",
+                "value": 4
+              }
+            },
+            "integrity": {
+              "identity_source": "retained task contract / PR record",
+              "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
+            },
+            "producer_scope": null,
+            "schema_version": "artifact-eligibility-v1"
+          },
+          "claim_boundary": "checkpoint-conditional complete-run mechanism evidence",
+          "eligible": true,
+          "predicates": [
+            {
+              "fact": "trainer_record_count",
+              "observed": 4,
+              "reason": "satisfied",
+              "required": 1,
+              "result": true
+            }
+          ],
+          "requirements": {
+            "claim_boundary": "checkpoint-conditional complete-run mechanism evidence",
+            "predicates": [
+              {
+                "fact": "trainer_record_count",
+                "operator": "min",
+                "required": 1
+              }
+            ],
+            "reuse_mode": "diagnostic_mechanism"
+          },
+          "reuse_mode": "diagnostic_mechanism",
+          "schema_version": "artifact-eligibility-v1"
+        },
+        "historical_reproduction": {
+          "artifact": {
+            "artifact": {
+              "id": "t043-assist_0-smoke",
+              "kind": "checkpoint",
+              "schema": "unavailable"
+            },
+            "facts": {
+              "override_kind": {
+                "status": "known",
+                "value": "smoke"
+              },
+              "source_pool_runs": {
+                "reason": "upstream run count is not a trainer fact",
+                "status": "unavailable"
+              },
+              "teacher_record_count": {
+                "reason": "not retained in the cited task/PR records",
+                "status": "unavailable"
+              },
+              "trainer_record_count": {
+                "status": "known",
+                "value": 4
+              }
+            },
+            "integrity": {
+              "identity_source": "retained task contract / PR record",
+              "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
+            },
+            "producer_scope": null,
+            "schema_version": "artifact-eligibility-v1"
+          },
+          "claim_boundary": "exact historical dependency",
+          "eligible": true,
+          "predicates": [],
+          "requirements": {
+            "claim_boundary": "exact historical dependency",
+            "predicates": [],
+            "reuse_mode": "historical_reproduction"
+          },
+          "reuse_mode": "historical_reproduction",
+          "schema_version": "artifact-eligibility-v1"
+        },
+        "scientific_quality_claim": {
+          "artifact": {
+            "artifact": {
+              "id": "t043-assist_0-smoke",
+              "kind": "checkpoint",
+              "schema": "unavailable"
+            },
+            "facts": {
+              "override_kind": {
+                "status": "known",
+                "value": "smoke"
+              },
+              "source_pool_runs": {
+                "reason": "upstream run count is not a trainer fact",
+                "status": "unavailable"
+              },
+              "teacher_record_count": {
+                "reason": "not retained in the cited task/PR records",
+                "status": "unavailable"
+              },
+              "trainer_record_count": {
+                "status": "known",
+                "value": 4
+              }
+            },
+            "integrity": {
+              "identity_source": "retained task contract / PR record",
+              "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
+            },
+            "producer_scope": null,
+            "schema_version": "artifact-eligibility-v1"
+          },
+          "claim_boundary": "new generalized model-quality claim",
+          "eligible": false,
+          "predicates": [
+            {
+              "fact": "trainer_record_count",
+              "observed": 4,
+              "reason": "observed fact does not satisfy requirement",
+              "required": 1000,
+              "result": false
+            },
+            {
+              "fact": "override_kind",
+              "observed": "smoke",
+              "reason": "observed fact does not satisfy requirement",
+              "required": "smoke",
+              "result": false
+            }
+          ],
+          "requirements": {
+            "claim_boundary": "new generalized model-quality claim",
+            "predicates": [
+              {
+                "fact": "trainer_record_count",
+                "operator": "min",
+                "required": 1000
+              }
+            ],
+            "reuse_mode": "scientific_quality_claim"
+          },
+          "reuse_mode": "scientific_quality_claim",
+          "schema_version": "artifact-eligibility-v1"
+        }
+      },
       "historical_use": "diagnostic_mechanism",
+      "integrity": {
+        "identity_source": "retained task contract / PR record",
+        "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
+      },
       "limitations": "no generalized learned-quality claim",
       "maximum_justified_claim": "checkpoint-conditional complete-run mechanism evidence",
       "qualification": {
-        "override_kind": "smoke",
-        "trainer_record_count": 4,
-        "upstream_source_pool": "unavailable"
+        "override_kind": {
+          "status": "known",
+          "value": "smoke"
+        },
+        "source_pool_runs": {
+          "reason": "upstream run count is not a trainer fact",
+          "status": "unavailable"
+        },
+        "teacher_record_count": {
+          "reason": "not retained in the cited task/PR records",
+          "status": "unavailable"
+        },
+        "trainer_record_count": {
+          "status": "known",
+          "value": 4
+        }
       },
       "task": "T050"
     },
     {
-      "checkpoint_sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+      "consumer_decisions": {
+        "diagnostic_mechanism": {
+          "artifact": {
+            "artifact": {
+              "id": "t043-assist_0-smoke",
+              "kind": "checkpoint",
+              "schema": "unavailable"
+            },
+            "facts": {
+              "override_kind": {
+                "status": "known",
+                "value": "smoke"
+              },
+              "source_pool_runs": {
+                "reason": "upstream run count is not a trainer fact",
+                "status": "unavailable"
+              },
+              "teacher_record_count": {
+                "reason": "not retained in the cited task/PR records",
+                "status": "unavailable"
+              },
+              "trainer_record_count": {
+                "status": "known",
+                "value": 4
+              }
+            },
+            "integrity": {
+              "identity_source": "retained task contract / PR record",
+              "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
+            },
+            "producer_scope": null,
+            "schema_version": "artifact-eligibility-v1"
+          },
+          "claim_boundary": "checkpoint-conditional source/reachability evidence",
+          "eligible": true,
+          "predicates": [
+            {
+              "fact": "trainer_record_count",
+              "observed": 4,
+              "reason": "satisfied",
+              "required": 1,
+              "result": true
+            }
+          ],
+          "requirements": {
+            "claim_boundary": "checkpoint-conditional source/reachability evidence",
+            "predicates": [
+              {
+                "fact": "trainer_record_count",
+                "operator": "min",
+                "required": 1
+              }
+            ],
+            "reuse_mode": "diagnostic_mechanism"
+          },
+          "reuse_mode": "diagnostic_mechanism",
+          "schema_version": "artifact-eligibility-v1"
+        },
+        "historical_reproduction": {
+          "artifact": {
+            "artifact": {
+              "id": "t043-assist_0-smoke",
+              "kind": "checkpoint",
+              "schema": "unavailable"
+            },
+            "facts": {
+              "override_kind": {
+                "status": "known",
+                "value": "smoke"
+              },
+              "source_pool_runs": {
+                "reason": "upstream run count is not a trainer fact",
+                "status": "unavailable"
+              },
+              "teacher_record_count": {
+                "reason": "not retained in the cited task/PR records",
+                "status": "unavailable"
+              },
+              "trainer_record_count": {
+                "status": "known",
+                "value": 4
+              }
+            },
+            "integrity": {
+              "identity_source": "retained task contract / PR record",
+              "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
+            },
+            "producer_scope": null,
+            "schema_version": "artifact-eligibility-v1"
+          },
+          "claim_boundary": "exact historical dependency",
+          "eligible": true,
+          "predicates": [],
+          "requirements": {
+            "claim_boundary": "exact historical dependency",
+            "predicates": [],
+            "reuse_mode": "historical_reproduction"
+          },
+          "reuse_mode": "historical_reproduction",
+          "schema_version": "artifact-eligibility-v1"
+        },
+        "scientific_quality_claim": {
+          "artifact": {
+            "artifact": {
+              "id": "t043-assist_0-smoke",
+              "kind": "checkpoint",
+              "schema": "unavailable"
+            },
+            "facts": {
+              "override_kind": {
+                "status": "known",
+                "value": "smoke"
+              },
+              "source_pool_runs": {
+                "reason": "upstream run count is not a trainer fact",
+                "status": "unavailable"
+              },
+              "teacher_record_count": {
+                "reason": "not retained in the cited task/PR records",
+                "status": "unavailable"
+              },
+              "trainer_record_count": {
+                "status": "known",
+                "value": 4
+              }
+            },
+            "integrity": {
+              "identity_source": "retained task contract / PR record",
+              "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
+            },
+            "producer_scope": null,
+            "schema_version": "artifact-eligibility-v1"
+          },
+          "claim_boundary": "new generalized model-quality claim",
+          "eligible": false,
+          "predicates": [
+            {
+              "fact": "trainer_record_count",
+              "observed": 4,
+              "reason": "observed fact does not satisfy requirement",
+              "required": 1000,
+              "result": false
+            },
+            {
+              "fact": "override_kind",
+              "observed": "smoke",
+              "reason": "observed fact does not satisfy requirement",
+              "required": "smoke",
+              "result": false
+            }
+          ],
+          "requirements": {
+            "claim_boundary": "new generalized model-quality claim",
+            "predicates": [
+              {
+                "fact": "trainer_record_count",
+                "operator": "min",
+                "required": 1000
+              }
+            ],
+            "reuse_mode": "scientific_quality_claim"
+          },
+          "reuse_mode": "scientific_quality_claim",
+          "schema_version": "artifact-eligibility-v1"
+        }
+      },
       "historical_use": "diagnostic_mechanism",
+      "integrity": {
+        "identity_source": "retained task contract / PR record",
+        "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
+      },
       "limitations": "upstream run count is not trainer scale",
       "maximum_justified_claim": "checkpoint-conditional source/reachability evidence",
       "qualification": {
-        "override_kind": "smoke",
-        "trainer_record_count": 4,
-        "upstream_source_pool": "runs1000"
+        "override_kind": {
+          "status": "known",
+          "value": "smoke"
+        },
+        "source_pool_runs": {
+          "reason": "upstream run count is not a trainer fact",
+          "status": "unavailable"
+        },
+        "teacher_record_count": {
+          "reason": "not retained in the cited task/PR records",
+          "status": "unavailable"
+        },
+        "trainer_record_count": {
+          "status": "known",
+          "value": 4
+        }
       },
       "task": "T051"
     },
     {
-      "checkpoint_sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+      "consumer_decisions": {
+        "diagnostic_mechanism": {
+          "artifact": {
+            "artifact": {
+              "id": "t043-assist_0-smoke",
+              "kind": "checkpoint",
+              "schema": "unavailable"
+            },
+            "facts": {
+              "override_kind": {
+                "status": "known",
+                "value": "smoke"
+              },
+              "source_pool_runs": {
+                "reason": "upstream run count is not a trainer fact",
+                "status": "unavailable"
+              },
+              "teacher_record_count": {
+                "reason": "not retained in the cited task/PR records",
+                "status": "unavailable"
+              },
+              "trainer_record_count": {
+                "status": "known",
+                "value": 4
+              }
+            },
+            "integrity": {
+              "identity_source": "retained task contract / PR record",
+              "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
+            },
+            "producer_scope": null,
+            "schema_version": "artifact-eligibility-v1"
+          },
+          "claim_boundary": "checkpoint-conditional fixed-cohort comparison",
+          "eligible": true,
+          "predicates": [
+            {
+              "fact": "trainer_record_count",
+              "observed": 4,
+              "reason": "satisfied",
+              "required": 1,
+              "result": true
+            }
+          ],
+          "requirements": {
+            "claim_boundary": "checkpoint-conditional fixed-cohort comparison",
+            "predicates": [
+              {
+                "fact": "trainer_record_count",
+                "operator": "min",
+                "required": 1
+              }
+            ],
+            "reuse_mode": "diagnostic_mechanism"
+          },
+          "reuse_mode": "diagnostic_mechanism",
+          "schema_version": "artifact-eligibility-v1"
+        },
+        "historical_reproduction": {
+          "artifact": {
+            "artifact": {
+              "id": "t043-assist_0-smoke",
+              "kind": "checkpoint",
+              "schema": "unavailable"
+            },
+            "facts": {
+              "override_kind": {
+                "status": "known",
+                "value": "smoke"
+              },
+              "source_pool_runs": {
+                "reason": "upstream run count is not a trainer fact",
+                "status": "unavailable"
+              },
+              "teacher_record_count": {
+                "reason": "not retained in the cited task/PR records",
+                "status": "unavailable"
+              },
+              "trainer_record_count": {
+                "status": "known",
+                "value": 4
+              }
+            },
+            "integrity": {
+              "identity_source": "retained task contract / PR record",
+              "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
+            },
+            "producer_scope": null,
+            "schema_version": "artifact-eligibility-v1"
+          },
+          "claim_boundary": "exact historical dependency",
+          "eligible": true,
+          "predicates": [],
+          "requirements": {
+            "claim_boundary": "exact historical dependency",
+            "predicates": [],
+            "reuse_mode": "historical_reproduction"
+          },
+          "reuse_mode": "historical_reproduction",
+          "schema_version": "artifact-eligibility-v1"
+        },
+        "scientific_quality_claim": {
+          "artifact": {
+            "artifact": {
+              "id": "t043-assist_0-smoke",
+              "kind": "checkpoint",
+              "schema": "unavailable"
+            },
+            "facts": {
+              "override_kind": {
+                "status": "known",
+                "value": "smoke"
+              },
+              "source_pool_runs": {
+                "reason": "upstream run count is not a trainer fact",
+                "status": "unavailable"
+              },
+              "teacher_record_count": {
+                "reason": "not retained in the cited task/PR records",
+                "status": "unavailable"
+              },
+              "trainer_record_count": {
+                "status": "known",
+                "value": 4
+              }
+            },
+            "integrity": {
+              "identity_source": "retained task contract / PR record",
+              "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
+            },
+            "producer_scope": null,
+            "schema_version": "artifact-eligibility-v1"
+          },
+          "claim_boundary": "new generalized model-quality claim",
+          "eligible": false,
+          "predicates": [
+            {
+              "fact": "trainer_record_count",
+              "observed": 4,
+              "reason": "observed fact does not satisfy requirement",
+              "required": 1000,
+              "result": false
+            },
+            {
+              "fact": "override_kind",
+              "observed": "smoke",
+              "reason": "observed fact does not satisfy requirement",
+              "required": "smoke",
+              "result": false
+            }
+          ],
+          "requirements": {
+            "claim_boundary": "new generalized model-quality claim",
+            "predicates": [
+              {
+                "fact": "trainer_record_count",
+                "operator": "min",
+                "required": 1000
+              }
+            ],
+            "reuse_mode": "scientific_quality_claim"
+          },
+          "reuse_mode": "scientific_quality_claim",
+          "schema_version": "artifact-eligibility-v1"
+        }
+      },
       "historical_use": "diagnostic_mechanism",
+      "integrity": {
+        "identity_source": "retained task contract / PR record",
+        "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
+      },
       "limitations": "historical numerical result is retained; model-quality generalization unavailable",
       "maximum_justified_claim": "checkpoint-conditional fixed-cohort comparison",
       "qualification": {
-        "override_kind": "smoke",
-        "trainer_record_count": 4,
-        "upstream_source_pool": "unavailable"
+        "override_kind": {
+          "status": "known",
+          "value": "smoke"
+        },
+        "source_pool_runs": {
+          "reason": "upstream run count is not a trainer fact",
+          "status": "unavailable"
+        },
+        "teacher_record_count": {
+          "reason": "not retained in the cited task/PR records",
+          "status": "unavailable"
+        },
+        "trainer_record_count": {
+          "status": "known",
+          "value": 4
+        }
       },
       "task": "T052"
     },
     {
-      "checkpoint_sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+      "consumer_decisions": {
+        "diagnostic_mechanism": {
+          "artifact": {
+            "artifact": {
+              "id": "t043-assist_0-smoke",
+              "kind": "checkpoint",
+              "schema": "unavailable"
+            },
+            "facts": {
+              "override_kind": {
+                "status": "known",
+                "value": "smoke"
+              },
+              "source_pool_runs": {
+                "reason": "upstream run count is not a trainer fact",
+                "status": "unavailable"
+              },
+              "teacher_record_count": {
+                "reason": "not retained in the cited task/PR records",
+                "status": "unavailable"
+              },
+              "trainer_record_count": {
+                "status": "known",
+                "value": 4
+              }
+            },
+            "integrity": {
+              "identity_source": "retained task contract / PR record",
+              "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
+            },
+            "producer_scope": null,
+            "schema_version": "artifact-eligibility-v1"
+          },
+          "claim_boundary": "reproduce/audit the exact historical dependency only",
+          "eligible": true,
+          "predicates": [
+            {
+              "fact": "trainer_record_count",
+              "observed": 4,
+              "reason": "satisfied",
+              "required": 1,
+              "result": true
+            }
+          ],
+          "requirements": {
+            "claim_boundary": "reproduce/audit the exact historical dependency only",
+            "predicates": [
+              {
+                "fact": "trainer_record_count",
+                "operator": "min",
+                "required": 1
+              }
+            ],
+            "reuse_mode": "diagnostic_mechanism"
+          },
+          "reuse_mode": "diagnostic_mechanism",
+          "schema_version": "artifact-eligibility-v1"
+        },
+        "historical_reproduction": {
+          "artifact": {
+            "artifact": {
+              "id": "t043-assist_0-smoke",
+              "kind": "checkpoint",
+              "schema": "unavailable"
+            },
+            "facts": {
+              "override_kind": {
+                "status": "known",
+                "value": "smoke"
+              },
+              "source_pool_runs": {
+                "reason": "upstream run count is not a trainer fact",
+                "status": "unavailable"
+              },
+              "teacher_record_count": {
+                "reason": "not retained in the cited task/PR records",
+                "status": "unavailable"
+              },
+              "trainer_record_count": {
+                "status": "known",
+                "value": 4
+              }
+            },
+            "integrity": {
+              "identity_source": "retained task contract / PR record",
+              "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
+            },
+            "producer_scope": null,
+            "schema_version": "artifact-eligibility-v1"
+          },
+          "claim_boundary": "exact historical dependency",
+          "eligible": true,
+          "predicates": [],
+          "requirements": {
+            "claim_boundary": "exact historical dependency",
+            "predicates": [],
+            "reuse_mode": "historical_reproduction"
+          },
+          "reuse_mode": "historical_reproduction",
+          "schema_version": "artifact-eligibility-v1"
+        },
+        "scientific_quality_claim": {
+          "artifact": {
+            "artifact": {
+              "id": "t043-assist_0-smoke",
+              "kind": "checkpoint",
+              "schema": "unavailable"
+            },
+            "facts": {
+              "override_kind": {
+                "status": "known",
+                "value": "smoke"
+              },
+              "source_pool_runs": {
+                "reason": "upstream run count is not a trainer fact",
+                "status": "unavailable"
+              },
+              "teacher_record_count": {
+                "reason": "not retained in the cited task/PR records",
+                "status": "unavailable"
+              },
+              "trainer_record_count": {
+                "status": "known",
+                "value": 4
+              }
+            },
+            "integrity": {
+              "identity_source": "retained task contract / PR record",
+              "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
+            },
+            "producer_scope": null,
+            "schema_version": "artifact-eligibility-v1"
+          },
+          "claim_boundary": "new generalized model-quality claim",
+          "eligible": false,
+          "predicates": [
+            {
+              "fact": "trainer_record_count",
+              "observed": 4,
+              "reason": "observed fact does not satisfy requirement",
+              "required": 1000,
+              "result": false
+            },
+            {
+              "fact": "override_kind",
+              "observed": "smoke",
+              "reason": "observed fact does not satisfy requirement",
+              "required": "smoke",
+              "result": false
+            }
+          ],
+          "requirements": {
+            "claim_boundary": "new generalized model-quality claim",
+            "predicates": [
+              {
+                "fact": "trainer_record_count",
+                "operator": "min",
+                "required": 1000
+              }
+            ],
+            "reuse_mode": "scientific_quality_claim"
+          },
+          "reuse_mode": "scientific_quality_claim",
+          "schema_version": "artifact-eligibility-v1"
+        }
+      },
       "historical_use": "historical_reproduction",
+      "integrity": {
+        "identity_source": "retained task contract / PR record",
+        "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
+      },
       "limitations": "no retained evidence of scale-qualified T043 training",
       "maximum_justified_claim": "reproduce/audit the exact historical dependency only",
       "qualification": {
-        "override_kind": "smoke",
-        "trainer_record_count": 4,
-        "upstream_source_pool": "unavailable"
+        "override_kind": {
+          "status": "known",
+          "value": "smoke"
+        },
+        "source_pool_runs": {
+          "reason": "upstream run count is not a trainer fact",
+          "status": "unavailable"
+        },
+        "teacher_record_count": {
+          "reason": "not retained in the cited task/PR records",
+          "status": "unavailable"
+        },
+        "trainer_record_count": {
+          "status": "known",
+          "value": 4
+        }
       },
       "task": "T062"
     },
     {
-      "checkpoint_sha256": "ab68439df429f603816f30064484cc99f33611a196ba456103397fc7ef8ed5f3",
+      "consumer_decisions": {
+        "diagnostic_mechanism": {
+          "artifact": {
+            "artifact": {
+              "id": "t043-assist_0-smoke",
+              "kind": "checkpoint",
+              "schema": "unavailable"
+            },
+            "facts": {
+              "override_kind": {
+                "status": "known",
+                "value": "smoke"
+              },
+              "source_pool_runs": {
+                "reason": "upstream run count is not a trainer fact",
+                "status": "unavailable"
+              },
+              "teacher_record_count": {
+                "reason": "not retained in the cited task/PR records",
+                "status": "unavailable"
+              },
+              "trainer_record_count": {
+                "status": "known",
+                "value": 4
+              }
+            },
+            "integrity": {
+              "identity_source": "retained task contract / PR record",
+              "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
+            },
+            "producer_scope": null,
+            "schema_version": "artifact-eligibility-v1"
+          },
+          "claim_boundary": "checkpoint-conditional Search v2 audit; not learned-quality evidence",
+          "eligible": true,
+          "predicates": [
+            {
+              "fact": "trainer_record_count",
+              "observed": 4,
+              "reason": "satisfied",
+              "required": 1,
+              "result": true
+            }
+          ],
+          "requirements": {
+            "claim_boundary": "checkpoint-conditional Search v2 audit; not learned-quality evidence",
+            "predicates": [
+              {
+                "fact": "trainer_record_count",
+                "operator": "min",
+                "required": 1
+              }
+            ],
+            "reuse_mode": "diagnostic_mechanism"
+          },
+          "reuse_mode": "diagnostic_mechanism",
+          "schema_version": "artifact-eligibility-v1"
+        },
+        "historical_reproduction": {
+          "artifact": {
+            "artifact": {
+              "id": "t043-assist_0-smoke",
+              "kind": "checkpoint",
+              "schema": "unavailable"
+            },
+            "facts": {
+              "override_kind": {
+                "status": "known",
+                "value": "smoke"
+              },
+              "source_pool_runs": {
+                "reason": "upstream run count is not a trainer fact",
+                "status": "unavailable"
+              },
+              "teacher_record_count": {
+                "reason": "not retained in the cited task/PR records",
+                "status": "unavailable"
+              },
+              "trainer_record_count": {
+                "status": "known",
+                "value": 4
+              }
+            },
+            "integrity": {
+              "identity_source": "retained task contract / PR record",
+              "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
+            },
+            "producer_scope": null,
+            "schema_version": "artifact-eligibility-v1"
+          },
+          "claim_boundary": "exact historical dependency",
+          "eligible": true,
+          "predicates": [],
+          "requirements": {
+            "claim_boundary": "exact historical dependency",
+            "predicates": [],
+            "reuse_mode": "historical_reproduction"
+          },
+          "reuse_mode": "historical_reproduction",
+          "schema_version": "artifact-eligibility-v1"
+        },
+        "scientific_quality_claim": {
+          "artifact": {
+            "artifact": {
+              "id": "t043-assist_0-smoke",
+              "kind": "checkpoint",
+              "schema": "unavailable"
+            },
+            "facts": {
+              "override_kind": {
+                "status": "known",
+                "value": "smoke"
+              },
+              "source_pool_runs": {
+                "reason": "upstream run count is not a trainer fact",
+                "status": "unavailable"
+              },
+              "teacher_record_count": {
+                "reason": "not retained in the cited task/PR records",
+                "status": "unavailable"
+              },
+              "trainer_record_count": {
+                "status": "known",
+                "value": 4
+              }
+            },
+            "integrity": {
+              "identity_source": "retained task contract / PR record",
+              "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
+            },
+            "producer_scope": null,
+            "schema_version": "artifact-eligibility-v1"
+          },
+          "claim_boundary": "new generalized model-quality claim",
+          "eligible": false,
+          "predicates": [
+            {
+              "fact": "trainer_record_count",
+              "observed": 4,
+              "reason": "observed fact does not satisfy requirement",
+              "required": 1000,
+              "result": false
+            },
+            {
+              "fact": "override_kind",
+              "observed": "smoke",
+              "reason": "observed fact does not satisfy requirement",
+              "required": "smoke",
+              "result": false
+            }
+          ],
+          "requirements": {
+            "claim_boundary": "new generalized model-quality claim",
+            "predicates": [
+              {
+                "fact": "trainer_record_count",
+                "operator": "min",
+                "required": 1000
+              }
+            ],
+            "reuse_mode": "scientific_quality_claim"
+          },
+          "reuse_mode": "scientific_quality_claim",
+          "schema_version": "artifact-eligibility-v1"
+        }
+      },
       "historical_use": "diagnostic_mechanism",
-      "limitations": "four trainer rows; runs1000 names upstream pool only",
+      "integrity": {
+        "identity_source": "retained task contract / PR record",
+        "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
+      },
+      "limitations": "four trainer rows; filename naming is not evidence of scale",
       "maximum_justified_claim": "checkpoint-conditional Search v2 audit; not learned-quality evidence",
       "qualification": {
-        "override_kind": "smoke",
-        "trainer_record_count": 4,
-        "upstream_source_pool": "runs1000"
+        "override_kind": {
+          "status": "known",
+          "value": "smoke"
+        },
+        "source_pool_runs": {
+          "reason": "upstream run count is not a trainer fact",
+          "status": "unavailable"
+        },
+        "teacher_record_count": {
+          "reason": "not retained in the cited task/PR records",
+          "status": "unavailable"
+        },
+        "trainer_record_count": {
+          "status": "known",
+          "value": 4
+        }
       },
       "task": "T070"
     }
   ],
   "inputs": {
-    "missing_facts": "reported as unavailable; no filename inference",
+    "missing_facts": "unavailable facts remain explicit; filenames never substitute for provenance",
     "source": "retained T043/T044/T047-T070 task and PR records"
   },
   "schema_version": "t081-historical-claim-boundary-audit-v1"
