@@ -73,13 +73,13 @@ def test_both_t043_fixtures_are_reproduction_diagnostic_only():
             assert record["upstream_source_runs"] == 1000
             assert not qualification.facts["source_pool_runs"].available
         historical = evaluate_eligibility(
-            qualification, EligibilityRequirements("historical_reproduction", "original", ())
+            qualification, EligibilityRequirements("historical_reproduction", "original", (), artifact_id, "checkpoint", sha)
         )
         diagnostic = evaluate_eligibility(
-            qualification, EligibilityRequirements("diagnostic_mechanism", "conditional", (Predicate("trainer_record_count", "min", 1),))
+            qualification, EligibilityRequirements("diagnostic_mechanism", "conditional", (Predicate("trainer_record_count", "min", 1),), artifact_id, "checkpoint", sha)
         )
         quality = evaluate_eligibility(
-            qualification, EligibilityRequirements("scientific_quality_claim", "general", (Predicate("trainer_record_count", "min", 1000),))
+            qualification, EligibilityRequirements("scientific_quality_claim", "general", (Predicate("trainer_record_count", "min", 1), Predicate("source.act", "contains", 1)), artifact_id, "checkpoint", sha)
         )
         assert historical["eligible"] and diagnostic["eligible"]
         assert not quality["eligible"]

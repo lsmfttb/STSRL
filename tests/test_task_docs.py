@@ -48,7 +48,7 @@ def test_published_learning_artifact_docs_have_eligibility_contract() -> None:
 def test_published_task_doc_scan_detects_learning_source_omission() -> None:
     from sts_combat_rl.task_doc_guard import check_published_task_doc
 
-    synthetic = ROOT / "tests" / ".task-doc-learning-source-omission.md"
+    synthetic = ROOT / "tests" / "T082-learning-source-omission.md"
     synthetic.write_text(
         "Artifact Eligibility Required: true\n\nConsumes a learning-source artifact.\n",
         encoding="utf-8",
@@ -62,7 +62,7 @@ def test_published_task_doc_scan_detects_learning_source_omission() -> None:
 
 
 def test_legacy_task_is_explicitly_exempt():
-    synthetic = ROOT / "tests" / ".task-doc-legacy.md"
+    synthetic = ROOT / "tests" / "T080-legacy.md"
     synthetic.write_text("# T080\nConsumes a checkpoint.\n", encoding="utf-8")
     try:
         assert check_published_task_doc(synthetic) == []
