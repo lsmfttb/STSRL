@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from sts_combat_rl.t082_value_target_semantic_closure import audit, classify, recover_behavior, _validate_pool
+from sts_combat_rl.t082_value_target_semantic_closure import audit, classify, recover_behavior, _validate_pool, _load_selected_envelope, sha256
 
 def action(number, occurrence=0):
     return {"action_id": number, "occurrence": occurrence, "kind": "card", "label": f"Card {number}", "stable_id": f"card:{number}"}
@@ -52,3 +52,38 @@ def test_pool_validator_rejects_mutated_metadata_hash_and_order(tmp_path: Path):
     pool = tmp_path / "pool.jsonl"
     pool.write_text(json.dumps({"type": "metadata", "metadata": {"schema_id": "assisted-run-source-pool-v1"}}) + "\n" + json.dumps({"type": "record", "record": {"record_index": 0, "structural_metadata": {"assistance_level": "assist_0"}}}) + "\n")
     assert not _validate_pool(pool, {"record_count": 1, "bytes": pool.stat().st_size, "sha256": "wrong"}, "assist_0")["valid"]
+
+
+def _envelope(path: Path, records, **metadata):
+    lines = [{"type": "metadata", "metadata": metadata | {"record_count": len(records)}}]
+    lines.extend({"type": "record", "record": record} for record in records)
+    path.write_text("\n".join(json.dumps(row, sort_keys=True) for row in lines) + "\n")
+
+
+def test_actual_shaped_reader_preserves_teacher_and_trainer_provenance(tmp_path: Path):
+    teacher = tmp_path / "teacher.jsonl"
+    trainer = tmp_path / "trainer.jsonl"
+    source = {"source_checkpoint_id": "ckpt", "source_run_id": "run", "source_seed": 3, "source_battle_index": 7, "source_pool_record_index": 11}
+    _envelope(teacher, [source | {"row_index": 0, "teacher_action": action(1)}], artifact_schema_id="oracle-search-teacher-v1")
+    _envelope(trainer, [{"example_index": 0, **source, "source_metadata": source | {"component": "assist_0", "assistance_level": "assist_0"}, "policy_target_kind": "oracle_soft_visit_distribution", "policy_target_source": "oracle_teacher_row.soft_visit_target", "structured_battle_outcome": {"battle_survived": {"status": "available", "value": True}}}], format_version=6)
+    teacher_meta, teacher_rows = _load_selected_envelope(teacher, 1, "row_index")
+    trainer_meta, trainer_rows = _load_selected_envelope(trainer, 1, "example_index")
+    assert teacher_meta["artifact_schema_id"] == "oracle-search-teacher-v1"
+    assert teacher_rows[0]["source_pool_record_index"] == 11
+    assert trainer_meta["format_version"] == 6
+    assert trainer_rows[0]["policy_target_kind"] == "oracle_soft_visit_distribution"
+    assert trainer_rows[0]["structured_battle_outcome"]["battle_survived"]["value"] is True
+
+
+def test_successor_reason_categories_and_deterministic_pool_fixture(tmp_path: Path):
+    current = {"action_trace": [action(1)], "source_run_id": "r", "source_seed": 1, "source_battle_index": 0, "structural_metadata": {"assistance_level": "assist_0"}}
+    successor = current | {"action_trace": [action(1), action(2)], "source_battle_index": 2}
+    assert recover_behavior(current, successor)["reason"] == "non-adjacent battle"
+    assert recover_behavior(current, None)["reason"] == "final/no immediate record"
+    bad = successor | {"action_trace": [action(9), action(2)], "source_battle_index": 1}
+    assert recover_behavior(current, bad)["reason"] == "non-prefix"
+    pool = tmp_path / "pool.jsonl"
+    _envelope(pool, [{"record_index": 0, "structural_metadata": {"assistance_level": "assist_0"}}], schema_id="assisted-run-source-pool-v1")
+    expected = {"record_count": 1, "bytes": pool.stat().st_size, "sha256": sha256(pool)}
+    assert _validate_pool(pool, expected, "assist_0")["valid"]
+    assert _validate_pool(pool, expected, "assist_0")["metadata"]["schema_id"] == "assisted-run-source-pool-v1"
