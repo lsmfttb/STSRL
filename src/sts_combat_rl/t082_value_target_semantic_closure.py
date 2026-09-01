@@ -11,6 +11,12 @@ from types import SimpleNamespace
 from sts_combat_rl.sim.source_identity import complete_source_identity, canonical_sha256
 
 SCHEMA = "t082-value-target-semantic-closure-v1"
+EXPECTED_INPUTS = {
+    "t064-curriculum-manifest.json": ("a111e082d4bc11e03bc5b785a814c422619404245ddda55c2954be09dded46c7", "t064-curriculum-manifest-v1"),
+    "t064-training-run-report.json": ("3e838bed72f5ca565532d39d77b1991e0d32919dcd9b1d6afe4d2c8f8ecdc38c", "t064-training-run-report-v1"),
+    "t064-stage-summary.json": ("5748e79a23152fa51475f8cb7359c81816d6bbdd26ed2a10d7489f1853b6b880", "t064-stage-summary-v1"),
+    "t064-transfer-decision.json": ("f8407acbc17cb13bba53009c91009fea961e7307071d54b0ff82147ff092603f", "t064-transfer-decision-v1"),
+}
 CLASSIFICATIONS = {"VALUE_TARGET_SEMANTIC_MISMATCH_CONFIRMED", "VALUE_TARGET_SEMANTICS_ALIGNED", "VALUE_TARGET_SEMANTICS_UNRESOLVED", "INCOMPLETE"}
 
 def sha256(path: Path) -> str:
@@ -121,8 +127,16 @@ def _load_selected_envelope(path: Path, expected: int, index_field: str) -> list
 
 def audit_t064(manifest_path: Path, output: Path) -> dict[str, Any]:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    input_checks = []
+    for name, (expected_hash, schema) in EXPECTED_INPUTS.items():
+        path = manifest_path.parent / name
+        actual = sha256(path) if path.exists() else None
+        document = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+        input_checks.append({"name": name, "path": str(path), "expected_sha256": expected_hash, "sha256": actual, "schema": document.get("schema_id"), "expected_schema": schema, "valid": actual == expected_hash and document.get("schema_id") == schema})
+    decision = json.loads((manifest_path.parent / "t064-transfer-decision.json").read_text(encoding="utf-8"))
+    terminal_valid = all(decision.get(key) is True for key in ("experiment_complete", "source_adequacy", "source_integrity_valid")) and decision.get("terminal_case") == "Case B"
     selected = manifest["selected_sources"]
-    if len(selected) != 460:
+    if len(selected) != 460 or any(item.get("complete_identity", {}).get("schema_id") != "t064-complete-source-identity-v1" for item in selected):
         raise ValueError("T064 selected inventory must contain exactly 460 rows")
     root = manifest_path.parent
     teacher_path, trainer_path = root / "teacher/merged.jsonl", root / "trainer/trainer-input.jsonl"
@@ -132,6 +146,7 @@ def audit_t064(manifest_path: Path, output: Path) -> dict[str, Any]:
         raise ValueError("T064 teacher/trainer inventories must each contain 460 rows")
     by_component: defaultdict[str, set[int]] = defaultdict(set)
     for index, item in enumerate(selected): by_component[item["component"]].add(item["source_record_index"])
+    coverage = Counter((item.get("act"), item.get("component")) for item in selected)
     found: dict[tuple[str, int], tuple[dict[str, Any], dict[str, Any] | None]] = {}
     for component, indexes in by_component.items():
         previous = None
@@ -159,7 +174,8 @@ def audit_t064(manifest_path: Path, output: Path) -> dict[str, Any]:
         comparison = "unavailable" if behavior.get("status") != "available" or teacher_action is None else "same" if tuple(behavior["identity"]) == teacher_action else "different"
         outcome = source.get("battle_outcome")
         rows.append({"index": index, "selected_identity": item["complete_identity"], "selected_identity_sha256": item.get("complete_identity_sha256"), "derived_identity_sha256": derived_sha, "identity_valid": identity_ok, "identity_error": source_error, "component": component, "source_record_index": record_index, "source_checkpoint_id": source.get("source_checkpoint_id"), "source_run_id": source.get("source_run_id"), "source_seed": source.get("source_seed"), "source_battle_index": source.get("source_battle_index"), "act": item.get("act"), "room_type": item.get("room_type"), "trace_length": len(source.get("action_trace", ())), "successor": {"record_index": successor.get("record_index"), "trace_length": len(successor.get("action_trace", ())), "battle_index": successor.get("source_battle_index")} if successor else None, "behavior": behavior, "teacher_action": teacher_action, "trainer_policy_action": _identity(trainers[index].get("policy_target_action_identity")), "comparison": comparison, "source_battle_outcome": outcome if isinstance(outcome, str) else None, "trainer_value_lineage": trainers[index].get("raw_reward_components", {}).get("battle_outcome"), "source_controller": source.get("source_battle_controller_provenance"), "teacher_controller": teachers[index].get("controller_provenance"), "policy_target_source": trainers[index].get("policy_target_source"), "value_target_source": "trainer_input_record.raw_reward_components.battle_outcome"})
-    report = {"schema_version": SCHEMA, "inputs": {"manifest": str(manifest_path), "manifest_sha256": sha256(manifest_path), "teacher": {"path": str(teacher_path), "sha256": sha256(teacher_path)}, "trainer": {"path": str(trainer_path), "sha256": sha256(trainer_path)}, "source_components": {component: {"path": str(manifest["input_artifacts"][component]["path"]), "expected_sha256": manifest["input_artifacts"][component]["sha256"]} for component in sorted(by_component)}}, "integrity": {"selected_teacher_trainer_counts": len(rows) == 460, "source_identity_valid": all(row["identity_valid"] for row in rows), "problems": [] if all(row["identity_valid"] for row in rows) else ["one or more source identities failed validation"]}, "counts": {"total_rows": len(rows), "behavior_recoverable": sum(row["behavior"]["status"] == "available" for row in rows), "behavior_unavailable": sum(row["behavior"]["status"] != "available" for row in rows), "comparisons": dict(Counter(row["comparison"] for row in rows)), "outcomes": dict(Counter("survived" if row["source_battle_outcome"] == "PLAYER_VICTORY" else "lost" if row["source_battle_outcome"] else "unavailable" for row in rows))}, "classification": classify(integrity_valid=all(row["identity_valid"] for row in rows), rows=rows), "rows": rows, "semantic_call_chain": {"policy_target": "oracle teacher action", "value_target": "realized source battle outcome", "search_v2_leaf": "battle_survival_probability at hypothetical leaf"}}
+    all_integrity = all(row["identity_valid"] for row in rows) and all(item["valid"] for item in input_checks) and terminal_valid
+    report = {"schema_version": SCHEMA, "inputs": {"manifest": str(manifest_path), "manifest_sha256": sha256(manifest_path), "control_artifacts": input_checks, "terminal_case_valid": terminal_valid, "teacher": {"path": str(teacher_path), "sha256": sha256(teacher_path)}, "trainer": {"path": str(trainer_path), "sha256": sha256(trainer_path)}, "source_components": {component: {"path": str(manifest["input_artifacts"][component]["path"]), "expected_sha256": manifest["input_artifacts"][component]["sha256"]} for component in sorted(by_component)}}, "coverage": {"observed": {str(key): value for key, value in sorted(coverage.items())}}, "integrity": {"valid": all_integrity, "selected_teacher_trainer_counts": len(rows) == 460, "source_identity_valid": all(row["identity_valid"] for row in rows), "problems": [] if all_integrity else ["one or more identity, control-artifact, or terminal predicates failed"]}, "counts": {"total_rows": len(rows), "behavior_recoverable": sum(row["behavior"]["status"] == "available" for row in rows), "behavior_unavailable": sum(row["behavior"]["status"] != "available" for row in rows), "comparisons": dict(Counter(row["comparison"] for row in rows)), "outcomes": dict(Counter("survived" if row["source_battle_outcome"] == "PLAYER_VICTORY" else "lost" if row["source_battle_outcome"] else "unavailable" for row in rows))}, "classification": classify(integrity_valid=all_integrity, rows=rows), "rows": rows, "semantic_call_chain": {"policy_target": "oracle teacher action", "value_target": "realized source battle outcome", "search_v2_leaf": "battle_survival_probability at hypothetical leaf"}}
     output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return report
 
