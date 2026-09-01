@@ -38,6 +38,27 @@
           "eligible": true,
           "predicates": [
             {
+              "fact": "artifact.id",
+              "observed": "t043-main-runs1000-assist_0-s4",
+              "reason": "satisfied",
+              "required": "t043-main-runs1000-assist_0-s4",
+              "result": true
+            },
+            {
+              "fact": "artifact.kind",
+              "observed": "checkpoint",
+              "reason": "satisfied",
+              "required": "checkpoint",
+              "result": true
+            },
+            {
+              "fact": "integrity.sha256",
+              "observed": "ab68439df429f603816f30064484cc99f33611a196ba456103397fc7ef8ed5f3",
+              "reason": "satisfied",
+              "required": "ab68439df429f603816f30064484cc99f33611a196ba456103397fc7ef8ed5f3",
+              "result": true
+            },
+            {
               "fact": "trainer_record_count",
               "observed": 4,
               "reason": "satisfied",
@@ -46,6 +67,8 @@
             }
           ],
           "requirements": {
+            "artifact_id": "t043-main-runs1000-assist_0-s4",
+            "artifact_kind": "checkpoint",
             "claim_boundary": "checkpoint-conditional evaluation; no generalized model-quality claim",
             "predicates": [
               {
@@ -54,7 +77,8 @@
                 "required": 1
               }
             ],
-            "reuse_mode": "diagnostic_mechanism"
+            "reuse_mode": "diagnostic_mechanism",
+            "sha256": "ab68439df429f603816f30064484cc99f33611a196ba456103397fc7ef8ed5f3"
           },
           "reuse_mode": "diagnostic_mechanism",
           "schema_version": "artifact-eligibility-v1"
@@ -93,11 +117,36 @@
           },
           "claim_boundary": "exact historical dependency",
           "eligible": true,
-          "predicates": [],
+          "predicates": [
+            {
+              "fact": "artifact.id",
+              "observed": "t043-main-runs1000-assist_0-s4",
+              "reason": "satisfied",
+              "required": "t043-main-runs1000-assist_0-s4",
+              "result": true
+            },
+            {
+              "fact": "artifact.kind",
+              "observed": "checkpoint",
+              "reason": "satisfied",
+              "required": "checkpoint",
+              "result": true
+            },
+            {
+              "fact": "integrity.sha256",
+              "observed": "ab68439df429f603816f30064484cc99f33611a196ba456103397fc7ef8ed5f3",
+              "reason": "satisfied",
+              "required": "ab68439df429f603816f30064484cc99f33611a196ba456103397fc7ef8ed5f3",
+              "result": true
+            }
+          ],
           "requirements": {
+            "artifact_id": "t043-main-runs1000-assist_0-s4",
+            "artifact_kind": "checkpoint",
             "claim_boundary": "exact historical dependency",
             "predicates": [],
-            "reuse_mode": "historical_reproduction"
+            "reuse_mode": "historical_reproduction",
+            "sha256": "ab68439df429f603816f30064484cc99f33611a196ba456103397fc7ef8ed5f3"
           },
           "reuse_mode": "historical_reproduction",
           "schema_version": "artifact-eligibility-v1"
@@ -138,10 +187,40 @@
           "eligible": false,
           "predicates": [
             {
+              "fact": "artifact.id",
+              "observed": "t043-main-runs1000-assist_0-s4",
+              "reason": "satisfied",
+              "required": "t043-main-runs1000-assist_0-s4",
+              "result": true
+            },
+            {
+              "fact": "artifact.kind",
+              "observed": "checkpoint",
+              "reason": "satisfied",
+              "required": "checkpoint",
+              "result": true
+            },
+            {
+              "fact": "integrity.sha256",
+              "observed": "ab68439df429f603816f30064484cc99f33611a196ba456103397fc7ef8ed5f3",
+              "reason": "satisfied",
+              "required": "ab68439df429f603816f30064484cc99f33611a196ba456103397fc7ef8ed5f3",
+              "result": true
+            },
+            {
               "fact": "trainer_record_count",
               "observed": 4,
               "reason": "observed fact does not satisfy requirement",
               "required": 1000,
+              "result": false
+            },
+            {
+              "fact": "__explicit_coverage_predicate_required",
+              "observed": {
+                "status": "unavailable"
+              },
+              "reason": "required fact unavailable",
+              "required": true,
               "result": false
             },
             {
@@ -153,6 +232,8 @@
             }
           ],
           "requirements": {
+            "artifact_id": "t043-main-runs1000-assist_0-s4",
+            "artifact_kind": "checkpoint",
             "claim_boundary": "new generalized model-quality claim",
             "predicates": [
               {
@@ -161,12 +242,14 @@
                 "required": 1000
               }
             ],
-            "reuse_mode": "scientific_quality_claim"
+            "reuse_mode": "scientific_quality_claim",
+            "sha256": "ab68439df429f603816f30064484cc99f33611a196ba456103397fc7ef8ed5f3"
           },
           "reuse_mode": "scientific_quality_claim",
           "schema_version": "artifact-eligibility-v1"
         }
       },
+      "evidence_family": "t043-main-runs1000-assist_0-s4",
       "historical_use": "diagnostic_mechanism",
       "integrity": {
         "identity_source": "retained task contract / PR record",
@@ -232,6 +315,27 @@
           "eligible": true,
           "predicates": [
             {
+              "fact": "artifact.id",
+              "observed": "t043-assist_0-smoke",
+              "reason": "satisfied",
+              "required": "t043-assist_0-smoke",
+              "result": true
+            },
+            {
+              "fact": "artifact.kind",
+              "observed": "checkpoint",
+              "reason": "satisfied",
+              "required": "checkpoint",
+              "result": true
+            },
+            {
+              "fact": "integrity.sha256",
+              "observed": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+              "reason": "satisfied",
+              "required": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+              "result": true
+            },
+            {
               "fact": "trainer_record_count",
               "observed": 4,
               "reason": "satisfied",
@@ -240,6 +344,8 @@
             }
           ],
           "requirements": {
+            "artifact_id": "t043-assist_0-smoke",
+            "artifact_kind": "checkpoint",
             "claim_boundary": "checkpoint-conditional search-mechanism result",
             "predicates": [
               {
@@ -248,7 +354,8 @@
                 "required": 1
               }
             ],
-            "reuse_mode": "diagnostic_mechanism"
+            "reuse_mode": "diagnostic_mechanism",
+            "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
           },
           "reuse_mode": "diagnostic_mechanism",
           "schema_version": "artifact-eligibility-v1"
@@ -287,11 +394,36 @@
           },
           "claim_boundary": "exact historical dependency",
           "eligible": true,
-          "predicates": [],
+          "predicates": [
+            {
+              "fact": "artifact.id",
+              "observed": "t043-assist_0-smoke",
+              "reason": "satisfied",
+              "required": "t043-assist_0-smoke",
+              "result": true
+            },
+            {
+              "fact": "artifact.kind",
+              "observed": "checkpoint",
+              "reason": "satisfied",
+              "required": "checkpoint",
+              "result": true
+            },
+            {
+              "fact": "integrity.sha256",
+              "observed": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+              "reason": "satisfied",
+              "required": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+              "result": true
+            }
+          ],
           "requirements": {
+            "artifact_id": "t043-assist_0-smoke",
+            "artifact_kind": "checkpoint",
             "claim_boundary": "exact historical dependency",
             "predicates": [],
-            "reuse_mode": "historical_reproduction"
+            "reuse_mode": "historical_reproduction",
+            "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
           },
           "reuse_mode": "historical_reproduction",
           "schema_version": "artifact-eligibility-v1"
@@ -332,10 +464,40 @@
           "eligible": false,
           "predicates": [
             {
+              "fact": "artifact.id",
+              "observed": "t043-assist_0-smoke",
+              "reason": "satisfied",
+              "required": "t043-assist_0-smoke",
+              "result": true
+            },
+            {
+              "fact": "artifact.kind",
+              "observed": "checkpoint",
+              "reason": "satisfied",
+              "required": "checkpoint",
+              "result": true
+            },
+            {
+              "fact": "integrity.sha256",
+              "observed": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+              "reason": "satisfied",
+              "required": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+              "result": true
+            },
+            {
               "fact": "trainer_record_count",
               "observed": 4,
               "reason": "observed fact does not satisfy requirement",
               "required": 1000,
+              "result": false
+            },
+            {
+              "fact": "__explicit_coverage_predicate_required",
+              "observed": {
+                "status": "unavailable"
+              },
+              "reason": "required fact unavailable",
+              "required": true,
               "result": false
             },
             {
@@ -347,6 +509,8 @@
             }
           ],
           "requirements": {
+            "artifact_id": "t043-assist_0-smoke",
+            "artifact_kind": "checkpoint",
             "claim_boundary": "new generalized model-quality claim",
             "predicates": [
               {
@@ -355,12 +519,14 @@
                 "required": 1000
               }
             ],
-            "reuse_mode": "scientific_quality_claim"
+            "reuse_mode": "scientific_quality_claim",
+            "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
           },
           "reuse_mode": "scientific_quality_claim",
           "schema_version": "artifact-eligibility-v1"
         }
       },
+      "evidence_family": "t043-assist_0-smoke",
       "historical_use": "diagnostic_mechanism",
       "integrity": {
         "identity_source": "retained task contract / PR record",
@@ -426,6 +592,27 @@
           "eligible": true,
           "predicates": [
             {
+              "fact": "artifact.id",
+              "observed": "t043-assist_0-smoke",
+              "reason": "satisfied",
+              "required": "t043-assist_0-smoke",
+              "result": true
+            },
+            {
+              "fact": "artifact.kind",
+              "observed": "checkpoint",
+              "reason": "satisfied",
+              "required": "checkpoint",
+              "result": true
+            },
+            {
+              "fact": "integrity.sha256",
+              "observed": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+              "reason": "satisfied",
+              "required": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+              "result": true
+            },
+            {
               "fact": "trainer_record_count",
               "observed": 4,
               "reason": "satisfied",
@@ -434,6 +621,8 @@
             }
           ],
           "requirements": {
+            "artifact_id": "t043-assist_0-smoke",
+            "artifact_kind": "checkpoint",
             "claim_boundary": "checkpoint-conditional search-mechanism result",
             "predicates": [
               {
@@ -442,7 +631,8 @@
                 "required": 1
               }
             ],
-            "reuse_mode": "diagnostic_mechanism"
+            "reuse_mode": "diagnostic_mechanism",
+            "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
           },
           "reuse_mode": "diagnostic_mechanism",
           "schema_version": "artifact-eligibility-v1"
@@ -481,11 +671,36 @@
           },
           "claim_boundary": "exact historical dependency",
           "eligible": true,
-          "predicates": [],
+          "predicates": [
+            {
+              "fact": "artifact.id",
+              "observed": "t043-assist_0-smoke",
+              "reason": "satisfied",
+              "required": "t043-assist_0-smoke",
+              "result": true
+            },
+            {
+              "fact": "artifact.kind",
+              "observed": "checkpoint",
+              "reason": "satisfied",
+              "required": "checkpoint",
+              "result": true
+            },
+            {
+              "fact": "integrity.sha256",
+              "observed": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+              "reason": "satisfied",
+              "required": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+              "result": true
+            }
+          ],
           "requirements": {
+            "artifact_id": "t043-assist_0-smoke",
+            "artifact_kind": "checkpoint",
             "claim_boundary": "exact historical dependency",
             "predicates": [],
-            "reuse_mode": "historical_reproduction"
+            "reuse_mode": "historical_reproduction",
+            "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
           },
           "reuse_mode": "historical_reproduction",
           "schema_version": "artifact-eligibility-v1"
@@ -526,10 +741,40 @@
           "eligible": false,
           "predicates": [
             {
+              "fact": "artifact.id",
+              "observed": "t043-assist_0-smoke",
+              "reason": "satisfied",
+              "required": "t043-assist_0-smoke",
+              "result": true
+            },
+            {
+              "fact": "artifact.kind",
+              "observed": "checkpoint",
+              "reason": "satisfied",
+              "required": "checkpoint",
+              "result": true
+            },
+            {
+              "fact": "integrity.sha256",
+              "observed": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+              "reason": "satisfied",
+              "required": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+              "result": true
+            },
+            {
               "fact": "trainer_record_count",
               "observed": 4,
               "reason": "observed fact does not satisfy requirement",
               "required": 1000,
+              "result": false
+            },
+            {
+              "fact": "__explicit_coverage_predicate_required",
+              "observed": {
+                "status": "unavailable"
+              },
+              "reason": "required fact unavailable",
+              "required": true,
               "result": false
             },
             {
@@ -541,6 +786,8 @@
             }
           ],
           "requirements": {
+            "artifact_id": "t043-assist_0-smoke",
+            "artifact_kind": "checkpoint",
             "claim_boundary": "new generalized model-quality claim",
             "predicates": [
               {
@@ -549,18 +796,297 @@
                 "required": 1000
               }
             ],
-            "reuse_mode": "scientific_quality_claim"
+            "reuse_mode": "scientific_quality_claim",
+            "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
           },
           "reuse_mode": "scientific_quality_claim",
           "schema_version": "artifact-eligibility-v1"
         }
       },
+      "evidence_family": "t043-assist_0-smoke; T046 cohort",
       "historical_use": "diagnostic_mechanism",
       "integrity": {
         "identity_source": "retained task contract / PR record",
         "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
       },
-      "limitations": "trainer scale and broad coverage unavailable",
+      "limitations": "current-T046 evidence family; trainer scale unavailable",
+      "maximum_justified_claim": "checkpoint-conditional search-mechanism result",
+      "qualification": {
+        "override_kind": {
+          "status": "known",
+          "value": "smoke"
+        },
+        "source_pool_runs": {
+          "reason": "upstream run count is not a trainer fact",
+          "status": "unavailable"
+        },
+        "teacher_record_count": {
+          "reason": "not retained in the cited task/PR records",
+          "status": "unavailable"
+        },
+        "trainer_record_count": {
+          "status": "known",
+          "value": 4
+        }
+      },
+      "task": "T048"
+    },
+    {
+      "consumer_decisions": {
+        "diagnostic_mechanism": {
+          "artifact": {
+            "artifact": {
+              "id": "t043-main-runs1000-assist_0-s4",
+              "kind": "checkpoint",
+              "schema": "unavailable"
+            },
+            "facts": {
+              "override_kind": {
+                "status": "known",
+                "value": "smoke"
+              },
+              "source_pool_runs": {
+                "reason": "upstream run count is not a trainer fact",
+                "status": "unavailable"
+              },
+              "teacher_record_count": {
+                "reason": "not retained in the cited task/PR records",
+                "status": "unavailable"
+              },
+              "trainer_record_count": {
+                "status": "known",
+                "value": 4
+              }
+            },
+            "integrity": {
+              "identity_source": "retained task contract / PR record",
+              "sha256": "ab68439df429f603816f30064484cc99f33611a196ba456103397fc7ef8ed5f3"
+            },
+            "producer_scope": null,
+            "schema_version": "artifact-eligibility-v1"
+          },
+          "claim_boundary": "checkpoint-conditional search-mechanism result",
+          "eligible": true,
+          "predicates": [
+            {
+              "fact": "artifact.id",
+              "observed": "t043-main-runs1000-assist_0-s4",
+              "reason": "satisfied",
+              "required": "t043-main-runs1000-assist_0-s4",
+              "result": true
+            },
+            {
+              "fact": "artifact.kind",
+              "observed": "checkpoint",
+              "reason": "satisfied",
+              "required": "checkpoint",
+              "result": true
+            },
+            {
+              "fact": "integrity.sha256",
+              "observed": "ab68439df429f603816f30064484cc99f33611a196ba456103397fc7ef8ed5f3",
+              "reason": "satisfied",
+              "required": "ab68439df429f603816f30064484cc99f33611a196ba456103397fc7ef8ed5f3",
+              "result": true
+            },
+            {
+              "fact": "trainer_record_count",
+              "observed": 4,
+              "reason": "satisfied",
+              "required": 1,
+              "result": true
+            }
+          ],
+          "requirements": {
+            "artifact_id": "t043-main-runs1000-assist_0-s4",
+            "artifact_kind": "checkpoint",
+            "claim_boundary": "checkpoint-conditional search-mechanism result",
+            "predicates": [
+              {
+                "fact": "trainer_record_count",
+                "operator": "min",
+                "required": 1
+              }
+            ],
+            "reuse_mode": "diagnostic_mechanism",
+            "sha256": "ab68439df429f603816f30064484cc99f33611a196ba456103397fc7ef8ed5f3"
+          },
+          "reuse_mode": "diagnostic_mechanism",
+          "schema_version": "artifact-eligibility-v1"
+        },
+        "historical_reproduction": {
+          "artifact": {
+            "artifact": {
+              "id": "t043-main-runs1000-assist_0-s4",
+              "kind": "checkpoint",
+              "schema": "unavailable"
+            },
+            "facts": {
+              "override_kind": {
+                "status": "known",
+                "value": "smoke"
+              },
+              "source_pool_runs": {
+                "reason": "upstream run count is not a trainer fact",
+                "status": "unavailable"
+              },
+              "teacher_record_count": {
+                "reason": "not retained in the cited task/PR records",
+                "status": "unavailable"
+              },
+              "trainer_record_count": {
+                "status": "known",
+                "value": 4
+              }
+            },
+            "integrity": {
+              "identity_source": "retained task contract / PR record",
+              "sha256": "ab68439df429f603816f30064484cc99f33611a196ba456103397fc7ef8ed5f3"
+            },
+            "producer_scope": null,
+            "schema_version": "artifact-eligibility-v1"
+          },
+          "claim_boundary": "exact historical dependency",
+          "eligible": true,
+          "predicates": [
+            {
+              "fact": "artifact.id",
+              "observed": "t043-main-runs1000-assist_0-s4",
+              "reason": "satisfied",
+              "required": "t043-main-runs1000-assist_0-s4",
+              "result": true
+            },
+            {
+              "fact": "artifact.kind",
+              "observed": "checkpoint",
+              "reason": "satisfied",
+              "required": "checkpoint",
+              "result": true
+            },
+            {
+              "fact": "integrity.sha256",
+              "observed": "ab68439df429f603816f30064484cc99f33611a196ba456103397fc7ef8ed5f3",
+              "reason": "satisfied",
+              "required": "ab68439df429f603816f30064484cc99f33611a196ba456103397fc7ef8ed5f3",
+              "result": true
+            }
+          ],
+          "requirements": {
+            "artifact_id": "t043-main-runs1000-assist_0-s4",
+            "artifact_kind": "checkpoint",
+            "claim_boundary": "exact historical dependency",
+            "predicates": [],
+            "reuse_mode": "historical_reproduction",
+            "sha256": "ab68439df429f603816f30064484cc99f33611a196ba456103397fc7ef8ed5f3"
+          },
+          "reuse_mode": "historical_reproduction",
+          "schema_version": "artifact-eligibility-v1"
+        },
+        "scientific_quality_claim": {
+          "artifact": {
+            "artifact": {
+              "id": "t043-main-runs1000-assist_0-s4",
+              "kind": "checkpoint",
+              "schema": "unavailable"
+            },
+            "facts": {
+              "override_kind": {
+                "status": "known",
+                "value": "smoke"
+              },
+              "source_pool_runs": {
+                "reason": "upstream run count is not a trainer fact",
+                "status": "unavailable"
+              },
+              "teacher_record_count": {
+                "reason": "not retained in the cited task/PR records",
+                "status": "unavailable"
+              },
+              "trainer_record_count": {
+                "status": "known",
+                "value": 4
+              }
+            },
+            "integrity": {
+              "identity_source": "retained task contract / PR record",
+              "sha256": "ab68439df429f603816f30064484cc99f33611a196ba456103397fc7ef8ed5f3"
+            },
+            "producer_scope": null,
+            "schema_version": "artifact-eligibility-v1"
+          },
+          "claim_boundary": "new generalized model-quality claim",
+          "eligible": false,
+          "predicates": [
+            {
+              "fact": "artifact.id",
+              "observed": "t043-main-runs1000-assist_0-s4",
+              "reason": "satisfied",
+              "required": "t043-main-runs1000-assist_0-s4",
+              "result": true
+            },
+            {
+              "fact": "artifact.kind",
+              "observed": "checkpoint",
+              "reason": "satisfied",
+              "required": "checkpoint",
+              "result": true
+            },
+            {
+              "fact": "integrity.sha256",
+              "observed": "ab68439df429f603816f30064484cc99f33611a196ba456103397fc7ef8ed5f3",
+              "reason": "satisfied",
+              "required": "ab68439df429f603816f30064484cc99f33611a196ba456103397fc7ef8ed5f3",
+              "result": true
+            },
+            {
+              "fact": "trainer_record_count",
+              "observed": 4,
+              "reason": "observed fact does not satisfy requirement",
+              "required": 1000,
+              "result": false
+            },
+            {
+              "fact": "__explicit_coverage_predicate_required",
+              "observed": {
+                "status": "unavailable"
+              },
+              "reason": "required fact unavailable",
+              "required": true,
+              "result": false
+            },
+            {
+              "fact": "override_kind",
+              "observed": "smoke",
+              "reason": "observed fact does not satisfy requirement",
+              "required": "smoke",
+              "result": false
+            }
+          ],
+          "requirements": {
+            "artifact_id": "t043-main-runs1000-assist_0-s4",
+            "artifact_kind": "checkpoint",
+            "claim_boundary": "new generalized model-quality claim",
+            "predicates": [
+              {
+                "fact": "trainer_record_count",
+                "operator": "min",
+                "required": 1000
+              }
+            ],
+            "reuse_mode": "scientific_quality_claim",
+            "sha256": "ab68439df429f603816f30064484cc99f33611a196ba456103397fc7ef8ed5f3"
+          },
+          "reuse_mode": "scientific_quality_claim",
+          "schema_version": "artifact-eligibility-v1"
+        }
+      },
+      "evidence_family": "t043-main-runs1000-assist_0-s4; runs1000 assist_0 cohort",
+      "historical_use": "diagnostic_mechanism",
+      "integrity": {
+        "identity_source": "retained task contract / PR record",
+        "sha256": "ab68439df429f603816f30064484cc99f33611a196ba456103397fc7ef8ed5f3"
+      },
+      "limitations": "upstream naming is not trainer scale",
       "maximum_justified_claim": "checkpoint-conditional search-mechanism result",
       "qualification": {
         "override_kind": {
@@ -620,6 +1146,27 @@
           "eligible": true,
           "predicates": [
             {
+              "fact": "artifact.id",
+              "observed": "t043-assist_0-smoke",
+              "reason": "satisfied",
+              "required": "t043-assist_0-smoke",
+              "result": true
+            },
+            {
+              "fact": "artifact.kind",
+              "observed": "checkpoint",
+              "reason": "satisfied",
+              "required": "checkpoint",
+              "result": true
+            },
+            {
+              "fact": "integrity.sha256",
+              "observed": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+              "reason": "satisfied",
+              "required": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+              "result": true
+            },
+            {
               "fact": "trainer_record_count",
               "observed": 4,
               "reason": "satisfied",
@@ -628,6 +1175,8 @@
             }
           ],
           "requirements": {
+            "artifact_id": "t043-assist_0-smoke",
+            "artifact_kind": "checkpoint",
             "claim_boundary": "checkpoint-conditional complete-run mechanism evidence",
             "predicates": [
               {
@@ -636,7 +1185,8 @@
                 "required": 1
               }
             ],
-            "reuse_mode": "diagnostic_mechanism"
+            "reuse_mode": "diagnostic_mechanism",
+            "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
           },
           "reuse_mode": "diagnostic_mechanism",
           "schema_version": "artifact-eligibility-v1"
@@ -675,11 +1225,36 @@
           },
           "claim_boundary": "exact historical dependency",
           "eligible": true,
-          "predicates": [],
+          "predicates": [
+            {
+              "fact": "artifact.id",
+              "observed": "t043-assist_0-smoke",
+              "reason": "satisfied",
+              "required": "t043-assist_0-smoke",
+              "result": true
+            },
+            {
+              "fact": "artifact.kind",
+              "observed": "checkpoint",
+              "reason": "satisfied",
+              "required": "checkpoint",
+              "result": true
+            },
+            {
+              "fact": "integrity.sha256",
+              "observed": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+              "reason": "satisfied",
+              "required": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+              "result": true
+            }
+          ],
           "requirements": {
+            "artifact_id": "t043-assist_0-smoke",
+            "artifact_kind": "checkpoint",
             "claim_boundary": "exact historical dependency",
             "predicates": [],
-            "reuse_mode": "historical_reproduction"
+            "reuse_mode": "historical_reproduction",
+            "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
           },
           "reuse_mode": "historical_reproduction",
           "schema_version": "artifact-eligibility-v1"
@@ -720,10 +1295,40 @@
           "eligible": false,
           "predicates": [
             {
+              "fact": "artifact.id",
+              "observed": "t043-assist_0-smoke",
+              "reason": "satisfied",
+              "required": "t043-assist_0-smoke",
+              "result": true
+            },
+            {
+              "fact": "artifact.kind",
+              "observed": "checkpoint",
+              "reason": "satisfied",
+              "required": "checkpoint",
+              "result": true
+            },
+            {
+              "fact": "integrity.sha256",
+              "observed": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+              "reason": "satisfied",
+              "required": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+              "result": true
+            },
+            {
               "fact": "trainer_record_count",
               "observed": 4,
               "reason": "observed fact does not satisfy requirement",
               "required": 1000,
+              "result": false
+            },
+            {
+              "fact": "__explicit_coverage_predicate_required",
+              "observed": {
+                "status": "unavailable"
+              },
+              "reason": "required fact unavailable",
+              "required": true,
               "result": false
             },
             {
@@ -735,6 +1340,8 @@
             }
           ],
           "requirements": {
+            "artifact_id": "t043-assist_0-smoke",
+            "artifact_kind": "checkpoint",
             "claim_boundary": "new generalized model-quality claim",
             "predicates": [
               {
@@ -743,12 +1350,14 @@
                 "required": 1000
               }
             ],
-            "reuse_mode": "scientific_quality_claim"
+            "reuse_mode": "scientific_quality_claim",
+            "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
           },
           "reuse_mode": "scientific_quality_claim",
           "schema_version": "artifact-eligibility-v1"
         }
       },
+      "evidence_family": "t043-assist_0-smoke",
       "historical_use": "diagnostic_mechanism",
       "integrity": {
         "identity_source": "retained task contract / PR record",
@@ -814,6 +1423,27 @@
           "eligible": true,
           "predicates": [
             {
+              "fact": "artifact.id",
+              "observed": "t043-assist_0-smoke",
+              "reason": "satisfied",
+              "required": "t043-assist_0-smoke",
+              "result": true
+            },
+            {
+              "fact": "artifact.kind",
+              "observed": "checkpoint",
+              "reason": "satisfied",
+              "required": "checkpoint",
+              "result": true
+            },
+            {
+              "fact": "integrity.sha256",
+              "observed": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+              "reason": "satisfied",
+              "required": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+              "result": true
+            },
+            {
               "fact": "trainer_record_count",
               "observed": 4,
               "reason": "satisfied",
@@ -822,6 +1452,8 @@
             }
           ],
           "requirements": {
+            "artifact_id": "t043-assist_0-smoke",
+            "artifact_kind": "checkpoint",
             "claim_boundary": "checkpoint-conditional source/reachability evidence",
             "predicates": [
               {
@@ -830,7 +1462,8 @@
                 "required": 1
               }
             ],
-            "reuse_mode": "diagnostic_mechanism"
+            "reuse_mode": "diagnostic_mechanism",
+            "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
           },
           "reuse_mode": "diagnostic_mechanism",
           "schema_version": "artifact-eligibility-v1"
@@ -869,11 +1502,36 @@
           },
           "claim_boundary": "exact historical dependency",
           "eligible": true,
-          "predicates": [],
+          "predicates": [
+            {
+              "fact": "artifact.id",
+              "observed": "t043-assist_0-smoke",
+              "reason": "satisfied",
+              "required": "t043-assist_0-smoke",
+              "result": true
+            },
+            {
+              "fact": "artifact.kind",
+              "observed": "checkpoint",
+              "reason": "satisfied",
+              "required": "checkpoint",
+              "result": true
+            },
+            {
+              "fact": "integrity.sha256",
+              "observed": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+              "reason": "satisfied",
+              "required": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+              "result": true
+            }
+          ],
           "requirements": {
+            "artifact_id": "t043-assist_0-smoke",
+            "artifact_kind": "checkpoint",
             "claim_boundary": "exact historical dependency",
             "predicates": [],
-            "reuse_mode": "historical_reproduction"
+            "reuse_mode": "historical_reproduction",
+            "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
           },
           "reuse_mode": "historical_reproduction",
           "schema_version": "artifact-eligibility-v1"
@@ -914,10 +1572,40 @@
           "eligible": false,
           "predicates": [
             {
+              "fact": "artifact.id",
+              "observed": "t043-assist_0-smoke",
+              "reason": "satisfied",
+              "required": "t043-assist_0-smoke",
+              "result": true
+            },
+            {
+              "fact": "artifact.kind",
+              "observed": "checkpoint",
+              "reason": "satisfied",
+              "required": "checkpoint",
+              "result": true
+            },
+            {
+              "fact": "integrity.sha256",
+              "observed": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+              "reason": "satisfied",
+              "required": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+              "result": true
+            },
+            {
               "fact": "trainer_record_count",
               "observed": 4,
               "reason": "observed fact does not satisfy requirement",
               "required": 1000,
+              "result": false
+            },
+            {
+              "fact": "__explicit_coverage_predicate_required",
+              "observed": {
+                "status": "unavailable"
+              },
+              "reason": "required fact unavailable",
+              "required": true,
               "result": false
             },
             {
@@ -929,6 +1617,8 @@
             }
           ],
           "requirements": {
+            "artifact_id": "t043-assist_0-smoke",
+            "artifact_kind": "checkpoint",
             "claim_boundary": "new generalized model-quality claim",
             "predicates": [
               {
@@ -937,12 +1627,14 @@
                 "required": 1000
               }
             ],
-            "reuse_mode": "scientific_quality_claim"
+            "reuse_mode": "scientific_quality_claim",
+            "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
           },
           "reuse_mode": "scientific_quality_claim",
           "schema_version": "artifact-eligibility-v1"
         }
       },
+      "evidence_family": "t043-assist_0-smoke",
       "historical_use": "diagnostic_mechanism",
       "integrity": {
         "identity_source": "retained task contract / PR record",
@@ -1008,6 +1700,27 @@
           "eligible": true,
           "predicates": [
             {
+              "fact": "artifact.id",
+              "observed": "t043-assist_0-smoke",
+              "reason": "satisfied",
+              "required": "t043-assist_0-smoke",
+              "result": true
+            },
+            {
+              "fact": "artifact.kind",
+              "observed": "checkpoint",
+              "reason": "satisfied",
+              "required": "checkpoint",
+              "result": true
+            },
+            {
+              "fact": "integrity.sha256",
+              "observed": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+              "reason": "satisfied",
+              "required": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+              "result": true
+            },
+            {
               "fact": "trainer_record_count",
               "observed": 4,
               "reason": "satisfied",
@@ -1016,6 +1729,8 @@
             }
           ],
           "requirements": {
+            "artifact_id": "t043-assist_0-smoke",
+            "artifact_kind": "checkpoint",
             "claim_boundary": "checkpoint-conditional fixed-cohort comparison",
             "predicates": [
               {
@@ -1024,7 +1739,8 @@
                 "required": 1
               }
             ],
-            "reuse_mode": "diagnostic_mechanism"
+            "reuse_mode": "diagnostic_mechanism",
+            "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
           },
           "reuse_mode": "diagnostic_mechanism",
           "schema_version": "artifact-eligibility-v1"
@@ -1063,11 +1779,36 @@
           },
           "claim_boundary": "exact historical dependency",
           "eligible": true,
-          "predicates": [],
+          "predicates": [
+            {
+              "fact": "artifact.id",
+              "observed": "t043-assist_0-smoke",
+              "reason": "satisfied",
+              "required": "t043-assist_0-smoke",
+              "result": true
+            },
+            {
+              "fact": "artifact.kind",
+              "observed": "checkpoint",
+              "reason": "satisfied",
+              "required": "checkpoint",
+              "result": true
+            },
+            {
+              "fact": "integrity.sha256",
+              "observed": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+              "reason": "satisfied",
+              "required": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+              "result": true
+            }
+          ],
           "requirements": {
+            "artifact_id": "t043-assist_0-smoke",
+            "artifact_kind": "checkpoint",
             "claim_boundary": "exact historical dependency",
             "predicates": [],
-            "reuse_mode": "historical_reproduction"
+            "reuse_mode": "historical_reproduction",
+            "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
           },
           "reuse_mode": "historical_reproduction",
           "schema_version": "artifact-eligibility-v1"
@@ -1108,10 +1849,40 @@
           "eligible": false,
           "predicates": [
             {
+              "fact": "artifact.id",
+              "observed": "t043-assist_0-smoke",
+              "reason": "satisfied",
+              "required": "t043-assist_0-smoke",
+              "result": true
+            },
+            {
+              "fact": "artifact.kind",
+              "observed": "checkpoint",
+              "reason": "satisfied",
+              "required": "checkpoint",
+              "result": true
+            },
+            {
+              "fact": "integrity.sha256",
+              "observed": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+              "reason": "satisfied",
+              "required": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+              "result": true
+            },
+            {
               "fact": "trainer_record_count",
               "observed": 4,
               "reason": "observed fact does not satisfy requirement",
               "required": 1000,
+              "result": false
+            },
+            {
+              "fact": "__explicit_coverage_predicate_required",
+              "observed": {
+                "status": "unavailable"
+              },
+              "reason": "required fact unavailable",
+              "required": true,
               "result": false
             },
             {
@@ -1123,6 +1894,8 @@
             }
           ],
           "requirements": {
+            "artifact_id": "t043-assist_0-smoke",
+            "artifact_kind": "checkpoint",
             "claim_boundary": "new generalized model-quality claim",
             "predicates": [
               {
@@ -1131,12 +1904,14 @@
                 "required": 1000
               }
             ],
-            "reuse_mode": "scientific_quality_claim"
+            "reuse_mode": "scientific_quality_claim",
+            "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
           },
           "reuse_mode": "scientific_quality_claim",
           "schema_version": "artifact-eligibility-v1"
         }
       },
+      "evidence_family": "t043-assist_0-smoke",
       "historical_use": "diagnostic_mechanism",
       "integrity": {
         "identity_source": "retained task contract / PR record",
@@ -1202,6 +1977,27 @@
           "eligible": true,
           "predicates": [
             {
+              "fact": "artifact.id",
+              "observed": "t043-assist_0-smoke",
+              "reason": "satisfied",
+              "required": "t043-assist_0-smoke",
+              "result": true
+            },
+            {
+              "fact": "artifact.kind",
+              "observed": "checkpoint",
+              "reason": "satisfied",
+              "required": "checkpoint",
+              "result": true
+            },
+            {
+              "fact": "integrity.sha256",
+              "observed": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+              "reason": "satisfied",
+              "required": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+              "result": true
+            },
+            {
               "fact": "trainer_record_count",
               "observed": 4,
               "reason": "satisfied",
@@ -1210,6 +2006,8 @@
             }
           ],
           "requirements": {
+            "artifact_id": "t043-assist_0-smoke",
+            "artifact_kind": "checkpoint",
             "claim_boundary": "checkpoint-conditional tree-internal Search v2 mechanism evidence",
             "predicates": [
               {
@@ -1218,7 +2016,8 @@
                 "required": 1
               }
             ],
-            "reuse_mode": "diagnostic_mechanism"
+            "reuse_mode": "diagnostic_mechanism",
+            "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
           },
           "reuse_mode": "diagnostic_mechanism",
           "schema_version": "artifact-eligibility-v1"
@@ -1257,11 +2056,36 @@
           },
           "claim_boundary": "exact historical dependency",
           "eligible": true,
-          "predicates": [],
+          "predicates": [
+            {
+              "fact": "artifact.id",
+              "observed": "t043-assist_0-smoke",
+              "reason": "satisfied",
+              "required": "t043-assist_0-smoke",
+              "result": true
+            },
+            {
+              "fact": "artifact.kind",
+              "observed": "checkpoint",
+              "reason": "satisfied",
+              "required": "checkpoint",
+              "result": true
+            },
+            {
+              "fact": "integrity.sha256",
+              "observed": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+              "reason": "satisfied",
+              "required": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+              "result": true
+            }
+          ],
           "requirements": {
+            "artifact_id": "t043-assist_0-smoke",
+            "artifact_kind": "checkpoint",
             "claim_boundary": "exact historical dependency",
             "predicates": [],
-            "reuse_mode": "historical_reproduction"
+            "reuse_mode": "historical_reproduction",
+            "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
           },
           "reuse_mode": "historical_reproduction",
           "schema_version": "artifact-eligibility-v1"
@@ -1302,10 +2126,40 @@
           "eligible": false,
           "predicates": [
             {
+              "fact": "artifact.id",
+              "observed": "t043-assist_0-smoke",
+              "reason": "satisfied",
+              "required": "t043-assist_0-smoke",
+              "result": true
+            },
+            {
+              "fact": "artifact.kind",
+              "observed": "checkpoint",
+              "reason": "satisfied",
+              "required": "checkpoint",
+              "result": true
+            },
+            {
+              "fact": "integrity.sha256",
+              "observed": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+              "reason": "satisfied",
+              "required": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+              "result": true
+            },
+            {
               "fact": "trainer_record_count",
               "observed": 4,
               "reason": "observed fact does not satisfy requirement",
               "required": 1000,
+              "result": false
+            },
+            {
+              "fact": "__explicit_coverage_predicate_required",
+              "observed": {
+                "status": "unavailable"
+              },
+              "reason": "required fact unavailable",
+              "required": true,
               "result": false
             },
             {
@@ -1317,6 +2171,8 @@
             }
           ],
           "requirements": {
+            "artifact_id": "t043-assist_0-smoke",
+            "artifact_kind": "checkpoint",
             "claim_boundary": "new generalized model-quality claim",
             "predicates": [
               {
@@ -1325,12 +2181,14 @@
                 "required": 1000
               }
             ],
-            "reuse_mode": "scientific_quality_claim"
+            "reuse_mode": "scientific_quality_claim",
+            "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
           },
           "reuse_mode": "scientific_quality_claim",
           "schema_version": "artifact-eligibility-v1"
         }
       },
+      "evidence_family": "t043-assist_0-smoke",
       "historical_use": "diagnostic_mechanism",
       "integrity": {
         "identity_source": "retained task contract / PR record",
@@ -1396,6 +2254,27 @@
           "eligible": true,
           "predicates": [
             {
+              "fact": "artifact.id",
+              "observed": "t043-assist_0-smoke",
+              "reason": "satisfied",
+              "required": "t043-assist_0-smoke",
+              "result": true
+            },
+            {
+              "fact": "artifact.kind",
+              "observed": "checkpoint",
+              "reason": "satisfied",
+              "required": "checkpoint",
+              "result": true
+            },
+            {
+              "fact": "integrity.sha256",
+              "observed": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+              "reason": "satisfied",
+              "required": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+              "result": true
+            },
+            {
               "fact": "trainer_record_count",
               "observed": 4,
               "reason": "satisfied",
@@ -1404,6 +2283,8 @@
             }
           ],
           "requirements": {
+            "artifact_id": "t043-assist_0-smoke",
+            "artifact_kind": "checkpoint",
             "claim_boundary": "checkpoint-conditional Search v2 audit; not learned-quality evidence",
             "predicates": [
               {
@@ -1412,7 +2293,8 @@
                 "required": 1
               }
             ],
-            "reuse_mode": "diagnostic_mechanism"
+            "reuse_mode": "diagnostic_mechanism",
+            "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
           },
           "reuse_mode": "diagnostic_mechanism",
           "schema_version": "artifact-eligibility-v1"
@@ -1451,11 +2333,36 @@
           },
           "claim_boundary": "exact historical dependency",
           "eligible": true,
-          "predicates": [],
+          "predicates": [
+            {
+              "fact": "artifact.id",
+              "observed": "t043-assist_0-smoke",
+              "reason": "satisfied",
+              "required": "t043-assist_0-smoke",
+              "result": true
+            },
+            {
+              "fact": "artifact.kind",
+              "observed": "checkpoint",
+              "reason": "satisfied",
+              "required": "checkpoint",
+              "result": true
+            },
+            {
+              "fact": "integrity.sha256",
+              "observed": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+              "reason": "satisfied",
+              "required": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+              "result": true
+            }
+          ],
           "requirements": {
+            "artifact_id": "t043-assist_0-smoke",
+            "artifact_kind": "checkpoint",
             "claim_boundary": "exact historical dependency",
             "predicates": [],
-            "reuse_mode": "historical_reproduction"
+            "reuse_mode": "historical_reproduction",
+            "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
           },
           "reuse_mode": "historical_reproduction",
           "schema_version": "artifact-eligibility-v1"
@@ -1496,10 +2403,40 @@
           "eligible": false,
           "predicates": [
             {
+              "fact": "artifact.id",
+              "observed": "t043-assist_0-smoke",
+              "reason": "satisfied",
+              "required": "t043-assist_0-smoke",
+              "result": true
+            },
+            {
+              "fact": "artifact.kind",
+              "observed": "checkpoint",
+              "reason": "satisfied",
+              "required": "checkpoint",
+              "result": true
+            },
+            {
+              "fact": "integrity.sha256",
+              "observed": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+              "reason": "satisfied",
+              "required": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+              "result": true
+            },
+            {
               "fact": "trainer_record_count",
               "observed": 4,
               "reason": "observed fact does not satisfy requirement",
               "required": 1000,
+              "result": false
+            },
+            {
+              "fact": "__explicit_coverage_predicate_required",
+              "observed": {
+                "status": "unavailable"
+              },
+              "reason": "required fact unavailable",
+              "required": true,
               "result": false
             },
             {
@@ -1511,6 +2448,8 @@
             }
           ],
           "requirements": {
+            "artifact_id": "t043-assist_0-smoke",
+            "artifact_kind": "checkpoint",
             "claim_boundary": "new generalized model-quality claim",
             "predicates": [
               {
@@ -1519,12 +2458,14 @@
                 "required": 1000
               }
             ],
-            "reuse_mode": "scientific_quality_claim"
+            "reuse_mode": "scientific_quality_claim",
+            "sha256": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
           },
           "reuse_mode": "scientific_quality_claim",
           "schema_version": "artifact-eligibility-v1"
         }
       },
+      "evidence_family": "t043-assist_0-smoke",
       "historical_use": "diagnostic_mechanism",
       "integrity": {
         "identity_source": "retained task contract / PR record",

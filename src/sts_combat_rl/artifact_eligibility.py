@@ -76,12 +76,18 @@ class EligibilityRequirements:
     reuse_mode: str
     claim_boundary: str
     predicates: tuple[Predicate, ...]
+    artifact_id: str | None = None
+    artifact_kind: str | None = None
+    sha256: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "reuse_mode": self.reuse_mode,
             "claim_boundary": self.claim_boundary,
             "predicates": [p.to_dict() for p in self.predicates],
+            "artifact_id": self.artifact_id,
+            "artifact_kind": self.artifact_kind,
+            "sha256": self.sha256,
         }
 
 
@@ -110,10 +116,20 @@ def evaluate_eligibility(
         raise ValueError(f"unknown reuse mode: {requirements.reuse_mode}")
     predicates = []
     requested = requirements.predicates
+    identity = (("artifact.id", qualification.artifact.get("id"), requirements.artifact_id),
+                ("artifact.kind", qualification.artifact.get("kind"), requirements.artifact_kind),
+                ("integrity.sha256", qualification.integrity.get("sha256"), requirements.sha256))
+    for fact_name, observed, required in identity:
+        if required is not None:
+            predicates.append({"fact": fact_name, "observed": _json(observed) if observed is not None else UNKNOWN,
+                               "required": required, "result": observed == required,
+                               "reason": "satisfied" if observed == required else "missing or mismatched artifact identity"})
     if requirements.reuse_mode == "scientific_quality_claim":
-        # An empty requirement set must not turn into all([]) == True.
-        if not requested:
-            requested = (Predicate("__quality_predicates_required", "equals", True),)
+        scale = any("count" in p.fact or "scale" in p.fact for p in requested)
+        coverage = any("coverage" in p.fact or p.fact.startswith("source.") for p in requested)
+        if not scale or not coverage:
+            requested = requested + (Predicate("__explicit_scale_predicate_required", "equals", True),) if not scale else requested
+            requested = requested + (Predicate("__explicit_coverage_predicate_required", "equals", True),) if not coverage else requested
         # Override status is itself a required quality fact unless the
         # consumer explicitly supplies a predicate for it.
         override = qualification.facts.get("override_kind")

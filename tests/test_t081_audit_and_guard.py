@@ -26,15 +26,16 @@ def test_audit_is_deterministic_and_covers_required_tasks():
     t062 = next(row for row in audit["claims"] if row["task"] == "T062")
     assert t062["historical_use"] == "diagnostic_mechanism"
     assert "tree-internal Search v2" in t062["maximum_justified_claim"]
-    assert {row["task"]: row["integrity"]["sha256"] for row in audit["claims"]} == {
-        "T044": "ab68439df429f603816f30064484cc99f33611a196ba456103397fc7ef8ed5f3",
-        "T047": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
-        "T048": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
-        "T050": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
-        "T051": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
-        "T052": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
-        "T062": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
-        "T070": "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+    assert {(row["task"], row["evidence_family"]): row["integrity"]["sha256"] for row in audit["claims"]} == {
+        ("T044", "t043-main-runs1000-assist_0-s4"): "ab68439df429f603816f30064484cc99f33611a196ba456103397fc7ef8ed5f3",
+        ("T047", "t043-assist_0-smoke"): "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+        ("T048", "t043-assist_0-smoke; T046 cohort"): "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+        ("T048", "t043-main-runs1000-assist_0-s4; runs1000 assist_0 cohort"): "ab68439df429f603816f30064484cc99f33611a196ba456103397fc7ef8ed5f3",
+        ("T050", "t043-assist_0-smoke"): "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+        ("T051", "t043-assist_0-smoke"): "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+        ("T052", "t043-assist_0-smoke"): "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+        ("T062", "t043-assist_0-smoke"): "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
+        ("T070", "t043-assist_0-smoke"): "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4",
     }
     assert all("consumer_decisions" in row for row in audit["claims"])
     json.dumps(audit, sort_keys=True)

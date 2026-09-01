@@ -22,6 +22,7 @@ def qualification(path="/retained/checkpoint-runs1000.pt", trainer_count=4):
             "override_kind": Fact("smoke"),
             "training_gate": Fact("passed"),
             "source.act": Fact([1]),
+            "coverage.acts": Fact([1]),
         },
     )
 
@@ -89,11 +90,15 @@ def test_reuse_modes_and_claim_boundaries_are_preserved(mode, boundary):
     if mode == "scientific_quality_claim":
         q = qualification()
         q.facts["override_kind"] = Fact("none")
+        if mode == "scientific_quality_claim":
+            predicates = (Predicate("trainer_record_count", "min", 1), Predicate("coverage.acts", "contains", 1))
+        else:
+            predicates = (Predicate("training_gate", required="passed"),)
+    else:
+        predicates = (Predicate("training_gate", required="passed"),)
     result = evaluate_eligibility(
         q,
-        EligibilityRequirements(
-            mode, boundary, (Predicate("training_gate", required="passed"),)
-        ),
+        EligibilityRequirements(mode, boundary, predicates),
     )
     assert result["eligible"] is True
     assert result["reuse_mode"] == mode
