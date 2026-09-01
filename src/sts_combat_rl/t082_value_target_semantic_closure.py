@@ -107,6 +107,18 @@ def _record_identity(row: Mapping[str, Any], component: str) -> tuple[dict[str, 
     identity = complete_source_identity(obj, source_arm="")
     return identity, identity["complete_identity_sha256"]
 
+def _linkage_ok(item: Mapping[str, Any], teacher: Mapping[str, Any], trainer: Mapping[str, Any], index: int, record_index: int) -> tuple[bool, list[str]]:
+    identity = item.get("complete_identity", {})
+    metadata = trainer.get("source_metadata", {})
+    checks = {
+        "teacher_index": teacher.get("row_index") == index,
+        "trainer_index": trainer.get("example_index") == index,
+        "teacher_source": all(teacher.get(key) == identity.get(key) for key in ("source_checkpoint_id", "source_run_id", "source_seed", "source_battle_index")) and teacher.get("source_pool_record_index") == record_index,
+        "trainer_source": all(metadata.get(key) == identity.get(key) for key in ("source_checkpoint_id", "source_run_id", "source_seed", "source_battle_index")),
+        "policy_lineage": trainer.get("policy_target_kind") == "oracle_teacher_action" and trainer.get("policy_target_source") == "oracle_teacher_row.teacher_action",
+    }
+    return all(checks.values()), [name for name, valid in checks.items() if not valid]
+
 def _load_envelope(path: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     metadata: dict[str, Any] | None = None
     rows: list[dict[str, Any]] = []
