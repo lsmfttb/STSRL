@@ -112,7 +112,7 @@ def test_successor_reason_categories_and_deterministic_pool_fixture(tmp_path: Pa
     bad = successor | {"action_trace": [action(9), action(2)], "source_battle_index": 1}
     assert recover_behavior(current, bad)["reason"] == "non-prefix"
     pool = tmp_path / "pool.jsonl"
-    _envelope(pool, [{"record_index": 0, "structural_metadata": {"assistance_level": "assist_0"}}], schema_id="assisted-run-source-pool-v1")
+    _envelope(pool, [{"record_index": 0, "structural_metadata": {"assistance_level": "assist_0"}}], schema_id="assisted-run-source-pool-v1", format_version=1, assistance_level="assist_0")
     expected = {"record_count": 1, "bytes": pool.stat().st_size, "sha256": sha256(pool), "schema_id": "assisted-run-source-pool-v1", "format_version": 1}
     assert _validate_pool(pool, expected, "assist_0")["valid"]
     assert _validate_pool(pool, expected, "assist_0")["metadata"]["schema_id"] == "assisted-run-source-pool-v1"

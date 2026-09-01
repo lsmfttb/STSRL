@@ -313,6 +313,9 @@ def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460) -
         return incomplete(f"selected inventory does not contain exactly {expected_rows} valid rows")
     if any(not isinstance(item.get("component"), str) or not isinstance(item.get("source_record_index"), int) or isinstance(item.get("source_record_index"), bool) or not isinstance(item.get("source_path"), str) or not item["source_path"] for item in selected):
         return incomplete("selected inventory has missing or malformed component/index/source_path")
+    artifacts = manifest.get("input_artifacts")
+    if not isinstance(artifacts, Mapping) or any(item["component"] not in artifacts or not isinstance(artifacts[item["component"]], Mapping) or not all(isinstance(artifacts[item["component"]].get(k), (str, int)) for k in ("path", "sha256", "bytes", "record_count", "schema_id", "format_version")) for item in selected):
+        return incomplete("selected component has missing or malformed input artifact specification")
     selected_hashes = [item["complete_identity_sha256"] for item in selected]
     selected_indexes = [(item.get("component"), item.get("source_record_index")) for item in selected]
     if len(set(selected_hashes)) != len(selected_hashes) or len(set(selected_indexes)) != len(selected_indexes):
@@ -383,10 +386,15 @@ def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460) -
         teacher_payload = teachers[index].get("teacher_action")
         teacher_action = _identity(teacher_payload.get("action_identity")) if isinstance(teacher_payload, Mapping) else None
         teacher_source = teachers[index].get("source_metadata", teachers[index].get("structural_metadata", {}))
+        if not isinstance(teacher_source, Mapping):
+            teacher_source = {}
         teacher_for_link = dict(teachers[index])
         teacher_for_link.update(teacher_source)
         linkage_valid, linkage_problems = _linkage_ok(item, teacher_for_link, trainers[index], index, record_index)
         trainer_meta = trainers[index].get("source_metadata", {})
+        if not isinstance(trainer_meta, Mapping):
+            row_problems.append(f"row {index}: trainer source_metadata is not an object")
+            trainer_meta = {}
         trainer_action = _identity(trainers[index].get("policy_target_action_identity"))
         trainer_action = _identity(trainers[index].get("policy_target_action_identity"))
         same = teacher_action == trainer_action
@@ -450,6 +458,8 @@ def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460) -
     report["inputs"]["terminal"] = {"observed": decision, "valid": terminal_valid}
     report["inputs"]["teacher"]["metadata"] = teacher_meta
     report["inputs"]["trainer"]["metadata"] = trainer_meta
+    report["inputs"]["teacher"].update({"expected_sha256": EXPECTED_TEACHER_SHA, "actual_sha256": sha256(teacher_path), "valid": input_checks[-2]["valid"]})
+    report["inputs"]["trainer"].update({"expected_sha256": EXPECTED_TRAINER_SHA, "actual_sha256": sha256(trainer_path), "valid": input_checks[-1]["valid"]})
     report["counts"]["trainer_value_labels"] = dict(trainer_outcomes)
     report["counts"]["divergent_trainer_value_labels"] = dict(divergent_trainer_outcomes)
     rendered = json.dumps(report, indent=2, sort_keys=True) + "\n"
