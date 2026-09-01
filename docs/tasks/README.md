@@ -101,6 +101,7 @@ workflow's explicit implementation-authorization gate is satisfied.
 | T078 | DONE | [Restored public-context fidelity repair](T078-restored-public-context-fidelity-repair.md) | T077, T076, T015, T016, T017, T020, T033 | PR #82 merged at d61be1d; state-160 restore fidelity repaired and the exact 320-state restore-only audit passed |
 | T079 | DONE | [Battle Search state-utilization bounds recovery](T079-battle-search-state-utilization-diagnostic.md) | T078, T070, T069, T062, T052, T043, T017, T020 | PR #84 merged at dbee053; conservative exact-state bounds completed with an AMBIGUOUS terminal classification |
 | T080 | DONE | [Battle value-target semantic alignment audit](T080-battle-value-target-semantics-audit.md) | T079, T070, T069, T062, T052, T043 | PR #86 merged at 1771203; exact frozen provenance audit completed with VALUE_TARGET_SEMANTICS_UNRESOLVED and no automatic successor |
+| T081 | DONE | [Scientific artifact eligibility gate](T081-scientific-artifact-eligibility-gate.md) | T043, T044, T047, T048, T050, T051, T052, T062, T070 | PR #87 merged at 4a24f18; artifact integrity and scientific eligibility are now separate, fail-closed consumer gates with a durable historical claim-boundary audit |
 
 Use the table, not per-task files or roadmap prose, when deciding whether a task
 may receive a branch. Only `READY` rows should receive a new implementation
@@ -265,9 +266,9 @@ and inspect again after the expected window or on request rather than continuous
 
 The executable queue is exactly the set of `READY` rows in the Active Backlog;
 it is currently empty. T063 and T066 remain `DRAFT`; T075, T076, T077, T078,
-T079, T080, T065, T071, T072, T073, and T074 are `DONE`. T065, T075, T077,
-T078, T079, and T080 are complete with their recorded diagnostic or repair
-outcomes. T034 remains
+T079, T080, T081, T065, T071, T072, T073, and T074 are `DONE`. T065, T075,
+T077, T078, T079, T080, and T081 are complete with their recorded diagnostic,
+repair, or control-plane outcomes. T034 remains
 blocked on native public-consistent hidden-future sampling support.
 
 ## Standard Local Gates

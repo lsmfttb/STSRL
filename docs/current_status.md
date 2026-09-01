@@ -329,6 +329,34 @@ automatic successor was authorized. Research ledger #85 records the accepted
 interpretation and the need to compare a minimal counterfactual continuation
 experiment against the feature/encoding audit before publishing any successor.
 
+T081 is now complete after PR #87 merged at
+`4a24f18639b409251f5033154eb1b3f9f1fb48be`. Its approved specification commit
+was `f09f46f34e089ea110f7917c22327464f22ef943`, and its accepted exact
+implementation head was `4231eb6ce938b1600cbaac860779908d8d52706e`. It adds a
+versioned, fail-closed artifact qualification surface that keeps artifact
+identity/integrity separate from scientific eligibility, requires consumer
+identity/kind/SHA-256 for every reuse mode, and requires explicit scale and
+coverage predicates without inventing a universal numeric threshold for
+scientific-quality claims. Active smoke/debug/named overrides and unavailable
+required facts remain ineligible. The task-document guard requires the marker
+and Artifact Eligibility Contract for new learning-artifact task documents,
+with an explicit T001-T080 legacy exemption.
+
+The deterministic historical audit is committed at
+`reports/t081-historical-claim-boundary-audit-v1.json` with SHA-256
+`3278d4d391a4c0fde44aca2fa1b19094b145b654d75bd102859072ad8c37411b` and size
+89,127 bytes. It preserves both accepted T048 evidence families, keeps the
+T043 lineages at four trainer rows despite `runs1000` upstream naming, and
+retains T062 as checkpoint-conditional diagnostic Search v2 evidence. No
+historical numerical result, model, training, feature, Search, simulator,
+native, controller, or T079 behavior changed, and T081 authorizes no successor
+experiment. Planner scientific acceptance and Maintainer operational acceptance
+passed on the exact head. Focused T081 tests passed (`21`); the final full
+suite was `965 passed, 2 skipped, 2` unrelated baseline failures, both
+reproduced on clean `main`. Ruff check/format, compileall, and diff checks
+passed. Research ledger #85 records the final guard contract and requires
+future model-side evidence to be reassessed under it.
+
 ## Implemented On Main
 
 ### Runtime
