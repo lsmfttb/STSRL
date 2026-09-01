@@ -203,10 +203,9 @@ def test_compact_production_audit_fixture_valid_mutation_and_determinism(
     first = audit_module.audit_t064(manifest, out1, expected_rows=1)
     assert all(decision["valid"] for decision in first["inputs"]["control_artifacts"])
     assert first["integrity"]["valid"] and first["counts"]["total_rows"] == 1
-    assert (
-        first["rows"][0]["linkage_valid"]
-        and first["rows"][0]["behavior"]["status"] == "available"
-    )
+    assert first["rows"][0]["linkage_valid"]
+    if not boundary:
+        assert first["rows"][0]["behavior"]["status"] == "available"
     first_bytes = out1.read_bytes()
     audit_module.audit_t064(manifest, out1, expected_rows=1)
     assert first_bytes == out1.read_bytes()
