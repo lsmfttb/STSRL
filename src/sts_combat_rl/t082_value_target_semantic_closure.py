@@ -16,6 +16,7 @@ EXPECTED_INPUTS = {
     "t064-training-run-report.json": ("3e838bed72f5ca565532d39d77b1991e0d32919dcd9b1d6afe4d2c8f8ecdc38c", "t064-training-run-report-v1"),
     "t064-stage-summary.json": ("5748e79a23152fa51475f8cb7359c81816d6bbdd26ed2a10d7489f1853b6b880", "t064-stage-summary-v1"),
     "t064-transfer-decision.json": ("f8407acbc17cb13bba53009c91009fea961e7307071d54b0ff82147ff092603f", "t064-transfer-decision-v1"),
+    "../t042-assisted-source-scale-pr39/runs1000_s20_workers16/scale-manifest.json": ("25efae30dc9a61c8b97cb09e1844b93b9ffe693bde51c0f494f0f65203a1d327", "assisted-source-scale-manifest-v1"),
 }
 CLASSIFICATIONS = {"VALUE_TARGET_SEMANTIC_MISMATCH_CONFIRMED", "VALUE_TARGET_SEMANTICS_ALIGNED", "VALUE_TARGET_SEMANTICS_UNRESOLVED", "INCOMPLETE"}
 
@@ -163,6 +164,11 @@ def audit_t064(manifest_path: Path, output: Path) -> dict[str, Any]:
     trainers = _load_selected_envelope(trainer_path, 460, "example_index")
     if len(teachers) != 460 or len(trainers) != 460:
         raise ValueError("T064 teacher/trainer inventories must each contain 460 rows")
+    pool_checks = []
+    for component, spec in manifest["input_artifacts"].items():
+        if component in by_component:
+            pool = Path(spec["path"].replace("D:\\", "/mnt/d/").replace("\\", "/"))
+            pool_checks.append(_validate_pool(pool, spec, component))
     by_component: defaultdict[str, set[int]] = defaultdict(set)
     for index, item in enumerate(selected): by_component[item["component"]].add(item["source_record_index"])
     coverage = Counter((item.get("act"), item.get("component")) for item in selected)
@@ -196,7 +202,7 @@ def audit_t064(manifest_path: Path, output: Path) -> dict[str, Any]:
         outcome = source.get("battle_outcome")
         outcome_status = "available" if outcome in ("PLAYER_VICTORY", "PLAYER_DEFEAT") else "unavailable"
         rows.append({"index": index, "selected_identity": item["complete_identity"], "selected_identity_sha256": item.get("complete_identity_sha256"), "derived_identity_sha256": derived_sha, "identity_valid": identity_ok, "identity_error": source_error, "component": component, "source_record_index": record_index, "source_checkpoint_id": source.get("source_checkpoint_id"), "source_run_id": source.get("source_run_id"), "source_seed": source.get("source_seed"), "source_battle_index": source.get("source_battle_index"), "act": item.get("act"), "room_type": item.get("room_type"), "trace_length": len(source.get("action_trace", ())), "successor": {"record_index": successor.get("record_index"), "trace_length": len(successor.get("action_trace", ())), "battle_index": successor.get("source_battle_index")} if successor else None, "behavior": behavior, "teacher_action": teacher_action, "trainer_policy_action": trainer_action, "comparison": comparison, "outcome": outcome_status, "source_battle_outcome": outcome if isinstance(outcome, str) else None, "trainer_value_lineage": trainers[index].get("raw_reward_components", {}).get("battle_outcome"), "source_controller": source.get("source_battle_controller_provenance"), "teacher_controller": teachers[index].get("controller_provenance"), "policy_target_source": trainers[index].get("policy_target_source"), "value_target_source": "trainer_input_record.raw_reward_components.battle_outcome"})
-    all_integrity = all(row["identity_valid"] for row in rows) and all(item["valid"] for item in input_checks) and terminal_valid
+    all_integrity = all(row["identity_valid"] for row in rows) and all(item["valid"] for item in input_checks) and all(item["valid"] for item in pool_checks) and terminal_valid
     observed_acts = Counter(item.get("act") for item in selected)
     observed_components = Counter(item.get("component") for item in selected)
     coverage_valid = observed_acts == Counter({1: 256, 2: 204}) and observed_components == Counter({"assist_0": 256, "assist_hp50": 12, "assist_hp50_potion_elite_boss": 32, "assist_hp75_potion": 160})

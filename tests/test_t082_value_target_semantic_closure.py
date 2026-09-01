@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from sts_combat_rl.t082_value_target_semantic_closure import audit, classify, recover_behavior
+from sts_combat_rl.t082_value_target_semantic_closure import audit, classify, recover_behavior, _validate_pool
 
 def action(number, occurrence=0):
     return {"action_id": number, "occurrence": occurrence, "kind": "card", "label": f"Card {number}", "stable_id": f"card:{number}"}
@@ -33,3 +33,8 @@ def test_classification_requires_explicit_proof_and_outcome():
     assert classify(integrity_valid=True, rows=divergent) == "VALUE_TARGET_SEMANTICS_UNRESOLVED"
     assert classify(integrity_valid=True, rows=divergent, source_outcome_proven=True, search_leaf_proven=True, oracle_policy_proven=True, no_alignment_contract=True) == "VALUE_TARGET_SEMANTIC_MISMATCH_CONFIRMED"
     assert classify(integrity_valid=True, rows=[], source_outcome_proven=True, search_leaf_proven=True, oracle_policy_proven=True, no_alignment_contract=True) == "VALUE_TARGET_SEMANTICS_UNRESOLVED"
+
+def test_pool_validator_rejects_mutated_metadata_hash_and_order(tmp_path: Path):
+    pool = tmp_path / "pool.jsonl"
+    pool.write_text(json.dumps({"type": "metadata", "metadata": {"schema_id": "assisted-run-source-pool-v1"}}) + "\n" + json.dumps({"type": "record", "record": {"record_index": 0, "structural_metadata": {"assistance_level": "assist_0"}}}) + "\n")
+    assert not _validate_pool(pool, {"record_count": 1, "bytes": pool.stat().st_size, "sha256": "wrong"}, "assist_0")["valid"]
