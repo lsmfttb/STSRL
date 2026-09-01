@@ -293,6 +293,10 @@ def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460) -
     selected = manifest.get("selected_sources", []) if isinstance(manifest, Mapping) else []
     if len(selected) != expected_rows or any(not isinstance(item, Mapping) or not isinstance(item.get("complete_identity"), Mapping) or item.get("complete_identity", {}).get("schema_id") != "t064-complete-source-identity-v1" or not isinstance(item.get("complete_identity_sha256"), str) for item in selected):
         return incomplete(f"selected inventory does not contain exactly {expected_rows} valid rows")
+    selected_hashes = [item["complete_identity_sha256"] for item in selected]
+    selected_indexes = [(item.get("component"), item.get("source_record_index")) for item in selected]
+    if len(set(selected_hashes)) != len(selected_hashes) or len(set(selected_indexes)) != len(selected_indexes):
+        return incomplete("selected inventory contains duplicate identity hashes or component/index pairs")
     root = manifest_path.parent
     if not isinstance(manifest.get("input_artifacts"), Mapping):
         return incomplete("manifest input_artifacts is missing or not an object")
@@ -349,6 +353,11 @@ def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460) -
         except (ValueError, KeyError, TypeError, AttributeError) as exc: derived, derived_sha = {}, None; source_error = str(exc)
         else: source_error = None
         identity_ok = derived_sha == item.get("complete_identity_sha256")
+        source_meta = source.get("structural_metadata", {}) if isinstance(source, Mapping) else {}
+        selected_source_path = item.get("source_path")
+        expected_path = str(manifest["input_artifacts"].get(component, {}).get("path", ""))
+        path_ok = selected_source_path is None or selected_source_path == expected_path
+        shape_ok = isinstance(source_meta, Mapping) and all(source_meta.get(key) == item.get(key) for key in ("act", "room_type", "encounter_id", "assistance_level"))
         behavior = recover_behavior(source, successor) if source else {"status": "unavailable", "reason": "source record missing"}
         teacher_action = _identity(teachers[index].get("teacher_action", {}).get("action_identity"))
         teacher_source = teachers[index].get("source_metadata", teachers[index].get("structural_metadata", {}))
@@ -370,7 +379,10 @@ def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460) -
             successor_identity = None
             row_problems.append(f"row {index}: successor identity failure: {exc}")
         rows[-1].update({
-            "strict_prefix_validation": behavior.get("status") == "available",
+            "selected_source_path": selected_source_path,
+            "source_path_exact": path_ok,
+            "source_shape_exact": shape_ok,
+            "strict_prefix_validation": {"status": behavior.get("status"), "reason": behavior.get("reason"), "successor_exists": behavior.get("successor_exists", successor is not None)},
             "linkage_valid": linkage_valid, "linkage_problems": linkage_problems,
             "source_pool": {"component": component, "path": str(manifest["input_artifacts"][component]["path"]), "sha256": manifest["input_artifacts"][component].get("sha256")},
             "current_complete_identity": derived,
@@ -387,6 +399,9 @@ def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460) -
             "value_target_source": "trainer_input_record.structured_battle_outcome.battle_survived",
             "raw_reward_components_battle_outcome": trainers[index].get("raw_reward_components", {}).get("battle_outcome"),
         })
+        if not path_ok: row_problems.append(f"row {index}: selected source_path does not match pool path")
+        if not shape_ok: row_problems.append(f"row {index}: source structural metadata does not match selected metadata")
+        if teacher_action is None: row_problems.append(f"row {index}: teacher action identity missing or malformed")
         if not (isinstance(trainer_outcome, Mapping) and trainer_outcome.get("status") == "available" and isinstance(trainer_outcome.get("value"), bool)):
             row_problems.append(f"row {index}: structured battle-survived target unavailable or malformed")
     all_integrity = all(row["identity_valid"] and row["linkage_valid"] for row in rows) and all(item["valid"] for item in input_checks) and all(item["valid"] for item in pool_checks) and terminal_valid
