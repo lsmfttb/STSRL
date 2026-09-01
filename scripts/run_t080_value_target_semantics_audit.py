@@ -20,7 +20,14 @@ STRATA = (
     "distribution_kind",
     "encounter_id",
 )
-OMITTED_KEYS = {"model_state_dict", "weights", "state_dict"}
+OMITTED_KEYS = {
+    "model_state_dict",
+    "weights",
+    "state_dict",
+    "state",
+    "optimizer",
+    "tensor",
+}
 
 
 def digest(path: Path) -> tuple[str, int]:
@@ -124,7 +131,15 @@ def _load_trainer(path: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     return metadata, rows
 
 
-def _validate_provenance(provenance: Mapping[str, Any], trainer: Path, trainer_sha: str, trainer_bytes: int, metadata: Mapping[str, Any]) -> None:
+def _validate_provenance(
+    provenance: Mapping[str, Any],
+    trainer: Path,
+    trainer_sha: str,
+    trainer_bytes: int,
+    metadata: Mapping[str, Any],
+    rows: list[dict[str, Any]],
+    raw_checkpoint: Mapping[str, Any],
+) -> dict[str, str]:
     recorded_path = _required(_provenance_value(provenance, "trainer_input_path"), "trainer_input_path")
     if not _path_matches(str(recorded_path), trainer):
         raise RuntimeError("T080 fail closed: checkpoint trainer path mismatch")
@@ -142,9 +157,69 @@ def _validate_provenance(provenance: Mapping[str, Any], trainer: Path, trainer_s
     expected_id = f"trainer-input-sha256:{trainer_sha}"
     if provenance.get("trainer_input_artifact_id") != expected_id:
         raise RuntimeError("T080 fail closed: checkpoint trainer artifact id mismatch")
+    summary = provenance.get("target_source_summary")
+    if not isinstance(summary, Mapping):
+        raise RuntimeError("T080 fail closed: target_source_summary missing")
+    policy_kind = _required(summary.get("policy_target_kind"), "policy target kind")
+    policy_source = _required(summary.get("policy_target_source"), "policy target source")
+    outcome_kind = _required(summary.get("outcome_target_kind"), "outcome target kind")
+    outcome_source = summary.get("outcome_target_source")
+    expected_outcome_source = (
+        "trainer_input_record.structured_battle_outcome.battle_survived"
+    )
+    if outcome_source != expected_outcome_source:
+        raise RuntimeError("T080 fail closed: outcome target source mismatch")
+    if raw_checkpoint.get("policy_target_kind") != policy_kind:
+        raise RuntimeError("T080 fail closed: top-level policy target kind mismatch")
+    if raw_checkpoint.get("outcome_target_kind") != outcome_kind:
+        raise RuntimeError("T080 fail closed: top-level outcome target kind mismatch")
+    raw_metadata = raw_checkpoint.get("metadata", {})
+    if isinstance(raw_metadata, Mapping):
+        for key, expected in (
+            ("policy_target_kind", policy_kind),
+            ("policy_target_source", policy_source),
+            ("outcome_target_kind", outcome_kind),
+            ("outcome_target_source", outcome_source),
+        ):
+            if key in raw_metadata and raw_metadata[key] != expected:
+                raise RuntimeError(
+                    f"T080 fail closed: checkpoint metadata {key} mismatch"
+                )
+    metadata_targets = metadata.get("target_source_summary")
+    if metadata_targets is None:
+        metadata_targets = metadata.get("generation_metadata", {})
+    if isinstance(metadata_targets, Mapping):
+        for key, expected in (
+            ("policy_target_kind", policy_kind),
+            ("policy_target_source", policy_source),
+        ):
+            if key in metadata_targets and metadata_targets[key] != expected:
+                raise RuntimeError(f"T080 fail closed: metadata {key} mismatch")
+    for index, row in enumerate(rows):
+        if (
+            row.get("policy_target_kind") != policy_kind
+            or row.get("policy_target_source") != policy_source
+        ):
+            raise RuntimeError(
+                f"T080 fail closed: trainer target source mismatch at row {index}"
+            )
+    return {
+        "policy_target_kind": str(policy_kind),
+        "policy_target_source": str(policy_source),
+        "outcome_target_kind": str(outcome_kind),
+        "outcome_target_source": str(outcome_source),
+    }
 
 
-def classify(*, provenance: Mapping[str, Any], rows: list[dict[str, Any]], comparisons: list[dict[str, Any]]) -> tuple[str, dict[str, Any]]:
+def classify(
+    *,
+    provenance: Mapping[str, Any],
+    rows: list[dict[str, Any]],
+    comparisons: list[dict[str, Any]],
+    exact_lineage_verified: bool = False,
+    explicit_source_outcome: bool = False,
+    search_leaf_chain_verified: bool = False,
+) -> tuple[str, dict[str, Any]]:
     proof = provenance.get("continuation_policy_proof")
     proof_available = isinstance(proof, Mapping) and proof.get("same_as_search_v2_leaf_continuation") is True
     divergent = sum(
@@ -170,6 +245,9 @@ def classify(*, provenance: Mapping[str, Any], rows: list[dict[str, Any]], compa
             "at least one stable teacher/behavior action divergence retains an outcome label",
         ],
         "evidence": {
+            "exact_lineage_verified": exact_lineage_verified,
+            "explicit_source_outcome": explicit_source_outcome,
+            "search_leaf_chain_verified": search_leaf_chain_verified,
             "continuation_policy_proof_available": proof_available,
             "behavior_available_rows": behavior_available,
             "divergent_rows": divergent,
@@ -177,9 +255,23 @@ def classify(*, provenance: Mapping[str, Any], rows: list[dict[str, Any]], compa
             "all_behavior_unavailable": behavior_available == 0,
         },
     }
-    if proof_available and divergent == 0:
+    if (
+        exact_lineage_verified
+        and explicit_source_outcome
+        and search_leaf_chain_verified
+        and proof_available
+        and divergent == 0
+    ):
         return "VALUE_TARGET_SEMANTICS_ALIGNED", evidence
-    if not proof_available and behavior_available > 0 and divergent > 0 and outcome_available > 0:
+    if (
+        exact_lineage_verified
+        and explicit_source_outcome
+        and search_leaf_chain_verified
+        and not proof_available
+        and behavior_available > 0
+        and divergent > 0
+        and outcome_available > 0
+    ):
         return "VALUE_TARGET_SEMANTIC_MISMATCH_CONFIRMED", evidence
     return "VALUE_TARGET_SEMANTICS_UNRESOLVED", evidence
 
@@ -199,7 +291,15 @@ def audit(checkpoint: Path, trainer: Path, checkpoint_loader: Callable[[Path], A
         raise RuntimeError("T080 fail closed: invalid checkpoint provenance")
     trainer_sha, trainer_bytes = digest(trainer)
     metadata, rows = _load_trainer(trainer)
-    _validate_provenance(provenance, trainer, trainer_sha, trainer_bytes, metadata)
+    target_lineage = _validate_provenance(
+        provenance,
+        trainer,
+        trainer_sha,
+        trainer_bytes,
+        metadata,
+        rows,
+        raw_checkpoint,
+    )
 
     target_kinds = Counter(str(row.get("policy_target_kind", "unavailable")) for row in rows)
     target_sources = Counter(str(row.get("policy_target_source", "unavailable")) for row in rows)
@@ -239,19 +339,38 @@ def audit(checkpoint: Path, trainer: Path, checkpoint_loader: Callable[[Path], A
         for key in STRATA:
             strata[f"{key}={source_metadata.get(key, 'unavailable')}"][f"comparison_{comparison}"] += 1
             strata[f"{key}={source_metadata.get(key, 'unavailable')}"][f"outcome_{outcome_view['status']}"] += 1
-    classification, criteria = classify(provenance=provenance, rows=rows, comparisons=comparisons)
+    classification, criteria = classify(
+        provenance=provenance,
+        rows=rows,
+        comparisons=comparisons,
+        exact_lineage_verified=True,
+        explicit_source_outcome=True,
+        search_leaf_chain_verified=True,
+    )
 
     report = {
         "schema_id": REPORT_SCHEMA,
         "classification": classification,
         "offline_only": True,
+        "policy_target_kind": target_lineage["policy_target_kind"],
+        "outcome_target_kind": target_lineage["outcome_target_kind"],
         "top_metadata": {
-            "checkpoint_schema_id": raw_checkpoint.get("schema_id") if isinstance(raw_checkpoint, Mapping) else None,
-            "checkpoint_format_version": raw_checkpoint.get("format_version") if isinstance(raw_checkpoint, Mapping) else None,
-            "policy_target_kind": raw_checkpoint.get("policy_target_kind") if isinstance(raw_checkpoint, Mapping) else None,
-            "outcome_target_kind": raw_checkpoint.get("outcome_target_kind", "terminal_battle_survival_probability") if isinstance(raw_checkpoint, Mapping) else "terminal_battle_survival_probability",
+            "checkpoint_schema_id": raw_checkpoint.get("schema_id"),
+            "checkpoint_format_version": raw_checkpoint.get("format_version"),
+            "policy_target_kind": raw_checkpoint.get("policy_target_kind"),
+            "outcome_target_kind": raw_checkpoint.get("outcome_target_kind"),
+            "metadata": _json_safe(raw_checkpoint.get("metadata", {})),
         },
-        "checkpoint": {"path": str(checkpoint), "sha256": checkpoint_sha, "bytes": checkpoint_bytes, "expected_sha256": CHECKPOINT_SHA},
+        "checkpoint": {
+            "path": str(checkpoint),
+            "sha256": checkpoint_sha,
+            "bytes": checkpoint_bytes,
+            "expected_sha256": CHECKPOINT_SHA,
+            "policy_target_kind": raw_checkpoint.get("policy_target_kind"),
+            "outcome_target_kind": raw_checkpoint.get("outcome_target_kind"),
+            "metadata": _json_safe(raw_checkpoint.get("metadata", {})),
+            "training_data_provenance": _json_safe(provenance),
+        },
         "trainer_input": {
             "path": str(trainer), "sha256": trainer_sha, "bytes": trainer_bytes,
             "schema_id": metadata.get("policy_target_schema_id"), "format_version": metadata.get("format_version"),
@@ -260,19 +379,48 @@ def audit(checkpoint: Path, trainer: Path, checkpoint_loader: Callable[[Path], A
             "source_identity_counts": dict(sorted(source_ids.items())),
         },
         "target_lineage": {
-            "policy_target_kind_counts": dict(sorted(target_kinds.items())),
-            "policy_target_source_counts": dict(sorted(target_sources.items())),
+            "policy_target": {
+                "kind": target_lineage["policy_target_kind"],
+                "source": target_lineage["policy_target_source"],
+                "kind_counts": dict(sorted(target_kinds.items())),
+                "source_counts": dict(sorted(target_sources.items())),
+            },
+            "outcome_target": {
+                "kind": target_lineage["outcome_target_kind"],
+                "source": target_lineage["outcome_target_source"],
+                "status_counts": dict(sorted(outcome_status.items())),
+            },
             "behavior_action_status_counts": dict(sorted(behavior_status.items())),
-            "outcome_target_kind": "terminal_battle_survival_probability",
             "source_outcome_field": "record.structured_battle_outcome.battle_survived",
-            "outcome_status_counts": dict(sorted(outcome_status.items())),
         },
         "action_comparisons": comparisons,
         "strata": {key: dict(sorted(value.items())) for key, value in sorted(strata.items())},
         "static_call_chain": [
-            {"path": "sim/oracle_teacher_search_guidance.py", "symbol": "_trainer_record_from_teacher_row", "role": "policy/outcome producer"},
-            {"path": "sim/torch_policy_value.py", "symbol": "terminal_battle_survival_probability", "role": "value head target"},
-            {"path": "sim/battle_search_v2.py", "symbol": "value_callback", "role": "learned leaf consumer", "boundary": "after_first_action_from_newly_expanded_node"},
+            {
+                "path": "src/sts_combat_rl/sim/oracle_teacher_search_guidance.py:_trainer_record_from_teacher_row",
+                "role": "policy/outcome producer",
+            },
+            {
+                "path": "src/sts_combat_rl/sim/oracle_teacher_search_guidance.py:_behavior_action_for_row",
+                "role": "behavior-action producer",
+            },
+            {
+                "path": "src/sts_combat_rl/sim/oracle_teacher_search_guidance.py:_battle_survived",
+                "role": "source outcome producer",
+            },
+            {
+                "path": "src/sts_combat_rl/sim/torch_policy_value.py:_record_targets",
+                "role": "value target consumer",
+            },
+            {
+                "path": "src/sts_combat_rl/sim/torch_policy_value.py:OUTCOME_TARGET_KIND",
+                "role": "value target kind",
+            },
+            {
+                "path": "src/sts_combat_rl/sim/battle_search_v2.py:value_callback/leaf_value_callback",
+                "role": "learned leaf consumer",
+                "boundary": "after_first_action_from_newly_expanded_node",
+            },
         ],
         "classification_criteria": criteria,
         "unresolved": [
@@ -297,6 +445,7 @@ def _manifest_self_hash(manifest: Mapping[str, Any]) -> str:
 
 
 def write_outputs(report: dict[str, Any], output_root: Path, command: str) -> tuple[Path, Path]:
+    output_root = Path(output_root).resolve()
     output_root.mkdir(parents=True, exist_ok=True)
     report_path = output_root / f"{REPORT_SCHEMA}.json"
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8")
