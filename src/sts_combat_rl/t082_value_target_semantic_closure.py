@@ -173,7 +173,7 @@ def _validate_pool(path: Path, expected: Mapping[str, Any], component: str) -> d
             previous = index if isinstance(index, int) else previous; count += 1
             if row.get("structural_metadata", {}).get("assistance_level", component) != component:
                 duplicate = True
-    valid = schema == "assisted-run-source-pool-v1" and count == expected.get("record_count") and size == expected.get("bytes") and digest.hexdigest() == expected.get("sha256") and not duplicate
+    valid = (schema == expected.get("schema_id", "assisted-run-source-pool-v1") and isinstance(metadata, Mapping) and metadata.get("record_count") == count and metadata.get("format_version") == expected.get("format_version", metadata.get("format_version")) and count == expected.get("record_count") and size == expected.get("bytes") and digest.hexdigest() == expected.get("sha256") and not duplicate)
     return {"path": str(path), "component": component, "schema": schema, "metadata": metadata, "record_count": count, "bytes": size, "sha256": digest.hexdigest(), "expected": dict(expected), "valid": valid, "ordering_valid": not duplicate}
 
 def _record_identity(row: Mapping[str, Any], component: str) -> tuple[dict[str, Any], str]:
@@ -206,6 +206,14 @@ def _linkage_ok(item: Mapping[str, Any], teacher: Mapping[str, Any], trainer: Ma
         "policy_lineage": trainer.get("policy_target_kind") == "oracle_soft_visit_distribution" and trainer.get("policy_target_source") == "oracle_teacher_row.soft_visit_target",
     }
     return all(checks.values()), [name for name, valid in checks.items() if not valid]
+
+
+def _controller_key(value: Any) -> str:
+    if not isinstance(value, Mapping):
+        return "unavailable"
+    name = value.get("name", value.get("controller_name", "unavailable"))
+    version = value.get("version", value.get("controller_version", "unavailable"))
+    return f"{name}/{version}#{canonical_sha256(value)}"
 
 def _load_envelope(path: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     metadata: dict[str, Any] | None = None
@@ -250,15 +258,15 @@ def _load_selected_envelope(path: Path, expected: int, index_field: str) -> tupl
     return metadata, [rows[index] for index in range(expected)]
 
 def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460, expected_inputs: Mapping[str, tuple[str, str]] | None = None) -> dict[str, Any]:
+    input_checks: list[dict[str, Any]] = []
     def incomplete(problem: str) -> dict[str, Any]:
-        report = {"schema_version": SCHEMA, "classification": "INCOMPLETE", "integrity": {"valid": False, "problems": [problem]}, "rows": []}
+        report = {"schema_version": SCHEMA, "classification": "INCOMPLETE", "inputs": {"control_artifacts": input_checks, "pool_checks": []}, "integrity": {"valid": False, "problems": [problem]}, "rows": []}
         output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         return report
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         return incomplete(f"manifest unavailable: {exc}")
-    input_checks = []
     for name, (expected_hash, schema) in (EXPECTED_INPUTS if expected_inputs is None else expected_inputs).items():
         path = manifest_path.parent / name
         actual = sha256(path) if path.exists() else None
@@ -342,11 +350,16 @@ def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460, e
         outcome_status = "available" if outcome in ("PLAYER_VICTORY", "PLAYER_DEFEAT") else "unavailable"
         rows.append({"index": index, "selected_identity": item["complete_identity"], "selected_identity_sha256": item.get("complete_identity_sha256"), "derived_identity_sha256": derived_sha, "identity_valid": identity_ok, "identity_error": source_error, "component": component, "source_record_index": record_index, "source_checkpoint_id": source.get("source_checkpoint_id"), "source_run_id": source.get("source_run_id"), "source_seed": source.get("source_seed"), "source_battle_index": source.get("source_battle_index"), "act": item.get("act"), "room_type": item.get("room_type"), "trace_length": len(source.get("action_trace", ())), "successor": {"record_index": successor.get("record_index"), "trace_length": len(successor.get("action_trace", ())), "battle_index": successor.get("source_battle_index")} if successor else None, "behavior": behavior, "teacher_action": teacher_action, "trainer_policy_action": trainer_action, "comparison": comparison, "outcome": outcome_status, "source_battle_outcome": outcome if isinstance(outcome, str) else None, "trainer_value_lineage": trainers[index].get("raw_reward_components", {}).get("battle_outcome"), "source_controller": source.get("source_battle_controller_provenance"), "teacher_controller": teachers[index].get("controller_provenance"), "policy_target_source": trainers[index].get("policy_target_source"), "value_target_source": "trainer_input_record.raw_reward_components.battle_outcome"})
         trainer_outcome = trainers[index].get("structured_battle_outcome", {}).get("battle_survived", {})
+        try:
+            successor_identity = _record_identity(successor, component)[0] if successor else None
+        except (ValueError, KeyError, TypeError, AttributeError) as exc:
+            successor_identity = None
+            row_problems.append(f"row {index}: successor identity failure: {exc}")
         rows[-1].update({
             "linkage_valid": linkage_valid, "linkage_problems": linkage_problems,
             "source_pool": {"component": component, "path": str(manifest["input_artifacts"][component]["path"]), "sha256": manifest["input_artifacts"][component].get("sha256")},
             "current_complete_identity": derived,
-            "successor_complete_identity": (_record_identity(successor, component)[0] if successor else None),
+            "successor_complete_identity": successor_identity,
             "successor_exists": successor is not None,
             "successor_reason": behavior.get("reason"),
             "source_act": source.get("structural_metadata", {}).get("act"),
@@ -372,7 +385,7 @@ def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460, e
     proof = semantic_proof()
     source_outcomes = Counter("survived" if row["source_battle_outcome"] == "PLAYER_VICTORY" else "lost" if row["source_battle_outcome"] == "PLAYER_DEFEAT" else "unavailable" for row in rows)
     divergent_outcomes = Counter("survived" if row["source_battle_outcome"] == "PLAYER_VICTORY" else "lost" if row["source_battle_outcome"] == "PLAYER_DEFEAT" else "unavailable" for row in divergent)
-    strata = {name: {str(key): value for key, value in Counter((row[field], row["comparison"]) for row in rows).items()} for name, field in (("act", "act"), ("room_type", "room_type"), ("component", "component"), ("source_battle_controller_provenance", "source_battle_controller_provenance"))}
+    strata = {name: {str(key): value for key, value in Counter(((_controller_key(row[field]) if field == "source_battle_controller_provenance" else row[field]), row["comparison"]) for row in rows).items()} for name, field in (("act", "act"), ("room_type", "room_type"), ("component", "component"), ("source_battle_controller_provenance", "source_battle_controller_provenance"))}
     report = {"schema_version": SCHEMA, "inputs": {"manifest": str(manifest_path), "manifest_sha256": sha256(manifest_path), "control_artifacts": input_checks, "pool_checks": pool_checks, "terminal_case_valid": terminal_valid, "teacher": {"path": str(teacher_path), "sha256": sha256(teacher_path)}, "trainer": {"path": str(trainer_path), "sha256": sha256(trainer_path)}, "source_components": {component: {"path": str(manifest["input_artifacts"][component]["path"]), "sha256": manifest["input_artifacts"][component].get("sha256")} for component in sorted(by_component)}}, "coverage": {"observed": {str(key): value for key, value in sorted(coverage.items())}, "expected_acts": {"1": 256, "2": 204}, "expected_components": {"assist_0": 256, "assist_hp50": 12, "assist_hp50_potion_elite_boss": 32, "assist_hp75_potion": 160}, "valid": coverage_valid}, "integrity": {"valid": all_integrity and not row_problems, "selected_teacher_trainer_counts": len(rows) == 460, "source_identity_valid": all(row["identity_valid"] for row in rows), "problems": row_problems + ([] if all_integrity else ["one or more identity, coverage, control-artifact, or terminal predicates failed"])}, "counts": {"total_rows": len(rows), "behavior_recoverable": sum(row["behavior"]["status"] == "available" for row in rows), "behavior_unavailable": sum(row["behavior"]["status"] != "available" for row in rows), "comparison_denominator": sum(row["comparison"] != "unavailable" for row in rows), "comparisons": dict(Counter(row["comparison"] for row in rows)), "divergence_rate": len(divergent) / max(1, sum(row["comparison"] != "unavailable" for row in rows)), "outcomes": dict(source_outcomes), "divergent_outcomes": dict(divergent_outcomes), "divergent_with_available_outcome": sum(row["source_battle_outcome"] in ("PLAYER_VICTORY", "PLAYER_DEFEAT") for row in divergent)}, "strata": strata, "classification": classify(integrity_valid=all_integrity and not row_problems, rows=rows, proof=proof), "rows": rows, "semantic_proof": proof}
     output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return report
