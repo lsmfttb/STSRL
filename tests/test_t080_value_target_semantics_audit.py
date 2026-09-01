@@ -44,7 +44,7 @@ def _fake_audit(
 ):
     checkpoint = tmp_path / "checkpoint.pt"
     trainer = tmp_path / "artifacts" / "trainer.jsonl"
-    trainer.parent.mkdir()
+    trainer.parent.mkdir(exist_ok=True)
     checkpoint.write_bytes(b"checkpoint")
     _trainer(trainer, outcomes=outcomes or [False] * 4, behavior=behavior)
     if target_source != "oracle_teacher_row.teacher_action":

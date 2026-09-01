@@ -457,12 +457,28 @@ def write_outputs(report: dict[str, Any], output_root: Path, command: str) -> tu
     # file size, while its digest is over canonical JSON with only sha256 blank.
     self_entry = manifest["files"][-1]
     self_entry["bytes"] = 0
-    for _ in range(4):
-        self_entry["bytes"] = len(json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=False).encode() + b"\n")
-        self_entry["sha256"] = "0" * 64
-    self_entry["sha256"] = _manifest_self_hash(manifest)
-    self_entry["bytes"] = len(json.dumps(manifest, indent=2, sort_keys=True, ensure_ascii=False).encode() + b"\n")
-    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8")
+    self_entry["sha256"] = "0" * 64
+    for _ in range(20):
+        rendered = json.dumps(
+            manifest, indent=2, sort_keys=True, allow_nan=False
+        ) + "\n"
+        actual_bytes = len(rendered.encode("utf-8"))
+        actual_hash = _manifest_self_hash(manifest)
+        if self_entry["bytes"] == actual_bytes and self_entry["sha256"] == actual_hash:
+            break
+        self_entry["bytes"] = actual_bytes
+        self_entry["sha256"] = actual_hash
+    else:
+        raise RuntimeError("T080 manifest self identity did not converge")
+    rendered = json.dumps(
+        manifest, indent=2, sort_keys=True, allow_nan=False
+    ) + "\n"
+    manifest_path.write_text(rendered, encoding="utf-8")
+    written = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if written["files"][-1]["bytes"] != manifest_path.stat().st_size:
+        raise RuntimeError("T080 manifest self byte count mismatch")
+    if written["files"][-1]["sha256"] != _manifest_self_hash(written):
+        raise RuntimeError("T080 manifest self hash mismatch")
     json.loads(report_path.read_text(encoding="utf-8")); json.loads(manifest_path.read_text(encoding="utf-8"))
     return report_path, manifest_path
 
