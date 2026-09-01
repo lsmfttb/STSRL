@@ -190,7 +190,7 @@ def audit_t064(manifest_path: Path, output: Path) -> dict[str, Any]:
 def _join_successors(path: Path, selected: set[tuple[Any, ...]]) -> dict[tuple[Any, ...], dict[str, Any]]:
     found: dict[tuple[Any, ...], dict[str, Any]] = {}
     previous: dict[tuple[Any, ...], dict[str, Any]] = {}
-    for row in _rows(path):
+    for row in _source_rows(path):
         key = (row.get("source_pool_sha256"), row.get("source_run_id"), row.get("source_seed"))
         prior = previous.get(key)
         if prior is not None and (prior.get("source_battle_index", -1) + 1 == row.get("source_battle_index")):
@@ -228,7 +228,7 @@ def audit(selected: list[Mapping[str, Any]], teacher: list[Mapping[str, Any]], t
         successor = source_successors.get(selected_keys[index])
         behavior = recover_behavior(source, successor)
         teacher_id = _identity(teach.get("teacher_action") or teach.get("policy_target_action_identity"))
-        comparison = "unavailable" if behavior.get("status") != "available" or teacher_id is None else "same" if tuple(behavior["identity"]) == teacher_id else "different"
+        comparison = "unavailable" if behavior.get("status") != "available" or teacher_id is None else "same" if behavior["identity"] == teacher_id else "different"
         outcome = train.get("battle_survived", train.get("structured_battle_outcome", {}).get("battle_survived"))
         outcome_status = "available" if isinstance(outcome, bool) else "unavailable"
         row = {"index": index, "source_identity": source.get("complete_identity"), "behavior": behavior, "teacher_action": teacher_id, "comparison": comparison, "outcome": outcome_status, "assistance_level": source.get("assistance_level"), "act": source.get("act"), "room_type": source.get("room_type"), "source_battle_controller": source.get("battle_controller_provenance")}

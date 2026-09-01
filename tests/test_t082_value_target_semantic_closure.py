@@ -27,3 +27,9 @@ def test_bounded_audit_counts_and_incomplete_classification(tmp_path: Path):
     report = audit(selected, teacher, trainer, source, expected_rows=1)
     assert report["counts"]["behavior_recoverable"] == 1
     assert classify(integrity_valid=False, rows=[]) == "INCOMPLETE"
+
+def test_classification_requires_explicit_proof_and_outcome():
+    divergent = [{"comparison": "different", "outcome": "available"}]
+    assert classify(integrity_valid=True, rows=divergent) == "VALUE_TARGET_SEMANTICS_UNRESOLVED"
+    assert classify(integrity_valid=True, rows=divergent, source_outcome_proven=True, search_leaf_proven=True, oracle_policy_proven=True, no_alignment_contract=True) == "VALUE_TARGET_SEMANTIC_MISMATCH_CONFIRMED"
+    assert classify(integrity_valid=True, rows=[], source_outcome_proven=True, search_leaf_proven=True, oracle_policy_proven=True, no_alignment_contract=True) == "VALUE_TARGET_SEMANTICS_UNRESOLVED"
