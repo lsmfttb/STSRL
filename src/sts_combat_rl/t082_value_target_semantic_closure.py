@@ -395,6 +395,7 @@ def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460) -
         trainer_source_metadata = trainers[index].get("source_metadata")
         if not isinstance(trainer_source_metadata, Mapping):
             row_problems.append(f"row {index}: trainer source_metadata is not an object")
+        trainer_action = _identity(trainers[index].get("policy_target_action_identity"))
         comparison = "unavailable" if behavior.get("status") != "available" or teacher_action is None else "same" if behavior["identity"] == teacher_action else "different"
         outcome = source.get("battle_outcome")
         outcome_status = "available" if outcome in ("PLAYER_VICTORY", "PLAYER_DEFEAT") else "unavailable"
