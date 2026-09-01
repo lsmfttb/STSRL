@@ -60,10 +60,25 @@ matched all 866 scorer requests and accepted search semantics, materially
 reduced search wall time in every guided arm, and locked wall-clock budgets
 `1/1/2` plus simulator-step budgets `86/408/384`. Its terminal evidence
 recommended the original T062 matched 93-record outcome comparison for planner
-consideration, but no successor task is currently published.
+consideration. T070 then completed that fixed-cohort outcome and budget audit:
+the 100-simulation budget was insufficient, the high-budget guidance signal was
+false, and the terminal Case C recommended T064 without publishing a successor.
+T071--T074 completed the post-T064 execution and repository maintenance gate;
+T075--T078 repaired and validated non-combat cohort ownership and restored
+public-context fidelity without changing the accepted scientific conclusions.
+T079 completed the search-state-utilization diagnostic as `AMBIGUOUS`, so exact
+transposition remains parked rather than promoted. T080 completed the initial
+value-target audit as `VALUE_TARGET_SEMANTICS_UNRESOLVED` on the four-row smoke
+lineage. T081 added the fail-closed artifact-eligibility guard. T082 then used
+the accepted non-smoke T064 lineage and confirmed
+`VALUE_TARGET_SEMANTIC_MISMATCH_CONFIRMED` over 460 selected rows. The active
+model-side direction is now one bounded value-target repair with policy targets,
+features, model architecture, Search v2, simulator, and evaluation cohorts
+held fixed as far as feasible; this requires a fresh task specification and is
+not an automatic queue entry. T034 remains blocked on native public-consistent
+hidden-future sampler support, and T063/T066 remain `DRAFT`.
 New implementation work should start only from rows marked `READY` in the task
-index. The queue is currently empty while the planner reviews the maintainer
-report; T034 remains blocked on native sampler support.
+index. The queue is currently empty.
 
 ## Goals
 

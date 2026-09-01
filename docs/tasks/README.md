@@ -102,6 +102,7 @@ workflow's explicit implementation-authorization gate is satisfied.
 | T079 | DONE | [Battle Search state-utilization bounds recovery](T079-battle-search-state-utilization-diagnostic.md) | T078, T070, T069, T062, T052, T043, T017, T020 | PR #84 merged at dbee053; conservative exact-state bounds completed with an AMBIGUOUS terminal classification |
 | T080 | DONE | [Battle value-target semantic alignment audit](T080-battle-value-target-semantics-audit.md) | T079, T070, T069, T062, T052, T043 | PR #86 merged at 1771203; exact frozen provenance audit completed with VALUE_TARGET_SEMANTICS_UNRESOLVED and no automatic successor |
 | T081 | DONE | [Scientific artifact eligibility gate](T081-scientific-artifact-eligibility-gate.md) | T043, T044, T047, T048, T050, T051, T052, T062, T070 | PR #87 merged at 4a24f18; artifact integrity and scientific eligibility are now separate, fail-closed consumer gates with a durable historical claim-boundary audit |
+| T082 | DONE | [T064 value-target semantic closure](T082-t064-value-target-semantic-closure.md) | T080, T081, T064, T043, T042 | PR #88 merged at 2acd1e8; qualified 460-row lineage audit confirmed VALUE_TARGET_SEMANTIC_MISMATCH_CONFIRMED and permits one bounded value-target repair experiment |
 
 Use the table, not per-task files or roadmap prose, when deciding whether a task
 may receive a branch. Only `READY` rows should receive a new implementation
@@ -220,9 +221,16 @@ report is retained at
 with SHA-256
 `9abb6e76c7fe271884a37394b31058406ad0591b9949b7c109671d6d2ae539b1`. T075 and
 T077 science and artifacts were not rerun, reclassified, or changed. The
-intended next research priority remains a separate Battle Search
-state-utilization/path-replay diagnostic; T063 and T066 remain `DRAFT` and are
-not implicitly promoted.
+T079 then completed the separate Battle Search state-utilization diagnostic
+with an `AMBIGUOUS` terminal result; exact transposition remains parked under
+its re-open conditions. T080 completed the value-target audit as
+`VALUE_TARGET_SEMANTICS_UNRESOLVED` on the historical four-row smoke lineage.
+T081 added the fail-closed Artifact Eligibility Contract, and T082 applied it to
+the accepted non-smoke T064 lineage. T082 confirmed
+`VALUE_TARGET_SEMANTIC_MISMATCH_CONFIRMED`; the next model-side direction is one
+bounded value-target repair with policy targets, features, model architecture,
+Search v2, simulator, and evaluation cohorts held fixed as far as feasible.
+T063 and T066 remain `DRAFT` and are not implicitly promoted.
 
 ## Task Boundary And Artifact Rules
 
@@ -265,11 +273,12 @@ and inspect again after the expected window or on request rather than continuous
 ## Published Queue
 
 The executable queue is exactly the set of `READY` rows in the Active Backlog;
-it is currently empty. T063 and T066 remain `DRAFT`; T075, T076, T077, T078,
-T079, T080, T081, T065, T071, T072, T073, and T074 are `DONE`. T065, T075,
-T077, T078, T079, T080, and T081 are complete with their recorded diagnostic,
-repair, or control-plane outcomes. T034 remains
-blocked on native public-consistent hidden-future sampling support.
+it is currently empty. T063 and T066 remain `DRAFT`; T034 remains blocked on
+native public-consistent hidden-future sampling support. T064, T065, and
+T071--T082 are `DONE` with their recorded diagnostic, repair, or control-plane
+outcomes. T082 does not publish a successor by itself; any value-target repair
+must first receive a fresh Planner specification and Maintainer exact-head
+approval.
 
 ## Standard Local Gates
 

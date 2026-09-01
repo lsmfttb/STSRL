@@ -1,6 +1,6 @@
 # Current Status
 
-Last reviewed: 2026-09-01.
+Last reviewed: 2026-09-02.
 
 This document is the main maintainer's canonical execution-result report for
 the planner and describes the latest `main` branch only. Results from local
@@ -356,6 +356,49 @@ suite was `965 passed, 2 skipped, 2` unrelated baseline failures, both
 reproduced on clean `main`. Ruff check/format, compileall, and diff checks
 passed. Research ledger #85 records the final guard contract and requires
 future model-side evidence to be reassessed under it.
+
+T082 is now complete after PR #88 merged at
+`2acd1e8854e25c81388fe63488f1b0d2dbf595bd`. Its approved specification commit
+was `188d4059669dfa362d34bc641a0ea58ac3d89d41`, and its accepted exact
+implementation head was `f2e3b63c1d308afa9e85b612e9a9f0ab21d05c2b`, based on
+`ab19fae5c1fbd5c50c000a6425e15215c1e555bf`. The offline audit exercised the
+T081 Artifact Eligibility Contract against the accepted T064/T042 lineage and
+recorded `integrity=true` and `coverage=true` for all 460 selected rows.
+
+The formal report is retained at
+`/mnt/d/DeadlyCatCoding/STSRL/artifacts/t082-value-target-semantic-closure/t082-value-target-semantic-closure-v1.json`;
+it is 74,412,899 bytes with SHA-256
+`e1435812abed86d9ddb4c857cba1863edf852f1e956db9fc002e043a4eb2febc`. The
+retention manifest is at
+`/mnt/d/DeadlyCatCoding/STSRL/artifacts/t082-value-target-semantic-closure/t082-retention-manifest-v1.json`;
+it is 8,611 bytes with SHA-256
+`ba9362fb953dbfcd992c4a6dda5a5420f12c35bb6921bcf34e2cf520990eb69a`.
+The manifest records the exact frozen inputs and output hashes, the bounded
+offline scan command, `worker_count=1` with its non-simulator aggregation
+reason, job status/log identities, and the raw-artifact deletion condition.
+
+All 460 selected rows joined exactly once to source, teacher, and trainer
+records. Exact immediate-next-battle trace recovery made 320/460 behavior
+actions available; 140 remained explicitly unavailable. The auditable
+teacher-versus-behavior comparison was 149 same / 171 different over 320 rows
+(`0.534375` divergence), and all 171 divergent rows retained an available
+source outcome. Source outcomes were 322 survived / 138 lost, with all trainer
+battle-survival labels consistent. The static semantic proof connects the
+Oracle policy target to the policy head, realized source outcome to the value
+head, and learned survival head to the Search v2 leaf consumer, while finding
+no retained same-continuation alignment contract. The terminal classification
+is `VALUE_TARGET_SEMANTIC_MISMATCH_CONFIRMED`; it does not quantify causal
+performance impact or show that value functions are intrinsically harmful.
+
+Planner scientific/architecture acceptance and Maintainer operational acceptance
+passed on the exact head. Focused T082/task-document tests passed (`19`), as did
+changed-file Ruff, format, compileall, and diff checks. The final full suite was
+`962 passed, 8 skipped, 1 failed`; the sole failure was the pre-existing
+`tests/test_non_combat_learning.py::test_regeneration_command_is_full_pinned_wsl_command`
+assertion, reproduced independently on clean `main`. No model, training,
+feature, Search, simulator, controller, T079, or historical numerical result
+changed. Research ledger #85 records the accepted classification and permits
+one bounded value-target repair experiment; no successor is published by T082.
 
 ## Implemented On Main
 
