@@ -142,13 +142,15 @@ def _source_rows(path: Path) -> Iterable[dict[str, Any]]:
             yield {key: row[key] for key in keep if key in row}
 
 def _validate_pool(path: Path, expected: Mapping[str, Any], component: str) -> dict[str, Any]:
-    digest = hashlib.sha256(); size = 0; count = 0; previous = -1; duplicate = False; schema = None
+    digest = hashlib.sha256(); size = 0; count = 0; previous = -1; duplicate = False; schema = None; metadata = {}
+    if not path.exists():
+        return {"path": str(path), "component": component, "schema": None, "metadata": {}, "record_count": 0, "bytes": 0, "sha256": None, "expected": dict(expected), "valid": False, "ordering_valid": False, "reason": "missing artifact"}
     with path.open("rb") as stream:
         for raw in iter(lambda: stream.readline(), b""):
             digest.update(raw); size += len(raw)
             item = json.loads(raw)
             if item.get("type") == "metadata":
-                schema = item.get("metadata", {}).get("schema_id")
+                metadata = dict(item.get("metadata", {})); schema = metadata.get("schema_id")
                 continue
             row = item.get("record", item); index = row.get("record_index")
             if not isinstance(index, int) or index <= previous: duplicate = True
@@ -156,7 +158,7 @@ def _validate_pool(path: Path, expected: Mapping[str, Any], component: str) -> d
             if row.get("structural_metadata", {}).get("assistance_level", component) != component:
                 duplicate = True
     valid = schema == "assisted-run-source-pool-v1" and count == expected.get("record_count") and size == expected.get("bytes") and digest.hexdigest() == expected.get("sha256") and not duplicate
-    return {"path": str(path), "component": component, "schema": schema, "record_count": count, "bytes": size, "sha256": digest.hexdigest(), "expected": dict(expected), "valid": valid, "ordering_valid": not duplicate}
+    return {"path": str(path), "component": component, "schema": schema, "metadata": metadata, "record_count": count, "bytes": size, "sha256": digest.hexdigest(), "expected": dict(expected), "valid": valid, "ordering_valid": not duplicate}
 
 def _record_identity(row: Mapping[str, Any], component: str) -> tuple[dict[str, Any], str]:
     metadata = dict(row.get("structural_metadata", {}))
@@ -263,6 +265,8 @@ def audit_t064(manifest_path: Path, output: Path) -> dict[str, Any]:
     for component, indexes in by_component.items():
         previous = None
         pool = Path(manifest["input_artifacts"][component]["path"].replace("D:\\", "/mnt/d/").replace("\\", "/"))
+        if not pool.exists():
+            continue
         for record in _source_rows(pool):
             record_index = record.get("record_index")
             if record_index in indexes:
