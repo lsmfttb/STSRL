@@ -72,6 +72,23 @@ def _source_rows(path: Path) -> Iterable[dict[str, Any]]:
                 raise ValueError(f"invalid source row {number}")
             yield {key: row[key] for key in keep if key in row}
 
+def _validate_pool(path: Path, expected: Mapping[str, Any], component: str) -> dict[str, Any]:
+    digest = hashlib.sha256(); size = 0; count = 0; previous = -1; duplicate = False; schema = None
+    with path.open("rb") as stream:
+        for raw in iter(lambda: stream.readline(), b""):
+            digest.update(raw); size += len(raw)
+            item = json.loads(raw)
+            if item.get("type") == "metadata":
+                schema = item.get("metadata", {}).get("schema_id")
+                continue
+            row = item.get("record", item); index = row.get("record_index")
+            if not isinstance(index, int) or index <= previous: duplicate = True
+            previous = index if isinstance(index, int) else previous; count += 1
+            if row.get("structural_metadata", {}).get("assistance_level", component) != component:
+                duplicate = True
+    valid = schema == "assisted-run-source-pool-v1" and count == expected.get("record_count") and size == expected.get("bytes") and digest.hexdigest() == expected.get("sha256") and not duplicate
+    return {"path": str(path), "component": component, "schema": schema, "record_count": count, "bytes": size, "sha256": digest.hexdigest(), "expected": dict(expected), "valid": valid, "ordering_valid": not duplicate}
+
 def _record_identity(row: Mapping[str, Any], component: str) -> tuple[dict[str, Any], str]:
     metadata = dict(row.get("structural_metadata", {}))
     metadata.setdefault("assistance_level", component)
