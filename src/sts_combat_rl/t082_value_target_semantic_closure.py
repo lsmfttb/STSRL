@@ -325,13 +325,13 @@ def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460) -
         return incomplete("manifest input_artifacts is missing or not an object")
     teacher_path, trainer_path = root / "teacher/merged.jsonl", root / "trainer/trainer-input.jsonl"
     try:
-        teacher_meta, teachers = _load_selected_envelope(teacher_path, expected_rows, "row_index")
-        trainer_meta, trainers = _load_selected_envelope(trainer_path, expected_rows, "example_index")
+        teacher_envelope_meta, teachers = _load_selected_envelope(teacher_path, expected_rows, "row_index")
+        trainer_envelope_meta, trainers = _load_selected_envelope(trainer_path, expected_rows, "example_index")
     except (OSError, ValueError, TypeError, AttributeError, json.JSONDecodeError) as exc:
         return incomplete(f"teacher/trainer artifact unavailable or malformed: {exc}")
     input_checks.extend([
-        {"name": "teacher", "sha256": sha256(teacher_path), "expected_sha256": EXPECTED_TEACHER_SHA, "schema": teacher_meta.get("artifact_schema_id"), "record_count": teacher_meta.get("record_count"), "controller_provenance": teacher_meta.get("controller_provenance"), "valid": (expected_rows != 460 or sha256(teacher_path) == EXPECTED_TEACHER_SHA) and teacher_meta.get("artifact_schema_id") == "oracle-search-teacher-v1" and teacher_meta.get("record_count") == expected_rows and isinstance(teacher_meta.get("controller_provenance"), Mapping) and teacher_meta["controller_provenance"].get("config", {}).get("information_regime") == "full_simulator_state_oracle_like" and teacher_meta["controller_provenance"].get("config", {}).get("search_budget", {}).get("simulations") == 100 and teacher_meta["controller_provenance"].get("config", {}).get("root_selection_rule") == "highest_mean" and teacher_meta["controller_provenance"].get("config", {}).get("include_potions") is False},
-        {"name": "trainer", "sha256": sha256(trainer_path), "expected_sha256": EXPECTED_TRAINER_SHA, "schema": trainer_meta.get("format_version"), "record_count": trainer_meta.get("record_count"), "policy_target_schema_id": trainer_meta.get("policy_target_schema_id"), "policy_target_schema_version": trainer_meta.get("policy_target_schema_version"), "structured_battle_outcome_schema_id": trainer_meta.get("structured_battle_outcome_schema_id"), "structured_battle_outcome_schema_version": trainer_meta.get("structured_battle_outcome_schema_version"), "valid": (expected_rows != 460 or sha256(trainer_path) == EXPECTED_TRAINER_SHA) and trainer_meta.get("record_count") == expected_rows and trainer_meta.get("format_version") in (6, "6") and trainer_meta.get("policy_target_schema_id") == "trainer-policy-target-v1" and trainer_meta.get("policy_target_schema_version") == 1 and trainer_meta.get("structured_battle_outcome_schema_id") == "structured-battle-outcome-v1" and trainer_meta.get("structured_battle_outcome_schema_version") == 1},
+        {"name": "teacher", "sha256": sha256(teacher_path), "expected_sha256": EXPECTED_TEACHER_SHA, "schema": teacher_envelope_meta.get("artifact_schema_id"), "record_count": teacher_envelope_meta.get("record_count"), "controller_provenance": teacher_envelope_meta.get("controller_provenance"), "valid": (expected_rows != 460 or sha256(teacher_path) == EXPECTED_TEACHER_SHA) and teacher_envelope_meta.get("artifact_schema_id") == "oracle-search-teacher-v1" and teacher_envelope_meta.get("record_count") == expected_rows and isinstance(teacher_envelope_meta.get("controller_provenance"), Mapping) and teacher_envelope_meta["controller_provenance"].get("config", {}).get("information_regime") == "full_simulator_state_oracle_like" and teacher_envelope_meta["controller_provenance"].get("config", {}).get("search_budget", {}).get("simulations") == 100 and teacher_envelope_meta["controller_provenance"].get("config", {}).get("root_selection_rule") == "highest_mean" and teacher_envelope_meta["controller_provenance"].get("config", {}).get("include_potions") is False},
+        {"name": "trainer", "sha256": sha256(trainer_path), "expected_sha256": EXPECTED_TRAINER_SHA, "schema": trainer_envelope_meta.get("format_version"), "record_count": trainer_envelope_meta.get("record_count"), "policy_target_schema_id": trainer_envelope_meta.get("policy_target_schema_id"), "policy_target_schema_version": trainer_envelope_meta.get("policy_target_schema_version"), "structured_battle_outcome_schema_id": trainer_envelope_meta.get("structured_battle_outcome_schema_id"), "structured_battle_outcome_schema_version": trainer_envelope_meta.get("structured_battle_outcome_schema_version"), "valid": (expected_rows != 460 or sha256(trainer_path) == EXPECTED_TRAINER_SHA) and trainer_envelope_meta.get("record_count") == expected_rows and trainer_envelope_meta.get("format_version") in (6, "6") and trainer_envelope_meta.get("policy_target_schema_id") == "trainer-policy-target-v1" and trainer_envelope_meta.get("policy_target_schema_version") == 1 and trainer_envelope_meta.get("structured_battle_outcome_schema_id") == "structured-battle-outcome-v1" and trainer_envelope_meta.get("structured_battle_outcome_schema_version") == 1},
     ])
     if len(teachers) != expected_rows or len(trainers) != expected_rows:
         return incomplete("teacher/trainer row count mismatch")
@@ -456,14 +456,14 @@ def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460) -
     report["regeneration"]["command"] = f"PYTHONPATH=src python scripts/run_t082_value_target_semantic_closure.py --manifest {manifest_path} --output {output}"
     report["inputs"]["manifest"] = {"path": str(manifest_path), "sha256": sha256(manifest_path), "valid": True}
     report["inputs"]["terminal"] = {"observed": decision, "valid": terminal_valid}
-    report["inputs"]["teacher"]["metadata"] = teacher_meta
-    report["inputs"]["trainer"]["metadata"] = trainer_meta
+    report["inputs"]["teacher"]["metadata"] = teacher_envelope_meta
+    report["inputs"]["trainer"]["metadata"] = trainer_envelope_meta
     report["inputs"]["teacher"].update({"expected_sha256": EXPECTED_TEACHER_SHA, "actual_sha256": sha256(teacher_path), "valid": input_checks[-2]["valid"]})
     report["inputs"]["trainer"].update({"expected_sha256": EXPECTED_TRAINER_SHA, "actual_sha256": sha256(trainer_path), "valid": input_checks[-1]["valid"]})
     report["counts"]["trainer_value_labels"] = dict(trainer_outcomes)
     report["counts"]["divergent_trainer_value_labels"] = dict(divergent_trainer_outcomes)
+    report["regeneration"].update({"hash_convention": "hash the committed output bytes externally; no self-referential hash is embedded"})
     rendered = json.dumps(report, indent=2, sort_keys=True) + "\n"
-    report["regeneration"].update({"rendered_report_size": len(rendered.encode()), "hash_convention": "hash the committed output bytes externally; no self-referential hash is embedded"})
     output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return report
 
