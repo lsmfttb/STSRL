@@ -380,6 +380,56 @@ def test_actual_trainer_linkage_uses_complete_identity_hash_not_pool_index():
     assert not _linkage_ok(selected, teacher, trainer, 0, 11)[0]
 
 
+def test_selected_component_supplies_assistance_lineage():
+    identity = {
+        "source_checkpoint_id": "ckpt",
+        "source_run_id": "run",
+        "source_seed": 3,
+        "source_battle_index": 7,
+        "complete_identity_sha256": "identity",
+    }
+    selected = {
+        "complete_identity": identity,
+        "component": "assist_0",
+        "act": 1,
+        "room_type": "monster",
+        "encounter_id": "jaw_worm",
+    }
+    teacher = {
+        "row_index": 0,
+        **{
+            k: identity[k]
+            for k in (
+                "source_checkpoint_id",
+                "source_run_id",
+                "source_seed",
+                "source_battle_index",
+            )
+        },
+        "source_pool_record_index": 11,
+        "structural_metadata": {
+            "act": 1,
+            "room_type": "monster",
+            "encounter_id": "jaw_worm",
+            "assistance_level": "assist_0",
+        },
+    }
+    trainer = {
+        "example_index": 0,
+        "policy_target_kind": "oracle_soft_visit_distribution",
+        "policy_target_source": "oracle_teacher_row.soft_visit_target",
+        "source_metadata": identity
+        | {
+            "t064_complete_identity_sha256": "identity",
+            "act": 1,
+            "room_type": "monster",
+            "encounter_id": "jaw_worm",
+            "assistance_level": "assist_0",
+        },
+    }
+    assert _linkage_ok(selected, teacher, trainer, 0, 11)[0]
+
+
 def test_successor_reason_categories_and_deterministic_pool_fixture(tmp_path: Path):
     current = {
         "action_trace": [action(1)],

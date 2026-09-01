@@ -390,6 +390,7 @@ def _linkage_ok(
     identity = item.get("complete_identity", {})
     teacher_metadata = teacher.get("structural_metadata", {})
     metadata = trainer.get("source_metadata", {})
+    selected_assistance = item.get("component")
     if (
         not isinstance(identity, Mapping)
         or not isinstance(teacher_metadata, Mapping)
@@ -409,11 +410,11 @@ def _linkage_ok(
             )
         )
         and teacher.get("source_pool_record_index") == record_index,
-        "teacher_shape": all(
-            isinstance(teacher_metadata, Mapping)
-            and teacher_metadata.get(key) == item.get(key)
-            for key in ("act", "room_type", "encounter_id", "assistance_level")
-        ),
+        "teacher_shape": isinstance(teacher_metadata, Mapping)
+        and teacher_metadata.get("act") == item.get("act")
+        and teacher_metadata.get("room_type") == item.get("room_type")
+        and teacher_metadata.get("encounter_id") == item.get("encounter_id")
+        and teacher_metadata.get("assistance_level") == selected_assistance,
         "trainer_source": all(
             metadata.get(key) == identity.get(key)
             for key in (
@@ -425,10 +426,10 @@ def _linkage_ok(
         )
         and metadata.get("t064_complete_identity_sha256")
         == identity.get("complete_identity_sha256"),
-        "trainer_shape": all(
-            metadata.get(key) == item.get(key)
-            for key in ("act", "room_type", "encounter_id", "assistance_level")
-        ),
+        "trainer_shape": metadata.get("act") == item.get("act")
+        and metadata.get("room_type") == item.get("room_type")
+        and metadata.get("encounter_id") == item.get("encounter_id")
+        and metadata.get("assistance_level") == selected_assistance,
         "policy_lineage": trainer.get("policy_target_kind")
         == "oracle_soft_visit_distribution"
         and trainer.get("policy_target_source")
@@ -924,9 +925,12 @@ def audit_t064(
             isinstance(selected_source_path, str)
             and selected_source_path == expected_path
         )
-        shape_ok = isinstance(source_meta, Mapping) and all(
-            source_meta.get(key) == item.get(key)
-            for key in ("act", "room_type", "encounter_id", "assistance_level")
+        shape_ok = (
+            isinstance(source_meta, Mapping)
+            and source_meta.get("act") == item.get("act")
+            and source_meta.get("room_type") == item.get("room_type")
+            and source_meta.get("encounter_id") == item.get("encounter_id")
+            and source_meta.get("assistance_level") == component
         )
         behavior = (
             recover_behavior(source, successor)
