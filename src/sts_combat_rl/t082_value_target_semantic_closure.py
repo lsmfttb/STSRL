@@ -6,9 +6,14 @@ import json
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Any
 from types import SimpleNamespace
-from sts_combat_rl.sim.source_identity import complete_source_identity, canonical_sha256, action_trace_identity_sha256
+from typing import Any
+
+from sts_combat_rl.sim.source_identity import (
+    action_trace_identity_sha256,
+    canonical_sha256,
+    complete_source_identity,
+)
 
 SCHEMA = "t082-value-target-semantic-closure-v1"
 EXPECTED_INPUTS = {
