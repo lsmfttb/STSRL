@@ -448,7 +448,11 @@ def write_outputs(report: dict[str, Any], output_root: Path, command: str) -> tu
     output_root = Path(output_root).resolve()
     output_root.mkdir(parents=True, exist_ok=True)
     report_path = output_root / f"{REPORT_SCHEMA}.json"
-    report_path.write_text(json.dumps(report, indent=2, sort_keys=True, allow_nan=False) + "\n", encoding="utf-8")
+    report_path.write_text(
+        json.dumps(report, indent=2, sort_keys=True, allow_nan=False) + "\n",
+        encoding="utf-8",
+        newline="\n",
+    )
     report_sha, report_bytes = digest(report_path)
     manifest_path = output_root / f"{MANIFEST_SCHEMA}.json"
     files = [{"path": str(report_path), "sha256": report_sha, "bytes": report_bytes, "schema_id": REPORT_SCHEMA, "provenance": "audit output", "regeneration": command, "retention": "immutable T080 evidence", "consumer": "T080 review", "deletion_condition": "after successor decision"}]
@@ -473,7 +477,7 @@ def write_outputs(report: dict[str, Any], output_root: Path, command: str) -> tu
     rendered = json.dumps(
         manifest, indent=2, sort_keys=True, allow_nan=False
     ) + "\n"
-    manifest_path.write_text(rendered, encoding="utf-8")
+    manifest_path.write_text(rendered, encoding="utf-8", newline="\n")
     written = json.loads(manifest_path.read_text(encoding="utf-8"))
     if written["files"][-1]["bytes"] != manifest_path.stat().st_size:
         raise RuntimeError("T080 manifest self byte count mismatch")
