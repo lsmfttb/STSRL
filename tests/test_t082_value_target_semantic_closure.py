@@ -53,7 +53,7 @@ def test_duplicate_actions_use_occurrence_identity():
 
 
 def test_compact_production_audit_fixture_valid_mutation_and_determinism(
-    tmp_path: Path, monkeypatch, boundary=False
+    tmp_path: Path, monkeypatch, boundary=False, loss=False
 ):
     root = tmp_path
     pool = root / "pool.jsonl"
@@ -67,6 +67,7 @@ def test_compact_production_audit_fixture_valid_mutation_and_determinism(
         "encounter_id": "jaw_worm",
         "assistance_level": "assist_0",
     }
+    outcome = "PLAYER_LOSS" if loss else "PLAYER_VICTORY"
     current = {
         "record_index": 0,
         "source_checkpoint_id": "ckpt",
@@ -74,7 +75,7 @@ def test_compact_production_audit_fixture_valid_mutation_and_determinism(
         "source_seed": 1,
         "source_battle_index": 0,
         "action_trace": [action(1)],
-        "battle_outcome": "PLAYER_VICTORY",
+        "battle_outcome": outcome,
         "checkpoint_information_regime": "full_simulator_state_oracle_like",
         "distribution_kind": "constructed",
         "structural_metadata": meta,
@@ -83,7 +84,7 @@ def test_compact_production_audit_fixture_valid_mutation_and_determinism(
         "record_index": 1,
         "source_battle_index": 1,
         "action_trace": [action(1), action(2)],
-        "battle_outcome": "PLAYER_VICTORY",
+        "battle_outcome": outcome,
     }
     if boundary:
         successor = successor | {"source_run_id": "next-run"}
@@ -142,7 +143,7 @@ def test_compact_production_audit_fixture_valid_mutation_and_determinism(
                 "source_metadata": source
                 | {"t064_complete_identity_sha256": identity_sha, **meta},
                 "structured_battle_outcome": {
-                    "battle_survived": {"status": "available", "value": True}
+                    "battle_survived": {"status": "available", "value": not loss}
                 },
             }
         ],
@@ -503,3 +504,19 @@ def test_audit_t064_run_boundary_is_not_an_integrity_failure(tmp_path: Path):
     assert row["physical_successor_candidate"] is True
     assert row["successor_reason"] == "run boundary/no exact successor"
     assert report["integrity"]["valid"] is True
+
+
+def test_audit_t064_player_loss_maps_to_lost_and_consistent(tmp_path: Path):
+    class Monkeypatch:
+        def setattr(self, obj, name, value):
+            setattr(obj, name, value)
+
+    test_compact_production_audit_fixture_valid_mutation_and_determinism(
+        tmp_path, Monkeypatch(), loss=True
+    )
+    report = json.loads((tmp_path / "report1.json").read_text())
+    row = report["rows"][0]
+    assert row["source_battle_outcome"] == "PLAYER_LOSS"
+    assert row["outcome"] == "available"
+    assert row["outcome_consistency"] == "consistent"
+    assert report["counts"]["outcomes"]["lost"] == 1

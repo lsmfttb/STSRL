@@ -990,7 +990,7 @@ def audit_t064(
         outcome = source.get("battle_outcome")
         outcome_status = (
             "available"
-            if outcome in ("PLAYER_VICTORY", "PLAYER_DEFEAT")
+            if outcome in ("PLAYER_VICTORY", "PLAYER_LOSS", "PLAYER_DEFEAT")
             else "unavailable"
         )
         rows.append(
@@ -1096,7 +1096,7 @@ def audit_t064(
                 "outcome_consistency": "unavailable"
                 if not isinstance(trainer_outcome, Mapping)
                 or "value" not in trainer_outcome
-                or outcome not in ("PLAYER_VICTORY", "PLAYER_DEFEAT")
+                or outcome not in ("PLAYER_VICTORY", "PLAYER_LOSS", "PLAYER_DEFEAT")
                 else "consistent"
                 if ((outcome == "PLAYER_VICTORY") == bool(trainer_outcome["value"]))
                 else "mismatch",
@@ -1175,7 +1175,7 @@ def audit_t064(
         "survived"
         if row["source_battle_outcome"] == "PLAYER_VICTORY"
         else "lost"
-        if row["source_battle_outcome"] == "PLAYER_DEFEAT"
+        if row["source_battle_outcome"] in ("PLAYER_LOSS", "PLAYER_DEFEAT")
         else "unavailable"
         for row in rows
     )
@@ -1183,7 +1183,7 @@ def audit_t064(
         "survived"
         if row["source_battle_outcome"] == "PLAYER_VICTORY"
         else "lost"
-        if row["source_battle_outcome"] == "PLAYER_DEFEAT"
+        if row["source_battle_outcome"] in ("PLAYER_LOSS", "PLAYER_DEFEAT")
         else "unavailable"
         for row in divergent
     )
@@ -1295,7 +1295,8 @@ def audit_t064(
             "outcomes": dict(source_outcomes),
             "divergent_outcomes": dict(divergent_outcomes),
             "divergent_with_available_outcome": sum(
-                row["source_battle_outcome"] in ("PLAYER_VICTORY", "PLAYER_DEFEAT")
+                row["source_battle_outcome"]
+                in ("PLAYER_VICTORY", "PLAYER_LOSS", "PLAYER_DEFEAT")
                 for row in divergent
             ),
         },
