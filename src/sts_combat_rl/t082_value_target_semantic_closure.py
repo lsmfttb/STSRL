@@ -307,7 +307,7 @@ def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460) -
         decision = json.loads(decision_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         decision = {}
-    terminal_valid = all(decision.get(key) is True for key in ("experiment_complete", "source_adequacy", "source_integrity_valid")) and decision.get("terminal_case") == "Case B"
+    terminal_valid = isinstance(decision, Mapping) and all(decision.get(key) is True for key in ("experiment_complete", "source_adequacy", "source_integrity_valid")) and decision.get("terminal_case") == "Case B"
     selected = manifest.get("selected_sources", []) if isinstance(manifest, Mapping) else []
     if len(selected) != expected_rows or any(not isinstance(item, Mapping) or not isinstance(item.get("complete_identity"), Mapping) or item.get("complete_identity", {}).get("schema_id") != "t064-complete-source-identity-v1" or not isinstance(item.get("complete_identity_sha256"), str) for item in selected):
         return incomplete(f"selected inventory does not contain exactly {expected_rows} valid rows")
@@ -385,18 +385,16 @@ def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460) -
         behavior = recover_behavior(source, successor) if source else {"status": "unavailable", "reason": "source record missing"}
         teacher_payload = teachers[index].get("teacher_action")
         teacher_action = _identity(teacher_payload.get("action_identity")) if isinstance(teacher_payload, Mapping) else None
-        teacher_source = teachers[index].get("source_metadata", teachers[index].get("structural_metadata", {}))
-        if not isinstance(teacher_source, Mapping):
-            teacher_source = {}
-        teacher_for_link = dict(teachers[index])
-        teacher_for_link.update(teacher_source)
-        linkage_valid, linkage_problems = _linkage_ok(item, teacher_for_link, trainers[index], index, record_index)
-        trainer_source_metadata = trainers[index].get("source_metadata", {})
+        teacher_source = teachers[index].get("source_metadata")
+        teacher_metadata = teachers[index].get("structural_metadata")
+        if teacher_source is not None and not isinstance(teacher_source, Mapping):
+            row_problems.append(f"row {index}: teacher source_metadata is not an object")
+        if not isinstance(teacher_metadata, Mapping):
+            row_problems.append(f"row {index}: teacher structural_metadata is not an object")
+        linkage_valid, linkage_problems = _linkage_ok(item, teachers[index], trainers[index], index, record_index)
+        trainer_source_metadata = trainers[index].get("source_metadata")
         if not isinstance(trainer_source_metadata, Mapping):
             row_problems.append(f"row {index}: trainer source_metadata is not an object")
-            trainer_source_metadata = {}
-        trainer_action = _identity(trainers[index].get("policy_target_action_identity"))
-        trainer_action = _identity(trainers[index].get("policy_target_action_identity"))
         comparison = "unavailable" if behavior.get("status") != "available" or teacher_action is None else "same" if behavior["identity"] == teacher_action else "different"
         outcome = source.get("battle_outcome")
         outcome_status = "available" if outcome in ("PLAYER_VICTORY", "PLAYER_DEFEAT") else "unavailable"
