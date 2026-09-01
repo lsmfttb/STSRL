@@ -226,7 +226,7 @@ def _load_selected_envelope(path: Path, expected: int, index_field: str) -> tupl
                 metadata = dict(item.get("metadata", {}))
             elif item.get("type") == "record":
                 raw = item["record"]
-                keep = {"row_index", "example_index", "source_checkpoint_id", "source_run_id", "source_seed", "source_battle_index", "source_pool_record_index", "teacher_action", "policy_target_action_identity", "policy_target_kind", "policy_target_source", "source_metadata", "controller_provenance", "raw_reward_components", "structured_battle_outcome", "behavior_action", "behavior_action_status"}
+                keep = {"row_index", "example_index", "source_checkpoint_id", "source_run_id", "source_seed", "source_battle_index", "source_pool_record_index", "teacher_action", "policy_target_action_identity", "policy_target_kind", "policy_target_source", "source_metadata", "structural_metadata", "controller_provenance", "raw_reward_components", "structured_battle_outcome", "behavior_action", "behavior_action_status"}
                 row = {key: raw[key] for key in keep if key in raw}
                 index = row.get(index_field)
                 if not isinstance(index, int) or not 0 <= index < expected:
