@@ -341,6 +341,7 @@ def test_actual_trainer_linkage_uses_complete_identity_hash_not_pool_index():
     }
     selected = {
         "complete_identity": identity,
+        "component": "assist_0",
         "act": 1,
         "room_type": "monster",
         "encounter_id": "jaw_worm",
