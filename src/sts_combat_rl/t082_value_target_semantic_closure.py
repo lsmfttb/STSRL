@@ -297,7 +297,7 @@ def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460) -
             document = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
         except (OSError, json.JSONDecodeError) as exc:
             document = {"parse_error": str(exc)}
-        input_checks.append({"name": name, "path": str(path), "expected_sha256": expected_hash, "sha256": actual, "schema": document.get("schema_id"), "expected_schema": schema, "valid": actual == expected_hash and document.get("schema_id") == schema})
+        input_checks.append({"name": name, "path": str(path), "expected_sha256": expected_hash, "sha256": actual, "schema": document.get("schema_id") if isinstance(document, Mapping) else None, "expected_schema": schema, "valid": actual == expected_hash and isinstance(document, Mapping) and document.get("schema_id") == schema})
     decision_path = manifest_path.parent / "t064-transfer-decision.json"
     try:
         decision = json.loads(decision_path.read_text(encoding="utf-8"))
@@ -307,6 +307,8 @@ def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460) -
     selected = manifest.get("selected_sources", []) if isinstance(manifest, Mapping) else []
     if len(selected) != expected_rows or any(not isinstance(item, Mapping) or not isinstance(item.get("complete_identity"), Mapping) or item.get("complete_identity", {}).get("schema_id") != "t064-complete-source-identity-v1" or not isinstance(item.get("complete_identity_sha256"), str) for item in selected):
         return incomplete(f"selected inventory does not contain exactly {expected_rows} valid rows")
+    if any(not isinstance(item.get("component"), str) or not isinstance(item.get("source_record_index"), int) or isinstance(item.get("source_record_index"), bool) or not isinstance(item.get("source_path"), str) or not item["source_path"] for item in selected):
+        return incomplete("selected inventory has missing or malformed component/index/source_path")
     selected_hashes = [item["complete_identity_sha256"] for item in selected]
     selected_indexes = [(item.get("component"), item.get("source_record_index")) for item in selected]
     if len(set(selected_hashes)) != len(selected_hashes) or len(set(selected_indexes)) != len(selected_indexes):
@@ -374,7 +376,8 @@ def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460) -
         path_ok = isinstance(selected_source_path, str) and selected_source_path == expected_path
         shape_ok = isinstance(source_meta, Mapping) and all(source_meta.get(key) == item.get(key) for key in ("act", "room_type", "encounter_id", "assistance_level"))
         behavior = recover_behavior(source, successor) if source else {"status": "unavailable", "reason": "source record missing"}
-        teacher_action = _identity(teachers[index].get("teacher_action", {}).get("action_identity"))
+        teacher_payload = teachers[index].get("teacher_action")
+        teacher_action = _identity(teacher_payload.get("action_identity")) if isinstance(teacher_payload, Mapping) else None
         teacher_source = teachers[index].get("source_metadata", teachers[index].get("structural_metadata", {}))
         teacher_for_link = dict(teachers[index])
         teacher_for_link.update(teacher_source)
@@ -387,7 +390,9 @@ def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460) -
         outcome = source.get("battle_outcome")
         outcome_status = "available" if outcome in ("PLAYER_VICTORY", "PLAYER_DEFEAT") else "unavailable"
         rows.append({"index": index, "selected_identity": item["complete_identity"], "selected_identity_sha256": item.get("complete_identity_sha256"), "derived_identity_sha256": derived_sha, "identity_valid": identity_ok, "identity_error": source_error, "component": component, "source_record_index": record_index, "source_checkpoint_id": source.get("source_checkpoint_id"), "source_run_id": source.get("source_run_id"), "source_seed": source.get("source_seed"), "source_battle_index": source.get("source_battle_index"), "act": item.get("act"), "room_type": item.get("room_type"), "trace_length": len(source.get("action_trace", ())), "successor": {"record_index": successor.get("record_index"), "trace_length": len(successor.get("action_trace", ())), "battle_index": successor.get("source_battle_index")} if successor else None, "behavior": behavior, "teacher_action": teacher_action, "trainer_policy_action": trainer_action, "comparison": comparison, "outcome": outcome_status, "source_battle_outcome": outcome if isinstance(outcome, str) else None, "trainer_value_lineage": trainers[index].get("raw_reward_components", {}).get("battle_outcome"), "source_controller": source.get("source_battle_controller_provenance"), "teacher_controller": teachers[index].get("controller_provenance"), "policy_target_source": trainers[index].get("policy_target_source"), "value_target_source": "trainer_input_record.raw_reward_components.battle_outcome"})
-        trainer_outcome = trainers[index].get("structured_battle_outcome", {}).get("battle_survived", {})
+        raw_rewards = trainers[index].get("raw_reward_components")
+        structured_outcome = trainers[index].get("structured_battle_outcome")
+        trainer_outcome = structured_outcome.get("battle_survived", {}) if isinstance(structured_outcome, Mapping) else {}
         try:
             successor_identity = _record_identity(successor, component)[0] if successor else None
         except (ValueError, KeyError, TypeError, AttributeError) as exc:
@@ -412,7 +417,7 @@ def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460) -
             "trainer_battle_survived": {"status": "available" if isinstance(trainer_outcome, Mapping) and "value" in trainer_outcome else "unavailable", "value": trainer_outcome.get("value") if isinstance(trainer_outcome, Mapping) else None},
             "outcome_consistency": "unavailable" if not isinstance(trainer_outcome, Mapping) or "value" not in trainer_outcome or outcome not in ("PLAYER_VICTORY", "PLAYER_DEFEAT") else "consistent" if ((outcome == "PLAYER_VICTORY") == bool(trainer_outcome["value"])) else "mismatch",
             "value_target_source": "trainer_input_record.structured_battle_outcome.battle_survived",
-            "raw_reward_components_battle_outcome": trainers[index].get("raw_reward_components", {}).get("battle_outcome"),
+            "raw_reward_components_battle_outcome": raw_rewards.get("battle_outcome") if isinstance(raw_rewards, Mapping) else None,
         })
         rows[-1].pop("trainer_value_lineage", None)
         if not path_ok: row_problems.append(f"row {index}: selected source_path does not match pool path")
@@ -437,6 +442,10 @@ def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460) -
     strata = {name: {str(key): value for key, value in Counter(((_controller_key(row[field]) if field == "source_battle_controller_provenance" else row[field]), row["comparison"]) for row in rows).items()} for name, field in (("act", "act"), ("room_type", "room_type"), ("component", "component"), ("source_battle_controller_provenance", "source_battle_controller_provenance"))}
     report = {"schema_version": SCHEMA, "qualification_mode": "formal_460" if expected_rows == 460 else "compact_non_qualifying", "execution": {"mode": "offline_streaming", "worker_count": 1, "reason": "non-simulator aggregation/single stream"}, "regeneration": {"command": f"python -m sts_combat_rl.t082_value_target_semantic_closure --manifest {manifest_path} --output {output}"}, "inputs": {"manifest": str(manifest_path), "manifest_sha256": sha256(manifest_path), "control_artifacts": input_checks, "pool_checks": pool_checks, "terminal_case_valid": terminal_valid, "teacher": {"path": str(teacher_path), "sha256": sha256(teacher_path)}, "trainer": {"path": str(trainer_path), "sha256": sha256(trainer_path)}, "source_components": {component: {"path": str(manifest["input_artifacts"][component]["path"]), "sha256": manifest["input_artifacts"][component].get("sha256")} for component in sorted(by_component)}}, "coverage": {"observed": {str(key): value for key, value in sorted(coverage.items())}, "expected_acts": {"1": 256, "2": 204}, "expected_components": {"assist_0": 256, "assist_hp50": 12, "assist_hp50_potion_elite_boss": 32, "assist_hp75_potion": 160}, "valid": coverage_valid}, "integrity": {"valid": all_integrity and not row_problems, "selected_teacher_trainer_counts": len(rows) == 460, "source_identity_valid": all(row["identity_valid"] for row in rows), "problems": row_problems + ([] if all_integrity else ["one or more identity, coverage, control-artifact, or terminal predicates failed"])}, "counts": {"total_rows": len(rows), "behavior_recoverable": sum(row["behavior"]["status"] == "available" for row in rows), "behavior_unavailable": sum(row["behavior"]["status"] != "available" for row in rows), "comparison_denominator": sum(row["comparison"] != "unavailable" for row in rows), "comparisons": dict(Counter(row["comparison"] for row in rows)), "divergence_rate": len(divergent) / max(1, sum(row["comparison"] != "unavailable" for row in rows)), "outcomes": dict(source_outcomes), "divergent_outcomes": dict(divergent_outcomes), "divergent_with_available_outcome": sum(row["source_battle_outcome"] in ("PLAYER_VICTORY", "PLAYER_DEFEAT") for row in divergent)}, "strata": strata, "classification": classify(integrity_valid=all_integrity and not row_problems, rows=rows, proof=proof), "semantic_proof": proof, "rows": rows}
     report["regeneration"]["command"] = f"PYTHONPATH=src python scripts/run_t082_value_target_semantic_closure.py --manifest {manifest_path} --output {output}"
+    report["inputs"]["manifest"] = {"path": str(manifest_path), "sha256": sha256(manifest_path), "valid": True}
+    report["inputs"]["terminal"] = {"observed": decision, "valid": terminal_valid}
+    report["inputs"]["teacher"]["metadata"] = teacher_meta
+    report["inputs"]["trainer"]["metadata"] = trainer_meta
     report["counts"]["trainer_value_labels"] = dict(trainer_outcomes)
     report["counts"]["divergent_trainer_value_labels"] = dict(divergent_trainer_outcomes)
     rendered = json.dumps(report, indent=2, sort_keys=True) + "\n"
