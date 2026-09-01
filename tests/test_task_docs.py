@@ -68,3 +68,12 @@ def test_legacy_task_is_explicitly_exempt():
         assert check_published_task_doc(synthetic) == []
     finally:
         synthetic.unlink()
+
+
+def test_new_unmarked_learning_artifact_doc_fails_closed():
+    synthetic = ROOT / "tests" / "T082-unmarked-learning-source.md"
+    synthetic.write_text("# T082\nConsumes a learning-source artifact.\n", encoding="utf-8")
+    try:
+        assert check_published_task_doc(synthetic) == ["missing Artifact Eligibility Required marker"]
+    finally:
+        synthetic.unlink()

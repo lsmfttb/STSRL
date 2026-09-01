@@ -139,4 +139,7 @@ def test_historical_identity_is_required_and_mismatch_fails_closed():
     assert not missing["eligible"] and not missing_diagnostic["eligible"]
     wrong_sha = evaluate_eligibility(q, EligibilityRequirements("historical_reproduction", "original", (), "/retained/checkpoint-runs1000.pt", "checkpoint", "wrong"))
     wrong_kind = evaluate_eligibility(q, EligibilityRequirements("historical_reproduction", "original", (), "/retained/checkpoint-runs1000.pt", "dataset", q.integrity["sha256"]))
+    wrong_diag_sha = evaluate_eligibility(q, EligibilityRequirements("diagnostic_mechanism", "original", (), "/retained/checkpoint-runs1000.pt", "checkpoint", "wrong"))
+    wrong_diag_kind = evaluate_eligibility(q, EligibilityRequirements("diagnostic_mechanism", "original", (), "/retained/checkpoint-runs1000.pt", "dataset", q.integrity["sha256"]))
     assert not wrong_sha["eligible"] and not wrong_kind["eligible"]
+    assert not wrong_diag_sha["eligible"] and not wrong_diag_kind["eligible"]
