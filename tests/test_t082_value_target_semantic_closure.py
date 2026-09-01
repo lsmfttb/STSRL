@@ -53,7 +53,7 @@ def test_duplicate_actions_use_occurrence_identity():
 
 
 def test_compact_production_audit_fixture_valid_mutation_and_determinism(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch, boundary=False
 ):
     root = tmp_path
     pool = root / "pool.jsonl"
@@ -85,6 +85,8 @@ def test_compact_production_audit_fixture_valid_mutation_and_determinism(
         "action_trace": [action(1), action(2)],
         "battle_outcome": "PLAYER_VICTORY",
     }
+    if boundary:
+        successor = successor | {"source_run_id": "next-run"}
     identity, identity_sha = _record_identity(current, "assist_0")
     pool_lines = [
         {
@@ -435,3 +437,19 @@ def test_audit_t064_malformed_manifest_writes_complete_incomplete_report(
     assert report["inputs"]["teacher"]["observed"] is None
     assert len(report["inputs"]["pool_checks"]) == 4
     assert output.read_bytes() == output.read_bytes()
+
+
+def test_audit_t064_run_boundary_is_not_an_integrity_failure(tmp_path: Path):
+    class Monkeypatch:
+        def setattr(self, obj, name, value):
+            setattr(obj, name, value)
+
+    test_compact_production_audit_fixture_valid_mutation_and_determinism(
+        tmp_path, Monkeypatch(), boundary=True
+    )
+    report = json.loads((tmp_path / "report1.json").read_text())
+    row = report["rows"][0]
+    assert row["successor_exists"] is False
+    assert row["physical_successor_candidate"] is True
+    assert row["successor_reason"] == "run boundary/no exact successor"
+    assert report["integrity"]["valid"] is True

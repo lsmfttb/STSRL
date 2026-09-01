@@ -1151,7 +1151,10 @@ def audit_t064(
         f"row {row['index']}: {row['successor_reason']}"
         for row in rows
         if row.get("successor_reason")
-        and not row["successor_reason"].startswith("final/")
+        and not (
+            row["successor_reason"].startswith("final/")
+            or row["successor_reason"] == "run boundary/no exact successor"
+        )
     )
     row_problems.extend(
         f"row {row['index']}: outcome lineage mismatch"
