@@ -15,7 +15,7 @@ Artifact Eligibility Required: true
   source/behavior continuation policy. Any conclusion is limited to the
   audited T043/T064 target-construction contract and does not retroactively
   rewrite T070 numerical results.
-- Required identity predicates: every consumed artifact must match its exact
+- Required predicates: every consumed artifact must match its exact
   schema/provenance and SHA-256 identity. Filename/path text is never evidence.
 - Required scale predicate: the accepted T064 selected-source, teacher, and
   trainer inventories must each contain exactly 460 rows in the frozen order.
