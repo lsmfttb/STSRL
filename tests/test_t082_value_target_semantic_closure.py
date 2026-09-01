@@ -123,3 +123,14 @@ def test_malformed_source_reader_is_explicit_not_silent(tmp_path: Path):
     source.write_text('{"type":"record","record":[]\n')
     errors = list(audit_module._safe_source_rows(source))
     assert errors and "malformed" in errors[0]["_audit_source_error"]
+
+
+def test_audit_t064_malformed_manifest_writes_complete_incomplete_report(tmp_path: Path):
+    manifest = tmp_path / "manifest.json"
+    output = tmp_path / "report.json"
+    manifest.write_text(json.dumps({"selected_sources": [{"component": []}]}))
+    report = audit_module.audit_t064(manifest, output, expected_rows=1)
+    assert report["classification"] == "INCOMPLETE"
+    assert report["inputs"]["teacher"]["observed"] is None
+    assert len(report["inputs"]["pool_checks"]) == 4
+    assert output.read_bytes() == output.read_bytes()
