@@ -115,7 +115,9 @@ def _load_selected_envelope(path: Path, expected: int, index_field: str) -> list
                 raw = item["record"]
                 keep = {"row_index", "example_index", "teacher_action", "policy_target_action_identity", "policy_target_kind", "policy_target_source", "source_metadata", "controller_provenance", "raw_reward_components", "structured_battle_outcome", "behavior_action", "behavior_action_status"}
                 row = {key: raw[key] for key in keep if key in raw}
-                index = row.get(index_field, number - 2)
+                index = row.get(index_field)
+                if not isinstance(index, int) or not 0 <= index < expected:
+                    raise ValueError(f"missing or invalid {index_field}: row {number}")
                 if isinstance(index, int) and 0 <= index < expected:
                     if index in rows: raise ValueError(f"duplicate {index_field}: {index}")
                     rows[index] = row
