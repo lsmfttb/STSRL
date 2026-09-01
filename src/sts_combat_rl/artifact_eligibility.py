@@ -121,7 +121,9 @@ def evaluate_eligibility(
             if override is None or not override.available:
                 requested = requested + (Predicate("override_kind", "equals", "none"),)
             elif override.value != "none":
-                requested = requested + (Predicate("override_kind", "not_equals", override.value),)
+                requested = requested + (
+                    Predicate("override_kind", "not_equals", override.value),
+                )
     for predicate in requested:
         fact = qualification.facts.get(predicate.fact)
         if fact is None or not fact.available:
@@ -129,7 +131,9 @@ def evaluate_eligibility(
         else:
             observed = fact.value
             result = _check(observed, predicate.operator, predicate.required)
-            reason = "satisfied" if result else "observed fact does not satisfy requirement"
+            reason = (
+                "satisfied" if result else "observed fact does not satisfy requirement"
+            )
         predicates.append(
             {
                 "fact": predicate.fact,

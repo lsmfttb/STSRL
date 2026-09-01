@@ -14,7 +14,9 @@ from sts_combat_rl.artifact_eligibility import (
 def qualification(path="/retained/checkpoint-runs1000.pt", trainer_count=4):
     return ArtifactQualification(
         artifact={"id": path, "kind": "checkpoint"},
-        integrity={"sha256": "ab68439df429f603816f30064484cc99f33611a196ba456103397fc7ef8ed5f3"},
+        integrity={
+            "sha256": "ab68439df429f603816f30064484cc99f33611a196ba456103397fc7ef8ed5f3"
+        },
         facts={
             "trainer_record_count": Fact(trainer_count),
             "override_kind": Fact("smoke"),
@@ -51,7 +53,8 @@ def test_unknown_required_fact_fails_closed():
 
 def test_empty_quality_requirements_fail_closed():
     result = evaluate_eligibility(
-        qualification(), EligibilityRequirements("scientific_quality_claim", "model quality", ())
+        qualification(),
+        EligibilityRequirements("scientific_quality_claim", "model quality", ()),
     )
     assert result["eligible"] is False
 
@@ -68,7 +71,9 @@ def test_unavailable_override_fact_fails_quality_claim_closed():
         ),
     )
     assert result["eligible"] is False
-    assert any(p["fact"] == "override_kind" and not p["result"] for p in result["predicates"])
+    assert any(
+        p["fact"] == "override_kind" and not p["result"] for p in result["predicates"]
+    )
 
 
 @pytest.mark.parametrize(
@@ -85,7 +90,10 @@ def test_reuse_modes_and_claim_boundaries_are_preserved(mode, boundary):
         q = qualification()
         q.facts["override_kind"] = Fact("none")
     result = evaluate_eligibility(
-        q, EligibilityRequirements(mode, boundary, (Predicate("training_gate", required="passed"),))
+        q,
+        EligibilityRequirements(
+            mode, boundary, (Predicate("training_gate", required="passed"),)
+        ),
     )
     assert result["eligible"] is True
     assert result["reuse_mode"] == mode
@@ -101,9 +109,13 @@ def test_report_is_deterministic():
             Predicate("trainer_record_count", "min", 4),
         ),
     )
-    assert evaluate_eligibility(qualification(), req) == evaluate_eligibility(qualification(), req)
+    assert evaluate_eligibility(qualification(), req) == evaluate_eligibility(
+        qualification(), req
+    )
 
 
 def test_malformed_mode_fails_clearly():
     with pytest.raises(ValueError, match="unknown reuse mode"):
-        evaluate_eligibility(qualification(), EligibilityRequirements("other", "none", ()))
+        evaluate_eligibility(
+            qualification(), EligibilityRequirements("other", "none", ())
+        )
