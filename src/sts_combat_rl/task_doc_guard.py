@@ -17,7 +17,13 @@ def artifact_contract_errors(text: str) -> list[str]:
     if CONTRACT not in text:
         return ["missing Artifact Eligibility Contract section"]
     section = text.split(CONTRACT, 1)[1].split("\n## ", 1)[0].lower()
-    required = ("inputs", "reuse mode", "claim boundary", "required predicates", "unavailable")
+    required = (
+        "inputs",
+        "reuse mode",
+        "claim boundary",
+        "required predicates",
+        "unavailable",
+    )
     return [f"contract missing {item}" for item in required if item not in section]
 
 

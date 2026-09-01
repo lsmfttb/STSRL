@@ -10,7 +10,11 @@ from sts_combat_rl.artifact_eligibility import (
     evaluate_eligibility,
 )
 
-IDENTITY = ("/retained/checkpoint-runs1000.pt", "checkpoint", "ab68439df429f603816f30064484cc99f33611a196ba456103397fc7ef8ed5f3")
+IDENTITY = (
+    "/retained/checkpoint-runs1000.pt",
+    "checkpoint",
+    "ab68439df429f603816f30064484cc99f33611a196ba456103397fc7ef8ed5f3",
+)
 
 
 def qualification(path="/retained/checkpoint-runs1000.pt", trainer_count=4):
@@ -39,7 +43,10 @@ def test_exact_facts_and_misleading_filename_do_not_upgrade_scale():
     )
     report = evaluate_eligibility(q, req)
     assert report["eligible"] is False
-    assert any(p["fact"] == "trainer_record_count" and p["observed"] == 4 for p in report["predicates"])
+    assert any(
+        p["fact"] == "trainer_record_count" and p["observed"] == 4
+        for p in report["predicates"]
+    )
     json.dumps(report, sort_keys=True)
 
 
@@ -52,13 +59,19 @@ def test_unknown_required_fact_fails_closed():
     )
     result = evaluate_eligibility(q, req)
     assert result["eligible"] is False
-    assert any(p["fact"] == "teacher_record_count" and p["observed"] == {"status": "unavailable"} for p in result["predicates"])
+    assert any(
+        p["fact"] == "teacher_record_count"
+        and p["observed"] == {"status": "unavailable"}
+        for p in result["predicates"]
+    )
 
 
 def test_empty_quality_requirements_fail_closed():
     result = evaluate_eligibility(
         qualification(),
-        EligibilityRequirements("scientific_quality_claim", "model quality", (), *IDENTITY),
+        EligibilityRequirements(
+            "scientific_quality_claim", "model quality", (), *IDENTITY
+        ),
     )
     assert result["eligible"] is False
 
@@ -71,7 +84,10 @@ def test_unavailable_override_fact_fails_quality_claim_closed():
         EligibilityRequirements(
             "scientific_quality_claim",
             "model quality",
-            (Predicate("trainer_record_count", "min", 1), Predicate("coverage.acts", "contains", 1)),
+            (
+                Predicate("trainer_record_count", "min", 1),
+                Predicate("coverage.acts", "contains", 1),
+            ),
             *IDENTITY,
         ),
     )
@@ -95,7 +111,10 @@ def test_reuse_modes_and_claim_boundaries_are_preserved(mode, boundary):
         q = qualification()
         q.facts["override_kind"] = Fact("none")
         if mode == "scientific_quality_claim":
-            predicates = (Predicate("trainer_record_count", "min", 1), Predicate("coverage.acts", "contains", 1))
+            predicates = (
+                Predicate("trainer_record_count", "min", 1),
+                Predicate("coverage.acts", "contains", 1),
+            )
         else:
             predicates = (Predicate("training_gate", required="passed"),)
     else:
@@ -133,14 +152,58 @@ def test_malformed_mode_fails_clearly():
 
 def test_historical_identity_is_required_and_mismatch_fails_closed():
     q = qualification()
-    missing = evaluate_eligibility(q, EligibilityRequirements("historical_reproduction", "original", ()))
+    missing = evaluate_eligibility(
+        q, EligibilityRequirements("historical_reproduction", "original", ())
+    )
 
-    missing_diagnostic = evaluate_eligibility(q, EligibilityRequirements("diagnostic_mechanism", "original", ()))
+    missing_diagnostic = evaluate_eligibility(
+        q, EligibilityRequirements("diagnostic_mechanism", "original", ())
+    )
     assert not missing["eligible"] and not missing_diagnostic["eligible"]
-    wrong_sha = evaluate_eligibility(q, EligibilityRequirements("historical_reproduction", "original", (), "/retained/checkpoint-runs1000.pt", "checkpoint", "wrong"))
-    wrong_kind = evaluate_eligibility(q, EligibilityRequirements("historical_reproduction", "original", (), "/retained/checkpoint-runs1000.pt", "dataset", q.integrity["sha256"]))
-    wrong_diag_sha = evaluate_eligibility(q, EligibilityRequirements("diagnostic_mechanism", "original", (), "/retained/checkpoint-runs1000.pt", "checkpoint", "wrong"))
-    wrong_diag_kind = evaluate_eligibility(q, EligibilityRequirements("diagnostic_mechanism", "original", (), "/retained/checkpoint-runs1000.pt", "dataset", q.integrity["sha256"]))
+    wrong_sha = evaluate_eligibility(
+        q,
+        EligibilityRequirements(
+            "historical_reproduction",
+            "original",
+            (),
+            "/retained/checkpoint-runs1000.pt",
+            "checkpoint",
+            "wrong",
+        ),
+    )
+    wrong_kind = evaluate_eligibility(
+        q,
+        EligibilityRequirements(
+            "historical_reproduction",
+            "original",
+            (),
+            "/retained/checkpoint-runs1000.pt",
+            "dataset",
+            q.integrity["sha256"],
+        ),
+    )
+    wrong_diag_sha = evaluate_eligibility(
+        q,
+        EligibilityRequirements(
+            "diagnostic_mechanism",
+            "original",
+            (),
+            "/retained/checkpoint-runs1000.pt",
+            "checkpoint",
+            "wrong",
+        ),
+    )
+    wrong_diag_kind = evaluate_eligibility(
+        q,
+        EligibilityRequirements(
+            "diagnostic_mechanism",
+            "original",
+            (),
+            "/retained/checkpoint-runs1000.pt",
+            "dataset",
+            q.integrity["sha256"],
+        ),
+    )
     assert not wrong_sha["eligible"] and not wrong_kind["eligible"]
     assert not wrong_diag_sha["eligible"] and not wrong_diag_kind["eligible"]
 
@@ -150,11 +213,25 @@ def test_mandatory_checks_cannot_be_spoofed_by_fact_names():
     q.facts["__artifact_identity_requirements"] = Fact(True)
     q.facts["__explicit_scale_predicate_required"] = Fact(True)
     q.facts["__explicit_coverage_predicate_required"] = Fact(True)
-    result = evaluate_eligibility(q, EligibilityRequirements("scientific_quality_claim", "quality", (), *IDENTITY))
+    result = evaluate_eligibility(
+        q, EligibilityRequirements("scientific_quality_claim", "quality", (), *IDENTITY)
+    )
     assert not result["eligible"]
 
 
 def test_quality_override_safety_cannot_be_permissed_by_consumer_predicate():
     q = qualification()
-    result = evaluate_eligibility(q, EligibilityRequirements("scientific_quality_claim", "quality", (Predicate("trainer_record_count", "min", 1), Predicate("coverage.acts", "contains", 1), Predicate("override_kind", "equals", "smoke")), *IDENTITY))
+    result = evaluate_eligibility(
+        q,
+        EligibilityRequirements(
+            "scientific_quality_claim",
+            "quality",
+            (
+                Predicate("trainer_record_count", "min", 1),
+                Predicate("coverage.acts", "contains", 1),
+                Predicate("override_kind", "equals", "smoke"),
+            ),
+            *IDENTITY,
+        ),
+    )
     assert not result["eligible"]

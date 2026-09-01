@@ -116,30 +116,86 @@ def evaluate_eligibility(
         raise ValueError(f"unknown reuse mode: {requirements.reuse_mode}")
     predicates = []
     requested = requirements.predicates
-    if requirements.artifact_id is None or requirements.artifact_kind is None or requirements.sha256 is None:
-        predicates.append({"fact": "artifact_identity_requirements", "observed": UNKNOWN, "required": "complete", "result": False, "reason": "required artifact identity omitted"})
-    identity = (("artifact.id", qualification.artifact.get("id"), requirements.artifact_id),
-                ("artifact.kind", qualification.artifact.get("kind"), requirements.artifact_kind),
-                ("integrity.sha256", qualification.integrity.get("sha256"), requirements.sha256))
+    if (
+        requirements.artifact_id is None
+        or requirements.artifact_kind is None
+        or requirements.sha256 is None
+    ):
+        predicates.append(
+            {
+                "fact": "artifact_identity_requirements",
+                "observed": UNKNOWN,
+                "required": "complete",
+                "result": False,
+                "reason": "required artifact identity omitted",
+            }
+        )
+    identity = (
+        ("artifact.id", qualification.artifact.get("id"), requirements.artifact_id),
+        (
+            "artifact.kind",
+            qualification.artifact.get("kind"),
+            requirements.artifact_kind,
+        ),
+        (
+            "integrity.sha256",
+            qualification.integrity.get("sha256"),
+            requirements.sha256,
+        ),
+    )
     for fact_name, observed, required in identity:
         if required is not None:
-            predicates.append({"fact": fact_name, "observed": _json(observed) if observed is not None else UNKNOWN,
-                               "required": required, "result": observed == required,
-                               "reason": "satisfied" if observed == required else "missing or mismatched artifact identity"})
+            predicates.append(
+                {
+                    "fact": fact_name,
+                    "observed": _json(observed) if observed is not None else UNKNOWN,
+                    "required": required,
+                    "result": observed == required,
+                    "reason": "satisfied"
+                    if observed == required
+                    else "missing or mismatched artifact identity",
+                }
+            )
     if requirements.reuse_mode == "scientific_quality_claim":
         scale = any("count" in p.fact or "scale" in p.fact for p in requested)
-        coverage = any("coverage" in p.fact or p.fact.startswith("source.") for p in requested)
+        coverage = any(
+            "coverage" in p.fact or p.fact.startswith("source.") for p in requested
+        )
         if not scale:
-            predicates.append({"fact": "explicit_scale_predicate", "observed": UNKNOWN, "required": "consumer-provided", "result": False, "reason": "required scale predicate omitted"})
+            predicates.append(
+                {
+                    "fact": "explicit_scale_predicate",
+                    "observed": UNKNOWN,
+                    "required": "consumer-provided",
+                    "result": False,
+                    "reason": "required scale predicate omitted",
+                }
+            )
         if not coverage:
-            predicates.append({"fact": "explicit_coverage_predicate", "observed": UNKNOWN, "required": "consumer-provided", "result": False, "reason": "required coverage predicate omitted"})
+            predicates.append(
+                {
+                    "fact": "explicit_coverage_predicate",
+                    "observed": UNKNOWN,
+                    "required": "consumer-provided",
+                    "result": False,
+                    "reason": "required coverage predicate omitted",
+                }
+            )
         # Override status is itself a required quality fact unless the
         # consumer explicitly supplies a predicate for it.
         override = qualification.facts.get("override_kind")
         if override is None or not override.available:
             requested = requested + (Predicate("override_kind", "equals", "none"),)
         elif override.value != "none":
-            predicates.append({"fact": "override_kind", "observed": override.value, "required": "none", "result": False, "reason": "quality claims disallow smoke/debug/named overrides"})
+            predicates.append(
+                {
+                    "fact": "override_kind",
+                    "observed": override.value,
+                    "required": "none",
+                    "result": False,
+                    "reason": "quality claims disallow smoke/debug/named overrides",
+                }
+            )
     for predicate in requested:
         fact = qualification.facts.get(predicate.fact)
         if fact is None or not fact.available:
