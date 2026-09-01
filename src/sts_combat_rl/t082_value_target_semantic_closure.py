@@ -150,7 +150,7 @@ def _source_rows(path: Path) -> Iterable[dict[str, Any]]:
 def _safe_source_rows(path: Path) -> Iterable[dict[str, Any]]:
     try:
         yield from _source_rows(path)
-    except (OSError, ValueError, json.JSONDecodeError) as exc:
+    except (OSError, ValueError, TypeError, AttributeError, json.JSONDecodeError) as exc:
         yield {"_audit_source_error": str(exc)}
 
 def _validate_pool(path: Path, expected: Mapping[str, Any], component: str) -> dict[str, Any]:
@@ -266,6 +266,8 @@ def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460) -
     def incomplete(problem: str) -> dict[str, Any]:
         report = {"schema_version": SCHEMA, "qualification_mode": "formal_460" if expected_rows == 460 else "compact_non_qualifying", "execution": {"mode": "offline_streaming", "worker_count": 1, "reason": "non-simulator aggregation/single stream"}, "regeneration": {"command": f"PYTHONPATH=src python scripts/run_t082_value_target_semantic_closure.py --manifest {manifest_path} --output {output}"}, "inputs": {"manifest": {"path": str(manifest_path), "valid": False, "reason": problem}, "control_artifacts": input_checks, "pool_checks": [{"valid": False, "reason": "unavailable before pool read"}], "teacher": {"path": str(manifest_path.parent / "teacher/merged.jsonl"), "valid": False, "reason": "unavailable before teacher read"}, "trainer": {"path": str(manifest_path.parent / "trainer/trainer-input.jsonl"), "valid": False, "reason": "unavailable before trainer read"}, "terminal_case_valid": False}, "integrity": {"valid": False, "problems": [problem]}, "rows": []}
         report["regeneration"]["command"] = f"PYTHONPATH=src python scripts/run_t082_value_target_semantic_closure.py --manifest {manifest_path} --output {output}"
+        report["inputs"]["pool_checks"] = [{"component": c, "observed": None, "valid": False, "reason": "unavailable before pool read"} for c in ("assist_0", "assist_hp50", "assist_hp50_potion_elite_boss", "assist_hp75_potion")]
+        report["inputs"]["terminal"] = {"observed": None, "valid": False, "reason": "unavailable before decision read"}
         output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         return report
     try:

@@ -116,3 +116,10 @@ def test_successor_reason_categories_and_deterministic_pool_fixture(tmp_path: Pa
     expected = {"record_count": 1, "bytes": pool.stat().st_size, "sha256": sha256(pool)}
     assert _validate_pool(pool, expected, "assist_0")["valid"]
     assert _validate_pool(pool, expected, "assist_0")["metadata"]["schema_id"] == "assisted-run-source-pool-v1"
+
+
+def test_malformed_source_reader_is_explicit_not_silent(tmp_path: Path):
+    source = tmp_path / "bad.jsonl"
+    source.write_text('{"type":"record","record":[]\n')
+    errors = list(audit_module._safe_source_rows(source))
+    assert errors and "malformed" in errors[0]["_audit_source_error"]
