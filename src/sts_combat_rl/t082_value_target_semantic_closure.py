@@ -19,6 +19,8 @@ EXPECTED_INPUTS = {
     "../t042-assisted-source-scale-pr39/runs1000_s20_workers16/scale-manifest.json": ("25efae30dc9a61c8b97cb09e1844b93b9ffe693bde51c0f494f0f65203a1d327", "assisted-source-scale-manifest-v1"),
 }
 CLASSIFICATIONS = {"VALUE_TARGET_SEMANTIC_MISMATCH_CONFIRMED", "VALUE_TARGET_SEMANTICS_ALIGNED", "VALUE_TARGET_SEMANTICS_UNRESOLVED", "INCOMPLETE"}
+EXPECTED_TEACHER_SHA = "1352eb301509f258ae92509b804125d59d2da17ef5f7f6e5b81131f11e1d0d72"
+EXPECTED_TRAINER_SHA = "aae847505ece7c4d535d08cffc9e24bc2aaead334234332f41c69f0b2c99bada"
 
 def sha256(path: Path) -> str:
     digest = hashlib.sha256()
@@ -121,7 +123,7 @@ def _load_envelope(path: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         raise ValueError(f"missing metadata envelope: {path}")
     return metadata, rows
 
-def _load_selected_envelope(path: Path, expected: int, index_field: str) -> list[dict[str, Any]]:
+def _load_selected_envelope(path: Path, expected: int, index_field: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     metadata: dict[str, Any] | None = None
     rows: dict[int, dict[str, Any]] = {}
     with path.open(encoding="utf-8") as stream:
@@ -143,7 +145,9 @@ def _load_selected_envelope(path: Path, expected: int, index_field: str) -> list
                 raise ValueError(f"invalid envelope row {number}")
     if metadata is None or len(rows) != expected:
         raise ValueError(f"{path} does not contain exactly {expected} indexed rows")
-    return [rows[index] for index in range(expected)]
+    if metadata.get("record_count") != expected:
+        raise ValueError(f"{path} metadata record_count is not {expected}")
+    return metadata, [rows[index] for index in range(expected)]
 
 def audit_t064(manifest_path: Path, output: Path) -> dict[str, Any]:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -160,8 +164,12 @@ def audit_t064(manifest_path: Path, output: Path) -> dict[str, Any]:
         raise ValueError("T064 selected inventory must contain exactly 460 rows")
     root = manifest_path.parent
     teacher_path, trainer_path = root / "teacher/merged.jsonl", root / "trainer/trainer-input.jsonl"
-    teachers = _load_selected_envelope(teacher_path, 460, "row_index")
-    trainers = _load_selected_envelope(trainer_path, 460, "example_index")
+    teacher_meta, teachers = _load_selected_envelope(teacher_path, 460, "row_index")
+    trainer_meta, trainers = _load_selected_envelope(trainer_path, 460, "example_index")
+    input_checks.extend([
+        {"name": "teacher", "sha256": sha256(teacher_path), "expected_sha256": EXPECTED_TEACHER_SHA, "schema": teacher_meta.get("artifact_schema_id"), "record_count": teacher_meta.get("record_count"), "valid": sha256(teacher_path) == EXPECTED_TEACHER_SHA and teacher_meta.get("artifact_schema_id") == "oracle-search-teacher-v1" and teacher_meta.get("record_count") == 460},
+        {"name": "trainer", "sha256": sha256(trainer_path), "expected_sha256": EXPECTED_TRAINER_SHA, "schema": trainer_meta.get("format_version"), "record_count": trainer_meta.get("record_count"), "valid": sha256(trainer_path) == EXPECTED_TRAINER_SHA and trainer_meta.get("record_count") == 460},
+    ])
     if len(teachers) != 460 or len(trainers) != 460:
         raise ValueError("T064 teacher/trainer inventories must each contain 460 rows")
     by_component: defaultdict[str, set[int]] = defaultdict(set)
