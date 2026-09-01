@@ -45,9 +45,11 @@ def test_compact_production_audit_fixture_valid_mutation_and_determinism(tmp_pat
     _envelope(trainer, [{"example_index": 0, "policy_target_kind": "oracle_soft_visit_distribution", "policy_target_source": "oracle_teacher_row.soft_visit_target", "source_metadata": source | {"t064_complete_identity_sha256": identity_sha, **meta}, "structured_battle_outcome": {"battle_survived": {"status": "available", "value": True}}}], format_version=6, policy_target_schema_id="trainer-policy-target-v1", policy_target_schema_version=1, structured_battle_outcome_schema_id="structured-battle-outcome-v1", structured_battle_outcome_schema_version=1)
     manifest = root / "manifest.json"; manifest.write_text(json.dumps({"selected_sources": [{"component": "assist_0", "source_record_index": 0, "source_path": str(pool), **meta, "complete_identity": identity, "complete_identity_sha256": identity_sha}], "input_artifacts": {"assist_0": {"path": str(pool), "record_count": 2, "bytes": pool.stat().st_size, "sha256": sha256(pool)}}}, sort_keys=True))
     (root / "t064-transfer-decision.json").write_text(json.dumps({"experiment_complete": True, "source_adequacy": True, "source_integrity_valid": True, "terminal_case": "Case B"}))
-    monkeypatch.setattr(audit_module, "EXPECTED_INPUTS", {})
+    control = root / "control.json"; control.write_text(json.dumps({"schema_id": "synthetic-control-v1", "value": "frozen"}, sort_keys=True) + "\n")
+    expected_inputs = {"control.json": (sha256(control), "synthetic-control-v1")}
     out1 = root / "report1.json"; out2 = root / "report2.json"
-    first = audit_module.audit_t064(manifest, out1, expected_rows=1); second = audit_module.audit_t064(manifest, out2, expected_rows=1)
+    first = audit_module.audit_t064(manifest, out1, expected_rows=1, expected_inputs=expected_inputs); second = audit_module.audit_t064(manifest, out2, expected_rows=1, expected_inputs=expected_inputs)
+    assert all(decision["valid"] for decision in first["inputs"]["control_artifacts"])
     assert first["integrity"]["valid"] and first["counts"]["total_rows"] == 1
     assert first["rows"][0]["linkage_valid"] and first["rows"][0]["behavior"]["status"] == "available"
     assert out1.read_bytes() == out2.read_bytes()

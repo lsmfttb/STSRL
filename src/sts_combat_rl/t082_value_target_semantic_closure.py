@@ -134,17 +134,24 @@ def _source_rows(path: Path) -> Iterable[dict[str, Any]]:
             try:
                 item = json.loads(line)
             except json.JSONDecodeError:
-                return
+                raise ValueError(f"malformed source JSON at {path}:{number}")
             if item.get("type") == "metadata":
                 continue
             row = item.get("record", item)
             if not isinstance(row, Mapping):
-                raise ValueError(f"invalid source row {number}")
+                raise ValueError(f"malformed non-object source row {number}")
             index = row.get("record_index")
             if not isinstance(index, int) or index <= previous_index:
                 raise ValueError(f"malformed or duplicate source record_index in {path}")
             previous_index = index
             yield {key: row[key] for key in keep if key in row}
+
+
+def _safe_source_rows(path: Path) -> Iterable[dict[str, Any]]:
+    try:
+        yield from _source_rows(path)
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        yield {"_audit_source_error": str(exc)}
 
 def _validate_pool(path: Path, expected: Mapping[str, Any], component: str) -> dict[str, Any]:
     digest = hashlib.sha256(); size = 0; count = 0; previous = -1; duplicate = False; schema = None; metadata = {}
@@ -294,12 +301,16 @@ def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460, e
                 pool_checks.append({"path": str(pool), "component": component, "valid": False, "reason": f"malformed artifact: {exc}"})
     coverage = Counter((item.get("act"), item.get("component")) for item in selected)
     found: dict[tuple[str, int], tuple[dict[str, Any], dict[str, Any] | None]] = {}
+    source_reader_errors: list[str] = []
     for component, indexes in by_component.items():
         previous = None
         pool = Path(manifest["input_artifacts"][component]["path"].replace("D:\\", "/mnt/d/").replace("\\", "/"))
         if not pool.exists():
             continue
-        for record in _source_rows(pool):
+        for record in _safe_source_rows(pool):
+            if "_audit_source_error" in record:
+                source_reader_errors.append(f"{component}: {record['_audit_source_error']}")
+                continue
             record_index = record.get("record_index")
             if record_index in indexes:
                 found[(component, record_index)] = (record, None)
@@ -355,6 +366,7 @@ def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460, e
     coverage_valid = (expected_rows != 460) or (observed_acts == Counter({1: 256, 2: 204}) and observed_components == Counter({"assist_0": 256, "assist_hp50": 12, "assist_hp50_potion_elite_boss": 32, "assist_hp75_potion": 160}))
     all_integrity = all_integrity and coverage_valid
     divergent = [row for row in rows if row["comparison"] == "different"]
+    row_problems.extend(source_reader_errors)
     row_problems.extend(f"row {row['index']}: {row['successor_reason']}" for row in rows if row.get("successor_reason") and not row["successor_reason"].startswith("final/"))
     row_problems.extend(f"row {row['index']}: outcome lineage mismatch" for row in rows if row.get("source_battle_outcome") not in ("unavailable", None) and row.get("trainer_battle_survived", {}).get("status") == "available" and ((row["source_battle_outcome"] == "PLAYER_VICTORY") != bool(row["trainer_battle_survived"].get("value"))))
     proof = semantic_proof()
