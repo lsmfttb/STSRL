@@ -143,3 +143,18 @@ def test_historical_identity_is_required_and_mismatch_fails_closed():
     wrong_diag_kind = evaluate_eligibility(q, EligibilityRequirements("diagnostic_mechanism", "original", (), "/retained/checkpoint-runs1000.pt", "dataset", q.integrity["sha256"]))
     assert not wrong_sha["eligible"] and not wrong_kind["eligible"]
     assert not wrong_diag_sha["eligible"] and not wrong_diag_kind["eligible"]
+
+
+def test_mandatory_checks_cannot_be_spoofed_by_fact_names():
+    q = qualification()
+    q.facts["__artifact_identity_requirements"] = Fact(True)
+    q.facts["__explicit_scale_predicate_required"] = Fact(True)
+    q.facts["__explicit_coverage_predicate_required"] = Fact(True)
+    result = evaluate_eligibility(q, EligibilityRequirements("scientific_quality_claim", "quality", (), *IDENTITY))
+    assert not result["eligible"]
+
+
+def test_quality_override_safety_cannot_be_permissed_by_consumer_predicate():
+    q = qualification()
+    result = evaluate_eligibility(q, EligibilityRequirements("scientific_quality_claim", "quality", (Predicate("trainer_record_count", "min", 1), Predicate("coverage.acts", "contains", 1), Predicate("override_kind", "equals", "smoke")), *IDENTITY))
+    assert not result["eligible"]

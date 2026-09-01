@@ -208,28 +208,28 @@
               "result": true
             },
             {
-              "fact": "__explicit_scale_predicate_required",
+              "fact": "explicit_scale_predicate",
               "observed": {
                 "status": "unavailable"
               },
-              "reason": "required fact unavailable",
-              "required": true,
+              "reason": "required scale predicate omitted",
+              "required": "consumer-provided",
               "result": false
             },
             {
-              "fact": "__explicit_coverage_predicate_required",
+              "fact": "explicit_coverage_predicate",
               "observed": {
                 "status": "unavailable"
               },
-              "reason": "required fact unavailable",
-              "required": true,
+              "reason": "required coverage predicate omitted",
+              "required": "consumer-provided",
               "result": false
             },
             {
               "fact": "override_kind",
               "observed": "smoke",
-              "reason": "observed fact does not satisfy requirement",
-              "required": "smoke",
+              "reason": "quality claims disallow smoke/debug/named overrides",
+              "required": "none",
               "result": false
             }
           ],
@@ -481,28 +481,28 @@
               "result": true
             },
             {
-              "fact": "__explicit_scale_predicate_required",
+              "fact": "explicit_scale_predicate",
               "observed": {
                 "status": "unavailable"
               },
-              "reason": "required fact unavailable",
-              "required": true,
+              "reason": "required scale predicate omitted",
+              "required": "consumer-provided",
               "result": false
             },
             {
-              "fact": "__explicit_coverage_predicate_required",
+              "fact": "explicit_coverage_predicate",
               "observed": {
                 "status": "unavailable"
               },
-              "reason": "required fact unavailable",
-              "required": true,
+              "reason": "required coverage predicate omitted",
+              "required": "consumer-provided",
               "result": false
             },
             {
               "fact": "override_kind",
               "observed": "smoke",
-              "reason": "observed fact does not satisfy requirement",
-              "required": "smoke",
+              "reason": "quality claims disallow smoke/debug/named overrides",
+              "required": "none",
               "result": false
             }
           ],
@@ -754,28 +754,28 @@
               "result": true
             },
             {
-              "fact": "__explicit_scale_predicate_required",
+              "fact": "explicit_scale_predicate",
               "observed": {
                 "status": "unavailable"
               },
-              "reason": "required fact unavailable",
-              "required": true,
+              "reason": "required scale predicate omitted",
+              "required": "consumer-provided",
               "result": false
             },
             {
-              "fact": "__explicit_coverage_predicate_required",
+              "fact": "explicit_coverage_predicate",
               "observed": {
                 "status": "unavailable"
               },
-              "reason": "required fact unavailable",
-              "required": true,
+              "reason": "required coverage predicate omitted",
+              "required": "consumer-provided",
               "result": false
             },
             {
               "fact": "override_kind",
               "observed": "smoke",
-              "reason": "observed fact does not satisfy requirement",
-              "required": "smoke",
+              "reason": "quality claims disallow smoke/debug/named overrides",
+              "required": "none",
               "result": false
             }
           ],
@@ -1027,28 +1027,28 @@
               "result": true
             },
             {
-              "fact": "__explicit_scale_predicate_required",
+              "fact": "explicit_scale_predicate",
               "observed": {
                 "status": "unavailable"
               },
-              "reason": "required fact unavailable",
-              "required": true,
+              "reason": "required scale predicate omitted",
+              "required": "consumer-provided",
               "result": false
             },
             {
-              "fact": "__explicit_coverage_predicate_required",
+              "fact": "explicit_coverage_predicate",
               "observed": {
                 "status": "unavailable"
               },
-              "reason": "required fact unavailable",
-              "required": true,
+              "reason": "required coverage predicate omitted",
+              "required": "consumer-provided",
               "result": false
             },
             {
               "fact": "override_kind",
               "observed": "smoke",
-              "reason": "observed fact does not satisfy requirement",
-              "required": "smoke",
+              "reason": "quality claims disallow smoke/debug/named overrides",
+              "required": "none",
               "result": false
             }
           ],
@@ -1300,28 +1300,28 @@
               "result": true
             },
             {
-              "fact": "__explicit_scale_predicate_required",
+              "fact": "explicit_scale_predicate",
               "observed": {
                 "status": "unavailable"
               },
-              "reason": "required fact unavailable",
-              "required": true,
+              "reason": "required scale predicate omitted",
+              "required": "consumer-provided",
               "result": false
             },
             {
-              "fact": "__explicit_coverage_predicate_required",
+              "fact": "explicit_coverage_predicate",
               "observed": {
                 "status": "unavailable"
               },
-              "reason": "required fact unavailable",
-              "required": true,
+              "reason": "required coverage predicate omitted",
+              "required": "consumer-provided",
               "result": false
             },
             {
               "fact": "override_kind",
               "observed": "smoke",
-              "reason": "observed fact does not satisfy requirement",
-              "required": "smoke",
+              "reason": "quality claims disallow smoke/debug/named overrides",
+              "required": "none",
               "result": false
             }
           ],
@@ -1573,28 +1573,28 @@
               "result": true
             },
             {
-              "fact": "__explicit_scale_predicate_required",
+              "fact": "explicit_scale_predicate",
               "observed": {
                 "status": "unavailable"
               },
-              "reason": "required fact unavailable",
-              "required": true,
+              "reason": "required scale predicate omitted",
+              "required": "consumer-provided",
               "result": false
             },
             {
-              "fact": "__explicit_coverage_predicate_required",
+              "fact": "explicit_coverage_predicate",
               "observed": {
                 "status": "unavailable"
               },
-              "reason": "required fact unavailable",
-              "required": true,
+              "reason": "required coverage predicate omitted",
+              "required": "consumer-provided",
               "result": false
             },
             {
               "fact": "override_kind",
               "observed": "smoke",
-              "reason": "observed fact does not satisfy requirement",
-              "required": "smoke",
+              "reason": "quality claims disallow smoke/debug/named overrides",
+              "required": "none",
               "result": false
             }
           ],
@@ -1846,28 +1846,28 @@
               "result": true
             },
             {
-              "fact": "__explicit_scale_predicate_required",
+              "fact": "explicit_scale_predicate",
               "observed": {
                 "status": "unavailable"
               },
-              "reason": "required fact unavailable",
-              "required": true,
+              "reason": "required scale predicate omitted",
+              "required": "consumer-provided",
               "result": false
             },
             {
-              "fact": "__explicit_coverage_predicate_required",
+              "fact": "explicit_coverage_predicate",
               "observed": {
                 "status": "unavailable"
               },
-              "reason": "required fact unavailable",
-              "required": true,
+              "reason": "required coverage predicate omitted",
+              "required": "consumer-provided",
               "result": false
             },
             {
               "fact": "override_kind",
               "observed": "smoke",
-              "reason": "observed fact does not satisfy requirement",
-              "required": "smoke",
+              "reason": "quality claims disallow smoke/debug/named overrides",
+              "required": "none",
               "result": false
             }
           ],
@@ -2119,28 +2119,28 @@
               "result": true
             },
             {
-              "fact": "__explicit_scale_predicate_required",
+              "fact": "explicit_scale_predicate",
               "observed": {
                 "status": "unavailable"
               },
-              "reason": "required fact unavailable",
-              "required": true,
+              "reason": "required scale predicate omitted",
+              "required": "consumer-provided",
               "result": false
             },
             {
-              "fact": "__explicit_coverage_predicate_required",
+              "fact": "explicit_coverage_predicate",
               "observed": {
                 "status": "unavailable"
               },
-              "reason": "required fact unavailable",
-              "required": true,
+              "reason": "required coverage predicate omitted",
+              "required": "consumer-provided",
               "result": false
             },
             {
               "fact": "override_kind",
               "observed": "smoke",
-              "reason": "observed fact does not satisfy requirement",
-              "required": "smoke",
+              "reason": "quality claims disallow smoke/debug/named overrides",
+              "required": "none",
               "result": false
             }
           ],
@@ -2392,28 +2392,28 @@
               "result": true
             },
             {
-              "fact": "__explicit_scale_predicate_required",
+              "fact": "explicit_scale_predicate",
               "observed": {
                 "status": "unavailable"
               },
-              "reason": "required fact unavailable",
-              "required": true,
+              "reason": "required scale predicate omitted",
+              "required": "consumer-provided",
               "result": false
             },
             {
-              "fact": "__explicit_coverage_predicate_required",
+              "fact": "explicit_coverage_predicate",
               "observed": {
                 "status": "unavailable"
               },
-              "reason": "required fact unavailable",
-              "required": true,
+              "reason": "required coverage predicate omitted",
+              "required": "consumer-provided",
               "result": false
             },
             {
               "fact": "override_kind",
               "observed": "smoke",
-              "reason": "observed fact does not satisfy requirement",
-              "required": "smoke",
+              "reason": "quality claims disallow smoke/debug/named overrides",
+              "required": "none",
               "result": false
             }
           ],
