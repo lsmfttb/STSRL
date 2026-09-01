@@ -79,7 +79,7 @@ def test_actual_trainer_linkage_uses_complete_identity_hash_not_pool_index():
     identity = {"source_checkpoint_id": "ckpt", "source_run_id": "run", "source_seed": 3, "source_battle_index": 7, "complete_identity_sha256": "identity"}
     selected = {"complete_identity": identity, "act": 1, "room_type": "monster", "encounter_id": "jaw_worm", "assistance_level": "assist_0"}
     teacher = {"row_index": 0, "source_checkpoint_id": "ckpt", "source_run_id": "run", "source_seed": 3, "source_battle_index": 7, "source_pool_record_index": 11, "structural_metadata": {"act": 1, "room_type": "monster", "encounter_id": "jaw_worm", "assistance_level": "assist_0"}}
-    trainer = {"example_index": 0, "policy_target_kind": "oracle_soft_visit_distribution", "policy_target_source": "oracle_teacher_row.soft_visit_target", "source_metadata": identity | {"act": 1, "room_type": "monster", "encounter_id": "jaw_worm", "assistance_level": "assist_0"}}
+    trainer = {"example_index": 0, "policy_target_kind": "oracle_soft_visit_distribution", "policy_target_source": "oracle_teacher_row.soft_visit_target", "source_metadata": identity | {"t064_complete_identity_sha256": "identity", "act": 1, "room_type": "monster", "encounter_id": "jaw_worm", "assistance_level": "assist_0"}}
     assert _linkage_ok(selected, teacher, trainer, 0, 11)[0]
     trainer["source_metadata"] = trainer["source_metadata"] | {"t064_complete_identity_sha256": "wrong"}
     assert not _linkage_ok(selected, teacher, trainer, 0, 11)[0]
