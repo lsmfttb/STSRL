@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 """Fail-closed offline audit for the frozen T043 value-target lineage."""
+# RuntimeError is part of this script's fail-closed public diagnostic contract.
+# ruff: noqa: TRY004
+
 from __future__ import annotations
 
 import argparse
-from collections import Counter, defaultdict
 import hashlib
 import json
+from collections import Counter, defaultdict
+from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import Any, Callable, Mapping
+from typing import Any
 
 CHECKPOINT_SHA = "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"
 REPORT_SCHEMA = "t080-value-target-semantics-audit-v1"
@@ -78,7 +82,9 @@ def _path_matches(recorded: str, actual: Path) -> bool:
     normalized = recorded_path.as_posix().lstrip("./")
     actual_parts = actual.resolve().parts
     recorded_parts = tuple(part for part in normalized.split("/") if part)
-    return bool(recorded_parts) and actual_parts[-len(recorded_parts) :] == recorded_parts
+    return (
+        bool(recorded_parts) and actual_parts[-len(recorded_parts) :] == recorded_parts
+    )
 
 
 def load_checkpoint(path: Path) -> tuple[Mapping[str, Any], Mapping[str, Any]]:
@@ -92,7 +98,9 @@ def load_checkpoint(path: Path) -> tuple[Mapping[str, Any], Mapping[str, Any]]:
         raise RuntimeError("T080 fail closed: checkpoint is not a mapping")
     provenance = raw.get("training_data_provenance")
     if not isinstance(provenance, Mapping):
-        raise RuntimeError("T080 fail closed: checkpoint training_data_provenance missing")
+        raise RuntimeError(
+            "T080 fail closed: checkpoint training_data_provenance missing"
+        )
     return provenance, raw
 
 
@@ -104,7 +112,10 @@ def _stable(value: Any, where: str) -> dict[str, Any]:
     fields = ("action_id", "occurrence", "kind", "label", "stable_id")
     if any(value.get(field) is None for field in fields):
         raise RuntimeError(f"T080 fail closed: incomplete {where} identity")
-    return {"status": "available", "identity": {field: value[field] for field in fields}}
+    return {
+        "status": "available",
+        "identity": {field: value[field] for field in fields},
+    }
 
 
 def _load_trainer(path: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
@@ -115,19 +126,31 @@ def _load_trainer(path: Path) -> tuple[dict[str, Any], list[dict[str, Any]]]:
             try:
                 item = json.loads(line)
             except json.JSONDecodeError as exc:
-                raise RuntimeError(f"T080 fail closed: invalid trainer JSON line {line_number}") from exc
+                raise RuntimeError(
+                    f"T080 fail closed: invalid trainer JSON line {line_number}"
+                ) from exc
             if not isinstance(item, Mapping):
-                raise RuntimeError(f"T080 fail closed: invalid trainer line {line_number}")
-            if item.get("type") == "metadata" and isinstance(item.get("metadata"), Mapping):
+                raise RuntimeError(
+                    f"T080 fail closed: invalid trainer line {line_number}"
+                )
+            if item.get("type") == "metadata" and isinstance(
+                item.get("metadata"), Mapping
+            ):
                 if metadata is not None:
                     raise RuntimeError("T080 fail closed: duplicate metadata wrapper")
                 metadata = dict(item["metadata"])
-            elif item.get("type") == "record" and isinstance(item.get("record"), Mapping):
+            elif item.get("type") == "record" and isinstance(
+                item.get("record"), Mapping
+            ):
                 rows.append(dict(item["record"]))
             else:
-                raise RuntimeError(f"T080 fail closed: invalid trainer line {line_number}")
+                raise RuntimeError(
+                    f"T080 fail closed: invalid trainer line {line_number}"
+                )
     if metadata is None or len(rows) != 4 or metadata.get("record_count") != 4:
-        raise RuntimeError("T080 fail closed: trainer must be metadata plus exactly 4 records")
+        raise RuntimeError(
+            "T080 fail closed: trainer must be metadata plus exactly 4 records"
+        )
     return metadata, rows
 
 
@@ -140,14 +163,21 @@ def _validate_provenance(
     rows: list[dict[str, Any]],
     raw_checkpoint: Mapping[str, Any],
 ) -> dict[str, str]:
-    recorded_path = _required(_provenance_value(provenance, "trainer_input_path"), "trainer_input_path")
+    recorded_path = _required(
+        _provenance_value(provenance, "trainer_input_path"), "trainer_input_path"
+    )
     if not _path_matches(str(recorded_path), trainer):
         raise RuntimeError("T080 fail closed: checkpoint trainer path mismatch")
     if _provenance_value(provenance, "trainer_input_sha256") != trainer_sha:
         raise RuntimeError("T080 fail closed: checkpoint trainer SHA-256 mismatch")
-    if _provenance_value(provenance, "trainer_input_byte_count", "trainer_input_bytes") != trainer_bytes:
+    if (
+        _provenance_value(provenance, "trainer_input_byte_count", "trainer_input_bytes")
+        != trainer_bytes
+    ):
         raise RuntimeError("T080 fail closed: checkpoint trainer bytes mismatch")
-    format_version = _provenance_value(provenance, "trainer_input_format_version", "format_version")
+    format_version = _provenance_value(
+        provenance, "trainer_input_format_version", "format_version"
+    )
     if format_version is None:
         raise RuntimeError("T080 fail closed: checkpoint trainer format missing")
     if metadata.get("format_version") != format_version:
@@ -161,7 +191,9 @@ def _validate_provenance(
     if not isinstance(summary, Mapping):
         raise RuntimeError("T080 fail closed: target_source_summary missing")
     policy_kind = _required(summary.get("policy_target_kind"), "policy target kind")
-    policy_source = _required(summary.get("policy_target_source"), "policy target source")
+    policy_source = _required(
+        summary.get("policy_target_source"), "policy target source"
+    )
     outcome_kind = _required(summary.get("outcome_target_kind"), "outcome target kind")
     outcome_source = summary.get("outcome_target_source")
     expected_outcome_source = (
@@ -221,10 +253,12 @@ def classify(
     search_leaf_chain_verified: bool = False,
 ) -> tuple[str, dict[str, Any]]:
     proof = provenance.get("continuation_policy_proof")
-    proof_available = isinstance(proof, Mapping) and proof.get("same_as_search_v2_leaf_continuation") is True
+    proof_available = (
+        isinstance(proof, Mapping)
+        and proof.get("same_as_search_v2_leaf_continuation") is True
+    )
     divergent = sum(
-        item["behavior_action"]["comparison"] == "different"
-        for item in comparisons
+        item["behavior_action"]["comparison"] == "different" for item in comparisons
     )
     behavior_available = sum(
         item["behavior_action"]["status"] == "available" for item in comparisons
@@ -276,7 +310,11 @@ def classify(
     return "VALUE_TARGET_SEMANTICS_UNRESOLVED", evidence
 
 
-def audit(checkpoint: Path, trainer: Path, checkpoint_loader: Callable[[Path], Any] = load_checkpoint) -> dict[str, Any]:
+def audit(
+    checkpoint: Path,
+    trainer: Path,
+    checkpoint_loader: Callable[[Path], Any] = load_checkpoint,
+) -> dict[str, Any]:
     checkpoint = Path(checkpoint).resolve()
     trainer = Path(trainer).resolve()
     checkpoint_sha, checkpoint_bytes = digest(checkpoint)
@@ -301,16 +339,26 @@ def audit(checkpoint: Path, trainer: Path, checkpoint_loader: Callable[[Path], A
         raw_checkpoint,
     )
 
-    target_kinds = Counter(str(row.get("policy_target_kind", "unavailable")) for row in rows)
-    target_sources = Counter(str(row.get("policy_target_source", "unavailable")) for row in rows)
-    behavior_status = Counter(str(row.get("behavior_action_status", "unavailable")) for row in rows)
+    target_kinds = Counter(
+        str(row.get("policy_target_kind", "unavailable")) for row in rows
+    )
+    target_sources = Counter(
+        str(row.get("policy_target_source", "unavailable")) for row in rows
+    )
+    behavior_status = Counter(
+        str(row.get("behavior_action_status", "unavailable")) for row in rows
+    )
     outcome_status = Counter()
     comparisons: list[dict[str, Any]] = []
     strata: dict[str, Counter[str]] = defaultdict(Counter)
     source_ids = Counter()
     for row in rows:
         outcome = row.get("structured_battle_outcome", {}).get("battle_survived", {})
-        if not isinstance(outcome, Mapping) or outcome.get("status") != "available" or not isinstance(outcome.get("value"), bool):
+        if (
+            not isinstance(outcome, Mapping)
+            or outcome.get("status") != "available"
+            or not isinstance(outcome.get("value"), bool)
+        ):
             outcome_view = {"status": "unavailable", "value": None}
             outcome_status["unavailable"] += 1
         else:
@@ -319,26 +367,49 @@ def audit(checkpoint: Path, trainer: Path, checkpoint_loader: Callable[[Path], A
         teacher = _stable(row.get("policy_target_action_identity"), "teacher")
         if row.get("behavior_action_status") == "available":
             behavior_action = row.get("behavior_action")
-            behavior_identity = behavior_action.get("action_identity") if isinstance(behavior_action, Mapping) else None
+            behavior_identity = (
+                behavior_action.get("action_identity")
+                if isinstance(behavior_action, Mapping)
+                else None
+            )
             behavior = _stable(behavior_identity, "behavior")
         else:
-            behavior = {"status": str(row.get("behavior_action_status", "unavailable")), "identity": None}
-        same = teacher["identity"] == behavior["identity"] if teacher["status"] == behavior["status"] == "available" else None
-        comparison = "same" if same is True else "different" if same is False else "unavailable"
+            behavior = {
+                "status": str(row.get("behavior_action_status", "unavailable")),
+                "identity": None,
+            }
+        same = (
+            teacher["identity"] == behavior["identity"]
+            if teacher["status"] == behavior["status"] == "available"
+            else None
+        )
+        comparison = (
+            "same" if same is True else "different" if same is False else "unavailable"
+        )
         source_metadata = row.get("source_metadata", {})
-        source_id = source_metadata.get("source_checkpoint_id") or source_metadata.get("source_run_id")
+        source_id = source_metadata.get("source_checkpoint_id") or source_metadata.get(
+            "source_run_id"
+        )
         if source_id is not None:
             source_ids[str(source_id)] += 1
         item = {
             "example_index": row.get("example_index"),
             "teacher_target_action_identity": teacher,
-            "behavior_action": {"status": behavior["status"], "action_identity": behavior["identity"], "comparison": comparison},
+            "behavior_action": {
+                "status": behavior["status"],
+                "action_identity": behavior["identity"],
+                "comparison": comparison,
+            },
             "outcome": outcome_view,
         }
         comparisons.append(item)
         for key in STRATA:
-            strata[f"{key}={source_metadata.get(key, 'unavailable')}"][f"comparison_{comparison}"] += 1
-            strata[f"{key}={source_metadata.get(key, 'unavailable')}"][f"outcome_{outcome_view['status']}"] += 1
+            strata[f"{key}={source_metadata.get(key, 'unavailable')}"][
+                f"comparison_{comparison}"
+            ] += 1
+            strata[f"{key}={source_metadata.get(key, 'unavailable')}"][
+                f"outcome_{outcome_view['status']}"
+            ] += 1
     classification, criteria = classify(
         provenance=provenance,
         rows=rows,
@@ -372,10 +443,15 @@ def audit(checkpoint: Path, trainer: Path, checkpoint_loader: Callable[[Path], A
             "training_data_provenance": _json_safe(provenance),
         },
         "trainer_input": {
-            "path": str(trainer), "sha256": trainer_sha, "bytes": trainer_bytes,
-            "schema_id": metadata.get("policy_target_schema_id"), "format_version": metadata.get("format_version"),
-            "record_schema_version": metadata.get("decision_record_schema_version"), "record_count": len(rows),
-            "metadata_wrapper_count": 1, "provenance": _json_safe(provenance),
+            "path": str(trainer),
+            "sha256": trainer_sha,
+            "bytes": trainer_bytes,
+            "schema_id": metadata.get("policy_target_schema_id"),
+            "format_version": metadata.get("format_version"),
+            "record_schema_version": metadata.get("decision_record_schema_version"),
+            "record_count": len(rows),
+            "metadata_wrapper_count": 1,
+            "provenance": _json_safe(provenance),
             "source_identity_counts": dict(sorted(source_ids.items())),
         },
         "target_lineage": {
@@ -394,7 +470,9 @@ def audit(checkpoint: Path, trainer: Path, checkpoint_loader: Callable[[Path], A
             "source_outcome_field": "record.structured_battle_outcome.battle_survived",
         },
         "action_comparisons": comparisons,
-        "strata": {key: dict(sorted(value.items())) for key, value in sorted(strata.items())},
+        "strata": {
+            key: dict(sorted(value.items())) for key, value in sorted(strata.items())
+        },
         "static_call_chain": [
             {
                 "path": "src/sts_combat_rl/sim/oracle_teacher_search_guidance.py:_trainer_record_from_teacher_row",
@@ -427,14 +505,27 @@ def audit(checkpoint: Path, trainer: Path, checkpoint_loader: Callable[[Path], A
             "unavailable behavior actions are not inferred",
             "available artifacts do not prove source continuation policy equals Search v2 leaf continuation policy",
         ],
-        "prohibited_actions": ["retraining", "Search/model/feature/simulator changes", "successor publication"],
+        "prohibited_actions": [
+            "retraining",
+            "Search/model/feature/simulator changes",
+            "successor publication",
+        ],
     }
     json.dumps(report, allow_nan=False)
     return report
 
 
 def _canonical(value: Mapping[str, Any]) -> bytes:
-    return (json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False) + "\n").encode()
+    return (
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        )
+        + "\n"
+    ).encode()
 
 
 def _manifest_self_hash(manifest: Mapping[str, Any]) -> str:
@@ -444,7 +535,9 @@ def _manifest_self_hash(manifest: Mapping[str, Any]) -> str:
     return hashlib.sha256(_canonical(clone)).hexdigest()
 
 
-def write_outputs(report: dict[str, Any], output_root: Path, command: str) -> tuple[Path, Path]:
+def write_outputs(
+    report: dict[str, Any], output_root: Path, command: str
+) -> tuple[Path, Path]:
     output_root = Path(output_root).resolve()
     output_root.mkdir(parents=True, exist_ok=True)
     report_path = output_root / f"{REPORT_SCHEMA}.json"
@@ -455,17 +548,47 @@ def write_outputs(report: dict[str, Any], output_root: Path, command: str) -> tu
     )
     report_sha, report_bytes = digest(report_path)
     manifest_path = output_root / f"{MANIFEST_SCHEMA}.json"
-    files = [{"path": str(report_path), "sha256": report_sha, "bytes": report_bytes, "schema_id": REPORT_SCHEMA, "provenance": "audit output", "regeneration": command, "retention": "immutable T080 evidence", "consumer": "T080 review", "deletion_condition": "after successor decision"}]
-    manifest = {"schema_id": MANIFEST_SCHEMA, "format_version": 1, "self_hash_rule": "sha256(canonical JSON with this file entry sha256 blank and its final bytes value retained)", "files": files + [{"path": str(manifest_path), "sha256": "", "bytes": None, "schema_id": MANIFEST_SCHEMA, "provenance": "generated with report", "regeneration": command, "retention": "immutable T080 evidence", "consumer": "T080 review", "deletion_condition": "after successor decision"}]}
+    files = [
+        {
+            "path": str(report_path),
+            "sha256": report_sha,
+            "bytes": report_bytes,
+            "schema_id": REPORT_SCHEMA,
+            "provenance": "audit output",
+            "regeneration": command,
+            "retention": "immutable T080 evidence",
+            "consumer": "T080 review",
+            "deletion_condition": "after successor decision",
+        }
+    ]
+    manifest = {
+        "schema_id": MANIFEST_SCHEMA,
+        "format_version": 1,
+        "self_hash_rule": "sha256(canonical JSON with this file entry sha256 blank and its final bytes value retained)",
+        "files": files
+        + [
+            {
+                "path": str(manifest_path),
+                "sha256": "",
+                "bytes": None,
+                "schema_id": MANIFEST_SCHEMA,
+                "provenance": "generated with report",
+                "regeneration": command,
+                "retention": "immutable T080 evidence",
+                "consumer": "T080 review",
+                "deletion_condition": "after successor decision",
+            }
+        ],
+    }
     # The self entry is a fixed point: its byte count is the final pretty-JSON
     # file size, while its digest is over canonical JSON with only sha256 blank.
     self_entry = manifest["files"][-1]
     self_entry["bytes"] = 0
     self_entry["sha256"] = "0" * 64
     for _ in range(20):
-        rendered = json.dumps(
-            manifest, indent=2, sort_keys=True, allow_nan=False
-        ) + "\n"
+        rendered = (
+            json.dumps(manifest, indent=2, sort_keys=True, allow_nan=False) + "\n"
+        )
         actual_bytes = len(rendered.encode("utf-8"))
         actual_hash = _manifest_self_hash(manifest)
         if self_entry["bytes"] == actual_bytes and self_entry["sha256"] == actual_hash:
@@ -474,16 +597,15 @@ def write_outputs(report: dict[str, Any], output_root: Path, command: str) -> tu
         self_entry["sha256"] = actual_hash
     else:
         raise RuntimeError("T080 manifest self identity did not converge")
-    rendered = json.dumps(
-        manifest, indent=2, sort_keys=True, allow_nan=False
-    ) + "\n"
+    rendered = json.dumps(manifest, indent=2, sort_keys=True, allow_nan=False) + "\n"
     manifest_path.write_text(rendered, encoding="utf-8", newline="\n")
     written = json.loads(manifest_path.read_text(encoding="utf-8"))
     if written["files"][-1]["bytes"] != manifest_path.stat().st_size:
         raise RuntimeError("T080 manifest self byte count mismatch")
     if written["files"][-1]["sha256"] != _manifest_self_hash(written):
         raise RuntimeError("T080 manifest self hash mismatch")
-    json.loads(report_path.read_text(encoding="utf-8")); json.loads(manifest_path.read_text(encoding="utf-8"))
+    json.loads(report_path.read_text(encoding="utf-8"))
+    json.loads(manifest_path.read_text(encoding="utf-8"))
     return report_path, manifest_path
 
 
@@ -494,8 +616,19 @@ def main() -> None:
     parser.add_argument("--output-root", type=Path, required=True)
     args = parser.parse_args()
     report = audit(args.checkpoint, args.trainer)
-    report_path, manifest_path = write_outputs(report, args.output_root, " ".join(__import__("sys").argv))
-    print(json.dumps({"classification": report["classification"], "report": str(report_path), "manifest": str(manifest_path)}, sort_keys=True))
+    report_path, manifest_path = write_outputs(
+        report, args.output_root, " ".join(__import__("sys").argv)
+    )
+    print(
+        json.dumps(
+            {
+                "classification": report["classification"],
+                "report": str(report_path),
+                "manifest": str(manifest_path),
+            },
+            sort_keys=True,
+        )
+    )
 
 
 if __name__ == "__main__":
