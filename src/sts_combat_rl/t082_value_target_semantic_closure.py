@@ -444,22 +444,6 @@ def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460) -
     output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return report
 
-def _join_successors(path: Path, selected: set[tuple[Any, ...]]) -> dict[tuple[Any, ...], dict[str, Any]]:
-    found: dict[tuple[Any, ...], dict[str, Any]] = {}
-    previous: dict[tuple[Any, ...], dict[str, Any]] = {}
-    for row in _source_rows(path):
-        key = (row.get("source_pool_sha256"), row.get("source_run_id"), row.get("source_seed"))
-        prior = previous.get(key)
-        if prior is not None and (prior.get("source_battle_index", -1) + 1 == row.get("source_battle_index")):
-            try:
-                identity = _record_identity(prior, path.stem)[1]
-            except (ValueError, KeyError):
-                identity = None
-            if identity in selected:
-                found[identity] = row
-        previous[key] = row
-    return found
-
 def classify(*, integrity_valid: bool, rows: list[dict[str, Any]], proof: Mapping[str, Any]) -> str:
     if not integrity_valid:
         return "INCOMPLETE"
@@ -480,38 +464,3 @@ def classify(*, integrity_valid: bool, rows: list[dict[str, Any]], proof: Mappin
     if semantic and aligned and not divergent:
         return "VALUE_TARGET_SEMANTICS_ALIGNED"
     return "VALUE_TARGET_SEMANTICS_UNRESOLVED"
-
-def audit(selected: list[Mapping[str, Any]], teacher: list[Mapping[str, Any]], trainer: list[Mapping[str, Any]], source_path: Path, *, expected_rows: int = 460) -> dict[str, Any]:
-    problems: list[str] = []
-    integrity = len(selected) == len(teacher) == len(trainer) == expected_rows
-    if not integrity:
-        problems.append("selected/teacher/trainer row counts are not all 460")
-    selected_keys = [row.get("complete_identity_sha256") or canonical_sha256(row.get("complete_identity", {})) for row in selected]
-    if len(set(selected_keys)) != len(selected_keys):
-        integrity = False; problems.append("selected source identities are duplicated")
-    source_successors = _join_successors(source_path, set(selected_keys))
-    rows: list[dict[str, Any]] = []
-    strata: defaultdict[str, Counter[str]] = defaultdict(Counter)
-    for index, (source, teach, train) in enumerate(zip(selected, teacher, trainer, strict=True)):
-        successor = source_successors.get(selected_keys[index])
-        behavior = recover_behavior(source, successor)
-        teacher_id = _identity(teach.get("teacher_action") or teach.get("policy_target_action_identity"))
-        comparison = "unavailable" if behavior.get("status") != "available" or teacher_id is None else "same" if behavior["identity"] == teacher_id else "different"
-        outcome = train.get("battle_survived", train.get("structured_battle_outcome", {}).get("battle_survived"))
-        outcome_status = "available" if isinstance(outcome, bool) else "unavailable"
-        row = {"index": index, "source_identity": source.get("complete_identity"), "behavior": behavior, "teacher_action": teacher_id, "comparison": comparison, "outcome": outcome_status, "assistance_level": source.get("assistance_level"), "act": source.get("act"), "room_type": source.get("room_type"), "source_battle_controller": source.get("battle_controller_provenance")}
-        rows.append(row)
-        for key in ("act", "room_type", "assistance_level", "source_battle_controller"):
-            strata[f"{key}={row.get(key, 'unavailable')}"][comparison] += 1
-    classification = classify(integrity_valid=integrity, rows=rows, proof=semantic_proof())
-    return {"schema_version": SCHEMA, "classification": classification, "integrity": {"valid": integrity, "problems": problems}, "counts": {"total_rows": len(rows), "behavior_recoverable": sum(row["behavior"]["status"] == "available" for row in rows), "behavior_unavailable": sum(row["behavior"]["status"] != "available" for row in rows), "comparisons": dict(Counter(row["comparison"] for row in rows)), "outcomes": dict(Counter(row["outcome"] for row in rows))}, "strata": {key: dict(sorted(value.items())) for key, value in sorted(strata.items())}, "rows": rows}
-
-def main() -> None:
-    import argparse
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--selected", type=Path, required=True); parser.add_argument("--teacher", type=Path, required=True); parser.add_argument("--trainer", type=Path, required=True); parser.add_argument("--sources", type=Path, required=True); parser.add_argument("--output", type=Path, required=True)
-    def load(path: Path) -> list[dict[str, Any]]: return list(_rows(path))
-    report = audit(load(parser.parse_args().selected), load(parser.parse_args().teacher), load(parser.parse_args().trainer), parser.parse_args().sources)
-    parser.parse_args().output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-
-if __name__ == "__main__": main()
