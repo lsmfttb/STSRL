@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 from sts_combat_rl.t081_historical_audit import build_audit
 from sts_combat_rl.task_doc_guard import artifact_contract_errors, check_published_task_doc
@@ -46,15 +47,27 @@ def test_task_guard_exempts_non_artifact_and_checks_contract_fields():
 
 
 def test_both_t043_fixtures_are_reproduction_diagnostic_only():
-    for artifact_id, sha in (
-        ("t043-assist_0-smoke", "a2317354b24f93ff48f0408ba3fdc92056701ef16e9b3a1b8b17aa1cce2a56e4"),
-        ("t043-main-runs1000-assist_0-s4", "ab68439df429f603816f30064484cc99f33611a196ba456103397fc7ef8ed5f3"),
-    ):
+    fixture_path = Path(__file__).parent / "fixtures" / "t081" / "t043-qualifications.json"
+    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
+    assert len(fixture["fixtures"]) == 2
+    for record in fixture["fixtures"]:
+        artifact_id = record["id"]
+        sha = record["sha256"]
+        assert record["trainer_record_count"] == 4
+        assert record["override_kind"] == "smoke"
         qualification = ArtifactQualification(
-            {"id": artifact_id, "path": "runs1000/checkpoint.pt"},
-            {"trainer_record_count": Fact(4), "override_kind": Fact("smoke")},
+            {"id": artifact_id, "path": record.get("path", "retained/checkpoint.pt")},
+            {
+                "trainer_record_count": Fact(record["trainer_record_count"]),
+                "override_kind": Fact(record["override_kind"]),
+                "source_pool_runs": Fact.unavailable("upstream pool is not trainer provenance"),
+            },
             {"sha256": sha},
         )
+        assert qualification.integrity["sha256"] == sha
+        if "upstream_source_runs" in record:
+            assert record["upstream_source_runs"] == 1000
+            assert not qualification.facts["source_pool_runs"].available
         historical = evaluate_eligibility(
             qualification, EligibilityRequirements("historical_reproduction", "original", ())
         )
