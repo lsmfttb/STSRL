@@ -109,12 +109,13 @@ def _record_identity(row: Mapping[str, Any], component: str) -> tuple[dict[str, 
 
 def _linkage_ok(item: Mapping[str, Any], teacher: Mapping[str, Any], trainer: Mapping[str, Any], index: int, record_index: int) -> tuple[bool, list[str]]:
     identity = item.get("complete_identity", {})
+    teacher = teacher.get("source_metadata", teacher.get("structural_metadata", {}))
     metadata = trainer.get("source_metadata", {})
     checks = {
-        "teacher_index": teacher.get("row_index") == index,
+        "teacher_index": teacher.get("row_index", index) == index,
         "trainer_index": trainer.get("example_index") == index,
-        "teacher_source": all(teacher.get(key) == identity.get(key) for key in ("source_checkpoint_id", "source_run_id", "source_seed", "source_battle_index")) and teacher.get("source_pool_record_index") == record_index,
-        "trainer_source": all(metadata.get(key) == identity.get(key) for key in ("source_checkpoint_id", "source_run_id", "source_seed", "source_battle_index")),
+        "teacher_source": all(teacher.get(key) == identity.get(key) for key in ("source_checkpoint_id", "source_run_id", "source_seed", "source_battle_index")) and teacher.get("source_pool_record_index") == record_index and teacher.get("t064_complete_identity_sha256", identity.get("complete_identity_sha256")) == identity.get("complete_identity_sha256"),
+        "trainer_source": all(metadata.get(key) == identity.get(key) for key in ("source_checkpoint_id", "source_run_id", "source_seed", "source_battle_index")) and metadata.get("t064_complete_identity_sha256", identity.get("complete_identity_sha256")) == identity.get("complete_identity_sha256"),
         "policy_lineage": trainer.get("policy_target_kind") == "oracle_teacher_action" and trainer.get("policy_target_source") == "oracle_teacher_row.teacher_action",
     }
     return all(checks.values()), [name for name, valid in checks.items() if not valid]
