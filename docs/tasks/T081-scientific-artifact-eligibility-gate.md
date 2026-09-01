@@ -2,6 +2,22 @@
 
 Artifact Eligibility Required: true
 
+## Artifact Eligibility Contract
+
+- Inputs: the retained T043 checkpoint identities and provenance facts recorded
+  by this task's historical audit; ignored raw checkpoints are optional
+  inspection inputs and never required by CI.
+- Reuse mode: `historical_reproduction` for exact historical dependency audits
+  and `diagnostic_mechanism` for bounded checkpoint-conditional evidence.
+- Claim boundary: preserve historical numerical results without treating either
+  four-row smoke checkpoint as representative model-quality evidence.
+- Required predicates: exact checkpoint identity and kind/schema integrity;
+  known trainer provenance; diagnostic use requires at least one trainer row;
+  new `scientific_quality_claim` use requires explicit scale/coverage facts and
+  disallows an active smoke/debug override.
+- Unavailable-fact behavior: retain an explicit unavailable fact and fail closed
+  whenever that fact is required; never infer scale from filenames or paths.
+
 ## Objective
 
 Prevent a reproducible but scientifically underqualified artifact from becoming a de facto canonical dependency merely because downstream tasks can verify its SHA, schema, and provenance.
