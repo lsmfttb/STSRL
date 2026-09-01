@@ -48,7 +48,8 @@ def test_compact_production_audit_fixture_valid_mutation_and_determinism(tmp_pat
     control = root / "control.json"; control.write_text(json.dumps({"schema_id": "synthetic-control-v1", "value": "frozen"}, sort_keys=True) + "\n")
     expected_inputs = {"control.json": (sha256(control), "synthetic-control-v1")}
     out1 = root / "report1.json"; out2 = root / "report2.json"
-    first = audit_module.audit_t064(manifest, out1, expected_rows=1, expected_inputs=expected_inputs); second = audit_module.audit_t064(manifest, out2, expected_rows=1, expected_inputs=expected_inputs)
+    monkeypatch.setattr(audit_module, "EXPECTED_INPUTS", expected_inputs)
+    first = audit_module.audit_t064(manifest, out1, expected_rows=1); second = audit_module.audit_t064(manifest, out2, expected_rows=1)
     assert all(decision["valid"] for decision in first["inputs"]["control_artifacts"])
     assert first["integrity"]["valid"] and first["counts"]["total_rows"] == 1
     assert first["rows"][0]["linkage_valid"] and first["rows"][0]["behavior"]["status"] == "available"

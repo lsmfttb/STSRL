@@ -257,17 +257,17 @@ def _load_selected_envelope(path: Path, expected: int, index_field: str) -> tupl
         raise ValueError(f"{path} metadata record_count is not {expected}")
     return metadata, [rows[index] for index in range(expected)]
 
-def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460, expected_inputs: Mapping[str, tuple[str, str]] | None = None) -> dict[str, Any]:
+def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460) -> dict[str, Any]:
     input_checks: list[dict[str, Any]] = []
     def incomplete(problem: str) -> dict[str, Any]:
-        report = {"schema_version": SCHEMA, "classification": "INCOMPLETE", "inputs": {"control_artifacts": input_checks, "pool_checks": []}, "integrity": {"valid": False, "problems": [problem]}, "rows": []}
+        report = {"schema_version": SCHEMA, "qualification_mode": "formal_460" if expected_rows == 460 else "compact_non_qualifying", "execution": {"mode": "offline_streaming", "worker_count": 1, "reason": "non-simulator aggregation/single stream"}, "regeneration": {"command": f"python -m sts_combat_rl.t082_value_target_semantic_closure --manifest {manifest_path} --output {output}"}, "inputs": {"manifest": str(manifest_path), "control_artifacts": input_checks, "pool_checks": [], "teacher": {"path": str(manifest_path.parent / "teacher/merged.jsonl")}, "trainer": {"path": str(manifest_path.parent / "trainer/trainer-input.jsonl")}, "terminal_case_valid": False}, "integrity": {"valid": False, "problems": [problem]}, "rows": []}
         output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         return report
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         return incomplete(f"manifest unavailable: {exc}")
-    for name, (expected_hash, schema) in (EXPECTED_INPUTS if expected_inputs is None else expected_inputs).items():
+    for name, (expected_hash, schema) in EXPECTED_INPUTS.items():
         path = manifest_path.parent / name
         actual = sha256(path) if path.exists() else None
         try:
@@ -281,10 +281,12 @@ def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460, e
     except (OSError, json.JSONDecodeError):
         decision = {}
     terminal_valid = all(decision.get(key) is True for key in ("experiment_complete", "source_adequacy", "source_integrity_valid")) and decision.get("terminal_case") == "Case B"
-    selected = manifest.get("selected_sources", [])
-    if len(selected) != expected_rows or any(item.get("complete_identity", {}).get("schema_id") != "t064-complete-source-identity-v1" for item in selected):
+    selected = manifest.get("selected_sources", []) if isinstance(manifest, Mapping) else []
+    if len(selected) != expected_rows or any(not isinstance(item, Mapping) or not isinstance(item.get("complete_identity"), Mapping) or item.get("complete_identity", {}).get("schema_id") != "t064-complete-source-identity-v1" or not isinstance(item.get("complete_identity_sha256"), str) for item in selected):
         return incomplete(f"selected inventory does not contain exactly {expected_rows} valid rows")
     root = manifest_path.parent
+    if not isinstance(manifest.get("input_artifacts"), Mapping):
+        return incomplete("manifest input_artifacts is missing or not an object")
     teacher_path, trainer_path = root / "teacher/merged.jsonl", root / "trainer/trainer-input.jsonl"
     try:
         teacher_meta, teachers = _load_selected_envelope(teacher_path, expected_rows, "row_index")
@@ -302,6 +304,9 @@ def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460, e
     pool_checks = []
     for component, spec in manifest["input_artifacts"].items():
         if component in by_component:
+            if not isinstance(spec, Mapping) or not isinstance(spec.get("path"), str):
+                pool_checks.append({"component": component, "valid": False, "reason": "malformed input artifact specification"})
+                continue
             pool = Path(spec["path"].replace("D:\\", "/mnt/d/").replace("\\", "/"))
             try:
                 pool_checks.append(_validate_pool(pool, spec, component))
@@ -386,7 +391,9 @@ def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460, e
     source_outcomes = Counter("survived" if row["source_battle_outcome"] == "PLAYER_VICTORY" else "lost" if row["source_battle_outcome"] == "PLAYER_DEFEAT" else "unavailable" for row in rows)
     divergent_outcomes = Counter("survived" if row["source_battle_outcome"] == "PLAYER_VICTORY" else "lost" if row["source_battle_outcome"] == "PLAYER_DEFEAT" else "unavailable" for row in divergent)
     strata = {name: {str(key): value for key, value in Counter(((_controller_key(row[field]) if field == "source_battle_controller_provenance" else row[field]), row["comparison"]) for row in rows).items()} for name, field in (("act", "act"), ("room_type", "room_type"), ("component", "component"), ("source_battle_controller_provenance", "source_battle_controller_provenance"))}
-    report = {"schema_version": SCHEMA, "inputs": {"manifest": str(manifest_path), "manifest_sha256": sha256(manifest_path), "control_artifacts": input_checks, "pool_checks": pool_checks, "terminal_case_valid": terminal_valid, "teacher": {"path": str(teacher_path), "sha256": sha256(teacher_path)}, "trainer": {"path": str(trainer_path), "sha256": sha256(trainer_path)}, "source_components": {component: {"path": str(manifest["input_artifacts"][component]["path"]), "sha256": manifest["input_artifacts"][component].get("sha256")} for component in sorted(by_component)}}, "coverage": {"observed": {str(key): value for key, value in sorted(coverage.items())}, "expected_acts": {"1": 256, "2": 204}, "expected_components": {"assist_0": 256, "assist_hp50": 12, "assist_hp50_potion_elite_boss": 32, "assist_hp75_potion": 160}, "valid": coverage_valid}, "integrity": {"valid": all_integrity and not row_problems, "selected_teacher_trainer_counts": len(rows) == 460, "source_identity_valid": all(row["identity_valid"] for row in rows), "problems": row_problems + ([] if all_integrity else ["one or more identity, coverage, control-artifact, or terminal predicates failed"])}, "counts": {"total_rows": len(rows), "behavior_recoverable": sum(row["behavior"]["status"] == "available" for row in rows), "behavior_unavailable": sum(row["behavior"]["status"] != "available" for row in rows), "comparison_denominator": sum(row["comparison"] != "unavailable" for row in rows), "comparisons": dict(Counter(row["comparison"] for row in rows)), "divergence_rate": len(divergent) / max(1, sum(row["comparison"] != "unavailable" for row in rows)), "outcomes": dict(source_outcomes), "divergent_outcomes": dict(divergent_outcomes), "divergent_with_available_outcome": sum(row["source_battle_outcome"] in ("PLAYER_VICTORY", "PLAYER_DEFEAT") for row in divergent)}, "strata": strata, "classification": classify(integrity_valid=all_integrity and not row_problems, rows=rows, proof=proof), "rows": rows, "semantic_proof": proof}
+    report = {"schema_version": SCHEMA, "qualification_mode": "formal_460" if expected_rows == 460 else "compact_non_qualifying", "execution": {"mode": "offline_streaming", "worker_count": 1, "reason": "non-simulator aggregation/single stream"}, "regeneration": {"command": f"python -m sts_combat_rl.t082_value_target_semantic_closure --manifest {manifest_path} --output {output}"}, "inputs": {"manifest": str(manifest_path), "manifest_sha256": sha256(manifest_path), "control_artifacts": input_checks, "pool_checks": pool_checks, "terminal_case_valid": terminal_valid, "teacher": {"path": str(teacher_path), "sha256": sha256(teacher_path)}, "trainer": {"path": str(trainer_path), "sha256": sha256(trainer_path)}, "source_components": {component: {"path": str(manifest["input_artifacts"][component]["path"]), "sha256": manifest["input_artifacts"][component].get("sha256")} for component in sorted(by_component)}}, "coverage": {"observed": {str(key): value for key, value in sorted(coverage.items())}, "expected_acts": {"1": 256, "2": 204}, "expected_components": {"assist_0": 256, "assist_hp50": 12, "assist_hp50_potion_elite_boss": 32, "assist_hp75_potion": 160}, "valid": coverage_valid}, "integrity": {"valid": all_integrity and not row_problems, "selected_teacher_trainer_counts": len(rows) == 460, "source_identity_valid": all(row["identity_valid"] for row in rows), "problems": row_problems + ([] if all_integrity else ["one or more identity, coverage, control-artifact, or terminal predicates failed"])}, "counts": {"total_rows": len(rows), "behavior_recoverable": sum(row["behavior"]["status"] == "available" for row in rows), "behavior_unavailable": sum(row["behavior"]["status"] != "available" for row in rows), "comparison_denominator": sum(row["comparison"] != "unavailable" for row in rows), "comparisons": dict(Counter(row["comparison"] for row in rows)), "divergence_rate": len(divergent) / max(1, sum(row["comparison"] != "unavailable" for row in rows)), "outcomes": dict(source_outcomes), "divergent_outcomes": dict(divergent_outcomes), "divergent_with_available_outcome": sum(row["source_battle_outcome"] in ("PLAYER_VICTORY", "PLAYER_DEFEAT") for row in divergent)}, "strata": strata, "classification": classify(integrity_valid=all_integrity and not row_problems, rows=rows, proof=proof), "semantic_proof": proof, "rows": rows}
+    rendered = json.dumps(report, indent=2, sort_keys=True) + "\n"
+    report["regeneration"].update({"output_sha256": hashlib.sha256(rendered.encode()).hexdigest(), "output_size": len(rendered.encode())})
     output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return report
 
