@@ -38,7 +38,7 @@ def test_bounded_audit_counts_and_incomplete_classification(tmp_path: Path):
     trainer = [{"battle_survived": True}]
     report = audit(selected, teacher, trainer, source, expected_rows=1)
     assert report["counts"]["behavior_recoverable"] == 1
-    assert classify(integrity_valid=False, rows=[]) == "INCOMPLETE"
+    assert classify(integrity_valid=False, rows=[], proof=proof()) == "INCOMPLETE"
 
 def test_classification_requires_explicit_proof_and_outcome():
     divergent = [{"comparison": "different", "outcome": "available"}]
