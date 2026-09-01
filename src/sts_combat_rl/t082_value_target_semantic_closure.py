@@ -391,17 +391,16 @@ def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460) -
         teacher_for_link = dict(teachers[index])
         teacher_for_link.update(teacher_source)
         linkage_valid, linkage_problems = _linkage_ok(item, teacher_for_link, trainers[index], index, record_index)
-        trainer_meta = trainers[index].get("source_metadata", {})
-        if not isinstance(trainer_meta, Mapping):
+        trainer_source_metadata = trainers[index].get("source_metadata", {})
+        if not isinstance(trainer_source_metadata, Mapping):
             row_problems.append(f"row {index}: trainer source_metadata is not an object")
-            trainer_meta = {}
+            trainer_source_metadata = {}
         trainer_action = _identity(trainers[index].get("policy_target_action_identity"))
         trainer_action = _identity(trainers[index].get("policy_target_action_identity"))
-        same = teacher_action == trainer_action
         comparison = "unavailable" if behavior.get("status") != "available" or teacher_action is None else "same" if behavior["identity"] == teacher_action else "different"
         outcome = source.get("battle_outcome")
         outcome_status = "available" if outcome in ("PLAYER_VICTORY", "PLAYER_DEFEAT") else "unavailable"
-        rows.append({"index": index, "selected_identity": item["complete_identity"], "selected_identity_sha256": item.get("complete_identity_sha256"), "derived_identity_sha256": derived_sha, "identity_valid": identity_ok, "identity_error": source_error, "component": component, "source_record_index": record_index, "source_checkpoint_id": source.get("source_checkpoint_id"), "source_run_id": source.get("source_run_id"), "source_seed": source.get("source_seed"), "source_battle_index": source.get("source_battle_index"), "act": item.get("act"), "room_type": item.get("room_type"), "trace_length": len(source.get("action_trace", ())), "successor": {"record_index": successor.get("record_index"), "trace_length": len(successor.get("action_trace", ())), "battle_index": successor.get("source_battle_index")} if successor else None, "behavior": behavior, "teacher_action": teacher_action, "trainer_policy_action": trainer_action, "comparison": comparison, "outcome": outcome_status, "source_battle_outcome": outcome if isinstance(outcome, str) else None, "trainer_value_lineage": trainers[index].get("raw_reward_components", {}).get("battle_outcome"), "source_controller": source.get("source_battle_controller_provenance"), "teacher_controller": teachers[index].get("controller_provenance"), "policy_target_source": trainers[index].get("policy_target_source"), "value_target_source": "trainer_input_record.raw_reward_components.battle_outcome"})
+        rows.append({"index": index, "selected_identity": item["complete_identity"], "selected_identity_sha256": item.get("complete_identity_sha256"), "derived_identity_sha256": derived_sha, "identity_valid": identity_ok, "identity_error": source_error, "component": component, "source_record_index": record_index, "source_checkpoint_id": source.get("source_checkpoint_id"), "source_run_id": source.get("source_run_id"), "source_seed": source.get("source_seed"), "source_battle_index": source.get("source_battle_index"), "act": item.get("act"), "room_type": item.get("room_type"), "trace_length": len(source.get("action_trace", ())) if isinstance(source.get("action_trace", ()), (list, tuple)) else 0, "successor": {"record_index": successor.get("record_index"), "trace_length": len(successor.get("action_trace", ())), "battle_index": successor.get("source_battle_index")} if successor else None, "behavior": behavior, "teacher_action": teacher_action, "trainer_policy_action": trainer_action, "comparison": comparison, "outcome": outcome_status, "source_battle_outcome": outcome if isinstance(outcome, str) else None, "source_controller": source.get("source_battle_controller_provenance"), "teacher_controller": teachers[index].get("controller_provenance"), "policy_target_source": trainers[index].get("policy_target_source"), "value_target_source": "trainer_input_record.structured_battle_outcome.battle_survived"})
         raw_rewards = trainers[index].get("raw_reward_components")
         structured_outcome = trainers[index].get("structured_battle_outcome")
         trainer_outcome = structured_outcome.get("battle_survived", {}) if isinstance(structured_outcome, Mapping) else {}
@@ -421,8 +420,8 @@ def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460) -
             "successor_complete_identity": successor_identity,
             "successor_exists": successor is not None,
             "successor_reason": behavior.get("reason"),
-            "source_act": source.get("structural_metadata", {}).get("act"),
-            "source_encounter": source.get("structural_metadata", {}).get("encounter_id"),
+            "source_act": source_meta.get("act") if isinstance(source_meta, Mapping) else None,
+            "source_encounter": source_meta.get("encounter_id") if isinstance(source_meta, Mapping) else None,
             "source_controller_provenance": source.get("source_controller_provenance"),
             "source_battle_controller_provenance": source.get("source_battle_controller_provenance"),
             "source_battle_outcome": outcome if isinstance(outcome, str) else "unavailable",
@@ -449,8 +448,12 @@ def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460) -
     proof = semantic_proof()
     source_outcomes = Counter("survived" if row["source_battle_outcome"] == "PLAYER_VICTORY" else "lost" if row["source_battle_outcome"] == "PLAYER_DEFEAT" else "unavailable" for row in rows)
     divergent_outcomes = Counter("survived" if row["source_battle_outcome"] == "PLAYER_VICTORY" else "lost" if row["source_battle_outcome"] == "PLAYER_DEFEAT" else "unavailable" for row in divergent)
-    trainer_outcomes = Counter("survived" if row.get("trainer_battle_survived", {}).get("status") == "available" and row["trainer_battle_survived"].get("value") is True else "lost" if row.get("trainer_battle_survived", {}).get("status") == "available" and row["trainer_battle_survived"].get("value") is False else "unavailable" for row in rows)
-    divergent_trainer_outcomes = Counter("survived" if row.get("trainer_battle_survived", {}).get("status") == "available" and row["trainer_battle_survived"].get("value") is True else "lost" if row.get("trainer_battle_survived", {}).get("status") == "available" and row["trainer_battle_survived"].get("value") is False else "unavailable" for row in divergent)
+    def trainer_label(row: Mapping[str, Any]) -> str:
+        value = row.get("trainer_battle_survived")
+        if not isinstance(value, Mapping) or value.get("status") != "available" or not isinstance(value.get("value"), bool): return "unavailable"
+        return "survived" if value["value"] else "lost"
+    trainer_outcomes = Counter(trainer_label(row) for row in rows)
+    divergent_trainer_outcomes = Counter(trainer_label(row) for row in divergent)
     strata = {name: {str(key): value for key, value in Counter(((_controller_key(row[field]) if field == "source_battle_controller_provenance" else row[field]), row["comparison"]) for row in rows).items()} for name, field in (("act", "act"), ("room_type", "room_type"), ("component", "component"), ("source_battle_controller_provenance", "source_battle_controller_provenance"))}
     report = {"schema_version": SCHEMA, "qualification_mode": "formal_460" if expected_rows == 460 else "compact_non_qualifying", "execution": {"mode": "offline_streaming", "worker_count": 1, "reason": "non-simulator aggregation/single stream"}, "regeneration": {"command": f"python -m sts_combat_rl.t082_value_target_semantic_closure --manifest {manifest_path} --output {output}"}, "inputs": {"manifest": str(manifest_path), "manifest_sha256": sha256(manifest_path), "control_artifacts": input_checks, "pool_checks": pool_checks, "terminal_case_valid": terminal_valid, "teacher": {"path": str(teacher_path), "sha256": sha256(teacher_path)}, "trainer": {"path": str(trainer_path), "sha256": sha256(trainer_path)}, "source_components": {component: {"path": str(manifest["input_artifacts"][component]["path"]), "sha256": manifest["input_artifacts"][component].get("sha256")} for component in sorted(by_component)}}, "coverage": {"observed": {str(key): value for key, value in sorted(coverage.items())}, "expected_acts": {"1": 256, "2": 204}, "expected_components": {"assist_0": 256, "assist_hp50": 12, "assist_hp50_potion_elite_boss": 32, "assist_hp75_potion": 160}, "valid": coverage_valid}, "integrity": {"valid": all_integrity and not row_problems, "selected_teacher_trainer_counts": len(rows) == 460, "source_identity_valid": all(row["identity_valid"] for row in rows), "problems": row_problems + ([] if all_integrity else ["one or more identity, coverage, control-artifact, or terminal predicates failed"])}, "counts": {"total_rows": len(rows), "behavior_recoverable": sum(row["behavior"]["status"] == "available" for row in rows), "behavior_unavailable": sum(row["behavior"]["status"] != "available" for row in rows), "comparison_denominator": sum(row["comparison"] != "unavailable" for row in rows), "comparisons": dict(Counter(row["comparison"] for row in rows)), "divergence_rate": len(divergent) / max(1, sum(row["comparison"] != "unavailable" for row in rows)), "outcomes": dict(source_outcomes), "divergent_outcomes": dict(divergent_outcomes), "divergent_with_available_outcome": sum(row["source_battle_outcome"] in ("PLAYER_VICTORY", "PLAYER_DEFEAT") for row in divergent)}, "strata": strata, "classification": classify(integrity_valid=all_integrity and not row_problems, rows=rows, proof=proof), "semantic_proof": proof, "rows": rows}
     report["regeneration"]["command"] = f"PYTHONPATH=src python scripts/run_t082_value_target_semantic_closure.py --manifest {manifest_path} --output {output}"
@@ -463,7 +466,6 @@ def audit_t064(manifest_path: Path, output: Path, *, expected_rows: int = 460) -
     report["counts"]["trainer_value_labels"] = dict(trainer_outcomes)
     report["counts"]["divergent_trainer_value_labels"] = dict(divergent_trainer_outcomes)
     report["regeneration"].update({"hash_convention": "hash the committed output bytes externally; no self-referential hash is embedded"})
-    rendered = json.dumps(report, indent=2, sort_keys=True) + "\n"
     output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return report
 
