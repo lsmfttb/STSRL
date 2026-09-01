@@ -164,13 +164,13 @@ def audit_t064(manifest_path: Path, output: Path) -> dict[str, Any]:
     trainers = _load_selected_envelope(trainer_path, 460, "example_index")
     if len(teachers) != 460 or len(trainers) != 460:
         raise ValueError("T064 teacher/trainer inventories must each contain 460 rows")
+    by_component: defaultdict[str, set[int]] = defaultdict(set)
+    for index, item in enumerate(selected): by_component[item["component"]].add(item["source_record_index"])
     pool_checks = []
     for component, spec in manifest["input_artifacts"].items():
         if component in by_component:
             pool = Path(spec["path"].replace("D:\\", "/mnt/d/").replace("\\", "/"))
             pool_checks.append(_validate_pool(pool, spec, component))
-    by_component: defaultdict[str, set[int]] = defaultdict(set)
-    for index, item in enumerate(selected): by_component[item["component"]].add(item["source_record_index"])
     coverage = Counter((item.get("act"), item.get("component")) for item in selected)
     found: dict[tuple[str, int], tuple[dict[str, Any], dict[str, Any] | None]] = {}
     for component, indexes in by_component.items():
