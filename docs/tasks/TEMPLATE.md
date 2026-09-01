@@ -29,8 +29,8 @@ an implicit input.
 
 If this task consumes a learned checkpoint, teacher/trainer dataset, or
 generated learning-source artifact, name the inputs, intended reuse mode,
-scientific claim boundary, required qualification predicates, and what happens
-when a required fact is unavailable. Tasks with no such dependency may state
+scientific claim boundary, required predicates, and unavailable-fact behavior
+(what happens when a required fact is unavailable). Tasks with no such dependency may state
 `none` and are exempt from this contract.
 
 ## Scope
