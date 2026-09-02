@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import multiprocessing
 import os
 import sys
@@ -260,6 +261,45 @@ def _scorer_for_arm(arm: str) -> Any | None:
     return scorer
 
 
+def _native_policy_prior_scores(scorer: Any, context: Any) -> list[float]:
+    """Adapt the public SearchGuidance scorer result to native prior scores."""
+
+    result = scorer.score_decision_context(context)
+    action_scores = getattr(result, "action_scores", None)
+    if not isinstance(action_scores, list):
+        raise TypeError("search guidance result action_scores must be a list")
+    legal_action_count = len(context.legal_action_features)
+    if len(action_scores) != legal_action_count:
+        raise ValueError(
+            "search guidance action score count "
+            f"{len(action_scores)} does not match native legal action count "
+            f"{legal_action_count}"
+        )
+    scores_by_index: dict[int, float] = {}
+    for action_score in action_scores:
+        index = getattr(action_score, "legal_action_index", None)
+        if not isinstance(index, int) or index < 0 or index >= legal_action_count:
+            raise ValueError("search guidance action score index is invalid")
+        if index in scores_by_index:
+            raise ValueError(
+                f"search guidance has duplicate action score index {index}"
+            )
+        try:
+            probability = float(action_score.policy_probability)
+        except (AttributeError, TypeError, ValueError) as exc:
+            raise ValueError(
+                "search guidance action score probability is invalid"
+            ) from exc
+        if not math.isfinite(probability) or not 0.0 <= probability <= 1.0:
+            raise ValueError(
+                "search guidance action score probability must be finite in [0, 1]"
+            )
+        scores_by_index[index] = probability
+    if set(scores_by_index) != set(range(legal_action_count)):
+        raise ValueError("search guidance action scores do not cover legal actions")
+    return [scores_by_index[index] for index in range(legal_action_count)]
+
+
 def _work_one(task: tuple[int, str]) -> dict[str, Any]:
     root_index, arm = task
     started = time.monotonic()
@@ -299,7 +339,7 @@ def _work_one(task: tuple[int, str]) -> dict[str, Any]:
             ActionSpaceConfig.initial_no_potions(),
             public_run_context=root.public_run_context,
         )
-        return [float(value) for value in scorer.score_actions(context)]
+        return _native_policy_prior_scores(scorer, context)
 
     def collect(
         checkpoint: object,
@@ -565,7 +605,7 @@ def _work_parity_one(task: tuple[int, str]) -> dict[str, Any]:
             ActionSpaceConfig.initial_no_potions(),
             public_run_context=root.public_run_context,
         )
-        return [float(value) for value in scorer.score_actions(context)]
+        return _native_policy_prior_scores(scorer, context)
 
     off_adapter = LightSpeedAdapter(
         seed=root.source_seed,

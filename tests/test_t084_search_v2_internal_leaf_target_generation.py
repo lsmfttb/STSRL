@@ -482,3 +482,126 @@ def test_assisted_root_uses_assisted_restore_and_reaches_search_boundary(
     )
     assert isinstance(public_input["legal_action_features"][0], list)
     assert public_input["hidden_state_excluded"] is True
+
+
+def test_prior_policy_callback_uses_search_guidance_policy_probabilities(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = SimpleNamespace(
+        source_seed=122,
+        snapshot_raw={"ascension": 20, "act": 1},
+        public_run_context={"visible": "context"},
+    )
+    observed_contexts: list[object] = []
+    observed_priors: list[list[float]] = []
+
+    class FakeScorer:
+        def score_actions(self, _context: object) -> list[float]:
+            raise AssertionError("T084 must use the SearchGuidance scorer contract")
+
+        def score_decision_context(self, context: object) -> SimpleNamespace:
+            observed_contexts.append(context)
+            return SimpleNamespace(
+                action_scores=[
+                    SimpleNamespace(
+                        legal_action_index=0,
+                        policy_logit=1.25,
+                        policy_probability=0.01,
+                    ),
+                    SimpleNamespace(
+                        legal_action_index=1,
+                        policy_logit=-2.5,
+                        policy_probability=0.99,
+                    ),
+                ],
+                value_prediction=SimpleNamespace(
+                    battle_survival_probability=999.0,
+                ),
+            )
+
+    class FakeAdapter:
+        def __init__(self, **_: object) -> None:
+            pass
+
+        def battle_search_v2_with_leaf_collection(
+            self, snapshot: object, **kwargs: object
+        ) -> dict:
+            assert snapshot == "assisted-snapshot"
+            policy_callback = kwargs["policy_prior_callback"]
+            assert callable(policy_callback)
+            observed_priors.append(
+                policy_callback(
+                    {"act": 1, "hidden_state": "not-public"},
+                    [
+                        {
+                            "scope": "battle",
+                            "bits": 1,
+                            "kind": "play",
+                            "label": "play-1",
+                        },
+                        {
+                            "scope": "battle",
+                            "bits": 2,
+                            "kind": "play",
+                            "label": "play-2",
+                        },
+                    ],
+                )
+            )
+            callback = kwargs["leaf_collector_callback"]
+            callback(
+                "opaque-checkpoint",
+                {"act": 1},
+                [{"scope": "battle", "bits": 1, "kind": "play", "label": "play"}],
+                1,
+                0,
+                "path-0",
+                "digest-0",
+                json.dumps({"hidden": "state-0"}, sort_keys=True),
+                {"seed": 122},
+            )
+            return {"root_action": "battle:1", "root_rows": [{"visits": 1}]}
+
+    monkeypatch.setattr(t084_collector, "LightSpeedAdapter", FakeAdapter)
+    monkeypatch.setattr(
+        t084_collector,
+        "record_from_manifest",
+        lambda *_args, **_kwargs: root,
+    )
+    monkeypatch.setattr(
+        t084_collector,
+        "restore_assisted_battle_start_record",
+        lambda *_args, **_kwargs: ("assisted-snapshot", "assisted_restore"),
+    )
+    monkeypatch.setattr(
+        t084_collector,
+        "_scorer_for_arm",
+        lambda _arm: FakeScorer(),
+    )
+
+    def build_context(
+        _raw: object,
+        actions: list[object],
+        *_args: object,
+        **kwargs: object,
+    ) -> SimpleNamespace:
+        return SimpleNamespace(
+            snapshot_features=[1.0],
+            legal_action_features=[[2.0, 3.0] for _ in actions],
+            eligible_action_indices=list(range(len(actions))),
+            public_run_context=kwargs["public_run_context"],
+        )
+
+    monkeypatch.setattr(t084_collector, "build_decision_context", build_context)
+    monkeypatch.setattr(t084_collector, "public_context_features", lambda _: [0.0])
+    t084_collector._ROOT_ROWS[:] = [{"_t084_source_identity": "source-0"}]
+    t084_collector._NATIVE_MODULE = object()
+    t084_collector._PASS_MODE = "candidate"
+    t084_collector._NATIVE_COMMIT = "858f4ca"
+
+    result = t084_collector._work_one((0, ARMS[1]))
+
+    assert observed_priors == [[0.01, 0.99]]
+    assert len(observed_contexts) == 1
+    assert observed_contexts[0].public_run_context == {"visible": "context"}
+    assert result["candidate_count"] == 1
