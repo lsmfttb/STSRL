@@ -4,21 +4,22 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timedelta, timezone
 import json
 import os
-from pathlib import Path
+import signal
 import subprocess
 import sys
 import time
-from typing import Any, Sequence
-
+from collections.abc import Sequence
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any
 
 STATES = {"RUNNING", "SUCCEEDED", "FAILED"}
 
 
 def _timestamp() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def _atomic_write(path: Path, payload: dict[str, Any]) -> None:
@@ -131,6 +132,32 @@ def _supervise(
                 )
                 return 1
             _atomic_write(status_path, _status_payload(**common, state="RUNNING"))
+
+            def handle_supervisor_signal(signum: int, _frame: object) -> None:
+                """Terminate the child and leave a terminal status on supervisor kill."""
+
+                if target.poll() is None:
+                    target.terminate()
+                try:
+                    target.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    target.kill()
+                    target.wait()
+                _atomic_write(
+                    status_path,
+                    _status_payload(
+                        **common,
+                        state="FAILED",
+                        finished_at=_timestamp(),
+                        exit_code=128 + signum,
+                        startup_error=(
+                            f"detached supervisor terminated by signal {signum}"
+                        ),
+                    ),
+                )
+                raise SystemExit(128 + signum)
+
+            signal.signal(signal.SIGTERM, handle_supervisor_signal)
             exit_code = target.wait()
         _atomic_write(
             status_path,
@@ -142,7 +169,7 @@ def _supervise(
             ),
         )
         return exit_code
-    except BaseException as exc:
+    except BaseException as exc:  # noqa: BLE001 - supervisor must record all failures
         _atomic_write(
             status_path,
             _status_payload(

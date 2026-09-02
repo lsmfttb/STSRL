@@ -113,7 +113,7 @@ def _iter_selected_record_lines(
                 raise ValueError(f"{path}: selected record line is malformed")
             record = value.get("record")
             if not isinstance(record, Mapping):
-                raise ValueError(f"{path}: selected record payload is malformed")
+                raise TypeError(f"{path}: selected record payload is malformed")
             found.add(record_index)
             yield record_index, record
             if found == selected_indices:

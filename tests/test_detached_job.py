@@ -1,13 +1,15 @@
 from __future__ import annotations
 
-from datetime import datetime
 import json
 import os
-from pathlib import Path
+import signal
 import subprocess
 import sys
 import time
+from datetime import datetime
+from pathlib import Path
 
+import pytest
 
 SCRIPT = Path(__file__).parents[1] / "scripts" / "run_detached_job.py"
 
@@ -52,8 +54,10 @@ def test_start_status_success_logs_pid_cwd_and_environment(tmp_path: Path) -> No
     command = [
         sys.executable,
         "-c",
-        "import os,sys; print(os.environ['STSRL_DETACHED_MARKER']); "
-        "print('stderr-line', file=sys.stderr)",
+        (
+            "import os,sys; print(os.environ['STSRL_DETACHED_MARKER']); "
+            "print('stderr-line', file=sys.stderr)"
+        ),
     ]
     status, started = _start(tmp_path, command, expected_seconds=4, env=env)
     assert started.returncode == 0, started.stderr
@@ -109,3 +113,25 @@ def test_startup_failure_is_recorded_without_losing_atomic_status(
     assert payload["exit_code"] != 0
     assert payload["startup_error"]
     assert not list(status.parent.glob(".*.tmp"))
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="supervisor signal delivery is WSL/Unix-only"
+)
+def test_supervisor_signal_records_terminal_failed_status(tmp_path: Path) -> None:
+    status, started = _start(
+        tmp_path,
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+    )
+    assert started.returncode == 0, started.stderr
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        if status.is_file() and json.loads(status.read_text())["state"] == "RUNNING":
+            break
+        time.sleep(0.02)
+    running = json.loads(status.read_text(encoding="utf-8"))
+    os.kill(int(running["pid"]), signal.SIGTERM)
+    payload = _wait_for_terminal(status)
+    assert payload["state"] == "FAILED"
+    assert payload["exit_code"] == 143
+    assert "terminated by signal" in str(payload["startup_error"])
