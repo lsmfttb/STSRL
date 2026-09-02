@@ -231,6 +231,38 @@ def test_collector_validation_requires_complete_three_arm_root_inventory() -> No
     assert any("parity" in item for item in result["problems"])
 
 
+def test_collector_validation_requires_parity_available_and_passed() -> None:
+    result = validate_collector_execution(
+        {
+            "schema_id": "t084-native-internal-leaf-collector-v1",
+            "generation_mode": "native_runtime_collector",
+            "search_simulations_per_root": 100,
+            "worker_count": 16,
+            "effective_worker_count": 16,
+            "root_runs": [],
+            "arm_configs": {},
+            "parity": {
+                "available": False,
+                "passed": False,
+                "checked_root_count": 16,
+                "task_count": 48,
+                "arms": [],
+                "acts": [],
+                "act_counts": {"1": 24, "2": 24},
+                "worker_count": 16,
+                "material_outputs_equal": True,
+                "root_action_equal": True,
+                "root_statistics_equal": True,
+                "rng_semantics_equal": True,
+                "rows": [],
+            },
+            "candidate_rows": [],
+        },
+        [],
+    )
+    assert any("not available and passed" in item for item in result["problems"])
+
+
 def test_native_probe_requires_actual_cpython_313_runtime_and_apis() -> None:
     native = {"identity_valid": True, "resolved_commit": "native-commit"}
     probe = {

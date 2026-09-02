@@ -949,14 +949,23 @@ def main() -> int:
         "shards": [
             {
                 "worker_count": args.workers,
+                "effective_worker_count": args.workers,
                 "task_count": tasks,
-                "task_ranges": "root indices 0..459 x three arms",
-                "wall_clock_seconds": total_wall,
+                "task_ranges": "candidate pass: root indices 0..459 x three arms",
+                "wall_clock_seconds": candidate_wall,
             },
             {
                 "worker_count": args.workers,
+                "effective_worker_count": args.workers,
+                "task_count": tasks,
+                "task_ranges": "selected_leaf_continuation pass: root indices 0..459 x three arms",
+                "wall_clock_seconds": target_wall,
+            },
+            {
+                "worker_count": args.workers,
+                "effective_worker_count": args.workers,
                 "task_count": 16 * len(ARMS),
-                "task_ranges": "first eight Act1 and first eight Act2 source roots x three arms parity preflight",
+                "task_ranges": "parity_preflight: first eight Act1 and first eight Act2 source roots x three arms",
                 "wall_clock_seconds": parity_wall,
             },
         ],

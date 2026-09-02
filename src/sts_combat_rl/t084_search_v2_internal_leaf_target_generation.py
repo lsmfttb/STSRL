@@ -713,14 +713,29 @@ def validate_collector_execution(
     ):
         problems.append("collector parity evidence is incomplete")
     else:
+        if parity.get("available") is not True or parity.get("passed") is not True:
+            problems.append("collector parity is not available and passed")
         if (
             parity.get("checked_root_count") != 16
+            or parity.get("task_count") != 48
             or set(parity.get("arms", [])) != set(ARMS)
             or set(parity.get("acts", [])) != {1, 2}
+            or parity.get("act_counts") != {"1": 24, "2": 24}
         ):
             problems.append(
-                "collector parity does not cover 16 roots, all arms, and both Acts"
+                "collector parity does not cover 16 roots, 48 arm tasks, 24+24 Acts, and all arms"
             )
+        parity_rows = parity.get("rows")
+        if not isinstance(parity_rows, list) or len(parity_rows) != 48:
+            problems.append("collector parity rows are not exactly 16x3")
+        else:
+            parity_keys = {
+                (row.get("root_index"), row.get("sampling_arm"))
+                for row in parity_rows
+                if isinstance(row, Mapping)
+            }
+            if len(parity_keys) != 48:
+                problems.append("collector parity contains duplicate root/arm rows")
         if parity.get("worker_count") != WORKER_COUNT or not all(
             parity.get(field) is True for field in parity_fields[4:]
         ):
