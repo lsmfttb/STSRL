@@ -35,7 +35,6 @@ from sts_combat_rl.sim.battle_start_pool import (
 from sts_combat_rl.sim.contract import SimulatorAction
 from sts_combat_rl.sim.controlled_run import build_decision_context
 from sts_combat_rl.sim.lightspeed import LightSpeedAdapter
-from sts_combat_rl.sim.torch_policy_value import TorchPolicyValueGuidanceScorer
 from sts_combat_rl.t084_search_v2_internal_leaf_target_generation import (
     ARMS,
     COLLECTOR_SCHEMA_ID,
@@ -48,10 +47,11 @@ from sts_combat_rl.t084_search_v2_internal_leaf_target_generation import (
 _ROOT_ROWS: list[dict[str, Any]] = []
 _NATIVE_COMMIT = ""
 _NATIVE_MODULE: Any | None = None
-_SCORERS: dict[str, TorchPolicyValueGuidanceScorer] = {}
+_SCORERS: dict[str, Any] = {}
 _CHECKPOINT_PATHS: dict[str, str] = {}
 _PASS_MODE = "candidate"
 _TARGET_SPECS: dict[str, str] = {}
+_SELECTION_POLICY = "canonical-hidden-payload-v1-root-first-hash-v1"
 
 
 def _iter_json_values(path: Path) -> Iterable[object]:
@@ -183,11 +183,15 @@ def _public_input(
     return values
 
 
-def _scorer_for_arm(arm: str) -> TorchPolicyValueGuidanceScorer | None:
+def _scorer_for_arm(arm: str) -> Any | None:
     if arm == ARMS[0]:
         return None
     scorer = _SCORERS.get(arm)
     if scorer is None:
+        from sts_combat_rl.sim.torch_policy_value import (
+            TorchPolicyValueGuidanceScorer,
+        )
+
         path = _CHECKPOINT_PATHS[arm]
         scorer = TorchPolicyValueGuidanceScorer.from_checkpoint_path(path)
         _SCORERS[arm] = scorer
@@ -218,6 +222,7 @@ def _work_one(task: tuple[int, str]) -> dict[str, Any]:
     candidates: list[dict[str, Any]] = []
     target_rows: list[dict[str, Any]] = []
     consumed_target_ids: set[str] = set()
+    callback_count = 0
     scorer = _scorer_for_arm(arm)
 
     def policy_callback(raw: object, native_actions: object) -> list[float]:
@@ -245,8 +250,14 @@ def _work_one(task: tuple[int, str]) -> dict[str, Any]:
         payload: str,
         rng: object,
     ) -> None:
+        nonlocal callback_count
+        callback_count += 1
         if not isinstance(raw, Mapping) or not isinstance(rng, Mapping):
             raise TypeError("native collector callback omitted structured state/RNG")
+        if not isinstance(payload, str) or not payload:
+            raise ValueError(
+                "native collector callback omitted canonical hidden payload"
+            )
         actions = _native_actions(native_actions)
         context = build_decision_context(
             raw,
@@ -261,11 +272,12 @@ def _work_one(task: tuple[int, str]) -> dict[str, Any]:
             decoded = None
         if isinstance(decoded, Mapping):
             payload_value = dict(decoded)
-        leaf_seed = "|".join(
-            (source_identity, arm, digest, str(ordinal), path_fingerprint)
-        )
-        leaf_identity = hashlib.sha256(leaf_seed.encode()).hexdigest()
-        exact_identity = f"t084-leaf-{leaf_identity}"
+        # The native canonical payload is the formal hidden-state identity.  The
+        # native digest is only an index; validate_collector_execution performs
+        # the digest-bucket collision check.  Ordinal/path remain occupancy
+        # provenance and must not create independent formal states.
+        leaf_identity = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+        exact_identity = f"t084-hidden-state-{leaf_identity}"
         base_row = {
             "sampling_arm": arm,
             "act": int(raw.get("act", root.snapshot_raw.get("act", 0))),
@@ -273,6 +285,9 @@ def _work_one(task: tuple[int, str]) -> dict[str, Any]:
             "exact_leaf_identity": exact_identity,
             "exact_hidden_state_payload": {
                 "canonical_native_payload": payload_value,
+                "canonical_native_payload_json": payload,
+                "identity_definition": "sha256(canonical_native_payload UTF-8 bytes)",
+                "occupancy_duplicate": False,
                 "retention_boundary": "opaque native checkpoint captured at callback boundary",
                 "restoration_status": (
                     "consumed_in_callback_for_continuation_replicates"
@@ -291,6 +306,11 @@ def _work_one(task: tuple[int, str]) -> dict[str, Any]:
             "depth": depth,
             "callback_ordinal": ordinal,
             "path_fingerprint": path_fingerprint,
+            "occupancy": {
+                "native_digest_index": digest,
+                "callback_ordinal": ordinal,
+                "path_fingerprint": path_fingerprint,
+            },
             "rng_provenance": dict(rng),
         }
         if _PASS_MODE == "candidate":
@@ -352,7 +372,7 @@ def _work_one(task: tuple[int, str]) -> dict[str, Any]:
         "simulations": 100,
         "status": "complete",
         "restore_method": restore_method,
-        "candidate_count": len(candidates),
+        "candidate_count": callback_count,
         "root_action": result.get("root_action"),
         "root_statistics": result.get("root_statistics"),
         "candidate_rows": candidates,
@@ -446,32 +466,138 @@ def _leaf_rank(row: Mapping[str, Any]) -> str:
     return hashlib.sha256(value.encode()).hexdigest()
 
 
-def _select_target_specs(candidate_rows: list[dict[str, Any]]) -> dict[str, str]:
-    unique: dict[str, dict[str, Any]] = {}
-    for row in candidate_rows:
-        unique.setdefault(str(row["exact_leaf_identity"]), row)
+def _canonical_payload(row: Mapping[str, Any]) -> str:
+    hidden = row.get("exact_hidden_state_payload")
+    if not isinstance(hidden, Mapping):
+        raise TypeError("candidate lacks exact hidden state payload")
+    payload = hidden.get("canonical_native_payload_json")
+    if not isinstance(payload, str) or not payload:
+        raise ValueError("candidate lacks retained canonical native payload bytes")
+    expected_identity = (
+        f"t084-hidden-state-{hashlib.sha256(payload.encode('utf-8')).hexdigest()}"
+    )
+    if str(row.get("exact_leaf_identity")) != expected_identity:
+        raise ValueError(
+            "candidate exact hidden identity is not derived from canonical payload"
+        )
+    return payload
+
+
+def _select_cell(
+    rows: list[dict[str, Any]],
+    count: int,
+    selected: dict[str, str],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Select unique hidden states with distinct source roots as the first phase."""
+
+    by_identity: dict[str, list[dict[str, Any]]] = {}
+    digest_payloads: dict[str, str] = {}
+    for row in rows:
+        identity = str(row["exact_leaf_identity"])
+        payload = _canonical_payload(row)
+        digest = str(row.get("exact_state_digest", ""))
+        previous_payload = digest_payloads.setdefault(digest, payload)
+        if previous_payload != payload:
+            raise ValueError(f"native digest collision for {digest}")
+        by_identity.setdefault(identity, []).append(row)
+
+    available = {
+        identity: occurrences
+        for identity, occurrences in by_identity.items()
+        if identity not in selected
+    }
+    ordered = sorted(
+        available,
+        key=lambda identity: min(_leaf_rank(row) for row in available[identity]),
+    )
+    chosen: list[dict[str, Any]] = []
+    used_roots: set[str] = set()
+    root_first = True
+    while len(chosen) < count:
+        candidates = [
+            (identity, row)
+            for identity in ordered
+            if identity not in {str(item["exact_leaf_identity"]) for item in chosen}
+            for row in available[identity]
+            if str(row.get("root_identity", "")) not in used_roots
+        ]
+        if not candidates:
+            root_first = False
+            break
+        identity, row = min(
+            candidates,
+            key=lambda item: (
+                _leaf_rank(item[1]),
+                str(item[1].get("root_identity", "")),
+                item[0],
+            ),
+        )
+        chosen.append(row)
+        used_roots.add(str(row.get("root_identity", "")))
+        ordered.remove(identity)
+    while len(chosen) < count and ordered:
+        identity = ordered.pop(0)
+        row = min(available[identity], key=lambda item: (_leaf_rank(item), str(item)))
+        chosen.append(row)
+    for row in chosen:
+        selected[str(row["exact_leaf_identity"])] = "pending"
+    return chosen, {
+        "requested": count,
+        "selected": len(chosen),
+        "distinct_source_roots": len(used_roots),
+        "root_first_phase_completed": root_first,
+        "hash_tie_break": "sha256(source_complete_identity_sha256|sampling_arm|exact_leaf_identity)",
+    }
+
+
+def _select_target_specs_with_policy(
+    candidate_rows: list[dict[str, Any]],
+) -> tuple[dict[str, str], dict[str, Any]]:
+    """Select calibration/formal identities, never counting occupancy duplicates."""
+
     selected: dict[str, str] = {}
+    cells: list[dict[str, Any]] = []
     for arm in ARMS:
         for act, count, kind in ((1, 18, "calibration"), (2, 14, "calibration")):
-            cell = [
-                row
-                for row in unique.values()
-                if row.get("sampling_arm") == arm and row.get("act") == act
-            ]
-            cell.sort(key=_leaf_rank)
-            for row in cell[:count]:
+            chosen, detail = _select_cell(
+                [
+                    row
+                    for row in candidate_rows
+                    if row.get("sampling_arm") == arm and row.get("act") == act
+                ],
+                count,
+                selected,
+            )
+            for row in chosen:
                 selected[str(row["exact_leaf_identity"])] = kind
+            cells.append({"arm": arm, "act": act, "kind": kind, **detail})
         for act, count in ((1, 178), (2, 142)):
-            cell = [
-                row
-                for row in unique.values()
-                if row.get("sampling_arm") == arm
-                and row.get("act") == act
-                and str(row["exact_leaf_identity"]) not in selected
-            ]
-            cell.sort(key=_leaf_rank)
-            for row in cell[:count]:
+            chosen, detail = _select_cell(
+                [
+                    row
+                    for row in candidate_rows
+                    if row.get("sampling_arm") == arm and row.get("act") == act
+                ],
+                count,
+                selected,
+            )
+            for row in chosen:
                 selected[str(row["exact_leaf_identity"])] = "formal"
+            cells.append({"arm": arm, "act": act, "kind": "formal", **detail})
+    return selected, {
+        "schema_id": _SELECTION_POLICY,
+        "identity": "sha256(canonical_native_payload UTF-8 bytes)",
+        "digest_role": "index-only-with-canonical-payload-collision-check",
+        "occupancy_duplicates": "retained in candidate_rows, excluded from identity counts and target selection",
+        "root_policy": "distinct source roots first, then versioned hash ranking",
+        "cells": cells,
+    }
+
+
+def _select_target_specs(candidate_rows: list[dict[str, Any]]) -> dict[str, str]:
+    """Compatibility wrapper for focused callers."""
+
+    selected, _ = _select_target_specs_with_policy(candidate_rows)
     return selected
 
 
@@ -508,7 +634,7 @@ def main() -> int:
         for run in candidate_runs
         for candidate in run.get("candidate_rows", [])
     ]
-    target_specs = _select_target_specs(candidate_rows)
+    target_specs, selection_policy = _select_target_specs_with_policy(candidate_rows)
     target_runs, target_failures, target_wall = _run_pass(
         roots,
         checkpoint_paths,
@@ -546,7 +672,11 @@ def main() -> int:
         "worker_count": args.workers,
         "effective_worker_count": args.workers,
         "root_runs": [
-            {key: value for key, value in run.items() if key != "candidate_rows"}
+            {
+                key: value
+                for key, value in run.items()
+                if key not in ("candidate_rows", "target_rows")
+            }
             for run in root_runs
         ],
         "candidate_rows": candidate_rows,
@@ -565,6 +695,7 @@ def main() -> int:
                 "wall_clock_seconds": target_wall,
                 "target_identity_count": len(target_specs),
             },
+            "selection_policy": selection_policy,
         },
         "arm_configs": {
             "unguided_search_v2": {

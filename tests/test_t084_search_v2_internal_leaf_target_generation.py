@@ -4,6 +4,7 @@ import hashlib
 
 import pytest
 
+from scripts.collect_t084_native_leaf_candidates import _select_cell
 from sts_combat_rl.t084_search_v2_internal_leaf_target_generation import (
     ACTION_CAP,
     CALIBRATION_COUNT,
@@ -243,3 +244,56 @@ def test_native_probe_requires_actual_cpython_313_runtime_and_apis() -> None:
     assert validate_native_probe(probe, native)["valid"] is True
     probe["extension"] = "/tmp/slaythespire.cpython-314-x86_64-linux-gnu.so"
     assert validate_native_probe(probe, native)["valid"] is False
+
+
+def _candidate(
+    payload: str,
+    *,
+    root: str,
+    digest: str = "digest",
+    arm: str = "unguided_search_v2",
+) -> dict:
+    identity = "t084-hidden-state-" + hashlib.sha256(payload.encode()).hexdigest()
+    return {
+        "sampling_arm": arm,
+        "act": 1,
+        "root_identity": root,
+        "exact_leaf_identity": identity,
+        "exact_hidden_state_payload": {
+            "canonical_native_payload": {"state": payload},
+            "canonical_native_payload_json": payload,
+        },
+        "exact_state_digest": digest,
+        "source_complete_identity_sha256": hashlib.sha256(root.encode()).hexdigest(),
+    }
+
+
+def test_selection_deduplicates_repeated_hidden_state_visits() -> None:
+    duplicate_a = _candidate("same-hidden-state", root="root-a")
+    duplicate_b = _candidate("same-hidden-state", root="root-b")
+    selected, policy = _select_cell([duplicate_a, duplicate_b], 2, {})
+    assert len(selected) == 1
+    assert len({row["exact_leaf_identity"] for row in selected}) == 1
+    assert policy["selected"] == 1
+
+
+def test_selection_prefers_distinct_roots_before_hash_tie_break() -> None:
+    rows = [
+        _candidate("state-a", root="root-a", digest="digest-a"),
+        _candidate("state-b", root="root-a", digest="digest-b"),
+        _candidate("state-c", root="root-b", digest="digest-c"),
+    ]
+    selected, policy = _select_cell(rows, 2, {})
+    assert len(selected) == 2
+    assert {row["root_identity"] for row in selected} == {"root-a", "root-b"}
+    assert policy["distinct_source_roots"] == 2
+    assert policy["root_first_phase_completed"] is True
+
+
+def test_selection_rejects_digest_collision_with_different_canonical_payload() -> None:
+    rows = [
+        _candidate("state-a", root="root-a", digest="collision"),
+        _candidate("state-b", root="root-b", digest="collision"),
+    ]
+    with pytest.raises(ValueError, match="native digest collision"):
+        _select_cell(rows, 1, {})
