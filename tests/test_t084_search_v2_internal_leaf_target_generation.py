@@ -4,7 +4,10 @@ import hashlib
 
 import pytest
 
-from scripts.collect_t084_native_leaf_candidates import _select_cell
+from scripts.collect_t084_native_leaf_candidates import (
+    _select_cell,
+    _selected_target_for_occurrence,
+)
 from sts_combat_rl.t084_search_v2_internal_leaf_target_generation import (
     ACTION_CAP,
     CALIBRATION_COUNT,
@@ -254,6 +257,11 @@ def _candidate(
     arm: str = "unguided_search_v2",
 ) -> dict:
     identity = "t084-hidden-state-" + hashlib.sha256(payload.encode()).hexdigest()
+    source_identity = hashlib.sha256(root.encode()).hexdigest()
+    path_fingerprint = f"path-{root}"
+    occurrence_key = hashlib.sha256(
+        f"{source_identity}|{arm}|{digest}|1|{path_fingerprint}".encode()
+    ).hexdigest()
     return {
         "sampling_arm": arm,
         "act": 1,
@@ -264,7 +272,10 @@ def _candidate(
             "canonical_native_payload_json": payload,
         },
         "exact_state_digest": digest,
-        "source_complete_identity_sha256": hashlib.sha256(root.encode()).hexdigest(),
+        "source_complete_identity_sha256": source_identity,
+        "callback_ordinal": 1,
+        "path_fingerprint": path_fingerprint,
+        "occurrence_key": occurrence_key,
     }
 
 
@@ -297,3 +308,34 @@ def test_selection_rejects_digest_collision_with_different_canonical_payload() -
     ]
     with pytest.raises(ValueError, match="native digest collision"):
         _select_cell(rows, 1, {})
+
+
+def test_selected_replay_consumes_only_the_selected_duplicate_occurrence() -> None:
+    first = _candidate("same-state", root="root-a", digest="same-digest")
+    second = _candidate("same-state", root="root-b", digest="same-digest")
+    selected, _ = _select_cell([first, second], 1, {})
+    identity = selected[0]["exact_leaf_identity"]
+    selected_spec = {
+        identity: {
+            "target_kind": "formal",
+            "occurrence_key": selected[0]["occurrence_key"],
+            "root_identity": selected[0]["root_identity"],
+        }
+    }
+    consumed: set[str] = set()
+    generated: list[str] = []
+    assert (
+        _selected_target_for_occurrence(
+            selected_spec, identity, selected[0]["occurrence_key"], consumed
+        )
+        is not None
+    )
+    generated.append(identity)
+    consumed.add(identity)
+    assert (
+        _selected_target_for_occurrence(
+            selected_spec, identity, second["occurrence_key"], consumed
+        )
+        is None
+    )
+    assert generated == [identity]

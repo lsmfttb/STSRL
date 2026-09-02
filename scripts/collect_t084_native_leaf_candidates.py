@@ -50,7 +50,7 @@ _NATIVE_MODULE: Any | None = None
 _SCORERS: dict[str, Any] = {}
 _CHECKPOINT_PATHS: dict[str, str] = {}
 _PASS_MODE = "candidate"
-_TARGET_SPECS: dict[str, str] = {}
+_TARGET_SPECS: dict[str, dict[str, Any]] = {}
 _SELECTION_POLICY = "canonical-hidden-payload-v1-root-first-hash-v1"
 
 
@@ -278,6 +278,10 @@ def _work_one(task: tuple[int, str]) -> dict[str, Any]:
         # provenance and must not create independent formal states.
         leaf_identity = hashlib.sha256(payload.encode("utf-8")).hexdigest()
         exact_identity = f"t084-hidden-state-{leaf_identity}"
+        occurrence_seed = "|".join(
+            (source_identity, arm, digest, str(ordinal), path_fingerprint)
+        )
+        occurrence_key = hashlib.sha256(occurrence_seed.encode()).hexdigest()
         base_row = {
             "sampling_arm": arm,
             "act": int(raw.get("act", root.snapshot_raw.get("act", 0))),
@@ -289,11 +293,7 @@ def _work_one(task: tuple[int, str]) -> dict[str, Any]:
                 "identity_definition": "sha256(canonical_native_payload UTF-8 bytes)",
                 "occupancy_duplicate": False,
                 "retention_boundary": "opaque native checkpoint captured at callback boundary",
-                "restoration_status": (
-                    "consumed_in_callback_for_continuation_replicates"
-                    if exact_identity in _TARGET_SPECS
-                    else "candidate_only_until_selected"
-                ),
+                "restoration_status": "candidate_only_until_selected",
             },
             "exact_state_digest": digest,
             "public_projection": dict(raw),
@@ -306,6 +306,7 @@ def _work_one(task: tuple[int, str]) -> dict[str, Any]:
             "depth": depth,
             "callback_ordinal": ordinal,
             "path_fingerprint": path_fingerprint,
+            "occurrence_key": occurrence_key,
             "occupancy": {
                 "native_digest_index": digest,
                 "callback_ordinal": ordinal,
@@ -316,9 +317,15 @@ def _work_one(task: tuple[int, str]) -> dict[str, Any]:
         if _PASS_MODE == "candidate":
             candidates.append(base_row)
             return
-        if exact_identity not in _TARGET_SPECS or exact_identity in consumed_target_ids:
+        target_spec = _selected_target_for_occurrence(
+            _TARGET_SPECS, exact_identity, occurrence_key, consumed_target_ids
+        )
+        if target_spec is None:
             return
         consumed_target_ids.add(exact_identity)
+        base_row["exact_hidden_state_payload"]["restoration_status"] = (
+            "consumed_in_callback_for_continuation_replicates"
+        )
         replicates: list[dict[str, Any]] = []
         for replicate_index in range(1, 257):
             seed_provenance = derive_replicate_seed(
@@ -347,7 +354,7 @@ def _work_one(task: tuple[int, str]) -> dict[str, Any]:
                     ),
                 }
             )
-        base_row["target_kind"] = _TARGET_SPECS[exact_identity]
+        base_row["target_kind"] = target_spec["target_kind"]
         base_row["replicates"] = replicates
         base_row["selected_repetition_count"] = 256
         target_rows.append(base_row)
@@ -388,7 +395,7 @@ def _worker_init(
     native_commit: str,
     checkpoint_paths: dict[str, str],
     pass_mode: str,
-    target_specs: dict[str, str],
+    target_specs: dict[str, dict[str, Any]],
 ) -> None:
     global _ROOT_ROWS, _NATIVE_COMMIT, _NATIVE_MODULE, _CHECKPOINT_PATHS
     global _PASS_MODE, _TARGET_SPECS
@@ -415,7 +422,7 @@ def _run_pass(
     native_commit: str,
     workers: int,
     pass_mode: str,
-    target_specs: dict[str, str],
+    target_specs: dict[str, dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], list[str], float]:
     tasks = [(root_index, arm) for root_index in range(len(roots)) for arm in ARMS]
     started = time.monotonic()
@@ -455,6 +462,155 @@ def _run_pass(
     return root_runs, failures, time.monotonic() - started
 
 
+def _work_parity_one(task: tuple[int, str]) -> dict[str, Any]:
+    root_index, arm = task
+    root_raw = _ROOT_ROWS[root_index]
+    root = record_from_manifest(
+        root_raw,
+        label=f"T084 parity root {root_index}",
+        allowed_distribution_kinds=frozenset({ASSISTED_RUN_DISTRIBUTION_KIND}),
+        allow_assistance_history=True,
+    )
+    source_identity = str(root_raw["_t084_source_identity"])
+    scorer = _scorer_for_arm(arm)
+
+    def policy_callback(raw: object, native_actions: object) -> list[float]:
+        if scorer is None:
+            raise AssertionError("unguided arm must not invoke a policy callback")
+        actions = _native_actions(native_actions)
+        if not isinstance(raw, Mapping):
+            raise TypeError("native parity policy snapshot is malformed")
+        context = build_decision_context(
+            raw,
+            actions,
+            ActionSpaceConfig.initial_no_potions(),
+            public_run_context=root.public_run_context,
+        )
+        return [float(value) for value in scorer.score_actions(context)]
+
+    off_adapter = LightSpeedAdapter(
+        seed=root.source_seed,
+        ascension=int(root.snapshot_raw.get("ascension", 20)),
+        module=_NATIVE_MODULE,
+    )
+    off_snapshot, _ = restore_battle_start_record(off_adapter, root)
+    on_adapter = LightSpeedAdapter(
+        seed=root.source_seed,
+        ascension=int(root.snapshot_raw.get("ascension", 20)),
+        module=_NATIVE_MODULE,
+    )
+    on_snapshot, _ = restore_battle_start_record(on_adapter, root)
+    observed_rng: list[dict[str, Any]] = []
+
+    def collect_rng(*values: object) -> None:
+        if values and isinstance(values[-1], Mapping):
+            observed_rng.append(dict(values[-1]))
+
+    off = off_adapter.battle_search_v2(
+        off_snapshot,
+        simulations=100,
+        include_potions=False,
+        policy_prior_callback=policy_callback if scorer is not None else None,
+    )
+    on = on_adapter.battle_search_v2_with_leaf_collection(
+        on_snapshot,
+        simulations=100,
+        include_potions=False,
+        policy_prior_callback=policy_callback if scorer is not None else None,
+        collector_config={
+            "schema_id": COLLECTOR_SCHEMA_ID,
+            "sampling_arm": arm,
+            "native_commit": _NATIVE_COMMIT,
+            "parity_preflight": True,
+        },
+        leaf_collector_callback=collect_rng,
+    )
+    expected_rng = {
+        "battle_context_seed": root.source_seed,
+        "battle_context_floor_num": int(off_snapshot.raw["floor_num"]),
+        "search_action_rng_seed_rule": (
+            "BattleScumSearcher2::randGen seeded from BattleContext.seed+floorNum"
+        ),
+    }
+    rng_equal = bool(observed_rng) and all(
+        value == expected_rng for value in observed_rng
+    )
+    return {
+        "root_index": root_index,
+        "root_identity": source_identity,
+        "sampling_arm": arm,
+        "act": int(root_raw["act"]),
+        "root_action_equal": off.get("root_action") == on.get("root_action"),
+        "root_statistics_equal": off.get("root_rows") == on.get("root_rows"),
+        "rng_semantics_equal": rng_equal,
+        "material_outputs_equal": (
+            off.get("root_action") == on.get("root_action")
+            and off.get("root_rows") == on.get("root_rows")
+            and rng_equal
+        ),
+        "off_root_action": off.get("root_action"),
+        "on_root_action": on.get("root_action"),
+        "observed_rng_count": len(observed_rng),
+        "expected_rng": expected_rng,
+    }
+
+
+def _run_parity(
+    roots: list[dict[str, Any]],
+    checkpoint_paths: dict[str, str],
+    native_commit: str,
+    workers: int,
+) -> tuple[dict[str, Any], list[str], float]:
+    parity_roots = roots[:16]
+    tasks = [
+        (root_index, arm) for root_index in range(len(parity_roots)) for arm in ARMS
+    ]
+    started = time.monotonic()
+    rows: list[dict[str, Any]] = []
+    failures: list[str] = []
+    context = multiprocessing.get_context("fork")
+    with ProcessPoolExecutor(
+        max_workers=workers,
+        mp_context=context,
+        initializer=_worker_init,
+        initargs=(parity_roots, native_commit, checkpoint_paths, "parity", {}),
+    ) as pool:
+        futures = {pool.submit(_work_parity_one, task): task for task in tasks}
+        for future in as_completed(futures):
+            root_index, arm = futures[future]
+            try:
+                rows.append(future.result())
+            except Exception as exc:  # noqa: BLE001 - retained as stage evidence
+                failures.append(f"{arm}/root{root_index}: {type(exc).__name__}: {exc}")
+    rows.sort(key=lambda row: (str(row["sampling_arm"]), int(row["root_index"])))
+    parity = {
+        "available": not failures,
+        "passed": (
+            not failures
+            and len(rows) == len(tasks)
+            and all(row["material_outputs_equal"] for row in rows)
+        ),
+        "checked_root_count": len({row["root_index"] for row in rows}),
+        "arms": sorted({row["sampling_arm"] for row in rows}),
+        "acts": sorted({row["act"] for row in rows}),
+        "worker_count": workers,
+        "task_count": len(tasks),
+        "task_ranges": "root indices 0..15 x three arms",
+        "material_outputs_equal": bool(rows)
+        and all(row["material_outputs_equal"] for row in rows),
+        "root_action_equal": bool(rows)
+        and all(row["root_action_equal"] for row in rows),
+        "root_statistics_equal": bool(rows)
+        and all(row["root_statistics_equal"] for row in rows),
+        "rng_semantics_equal": bool(rows)
+        and all(row["rng_semantics_equal"] for row in rows),
+        "rows": rows,
+        "failures": failures,
+        "wall_clock_seconds": time.monotonic() - started,
+    }
+    return parity, failures, time.monotonic() - started
+
+
 def _leaf_rank(row: Mapping[str, Any]) -> str:
     value = "|".join(
         (
@@ -483,10 +639,28 @@ def _canonical_payload(row: Mapping[str, Any]) -> str:
     return payload
 
 
+def _selected_target_for_occurrence(
+    target_specs: Mapping[str, Mapping[str, Any]],
+    exact_identity: str,
+    occurrence_key: str,
+    consumed_target_ids: set[str],
+) -> Mapping[str, Any] | None:
+    """Return a target only for its selected occurrence, once per replay."""
+
+    spec = target_specs.get(exact_identity)
+    if (
+        not isinstance(spec, Mapping)
+        or spec.get("occurrence_key") != occurrence_key
+        or exact_identity in consumed_target_ids
+    ):
+        return None
+    return spec
+
+
 def _select_cell(
     rows: list[dict[str, Any]],
     count: int,
-    selected: dict[str, str],
+    selected: dict[str, dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """Select unique hidden states with distinct source roots as the first phase."""
 
@@ -540,7 +714,11 @@ def _select_cell(
         row = min(available[identity], key=lambda item: (_leaf_rank(item), str(item)))
         chosen.append(row)
     for row in chosen:
-        selected[str(row["exact_leaf_identity"])] = "pending"
+        selected[str(row["exact_leaf_identity"])] = {
+            "target_kind": "pending",
+            "occurrence_key": str(row["occurrence_key"]),
+            "root_identity": str(row["root_identity"]),
+        }
     return chosen, {
         "requested": count,
         "selected": len(chosen),
@@ -552,10 +730,10 @@ def _select_cell(
 
 def _select_target_specs_with_policy(
     candidate_rows: list[dict[str, Any]],
-) -> tuple[dict[str, str], dict[str, Any]]:
+) -> tuple[dict[str, dict[str, Any]], dict[str, Any]]:
     """Select calibration/formal identities, never counting occupancy duplicates."""
 
-    selected: dict[str, str] = {}
+    selected: dict[str, dict[str, Any]] = {}
     cells: list[dict[str, Any]] = []
     for arm in ARMS:
         for act, count, kind in ((1, 18, "calibration"), (2, 14, "calibration")):
@@ -569,7 +747,8 @@ def _select_target_specs_with_policy(
                 selected,
             )
             for row in chosen:
-                selected[str(row["exact_leaf_identity"])] = kind
+                identity = str(row["exact_leaf_identity"])
+                selected[identity] = {**selected[identity], "target_kind": kind}
             cells.append({"arm": arm, "act": act, "kind": kind, **detail})
         for act, count in ((1, 178), (2, 142)):
             chosen, detail = _select_cell(
@@ -582,7 +761,8 @@ def _select_target_specs_with_policy(
                 selected,
             )
             for row in chosen:
-                selected[str(row["exact_leaf_identity"])] = "formal"
+                identity = str(row["exact_leaf_identity"])
+                selected[identity] = {**selected[identity], "target_kind": "formal"}
             cells.append({"arm": arm, "act": act, "kind": "formal", **detail})
     return selected, {
         "schema_id": _SELECTION_POLICY,
@@ -590,6 +770,15 @@ def _select_target_specs_with_policy(
         "digest_role": "index-only-with-canonical-payload-collision-check",
         "occupancy_duplicates": "retained in candidate_rows, excluded from identity counts and target selection",
         "root_policy": "distinct source roots first, then versioned hash ranking",
+        "selected_occurrences": [
+            {
+                "exact_leaf_identity": identity,
+                "target_kind": spec["target_kind"],
+                "occurrence_key": spec["occurrence_key"],
+                "root_identity": spec["root_identity"],
+            }
+            for identity, spec in sorted(selected.items())
+        ],
         "cells": cells,
     }
 
@@ -598,7 +787,7 @@ def _select_target_specs(candidate_rows: list[dict[str, Any]]) -> dict[str, str]
     """Compatibility wrapper for focused callers."""
 
     selected, _ = _select_target_specs_with_policy(candidate_rows)
-    return selected
+    return {identity: str(spec["target_kind"]) for identity, spec in selected.items()}
 
 
 def main() -> int:
@@ -660,9 +849,12 @@ def main() -> int:
         for row in formal_rows:
             row["selected_repetition_count"] = selected_n
             row["replicates"] = row["replicates"][:selected_n]
+    parity, parity_failures, parity_wall = _run_parity(
+        roots, checkpoint_paths, args.native_commit, args.workers
+    )
     root_runs = target_runs
     failures = candidate_failures + target_failures
-    total_wall = candidate_wall + target_wall
+    total_wall = candidate_wall + target_wall + parity_wall
     tasks = len(roots) * len(ARMS)
     execution = {
         "schema_id": COLLECTOR_SCHEMA_ID,
@@ -695,6 +887,12 @@ def main() -> int:
                 "wall_clock_seconds": target_wall,
                 "target_identity_count": len(target_specs),
             },
+            "parity_preflight": {
+                "worker_count": args.workers,
+                "task_count": 16 * len(ARMS),
+                "task_ranges": "root indices 0..15 x three arms",
+                "wall_clock_seconds": parity_wall,
+            },
             "selection_policy": selection_policy,
         },
         "arm_configs": {
@@ -718,19 +916,21 @@ def main() -> int:
                 ][0],
             },
         },
-        "parity": {
-            "available": False,
-            "passed": False,
-            "reason": "collector candidate stage does not substitute for the required deterministic off/on 16-root parity preflight",
-        },
-        "failures": failures,
+        "parity": parity,
+        "failures": failures + parity_failures,
         "shards": [
             {
                 "worker_count": args.workers,
                 "task_count": tasks,
                 "task_ranges": "root indices 0..459 x three arms",
                 "wall_clock_seconds": total_wall,
-            }
+            },
+            {
+                "worker_count": args.workers,
+                "task_count": 16 * len(ARMS),
+                "task_ranges": "root indices 0..15 x three arms parity preflight",
+                "wall_clock_seconds": parity_wall,
+            },
         ],
         "wall_clock_seconds": total_wall,
     }

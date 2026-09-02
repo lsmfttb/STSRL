@@ -90,6 +90,17 @@ def main() -> int:
     )
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
     command = shlex.join([sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]])
+    collector_output = {
+        "path": str(args.collector) if args.collector else None,
+        "bytes": args.collector.stat().st_size
+        if args.collector and args.collector.exists()
+        else None,
+        "sha256": sha256_file(args.collector)
+        if args.collector and args.collector.exists()
+        else None,
+        "schema_id": "t084-native-internal-leaf-collector-v1",
+        "available": bool(args.collector and args.collector.exists()),
+    }
     manifest = {
         "schema_id": RETENTION_SCHEMA_ID,
         "schema_version": 1,
@@ -130,6 +141,30 @@ def main() -> int:
                 "schema_id": SCHEMA_ID,
                 "bytes": args.output.stat().st_size,
                 "sha256": sha256_file(args.output),
+            },
+            "collector_candidate_pool": {
+                **collector_output,
+                "json_pointer": "/candidate_rows",
+                "field_schema": "array<t084-leaf-candidate-v1>",
+                "retention_role": "all callback occupancy rows; canonical hidden identity deduplicated for selection",
+            },
+            "calibration_cohort_256_replicates": {
+                **collector_output,
+                "json_pointer": "/calibration_rows",
+                "field_schema": "array<t084-leaf-target-row-v1 with 256 replicate objects>",
+                "retention_role": "96-leaf disjoint calibration cohort and repetition gate inputs",
+            },
+            "formal_target_dataset": {
+                **collector_output,
+                "json_pointer": "/formal_rows",
+                "field_schema": "array<t084-leaf-target-row-v1 with selected repetition count>",
+                "retention_role": "960-row formal value-target dataset when validation passes",
+            },
+            "parity_evidence": {
+                **collector_output,
+                "json_pointer": "/parity",
+                "field_schema": "t084-deterministic-off-on-parity-v1",
+                "retention_role": "16-root x 3-arm deterministic Search off/on equality evidence",
             },
         },
         "code_identity": result["identity"]["code"],
