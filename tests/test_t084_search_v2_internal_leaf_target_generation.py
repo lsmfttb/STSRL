@@ -12,6 +12,7 @@ from scripts.collect_t084_native_leaf_candidates import (
     PROGRESS_SCHEMA_ID,
     _candidate_metadata,
     _iter_stage_field_rows,
+    _ordered_cell_rows,
     _ProgressStore,
     _select_cell,
     _select_parity_root_indices,
@@ -383,6 +384,31 @@ def test_selection_prefers_distinct_roots_before_hash_tie_break() -> None:
     assert {row["root_identity"] for row in selected} == {"root-a", "root-b"}
     assert policy["distinct_source_roots"] == 2
     assert policy["root_first_phase_completed"] is True
+
+
+def test_ordered_cell_rows_ranks_each_candidate_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rows = [
+        _candidate("state-a", root="root-a", digest="digest-a"),
+        _candidate("state-b", root="root-a", digest="digest-b"),
+        _candidate("state-c", root="root-b", digest="digest-c"),
+        _candidate("state-d", root="root-c", digest="digest-d"),
+    ]
+    calls = 0
+    original_rank = t084_collector._leaf_rank
+
+    def rank_once(row: dict[str, object]) -> str:
+        nonlocal calls
+        calls += 1
+        return original_rank(row)
+
+    monkeypatch.setattr(t084_collector, "_leaf_rank", rank_once)
+    ordered = _ordered_cell_rows(rows)
+
+    assert calls == len(rows)
+    assert len({row["exact_leaf_identity"] for row in ordered}) == len(rows)
+    assert len({row["root_identity"] for row in ordered[:3]}) == 3
 
 
 def test_selection_rejects_digest_collision_with_different_canonical_payload() -> None:

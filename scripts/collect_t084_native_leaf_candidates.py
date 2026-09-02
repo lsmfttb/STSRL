@@ -28,6 +28,7 @@ from collections import Counter
 from collections.abc import Iterable, Mapping
 from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from datetime import UTC, datetime
+from heapq import heappop, heappush
 from pathlib import Path
 from typing import Any
 
@@ -1923,7 +1924,9 @@ def _ordered_cell_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     by_identity: dict[str, list[dict[str, Any]]] = {}
     digest_identities: dict[str, str] = {}
     identity_digests: dict[str, str] = {}
-    for raw_row in rows:
+    ranked_rows: list[tuple[str, str, str, int, dict[str, Any]]] = []
+    available_rows: list[tuple[str, str, str, int, dict[str, Any]]] = []
+    for ordinal, raw_row in enumerate(rows):
         row = _candidate_metadata(raw_row)
         identity = str(row["exact_leaf_identity"])
         digest = str(row["exact_state_digest"])
@@ -1936,34 +1939,47 @@ def _ordered_cell_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 "candidate exact hidden identity maps to conflicting state digests"
             )
         by_identity.setdefault(identity, []).append(row)
+        ranked_row = (
+            _leaf_rank(row),
+            str(row.get("root_identity", "")),
+            identity,
+            ordinal,
+            row,
+        )
+        heappush(ranked_rows, ranked_row)
+        heappush(available_rows, ranked_row)
 
     remaining = set(by_identity)
     chosen: list[dict[str, Any]] = []
     used_roots: set[str] = set()
+
+    def pop_valid(
+        heap: list[tuple[str, str, str, int, dict[str, Any]]],
+        *,
+        require_unused_root: bool,
+    ) -> tuple[str, str, str, int, dict[str, Any]] | None:
+        while heap:
+            ranked_row = heap[0]
+            identity = ranked_row[2]
+            root_identity = ranked_row[1]
+            if identity not in remaining or (
+                require_unused_root and root_identity in used_roots
+            ):
+                heappop(heap)
+                continue
+            return heappop(heap)
+        return None
+
     while remaining:
-        candidates = [
-            (identity, row)
-            for identity in remaining
-            for row in by_identity[identity]
-            if str(row.get("root_identity", "")) not in used_roots
-        ]
-        if not candidates:
-            candidates = [
-                (identity, row)
-                for identity in remaining
-                for row in by_identity[identity]
-            ]
-        identity, row = min(
-            candidates,
-            key=lambda item: (
-                _leaf_rank(item[1]),
-                str(item[1].get("root_identity", "")),
-                item[0],
-            ),
-        )
+        ranked_row = pop_valid(available_rows, require_unused_root=True)
+        if ranked_row is None:
+            ranked_row = pop_valid(ranked_rows, require_unused_root=False)
+        if ranked_row is None:
+            raise RuntimeError("candidate ranking heaps lost a remaining identity")
+        _, root_identity, identity, _, row = ranked_row
         chosen.append(row)
         remaining.remove(identity)
-        used_roots.add(str(row.get("root_identity", "")))
+        used_roots.add(root_identity)
     return chosen
 
 
