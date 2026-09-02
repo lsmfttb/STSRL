@@ -26,7 +26,7 @@ import tempfile
 import time
 from collections import Counter
 from collections.abc import Iterable, Mapping
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -81,6 +81,25 @@ _CHECKPOINT_PATHS: dict[str, str] = {}
 _PASS_MODE = "candidate"
 _TARGET_SPECS: dict[str, dict[str, Any]] = {}
 _SELECTION_POLICY = "canonical-hidden-payload-v1-root-first-hash-v1"
+
+
+def _validate_worker_count(value: object) -> int:
+    """Validate the bounded native worker range without changing the default."""
+
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not 1 <= value <= WORKER_COUNT
+    ):
+        raise ValueError(f"workers must be an integer in the range 1..{WORKER_COUNT}")
+    return value
+
+
+def _worker_count_argument(value: str) -> int:
+    try:
+        return _validate_worker_count(int(value))
+    except (TypeError, ValueError) as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 def _iter_json_values(path: Path) -> Iterable[object]:
@@ -757,6 +776,26 @@ class _ProgressStore:
             raise ValueError("progress task artifact escapes parts directory") from exc
         return candidate
 
+    def _validated_artifact_path(
+        self,
+        stage_key: str,
+        task: tuple[int, str],
+        entry: Mapping[str, Any],
+    ) -> Path:
+        artifact = entry.get("artifact")
+        if not isinstance(artifact, Mapping):
+            raise TypeError(
+                f"progress task artifact reference is missing: {stage_key}/{_task_key(task)}"
+            )
+        path = self._artifact_path(artifact.get("path"))
+        if not path.is_file():
+            raise ValueError(f"progress task artifact is missing: {path}")
+        if artifact.get("bytes") != path.stat().st_size:
+            raise ValueError(f"progress task artifact size mismatch: {path}")
+        if artifact.get("sha256") != sha256_file(path):
+            raise ValueError(f"progress task artifact hash mismatch: {path}")
+        return path
+
     def _artifact_ref(self, path: Path) -> dict[str, Any]:
         return {
             "path": str(path.resolve().relative_to(self.path.parent)),
@@ -770,20 +809,10 @@ class _ProgressStore:
         task: tuple[int, str],
         entry: Mapping[str, Any],
     ) -> dict[str, Any]:
-        artifact = entry.get("artifact")
-        if not isinstance(artifact, Mapping):
-            raise TypeError(
-                f"progress task artifact reference is missing: {stage_key}/{_task_key(task)}"
-            )
-        path = self._artifact_path(artifact.get("path"))
-        if not path.is_file():
-            raise ValueError(f"progress task artifact is missing: {path}")
-        if artifact.get("bytes") != path.stat().st_size:
-            raise ValueError(f"progress task artifact size mismatch: {path}")
-        if artifact.get("sha256") != sha256_file(path):
-            raise ValueError(f"progress task artifact hash mismatch: {path}")
+        path = self._validated_artifact_path(stage_key, task, entry)
         try:
-            raw = json.loads(path.read_text(encoding="utf-8"))
+            with path.open("r", encoding="utf-8") as stream:
+                raw = json.load(stream)
         except (OSError, json.JSONDecodeError) as exc:
             raise ValueError(f"progress task artifact is unreadable: {path}") from exc
         expected_key = _task_key(task)
@@ -864,11 +893,13 @@ class _ProgressStore:
             existing["status"] = "RUNNING"
             self._save()
 
-    def successful_results(
+    def successful_task_keys(
         self,
         stage_key: str,
         tasks: list[tuple[int, str]],
-    ) -> dict[str, dict[str, Any]]:
+    ) -> set[str]:
+        """Return successful task keys without loading any task result rows."""
+
         stages = self.document.get("stages")
         stage = stages.get(stage_key) if isinstance(stages, Mapping) else None
         if not isinstance(stage, Mapping):
@@ -876,7 +907,7 @@ class _ProgressStore:
         raw_tasks = stage.get("tasks")
         if not isinstance(raw_tasks, Mapping):
             raise TypeError(f"progress stage task map is malformed: {stage_key}")
-        results: dict[str, dict[str, Any]] = {}
+        successful: set[str] = set()
         for task in tasks:
             key = _task_key(task)
             entry = raw_tasks.get(key)
@@ -884,10 +915,50 @@ class _ProgressStore:
                 continue
             status = entry.get("status")
             if status == "success":
-                results[key] = self._read_task_artifact(stage_key, task, entry)
+                # Validate the bounded artifact reference now, but defer JSON
+                # decoding until the caller asks for this particular result.
+                self._validated_artifact_path(stage_key, task, entry)
+                successful.add(key)
             elif status != "failed":
                 raise ValueError(f"progress task status is invalid: {stage_key}/{key}")
-        return results
+        return successful
+
+    def iter_successful_results(
+        self,
+        stage_key: str,
+        tasks: list[tuple[int, str]],
+    ) -> Iterable[tuple[tuple[int, str], dict[str, Any]]]:
+        """Yield one verified task result at a time from progress parts."""
+
+        stages = self.document.get("stages")
+        stage = stages.get(stage_key) if isinstance(stages, Mapping) else None
+        if not isinstance(stage, Mapping):
+            raise TypeError(f"progress stage is missing: {stage_key}")
+        raw_tasks = stage.get("tasks")
+        if not isinstance(raw_tasks, Mapping):
+            raise TypeError(f"progress stage task map is malformed: {stage_key}")
+        for task in tasks:
+            key = _task_key(task)
+            entry = raw_tasks.get(key)
+            if not isinstance(entry, Mapping):
+                continue
+            status = entry.get("status")
+            if status == "success":
+                yield task, self._read_task_artifact(stage_key, task, entry)
+            elif status != "failed":
+                raise ValueError(f"progress task status is invalid: {stage_key}/{key}")
+
+    def successful_results(
+        self,
+        stage_key: str,
+        tasks: list[tuple[int, str]],
+    ) -> dict[str, dict[str, Any]]:
+        """Compatibility helper; new collection paths use the lazy iterator."""
+
+        return {
+            _task_key(task): result
+            for task, result in self.iter_successful_results(stage_key, tasks)
+        }
 
     def record_success(
         self,
@@ -1157,12 +1228,16 @@ def _run_parallel_tasks(
     pass_index: int,
     task_ranges: str,
     plan: object = None,
+    retain_results: bool = True,
 ) -> tuple[list[dict[str, Any]], list[str], float, dict[str, Any]]:
+    workers = _validate_worker_count(workers)
     tasks = [(root_index, arm) for root_index in range(len(roots)) for arm in ARMS]
-    if progress is None:
-        started = time.monotonic()
-        rows: list[dict[str, Any]] = []
-        failures: list[str] = []
+
+    def iter_worker_results(
+        scheduled_tasks: list[tuple[int, str]],
+    ) -> Iterable[tuple[tuple[int, str], dict[str, Any] | None, BaseException | None]]:
+        """Keep at most ``workers`` native results live in the parent process."""
+
         context = multiprocessing.get_context("fork")
         with ProcessPoolExecutor(
             max_workers=workers,
@@ -1170,30 +1245,55 @@ def _run_parallel_tasks(
             initializer=_worker_init,
             initargs=(roots, native_commit, checkpoint_paths, pass_mode, target_specs),
         ) as pool:
-            futures = {pool.submit(worker_function, task): task for task in tasks}
-            for completed, future in enumerate(as_completed(futures), start=1):
-                task = futures[future]
-                try:
-                    rows.append(_validate_task_result(future.result(), task))
-                except Exception as exc:  # noqa: BLE001 - retained per-task evidence
-                    root_index, arm = task
-                    failures.append(
-                        f"{arm}/root{root_index}: {type(exc).__name__}: {exc}"
-                    )
-                if completed % 16 == 0 or completed == len(tasks):
-                    print(
-                        json.dumps(
-                            {
-                                "pass": pass_mode,
-                                "completed": completed,
-                                "total": len(tasks),
-                                "failures": len(failures),
-                                "wall_clock_seconds": time.monotonic() - started,
-                            },
-                            sort_keys=True,
-                        ),
-                        flush=True,
-                    )
+            task_iterator = iter(scheduled_tasks)
+            futures: dict[Any, tuple[int, str]] = {}
+            for _ in range(min(workers, len(scheduled_tasks))):
+                task = next(task_iterator, None)
+                if task is None:
+                    break
+                futures[pool.submit(worker_function, task)] = task
+            while futures:
+                done, _ = wait(set(futures), return_when=FIRST_COMPLETED)
+                for future in done:
+                    task = futures.pop(future)
+                    try:
+                        result = _validate_task_result(future.result(), task)
+                    except Exception as exc:  # noqa: BLE001 - retained per-task evidence
+                        yield task, None, exc
+                    else:
+                        yield task, result, None
+                    next_task = next(task_iterator, None)
+                    if next_task is not None:
+                        futures[pool.submit(worker_function, next_task)] = next_task
+
+    if progress is None:
+        started = time.monotonic()
+        rows: list[dict[str, Any]] = []
+        failures: list[str] = []
+        for completed, (task, result, error) in enumerate(
+            iter_worker_results(tasks), start=1
+        ):
+            if error is not None:
+                root_index, arm = task
+                failures.append(
+                    f"{arm}/root{root_index}: {type(error).__name__}: {error}"
+                )
+            elif result is not None:
+                rows.append(result)
+            if completed % 16 == 0 or completed == len(tasks):
+                print(
+                    json.dumps(
+                        {
+                            "pass": pass_mode,
+                            "completed": completed,
+                            "total": len(tasks),
+                            "failures": len(failures),
+                            "wall_clock_seconds": time.monotonic() - started,
+                        },
+                        sort_keys=True,
+                    ),
+                    flush=True,
+                )
         rows.sort(
             key=lambda row: (
                 str(row.get("sampling_arm")),
@@ -1224,53 +1324,39 @@ def _run_parallel_tasks(
         plan=plan,
     )
     started = time.monotonic()
-    cached = progress.successful_results(stage_key, tasks)
-    pending = [task for task in tasks if _task_key(task) not in cached]
-    completed = len(cached)
+    cached_keys = progress.successful_task_keys(stage_key, tasks)
+    pending = [task for task in tasks if _task_key(task) not in cached_keys]
+    completed = len(cached_keys)
     session_worker_pids: set[int] = set()
     if pending:
-        context = multiprocessing.get_context("fork")
-        with ProcessPoolExecutor(
-            max_workers=workers,
-            mp_context=context,
-            initializer=_worker_init,
-            initargs=(roots, native_commit, checkpoint_paths, pass_mode, target_specs),
-        ) as pool:
-            futures = {pool.submit(worker_function, task): task for task in pending}
-            for future in as_completed(futures):
-                task = futures[future]
-                try:
-                    result = _validate_task_result(future.result(), task)
-                    progress.record_success(stage_key, task, result)
-                    worker_pid = result.get("worker_pid")
-                    if isinstance(worker_pid, int) and not isinstance(worker_pid, bool):
-                        session_worker_pids.add(worker_pid)
-                except Exception as exc:  # noqa: BLE001 - retained per-task evidence
-                    progress.record_failure(stage_key, task, exc)
-                completed += 1
-                if completed % 16 == 0 or completed == len(tasks):
-                    print(
-                        json.dumps(
-                            {
-                                "pass": pass_mode,
-                                "completed": completed,
-                                "total": len(tasks),
-                                "failures": len(progress.stage_failures(stage_key)),
-                                "wall_clock_seconds": time.monotonic() - started,
-                            },
-                            sort_keys=True,
-                        ),
-                        flush=True,
-                    )
-    results_by_key = progress.successful_results(stage_key, tasks)
-    rows = [
-        results_by_key[_task_key(task)]
-        for task in tasks
-        if _task_key(task) in results_by_key
-    ]
-    rows.sort(
-        key=lambda row: (str(row.get("sampling_arm")), int(row.get("root_index", -1)))
-    )
+        for task, result, error in iter_worker_results(pending):
+            if error is not None:
+                progress.record_failure(stage_key, task, error)
+            elif result is not None:
+                progress.record_success(stage_key, task, result)
+                worker_pid = result.get("worker_pid")
+                if isinstance(worker_pid, int) and not isinstance(worker_pid, bool):
+                    session_worker_pids.add(worker_pid)
+            completed += 1
+            if completed % 16 == 0 or completed == len(tasks):
+                print(
+                    json.dumps(
+                        {
+                            "pass": pass_mode,
+                            "completed": completed,
+                            "total": len(tasks),
+                            "failures": len(progress.stage_failures(stage_key)),
+                            "wall_clock_seconds": time.monotonic() - started,
+                        },
+                        sort_keys=True,
+                    ),
+                    flush=True,
+                )
+    rows: list[dict[str, Any]] = []
+    if retain_results:
+        rows = [
+            result for _, result in progress.iter_successful_results(stage_key, tasks)
+        ]
     failures = progress.stage_failures(stage_key)
     stored_worker_pids = set(progress.stage_worker_pids(stage_key))
     worker_pids = sorted(stored_worker_pids | session_worker_pids)
@@ -1291,7 +1377,7 @@ def _run_parallel_tasks(
         "effective_worker_count": observed_worker_count,
         "worker_pids": worker_pids,
         "host_logical_cpu_count": os.cpu_count(),
-        "resume_cached_task_count": len(cached),
+        "resume_cached_task_count": len(cached_keys),
         "newly_executed_task_count": len(pending),
     }
     wall_clock_seconds = time.monotonic() - started
@@ -1334,6 +1420,7 @@ def _run_pass(
             else "selected_leaf_continuation pass: root indices 0..459 x three arms"
         ),
         plan=plan,
+        retain_results=progress is None,
     )
 
 
@@ -1510,6 +1597,280 @@ def _select_parity_root_indices(roots: list[dict[str, Any]]) -> list[int]:
     return act1[:8] + act2[:8]
 
 
+def _stage_tasks(root_count: int) -> list[tuple[int, str]]:
+    return [(root_index, arm) for root_index in range(root_count) for arm in ARMS]
+
+
+def _sorted_stage_tasks(tasks: Iterable[tuple[int, str]]) -> list[tuple[int, str]]:
+    return sorted(tasks, key=lambda task: (str(task[1]), int(task[0])))
+
+
+def _iter_stage_field_rows(
+    progress: _ProgressStore,
+    stage_key: str,
+    tasks: list[tuple[int, str]],
+    field: str,
+) -> Iterable[tuple[tuple[int, str], int, Mapping[str, Any]]]:
+    """Read one task part at a time and yield rows without stage accumulation."""
+
+    for task, result in progress.iter_successful_results(
+        stage_key, _sorted_stage_tasks(tasks)
+    ):
+        raw_rows = result.get(field)
+        if not isinstance(raw_rows, list):
+            raise TypeError(f"progress task result field is not a list: {field}")
+        for row_index, raw_row in enumerate(raw_rows):
+            if not isinstance(raw_row, Mapping):
+                raise TypeError(f"progress task row is malformed: {field}/{row_index}")
+            yield task, row_index, raw_row
+
+
+def _candidate_metadata(row: Mapping[str, Any]) -> dict[str, Any]:
+    """Keep only selection metadata after a candidate task part is read."""
+
+    identity = row.get("exact_leaf_identity")
+    digest = row.get("exact_state_digest")
+    if not isinstance(identity, str) or not identity:
+        raise ValueError("candidate exact hidden identity is missing")
+    if not isinstance(digest, str) or not digest:
+        raise ValueError("candidate exact state digest is missing")
+    hidden = row.get("exact_hidden_state_payload")
+    payload_sha256 = row.get("canonical_native_payload_sha256")
+    if isinstance(hidden, Mapping):
+        payload = hidden.get("canonical_native_payload_json")
+        if isinstance(payload, str) and payload:
+            payload_sha256 = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    if not isinstance(payload_sha256, str) or not payload_sha256:
+        raise ValueError("candidate lacks canonical hidden payload identity")
+    expected_identity = f"t084-hidden-state-{payload_sha256}"
+    if identity != expected_identity:
+        raise ValueError(
+            "candidate exact hidden identity is not derived from canonical payload"
+        )
+    source_identity = row.get(
+        "source_complete_identity_sha256", row.get("root_identity")
+    )
+    occurrence_key = row.get("occurrence_key")
+    if not isinstance(source_identity, str) or not source_identity:
+        raise ValueError("candidate source identity is missing")
+    if not isinstance(occurrence_key, str) or not occurrence_key:
+        raise ValueError("candidate occurrence key is missing")
+    act = row.get("act")
+    if isinstance(act, bool) or not isinstance(act, int):
+        raise TypeError("candidate Act is invalid")
+    return {
+        "sampling_arm": str(row.get("sampling_arm")),
+        "act": act,
+        "root_identity": str(row.get("root_identity", source_identity)),
+        "exact_leaf_identity": identity,
+        "exact_state_digest": digest,
+        "source_complete_identity_sha256": source_identity,
+        "occurrence_key": occurrence_key,
+        "canonical_native_payload_sha256": payload_sha256,
+        "depth": row.get("depth"),
+        "callback_ordinal": row.get("callback_ordinal"),
+        "path_fingerprint": row.get("path_fingerprint"),
+    }
+
+
+def _iter_candidate_metadata(
+    progress: _ProgressStore,
+    stage_key: str,
+    tasks: list[tuple[int, str]],
+) -> Iterable[dict[str, Any]]:
+    for _, _, row in _iter_stage_field_rows(
+        progress, stage_key, tasks, "candidate_rows"
+    ):
+        yield _candidate_metadata(row)
+
+
+def _iter_candidate_rows_with_occupancy(
+    progress: _ProgressStore,
+    stage_key: str,
+    tasks: list[tuple[int, str]],
+    occupancy_counts: Mapping[str, int],
+) -> Iterable[dict[str, Any]]:
+    """Stream full candidate rows and add the existing occupancy annotations."""
+
+    for _, _, raw_row in _iter_stage_field_rows(
+        progress, stage_key, tasks, "candidate_rows"
+    ):
+        metadata = _candidate_metadata(raw_row)
+        identity = str(metadata["exact_leaf_identity"])
+        expected_count = occupancy_counts.get(identity)
+        if expected_count is None:
+            raise ValueError("candidate occupancy metadata is incomplete")
+        row = dict(raw_row)
+        hidden = row.get("exact_hidden_state_payload")
+        if not isinstance(hidden, Mapping):
+            raise TypeError("candidate lacks exact hidden state payload")
+        annotated_hidden = dict(hidden)
+        annotated_hidden["occupancy_duplicate"] = expected_count > 1
+        annotated_hidden["occupancy_count"] = expected_count
+        row["exact_hidden_state_payload"] = annotated_hidden
+        yield row
+
+
+def _iter_root_runs(
+    progress: _ProgressStore,
+    stage_key: str,
+    tasks: list[tuple[int, str]],
+) -> Iterable[dict[str, Any]]:
+    for _, result in progress.iter_successful_results(
+        stage_key, _sorted_stage_tasks(tasks)
+    ):
+        yield {
+            key: value
+            for key, value in result.items()
+            if key not in ("candidate_rows", "target_rows")
+        }
+
+
+def _target_location(descriptor: Mapping[str, Any]) -> tuple[str, str, int]:
+    stage_key = descriptor.get("_stage_key")
+    task_key = descriptor.get("_task_key")
+    row_index = descriptor.get("_row_index")
+    if (
+        not isinstance(stage_key, str)
+        or not isinstance(task_key, str)
+        or isinstance(row_index, bool)
+        or not isinstance(row_index, int)
+    ):
+        raise TypeError("accepted target row has no valid progress locator")
+    return stage_key, task_key, row_index
+
+
+def _iter_located_target_rows(
+    progress: _ProgressStore,
+    stage_keys: list[str],
+    tasks: list[tuple[int, str]],
+    descriptors: Iterable[Mapping[str, Any]],
+) -> Iterable[tuple[Mapping[str, Any], Mapping[str, Any]]]:
+    descriptor_list = list(descriptors)
+    wanted = {
+        _target_location(descriptor): descriptor for descriptor in descriptor_list
+    }
+    if len(wanted) != len(descriptor_list):
+        raise ValueError("accepted target row locators are not unique")
+    found: set[tuple[str, str, int]] = set()
+    for stage_key in stage_keys:
+        for task, row_index, row in _iter_stage_field_rows(
+            progress, stage_key, tasks, "target_rows"
+        ):
+            location = (stage_key, _task_key(task), row_index)
+            descriptor = wanted.get(location)
+            if descriptor is None:
+                continue
+            if location in found:
+                raise ValueError("accepted target row locator was emitted twice")
+            found.add(location)
+            yield descriptor, row
+    missing = set(wanted) - found
+    if missing:
+        raise ValueError(
+            "accepted target row parts are missing: "
+            + ", ".join(
+                f"{stage}/{task}/{index}" for stage, task, index in sorted(missing)
+            )
+        )
+
+
+def _accepted_descriptors(
+    accepted_by_cell: Mapping[tuple[str, int, str], list[dict[str, Any]]],
+    target_kind: str,
+) -> list[dict[str, Any]]:
+    descriptors: list[dict[str, Any]] = []
+    for arm in ARMS:
+        for act in (1, 2):
+            descriptors.extend(
+                descriptor
+                for descriptor in accepted_by_cell.get((arm, act, target_kind), [])
+                if descriptor.get("target_kind") == target_kind
+            )
+    return descriptors
+
+
+def _write_streaming_json_temp(
+    path: Path,
+    execution: Mapping[str, Any],
+    row_streams: Mapping[str, Iterable[object]],
+) -> tuple[Path, dict[str, Any]]:
+    """Encode the final object while retaining at most one row at a time."""
+
+    path = path.resolve()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_fd, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent)
+    )
+    temporary = Path(temporary_name)
+    encoder = json.JSONEncoder(indent=2, sort_keys=True, allow_nan=False)
+    try:
+        with os.fdopen(temporary_fd, "w", encoding="utf-8", newline="\n") as stream:
+            stream.write("{")
+            first = True
+            for key in sorted(execution):
+                if not first:
+                    stream.write(",")
+                first = False
+                stream.write("\n  ")
+                for chunk in encoder.iterencode(key):
+                    stream.write(chunk)
+                stream.write(": ")
+                row_stream = row_streams.get(key)
+                if row_stream is None:
+                    for chunk in encoder.iterencode(execution[key]):
+                        stream.write(chunk)
+                    continue
+                stream.write("[")
+                first_row = True
+                for row in row_stream:
+                    if not first_row:
+                        stream.write(",")
+                    first_row = False
+                    for chunk in encoder.iterencode(row):
+                        stream.write(chunk)
+                stream.write("]")
+            stream.write("\n}\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        output_ref = {
+            "path": str(path),
+            "bytes": temporary.stat().st_size,
+            "sha256": sha256_file(temporary),
+        }
+        return temporary, output_ref
+    except BaseException:
+        if temporary.exists():
+            temporary.unlink()
+        raise
+
+
+def _publish_streaming_json(
+    path: Path,
+    execution: Mapping[str, Any],
+    row_streams: Mapping[str, Iterable[object]],
+    progress: _ProgressStore,
+) -> None:
+    temporary, expected = _write_streaming_json_temp(path, execution, row_streams)
+    try:
+        progress.prepare_final(expected)
+        os.replace(temporary, path)
+        directory_fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+        actual = {
+            "path": str(path.resolve()),
+            "bytes": path.stat().st_size,
+            "sha256": sha256_file(path),
+        }
+        progress.mark_complete(actual)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
 def _leaf_rank(row: Mapping[str, Any]) -> str:
     value = "|".join(
         (
@@ -1560,14 +1921,20 @@ def _ordered_cell_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Return unique states in deterministic root-first then hash order."""
 
     by_identity: dict[str, list[dict[str, Any]]] = {}
-    digest_payloads: dict[str, str] = {}
-    for row in rows:
+    digest_identities: dict[str, str] = {}
+    identity_digests: dict[str, str] = {}
+    for raw_row in rows:
+        row = _candidate_metadata(raw_row)
         identity = str(row["exact_leaf_identity"])
-        payload = _canonical_payload(row)
-        digest = str(row.get("exact_state_digest", ""))
-        previous_payload = digest_payloads.setdefault(digest, payload)
-        if previous_payload != payload:
+        digest = str(row["exact_state_digest"])
+        previous_identity = digest_identities.setdefault(digest, identity)
+        if previous_identity != identity:
             raise ValueError(f"native digest collision for {digest}")
+        previous_digest = identity_digests.setdefault(identity, digest)
+        if previous_digest != digest:
+            raise ValueError(
+                "candidate exact hidden identity maps to conflicting state digests"
+            )
         by_identity.setdefault(identity, []).append(row)
 
     remaining = set(by_identity)
@@ -1707,6 +2074,7 @@ def _target_row_has_full_replicates(row: Mapping[str, Any]) -> bool:
 
 def _target_spec_for_row(row: Mapping[str, Any], target_kind: str) -> dict[str, Any]:
     return {
+        "exact_leaf_identity": str(row["exact_leaf_identity"]),
         "target_kind": target_kind,
         "occurrence_key": str(row["occurrence_key"]),
         "root_identity": str(row["root_identity"]),
@@ -1818,7 +2186,9 @@ def _run_identity(
     native_commit: str,
     checkpoint_paths: Mapping[str, str],
     output_path: Path,
+    workers: int,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
+    workers = _validate_worker_count(workers)
     manifest_sha = sha256_file(manifest_path)
     expected_manifest_sha = EXPECTED_T064_ARTIFACTS["t064-curriculum-manifest.json"][0]
     if manifest_sha != expected_manifest_sha:
@@ -1851,7 +2221,7 @@ def _run_identity(
         "arms": list(ARMS),
         "search_simulations_per_root": 100,
         "include_potions": False,
-        "workers": WORKER_COUNT,
+        "workers": workers,
         "action_cap": 2048,
         "calibration_count": CALIBRATION_COUNT,
         "calibration_replicates": CALIBRATION_REPLICATES,
@@ -1862,6 +2232,370 @@ def _run_identity(
         "output_path": str(output_path.resolve()),
     }
     return identity, configuration
+
+
+def _run_progress_collection(
+    roots: list[dict[str, Any]],
+    checkpoint_paths: dict[str, str],
+    native_commit: str,
+    workers: int,
+    output_path: Path,
+    progress: _ProgressStore,
+) -> int:
+    """Run the resumable path with bounded parent-memory aggregation."""
+
+    workers = _validate_worker_count(workers)
+    tasks = _stage_tasks(len(roots))
+    _, candidate_failures, candidate_wall, candidate_workers = _run_pass(
+        roots,
+        checkpoint_paths,
+        native_commit,
+        workers,
+        "candidate",
+        {},
+        progress=progress,
+        stage_key="candidate",
+        pass_index=0,
+    )
+    if candidate_failures:
+        raise RuntimeError(
+            "candidate pass incomplete: " + "; ".join(candidate_failures[:8])
+        )
+    candidate_successes = progress.successful_task_keys("candidate", tasks)
+    if len(candidate_successes) != len(tasks):
+        raise RuntimeError(
+            "candidate pass incomplete: "
+            f"{len(candidate_successes)}/{len(tasks)} task parts are successful"
+        )
+
+    # Candidate rows are decoded one task part at a time and reduced to the
+    # fields needed for deterministic selection.  Full candidate rows remain
+    # on disk until the final JSON encoder asks for them.
+    candidate_metadata = list(_iter_candidate_metadata(progress, "candidate", tasks))
+    occupancy_counts = Counter(
+        str(row["exact_leaf_identity"]) for row in candidate_metadata
+    )
+    target_specs, selection_policy = _select_target_specs_with_policy(
+        candidate_metadata
+    )
+
+    replay_passes: list[dict[str, Any]] = []
+    target_stage_keys: list[str] = []
+    target_worker_evidence: list[dict[str, Any]] = []
+    attempted_ids: set[str] = set()
+    accepted_by_cell: dict[tuple[str, int, str], list[dict[str, Any]]] = {}
+    accepted_ids: set[str] = set()
+    target_attempts: list[dict[str, Any]] = []
+    current_specs = target_specs
+    pass_index = 1
+    while current_specs:
+        scheduled_ids = set(current_specs)
+        stage_key = f"selected_leaf_continuation_pass_{pass_index:04d}"
+        _, pass_failures, pass_wall, pass_workers = _run_pass(
+            roots,
+            checkpoint_paths,
+            native_commit,
+            workers,
+            "selected_leaf_continuation",
+            current_specs,
+            progress=progress,
+            stage_key=stage_key,
+            pass_index=pass_index,
+            plan={"target_specs": current_specs},
+        )
+        if pass_failures:
+            raise RuntimeError(
+                f"selected-leaf replay pass {pass_index} incomplete: "
+                + "; ".join(pass_failures[:8])
+            )
+        pass_successes = progress.successful_task_keys(stage_key, tasks)
+        if len(pass_successes) != len(tasks):
+            raise RuntimeError(
+                f"selected-leaf replay pass {pass_index} incomplete: "
+                f"{len(pass_successes)}/{len(tasks)} task parts are successful"
+            )
+        target_stage_keys.append(stage_key)
+        attempted_ids.update(scheduled_ids)
+        target_worker_evidence.append(pass_workers)
+        returned_ids: set[str] = set()
+        valid_rows = 0
+        invalid_rows = 0
+        for task, row_index, row in _iter_stage_field_rows(
+            progress, stage_key, tasks, "target_rows"
+        ):
+            leaf_id = row.get("exact_leaf_identity")
+            if not isinstance(leaf_id, str) or leaf_id not in current_specs:
+                raise ValueError(
+                    f"target row is not in scheduled target specs: {leaf_id}"
+                )
+            spec = current_specs[leaf_id]
+            if row.get("target_kind") != spec.get("target_kind"):
+                raise ValueError(f"target kind mismatch for {leaf_id}")
+            returned_ids.add(leaf_id)
+            usable = _target_row_has_full_replicates(row)
+            if usable:
+                valid_rows += 1
+            else:
+                invalid_rows += 1
+            target_attempts.append(
+                {
+                    "exact_leaf_identity": leaf_id,
+                    "occurrence_key": row.get("occurrence_key"),
+                    "root_identity": row.get("root_identity"),
+                    "sampling_arm": row.get("sampling_arm"),
+                    "act": row.get("act"),
+                    "target_kind": row.get("target_kind"),
+                    "valid_256_replicates": usable,
+                    "replay_pass": pass_index,
+                    "backfill_used": pass_index > 1,
+                }
+            )
+            if usable and leaf_id not in accepted_ids:
+                descriptor = _target_spec_for_row(row, str(row.get("target_kind")))
+                descriptor.update(
+                    {
+                        "_stage_key": stage_key,
+                        "_task_key": _task_key(task),
+                        "_row_index": row_index,
+                    }
+                )
+                cell = (
+                    str(row["sampling_arm"]),
+                    int(row["act"]),
+                    str(row["target_kind"]),
+                )
+                accepted_by_cell.setdefault(cell, []).append(descriptor)
+                accepted_ids.add(leaf_id)
+        for leaf_id, spec in current_specs.items():
+            if leaf_id not in returned_ids:
+                target_attempts.append(
+                    {
+                        "exact_leaf_identity": leaf_id,
+                        "occurrence_key": spec.get("occurrence_key"),
+                        "root_identity": spec.get("root_identity"),
+                        "sampling_arm": spec.get("sampling_arm"),
+                        "act": spec.get("act"),
+                        "target_kind": spec.get("target_kind"),
+                        "valid_256_replicates": False,
+                        "replay_pass": pass_index,
+                        "backfill_used": pass_index > 1,
+                        "error": "scheduled occurrence produced no target row; see collector evidence",
+                    }
+                )
+        replay_passes.append(
+            {
+                "pass_index": pass_index,
+                "candidate_occurrence_count": len(current_specs),
+                "worker_count": workers,
+                "task_count": len(tasks),
+                "task_ranges": "root indices 0..459 x three arms",
+                "wall_clock_seconds": pass_wall,
+                "worker_evidence": pass_workers,
+                "valid_rows": valid_rows,
+                "invalid_rows": invalid_rows,
+            }
+        )
+        current_specs = _backfill_specs(
+            candidate_metadata, attempted_ids, accepted_by_cell, set()
+        )
+        pass_index += 1
+
+    calibration_descriptors = _accepted_descriptors(accepted_by_cell, "calibration")
+    formal_descriptors = _accepted_descriptors(accepted_by_cell, "formal")
+    calibration_by_identity: dict[str, Mapping[str, Any]] = {}
+    for descriptor, row in _iter_located_target_rows(
+        progress, target_stage_keys, tasks, calibration_descriptors
+    ):
+        identity = str(row.get("exact_leaf_identity"))
+        if identity in calibration_by_identity:
+            raise ValueError(f"duplicate calibration target row: {identity}")
+        if row.get("target_kind") != "calibration":
+            raise ValueError(
+                f"calibration locator returned non-calibration row: {identity}"
+            )
+        calibration_by_identity[identity] = row
+    calibration_rows = [
+        calibration_by_identity[str(descriptor["exact_leaf_identity"])]
+        for descriptor in calibration_descriptors
+        if str(descriptor["exact_leaf_identity"]) in calibration_by_identity
+    ]
+    calibration = (
+        select_repetition_count(calibration_rows)
+        if len(calibration_rows) == CALIBRATION_COUNT
+        else {"qualified": False, "reason": "exact 96 calibration rows unavailable"}
+    )
+    selected_n = calibration.get("selected_repetition_count")
+
+    parity, parity_failures, parity_wall = _run_parity(
+        roots,
+        checkpoint_paths,
+        native_commit,
+        workers,
+        progress=progress,
+    )
+    if parity_failures:
+        raise RuntimeError(
+            "parity preflight incomplete: " + "; ".join(parity_failures[:8])
+        )
+
+    target_wall = sum(item["wall_clock_seconds"] for item in replay_passes)
+    total_wall = candidate_wall + target_wall + parity_wall
+    selected_worker_summary = {
+        "configured_worker_count": workers,
+        "observed_worker_count": min(
+            [item["observed_worker_count"] for item in target_worker_evidence]
+            or [candidate_workers["observed_worker_count"]]
+        ),
+        "effective_worker_count": min(
+            [item["effective_worker_count"] for item in target_worker_evidence]
+            or [candidate_workers["effective_worker_count"]]
+        ),
+        "worker_pids": sorted(
+            {pid for item in target_worker_evidence for pid in item["worker_pids"]}
+        ),
+        "host_logical_cpu_count": os.cpu_count(),
+    }
+    root_stage_key = target_stage_keys[-1] if target_stage_keys else "candidate"
+    execution = {
+        "schema_id": COLLECTOR_SCHEMA_ID,
+        "generation_mode": "native_runtime_collector",
+        "native_commit": native_commit,
+        "search_simulations_per_root": 100,
+        "worker_count": workers,
+        "effective_worker_count": min(
+            [candidate_workers["effective_worker_count"]]
+            + [item["effective_worker_count"] for item in target_worker_evidence]
+            + [parity["effective_worker_count"]]
+        ),
+        # These four arrays are supplied by row_streams below.  The placeholders
+        # keep the final object schema identical without retaining their rows.
+        "root_runs": None,
+        "candidate_rows": None,
+        "calibration_rows": None,
+        "formal_rows": None,
+        "calibration": calibration,
+        "generation_passes": {
+            "candidate": {
+                "worker_count": workers,
+                "effective_worker_count": candidate_workers["effective_worker_count"],
+                "worker_evidence": candidate_workers,
+                "task_count": len(tasks),
+                "wall_clock_seconds": candidate_wall,
+            },
+            "selected_leaf_continuation": {
+                "worker_count": workers,
+                "task_count": len(tasks) * max(1, len(replay_passes)),
+                "tasks_per_pass": len(tasks),
+                "wall_clock_seconds": target_wall,
+                "target_identity_count": len(target_specs),
+                "worker_evidence": target_worker_evidence,
+                "replay_passes": replay_passes,
+                "target_attempts": target_attempts,
+            },
+            "parity_preflight": {
+                "worker_count": workers,
+                "effective_worker_count": parity["effective_worker_count"],
+                "worker_evidence": parity["worker_evidence"],
+                "task_count": 16 * len(ARMS),
+                "task_ranges": "first eight Act1 and first eight Act2 source roots x three arms",
+                "wall_clock_seconds": parity_wall,
+            },
+            "selection_policy": selection_policy,
+            "backfill": {
+                "policy": "same arm/Act cell; next root-first/canonical candidate only after 256-replicate failure",
+                "target_attempts": target_attempts,
+            },
+        },
+        "arm_configs": {
+            "unguided_search_v2": {
+                "policy_prior": False,
+                "leaf_value": False,
+                "checkpoint_sha256": None,
+            },
+            "prior_only_static_64001": {
+                "policy_prior": True,
+                "leaf_value": False,
+                "checkpoint_sha256": EXPECTED_STATIC_CHECKPOINTS[
+                    "prior_only_static_64001"
+                ][0],
+            },
+            "prior_only_static_64002": {
+                "policy_prior": True,
+                "leaf_value": False,
+                "checkpoint_sha256": EXPECTED_STATIC_CHECKPOINTS[
+                    "prior_only_static_64002"
+                ][0],
+            },
+        },
+        "parity": parity,
+        "failures": [],
+        "shards": [
+            {
+                "worker_count": workers,
+                "effective_worker_count": candidate_workers["effective_worker_count"],
+                "task_count": len(tasks),
+                "task_ranges": "candidate pass: root indices 0..459 x three arms",
+                "wall_clock_seconds": candidate_wall,
+                "worker_evidence": candidate_workers,
+            },
+            {
+                "worker_count": workers,
+                "effective_worker_count": min(
+                    item["effective_worker_count"] for item in target_worker_evidence
+                )
+                if target_worker_evidence
+                else 0,
+                "task_count": len(tasks) * max(1, len(replay_passes)),
+                "task_ranges": "selected_leaf_continuation pass: root indices 0..459 x three arms",
+                "wall_clock_seconds": target_wall,
+                "worker_evidence": selected_worker_summary,
+            },
+            {
+                "worker_count": workers,
+                "effective_worker_count": parity["effective_worker_count"],
+                "task_count": 16 * len(ARMS),
+                "task_ranges": "parity_preflight: first eight Act1 and first eight Act2 source roots x three arms",
+                "wall_clock_seconds": parity_wall,
+                "worker_evidence": parity["worker_evidence"],
+            },
+        ],
+        "result_aggregation": {
+            "mode": "progress_parts_streaming",
+            "candidate_task_results": "read_one_verified_part_at_a_time",
+            "target_task_results": "read_one_verified_part_at_a_time",
+            "candidate_rows_in_memory_during_selection": 0,
+            "formal_rows_in_memory_during_aggregation": 0,
+            "calibration_rows_in_memory_during_metrics": len(calibration_rows),
+            "selection_metadata_rows_in_memory": len(candidate_metadata),
+        },
+        "wall_clock_seconds": total_wall,
+    }
+
+    def formal_row_stream() -> Iterable[Mapping[str, Any]]:
+        for _, row in _iter_located_target_rows(
+            progress, target_stage_keys, tasks, formal_descriptors
+        ):
+            formal_row = dict(row)
+            if isinstance(selected_n, int):
+                replicates = formal_row.get("replicates")
+                if not isinstance(replicates, list):
+                    raise TypeError(
+                        f"formal target row has no replicate list: {formal_row.get('exact_leaf_identity')}"
+                    )
+                formal_row["selected_repetition_count"] = selected_n
+                formal_row["replicates"] = replicates[:selected_n]
+            yield formal_row
+
+    row_streams: dict[str, Iterable[object]] = {
+        "root_runs": _iter_root_runs(progress, root_stage_key, tasks),
+        "candidate_rows": _iter_candidate_rows_with_occupancy(
+            progress, "candidate", tasks, occupancy_counts
+        ),
+        "calibration_rows": iter(calibration_rows),
+        "formal_rows": formal_row_stream(),
+    }
+    _publish_streaming_json(output_path, execution, row_streams, progress)
+    return 0
 
 
 def main() -> int:
@@ -1882,10 +2616,9 @@ def main() -> int:
         action="store_true",
         help="resume the exact run recorded under --progress-dir",
     )
-    parser.add_argument("--workers", type=int, default=WORKER_COUNT)
+    parser.add_argument("--workers", type=_worker_count_argument, default=WORKER_COUNT)
     args = parser.parse_args()
-    if args.workers != WORKER_COUNT:
-        raise SystemExit("T084 collector requires exactly 16 workers")
+    args.workers = _validate_worker_count(args.workers)
     if not args.native_build.is_dir():
         raise SystemExit(f"native build directory is missing: {args.native_build}")
     args.output = args.output.resolve()
@@ -1910,6 +2643,7 @@ def main() -> int:
                 args.native_commit,
                 checkpoint_paths,
                 args.output,
+                args.workers,
             )
             progress = _ProgressStore(
                 progress_path,
@@ -1920,6 +2654,14 @@ def main() -> int:
             )
             if progress.already_complete:
                 return 0
+            return _run_progress_collection(
+                roots,
+                checkpoint_paths,
+                args.native_commit,
+                args.workers,
+                args.output,
+                progress,
+            )
         tasks = len(roots) * len(ARMS)
         candidate_runs, candidate_failures, candidate_wall, candidate_workers = (
             _run_pass(

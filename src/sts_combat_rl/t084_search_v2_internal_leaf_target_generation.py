@@ -79,6 +79,7 @@ CALIBRATION_REPLICATES = 256
 CANDIDATE_REPETITIONS = (16, 32, 64, 100, 128)
 ACTION_CAP = 2048
 WORKER_COUNT = 16
+MIN_WORKER_COUNT = 1
 FORMAL_ACT_COUNTS = {1: 178, 2: 142}
 CLASSIFICATIONS = (
     "LEAF_CONTINUATION_UTILITY_TARGETS_READY",
@@ -92,6 +93,14 @@ PUBLIC_TACTICAL_FEATURE_SCHEMA_ID = "public-tactical-v2"
 PUBLIC_TACTICAL_FEATURE_SCHEMA_VERSION = 2
 PUBLIC_CONTEXT_FEATURE_SCHEMA_ID = "public-context-model-input-v1"
 PUBLIC_CONTEXT_FEATURE_SCHEMA_VERSION = 1
+
+
+def _valid_worker_count(value: object) -> bool:
+    return (
+        isinstance(value, int)
+        and not isinstance(value, bool)
+        and MIN_WORKER_COUNT <= value <= WORKER_COUNT
+    )
 
 
 def sha256_file(path: Path) -> str:
@@ -732,11 +741,18 @@ def validate_collector_execution(
         problems.append("collector search_simulations_per_root is not 100")
     if len(selected_sources) != 460:
         problems.append("collector selected T064 root cohort is not exactly 460 roots")
+    configured_workers = execution.get("worker_count")
+    effective_workers = execution.get("effective_worker_count")
+    valid_configured_workers = _valid_worker_count(configured_workers)
+    valid_effective_workers = _valid_worker_count(effective_workers)
     if (
-        execution.get("worker_count") != WORKER_COUNT
-        or execution.get("effective_worker_count") != WORKER_COUNT
+        not valid_configured_workers
+        or not valid_effective_workers
+        or effective_workers > configured_workers
     ):
-        problems.append("collector did not prove 16 configured/effective workers")
+        problems.append(
+            "collector configured/effective worker counts must be in 1..16 with effective <= configured"
+        )
     shards = execution.get("shards")
     expected_stage_ranges = (
         "candidate pass: root indices 0..459 x three arms",
@@ -747,13 +763,27 @@ def validate_collector_execution(
         problems.append("collector stage shards are not the three required stages")
     else:
         for shard, expected_range in zip(shards, expected_stage_ranges):
+            shard_workers = (
+                shard.get("worker_count") if isinstance(shard, Mapping) else None
+            )
+            shard_effective = (
+                shard.get("effective_worker_count")
+                if isinstance(shard, Mapping)
+                else None
+            )
+            shard_worker_range_valid = (
+                _valid_worker_count(shard_workers)
+                and _valid_worker_count(shard_effective)
+                and shard_effective <= shard_workers
+            )
             if (
                 not isinstance(shard, Mapping)
-                or shard.get("worker_count") != WORKER_COUNT
-                or shard.get("effective_worker_count") != WORKER_COUNT
+                or shard.get("worker_count") != configured_workers
+                or not shard_worker_range_valid
                 or shard.get("task_ranges") != expected_range
                 or not isinstance(shard.get("worker_evidence"), Mapping)
-                or shard["worker_evidence"].get("observed_worker_count") != WORKER_COUNT
+                or shard["worker_evidence"].get("observed_worker_count")
+                != shard.get("effective_worker_count")
             ):
                 problems.append(
                     f"collector shard evidence is incomplete: {expected_range}"
@@ -844,7 +874,11 @@ def validate_collector_execution(
         if (
             parity.get("checked_root_count") != 16
             or parity.get("task_count") != 48
-            or parity.get("effective_worker_count") != WORKER_COUNT
+            or not _valid_worker_count(parity.get("effective_worker_count"))
+            or (
+                valid_configured_workers
+                and parity.get("effective_worker_count") > configured_workers
+            )
             or set(parity.get("arms", [])) != set(ARMS)
             or set(parity.get("acts", [])) != {1, 2}
             or parity.get("act_counts") != {"1": 24, "2": 24}
@@ -863,7 +897,7 @@ def validate_collector_execution(
             }
             if len(parity_keys) != 48:
                 problems.append("collector parity contains duplicate root/arm rows")
-        if parity.get("worker_count") != WORKER_COUNT or not all(
+        if parity.get("worker_count") != configured_workers or not all(
             parity.get(field) is True for field in parity_fields[4:]
         ):
             problems.append(

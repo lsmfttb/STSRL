@@ -10,11 +10,15 @@ import scripts.collect_t084_native_leaf_candidates as t084_collector
 from scripts.collect_t084_native_leaf_candidates import (
     ARMS,
     PROGRESS_SCHEMA_ID,
+    _candidate_metadata,
+    _iter_stage_field_rows,
     _ProgressStore,
     _select_cell,
     _select_parity_root_indices,
     _selected_target_for_occurrence,
     _task_key,
+    _validate_worker_count,
+    _write_streaming_json_temp,
 )
 from sts_combat_rl.t084_search_v2_internal_leaf_target_generation import (
     ACTION_CAP,
@@ -256,6 +260,26 @@ def test_collector_validation_requires_complete_three_arm_root_inventory() -> No
     assert result["valid"] is False
     assert any("3x460" in item for item in result["problems"])
     assert any("parity" in item for item in result["problems"])
+
+
+def test_collector_validation_allows_explicit_lower_worker_count() -> None:
+    result = validate_collector_execution(
+        {
+            "schema_id": "t084-native-internal-leaf-collector-v1",
+            "generation_mode": "native_runtime_collector",
+            "search_simulations_per_root": 100,
+            "worker_count": 6,
+            "effective_worker_count": 6,
+            "root_runs": [],
+            "arm_configs": {},
+            "parity": {},
+            "candidate_rows": [],
+        },
+        [],
+    )
+    assert not any(
+        "configured/effective worker counts" in item for item in result["problems"]
+    )
 
 
 def test_collector_validation_requires_parity_available_and_passed() -> None:
@@ -751,3 +775,132 @@ def test_progress_corruption_fails_closed_before_reuse(tmp_path) -> None:
     )
     with pytest.raises(ValueError, match="artifact (size|hash) mismatch"):
         resumed.successful_results("candidate", [task])
+
+
+@pytest.mark.parametrize("workers", [1, 4, 6, 16])
+def test_collector_accepts_bounded_worker_range(workers: int) -> None:
+    assert _validate_worker_count(workers) == workers
+
+
+@pytest.mark.parametrize("workers", [0, -1, 17, True, "6", None])
+def test_collector_rejects_worker_count_outside_bounded_range(workers) -> None:
+    with pytest.raises(ValueError, match="range 1..16"):
+        _validate_worker_count(workers)
+
+
+def test_progress_resume_rejects_worker_configuration_change(tmp_path) -> None:
+    progress_path = tmp_path / "t084.progress.json"
+    output_path = tmp_path / "t084.json"
+    identity = _progress_identity()
+    _ProgressStore(
+        progress_path,
+        identity=identity,
+        configuration={**_progress_configuration(), "workers": 6},
+        output_path=output_path,
+        resume=False,
+    )
+    with pytest.raises(ValueError, match="task configuration mismatch"):
+        _ProgressStore(
+            progress_path,
+            identity=identity,
+            configuration={**_progress_configuration(), "workers": 4},
+            output_path=output_path,
+            resume=True,
+        )
+
+
+def test_progress_parts_are_iterated_lazily_and_final_rows_are_streamed(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    progress_path = tmp_path / "t084.progress.json"
+    output_path = tmp_path / "t084.json"
+    identity = _progress_identity()
+    configuration = _progress_configuration()
+    store = _ProgressStore(
+        progress_path,
+        identity=identity,
+        configuration=configuration,
+        output_path=output_path,
+        resume=False,
+    )
+    tasks = [(0, ARMS[0]), (1, ARMS[0])]
+    store.ensure_stage("candidate", tasks, pass_index=0, task_ranges="range")
+    for index, task in enumerate(tasks):
+        store.record_success(
+            "candidate",
+            task,
+            {
+                "root_index": task[0],
+                "sampling_arm": task[1],
+                "candidate_rows": [{"row": index}],
+                "target_rows": [],
+            },
+        )
+
+    reads: list[str] = []
+    original_read = store._read_task_artifact
+
+    def read_one(
+        stage_key: str,
+        task: tuple[int, str],
+        entry: dict[str, object],
+    ) -> dict[str, object]:
+        reads.append(_task_key(task))
+        return original_read(stage_key, task, entry)
+
+    monkeypatch.setattr(store, "_read_task_artifact", read_one)
+    iterator = _iter_stage_field_rows(store, "candidate", tasks, "candidate_rows")
+    assert reads == []
+    first = next(iterator)
+    assert first[2] == {"row": 0}
+    assert reads == [_task_key(tasks[0])]
+    second = next(iterator)
+    assert second[2] == {"row": 1}
+    assert reads == [_task_key(tasks[0]), _task_key(tasks[1])]
+    with pytest.raises(StopIteration):
+        next(iterator)
+
+    execution = {"candidate_rows": None, "small_metadata": {"bounded": True}}
+
+    def rows_only():
+        for _, _, row in _iter_stage_field_rows(
+            store, "candidate", tasks, "candidate_rows"
+        ):
+            yield row
+
+    temporary, output_ref = _write_streaming_json_temp(
+        output_path,
+        execution,
+        {"candidate_rows": rows_only()},
+    )
+    try:
+        parsed = json.loads(temporary.read_text(encoding="utf-8"))
+    finally:
+        temporary.unlink()
+    assert output_ref["bytes"] > 0
+    assert parsed["candidate_rows"] == [{"row": 0}, {"row": 1}]
+    assert parsed["small_metadata"] == {"bounded": True}
+
+
+def test_candidate_selection_metadata_drops_full_payload() -> None:
+    row = {
+        "sampling_arm": ARMS[0],
+        "act": 1,
+        "root_identity": "root",
+        "source_complete_identity_sha256": "source",
+        "exact_leaf_identity": "t084-hidden-state-"
+        + hashlib.sha256(b"payload").hexdigest(),
+        "exact_state_digest": "digest",
+        "occurrence_key": "occurrence",
+        "exact_hidden_state_payload": {
+            "canonical_native_payload_json": "payload",
+            "large_opaque_state": "not retained by selection",
+        },
+    }
+    metadata = _candidate_metadata(row)
+    assert "exact_hidden_state_payload" not in metadata
+    assert (
+        metadata["canonical_native_payload_sha256"]
+        == hashlib.sha256(b"payload").hexdigest()
+    )
