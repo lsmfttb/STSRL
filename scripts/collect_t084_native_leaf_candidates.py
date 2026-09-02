@@ -32,10 +32,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from sts_combat_rl.sim.action_space import ActionSpaceConfig
 from sts_combat_rl.sim.assisted_source_generation import (
     ASSISTED_RUN_DISTRIBUTION_KIND,
+    restore_assisted_battle_start_record,
 )
 from sts_combat_rl.sim.battle_start_pool import (
     record_from_manifest,
-    restore_battle_start_record,
 )
 from sts_combat_rl.sim.contract import SimulatorAction
 from sts_combat_rl.sim.controlled_run import build_decision_context
@@ -235,7 +235,7 @@ def _work_one(task: tuple[int, str]) -> dict[str, Any]:
         ascension=int(root.snapshot_raw.get("ascension", 20)),
         module=_NATIVE_MODULE,
     )
-    snapshot, restore_method = restore_battle_start_record(adapter, root)
+    snapshot, restoration_method = restore_assisted_battle_start_record(adapter, root)
     source_identity = str(root_raw.get("_t084_source_identity", ""))
     if not source_identity:
         source_identity = hashlib.sha256(
@@ -402,7 +402,7 @@ def _work_one(task: tuple[int, str]) -> dict[str, Any]:
         "source_complete_identity_sha256": source_identity,
         "simulations": 100,
         "status": "complete",
-        "restore_method": restore_method,
+        "restoration_method": restoration_method,
         "candidate_count": callback_count,
         "root_action": result.get("root_action"),
         "root_statistics": result.get("root_rows"),
@@ -532,13 +532,13 @@ def _work_parity_one(task: tuple[int, str]) -> dict[str, Any]:
         ascension=int(root.snapshot_raw.get("ascension", 20)),
         module=_NATIVE_MODULE,
     )
-    off_snapshot, _ = restore_battle_start_record(off_adapter, root)
+    off_snapshot, _ = restore_assisted_battle_start_record(off_adapter, root)
     on_adapter = LightSpeedAdapter(
         seed=root.source_seed,
         ascension=int(root.snapshot_raw.get("ascension", 20)),
         module=_NATIVE_MODULE,
     )
-    on_snapshot, _ = restore_battle_start_record(on_adapter, root)
+    on_snapshot, _ = restore_assisted_battle_start_record(on_adapter, root)
     observed_rng: list[dict[str, Any]] = []
 
     def collect_rng(*values: object) -> None:

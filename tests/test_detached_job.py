@@ -135,3 +135,47 @@ def test_supervisor_signal_records_terminal_failed_status(tmp_path: Path) -> Non
     assert payload["state"] == "FAILED"
     assert payload["exit_code"] == 143
     assert "terminated by signal" in str(payload["startup_error"])
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="process-group verification is POSIX-only"
+)
+def test_supervisor_signal_terminates_target_process_group(tmp_path: Path) -> None:
+    command = [
+        sys.executable,
+        "-c",
+        "import subprocess,sys,time; subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)']); time.sleep(30)",
+    ]
+    status, started = _start(tmp_path, command)
+    assert started.returncode == 0, started.stderr
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline:
+        if status.is_file() and json.loads(status.read_text())["state"] == "RUNNING":
+            break
+        time.sleep(0.02)
+    running = json.loads(status.read_text(encoding="utf-8"))
+    target_deadline = time.monotonic() + 10
+    target_pid = None
+    while time.monotonic() < target_deadline:
+        children = subprocess.run(
+            ["ps", "--ppid", str(running["pid"]), "-o", "pid="],
+            capture_output=True,
+            text=True,
+            check=False,
+        ).stdout.split()
+        if children:
+            target_pid = int(children[0])
+            break
+        time.sleep(0.02)
+    assert target_pid is not None
+    os.kill(int(running["pid"]), signal.SIGTERM)
+    payload = _wait_for_terminal(status)
+    assert payload["state"] == "FAILED"
+    time.sleep(0.1)
+    remaining = subprocess.run(
+        ["ps", "-g", str(target_pid), "-o", "pid="],
+        capture_output=True,
+        text=True,
+        check=False,
+    ).stdout.split()
+    assert not remaining

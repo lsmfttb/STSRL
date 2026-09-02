@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import hashlib
+import json
+from types import SimpleNamespace
 
 import pytest
 
+import scripts.collect_t084_native_leaf_candidates as t084_collector
 from scripts.collect_t084_native_leaf_candidates import (
+    ARMS,
     _select_cell,
     _select_parity_root_indices,
     _selected_target_for_occurrence,
@@ -380,3 +384,69 @@ def test_parity_subset_covers_both_acts_deterministically() -> None:
     assert indices == list(range(8)) + list(range(256, 264))
     assert [roots[index]["act"] for index in indices].count(1) == 8
     assert [roots[index]["act"] for index in indices].count(2) == 8
+
+
+def test_assisted_root_uses_assisted_restore_and_reaches_search_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = SimpleNamespace(
+        source_seed=122,
+        snapshot_raw={"ascension": 20, "act": 2},
+        public_run_context={},
+    )
+    calls: list[str] = []
+
+    class FakeAdapter:
+        def __init__(self, **_: object) -> None:
+            pass
+
+        def battle_search_v2_with_leaf_collection(
+            self, snapshot: object, **kwargs: object
+        ) -> dict:
+            assert snapshot == "assisted-snapshot"
+            callback = kwargs["leaf_collector_callback"]
+            callback(
+                "opaque-checkpoint",
+                {"act": 2},
+                [{"scope": "battle", "bits": 1, "kind": "play", "label": "play"}],
+                1,
+                0,
+                "path-0",
+                "digest-0",
+                json.dumps({"hidden": "state-0"}, sort_keys=True),
+                {"seed": 122},
+            )
+            return {"root_action": "battle:1", "root_rows": [{"visits": 1}]}
+
+    monkeypatch.setattr(t084_collector, "LightSpeedAdapter", FakeAdapter)
+    monkeypatch.setattr(
+        t084_collector,
+        "record_from_manifest",
+        lambda *_args, **_kwargs: root,
+    )
+
+    def assisted_restore(_adapter: object, _record: object) -> tuple[str, str]:
+        calls.append("assisted")
+        return "assisted-snapshot", "assisted_seed_action_trace"
+
+    monkeypatch.setattr(
+        t084_collector, "restore_assisted_battle_start_record", assisted_restore
+    )
+    monkeypatch.setattr(
+        t084_collector,
+        "build_decision_context",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            snapshot_features=(), legal_action_features=()
+        ),
+    )
+    t084_collector._ROOT_ROWS[:] = [{"_t084_source_identity": "source-0"}]
+    t084_collector._NATIVE_MODULE = object()
+    t084_collector._PASS_MODE = "candidate"
+    t084_collector._NATIVE_COMMIT = "858f4ca"
+
+    result = t084_collector._work_one((0, ARMS[0]))
+
+    assert calls == ["assisted"]
+    assert result["restoration_method"] == "assisted_seed_action_trace"
+    assert result["candidate_count"] == 1
+    assert len(result["candidate_rows"]) == 1

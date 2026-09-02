@@ -84,6 +84,15 @@ def _creation_flags() -> int:
     )
 
 
+def _terminate_target_group(target: subprocess.Popen[bytes]) -> None:
+    """Terminate the detached target and all POSIX children in its process group."""
+
+    if os.name == "nt":
+        target.terminate()
+        return
+    os.killpg(target.pid, signal.SIGTERM)
+
+
 def _supervise(
     *,
     status_path: Path,
@@ -137,11 +146,14 @@ def _supervise(
                 """Terminate the child and leave a terminal status on supervisor kill."""
 
                 if target.poll() is None:
-                    target.terminate()
+                    _terminate_target_group(target)
                 try:
                     target.wait(timeout=10)
                 except subprocess.TimeoutExpired:
-                    target.kill()
+                    if os.name == "nt":
+                        target.kill()
+                    else:
+                        os.killpg(target.pid, signal.SIGKILL)
                     target.wait()
                 _atomic_write(
                     status_path,
