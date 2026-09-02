@@ -260,3 +260,53 @@ reason, possible downstream consumers, and deletion conditions.
 A pull request submitted as ready for review must satisfy all published
 acceptance criteria and required verification. Otherwise it remains draft and
 names the missing criteria explicitly.
+
+Long-running WSL stages must be explicitly sharded and parallelized. The default
+target on the maintainer workstation is 16 effective workers, capped by shard
+count and documented simulator or memory limits. Every expensive stage reports
+commands, worker and shard counts, seed or cohort ranges, artifact identities,
+and wall-clock cost. A `smoke` label does not justify undocumented single-worker
+execution for a substantial workload.
+
+Task authors should define the earliest affected stage or independent run after a
+repair. Validated work before that boundary may be reused with its producer
+provenance; affected, partial, or failed work is rerun. Healthy long jobs may use
+`scripts/run_detached_job.py`; report the PID, status/log paths, and coarse ETA once
+and inspect again after the expected window or on request rather than continuously.
+
+## Published Queue
+
+The executable queue is exactly the set of `READY` rows in the Active Backlog;
+it is currently empty. T063 and T066 remain `DRAFT`; T034 remains blocked on
+native public-consistent hidden-future sampling support. T064, T065, and
+T071--T083 are `DONE` with their recorded diagnostic, repair, or control-plane
+outcomes. T082 and T083 do not publish an executable successor by themselves;
+T083 identifies the required internal-leaf continuation-utility target
+generation boundary, while any target-generation or value-repair task must
+first receive a fresh Planner specification and Maintainer exact-head
+approval.
+
+## Standard Local Gates
+
+Unless a task explicitly says otherwise, every task must pass:
+
+```bash
+pytest
+python -m compileall -q src tests
+ruff check src tests
+ruff format --check src tests
+python -m sts_combat_rl.cli --mock tests/fixtures/combat_basic.json
+python -m sts_combat_rl.cli --mock tests/fixtures/non_combat.json
+```
+
+Task-specific WSL, simulator, artifact, and documentation gates are additional
+requirements.
+
+## Historical Mapping
+
+Completed and cancelled task documents through T078 remain the durable
+historical record. Accepted experiment details and artifact identities remain in
+individual task documents, reports, and `current_status.md`; this index only owns
+lifecycle state and the current executable queue.
+
+New task documents should start from [`TEMPLATE.md`](TEMPLATE.md).
