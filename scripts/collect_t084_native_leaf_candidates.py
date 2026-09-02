@@ -40,10 +40,20 @@ from sts_combat_rl.sim.battle_start_pool import (
 from sts_combat_rl.sim.contract import SimulatorAction
 from sts_combat_rl.sim.controlled_run import build_decision_context
 from sts_combat_rl.sim.lightspeed import LightSpeedAdapter
+from sts_combat_rl.sim.public_context_model_input import (
+    PUBLIC_CONTEXT_MODEL_INPUT_FEATURE_SIZE,
+    PUBLIC_CONTEXT_MODEL_INPUT_SCHEMA_ID,
+    PUBLIC_CONTEXT_MODEL_INPUT_SCHEMA_VERSION,
+    public_context_features,
+)
 from sts_combat_rl.t084_search_v2_internal_leaf_target_generation import (
     ARMS,
     COLLECTOR_SCHEMA_ID,
     EXPECTED_STATIC_CHECKPOINTS,
+    PUBLIC_MODEL_INPUT_SCHEMA_ID,
+    PUBLIC_MODEL_INPUT_SCHEMA_VERSION,
+    PUBLIC_TACTICAL_FEATURE_SCHEMA_ID,
+    PUBLIC_TACTICAL_FEATURE_SCHEMA_VERSION,
     WORKER_COUNT,
     derive_replicate_seed,
     select_repetition_count,
@@ -198,11 +208,41 @@ def _native_actions(raw_actions: object) -> list[SimulatorAction]:
 
 def _public_input(
     raw: Mapping[str, Any], actions: list[SimulatorAction], context: Any
-) -> list[float | int | bool]:
-    values = list(context.snapshot_features) + list(context.legal_action_features)
-    if not all(isinstance(value, (bool, int, float)) for value in values):
-        raise ValueError("native callback public model input contains non-scalars")
-    return values
+) -> dict[str, Any]:
+    del raw, actions
+    snapshot_features = [float(value) for value in context.snapshot_features]
+    action_features = [
+        [float(value) for value in row] for row in context.legal_action_features
+    ]
+    context_features = public_context_features(context.public_run_context)
+    state_features = snapshot_features + context_features
+    action_widths = {len(row) for row in action_features}
+    if len(action_widths) > 1:
+        raise ValueError("native callback public action features have mixed widths")
+    action_feature_size = next(iter(action_widths), 0)
+    return {
+        "schema_id": PUBLIC_MODEL_INPUT_SCHEMA_ID,
+        "schema_version": PUBLIC_MODEL_INPUT_SCHEMA_VERSION,
+        "feature_schema_id": PUBLIC_TACTICAL_FEATURE_SCHEMA_ID,
+        "feature_schema_version": PUBLIC_TACTICAL_FEATURE_SCHEMA_VERSION,
+        "snapshot_features": snapshot_features,
+        "public_context_features": context_features,
+        "state_features": state_features,
+        "legal_action_features": action_features,
+        "eligible_action_indices": [
+            int(index) for index in context.eligible_action_indices
+        ],
+        "public_context_feature_schema_id": PUBLIC_CONTEXT_MODEL_INPUT_SCHEMA_ID,
+        "public_context_feature_schema_version": PUBLIC_CONTEXT_MODEL_INPUT_SCHEMA_VERSION,
+        "public_context_feature_size": PUBLIC_CONTEXT_MODEL_INPUT_FEATURE_SIZE,
+        "shape": {
+            "snapshot_features": [len(snapshot_features)],
+            "public_context_features": [len(context_features)],
+            "state_features": [len(state_features)],
+            "legal_action_features": [len(action_features), action_feature_size],
+        },
+        "hidden_state_excluded": True,
+    }
 
 
 def _scorer_for_arm(arm: str) -> Any | None:

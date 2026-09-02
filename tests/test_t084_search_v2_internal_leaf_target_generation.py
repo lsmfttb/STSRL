@@ -39,7 +39,27 @@ def _leaf(index: int, *, values: list[float] | None = None) -> dict:
         "exact_hidden_state_payload": {"opaque_native_payload": index},
         "exact_state_digest": hashlib.sha256(f"leaf-{index}".encode()).hexdigest(),
         "public_projection": {"hp": 50 + index},
-        "public_model_input": [index, 1],
+        "public_model_input": {
+            "schema_id": "t084-public-torch-policy-value-input-v1",
+            "schema_version": 1,
+            "feature_schema_id": "public-tactical-v2",
+            "feature_schema_version": 2,
+            "snapshot_features": [float(index)],
+            "public_context_features": [1.0],
+            "state_features": [float(index), 1.0],
+            "legal_action_features": [[0.0]],
+            "eligible_action_indices": [0],
+            "public_context_feature_schema_id": "public-context-model-input-v1",
+            "public_context_feature_schema_version": 1,
+            "public_context_feature_size": 1,
+            "shape": {
+                "snapshot_features": [1],
+                "public_context_features": [1],
+                "state_features": [2],
+                "legal_action_features": [1, 1],
+            },
+            "hidden_state_excluded": True,
+        },
         "legal_actions": [{"stable_id": "battle:1", "occurrence": 0}],
         "source_complete_identity_sha256": f"{index:064x}",
         "depth": 1,
@@ -436,9 +456,14 @@ def test_assisted_root_uses_assisted_restore_and_reaches_search_boundary(
         t084_collector,
         "build_decision_context",
         lambda *_args, **_kwargs: SimpleNamespace(
-            snapshot_features=(), legal_action_features=()
+            snapshot_features=[1.0],
+            legal_action_features=[[2.0, 3.0]],
+            eligible_action_indices=[0],
+            public_run_context={},
+            tactical_feature_schema_id="public-tactical-v2",
         ),
     )
+    monkeypatch.setattr(t084_collector, "public_context_features", lambda _: [0.0])
     t084_collector._ROOT_ROWS[:] = [{"_t084_source_identity": "source-0"}]
     t084_collector._NATIVE_MODULE = object()
     t084_collector._PASS_MODE = "candidate"
@@ -450,3 +475,10 @@ def test_assisted_root_uses_assisted_restore_and_reaches_search_boundary(
     assert result["restoration_method"] == "assisted_seed_action_trace"
     assert result["candidate_count"] == 1
     assert len(result["candidate_rows"]) == 1
+    public_input = result["candidate_rows"][0]["public_model_input"]
+    assert (
+        public_input["state_features"]
+        == public_input["snapshot_features"] + public_input["public_context_features"]
+    )
+    assert isinstance(public_input["legal_action_features"][0], list)
+    assert public_input["hidden_state_excluded"] is True

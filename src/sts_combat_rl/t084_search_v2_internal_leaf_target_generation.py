@@ -86,6 +86,12 @@ CLASSIFICATIONS = (
     "LEAF_TARGET_SUPPORT_INSUFFICIENT",
     "INCOMPLETE",
 )
+PUBLIC_MODEL_INPUT_SCHEMA_ID = "t084-public-torch-policy-value-input-v1"
+PUBLIC_MODEL_INPUT_SCHEMA_VERSION = 1
+PUBLIC_TACTICAL_FEATURE_SCHEMA_ID = "public-tactical-v2"
+PUBLIC_TACTICAL_FEATURE_SCHEMA_VERSION = 2
+PUBLIC_CONTEXT_FEATURE_SCHEMA_ID = "public-context-model-input-v1"
+PUBLIC_CONTEXT_FEATURE_SCHEMA_VERSION = 1
 
 
 def sha256_file(path: Path) -> str:
@@ -529,6 +535,106 @@ def _required_mapping(row: Mapping[str, Any], key: str) -> Mapping[str, Any]:
     return value
 
 
+def _numeric_vector(value: object, label: str) -> list[float]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        raise TypeError(f"public model input {label} must be a numeric vector")
+    result: list[float] = []
+    for index, item in enumerate(value):
+        if isinstance(item, bool) or not isinstance(item, (int, float)):
+            raise TypeError(
+                f"public model input {label}[{index}] must be a numeric scalar"
+            )
+        number = float(item)
+        if not math.isfinite(number):
+            raise ValueError(f"public model input {label}[{index}] is not finite")
+        result.append(number)
+    return result
+
+
+def _validate_public_model_input(value: object) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        raise TypeError("public model input must be an explicit encoded mapping")
+    expected = {
+        "schema_id",
+        "schema_version",
+        "feature_schema_id",
+        "feature_schema_version",
+        "snapshot_features",
+        "public_context_features",
+        "state_features",
+        "legal_action_features",
+        "eligible_action_indices",
+        "public_context_feature_schema_id",
+        "public_context_feature_schema_version",
+        "public_context_feature_size",
+        "shape",
+        "hidden_state_excluded",
+    }
+    missing = sorted(expected - set(value))
+    if missing:
+        raise ValueError("public model input missing: " + ", ".join(missing))
+    if value["schema_id"] != PUBLIC_MODEL_INPUT_SCHEMA_ID:
+        raise ValueError("public model input schema_id is unsupported")
+    if value["schema_version"] != PUBLIC_MODEL_INPUT_SCHEMA_VERSION:
+        raise ValueError("public model input schema_version is unsupported")
+    if value["feature_schema_id"] != PUBLIC_TACTICAL_FEATURE_SCHEMA_ID:
+        raise ValueError("public model input feature schema is unsupported")
+    if value["feature_schema_version"] != PUBLIC_TACTICAL_FEATURE_SCHEMA_VERSION:
+        raise ValueError("public model input feature schema version is unsupported")
+    if value["public_context_feature_schema_id"] != PUBLIC_CONTEXT_FEATURE_SCHEMA_ID:
+        raise ValueError("public model input public-context schema is unsupported")
+    if (
+        value["public_context_feature_schema_version"]
+        != PUBLIC_CONTEXT_FEATURE_SCHEMA_VERSION
+    ):
+        raise ValueError(
+            "public model input public-context schema version is unsupported"
+        )
+    if value["hidden_state_excluded"] is not True:
+        raise ValueError("public model input must explicitly exclude hidden state")
+    snapshot = _numeric_vector(value["snapshot_features"], "snapshot_features")
+    public_context = _numeric_vector(
+        value["public_context_features"], "public_context_features"
+    )
+    state = _numeric_vector(value["state_features"], "state_features")
+    if state != snapshot + public_context:
+        raise ValueError("public model input state_features cannot be reconstructed")
+    if value["public_context_feature_size"] != len(public_context):
+        raise ValueError("public model input public-context feature size mismatch")
+    raw_actions = value["legal_action_features"]
+    if not isinstance(raw_actions, Sequence) or isinstance(raw_actions, (str, bytes)):
+        raise TypeError("public model input legal_action_features must be a matrix")
+    action_features = [
+        _numeric_vector(row, f"legal_action_features[{index}]")
+        for index, row in enumerate(raw_actions)
+    ]
+    widths = {len(row) for row in action_features}
+    if len(widths) > 1:
+        raise ValueError("public model input legal-action rows have mixed widths")
+    eligible = value["eligible_action_indices"]
+    if not isinstance(eligible, Sequence) or isinstance(eligible, (str, bytes)):
+        raise TypeError("public model input eligible_action_indices must be a list")
+    if any(isinstance(index, bool) or not isinstance(index, int) for index in eligible):
+        raise TypeError("public model input eligible action indices must be integers")
+    if any(index < 0 or index >= len(action_features) for index in eligible):
+        raise ValueError("public model input eligible action index is out of range")
+    shape = value["shape"]
+    if not isinstance(shape, Mapping):
+        raise TypeError("public model input shape must be a mapping")
+    expected_shapes = {
+        "snapshot_features": [len(snapshot)],
+        "public_context_features": [len(public_context)],
+        "state_features": [len(state)],
+        "legal_action_features": [len(action_features), next(iter(widths), 0)],
+    }
+    if any(
+        shape.get(key) != expected_shape
+        for key, expected_shape in expected_shapes.items()
+    ):
+        raise ValueError("public model input shape does not match encoded values")
+    return dict(value)
+
+
 def validate_leaf_row(
     row: Mapping[str, Any], *, require_replicates: int | None = None
 ) -> dict[str, Any]:
@@ -556,10 +662,9 @@ def validate_leaf_row(
         raise TypeError("exact hidden state payload is not restorable structured data")
     if not isinstance(row["exact_state_digest"], str) or not row["exact_state_digest"]:
         raise ValueError("exact state digest is missing")
-    if not isinstance(row["public_projection"], Mapping) or not isinstance(
-        row["public_model_input"], Sequence
-    ):
-        raise TypeError("public projection/model input is malformed")
+    if not isinstance(row["public_projection"], Mapping):
+        raise TypeError("public projection is malformed")
+    _validate_public_model_input(row["public_model_input"])
     if not isinstance(row["legal_actions"], Sequence) or not row["legal_actions"]:
         raise ValueError("legal action provenance is missing")
     if (
