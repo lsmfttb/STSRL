@@ -163,7 +163,7 @@ def test_classifier_existing_requires_all_gates_and_retained_labels() -> None:
     )
 
 
-def test_classifier_new_requires_precise_materializable_generator() -> None:
+def test_classifier_new_requires_precise_specified_successor_generator() -> None:
     gates = {name: False for name in module.GATE_NAMES}
     assert (
         module.classify_contract(
@@ -173,6 +173,7 @@ def test_classifier_new_requires_precise_materializable_generator() -> None:
             generator_evidence={
                 "precise_generator_proven": True,
                 "accepted_surfaces_can_materialize_hidden_internal_state": True,
+                "successor_data_generation_surface": {"specified": True},
             },
         )
         == "NEW_LEAF_CONTINUATION_UTILITY_TARGET_REQUIRED"
@@ -189,6 +190,7 @@ def test_classifier_unresolved_when_generator_is_not_materializable() -> None:
             generator_evidence={
                 "precise_generator_proven": True,
                 "accepted_surfaces_can_materialize_hidden_internal_state": False,
+                "successor_data_generation_surface": {"specified": False},
             },
         )
         == "LEAF_VALUE_TARGET_CONTRACT_UNRESOLVED"
@@ -268,6 +270,7 @@ def test_audit_unresolved_when_generator_is_unproven_but_integrity_is_valid(
             "generator_evidence": {
                 "precise_generator_proven": False,
                 "accepted_surfaces_can_materialize_hidden_internal_state": False,
+                "successor_data_generation_surface": {"specified": False},
             },
         },
     )

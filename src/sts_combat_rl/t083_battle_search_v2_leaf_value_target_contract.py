@@ -428,9 +428,26 @@ def native_evidence(native_root: Path) -> dict[str, Any]:
                 generator_proven and materialization_evidence_available
             ),
             "materialization_evidence_available": materialization_evidence_available,
-            "materialization_boundary": "the accepted native search surface materializes and continues the hidden BattleContext internally; the Python callback receives only battleSearchNodeSnapshot(state), while T079 telemetry exports exactStateDigest/expanded_states metadata rather than the canonical payload",
+            "materialization_boundary": "the accepted native search surface has the hidden BattleContext at the callback boundary; the current Python callback receives only battleSearchNodeSnapshot(state), and T079 telemetry exports exactStateDigest/expanded_states metadata rather than the canonical payload",
+            "current_python_projection_can_materialize_hidden_internal_state": False,
             "python_callback_receives_hidden_internal_state": False,
-            "materialization_reason": "native target generation can capture the post-action BattleContext at the pinned callback boundary without changing Search semantics; retained T064 rows alone do not contain that hidden state",
+            "materialization_reason": "a successor native-side collector can copy the exact post-action BattleContext before the Python projection, restore that copy for each replicate, and run the pinned continuation; exactStateDigest is retained as provenance but is not used to reconstruct state",
+            "successor_data_generation_surface": {
+                "specified": generator_proven and materialization_evidence_available,
+                "executed_by_t083": False,
+                "kind": "native-side read-only collector/instrumentation at the existing callback boundary",
+                "capture": "immediately after edgeTaken.action.execute(curState) and searchStack.push_back(&edgeTaken.node), copy the exact post-action BattleContext before invoking the Python callback or any continuation",
+                "search_behavior_change": "none: collector observes/copies state and runs an offline target-generation path; it does not change Search topology, allocation, backup, root selection, or the production Python callback contract",
+                "repetitions_per_leaf": 100,
+                "per_replica_action_budget": 512,
+                "budget_failure": "mark the replica/leaf unavailable if terminal state is not reached within 512 native action transitions; never truncate and score a non-terminal state",
+                "seed_policy": "for each leaf and replicate index, derive a uint32 seed from the first 8 hex digits of SHA256(native_commit|source_complete_identity_sha256|leaf_ordinal|replicate_index), record it, and initialize an independent native continuation RNG",
+                "continuation": "restore the copied full BattleContext for every replicate, run pinned playoutRandom with enumerateActionsForNode(..., false) and uniform eligible-action selection until terminal, then call exact evaluateEndState on the terminal state",
+                "target": "mean of the 100 finite terminal evaluateEndState utilities; retain every replicate utility and seed for auditability",
+                "emission": "emit the public battleSearchNodeSnapshot and legal-action input for the model, plus full-state provenance (canonical hidden-state payload/digest, all RNG state, source identity, leaf identity, replicate seeds, repetition count, action budget, native identity, and terminal utility values)",
+                "python_boundary": "Python callback remains public-projection-only; it is not given hidden state and does not generate the target",
+                "provenance_boundary": "the native collector must emit the full-state provenance itself; exactStateDigest alone is insufficient",
+            },
             "target_definition": "V_leaf=E[evaluateEndState | post-action state, pinned playoutRandom]",
         },
         "backup_path": {
@@ -996,14 +1013,20 @@ def _classification_evidence(
             "accepted_surfaces_can_materialize_hidden_internal_state"
         )
     )
+    successor_surface_specified = bool(
+        (generator_evidence.get("successor_data_generation_surface") or {}).get(
+            "specified"
+        )
+    )
     return {
         "integrity_valid": integrity_valid,
         "execution_valid": execution_valid,
         "retained_candidate_all_gates_and_labels_sufficient": retained_candidate_all_gates,
         "accepted_native_precise_generator_proven": precise_generator_proven,
         "accepted_surfaces_can_materialize_hidden_internal_state": can_materialize_hidden_state,
+        "successor_data_generation_surface_specified": successor_surface_specified,
         "new_generator_usable": precise_generator_proven
-        and can_materialize_hidden_state,
+        and successor_surface_specified,
     }
 
 
@@ -1182,6 +1205,9 @@ def audit_t083(
                 "target_scalar": target_definition,
                 "terminal_utility": "exact pinned BattleScumSearcher2::evaluateEndState, including victory/non-victory formulas and all native inputs",
                 "continuation_policy": "pinned BattleScumSearcher2::playoutRandom",
+                "data_generation_surface": generator_evidence.get(
+                    "successor_data_generation_surface"
+                ),
                 "state_boundary": "sample post-first-action Search v2 internal leaves at the callback boundary; retain public model input and full-simulator Oracle-like target provenance",
                 "checks": [
                     "identity/integrity",
