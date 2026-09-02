@@ -400,6 +400,60 @@ feature, Search, simulator, controller, T079, or historical numerical result
 changed. Research ledger #85 records the accepted classification and permits
 one bounded value-target repair experiment; no successor is published by T082.
 
+T083 is now complete after PR #89 merged at
+`c4f943e70794afb450ca76206e0ead31a5cb0204`. Its approved specification commit
+was `411d3d79f5fa5228d849080ea434a67b6e16040b`, and its accepted exact
+implementation head was `4d964a1f0cd536d884e747eededf3cbc0dd57c92`, based on
+`2a0b36b5e7ea700f34ebde8288b0b1cf809ee080`. The native semantic inspection
+used `refs/heads/stsrl/main` at
+`1555348535d66e3035aac80933a60949d4bd850f`.
+
+The bounded audit confirmed that the current learned Search v2 callback returns
+the `[0,1]` `battle_survival_probability` directly into the native evaluation
+backup, while native terminal playouts use the continuous
+`BattleScumSearcher2::evaluateEndState` utility. The pinned no-learned-value
+continuation is explicit: after the first action at a newly expanded internal
+leaf, `playoutRandom` repeatedly enumerates legal actions with
+`applyPriors=false`, samples uniformly, continues to terminal, and backs up
+the exact native terminal utility. The required drop-in target is therefore
+`V_leaf(s) = E[evaluateEndState(S_terminal) | post-first-action internal state
+s, pinned native playoutRandom continuation]`.
+
+The qualified T064 lineage contains 460 restored battle-start/root decision
+rows, not exact post-first-action Search v2 internal-leaf target rows. All
+retained candidate scalars were finite, but no retained candidate passed every
+utility, continuation, state-target, leaf-support, information/provenance, and
+artifact gate together. The accepted classification is
+`NEW_LEAF_CONTINUATION_UTILITY_TARGET_REQUIRED`. A precise/materializable
+successor mechanism is recorded as a native-side read-only collector at the
+existing callback boundary: copy the full post-action `BattleContext`, run
+repeated pinned continuations, emit public model input, and retain hidden state
+only for target-generation provenance. The proposed 100 repetitions, 512-step
+cap, and derived seed policy remain successor proposals; `executed_by_t083=false`.
+
+The formal report is retained at
+`/mnt/d/DeadlyCatCoding/STSRL/artifacts/t083-battle-search-v2-leaf-value-target-contract/t083-battle-search-v2-leaf-value-target-contract-v1.json`;
+it is 37,667 bytes with SHA-256
+`459216b35ef93c4ca3c5f5183e2af73baf82fd612e4edfb195061f9b0e0d308f`. The
+retention manifest is at
+`/mnt/d/DeadlyCatCoding/STSRL/artifacts/t083-battle-search-v2-leaf-value-target-contract/t083-retention-manifest-v1.json`;
+it is 14,376 bytes with SHA-256
+`00afd1a28751c8b181ec70469d3a6700139c18c3b243a603bf8f1f889272b4d2`.
+The report and manifest preserve exact T064/T082/native identities, the
+non-simulator bounded single-stream worker reason, the regeneration command,
+and the deletion condition under the stable ignored artifact root.
+
+Planner scientific/architecture acceptance and Maintainer operational acceptance
+passed on the exact head. Focused T083/task-document tests passed (`18`), as did
+changed-file Ruff, format, compileall, and diff checks. The final full suite was
+`974 passed, 8 skipped, 1 failed`; the sole failure was the pre-existing
+`tests/test_non_combat_learning.py::test_regeneration_command_is_full_pinned_wsl_command`
+assertion about the old `.claude/worktrees/` path, reproduced on the base and
+head. No model, training, feature, production Search/native behavior, simulator
+run, T079 work, or successor generation changed. Research ledger #85 records
+the accepted classification and the required research order; no executable
+successor is published by T083.
+
 ## Implemented On Main
 
 ### Runtime

@@ -103,6 +103,7 @@ workflow's explicit implementation-authorization gate is satisfied.
 | T080 | DONE | [Battle value-target semantic alignment audit](T080-battle-value-target-semantics-audit.md) | T079, T070, T069, T062, T052, T043 | PR #86 merged at 1771203; exact frozen provenance audit completed with VALUE_TARGET_SEMANTICS_UNRESOLVED and no automatic successor |
 | T081 | DONE | [Scientific artifact eligibility gate](T081-scientific-artifact-eligibility-gate.md) | T043, T044, T047, T048, T050, T051, T052, T062, T070 | PR #87 merged at 4a24f18; artifact integrity and scientific eligibility are now separate, fail-closed consumer gates with a durable historical claim-boundary audit |
 | T082 | DONE | [T064 value-target semantic closure](T082-t064-value-target-semantic-closure.md) | T080, T081, T064, T043, T042 | PR #88 merged at 2acd1e8; qualified 460-row lineage audit confirmed VALUE_TARGET_SEMANTIC_MISMATCH_CONFIRMED and permits one bounded value-target repair experiment |
+| T083 | DONE | [Battle Search v2 leaf-value target contract audit](T083-battle-search-v2-leaf-value-target-contract.md) | T082, T081, T064, T062, T070 | PR #89 merged at c4f943e; accepted NEW_LEAF_CONTINUATION_UTILITY_TARGET_REQUIRED and specifies a separate internal-leaf continuation-utility target-generation consideration without publishing a successor |
 
 Use the table, not per-task files or roadmap prose, when deciding whether a task
 may receive a branch. Only `READY` rows should receive a new implementation
@@ -275,9 +276,11 @@ and inspect again after the expected window or on request rather than continuous
 The executable queue is exactly the set of `READY` rows in the Active Backlog;
 it is currently empty. T063 and T066 remain `DRAFT`; T034 remains blocked on
 native public-consistent hidden-future sampling support. T064, T065, and
-T071--T082 are `DONE` with their recorded diagnostic, repair, or control-plane
-outcomes. T082 does not publish a successor by itself; any value-target repair
-must first receive a fresh Planner specification and Maintainer exact-head
+T071--T083 are `DONE` with their recorded diagnostic, repair, or control-plane
+outcomes. T082 and T083 do not publish an executable successor by themselves;
+T083 identifies the required internal-leaf continuation-utility target
+generation boundary, while any target-generation or value-repair task must
+first receive a fresh Planner specification and Maintainer exact-head
 approval.
 
 ## Standard Local Gates

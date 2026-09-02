@@ -74,9 +74,14 @@ the accepted non-smoke T064 lineage and confirmed
 `VALUE_TARGET_SEMANTIC_MISMATCH_CONFIRMED` over 460 selected rows. The active
 model-side direction is now one bounded value-target repair with policy targets,
 features, model architecture, Search v2, simulator, and evaluation cohorts
-held fixed as far as feasible; this requires a fresh task specification and is
-not an automatic queue entry. T034 remains blocked on native public-consistent
-hidden-future sampler support, and T063/T066 remain `DRAFT`.
+held fixed as far as feasible. T083 then accepted the narrower contract result
+`NEW_LEAF_CONTINUATION_UTILITY_TARGET_REQUIRED`: existing T064 root labels do
+not cover post-first-action Search v2 internal leaves, while a
+materializable native-side continuation-utility target-generation surface is
+precisely specified. Target generation, 100-repetition/512-step choices, and
+the paired repair remain a fresh Planner task rather than an automatic queue
+entry. T034 remains blocked on native public-consistent hidden-future sampler
+support, and T063/T066 remain `DRAFT`.
 New implementation work should start only from rows marked `READY` in the task
 index. The queue is currently empty.
 
@@ -497,6 +502,19 @@ search-wall reductions were about 60.0%, 64.0%, and 66.7% for
 `prior_only`, `value_only`, and `prior_value`. Independent calibration locked
 wall-clock budgets `1/1/2` and simulator-step budgets `86/408/384`, so T069
 selected Case A and closed the semantics-preserving cost-repair line.
+
+T070 then completed the fixed-cohort outcome and budget-sufficiency audit and
+selected T064 without publishing a successor. T071--T078 completed execution
+and repository maintenance repairs without changing the accepted scientific
+conclusions. T079 completed the state-utilization diagnostic as `AMBIGUOUS`;
+T080 found the initial value-target question unresolved on the four-row smoke
+lineage; T081 added the fail-closed artifact-eligibility guard; and T082
+confirmed `VALUE_TARGET_SEMANTIC_MISMATCH_CONFIRMED` over the qualified 460-row
+T064 lineage. T083 then completed the Search v2 leaf-value contract audit and
+accepted `NEW_LEAF_CONTINUATION_UTILITY_TARGET_REQUIRED`, with the native
+`playoutRandom` continuation, exact `evaluateEndState` units, post-first-action
+internal-leaf boundary, and public-input/hidden-target provenance recorded for
+a future target-generation task. No successor is published yet.
 
 There is no active implementation priority or published successor task. T069's
 terminal evidence reports that the original T062 93-record outcome comparison
