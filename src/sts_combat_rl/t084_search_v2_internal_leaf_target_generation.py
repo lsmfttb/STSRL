@@ -659,6 +659,9 @@ def validate_collector_execution(
             problems.append("collector root-run lacks complete 100-simulation evidence")
         if run.get("source_complete_identity_sha256") != root:
             problems.append("collector root-run source/root identity disagrees")
+        root_statistics = run.get("native_root_statistics", run.get("root_statistics"))
+        if not isinstance(root_statistics, list) or not root_statistics:
+            problems.append("collector root-run lacks native root statistics")
     if len(seen_runs) != len(ARMS) * 460:
         problems.append(
             "collector root-run inventory does not cover every arm/root pair"

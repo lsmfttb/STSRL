@@ -6,6 +6,7 @@ import pytest
 
 from scripts.collect_t084_native_leaf_candidates import (
     _select_cell,
+    _select_parity_root_indices,
     _selected_target_for_occurrence,
 )
 from sts_combat_rl.t084_search_v2_internal_leaf_target_generation import (
@@ -339,3 +340,11 @@ def test_selected_replay_consumes_only_the_selected_duplicate_occurrence() -> No
         is None
     )
     assert generated == [identity]
+
+
+def test_parity_subset_covers_both_acts_deterministically() -> None:
+    roots = [{"act": 1} for _ in range(256)] + [{"act": 2} for _ in range(204)]
+    indices = _select_parity_root_indices(roots)
+    assert indices == list(range(8)) + list(range(256, 264))
+    assert [roots[index]["act"] for index in indices].count(1) == 8
+    assert [roots[index]["act"] for index in indices].count(2) == 8

@@ -5,8 +5,11 @@ This is the executable native collection stage, not successor generation or
 training.  It restores the exact T064 roots by their accepted seed/action
 traces, runs each of the three frozen Search v2 arms for 100 simulations, and
 retains the callback-boundary provenance emitted by the T084 native surface.
-The continuation/calibration stage remains a separate, explicit input to the
-audit runner.
+The selected-leaf replay is a second pass in this same executable: the first
+pass retains an occupancy pool, then selected occurrence keys are replayed and
+their callback-boundary checkpoints are consumed immediately for continuation
+targets.  No process-local checkpoint from the first pass is serialized or
+used by the second pass.
 """
 
 from __future__ import annotations
@@ -374,6 +377,7 @@ def _work_one(task: tuple[int, str]) -> dict[str, Any]:
     row = {
         "sampling_arm": arm,
         "root_index": root_index,
+        "source_root_index": root_raw.get("_t084_parity_source_index", root_index),
         "root_identity": source_identity,
         "source_complete_identity_sha256": source_identity,
         "simulations": 100,
@@ -381,7 +385,8 @@ def _work_one(task: tuple[int, str]) -> dict[str, Any]:
         "restore_method": restore_method,
         "candidate_count": callback_count,
         "root_action": result.get("root_action"),
-        "root_statistics": result.get("root_statistics"),
+        "root_statistics": result.get("root_rows"),
+        "native_root_statistics": result.get("root_rows"),
         "candidate_rows": candidates,
         "target_rows": target_rows,
         "native_commit": _NATIVE_COMMIT,
@@ -542,7 +547,10 @@ def _work_parity_one(task: tuple[int, str]) -> dict[str, Any]:
         "act": int(root_raw["act"]),
         "root_action_equal": off.get("root_action") == on.get("root_action"),
         "root_statistics_equal": off.get("root_rows") == on.get("root_rows"),
+        "native_root_statistics_equal": off.get("root_rows") == on.get("root_rows"),
         "rng_semantics_equal": rng_equal,
+        "off_native_root_statistics": off.get("root_rows"),
+        "on_native_root_statistics": on.get("root_rows"),
         "material_outputs_equal": (
             off.get("root_action") == on.get("root_action")
             and off.get("root_rows") == on.get("root_rows")
@@ -561,7 +569,13 @@ def _run_parity(
     native_commit: str,
     workers: int,
 ) -> tuple[dict[str, Any], list[str], float]:
-    parity_roots = roots[:16]
+    source_indices = _select_parity_root_indices(roots)
+    parity_roots = [roots[index] for index in source_indices]
+    for parity_index, source_index in enumerate(source_indices):
+        parity_roots[parity_index] = {
+            **parity_roots[parity_index],
+            "_t084_parity_source_index": source_index,
+        }
     tasks = [
         (root_index, arm) for root_index in range(len(parity_roots)) for arm in ARMS
     ]
@@ -595,7 +609,11 @@ def _run_parity(
         "acts": sorted({row["act"] for row in rows}),
         "worker_count": workers,
         "task_count": len(tasks),
-        "task_ranges": "root indices 0..15 x three arms",
+        "task_ranges": "first eight Act1 and first eight Act2 source roots x three arms",
+        "root_identities": [row["root_identity"] for row in rows],
+        "act_counts": {
+            str(act): sum(1 for row in rows if row["act"] == act) for act in (1, 2)
+        },
         "material_outputs_equal": bool(rows)
         and all(row["material_outputs_equal"] for row in rows),
         "root_action_equal": bool(rows)
@@ -609,6 +627,16 @@ def _run_parity(
         "wall_clock_seconds": time.monotonic() - started,
     }
     return parity, failures, time.monotonic() - started
+
+
+def _select_parity_root_indices(roots: list[dict[str, Any]]) -> list[int]:
+    """Choose a stable 8+8 Act parity subset, independent of source ordering."""
+
+    act1 = [index for index, root in enumerate(roots) if int(root.get("act", 0)) == 1]
+    act2 = [index for index, root in enumerate(roots) if int(root.get("act", 0)) == 2]
+    if len(act1) < 8 or len(act2) < 8:
+        raise ValueError("T084 parity requires at least eight roots from each Act")
+    return act1[:8] + act2[:8]
 
 
 def _leaf_rank(row: Mapping[str, Any]) -> str:
@@ -890,7 +918,7 @@ def main() -> int:
             "parity_preflight": {
                 "worker_count": args.workers,
                 "task_count": 16 * len(ARMS),
-                "task_ranges": "root indices 0..15 x three arms",
+                "task_ranges": "first eight Act1 and first eight Act2 source roots x three arms",
                 "wall_clock_seconds": parity_wall,
             },
             "selection_policy": selection_policy,
@@ -928,7 +956,7 @@ def main() -> int:
             {
                 "worker_count": args.workers,
                 "task_count": 16 * len(ARMS),
-                "task_ranges": "root indices 0..15 x three arms parity preflight",
+                "task_ranges": "first eight Act1 and first eight Act2 source roots x three arms parity preflight",
                 "wall_clock_seconds": parity_wall,
             },
         ],
