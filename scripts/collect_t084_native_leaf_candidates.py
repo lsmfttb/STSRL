@@ -41,6 +41,8 @@ from sts_combat_rl.t084_search_v2_internal_leaf_target_generation import (
     COLLECTOR_SCHEMA_ID,
     EXPECTED_STATIC_CHECKPOINTS,
     WORKER_COUNT,
+    derive_replicate_seed,
+    select_repetition_count,
 )
 
 _ROOT_ROWS: list[dict[str, Any]] = []
@@ -48,6 +50,8 @@ _NATIVE_COMMIT = ""
 _NATIVE_MODULE: Any | None = None
 _SCORERS: dict[str, TorchPolicyValueGuidanceScorer] = {}
 _CHECKPOINT_PATHS: dict[str, str] = {}
+_PASS_MODE = "candidate"
+_TARGET_SPECS: dict[str, str] = {}
 
 
 def _iter_json_values(path: Path) -> Iterable[object]:
@@ -101,6 +105,7 @@ def _load_selected_roots(manifest_path: Path) -> list[dict[str, Any]]:
         wanted.setdefault(path, set()).add(int(row["source_record_index"]))
 
     found: dict[tuple[Path, int], dict[str, Any]] = {}
+    wanted_count = sum(len(items) for items in wanted.values())
     for path, indexes in wanted.items():
         record_index = -1
         for value in _iter_json_values(path):
@@ -111,9 +116,20 @@ def _load_selected_roots(manifest_path: Path) -> list[dict[str, Any]]:
                 raise TypeError(f"{path}: record value is malformed")
             record_index += 1
             if record_index in indexes:
-                found[(path, record_index)] = dict(record)
-            if len(found) >= sum(len(items) for items in wanted.values()):
+                selected_identity = next(
+                    item["complete_identity_sha256"]
+                    for item in selected
+                    if _source_path(str(item["source_path"])) == path
+                    and int(item["source_record_index"]) == record_index
+                )
+                found[(path, record_index)] = {
+                    **dict(record),
+                    "_t084_source_identity": selected_identity,
+                }
+            if len(found) >= wanted_count:
                 break
+        if len(found) >= wanted_count:
+            break
     roots: list[dict[str, Any]] = []
     for selected_row in selected:
         path = _source_path(str(selected_row["source_path"]))
@@ -194,12 +210,14 @@ def _work_one(task: tuple[int, str]) -> dict[str, Any]:
         module=_NATIVE_MODULE,
     )
     snapshot, restore_method = restore_battle_start_record(adapter, root)
-    source_identity = str(root_raw.get("source_complete_identity_sha256", ""))
+    source_identity = str(root_raw.get("_t084_source_identity", ""))
     if not source_identity:
         source_identity = hashlib.sha256(
             json.dumps(root_raw, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
     candidates: list[dict[str, Any]] = []
+    target_rows: list[dict[str, Any]] = []
+    consumed_target_ids: set[str] = set()
     scorer = _scorer_for_arm(arm)
 
     def policy_callback(raw: object, native_actions: object) -> list[float]:
@@ -227,7 +245,6 @@ def _work_one(task: tuple[int, str]) -> dict[str, Any]:
         payload: str,
         rng: object,
     ) -> None:
-        del checkpoint
         if not isinstance(raw, Mapping) or not isinstance(rng, Mapping):
             raise TypeError("native collector callback omitted structured state/RNG")
         actions = _native_actions(native_actions)
@@ -248,31 +265,72 @@ def _work_one(task: tuple[int, str]) -> dict[str, Any]:
             (source_identity, arm, digest, str(ordinal), path_fingerprint)
         )
         leaf_identity = hashlib.sha256(leaf_seed.encode()).hexdigest()
-        candidates.append(
-            {
-                "sampling_arm": arm,
-                "act": int(raw.get("act", root.snapshot_raw.get("act", 0))),
-                "root_identity": source_identity,
-                "exact_leaf_identity": f"t084-leaf-{leaf_identity}",
-                "exact_hidden_state_payload": {
-                    "canonical_native_payload": payload_value,
-                    "retention_boundary": "opaque native checkpoint was captured at callback boundary and is process-local",
-                    "restoration_status": "available_only_during_native_collector_callback",
-                },
-                "exact_state_digest": digest,
-                "public_projection": dict(raw),
-                "public_model_input": _public_input(raw, actions, context),
-                "legal_actions": [
-                    {"stable_id": action.action_id, "occurrence": index}
-                    for index, action in enumerate(actions)
-                ],
-                "source_complete_identity_sha256": source_identity,
-                "depth": depth,
-                "callback_ordinal": ordinal,
-                "path_fingerprint": path_fingerprint,
-                "rng_provenance": dict(rng),
-            }
-        )
+        exact_identity = f"t084-leaf-{leaf_identity}"
+        base_row = {
+            "sampling_arm": arm,
+            "act": int(raw.get("act", root.snapshot_raw.get("act", 0))),
+            "root_identity": source_identity,
+            "exact_leaf_identity": exact_identity,
+            "exact_hidden_state_payload": {
+                "canonical_native_payload": payload_value,
+                "retention_boundary": "opaque native checkpoint captured at callback boundary",
+                "restoration_status": (
+                    "consumed_in_callback_for_continuation_replicates"
+                    if exact_identity in _TARGET_SPECS
+                    else "candidate_only_until_selected"
+                ),
+            },
+            "exact_state_digest": digest,
+            "public_projection": dict(raw),
+            "public_model_input": _public_input(raw, actions, context),
+            "legal_actions": [
+                {"stable_id": action.action_id, "occurrence": index}
+                for index, action in enumerate(actions)
+            ],
+            "source_complete_identity_sha256": source_identity,
+            "depth": depth,
+            "callback_ordinal": ordinal,
+            "path_fingerprint": path_fingerprint,
+            "rng_provenance": dict(rng),
+        }
+        if _PASS_MODE == "candidate":
+            candidates.append(base_row)
+            return
+        if exact_identity not in _TARGET_SPECS or exact_identity in consumed_target_ids:
+            return
+        consumed_target_ids.add(exact_identity)
+        replicates: list[dict[str, Any]] = []
+        for replicate_index in range(1, 257):
+            seed_provenance = derive_replicate_seed(
+                _NATIVE_COMMIT,
+                source_identity,
+                arm,
+                exact_identity,
+                replicate_index,
+            )
+            continuation = adapter.evaluate_leaf_continuation(
+                checkpoint,
+                search_action_seed=seed_provenance["seed"],
+                max_transitions=2048,
+                include_potions=False,
+            )
+            replicates.append(
+                {
+                    **dict(continuation),
+                    "replicate_index": replicate_index,
+                    "seed_provenance": seed_provenance,
+                    "terminal": continuation.get("terminal") is True,
+                    "cap_hit": continuation.get("cap_hit") is True,
+                    "transition_count": continuation.get("transition_count"),
+                    "terminal_evaluate_end_state": continuation.get(
+                        "terminal_evaluate_end_state"
+                    ),
+                }
+            )
+        base_row["target_kind"] = _TARGET_SPECS[exact_identity]
+        base_row["replicates"] = replicates
+        base_row["selected_repetition_count"] = 256
+        target_rows.append(base_row)
 
     result = adapter.battle_search_v2_with_leaf_collection(
         snapshot,
@@ -298,6 +356,7 @@ def _work_one(task: tuple[int, str]) -> dict[str, Any]:
         "root_action": result.get("root_action"),
         "root_statistics": result.get("root_statistics"),
         "candidate_rows": candidates,
+        "target_rows": target_rows,
         "native_commit": _NATIVE_COMMIT,
         "wall_clock_seconds": time.monotonic() - started,
     }
@@ -305,12 +364,19 @@ def _work_one(task: tuple[int, str]) -> dict[str, Any]:
 
 
 def _worker_init(
-    roots: list[dict[str, Any]], native_commit: str, checkpoint_paths: dict[str, str]
+    roots: list[dict[str, Any]],
+    native_commit: str,
+    checkpoint_paths: dict[str, str],
+    pass_mode: str,
+    target_specs: dict[str, str],
 ) -> None:
     global _ROOT_ROWS, _NATIVE_COMMIT, _NATIVE_MODULE, _CHECKPOINT_PATHS
+    global _PASS_MODE, _TARGET_SPECS
     _ROOT_ROWS = roots
     _NATIVE_COMMIT = native_commit
     _CHECKPOINT_PATHS = checkpoint_paths
+    _PASS_MODE = pass_mode
+    _TARGET_SPECS = target_specs
     import slaythespire
 
     _NATIVE_MODULE = slaythespire
@@ -321,6 +387,92 @@ def _write_json(path: Path, value: object) -> None:
     path.write_text(
         json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
+
+
+def _run_pass(
+    roots: list[dict[str, Any]],
+    checkpoint_paths: dict[str, str],
+    native_commit: str,
+    workers: int,
+    pass_mode: str,
+    target_specs: dict[str, str],
+) -> tuple[list[dict[str, Any]], list[str], float]:
+    tasks = [(root_index, arm) for root_index in range(len(roots)) for arm in ARMS]
+    started = time.monotonic()
+    root_runs: list[dict[str, Any]] = []
+    failures: list[str] = []
+    context = multiprocessing.get_context("fork")
+    with ProcessPoolExecutor(
+        max_workers=workers,
+        mp_context=context,
+        initializer=_worker_init,
+        initargs=(roots, native_commit, checkpoint_paths, pass_mode, target_specs),
+    ) as pool:
+        futures = {pool.submit(_work_one, task): task for task in tasks}
+        for completed, future in enumerate(as_completed(futures), start=1):
+            root_index, arm = futures[future]
+            try:
+                root_runs.append(future.result())
+            except Exception as exc:  # noqa: BLE001 - retained as per-root evidence
+                failures.append(f"{arm}/root{root_index}: {type(exc).__name__}: {exc}")
+            if completed % 16 == 0 or completed == len(tasks):
+                print(
+                    json.dumps(
+                        {
+                            "pass": pass_mode,
+                            "completed": completed,
+                            "total": len(tasks),
+                            "failures": len(failures),
+                            "wall_clock_seconds": time.monotonic() - started,
+                        },
+                        sort_keys=True,
+                    ),
+                    flush=True,
+                )
+    root_runs.sort(
+        key=lambda row: (str(row.get("sampling_arm")), int(row.get("root_index", -1)))
+    )
+    return root_runs, failures, time.monotonic() - started
+
+
+def _leaf_rank(row: Mapping[str, Any]) -> str:
+    value = "|".join(
+        (
+            str(row["source_complete_identity_sha256"]),
+            str(row["sampling_arm"]),
+            str(row["exact_leaf_identity"]),
+        )
+    )
+    return hashlib.sha256(value.encode()).hexdigest()
+
+
+def _select_target_specs(candidate_rows: list[dict[str, Any]]) -> dict[str, str]:
+    unique: dict[str, dict[str, Any]] = {}
+    for row in candidate_rows:
+        unique.setdefault(str(row["exact_leaf_identity"]), row)
+    selected: dict[str, str] = {}
+    for arm in ARMS:
+        for act, count, kind in ((1, 18, "calibration"), (2, 14, "calibration")):
+            cell = [
+                row
+                for row in unique.values()
+                if row.get("sampling_arm") == arm and row.get("act") == act
+            ]
+            cell.sort(key=_leaf_rank)
+            for row in cell[:count]:
+                selected[str(row["exact_leaf_identity"])] = kind
+        for act, count in ((1, 178), (2, 142)):
+            cell = [
+                row
+                for row in unique.values()
+                if row.get("sampling_arm") == arm
+                and row.get("act") == act
+                and str(row["exact_leaf_identity"]) not in selected
+            ]
+            cell.sort(key=_leaf_rank)
+            for row in cell[:count]:
+                selected[str(row["exact_leaf_identity"])] = "formal"
+    return selected
 
 
 def main() -> int:
@@ -343,43 +495,49 @@ def main() -> int:
         "prior_only_static_64001": str(args.static_64001),
         "prior_only_static_64002": str(args.static_64002),
     }
-    tasks = [(root_index, arm) for root_index in range(len(roots)) for arm in ARMS]
-    started = time.monotonic()
-    root_runs: list[dict[str, Any]] = []
-    failures: list[str] = []
-    context = multiprocessing.get_context("fork")
-    with ProcessPoolExecutor(
-        max_workers=args.workers,
-        mp_context=context,
-        initializer=_worker_init,
-        initargs=(roots, args.native_commit, checkpoint_paths),
-    ) as pool:
-        futures = {pool.submit(_work_one, task): task for task in tasks}
-        for completed, future in enumerate(as_completed(futures), start=1):
-            root_index, arm = futures[future]
-            try:
-                root_runs.append(future.result())
-            except Exception as exc:  # noqa: BLE001 - retained as per-root evidence
-                failures.append(f"{arm}/root{root_index}: {type(exc).__name__}: {exc}")
-            if completed % 16 == 0 or completed == len(tasks):
-                print(
-                    json.dumps(
-                        {
-                            "completed": completed,
-                            "total": len(tasks),
-                            "failures": len(failures),
-                            "wall_clock_seconds": time.monotonic() - started,
-                        },
-                        sort_keys=True,
-                    ),
-                    flush=True,
-                )
-    root_runs.sort(
-        key=lambda row: (str(row.get("sampling_arm")), int(row.get("root_index", -1)))
+    candidate_runs, candidate_failures, candidate_wall = _run_pass(
+        roots,
+        checkpoint_paths,
+        args.native_commit,
+        args.workers,
+        "candidate",
+        {},
     )
     candidate_rows = [
-        candidate for run in root_runs for candidate in run.get("candidate_rows", [])
+        candidate
+        for run in candidate_runs
+        for candidate in run.get("candidate_rows", [])
     ]
+    target_specs = _select_target_specs(candidate_rows)
+    target_runs, target_failures, target_wall = _run_pass(
+        roots,
+        checkpoint_paths,
+        args.native_commit,
+        args.workers,
+        "selected_leaf_continuation",
+        target_specs,
+    )
+    target_rows = [
+        target for run in target_runs for target in run.get("target_rows", [])
+    ]
+    calibration_rows = [
+        row for row in target_rows if row.get("target_kind") == "calibration"
+    ]
+    formal_rows = [row for row in target_rows if row.get("target_kind") == "formal"]
+    calibration = (
+        select_repetition_count(calibration_rows)
+        if len(calibration_rows) == 96
+        else {"qualified": False, "reason": "exact 96 calibration rows unavailable"}
+    )
+    selected_n = calibration.get("selected_repetition_count")
+    if isinstance(selected_n, int):
+        for row in formal_rows:
+            row["selected_repetition_count"] = selected_n
+            row["replicates"] = row["replicates"][:selected_n]
+    root_runs = target_runs
+    failures = candidate_failures + target_failures
+    total_wall = candidate_wall + target_wall
+    tasks = len(roots) * len(ARMS)
     execution = {
         "schema_id": COLLECTOR_SCHEMA_ID,
         "generation_mode": "native_runtime_collector",
@@ -392,8 +550,22 @@ def main() -> int:
             for run in root_runs
         ],
         "candidate_rows": candidate_rows,
-        "calibration_rows": [],
-        "formal_rows": [],
+        "calibration_rows": calibration_rows,
+        "formal_rows": formal_rows,
+        "calibration": calibration,
+        "generation_passes": {
+            "candidate": {
+                "worker_count": args.workers,
+                "task_count": tasks,
+                "wall_clock_seconds": candidate_wall,
+            },
+            "selected_leaf_continuation": {
+                "worker_count": args.workers,
+                "task_count": tasks,
+                "wall_clock_seconds": target_wall,
+                "target_identity_count": len(target_specs),
+            },
+        },
         "arm_configs": {
             "unguided_search_v2": {
                 "policy_prior": False,
@@ -424,12 +596,12 @@ def main() -> int:
         "shards": [
             {
                 "worker_count": args.workers,
-                "task_count": len(tasks),
+                "task_count": tasks,
                 "task_ranges": "root indices 0..459 x three arms",
-                "wall_clock_seconds": time.monotonic() - started,
+                "wall_clock_seconds": total_wall,
             }
         ],
-        "wall_clock_seconds": time.monotonic() - started,
+        "wall_clock_seconds": total_wall,
     }
     _write_json(args.output, execution)
     return 0 if not failures and len(root_runs) == len(tasks) else 2
