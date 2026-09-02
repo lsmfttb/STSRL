@@ -98,6 +98,24 @@ Inputs: the exact accepted T082 report, T083 report, T064 curriculum manifest an
 
 Claim boundary: T084 may claim only that a retained internal-leaf continuation-utility dataset is qualified for a bounded paired value-target repair under the frozen Search v2/native contract. It does not claim model quality, A20 game strength, learned-value benefit, or general later-act coverage.
 
+Required predicates: exact accepted T082/T083/T064 input identities; exact 460-root
+Act/component cohort; exact native/STSRL identities and source matches; collector
+off/on parity across all arms; complete restorable hidden-state provenance and
+public-input provenance for every leaf; valid 96-leaf calibration with a
+precommitted repetition gate; exact 960-row arm/Act quotas with finite terminal
+replicates; and intact report/retention hashes. The scientific claim is bounded
+by the continuation utility and public-input/hidden-state boundary defined in
+this document.
+
+Unavailable-fact behavior: retain an explicit unavailable fact and fail closed
+to `INCOMPLETE` for missing or conflicting artifact, code, native, collector,
+restoration, execution, or report-integrity evidence; do not infer a leaf state,
+target, source identity, or quota from filenames, coarse digests, public
+projections, or partial/non-terminal continuations. Valid execution with
+insufficient leaf support or failed precommitted Monte Carlo stability remains
+the corresponding support/unstable terminal classification, not a relaxed
+eligibility claim.
+
 ### Required scale and coverage predicates
 
 The consumed T064 source cohort is eligible only if all 460 exact selected roots and the accepted Act/component counts above are reproduced with no substitution.

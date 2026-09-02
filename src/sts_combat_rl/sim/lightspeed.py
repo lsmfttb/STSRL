@@ -377,6 +377,91 @@ class LightSpeedAdapter:
             )
         )
 
+    def battle_search_v2_with_leaf_collection(
+        self,
+        snapshot: SimulatorSnapshot,
+        *,
+        simulations: int,
+        include_potions: bool = False,
+        policy_prior_callback: Any | None = None,
+        leaf_value_callback: Any | None = None,
+        collector_config: Mapping[str, Any] | None = None,
+        leaf_collector_callback: Any | None = None,
+    ) -> dict[str, Any]:
+        """Run the optional read-only T084 collector companion.
+
+        The accepted T079 native build intentionally does not expose this
+        method.  Keeping the capability check here makes that absence explicit
+        and fail closed; it must never silently fall back to public
+        ``state_utilization`` digests, which cannot restore an internal leaf.
+        """
+
+        if not hasattr(self._sim, "battle_search_v2_with_leaf_collection"):
+            raise RuntimeError(
+                "slaythespire.StepSimulator does not expose "
+                "battle_search_v2_with_leaf_collection; a T084 native "
+                "collector build is required"
+            )
+        if policy_prior_callback is not None and not callable(policy_prior_callback):
+            raise ValueError(
+                "battle_search_v2_with_leaf_collection policy_prior_callback "
+                "must be callable"
+            )
+        if leaf_value_callback is not None and not callable(leaf_value_callback):
+            raise ValueError(
+                "battle_search_v2_with_leaf_collection leaf_value_callback "
+                "must be callable"
+            )
+        if leaf_collector_callback is None or not callable(leaf_collector_callback):
+            raise ValueError(
+                "battle_search_v2_with_leaf_collection leaf_collector_callback "
+                "must be callable"
+            )
+        self._assert_snapshot_is_current(snapshot)
+        return dict(
+            self._sim.battle_search_v2_with_leaf_collection(
+                int(simulations),
+                bool(include_potions),
+                policy_prior_callback,
+                leaf_value_callback,
+                dict(collector_config or {}),
+                leaf_collector_callback,
+            )
+        )
+
+    def evaluate_leaf_continuation(
+        self,
+        checkpoint: Any,
+        *,
+        search_action_seed: int,
+        max_transitions: int = 2048,
+        include_potions: bool = False,
+    ) -> dict[str, Any]:
+        """Replay one collected internal leaf with the native continuation policy."""
+
+        if not hasattr(self._sim, "evaluate_leaf_continuation"):
+            raise RuntimeError(
+                "slaythespire.StepSimulator does not expose "
+                "evaluate_leaf_continuation; build the T084 native collector "
+                "source integration"
+            )
+        if isinstance(search_action_seed, bool) or not isinstance(
+            search_action_seed, int
+        ):
+            raise TypeError("search_action_seed must be an integer")
+        if isinstance(max_transitions, bool) or not isinstance(max_transitions, int):
+            raise TypeError("max_transitions must be an integer")
+        if max_transitions <= 0:
+            raise ValueError("max_transitions must be positive")
+        return dict(
+            self._sim.evaluate_leaf_continuation(
+                checkpoint,
+                int(search_action_seed),
+                int(max_transitions),
+                bool(include_potions),
+            )
+        )
+
     def legal_battle_start_encounters(
         self,
         snapshot: SimulatorSnapshot,
