@@ -94,6 +94,32 @@ def _iter_json_values(path: Path) -> Iterable[object]:
                 return
 
 
+def _iter_selected_record_lines(
+    path: Path, selected_indices: set[int]
+) -> Iterable[tuple[int, Mapping[str, Any]]]:
+    """Scan accepted JSONL bytes but decode only the bounded selected rows."""
+
+    found: set[int] = set()
+    record_index = -1
+    with path.open("rb", buffering=4 * 1024 * 1024) as stream:
+        for line in stream:
+            if b'"type": "record"' not in line:
+                continue
+            record_index += 1
+            if record_index not in selected_indices:
+                continue
+            value = json.loads(line)
+            if not isinstance(value, Mapping) or value.get("type") != "record":
+                raise ValueError(f"{path}: selected record line is malformed")
+            record = value.get("record")
+            if not isinstance(record, Mapping):
+                raise ValueError(f"{path}: selected record payload is malformed")
+            found.add(record_index)
+            yield record_index, record
+            if found == selected_indices:
+                return
+
+
 def _source_path(raw: str) -> Path:
     return Path(raw.replace("D:\\", "/mnt/d/").replace("\\", "/"))
 
@@ -113,27 +139,17 @@ def _load_selected_roots(manifest_path: Path) -> list[dict[str, Any]]:
     found: dict[tuple[Path, int], dict[str, Any]] = {}
     wanted_count = sum(len(items) for items in wanted.values())
     for path, indexes in wanted.items():
-        record_index = -1
-        for value in _iter_json_values(path):
-            if not isinstance(value, Mapping) or value.get("type") != "record":
-                continue
-            record = value.get("record")
-            if not isinstance(record, Mapping):
-                raise TypeError(f"{path}: record value is malformed")
-            record_index += 1
-            if record_index in indexes:
-                selected_identity = next(
-                    item["complete_identity_sha256"]
-                    for item in selected
-                    if _source_path(str(item["source_path"])) == path
-                    and int(item["source_record_index"]) == record_index
-                )
-                found[(path, record_index)] = {
-                    **dict(record),
-                    "_t084_source_identity": selected_identity,
-                }
-            if len(found) >= wanted_count:
-                break
+        for record_index, record in _iter_selected_record_lines(path, indexes):
+            selected_identity = next(
+                item["complete_identity_sha256"]
+                for item in selected
+                if _source_path(str(item["source_path"])) == path
+                and int(item["source_record_index"]) == record_index
+            )
+            found[(path, record_index)] = {
+                **dict(record),
+                "_t084_source_identity": selected_identity,
+            }
         if len(found) >= wanted_count:
             break
     roots: list[dict[str, Any]] = []
