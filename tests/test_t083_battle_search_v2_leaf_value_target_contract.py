@@ -141,11 +141,182 @@ def test_code_evidence_requires_main_ref_and_matching_sources(tmp_path: Path) ->
     assert evidence["source_matches_main"] is False
 
 
-def test_terminal_classification_is_single_and_recommendation_is_bounded() -> None:
-    support = {
-        "reason": "missing terminal state",
-        "reconstructed_exact_native_utility_rows": 0,
+def _classification_candidate(*, gates: dict[str, bool], retained: bool) -> dict:
+    return {
+        "candidate": "synthetic",
+        "gates": gates,
+        "retained_labels_sufficient": retained,
+        "definition_reusable": all(gates.values()),
     }
-    table = module._candidate_table(support, True)
-    assert len({"NEW_LEAF_CONTINUATION_UTILITY_TARGET_REQUIRED"}) == 1
-    assert all("gates" in row and len(row["gates"]) == 6 for row in table)
+
+
+def test_classifier_existing_requires_all_gates_and_retained_labels() -> None:
+    gates = {name: True for name in module.GATE_NAMES}
+    assert (
+        module.classify_contract(
+            [_classification_candidate(gates=gates, retained=True)],
+            integrity_valid=True,
+            execution_valid=True,
+            generator_evidence={},
+        )
+        == "EXISTING_T064_LEAF_VALUE_LABELS_REUSABLE"
+    )
+
+
+def test_classifier_new_requires_precise_materializable_generator() -> None:
+    gates = {name: False for name in module.GATE_NAMES}
+    assert (
+        module.classify_contract(
+            [_classification_candidate(gates=gates, retained=False)],
+            integrity_valid=True,
+            execution_valid=True,
+            generator_evidence={
+                "precise_generator_proven": True,
+                "accepted_surfaces_can_materialize_hidden_internal_state": True,
+            },
+        )
+        == "NEW_LEAF_CONTINUATION_UTILITY_TARGET_REQUIRED"
+    )
+
+
+def test_classifier_unresolved_when_generator_is_not_materializable() -> None:
+    gates = {name: False for name in module.GATE_NAMES}
+    assert (
+        module.classify_contract(
+            [_classification_candidate(gates=gates, retained=False)],
+            integrity_valid=True,
+            execution_valid=True,
+            generator_evidence={
+                "precise_generator_proven": True,
+                "accepted_surfaces_can_materialize_hidden_internal_state": False,
+            },
+        )
+        == "LEAF_VALUE_TARGET_CONTRACT_UNRESOLVED"
+    )
+
+
+def test_classifier_incomplete_is_only_for_integrity_or_execution_failure() -> None:
+    gates = {name: False for name in module.GATE_NAMES}
+    assert (
+        module.classify_contract(
+            [_classification_candidate(gates=gates, retained=False)],
+            integrity_valid=False,
+            execution_valid=True,
+            generator_evidence={},
+        )
+        == "INCOMPLETE"
+    )
+
+
+def test_audit_unresolved_when_generator_is_unproven_but_integrity_is_valid(
+    tmp_path: Path, monkeypatch
+) -> None:
+    t082 = tmp_path / "t082.json"
+    t082.write_text(
+        json.dumps(
+            {
+                "schema_version": "t082-value-target-semantic-closure-v1",
+                "classification": "VALUE_TARGET_SEMANTIC_MISMATCH_CONFIRMED",
+            }
+        ),
+        encoding="utf-8",
+    )
+    valid_check = {"valid": True}
+    monkeypatch.setattr(
+        module, "_git_ref_commit", lambda *_: module.EXPECTED_MAIN_COMMIT
+    )
+    monkeypatch.setattr(
+        module, "_artifact_check", lambda *args, **kwargs: valid_check.copy()
+    )
+    monkeypatch.setattr(
+        module,
+        "_validate_t064_artifacts",
+        lambda *args, **kwargs: (
+            {"artifact_checks": [{"valid": True}]},
+            {"input_artifacts": {}},
+            [],
+            [],
+        ),
+    )
+    monkeypatch.setattr(
+        module,
+        "_teacher_inventory",
+        lambda *args, **kwargs: (
+            {"row_count": 0, "candidates": {}},
+            [],
+        ),
+    )
+    monkeypatch.setattr(
+        module,
+        "_trainer_check",
+        lambda *args, **kwargs: ({"row_count": 0}, []),
+    )
+    monkeypatch.setattr(
+        module,
+        "_source_terminal_support",
+        lambda *args, **kwargs: (
+            {"reconstructed_exact_native_utility_rows": 0},
+            [],
+        ),
+    )
+    monkeypatch.setattr(
+        module,
+        "native_evidence",
+        lambda *args, **kwargs: {
+            "identity_valid": True,
+            "formula_evidence": {"all_required_tokens_present": True},
+            "generator_evidence": {
+                "precise_generator_proven": False,
+                "accepted_surfaces_can_materialize_hidden_internal_state": False,
+            },
+        },
+    )
+    monkeypatch.setattr(
+        module,
+        "code_evidence",
+        lambda *args, **kwargs: {
+            **{
+                name: {"available": True, "tokens": {"evidence": True}}
+                for name in (
+                    "src/sts_combat_rl/sim/battle_search_v2.py",
+                    "src/sts_combat_rl/sim/torch_policy_value.py",
+                    "src/sts_combat_rl/sim/oracle_teacher_search_guidance.py",
+                )
+            },
+            "source_matches_main": True,
+            "contract": {},
+        },
+    )
+    result = module.audit_t083(
+        tmp_path / "t064",
+        t082,
+        tmp_path / "report.json",
+        repo_root=tmp_path,
+        native_root=tmp_path,
+        expected_rows=0,
+    )
+    assert result["classification"] == "LEAF_VALUE_TARGET_CONTRACT_UNRESOLVED"
+    assert result["integrity"]["valid"] is True
+    assert result["integrity"]["problems"] == []
+
+
+def test_root_candidates_are_not_definition_reusable_without_leaf_gates() -> None:
+    table = module._candidate_table(
+        {
+            "reason": "missing terminal state",
+            "reconstructed_exact_native_utility_rows": 0,
+        },
+        True,
+    )
+    assert all(len(row["gates"]) == 6 for row in table)
+    assert all(
+        not row["definition_reusable"]
+        for row in table
+        if row["candidate"]
+        in {
+            "selected_teacher_action_mean_value",
+            "root_max_eligible_mean_value",
+            "native_search_report_best_action_value",
+            "soft_visit_weighted_root_mean",
+        }
+    )

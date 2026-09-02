@@ -67,6 +67,14 @@ EXPECTED_NATIVE_FILES = (
     "src/sim/search/BattleScumSearcher2.cpp",
     "bindings/slaythespire.cpp",
 )
+GATE_NAMES = (
+    "utility_gate",
+    "continuation_gate",
+    "state_target_gate",
+    "leaf_support_gate",
+    "information_provenance_gate",
+    "artifact_gate",
+)
 
 
 def sha256(path: Path) -> str:
@@ -297,13 +305,13 @@ def native_evidence(native_root: Path) -> dict[str, Any]:
             "line_evidence": matches,
         }
     cpp, _ = _git_show(
-        native_root, EXPECTED_NATIVE_COMMIT, "src/sim/search/BattleScumSearcher2.cpp"
+        native_root, EXPECTED_NATIVE_REF, "src/sim/search/BattleScumSearcher2.cpp"
     )
     header, _ = _git_show(
-        native_root, EXPECTED_NATIVE_COMMIT, "include/sim/search/BattleScumSearcher2.h"
+        native_root, EXPECTED_NATIVE_REF, "include/sim/search/BattleScumSearcher2.h"
     )
     binding, _ = _git_show(
-        native_root, EXPECTED_NATIVE_COMMIT, "bindings/slaythespire.cpp"
+        native_root, EXPECTED_NATIVE_REF, "bindings/slaythespire.cpp"
     )
     all_source = "\n".join(
         value for value in (cpp, header, binding) if value is not None
@@ -317,6 +325,29 @@ def native_evidence(native_root: Path) -> dict[str, Any]:
         "bc.turn * .2",
         "updateFromEvaluation(searchStack, actionStack, evaluation)",
         "node.evaluationSum += evaluation",
+    )
+    generator_tokens = (
+        "void search::BattleScumSearcher2::playoutRandom",
+        "while (!isTerminalState(state))",
+        "enumerateActionsForNode(tempNode, state, false)",
+        "std::uniform_int_distribution<int>(0, static_cast<int>(tempNode.edges.size())-1)",
+        "const int selectedIdx = dist(randGen)",
+        "action.execute(state)",
+        "randGen(bc.seed+bc.floorNum)",
+        "edgeTaken.action.execute(curState)",
+        "searchStack.push_back(&edgeTaken.node)",
+        "learnedLeafValueFnc(curState, legalActions)",
+        "playoutRandom(curState, actionStack)",
+    )
+    materialization_tokens = (
+        "const BattleContext &state",
+        "battleSearchNodeSnapshot(state)",
+        "exactStateDigest",
+        'telemetry["expanded_states"] = rows',
+    )
+    generator_proven = all(token in all_source for token in generator_tokens)
+    materialization_evidence_available = all(
+        token in all_source for token in materialization_tokens
     )
     return {
         "repository": "https://github.com/lsmfttb/sts_lightspeed.git",
@@ -348,6 +379,59 @@ def native_evidence(native_root: Path) -> dict[str, Any]:
                 "encounter",
                 "cardsDrawn",
             ],
+        },
+        "generator_evidence": {
+            "name": "BattleScumSearcher2::playoutRandom",
+            "precise_generator_proven": generator_proven,
+            "required_tokens": list(generator_tokens),
+            "post_first_action_boundary": {
+                "proven": all(
+                    token in all_source
+                    for token in (
+                        "edgeTaken.action.execute(curState)",
+                        "searchStack.push_back(&edgeTaken.node)",
+                        "learnedLeafValueFnc(curState, legalActions)",
+                    )
+                ),
+                "semantics": "execute the selected first action, push its child, then request the learned value on the post-action state",
+            },
+            "eligible_action_enumeration": {
+                "proven": "enumerateActionsForNode(tempNode, state, false)"
+                in all_source,
+                "semantics": "playoutRandom enumerates actions without priors and samples the eligible action vector",
+            },
+            "uniform_random_action": {
+                "proven": all(
+                    token in all_source
+                    for token in (
+                        "std::uniform_int_distribution<int>(0, static_cast<int>(tempNode.edges.size())-1)",
+                        "const int selectedIdx = dist(randGen)",
+                    )
+                ),
+                "semantics": "uniform_int_distribution over the enumerated eligible actions",
+            },
+            "terminal_loop": {
+                "proven": all(
+                    token in all_source
+                    for token in (
+                        "while (!isTerminalState(state))",
+                        "action.execute(state)",
+                    )
+                ),
+                "semantics": "continue random action execution until isTerminalState(state)",
+            },
+            "random_rng_producer": {
+                "proven": "randGen(bc.seed+bc.floorNum)" in all_source,
+                "semantics": "BattleScumSearcher2::randGen is a std::default_random_engine seeded from battle seed plus floor",
+            },
+            "accepted_surfaces_can_materialize_hidden_internal_state": (
+                generator_proven and materialization_evidence_available
+            ),
+            "materialization_evidence_available": materialization_evidence_available,
+            "materialization_boundary": "the accepted native search surface materializes and continues the hidden BattleContext internally; the Python callback receives only battleSearchNodeSnapshot(state), while T079 telemetry exports exactStateDigest/expanded_states metadata rather than the canonical payload",
+            "python_callback_receives_hidden_internal_state": False,
+            "materialization_reason": "native target generation can capture the post-action BattleContext at the pinned callback boundary without changing Search semantics; retained T064 rows alone do not contain that hidden state",
+            "target_definition": "V_leaf=E[evaluateEndState | post-action state, pinned playoutRandom]",
         },
         "backup_path": {
             "terminal_playout": "updateFromPlayout -> evaluateEndState -> updateFromEvaluation",
@@ -876,8 +960,7 @@ def _candidate_table(
                 "value_kind": value_kind,
                 "proven_continuation_semantics": semantics,
                 "gates": gates,
-                "definition_reusable": name != "current_battle_survival_probability"
-                and name != "source_realized_terminal_utility",
+                "definition_reusable": all(gates.values()),
                 "retained_labels_sufficient": False,
                 "rejection_or_limit": "action-specific/root-only finite-search quantity lacks internal-leaf support and a continuation contract"
                 if name
@@ -893,6 +976,59 @@ def _candidate_table(
             }
         )
     return table
+
+
+def _classification_evidence(
+    candidate_table: Sequence[Mapping[str, Any]],
+    *,
+    integrity_valid: bool,
+    execution_valid: bool,
+    generator_evidence: Mapping[str, Any],
+) -> dict[str, Any]:
+    retained_candidate_all_gates = any(
+        bool(candidate.get("retained_labels_sufficient"))
+        and all(bool(value) for value in (candidate.get("gates") or {}).values())
+        for candidate in candidate_table
+    )
+    precise_generator_proven = bool(generator_evidence.get("precise_generator_proven"))
+    can_materialize_hidden_state = bool(
+        generator_evidence.get(
+            "accepted_surfaces_can_materialize_hidden_internal_state"
+        )
+    )
+    return {
+        "integrity_valid": integrity_valid,
+        "execution_valid": execution_valid,
+        "retained_candidate_all_gates_and_labels_sufficient": retained_candidate_all_gates,
+        "accepted_native_precise_generator_proven": precise_generator_proven,
+        "accepted_surfaces_can_materialize_hidden_internal_state": can_materialize_hidden_state,
+        "new_generator_usable": precise_generator_proven
+        and can_materialize_hidden_state,
+    }
+
+
+def classify_contract(
+    candidate_table: Sequence[Mapping[str, Any]],
+    *,
+    integrity_valid: bool,
+    execution_valid: bool,
+    generator_evidence: Mapping[str, Any],
+) -> str:
+    """Select exactly one classification from explicit audit evidence."""
+
+    evidence = _classification_evidence(
+        candidate_table,
+        integrity_valid=integrity_valid,
+        execution_valid=execution_valid,
+        generator_evidence=generator_evidence,
+    )
+    if not evidence["integrity_valid"] or not evidence["execution_valid"]:
+        return "INCOMPLETE"
+    if evidence["retained_candidate_all_gates_and_labels_sufficient"]:
+        return "EXISTING_T064_LEAF_VALUE_LABELS_REUSABLE"
+    if evidence["new_generator_usable"]:
+        return "NEW_LEAF_CONTINUATION_UTILITY_TARGET_REQUIRED"
+    return "LEAF_VALUE_TARGET_CONTRACT_UNRESOLVED"
 
 
 def _incomplete_report(
@@ -994,6 +1130,7 @@ def audit_t083(
             if key.startswith("src/")
         )
         code_valid = code_valid and bool(code.get("source_matches_main"))
+        generator_evidence = native.get("generator_evidence", {})
         native_valid = bool(
             native.get("identity_valid")
             and native.get("formula_evidence", {}).get("all_required_tokens_present")
@@ -1014,20 +1151,37 @@ def audit_t083(
             "deterministic_root_to_internal_leaf_transform": False,
             "reason": "T064 compact/teacher/trainer artifacts contain root decision rows and root search statistics, not the post-first-action internal leaf state/target pairs",
         }
-        classification = (
-            "INCOMPLETE"
-            if all_problems
-            else "NEW_LEAF_CONTINUATION_UTILITY_TARGET_REQUIRED"
+        integrity_valid = not all_problems and artifact_valid
+        classification_evidence = _classification_evidence(
+            table,
+            integrity_valid=integrity_valid,
+            execution_valid=True,
+            generator_evidence=generator_evidence,
         )
-        recommendation = (
-            None
-            if classification == "INCOMPLETE"
-            else {
+        classification = classify_contract(
+            table,
+            integrity_valid=integrity_valid,
+            execution_valid=True,
+            generator_evidence=generator_evidence,
+        )
+        target_definition = (
+            "V_leaf=E[evaluateEndState | post-action state, pinned playoutRandom]"
+        )
+        if classification == "INCOMPLETE":
+            recommendation = None
+        elif classification == "EXISTING_T064_LEAF_VALUE_LABELS_REUSABLE":
+            recommendation = {
+                "kind": "bounded paired value-only repair/evaluation task",
+                "target_scalar": target_definition,
+                "reason": "a retained T064 candidate passed all six gates and retained_labels_sufficient",
+            }
+        elif classification == "NEW_LEAF_CONTINUATION_UTILITY_TARGET_REQUIRED":
+            recommendation = {
                 "kind": "bounded successor target-generation task",
                 "minimum_data_product": "same-public-state/internal-leaf rows with native evaluateEndState-unit target and explicit terminal-utility continuation rollouts",
-                "target_scalar": "expected native evaluateEndState utility after a named fixed continuation/search policy, backed up in native utility units",
+                "target_scalar": target_definition,
                 "terminal_utility": "exact pinned BattleScumSearcher2::evaluateEndState, including victory/non-victory formulas and all native inputs",
-                "continuation_policy": "newly specified reproducible policy/search continuation, separately from T082 source-behavior continuation and T064 root teacher action selection",
+                "continuation_policy": "pinned BattleScumSearcher2::playoutRandom",
                 "state_boundary": "sample post-first-action Search v2 internal leaves at the callback boundary; retain public model input and full-simulator Oracle-like target provenance",
                 "checks": [
                     "identity/integrity",
@@ -1045,12 +1199,20 @@ def audit_t083(
                     "terminal resource heads",
                 ],
             }
-        )
+        else:
+            recommendation = {
+                "kind": "bounded leaf-value contract resolution task",
+                "target_scalar": target_definition,
+                "reason": "pinned native continuation semantics are not materializable from the accepted surfaces; resolve the hidden post-action state transport before any training successor",
+                "required_resolution": "add or identify an accepted read-only target-generation surface that materializes the exact post-action BattleContext without changing Search behavior",
+                "no_training_authorized": True,
+            }
         result = {
             "schema_id": SCHEMA_ID,
             "schema_version": 1,
             "task_id": "T083",
             "classification": classification,
+            "classification_evidence": classification_evidence,
             "recommendation": recommendation,
             "execution": {
                 "mode": "offline_streaming",
