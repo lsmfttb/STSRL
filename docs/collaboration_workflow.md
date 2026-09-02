@@ -22,7 +22,9 @@ Planner owns task meaning:
 - state/lineage rules only when they affect scientific results, reproducibility,
   or a real downstream contract;
 - resolution of genuine contract/architecture gaps;
-- final scientific/architecture acceptance.
+- final scientific/architecture acceptance;
+- direct task landing after both final acceptances are recorded on the same exact
+  head.
 
 Planner does not normally own module names, function signatures, CLI spelling,
 helper layout, logging, temporary files, or test harness design.
@@ -36,8 +38,9 @@ Maintainer owns execution coordination and repository conformance:
 - Implementer dispatch;
 - verification, runtime evidence, and artifact retention;
 - implementation review and finding classification;
-- final implementation/operational acceptance and merge;
-- post-merge result reporting.
+- final implementation/operational acceptance;
+- preparation of factual lifecycle/result landing records before final dual
+  acceptance whenever practical.
 
 Maintainer may choose ordinary execution bindings that do not change task meaning.
 Maintainer does not invent scientific semantics, acceptance meaning, information
@@ -122,13 +125,28 @@ not to keep appending rules.
 
 4. **Implementation And Evidence** — Implementer works inside the frozen semantic
    equivalence class; Maintainer coordinates verification/evidence.
-5. **Dual Final Acceptance** — the same exact head requires Planner scientific/
-   architecture acceptance and Maintainer implementation/operational acceptance.
-6. **Merge** — only Maintainer merges and updates merged lifecycle/result records.
+5. **Landing Record Preparation** — before final acceptance, Maintainer normally
+   places factual terminal results, artifact identities, limitations, and required
+   task-lifecycle/result documentation on the same PR head. Avoid a routine
+   post-merge documentation round trip.
+6. **Dual Final Acceptance** — the same exact head requires Maintainer
+   implementation/operational acceptance and Planner scientific/architecture
+   acceptance. The normal order is Maintainer first, Planner last.
+7. **Landing** — once both final acceptances refer to the same exact head, Planner
+   may merge immediately and update the research ledger / successor state. No
+   additional Maintainer handoff is required merely to perform the merge.
+   Maintainer may still perform the merge when explicitly requested or when a
+   repository constraint requires it.
 
 A material Planner-contract change after authorization requires renewed approval.
 Clearly non-semantic wording/spelling fixes do not require a semantic reset when
 Maintainer records them as immaterial.
+
+Any material change to the PR head after either final acceptance invalidates that
+acceptance for the new head. A clearly non-semantic landing-only change may retain
+acceptance only when both roles explicitly record that it is immaterial. Prefer
+putting landing records on the PR before dual final acceptance so this exception is
+rare.
 
 ## Artifacts And Runtime
 
@@ -160,13 +178,17 @@ the same task ID from current `main`.
 
 - `main` is durable project truth.
 - Task lifecycle is authoritative in merged `docs/tasks/README.md`.
-- `docs/current_status.md` is Maintainer's result report for Planner.
+- `docs/current_status.md` is the merged result record: Maintainer owns factual
+  execution/evidence reporting, and Planner owns accepted scientific
+  interpretation.
 - PR comments carry task-specific findings/acceptances but do not replace merged
   policy.
 - Prefer inheritance/reference over duplicated normative text.
 
-After a task ends, Maintainer records the result, evidence, limitations, retained
-material artifacts, and genuine gaps/escalations. Planner decides successor work.
+Before a task's final dual acceptance, Maintainer normally records the result,
+evidence, limitations, retained material artifacts, and genuine gaps/escalations
+on the task PR. After dual acceptance on that same exact head, Planner may land the
+task directly, update the research ledger, and decide successor work.
 
 Each role normally keeps one model/reasoning configuration for a task. If a role
 cannot execute within its boundary, narrow/split the work or escalate the material
