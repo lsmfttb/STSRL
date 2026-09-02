@@ -9,9 +9,12 @@ import pytest
 import scripts.collect_t084_native_leaf_candidates as t084_collector
 from scripts.collect_t084_native_leaf_candidates import (
     ARMS,
+    PROGRESS_SCHEMA_ID,
+    _ProgressStore,
     _select_cell,
     _select_parity_root_indices,
     _selected_target_for_occurrence,
+    _task_key,
 )
 from sts_combat_rl.t084_search_v2_internal_leaf_target_generation import (
     ACTION_CAP,
@@ -605,3 +608,146 @@ def test_prior_policy_callback_uses_search_guidance_policy_probabilities(
     assert len(observed_contexts) == 1
     assert observed_contexts[0].public_run_context == {"visible": "context"}
     assert result["candidate_count"] == 1
+
+
+def _progress_identity() -> dict[str, object]:
+    return {
+        "code": {"git_head": "code-a", "collector_sha256": "collector-a"},
+        "native_commit": "native-a",
+        "t064_manifest_sha256": "manifest-a",
+        "checkpoint_identities": {"arm": {"sha256": "checkpoint-a"}},
+    }
+
+
+def _progress_configuration() -> dict[str, object]:
+    return {
+        "task_id": "T084",
+        "arms": list(ARMS),
+        "workers": 16,
+        "search_simulations_per_root": 100,
+    }
+
+
+def test_progress_task_results_are_atomic_and_resume_skips_successes(
+    tmp_path,
+) -> None:
+    progress_path = tmp_path / "t084.progress.json"
+    output_path = tmp_path / "t084.json"
+    identity = _progress_identity()
+    configuration = _progress_configuration()
+    store = _ProgressStore(
+        progress_path,
+        identity=identity,
+        configuration=configuration,
+        output_path=output_path,
+        resume=False,
+    )
+    assert store.document["schema_id"] == PROGRESS_SCHEMA_ID
+    tasks = [(0, ARMS[0]), (1, ARMS[1])]
+    store.ensure_stage(
+        "candidate",
+        tasks,
+        pass_index=0,
+        task_ranges="test task range",
+    )
+    success = {
+        "root_index": 0,
+        "sampling_arm": ARMS[0],
+        "worker_pid": 123,
+    }
+    store.record_success("candidate", tasks[0], success)
+    store.record_failure("candidate", tasks[1], RuntimeError("transient"))
+
+    assert progress_path.is_file()
+    assert not list(tmp_path.rglob("*.tmp"))
+    resumed = _ProgressStore(
+        progress_path,
+        identity=identity,
+        configuration=configuration,
+        output_path=output_path,
+        resume=True,
+    )
+    cached = resumed.successful_results("candidate", tasks)
+    assert cached[_task_key(tasks[0])] == success
+    assert [task for task in tasks if _task_key(task) not in cached] == [tasks[1]]
+    assert (
+        resumed.document["stages"]["candidate"]["tasks"][_task_key(tasks[1])]["status"]
+        == "failed"
+    )
+    assert resumed.stage_failures("candidate")
+
+
+def test_progress_resume_rejects_identity_and_stage_configuration_mismatch(
+    tmp_path,
+) -> None:
+    progress_path = tmp_path / "t084.progress.json"
+    output_path = tmp_path / "t084.json"
+    identity = _progress_identity()
+    configuration = _progress_configuration()
+    store = _ProgressStore(
+        progress_path,
+        identity=identity,
+        configuration=configuration,
+        output_path=output_path,
+        resume=False,
+    )
+    tasks = [(0, ARMS[0])]
+    store.ensure_stage("candidate", tasks, pass_index=0, task_ranges="range")
+
+    with pytest.raises(ValueError, match="identity mismatch"):
+        _ProgressStore(
+            progress_path,
+            identity={**identity, "native_commit": "native-b"},
+            configuration=configuration,
+            output_path=output_path,
+            resume=True,
+        )
+    resumed = _ProgressStore(
+        progress_path,
+        identity=identity,
+        configuration=configuration,
+        output_path=output_path,
+        resume=True,
+    )
+    with pytest.raises(ValueError, match="stage configuration mismatch"):
+        resumed.ensure_stage(
+            "candidate",
+            [(0, ARMS[1])],
+            pass_index=0,
+            task_ranges="range",
+        )
+
+
+def test_progress_corruption_fails_closed_before_reuse(tmp_path) -> None:
+    progress_path = tmp_path / "t084.progress.json"
+    output_path = tmp_path / "t084.json"
+    identity = _progress_identity()
+    configuration = _progress_configuration()
+    store = _ProgressStore(
+        progress_path,
+        identity=identity,
+        configuration=configuration,
+        output_path=output_path,
+        resume=False,
+    )
+    task = (0, ARMS[0])
+    store.ensure_stage("candidate", [task], pass_index=0, task_ranges="range")
+    store.record_success(
+        "candidate",
+        task,
+        {"root_index": 0, "sampling_arm": ARMS[0], "worker_pid": 123},
+    )
+    artifact = store.document["stages"]["candidate"]["tasks"][_task_key(task)][
+        "artifact"
+    ]
+    artifact_path = progress_path.parent / artifact["path"]
+    artifact_path.write_text("{}\n", encoding="utf-8")
+    resumed = _ProgressStore(
+        progress_path,
+        identity=identity,
+        configuration=configuration,
+        output_path=output_path,
+        resume=True,
+    )
+    with pytest.raises(ValueError, match="artifact (size|hash) mismatch"):
+        resumed.successful_results("candidate", [task])

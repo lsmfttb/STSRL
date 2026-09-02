@@ -20,11 +20,14 @@ import json
 import math
 import multiprocessing
 import os
+import subprocess
 import sys
+import tempfile
 import time
 from collections import Counter
 from collections.abc import Iterable, Mapping
 from concurrent.futures import ProcessPoolExecutor, as_completed
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -49,8 +52,12 @@ from sts_combat_rl.sim.public_context_model_input import (
 )
 from sts_combat_rl.t084_search_v2_internal_leaf_target_generation import (
     ARMS,
+    CALIBRATION_COUNT,
+    CALIBRATION_REPLICATES,
+    CANDIDATE_REPETITIONS,
     COLLECTOR_SCHEMA_ID,
     EXPECTED_STATIC_CHECKPOINTS,
+    EXPECTED_T064_ARTIFACTS,
     PUBLIC_MODEL_INPUT_SCHEMA_ID,
     PUBLIC_MODEL_INPUT_SCHEMA_VERSION,
     PUBLIC_TACTICAL_FEATURE_SCHEMA_ID,
@@ -58,8 +65,13 @@ from sts_combat_rl.t084_search_v2_internal_leaf_target_generation import (
     WORKER_COUNT,
     derive_replicate_seed,
     select_repetition_count,
+    sha256_file,
     validate_replicate,
 )
+
+PROGRESS_SCHEMA_ID = "t084-native-collector-progress-v1"
+PROGRESS_TASK_SCHEMA_ID = "t084-native-collector-progress-task-v1"
+PROGRESS_SCHEMA_VERSION = 1
 
 _ROOT_ROWS: list[dict[str, Any]] = []
 _NATIVE_COMMIT = ""
@@ -514,11 +526,782 @@ def _worker_init(
     _NATIVE_MODULE = slaythespire
 
 
-def _write_json(path: Path, value: object) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+def _timestamp() -> str:
+    return datetime.now(UTC).isoformat()
+
+
+def _json_bytes(value: object) -> bytes:
+    return (json.dumps(value, indent=2, sort_keys=True, allow_nan=False) + "\n").encode(
+        "utf-8"
     )
+
+
+def _canonical_json_digest(value: object) -> str:
+    encoded = json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _atomic_write_json(path: Path, value: object) -> None:
+    """Write one JSON document with a same-directory atomic replace."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_fd, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent)
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(temporary_fd, "wb") as stream:
+            stream.write(_json_bytes(value))
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+        try:
+            directory_fd = os.open(path.parent, os.O_RDONLY)
+        except OSError:
+            directory_fd = None
+        if directory_fd is not None:
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+    finally:
+        if temporary.exists():
+            temporary.unlink()
+
+
+def _write_json(path: Path, value: object) -> None:
+    _atomic_write_json(path, value)
+
+
+def _task_key(task: tuple[int, str]) -> str:
+    root_index, arm = task
+    return f"root-{int(root_index):04d}-{arm}"
+
+
+def _task_descriptor(task: tuple[int, str]) -> dict[str, Any]:
+    root_index, arm = task
+    return {"root_index": int(root_index), "sampling_arm": str(arm)}
+
+
+def _validate_task_result(result: object, task: tuple[int, str]) -> dict[str, Any]:
+    if not isinstance(result, Mapping):
+        raise TypeError("worker result must be a mapping")
+    expected = _task_descriptor(task)
+    if result.get("root_index") != expected["root_index"]:
+        raise ValueError("worker result root index does not match task")
+    if result.get("sampling_arm") != expected["sampling_arm"]:
+        raise ValueError("worker result sampling arm does not match task")
+    return dict(result)
+
+
+def _error_payload(exc: BaseException) -> dict[str, str]:
+    return {
+        "type": type(exc).__name__,
+        "message": str(exc)[:2000],
+    }
+
+
+class _ProgressStore:
+    """Atomic, fail-closed index for resumable T084 task results."""
+
+    def __init__(
+        self,
+        path: Path,
+        *,
+        identity: Mapping[str, Any],
+        configuration: Mapping[str, Any],
+        output_path: Path,
+        resume: bool,
+    ) -> None:
+        self.path = path.resolve()
+        self.parts_directory = self.path.with_name(f"{self.path.stem}.parts").resolve()
+        self.output_path = output_path.resolve()
+        if resume:
+            if not self.path.is_file():
+                raise ValueError(f"resume progress file is missing: {self.path}")
+            try:
+                raw = json.loads(self.path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise ValueError(
+                    f"resume progress file is unreadable: {self.path}"
+                ) from exc
+            if not isinstance(raw, Mapping):
+                raise TypeError("resume progress document must be a JSON object")
+            self.document = dict(raw)
+            self._validate_document(identity, configuration)
+            self._recover_or_validate_final_output()
+        else:
+            if self.path.exists():
+                raise ValueError(
+                    f"progress already exists; use --resume or choose a new path: {self.path}"
+                )
+            if self.output_path.exists():
+                raise ValueError(
+                    f"output already exists; use the matching --resume run: {self.output_path}"
+                )
+            self.document = {
+                "schema_id": PROGRESS_SCHEMA_ID,
+                "schema_version": PROGRESS_SCHEMA_VERSION,
+                "task_id": "T084",
+                "state": "RUNNING",
+                "identity": dict(identity),
+                "configuration": dict(configuration),
+                "output_path": str(self.output_path),
+                "progress_path": str(self.path),
+                "parts_directory": str(self.parts_directory),
+                "created_at": _timestamp(),
+                "updated_at": _timestamp(),
+                "stages": {},
+                "final_output": None,
+                "last_error": None,
+            }
+            self._save()
+
+    @property
+    def already_complete(self) -> bool:
+        return self.document.get("state") == "COMPLETE"
+
+    def _save(self) -> None:
+        self.document["updated_at"] = _timestamp()
+        _atomic_write_json(self.path, self.document)
+
+    def _validate_document(
+        self,
+        identity: Mapping[str, Any],
+        configuration: Mapping[str, Any],
+    ) -> None:
+        required = {
+            "schema_id",
+            "schema_version",
+            "task_id",
+            "state",
+            "identity",
+            "configuration",
+            "output_path",
+            "progress_path",
+            "parts_directory",
+            "stages",
+        }
+        missing = sorted(required - set(self.document))
+        if missing:
+            raise ValueError("resume progress is missing: " + ", ".join(missing))
+        if self.document.get("schema_id") != PROGRESS_SCHEMA_ID:
+            raise ValueError("resume progress schema_id mismatch")
+        if self.document.get("schema_version") != PROGRESS_SCHEMA_VERSION:
+            raise ValueError("resume progress schema_version mismatch")
+        if self.document.get("task_id") != "T084":
+            raise ValueError("resume progress task_id mismatch")
+        if self.document.get("identity") != dict(identity):
+            raise ValueError("resume progress code/native/input identity mismatch")
+        if self.document.get("configuration") != dict(configuration):
+            raise ValueError("resume progress task configuration mismatch")
+        if self.document.get("output_path") != str(self.output_path):
+            raise ValueError("resume progress output path mismatch")
+        if self.document.get("progress_path") != str(self.path):
+            raise ValueError("resume progress path mismatch")
+        if self.document.get("parts_directory") != str(self.parts_directory):
+            raise ValueError("resume progress parts directory mismatch")
+        if self.document.get("state") not in {
+            "RUNNING",
+            "FAILED",
+            "FINALIZING",
+            "COMPLETE",
+        }:
+            raise ValueError("resume progress state is invalid")
+        stages = self.document.get("stages")
+        if not isinstance(stages, Mapping):
+            raise TypeError("resume progress stages must be a mapping")
+        for stage_key, raw_stage in stages.items():
+            if not isinstance(stage_key, str) or not isinstance(raw_stage, Mapping):
+                raise TypeError("resume progress stage entry is malformed")
+            task_keys = raw_stage.get("task_keys")
+            tasks = raw_stage.get("tasks")
+            if (
+                not isinstance(task_keys, list)
+                or len(set(task_keys)) != len(task_keys)
+                or not all(isinstance(item, str) for item in task_keys)
+                or not isinstance(tasks, Mapping)
+                or any(key not in task_keys for key in tasks)
+            ):
+                raise TypeError(
+                    f"resume progress task inventory is malformed: {stage_key}"
+                )
+            for task_key, raw_entry in tasks.items():
+                if not isinstance(raw_entry, Mapping):
+                    raise TypeError(
+                        f"resume progress task entry is malformed: {stage_key}/{task_key}"
+                    )
+                if raw_entry.get("status") not in {"success", "failed"}:
+                    raise ValueError(
+                        f"resume progress task status is invalid: {stage_key}/{task_key}"
+                    )
+                history = raw_entry.get("attempt_history")
+                if not isinstance(history, list) or not history:
+                    raise ValueError(
+                        f"resume progress task history is missing: {stage_key}/{task_key}"
+                    )
+
+    def _artifact_path(self, value: object) -> Path:
+        if not isinstance(value, str) or not value or Path(value).is_absolute():
+            raise TypeError("progress task artifact path must be relative")
+        candidate = (self.path.parent / value).resolve()
+        try:
+            candidate.relative_to(self.parts_directory)
+        except ValueError as exc:
+            raise ValueError("progress task artifact escapes parts directory") from exc
+        return candidate
+
+    def _artifact_ref(self, path: Path) -> dict[str, Any]:
+        return {
+            "path": str(path.resolve().relative_to(self.path.parent)),
+            "bytes": path.stat().st_size,
+            "sha256": sha256_file(path),
+        }
+
+    def _read_task_artifact(
+        self,
+        stage_key: str,
+        task: tuple[int, str],
+        entry: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        artifact = entry.get("artifact")
+        if not isinstance(artifact, Mapping):
+            raise TypeError(
+                f"progress task artifact reference is missing: {stage_key}/{_task_key(task)}"
+            )
+        path = self._artifact_path(artifact.get("path"))
+        if not path.is_file():
+            raise ValueError(f"progress task artifact is missing: {path}")
+        if artifact.get("bytes") != path.stat().st_size:
+            raise ValueError(f"progress task artifact size mismatch: {path}")
+        if artifact.get("sha256") != sha256_file(path):
+            raise ValueError(f"progress task artifact hash mismatch: {path}")
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError(f"progress task artifact is unreadable: {path}") from exc
+        expected_key = _task_key(task)
+        if not isinstance(raw, Mapping):
+            raise TypeError(f"progress task artifact document is malformed: {path}")
+        if (
+            raw.get("schema_id") != PROGRESS_TASK_SCHEMA_ID
+            or raw.get("schema_version") != PROGRESS_SCHEMA_VERSION
+            or raw.get("stage_key") != stage_key
+            or raw.get("task_key") != expected_key
+            or raw.get("task") != _task_descriptor(task)
+            or raw.get("status") != "success"
+        ):
+            raise ValueError(f"progress task artifact identity mismatch: {path}")
+        result = raw.get("result")
+        return _validate_task_result(result, task)
+
+    def ensure_stage(
+        self,
+        stage_key: str,
+        tasks: list[tuple[int, str]],
+        *,
+        pass_index: int,
+        task_ranges: str,
+        plan: object = None,
+    ) -> None:
+        task_keys = [_task_key(task) for task in tasks]
+        if len(set(task_keys)) != len(task_keys):
+            raise ValueError(f"duplicate progress task key in {stage_key}")
+        stages = self.document["stages"]
+        if not isinstance(stages, dict):
+            raise TypeError("progress stages are not mutable")
+        expected_plan_digest = _canonical_json_digest(plan)
+        existing = stages.get(stage_key)
+        if existing is None:
+            stages[stage_key] = {
+                "schema_id": PROGRESS_SCHEMA_ID,
+                "schema_version": PROGRESS_SCHEMA_VERSION,
+                "stage_key": stage_key,
+                "pass_index": pass_index,
+                "task_keys": task_keys,
+                "task_descriptors": [_task_descriptor(task) for task in tasks],
+                "task_count": len(tasks),
+                "task_ranges": task_ranges,
+                "plan": plan,
+                "plan_sha256": expected_plan_digest,
+                "status": "RUNNING",
+                "tasks": {},
+                "worker_pids": [],
+                "worker_evidence": None,
+                "worker_evidence_history": [],
+                "wall_clock_seconds": 0.0,
+                "last_failures": [],
+            }
+            self._save()
+            return
+        if not isinstance(existing, Mapping):
+            raise TypeError(f"progress stage is malformed: {stage_key}")
+        for key, expected in (
+            ("schema_id", PROGRESS_SCHEMA_ID),
+            ("schema_version", PROGRESS_SCHEMA_VERSION),
+            ("stage_key", stage_key),
+            ("pass_index", pass_index),
+            ("task_keys", task_keys),
+            ("task_count", len(tasks)),
+            ("task_ranges", task_ranges),
+            ("plan_sha256", expected_plan_digest),
+        ):
+            if existing.get(key) != expected:
+                raise ValueError(
+                    f"resume progress stage configuration mismatch: {stage_key}"
+                )
+        if existing.get("plan") != plan:
+            raise ValueError(f"resume progress stage plan mismatch: {stage_key}")
+        if existing.get("status") not in {"RUNNING", "FAILED", "COMPLETE"}:
+            raise ValueError(f"resume progress stage status is invalid: {stage_key}")
+        if existing.get("status") == "FAILED":
+            existing["status"] = "RUNNING"
+            self._save()
+
+    def successful_results(
+        self,
+        stage_key: str,
+        tasks: list[tuple[int, str]],
+    ) -> dict[str, dict[str, Any]]:
+        stages = self.document.get("stages")
+        stage = stages.get(stage_key) if isinstance(stages, Mapping) else None
+        if not isinstance(stage, Mapping):
+            raise TypeError(f"progress stage is missing: {stage_key}")
+        raw_tasks = stage.get("tasks")
+        if not isinstance(raw_tasks, Mapping):
+            raise TypeError(f"progress stage task map is malformed: {stage_key}")
+        results: dict[str, dict[str, Any]] = {}
+        for task in tasks:
+            key = _task_key(task)
+            entry = raw_tasks.get(key)
+            if not isinstance(entry, Mapping):
+                continue
+            status = entry.get("status")
+            if status == "success":
+                results[key] = self._read_task_artifact(stage_key, task, entry)
+            elif status != "failed":
+                raise ValueError(f"progress task status is invalid: {stage_key}/{key}")
+        return results
+
+    def record_success(
+        self,
+        stage_key: str,
+        task: tuple[int, str],
+        result: Mapping[str, Any],
+    ) -> None:
+        self._record_task(stage_key, task, "success", result=dict(result), error=None)
+
+    def record_failure(
+        self,
+        stage_key: str,
+        task: tuple[int, str],
+        exc: BaseException,
+    ) -> None:
+        self._record_task(
+            stage_key, task, "failed", result=None, error=_error_payload(exc)
+        )
+
+    def _record_task(
+        self,
+        stage_key: str,
+        task: tuple[int, str],
+        status: str,
+        *,
+        result: dict[str, Any] | None,
+        error: dict[str, str] | None,
+    ) -> None:
+        stages = self.document.get("stages")
+        stage = stages.get(stage_key) if isinstance(stages, dict) else None
+        if not isinstance(stage, dict):
+            raise TypeError(f"progress stage is missing: {stage_key}")
+        key = _task_key(task)
+        if key not in stage.get("task_keys", []):
+            raise ValueError(
+                f"task is not registered in progress stage: {stage_key}/{key}"
+            )
+        task_map = stage.get("tasks")
+        if not isinstance(task_map, dict):
+            raise TypeError(f"progress stage task map is malformed: {stage_key}")
+        previous = task_map.get(key)
+        previous_history = (
+            previous.get("attempt_history", []) if isinstance(previous, Mapping) else []
+        )
+        if not isinstance(previous_history, list):
+            raise TypeError(f"progress task history is malformed: {stage_key}/{key}")
+        attempt = len(previous_history) + 1
+        part_path = (
+            self.parts_directory / stage_key / f"{key}.attempt-{attempt:04d}.json"
+        )
+        document: dict[str, Any] = {
+            "schema_id": PROGRESS_TASK_SCHEMA_ID,
+            "schema_version": PROGRESS_SCHEMA_VERSION,
+            "stage_key": stage_key,
+            "pass_index": stage.get("pass_index"),
+            "task_key": key,
+            "task": _task_descriptor(task),
+            "attempt": attempt,
+            "status": status,
+        }
+        if status == "success":
+            if result is None:
+                raise ValueError("successful progress task has no result")
+            document["result"] = result
+        elif status == "failed":
+            document["error"] = error or {
+                "type": "UnknownError",
+                "message": "unknown failure",
+            }
+        else:
+            raise ValueError(f"unsupported progress task status: {status}")
+        _atomic_write_json(part_path, document)
+        artifact = self._artifact_ref(part_path)
+        history_entry: dict[str, Any] = {
+            "attempt": attempt,
+            "status": status,
+            "artifact": artifact,
+        }
+        if error is not None:
+            history_entry["error"] = error
+        task_map[key] = {
+            "task": _task_descriptor(task),
+            "status": status,
+            "attempt": attempt,
+            "artifact": artifact,
+            "error": error,
+            "attempt_history": [*previous_history, history_entry],
+        }
+        if status == "success" and isinstance(result, Mapping):
+            worker_pid = result.get("worker_pid")
+            worker_pids = stage.get("worker_pids")
+            if (
+                isinstance(worker_pid, int)
+                and not isinstance(worker_pid, bool)
+                and isinstance(worker_pids, list)
+                and worker_pid not in worker_pids
+            ):
+                worker_pids.append(worker_pid)
+        self._save()
+
+    def stage_failures(self, stage_key: str) -> list[str]:
+        stages = self.document.get("stages")
+        stage = stages.get(stage_key) if isinstance(stages, Mapping) else None
+        if not isinstance(stage, Mapping):
+            raise TypeError(f"progress stage is missing: {stage_key}")
+        task_map = stage.get("tasks")
+        if not isinstance(task_map, Mapping):
+            raise TypeError(f"progress stage task map is malformed: {stage_key}")
+        descriptors = stage.get("task_descriptors")
+        if not isinstance(descriptors, list):
+            raise TypeError(f"progress stage task descriptors are missing: {stage_key}")
+        by_key = {
+            _task_key((int(item["root_index"]), str(item["sampling_arm"]))): item
+            for item in descriptors
+            if isinstance(item, Mapping)
+            and isinstance(item.get("root_index"), int)
+            and isinstance(item.get("sampling_arm"), str)
+        }
+        failures: list[str] = []
+        for key in stage.get("task_keys", []):
+            entry = task_map.get(key)
+            if not isinstance(entry, Mapping) or entry.get("status") != "failed":
+                continue
+            descriptor = by_key.get(key, {})
+            error = entry.get("error")
+            if isinstance(error, Mapping):
+                message = f"{error.get('type', 'Error')}: {error.get('message', '')}"
+            else:
+                message = "unknown failure"
+            failures.append(
+                f"{descriptor.get('sampling_arm', key)}/root{descriptor.get('root_index', '?')}: {message}"
+            )
+        return failures
+
+    def finish_stage(
+        self,
+        stage_key: str,
+        *,
+        failures: list[str],
+        worker_evidence: Mapping[str, Any],
+        wall_clock_seconds: float,
+    ) -> None:
+        stages = self.document.get("stages")
+        stage = stages.get(stage_key) if isinstance(stages, dict) else None
+        if not isinstance(stage, dict):
+            raise TypeError(f"progress stage is missing: {stage_key}")
+        task_map = stage.get("tasks")
+        task_keys = stage.get("task_keys")
+        if not isinstance(task_map, Mapping) or not isinstance(task_keys, list):
+            raise TypeError(f"progress stage inventory is malformed: {stage_key}")
+        was_complete = stage.get("status") == "COMPLETE"
+        complete = not failures and all(
+            isinstance(task_map.get(key), Mapping)
+            and task_map[key].get("status") == "success"
+            for key in task_keys
+        )
+        stage["status"] = "COMPLETE" if complete else "FAILED"
+        stage["last_failures"] = list(failures)
+        if not was_complete:
+            previous_wall = stage.get("wall_clock_seconds", 0.0)
+            stage["wall_clock_seconds"] = float(previous_wall or 0.0) + float(
+                wall_clock_seconds
+            )
+            stage["worker_evidence"] = dict(worker_evidence)
+            history = stage.get("worker_evidence_history")
+            if not isinstance(history, list):
+                history = []
+                stage["worker_evidence_history"] = history
+            history.append(dict(worker_evidence))
+            self._save()
+
+    def stage_plan(self, stage_key: str) -> object | None:
+        stages = self.document.get("stages")
+        stage = stages.get(stage_key) if isinstance(stages, Mapping) else None
+        if not isinstance(stage, Mapping):
+            return None
+        return stage.get("plan")
+
+    def has_stage(self, stage_key: str) -> bool:
+        stages = self.document.get("stages")
+        return isinstance(stages, Mapping) and stage_key in stages
+
+    def stage_wall_clock(self, stage_key: str) -> float:
+        stages = self.document.get("stages")
+        stage = stages.get(stage_key) if isinstance(stages, Mapping) else None
+        if not isinstance(stage, Mapping):
+            return 0.0
+        value = stage.get("wall_clock_seconds", 0.0)
+        return float(value) if isinstance(value, (int, float)) else 0.0
+
+    def stage_worker_pids(self, stage_key: str) -> list[int]:
+        stages = self.document.get("stages")
+        stage = stages.get(stage_key) if isinstance(stages, Mapping) else None
+        if not isinstance(stage, Mapping):
+            return []
+        values = stage.get("worker_pids")
+        if not isinstance(values, list):
+            return []
+        return sorted(
+            int(value)
+            for value in values
+            if isinstance(value, int) and not isinstance(value, bool)
+        )
+
+    def mark_failed(self, exc: BaseException) -> None:
+        self.document["state"] = "FAILED"
+        self.document["last_error"] = _error_payload(exc)
+        self._save()
+
+    def prepare_final(self, expected_output: Mapping[str, Any]) -> None:
+        self.document["state"] = "FINALIZING"
+        self.document["final_output"] = dict(expected_output)
+        self._save()
+
+    def mark_complete(self, output_ref: Mapping[str, Any]) -> None:
+        expected = self.document.get("final_output")
+        if expected != dict(output_ref):
+            raise ValueError(
+                "final output identity does not match progress reservation"
+            )
+        self.document["state"] = "COMPLETE"
+        self.document["final_output"] = dict(output_ref)
+        self.document["last_error"] = None
+        self._save()
+
+    def _recover_or_validate_final_output(self) -> None:
+        state = self.document.get("state")
+        if state == "COMPLETE":
+            self._validate_final_output()
+            return
+        if self.output_path.exists() and state != "FINALIZING":
+            raise ValueError(
+                "resume progress is incomplete but final output already exists; refusing to mix outputs"
+            )
+        if state == "FINALIZING":
+            if self.output_path.exists():
+                self._validate_final_output()
+                self.document["state"] = "COMPLETE"
+                self._save()
+            else:
+                self.document["state"] = "RUNNING"
+                self._save()
+
+    def _validate_final_output(self) -> None:
+        expected = self.document.get("final_output")
+        if not isinstance(expected, Mapping):
+            raise TypeError("resume progress final output reservation is missing")
+        if not self.output_path.is_file():
+            raise ValueError(f"resume final output is missing: {self.output_path}")
+        if expected.get("bytes") != self.output_path.stat().st_size:
+            raise ValueError("resume final output size mismatch")
+        if expected.get("sha256") != sha256_file(self.output_path):
+            raise ValueError("resume final output hash mismatch")
+
+
+def _run_parallel_tasks(
+    roots: list[dict[str, Any]],
+    checkpoint_paths: dict[str, str],
+    native_commit: str,
+    workers: int,
+    pass_mode: str,
+    target_specs: dict[str, dict[str, Any]],
+    *,
+    worker_function: Any,
+    progress: _ProgressStore | None,
+    stage_key: str,
+    pass_index: int,
+    task_ranges: str,
+    plan: object = None,
+) -> tuple[list[dict[str, Any]], list[str], float, dict[str, Any]]:
+    tasks = [(root_index, arm) for root_index in range(len(roots)) for arm in ARMS]
+    if progress is None:
+        started = time.monotonic()
+        rows: list[dict[str, Any]] = []
+        failures: list[str] = []
+        context = multiprocessing.get_context("fork")
+        with ProcessPoolExecutor(
+            max_workers=workers,
+            mp_context=context,
+            initializer=_worker_init,
+            initargs=(roots, native_commit, checkpoint_paths, pass_mode, target_specs),
+        ) as pool:
+            futures = {pool.submit(worker_function, task): task for task in tasks}
+            for completed, future in enumerate(as_completed(futures), start=1):
+                task = futures[future]
+                try:
+                    rows.append(_validate_task_result(future.result(), task))
+                except Exception as exc:  # noqa: BLE001 - retained per-task evidence
+                    root_index, arm = task
+                    failures.append(
+                        f"{arm}/root{root_index}: {type(exc).__name__}: {exc}"
+                    )
+                if completed % 16 == 0 or completed == len(tasks):
+                    print(
+                        json.dumps(
+                            {
+                                "pass": pass_mode,
+                                "completed": completed,
+                                "total": len(tasks),
+                                "failures": len(failures),
+                                "wall_clock_seconds": time.monotonic() - started,
+                            },
+                            sort_keys=True,
+                        ),
+                        flush=True,
+                    )
+        rows.sort(
+            key=lambda row: (
+                str(row.get("sampling_arm")),
+                int(row.get("root_index", -1)),
+            )
+        )
+        worker_pids = sorted(
+            {
+                int(row["worker_pid"])
+                for row in rows
+                if isinstance(row.get("worker_pid"), int)
+                and not isinstance(row.get("worker_pid"), bool)
+            }
+        )
+        worker_evidence = {
+            "configured_worker_count": workers,
+            "observed_worker_count": len(worker_pids),
+            "effective_worker_count": len(worker_pids),
+            "worker_pids": worker_pids,
+            "host_logical_cpu_count": os.cpu_count(),
+        }
+        return rows, failures, time.monotonic() - started, worker_evidence
+    progress.ensure_stage(
+        stage_key,
+        tasks,
+        pass_index=pass_index,
+        task_ranges=task_ranges,
+        plan=plan,
+    )
+    started = time.monotonic()
+    cached = progress.successful_results(stage_key, tasks)
+    pending = [task for task in tasks if _task_key(task) not in cached]
+    completed = len(cached)
+    session_worker_pids: set[int] = set()
+    if pending:
+        context = multiprocessing.get_context("fork")
+        with ProcessPoolExecutor(
+            max_workers=workers,
+            mp_context=context,
+            initializer=_worker_init,
+            initargs=(roots, native_commit, checkpoint_paths, pass_mode, target_specs),
+        ) as pool:
+            futures = {pool.submit(worker_function, task): task for task in pending}
+            for future in as_completed(futures):
+                task = futures[future]
+                try:
+                    result = _validate_task_result(future.result(), task)
+                    progress.record_success(stage_key, task, result)
+                    worker_pid = result.get("worker_pid")
+                    if isinstance(worker_pid, int) and not isinstance(worker_pid, bool):
+                        session_worker_pids.add(worker_pid)
+                except Exception as exc:  # noqa: BLE001 - retained per-task evidence
+                    progress.record_failure(stage_key, task, exc)
+                completed += 1
+                if completed % 16 == 0 or completed == len(tasks):
+                    print(
+                        json.dumps(
+                            {
+                                "pass": pass_mode,
+                                "completed": completed,
+                                "total": len(tasks),
+                                "failures": len(progress.stage_failures(stage_key)),
+                                "wall_clock_seconds": time.monotonic() - started,
+                            },
+                            sort_keys=True,
+                        ),
+                        flush=True,
+                    )
+    results_by_key = progress.successful_results(stage_key, tasks)
+    rows = [
+        results_by_key[_task_key(task)]
+        for task in tasks
+        if _task_key(task) in results_by_key
+    ]
+    rows.sort(
+        key=lambda row: (str(row.get("sampling_arm")), int(row.get("root_index", -1)))
+    )
+    failures = progress.stage_failures(stage_key)
+    stored_worker_pids = set(progress.stage_worker_pids(stage_key))
+    worker_pids = sorted(stored_worker_pids | session_worker_pids)
+    existing_stage = progress.document["stages"][stage_key]
+    prior_evidence = existing_stage.get("worker_evidence")
+    prior_observed = (
+        int(prior_evidence.get("observed_worker_count", 0))
+        if isinstance(prior_evidence, Mapping)
+        and isinstance(prior_evidence.get("observed_worker_count"), int)
+        else 0
+    )
+    observed_worker_count = max(prior_observed, len(session_worker_pids))
+    if not pending and isinstance(prior_evidence, Mapping):
+        observed_worker_count = int(prior_evidence.get("observed_worker_count", 0))
+    worker_evidence = {
+        "configured_worker_count": workers,
+        "observed_worker_count": observed_worker_count,
+        "effective_worker_count": observed_worker_count,
+        "worker_pids": worker_pids,
+        "host_logical_cpu_count": os.cpu_count(),
+        "resume_cached_task_count": len(cached),
+        "newly_executed_task_count": len(pending),
+    }
+    wall_clock_seconds = time.monotonic() - started
+    progress.finish_stage(
+        stage_key,
+        failures=failures,
+        worker_evidence=worker_evidence,
+        wall_clock_seconds=wall_clock_seconds,
+    )
+    return rows, failures, progress.stage_wall_clock(stage_key), worker_evidence
 
 
 def _run_pass(
@@ -528,57 +1311,30 @@ def _run_pass(
     workers: int,
     pass_mode: str,
     target_specs: dict[str, dict[str, Any]],
+    *,
+    progress: _ProgressStore | None = None,
+    stage_key: str = "candidate",
+    pass_index: int = 0,
+    plan: object = None,
 ) -> tuple[list[dict[str, Any]], list[str], float, dict[str, Any]]:
-    tasks = [(root_index, arm) for root_index in range(len(roots)) for arm in ARMS]
-    started = time.monotonic()
-    root_runs: list[dict[str, Any]] = []
-    failures: list[str] = []
-    context = multiprocessing.get_context("fork")
-    with ProcessPoolExecutor(
-        max_workers=workers,
-        mp_context=context,
-        initializer=_worker_init,
-        initargs=(roots, native_commit, checkpoint_paths, pass_mode, target_specs),
-    ) as pool:
-        futures = {pool.submit(_work_one, task): task for task in tasks}
-        for completed, future in enumerate(as_completed(futures), start=1):
-            root_index, arm = futures[future]
-            try:
-                root_runs.append(future.result())
-            except Exception as exc:  # noqa: BLE001 - retained as per-root evidence
-                failures.append(f"{arm}/root{root_index}: {type(exc).__name__}: {exc}")
-            if completed % 16 == 0 or completed == len(tasks):
-                print(
-                    json.dumps(
-                        {
-                            "pass": pass_mode,
-                            "completed": completed,
-                            "total": len(tasks),
-                            "failures": len(failures),
-                            "wall_clock_seconds": time.monotonic() - started,
-                        },
-                        sort_keys=True,
-                    ),
-                    flush=True,
-                )
-    root_runs.sort(
-        key=lambda row: (str(row.get("sampling_arm")), int(row.get("root_index", -1)))
+    return _run_parallel_tasks(
+        roots,
+        checkpoint_paths,
+        native_commit,
+        workers,
+        pass_mode,
+        target_specs,
+        worker_function=_work_one,
+        progress=progress,
+        stage_key=stage_key,
+        pass_index=pass_index,
+        task_ranges=(
+            "candidate pass: root indices 0..459 x three arms"
+            if pass_mode == "candidate"
+            else "selected_leaf_continuation pass: root indices 0..459 x three arms"
+        ),
+        plan=plan,
     )
-    worker_pids = sorted(
-        {
-            int(row["worker_pid"])
-            for row in root_runs
-            if isinstance(row.get("worker_pid"), int)
-        }
-    )
-    worker_evidence = {
-        "configured_worker_count": workers,
-        "observed_worker_count": len(worker_pids),
-        "effective_worker_count": len(worker_pids),
-        "worker_pids": worker_pids,
-        "host_logical_cpu_count": os.cpu_count(),
-    }
-    return root_runs, failures, time.monotonic() - started, worker_evidence
 
 
 def _work_parity_one(task: tuple[int, str]) -> dict[str, Any]:
@@ -683,6 +1439,8 @@ def _run_parity(
     checkpoint_paths: dict[str, str],
     native_commit: str,
     workers: int,
+    *,
+    progress: _ProgressStore | None = None,
 ) -> tuple[dict[str, Any], list[str], float]:
     source_indices = _select_parity_root_indices(roots)
     parity_roots = [roots[index] for index in source_indices]
@@ -694,38 +1452,20 @@ def _run_parity(
     tasks = [
         (root_index, arm) for root_index in range(len(parity_roots)) for arm in ARMS
     ]
-    started = time.monotonic()
-    rows: list[dict[str, Any]] = []
-    failures: list[str] = []
-    context = multiprocessing.get_context("fork")
-    with ProcessPoolExecutor(
-        max_workers=workers,
-        mp_context=context,
-        initializer=_worker_init,
-        initargs=(parity_roots, native_commit, checkpoint_paths, "parity", {}),
-    ) as pool:
-        futures = {pool.submit(_work_parity_one, task): task for task in tasks}
-        for future in as_completed(futures):
-            root_index, arm = futures[future]
-            try:
-                rows.append(future.result())
-            except Exception as exc:  # noqa: BLE001 - retained as stage evidence
-                failures.append(f"{arm}/root{root_index}: {type(exc).__name__}: {exc}")
-    rows.sort(key=lambda row: (str(row["sampling_arm"]), int(row["root_index"])))
-    worker_pids = sorted(
-        {
-            int(row["worker_pid"])
-            for row in rows
-            if isinstance(row.get("worker_pid"), int)
-        }
+    rows, failures, wall_clock_seconds, worker_evidence = _run_parallel_tasks(
+        parity_roots,
+        checkpoint_paths,
+        native_commit,
+        workers,
+        "parity",
+        {},
+        worker_function=_work_parity_one,
+        progress=progress,
+        stage_key="parity_preflight",
+        pass_index=0,
+        task_ranges="parity_preflight: first eight Act1 and first eight Act2 source roots x three arms",
+        plan={"source_indices": source_indices},
     )
-    worker_evidence = {
-        "configured_worker_count": workers,
-        "observed_worker_count": len(worker_pids),
-        "effective_worker_count": len(worker_pids),
-        "worker_pids": worker_pids,
-        "host_logical_cpu_count": os.cpu_count(),
-    }
     parity = {
         "available": not failures,
         "passed": (
@@ -737,7 +1477,7 @@ def _run_parity(
         "arms": sorted({row["sampling_arm"] for row in rows}),
         "acts": sorted({row["act"] for row in rows}),
         "worker_count": workers,
-        "effective_worker_count": len(worker_pids),
+        "effective_worker_count": worker_evidence["effective_worker_count"],
         "worker_evidence": worker_evidence,
         "task_count": len(tasks),
         "task_ranges": "first eight Act1 and first eight Act2 source roots x three arms",
@@ -755,9 +1495,9 @@ def _run_parity(
         and all(row["rng_semantics_equal"] for row in rows),
         "rows": rows,
         "failures": failures,
-        "wall_clock_seconds": time.monotonic() - started,
+        "wall_clock_seconds": wall_clock_seconds,
     }
-    return parity, failures, time.monotonic() - started
+    return parity, failures, wall_clock_seconds
 
 
 def _select_parity_root_indices(roots: list[dict[str, Any]]) -> list[int]:
@@ -1027,6 +1767,103 @@ def _backfill_specs(
     return specs
 
 
+def _git_head(repo_root: Path) -> str:
+    try:
+        value = subprocess.check_output(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo_root,
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise ValueError("cannot resolve STSRL collector code identity") from exc
+    if not value:
+        raise ValueError("STSRL collector code identity is empty")
+    return value
+
+
+def _root_cohort_digest(roots: list[dict[str, Any]]) -> str:
+    identities = [str(root.get("_t084_source_identity", "")) for root in roots]
+    if len(identities) != 460 or any(not identity for identity in identities):
+        raise ValueError("T084 root cohort identities are incomplete")
+    return hashlib.sha256("\n".join(identities).encode("utf-8")).hexdigest()
+
+
+def _checkpoint_identities(
+    checkpoint_paths: Mapping[str, str],
+) -> dict[str, dict[str, Any]]:
+    identities: dict[str, dict[str, Any]] = {}
+    for arm in ARMS[1:]:
+        path = Path(checkpoint_paths[arm]).resolve()
+        if not path.is_file():
+            raise ValueError(f"checkpoint is missing: {path}")
+        actual = sha256_file(path)
+        expected, filename = EXPECTED_STATIC_CHECKPOINTS[arm]
+        if actual != expected:
+            raise ValueError(f"checkpoint identity mismatch: {arm}")
+        identities[arm] = {
+            "path": str(path),
+            "filename": filename,
+            "sha256": actual,
+            "bytes": path.stat().st_size,
+        }
+    return identities
+
+
+def _run_identity(
+    repo_root: Path,
+    manifest_path: Path,
+    roots: list[dict[str, Any]],
+    native_build: Path,
+    native_commit: str,
+    checkpoint_paths: Mapping[str, str],
+    output_path: Path,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    manifest_sha = sha256_file(manifest_path)
+    expected_manifest_sha = EXPECTED_T064_ARTIFACTS["t064-curriculum-manifest.json"][0]
+    if manifest_sha != expected_manifest_sha:
+        raise ValueError("T064 curriculum manifest identity mismatch")
+    checkpoint_identity = _checkpoint_identities(checkpoint_paths)
+    code_identity = {
+        "git_head": _git_head(repo_root),
+        "collector_script_sha256": sha256_file(Path(__file__).resolve()),
+        "target_module_sha256": sha256_file(
+            repo_root
+            / "src"
+            / "sts_combat_rl"
+            / "t084_search_v2_internal_leaf_target_generation.py"
+        ),
+    }
+    identity = {
+        "t064_manifest_sha256": manifest_sha,
+        "root_cohort_sha256": _root_cohort_digest(roots),
+        "native_commit": native_commit,
+        "native_build": str(native_build.resolve()),
+        "checkpoint_identities": checkpoint_identity,
+        "code": code_identity,
+    }
+    configuration = {
+        "task_id": "T084",
+        "collector_schema_id": COLLECTOR_SCHEMA_ID,
+        "progress_schema_id": PROGRESS_SCHEMA_ID,
+        "root_count": 460,
+        "acts": {"1": 256, "2": 204},
+        "arms": list(ARMS),
+        "search_simulations_per_root": 100,
+        "include_potions": False,
+        "workers": WORKER_COUNT,
+        "action_cap": 2048,
+        "calibration_count": CALIBRATION_COUNT,
+        "calibration_replicates": CALIBRATION_REPLICATES,
+        "candidate_repetitions": list(CANDIDATE_REPETITIONS),
+        "selection_policy": _SELECTION_POLICY,
+        "target_replicates_per_attempt": CALIBRATION_REPLICATES,
+        "parity_root_policy": "first eight Act1 and first eight Act2 source roots",
+        "output_path": str(output_path.resolve()),
+    }
+    return identity, configuration
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--t064-manifest", type=Path, required=True)
@@ -1035,288 +1872,378 @@ def main() -> int:
     parser.add_argument("--static-64001", type=Path, required=True)
     parser.add_argument("--static-64002", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--progress-dir",
+        type=Path,
+        help=("ignored atomic checkpoint directory; omit for the original fresh run"),
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="resume the exact run recorded under --progress-dir",
+    )
     parser.add_argument("--workers", type=int, default=WORKER_COUNT)
     args = parser.parse_args()
     if args.workers != WORKER_COUNT:
         raise SystemExit("T084 collector requires exactly 16 workers")
     if not args.native_build.is_dir():
         raise SystemExit(f"native build directory is missing: {args.native_build}")
+    args.output = args.output.resolve()
+    if args.resume and args.progress_dir is None:
+        raise SystemExit("--resume requires --progress-dir")
     sys.path.insert(0, str(args.native_build))
-    roots = _load_selected_roots(args.t064_manifest)
-    checkpoint_paths = {
-        "prior_only_static_64001": str(args.static_64001),
-        "prior_only_static_64002": str(args.static_64002),
-    }
-    candidate_runs, candidate_failures, candidate_wall, candidate_workers = _run_pass(
-        roots,
-        checkpoint_paths,
-        args.native_commit,
-        args.workers,
-        "candidate",
-        {},
-    )
-    candidate_rows = [
-        candidate
-        for run in candidate_runs
-        for candidate in run.get("candidate_rows", [])
-    ]
-    occupancy_counts = Counter(
-        str(row.get("exact_leaf_identity")) for row in candidate_rows
-    )
-    for row in candidate_rows:
-        hidden = row.get("exact_hidden_state_payload")
-        if isinstance(hidden, dict):
-            identity = str(row.get("exact_leaf_identity"))
-            hidden["occupancy_duplicate"] = occupancy_counts[identity] > 1
-            hidden["occupancy_count"] = occupancy_counts[identity]
-    target_specs, selection_policy = _select_target_specs_with_policy(candidate_rows)
-    target_runs: list[dict[str, Any]] = []
-    target_failures: list[str] = []
-    target_wall = 0.0
-    replay_passes: list[dict[str, Any]] = []
-    target_worker_evidence: list[dict[str, Any]] = []
-    attempted_ids: set[str] = set()
-    accepted_by_cell: dict[tuple[str, int, str], list[dict[str, Any]]] = {}
-    accepted_ids: set[str] = set()
-    target_attempts: list[dict[str, Any]] = []
-    current_specs = target_specs
-    while current_specs:
-        scheduled_ids = set(current_specs)
-        pass_started = time.monotonic()
-        pass_runs, pass_failures, pass_wall, pass_workers = _run_pass(
+    progress: _ProgressStore | None = None
+    try:
+        roots = _load_selected_roots(args.t064_manifest)
+        checkpoint_paths = {
+            "prior_only_static_64001": str(args.static_64001),
+            "prior_only_static_64002": str(args.static_64002),
+        }
+        if args.progress_dir is not None:
+            progress_dir = args.progress_dir.resolve()
+            progress_path = progress_dir / "t084-native-collector.progress.json"
+            identity, configuration = _run_identity(
+                Path(__file__).resolve().parents[1],
+                args.t064_manifest.resolve(),
+                roots,
+                args.native_build,
+                args.native_commit,
+                checkpoint_paths,
+                args.output,
+            )
+            progress = _ProgressStore(
+                progress_path,
+                identity=identity,
+                configuration=configuration,
+                output_path=args.output,
+                resume=args.resume,
+            )
+            if progress.already_complete:
+                return 0
+        tasks = len(roots) * len(ARMS)
+        candidate_runs, candidate_failures, candidate_wall, candidate_workers = (
+            _run_pass(
+                roots,
+                checkpoint_paths,
+                args.native_commit,
+                args.workers,
+                "candidate",
+                {},
+                progress=progress,
+                stage_key="candidate",
+                pass_index=0,
+            )
+        )
+        if candidate_failures or len(candidate_runs) != tasks:
+            raise RuntimeError(
+                "candidate pass incomplete: " + "; ".join(candidate_failures[:8])
+            )
+        candidate_rows = [
+            candidate
+            for run in candidate_runs
+            for candidate in run.get("candidate_rows", [])
+        ]
+        occupancy_counts = Counter(
+            str(row.get("exact_leaf_identity")) for row in candidate_rows
+        )
+        for row in candidate_rows:
+            hidden = row.get("exact_hidden_state_payload")
+            if isinstance(hidden, dict):
+                leaf_identity = str(row.get("exact_leaf_identity"))
+                hidden["occupancy_duplicate"] = occupancy_counts[leaf_identity] > 1
+                hidden["occupancy_count"] = occupancy_counts[leaf_identity]
+        target_specs, selection_policy = _select_target_specs_with_policy(
+            candidate_rows
+        )
+        target_runs: list[dict[str, Any]] = []
+        replay_passes: list[dict[str, Any]] = []
+        target_worker_evidence: list[dict[str, Any]] = []
+        attempted_ids: set[str] = set()
+        accepted_by_cell: dict[tuple[str, int, str], list[dict[str, Any]]] = {}
+        accepted_ids: set[str] = set()
+        target_attempts: list[dict[str, Any]] = []
+        current_specs = target_specs
+        pass_index = 1
+        while current_specs:
+            scheduled_ids = set(current_specs)
+            stage_key = f"selected_leaf_continuation_pass_{pass_index:04d}"
+            pass_runs, pass_failures, pass_wall, pass_workers = _run_pass(
+                roots,
+                checkpoint_paths,
+                args.native_commit,
+                args.workers,
+                "selected_leaf_continuation",
+                current_specs,
+                progress=progress,
+                stage_key=stage_key,
+                pass_index=pass_index,
+                plan={"target_specs": current_specs},
+            )
+            if pass_failures or len(pass_runs) != tasks:
+                raise RuntimeError(
+                    f"selected-leaf replay pass {pass_index} incomplete: "
+                    + "; ".join(pass_failures[:8])
+                )
+            target_runs = pass_runs
+            attempted_ids.update(scheduled_ids)
+            target_worker_evidence.append(pass_workers)
+            pass_rows = [
+                target for run in pass_runs for target in run.get("target_rows", [])
+            ]
+            returned_ids = {str(row["exact_leaf_identity"]) for row in pass_rows}
+            for leaf_id, spec in current_specs.items():
+                if leaf_id not in returned_ids:
+                    target_attempts.append(
+                        {
+                            "exact_leaf_identity": leaf_id,
+                            "occurrence_key": spec.get("occurrence_key"),
+                            "root_identity": spec.get("root_identity"),
+                            "sampling_arm": spec.get("sampling_arm"),
+                            "act": spec.get("act"),
+                            "target_kind": spec.get("target_kind"),
+                            "valid_256_replicates": False,
+                            "replay_pass": pass_index,
+                            "backfill_used": pass_index > 1,
+                            "error": "scheduled occurrence produced no target row; see collector evidence",
+                        }
+                    )
+            for row in pass_rows:
+                leaf_id = str(row["exact_leaf_identity"])
+                cell = (
+                    str(row["sampling_arm"]),
+                    int(row["act"]),
+                    str(row["target_kind"]),
+                )
+                attempted_ids.add(leaf_id)
+                usable = _target_row_has_full_replicates(row)
+                target_attempts.append(
+                    {
+                        "exact_leaf_identity": leaf_id,
+                        "occurrence_key": row.get("occurrence_key"),
+                        "root_identity": row.get("root_identity"),
+                        "sampling_arm": row.get("sampling_arm"),
+                        "act": row.get("act"),
+                        "target_kind": row.get("target_kind"),
+                        "valid_256_replicates": usable,
+                        "replay_pass": pass_index,
+                        "backfill_used": pass_index > 1,
+                    }
+                )
+                if usable and leaf_id not in accepted_ids:
+                    accepted_by_cell.setdefault(cell, []).append(row)
+                    accepted_ids.add(leaf_id)
+            replay_passes.append(
+                {
+                    "pass_index": pass_index,
+                    "candidate_occurrence_count": len(current_specs),
+                    "worker_count": args.workers,
+                    "task_count": tasks,
+                    "task_ranges": "root indices 0..459 x three arms",
+                    "wall_clock_seconds": pass_wall,
+                    "worker_evidence": pass_workers,
+                    "valid_rows": sum(
+                        1 for row in pass_rows if _target_row_has_full_replicates(row)
+                    ),
+                    "invalid_rows": sum(
+                        1
+                        for row in pass_rows
+                        if not _target_row_has_full_replicates(row)
+                    ),
+                }
+            )
+            current_specs = _backfill_specs(
+                candidate_rows, attempted_ids, accepted_by_cell, set()
+            )
+            pass_index += 1
+        calibration_rows = [
+            row
+            for rows in accepted_by_cell.values()
+            for row in rows
+            if row.get("target_kind") == "calibration"
+        ]
+        formal_rows = [
+            row
+            for rows in accepted_by_cell.values()
+            for row in rows
+            if row.get("target_kind") == "formal"
+        ]
+        calibration = (
+            select_repetition_count(calibration_rows)
+            if len(calibration_rows) == 96
+            else {"qualified": False, "reason": "exact 96 calibration rows unavailable"}
+        )
+        selected_n = calibration.get("selected_repetition_count")
+        if isinstance(selected_n, int):
+            for row in formal_rows:
+                row["selected_repetition_count"] = selected_n
+                row["replicates"] = row["replicates"][:selected_n]
+        parity, parity_failures, parity_wall = _run_parity(
             roots,
             checkpoint_paths,
             args.native_commit,
             args.workers,
-            "selected_leaf_continuation",
-            current_specs,
+            progress=progress,
         )
-        target_runs = pass_runs
-        target_failures.extend(pass_failures)
-        target_wall += pass_wall
-        attempted_ids.update(scheduled_ids)
-        target_worker_evidence.append(pass_workers)
-        pass_rows = [
-            target for run in pass_runs for target in run.get("target_rows", [])
-        ]
-        returned_ids = {str(row["exact_leaf_identity"]) for row in pass_rows}
-        for identity, spec in current_specs.items():
-            if identity in returned_ids:
-                continue
-            target_attempts.append(
+        if parity_failures:
+            raise RuntimeError(
+                "parity preflight incomplete: " + "; ".join(parity_failures[:8])
+            )
+        root_runs = target_runs or candidate_runs
+        failures: list[str] = []
+        target_wall = sum(item["wall_clock_seconds"] for item in replay_passes)
+        total_wall = candidate_wall + target_wall + parity_wall
+        selected_worker_summary = {
+            "configured_worker_count": args.workers,
+            "observed_worker_count": min(
+                [item["observed_worker_count"] for item in target_worker_evidence]
+                or [candidate_workers["observed_worker_count"]]
+            ),
+            "effective_worker_count": min(
+                [item["effective_worker_count"] for item in target_worker_evidence]
+                or [candidate_workers["effective_worker_count"]]
+            ),
+            "worker_pids": sorted(
+                {pid for item in target_worker_evidence for pid in item["worker_pids"]}
+            ),
+            "host_logical_cpu_count": os.cpu_count(),
+        }
+        execution = {
+            "schema_id": COLLECTOR_SCHEMA_ID,
+            "generation_mode": "native_runtime_collector",
+            "native_commit": args.native_commit,
+            "search_simulations_per_root": 100,
+            "worker_count": args.workers,
+            "effective_worker_count": min(
+                [candidate_workers["effective_worker_count"]]
+                + [item["effective_worker_count"] for item in target_worker_evidence]
+                + [parity["effective_worker_count"]]
+            ),
+            "root_runs": [
                 {
-                    "exact_leaf_identity": identity,
-                    "occurrence_key": spec.get("occurrence_key"),
-                    "root_identity": spec.get("root_identity"),
-                    "sampling_arm": spec.get("sampling_arm"),
-                    "act": spec.get("act"),
-                    "target_kind": spec.get("target_kind"),
-                    "valid_256_replicates": False,
-                    "replay_pass": len(replay_passes) + 1,
-                    "backfill_used": len(replay_passes) > 0,
-                    "error": "scheduled occurrence produced no target row; see pass failures",
+                    key: value
+                    for key, value in run.items()
+                    if key not in ("candidate_rows", "target_rows")
                 }
-            )
-        for row in pass_rows:
-            identity = str(row["exact_leaf_identity"])
-            cell = (
-                str(row["sampling_arm"]),
-                int(row["act"]),
-                str(row["target_kind"]),
-            )
-            attempted_ids.add(identity)
-            usable = _target_row_has_full_replicates(row)
-            target_attempts.append(
+                for run in root_runs
+            ],
+            "candidate_rows": candidate_rows,
+            "calibration_rows": calibration_rows,
+            "formal_rows": formal_rows,
+            "calibration": calibration,
+            "generation_passes": {
+                "candidate": {
+                    "worker_count": args.workers,
+                    "effective_worker_count": candidate_workers[
+                        "effective_worker_count"
+                    ],
+                    "worker_evidence": candidate_workers,
+                    "task_count": tasks,
+                    "wall_clock_seconds": candidate_wall,
+                },
+                "selected_leaf_continuation": {
+                    "worker_count": args.workers,
+                    "task_count": tasks * max(1, len(replay_passes)),
+                    "tasks_per_pass": tasks,
+                    "wall_clock_seconds": target_wall,
+                    "target_identity_count": len(target_specs),
+                    "worker_evidence": target_worker_evidence,
+                    "replay_passes": replay_passes,
+                    "target_attempts": target_attempts,
+                },
+                "parity_preflight": {
+                    "worker_count": args.workers,
+                    "effective_worker_count": parity["effective_worker_count"],
+                    "worker_evidence": parity["worker_evidence"],
+                    "task_count": 16 * len(ARMS),
+                    "task_ranges": "first eight Act1 and first eight Act2 source roots x three arms",
+                    "wall_clock_seconds": parity_wall,
+                },
+                "selection_policy": selection_policy,
+                "backfill": {
+                    "policy": "same arm/Act cell; next root-first/canonical candidate only after 256-replicate failure",
+                    "target_attempts": target_attempts,
+                },
+            },
+            "arm_configs": {
+                "unguided_search_v2": {
+                    "policy_prior": False,
+                    "leaf_value": False,
+                    "checkpoint_sha256": None,
+                },
+                "prior_only_static_64001": {
+                    "policy_prior": True,
+                    "leaf_value": False,
+                    "checkpoint_sha256": EXPECTED_STATIC_CHECKPOINTS[
+                        "prior_only_static_64001"
+                    ][0],
+                },
+                "prior_only_static_64002": {
+                    "policy_prior": True,
+                    "leaf_value": False,
+                    "checkpoint_sha256": EXPECTED_STATIC_CHECKPOINTS[
+                        "prior_only_static_64002"
+                    ][0],
+                },
+            },
+            "parity": parity,
+            "failures": failures + parity_failures,
+            "shards": [
                 {
-                    "exact_leaf_identity": identity,
-                    "occurrence_key": row.get("occurrence_key"),
-                    "root_identity": row.get("root_identity"),
-                    "sampling_arm": row.get("sampling_arm"),
-                    "act": row.get("act"),
-                    "target_kind": row.get("target_kind"),
-                    "valid_256_replicates": usable,
-                    "replay_pass": len(replay_passes) + 1,
-                    "backfill_used": len(replay_passes) > 0,
-                }
-            )
-            if usable and identity not in accepted_ids:
-                accepted_by_cell.setdefault(cell, []).append(row)
-                accepted_ids.add(identity)
-        replay_passes.append(
-            {
-                "pass_index": len(replay_passes) + 1,
-                "candidate_occurrence_count": len(current_specs),
-                "worker_count": args.workers,
-                "task_count": len(roots) * len(ARMS),
-                "task_ranges": "root indices 0..459 x three arms",
-                "wall_clock_seconds": time.monotonic() - pass_started,
-                "worker_evidence": pass_workers,
-                "valid_rows": sum(
-                    1 for row in pass_rows if _target_row_has_full_replicates(row)
-                ),
-                "invalid_rows": sum(
-                    1 for row in pass_rows if not _target_row_has_full_replicates(row)
-                ),
+                    "worker_count": args.workers,
+                    "effective_worker_count": candidate_workers[
+                        "effective_worker_count"
+                    ],
+                    "task_count": tasks,
+                    "task_ranges": "candidate pass: root indices 0..459 x three arms",
+                    "wall_clock_seconds": candidate_wall,
+                    "worker_evidence": candidate_workers,
+                },
+                {
+                    "worker_count": args.workers,
+                    "effective_worker_count": min(
+                        item["effective_worker_count"]
+                        for item in target_worker_evidence
+                    )
+                    if target_worker_evidence
+                    else 0,
+                    "task_count": tasks * max(1, len(replay_passes)),
+                    "task_ranges": "selected_leaf_continuation pass: root indices 0..459 x three arms",
+                    "wall_clock_seconds": target_wall,
+                    "worker_evidence": selected_worker_summary,
+                },
+                {
+                    "worker_count": args.workers,
+                    "effective_worker_count": parity["effective_worker_count"],
+                    "task_count": 16 * len(ARMS),
+                    "task_ranges": "parity_preflight: first eight Act1 and first eight Act2 source roots x three arms",
+                    "wall_clock_seconds": parity_wall,
+                    "worker_evidence": parity["worker_evidence"],
+                },
+            ],
+            "wall_clock_seconds": total_wall,
+        }
+        final_bytes = _json_bytes(execution)
+        expected_output = {
+            "path": str(args.output),
+            "bytes": len(final_bytes),
+            "sha256": hashlib.sha256(final_bytes).hexdigest(),
+        }
+        if progress is not None:
+            progress.prepare_final(expected_output)
+        _write_json(args.output, execution)
+        if progress is not None:
+            actual_output = {
+                "path": str(args.output),
+                "bytes": args.output.stat().st_size,
+                "sha256": sha256_file(args.output),
             }
-        )
-        reserved_ids: set[str] = set()
-        current_specs = _backfill_specs(
-            candidate_rows, attempted_ids, accepted_by_cell, reserved_ids
-        )
-    calibration_rows = [
-        row
-        for rows in accepted_by_cell.values()
-        for row in rows
-        if row.get("target_kind") == "calibration"
-    ]
-    formal_rows = [
-        row
-        for rows in accepted_by_cell.values()
-        for row in rows
-        if row.get("target_kind") == "formal"
-    ]
-    calibration = (
-        select_repetition_count(calibration_rows)
-        if len(calibration_rows) == 96
-        else {"qualified": False, "reason": "exact 96 calibration rows unavailable"}
-    )
-    selected_n = calibration.get("selected_repetition_count")
-    if isinstance(selected_n, int):
-        for row in formal_rows:
-            row["selected_repetition_count"] = selected_n
-            row["replicates"] = row["replicates"][:selected_n]
-    parity, parity_failures, parity_wall = _run_parity(
-        roots, checkpoint_paths, args.native_commit, args.workers
-    )
-    root_runs = target_runs
-    failures = candidate_failures + target_failures
-    total_wall = candidate_wall + target_wall + parity_wall
-    tasks = len(roots) * len(ARMS)
-    selected_worker_summary = {
-        "configured_worker_count": args.workers,
-        "observed_worker_count": min(
-            [item["observed_worker_count"] for item in target_worker_evidence] or [0]
-        ),
-        "effective_worker_count": min(
-            [item["effective_worker_count"] for item in target_worker_evidence] or [0]
-        ),
-        "worker_pids": sorted(
-            {pid for item in target_worker_evidence for pid in item["worker_pids"]}
-        ),
-        "host_logical_cpu_count": os.cpu_count(),
-    }
-    execution = {
-        "schema_id": COLLECTOR_SCHEMA_ID,
-        "generation_mode": "native_runtime_collector",
-        "native_commit": args.native_commit,
-        "search_simulations_per_root": 100,
-        "worker_count": args.workers,
-        "effective_worker_count": min(
-            [candidate_workers["effective_worker_count"]]
-            + [item["effective_worker_count"] for item in target_worker_evidence]
-            + [parity["effective_worker_count"]]
-        ),
-        "root_runs": [
-            {
-                key: value
-                for key, value in run.items()
-                if key not in ("candidate_rows", "target_rows")
-            }
-            for run in root_runs
-        ],
-        "candidate_rows": candidate_rows,
-        "calibration_rows": calibration_rows,
-        "formal_rows": formal_rows,
-        "calibration": calibration,
-        "generation_passes": {
-            "candidate": {
-                "worker_count": args.workers,
-                "effective_worker_count": candidate_workers["effective_worker_count"],
-                "worker_evidence": candidate_workers,
-                "task_count": tasks,
-                "wall_clock_seconds": candidate_wall,
-            },
-            "selected_leaf_continuation": {
-                "worker_count": args.workers,
-                "task_count": tasks * max(1, len(replay_passes)),
-                "tasks_per_pass": tasks,
-                "wall_clock_seconds": target_wall,
-                "target_identity_count": len(target_specs),
-                "worker_evidence": target_worker_evidence,
-                "replay_passes": replay_passes,
-                "target_attempts": target_attempts,
-            },
-            "parity_preflight": {
-                "worker_count": args.workers,
-                "effective_worker_count": parity["effective_worker_count"],
-                "worker_evidence": parity["worker_evidence"],
-                "task_count": 16 * len(ARMS),
-                "task_ranges": "first eight Act1 and first eight Act2 source roots x three arms",
-                "wall_clock_seconds": parity_wall,
-            },
-            "selection_policy": selection_policy,
-            "backfill": {
-                "policy": "same arm/Act cell; next root-first/canonical candidate only after 256-replicate failure",
-                "target_attempts": target_attempts,
-            },
-        },
-        "arm_configs": {
-            "unguided_search_v2": {
-                "policy_prior": False,
-                "leaf_value": False,
-                "checkpoint_sha256": None,
-            },
-            "prior_only_static_64001": {
-                "policy_prior": True,
-                "leaf_value": False,
-                "checkpoint_sha256": EXPECTED_STATIC_CHECKPOINTS[
-                    "prior_only_static_64001"
-                ][0],
-            },
-            "prior_only_static_64002": {
-                "policy_prior": True,
-                "leaf_value": False,
-                "checkpoint_sha256": EXPECTED_STATIC_CHECKPOINTS[
-                    "prior_only_static_64002"
-                ][0],
-            },
-        },
-        "parity": parity,
-        "failures": failures + parity_failures,
-        "shards": [
-            {
-                "worker_count": args.workers,
-                "effective_worker_count": candidate_workers["effective_worker_count"],
-                "task_count": tasks,
-                "task_ranges": "candidate pass: root indices 0..459 x three arms",
-                "wall_clock_seconds": candidate_wall,
-                "worker_evidence": candidate_workers,
-            },
-            {
-                "worker_count": args.workers,
-                "effective_worker_count": min(
-                    item["effective_worker_count"] for item in target_worker_evidence
-                )
-                if target_worker_evidence
-                else 0,
-                "task_count": tasks * max(1, len(replay_passes)),
-                "task_ranges": "selected_leaf_continuation pass: root indices 0..459 x three arms",
-                "wall_clock_seconds": target_wall,
-                "worker_evidence": selected_worker_summary,
-            },
-            {
-                "worker_count": args.workers,
-                "effective_worker_count": parity["effective_worker_count"],
-                "task_count": 16 * len(ARMS),
-                "task_ranges": "parity_preflight: first eight Act1 and first eight Act2 source roots x three arms",
-                "wall_clock_seconds": parity_wall,
-                "worker_evidence": parity["worker_evidence"],
-            },
-        ],
-        "wall_clock_seconds": total_wall,
-    }
-    _write_json(args.output, execution)
-    return 0 if not failures and len(root_runs) == len(tasks) else 2
+            progress.mark_complete(actual_output)
+        return 0
+    except Exception as exc:  # noqa: BLE001 - leave resumable failure evidence
+        if progress is not None:
+            progress.mark_failed(exc)
+        print(f"T084 collector failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

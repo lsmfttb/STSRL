@@ -363,6 +363,21 @@ Retain under one stable ignored T084 artifact root:
 
 Large full-state payloads remain outside Git.
 
+### Resumable collector execution
+
+The collector has an optional operational checkpoint mode for long native
+collection runs. A fresh run that should be resumable passes
+`--progress-dir <stable-ignored-directory>`; after an interruption, rerun the
+same command with `--resume` and the same progress directory, output path,
+inputs, native build/commit, checkpoints, worker count, and collector code.
+Each successful candidate or selected-leaf replay task is checkpointed as a
+complete task result under that directory using an atomic JSON replace. Failed
+tasks retain diagnostics only and are retried on resume. The progress index and
+task parts are operational intermediates, not scientific output, and must stay
+under the ignored T084 retention root. A run without `--progress-dir` retains
+the original fresh behavior and does not create progress state. Existing failed
+v9/v10 attempts remain retained evidence and must not be overwritten.
+
 ## Required verification
 
 - task-document / T081 Artifact Eligibility guard;
