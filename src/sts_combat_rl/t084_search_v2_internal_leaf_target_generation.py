@@ -632,6 +632,27 @@ def validate_collector_execution(
         or execution.get("effective_worker_count") != WORKER_COUNT
     ):
         problems.append("collector did not prove 16 configured/effective workers")
+    shards = execution.get("shards")
+    expected_stage_ranges = (
+        "candidate pass: root indices 0..459 x three arms",
+        "selected_leaf_continuation pass: root indices 0..459 x three arms",
+        "parity_preflight: first eight Act1 and first eight Act2 source roots x three arms",
+    )
+    if not isinstance(shards, list) or len(shards) != 3:
+        problems.append("collector stage shards are not the three required stages")
+    else:
+        for shard, expected_range in zip(shards, expected_stage_ranges):
+            if (
+                not isinstance(shard, Mapping)
+                or shard.get("worker_count") != WORKER_COUNT
+                or shard.get("effective_worker_count") != WORKER_COUNT
+                or shard.get("task_ranges") != expected_range
+                or not isinstance(shard.get("worker_evidence"), Mapping)
+                or shard["worker_evidence"].get("observed_worker_count") != WORKER_COUNT
+            ):
+                problems.append(
+                    f"collector shard evidence is incomplete: {expected_range}"
+                )
     root_by_identity = {
         str(item.get("complete_identity_sha256")): index
         for index, item in enumerate(selected_sources)
@@ -718,6 +739,7 @@ def validate_collector_execution(
         if (
             parity.get("checked_root_count") != 16
             or parity.get("task_count") != 48
+            or parity.get("effective_worker_count") != WORKER_COUNT
             or set(parity.get("arms", [])) != set(ARMS)
             or set(parity.get("acts", [])) != {1, 2}
             or parity.get("act_counts") != {"1": 24, "2": 24}

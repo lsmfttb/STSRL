@@ -18,6 +18,7 @@ import argparse
 import hashlib
 import json
 import multiprocessing
+import os
 import sys
 import time
 from collections import Counter
@@ -377,6 +378,7 @@ def _work_one(task: tuple[int, str]) -> dict[str, Any]:
         leaf_collector_callback=collect,
     )
     row = {
+        "worker_pid": os.getpid(),
         "sampling_arm": arm,
         "root_index": root_index,
         "source_root_index": root_raw.get("_t084_parity_source_index", root_index),
@@ -430,7 +432,7 @@ def _run_pass(
     workers: int,
     pass_mode: str,
     target_specs: dict[str, dict[str, Any]],
-) -> tuple[list[dict[str, Any]], list[str], float]:
+) -> tuple[list[dict[str, Any]], list[str], float, dict[str, Any]]:
     tasks = [(root_index, arm) for root_index in range(len(roots)) for arm in ARMS]
     started = time.monotonic()
     root_runs: list[dict[str, Any]] = []
@@ -466,7 +468,21 @@ def _run_pass(
     root_runs.sort(
         key=lambda row: (str(row.get("sampling_arm")), int(row.get("root_index", -1)))
     )
-    return root_runs, failures, time.monotonic() - started
+    worker_pids = sorted(
+        {
+            int(row["worker_pid"])
+            for row in root_runs
+            if isinstance(row.get("worker_pid"), int)
+        }
+    )
+    worker_evidence = {
+        "configured_worker_count": workers,
+        "observed_worker_count": len(worker_pids),
+        "effective_worker_count": len(worker_pids),
+        "worker_pids": worker_pids,
+        "host_logical_cpu_count": os.cpu_count(),
+    }
+    return root_runs, failures, time.monotonic() - started, worker_evidence
 
 
 def _work_parity_one(task: tuple[int, str]) -> dict[str, Any]:
@@ -544,6 +560,7 @@ def _work_parity_one(task: tuple[int, str]) -> dict[str, Any]:
     )
     return {
         "root_index": root_index,
+        "worker_pid": os.getpid(),
         "root_identity": source_identity,
         "sampling_arm": arm,
         "act": int(root_raw["act"]),
@@ -599,6 +616,20 @@ def _run_parity(
             except Exception as exc:  # noqa: BLE001 - retained as stage evidence
                 failures.append(f"{arm}/root{root_index}: {type(exc).__name__}: {exc}")
     rows.sort(key=lambda row: (str(row["sampling_arm"]), int(row["root_index"])))
+    worker_pids = sorted(
+        {
+            int(row["worker_pid"])
+            for row in rows
+            if isinstance(row.get("worker_pid"), int)
+        }
+    )
+    worker_evidence = {
+        "configured_worker_count": workers,
+        "observed_worker_count": len(worker_pids),
+        "effective_worker_count": len(worker_pids),
+        "worker_pids": worker_pids,
+        "host_logical_cpu_count": os.cpu_count(),
+    }
     parity = {
         "available": not failures,
         "passed": (
@@ -610,6 +641,8 @@ def _run_parity(
         "arms": sorted({row["sampling_arm"] for row in rows}),
         "acts": sorted({row["act"] for row in rows}),
         "worker_count": workers,
+        "effective_worker_count": len(worker_pids),
+        "worker_evidence": worker_evidence,
         "task_count": len(tasks),
         "task_ranges": "first eight Act1 and first eight Act2 source roots x three arms",
         "root_identities": [row["root_identity"] for row in rows],
@@ -918,7 +951,7 @@ def main() -> int:
         "prior_only_static_64001": str(args.static_64001),
         "prior_only_static_64002": str(args.static_64002),
     }
-    candidate_runs, candidate_failures, candidate_wall = _run_pass(
+    candidate_runs, candidate_failures, candidate_wall, candidate_workers = _run_pass(
         roots,
         checkpoint_paths,
         args.native_commit,
@@ -945,6 +978,7 @@ def main() -> int:
     target_failures: list[str] = []
     target_wall = 0.0
     replay_passes: list[dict[str, Any]] = []
+    target_worker_evidence: list[dict[str, Any]] = []
     attempted_ids: set[str] = set()
     accepted_by_cell: dict[tuple[str, int, str], list[dict[str, Any]]] = {}
     accepted_ids: set[str] = set()
@@ -953,7 +987,7 @@ def main() -> int:
     while current_specs:
         scheduled_ids = set(current_specs)
         pass_started = time.monotonic()
-        pass_runs, pass_failures, pass_wall = _run_pass(
+        pass_runs, pass_failures, pass_wall, pass_workers = _run_pass(
             roots,
             checkpoint_paths,
             args.native_commit,
@@ -965,6 +999,7 @@ def main() -> int:
         target_failures.extend(pass_failures)
         target_wall += pass_wall
         attempted_ids.update(scheduled_ids)
+        target_worker_evidence.append(pass_workers)
         pass_rows = [
             target for run in pass_runs for target in run.get("target_rows", [])
         ]
@@ -1019,6 +1054,7 @@ def main() -> int:
                 "task_count": len(roots) * len(ARMS),
                 "task_ranges": "root indices 0..459 x three arms",
                 "wall_clock_seconds": time.monotonic() - pass_started,
+                "worker_evidence": pass_workers,
                 "valid_rows": sum(
                     1 for row in pass_rows if _target_row_has_full_replicates(row)
                 ),
@@ -1060,13 +1096,30 @@ def main() -> int:
     failures = candidate_failures + target_failures
     total_wall = candidate_wall + target_wall + parity_wall
     tasks = len(roots) * len(ARMS)
+    selected_worker_summary = {
+        "configured_worker_count": args.workers,
+        "observed_worker_count": min(
+            [item["observed_worker_count"] for item in target_worker_evidence] or [0]
+        ),
+        "effective_worker_count": min(
+            [item["effective_worker_count"] for item in target_worker_evidence] or [0]
+        ),
+        "worker_pids": sorted(
+            {pid for item in target_worker_evidence for pid in item["worker_pids"]}
+        ),
+        "host_logical_cpu_count": os.cpu_count(),
+    }
     execution = {
         "schema_id": COLLECTOR_SCHEMA_ID,
         "generation_mode": "native_runtime_collector",
         "native_commit": args.native_commit,
         "search_simulations_per_root": 100,
         "worker_count": args.workers,
-        "effective_worker_count": args.workers,
+        "effective_worker_count": min(
+            [candidate_workers["effective_worker_count"]]
+            + [item["effective_worker_count"] for item in target_worker_evidence]
+            + [parity["effective_worker_count"]]
+        ),
         "root_runs": [
             {
                 key: value
@@ -1082,6 +1135,8 @@ def main() -> int:
         "generation_passes": {
             "candidate": {
                 "worker_count": args.workers,
+                "effective_worker_count": candidate_workers["effective_worker_count"],
+                "worker_evidence": candidate_workers,
                 "task_count": tasks,
                 "wall_clock_seconds": candidate_wall,
             },
@@ -1091,11 +1146,14 @@ def main() -> int:
                 "tasks_per_pass": tasks,
                 "wall_clock_seconds": target_wall,
                 "target_identity_count": len(target_specs),
+                "worker_evidence": target_worker_evidence,
                 "replay_passes": replay_passes,
                 "target_attempts": target_attempts,
             },
             "parity_preflight": {
                 "worker_count": args.workers,
+                "effective_worker_count": parity["effective_worker_count"],
+                "worker_evidence": parity["worker_evidence"],
                 "task_count": 16 * len(ARMS),
                 "task_ranges": "first eight Act1 and first eight Act2 source roots x three arms",
                 "wall_clock_seconds": parity_wall,
@@ -1132,24 +1190,31 @@ def main() -> int:
         "shards": [
             {
                 "worker_count": args.workers,
-                "effective_worker_count": args.workers,
+                "effective_worker_count": candidate_workers["effective_worker_count"],
                 "task_count": tasks,
                 "task_ranges": "candidate pass: root indices 0..459 x three arms",
                 "wall_clock_seconds": candidate_wall,
+                "worker_evidence": candidate_workers,
             },
             {
                 "worker_count": args.workers,
-                "effective_worker_count": args.workers,
+                "effective_worker_count": min(
+                    item["effective_worker_count"] for item in target_worker_evidence
+                )
+                if target_worker_evidence
+                else 0,
                 "task_count": tasks * max(1, len(replay_passes)),
                 "task_ranges": "selected_leaf_continuation pass: root indices 0..459 x three arms",
                 "wall_clock_seconds": target_wall,
+                "worker_evidence": selected_worker_summary,
             },
             {
                 "worker_count": args.workers,
-                "effective_worker_count": args.workers,
+                "effective_worker_count": parity["effective_worker_count"],
                 "task_count": 16 * len(ARMS),
                 "task_ranges": "parity_preflight: first eight Act1 and first eight Act2 source roots x three arms",
                 "wall_clock_seconds": parity_wall,
+                "worker_evidence": parity["worker_evidence"],
             },
         ],
         "wall_clock_seconds": total_wall,
