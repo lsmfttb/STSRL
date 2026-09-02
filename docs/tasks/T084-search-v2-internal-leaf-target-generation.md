@@ -386,17 +386,24 @@ change any frozen arm, Search, replay, seed, or selection semantics.
 
 The current maintainer host has 32 GB physical memory, while WSL is limited to
 `memory=24GB`, `swap=8GB`, and 16 logical processors so that Windows and other
-applications retain headroom. The v11 attempt is retained as an operational
-failure record: with 16 workers it was kernel-OOM-killed at candidate
-`261/1380`; `dmesg` recorded Python pid 8983 at `anon-rss=10632380 kB`.
-Worker snapshots also showed ordinary workers around 1.9--2.4 GiB RSS. The
-next formal run is therefore explicitly planned with `--workers 6` (after a
-short same-runtime memory smoke), rather than treating the generic 16-worker
-default as mandatory. If that smoke still approaches the WSL limit, use a new
-progress directory with 4 workers and record the reason. The final collector
-and retention evidence must report configured workers, observed/effective
-workers for every stage, host logical CPU count, WSL/host memory limits, and
-the resource reason for the chosen value.
+applications retain headroom. The same native/runtime smoke produced the
+following bounded-memory evidence; RSS values are GiB and `total` is the peak
+observed RSS across the smoke process tree:
+
+| stage | configured workers | scope/result | completion | wall clock | peak total RSS | parent RSS | single-worker RSS |
+| --- | ---: | --- | ---: | ---: | ---: | ---: | ---: |
+| candidate | 6 | 2 roots x 3 arms | 6/6 | 337.4 s | 3.787 | 0.517 | 0.595 |
+| candidate | 8 | 3 roots x 3 arms | 9/9 | 363.0 s | 5.172 | 0.562 | 0.615 |
+| target | 8 | 3 roots x 3 arms; 1 real leaf, 256 replicates | 9/9 | 361.2 s | 5.096 | 0.495 | 0.604 |
+
+The formal run is now explicitly planned with `--workers 8`. The earlier 4-worker
+choice was a conservative fallback and is not adopted after the smoke; 16
+workers remains disallowed for the formal run because v11 was kernel-OOM-killed
+at candidate `261/1380` and `dmesg` recorded Python pid 8983 at
+`anon-rss=10632380 kB`, with the old unbounded parent aggregation also carrying
+substantial risk. The final collector and retention evidence must report
+configured, observed, and effective workers for every stage, host logical CPU
+count, WSL/host memory limits, and this resource rationale.
 
 Progress-backed aggregation is bounded: successful task parts are verified
 and decoded one at a time; candidate selection retains only compact identity,
