@@ -74,8 +74,13 @@ def main() -> int:
         "classification": result.get("classification"),
         "recommendation": result.get("recommendation"),
         "producer": {
-            "code_commit": args.code_commit,
+            "code_commit": result.get("identity", {}).get("stsrl_main_resolved_commit"),
+            "code_ref": result.get("identity", {}).get("stsrl_main_ref"),
             "native_commit": result.get("identity", {}).get("native_commit"),
+            "native_ref": result.get("identity", {}).get("native_resolved_ref"),
+            "native_resolved_commit": result.get("identity", {}).get(
+                "native_resolved_commit"
+            ),
             "native_root": str(args.native_root),
         },
         "inputs": {

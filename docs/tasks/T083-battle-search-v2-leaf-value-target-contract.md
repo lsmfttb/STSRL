@@ -89,6 +89,14 @@ Artifact Eligibility Required: true
 
 Reuse mode: `diagnostic_mechanism`.
 
+Inputs: the exact frozen T082 report, qualified T064 compact/teacher/trainer
+artifacts, accepted source-pool manifest identities, and the pinned STSRL/native
+code identities named below.
+
+Claim boundary: this audit claims only the existing Search v2 value/backup
+contract and retained-artifact eligibility; it does not claim model quality,
+causality, or live-game performance.
+
 Consumed learning artifacts are not being used to claim model quality. They are used only to establish the exact existing target/search contract and whether a retained scalar definition is reusable.
 
 ### Required predicates

@@ -19,7 +19,9 @@ from typing import Any
 
 SCHEMA_ID = "t083-battle-search-v2-leaf-value-target-contract-v1"
 EXPECTED_MAIN_COMMIT = "2a0b36b5e7ea700f34ebde8288b0b1cf809ee080"
+EXPECTED_MAIN_REF = "refs/heads/main"
 EXPECTED_NATIVE_COMMIT = "1555348535d66e3035aac80933a60949d4bd850f"
+EXPECTED_NATIVE_REF = "refs/heads/stsrl/main"
 EXPECTED_T082_REPORT_SHA = (
     "e1435812abed86d9ddb4c857cba1863edf852f1e956db9fc002e043a4eb2febc"
 )
@@ -242,10 +244,17 @@ def _git_show(
     return source, hashlib.sha256(source.encode("utf-8")).hexdigest()
 
 
-def _git_commit(native_root: Path) -> str | None:
+def _git_ref_commit(repository: Path, ref: str) -> str | None:
     try:
         process = subprocess.run(
-            ["git", "-C", str(native_root), "rev-parse", EXPECTED_NATIVE_COMMIT],
+            [
+                "git",
+                "-C",
+                str(repository),
+                "rev-parse",
+                "--verify",
+                f"{ref}^{{commit}}",
+            ],
             check=True,
             capture_output=True,
             text=True,
@@ -257,9 +266,10 @@ def _git_commit(native_root: Path) -> str | None:
 
 
 def native_evidence(native_root: Path) -> dict[str, Any]:
+    resolved_ref = _git_ref_commit(native_root, EXPECTED_NATIVE_REF)
     files: dict[str, Any] = {}
     for relative in EXPECTED_NATIVE_FILES:
-        source, source_sha = _git_show(native_root, EXPECTED_NATIVE_COMMIT, relative)
+        source, source_sha = _git_show(native_root, EXPECTED_NATIVE_REF, relative)
         if source is None:
             files[relative] = {"available": False, "sha256": None}
             continue
@@ -310,10 +320,11 @@ def native_evidence(native_root: Path) -> dict[str, Any]:
     )
     return {
         "repository": "https://github.com/lsmfttb/sts_lightspeed.git",
-        "ref": "refs/heads/stsrl/main",
+        "ref": EXPECTED_NATIVE_REF,
         "commit": EXPECTED_NATIVE_COMMIT,
-        "resolved_commit": _git_commit(native_root),
-        "identity_valid": _git_commit(native_root) == EXPECTED_NATIVE_COMMIT,
+        "resolved_ref": EXPECTED_NATIVE_REF,
+        "resolved_commit": resolved_ref,
+        "identity_valid": resolved_ref == EXPECTED_NATIVE_COMMIT,
         "files": files,
         "formula_evidence": {
             "all_required_tokens_present": all(
@@ -348,7 +359,7 @@ def native_evidence(native_root: Path) -> dict[str, Any]:
     }
 
 
-def code_evidence(repo_root: Path) -> dict[str, Any]:
+def code_evidence(repo_root: Path, resolved_main: str | None = None) -> dict[str, Any]:
     files = {
         "src/sts_combat_rl/sim/battle_search_v2.py": (
             "value_callback",
@@ -367,18 +378,37 @@ def code_evidence(repo_root: Path) -> dict[str, Any]:
         ),
     }
     result: dict[str, Any] = {}
+    source_matches_main = resolved_main == EXPECTED_MAIN_COMMIT
     for relative, tokens in files.items():
         path = repo_root / relative
         try:
             source = path.read_text(encoding="utf-8")
         except OSError:
-            result[relative] = {"available": False, "sha256": None, "tokens": {}}
+            result[relative] = {
+                "available": False,
+                "sha256": None,
+                "main_sha256": None,
+                "source_matches_main": False,
+                "tokens": {},
+            }
+            source_matches_main = False
             continue
+        main_source, main_sha = _git_show(repo_root, EXPECTED_MAIN_REF, relative)
+        matches = (
+            main_source is not None
+            and hashlib.sha256(source.encode("utf-8")).hexdigest() == main_sha
+        )
+        source_matches_main = source_matches_main and matches
         result[relative] = {
             "available": True,
             "sha256": hashlib.sha256(source.encode("utf-8")).hexdigest(),
+            "main_sha256": main_sha,
+            "source_matches_main": matches,
             "tokens": {token: token in source for token in tokens},
         }
+    result["main_ref"] = EXPECTED_MAIN_REF
+    result["main_resolved_commit"] = resolved_main
+    result["source_matches_main"] = source_matches_main
     result["contract"] = {
         "value_head_target_kind": "terminal_battle_survival_probability",
         "producer": "outcome_head logits trained with binary_cross_entropy_with_logits",
@@ -885,7 +915,9 @@ def _incomplete_report(
             "expected_rows": expected_rows,
         },
         "problems": [problem],
-        "code_evidence": code_evidence(repo_root),
+        "code_evidence": code_evidence(
+            repo_root, _git_ref_commit(repo_root, EXPECTED_MAIN_REF)
+        ),
         "native_evidence": native_evidence(native_root),
     }
 
@@ -904,6 +936,11 @@ def audit_t083(
     try:
         if code_commit != EXPECTED_MAIN_COMMIT:
             raise ValueError(f"unexpected STSRL main identity: {code_commit}")
+        resolved_main = _git_ref_commit(repo_root, EXPECTED_MAIN_REF)
+        if resolved_main != EXPECTED_MAIN_COMMIT:
+            raise ValueError(
+                f"{EXPECTED_MAIN_REF} resolved to {resolved_main!r}, expected {EXPECTED_MAIN_COMMIT}"
+            )
         t082_check = _artifact_check(t082_report, EXPECTED_T082_REPORT_SHA, None)
         t082_document = _json(t082_report)
         t082_check["schema_id"] = t082_document.get("schema_version")
@@ -950,12 +987,13 @@ def audit_t083(
             item.get("valid") for item in artifact_result["artifact_checks"]
         )
         native = native_evidence(native_root)
-        code = code_evidence(repo_root)
+        code = code_evidence(repo_root, resolved_main)
         code_valid = all(
             item.get("available") and all(item.get("tokens", {}).values())
             for key, item in code.items()
-            if key != "contract"
+            if key.startswith("src/")
         )
+        code_valid = code_valid and bool(code.get("source_matches_main"))
         native_valid = bool(
             native.get("identity_valid")
             and native.get("formula_evidence", {}).get("all_required_tokens_present")
@@ -1021,8 +1059,12 @@ def audit_t083(
             },
             "identity": {
                 "stsrl_main_commit": EXPECTED_MAIN_COMMIT,
+                "stsrl_main_ref": EXPECTED_MAIN_REF,
+                "stsrl_main_resolved_commit": resolved_main,
                 "native_commit": EXPECTED_NATIVE_COMMIT,
-                "native_ref": "refs/heads/stsrl/main",
+                "native_ref": EXPECTED_NATIVE_REF,
+                "native_resolved_ref": native.get("resolved_ref"),
+                "native_resolved_commit": native.get("resolved_commit"),
                 "t082_report_sha256": EXPECTED_T082_REPORT_SHA,
                 "t064_teacher_sha256": EXPECTED_T064_TEACHER_SHA,
                 "t064_trainer_sha256": EXPECTED_T064_TRAINER_SHA,

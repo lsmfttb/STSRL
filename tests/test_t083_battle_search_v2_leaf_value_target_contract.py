@@ -127,6 +127,20 @@ def test_missing_identity_is_incomplete(tmp_path: Path, monkeypatch) -> None:
     assert result["classification"] == "INCOMPLETE"
 
 
+def test_native_ref_identity_is_fail_closed(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(module, "_git_ref_commit", lambda *_: None)
+    evidence = module.native_evidence(tmp_path)
+    assert evidence["ref"] == module.EXPECTED_NATIVE_REF
+    assert evidence["resolved_commit"] is None
+    assert evidence["identity_valid"] is False
+
+
+def test_code_evidence_requires_main_ref_and_matching_sources(tmp_path: Path) -> None:
+    evidence = module.code_evidence(tmp_path, module.EXPECTED_MAIN_COMMIT)
+    assert evidence["main_ref"] == module.EXPECTED_MAIN_REF
+    assert evidence["source_matches_main"] is False
+
+
 def test_terminal_classification_is_single_and_recommendation_is_bounded() -> None:
     support = {
         "reason": "missing terminal state",
