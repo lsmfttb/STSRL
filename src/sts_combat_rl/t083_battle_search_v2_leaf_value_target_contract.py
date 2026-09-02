@@ -1026,6 +1026,7 @@ def _classification_evidence(
         "accepted_surfaces_can_materialize_hidden_internal_state": can_materialize_hidden_state,
         "successor_data_generation_surface_specified": successor_surface_specified,
         "new_generator_usable": precise_generator_proven
+        and can_materialize_hidden_state
         and successor_surface_specified,
     }
 

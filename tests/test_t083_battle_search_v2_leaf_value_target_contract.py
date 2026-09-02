@@ -190,7 +190,7 @@ def test_classifier_unresolved_when_generator_is_not_materializable() -> None:
             generator_evidence={
                 "precise_generator_proven": True,
                 "accepted_surfaces_can_materialize_hidden_internal_state": False,
-                "successor_data_generation_surface": {"specified": False},
+                "successor_data_generation_surface": {"specified": True},
             },
         )
         == "LEAF_VALUE_TARGET_CONTRACT_UNRESOLVED"
