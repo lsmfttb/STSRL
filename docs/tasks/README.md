@@ -104,6 +104,7 @@ workflow's explicit implementation-authorization gate is satisfied.
 | T081 | DONE | [Scientific artifact eligibility gate](T081-scientific-artifact-eligibility-gate.md) | T043, T044, T047, T048, T050, T051, T052, T062, T070 | PR #87 merged at 4a24f18; artifact integrity and scientific eligibility are now separate, fail-closed consumer gates with a durable historical claim-boundary audit |
 | T082 | DONE | [T064 value-target semantic closure](T082-t064-value-target-semantic-closure.md) | T080, T081, T064, T043, T042 | PR #88 merged at 2acd1e8; qualified 460-row lineage audit confirmed VALUE_TARGET_SEMANTIC_MISMATCH_CONFIRMED and permits one bounded value-target repair experiment |
 | T083 | DONE | [Battle Search v2 leaf-value target contract audit](T083-battle-search-v2-leaf-value-target-contract.md) | T082, T081, T064, T062, T070 | PR #89 merged at c4f943e; accepted NEW_LEAF_CONTINUATION_UTILITY_TARGET_REQUIRED and specifies a separate internal-leaf continuation-utility target-generation consideration without publishing a successor |
+| T084 | DRAFT | [Search v2 internal-leaf continuation-utility target generation](T084-search-v2-internal-leaf-target-generation.md) | T083, T082, T081, T064, T062, T070 | Planner proposal for calibrated native-scale internal-leaf value targets; no training or outcome claim authorized |
 
 Use the table, not per-task files or roadmap prose, when deciding whether a task
 may receive a branch. Only `READY` rows should receive a new implementation
@@ -228,9 +229,11 @@ its re-open conditions. T080 completed the value-target audit as
 `VALUE_TARGET_SEMANTICS_UNRESOLVED` on the historical four-row smoke lineage.
 T081 added the fail-closed Artifact Eligibility Contract, and T082 applied it to
 the accepted non-smoke T064 lineage. T082 confirmed
-`VALUE_TARGET_SEMANTIC_MISMATCH_CONFIRMED`; the next model-side direction is one
-bounded value-target repair with policy targets, features, model architecture,
-Search v2, simulator, and evaluation cohorts held fixed as far as feasible.
+`VALUE_TARGET_SEMANTIC_MISMATCH_CONFIRMED`; T083 then accepted
+`NEW_LEAF_CONTINUATION_UTILITY_TARGET_REQUIRED` and fixed the required Search v2
+leaf scalar to pinned-native continuation utility at the post-first-action
+internal-leaf boundary. T084 is the current Planner `DRAFT`: it proposes only
+calibrated internal-leaf target generation, with no training or outcome claim.
 T063 and T066 remain `DRAFT` and are not implicitly promoted.
 
 ## Task Boundary And Artifact Rules
@@ -257,53 +260,3 @@ reason, possible downstream consumers, and deletion conditions.
 A pull request submitted as ready for review must satisfy all published
 acceptance criteria and required verification. Otherwise it remains draft and
 names the missing criteria explicitly.
-
-Long-running WSL stages must be explicitly sharded and parallelized. The default
-target on the maintainer workstation is 16 effective workers, capped by shard
-count and documented simulator or memory limits. Every expensive stage reports
-commands, worker and shard counts, seed or cohort ranges, artifact identities,
-and wall-clock cost. A `smoke` label does not justify undocumented single-worker
-execution for a substantial workload.
-
-Task authors should define the earliest affected stage or independent run after a
-repair. Validated work before that boundary may be reused with its producer
-provenance; affected, partial, or failed work is rerun. Healthy long jobs may use
-`scripts/run_detached_job.py`; report the PID, status/log paths, and coarse ETA once
-and inspect again after the expected window or on request rather than continuously.
-
-## Published Queue
-
-The executable queue is exactly the set of `READY` rows in the Active Backlog;
-it is currently empty. T063 and T066 remain `DRAFT`; T034 remains blocked on
-native public-consistent hidden-future sampling support. T064, T065, and
-T071--T083 are `DONE` with their recorded diagnostic, repair, or control-plane
-outcomes. T082 and T083 do not publish an executable successor by themselves;
-T083 identifies the required internal-leaf continuation-utility target
-generation boundary, while any target-generation or value-repair task must
-first receive a fresh Planner specification and Maintainer exact-head
-approval.
-
-## Standard Local Gates
-
-Unless a task explicitly says otherwise, every task must pass:
-
-```bash
-pytest
-python -m compileall -q src tests
-ruff check src tests
-ruff format --check src tests
-python -m sts_combat_rl.cli --mock tests/fixtures/combat_basic.json
-python -m sts_combat_rl.cli --mock tests/fixtures/non_combat.json
-```
-
-Task-specific WSL, simulator, artifact, and documentation gates are additional
-requirements.
-
-## Historical Mapping
-
-Completed and cancelled task documents through T078 remain the durable
-historical record. Accepted experiment details and artifact identities remain in
-individual task documents, reports, and `current_status.md`; this index only owns
-lifecycle state and the current executable queue.
-
-New task documents should start from [`TEMPLATE.md`](TEMPLATE.md).
