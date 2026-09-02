@@ -20,6 +20,7 @@ import json
 import multiprocessing
 import sys
 import time
+from collections import Counter
 from collections.abc import Iterable, Mapping
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
@@ -45,6 +46,7 @@ from sts_combat_rl.t084_search_v2_internal_leaf_target_generation import (
     WORKER_COUNT,
     derive_replicate_seed,
     select_repetition_count,
+    validate_replicate,
 )
 
 _ROOT_ROWS: list[dict[str, Any]] = []
@@ -685,12 +687,8 @@ def _selected_target_for_occurrence(
     return spec
 
 
-def _select_cell(
-    rows: list[dict[str, Any]],
-    count: int,
-    selected: dict[str, dict[str, Any]],
-) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    """Select unique hidden states with distinct source roots as the first phase."""
+def _ordered_cell_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return unique states in deterministic root-first then hash order."""
 
     by_identity: dict[str, list[dict[str, Any]]] = {}
     digest_payloads: dict[str, str] = {}
@@ -703,29 +701,22 @@ def _select_cell(
             raise ValueError(f"native digest collision for {digest}")
         by_identity.setdefault(identity, []).append(row)
 
-    available = {
-        identity: occurrences
-        for identity, occurrences in by_identity.items()
-        if identity not in selected
-    }
-    ordered = sorted(
-        available,
-        key=lambda identity: min(_leaf_rank(row) for row in available[identity]),
-    )
+    remaining = set(by_identity)
     chosen: list[dict[str, Any]] = []
     used_roots: set[str] = set()
-    root_first = True
-    while len(chosen) < count:
+    while remaining:
         candidates = [
             (identity, row)
-            for identity in ordered
-            if identity not in {str(item["exact_leaf_identity"]) for item in chosen}
-            for row in available[identity]
+            for identity in remaining
+            for row in by_identity[identity]
             if str(row.get("root_identity", "")) not in used_roots
         ]
         if not candidates:
-            root_first = False
-            break
+            candidates = [
+                (identity, row)
+                for identity in remaining
+                for row in by_identity[identity]
+            ]
         identity, row = min(
             candidates,
             key=lambda item: (
@@ -735,23 +726,38 @@ def _select_cell(
             ),
         )
         chosen.append(row)
+        remaining.remove(identity)
         used_roots.add(str(row.get("root_identity", "")))
-        ordered.remove(identity)
-    while len(chosen) < count and ordered:
-        identity = ordered.pop(0)
-        row = min(available[identity], key=lambda item: (_leaf_rank(item), str(item)))
-        chosen.append(row)
+    return chosen
+
+
+def _select_cell(
+    rows: list[dict[str, Any]],
+    count: int,
+    selected: dict[str, dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Select unique hidden states with distinct source roots as the first phase."""
+
+    ordered = [
+        row
+        for row in _ordered_cell_rows(rows)
+        if str(row["exact_leaf_identity"]) not in selected
+    ]
+    chosen = ordered[:count]
+    used_roots = {str(row.get("root_identity", "")) for row in chosen}
     for row in chosen:
         selected[str(row["exact_leaf_identity"])] = {
             "target_kind": "pending",
             "occurrence_key": str(row["occurrence_key"]),
             "root_identity": str(row["root_identity"]),
+            "sampling_arm": str(row["sampling_arm"]),
+            "act": int(row["act"]),
         }
     return chosen, {
         "requested": count,
         "selected": len(chosen),
         "distinct_source_roots": len(used_roots),
-        "root_first_phase_completed": root_first,
+        "root_first_phase_completed": len(used_roots) == len(chosen),
         "hash_tie_break": "sha256(source_complete_identity_sha256|sampling_arm|exact_leaf_identity)",
     }
 
@@ -818,6 +824,80 @@ def _select_target_specs(candidate_rows: list[dict[str, Any]]) -> dict[str, str]
     return {identity: str(spec["target_kind"]) for identity, spec in selected.items()}
 
 
+def _target_row_has_full_replicates(row: Mapping[str, Any]) -> bool:
+    replicates = row.get("replicates")
+    return (
+        isinstance(replicates, list)
+        and len(replicates) == 256
+        and all(
+            isinstance(replica, Mapping) and validate_replicate(replica)
+            for replica in replicates
+        )
+    )
+
+
+def _target_spec_for_row(row: Mapping[str, Any], target_kind: str) -> dict[str, Any]:
+    return {
+        "target_kind": target_kind,
+        "occurrence_key": str(row["occurrence_key"]),
+        "root_identity": str(row["root_identity"]),
+        "sampling_arm": str(row["sampling_arm"]),
+        "act": int(row["act"]),
+    }
+
+
+def _backfill_specs(
+    candidate_rows: list[dict[str, Any]],
+    attempted_ids: set[str],
+    accepted_by_cell: Mapping[tuple[str, int, str], list[dict[str, Any]]],
+    reserved_ids: set[str],
+) -> dict[str, dict[str, Any]]:
+    quotas = {
+        **{
+            (arm, act, "calibration"): count
+            for arm in ARMS
+            for act, count in ((1, 18), (2, 14))
+        },
+        **{
+            (arm, act, "formal"): count
+            for arm in ARMS
+            for act, count in ((1, 178), (2, 142))
+        },
+    }
+    specs: dict[str, dict[str, Any]] = {}
+    for (arm, act, target_kind), quota in quotas.items():
+        deficit = quota - len(accepted_by_cell.get((arm, act, target_kind), []))
+        if deficit <= 0:
+            continue
+        cell_rows = _ordered_cell_rows(
+            [
+                row
+                for row in candidate_rows
+                if row.get("sampling_arm") == arm and row.get("act") == act
+            ]
+        )
+        for row in cell_rows:
+            identity = str(row["exact_leaf_identity"])
+            if identity in attempted_ids or identity in reserved_ids:
+                continue
+            specs[identity] = _target_spec_for_row(row, target_kind)
+            reserved_ids.add(identity)
+            if (
+                len(
+                    [
+                        spec
+                        for spec in specs.values()
+                        if spec["sampling_arm"] == arm
+                        and spec["act"] == act
+                        and spec["target_kind"] == target_kind
+                    ]
+                )
+                >= deficit
+            ):
+                break
+    return specs
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--t064-manifest", type=Path, required=True)
@@ -851,22 +931,118 @@ def main() -> int:
         for run in candidate_runs
         for candidate in run.get("candidate_rows", [])
     ]
-    target_specs, selection_policy = _select_target_specs_with_policy(candidate_rows)
-    target_runs, target_failures, target_wall = _run_pass(
-        roots,
-        checkpoint_paths,
-        args.native_commit,
-        args.workers,
-        "selected_leaf_continuation",
-        target_specs,
+    occupancy_counts = Counter(
+        str(row.get("exact_leaf_identity")) for row in candidate_rows
     )
-    target_rows = [
-        target for run in target_runs for target in run.get("target_rows", [])
-    ]
+    for row in candidate_rows:
+        hidden = row.get("exact_hidden_state_payload")
+        if isinstance(hidden, dict):
+            identity = str(row.get("exact_leaf_identity"))
+            hidden["occupancy_duplicate"] = occupancy_counts[identity] > 1
+            hidden["occupancy_count"] = occupancy_counts[identity]
+    target_specs, selection_policy = _select_target_specs_with_policy(candidate_rows)
+    target_runs: list[dict[str, Any]] = []
+    target_failures: list[str] = []
+    target_wall = 0.0
+    replay_passes: list[dict[str, Any]] = []
+    attempted_ids: set[str] = set()
+    accepted_by_cell: dict[tuple[str, int, str], list[dict[str, Any]]] = {}
+    accepted_ids: set[str] = set()
+    target_attempts: list[dict[str, Any]] = []
+    current_specs = target_specs
+    while current_specs:
+        scheduled_ids = set(current_specs)
+        pass_started = time.monotonic()
+        pass_runs, pass_failures, pass_wall = _run_pass(
+            roots,
+            checkpoint_paths,
+            args.native_commit,
+            args.workers,
+            "selected_leaf_continuation",
+            current_specs,
+        )
+        target_runs = pass_runs
+        target_failures.extend(pass_failures)
+        target_wall += pass_wall
+        attempted_ids.update(scheduled_ids)
+        pass_rows = [
+            target for run in pass_runs for target in run.get("target_rows", [])
+        ]
+        returned_ids = {str(row["exact_leaf_identity"]) for row in pass_rows}
+        for identity, spec in current_specs.items():
+            if identity in returned_ids:
+                continue
+            target_attempts.append(
+                {
+                    "exact_leaf_identity": identity,
+                    "occurrence_key": spec.get("occurrence_key"),
+                    "root_identity": spec.get("root_identity"),
+                    "sampling_arm": spec.get("sampling_arm"),
+                    "act": spec.get("act"),
+                    "target_kind": spec.get("target_kind"),
+                    "valid_256_replicates": False,
+                    "replay_pass": len(replay_passes) + 1,
+                    "backfill_used": len(replay_passes) > 0,
+                    "error": "scheduled occurrence produced no target row; see pass failures",
+                }
+            )
+        for row in pass_rows:
+            identity = str(row["exact_leaf_identity"])
+            cell = (
+                str(row["sampling_arm"]),
+                int(row["act"]),
+                str(row["target_kind"]),
+            )
+            attempted_ids.add(identity)
+            usable = _target_row_has_full_replicates(row)
+            target_attempts.append(
+                {
+                    "exact_leaf_identity": identity,
+                    "occurrence_key": row.get("occurrence_key"),
+                    "root_identity": row.get("root_identity"),
+                    "sampling_arm": row.get("sampling_arm"),
+                    "act": row.get("act"),
+                    "target_kind": row.get("target_kind"),
+                    "valid_256_replicates": usable,
+                    "replay_pass": len(replay_passes) + 1,
+                    "backfill_used": len(replay_passes) > 0,
+                }
+            )
+            if usable and identity not in accepted_ids:
+                accepted_by_cell.setdefault(cell, []).append(row)
+                accepted_ids.add(identity)
+        replay_passes.append(
+            {
+                "pass_index": len(replay_passes) + 1,
+                "candidate_occurrence_count": len(current_specs),
+                "worker_count": args.workers,
+                "task_count": len(roots) * len(ARMS),
+                "task_ranges": "root indices 0..459 x three arms",
+                "wall_clock_seconds": time.monotonic() - pass_started,
+                "valid_rows": sum(
+                    1 for row in pass_rows if _target_row_has_full_replicates(row)
+                ),
+                "invalid_rows": sum(
+                    1 for row in pass_rows if not _target_row_has_full_replicates(row)
+                ),
+            }
+        )
+        reserved_ids: set[str] = set()
+        current_specs = _backfill_specs(
+            candidate_rows, attempted_ids, accepted_by_cell, reserved_ids
+        )
     calibration_rows = [
-        row for row in target_rows if row.get("target_kind") == "calibration"
+        row
+        for rows in accepted_by_cell.values()
+        for row in rows
+        if row.get("target_kind") == "calibration"
     ]
-    formal_rows = [row for row in target_rows if row.get("target_kind") == "formal"]
+    formal_rows = [
+        row
+        for rows in accepted_by_cell.values()
+        for row in rows
+        if row.get("target_kind") == "formal"
+    ]
     calibration = (
         select_repetition_count(calibration_rows)
         if len(calibration_rows) == 96
@@ -911,9 +1087,12 @@ def main() -> int:
             },
             "selected_leaf_continuation": {
                 "worker_count": args.workers,
-                "task_count": tasks,
+                "task_count": tasks * max(1, len(replay_passes)),
+                "tasks_per_pass": tasks,
                 "wall_clock_seconds": target_wall,
                 "target_identity_count": len(target_specs),
+                "replay_passes": replay_passes,
+                "target_attempts": target_attempts,
             },
             "parity_preflight": {
                 "worker_count": args.workers,
@@ -922,6 +1101,10 @@ def main() -> int:
                 "wall_clock_seconds": parity_wall,
             },
             "selection_policy": selection_policy,
+            "backfill": {
+                "policy": "same arm/Act cell; next root-first/canonical candidate only after 256-replicate failure",
+                "target_attempts": target_attempts,
+            },
         },
         "arm_configs": {
             "unguided_search_v2": {
@@ -957,7 +1140,7 @@ def main() -> int:
             {
                 "worker_count": args.workers,
                 "effective_worker_count": args.workers,
-                "task_count": tasks,
+                "task_count": tasks * max(1, len(replay_passes)),
                 "task_ranges": "selected_leaf_continuation pass: root indices 0..459 x three arms",
                 "wall_clock_seconds": target_wall,
             },
