@@ -37,7 +37,7 @@ workflow's explicit implementation-authorization gate is satisfied.
 | T014 | DONE | [Native public projection capability](T014-native-public-projection-capability.md) | T002, T003, T004, T010, T011 | native public projection and action parity |
 | T015 | DONE | [Public run context and controlled history](T015-public-run-context-and-controlled-history.md) | T002, T003, T004, T011, T014 | sanitized context and ordered history |
 | T016 | DONE | [Public-context artifacts, replay, and audit](T016-public-context-artifacts-replay-and-audit.md) | T003, T004, T005, T011, T014, T015 | migrations, replay, and coverage audit |
-| T017 | DONE | [Stable sts_lightspeed source integration](T017-stable-lightspeed-source-integration.md) | T004, T010, T014, T016 | external source manifest and verifier |
+| T017 | DONE | [Stable sts_lightspeed source integration](T017-stable-lightspeed-source-integration.md) | T004, T010, T014, T016 | native source manifest and verifier |
 | T018 | DONE | [Native terminal resource identity surface](T018-native-terminal-resource-identity.md) | T012, T017 | native terminal potion/deck/relic/key identities |
 | T019 | DONE | [Codebase mechanical refactor](T019-codebase-mechanical-refactor.md) | T001--T018 except cancelled T007 | CLI decomposition and export cleanup |
 | T020 | DONE | [sts_lightspeed fork maintenance line](T020-sts-lightspeed-fork-maintenance.md) | T017 | single active fork integration branch |
@@ -105,6 +105,7 @@ workflow's explicit implementation-authorization gate is satisfied.
 | T082 | DONE | [T064 value-target semantic closure](T082-t064-value-target-semantic-closure.md) | T080, T081, T064, T043, T042 | PR #88 merged at 2acd1e8; qualified 460-row lineage audit confirmed VALUE_TARGET_SEMANTIC_MISMATCH_CONFIRMED and permits one bounded value-target repair experiment |
 | T083 | DONE | [Battle Search v2 leaf-value target contract audit](T083-battle-search-v2-leaf-value-target-contract.md) | T082, T081, T064, T062, T070 | PR #89 merged at c4f943e; accepted NEW_LEAF_CONTINUATION_UTILITY_TARGET_REQUIRED and specifies a separate internal-leaf continuation-utility target-generation consideration without publishing a successor |
 | T084 | DONE | [Search v2 internal-leaf continuation-utility target generation](T084-search-v2-internal-leaf-target-generation.md) | T083, T082, T081, T064, T062, T070 | PR #91 accepted LEAF_CONTINUATION_UTILITY_TARGETS_READY; calibrated N=100 and retained 960 qualified public-input/native-utility internal-leaf rows; no training or outcome claim |
+| T085 | DRAFT | [Corrected Search v2 leaf-value repair and paired evaluation](T085-corrected-leaf-value-search-repair.md) | T084, T083, T082, T081, T064, T052, T042, T070 | Planner proposal for a value-head-only native-utility repair with frozen policy/Search semantics and broader paired battle evaluation; no complete-run or non-combat claim |
 
 Use the table, not per-task files or roadmap prose, when deciding whether a task
 may receive a branch. Only `READY` rows should receive a new implementation
@@ -241,8 +242,13 @@ and retention-manifest SHA-256 is
 `754a9d2560fb5b01c53e7789bdd558e5ef3cc9d0eca4dd690f8f1ab8df1fb0f6`.
 This qualifies the bounded target dataset for Planner consideration of a
 separate paired value-target repair/retraining task; T084 itself performed no
-training or outcome evaluation. T063 and T066 remain `DRAFT` and are not
-implicitly promoted.
+training or outcome evaluation. T085 is now the current Planner `DRAFT`: it
+proposes one value-head-only corrected native-utility repair with the parent
+policy/representation and Search semantics frozen, followed by paired hard,
+broad, and current-occupancy battle evaluation. A valid scientific T085 result
+closes this Battle value-repair round; the next Planner priority is then a
+minimal self-generated Non-Combat learner with Battle frozen. T063 and T066
+remain `DRAFT` and are not implicitly promoted.
 
 ## Task Boundary And Artifact Rules
 
@@ -285,13 +291,11 @@ and inspect again after the expected window or on request rather than continuous
 ## Published Queue
 
 The executable queue is exactly the set of `READY` rows in the Active Backlog;
-it is currently empty. T063 and T066 remain `DRAFT`; T034 remains blocked on
-native public-consistent hidden-future sampling support. T064, T065, and
+it is currently empty. T063, T066, and T085 remain `DRAFT`; T034 remains blocked
+on native public-consistent hidden-future sampling support. T064, T065, and
 T071--T084 are `DONE` with their recorded diagnostic, repair, control-plane, or
-target-generation outcomes. T084 qualifies a bounded internal-leaf
-continuation-utility dataset but does not itself publish a retraining or outcome
-evaluation successor; any such task requires a fresh Planner specification and
-Maintainer exact-head approval.
+target-generation outcomes. T085 is a Planner proposal only; no corrected-value
+training or outcome evaluation is executable until Maintainer exact-head approval.
 
 ## Standard Local Gates
 
