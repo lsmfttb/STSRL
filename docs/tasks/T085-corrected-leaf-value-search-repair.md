@@ -4,7 +4,7 @@
 
 Run one narrow causal test of the value-target repair enabled by accepted T084.
 
-T082/T083 established that the historical learned Search v2 value had two independent contract defects: it represented source-behavior battle survival rather than the continuation value consumed at an internal Search v2 leaf, and it returned a `[0,1]` probability into native backups whose terminal playouts use `BattleScumSearcher2::evaluateEndState` units. T084 then produced a scientifically qualified dataset for the corrected scalar:
+T082/T083 established two independent defects in the historical Search v2 value contract: the target represented source-behavior battle survival rather than the continuation value consumed at an internal Search v2 leaf, and the callback returned a `[0,1]` probability into native backups whose terminal playouts use `BattleScumSearcher2::evaluateEndState` units. T084 then produced a scientifically qualified target for:
 
 ```text
 V_leaf(s) = E[evaluateEndState(S_terminal)
@@ -14,7 +14,7 @@ V_leaf(s) = E[evaluateEndState(S_terminal)
 
 T085 asks exactly one scientific question:
 
-> With the policy path, public features, representation, Search v2 semantics, simulator, and search budgets held fixed, does replacing the old learned value with a value head trained on the qualified T084 native-utility leaf targets improve Search v2 behavior?
+> With the policy path, public features, representation, Search v2 semantics, simulator, and search budgets held fixed, does replacing the historical learned value with a value head trained on the qualified T084 native-utility targets improve Search v2 behavior?
 
 This is a value-head-only repair. It is not a representation, policy, Search-topology, non-combat, or complete-run experiment.
 
@@ -44,11 +44,27 @@ Use exactly these qualified T064 static formal checkpoints as frozen parent repr
 
 Both use the accepted hidden-size-16 architecture. Their historical value heads remain diagnostic comparators only; their survival-probability semantics are not valid native Search v2 leaf utility.
 
-### Frozen hard cohort
+### T052 hard cohort
 
-Reuse the exact T052 93-record Boss/later-act cohort:
+Reuse the exact 93-record Boss/later-act cohort:
 
 - SHA-256: `b7f8e9b85b53bbf8e37adfe6cc90d0579937661309b26bce2a8f2921604a8608`
+
+### T042 source-generation configuration anchor
+
+T085 does not reuse T042 rows for Cohort B. It reuses the accepted source-generation semantics of the `assist_hp75_potion` arm, anchored by the T042 accepted scale manifest:
+
+- scale manifest SHA-256: `25efae30dc9a61c8b97cb09e1844b93b9ffe693bde51c0f494f0f65203a1d327`
+- ascension: 20
+- maximum outer run steps: 500
+- action-space configuration: `initial_no_potions`
+- battle controller: `oracle_search`, 20 simulations, `highest_mean`
+- non-combat controller: `expert_non_combat_v1`
+- non-combat policy seed: `42042`
+- assistance schedule: exact merged `assist_hp75_potion` schedule
+- assistance-policy seed: `42042`
+
+T085 deliberately replaces only the T042 source-run seed domain and run count for its fresh Cohort-B source. No omitted CLI/default value may substitute for the frozen fields above.
 
 ### Code/native baseline
 
@@ -66,13 +82,15 @@ A material Search/native semantic change requires renewed Planner publication re
 
 Artifact Eligibility Required: true.
 
+Inputs: exact T084 report/retention/formal target dataset; exact two T064 formal parent checkpoints; exact T052 hard cohort; exact T042 scale-manifest configuration anchor; exact STSRL/native identities; and all T085-generated checkpoint/cohort/report/retention identities.
+
 Reuse mode: `scientific_quality_claim`.
 
 Claim boundary: T085 may establish only whether the frozen value-head-only native-utility repair improves the accepted Search v2 controller under the paired battle evaluation defined here. It does not establish complete-run A20 improvement, Heart win-rate improvement, non-combat quality, representation optimality, or a general solution to imperfect information.
 
-Required predicates: exact accepted T084 report/retention/formal-dataset identity; exact two T064 parent-checkpoint identities; exact T052 cohort identity; exact STSRL/native identities; valid public-only model inputs; value-head-only parameter invariance; explicit corrected target-kind metadata; deterministic fresh Cohort-B and Cohort-C source identities; valid restore/public-context parity; exact evaluation budgets/arms; complete generated checkpoint/cohort/report/retention identities.
+Required predicates: every accepted input above must match its exact identity and intended reuse role; T084 rows must have the accepted internal-leaf/native-utility semantics; parent checkpoints must be qualified formal T064 artifacts; all non-`outcome_head` parameters/buffers must remain invariant; corrected checkpoints must declare the corrected target kind; fresh source generation must use the frozen seed/configuration contracts below; restore/public-context parity must pass; evaluation budgets/arms and retained artifact identities must be complete and consistent.
 
-Unavailable-fact behavior: any required identity, qualification fact, provenance field, restore/parity result, target statistic, checkpoint compatibility fact, or required retained artifact that is unknown, conflicting, stale, smoke-only, filename-inferred, malformed, or unavailable fails closed to `INCOMPLETE`. Evaluation support that is validly generated but insufficient for a frozen quota instead maps to `VALUE_REPAIR_EVAL_SUPPORT_INSUFFICIENT`.
+Unavailable-fact behavior: any required identity, qualification fact, provenance field, source-generation binding, restore/parity result, target statistic, checkpoint compatibility fact, or retained artifact that is unknown, conflicting, stale, smoke-only, filename-inferred, malformed, or unavailable fails closed to `INCOMPLETE`. Validly generated evaluation support that cannot satisfy a frozen quota maps only to `VALUE_REPAIR_EVAL_SUPPORT_INSUFFICIENT`.
 
 ## Frozen scientific variable
 
@@ -132,9 +150,7 @@ At inference, de-normalize exactly once:
 native_leaf_utility = z_pred * target_std + target_mean
 ```
 
-and pass that scalar directly to Search v2.
-
-Non-finite statistics, missing labels, or `target_std <= 0` are integrity failures.
+and pass that scalar directly to Search v2. Non-finite statistics, missing labels, or `target_std <= 0` are integrity failures.
 
 ### Frozen optimization budget
 
@@ -168,7 +184,7 @@ No Search topology, UCT, root selection, legality, callback location, native bac
 
 All outcome comparisons are paired restored-battle comparisons at equal nominal Search simulations. This task measures guidance quality, not wall-clock-normalized controller strength. Retain wall clock, native/simulator steps, callbacks, and inference cost as diagnostics.
 
-The three cohorts have intentionally different roles:
+The cohorts have different roles:
 
 - Cohort A: historical hard regression/stress boundary;
 - Cohort B: fresh independently generated Act-stratified coverage holdout;
@@ -176,54 +192,60 @@ The three cohorts have intentionally different roles:
 
 ### Cohort A — frozen hard regression
 
-Use the exact 93-record T052 cohort unchanged. It is a stress cohort, not representative A20 occupancy.
+Use the exact T052 93-record cohort unchanged. It is a stress cohort, not representative A20 occupancy.
 
 ### Cohort B — fresh assisted coverage holdout
 
-Do not reuse the depleted T042 source pools as the evaluation population. Before any T085 model-guided outcome evaluation, generate one fresh coverage-only source pool with exactly 1,024 complete A20 runs using seeds `851001..852024`.
+Generate exactly 1,024 fresh A20 source runs with the exact source-run seed set `851001..852024`.
 
-Freeze source-generation semantics to the already merged T042 `assist_hp75_potion` source-generation regime:
+All source-generation fields except the source-run seed set/run count inherit the exact T042 `assist_hp75_potion` configuration anchor above. In particular:
 
-- battle controller: Oracle-like battle search, 20 simulations, accepted `highest_mean` semantics;
-- non-combat controller: frozen `expert_non_combat_v1`;
-- assistance schedule: exactly the merged `assist_hp75_potion` semantics;
-- current pinned simulator/native identities;
-- no repaired T085 checkpoint or T085 evaluation outcome may affect source generation.
+- ascension 20;
+- max outer steps 500;
+- action-space `initial_no_potions`;
+- `oracle_search` battle controller, 20 simulations, `highest_mean`;
+- `expert_non_combat_v1` with policy seed `42042`;
+- exact `assist_hp75_potion` schedule with assistance-policy seed `42042`;
+- current pinned simulator/native identities.
 
-This assisted source is only a coverage mechanism. It is not deployment evidence and does not become a training target.
+Do not let CLI defaults derive policy seeds from the fresh source-run seeds. No repaired T085 checkpoint or T085 outcome may affect source generation.
 
-Retain the complete source-run manifest before holdout selection. Then construct exactly 192 battle starts with quotas:
+This source is coverage-only evidence. It is not deployment evidence and is not a training target.
+
+Retain and hash the complete 1,024-run source manifest before holdout selection. Then select exactly 192 battle starts:
 
 - 96 Act 1
 - 96 Act 2+
 
 Eligibility:
 
-- A20;
-- current-schema provenance valid;
+- valid A20/current-schema provenance;
 - fresh restore succeeds;
 - public-context replay matches;
 - no truncation/controller/mapping/provenance failure;
-- exact complete identity absent from the T064 selected 460 roots;
-- exact complete identity absent from frozen T044 evaluation cohorts and T052;
 - selection reads no source battle outcome, terminal HP, teacher/model output, deck/relic quality, or perceived winnability.
 
-Within each Act cell, sort eligible records by SHA-256 of the accepted complete source identity and take the first 96. Do not impose a room-type quota; report MONSTER/ELITE/BOSS distribution instead. T052 already supplies the dedicated Boss/later-act stress boundary.
+Independence is defined by construction, not by a mutable historical exclusion inventory. The fresh source-run seed domain `851001..852024` is disjoint from the accepted T042/T064/T084 lineage and T052 source-run domains. `complete_source_identity` includes the source-run identity, so exact complete-source overlap with T084 training roots or T052 hard-cohort roots must be zero. Verify and report that zero-overlap assertion before outcome aggregation; any nonzero overlap is `INCOMPLETE` rather than a selector/backfill trigger. No T044 cohort inventory is consumed by T085.
 
-Exact duplicate complete identities are an integrity failure, not silently deduplicated. If the fixed 1,024-run source pool cannot provide both 96-record Act quotas after exclusions and validation, classify `VALUE_REPAIR_EVAL_SUPPORT_INSUFFICIENT`; do not add runs or relax quotas after seeing availability.
+Within each Act cell, sort eligible records by SHA-256 of the accepted complete source identity and take the first 96. Do not impose a room-type subquota; report MONSTER/ELITE/BOSS distribution. T052 supplies the dedicated Boss/later-act stress boundary.
 
-Freeze and hash the 192-record cohort manifest before any model-guided outcome aggregation.
+Exact duplicate complete identities inside the fresh pool are an integrity failure, not silently deduplicated. If the fixed 1,024-run pool cannot satisfy both 96-record Act quotas after validation, classify `VALUE_REPAIR_EVAL_SUPPORT_INSUFFICIENT`; do not add runs or relax quotas after observing availability.
+
+Freeze and hash the selected 192-record manifest before any model-guided outcome evaluation.
 
 ### Cohort C — fresh current-policy occupancy
 
-Generate exactly 128 standard-start A20 runs with seeds `850001..850128` using:
+Generate exactly 128 standard-start A20 runs with exact source-run seeds `850001..850128` using:
 
+- ascension 20;
+- max outer steps 500;
+- action-space `initial_no_potions`;
 - battle controller: unguided Search v2, 100 simulations, accepted `highest_mean` semantics;
-- non-combat controller: frozen `expert_non_combat_v1`;
+- non-combat controller: frozen `expert_non_combat_v1`, policy seed `42042`;
 - no assistance;
 - current pinned simulator/native identities.
 
-This defines current baseline occupancy only; `expert_non_combat_v1` is not a learning target.
+Do not derive the non-combat policy seed from the source-run seed. This cohort defines current baseline occupancy only; `expert_non_combat_v1` is not a learning target.
 
 From each run with at least one valid restorable battle start, choose exactly one start by deterministic SHA-256 ranking over `(source run identity, battle complete identity)`. This prevents long runs from dominating. Selection must not use battle outcome or depth preference.
 
@@ -250,7 +272,7 @@ On Cohorts A, B, and C at Search v2 budget 100, use matched restored records and
 
 Old-value arms are diagnostic comparators only and do not revalidate the old contract.
 
-On the 48-record budget-400 subset run only:
+On the 48-record Search@400 subset run only:
 
 - `baseline@400`
 - `corrected_value_85001@400`
@@ -267,29 +289,11 @@ Each pair must use the byte-identical parent policy path. These are secondary co
 
 Do not reopen the closed T047-T059 root-prior allocation-repair route.
 
-## Required metrics
+## Required metrics and bootstrap
 
-For every cohort/arm retain at least:
+For every cohort/arm retain at least battle survived/lost, exact terminal native utility, final HP/turn count where available, selected root action identity, simulator/search step counts, learned-value callback count, wall-clock duration, and failure reason.
 
-- battle survived/lost
-- exact terminal native `evaluateEndState` utility
-- final HP and turn count where available
-- selected root action identity
-- simulator/search step counts
-- learned-value callback count
-- wall-clock duration
-- failure reason
-
-For every paired comparison report:
-
-- total wins
-- baseline-only and comparator-only wins
-- paired win delta
-- per-record native-utility delta
-- mean/median native-utility delta
-- deterministic percentile-bootstrap confidence interval for mean utility delta
-
-### Frozen bootstrap rule
+For every paired comparison report total wins, comparator-only/baseline-only wins, paired win delta, per-record native-utility delta, mean/median delta, and deterministic percentile-bootstrap confidence interval for mean utility delta.
 
 For Cohort B per record:
 
@@ -301,7 +305,7 @@ delta_old  = corrected_mean - old_mean
 delta_base = corrected_mean - U_baseline
 ```
 
-Use 10,000 paired bootstrap resamples of Cohort-B records with replacement, seed `85085`. Report 2.5th/97.5th percentiles of the resampled mean for `delta_old` and `delta_base`. The sampling unit is the battle record, not callbacks/tree nodes.
+Use 10,000 paired bootstrap resamples of Cohort-B records with replacement, RNG seed `85085`. Report 2.5th/97.5th percentiles of the resampled mean for `delta_old` and `delta_base`. The sampling unit is the battle record, not callbacks/tree nodes.
 
 ## Terminal classifications
 
@@ -328,8 +332,6 @@ Use only when integrity/support are valid and Cohort B shows both:
 - 95% bootstrap upper bound for mean `delta_base` < 0; and
 - both corrected seeds win fewer Cohort-B battles than baseline.
 
-This closes the current value-head-only repair as harmful under the frozen representation/Search contract.
-
 ### `CORRECTED_VALUE_SEARCH_IMPROVEMENT_NOT_ESTABLISHED`
 
 Use for every valid sufficiently supported result satisfying neither positive nor harmful criteria. Mixed seeds, utility-only movement without win guardrails, isolated hard-cohort gains, or positive secondary prior/value compatibility do not upgrade the result.
@@ -340,20 +342,21 @@ Use when retained scientific inputs and training are valid but either frozen Coh
 
 ### `INCOMPLETE`
 
-Use for artifact/code/native mismatch, invalid provenance, policy-invariance failure, malformed/non-finite targets or inference, failed required restore/parity, execution failure, or retention integrity failure. `INCOMPLETE` is not a scientific result.
+Use for artifact/code/native mismatch, invalid provenance, policy-invariance failure, malformed/non-finite targets or inference, source-generation contract mismatch, nonzero forbidden complete-source overlap, failed required restore/parity, execution failure, or retention-integrity failure. `INCOMPLETE` is not a scientific result.
 
 ## Required artifacts
 
 Retain under one stable ignored T085 root:
 
-- exact input/eligibility manifest resolving T084 formal data;
+- exact input/eligibility manifest resolving accepted T084/T064/T052/T042 identities;
 - two repaired checkpoint files and training reports;
 - target normalization and deterministic batch-plan identity;
 - policy-invariance audit against both parents;
 - Cohort-B 1,024-run source manifest and selected 192-record manifest;
+- Cohort-B complete-source overlap audit;
 - Cohort-C 128-run source manifest and selected occupancy manifest;
 - Search@400 subset manifest;
-- primary and secondary paired evaluation reports;
+- primary/secondary paired evaluation reports;
 - terminal classification report;
 - retention manifest with hashes, sizes, schemas, commands, code/native identities, effective worker counts, wall-clock cost, regeneration path, compatibility boundary, and deletion conditions.
 
@@ -366,13 +369,15 @@ Before final acceptance verify at minimum:
 - T081 scientific eligibility guard;
 - exact T084 report/retention/formal-dataset identities and 960-row semantics;
 - exact T064 parent checkpoints;
+- exact T052 cohort identity;
+- exact T042 scale-manifest anchor and frozen inherited source-generation fields;
 - native-unit de-normalization with no sigmoid/clipping;
 - every non-`outcome_head` tensor/buffer byte-identical to parent;
 - policy logits/probabilities unchanged on all 960 T084 public inputs;
 - deterministic outcome-head reinitialization and 900-step reproduction;
 - historical checkpoint inference remains backward-compatible and semantically distinct;
-- Cohort-B exact 1,024 seeds/source-generation semantics, pre-outcome source freeze, exclusions, quotas, hash selection, restore/public-context validity, and no outcome-conditioned selection;
-- Cohort-C exact seeds/controller and one-record-per-run deterministic selection;
+- Cohort-B exact seed domain, run count, max steps, action space, controller/policy seeds, assistance semantics, source freeze, quotas, hash selection, zero complete-source overlap, restore/public-context validity, and no outcome-conditioned selection;
+- Cohort-C exact seed domain, run count, max steps, action space, non-combat seed, controller configuration, and one-record-per-run selection;
 - equal-budget paired Search configuration and matched randomness;
 - independent tests for bootstrap/classification logic including every terminal class;
 - standard compileall, Ruff, format, diff, mock, and relevant test gates;
