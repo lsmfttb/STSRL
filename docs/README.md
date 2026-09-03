@@ -120,12 +120,15 @@ acceptance plus Maintainer implementation/operational acceptance; the Maintainer
 then owns merge and the `current_status.md` result report. Merged task lifecycle
 remains authoritative in `tasks/README.md`.
 
-Before branch creation or execution readiness, the Maintainer must fetch the
-configured upstream `main` ref and verify exact full-SHA equality with local
-`main`; immediately before landing, repeat the fetch and compare the recorded
-pre-landing base SHA with remote `main`, requiring a fast-forward. A failed
-fetch or any ahead/behind/divergent state blocks the work. See the detailed
-[`Main Synchronization Gate`](collaboration_workflow.md#main-synchronization-gate).
+At the start of maintainer work and before branch creation or execution
+readiness, the Maintainer must refresh and exactly synchronize local `main`
+with the configured upstream `main` ref, then enumerate and inspect relevant
+remote open PRs against that current `main`. Immediately before landing, repeat
+the fetch and remote-PR query, compare the recorded pre-landing base SHA with
+remote `main`, and require a fast-forward. A failed fetch, unavailable PR query,
+or any ahead/behind/divergent state blocks the work. See the detailed
+[`Maintainer start and remote-PR review gate`](collaboration_workflow.md#maintainer-start-and-remote-pr-review-gate)
+and [`Main Synchronization Gate`](collaboration_workflow.md#main-synchronization-gate).
 
 See `collaboration_workflow.md` for the complete contract; do not infer workflow
 from old branch names, historical documents, or stale role summaries.

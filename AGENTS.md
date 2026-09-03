@@ -18,6 +18,20 @@ current contracts.
   the local `stsrl-powershell` Codex skill (`$stsrl-powershell`) and its command
   templates. This is required for multi-line commands, nested quoting, `gh pr`
   review/merge flows, artifact verification, and worktree/branch cleanup.
+- The Codex terminal may run WSL even when the repository's GitHub CLI is
+  installed on Windows. In WSL, check `command -v gh` first and use the native
+  `gh` when present; otherwise call the Windows installation explicitly as
+  `gh.exe` (for example, `gh.exe auth status` and `gh.exe pr list`). In
+  PowerShell, use `gh` or `gh.exe` directly.
+- Check GitHub CLI authentication separately from Git remote access: use
+  `gh.exe auth status` (or `gh auth status`) for CLI credentials and
+  `git fetch origin main` for the repository remote. Do not put tokens or
+  machine-specific credential paths in the repository.
+- At the start of maintainer work, refresh and exactly synchronize local
+  `main` with `origin/main` before reviewing or starting a task; then enumerate
+  remote open PRs based on current `main` and inspect relevant PR bodies and
+  exact heads. The detailed sequence is the `Maintainer start and remote-PR
+  review gate` in `docs/collaboration_workflow.md`.
 
 ## Project Design Principle
 

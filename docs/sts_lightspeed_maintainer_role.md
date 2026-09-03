@@ -79,6 +79,28 @@ Do not vendor simulator source, build products, game files, save files, jars,
 or large binaries into STSRL. STSRL stores the manifest, verifier, adapters,
 tests, and documentation.
 
+## GitHub CLI From WSL
+
+The maintainer terminal may be WSL while GitHub CLI is installed on Windows.
+These are separate command environments: a Windows installation is normally
+invoked from WSL as `gh.exe`, not as the bare command `gh`.
+
+Use this diagnostic sequence before GitHub PR or issue operations:
+
+```bash
+command -v gh
+command -v gh.exe
+gh.exe auth status
+gh.exe repo view lsmfttb/STSRL --json nameWithOwner,defaultBranchRef,url
+```
+
+If a native WSL `gh` is installed, it may be used instead. In PowerShell, use
+`gh` or `gh.exe` directly. GitHub CLI authentication and Git remote access are
+independent checks: `gh.exe auth status` validates the CLI session, while
+`git fetch origin main` validates the configured Git remote. Never copy tokens,
+keyring contents, or machine-specific credential paths into STSRL documentation
+or source.
+
 ## Branch Policy
 
 The fork should have exactly one active STSRL integration branch:
@@ -119,21 +141,34 @@ Rules:
 
 Use this sequence for native-heavy work:
 
-1. The planner sends the required native capability, information regime,
-   public API, verifier assertions, and task content to the STSRL main
-   maintainer. The maintainer validates and publishes it as a `READY` task.
-2. The `sts_lightspeed` maintainer creates a temporary fork branch from the
-   current active integration commit.
-3. Native implementation stays minimal: expose required API and telemetry, but
+1. The Planner creates a fresh STSRL specification-only branch and draft PR
+   from synchronized `main`, containing the required native capability,
+   information regime, public API, verifier assertions, complete task contract,
+   and proposed `READY` row.
+2. The STSRL main maintainer refreshes and exactly synchronizes local `main`,
+   enumerates the remote open PRs based on that current `main`, and reviews the
+   exact specification head, including its body and changed files. The
+   maintainer records `SPEC APPROVED` with the full head SHA and
+   `publication_authorized=true` when the contract is ready. The proposed row
+   is not executable while the PR is unmerged.
+3. The Planner merges that exact approved specification PR. Only after the
+   `READY` row is present on merged `main` may the `sts_lightspeed` maintainer
+   create a temporary fork branch from the current active integration commit.
+4. Native implementation stays minimal: expose required API and telemetry, but
    do not change game mechanics for training convenience.
-4. The fork change is reviewed or otherwise made auditable with a compare link,
+5. The fork change is reviewed or otherwise made auditable with a compare link,
    commit list, and build evidence.
-5. The active integration branch advances to the accepted fork commit.
-6. A STSRL PR updates `docs/sts_lightspeed_source_manifest.json` to the exact
-   new commit and updates adapters, tests, docs, and source-verifier assertions.
-7. The STSRL verifier builds from a disposable checkout of the manifest commit.
-8. Only after the STSRL PR merges is the new native surface an implemented STSRL
-   capability.
+6. The active integration branch advances to the accepted fork commit.
+7. A STSRL implementation PR updates `docs/sts_lightspeed_source_manifest.json`
+   to the exact new commit and updates adapters, tests, docs, and
+   source-verifier assertions.
+8. The STSRL verifier builds from a disposable checkout of the manifest commit.
+9. Only after the STSRL implementation PR merges is the new native surface an
+   implemented STSRL capability.
+
+The publication and implementation PRs remain separately reviewable. A draft
+task or an unmerged specification PR never authorizes native implementation,
+simulator execution, or a manifest update.
 
 If a native task also needs STSRL Python adapter changes, keep the fork commit
 and the STSRL branch separately reviewable. The PR report must make the

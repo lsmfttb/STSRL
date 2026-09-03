@@ -138,6 +138,41 @@ This split intentionally costs one small publication PR per new executable task.
 It prevents the ambiguity where `main` says no task is `READY` while an unmerged PR
 is treated as if it were authoritative.
 
+### Maintainer start and remote-PR review gate
+
+At the start of maintainer work, and before reviewing a task publication or
+implementation PR, first bring the local integration line up to the current
+upstream `main` and complete the Main Synchronization Gate below. If local
+`main` is behind and its worktree is clean, advance it only with a fast-forward
+to the fetched `origin/main`; if it is dirty or cannot be fast-forwarded, stop
+and use a clean integration checkout rather than resetting or overwriting work.
+
+After exact synchronization, query the remote open PRs whose base is `main`.
+Inspect each relevant PR's body, base/head refs, exact head commit, commits,
+files, and mergeability before deciding whether it is a specification proposal,
+implementation candidate, or unrelated work. In a WSL terminal use the native
+`gh` when available, otherwise `gh.exe`; in PowerShell use `gh` or `gh.exe`:
+
+```bash
+git status --short --branch
+git fetch origin main
+git merge --ff-only origin/main
+git rev-parse --verify main
+git rev-parse --verify origin/main
+git rev-list --left-right --count main...origin/main
+gh.exe pr list --state open --base main \
+  --json number,title,headRefName,headRefOid,baseRefName,updatedAt,url,isDraft \
+  --limit 100
+gh.exe pr view <number> \
+  --json number,title,body,headRefName,headRefOid,baseRefName,commits,files,mergeable,url
+```
+
+If native WSL `gh` exists, replace `gh.exe` in the example. A failed or
+unauthenticated CLI query is an operational blocker for remote-PR review; it
+must not be silently replaced with stale local branch metadata. An unmerged PR
+may provide review input, but only merged `docs/tasks/README.md` changes the
+task lifecycle or creates an executable `READY` task.
+
 ## Review Findings
 
 A finding is blocking only if both are true:
@@ -169,8 +204,10 @@ not to keep appending rules.
 
 1. **Planner Publication Contract** — Planner writes the delta contract and
    proposed `READY` Task Index row on a specification-only PR; no feature code.
-2. **Execution Readiness Review** — Maintainer first completes the Main
-   Synchronization Gate below, then reviews the exact publication head.
+2. **Execution Readiness Review** — Maintainer first completes the
+   Maintainer start and remote-PR review gate below, including exact
+   synchronization and remote PR inspection, then reviews the exact
+   publication head.
 3. **Spec Publication Approved** — Maintainer records exact-head `SPEC APPROVED /
    publication_authorized=true`.
 4. **Publish READY** — Planner merges the approved publication PR. Only now does
@@ -228,10 +265,10 @@ integration work until it is resolved. Record the remote/ref, fetch result, chec
 time, and both full SHAs in execution-readiness or PR evidence.
 
 Immediately before either publication landing or implementation landing, fetch
-again and verify that the recorded pre-landing base SHA still equals current
-remote `main`, then verify the pending landing against current `main`. If `main`
-advanced materially, rebase/review as required rather than landing a stale task
-contract or implementation.
+again, query the remote PR state again, and verify that the recorded pre-landing
+base SHA still equals current remote `main`, then verify the pending landing
+against current `main`. If `main` advanced materially, rebase/review as required
+rather than landing a stale task contract or implementation.
 
 ## Artifacts And Runtime
 
