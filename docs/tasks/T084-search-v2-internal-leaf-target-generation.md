@@ -378,6 +378,48 @@ under the ignored T084 retention root. A run without `--progress-dir` retains
 the original fresh behavior and does not create progress state. Existing failed
 v9/v10 attempts remain retained evidence and must not be overwritten.
 
+#### Candidate-only cache reuse after a collector-code change
+
+`--resume` is intentionally exact: it rejects a progress index whose collector
+or target-module code identity differs from the current invocation. When a
+previous run has a complete candidate stage but no target stages, the
+postprocessing-only recovery path is explicit and read-only:
+
+```text
+initial postprocessing-only run:
+  <the exact frozen T084 collector command> \
+    --progress-dir <new-postprocessing-progress-dir> \
+    --reuse-candidate-progress-dir <old-candidate-progress-dir>
+
+resume that postprocessing run:
+  <the same command> \
+    --progress-dir <new-postprocessing-progress-dir> \
+    --reuse-candidate-progress-dir <old-candidate-progress-dir> \
+    --resume
+```
+
+The cache path must be a different ignored directory from the new progress
+directory. Reuse is allowed only when the source progress schema is current,
+the candidate stage is `COMPLETE` with the exact frozen task inventory and no
+failures, the T064/root/native/checkpoint identities and scientific collector
+configuration match, and every referenced candidate part has the recorded
+size/hash and task-artifact identity. The source index and parts are never
+modified, and parts are verified/read one at a time; an overall stale
+supervisor state such as `RUNNING` does not override a verified complete
+candidate stage. Worker count and output path are operational fields: the
+cached candidate worker evidence is preserved, while the current
+postprocessing worker setting is recorded separately.
+
+The output/progress provenance records both the cached candidate producer
+identity and the current postprocessing producer identity, along with the
+source index hash and an ordered candidate-part manifest hash. Any mismatch,
+missing part, incomplete candidate stage, or malformed artifact fails closed
+before native target replay starts. Do not point ordinary `--resume` at an old
+code-version progress directory and do not treat candidate cache parts as a
+final scientific output. If verification fails, retain the evidence and use a
+new full collector run or another independently verified complete candidate
+cache.
+
 `--workers` accepts an explicit value from 1 through 16 and defaults to 16.
 The selected value is part of the progress configuration, so `--resume` must
 use the same worker configuration; changing it requires a new progress

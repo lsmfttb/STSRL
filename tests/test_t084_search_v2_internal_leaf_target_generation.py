@@ -11,6 +11,7 @@ from scripts.collect_t084_native_leaf_candidates import (
     ARMS,
     PROGRESS_SCHEMA_ID,
     _candidate_metadata,
+    _CandidateCache,
     _iter_stage_field_rows,
     _ordered_cell_rows,
     _ProgressStore,
@@ -833,6 +834,240 @@ def test_progress_resume_rejects_worker_configuration_change(tmp_path) -> None:
             output_path=output_path,
             resume=True,
         )
+
+
+def _candidate_cache_fixture(tmp_path, *, task_count: int = 1):
+    cache_dir = tmp_path / "candidate-cache"
+    cache_path = cache_dir / "t084-native-collector.progress.json"
+    old_output = tmp_path / "old-candidate-output.json"
+    identity = {
+        **_progress_identity(),
+        "code": {
+            "git_head": "old-candidate-producer",
+            "collector_script_sha256": "a" * 64,
+            "target_module_sha256": "b" * 64,
+        },
+    }
+    configuration = {
+        **_progress_configuration(),
+        "root_count": task_count,
+        "output_path": str(old_output.resolve()),
+    }
+    store = _ProgressStore(
+        cache_path,
+        identity=identity,
+        configuration=configuration,
+        output_path=old_output,
+        resume=False,
+    )
+    tasks = [(index, ARMS[0]) for index in range(task_count)]
+    store.ensure_stage(
+        "candidate", tasks, pass_index=0, task_ranges="candidate test range"
+    )
+    results = []
+    for task in tasks:
+        result = {
+            "root_index": task[0],
+            "sampling_arm": task[1],
+            "candidate_rows": [],
+            "target_rows": [],
+            "worker_pid": 123 + task[0],
+        }
+        results.append(result)
+        store.record_success("candidate", task, result)
+    stage = store.document["stages"]["candidate"]
+    stage["status"] = "COMPLETE"
+    stage["worker_evidence"] = {
+        "configured_worker_count": 8,
+        "observed_worker_count": 8,
+        "effective_worker_count": 8,
+    }
+    stage["last_failures"] = []
+    store._save()
+    expected_configuration = {
+        **configuration,
+        "workers": 16,
+        "output_path": str((tmp_path / "new-output.json").resolve()),
+    }
+    return (
+        cache_dir,
+        identity,
+        expected_configuration,
+        tasks,
+        results,
+    )
+
+
+def test_candidate_cache_reuses_complete_parts_and_records_two_producers(
+    tmp_path,
+) -> None:
+    cache_dir, identity, configuration, tasks, results = _candidate_cache_fixture(
+        tmp_path
+    )
+    cache = _CandidateCache.load(
+        cache_dir,
+        expected_identity=identity,
+        expected_configuration=configuration,
+        tasks=tasks,
+    )
+
+    assert list(cache.iter_successful_results("candidate", tasks)) == list(
+        zip(tasks, results, strict=True)
+    )
+    provenance = cache.provenance(
+        {
+            "git_head": "current-postprocessor",
+            "collector_script_sha256": "c" * 64,
+            "target_module_sha256": "d" * 64,
+        }
+    )
+    assert provenance["candidate_producer_identity"]["git_head"] == (
+        "old-candidate-producer"
+    )
+    assert provenance["postprocessing_producer_identity"]["git_head"] == (
+        "current-postprocessor"
+    )
+    assert provenance["source_candidate_stage"]["part_count"] == 1
+
+
+def test_candidate_cache_prefers_preserved_producer_identity_from_wrapper_metadata(
+    tmp_path,
+) -> None:
+    cache_dir, identity, configuration, tasks, _ = _candidate_cache_fixture(tmp_path)
+    progress_path = cache_dir / "t084-native-collector.progress.json"
+    document = json.loads(progress_path.read_text(encoding="utf-8"))
+    document["identity"]["code"]["git_head"] = (
+        "08800f6cb5be8116cfa7b429dfaa990c10a4a560"
+    )
+    document["identity"]["code"]["collector_script_sha256"] = (
+        "9f199ca31451291c8307ce1762de5c632b9133aa328bc021c1c814c172fd3eab"
+    )
+    document["cache_reuse"] = {
+        "cached_candidate_code_identity": {
+            "git_head": "2afb2ccc8989cf86ae66d832e6da5a030357c06d",
+            "collector_script_sha256": (
+                "84aa2e33eec42503d598503c37fda53001052b51e0190e4b0d02085950e8b487"
+            ),
+            "target_module_sha256": "b" * 64,
+        },
+        "current_postprocessing_code_identity": dict(document["identity"]["code"]),
+    }
+    progress_path.write_text(json.dumps(document), encoding="utf-8")
+
+    cache = _CandidateCache.load(
+        cache_dir,
+        expected_identity=identity,
+        expected_configuration=configuration,
+        tasks=tasks,
+    )
+    provenance = cache.provenance(identity["code"])
+
+    assert provenance["candidate_producer_identity"]["git_head"] == (
+        "2afb2ccc8989cf86ae66d832e6da5a030357c06d"
+    )
+    assert provenance["candidate_producer_identity_source"] == (
+        "cache_reuse.cached_candidate_code_identity"
+    )
+
+
+def test_candidate_cache_rejects_unhashed_wrapper_producer_identity(tmp_path) -> None:
+    cache_dir, identity, configuration, tasks, _ = _candidate_cache_fixture(tmp_path)
+    progress_path = cache_dir / "t084-native-collector.progress.json"
+    document = json.loads(progress_path.read_text(encoding="utf-8"))
+    document["cache_reuse"] = {
+        "cached_candidate_code_identity": "2afb2ccc8989cf86ae66d832e6da5a030357c06d"
+    }
+    progress_path.write_text(json.dumps(document), encoding="utf-8")
+
+    cache = _CandidateCache.load(
+        cache_dir,
+        expected_identity=identity,
+        expected_configuration=configuration,
+        tasks=tasks,
+    )
+    with pytest.raises(
+        ValueError, match="must include script and target-module hashes"
+    ):
+        cache.provenance(identity["code"])
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (
+            lambda document: document["stages"]["candidate"].update(status="RUNNING"),
+            "not COMPLETE",
+        ),
+        (
+            lambda document: document["identity"].update(native_commit="other"),
+            "identity mismatch",
+        ),
+        (
+            lambda document: document["identity"]["code"].update(
+                target_module_sha256="e" * 64
+            ),
+            "target module identity mismatch",
+        ),
+        (
+            lambda document: document["configuration"].update(
+                search_simulations_per_root=99
+            ),
+            "task configuration mismatch",
+        ),
+    ],
+)
+def test_candidate_cache_rejects_incomplete_or_mismatched_identity(
+    tmp_path,
+    mutation,
+    message,
+) -> None:
+    cache_dir, identity, configuration, tasks, _ = _candidate_cache_fixture(tmp_path)
+    progress_path = cache_dir / "t084-native-collector.progress.json"
+    document = json.loads(progress_path.read_text(encoding="utf-8"))
+    mutation(document)
+    progress_path.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(ValueError, match=message):
+        _CandidateCache.load(
+            cache_dir,
+            expected_identity=identity,
+            expected_configuration=configuration,
+            tasks=tasks,
+        )
+
+
+def test_candidate_cache_rejects_part_hash_corruption_fail_closed(tmp_path) -> None:
+    cache_dir, identity, configuration, tasks, _ = _candidate_cache_fixture(tmp_path)
+    progress_path = cache_dir / "t084-native-collector.progress.json"
+    document = json.loads(progress_path.read_text(encoding="utf-8"))
+    artifact = document["stages"]["candidate"]["tasks"][_task_key(tasks[0])]["artifact"]
+    artifact_path = progress_path.parent / artifact["path"]
+    artifact_path.write_bytes(artifact_path.read_bytes() + b"\n")
+
+    with pytest.raises(ValueError, match="artifact (size|hash) mismatch"):
+        cache = _CandidateCache.load(
+            cache_dir,
+            expected_identity=identity,
+            expected_configuration=configuration,
+            tasks=tasks,
+        )
+        list(cache.iter_successful_results("candidate", tasks))
+
+
+def test_candidate_cache_accepts_sorted_iteration_inventory(tmp_path) -> None:
+    cache_dir, identity, configuration, tasks, results = _candidate_cache_fixture(
+        tmp_path, task_count=2
+    )
+    cache = _CandidateCache.load(
+        cache_dir,
+        expected_identity=identity,
+        expected_configuration=configuration,
+        tasks=tasks,
+    )
+
+    assert list(
+        cache.iter_successful_results("candidate", list(reversed(tasks)))
+    ) == list(zip(tasks, results, strict=True))
 
 
 def test_progress_parts_are_iterated_lazily_and_final_rows_are_streamed(

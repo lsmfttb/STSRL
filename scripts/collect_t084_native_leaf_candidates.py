@@ -1169,6 +1169,16 @@ class _ProgressStore:
         self.document["last_error"] = _error_payload(exc)
         self._save()
 
+    def record_candidate_cache(self, provenance: Mapping[str, Any]) -> None:
+        """Reserve the exact read-only candidate cache for this run."""
+
+        existing = self.document.get("candidate_cache")
+        if existing is not None and existing != dict(provenance):
+            raise ValueError("candidate cache provenance does not match progress")
+        if existing is None:
+            self.document["candidate_cache"] = dict(provenance)
+            self._save()
+
     def prepare_final(self, expected_output: Mapping[str, Any]) -> None:
         self.document["state"] = "FINALIZING"
         self.document["final_output"] = dict(expected_output)
@@ -1213,6 +1223,387 @@ class _ProgressStore:
             raise ValueError("resume final output size mismatch")
         if expected.get("sha256") != sha256_file(self.output_path):
             raise ValueError("resume final output hash mismatch")
+
+
+_CANDIDATE_CACHE_CONFIGURATION_IGNORED = frozenset({"workers", "output_path"})
+_CANDIDATE_CACHE_CODE_KEYS = (
+    "git_head",
+    "collector_script_sha256",
+    "target_module_sha256",
+)
+_CANDIDATE_CACHE_IDENTITY_KEYS = (
+    "t064_manifest_sha256",
+    "root_cohort_sha256",
+    "native_commit",
+    "native_build",
+    "checkpoint_identities",
+)
+
+
+class _CandidateCache:
+    """Read-only candidate cache with bounded, fail-closed verification."""
+
+    def __init__(
+        self,
+        path: Path,
+        document: Mapping[str, Any],
+        tasks: list[tuple[int, str]],
+    ) -> None:
+        self.path = path.resolve()
+        self.parts_directory = self.path.with_name(f"{self.path.stem}.parts").resolve()
+        self.document = dict(document)
+        self.tasks = list(tasks)
+        self._part_manifest_sha256 = ""
+        self._index_bytes = 0
+        self._index_sha256 = ""
+        self._verified_part_keys: set[str] = set()
+        self._expected_target_module_sha256: str | None = None
+
+    @classmethod
+    def load(
+        cls,
+        progress_dir: Path,
+        *,
+        expected_identity: Mapping[str, Any],
+        expected_configuration: Mapping[str, Any],
+        tasks: list[tuple[int, str]],
+    ) -> _CandidateCache:
+        path = (
+            progress_dir.resolve() / "t084-native-collector.progress.json"
+        ).resolve()
+        if not path.is_file():
+            raise ValueError(f"candidate cache progress file is missing: {path}")
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError(
+                f"candidate cache progress file is unreadable: {path}"
+            ) from exc
+        if not isinstance(raw, Mapping):
+            raise TypeError("candidate cache progress document must be a JSON object")
+        cache = cls(path, raw, tasks)
+        cache._validate_document(expected_identity, expected_configuration)
+        cache._prepare_candidate_parts()
+        return cache
+
+    def _validate_document(
+        self,
+        expected_identity: Mapping[str, Any],
+        expected_configuration: Mapping[str, Any],
+    ) -> None:
+        required = {
+            "schema_id",
+            "schema_version",
+            "task_id",
+            "state",
+            "identity",
+            "configuration",
+            "progress_path",
+            "parts_directory",
+            "stages",
+        }
+        missing = sorted(required - set(self.document))
+        if missing:
+            raise ValueError("candidate cache is missing: " + ", ".join(missing))
+        if self.document.get("schema_id") != PROGRESS_SCHEMA_ID:
+            raise ValueError("candidate cache schema_id mismatch")
+        if self.document.get("schema_version") != PROGRESS_SCHEMA_VERSION:
+            raise ValueError("candidate cache schema_version mismatch")
+        if self.document.get("task_id") != "T084":
+            raise ValueError("candidate cache task_id mismatch")
+        if self.document.get("progress_path") != str(self.path):
+            raise ValueError("candidate cache progress path mismatch")
+        if self.document.get("parts_directory") != str(self.parts_directory):
+            raise ValueError("candidate cache parts directory mismatch")
+        if self.document.get("state") not in {
+            "RUNNING",
+            "FAILED",
+            "FINALIZING",
+            "COMPLETE",
+        }:
+            raise ValueError("candidate cache state is invalid")
+
+        actual_identity = self.document.get("identity")
+        if not isinstance(actual_identity, Mapping):
+            raise TypeError("candidate cache identity must be a mapping")
+        for key in _CANDIDATE_CACHE_IDENTITY_KEYS:
+            if actual_identity.get(key) != expected_identity.get(key):
+                raise ValueError(f"candidate cache identity mismatch: {key}")
+        actual_code = actual_identity.get("code")
+        if not isinstance(actual_code, Mapping):
+            raise TypeError("candidate cache producer identity is missing")
+        expected_code = expected_identity.get("code")
+        if not isinstance(expected_code, Mapping):
+            raise TypeError("current postprocessing producer identity is missing")
+        expected_target_module_sha256 = expected_code.get("target_module_sha256")
+        if (
+            not isinstance(expected_target_module_sha256, str)
+            or not expected_target_module_sha256
+        ):
+            raise ValueError("current target module identity is missing")
+        self._expected_target_module_sha256 = expected_target_module_sha256
+        for key in _CANDIDATE_CACHE_CODE_KEYS:
+            value = actual_code.get(key)
+            if not isinstance(value, str) or not value:
+                raise ValueError(f"candidate cache producer identity is missing: {key}")
+        if actual_code["target_module_sha256"] != expected_code.get(
+            "target_module_sha256"
+        ):
+            raise ValueError("candidate cache target module identity mismatch")
+
+        actual_configuration = self.document.get("configuration")
+        if not isinstance(actual_configuration, Mapping):
+            raise TypeError("candidate cache configuration must be a mapping")
+        expected_science_configuration = {
+            key: value
+            for key, value in expected_configuration.items()
+            if key not in _CANDIDATE_CACHE_CONFIGURATION_IGNORED
+        }
+        actual_science_configuration = {
+            key: value
+            for key, value in actual_configuration.items()
+            if key not in _CANDIDATE_CACHE_CONFIGURATION_IGNORED
+        }
+        if actual_science_configuration != expected_science_configuration:
+            raise ValueError("candidate cache task configuration mismatch")
+        for key in _CANDIDATE_CACHE_CONFIGURATION_IGNORED:
+            if key not in actual_configuration:
+                raise ValueError(f"candidate cache configuration is missing: {key}")
+
+        stages = self.document.get("stages")
+        stage = stages.get("candidate") if isinstance(stages, Mapping) else None
+        if not isinstance(stage, Mapping):
+            raise TypeError("candidate cache candidate stage is missing")
+        expected_task_keys = [_task_key(task) for task in self.tasks]
+        if stage.get("schema_id") != PROGRESS_SCHEMA_ID:
+            raise ValueError("candidate cache candidate stage schema_id mismatch")
+        if stage.get("schema_version") != PROGRESS_SCHEMA_VERSION:
+            raise ValueError("candidate cache candidate stage schema_version mismatch")
+        if stage.get("stage_key") != "candidate":
+            raise ValueError("candidate cache candidate stage key mismatch")
+        if stage.get("pass_index") != 0:
+            raise ValueError("candidate cache candidate stage pass index mismatch")
+        if stage.get("status") != "COMPLETE":
+            raise ValueError("candidate cache candidate stage is not COMPLETE")
+        if stage.get("task_count") != len(self.tasks):
+            raise ValueError("candidate cache candidate task count mismatch")
+        if stage.get("task_keys") != expected_task_keys:
+            raise ValueError("candidate cache candidate task ordering mismatch")
+        expected_descriptors = [_task_descriptor(task) for task in self.tasks]
+        if stage.get("task_descriptors") != expected_descriptors:
+            raise ValueError("candidate cache candidate task descriptors mismatch")
+        task_map = stage.get("tasks")
+        if not isinstance(task_map, Mapping) or set(task_map) != set(
+            expected_task_keys
+        ):
+            raise ValueError("candidate cache candidate task inventory mismatch")
+        if stage.get("last_failures") not in ([], None):
+            raise ValueError("candidate cache candidate stage has recorded failures")
+        if not isinstance(stage.get("task_ranges"), str) or not stage["task_ranges"]:
+            raise ValueError("candidate cache candidate task range is missing")
+        worker_evidence = stage.get("worker_evidence")
+        if not isinstance(worker_evidence, Mapping):
+            raise TypeError("candidate cache worker evidence is missing")
+        for key in (
+            "configured_worker_count",
+            "observed_worker_count",
+            "effective_worker_count",
+        ):
+            value = worker_evidence.get(key)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise ValueError(f"candidate cache worker evidence is invalid: {key}")
+
+        for task in self.tasks:
+            key = _task_key(task)
+            entry = task_map[key]
+            if not isinstance(entry, Mapping):
+                raise TypeError(f"candidate cache task entry is malformed: {key}")
+            if entry.get("task") != _task_descriptor(task):
+                raise ValueError(f"candidate cache task descriptor mismatch: {key}")
+            if entry.get("status") != "success":
+                raise ValueError(f"candidate cache task is not successful: {key}")
+            attempt = entry.get("attempt")
+            if isinstance(attempt, bool) or not isinstance(attempt, int) or attempt < 1:
+                raise ValueError(f"candidate cache task attempt is invalid: {key}")
+            history = entry.get("attempt_history")
+            if not isinstance(history, list) or not history:
+                raise ValueError(f"candidate cache task history is missing: {key}")
+            latest = history[-1]
+            if (
+                not isinstance(latest, Mapping)
+                or latest.get("status") != "success"
+                or latest.get("attempt") != attempt
+                or latest.get("artifact") != entry.get("artifact")
+            ):
+                raise ValueError(f"candidate cache task history mismatch: {key}")
+
+    def _artifact_path(self, value: object) -> Path:
+        if not isinstance(value, str) or not value or Path(value).is_absolute():
+            raise TypeError("candidate cache artifact path must be relative")
+        candidate = (self.path.parent / value).resolve()
+        try:
+            candidate.relative_to(self.parts_directory / "candidate")
+        except ValueError as exc:
+            raise ValueError(
+                "candidate cache artifact escapes candidate parts"
+            ) from exc
+        return candidate
+
+    def _read_task_artifact(
+        self,
+        task: tuple[int, str],
+        entry: Mapping[str, Any],
+        *,
+        verify_artifact: bool,
+    ) -> dict[str, Any]:
+        artifact = entry.get("artifact")
+        if not isinstance(artifact, Mapping):
+            raise TypeError(
+                f"candidate cache artifact reference is missing: {_task_key(task)}"
+            )
+        if verify_artifact:
+            path = self._artifact_path(artifact.get("path"))
+            try:
+                encoded = path.read_bytes()
+                if len(encoded) != artifact.get("bytes"):
+                    raise ValueError(f"candidate cache artifact size mismatch: {path}")
+                if hashlib.sha256(encoded).hexdigest() != artifact.get("sha256"):
+                    raise ValueError(f"candidate cache artifact hash mismatch: {path}")
+                raw = json.loads(encoded.decode("utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise ValueError(
+                    f"candidate cache artifact is unreadable: {path}"
+                ) from exc
+        else:
+            path = self._artifact_path(artifact.get("path"))
+            if not path.is_file():
+                raise ValueError(f"candidate cache artifact is missing: {path}")
+            try:
+                with path.open("r", encoding="utf-8") as stream:
+                    raw = json.load(stream)
+            except (OSError, json.JSONDecodeError) as exc:
+                raise ValueError(
+                    f"candidate cache artifact is unreadable: {path}"
+                ) from exc
+        if not isinstance(raw, Mapping):
+            raise TypeError(f"candidate cache artifact document is malformed: {path}")
+        if (
+            raw.get("schema_id") != PROGRESS_TASK_SCHEMA_ID
+            or raw.get("schema_version") != PROGRESS_SCHEMA_VERSION
+            or raw.get("stage_key") != "candidate"
+            or raw.get("task_key") != _task_key(task)
+            or raw.get("task") != _task_descriptor(task)
+            or raw.get("status") != "success"
+        ):
+            raise ValueError(f"candidate cache artifact identity mismatch: {path}")
+        return _validate_task_result(raw.get("result"), task)
+
+    def _prepare_candidate_parts(self) -> None:
+        stage = self.document["stages"]["candidate"]
+        task_map = stage["tasks"]
+        references: list[dict[str, Any]] = []
+        for task in self.tasks:
+            key = _task_key(task)
+            entry = task_map[key]
+            artifact = entry["artifact"]
+            if not isinstance(artifact, Mapping):
+                raise TypeError(f"candidate cache artifact reference is missing: {key}")
+            path = self._artifact_path(artifact.get("path"))
+            references.append({"task_key": key, "artifact": dict(artifact)})
+            if path.parent != (self.parts_directory / "candidate").resolve():
+                raise ValueError(
+                    f"candidate cache artifact is not a candidate part: {path}"
+                )
+        self._part_manifest_sha256 = _canonical_json_digest(references)
+        self._index_bytes = self.path.stat().st_size
+        self._index_sha256 = sha256_file(self.path)
+
+    def iter_successful_results(
+        self,
+        stage_key: str,
+        tasks: list[tuple[int, str]],
+    ) -> Iterable[tuple[tuple[int, str], dict[str, Any]]]:
+        if stage_key != "candidate" or _sorted_stage_tasks(
+            tasks
+        ) != _sorted_stage_tasks(self.tasks):
+            raise ValueError("candidate cache task inventory mismatch during iteration")
+        stage = self.document["stages"]["candidate"]
+        task_map = stage["tasks"]
+        for task in _sorted_stage_tasks(tasks):
+            key = _task_key(task)
+            result = self._read_task_artifact(
+                task,
+                task_map[key],
+                verify_artifact=key not in self._verified_part_keys,
+            )
+            self._verified_part_keys.add(key)
+            yield task, result
+
+    def stage_wall_clock(self, stage_key: str) -> float:
+        if stage_key != "candidate":
+            raise ValueError(f"candidate cache stage is unavailable: {stage_key}")
+        value = self.document["stages"]["candidate"].get("wall_clock_seconds", 0.0)
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            raise TypeError("candidate cache wall-clock evidence is invalid")
+        return float(value)
+
+    def stage_worker_evidence(self) -> dict[str, Any]:
+        return dict(self.document["stages"]["candidate"]["worker_evidence"])
+
+    def _candidate_producer_identity(self) -> tuple[dict[str, Any], str]:
+        code = self.document["identity"]["code"]
+        cache_reuse = self.document.get("cache_reuse")
+        if cache_reuse is None:
+            return dict(code), "identity.code"
+        if not isinstance(cache_reuse, Mapping):
+            raise TypeError("candidate cache_reuse metadata must be a mapping")
+        current = cache_reuse.get("current_postprocessing_code_identity")
+        if current is not None:
+            if not isinstance(current, Mapping):
+                raise TypeError("recorded postprocessing code identity is malformed")
+            for key in _CANDIDATE_CACHE_CODE_KEYS:
+                value = current.get(key)
+                if not isinstance(value, str) or not value:
+                    raise ValueError(
+                        "recorded postprocessing code identity is incomplete: " + key
+                    )
+        override = cache_reuse.get("cached_candidate_code_identity")
+        if isinstance(override, Mapping):
+            for key in _CANDIDATE_CACHE_CODE_KEYS:
+                value = override.get(key)
+                if not isinstance(value, str) or not value:
+                    raise ValueError(
+                        "cached candidate code identity is incomplete: " + key
+                    )
+            if override["target_module_sha256"] != self._expected_target_module_sha256:
+                raise ValueError("cached candidate target module identity mismatch")
+            return dict(override), "cache_reuse.cached_candidate_code_identity"
+        if isinstance(override, str) and override:
+            raise ValueError(
+                "cached candidate code identity must include script and target-module hashes"
+            )
+        raise ValueError("cached candidate code identity is invalid")
+
+    def provenance(self, postprocessing_identity: Mapping[str, Any]) -> dict[str, Any]:
+        producer, producer_source = self._candidate_producer_identity()
+        return {
+            "mode": "postprocessing_only_candidate_cache_reuse",
+            "source_progress_path": str(self.path),
+            "source_progress_bytes": self._index_bytes,
+            "source_progress_sha256": self._index_sha256,
+            "source_parts_directory": str(self.parts_directory),
+            "source_candidate_stage": {
+                "status": "COMPLETE",
+                "task_count": len(self.tasks),
+                "part_count": len(self.tasks),
+                "part_manifest_sha256": self._part_manifest_sha256,
+                "worker_evidence": self.stage_worker_evidence(),
+            },
+            "candidate_producer_identity": dict(producer),
+            "candidate_producer_identity_source": producer_source,
+            "postprocessing_producer_identity": dict(postprocessing_identity),
+            "candidate_configuration": dict(self.document["configuration"]),
+        }
 
 
 def _run_parallel_tasks(
@@ -2257,37 +2648,52 @@ def _run_progress_collection(
     workers: int,
     output_path: Path,
     progress: _ProgressStore,
+    candidate_cache: _CandidateCache | None = None,
 ) -> int:
     """Run the resumable path with bounded parent-memory aggregation."""
 
     workers = _validate_worker_count(workers)
     tasks = _stage_tasks(len(roots))
-    _, candidate_failures, candidate_wall, candidate_workers = _run_pass(
-        roots,
-        checkpoint_paths,
-        native_commit,
-        workers,
-        "candidate",
-        {},
-        progress=progress,
-        stage_key="candidate",
-        pass_index=0,
-    )
-    if candidate_failures:
-        raise RuntimeError(
-            "candidate pass incomplete: " + "; ".join(candidate_failures[:8])
+    candidate_source: _ProgressStore | _CandidateCache = progress
+    if candidate_cache is None:
+        _, candidate_failures, candidate_wall, candidate_workers = _run_pass(
+            roots,
+            checkpoint_paths,
+            native_commit,
+            workers,
+            "candidate",
+            {},
+            progress=progress,
+            stage_key="candidate",
+            pass_index=0,
         )
-    candidate_successes = progress.successful_task_keys("candidate", tasks)
-    if len(candidate_successes) != len(tasks):
-        raise RuntimeError(
-            "candidate pass incomplete: "
-            f"{len(candidate_successes)}/{len(tasks)} task parts are successful"
-        )
+        if candidate_failures:
+            raise RuntimeError(
+                "candidate pass incomplete: " + "; ".join(candidate_failures[:8])
+            )
+        candidate_successes = progress.successful_task_keys("candidate", tasks)
+        if len(candidate_successes) != len(tasks):
+            raise RuntimeError(
+                "candidate pass incomplete: "
+                f"{len(candidate_successes)}/{len(tasks)} task parts are successful"
+            )
+    else:
+        if progress.has_stage("candidate"):
+            raise ValueError(
+                "candidate cache reuse cannot mix a candidate stage into the new run"
+            )
+        candidate_source = candidate_cache
+        candidate_wall = candidate_cache.stage_wall_clock("candidate")
+        candidate_workers = candidate_cache.stage_worker_evidence()
+        if not isinstance(progress.document.get("candidate_cache"), Mapping):
+            raise ValueError("candidate cache provenance was not reserved in progress")
 
     # Candidate rows are decoded one task part at a time and reduced to the
     # fields needed for deterministic selection.  Full candidate rows remain
     # on disk until the final JSON encoder asks for them.
-    candidate_metadata = list(_iter_candidate_metadata(progress, "candidate", tasks))
+    candidate_metadata = list(
+        _iter_candidate_metadata(candidate_source, "candidate", tasks)
+    )
     occupancy_counts = Counter(
         str(row["exact_leaf_identity"]) for row in candidate_metadata
     )
@@ -2471,7 +2877,11 @@ def _run_progress_collection(
         ),
         "host_logical_cpu_count": os.cpu_count(),
     }
+    root_source: _ProgressStore | _CandidateCache = progress
     root_stage_key = target_stage_keys[-1] if target_stage_keys else "candidate"
+    if not target_stage_keys:
+        root_source = candidate_source
+    candidate_cache_provenance = progress.document.get("candidate_cache")
     execution = {
         "schema_id": COLLECTOR_SCHEMA_ID,
         "generation_mode": "native_runtime_collector",
@@ -2492,7 +2902,7 @@ def _run_progress_collection(
         "calibration": calibration,
         "generation_passes": {
             "candidate": {
-                "worker_count": workers,
+                "worker_count": candidate_workers["configured_worker_count"],
                 "effective_worker_count": candidate_workers["effective_worker_count"],
                 "worker_evidence": candidate_workers,
                 "task_count": len(tasks),
@@ -2547,7 +2957,7 @@ def _run_progress_collection(
         "failures": [],
         "shards": [
             {
-                "worker_count": workers,
+                "worker_count": candidate_workers["configured_worker_count"],
                 "effective_worker_count": candidate_workers["effective_worker_count"],
                 "task_count": len(tasks),
                 "task_ranges": "candidate pass: root indices 0..459 x three arms",
@@ -2586,6 +2996,8 @@ def _run_progress_collection(
         },
         "wall_clock_seconds": total_wall,
     }
+    if candidate_cache_provenance is not None:
+        execution["candidate_cache"] = dict(candidate_cache_provenance)
 
     def formal_row_stream() -> Iterable[Mapping[str, Any]]:
         for _, row in _iter_located_target_rows(
@@ -2603,9 +3015,9 @@ def _run_progress_collection(
             yield formal_row
 
     row_streams: dict[str, Iterable[object]] = {
-        "root_runs": _iter_root_runs(progress, root_stage_key, tasks),
+        "root_runs": _iter_root_runs(root_source, root_stage_key, tasks),
         "candidate_rows": _iter_candidate_rows_with_occupancy(
-            progress, "candidate", tasks, occupancy_counts
+            candidate_source, "candidate", tasks, occupancy_counts
         ),
         "calibration_rows": iter(calibration_rows),
         "formal_rows": formal_row_stream(),
@@ -2632,6 +3044,14 @@ def main() -> int:
         action="store_true",
         help="resume the exact run recorded under --progress-dir",
     )
+    parser.add_argument(
+        "--reuse-candidate-progress-dir",
+        type=Path,
+        help=(
+            "read a COMPLETE candidate stage from this ignored progress "
+            "directory and run only postprocessing/replay"
+        ),
+    )
     parser.add_argument("--workers", type=_worker_count_argument, default=WORKER_COUNT)
     args = parser.parse_args()
     args.workers = _validate_worker_count(args.workers)
@@ -2640,6 +3060,8 @@ def main() -> int:
     args.output = args.output.resolve()
     if args.resume and args.progress_dir is None:
         raise SystemExit("--resume requires --progress-dir")
+    if args.reuse_candidate_progress_dir is not None and args.progress_dir is None:
+        raise SystemExit("--reuse-candidate-progress-dir requires --progress-dir")
     sys.path.insert(0, str(args.native_build))
     progress: _ProgressStore | None = None
     try:
@@ -2670,6 +3092,27 @@ def main() -> int:
             )
             if progress.already_complete:
                 return 0
+            candidate_cache: _CandidateCache | None = None
+            if args.reuse_candidate_progress_dir is not None:
+                reuse_dir = args.reuse_candidate_progress_dir.resolve()
+                if reuse_dir == progress_dir:
+                    raise ValueError(
+                        "candidate cache directory must differ from the new progress directory"
+                    )
+                candidate_cache = _CandidateCache.load(
+                    reuse_dir,
+                    expected_identity=identity,
+                    expected_configuration=configuration,
+                    tasks=_stage_tasks(len(roots)),
+                )
+                progress.record_candidate_cache(
+                    candidate_cache.provenance(identity["code"])
+                )
+            elif progress.document.get("candidate_cache") is not None:
+                raise ValueError(
+                    "--resume of a candidate-cache run requires "
+                    "--reuse-candidate-progress-dir"
+                )
             return _run_progress_collection(
                 roots,
                 checkpoint_paths,
@@ -2677,6 +3120,7 @@ def main() -> int:
                 args.workers,
                 args.output,
                 progress,
+                candidate_cache=candidate_cache,
             )
         tasks = len(roots) * len(ARMS)
         candidate_runs, candidate_failures, candidate_wall, candidate_workers = (
