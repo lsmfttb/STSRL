@@ -10,12 +10,15 @@ lifecycle state. Individual task documents intentionally omit mutable
 disposition where needed. `current_status.md` and roadmap files may summarize
 the current milestone, but they do not override this table.
 
-New task content originates with the planner. For a new task, the planner creates
-a fresh task branch and draft pull request, writes the complete specification and
-proposed lifecycle changes there, and submits that exact head to the maintainer
-for independent review. The maintainer does not proactively add successor tasks.
-Implementers are maintainer-managed sub-agents and may start only after the
-workflow's explicit implementation-authorization gate is satisfied.
+New task content originates with the Planner. For a new task, the Planner creates
+a fresh specification-only publication branch and PR from synchronized `main`,
+writes the complete task contract, and proposes the lifecycle row that would make
+the task `READY` if merged. That unmerged publication PR is non-executable. The
+Maintainer independently reviews the exact publication head; only after
+`SPEC APPROVED` with `publication_authorized=true` and merge into `main` does the
+merged `READY` row authorize a fresh implementation branch/PR. The Maintainer
+does not proactively add successor tasks. Implementers are Maintainer-managed
+sub-agents and may start only from a task that is `READY` in merged `main`.
 
 Before creating or accepting an implementation branch, the Maintainer must
 refresh the configured upstream remote's `main` ref and verify exact full-SHA
@@ -112,6 +115,7 @@ immediately before landing against the recorded pre-landing base SHA; see the de
 | T082 | DONE | [T064 value-target semantic closure](T082-t064-value-target-semantic-closure.md) | T080, T081, T064, T043, T042 | PR #88 merged at 2acd1e8; qualified 460-row lineage audit confirmed VALUE_TARGET_SEMANTIC_MISMATCH_CONFIRMED and permits one bounded value-target repair experiment |
 | T083 | DONE | [Battle Search v2 leaf-value target contract audit](T083-battle-search-v2-leaf-value-target-contract.md) | T082, T081, T064, T062, T070 | PR #89 merged at c4f943e; accepted NEW_LEAF_CONTINUATION_UTILITY_TARGET_REQUIRED and specifies a separate internal-leaf continuation-utility target-generation consideration without publishing a successor |
 | T084 | DONE | [Search v2 internal-leaf continuation-utility target generation](T084-search-v2-internal-leaf-target-generation.md) | T083, T082, T081, T064, T062, T070 | PR #91 accepted LEAF_CONTINUATION_UTILITY_TARGETS_READY; calibrated N=100 and retained 960 qualified public-input/native-utility internal-leaf rows; no training or outcome claim |
+| T085 | READY | [Corrected Search v2 leaf-value repair and paired evaluation](T085-corrected-leaf-value-search-repair.md) | T084, T083, T082, T081, T064, T052, T042, T070 | value-head-only native-utility repair with frozen policy/Search semantics and broader paired battle evaluation; no complete-run or non-combat claim |
 
 Use the table, not per-task files or roadmap prose, when deciding whether a task
 may receive a branch. Only `READY` rows should receive a new implementation
@@ -121,8 +125,8 @@ upstream capability. `CANCELLED` rows remain as historical planning records and
 must not receive implementation branches.
 
 Once a task is `READY`, its published acceptance criteria are the review
-contract. A material scope change requires a documentation PR before an
-implementation PR can be accepted.
+contract. A material scope change requires a specification amendment/publication
+before an implementation PR can be accepted.
 
 ## Current Planning Direction
 
@@ -246,10 +250,13 @@ value rows (320 per occupancy arm; aggregate Act counts 534/426). The accepted
 report SHA-256 is `b6cbcb5ee96d9538adb6ee7a4849a138f6d3a3f93b6127e7ba0ff91dcae1ad1c`
 and retention-manifest SHA-256 is
 `754a9d2560fb5b01c53e7789bdd558e5ef3cc9d0eca4dd690f8f1ab8df1fb0f6`.
-This qualifies the bounded target dataset for Planner consideration of a
-separate paired value-target repair/retraining task; T084 itself performed no
-training or outcome evaluation. T063 and T066 remain `DRAFT` and are not
-implicitly promoted.
+This qualifies the bounded target dataset for T085. T085 is the current proposed
+`READY` task: one value-head-only corrected native-utility repair with the parent
+policy/representation and Search semantics frozen, followed by paired hard,
+broad, and current-occupancy battle evaluation. A valid T085 result closes this
+Battle value-repair round; the next Planner priority is then a minimal
+self-generated Non-Combat learner with Battle frozen. T063 and T066 remain
+`DRAFT` and are not implicitly promoted.
 
 ## Task Boundary And Artifact Rules
 
@@ -291,14 +298,16 @@ and inspect again after the expected window or on request rather than continuous
 
 ## Published Queue
 
-The executable queue is exactly the set of `READY` rows in the Active Backlog;
-it is currently empty. T063 and T066 remain `DRAFT`; T034 remains blocked on
-native public-consistent hidden-future sampling support. T064, T065, and
-T071--T084 are `DONE` with their recorded diagnostic, repair, control-plane, or
-target-generation outcomes. T084 qualifies a bounded internal-leaf
-continuation-utility dataset but does not itself publish a retraining or outcome
-evaluation successor; any such task requires a fresh Planner specification and
-Maintainer exact-head approval.
+The executable queue is exactly the set of `READY` rows in the Active Backlog.
+If this publication PR is merged, T085 is the sole `READY` task. T063 and T066
+remain `DRAFT`; T034 remains blocked on native public-consistent hidden-future
+sampling support. T064, T065, and T071--T084 are `DONE` with their recorded
+diagnostic, repair, control-plane, or target-generation outcomes.
+
+While this specification-publication PR is still unmerged, however, the
+candidate `READY` row above is not yet durable project truth and authorizes no
+implementation. Only the merged version of this same Task Index controls the
+implementation queue.
 
 ## Standard Local Gates
 
