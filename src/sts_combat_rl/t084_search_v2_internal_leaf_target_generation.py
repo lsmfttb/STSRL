@@ -216,7 +216,7 @@ class _IncrementalJsonReader:
         while True:
             key = self.value()
             if not isinstance(key, str):
-                raise ValueError("collector JSON object key is not a string")
+                raise TypeError("collector JSON object key is not a string")
             self._take(":")
             if self._peek() == "[":
                 value: Any = self.array()
@@ -892,8 +892,10 @@ def validate_collector_execution(
     expected_stage_ranges = (
         "candidate pass: root indices 0..459 x three arms",
         "selected_leaf_continuation pass: root indices 0..459 x three arms",
-        "parity_preflight: first eight Act1 and first eight Act2 source roots "
-        "x three arms",
+        (
+            "parity_preflight: first eight Act1 and first eight Act2 source roots "
+            "x three arms"
+        ),
     )
     if not isinstance(shards, list) or len(shards) != 3:
         problems.append("collector stage shards are not the three required stages")
@@ -1604,7 +1606,24 @@ class _StreamingTargetValidation:
             self.calibration_count += 1
             self.calibration_arm_counts[arm] += 1
             self.calibration_cells[(arm, act)] += 1
-            self.calibration_metrics_rows.append({"replicates": replicas})
+            self.calibration_metrics_rows.append(
+                {
+                    "replicates": [
+                        {
+                            key: replica.get(key)
+                            for key in (
+                                "terminal",
+                                "cap_hit",
+                                "transition_count",
+                                "terminal_evaluate_end_state",
+                            )
+                        }
+                        if isinstance(replica, Mapping)
+                        else replica
+                        for replica in replicas
+                    ]
+                }
+            )
         else:
             self.formal_count += 1
             self.formal_arm_counts[arm] += 1
@@ -1634,9 +1653,7 @@ class _StreamingTargetValidation:
             self.calibration_ids & self.formal_ids
             or self.calibration_digests & self.formal_digests
         )
-        formal_unique = (
-            len(self.formal_ids) == self.formal_count == FORMAL_ROW_COUNT
-        )
+        formal_unique = len(self.formal_ids) == self.formal_count == FORMAL_ROW_COUNT
         if self.calibration_count != CALIBRATION_COUNT:
             self.problems.append(
                 f"calibration row count is {self.calibration_count}, "
@@ -1786,7 +1803,15 @@ def _stream_validate_collector(
                         ),
                     )
             else:
-                execution[key] = value
+                if isinstance(value, Iterator):
+                    if key in {"failures", "shards"}:
+                        execution[key] = list(value)
+                    else:
+                        for _ in value:
+                            pass
+                        problems.append(f"collector has unsupported array field: {key}")
+                else:
+                    execution[key] = value
     except (OSError, UnicodeError, TypeError, ValueError, json.JSONDecodeError) as exc:
         problems.append(f"collector artifact invalid: {exc}")
 
@@ -1812,8 +1837,10 @@ def _stream_validate_collector(
     expected_stage_ranges = (
         "candidate pass: root indices 0..459 x three arms",
         "selected_leaf_continuation pass: root indices 0..459 x three arms",
-        "parity_preflight: first eight Act1 and first eight Act2 source roots "
-        "x three arms",
+        (
+            "parity_preflight: first eight Act1 and first eight Act2 source roots "
+            "x three arms"
+        ),
     )
     shards = execution.get("shards")
     if not isinstance(shards, list) or len(shards) != 3:
@@ -1855,16 +1882,16 @@ def _stream_validate_collector(
         "prior_only_static_64001": {
             "policy_prior": True,
             "leaf_value": False,
-            "checkpoint_sha256": EXPECTED_STATIC_CHECKPOINTS[
-                "prior_only_static_64001"
-            ][0],
+            "checkpoint_sha256": EXPECTED_STATIC_CHECKPOINTS["prior_only_static_64001"][
+                0
+            ],
         },
         "prior_only_static_64002": {
             "policy_prior": True,
             "leaf_value": False,
-            "checkpoint_sha256": EXPECTED_STATIC_CHECKPOINTS[
-                "prior_only_static_64002"
-            ][0],
+            "checkpoint_sha256": EXPECTED_STATIC_CHECKPOINTS["prior_only_static_64002"][
+                0
+            ],
         },
     }
     arm_configs = execution.get("arm_configs")
@@ -1879,8 +1906,14 @@ def _stream_validate_collector(
                 problems.append(f"collector configuration mismatch: {arm}")
     parity = execution.get("parity")
     parity_fields = (
-        "checked_root_count", "arms", "acts", "worker_count", "material_outputs_equal",
-        "root_action_equal", "root_statistics_equal", "rng_semantics_equal",
+        "checked_root_count",
+        "arms",
+        "acts",
+        "worker_count",
+        "material_outputs_equal",
+        "root_action_equal",
+        "root_statistics_equal",
+        "rng_semantics_equal",
     )
     if not isinstance(parity, Mapping) or any(
         field not in parity for field in parity_fields
@@ -1906,11 +1939,15 @@ def _stream_validate_collector(
                 "24+24 Acts, and all arms"
             )
         parity_rows = parity.get("rows")
-        parity_keys = {
-            (row.get("root_index"), row.get("sampling_arm"))
-            for row in parity_rows
-            if isinstance(row, Mapping)
-        } if isinstance(parity_rows, list) else set()
+        parity_keys = (
+            {
+                (row.get("root_index"), row.get("sampling_arm"))
+                for row in parity_rows
+                if isinstance(row, Mapping)
+            }
+            if isinstance(parity_rows, list)
+            else set()
+        )
         if not isinstance(parity_rows, list) or len(parity_rows) != 48:
             problems.append("collector parity rows are not exactly 16x3")
         elif len(parity_keys) != 48:
@@ -2069,7 +2106,6 @@ def audit_t084(
         integrity_problems.append("native build/API probe is missing or invalid")
     collector_validation = streamed_collector
     formal_rows = streamed_collector["formal_rows"]
-    candidate_ids = streamed_collector["candidate_ids"]
     calibration = streamed_collector["calibration"]
     target_validation = streamed_collector["target_validation"]
     formal_valid = target_validation["valid"]

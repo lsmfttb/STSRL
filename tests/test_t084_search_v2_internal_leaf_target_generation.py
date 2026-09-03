@@ -114,6 +114,49 @@ def test_streaming_target_membership_is_order_independent(tmp_path) -> None:
     )
 
 
+def test_streaming_audit_retains_only_compact_formal_row_summary(tmp_path) -> None:
+    calibration_rows = [
+        _leaf(index, values=[float(index)] * CALIBRATION_REPLICATES)
+        for index in range(CALIBRATION_COUNT)
+    ]
+    formal_row = _leaf(999, values=[999.0] * 16)
+    large_public_marker = "formal-public-input-must-not-be-retained" * 1024
+    formal_row["public_model_input"]["large_opaque_marker"] = large_public_marker
+    payload = dict(
+        sorted(
+            {
+                "schema_id": "t084-native-internal-leaf-collector-v1",
+                "generation_mode": "native_runtime_collector",
+                "search_simulations_per_root": 100,
+                "worker_count": 1,
+                "effective_worker_count": 1,
+                "shards": [],
+                "arm_configs": {},
+                "parity": {},
+                "root_runs": [],
+                "candidate_rows": [*calibration_rows, formal_row],
+                "calibration_rows": calibration_rows,
+                "formal_rows": [formal_row],
+            }.items()
+        )
+    )
+    path = tmp_path / "compact-formal-summary.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = _stream_validate_collector(path, [], native_commit="native")
+
+    assert len(result["formal_rows"]) == 1
+    assert set(result["formal_rows"][0]) == {
+        "sampling_arm",
+        "act",
+        "exact_leaf_identity",
+        "exact_state_digest",
+        "public_model_input_sha256",
+        "target_mean",
+    }
+    assert large_public_marker not in json.dumps(result["formal_rows"])
+
+
 def _leaf(index: int, *, values: list[float] | None = None) -> dict:
     return {
         "sampling_arm": "unguided_search_v2",
