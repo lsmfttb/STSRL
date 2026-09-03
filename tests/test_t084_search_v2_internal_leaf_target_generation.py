@@ -28,6 +28,8 @@ from sts_combat_rl.t084_search_v2_internal_leaf_target_generation import (
     CALIBRATION_COUNT,
     CALIBRATION_REPLICATES,
     CANDIDATE_REPETITIONS,
+    _IncrementalJsonReader,
+    _stream_validate_collector,
     calibration_metrics,
     classify_t084,
     derive_replicate_seed,
@@ -38,6 +40,41 @@ from sts_combat_rl.t084_search_v2_internal_leaf_target_generation import (
     validate_replicate,
     validate_target_rows,
 )
+
+
+def test_incremental_collector_reader_yields_array_items_across_small_chunks() -> None:
+    class ChunkedStream:
+        def __init__(self, value: str) -> None:
+            self.value = value
+
+        def read(self, size: int) -> str:
+            chunk, self.value = self.value[:size], self.value[size:]
+            return chunk
+
+    reader = _IncrementalJsonReader(
+        ChunkedStream('{"metadata":{"ok":true},"rows":[{"i":1},{"i":2}]}')
+    )
+    reader._CHUNK_SIZE = 3
+    fields = reader.object_fields()
+    key, metadata = next(fields)
+    assert (key, metadata) == ("metadata", {"ok": True})
+    key, rows = next(fields)
+    assert key == "rows"
+    assert list(rows) == [{"i": 1}, {"i": 2}]
+    with pytest.raises(StopIteration):
+        next(fields)
+
+
+def test_streaming_collector_reader_fails_closed_on_truncated_array(tmp_path) -> None:
+    path = tmp_path / "truncated-collector.json"
+    path.write_text(
+        '{"schema_id":"t084-native-internal-leaf-collector-v1",'
+        '"candidate_rows":[{"partial":true}',
+        encoding="utf-8",
+    )
+    result = _stream_validate_collector(path, [], native_commit="native")
+    assert result["valid"] is False
+    assert any("malformed or truncated" in item for item in result["problems"])
 
 
 def _leaf(index: int, *, values: list[float] | None = None) -> dict:

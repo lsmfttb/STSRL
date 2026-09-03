@@ -14,7 +14,7 @@ import json
 import math
 import subprocess
 from collections import Counter, defaultdict
-from collections.abc import Iterable, Mapping, Sequence
+from collections.abc import Iterable, Iterator, Mapping, Sequence
 from pathlib import Path
 from statistics import median
 from typing import Any
@@ -116,6 +116,140 @@ def _json(path: Path) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         raise TypeError(f"{path} is not a JSON object")
     return dict(value)
+
+
+class _IncrementalJsonReader:
+    """Decode one JSON value at a time from a bounded text buffer.
+
+    The collector is one JSON object whose large fields are arrays.  Calling
+    ``json.load`` on that object materializes every hidden-state payload at
+    once, so this reader deliberately exposes arrays as item iterators.  The
+    buffer grows only to the size of the current JSON value (normally one
+    collector row), not to the size of the document.
+    """
+
+    _CHUNK_SIZE = 1024 * 1024
+
+    def __init__(self, stream: Any) -> None:
+        self._stream = stream
+        self._decoder = json.JSONDecoder()
+        self._buffer = ""
+        self._eof = False
+
+    def _fill(self) -> None:
+        if self._eof:
+            return
+        chunk = self._stream.read(self._CHUNK_SIZE)
+        if chunk == "":
+            self._eof = True
+        else:
+            self._buffer += chunk
+
+    def _skip_whitespace(self) -> None:
+        while True:
+            stripped = self._buffer.lstrip()
+            if stripped:
+                self._buffer = stripped
+                return
+            if self._eof:
+                return
+            self._buffer = ""
+            self._fill()
+
+    def _peek(self) -> str:
+        self._skip_whitespace()
+        while not self._buffer and not self._eof:
+            self._fill()
+            self._skip_whitespace()
+        return self._buffer[:1]
+
+    def _take(self, expected: str) -> None:
+        actual = self._peek()
+        if actual != expected:
+            raise ValueError(
+                f"collector JSON expected {expected!r}, found {actual or 'EOF'!r}"
+            )
+        self._buffer = self._buffer[1:]
+
+    def value(self) -> Any:
+        """Decode one complete JSON value, retaining no consumed prefix."""
+
+        while True:
+            self._skip_whitespace()
+            try:
+                value, end = self._decoder.raw_decode(self._buffer)
+            except json.JSONDecodeError as exc:
+                if self._eof:
+                    raise ValueError(
+                        "collector JSON is malformed or truncated"
+                    ) from exc
+                self._fill()
+                continue
+            self._buffer = self._buffer[end:]
+            return value
+
+    def array(self) -> Iterator[Any]:
+        self._take("[")
+        if self._peek() == "]":
+            self._buffer = self._buffer[1:]
+            return
+        while True:
+            yield self.value()
+            delimiter = self._peek()
+            if delimiter == ",":
+                self._buffer = self._buffer[1:]
+                continue
+            if delimiter == "]":
+                self._buffer = self._buffer[1:]
+                return
+            raise ValueError(
+                "collector JSON array is malformed or truncated; "
+                f"expected ',' or ']', found {delimiter or 'EOF'!r}"
+            )
+
+    def object_fields(self) -> Iterator[tuple[str, Any]]:
+        self._take("{")
+        if self._peek() == "}":
+            self._buffer = self._buffer[1:]
+            self._ensure_eof()
+            return
+        while True:
+            key = self.value()
+            if not isinstance(key, str):
+                raise ValueError("collector JSON object key is not a string")
+            self._take(":")
+            if self._peek() == "[":
+                value: Any = self.array()
+            else:
+                value = self.value()
+            yield key, value
+            delimiter = self._peek()
+            if delimiter == ",":
+                self._buffer = self._buffer[1:]
+                continue
+            if delimiter == "}":
+                self._buffer = self._buffer[1:]
+                self._ensure_eof()
+                return
+            raise ValueError(
+                "collector JSON object is malformed or truncated; "
+                f"expected ',' or '}}', found {delimiter or 'EOF'!r}"
+            )
+
+    def _ensure_eof(self) -> None:
+        self._skip_whitespace()
+        if self._buffer or not self._eof:
+            self._fill()
+            self._skip_whitespace()
+        if self._buffer or not self._eof:
+            raise ValueError("collector JSON has trailing data")
+
+
+def _iter_collector_fields(path: Path) -> Iterator[tuple[str, Any]]:
+    """Yield top-level collector fields without materializing large arrays."""
+
+    with path.open("r", encoding="utf-8") as stream:
+        yield from _IncrementalJsonReader(stream).object_fields()
 
 
 def _path(value: object) -> Path:
@@ -751,13 +885,15 @@ def validate_collector_execution(
         or effective_workers > configured_workers
     ):
         problems.append(
-            "collector configured/effective worker counts must be in 1..16 with effective <= configured"
+            "collector configured/effective worker counts must be in 1..16 "
+            "with effective <= configured"
         )
     shards = execution.get("shards")
     expected_stage_ranges = (
         "candidate pass: root indices 0..459 x three arms",
         "selected_leaf_continuation pass: root indices 0..459 x three arms",
-        "parity_preflight: first eight Act1 and first eight Act2 source roots x three arms",
+        "parity_preflight: first eight Act1 and first eight Act2 source roots "
+        "x three arms",
     )
     if not isinstance(shards, list) or len(shards) != 3:
         problems.append("collector stage shards are not the three required stages")
@@ -1280,18 +1416,520 @@ def _empty_execution(reason: str) -> dict[str, Any]:
     }
 
 
-def _load_collector(path: Path | None) -> dict[str, Any]:
-    if path is None:
-        return _empty_execution(
-            "collector artifact not supplied; accepted native surface cannot restore hidden internal leaves"
+class _StreamingCandidateSummary:
+    """Bounded metadata accumulator for the potentially very large pool."""
+
+    def __init__(self, selected_sources: Sequence[Mapping[str, Any]]) -> None:
+        self.problems: list[str] = []
+        self.root_by_identity = {
+            str(item.get("complete_identity_sha256")): index
+            for index, item in enumerate(selected_sources)
+        }
+        self.valid_count = 0
+        self.identities: set[str] = set()
+        self.digests: set[str] = set()
+        self.identity_digests: dict[str, str] = {}
+        self.digest_identities: dict[str, str] = {}
+        self.counts: Counter[tuple[str, int]] = Counter()
+        self.unique: dict[tuple[str, int], set[str]] = defaultdict(set)
+        self.public: dict[str, set[str]] = defaultdict(set)
+        self.roots: Counter[tuple[str, str]] = Counter()
+        self.depths: Counter[tuple[str, int]] = Counter()
+
+    def add(self, raw: object) -> None:
+        if not isinstance(raw, Mapping):
+            self.problems.append("collector candidate row is malformed")
+            return
+        try:
+            row = validate_leaf_row(raw)
+        except (TypeError, ValueError) as exc:
+            self.problems.append(str(exc))
+            return
+        root = str(row["root_identity"])
+        if (
+            root not in self.root_by_identity
+            or row["source_complete_identity_sha256"] != root
+        ):
+            self.problems.append(
+                "candidate leaf is not tied to an exact selected T064 root"
+            )
+        identity = str(row["exact_leaf_identity"])
+        digest = str(row["exact_state_digest"])
+        if (
+            identity in self.identity_digests
+            and self.identity_digests[identity] != digest
+        ):
+            self.problems.append(
+                "candidate exact hidden identity maps to conflicting state digests"
+            )
+        if (
+            digest in self.digest_identities
+            and self.digest_identities[digest] != identity
+        ):
+            self.problems.append(
+                "candidate exact state digest maps to conflicting hidden identities"
+            )
+        self.identity_digests[identity] = digest
+        self.digest_identities[digest] = identity
+        self.identities.add(identity)
+        self.digests.add(digest)
+        arm, act = str(row["sampling_arm"]), int(row["act"])
+        self.counts[(arm, act)] += 1
+        self.unique[(arm, act)].add(identity)
+        public_key = json.dumps(
+            row["public_model_input"], sort_keys=True, separators=(",", ":")
         )
+        self.public[public_key].add(identity)
+        self.roots[(arm, root)] += 1
+        self.depths[(arm, int(row["depth"]))] += 1
+        self.valid_count += 1
+
+    def report(self) -> dict[str, Any]:
+        duplicate_groups = [
+            identities for identities in self.public.values() if len(identities) > 1
+        ]
+        return {
+            "total_rows": self.valid_count,
+            "by_arm_act": {
+                f"{arm}/act{act}": self.counts[(arm, act)]
+                for arm in ARMS
+                for act in ACT_COUNTS
+            },
+            "unique_hidden_by_arm_act": {
+                f"{arm}/act{act}": len(self.unique[(arm, act)])
+                for arm in ARMS
+                for act in ACT_COUNTS
+            },
+            "per_root_counts": {
+                f"{arm}/{root}": count
+                for (arm, root), count in sorted(self.roots.items())
+            },
+            "depth_counts": {
+                f"{arm}/depth{depth}": count
+                for (arm, depth), count in sorted(self.depths.items())
+            },
+            "public_duplicate_group_count": len(duplicate_groups),
+            "public_duplicate_groups": [sorted(group) for group in duplicate_groups],
+        }
+
+
+class _StreamingTargetValidation:
+    """Validate target rows while retaining only bounded report/metric data."""
+
+    def __init__(self, candidate_ids: set[str], native_commit: str) -> None:
+        self.candidate_ids = candidate_ids
+        self.native_commit = native_commit
+        self.problems: list[str] = []
+        self.calibration_ids: set[str] = set()
+        self.formal_ids: set[str] = set()
+        self.calibration_digests: set[str] = set()
+        self.formal_digests: set[str] = set()
+        self.calibration_metrics_rows: list[dict[str, Any]] = []
+        self.formal_report_rows: list[dict[str, Any]] = []
+        self.calibration_count = 0
+        self.formal_count = 0
+        self.calibration_arm_counts: Counter[str] = Counter()
+        self.formal_arm_counts: Counter[str] = Counter()
+        self.calibration_cells: Counter[tuple[object, object]] = Counter()
+        self.formal_cells: Counter[tuple[object, object]] = Counter()
+
+    def add(
+        self,
+        raw: object,
+        label: str,
+        *,
+        selected_repetition_count: int | None,
+    ) -> None:
+        required = (
+            CALIBRATION_REPLICATES
+            if label == "calibration"
+            else selected_repetition_count
+        )
+        try:
+            row = validate_leaf_row(raw, require_replicates=required)
+        except (TypeError, ValueError) as exc:
+            self.problems.append(f"{label} row invalid: {exc}")
+            return
+        identity = str(row["exact_leaf_identity"])
+        digest = str(row["exact_state_digest"])
+        ids = self.calibration_ids if label == "calibration" else self.formal_ids
+        digests = (
+            self.calibration_digests if label == "calibration" else self.formal_digests
+        )
+        if identity in ids or digest in digests:
+            self.problems.append(f"duplicate {label} exact hidden leaf identity")
+        ids.add(identity)
+        digests.add(digest)
+        if identity not in self.candidate_ids:
+            self.problems.append(f"{label} leaf is absent from candidate pool")
+        if label == "formal" and row["sampling_arm"] not in ARMS:
+            self.problems.append("formal row has unknown sampling arm")
+        if required is None:
+            self.problems.append("formal repetition count is unavailable")
+            return
+        utilities, _, replica_problems = validate_replicates(row, required)
+        if replica_problems or len(utilities) != required:
+            self.problems.append(
+                f"{label} leaf {identity} has invalid continuation replicates"
+            )
+        replicas = row.get("replicates")
+        if not isinstance(replicas, list):
+            return
+        for replicate_index, replica in enumerate(replicas, 1):
+            if not isinstance(replica, Mapping):
+                continue
+            expected = derive_replicate_seed(
+                self.native_commit,
+                str(row["source_complete_identity_sha256"]),
+                str(row["sampling_arm"]),
+                identity,
+                replicate_index,
+            )
+            if replica.get("seed_provenance") != expected:
+                self.problems.append(
+                    f"{label} leaf {identity} replicate {replicate_index} "
+                    "seed lineage mismatch"
+                )
+        arm, act = row["sampling_arm"], row["act"]
+        if label == "calibration":
+            self.calibration_count += 1
+            self.calibration_arm_counts[arm] += 1
+            self.calibration_cells[(arm, act)] += 1
+            self.calibration_metrics_rows.append({"replicates": replicas})
+        else:
+            self.formal_count += 1
+            self.formal_arm_counts[arm] += 1
+            self.formal_cells[(arm, act)] += 1
+            self.formal_report_rows.append(
+                {
+                    "sampling_arm": arm,
+                    "act": act,
+                    "exact_leaf_identity": identity,
+                    "exact_state_digest": digest,
+                    "public_model_input": row["public_model_input"],
+                    "target_mean": row.get("target_mean"),
+                }
+            )
+
+    def report(self, selected_repetition_count: int | None) -> dict[str, Any]:
+        disjoint = not bool(
+            self.calibration_ids & self.formal_ids
+            or self.calibration_digests & self.formal_digests
+        )
+        formal_unique = (
+            len(self.formal_ids) == self.formal_count == FORMAL_ROW_COUNT
+        )
+        if self.calibration_count != CALIBRATION_COUNT:
+            self.problems.append(
+                f"calibration row count is {self.calibration_count}, "
+                f"expected {CALIBRATION_COUNT}"
+            )
+        if self.formal_count != FORMAL_ROW_COUNT:
+            self.problems.append(
+                f"formal row count is {self.formal_count}, expected {FORMAL_ROW_COUNT}"
+            )
+        if not disjoint:
+            self.problems.append(
+                "calibration and formal hidden leaf identities are not disjoint"
+            )
+        if not formal_unique:
+            self.problems.append("formal exact hidden leaf identities are not unique")
+        for arm in ARMS:
+            if self.calibration_arm_counts[arm] != 32:
+                self.problems.append(f"calibration arm quota mismatch: {arm}")
+            if self.formal_arm_counts[arm] != ARM_ROW_COUNT:
+                self.problems.append(f"formal arm quota mismatch: {arm}")
+            for act, expected in ((1, 18), (2, 14)):
+                if self.calibration_cells[(arm, act)] != expected:
+                    self.problems.append(
+                        f"calibration Act quota mismatch: {arm}/act{act}"
+                    )
+            for act, expected in FORMAL_ACT_COUNTS.items():
+                if self.formal_cells[(arm, act)] != expected:
+                    self.problems.append(f"formal Act quota mismatch: {arm}/act{act}")
+        return {
+            "valid": not self.problems,
+            "problems": self.problems,
+            "calibration_count": self.calibration_count,
+            "formal_count": self.formal_count,
+            "calibration_hidden_identity_count": len(self.calibration_ids),
+            "formal_hidden_identity_count": len(self.formal_ids),
+            "calibration_formal_disjoint": disjoint,
+            "formal_unique": formal_unique,
+            "calibration_arm_counts": dict(self.calibration_arm_counts),
+            "formal_arm_counts": dict(self.formal_arm_counts),
+            "formal_cells": {
+                f"{arm}/act{act}": self.formal_cells[(arm, act)]
+                for arm in ARMS
+                for act in FORMAL_ACT_COUNTS
+            },
+            "selected_repetition_count": selected_repetition_count,
+        }
+
+
+def _stream_validate_collector(
+    path: Path,
+    selected_sources: Sequence[Mapping[str, Any]],
+    *,
+    native_commit: str,
+) -> dict[str, Any]:
+    """Read and validate a collector document one top-level array item at a time."""
+
+    execution: dict[str, Any] = {}
+    problems: list[str] = []
+    seen_fields: set[str] = set()
+    candidate_summary = _StreamingCandidateSummary(selected_sources)
+    target_validation = _StreamingTargetValidation(
+        candidate_summary.identities, native_commit
+    )
+    calibration: dict[str, Any] = {
+        "candidate_metrics": [],
+        "selected_repetition_count": None,
+        "qualified": False,
+        "reason": "exact 96 calibration rows unavailable",
+    }
+    root_run_count = 0
+    seen_runs: set[tuple[str, str]] = set()
+    root_by_identity = {
+        str(item.get("complete_identity_sha256")): index
+        for index, item in enumerate(selected_sources)
+    }
+
     try:
-        payload = _json(path)
-    except (OSError, ValueError, TypeError, json.JSONDecodeError) as exc:
-        return _empty_execution(f"collector artifact invalid: {exc}")
-    if payload.get("schema_id") != COLLECTOR_SCHEMA_ID:
-        return _empty_execution("collector schema_id mismatch")
-    return payload
+        fields = _iter_collector_fields(path)
+        for key, value in fields:
+            seen_fields.add(key)
+            if key == "candidate_rows":
+                if not isinstance(value, Iterator):
+                    problems.append("collector candidate_rows is malformed")
+                    continue
+                for row in value:
+                    candidate_summary.add(row)
+            elif key == "root_runs":
+                if not isinstance(value, Iterator):
+                    problems.append("collector root_runs is malformed")
+                    continue
+                for run in value:
+                    root_run_count += 1
+                    if not isinstance(run, Mapping):
+                        problems.append("collector root-run row is malformed")
+                        continue
+                    arm = run.get("sampling_arm")
+                    root = str(run.get("root_identity"))
+                    run_key = (str(arm), root)
+                    if arm not in ARMS or root not in root_by_identity:
+                        problems.append(
+                            "collector root-run has unknown arm/root identity"
+                        )
+                    if run_key in seen_runs:
+                        problems.append(
+                            "collector root-run inventory contains a duplicate arm/root"
+                        )
+                    seen_runs.add(run_key)
+                    if run.get("simulations") != 100 or run.get("status") != "complete":
+                        problems.append(
+                            "collector root-run lacks complete 100-simulation evidence"
+                        )
+                    if run.get("source_complete_identity_sha256") != root:
+                        problems.append(
+                            "collector root-run source/root identity disagrees"
+                        )
+                    root_statistics = run.get(
+                        "native_root_statistics", run.get("root_statistics")
+                    )
+                    if not isinstance(root_statistics, list) or not root_statistics:
+                        problems.append(
+                            "collector root-run lacks native root statistics"
+                        )
+            elif key == "calibration_rows":
+                if not isinstance(value, Iterator):
+                    problems.append("collector calibration_rows is malformed")
+                    continue
+                for row in value:
+                    target_validation.add(
+                        row,
+                        "calibration",
+                        selected_repetition_count=CALIBRATION_REPLICATES,
+                    )
+                if target_validation.calibration_count == CALIBRATION_COUNT:
+                    calibration = select_repetition_count(
+                        target_validation.calibration_metrics_rows
+                    )
+            elif key == "formal_rows":
+                if not isinstance(value, Iterator):
+                    problems.append("collector formal_rows is malformed")
+                    continue
+                for row in value:
+                    target_validation.add(
+                        row,
+                        "formal",
+                        selected_repetition_count=calibration.get(
+                            "selected_repetition_count"
+                        ),
+                    )
+            else:
+                execution[key] = value
+    except (OSError, UnicodeError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        problems.append(f"collector artifact invalid: {exc}")
+
+    if execution.get("schema_id") != COLLECTOR_SCHEMA_ID:
+        problems.append("collector schema_id mismatch")
+    if execution.get("generation_mode") != "native_runtime_collector":
+        problems.append("collector generation_mode is not native_runtime_collector")
+    if execution.get("search_simulations_per_root") != 100:
+        problems.append("collector search_simulations_per_root is not 100")
+    if len(selected_sources) != 460:
+        problems.append("collector selected T064 root cohort is not exactly 460 roots")
+    configured_workers = execution.get("worker_count")
+    effective_workers = execution.get("effective_worker_count")
+    if (
+        not _valid_worker_count(configured_workers)
+        or not _valid_worker_count(effective_workers)
+        or effective_workers > configured_workers
+    ):
+        problems.append(
+            "collector configured/effective worker counts must be in 1..16 "
+            "with effective <= configured"
+        )
+    expected_stage_ranges = (
+        "candidate pass: root indices 0..459 x three arms",
+        "selected_leaf_continuation pass: root indices 0..459 x three arms",
+        "parity_preflight: first eight Act1 and first eight Act2 source roots "
+        "x three arms",
+    )
+    shards = execution.get("shards")
+    if not isinstance(shards, list) or len(shards) != 3:
+        problems.append("collector stage shards are not the three required stages")
+    else:
+        for shard, expected_range in zip(shards, expected_stage_ranges, strict=True):
+            if not isinstance(shard, Mapping):
+                problems.append(
+                    f"collector shard evidence is incomplete: {expected_range}"
+                )
+                continue
+            shard_workers = shard.get("worker_count")
+            shard_effective = shard.get("effective_worker_count")
+            if (
+                shard_workers != configured_workers
+                or not _valid_worker_count(shard_workers)
+                or not _valid_worker_count(shard_effective)
+                or shard_effective > shard_workers
+                or shard.get("task_ranges") != expected_range
+                or not isinstance(shard.get("worker_evidence"), Mapping)
+                or shard["worker_evidence"].get("observed_worker_count")
+                != shard_effective
+            ):
+                problems.append(
+                    f"collector shard evidence is incomplete: {expected_range}"
+                )
+    if root_run_count != len(ARMS) * 460:
+        problems.append("collector root_runs is not exactly 3x460")
+    if len(seen_runs) != len(ARMS) * 460:
+        problems.append(
+            "collector root-run inventory does not cover every arm/root pair"
+        )
+    expected_configs = {
+        "unguided_search_v2": {
+            "policy_prior": False,
+            "leaf_value": False,
+            "checkpoint_sha256": None,
+        },
+        "prior_only_static_64001": {
+            "policy_prior": True,
+            "leaf_value": False,
+            "checkpoint_sha256": EXPECTED_STATIC_CHECKPOINTS[
+                "prior_only_static_64001"
+            ][0],
+        },
+        "prior_only_static_64002": {
+            "policy_prior": True,
+            "leaf_value": False,
+            "checkpoint_sha256": EXPECTED_STATIC_CHECKPOINTS[
+                "prior_only_static_64002"
+            ][0],
+        },
+    }
+    arm_configs = execution.get("arm_configs")
+    if not isinstance(arm_configs, Mapping):
+        problems.append("collector arm_configs is unavailable")
+    else:
+        for arm, expected in expected_configs.items():
+            actual = arm_configs.get(arm)
+            if not isinstance(actual, Mapping) or any(
+                actual.get(key) != item for key, item in expected.items()
+            ):
+                problems.append(f"collector configuration mismatch: {arm}")
+    parity = execution.get("parity")
+    parity_fields = (
+        "checked_root_count", "arms", "acts", "worker_count", "material_outputs_equal",
+        "root_action_equal", "root_statistics_equal", "rng_semantics_equal",
+    )
+    if not isinstance(parity, Mapping) or any(
+        field not in parity for field in parity_fields
+    ):
+        problems.append("collector parity evidence is incomplete")
+    else:
+        if parity.get("available") is not True or parity.get("passed") is not True:
+            problems.append("collector parity is not available and passed")
+        if (
+            parity.get("checked_root_count") != 16
+            or parity.get("task_count") != 48
+            or not _valid_worker_count(parity.get("effective_worker_count"))
+            or (
+                isinstance(configured_workers, int)
+                and parity.get("effective_worker_count") > configured_workers
+            )
+            or set(parity.get("arms", [])) != set(ARMS)
+            or set(parity.get("acts", [])) != {1, 2}
+            or parity.get("act_counts") != {"1": 24, "2": 24}
+        ):
+            problems.append(
+                "collector parity does not cover 16 roots, 48 arm tasks, "
+                "24+24 Acts, and all arms"
+            )
+        parity_rows = parity.get("rows")
+        parity_keys = {
+            (row.get("root_index"), row.get("sampling_arm"))
+            for row in parity_rows
+            if isinstance(row, Mapping)
+        } if isinstance(parity_rows, list) else set()
+        if not isinstance(parity_rows, list) or len(parity_rows) != 48:
+            problems.append("collector parity rows are not exactly 16x3")
+        elif len(parity_keys) != 48:
+            problems.append("collector parity contains duplicate root/arm rows")
+        if parity.get("worker_count") != configured_workers or not all(
+            parity.get(field) is True for field in parity_fields[4:]
+        ):
+            problems.append(
+                "collector parity did not prove material Search/RNG equality"
+            )
+    required_arrays = {"root_runs", "candidate_rows", "calibration_rows", "formal_rows"}
+    for missing in sorted(required_arrays - seen_fields):
+        problems.append(f"collector {missing} is missing")
+    problems.extend(candidate_summary.problems)
+    target_validation_report = target_validation.report(
+        calibration.get("selected_repetition_count")
+    )
+    problems.extend(target_validation_report["problems"])
+    execution["available"] = True
+    execution["failures"] = problems
+    execution["parity"] = parity if isinstance(parity, Mapping) else {}
+    return {
+        "execution": execution,
+        "valid": not problems,
+        "problems": problems,
+        "candidate_ids": candidate_summary.identities,
+        "candidate_pool": candidate_summary.report(),
+        "candidate_count": candidate_summary.valid_count,
+        "candidate_exact_hidden_identity_count": len(candidate_summary.identities),
+        "candidate_exact_state_digest_count": len(candidate_summary.digests),
+        "candidate_duplicate_occupancy_count": candidate_summary.valid_count
+        - len(candidate_summary.identities),
+        "calibration": calibration,
+        "target_validation": target_validation_report,
+        "formal_rows": target_validation.formal_report_rows,
+        "parity": parity if isinstance(parity, Mapping) else {},
+    }
 
 
 def audit_t084(
@@ -1335,7 +1973,67 @@ def audit_t084(
         verifier_result=native_verifier_result,
     )
     probe = validate_native_probe(native_probe, native)
-    execution = _load_collector(collector)
+    if collector is None:
+        streamed_collector = {
+            "execution": _empty_execution(
+                "collector artifact not supplied; accepted native surface cannot "
+                "restore hidden internal leaves"
+            ),
+            "valid": False,
+            "candidate_ids": set(),
+            "candidate_pool": summarize_candidate_pool([]),
+            "calibration": {
+                "candidate_metrics": [],
+                "selected_repetition_count": None,
+                "qualified": False,
+                "reason": "collector artifact unavailable",
+            },
+            "target_validation": {
+                "valid": False,
+                "problems": ["collector artifact unavailable"],
+                "calibration_count": 0,
+                "formal_count": 0,
+                "calibration_formal_disjoint": True,
+                "formal_unique": False,
+            },
+            "formal_rows": [],
+        }
+    else:
+        try:
+            streamed_collector = _stream_validate_collector(
+                collector,
+                t064["selected_sources"],
+                native_commit=str(native.get("resolved_commit")),
+            )
+        except (
+            OSError,
+            UnicodeError,
+            TypeError,
+            ValueError,
+            json.JSONDecodeError,
+        ) as exc:
+            streamed_collector = {
+                "execution": _empty_execution(f"collector artifact invalid: {exc}"),
+                "valid": False,
+                "candidate_ids": set(),
+                "candidate_pool": summarize_candidate_pool([]),
+                "calibration": {
+                    "candidate_metrics": [],
+                    "selected_repetition_count": None,
+                    "qualified": False,
+                    "reason": "collector artifact unavailable",
+                },
+                "target_validation": {
+                    "valid": False,
+                    "problems": ["collector artifact unavailable"],
+                    "calibration_count": 0,
+                    "formal_count": 0,
+                    "calibration_formal_disjoint": True,
+                    "formal_unique": False,
+                },
+                "formal_rows": [],
+            }
+    execution = streamed_collector["execution"]
     integrity_problems = list(t064["problems"])
     if not t082["valid"]:
         integrity_problems.append("invalid accepted T082 report")
@@ -1351,40 +2049,14 @@ def audit_t084(
         integrity_problems.append("accepted T083 classification mismatch")
     if not probe["valid"]:
         integrity_problems.append("native build/API probe is missing or invalid")
-    collector_validation = validate_collector_execution(
-        execution, t064["selected_sources"]
-    )
-    if not collector_validation["valid"]:
-        execution.setdefault("failures", []).extend(collector_validation["problems"])
-    valid_candidates = collector_validation["candidate_rows"]
-    calibration_rows = execution.get("calibration_rows", [])
-    formal_rows = execution.get("formal_rows", [])
-    if not isinstance(calibration_rows, list) or not isinstance(formal_rows, list):
-        execution.setdefault("failures", []).append(
-            "collector calibration/formal rows are malformed"
-        )
-        calibration_rows, formal_rows = [], []
-    calibration = (
-        select_repetition_count(calibration_rows)
-        if len(calibration_rows) == CALIBRATION_COUNT
-        else {
-            "candidate_metrics": [],
-            "selected_repetition_count": None,
-            "qualified": False,
-            "reason": "exact 96 calibration rows unavailable",
-        }
-    )
-    candidate_ids = {str(row.get("exact_leaf_identity")) for row in valid_candidates}
-    target_validation = validate_target_rows(
-        calibration_rows,
-        formal_rows,
-        native_commit=str(native.get("resolved_commit")),
-        selected_repetition_count=calibration["selected_repetition_count"],
-        candidate_ids=candidate_ids,
-    )
+    collector_validation = streamed_collector
+    formal_rows = streamed_collector["formal_rows"]
+    candidate_ids = streamed_collector["candidate_ids"]
+    calibration = streamed_collector["calibration"]
+    target_validation = streamed_collector["target_validation"]
     formal_valid = target_validation["valid"]
     support_sufficient = (
-        collector_validation["valid"]
+        streamed_collector["valid"]
         and target_validation["calibration_count"] == CALIBRATION_COUNT
         and target_validation["formal_count"] == FORMAL_ROW_COUNT
         and target_validation["calibration_formal_disjoint"]
@@ -1397,7 +2069,7 @@ def audit_t084(
     )
     parity = collector_validation.get("parity", {})
     parity_passed = (
-        collector_validation["valid"] and parity.get("material_outputs_equal") is True
+        streamed_collector["valid"] and parity.get("material_outputs_equal") is True
     )
     classification = classify_t084(
         integrity_valid=not integrity_problems,
@@ -1437,7 +2109,7 @@ def audit_t084(
                 "parity",
             )
         },
-        "candidate_pool": summarize_candidate_pool(valid_candidates),
+        "candidate_pool": streamed_collector["candidate_pool"],
         "calibration": calibration,
         "target_validation": target_validation,
         "formal_dataset": {
