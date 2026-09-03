@@ -95,6 +95,105 @@ Relevant upstream notices:
 - https://github.com/Torch1230/CombatSolver/blob/main/README.md
 - https://github.com/Torch1230/CombatSolver/blob/main/THIRD_PARTY_NOTICES.md
 
+## Jialeiv/sts-rl-agent
+
+The public `Jialeiv/sts-rl-agent` project is an external empirical baseline for
+STSRL's split between learned non-combat judgment and online combat planning. It
+was reviewed at upstream commit
+`54d74021f905b78f32923ccd49fbdacb8fc43553` (2026-08-31).
+
+Project reference:
+
+- GitHub: https://github.com/Jialeiv/sts-rl-agent
+
+The project trains a small shared candidate scorer for all non-combat decisions
+(map pathing, card rewards, shops, campfires, and events) while leaving combat to
+the same `sts_lightspeed` MCTS in both learned and baseline conditions. The
+published scorer consumes the simulator's 412-dimensional run observation plus a
+candidate-action descriptor, uses a two-layer `[128, 128]` MLP of roughly 100k
+parameters, and is trained from self-generated complete runs with episodic
+REINFORCE. The training return is final floor divided by 50 with a moving-average
+baseline; no internet guide or human gameplay trace is used as the policy target.
+
+### Reported controlled result
+
+On A0 Ironclad, the repository reports the following comparison on the same fixed
+50 evaluation seeds with the combat-search budget held equal:
+
+| Non-combat controller | Combat | Mean floor | Win rate |
+| --- | --- | ---: | ---: |
+| stock/built-in non-combat (`map = random`) | MCTS @2000 | 22.8 | 2% |
+| learned non-combat scorer | MCTS @2000 | 38.5 | 4% |
+| stock/built-in non-combat (`map = random`) | MCTS @50000 | 31.2 | 6% |
+| learned non-combat scorer | MCTS @50000 | 42.5 | 14% |
+
+The repository also provides a real-Steam integration case in which, for one
+high-contrast seed with the same combat search on both sides, the random
+non-combat controller died on floor 7 and the learned non-combat controller
+cleared floor 51. That single run is integration evidence only; the repository
+itself treats the 50-seed simulator table as its comparative performance
+boundary.
+
+### Evaluation and information-regime limitations
+
+This result is relevant evidence, but it is not directly comparable to STSRL's
+A20 Heart objective or final normal-public information regime:
+
+- the headline controlled result is A0 Ironclad;
+- the same 50 seeds were repeatedly evaluated during training and used for best
+  checkpoint selection, so the upstream project correctly describes them as a
+  validation/evaluation set rather than an untouched final test set;
+- the reported table is a single trained run with no confidence intervals or
+  multiple training initializations;
+- the repository reports its MCTS@2000 difficulty ladder falling to mean floor
+  25.7 and 0% wins at A20;
+- the real-Steam bridge exports exact RNG state to reconstruct simulator battle
+  state for MCTS, so that integration mechanism is not normal-public deployment
+  evidence under STSRL's stricter final controller boundary.
+
+The large mean-floor improvement at A0 is nevertheless a material external signal
+that learned non-combat control can substantially improve complete-run occupancy
+while combat remains fixed.
+
+### Combat-learning negative result
+
+The repository separately documents six attempts to replace or guide combat MCTS
+with learned models. Its reported behavior cloning, DAgger, combat REINFORCE,
+attention models, value/lookahead, and policy/value-guided PUCT did not match the
+blind search baseline; in particular, learned PUCT guidance lost to blind MCTS at
+an equal search budget. The authors attribute an important part of the difficulty
+to the native search teacher's access to true future RNG/draw information.
+
+This negative result is independently relevant to STSRL because it supports two
+working hypotheses already present in our architecture:
+
+1. non-combat decisions can be treated as a distinct long-horizon learned policy
+   rather than forcing one learner to solve both decision regimes; and
+2. learned combat guidance should not be judged from a weak or semantically
+   mismatched network plugged into search. STSRL's T082--T084 line therefore
+   continues to repair the learned-leaf target/search contract rather than
+   interpreting early harmful value guidance as evidence that search-guided
+   combat learning is intrinsically invalid.
+
+For future planning, this project should be treated as motivation for a minimal
+self-generated non-combat REINFORCE baseline after the currently authorized
+battle-value target work reaches its review boundary. Such a baseline should be
+implemented and evaluated under STSRL's own public-state, A20, seed-split, and
+artifact-eligibility contracts rather than importing the upstream headline
+numbers as STSRL evidence.
+
+### Source-use and licensing boundary
+
+At the reviewed upstream commit, `Jialeiv/sts-rl-agent` is published under the
+MIT License and explicitly includes attribution for its `sts_lightspeed`-derived
+patch material. The current STSRL use is reference-only: no upstream source or
+weights have been copied into this repository.
+
+If future work reuses implementation text, code, patches, or weights rather than
+independently reproducing the experimental idea, the consuming PR must pin the
+exact upstream revision and preserve the applicable MIT copyright/license notice
+and any transitive third-party attribution requirements.
+
 ## Publication Requirement
 
 Before a public research release, paper-like technical report, or polished
@@ -104,6 +203,8 @@ open-source announcement, maintainers must verify that:
 - Suphx is cited for the training-time Oracle/privileged-information lineage;
 - CombatSolver is cited wherever its public architecture materially informed
   STSRL combat-search research;
+- `Jialeiv/sts-rl-agent` is cited wherever its public non-combat learning result or
+  combat-learning negative evidence materially informs STSRL experimental design;
 - implementation provenance is kept separate from conceptual attribution;
 - every copied, modified, linked, or redistributed third-party component has a
   verified compatible license or written permission and the required notices;
