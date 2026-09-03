@@ -15,6 +15,7 @@ from scripts.collect_t084_native_leaf_candidates import (
     _iter_stage_field_rows,
     _ordered_cell_rows,
     _ProgressStore,
+    _RepairCache,
     _select_cell,
     _select_parity_root_indices,
     _selected_target_for_occurrence,
@@ -453,11 +454,70 @@ def test_selected_replay_consumes_only_the_selected_duplicate_occurrence() -> No
 
 
 def test_parity_subset_covers_both_acts_deterministically() -> None:
-    roots = [{"act": 1} for _ in range(256)] + [{"act": 2} for _ in range(204)]
+    roots = [{"snapshot_raw": {"act": 1}} for _ in range(256)] + [
+        {"snapshot_raw": {"act": 2}} for _ in range(204)
+    ]
     indices = _select_parity_root_indices(roots)
     assert indices == list(range(8)) + list(range(256, 264))
-    assert [roots[index]["act"] for index in indices].count(1) == 8
-    assert [roots[index]["act"] for index in indices].count(2) == 8
+    assert [roots[index]["snapshot_raw"]["act"] for index in indices].count(1) == 8
+    assert [roots[index]["snapshot_raw"]["act"] for index in indices].count(2) == 8
+
+
+def test_parity_row_act_comes_from_restored_snapshot_raw(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root_raw = {
+        "_t084_source_identity": "source-2",
+        "snapshot_raw": {"act": 2, "ascension": 20},
+    }
+    root = SimpleNamespace(
+        source_seed=122,
+        snapshot_raw={"act": 2, "ascension": 20},
+        public_run_context={},
+    )
+
+    class FakeSnapshot:
+        def __init__(self) -> None:
+            self.raw = {"floor_num": 1}
+
+    class FakeAdapter:
+        def __init__(self, **_: object) -> None:
+            pass
+
+        def battle_search_v2(self, _snapshot: object, **_: object) -> dict:
+            return {"root_action": "battle:1", "root_rows": [{"visits": 1}]}
+
+        def battle_search_v2_with_leaf_collection(
+            self, _snapshot: object, **kwargs: object
+        ) -> dict:
+            callback = kwargs["leaf_collector_callback"]
+            callback(
+                {
+                    "battle_context_seed": 122,
+                    "battle_context_floor_num": 1,
+                    "search_action_rng_seed_rule": (
+                        "BattleScumSearcher2::randGen seeded from BattleContext.seed+floorNum"
+                    ),
+                }
+            )
+            return {"root_action": "battle:1", "root_rows": [{"visits": 1}]}
+
+    monkeypatch.setattr(t084_collector, "LightSpeedAdapter", FakeAdapter)
+    monkeypatch.setattr(
+        t084_collector, "record_from_manifest", lambda *_args, **_kwargs: root
+    )
+    monkeypatch.setattr(
+        t084_collector,
+        "restore_assisted_battle_start_record",
+        lambda *_args, **_kwargs: (FakeSnapshot(), "assisted_restore"),
+    )
+    monkeypatch.setattr(t084_collector, "_ROOT_ROWS", [root_raw])
+    monkeypatch.setattr(t084_collector, "_NATIVE_MODULE", object())
+    monkeypatch.setattr(t084_collector, "_NATIVE_COMMIT", "native-commit")
+
+    result = t084_collector._work_parity_one((0, ARMS[0]))
+
+    assert result["act"] == 2
 
 
 def test_assisted_root_uses_assisted_restore_and_reaches_search_boundary(
@@ -1068,6 +1128,222 @@ def test_candidate_cache_accepts_sorted_iteration_inventory(tmp_path) -> None:
     assert list(
         cache.iter_successful_results("candidate", list(reversed(tasks)))
     ) == list(zip(tasks, results, strict=True))
+
+
+def _repair_cache_fixture(tmp_path):
+    (
+        candidate_dir,
+        candidate_identity,
+        configuration,
+        tasks,
+        _,
+    ) = _candidate_cache_fixture(tmp_path)
+    current_identity = {
+        **candidate_identity,
+        "code": {
+            "git_head": "current-repair",
+            "collector_script_sha256": "d" * 64,
+            "target_module_sha256": "b" * 64,
+        },
+    }
+    candidate_cache = _CandidateCache.load(
+        candidate_dir,
+        expected_identity=current_identity,
+        expected_configuration=configuration,
+        tasks=tasks,
+    )
+
+    repair_dir = tmp_path / "replay-source"
+    repair_path = repair_dir / "t084-native-collector.progress.json"
+    repair_output = tmp_path / "old-replay-output.json"
+    source_identity = {
+        **current_identity,
+        "code": {
+            "git_head": "old-replay",
+            "collector_script_sha256": "c" * 64,
+            "target_module_sha256": "b" * 64,
+        },
+    }
+    source_configuration = {
+        **configuration,
+        "workers": 8,
+        "output_path": str(repair_output.resolve()),
+    }
+    store = _ProgressStore(
+        repair_path,
+        identity=source_identity,
+        configuration=source_configuration,
+        output_path=repair_output,
+        resume=False,
+    )
+    leaf_id = "t084-hidden-state-" + hashlib.sha256(b"payload").hexdigest()
+    target_specs = {
+        leaf_id: {
+            "target_kind": "formal",
+            "occurrence_key": "occurrence",
+            "root_identity": "root-0",
+            "sampling_arm": ARMS[0],
+            "act": 1,
+        }
+    }
+    store.ensure_stage(
+        "selected_leaf_continuation_pass_0001",
+        tasks,
+        pass_index=1,
+        task_ranges="repair test range",
+        plan={"target_specs": target_specs},
+    )
+    store.record_success(
+        "selected_leaf_continuation_pass_0001",
+        tasks[0],
+        {
+            "root_index": tasks[0][0],
+            "sampling_arm": tasks[0][1],
+            "target_rows": [
+                {
+                    "exact_leaf_identity": leaf_id,
+                    "occurrence_key": "occurrence",
+                    "root_identity": "root-0",
+                    "sampling_arm": ARMS[0],
+                    "act": 1,
+                    "target_kind": "formal",
+                    "replicates": [],
+                }
+            ],
+            "candidate_rows": [],
+        },
+    )
+    stage = store.document["stages"]["selected_leaf_continuation_pass_0001"]
+    stage["status"] = "COMPLETE"
+    stage["worker_evidence"] = {
+        "configured_worker_count": 8,
+        "observed_worker_count": 8,
+        "effective_worker_count": 8,
+        "worker_pids": [321],
+    }
+    stage["last_failures"] = []
+    recorded_candidate_cache = candidate_cache.provenance(current_identity["code"])
+    recorded_candidate_cache["candidate_producer_identity"] = {
+        "git_head": "archived-candidate",
+        "collector_script_sha256": "e" * 64,
+        "target_module_sha256": "b" * 64,
+    }
+    recorded_candidate_cache["candidate_producer_identity_source"] = (
+        "cache_reuse.cached_candidate_code_identity"
+    )
+    store.document["candidate_cache"] = recorded_candidate_cache
+    store.document["state"] = "FAILED"
+    store.document["last_error"] = {
+        "type": "ValueError",
+        "message": "T084 parity requires at least eight roots from each Act",
+    }
+    store._save()
+    return (
+        repair_dir,
+        candidate_cache,
+        current_identity,
+        configuration,
+        tasks,
+        target_specs,
+    )
+
+
+def test_repair_cache_reuses_only_complete_selected_replay_without_native_replay(
+    tmp_path,
+) -> None:
+    (
+        repair_dir,
+        candidate_cache,
+        identity,
+        configuration,
+        tasks,
+        target_specs,
+    ) = _repair_cache_fixture(tmp_path)
+
+    repair = _RepairCache.load(
+        repair_dir,
+        expected_identity=identity,
+        expected_configuration=configuration,
+        tasks=tasks,
+        candidate_cache=candidate_cache,
+    )
+
+    assert repair.target_specs == target_specs
+    provenance = repair.provenance(identity["code"])
+    assert provenance["reused_stage"]["native_replay_executed"] is False
+    assert provenance["cached_candidate_producer_identity"]["git_head"] == (
+        "archived-candidate"
+    )
+    resolved_candidate = candidate_cache.provenance(
+        identity["code"],
+        candidate_producer_identity=provenance["cached_candidate_producer_identity"],
+        candidate_producer_identity_source=repair.candidate_cache_provenance[
+            "candidate_producer_identity_source"
+        ],
+    )
+    assert resolved_candidate["candidate_producer_identity"]["git_head"] == (
+        "archived-candidate"
+    )
+    assert resolved_candidate["postprocessing_producer_identity"] == identity["code"]
+
+
+def test_repair_cache_rejects_selected_replay_part_corruption(tmp_path) -> None:
+    (
+        repair_dir,
+        candidate_cache,
+        identity,
+        configuration,
+        tasks,
+        _,
+    ) = _repair_cache_fixture(tmp_path)
+    progress_path = repair_dir / "t084-native-collector.progress.json"
+    document = json.loads(progress_path.read_text(encoding="utf-8"))
+    artifact = document["stages"]["selected_leaf_continuation_pass_0001"]["tasks"][
+        _task_key(tasks[0])
+    ]["artifact"]
+    artifact_path = progress_path.parent / artifact["path"]
+    artifact_path.write_bytes(artifact_path.read_bytes() + b"\n")
+
+    with pytest.raises(ValueError, match="artifact (size|hash) mismatch"):
+        _RepairCache.load(
+            repair_dir,
+            expected_identity=identity,
+            expected_configuration=configuration,
+            tasks=tasks,
+            candidate_cache=candidate_cache,
+        )
+
+
+def test_repair_cache_rejects_target_plan_hash_mismatch(tmp_path) -> None:
+    (
+        repair_dir,
+        candidate_cache,
+        identity,
+        configuration,
+        tasks,
+        _,
+    ) = _repair_cache_fixture(tmp_path)
+    progress_path = repair_dir / "t084-native-collector.progress.json"
+    document = json.loads(progress_path.read_text(encoding="utf-8"))
+    document["stages"]["selected_leaf_continuation_pass_0001"]["plan"]["target_specs"][
+        "extra"
+    ] = {
+        "target_kind": "formal",
+        "occurrence_key": "other",
+        "root_identity": "root-0",
+        "sampling_arm": ARMS[0],
+        "act": 1,
+    }
+    progress_path.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(ValueError, match="target plan hash mismatch"):
+        _RepairCache.load(
+            repair_dir,
+            expected_identity=identity,
+            expected_configuration=configuration,
+            tasks=tasks,
+            candidate_cache=candidate_cache,
+        )
 
 
 def test_progress_parts_are_iterated_lazily_and_final_rows_are_streamed(

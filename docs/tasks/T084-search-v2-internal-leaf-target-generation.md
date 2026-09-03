@@ -420,6 +420,50 @@ final scientific output. If verification fails, retain the evidence and use a
 new full collector run or another independently verified complete candidate
 cache.
 
+#### Parity/finalization-only repair of a completed selected replay
+
+If a collector version failed only before parity because it read the root Act
+from a stale/missing top-level field, do not resume that failed run with a
+new collector identity. The controlled repair path takes the old selected
+replay progress as a read-only source, takes its explicitly recorded
+candidate cache as a second read-only source, and writes to a new progress
+directory and output path:
+
+```text
+initial repair run:
+  <the exact frozen T084 collector command> \
+    --progress-dir <new-repair-progress-dir> \
+    --reuse-candidate-progress-dir <old-v12-candidate-progress-dir> \
+    --repair-parity-progress-dir <old-v13-selected-replay-progress-dir>
+
+resume the repair run after an interruption:
+  <the same command> \
+    --progress-dir <new-repair-progress-dir> \
+    --reuse-candidate-progress-dir <old-v12-candidate-progress-dir> \
+    --repair-parity-progress-dir <old-v13-selected-replay-progress-dir> \
+    --resume
+```
+
+(`--repair-progress-dir` is an accepted alias.) The repair source must be
+the expected failed parity-only run: current progress schema, exact
+T064/root/native/checkpoint and scientific configuration identities, no
+parity stage or final-output reservation, exactly one COMPLETE
+`selected_leaf_continuation_pass_0001`, a valid target plan, and every
+selected-replay task part present with matching size/hash/schema/task
+identity. Its recorded candidate-cache provenance must match the separately
+verified candidate cache. The repair validates the selected-replay parts and
+streams them to rebuild the accepted target rows; it invokes no candidate or
+selected-leaf replay workers. It runs only the 48-task parity preflight and
+the final summary/output publication. The new progress provenance records
+the old source index hash, old producer identity, current repair identity,
+reason, reused stage plan/evidence, and `native_replay_executed: false`.
+
+The old progress/index/parts are never modified or deleted. The repair
+source is not a scientific output, and an incomplete or mismatched source
+fails closed. Ordinary `--resume` remains exact and cannot use this repair
+escape hatch; the repair source and candidate-cache flags must be supplied
+again on repair resume so the source identities are revalidated.
+
 `--workers` accepts an explicit value from 1 through 16 and defaults to 16.
 The selected value is part of the progress configuration, so `--resume` must
 use the same worker configuration; changing it requires a new progress

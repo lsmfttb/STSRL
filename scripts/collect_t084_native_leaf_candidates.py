@@ -1179,6 +1179,16 @@ class _ProgressStore:
             self.document["candidate_cache"] = dict(provenance)
             self._save()
 
+    def record_repair(self, provenance: Mapping[str, Any]) -> None:
+        """Reserve the exact read-only completed replay stage for this run."""
+
+        existing = self.document.get("repair")
+        if existing is not None and existing != dict(provenance):
+            raise ValueError("repair provenance does not match progress")
+        if existing is None:
+            self.document["repair"] = dict(provenance)
+            self._save()
+
     def prepare_final(self, expected_output: Mapping[str, Any]) -> None:
         self.document["state"] = "FINALIZING"
         self.document["final_output"] = dict(expected_output)
@@ -1584,8 +1594,31 @@ class _CandidateCache:
             )
         raise ValueError("cached candidate code identity is invalid")
 
-    def provenance(self, postprocessing_identity: Mapping[str, Any]) -> dict[str, Any]:
-        producer, producer_source = self._candidate_producer_identity()
+    def provenance(
+        self,
+        postprocessing_identity: Mapping[str, Any],
+        *,
+        candidate_producer_identity: Mapping[str, Any] | None = None,
+        candidate_producer_identity_source: str | None = None,
+    ) -> dict[str, Any]:
+        if candidate_producer_identity is None:
+            producer, producer_source = self._candidate_producer_identity()
+        else:
+            if (
+                not isinstance(candidate_producer_identity_source, str)
+                or not candidate_producer_identity_source
+            ):
+                raise ValueError("candidate producer identity source is missing")
+            producer = dict(candidate_producer_identity)
+            for key in _CANDIDATE_CACHE_CODE_KEYS:
+                value = producer.get(key)
+                if not isinstance(value, str) or not value:
+                    raise ValueError(
+                        "candidate producer identity is incomplete: " + key
+                    )
+            if producer["target_module_sha256"] != self._expected_target_module_sha256:
+                raise ValueError("candidate producer target module identity mismatch")
+            producer_source = candidate_producer_identity_source
         return {
             "mode": "postprocessing_only_candidate_cache_reuse",
             "source_progress_path": str(self.path),
@@ -1603,6 +1636,310 @@ class _CandidateCache:
             "candidate_producer_identity_source": producer_source,
             "postprocessing_producer_identity": dict(postprocessing_identity),
             "candidate_configuration": dict(self.document["configuration"]),
+        }
+
+
+_REPAIR_STAGE_KEY = "selected_leaf_continuation_pass_0001"
+_REPAIR_FAILURE_REASON = "T084 parity requires at least eight roots from each Act"
+_REPAIR_REASON = (
+    "repair parity after the collector read Act from a missing top-level "
+    "root field; selected replay was already complete"
+)
+_CANDIDATE_CACHE_LINK_KEYS = (
+    "mode",
+    "source_progress_path",
+    "source_progress_bytes",
+    "source_progress_sha256",
+    "source_parts_directory",
+    "source_candidate_stage",
+    "candidate_producer_identity",
+    "candidate_producer_identity_source",
+    "candidate_configuration",
+)
+
+
+class _RepairCache:
+    """Read-only completed replay stage used by the parity repair command."""
+
+    def __init__(
+        self,
+        path: Path,
+        progress: _ProgressStore,
+        stage_key: str,
+        target_specs: dict[str, dict[str, Any]],
+        source_producer_identity: Mapping[str, Any],
+        candidate_cache_provenance: Mapping[str, Any],
+    ) -> None:
+        self.path = path.resolve()
+        self.progress = progress
+        self.stage_key = stage_key
+        self.target_specs = target_specs
+        self.source_producer_identity = dict(source_producer_identity)
+        self.candidate_cache_provenance = dict(candidate_cache_provenance)
+        self._index_bytes = self.path.stat().st_size
+        self._index_sha256 = sha256_file(self.path)
+
+    @classmethod
+    def load(
+        cls,
+        progress_dir: Path,
+        *,
+        expected_identity: Mapping[str, Any],
+        expected_configuration: Mapping[str, Any],
+        tasks: list[tuple[int, str]],
+        candidate_cache: _CandidateCache,
+    ) -> _RepairCache:
+        path = (
+            progress_dir.resolve() / "t084-native-collector.progress.json"
+        ).resolve()
+        if not path.is_file():
+            raise ValueError(f"repair source progress file is missing: {path}")
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError(
+                f"repair source progress file is unreadable: {path}"
+            ) from exc
+        if not isinstance(raw, Mapping):
+            raise TypeError("repair source progress document must be a JSON object")
+        source_identity = raw.get("identity")
+        source_configuration = raw.get("configuration")
+        if not isinstance(source_identity, Mapping):
+            raise TypeError("repair source identity must be a mapping")
+        if not isinstance(source_configuration, Mapping):
+            raise TypeError("repair source configuration must be a mapping")
+        for key in _CANDIDATE_CACHE_IDENTITY_KEYS:
+            if source_identity.get(key) != expected_identity.get(key):
+                raise ValueError(f"repair source identity mismatch: {key}")
+        source_code = source_identity.get("code")
+        expected_code = expected_identity.get("code")
+        if not isinstance(source_code, Mapping):
+            raise TypeError("repair source producer identity is missing")
+        if not isinstance(expected_code, Mapping):
+            raise TypeError("current repair producer identity is missing")
+        for key in _CANDIDATE_CACHE_CODE_KEYS:
+            if not isinstance(source_code.get(key), str) or not source_code[key]:
+                raise ValueError(f"repair source producer identity is missing: {key}")
+        if source_code.get("target_module_sha256") != expected_code.get(
+            "target_module_sha256"
+        ):
+            raise ValueError("repair source target module identity mismatch")
+        expected_science_configuration = {
+            key: value
+            for key, value in expected_configuration.items()
+            if key not in _CANDIDATE_CACHE_CONFIGURATION_IGNORED
+        }
+        source_science_configuration = {
+            key: value
+            for key, value in source_configuration.items()
+            if key not in _CANDIDATE_CACHE_CONFIGURATION_IGNORED
+        }
+        if source_science_configuration != expected_science_configuration:
+            raise ValueError("repair source task configuration mismatch")
+
+        if raw.get("state") != "FAILED":
+            raise ValueError("repair source must be FAILED after parity-only failure")
+        last_error = raw.get("last_error")
+        if not isinstance(last_error, Mapping) or _REPAIR_FAILURE_REASON not in str(
+            last_error.get("message", "")
+        ):
+            raise ValueError("repair source failure is not the expected parity failure")
+        if raw.get("final_output") is not None:
+            raise ValueError("repair source already has a final-output reservation")
+        stages = raw.get("stages")
+        if not isinstance(stages, Mapping) or "parity_preflight" in stages:
+            raise ValueError("repair source must not contain a parity stage")
+        if set(stages) != {_REPAIR_STAGE_KEY}:
+            raise ValueError(
+                "repair source must contain only selected replay pass 0001"
+            )
+
+        recorded_candidate_cache = raw.get("candidate_cache")
+        if not isinstance(recorded_candidate_cache, Mapping):
+            raise TypeError("repair source candidate-cache provenance is missing")
+        recorded_candidate_producer = recorded_candidate_cache.get(
+            "candidate_producer_identity"
+        )
+        recorded_candidate_producer_source = recorded_candidate_cache.get(
+            "candidate_producer_identity_source"
+        )
+        if not isinstance(recorded_candidate_producer, Mapping):
+            raise TypeError("repair source candidate producer identity is missing")
+        expected_candidate_cache = candidate_cache.provenance(
+            expected_code,
+            candidate_producer_identity=recorded_candidate_producer,
+            candidate_producer_identity_source=recorded_candidate_producer_source,
+        )
+        if any(
+            recorded_candidate_cache.get(key) != expected_candidate_cache.get(key)
+            for key in _CANDIDATE_CACHE_LINK_KEYS
+        ):
+            raise ValueError("repair source candidate-cache provenance mismatch")
+
+        output_path = raw.get("output_path")
+        if not isinstance(output_path, str) or not output_path:
+            raise TypeError("repair source output path is missing")
+        source_progress = _ProgressStore(
+            path,
+            identity=source_identity,
+            configuration=source_configuration,
+            output_path=Path(output_path),
+            resume=True,
+        )
+        target_specs = cls._validate_stage(source_progress, _REPAIR_STAGE_KEY, tasks)
+        return cls(
+            path,
+            source_progress,
+            _REPAIR_STAGE_KEY,
+            target_specs,
+            source_code,
+            recorded_candidate_cache,
+        )
+
+    @staticmethod
+    def _validate_stage(
+        progress: _ProgressStore,
+        stage_key: str,
+        tasks: list[tuple[int, str]],
+    ) -> dict[str, dict[str, Any]]:
+        stages = progress.document.get("stages")
+        stage = stages.get(stage_key) if isinstance(stages, Mapping) else None
+        if not isinstance(stage, Mapping):
+            raise TypeError(f"repair stage is missing: {stage_key}")
+        expected_task_keys = [_task_key(task) for task in tasks]
+        if stage.get("schema_id") != PROGRESS_SCHEMA_ID:
+            raise ValueError("repair stage schema_id mismatch")
+        if stage.get("schema_version") != PROGRESS_SCHEMA_VERSION:
+            raise ValueError("repair stage schema_version mismatch")
+        if stage.get("stage_key") != stage_key:
+            raise ValueError("repair stage key mismatch")
+        if stage.get("pass_index") != 1:
+            raise ValueError("repair stage pass index mismatch")
+        if stage.get("status") != "COMPLETE":
+            raise ValueError("repair selected replay stage is not COMPLETE")
+        if stage.get("task_count") != len(tasks):
+            raise ValueError("repair selected replay task count mismatch")
+        if stage.get("task_keys") != expected_task_keys:
+            raise ValueError("repair selected replay task ordering mismatch")
+        if stage.get("task_descriptors") != [_task_descriptor(task) for task in tasks]:
+            raise ValueError("repair selected replay task descriptors mismatch")
+        if not isinstance(stage.get("task_ranges"), str) or not stage["task_ranges"]:
+            raise ValueError("repair selected replay task range is missing")
+        if stage.get("last_failures") not in ([], None):
+            raise ValueError("repair selected replay stage has recorded failures")
+        worker_evidence = stage.get("worker_evidence")
+        if not isinstance(worker_evidence, Mapping):
+            raise TypeError("repair selected replay worker evidence is missing")
+        for key in (
+            "configured_worker_count",
+            "observed_worker_count",
+            "effective_worker_count",
+        ):
+            value = worker_evidence.get(key)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+                raise ValueError(
+                    f"repair selected replay worker evidence is invalid: {key}"
+                )
+        plan = stage.get("plan")
+        if not isinstance(plan, Mapping) or set(plan) != {"target_specs"}:
+            raise ValueError("repair selected replay target plan is malformed")
+        if stage.get("plan_sha256") != _canonical_json_digest(plan):
+            raise ValueError("repair selected replay target plan hash mismatch")
+        raw_specs = plan.get("target_specs")
+        if not isinstance(raw_specs, Mapping) or not raw_specs:
+            raise ValueError("repair selected replay target plan is empty")
+        target_specs: dict[str, dict[str, Any]] = {}
+        for leaf_id, raw_spec in raw_specs.items():
+            if not isinstance(leaf_id, str) or not leaf_id:
+                raise ValueError("repair target plan leaf identity is invalid")
+            if not isinstance(raw_spec, Mapping):
+                raise TypeError(f"repair target plan spec is malformed: {leaf_id}")
+            spec = dict(raw_spec)
+            if (
+                spec.get("sampling_arm") not in ARMS
+                or spec.get("target_kind") not in {"calibration", "formal"}
+                or isinstance(spec.get("act"), bool)
+                or spec.get("act") not in (1, 2)
+                or not isinstance(spec.get("root_identity"), str)
+                or not spec["root_identity"]
+                or not isinstance(spec.get("occurrence_key"), str)
+                or not spec["occurrence_key"]
+            ):
+                raise ValueError(f"repair target plan spec is invalid: {leaf_id}")
+            target_specs[leaf_id] = spec
+        task_map = stage.get("tasks")
+        if not isinstance(task_map, Mapping) or set(task_map) != set(
+            expected_task_keys
+        ):
+            raise ValueError("repair selected replay task inventory mismatch")
+        for task in tasks:
+            key = _task_key(task)
+            entry = task_map[key]
+            if not isinstance(entry, Mapping) or entry.get("status") != "success":
+                raise ValueError(
+                    f"repair selected replay task is not successful: {key}"
+                )
+            if entry.get("task") != _task_descriptor(task):
+                raise ValueError(
+                    f"repair selected replay task descriptor mismatch: {key}"
+                )
+            attempt = entry.get("attempt")
+            history = entry.get("attempt_history")
+            if (
+                isinstance(attempt, bool)
+                or not isinstance(attempt, int)
+                or attempt < 1
+                or not isinstance(history, list)
+                or not history
+                or not isinstance(history[-1], Mapping)
+                or history[-1].get("status") != "success"
+                or history[-1].get("attempt") != attempt
+                or history[-1].get("artifact") != entry.get("artifact")
+            ):
+                raise ValueError(f"repair selected replay task history mismatch: {key}")
+            artifact = entry.get("artifact")
+            if not isinstance(artifact, Mapping):
+                raise TypeError(f"repair selected replay artifact is missing: {key}")
+            artifact_path = progress._validated_artifact_path(stage_key, task, entry)
+            if artifact_path.parent != (progress.parts_directory / stage_key).resolve():
+                raise ValueError(
+                    f"repair selected replay artifact path mismatch: {key}"
+                )
+        return target_specs
+
+    def stage_worker_evidence(self) -> dict[str, Any]:
+        return dict(self.progress.document["stages"][self.stage_key]["worker_evidence"])
+
+    def stage_wall_clock(self) -> float:
+        value = self.progress.document["stages"][self.stage_key].get(
+            "wall_clock_seconds", 0.0
+        )
+        if not isinstance(value, (int, float)) or isinstance(value, bool):
+            raise TypeError("repair selected replay wall-clock evidence is invalid")
+        return float(value)
+
+    def provenance(self, repair_identity: Mapping[str, Any]) -> dict[str, Any]:
+        stage = self.progress.document["stages"][self.stage_key]
+        return {
+            "mode": "parity_finalization_only_repair",
+            "reason": _REPAIR_REASON,
+            "source_progress_path": str(self.path),
+            "source_progress_bytes": self._index_bytes,
+            "source_progress_sha256": self._index_sha256,
+            "source_run_producer_identity": dict(self.source_producer_identity),
+            "cached_candidate_producer_identity": dict(
+                self.candidate_cache_provenance["candidate_producer_identity"]
+            ),
+            "repair_producer_identity": dict(repair_identity),
+            "reused_stage": {
+                "stage_key": self.stage_key,
+                "status": stage["status"],
+                "task_count": stage["task_count"],
+                "part_count": len(stage["tasks"]),
+                "plan_sha256": stage["plan_sha256"],
+                "worker_evidence": self.stage_worker_evidence(),
+                "native_replay_executed": False,
+            },
         }
 
 
@@ -1894,7 +2231,7 @@ def _work_parity_one(task: tuple[int, str]) -> dict[str, Any]:
         "worker_pid": os.getpid(),
         "root_identity": source_identity,
         "sampling_arm": arm,
-        "act": int(root_raw["act"]),
+        "act": _snapshot_act(root.snapshot_raw),
         "root_action_equal": off.get("root_action") == on.get("root_action"),
         "root_statistics_equal": off.get("root_rows") == on.get("root_rows"),
         "native_root_statistics_equal": off.get("root_rows") == on.get("root_rows"),
@@ -1979,11 +2316,27 @@ def _run_parity(
     return parity, failures, wall_clock_seconds
 
 
+def _snapshot_act(snapshot_raw: Mapping[str, Any]) -> int:
+    act = snapshot_raw.get("act")
+    if isinstance(act, bool) or not isinstance(act, int) or act not in (1, 2):
+        raise ValueError("T084 root snapshot_raw Act is invalid")
+    return act
+
+
+def _root_act(root_raw: Mapping[str, Any]) -> int:
+    """Read Act from the authoritative T064 snapshot_raw field."""
+
+    snapshot_raw = root_raw.get("snapshot_raw")
+    if not isinstance(snapshot_raw, Mapping):
+        raise TypeError("T084 root snapshot_raw is missing")
+    return _snapshot_act(snapshot_raw)
+
+
 def _select_parity_root_indices(roots: list[dict[str, Any]]) -> list[int]:
     """Choose a stable 8+8 Act parity subset, independent of source ordering."""
 
-    act1 = [index for index, root in enumerate(roots) if int(root.get("act", 0)) == 1]
-    act2 = [index for index, root in enumerate(roots) if int(root.get("act", 0)) == 2]
+    act1 = [index for index, root in enumerate(roots) if _root_act(root) == 1]
+    act2 = [index for index, root in enumerate(roots) if _root_act(root) == 2]
     if len(act1) < 8 or len(act2) < 8:
         raise ValueError("T084 parity requires at least eight roots from each Act")
     return act1[:8] + act2[:8]
@@ -2649,10 +3002,13 @@ def _run_progress_collection(
     output_path: Path,
     progress: _ProgressStore,
     candidate_cache: _CandidateCache | None = None,
+    repair_cache: _RepairCache | None = None,
 ) -> int:
     """Run the resumable path with bounded parent-memory aggregation."""
 
     workers = _validate_worker_count(workers)
+    if repair_cache is not None and candidate_cache is None:
+        raise ValueError("parity repair requires an explicit candidate cache")
     tasks = _stage_tasks(len(roots))
     candidate_source: _ProgressStore | _CandidateCache = progress
     if candidate_cache is None:
@@ -2697,9 +3053,17 @@ def _run_progress_collection(
     occupancy_counts = Counter(
         str(row["exact_leaf_identity"]) for row in candidate_metadata
     )
-    target_specs, selection_policy = _select_target_specs_with_policy(
+    selected_target_specs, selection_policy = _select_target_specs_with_policy(
         candidate_metadata
     )
+    if repair_cache is not None:
+        if selected_target_specs != repair_cache.target_specs:
+            raise ValueError(
+                "repair selected replay target plan differs from candidate selection"
+            )
+        target_specs = repair_cache.target_specs
+    else:
+        target_specs = selected_target_specs
 
     replay_passes: list[dict[str, Any]] = []
     target_stage_keys: list[str] = []
@@ -2709,33 +3073,45 @@ def _run_progress_collection(
     accepted_ids: set[str] = set()
     target_attempts: list[dict[str, Any]] = []
     current_specs = target_specs
+    target_source: _ProgressStore = progress
     pass_index = 1
     while current_specs:
         scheduled_ids = set(current_specs)
         stage_key = f"selected_leaf_continuation_pass_{pass_index:04d}"
-        _, pass_failures, pass_wall, pass_workers = _run_pass(
-            roots,
-            checkpoint_paths,
-            native_commit,
-            workers,
-            "selected_leaf_continuation",
-            current_specs,
-            progress=progress,
-            stage_key=stage_key,
-            pass_index=pass_index,
-            plan={"target_specs": current_specs},
-        )
+        if repair_cache is None:
+            _, pass_failures, pass_wall, pass_workers = _run_pass(
+                roots,
+                checkpoint_paths,
+                native_commit,
+                workers,
+                "selected_leaf_continuation",
+                current_specs,
+                progress=progress,
+                stage_key=stage_key,
+                pass_index=pass_index,
+                plan={"target_specs": current_specs},
+            )
+        else:
+            if pass_index != 1 or stage_key != repair_cache.stage_key:
+                raise ValueError("repair can reuse only selected replay pass 0001")
+            target_source = repair_cache.progress
+            if current_specs != repair_cache.target_specs:
+                raise ValueError("repair selected replay target plan changed")
+            pass_failures = []
+            pass_wall = repair_cache.stage_wall_clock()
+            pass_workers = repair_cache.stage_worker_evidence()
         if pass_failures:
             raise RuntimeError(
                 f"selected-leaf replay pass {pass_index} incomplete: "
                 + "; ".join(pass_failures[:8])
             )
-        pass_successes = progress.successful_task_keys(stage_key, tasks)
-        if len(pass_successes) != len(tasks):
-            raise RuntimeError(
-                f"selected-leaf replay pass {pass_index} incomplete: "
-                f"{len(pass_successes)}/{len(tasks)} task parts are successful"
-            )
+        if repair_cache is None:
+            pass_successes = progress.successful_task_keys(stage_key, tasks)
+            if len(pass_successes) != len(tasks):
+                raise RuntimeError(
+                    f"selected-leaf replay pass {pass_index} incomplete: "
+                    f"{len(pass_successes)}/{len(tasks)} task parts are successful"
+                )
         target_stage_keys.append(stage_key)
         attempted_ids.update(scheduled_ids)
         target_worker_evidence.append(pass_workers)
@@ -2743,7 +3119,7 @@ def _run_progress_collection(
         valid_rows = 0
         invalid_rows = 0
         for task, row_index, row in _iter_stage_field_rows(
-            progress, stage_key, tasks, "target_rows"
+            target_source, stage_key, tasks, "target_rows"
         ):
             leaf_id = row.get("exact_leaf_identity")
             if not isinstance(leaf_id, str) or leaf_id not in current_specs:
@@ -2815,10 +3191,22 @@ def _run_progress_collection(
                 "worker_evidence": pass_workers,
                 "valid_rows": valid_rows,
                 "invalid_rows": invalid_rows,
+                **(
+                    {
+                        "reused_completed_stage": True,
+                        "native_replay_executed": False,
+                    }
+                    if repair_cache is not None
+                    else {}
+                ),
             }
         )
-        current_specs = _backfill_specs(
-            candidate_metadata, attempted_ids, accepted_by_cell, set()
+        current_specs = (
+            {}
+            if repair_cache is not None
+            else _backfill_specs(
+                candidate_metadata, attempted_ids, accepted_by_cell, set()
+            )
         )
         pass_index += 1
 
@@ -2826,7 +3214,7 @@ def _run_progress_collection(
     formal_descriptors = _accepted_descriptors(accepted_by_cell, "formal")
     calibration_by_identity: dict[str, Mapping[str, Any]] = {}
     for descriptor, row in _iter_located_target_rows(
-        progress, target_stage_keys, tasks, calibration_descriptors
+        target_source, target_stage_keys, tasks, calibration_descriptors
     ):
         identity = str(row.get("exact_leaf_identity"))
         if identity in calibration_by_identity:
@@ -2877,11 +3265,12 @@ def _run_progress_collection(
         ),
         "host_logical_cpu_count": os.cpu_count(),
     }
-    root_source: _ProgressStore | _CandidateCache = progress
+    root_source: _ProgressStore | _CandidateCache = target_source
     root_stage_key = target_stage_keys[-1] if target_stage_keys else "candidate"
     if not target_stage_keys:
         root_source = candidate_source
     candidate_cache_provenance = progress.document.get("candidate_cache")
+    repair_provenance = progress.document.get("repair")
     execution = {
         "schema_id": COLLECTOR_SCHEMA_ID,
         "generation_mode": "native_runtime_collector",
@@ -2998,10 +3387,12 @@ def _run_progress_collection(
     }
     if candidate_cache_provenance is not None:
         execution["candidate_cache"] = dict(candidate_cache_provenance)
+    if repair_provenance is not None:
+        execution["repair"] = dict(repair_provenance)
 
     def formal_row_stream() -> Iterable[Mapping[str, Any]]:
         for _, row in _iter_located_target_rows(
-            progress, target_stage_keys, tasks, formal_descriptors
+            target_source, target_stage_keys, tasks, formal_descriptors
         ):
             formal_row = dict(row)
             if isinstance(selected_n, int):
@@ -3052,6 +3443,16 @@ def main() -> int:
             "directory and run only postprocessing/replay"
         ),
     )
+    parser.add_argument(
+        "--repair-parity-progress-dir",
+        "--repair-progress-dir",
+        dest="repair_progress_dir",
+        type=Path,
+        help=(
+            "read a FAILED old progress directory whose selected replay pass "
+            "is complete and rerun only parity/finalization"
+        ),
+    )
     parser.add_argument("--workers", type=_worker_count_argument, default=WORKER_COUNT)
     args = parser.parse_args()
     args.workers = _validate_worker_count(args.workers)
@@ -3062,6 +3463,15 @@ def main() -> int:
         raise SystemExit("--resume requires --progress-dir")
     if args.reuse_candidate_progress_dir is not None and args.progress_dir is None:
         raise SystemExit("--reuse-candidate-progress-dir requires --progress-dir")
+    if args.repair_progress_dir is not None and args.progress_dir is None:
+        raise SystemExit("--repair-progress-dir requires --progress-dir")
+    if (
+        args.repair_progress_dir is not None
+        and args.reuse_candidate_progress_dir is None
+    ):
+        raise SystemExit(
+            "--repair-progress-dir requires --reuse-candidate-progress-dir"
+        )
     sys.path.insert(0, str(args.native_build))
     progress: _ProgressStore | None = None
     try:
@@ -3093,8 +3503,18 @@ def main() -> int:
             if progress.already_complete:
                 return 0
             candidate_cache: _CandidateCache | None = None
-            if args.reuse_candidate_progress_dir is not None:
-                reuse_dir = args.reuse_candidate_progress_dir.resolve()
+            repair_cache: _RepairCache | None = None
+            reuse_dir = (
+                args.reuse_candidate_progress_dir.resolve()
+                if args.reuse_candidate_progress_dir is not None
+                else None
+            )
+            repair_dir = (
+                args.repair_progress_dir.resolve()
+                if args.repair_progress_dir is not None
+                else None
+            )
+            if reuse_dir is not None:
                 if reuse_dir == progress_dir:
                     raise ValueError(
                         "candidate cache directory must differ from the new progress directory"
@@ -3105,8 +3525,45 @@ def main() -> int:
                     expected_configuration=configuration,
                     tasks=_stage_tasks(len(roots)),
                 )
-                progress.record_candidate_cache(
-                    candidate_cache.provenance(identity["code"])
+                if repair_dir is not None:
+                    if repair_dir in {progress_dir, reuse_dir}:
+                        raise ValueError(
+                            "repair source directory must differ from the new progress "
+                            "and candidate cache directories"
+                        )
+                    repair_cache = _RepairCache.load(
+                        repair_dir,
+                        expected_identity=identity,
+                        expected_configuration=configuration,
+                        tasks=_stage_tasks(len(roots)),
+                        candidate_cache=candidate_cache,
+                    )
+                    source_candidate_cache = repair_cache.candidate_cache_provenance
+                    progress.record_candidate_cache(
+                        candidate_cache.provenance(
+                            identity["code"],
+                            candidate_producer_identity=source_candidate_cache[
+                                "candidate_producer_identity"
+                            ],
+                            candidate_producer_identity_source=source_candidate_cache[
+                                "candidate_producer_identity_source"
+                            ],
+                        )
+                    )
+                    progress.record_repair(repair_cache.provenance(identity["code"]))
+                elif progress.document.get("repair") is not None:
+                    raise ValueError(
+                        "--resume of a parity-repair run requires "
+                        "--repair-progress-dir and --reuse-candidate-progress-dir"
+                    )
+                else:
+                    progress.record_candidate_cache(
+                        candidate_cache.provenance(identity["code"])
+                    )
+            elif progress.document.get("repair") is not None:
+                raise ValueError(
+                    "--resume of a parity-repair run requires "
+                    "--repair-progress-dir and --reuse-candidate-progress-dir"
                 )
             elif progress.document.get("candidate_cache") is not None:
                 raise ValueError(
@@ -3121,6 +3578,7 @@ def main() -> int:
                 args.output,
                 progress,
                 candidate_cache=candidate_cache,
+                repair_cache=repair_cache,
             )
         tasks = len(roots) * len(ARMS)
         candidate_runs, candidate_failures, candidate_wall, candidate_workers = (
