@@ -17,6 +17,13 @@ for independent review. The maintainer does not proactively add successor tasks.
 Implementers are maintainer-managed sub-agents and may start only after the
 workflow's explicit implementation-authorization gate is satisfied.
 
+Before creating or accepting an implementation branch, the Maintainer must
+refresh the configured upstream remote's `main` ref and verify exact full-SHA
+equality between local `main` and that remote ref. A failed fetch, missing ref,
+or any ahead/behind/divergent state blocks the work. The check must be repeated
+immediately before landing against the recorded pre-landing base SHA; see the detailed
+[`Main Synchronization Gate`](../collaboration_workflow.md#main-synchronization-gate).
+
 ## Active Backlog
 
 | ID | Status | Task | Depends On | Legacy Reference Areas |

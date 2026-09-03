@@ -111,8 +111,9 @@ not to keep appending rules.
 ## Task Flow
 
 1. **Planner Contract** — delta contract and acceptance meaning; no feature code.
-2. **Execution Readiness** — Maintainer checks current-`main` consistency,
-   feasibility, required inputs, and unresolved material semantics.
+2. **Execution Readiness** — Maintainer first completes the Main Synchronization
+   Gate below, then checks current-`main` consistency, feasibility, required
+   inputs, and unresolved material semantics.
 3. **Implementation Authorized** — Maintainer publishes exact-head authorization:
 
    ```text
@@ -147,6 +148,33 @@ acceptance for the new head. A clearly non-semantic landing-only change may reta
 acceptance only when both roles explicitly record that it is immaterial. Prefer
 putting landing records on the PR before dual final acceptance so this exception is
 rare.
+
+## Main Synchronization Gate
+
+Before a task branch is created or execution readiness begins, the Maintainer
+must ensure that the configured upstream remote's `main` ref (normally
+`origin/main`) has been refreshed and that the local integration line is exactly
+synchronized with it. The branch creator must not bypass this gate with a stale
+local branch or an unverified moving remote ref. The check is:
+
+```text
+git fetch <remote> main
+git rev-parse --verify main
+git rev-parse --verify <remote>/main
+git rev-list --left-right --count main...<remote>/main
+```
+
+Replace `<remote>` when the repository's configured upstream is not `origin`.
+The two full commit SHAs must be identical and the ahead/behind count must be
+`0 0` for execution readiness and branch creation. A failed fetch, missing
+remote ref, stale local `main`, or any ahead/behind/divergent state blocks
+branch creation, exact-head approval, and integration work until it is resolved.
+Record the remote/ref, fetch result, check time, and both full SHAs in
+execution-readiness or PR evidence. Immediately before landing, fetch again and
+verify that the recorded pre-landing base SHA still equals the current remote
+`main`, then verify that the pending landing is a fast-forward. The equality
+comparison at this point is against that recorded base, not a pending `HEAD`
+that already includes the commits being landed.
 
 ## Artifacts And Runtime
 

@@ -169,6 +169,16 @@ current contracts.
   specification, manages lifecycle state, dispatches the implementer on the same
   branch/PR, and maintains `docs/current_status.md` as the planner-facing result
   report. It does not proactively originate new tasks.
+- Before a task branch is created, execution readiness begins, or
+  integration/merge work starts, the maintainer must ensure the configured
+  upstream remote's `main` ref (normally `origin/main`) has been refreshed and
+  that local `main` has the exact same full commit SHA. A branch creator must
+  not bypass this gate with a stale local branch or an unverified moving remote
+  ref. A fetch failure, missing ref, or any ahead/behind/divergent state blocks
+  the work; record the remote/ref and both SHAs in readiness or PR evidence.
+  Immediately before landing, fetch again and verify that the recorded
+  pre-landing base SHA still equals remote `main` and that the pending landing
+  is a fast-forward; record that base/remote comparison as well.
 - A task implementer starts only after a valid exact-commit specification
   approval. Task lifecycle state is authoritative only in
   `docs/tasks/README.md`; an empty executable queue is valid while awaiting

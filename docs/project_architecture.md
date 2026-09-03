@@ -363,6 +363,12 @@ boundary.
 
 - One published task corresponds to one fresh branch and one pull request.
 - Every task branch starts from latest `main`.
+- Before readiness or branch creation, refresh the configured upstream remote's
+  `main` ref and require exact full-SHA equality with local `main`; a failed
+  fetch, missing ref, or any ahead/behind/divergent state blocks the work. Before
+  landing, repeat the fetch and compare the recorded pre-landing base SHA with
+  remote `main`, then require a fast-forward and record both SHAs. See the detailed
+  [`Main Synchronization Gate`](collaboration_workflow.md#main-synchronization-gate).
 - Parallel tasks use isolated worktrees and never switch branches in a shared
   worktree.
 - The repository-read-only planner proposes new task content and priority to
