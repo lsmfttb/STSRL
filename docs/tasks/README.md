@@ -104,7 +104,7 @@ workflow's explicit implementation-authorization gate is satisfied.
 | T081 | DONE | [Scientific artifact eligibility gate](T081-scientific-artifact-eligibility-gate.md) | T043, T044, T047, T048, T050, T051, T052, T062, T070 | PR #87 merged at 4a24f18; artifact integrity and scientific eligibility are now separate, fail-closed consumer gates with a durable historical claim-boundary audit |
 | T082 | DONE | [T064 value-target semantic closure](T082-t064-value-target-semantic-closure.md) | T080, T081, T064, T043, T042 | PR #88 merged at 2acd1e8; qualified 460-row lineage audit confirmed VALUE_TARGET_SEMANTIC_MISMATCH_CONFIRMED and permits one bounded value-target repair experiment |
 | T083 | DONE | [Battle Search v2 leaf-value target contract audit](T083-battle-search-v2-leaf-value-target-contract.md) | T082, T081, T064, T062, T070 | PR #89 merged at c4f943e; accepted NEW_LEAF_CONTINUATION_UTILITY_TARGET_REQUIRED and specifies a separate internal-leaf continuation-utility target-generation consideration without publishing a successor |
-| T084 | DRAFT | [Search v2 internal-leaf continuation-utility target generation](T084-search-v2-internal-leaf-target-generation.md) | T083, T082, T081, T064, T062, T070 | Planner proposal for calibrated native-scale internal-leaf value targets; no training or outcome claim authorized |
+| T084 | DONE | [Search v2 internal-leaf continuation-utility target generation](T084-search-v2-internal-leaf-target-generation.md) | T083, T082, T081, T064, T062, T070 | PR #91 accepted LEAF_CONTINUATION_UTILITY_TARGETS_READY; calibrated N=100 and retained 960 qualified public-input/native-utility internal-leaf rows; no training or outcome claim |
 
 Use the table, not per-task files or roadmap prose, when deciding whether a task
 may receive a branch. Only `READY` rows should receive a new implementation
@@ -232,9 +232,17 @@ the accepted non-smoke T064 lineage. T082 confirmed
 `VALUE_TARGET_SEMANTIC_MISMATCH_CONFIRMED`; T083 then accepted
 `NEW_LEAF_CONTINUATION_UTILITY_TARGET_REQUIRED` and fixed the required Search v2
 leaf scalar to pinned-native continuation utility at the post-first-action
-internal-leaf boundary. T084 is the current Planner `DRAFT`: it proposes only
-calibrated internal-leaf target generation, with no training or outcome claim.
-T063 and T066 remain `DRAFT` and are not implicitly promoted.
+internal-leaf boundary. T084 is now complete with terminal classification
+`LEAF_CONTINUATION_UTILITY_TARGETS_READY`: the repaired audit selected `N=100`
+from the precommitted repetition grid and validated 960 qualified internal-leaf
+value rows (320 per occupancy arm; aggregate Act counts 534/426). The accepted
+report SHA-256 is `b6cbcb5ee96d9538adb6ee7a4849a138f6d3a3f93b6127e7ba0ff91dcae1ad1c`
+and retention-manifest SHA-256 is
+`754a9d2560fb5b01c53e7789bdd558e5ef3cc9d0eca4dd690f8f1ab8df1fb0f6`.
+This qualifies the bounded target dataset for Planner consideration of a
+separate paired value-target repair/retraining task; T084 itself performed no
+training or outcome evaluation. T063 and T066 remain `DRAFT` and are not
+implicitly promoted.
 
 ## Task Boundary And Artifact Rules
 
@@ -279,12 +287,11 @@ and inspect again after the expected window or on request rather than continuous
 The executable queue is exactly the set of `READY` rows in the Active Backlog;
 it is currently empty. T063 and T066 remain `DRAFT`; T034 remains blocked on
 native public-consistent hidden-future sampling support. T064, T065, and
-T071--T083 are `DONE` with their recorded diagnostic, repair, or control-plane
-outcomes. T082 and T083 do not publish an executable successor by themselves;
-T083 identifies the required internal-leaf continuation-utility target
-generation boundary, while any target-generation or value-repair task must
-first receive a fresh Planner specification and Maintainer exact-head
-approval.
+T071--T084 are `DONE` with their recorded diagnostic, repair, control-plane, or
+target-generation outcomes. T084 qualifies a bounded internal-leaf
+continuation-utility dataset but does not itself publish a retraining or outcome
+evaluation successor; any such task requires a fresh Planner specification and
+Maintainer exact-head approval.
 
 ## Standard Local Gates
 
@@ -304,7 +311,7 @@ requirements.
 
 ## Historical Mapping
 
-Completed and cancelled task documents through T078 remain the durable
+Completed and cancelled task documents through T084 remain the durable
 historical record. Accepted experiment details and artifact identities remain in
 individual task documents, reports, and `current_status.md`; this index only owns
 lifecycle state and the current executable queue.
