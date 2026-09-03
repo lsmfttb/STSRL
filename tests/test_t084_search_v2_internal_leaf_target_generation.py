@@ -77,6 +77,43 @@ def test_streaming_collector_reader_fails_closed_on_truncated_array(tmp_path) ->
     assert any("malformed or truncated" in item for item in result["problems"])
 
 
+def test_streaming_target_membership_is_order_independent(tmp_path) -> None:
+    row = _leaf(0)
+    row["root_identity"] = "root"
+    row["source_complete_identity_sha256"] = "root"
+    payload = dict(
+        sorted(
+            {
+                "schema_id": "t084-native-internal-leaf-collector-v1",
+                "generation_mode": "native_runtime_collector",
+                "search_simulations_per_root": 100,
+                "worker_count": 1,
+                "effective_worker_count": 1,
+                "shards": [],
+                "arm_configs": {},
+                "parity": {},
+                "root_runs": [],
+                "candidate_rows": [row],
+                "calibration_rows": [row],
+                "formal_rows": [],
+            }.items()
+        )
+    )
+    assert list(payload)[:3] == [
+        "arm_configs",
+        "calibration_rows",
+        "candidate_rows",
+    ]
+    path = tmp_path / "sorted-collector.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    result = _stream_validate_collector(path, [], native_commit="native")
+    assert not any(
+        "calibration leaf is absent from candidate pool" in item
+        for item in result["problems"]
+    )
+
+
 def _leaf(index: int, *, values: list[float] | None = None) -> dict:
     return {
         "sampling_arm": "unguided_search_v2",

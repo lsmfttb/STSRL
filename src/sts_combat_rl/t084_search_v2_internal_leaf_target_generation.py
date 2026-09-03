@@ -1358,9 +1358,15 @@ def summarize_candidate_pool(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any
 def ambiguity_diagnostic(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     groups: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
     for row in rows:
-        key = json.dumps(
-            row.get("public_model_input"), sort_keys=True, separators=(",", ":")
-        )
+        key = row.get("public_model_input_sha256")
+        if not isinstance(key, str):
+            key = hashlib.sha256(
+                json.dumps(
+                    row.get("public_model_input"),
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ).encode()
+            ).hexdigest()
         groups[key].append(row)
     diagnostics = []
     for key, group in groups.items():
@@ -1371,7 +1377,7 @@ def ambiguity_diagnostic(rows: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         values = [value for value in means if value is not None]
         diagnostics.append(
             {
-                "public_model_input_sha256": hashlib.sha256(key.encode()).hexdigest(),
+                "public_model_input_sha256": key,
                 "hidden_leaf_count": len(identities),
                 "target_spread": max(values) - min(values) if values else None,
                 "target_stats": value_stats(values),
@@ -1526,6 +1532,7 @@ class _StreamingTargetValidation:
         self.formal_digests: set[str] = set()
         self.calibration_metrics_rows: list[dict[str, Any]] = []
         self.formal_report_rows: list[dict[str, Any]] = []
+        self.candidate_membership_checks: list[tuple[str, str]] = []
         self.calibration_count = 0
         self.formal_count = 0
         self.calibration_arm_counts: Counter[str] = Counter()
@@ -1560,8 +1567,10 @@ class _StreamingTargetValidation:
             self.problems.append(f"duplicate {label} exact hidden leaf identity")
         ids.add(identity)
         digests.add(digest)
-        if identity not in self.candidate_ids:
-            self.problems.append(f"{label} leaf is absent from candidate pool")
+        # The writer emits calibration_rows before candidate_rows in sorted
+        # top-level order.  Defer this cross-array check until both streams
+        # have been consumed so correctness does not depend on field order.
+        self.candidate_membership_checks.append((label, identity))
         if label == "formal" and row["sampling_arm"] not in ARMS:
             self.problems.append("formal row has unknown sampling arm")
         if required is None:
@@ -1606,12 +1615,21 @@ class _StreamingTargetValidation:
                     "act": act,
                     "exact_leaf_identity": identity,
                     "exact_state_digest": digest,
-                    "public_model_input": row["public_model_input"],
+                    "public_model_input_sha256": hashlib.sha256(
+                        json.dumps(
+                            row["public_model_input"],
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        ).encode()
+                    ).hexdigest(),
                     "target_mean": row.get("target_mean"),
                 }
             )
 
     def report(self, selected_repetition_count: int | None) -> dict[str, Any]:
+        for label, identity in self.candidate_membership_checks:
+            if identity not in self.candidate_ids:
+                self.problems.append(f"{label} leaf is absent from candidate pool")
         disjoint = not bool(
             self.calibration_ids & self.formal_ids
             or self.calibration_digests & self.formal_digests
