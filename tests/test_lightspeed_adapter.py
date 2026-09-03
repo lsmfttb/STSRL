@@ -35,6 +35,7 @@ class FakeStepSimulator:
         self.root_prior_calls = 0
         self.geometry_calls = 0
         self.state_utilization_calls = 0
+        self.leaf_collection_calls = 0
 
     def reset(self, character_class: str, seed: int, ascension: int) -> None:
         self.character_class = character_class
@@ -143,6 +144,39 @@ class FakeStepSimulator:
             "include_potions": include_potions,
             "policy_enabled": policy_prior_callback is not None,
             "value_enabled": leaf_value_callback is not None,
+        }
+
+    def battle_search_v2_with_leaf_collection(
+        self,
+        simulations: int,
+        include_potions: bool,
+        policy_prior_callback,
+        leaf_value_callback,
+        collector_config: dict[str, object],
+        leaf_collector_callback,
+    ) -> dict[str, object]:
+        self.leaf_collection_calls += 1
+        return {
+            "simulations": simulations,
+            "include_potions": include_potions,
+            "policy_enabled": policy_prior_callback is not None,
+            "value_enabled": leaf_value_callback is not None,
+            "collector_config": collector_config,
+            "collector_callback": leaf_collector_callback is not None,
+        }
+
+    def evaluate_leaf_continuation(
+        self,
+        checkpoint: object,
+        search_action_seed: int,
+        max_transitions: int,
+        include_potions: bool,
+    ) -> dict[str, object]:
+        return {
+            "checkpoint": checkpoint,
+            "search_action_seed": search_action_seed,
+            "max_transitions": max_transitions,
+            "include_potions": include_potions,
         }
 
 
@@ -265,6 +299,59 @@ def test_lightspeed_adapter_wraps_state_utilization_companion() -> None:
     assert report["policy_enabled"] is True
     assert report["value_enabled"] is True
     assert adapter._sim.state_utilization_calls == 1
+
+
+def test_lightspeed_adapter_exposes_explicit_t084_collector_surface() -> None:
+    adapter = LightSpeedAdapter(seed=7, ascension=20, module=FakeModule)
+    snapshot = adapter.reset(seed=11)
+    collector = lambda *args: None
+    report = adapter.battle_search_v2_with_leaf_collection(
+        snapshot,
+        simulations=100,
+        collector_config={"sampling_arm": "unguided_search_v2"},
+        leaf_collector_callback=collector,
+    )
+
+    assert report["simulations"] == 100
+    assert report["collector_config"] == {"sampling_arm": "unguided_search_v2"}
+    assert adapter._sim.leaf_collection_calls == 1
+
+
+def test_lightspeed_adapter_requires_t084_collector_callback() -> None:
+    adapter = LightSpeedAdapter(seed=7, ascension=20, module=FakeModule)
+    snapshot = adapter.reset(seed=11)
+
+    with pytest.raises(ValueError, match="leaf_collector_callback"):
+        adapter.battle_search_v2_with_leaf_collection(snapshot, simulations=100)
+
+
+def test_lightspeed_adapter_exposes_t084_continuation_surface() -> None:
+    adapter = LightSpeedAdapter(seed=7, ascension=20, module=FakeModule)
+    adapter.reset(seed=11)
+    checkpoint = object()
+
+    result = adapter.evaluate_leaf_continuation(
+        checkpoint,
+        search_action_seed=123,
+        max_transitions=2048,
+        include_potions=True,
+    )
+
+    assert result == {
+        "checkpoint": checkpoint,
+        "search_action_seed": 123,
+        "max_transitions": 2048,
+        "include_potions": True,
+    }
+
+    with pytest.raises(TypeError, match="search_action_seed"):
+        adapter.evaluate_leaf_continuation(
+            checkpoint, search_action_seed=True, max_transitions=1
+        )
+    with pytest.raises(ValueError, match="max_transitions"):
+        adapter.evaluate_leaf_continuation(
+            checkpoint, search_action_seed=123, max_transitions=0
+        )
 
 
 def test_lightspeed_snapshot_fingerprint_ignores_transition_only_battle_outcome() -> (
