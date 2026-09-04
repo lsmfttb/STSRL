@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import inspect
 from dataclasses import dataclass, replace
+from types import SimpleNamespace
 
 import pytest
 
+import sts_combat_rl.commands.t085_native_execution as t085_execution
 from sts_combat_rl.commands.cli_parser import build_parser
 from sts_combat_rl.commands.t085_native_execution import (
     T085NativeExecutionError,
@@ -13,7 +15,9 @@ from sts_combat_rl.commands.t085_native_execution import (
     build_t085_native_arms,
     finalize_t085_native_root_edge_label,
     prepare_t085_native_root_edge_label,
+    resolve_t085_canonical_records,
     run_t085_native_paired_evaluation,
+    t085_scorer_callbacks,
 )
 from sts_combat_rl.sim.action_space import ActionSpaceConfig
 from sts_combat_rl.sim.contract import (
@@ -27,6 +31,14 @@ from sts_combat_rl.sim.oracle_search import (
     ORACLE_SEARCH_SCHEMA_ID,
 )
 from sts_combat_rl.sim.policy_contract import DecisionContext
+from sts_combat_rl.sim.search_guidance_inference import (
+    SEARCH_V2_LEAF_NATIVE_UTILITY_TARGET_KIND,
+    SearchGuidanceActionScore,
+    SearchGuidanceCheckpointProvenance,
+    SearchGuidanceInferenceResult,
+    SearchGuidanceValuePrediction,
+)
+from sts_combat_rl.sim.torch_policy_value import OUTCOME_TARGET_KIND
 
 
 def _actions() -> list[SimulatorAction]:
@@ -526,6 +538,159 @@ def test_t085_arm_builder_makes_baselines_explicit_native_v2_no_callback() -> No
         assert arms[name].leaf_value_callback is None
         assert arms[name].provenance["native_search_api"] == (
             "StepSimulator.battle_search_v2.v1"
+        )
+
+
+def test_source_resolver_requires_explicit_schema_and_accepts_full_source_pool(
+    tmp_path, monkeypatch
+) -> None:
+    from tests.test_fixed_evaluation_set import _make_record
+
+    artifact = tmp_path / "source.jsonl"
+    artifact.write_text("source-pool\n", encoding="utf-8")
+    full = _make_record(0)
+    monkeypatch.setattr(
+        t085_execution,
+        "load_natural_battle_start_pool_jsonl",
+        lambda stream: SimpleNamespace(records=[full]),
+    )
+    resolved = resolve_t085_canonical_records(
+        artifact,
+        expected_sha256=t085_execution.sha256_file(artifact),
+        artifact_kind="natural_pool",
+    )
+    assert resolved[full.source_checkpoint_id] is full
+    with pytest.raises(T085NativeExecutionError, match="unsupported T085 source"):
+        resolve_t085_canonical_records(
+            artifact,
+            expected_sha256=t085_execution.sha256_file(artifact),
+            artifact_kind="not-a-schema",  # type: ignore[arg-type]
+        )
+
+
+def test_restore_base_then_prime_reset_does_not_search_or_reset() -> None:
+    events: list[str] = []
+
+    class RestoringBase(_ProxyBaseAdapter):
+        def restore_checkpoint(self, checkpoint):
+            events.append(f"restore:{checkpoint}")
+            self.snapshot = _snapshot()
+            return self.snapshot
+
+    base = RestoringBase(events)
+    restored = base.restore_checkpoint("canonical")
+    proxy = T085NativeTerminalSearchAdapter(base, search_simulations=100)
+    proxy.prime_restored_snapshot(restored)
+    assert proxy.reset(seed=999) is restored
+    assert events == ["restore:canonical"]
+    assert proxy.legal_actions(restored) == base.actions
+
+
+def test_scorer_callbacks_bind_context_and_keep_old_vs_corrected_targets(
+    monkeypatch,
+) -> None:
+    provenance = SearchGuidanceCheckpointProvenance(
+        checkpoint_schema_id="torch-policy-value-checkpoint-v1",
+        checkpoint_format_version=1,
+        checkpoint_artifact_id="fake",
+        checkpoint_path=None,
+        model_class="fake",
+        model_config={},
+        trainer_input_artifact_id="input",
+        trainer_input_sha256="sha",
+        policy_target_kind="policy",
+        policy_target_source="fake",
+        outcome_target_kind=OUTCOME_TARGET_KIND,
+    )
+
+    class Scorer:
+        checkpoint_provenance = provenance
+
+        def score_decision_context(self, context):
+            del context
+            return SearchGuidanceInferenceResult(
+                scorer_name="fake",
+                checkpoint_provenance=provenance,
+                legal_action_count=2,
+                eligible_action_count=2,
+                action_scores=[
+                    SearchGuidanceActionScore(0, "card", True, 0.0, 0.25),
+                    SearchGuidanceActionScore(1, "end_turn", True, 0.0, 0.75),
+                ],
+                value_prediction=SearchGuidanceValuePrediction(
+                    battle_survival_probability=0.4
+                ),
+            )
+
+    monkeypatch.setattr(t085_execution, "_node_context", lambda *args: _context())
+    policy, value = t085_scorer_callbacks(
+        Scorer(), root_context=object(), corrected=False
+    )
+    assert policy({}, _actions()) == [0.25, 0.75]
+    assert value({}, _actions()) == 0.4
+    corrected_provenance = replace(
+        provenance, outcome_target_kind=SEARCH_V2_LEAF_NATIVE_UTILITY_TARGET_KIND
+    )
+    corrected = Scorer()
+    corrected.checkpoint_provenance = corrected_provenance
+    corrected.score_decision_context = lambda context: SearchGuidanceInferenceResult(
+        scorer_name="fake",
+        checkpoint_provenance=corrected_provenance,
+        legal_action_count=2,
+        eligible_action_count=2,
+        action_scores=[
+            SearchGuidanceActionScore(0, "card", True, 0.0, 0.5),
+            SearchGuidanceActionScore(1, "end_turn", True, 0.0, 0.5),
+        ],
+        value_prediction=SearchGuidanceValuePrediction(native_leaf_utility=7.5),
+    )
+    _, corrected_value = t085_scorer_callbacks(
+        corrected, root_context=object(), corrected=True
+    )
+    assert corrected_value({}, _actions()) == 7.5
+
+
+def test_from_paths_fails_closed_on_checkpoint_sha_before_execution(
+    tmp_path, monkeypatch
+) -> None:
+    files = [tmp_path / name for name in ("a", "b", "c", "old", "new", "old2", "new2")]
+    for path in files:
+        path.write_bytes(b"artifact")
+    monkeypatch.setattr(
+        t085_execution, "load_t085_native_evaluation_plan", lambda *a, **k: object()
+    )
+    monkeypatch.setattr(
+        t085_execution, "resolve_t085_canonical_records", lambda *a, **k: {}
+    )
+    import sts_combat_rl.commands.model_guided_oracle_search as scorer_commands
+
+    monkeypatch.setattr(
+        scorer_commands,
+        "build_torch_guidance_scorer_from_checkpoint",
+        lambda path: SimpleNamespace(checkpoint_provenance=object()),
+    )
+    with pytest.raises(T085NativeExecutionError, match="checkpoint SHA-256 mismatch"):
+        t085_execution.run_t085_native_paired_evaluation_from_paths(
+            adapter_factory=lambda: object(),
+            selection_path=files[0],
+            selection_sha256="x",
+            a_full_map_path=files[0],
+            b_full_map_path=files[1],
+            c_full_map_path=files[2],
+            a_sha256="a",
+            b_sha256="b",
+            c_sha256="c",
+            old_checkpoint_64001=files[3],
+            corrected_checkpoint_85001=files[4],
+            old_checkpoint_64002=files[5],
+            corrected_checkpoint_85002=files[6],
+            old_checkpoint_64001_sha256="bad",
+            corrected_checkpoint_85001_sha256="bad",
+            old_checkpoint_64002_sha256="bad",
+            corrected_checkpoint_85002_sha256="bad",
+            selection_output_path=files[0],
+            report_output_path=files[1],
+            outcomes_output_path=files[2],
         )
 
 
