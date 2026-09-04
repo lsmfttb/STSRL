@@ -29,7 +29,11 @@ from sts_combat_rl.sim.contract import (
     SimulatorSnapshot,
     SimulatorTransition,
 )
-from sts_combat_rl.sim.controlled_run import ControlledRun, execute_controlled_run
+from sts_combat_rl.sim.controlled_run import (
+    ControlledRun,
+    build_decision_context,
+    execute_controlled_run,
+)
 from sts_combat_rl.sim.controller_contract import (
     ControllerDecision,
     ControllerProvenance,
@@ -80,6 +84,12 @@ T085_PRIMARY_ARMS = (
     "old_value_64002",
     "corrected_value_85002",
 )
+T085_SECONDARY_ARMS = (
+    "prior_only_64001",
+    "prior_corrected_85001",
+    "prior_only_64002",
+    "prior_corrected_85002",
+)
 
 
 @dataclass(frozen=True)
@@ -107,8 +117,7 @@ class T085NativeArm:
             if (
                 self.checkpoint is None
                 or self.leaf_value_callback is None
-                or self.target_kind
-                != "search_v2_leaf_continuation_native_utility_v1"
+                or self.target_kind != "search_v2_leaf_continuation_native_utility_v1"
             ):
                 raise T085NativeExecutionError(
                     "T085 corrected arm lacks explicit checkpoint/utility callback provenance"
@@ -121,6 +130,25 @@ class T085NativeArm:
             ):
                 raise T085NativeExecutionError(
                     "T085 old arm lacks explicit checkpoint/survival callback provenance"
+                )
+        elif base_name.startswith("prior_only_"):
+            if (
+                self.checkpoint is None
+                or self.policy_prior_callback is None
+                or self.leaf_value_callback is not None
+            ):
+                raise T085NativeExecutionError(
+                    "T085 prior-only arm lacks explicit prior provenance"
+                )
+        elif base_name.startswith("prior_corrected_"):
+            if (
+                self.checkpoint is None
+                or self.policy_prior_callback is None
+                or self.leaf_value_callback is None
+                or self.target_kind != "search_v2_leaf_continuation_native_utility_v1"
+            ):
+                raise T085NativeExecutionError(
+                    "T085 prior-corrected arm lacks explicit provenance"
                 )
         else:
             raise T085NativeExecutionError(f"unknown T085 arm {self.name!r}")
@@ -148,38 +176,80 @@ def build_t085_native_arms(
     corrected_value_callback_85001: Callable[..., object],
     old_value_callback_64002: Callable[..., object],
     corrected_value_callback_85002: Callable[..., object],
+    prior_callback_64001: Callable[..., object],
+    prior_callback_64002: Callable[..., object],
 ) -> dict[str, T085NativeArm]:
     """Construct the frozen primary arms; baseline is always native v2 unguided."""
     arms = {
         "baseline": T085NativeArm("baseline", None, None, None, None),
         "old_value_64001": T085NativeArm(
-            "old_value_64001", old_checkpoint_64001, None,
-            old_value_callback_64001, "battle_survival_probability"
+            "old_value_64001",
+            old_checkpoint_64001,
+            None,
+            old_value_callback_64001,
+            "battle_survival_probability",
         ),
         "corrected_value_85001": T085NativeArm(
-            "corrected_value_85001", corrected_checkpoint_85001, None,
+            "corrected_value_85001",
+            corrected_checkpoint_85001,
+            None,
             corrected_value_callback_85001,
-            "search_v2_leaf_continuation_native_utility_v1"
+            "search_v2_leaf_continuation_native_utility_v1",
         ),
         "old_value_64002": T085NativeArm(
-            "old_value_64002", old_checkpoint_64002, None,
-            old_value_callback_64002, "battle_survival_probability"
+            "old_value_64002",
+            old_checkpoint_64002,
+            None,
+            old_value_callback_64002,
+            "battle_survival_probability",
         ),
         "corrected_value_85002": T085NativeArm(
-            "corrected_value_85002", corrected_checkpoint_85002, None,
+            "corrected_value_85002",
+            corrected_checkpoint_85002,
+            None,
             corrected_value_callback_85002,
-            "search_v2_leaf_continuation_native_utility_v1"
+            "search_v2_leaf_continuation_native_utility_v1",
         ),
     }
-    arms.update({
-        "baseline@400": replace(arms["baseline"], name="baseline@400"),
-        "corrected_value_85001@400": replace(
-            arms["corrected_value_85001"], name="corrected_value_85001@400"
-        ),
-        "corrected_value_85002@400": replace(
-            arms["corrected_value_85002"], name="corrected_value_85002@400"
-        ),
-    })
+    arms.update(
+        {
+            "baseline@400": replace(arms["baseline"], name="baseline@400"),
+            "corrected_value_85001@400": replace(
+                arms["corrected_value_85001"], name="corrected_value_85001@400"
+            ),
+            "corrected_value_85002@400": replace(
+                arms["corrected_value_85002"], name="corrected_value_85002@400"
+            ),
+            "prior_only_64001": T085NativeArm(
+                "prior_only_64001",
+                old_checkpoint_64001,
+                prior_callback_64001,
+                None,
+                None,
+            ),
+            "prior_corrected_85001": T085NativeArm(
+                "prior_corrected_85001",
+                corrected_checkpoint_85001,
+                prior_callback_64001,
+                corrected_value_callback_85001,
+                "search_v2_leaf_continuation_native_utility_v1",
+            ),
+            "prior_only_64002": T085NativeArm(
+                "prior_only_64002",
+                old_checkpoint_64002,
+                prior_callback_64002,
+                None,
+                None,
+            ),
+            "prior_corrected_85002": T085NativeArm(
+                "prior_corrected_85002",
+                corrected_checkpoint_85002,
+                prior_callback_64002,
+                corrected_value_callback_85002,
+                "search_v2_leaf_continuation_native_utility_v1",
+            ),
+        }
+    )
     return arms
 
 
@@ -748,8 +818,10 @@ class T085NativeTerminalSearchAdapter:
                 index,
                 simulations=self._search_simulations,
                 backend=self._search_backend,
-                policy_prior_callback=self._policy_prior_callback,
-                leaf_value_callback=self._leaf_value_callback,
+                # Terminal utility labels are always the native no-callback
+                # evaluateEndState path, independent of controller guidance.
+                policy_prior_callback=None,
+                leaf_value_callback=None,
             )
             self._search_call_count += 1
         step = getattr(self._base_adapter, "step", None)
@@ -909,7 +981,9 @@ class T085NativeArmController:
         if self.arm.name == "baseline":
             _validate_unguided_v2_telemetry(raw)
         report = build_oracle_search_report(
-            raw, actions, context,
+            raw,
+            actions,
+            context,
             expected_native_api=T085_NATIVE_V2_API,
             expected_patch_identity=T085_NATIVE_V2_PATCH,
         )
@@ -1165,9 +1239,13 @@ def run_t085_native_paired_evaluation(
     native_identity = _validate_t085_native_source_manifest(search_backend)
     if search_backend != "battle_search_v2":
         raise T085NativeExecutionError("T085 arms require native battle_search_v2")
-    expected_arm_names = set(T085_PRIMARY_ARMS) | set(T085_SEARCH_400_ARMS)
+    expected_arm_names = (
+        set(T085_PRIMARY_ARMS) | set(T085_SECONDARY_ARMS) | set(T085_SEARCH_400_ARMS)
+    )
     if set(arms) != expected_arm_names:
-        raise T085NativeExecutionError("T085 arm inventory is incomplete or contains unknown arms")
+        raise T085NativeExecutionError(
+            "T085 arm inventory is incomplete or contains unknown arms"
+        )
     if any(not isinstance(arm, T085NativeArm) for arm in arms.values()):
         raise T085NativeExecutionError("T085 arm inventory is malformed")
     selection_reference = write_t085_native_selection_artifact(
@@ -1202,7 +1280,9 @@ def run_t085_native_paired_evaluation(
         else:
             snapshot = restored
         if not isinstance(snapshot, SimulatorSnapshot):
-            raise T085NativeExecutionError("T085 restore did not return a SimulatorSnapshot")
+            raise T085NativeExecutionError(
+                "T085 restore did not return a SimulatorSnapshot"
+            )
         adapter._current_snapshot = snapshot
         controller: OnlineController = T085NativeArmController(
             selected_arm,
@@ -1266,10 +1346,13 @@ def run_t085_native_paired_evaluation(
                 1 for step in controlled.steps if step.battle_active
             )
             payload["learned_value_callback_count"] = sum(
-                1 for step in controlled.steps
+                1
+                for step in controlled.steps
                 if step.decision_metadata.get("t085_arm", {}).get("leaf_value_callback")
             )
-            resource_outcome = last_step.next_snapshot_raw.get("completed_battle_resource_outcome")
+            resource_outcome = last_step.next_snapshot_raw.get(
+                "completed_battle_resource_outcome"
+            )
             if isinstance(resource_outcome, Mapping):
                 payload["structured_battle_resource_outcome"] = dict(resource_outcome)
         row = T085OutcomeRecord.from_mapping(payload)
@@ -1327,15 +1410,15 @@ def run_t085_native_paired_evaluation(
 
 __all__ = [
     "T085NativeArm",
+    "T085NativeArmController",
     "T085NativeEvaluationPlan",
     "T085NativeExecutionError",
     "T085NativeRootEdgeLabel",
     "T085NativeSearchBackend",
     "T085NativeTerminalSearchAdapter",
-    "T085NativeArmController",
     "T085UnguidedBattleSearchV2Controller",
-    "build_t085_native_evaluation_plan",
     "build_t085_native_arms",
+    "build_t085_native_evaluation_plan",
     "finalize_t085_native_root_edge_label",
     "prepare_t085_native_root_edge_label",
     "run_t085_native_paired_evaluation",

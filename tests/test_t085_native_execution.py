@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
 import inspect
+from dataclasses import dataclass, replace
 
 import pytest
 
@@ -10,9 +10,9 @@ from sts_combat_rl.commands.t085_native_execution import (
     T085NativeTerminalSearchAdapter,
     T085UnguidedBattleSearchV2Controller,
     build_t085_native_arms,
-    run_t085_native_paired_evaluation,
     finalize_t085_native_root_edge_label,
     prepare_t085_native_root_edge_label,
+    run_t085_native_paired_evaluation,
 )
 from sts_combat_rl.sim.action_space import ActionSpaceConfig
 from sts_combat_rl.sim.contract import (
@@ -490,6 +490,8 @@ def test_t085_arm_builder_makes_baselines_explicit_native_v2_no_callback() -> No
         corrected_value_callback_85001=callback,
         old_value_callback_64002=callback,
         corrected_value_callback_85002=callback,
+        prior_callback_64001=callback,
+        prior_callback_64002=callback,
     )
     for name in ("baseline", "baseline@400"):
         assert arms[name].policy_prior_callback is None
