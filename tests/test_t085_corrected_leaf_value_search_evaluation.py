@@ -6,12 +6,18 @@ from pathlib import Path
 
 import pytest
 
+import sts_combat_rl.t085_corrected_leaf_value_search_evaluation as t085_evaluation
 from sts_combat_rl.commands.t085_corrected_leaf_value_search_evaluation import (
     run_t085_paired_evaluation_report_from_paths,
+    run_t085_retention_validation_from_path,
 )
 from sts_combat_rl.t085_corrected_leaf_value_search_evaluation import (
     T085_ARTIFACT_ROOT,
+    T085_INPUT_ELIGIBILITY_SCHEMA_ID,
+    T085_NATIVE_IDENTITY,
     T085_PRIMARY_ARMS,
+    T085_REQUIRED_INPUT_ARTIFACT_KEYS,
+    T085_REQUIRED_RETENTION_OUTPUT_ROLES,
     T085_SEARCH_400_ARMS,
     T085_SECONDARY_ARMS,
     T085_T052_COHORT_BYTE_COUNT,
@@ -104,6 +110,23 @@ def _source_manifest(tmp_path, *, cohort: str) -> dict[str, object]:
         "source_manifest_byte_count": target.stat().st_size,
     }
     return common | reference
+
+
+def _retention_test_inputs(tmp_path, monkeypatch):
+    identities = {}
+    paths = []
+    for key in T085_REQUIRED_INPUT_ARTIFACT_KEYS:
+        target = (
+            T085_ARTIFACT_ROOT / f".pytest-t085-input-source-{tmp_path.name}-{key}.json"
+        )
+        identities[key] = write_t085_json_artifact(
+            target,
+            {"fixture_input": key},
+            schema_id=f"t085-test-input-{key}-v1",
+        )
+        paths.append(target)
+    monkeypatch.setattr(t085_evaluation, "T085_INPUT_ARTIFACT_IDENTITIES", identities)
+    return identities, paths
 
 
 def _b_sources() -> list[T085SourceRunRecord]:
@@ -291,6 +314,22 @@ def _row(
         source_run_identity=source_run_identity or identity,
         search_budget=400 if cohort == "B@400" else 100,
     )
+
+
+def test_outcome_mapping_requires_explicit_boolean_survival() -> None:
+    payload = asdict(_row("A", "A-0", "baseline", False, 1.0))
+    assert T085OutcomeRecord.from_mapping(payload).battle_survived is False
+
+    missing = dict(payload)
+    missing.pop("battle_survived")
+    with pytest.raises(ValueError, match="battle_survived is required"):
+        T085OutcomeRecord.from_mapping(missing)
+
+    for invalid in (None, 0, 1, "false"):
+        malformed = dict(payload)
+        malformed["battle_survived"] = invalid
+        with pytest.raises(ValueError, match="battle_survived must be a boolean"):
+            T085OutcomeRecord.from_mapping(malformed)
 
 
 def _evaluation_rows() -> list[T085OutcomeRecord]:
@@ -691,38 +730,40 @@ def _gate_evidence(
     tmp_path,
     selection_evidence: dict[str, dict[str, object]],
     *,
+    input_identities: dict[str, dict[str, object]],
     support_status: str = "supported",
 ) -> dict[str, object]:
     target = T085_ARTIFACT_ROOT / f".pytest-t085-gates-{tmp_path.name}.json"
+    eligibility_path = (
+        T085_ARTIFACT_ROOT / f".pytest-t085-input-eligibility-{tmp_path.name}.json"
+    )
+    code_identity = {"commit": "test"}
+    inputs = {
+        key: dict(input_identities[key]) for key in T085_REQUIRED_INPUT_ARTIFACT_KEYS
+    }
+    eligibility = write_t085_json_artifact(
+        eligibility_path,
+        {
+            "task_id": "T085",
+            "accepted_inputs": inputs,
+            "code_identity": code_identity,
+            "native_identity": dict(T085_NATIVE_IDENTITY),
+        },
+        schema_id=T085_INPUT_ELIGIBILITY_SCHEMA_ID,
+    )
     artifact = write_t085_json_artifact(
         target,
         {"evidence": True},
         schema_id="t085-terminal-classification-report-v1",
     )
+    outputs = {role: artifact for role in T085_REQUIRED_RETENTION_OUTPUT_ROLES}
+    outputs["input_eligibility_manifest"] = eligibility
     manifest = build_t085_retention_manifest(
-        inputs={},
-        outputs={
-            role: artifact
-            for role in (
-                "input_eligibility_manifest",
-                "repaired_checkpoint_85001",
-                "repaired_checkpoint_85002",
-                "training_report_85001",
-                "training_report_85002",
-                "cohort_a_manifest",
-                "cohort_b_source_manifest",
-                "cohort_b_selected_manifest",
-                "cohort_b_overlap_audit",
-                "cohort_c_source_manifest",
-                "cohort_c_selected_manifest",
-                "search_400_manifest",
-                "paired_evaluation_report",
-                "terminal_classification_report",
-            )
-        },
+        inputs=inputs,
+        outputs=outputs,
         stages=[],
-        code_identity={"commit": "test"},
-        native_identity={"commit": "test"},
+        code_identity=code_identity,
+        native_identity=T085_NATIVE_IDENTITY,
         terminal_classification="INCOMPLETE",
         regeneration_commands=["test"],
         retention_reason="classification test",
@@ -762,10 +803,13 @@ def _gate_evidence(
         },
         "retention_manifest": manifest,
         "_artifact_path": target,
+        "_eligibility_path": eligibility_path,
     }
 
 
-def test_terminal_classification_covers_every_published_class(tmp_path) -> None:
+def test_terminal_classification_covers_every_published_class(
+    tmp_path, monkeypatch
+) -> None:
     gates = {
         name: True
         for name in (
@@ -779,7 +823,12 @@ def test_terminal_classification_covers_every_published_class(tmp_path) -> None:
         )
     }
     cohorts, selection_evidence, source_paths = _formal_selection(tmp_path)
-    evidence = _gate_evidence(tmp_path, selection_evidence)
+    input_identities, input_paths = _retention_test_inputs(tmp_path, monkeypatch)
+    evidence = _gate_evidence(
+        tmp_path,
+        selection_evidence,
+        input_identities=input_identities,
+    )
     try:
         report_kwargs = {
             "cohort_b_record_count": len(cohorts["B"]),
@@ -856,13 +905,17 @@ def test_terminal_classification_covers_every_published_class(tmp_path) -> None:
         )
     finally:
         evidence["_artifact_path"].unlink(missing_ok=True)
+        evidence["_eligibility_path"].unlink(missing_ok=True)
+        for path in input_paths:
+            path.unlink(missing_ok=True)
         for path in source_paths:
             path.unlink(missing_ok=True)
 
 
 def test_retention_artifact_manifest_records_hash_size_schema_and_workers(
-    tmp_path,
+    tmp_path, monkeypatch
 ) -> None:
+    input_identities, input_paths = _retention_test_inputs(tmp_path, monkeypatch)
     target = T085_ARTIFACT_ROOT / f".pytest-t085-{tmp_path.name}.json"
     artifact = write_t085_json_artifact(
         target,
@@ -870,54 +923,209 @@ def test_retention_artifact_manifest_records_hash_size_schema_and_workers(
         schema_id="t085-paired-evaluation-report-v1",
     )
     try:
-        manifest = build_t085_retention_manifest(
-            inputs={"t084": artifact},
-            outputs={"paired": artifact},
-            stages=[
+        eligibility_path = (
+            T085_ARTIFACT_ROOT / f".pytest-t085-input-{tmp_path.name}.json"
+        )
+        code_identity = {"commit": "test"}
+        inputs = {
+            key: dict(input_identities[key])
+            for key in T085_REQUIRED_INPUT_ARTIFACT_KEYS
+        }
+        eligibility = write_t085_json_artifact(
+            eligibility_path,
+            {
+                "task_id": "T085",
+                "accepted_inputs": inputs,
+                "code_identity": code_identity,
+                "native_identity": dict(T085_NATIVE_IDENTITY),
+            },
+            schema_id=T085_INPUT_ELIGIBILITY_SCHEMA_ID,
+        )
+        outputs = {role: artifact for role in T085_REQUIRED_RETENTION_OUTPUT_ROLES}
+        outputs["input_eligibility_manifest"] = eligibility
+        kwargs = {
+            "inputs": inputs,
+            "outputs": outputs,
+            "stages": [
                 {
                     "stage": "evaluation",
+                    "configured_worker_count": 16,
                     "effective_worker_count": 16,
                     "shard_count": 16,
                     "record_range": "test",
                     "wall_clock_seconds": 0.1,
                 }
             ],
-            code_identity={"commit": "test"},
-            native_identity={"commit": "test"},
-            terminal_classification="INCOMPLETE",
-            regeneration_commands=["python -m test"],
-            retention_reason="review evidence",
-            deletion_conditions=["after merged retention handoff"],
-        )
+            "code_identity": code_identity,
+            "native_identity": T085_NATIVE_IDENTITY,
+            "terminal_classification": "INCOMPLETE",
+            "regeneration_commands": ["python -m test"],
+            "retention_reason": "review evidence",
+            "deletion_conditions": ["after merged retention handoff"],
+        }
+        manifest = build_t085_retention_manifest(**kwargs)
         assert manifest["artifact_root"] == str(T085_ARTIFACT_ROOT)
-        assert manifest["outputs"]["paired"]["byte_count"] > 0
-        assert len(manifest["outputs"]["paired"]["sha256"]) == 64
+        assert manifest["outputs"]["paired_evaluation_report"]["byte_count"] > 0
+        assert len(manifest["outputs"]["paired_evaluation_report"]["sha256"]) == 64
         assert validate_t085_retention_manifest(manifest)["verified"] is True
         terminal = build_t085_terminal_report(
             "INCOMPLETE", gates={"execution": False}, evaluation_report=manifest
         )
         assert terminal["classification"] == "INCOMPLETE"
+
+        incomplete = dict(manifest)
+        incomplete_outputs = dict(manifest["outputs"])
+        del incomplete_outputs["terminal_classification_report"]
+        incomplete["outputs"] = incomplete_outputs
+        with pytest.raises(ValueError, match="missing required output roles"):
+            validate_t085_retention_manifest(incomplete)
+
+        malformed_stage = dict(manifest)
+        malformed_stage.pop("stages")
+        with pytest.raises(ValueError, match="stages must be a list"):
+            validate_t085_retention_manifest(malformed_stage)
+
+        forged = dict(artifact)
+        forged["sha256"] = "0" * 64
+        with pytest.raises(ValueError, match="hash changed"):
+            build_t085_retention_manifest(
+                **{
+                    **kwargs,
+                    "outputs": {
+                        role: forged for role in T085_REQUIRED_RETENTION_OUTPUT_ROLES
+                    },
+                }
+            )
+
+        tampered_path = input_paths[0]
+        original = tampered_path.read_bytes()
+        tampered_path.write_bytes(bytes([original[0] ^ 1]) + original[1:])
+        try:
+            with pytest.raises(ValueError, match="inputs.t084_report hash changed"):
+                validate_t085_retention_manifest(manifest)
+        finally:
+            tampered_path.write_bytes(original)
     finally:
         target.unlink(missing_ok=True)
+        eligibility_path.unlink(missing_ok=True)
+        for path in input_paths:
+            path.unlink(missing_ok=True)
 
 
-def test_retention_rejects_non_stable_output_path(tmp_path) -> None:
+def test_retention_rejects_non_stable_output_path(tmp_path, monkeypatch) -> None:
+    input_identities, input_paths = _retention_test_inputs(tmp_path, monkeypatch)
+    target = T085_ARTIFACT_ROOT / f".pytest-t085-stable-{tmp_path.name}.json"
+    eligibility_path = (
+        T085_ARTIFACT_ROOT / f".pytest-t085-stable-input-{tmp_path.name}.json"
+    )
+    inputs = {
+        key: dict(input_identities[key]) for key in T085_REQUIRED_INPUT_ARTIFACT_KEYS
+    }
+    eligibility = write_t085_json_artifact(
+        eligibility_path,
+        {
+            "task_id": "T085",
+            "accepted_inputs": inputs,
+            "code_identity": {"commit": "test"},
+            "native_identity": dict(T085_NATIVE_IDENTITY),
+        },
+        schema_id=T085_INPUT_ELIGIBILITY_SCHEMA_ID,
+    )
+    artifact = write_t085_json_artifact(
+        target,
+        {"rows": 1},
+        schema_id="t085-paired-evaluation-report-v1",
+    )
+    outputs = {role: artifact for role in T085_REQUIRED_RETENTION_OUTPUT_ROLES}
+    outputs["input_eligibility_manifest"] = eligibility
+    bad = dict(artifact)
+    bad["path"] = str(tmp_path / "bad.json")
+    outputs["paired_evaluation_report"] = bad
     with pytest.raises(ValueError, match="stable ignored T085 root"):
-        build_t085_retention_manifest(
-            inputs={},
-            outputs={
-                "bad": {
-                    "path": str(tmp_path / "bad.json"),
-                    "schema_id": "test",
-                    "sha256": "a" * 64,
-                    "byte_count": 1,
-                }
-            },
+        try:
+            build_t085_retention_manifest(
+                inputs=inputs,
+                outputs=outputs,
+                stages=[],
+                code_identity={"commit": "test"},
+                native_identity=T085_NATIVE_IDENTITY,
+                terminal_classification="INCOMPLETE",
+                regeneration_commands=["test"],
+                retention_reason="test",
+                deletion_conditions=["test complete"],
+            )
+        finally:
+            target.unlink(missing_ok=True)
+            eligibility_path.unlink(missing_ok=True)
+            for path in input_paths:
+                path.unlink(missing_ok=True)
+
+
+def test_retention_cli_rejects_missing_accepted_input_identity(
+    tmp_path, monkeypatch
+) -> None:
+    input_identities, input_paths = _retention_test_inputs(tmp_path, monkeypatch)
+    eligibility_path = (
+        T085_ARTIFACT_ROOT / f".pytest-t085-cli-input-{tmp_path.name}.json"
+    )
+    artifact_path = T085_ARTIFACT_ROOT / f".pytest-t085-cli-output-{tmp_path.name}.json"
+    manifest_path = (
+        T085_ARTIFACT_ROOT / f".pytest-t085-cli-retention-{tmp_path.name}.json"
+    )
+    inputs = {
+        key: dict(input_identities[key]) for key in T085_REQUIRED_INPUT_ARTIFACT_KEYS
+    }
+    code_identity = {"commit": "test"}
+    eligibility = write_t085_json_artifact(
+        eligibility_path,
+        {
+            "task_id": "T085",
+            "accepted_inputs": inputs,
+            "code_identity": code_identity,
+            "native_identity": dict(T085_NATIVE_IDENTITY),
+        },
+        schema_id=T085_INPUT_ELIGIBILITY_SCHEMA_ID,
+    )
+    artifact = write_t085_json_artifact(
+        artifact_path,
+        {"rows": 1},
+        schema_id="t085-paired-evaluation-report-v1",
+    )
+    outputs = {role: artifact for role in T085_REQUIRED_RETENTION_OUTPUT_ROLES}
+    outputs["input_eligibility_manifest"] = eligibility
+    try:
+        manifest = build_t085_retention_manifest(
+            inputs=inputs,
+            outputs=outputs,
             stages=[],
-            code_identity={},
-            native_identity={},
+            code_identity=code_identity,
+            native_identity=T085_NATIVE_IDENTITY,
             terminal_classification="INCOMPLETE",
-            regeneration_commands=[],
+            regeneration_commands=["test"],
             retention_reason="test",
-            deletion_conditions=[],
+            deletion_conditions=["test complete"],
         )
+        write_t085_json_artifact(
+            manifest_path,
+            manifest,
+            schema_id="t085-retention-manifest-v1",
+        )
+        assert (
+            run_t085_retention_validation_from_path(manifest_path)["verified"] is True
+        )
+
+        incomplete = json.loads(manifest_path.read_text(encoding="utf-8"))
+        incomplete["inputs"].pop("t084_report")
+        write_t085_json_artifact(
+            manifest_path,
+            incomplete,
+            schema_id="t085-retention-manifest-v1",
+        )
+        with pytest.raises(ValueError, match="exact accepted input set"):
+            run_t085_retention_validation_from_path(manifest_path)
+    finally:
+        eligibility_path.unlink(missing_ok=True)
+        artifact_path.unlink(missing_ok=True)
+        manifest_path.unlink(missing_ok=True)
+        for path in input_paths:
+            path.unlink(missing_ok=True)

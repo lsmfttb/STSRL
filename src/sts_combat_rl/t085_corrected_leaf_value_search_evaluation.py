@@ -32,6 +32,79 @@ T085_SELECTION_EVIDENCE_SCHEMA_ID = "t085-selection-gate-evidence-v1"
 T085_T052_COHORT_SHA256 = (
     "b7f8e9b85b53bbf8e37adfe6cc90d0579937661309b26bce2a8f2921604a8608"
 )
+T085_T042_SCALE_MANIFEST_SHA256 = (
+    "25efae30dc9a61c8b97cb09e1844b93bffe693bde51c0f494f0f65203a1d327"
+)
+T085_INPUT_ELIGIBILITY_SCHEMA_ID = "t085-input-eligibility-manifest-v1"
+T085_REQUIRED_INPUT_ARTIFACT_KEYS = (
+    "t084_report",
+    "t084_retention",
+    "t084_formal_dataset",
+    "t064_parent_85001",
+    "t064_parent_85002",
+    "t052_cohort",
+    "t042_scale_manifest",
+)
+T085_INPUT_ARTIFACT_IDENTITIES = {
+    "t084_report": {
+        "path": "/mnt/d/DeadlyCatCoding/STSRL/artifacts/"
+        "t084-search-v2-internal-leaf-target-generation/t084-report-v13-repair.json",
+        "schema_id": "t084-search-v2-internal-leaf-target-generation-v1",
+        "sha256": "b6cbcb5ee96d9538adb6ee7a4849a138f6d3a3f93b6127e7ba0ff91dcae1ad1c",
+        "byte_count": 3_977_809,
+    },
+    "t084_retention": {
+        "path": "/mnt/d/DeadlyCatCoding/STSRL/artifacts/"
+        "t084-search-v2-internal-leaf-target-generation/"
+        "t084-retention-manifest-v13-repair.json",
+        "schema_id": "t084-retention-manifest-v1",
+        "sha256": "754a9d2560fb5b01c53e7789bdd558e5ef3cc9d0eca4dd690f8f1ab8df1fb0f6",
+        "byte_count": 18_227,
+    },
+    "t084_formal_dataset": {
+        "path": "/mnt/d/DeadlyCatCoding/STSRL/artifacts/"
+        "t084-search-v2-internal-leaf-target-generation/"
+        "t084-native-leaf-target-generation-v13-repair.json",
+        "schema_id": "t084-native-internal-leaf-collector-v1",
+        "sha256": "f17cd7f33c11048d59a80a49f0197a972e636bbd36e25fd3ce9849f05d600d91",
+        "byte_count": 17_495_721_852,
+    },
+    "t064_parent_85001": {
+        "path": "/mnt/d/DeadlyCatCoding/STSRL/artifacts/"
+        "t064-later-act-curriculum-transfer/training/checkpoints/"
+        "static_mixture_v1-64001.pt",
+        "schema_id": "torch-policy-value-checkpoint-v1",
+        "sha256": "c0c38c239047f6be67e983768e53bd680007e9cba117e17c7d226583ed751193",
+        "byte_count": 462_895,
+    },
+    "t064_parent_85002": {
+        "path": "/mnt/d/DeadlyCatCoding/STSRL/artifacts/"
+        "t064-later-act-curriculum-transfer/training/checkpoints/"
+        "static_mixture_v1-64002.pt",
+        "schema_id": "torch-policy-value-checkpoint-v1",
+        "sha256": "32dbf18a187e8b6d465bb026d90643e3dd28624066628019c61455fcd8f5573a",
+        "byte_count": 504_341,
+    },
+    "t052_cohort": {
+        "path": str(T085_T052_COHORT_PATH),
+        "schema_id": T085_T052_COHORT_SCHEMA_ID,
+        "sha256": T085_T052_COHORT_SHA256,
+        "byte_count": T085_T052_COHORT_BYTE_COUNT,
+    },
+    "t042_scale_manifest": {
+        "path": "/mnt/d/DeadlyCatCoding/STSRL/artifacts/"
+        "t042-assisted-source-scale-pr39/runs1000_s20_workers16/"
+        "scale-manifest.json",
+        "schema_id": "t042-assisted-source-scale-manifest-v2",
+        "sha256": T085_T042_SCALE_MANIFEST_SHA256,
+        "byte_count": 8_159,
+    },
+}
+T085_NATIVE_IDENTITY = {
+    "repository": "lsmfttb/sts_lightspeed",
+    "ref": "refs/heads/stsrl/main",
+    "commit": "1555348535d66e3035aac80933a60949d4bd850f",
+}
 T085_COHORT_B_SEED_START = 851001
 T085_COHORT_B_SEED_END = 852024
 T085_COHORT_B_RUN_COUNT = 1024
@@ -43,9 +116,6 @@ T085_COHORT_C_MIN_SELECTED_COUNT = 96
 T085_SEARCH_400_SELECTED_COUNT = 48
 T085_BOOTSTRAP_COUNT = 10_000
 T085_BOOTSTRAP_SEED = 85085
-T085_T042_SCALE_MANIFEST_SHA256 = (
-    "25efae30dc9a61c8b97cb09e1844b93bffe693bde51c0f494f0f65203a1d327"
-)
 
 T085_PRIMARY_ARMS = (
     "baseline",
@@ -111,6 +181,15 @@ def _required_int(value: object, label: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise T085EvaluationIntegrityError(f"{label} must be an integer")
     return value
+
+
+def _required_bool(value: Mapping[str, object], key: str) -> bool:
+    if key not in value:
+        raise T085EvaluationIntegrityError(f"{key} is required")
+    result = value[key]
+    if not isinstance(result, bool):
+        raise T085EvaluationIntegrityError(f"{key} must be a boolean")
+    return result
 
 
 def _required_finite(value: object, label: str) -> float:
@@ -269,7 +348,7 @@ class T085OutcomeRecord:
                 value.get("record_identity"), "record_identity"
             ),
             arm=_required_string(value.get("arm"), "arm"),
-            battle_survived=value.get("battle_survived") is True,
+            battle_survived=_required_bool(value, "battle_survived"),
             terminal_native_utility=_required_finite(
                 value.get("terminal_native_utility"), "terminal_native_utility"
             ),
@@ -2511,6 +2590,176 @@ def write_t085_json_artifact(
     return artifact_reference(target, schema_id=schema_id)
 
 
+def _validate_t085_artifact_reference(
+    raw_reference: object,
+    label: str,
+    *,
+    require_stable_root: bool,
+    verified_digests: dict[Path, str] | None = None,
+) -> None:
+    reference = _required_mapping(raw_reference, label)
+    path = Path(_required_string(reference.get("path"), f"{label}.path")).resolve()
+    if require_stable_root:
+        _require_t085_output_path(path)
+    _required_string(reference.get("schema_id"), f"{label}.schema_id")
+    digest = reference.get("sha256")
+    if not _is_sha256(digest):
+        raise T085EvaluationIntegrityError(
+            f"{label}.sha256 must be a SHA-256 hex digest"
+        )
+    byte_count = _required_int(reference.get("byte_count"), f"{label}.byte_count")
+    if byte_count <= 0:
+        raise T085EvaluationIntegrityError(
+            f"{label}.byte_count must be a positive integer"
+        )
+    if not path.is_file():
+        raise T085EvaluationIntegrityError(f"retained artifact {label} is unavailable")
+    actual_byte_count = path.stat().st_size
+    if actual_byte_count != byte_count:
+        raise T085EvaluationIntegrityError(f"retained artifact {label} size changed")
+    if verified_digests is not None and path in verified_digests:
+        actual_digest = verified_digests[path]
+    else:
+        actual_digest = sha256_file(path)
+        if verified_digests is not None:
+            verified_digests[path] = actual_digest
+    if actual_digest != digest:
+        raise T085EvaluationIntegrityError(f"retained artifact {label} hash changed")
+
+
+def _validate_t085_input_eligibility_manifest(
+    raw_reference: object,
+    inputs: Mapping[str, object],
+    code_identity: Mapping[str, object],
+    native_identity: Mapping[str, object],
+    verified_digests: dict[Path, str],
+) -> None:
+    reference = _required_mapping(raw_reference, "outputs.input_eligibility_manifest")
+    if reference.get("schema_id") != T085_INPUT_ELIGIBILITY_SCHEMA_ID:
+        raise T085EvaluationIntegrityError(
+            "input_eligibility_manifest schema is not current"
+        )
+    path = Path(
+        _required_string(
+            reference.get("path"), "outputs.input_eligibility_manifest.path"
+        )
+    ).resolve()
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise T085EvaluationIntegrityError(
+            "input_eligibility_manifest is unreadable"
+        ) from exc
+    if not isinstance(document, Mapping):
+        raise T085EvaluationIntegrityError(
+            "input_eligibility_manifest must contain an object"
+        )
+    if (
+        document.get("schema_id") != T085_INPUT_ELIGIBILITY_SCHEMA_ID
+        or document.get("task_id") != "T085"
+    ):
+        raise T085EvaluationIntegrityError(
+            "input_eligibility_manifest task/schema identity is invalid"
+        )
+    accepted = _required_mapping(
+        document.get("accepted_inputs"),
+        "input_eligibility_manifest.accepted_inputs",
+    )
+    expected_keys = set(T085_REQUIRED_INPUT_ARTIFACT_KEYS)
+    if set(inputs) != expected_keys or set(accepted) != expected_keys:
+        raise T085EvaluationIntegrityError(
+            "input eligibility manifest does not contain the exact accepted input set"
+        )
+    for key in T085_REQUIRED_INPUT_ARTIFACT_KEYS:
+        expected = T085_INPUT_ARTIFACT_IDENTITIES[key]
+        document_reference = _required_mapping(
+            accepted[key], f"input_eligibility_manifest.accepted_inputs.{key}"
+        )
+        input_reference = _required_mapping(inputs[key], f"inputs.{key}")
+        _validate_t085_artifact_reference(
+            document_reference,
+            f"input_eligibility_manifest.accepted_inputs.{key}",
+            require_stable_root=False,
+            verified_digests=verified_digests,
+        )
+        _validate_t085_artifact_reference(
+            input_reference,
+            f"inputs.{key}",
+            require_stable_root=False,
+            verified_digests=verified_digests,
+        )
+        if dict(document_reference) != expected or dict(input_reference) != expected:
+            raise T085EvaluationIntegrityError(
+                f"accepted input identity mismatch for {key}"
+            )
+    document_code_identity = _required_mapping(
+        document.get("code_identity"),
+        "input_eligibility_manifest.code_identity",
+    )
+    if not code_identity or dict(document_code_identity) != dict(code_identity):
+        raise T085EvaluationIntegrityError(
+            "input eligibility code identity is missing or inconsistent"
+        )
+    document_native_identity = _required_mapping(
+        document.get("native_identity"),
+        "input_eligibility_manifest.native_identity",
+    )
+    if (
+        dict(native_identity) != T085_NATIVE_IDENTITY
+        or dict(document_native_identity) != T085_NATIVE_IDENTITY
+    ):
+        raise T085EvaluationIntegrityError(
+            "input eligibility native identity is not the accepted baseline"
+        )
+
+
+def _validate_t085_retention_stage(
+    raw_stage: object,
+    index: int,
+) -> int:
+    label = f"stages[{index}]"
+    stage = _required_mapping(raw_stage, label)
+    _required_string(stage.get("stage"), f"{label}.stage")
+    configured_workers = _required_int(
+        stage.get("configured_worker_count"), f"{label}.configured_worker_count"
+    )
+    if configured_workers <= 0:
+        raise T085EvaluationIntegrityError(
+            f"{label}.configured_worker_count must be positive"
+        )
+    effective_workers = _required_int(
+        stage.get("effective_worker_count"), f"{label}.effective_worker_count"
+    )
+    if effective_workers <= 0:
+        raise T085EvaluationIntegrityError(
+            f"{label}.effective_worker_count must be positive"
+        )
+    shard_count = _required_int(stage.get("shard_count"), f"{label}.shard_count")
+    if shard_count <= 0:
+        raise T085EvaluationIntegrityError(f"{label}.shard_count must be positive")
+    _required_string(stage.get("record_range"), f"{label}.record_range")
+    wall_clock_seconds = _required_finite(
+        stage.get("wall_clock_seconds"), f"{label}.wall_clock_seconds"
+    )
+    if wall_clock_seconds < 0.0:
+        raise T085EvaluationIntegrityError(
+            f"{label}.wall_clock_seconds must be non-negative"
+        )
+    if (
+        stage.get("stage")
+        in {
+            "source_generation",
+            "restore_parity",
+            "teacher_collection",
+            "evaluation",
+            "comparison",
+        }
+        and effective_workers != 16
+    ):
+        raise T085EvaluationIntegrityError(f"{label}.effective_worker_count must be 16")
+    return effective_workers
+
+
 def validate_t085_retention_manifest(
     manifest: Mapping[str, object],
     *,
@@ -2518,6 +2767,10 @@ def validate_t085_retention_manifest(
 ) -> dict[str, object]:
     """Revalidate a retention manifest before it can support a claim."""
 
+    if verify_files is not True:
+        raise T085EvaluationIntegrityError(
+            "T085 retention file verification cannot be disabled"
+        )
     if manifest.get("schema_id") != "t085-retention-manifest-v1":
         raise T085EvaluationIntegrityError("unsupported T085 retention schema")
     if manifest.get("task_id") != "T085":
@@ -2529,28 +2782,98 @@ def validate_t085_retention_manifest(
         != T085_ARTIFACT_ROOT.resolve()
     ):
         raise T085EvaluationIntegrityError("T085 retention root is not stable")
+    inputs = _required_mapping(manifest.get("inputs"), "inputs")
+    verified_digests: dict[Path, str] = {}
+    for name, raw_reference in inputs.items():
+        _validate_t085_artifact_reference(
+            raw_reference,
+            f"inputs.{name}",
+            require_stable_root=False,
+            verified_digests=verified_digests,
+        )
     outputs = _required_mapping(manifest.get("outputs"), "outputs")
-    verified: dict[str, object] = {"output_count": len(outputs), "verified": True}
-    for name, raw_reference in outputs.items():
-        reference = _required_mapping(raw_reference, f"outputs.{name}")
-        path = Path(
-            _required_string(reference.get("path"), f"outputs.{name}.path")
-        ).resolve()
-        _require_t085_output_path(path)
-        if verify_files:
-            if not path.is_file():
-                raise T085EvaluationIntegrityError(
-                    f"retained T085 output {name} is unavailable"
-                )
-            if sha256_file(path) != reference.get("sha256"):
-                raise T085EvaluationIntegrityError(
-                    f"retained T085 output {name} hash changed"
-                )
-            if path.stat().st_size != reference.get("byte_count"):
-                raise T085EvaluationIntegrityError(
-                    f"retained T085 output {name} size changed"
-                )
-    return verified
+    output_roles = set(outputs)
+    required_roles = set(T085_REQUIRED_RETENTION_OUTPUT_ROLES)
+    missing_roles = sorted(required_roles - output_roles)
+    if missing_roles:
+        raise T085EvaluationIntegrityError(
+            "retention manifest is missing required output roles: "
+            + ", ".join(missing_roles)
+        )
+    unexpected_roles = sorted(output_roles - required_roles)
+    if unexpected_roles:
+        raise T085EvaluationIntegrityError(
+            "retention manifest has unexpected output roles: "
+            + ", ".join(unexpected_roles)
+        )
+    for name in T085_REQUIRED_RETENTION_OUTPUT_ROLES:
+        _validate_t085_artifact_reference(
+            outputs[name],
+            f"outputs.{name}",
+            require_stable_root=True,
+            verified_digests=verified_digests,
+        )
+
+    raw_stages = manifest.get("stages")
+    if not isinstance(raw_stages, list):
+        raise T085EvaluationIntegrityError("stages must be a list")
+    effective_worker_counts = manifest.get("effective_worker_counts")
+    if not isinstance(effective_worker_counts, list):
+        raise T085EvaluationIntegrityError("effective_worker_counts must be a list")
+    validated_worker_counts = [
+        _validate_t085_retention_stage(raw_stage, index)
+        for index, raw_stage in enumerate(raw_stages)
+    ]
+    if effective_worker_counts != validated_worker_counts:
+        raise T085EvaluationIntegrityError(
+            "effective_worker_counts do not match retained stages"
+        )
+
+    code_identity = _required_mapping(manifest.get("code_identity"), "code_identity")
+    native_identity = _required_mapping(
+        manifest.get("native_identity"), "native_identity"
+    )
+    if not code_identity:
+        raise T085EvaluationIntegrityError("code_identity must not be empty")
+    if not native_identity:
+        raise T085EvaluationIntegrityError("native_identity must not be empty")
+    _validate_t085_input_eligibility_manifest(
+        outputs["input_eligibility_manifest"],
+        inputs,
+        code_identity,
+        native_identity,
+        verified_digests,
+    )
+    terminal_classification = _required_string(
+        manifest.get("terminal_classification"), "terminal_classification"
+    )
+    if terminal_classification not in T085_TERMINAL_CLASSIFICATIONS:
+        raise T085EvaluationIntegrityError("unknown terminal classification")
+    regeneration_commands = manifest.get("regeneration_commands")
+    if not isinstance(regeneration_commands, list) or not regeneration_commands:
+        raise T085EvaluationIntegrityError(
+            "regeneration_commands must be a non-empty list"
+        )
+    for index, command in enumerate(regeneration_commands):
+        _required_string(command, f"regeneration_commands[{index}]")
+    retention = _required_mapping(manifest.get("retention"), "retention")
+    _required_string(retention.get("reason"), "retention.reason")
+    deletion_conditions = retention.get("deletion_conditions")
+    if not isinstance(deletion_conditions, list) or not deletion_conditions:
+        raise T085EvaluationIntegrityError(
+            "retention.deletion_conditions must be a non-empty list"
+        )
+    for index, condition in enumerate(deletion_conditions):
+        _required_string(condition, f"retention.deletion_conditions[{index}]")
+    if _required_bool(retention, "raw_files_outside_git") is not True:
+        raise T085EvaluationIntegrityError(
+            "retention.raw_files_outside_git must be true"
+        )
+    return {
+        "output_count": len(outputs),
+        "output_roles": list(T085_REQUIRED_RETENTION_OUTPUT_ROLES),
+        "verified": True,
+    }
 
 
 def _require_t085_output_path(path: Path) -> None:
@@ -2578,37 +2901,8 @@ def build_t085_retention_manifest(
 
     if terminal_classification not in T085_TERMINAL_CLASSIFICATIONS:
         raise T085EvaluationIntegrityError("unknown terminal classification")
-    for label, refs in (("inputs", inputs), ("outputs", outputs)):
-        for name, reference in refs.items():
-            for key in ("path", "schema_id", "sha256", "byte_count"):
-                if key not in reference:
-                    raise T085EvaluationIntegrityError(
-                        f"{label}.{name} is missing artifact field {key}"
-                    )
-            if label == "outputs":
-                _require_t085_output_path(
-                    Path(
-                        _required_string(reference["path"], f"outputs.{name}.path")
-                    ).resolve()
-                )
-    worker_counts = []
-    for stage in stages:
-        worker_counts.append(stage.get("effective_worker_count"))
-        if (
-            stage.get("stage")
-            in {
-                "source_generation",
-                "restore_parity",
-                "teacher_collection",
-                "evaluation",
-                "comparison",
-            }
-            and stage.get("effective_worker_count") != 16
-        ):
-            raise T085EvaluationIntegrityError(
-                f"{stage.get('stage')} must record the default 16-worker gate"
-            )
-    return {
+    worker_counts = [stage.get("effective_worker_count") for stage in stages]
+    manifest = {
         "schema_id": "t085-retention-manifest-v1",
         "task_id": "T085",
         "artifact_root": str(T085_ARTIFACT_ROOT),
@@ -2626,6 +2920,8 @@ def build_t085_retention_manifest(
             "raw_files_outside_git": True,
         },
     }
+    validate_t085_retention_manifest(manifest)
+    return manifest
 
 
 def _required_mapping(value: object, label: str) -> Mapping[str, object]:
@@ -2642,6 +2938,10 @@ __all__ = [
     "T085_COHORT_B_SELECTED_COUNT",
     "T085_COHORT_C_MIN_SELECTED_COUNT",
     "T085_COHORT_C_RUN_COUNT",
+    "T085_INPUT_ARTIFACT_IDENTITIES",
+    "T085_INPUT_ELIGIBILITY_SCHEMA_ID",
+    "T085_NATIVE_IDENTITY",
+    "T085_REQUIRED_INPUT_ARTIFACT_KEYS",
     "T085_REQUIRED_RETENTION_OUTPUT_ROLES",
     "T085_SEARCH_400_BUDGET",
     "T085_SEARCH_BUDGET",
