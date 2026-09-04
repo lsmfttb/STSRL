@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 import pytest
@@ -22,6 +22,7 @@ from sts_combat_rl.sim.oracle_search import (
 )
 from sts_combat_rl.sim.policy_contract import DecisionContext
 from sts_combat_rl.sim.search_guidance_inference import (
+    SEARCH_V2_LEAF_NATIVE_UTILITY_TARGET_KIND,
     SearchGuidanceActionScore,
     SearchGuidanceCheckpointProvenance,
     SearchGuidanceInferenceResult,
@@ -51,6 +52,7 @@ def _checkpoint() -> SearchGuidanceCheckpointProvenance:
 class _Scorer:
     checkpoint_provenance: SearchGuidanceCheckpointProvenance
     with_value: bool = True
+    native_value: float | None = None
     name: str = "unit-test-scorer"
     calls: int = 0
 
@@ -76,7 +78,12 @@ class _Scorer:
                 for index in range(count)
             ],
             value_prediction=(
-                SearchGuidanceValuePrediction(battle_survival_probability=0.7)
+                SearchGuidanceValuePrediction(
+                    battle_survival_probability=(
+                        None if self.native_value is not None else 0.7
+                    ),
+                    native_leaf_utility=self.native_value,
+                )
                 if self.with_value
                 else None
             ),
@@ -284,7 +291,9 @@ def _raw_search(*, policy_calls: int, value_calls: int) -> dict[str, Any]:
     }
 
 
-class _Adapter:
+class _BaseAdapter:
+    expected_value = 0.7
+
     def battle_search_v2(
         self, snapshot: SimulatorSnapshot, **kwargs: Any
     ) -> dict[str, Any]:
@@ -297,10 +306,14 @@ class _Adapter:
             assert policy(_node_raw(), _node_actions()) == pytest.approx([0.3, 0.7])
             policy_calls = 1
         if value is not None:
-            assert value(_node_raw(), _node_actions()) == pytest.approx(0.7)
+            assert value(_node_raw(), _node_actions()) == pytest.approx(
+                self.expected_value
+            )
             value_calls = 1
         return _raw_search(policy_calls=policy_calls, value_calls=value_calls)
 
+
+class _Adapter(_BaseAdapter):
     def battle_search_v2_with_tree_geometry(
         self, snapshot: SimulatorSnapshot, **kwargs: Any
     ) -> dict[str, Any]:
@@ -401,6 +414,10 @@ class _Adapter:
         raw["model_calls"] = None
         raw.pop("tree_internal_telemetry")
         return raw
+
+
+class _CorrectedValueAdapter(_Adapter):
+    expected_value = 3.25
 
 
 class _RepeatingAdapter(_Adapter):
@@ -536,6 +553,27 @@ def test_value_ablation_rejects_checkpoint_without_survival_head() -> None:
             _context(),
             0,
         )
+
+
+def test_corrected_native_utility_is_passed_to_existing_search_v2_callback() -> None:
+    checkpoint = replace(
+        _checkpoint(),
+        outcome_target_kind=SEARCH_V2_LEAF_NATIVE_UTILITY_TARGET_KIND,
+    )
+    controller = BattleSearchV2Controller(
+        simulations=10,
+        scorer=_Scorer(checkpoint, native_value=3.25),
+        ablation="value_only",
+        native_source_identity={"integration_commit": "t085"},
+    )
+    decision = controller.select_action(
+        _CorrectedValueAdapter(),
+        SimulatorSnapshot(observation=[], raw=_node_raw()),
+        _actions(),
+        _context(),
+        0,
+    )
+    assert decision.selected_index == 0
 
 
 def test_t067_public_node_cache_reuses_exact_policy_value_result() -> None:
