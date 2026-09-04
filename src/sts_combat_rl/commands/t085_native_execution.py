@@ -17,13 +17,24 @@ survival, utility, cohort, arm, budget, or provenance fields are not accepted.
 
 from __future__ import annotations
 
+import json
 import math
+import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field, replace
+from hashlib import sha256
 from pathlib import Path
 from typing import Any, Literal
 
 from sts_combat_rl.sim.action_space import ActionSpaceConfig
+from sts_combat_rl.sim.assisted_source_generation import (
+    restore_assisted_battle_start_record,
+)
+from sts_combat_rl.sim.battle_start_pool import (
+    BattleStartCheckpointRecord,
+    record_from_manifest,
+    restore_battle_start_record,
+)
 from sts_combat_rl.sim.contract import (
     SimulatorAction,
     SimulatorSnapshot,
@@ -40,6 +51,7 @@ from sts_combat_rl.sim.controller_contract import (
     OnlineController,
 )
 from sts_combat_rl.sim.decision_record import action_identity_dicts_for_actions
+from sts_combat_rl.sim.fixed_evaluation_set import load_fixed_cohort_jsonl
 from sts_combat_rl.sim.lightspeed_source import load_lightspeed_source_manifest
 from sts_combat_rl.sim.online_controller import NATIVE_SEARCH_INFORMATION_REGIME
 from sts_combat_rl.sim.oracle_search import (
@@ -54,6 +66,8 @@ from sts_combat_rl.sim.oracle_search import (
 from sts_combat_rl.t085_corrected_leaf_value_search_evaluation import (
     T085_NATIVE_IDENTITY,
     T085_SEARCH_400_ARMS,
+    T085_T052_COHORT_PATH,
+    T085_T052_COHORT_SHA256,
     T085BattleStartRecord,
     T085EvaluationIntegrityError,
     T085OutcomeRecord,
@@ -90,6 +104,120 @@ T085_SECONDARY_ARMS = (
     "prior_only_64002",
     "prior_corrected_85002",
 )
+
+
+def resolve_t085_canonical_records(
+    path: str | Path = T085_T052_COHORT_PATH,
+    *,
+    expected_sha256: str = T085_T052_COHORT_SHA256,
+) -> dict[str, BattleStartCheckpointRecord]:
+    """Load full fixed-cohort records and bind them by exact checkpoint identity."""
+    resolved = Path(path).resolve(strict=True)
+    digest = sha256(resolved.read_bytes()).hexdigest()
+    if digest != expected_sha256:
+        raise T085NativeExecutionError(
+            "T085 canonical cohort bytes do not match the accepted SHA-256"
+        )
+    with resolved.open(encoding="utf-8") as stream:
+        cohort = load_fixed_cohort_jsonl(stream)
+    records: dict[str, BattleStartCheckpointRecord] = {}
+    for index, full in enumerate(cohort.records):
+        raw = {
+            "record_index": full.cohort_index,
+            "source_checkpoint_id": full.source_checkpoint_id,
+            "source_run_id": full.source_run_id,
+            "source_seed": full.source_seed,
+            "source_battle_index": full.source_battle_index,
+            "structural_metadata": full.structural_metadata,
+            "source_controller_provenance": full.source_controller_provenance,
+            "source_battle_controller_provenance": full.source_battle_controller_provenance,
+            "source_non_combat_controller_provenance": full.source_non_combat_controller_provenance,
+            "action_trace": list(full.action_trace),
+            "snapshot_observation": list(full.snapshot_observation),
+            "snapshot_raw": full.snapshot_raw,
+            "distribution_kind": full.source_distribution_kind,
+            "checkpoint_information_regime": full.checkpoint_information_regime,
+            "public_context_status": full.public_context_status,
+            "public_run_context": full.public_run_context,
+            "assistance_history": list(full.assistance_history),
+            "battle_outcome": None,
+            "battle_completed": False,
+            "completed_battle_resource_outcome_status": "legacy_unavailable",
+            "completed_battle_resource_outcome": {},
+        }
+        record = record_from_manifest(
+            raw,
+            label=f"T085 canonical record {index}",
+            allowed_distribution_kinds=frozenset({"natural_run", "assisted_run"}),
+            allow_assistance_history=True,
+        )
+        if record.source_checkpoint_id in records:
+            raise T085NativeExecutionError(
+                "T085 canonical cohort contains duplicate checkpoint identities"
+            )
+        records[record.source_checkpoint_id] = record
+    if not records:
+        raise T085NativeExecutionError("T085 canonical cohort contains no full records")
+    return records
+
+
+def restore_t085_canonical_record(
+    adapter: object,
+    selected: T085BattleStartRecord,
+    canonical_records: Mapping[str, BattleStartCheckpointRecord],
+) -> tuple[SimulatorSnapshot, str]:
+    """Restore one selected row only through the accepted canonical helpers."""
+    canonical = canonical_records.get(selected.complete_source_identity)
+    if canonical is None or canonical.source_run_id != selected.source_run_identity:
+        raise T085NativeExecutionError(
+            "T085 selected row is not bound to a canonical full checkpoint record"
+        )
+    if canonical.distribution_kind == "assisted_run":
+        return restore_assisted_battle_start_record(adapter, canonical)
+    return restore_battle_start_record(adapter, canonical)
+
+
+def run_t085_native_restore_smoke(
+    adapter_factory: Callable[[], object],
+    canonical_path: str | Path,
+    output_path: str | Path,
+    *,
+    limit: int = 1,
+) -> dict[str, object]:
+    """Execute a real canonical restore pass and retain its auditable artifact."""
+    if limit < 1:
+        raise T085NativeExecutionError("T085 restore smoke limit must be positive")
+    canonical = resolve_t085_canonical_records(canonical_path)
+    rows = []
+    for record in list(canonical.values())[:limit]:
+        adapter = adapter_factory()
+        snapshot, method = (
+            restore_assisted_battle_start_record(adapter, record)
+            if record.distribution_kind == "assisted_run"
+            else restore_battle_start_record(adapter, record)
+        )
+        rows.append(
+            {
+                "source_checkpoint_id": record.source_checkpoint_id,
+                "source_run_id": record.source_run_id,
+                "restore_method": method,
+                "snapshot_fingerprint": sha256(
+                    json.dumps(dict(snapshot.raw), sort_keys=True, default=str).encode()
+                ).hexdigest(),
+            }
+        )
+    payload = {
+        "schema_id": "t085-native-canonical-restore-smoke-v1",
+        "task_id": "T085",
+        "canonical_sha256": sha256(Path(canonical_path).read_bytes()).hexdigest(),
+        "restored_records": rows,
+    }
+    target = Path(output_path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    return payload
 
 
 @dataclass(frozen=True)
@@ -1214,6 +1342,7 @@ def run_t085_native_paired_evaluation(
     plan: T085NativeEvaluationPlan,
     *,
     adapter_factory: Callable[[], object],
+    canonical_records_path: str | Path = T085_T052_COHORT_PATH,
     arms: Mapping[str, T085NativeArm],
     selection_output_path: str | Path,
     report_output_path: str | Path,
@@ -1237,6 +1366,7 @@ def run_t085_native_paired_evaluation(
             f"unknown T085 native search backend {search_backend!r}"
         )
     native_identity = _validate_t085_native_source_manifest(search_backend)
+    canonical_records = resolve_t085_canonical_records(canonical_records_path)
     if search_backend != "battle_search_v2":
         raise T085NativeExecutionError("T085 arms require native battle_search_v2")
     expected_arm_names = (
@@ -1261,6 +1391,7 @@ def run_t085_native_paired_evaluation(
         budget: int,
     ) -> T085OutcomeRecord:
         base_adapter = adapter_factory()
+        started = time.perf_counter()
         selected_arm = arms[arm]
         adapter = T085NativeTerminalSearchAdapter(
             base_adapter,
@@ -1269,12 +1400,7 @@ def run_t085_native_paired_evaluation(
             policy_prior_callback=selected_arm.policy_prior_callback,
             leaf_value_callback=selected_arm.leaf_value_callback,
         )
-        restore = getattr(adapter, "restore_t085_battle_start_record", None)
-        if not callable(restore):
-            raise T085NativeExecutionError(
-                "T085 adapter must own restore_t085_battle_start_record and use the accepted restore helper"
-            )
-        restored = restore(record)
+        restored = restore_t085_canonical_record(adapter, record, canonical_records)
         if isinstance(restored, tuple):
             snapshot = restored[0]
         else:
@@ -1295,6 +1421,7 @@ def run_t085_native_paired_evaluation(
             max_steps=200,
             action_space=ActionSpaceConfig.initial_no_potions(),
         )
+        wall_clock_seconds = time.perf_counter() - started
         terminal_outcome = (
             last_step.next_battle_outcome
             if (last_step := (controlled.steps[-1] if controlled.steps else None))
@@ -1337,6 +1464,15 @@ def run_t085_native_paired_evaluation(
             "selected_root_action_identity": selected_identity,
             "source_run_identity": record.source_run_identity,
             "search_budget": budget,
+            "wall_clock_seconds": wall_clock_seconds,
+            "controller_provenance": controlled.controller_provenance,
+            "arm_provenance": selected_arm.provenance,
+            "inference_diagnostics": {
+                str(key): value
+                for step in controlled.steps
+                for key, value in step.decision_metadata.items()
+                if isinstance(value, (int, float)) and not isinstance(value, bool)
+            },
         }
         if last_step is not None:
             payload["terminal_current_hp"] = last_step.next_player_hp

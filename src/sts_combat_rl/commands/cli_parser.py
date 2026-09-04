@@ -5,6 +5,10 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from sts_combat_rl.commands.search_battle_controller import (
+    SEARCH_BATTLE_CONTROLLER_CHOICES,
+    SEARCH_BATTLE_CONTROLLER_ORACLE,
+)
 from sts_combat_rl.logging_utils import DEFAULT_LOG_FILE
 from sts_combat_rl.sim.assisted_source_generation import ASSISTANCE_LEVELS
 from sts_combat_rl.sim.model_guided_oracle_search import (
@@ -21,10 +25,6 @@ from sts_combat_rl.sim.oracle_teacher_search_guidance import (
 )
 from sts_combat_rl.sim.reward_design import BATTLE_REWARD_PRESETS
 from sts_combat_rl.sim.training_gate import TRAINING_GATE_OVERRIDES
-from sts_combat_rl.commands.search_battle_controller import (
-    SEARCH_BATTLE_CONTROLLER_CHOICES,
-    SEARCH_BATTLE_CONTROLLER_ORACLE,
-)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -53,6 +53,12 @@ def build_parser() -> argparse.ArgumentParser:
             "Run a bounded smoke calibration against a patched external "
             "slaythespire.StepSimulator and summarize to stderr."
         ),
+    )
+    input_group.add_argument(
+        "--lightspeed-t085-native-restore-smoke",
+        type=Path,
+        metavar="PATH",
+        help="Restore canonical T085 fixed-cohort records through native simulator helpers.",
     )
     input_group.add_argument(
         "--lightspeed-tactical-feature-audit",
@@ -1077,6 +1083,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         metavar="PATH",
         help=("Write the --lightspeed-a20-battle-start-coverage JSON report to PATH."),
+    )
+    parser.add_argument(
+        "--t085-native-restore-output",
+        type=Path,
+        help="Write the T085 canonical restore smoke artifact.",
     )
     parser.add_argument(
         "--assistance-level",

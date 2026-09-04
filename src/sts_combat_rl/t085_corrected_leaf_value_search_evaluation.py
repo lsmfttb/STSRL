@@ -337,6 +337,9 @@ class T085OutcomeRecord:
     search_steps: int | None = None
     learned_value_callback_count: int | None = None
     wall_clock_seconds: float | None = None
+    controller_provenance: Mapping[str, object] | None = None
+    arm_provenance: Mapping[str, object] | None = None
+    inference_diagnostics: Mapping[str, object] | None = None
     failure_reason: str | None = None
     source_run_identity: str | None = None
     search_budget: int | None = None
@@ -394,6 +397,21 @@ class T085OutcomeRecord:
             wall_clock_seconds=(
                 _required_finite(value["wall_clock_seconds"], "wall_clock_seconds")
                 if value.get("wall_clock_seconds") is not None
+                else None
+            ),
+            controller_provenance=(
+                dict(value["controller_provenance"])
+                if isinstance(value.get("controller_provenance"), Mapping)
+                else None
+            ),
+            arm_provenance=(
+                dict(value["arm_provenance"])
+                if isinstance(value.get("arm_provenance"), Mapping)
+                else None
+            ),
+            inference_diagnostics=(
+                dict(value["inference_diagnostics"])
+                if isinstance(value.get("inference_diagnostics"), Mapping)
                 else None
             ),
             failure_reason=(

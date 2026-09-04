@@ -5,6 +5,7 @@ from dataclasses import dataclass, replace
 
 import pytest
 
+from sts_combat_rl.commands.cli_parser import build_parser
 from sts_combat_rl.commands.t085_native_execution import (
     T085NativeExecutionError,
     T085NativeTerminalSearchAdapter,
@@ -170,6 +171,14 @@ class _SearchAdapter:
         self.events: list[str] = []
         self.snapshot = _snapshot()
 
+    def reset(self, seed=None):
+        del seed
+        return self.snapshot
+
+    def legal_actions(self, snapshot):
+        assert snapshot is self.snapshot
+        return _actions()
+
     def battle_search(self, snapshot, *, simulations, include_potions=False):
         assert self.backend == "battle_search"
         assert snapshot is self.snapshot
@@ -195,6 +204,25 @@ class _SearchAdapter:
         assert leaf_value_callback is None
         self.events.append("search_v2")
         return _raw_search(backend="battle_search_v2")
+
+    def step(self, action):
+        assert action in _actions()
+        return _terminal_transition()
+
+
+def test_guided_proxy_terminal_label_uses_no_callback_native_search() -> None:
+    adapter = _SearchAdapter(backend="battle_search_v2")
+    proxy = T085NativeTerminalSearchAdapter(
+        adapter,
+        search_simulations=100,
+        search_backend="battle_search_v2",
+        policy_prior_callback=lambda *_args, **_kwargs: 0.2,
+        leaf_value_callback=lambda *_args, **_kwargs: 0.3,
+    )
+    proxy.reset(seed=1)
+    actions = proxy.legal_actions(adapter.snapshot)
+    proxy.step(actions[0])
+    assert len(proxy.native_terminal_labels) == 1
 
 
 def test_terminal_utility_is_the_pre_action_selected_root_edge_mean() -> None:
@@ -519,3 +547,16 @@ def test_outcome_parser_keeps_absolute_hp_and_structured_resources_separate() ->
     )
     assert row.terminal_current_hp == 42
     assert row.structured_battle_resource_outcome == {"gold_delta": 9}
+
+
+def test_t085_restore_smoke_is_exposed_by_cli_parser() -> None:
+    args = build_parser().parse_args(
+        [
+            "--lightspeed-t085-native-restore-smoke",
+            "cohort.jsonl",
+            "--t085-native-restore-output",
+            "restore.json",
+        ]
+    )
+    assert args.lightspeed_t085_native_restore_smoke.name == "cohort.jsonl"
+    assert args.t085_native_restore_output.name == "restore.json"
