@@ -330,6 +330,7 @@ class T085OutcomeRecord:
     battle_survived: bool
     terminal_native_utility: float
     terminal_current_hp: float | None = None
+    structured_battle_resource_outcome: Mapping[str, object] | None = None
     turn_count: int | None = None
     selected_root_action_identity: str | None = None
     simulator_steps: int | None = None
@@ -355,6 +356,11 @@ class T085OutcomeRecord:
             terminal_current_hp=(
                 _required_finite(value["terminal_current_hp"], "terminal_current_hp")
                 if value.get("terminal_current_hp") is not None
+                else None
+            ),
+            structured_battle_resource_outcome=(
+                dict(value["structured_battle_resource_outcome"])
+                if isinstance(value.get("structured_battle_resource_outcome"), Mapping)
                 else None
             ),
             turn_count=(
