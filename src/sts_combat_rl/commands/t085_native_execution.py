@@ -28,11 +28,13 @@ from typing import Any, Literal
 
 from sts_combat_rl.sim.action_space import ActionSpaceConfig
 from sts_combat_rl.sim.assisted_source_generation import (
+    load_assisted_source_pool_jsonl,
     restore_assisted_battle_start_record,
 )
 from sts_combat_rl.sim.battle_search_v2 import _node_context
 from sts_combat_rl.sim.battle_start_pool import (
     BattleStartCheckpointRecord,
+    load_natural_battle_start_pool_jsonl,
     record_from_manifest,
     restore_battle_start_record,
 )
@@ -70,6 +72,7 @@ from sts_combat_rl.sim.search_guidance_inference import (
     search_guidance_scorer_checkpoint_provenance,
     validate_search_guidance_result,
 )
+from sts_combat_rl.sim.torch_policy_value import OUTCOME_TARGET_KIND
 from sts_combat_rl.t085_corrected_leaf_value_search_evaluation import (
     T085_NATIVE_IDENTITY,
     T085_SEARCH_400_ARMS,
@@ -118,8 +121,15 @@ def resolve_t085_canonical_records(
     path: str | Path = T085_T052_COHORT_PATH,
     *,
     expected_sha256: str = T085_T052_COHORT_SHA256,
+    artifact_kind: Literal[
+        "fixed_cohort", "natural_pool", "assisted_pool"
+    ] = "fixed_cohort",
 ) -> dict[str, BattleStartCheckpointRecord]:
-    """Load full fixed-cohort records and bind them by exact checkpoint identity."""
+    """Load one explicitly typed, verified full-record source artifact.
+
+    The explicit kind is intentional: a natural or assisted source pool must
+    never be silently interpreted as the T052 fixed cohort, and vice versa.
+    """
     resolved = Path(path).resolve(strict=True)
     digest = sha256_file(resolved)
     if digest != expected_sha256:
@@ -127,38 +137,57 @@ def resolve_t085_canonical_records(
             "T085 canonical cohort bytes do not match the accepted SHA-256"
         )
     with resolved.open(encoding="utf-8") as stream:
-        cohort = load_fixed_cohort_jsonl(stream)
+        if artifact_kind == "fixed_cohort":
+            loaded = load_fixed_cohort_jsonl(stream)
+            full_records: Iterable[object] = loaded.records
+        elif artifact_kind == "natural_pool":
+            full_records = load_natural_battle_start_pool_jsonl(stream).records
+        elif artifact_kind == "assisted_pool":
+            full_records = load_assisted_source_pool_jsonl(stream).records
+        else:  # pragma: no cover - Literal protects callers, fail closed at runtime
+            raise T085NativeExecutionError(
+                f"unsupported T085 source artifact kind {artifact_kind!r}"
+            )
     records: dict[str, BattleStartCheckpointRecord] = {}
-    for index, full in enumerate(cohort.records):
-        raw = {
-            "record_index": full.cohort_index,
-            "source_checkpoint_id": full.source_checkpoint_id,
-            "source_run_id": full.source_run_id,
-            "source_seed": full.source_seed,
-            "source_battle_index": full.source_battle_index,
-            "structural_metadata": full.structural_metadata,
-            "source_controller_provenance": full.source_controller_provenance,
-            "source_battle_controller_provenance": full.source_battle_controller_provenance,
-            "source_non_combat_controller_provenance": full.source_non_combat_controller_provenance,
-            "action_trace": list(full.action_trace),
-            "snapshot_observation": list(full.snapshot_observation),
-            "snapshot_raw": full.snapshot_raw,
-            "distribution_kind": full.source_distribution_kind,
-            "checkpoint_information_regime": full.checkpoint_information_regime,
-            "public_context_status": full.public_context_status,
-            "public_run_context": full.public_run_context,
-            "assistance_history": list(full.assistance_history),
-            "battle_outcome": None,
-            "battle_completed": False,
-            "completed_battle_resource_outcome_status": "legacy_unavailable",
-            "completed_battle_resource_outcome": {},
-        }
-        record = record_from_manifest(
-            raw,
-            label=f"T085 canonical record {index}",
-            allowed_distribution_kinds=frozenset({"natural_run", "assisted_run"}),
-            allow_assistance_history=True,
-        )
+    for index, full in enumerate(full_records):
+        if isinstance(full, BattleStartCheckpointRecord):
+            record = full
+        else:
+            # Fixed-cohort rows are a separate schema and require this
+            # repository-owned conversion into the restore record.
+            if artifact_kind != "fixed_cohort":
+                raise T085NativeExecutionError(
+                    f"{artifact_kind} loader did not return full restore records"
+                )
+            raw = {
+                "record_index": full.cohort_index,
+                "source_checkpoint_id": full.source_checkpoint_id,
+                "source_run_id": full.source_run_id,
+                "source_seed": full.source_seed,
+                "source_battle_index": full.source_battle_index,
+                "structural_metadata": full.structural_metadata,
+                "source_controller_provenance": full.source_controller_provenance,
+                "source_battle_controller_provenance": full.source_battle_controller_provenance,
+                "source_non_combat_controller_provenance": full.source_non_combat_controller_provenance,
+                "action_trace": list(full.action_trace),
+                "snapshot_observation": list(full.snapshot_observation),
+                "snapshot_raw": full.snapshot_raw,
+                "distribution_kind": full.source_distribution_kind,
+                "checkpoint_information_regime": full.checkpoint_information_regime,
+                "public_context_status": full.public_context_status,
+                "public_run_context": full.public_run_context,
+                "assistance_history": list(full.assistance_history),
+                "battle_outcome": None,
+                "battle_completed": False,
+                "completed_battle_resource_outcome_status": "legacy_unavailable",
+                "completed_battle_resource_outcome": {},
+            }
+            record = record_from_manifest(
+                raw,
+                label=f"T085 canonical record {index}",
+                allowed_distribution_kinds=frozenset({"natural_run", "assisted_run"}),
+                allow_assistance_history=True,
+            )
         if record.source_checkpoint_id in records:
             raise T085NativeExecutionError(
                 "T085 canonical cohort contains duplicate checkpoint identities"
@@ -375,6 +404,12 @@ class T085NativeArm:
     target_kind: str | None
 
     def __post_init__(self) -> None:
+        try:
+            json.dumps(self.checkpoint, sort_keys=True)
+        except (TypeError, ValueError) as exc:
+            raise T085NativeExecutionError(
+                "T085 arm checkpoint provenance must be JSON-safe"
+            ) from exc
         base_name = self.name.removesuffix("@400")
         if base_name == "baseline":
             if (
@@ -540,6 +575,12 @@ def run_t085_native_paired_evaluation_from_paths(
     corrected_checkpoint_85001: str | Path,
     old_checkpoint_64002: str | Path,
     corrected_checkpoint_85002: str | Path,
+    old_checkpoint_64001_sha256: str,
+    corrected_checkpoint_85001_sha256: str,
+    old_checkpoint_64002_sha256: str,
+    corrected_checkpoint_85002_sha256: str,
+    b_artifact_kind: Literal["assisted_pool", "fixed_cohort"] = "assisted_pool",
+    c_artifact_kind: Literal["natural_pool", "fixed_cohort"] = "natural_pool",
     selection_output_path: str | Path,
     report_output_path: str | Path,
     outcomes_output_path: str | Path,
@@ -550,8 +591,12 @@ def run_t085_native_paired_evaluation_from_paths(
     )
     maps = {
         "A": resolve_t085_canonical_records(a_full_map_path, expected_sha256=a_sha256),
-        "B": resolve_t085_canonical_records(b_full_map_path, expected_sha256=b_sha256),
-        "C": resolve_t085_canonical_records(c_full_map_path, expected_sha256=c_sha256),
+        "B": resolve_t085_canonical_records(
+            b_full_map_path, expected_sha256=b_sha256, artifact_kind=b_artifact_kind
+        ),
+        "C": resolve_t085_canonical_records(
+            c_full_map_path, expected_sha256=c_sha256, artifact_kind=c_artifact_kind
+        ),
     }
     maps["B@400"] = maps["B"]
     from sts_combat_rl.commands.model_guided_oracle_search import (
@@ -562,6 +607,44 @@ def run_t085_native_paired_evaluation_from_paths(
     new1 = build_torch_guidance_scorer_from_checkpoint(Path(corrected_checkpoint_85001))
     old2 = build_torch_guidance_scorer_from_checkpoint(Path(old_checkpoint_64002))
     new2 = build_torch_guidance_scorer_from_checkpoint(Path(corrected_checkpoint_85002))
+
+    # Validate each loaded scorer independently after loading.  The explicit
+    # SHA arguments bind the path bytes; scorer provenance binds schema and
+    # target semantics, so an arbitrary checkpoint cannot masquerade as an arm.
+    for path, expected_sha256, scorer, corrected, label in (
+        (old_checkpoint_64001, old_checkpoint_64001_sha256, old1, False, "old 64001"),
+        (
+            corrected_checkpoint_85001,
+            corrected_checkpoint_85001_sha256,
+            new1,
+            True,
+            "corrected 85001",
+        ),
+        (old_checkpoint_64002, old_checkpoint_64002_sha256, old2, False, "old 64002"),
+        (
+            corrected_checkpoint_85002,
+            corrected_checkpoint_85002_sha256,
+            new2,
+            True,
+            "corrected 85002",
+        ),
+    ):
+        if sha256_file(path) != expected_sha256:
+            raise T085NativeExecutionError(f"T085 {label} checkpoint SHA-256 mismatch")
+        provenance = search_guidance_scorer_checkpoint_provenance(scorer, label=label)
+        if provenance.checkpoint_schema_id != "torch-policy-value-checkpoint-v1":
+            raise T085NativeExecutionError(
+                f"T085 {label} checkpoint schema is unsupported"
+            )
+        expected_target = (
+            SEARCH_V2_LEAF_NATIVE_UTILITY_TARGET_KIND
+            if corrected
+            else OUTCOME_TARGET_KIND
+        )
+        if provenance.outcome_target_kind != expected_target:
+            raise T085NativeExecutionError(
+                f"T085 {label} checkpoint target kind is not {expected_target!r}"
+            )
 
     # Root context is supplied at callback invocation by native Search v2; the
     # concrete controller path validates it before constructing callbacks.
@@ -1122,6 +1205,19 @@ class T085NativeTerminalSearchAdapter:
         self._restored_snapshot = snapshot
         return snapshot
 
+    def prime_restored_snapshot(self, snapshot: SimulatorSnapshot) -> None:
+        """Prime ``execute_controlled_run`` to preserve an already-restored start.
+
+        Canonical replay helpers deliberately receive the base simulator
+        adapter.  This seam transfers only their verified snapshot into the
+        native-label proxy; it does not expose a caller-controlled outcome or
+        bypass the proxy's reset contract.
+        """
+        if not isinstance(snapshot, SimulatorSnapshot):
+            raise T085NativeExecutionError("cannot prime a non-snapshot restore")
+        self._current_snapshot = snapshot
+        self._restored_snapshot = snapshot
+
     def legal_actions(self, snapshot: SimulatorSnapshot) -> list[SimulatorAction]:
         legal_actions = getattr(self._base_adapter, "legal_actions", None)
         if not callable(legal_actions):
@@ -1608,6 +1704,29 @@ def run_t085_native_paired_evaluation(
         raise T085NativeExecutionError(
             "T085 paired evaluation requires separately verified full-record maps for A/T052, B, and C"
         )
+    for cohort_name, selected_records in plan.cohorts.items():
+        source_map = canonical_records_by_cohort[cohort_name]
+        for selected in selected_records:
+            canonical = source_map.get(selected.complete_source_identity)
+            if canonical is None:
+                raise T085NativeExecutionError(
+                    f"T085 selection {cohort_name} is not bound to its full-record map: "
+                    f"{selected.complete_source_identity}"
+                )
+            # Check the complete identity before any simulator work.  The
+            # restore helper repeats this boundary for defense in depth.
+            if (
+                canonical.source_run_id != selected.source_run_identity
+                or canonical.source_seed != selected.source_run_seed
+                or canonical.source_battle_index != _selected_battle_index(selected)
+                or canonical.structural_metadata.get("act") != selected.act
+                or str(canonical.structural_metadata.get("room_type", "")).upper()
+                != selected.room_type
+            ):
+                raise T085NativeExecutionError(
+                    f"T085 selection {cohort_name} full-record identity mismatch: "
+                    f"{selected.complete_source_identity}"
+                )
     if search_backend != "battle_search_v2":
         raise T085NativeExecutionError("T085 arms require native battle_search_v2")
     expected_arm_names = (
@@ -1634,16 +1753,9 @@ def run_t085_native_paired_evaluation(
         base_adapter = adapter_factory()
         started = time.perf_counter()
         selected_arm = arms[arm]
-        adapter = T085NativeTerminalSearchAdapter(
-            base_adapter,
-            search_simulations=budget,
-            search_backend=search_backend,
-            policy_prior_callback=selected_arm.policy_prior_callback,
-            leaf_value_callback=selected_arm.leaf_value_callback,
-        )
         cohort = _cohort_for_record(plan, record, arm)
         restored = restore_t085_canonical_record(
-            adapter, record, canonical_records_by_cohort[cohort]
+            base_adapter, record, canonical_records_by_cohort[cohort]
         )
         if isinstance(restored, tuple):
             snapshot = restored[0]
@@ -1653,7 +1765,14 @@ def run_t085_native_paired_evaluation(
             raise T085NativeExecutionError(
                 "T085 restore did not return a SimulatorSnapshot"
             )
-        adapter._current_snapshot = snapshot
+        adapter = T085NativeTerminalSearchAdapter(
+            base_adapter,
+            search_simulations=budget,
+            search_backend=search_backend,
+            policy_prior_callback=selected_arm.policy_prior_callback,
+            leaf_value_callback=selected_arm.leaf_value_callback,
+        )
+        adapter.prime_restored_snapshot(snapshot)
         controller: OnlineController = T085NativeArmController(
             selected_arm,
             simulations=budget,
@@ -1800,7 +1919,11 @@ __all__ = [
     "build_t085_native_arms",
     "build_t085_native_evaluation_plan",
     "finalize_t085_native_root_edge_label",
+    "load_t085_native_evaluation_plan",
     "prepare_t085_native_root_edge_label",
+    "resolve_t085_canonical_records",
+    "restore_t085_canonical_record",
     "run_t085_native_paired_evaluation",
+    "run_t085_native_paired_evaluation_from_paths",
     "write_t085_native_selection_artifact",
 ]

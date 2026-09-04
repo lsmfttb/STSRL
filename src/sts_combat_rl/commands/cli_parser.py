@@ -1108,11 +1108,39 @@ def build_parser() -> argparse.ArgumentParser:
         ("--t085-outcomes-output", "Per-record outcomes output."),
     ):
         parser.add_argument(option, type=Path, help=help_text)
+    parser.add_argument(
+        "--t085-b-artifact-kind",
+        choices=("assisted_pool", "fixed_cohort"),
+        default="assisted_pool",
+        help="Verified schema of the Cohort-B full source artifact.",
+    )
+    parser.add_argument(
+        "--t085-c-artifact-kind",
+        choices=("natural_pool", "fixed_cohort"),
+        default="natural_pool",
+        help="Verified schema of the Cohort-C full source artifact.",
+    )
     for option, help_text in (
         ("--t085-selection-sha256", "Exact SHA-256 for the T085 selection artifact."),
         ("--t085-a-map-sha256", "Exact SHA-256 for the T052 map."),
         ("--t085-b-map-sha256", "Exact SHA-256 for the Cohort-B map."),
         ("--t085-c-map-sha256", "Exact SHA-256 for the Cohort-C map."),
+        (
+            "--t085-old-checkpoint-64001-sha256",
+            "Exact SHA-256 for T064 checkpoint 64001.",
+        ),
+        (
+            "--t085-corrected-checkpoint-85001-sha256",
+            "Exact SHA-256 for T085 checkpoint 85001.",
+        ),
+        (
+            "--t085-old-checkpoint-64002-sha256",
+            "Exact SHA-256 for T064 checkpoint 64002.",
+        ),
+        (
+            "--t085-corrected-checkpoint-85002-sha256",
+            "Exact SHA-256 for T085 checkpoint 85002.",
+        ),
     ):
         parser.add_argument(option, help=help_text)
     parser.add_argument(
