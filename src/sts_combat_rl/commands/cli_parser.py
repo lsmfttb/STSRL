@@ -61,6 +61,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Restore canonical T085 fixed-cohort records through native simulator helpers.",
     )
     input_group.add_argument(
+        "--lightspeed-t085-native-paired-evaluation",
+        type=Path,
+        metavar="SELECTION_JSON",
+        help="Run the complete repository-owned T085 paired evaluation.",
+    )
+    input_group.add_argument(
         "--lightspeed-tactical-feature-audit",
         action="store_true",
         help=(
@@ -1089,6 +1095,26 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Write the T085 canonical restore smoke artifact.",
     )
+    for option, help_text in (
+        ("--t085-a-map", "Full T052 canonical map artifact."),
+        ("--t085-b-map", "Full Cohort-B canonical map artifact."),
+        ("--t085-c-map", "Full Cohort-C canonical map artifact."),
+        ("--t085-old-checkpoint-64001", "T064 static/64001 checkpoint."),
+        ("--t085-corrected-checkpoint-85001", "T085 corrected/85001 checkpoint."),
+        ("--t085-old-checkpoint-64002", "T064 static/64002 checkpoint."),
+        ("--t085-corrected-checkpoint-85002", "T085 corrected/85002 checkpoint."),
+        ("--t085-selection-output", "Retained selection artifact output."),
+        ("--t085-report-output", "Paired report output."),
+        ("--t085-outcomes-output", "Per-record outcomes output."),
+    ):
+        parser.add_argument(option, type=Path, help=help_text)
+    for option, help_text in (
+        ("--t085-selection-sha256", "Exact SHA-256 for the T085 selection artifact."),
+        ("--t085-a-map-sha256", "Exact SHA-256 for the T052 map."),
+        ("--t085-b-map-sha256", "Exact SHA-256 for the Cohort-B map."),
+        ("--t085-c-map-sha256", "Exact SHA-256 for the Cohort-C map."),
+    ):
+        parser.add_argument(option, help=help_text)
     parser.add_argument(
         "--assistance-level",
         choices=ASSISTANCE_LEVELS,

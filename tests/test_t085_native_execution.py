@@ -591,3 +591,12 @@ def test_t085_restore_smoke_is_exposed_by_cli_parser() -> None:
     )
     assert args.lightspeed_t085_native_restore_smoke.name == "cohort.jsonl"
     assert args.t085_native_restore_output.name == "restore.json"
+
+
+def test_t085_paired_cli_requires_explicit_full_map_inputs() -> None:
+    args = build_parser().parse_args(
+        ["--lightspeed-t085-native-paired-evaluation", "selection.json"]
+    )
+    assert args.lightspeed_t085_native_paired_evaluation.name == "selection.json"
+    assert args.t085_b_map is None
+    assert args.t085_c_map is None

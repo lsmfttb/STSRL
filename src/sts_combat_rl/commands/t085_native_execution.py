@@ -30,6 +30,7 @@ from sts_combat_rl.sim.action_space import ActionSpaceConfig
 from sts_combat_rl.sim.assisted_source_generation import (
     restore_assisted_battle_start_record,
 )
+from sts_combat_rl.sim.battle_search_v2 import _node_context
 from sts_combat_rl.sim.battle_start_pool import (
     BattleStartCheckpointRecord,
     record_from_manifest,
@@ -62,6 +63,12 @@ from sts_combat_rl.sim.oracle_search import (
     build_oracle_search_report,
     oracle_search_controller_metadata,
     select_oracle_root_action,
+)
+from sts_combat_rl.sim.search_guidance_inference import (
+    SEARCH_V2_LEAF_NATIVE_UTILITY_TARGET_KIND,
+    SearchGuidanceScorer,
+    search_guidance_scorer_checkpoint_provenance,
+    validate_search_guidance_result,
 )
 from sts_combat_rl.t085_corrected_leaf_value_search_evaluation import (
     T085_NATIVE_IDENTITY,
@@ -188,6 +195,117 @@ def restore_t085_canonical_record(
     return restore_battle_start_record(adapter, canonical)
 
 
+def load_t085_native_evaluation_plan(
+    path: str | Path, *, expected_sha256: str | None = None
+) -> T085NativeEvaluationPlan:
+    """Load a previously written, current-schema T085 selection artifact."""
+    if expected_sha256 is not None and sha256_file(path) != expected_sha256:
+        raise T085NativeExecutionError("T085 selection artifact SHA-256 mismatch")
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise T085NativeExecutionError(
+            "T085 selection artifact is unavailable or invalid"
+        ) from exc
+    if (
+        not isinstance(payload, Mapping)
+        or payload.get("schema_id") != T085_NATIVE_SELECTION_SCHEMA_ID
+    ):
+        raise T085NativeExecutionError("T085 selection artifact schema is not current")
+    raw_cohorts = payload.get("cohorts")
+    raw_evidence = payload.get("selection_evidence")
+    if not isinstance(raw_cohorts, Mapping) or not isinstance(raw_evidence, Mapping):
+        raise T085NativeExecutionError("T085 selection artifact lacks cohorts/evidence")
+    cohorts = {
+        str(name): tuple(T085BattleStartRecord.from_mapping(item) for item in records)
+        for name, records in raw_cohorts.items()
+        if isinstance(records, Sequence) and not isinstance(records, (str, bytes))
+    }
+    if set(cohorts) != {"A", "B", "C", "B@400"}:
+        raise T085NativeExecutionError(
+            "T085 selection artifact cohort matrix is incomplete"
+        )
+    plan = T085NativeEvaluationPlan(
+        cohorts=cohorts,
+        selection_evidence={
+            str(k): dict(v) for k, v in raw_evidence.items() if isinstance(v, Mapping)
+        },
+        native_identity=dict(payload.get("native_identity", {}))
+        if isinstance(payload.get("native_identity"), Mapping)
+        else {},
+    )
+    _validate_plan(plan)
+    return plan
+
+
+@dataclass(frozen=True)
+class _T085ScorerCallback:
+    scorer: SearchGuidanceScorer
+    corrected: bool
+    kind: Literal["policy", "value"]
+    root_context: Any | None = None
+
+    def bind(self, root_context: Any) -> _T085ScorerCallback:
+        return replace(self, root_context=root_context)
+
+    def __call__(self, raw, native_actions):
+        if self.root_context is None:
+            raise T085NativeExecutionError(
+                "T085 scorer callback was not bound to root context"
+            )
+        context = _node_context(
+            raw,
+            native_actions,
+            ActionSpaceConfig.initial_no_potions(),
+            self.root_context,
+        )
+        provenance = search_guidance_scorer_checkpoint_provenance(self.scorer)
+        result = self.scorer.score_decision_context(context)
+        validate_search_guidance_result(
+            result, context=context, expected_checkpoint=provenance
+        )
+        if not result.inference_ok:
+            raise T085NativeExecutionError(
+                "T085 checkpoint scorer returned invalid inference result"
+            )
+        if self.kind == "policy":
+            return [float(score.policy_probability) for score in result.action_scores]
+        prediction = result.value_prediction
+        value = (
+            prediction.native_leaf_utility
+            if self.corrected and prediction is not None
+            else prediction.battle_survival_probability
+            if prediction is not None
+            else None
+        )
+        if value is None or not math.isfinite(float(value)):
+            raise T085NativeExecutionError(
+                "T085 checkpoint scorer returned no finite target value"
+            )
+        return float(value)
+
+
+def t085_scorer_callbacks(
+    scorer: SearchGuidanceScorer,
+    *,
+    root_context: Any,
+    corrected: bool,
+) -> tuple[Callable[..., object], Callable[..., object]]:
+    """Adapt the existing scorer to native callbacks with target-gated semantics."""
+    provenance = search_guidance_scorer_checkpoint_provenance(scorer)
+    if corrected != (
+        provenance.outcome_target_kind == SEARCH_V2_LEAF_NATIVE_UTILITY_TARGET_KIND
+    ):
+        raise T085NativeExecutionError(
+            "T085 scorer target kind does not match arm semantics"
+        )
+
+    return (
+        _T085ScorerCallback(scorer, corrected, "policy", root_context),
+        _T085ScorerCallback(scorer, corrected, "value", root_context),
+    )
+
+
 def _selected_battle_index(selected: T085BattleStartRecord) -> int:
     prefix = f"{selected.source_run_identity}:"
     if not selected.battle_identity.startswith(prefix):
@@ -280,7 +398,7 @@ class T085NativeArm:
             if (
                 self.checkpoint is None
                 or self.leaf_value_callback is None
-                or self.target_kind != "battle_survival_probability"
+                or self.target_kind != "terminal_battle_survival_probability"
             ):
                 raise T085NativeExecutionError(
                     "T085 old arm lacks explicit checkpoint/survival callback provenance"
@@ -341,7 +459,7 @@ def build_t085_native_arms(
             old_checkpoint_64001,
             None,
             old_value_callback_64001,
-            "battle_survival_probability",
+            "terminal_battle_survival_probability",
         ),
         "corrected_value_85001": T085NativeArm(
             "corrected_value_85001",
@@ -355,7 +473,7 @@ def build_t085_native_arms(
             old_checkpoint_64002,
             None,
             old_value_callback_64002,
-            "battle_survival_probability",
+            "terminal_battle_survival_probability",
         ),
         "corrected_value_85002": T085NativeArm(
             "corrected_value_85002",
@@ -405,6 +523,87 @@ def build_t085_native_arms(
         }
     )
     return arms
+
+
+def run_t085_native_paired_evaluation_from_paths(
+    *,
+    adapter_factory: Callable[[], object],
+    selection_path: str | Path,
+    selection_sha256: str,
+    a_full_map_path: str | Path,
+    b_full_map_path: str | Path,
+    c_full_map_path: str | Path,
+    a_sha256: str,
+    b_sha256: str,
+    c_sha256: str,
+    old_checkpoint_64001: str | Path,
+    corrected_checkpoint_85001: str | Path,
+    old_checkpoint_64002: str | Path,
+    corrected_checkpoint_85002: str | Path,
+    selection_output_path: str | Path,
+    report_output_path: str | Path,
+    outcomes_output_path: str | Path,
+) -> dict[str, object]:
+    """Complete path-bound T085 workflow; no caller result callback exists."""
+    plan = load_t085_native_evaluation_plan(
+        selection_path, expected_sha256=selection_sha256
+    )
+    maps = {
+        "A": resolve_t085_canonical_records(a_full_map_path, expected_sha256=a_sha256),
+        "B": resolve_t085_canonical_records(b_full_map_path, expected_sha256=b_sha256),
+        "C": resolve_t085_canonical_records(c_full_map_path, expected_sha256=c_sha256),
+    }
+    maps["B@400"] = maps["B"]
+    from sts_combat_rl.commands.model_guided_oracle_search import (
+        build_torch_guidance_scorer_from_checkpoint,
+    )
+
+    old1 = build_torch_guidance_scorer_from_checkpoint(Path(old_checkpoint_64001))
+    new1 = build_torch_guidance_scorer_from_checkpoint(Path(corrected_checkpoint_85001))
+    old2 = build_torch_guidance_scorer_from_checkpoint(Path(old_checkpoint_64002))
+    new2 = build_torch_guidance_scorer_from_checkpoint(Path(corrected_checkpoint_85002))
+
+    # Root context is supplied at callback invocation by native Search v2; the
+    # concrete controller path validates it before constructing callbacks.
+    def callback_pair(scorer, corrected):
+        return t085_scorer_callbacks(scorer, root_context=None, corrected=corrected)
+
+    # Native callback construction is deferred to the controller boundary;
+    # this workflow still binds every checkpoint identity before execution.
+    p1, v1 = callback_pair(old1, False)
+    _p2, v2 = callback_pair(new1, True)
+    p3, v3 = callback_pair(old2, False)
+    _p4, v4 = callback_pair(new2, True)
+    arms = build_t085_native_arms(
+        old_checkpoint_64001=search_guidance_scorer_checkpoint_provenance(
+            old1
+        ).to_dict(),
+        corrected_checkpoint_85001=search_guidance_scorer_checkpoint_provenance(
+            new1
+        ).to_dict(),
+        old_checkpoint_64002=search_guidance_scorer_checkpoint_provenance(
+            old2
+        ).to_dict(),
+        corrected_checkpoint_85002=search_guidance_scorer_checkpoint_provenance(
+            new2
+        ).to_dict(),
+        old_value_callback_64001=v1,
+        corrected_value_callback_85001=v2,
+        old_value_callback_64002=v3,
+        corrected_value_callback_85002=v4,
+        prior_callback_64001=p1,
+        prior_callback_64002=p3,
+    )
+    return run_t085_native_paired_evaluation(
+        plan,
+        adapter_factory=adapter_factory,
+        canonical_records_by_cohort=maps,
+        arms=arms,
+        selection_output_path=selection_output_path,
+        report_output_path=report_output_path,
+        outcomes_output_path=outcomes_output_path,
+        search_backend="battle_search_v2",
+    )
 
 
 class T085NativeExecutionError(T085EvaluationIntegrityError):
@@ -1125,12 +1324,18 @@ class T085NativeArmController:
         search = getattr(adapter, "battle_search_v2", None)
         if not callable(search):
             raise T085NativeExecutionError("T085 arm requires battle_search_v2")
+        policy_callback = self.arm.policy_prior_callback
+        leaf_callback = self.arm.leaf_value_callback
+        if hasattr(policy_callback, "bind"):
+            policy_callback = policy_callback.bind(context)
+        if hasattr(leaf_callback, "bind"):
+            leaf_callback = leaf_callback.bind(context)
         raw = search(
             snapshot,
             simulations=self.simulations,
             include_potions=False,
-            policy_prior_callback=self.arm.policy_prior_callback,
-            leaf_value_callback=self.arm.leaf_value_callback,
+            policy_prior_callback=policy_callback,
+            leaf_value_callback=leaf_callback,
         )
         if self.arm.name == "baseline":
             _validate_unguided_v2_telemetry(raw)

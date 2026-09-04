@@ -88,7 +88,10 @@ from sts_combat_rl.commands.t062_battle_search_v2 import (
     run_t062_comparison_from_cohort_path,
     write_t062_comparison_report,
 )
-from sts_combat_rl.commands.t085_native_execution import run_t085_native_restore_smoke
+from sts_combat_rl.commands.t085_native_execution import (
+    run_t085_native_paired_evaluation_from_paths,
+    run_t085_native_restore_smoke,
+)
 from sts_combat_rl.sim.a20_battle_start_coverage import (
     format_a20_battle_start_coverage_report,
 )
@@ -258,6 +261,7 @@ _LIGHTSPEED_BOOL_FLAGS = (
 )
 _LIGHTSPEED_PATH_FLAGS = (
     "lightspeed_t085_native_restore_smoke",
+    "lightspeed_t085_native_paired_evaluation",
     "lightspeed_battle_start_pool",
     "lightspeed_search_battle_start_pool",
     "lightspeed_assisted_battle_start_pool",
@@ -305,6 +309,49 @@ def run_lightspeed_command(args: argparse.Namespace) -> int:
                 action_space=action_space,
             )
             print(format_simulator_calibration_report(report), file=sys.stderr)
+        elif args.lightspeed_t085_native_paired_evaluation is not None:
+            required = (
+                args.t085_selection_sha256,
+                args.t085_a_map,
+                args.t085_b_map,
+                args.t085_c_map,
+                args.t085_a_map_sha256,
+                args.t085_b_map_sha256,
+                args.t085_c_map_sha256,
+                args.t085_old_checkpoint_64001,
+                args.t085_corrected_checkpoint_85001,
+                args.t085_old_checkpoint_64002,
+                args.t085_corrected_checkpoint_85002,
+                args.t085_selection_output,
+                args.t085_report_output,
+                args.t085_outcomes_output,
+            )
+            if any(value is None for value in required):
+                raise ValueError(
+                    "T085 paired evaluation requires selection, A/B/C full maps, "
+                    "all exact SHA-256 values, four checkpoints, and three outputs"
+                )
+            report = run_t085_native_paired_evaluation_from_paths(
+                adapter_factory=lambda: LightSpeedAdapter(
+                    seed=args.sim_seed, ascension=args.sim_ascension
+                ),
+                selection_path=args.lightspeed_t085_native_paired_evaluation,
+                selection_sha256=args.t085_selection_sha256,
+                a_full_map_path=args.t085_a_map,
+                b_full_map_path=args.t085_b_map,
+                c_full_map_path=args.t085_c_map,
+                a_sha256=args.t085_a_map_sha256,
+                b_sha256=args.t085_b_map_sha256,
+                c_sha256=args.t085_c_map_sha256,
+                old_checkpoint_64001=args.t085_old_checkpoint_64001,
+                corrected_checkpoint_85001=args.t085_corrected_checkpoint_85001,
+                old_checkpoint_64002=args.t085_old_checkpoint_64002,
+                corrected_checkpoint_85002=args.t085_corrected_checkpoint_85002,
+                selection_output_path=args.t085_selection_output,
+                report_output_path=args.t085_report_output,
+                outcomes_output_path=args.t085_outcomes_output,
+            )
+            print(json.dumps(report, sort_keys=True), file=sys.stderr)
         elif args.lightspeed_t085_native_restore_smoke is not None:
             if args.t085_native_restore_output is None:
                 raise ValueError(
