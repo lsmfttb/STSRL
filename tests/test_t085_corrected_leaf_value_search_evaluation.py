@@ -13,6 +13,7 @@ from sts_combat_rl.commands.t085_corrected_leaf_value_search_evaluation import (
 )
 from sts_combat_rl.t085_corrected_leaf_value_search_evaluation import (
     T085_ARTIFACT_ROOT,
+    T085_INPUT_ARTIFACT_IDENTITIES,
     T085_INPUT_ELIGIBILITY_SCHEMA_ID,
     T085_NATIVE_IDENTITY,
     T085_PRIMARY_ARMS,
@@ -20,6 +21,7 @@ from sts_combat_rl.t085_corrected_leaf_value_search_evaluation import (
     T085_REQUIRED_RETENTION_OUTPUT_ROLES,
     T085_SEARCH_400_ARMS,
     T085_SECONDARY_ARMS,
+    T085_T042_SCALE_MANIFEST_SHA256,
     T085_T052_COHORT_BYTE_COUNT,
     T085_T052_COHORT_PATH,
     T085_T052_COHORT_SHA256,
@@ -49,6 +51,22 @@ from sts_combat_rl.t085_corrected_leaf_value_search_evaluation import (
 )
 
 
+def test_t085_t042_scale_manifest_identity_is_exact() -> None:
+    """Keep the code identity bound to the published retained manifest."""
+
+    assert len(T085_T042_SCALE_MANIFEST_SHA256) == 64
+    assert all(
+        character in "0123456789abcdef" for character in T085_T042_SCALE_MANIFEST_SHA256
+    )
+
+    reference = T085_INPUT_ARTIFACT_IDENTITIES["t042_scale_manifest"]
+    path = Path(str(reference["path"]))
+    if not path.is_file():
+        pytest.skip("retained T042 scale manifest is not mounted")
+    assert path.stat().st_size == reference["byte_count"]
+    assert sha256_file(path) == T085_T042_SCALE_MANIFEST_SHA256
+
+
 def _source_manifest(tmp_path, *, cohort: str) -> dict[str, object]:
     common = {
         "schema_id": "t085-source-generation-manifest-v1",
@@ -71,7 +89,7 @@ def _source_manifest(tmp_path, *, cohort: str) -> dict[str, object]:
                 "root_selection": "highest_mean",
                 "assistance_level": "assist_hp75_potion",
                 "assistance_policy_seed": 42042,
-                "t042_scale_manifest_sha256": "25efae30dc9a61c8b97cb09e1844b93bffe693bde51c0f494f0f65203a1d327",
+                "t042_scale_manifest_sha256": T085_T042_SCALE_MANIFEST_SHA256,
             }
         )
     else:
