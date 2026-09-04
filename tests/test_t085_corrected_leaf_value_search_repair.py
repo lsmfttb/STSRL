@@ -8,6 +8,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
+import sts_combat_rl.t085_corrected_leaf_value_search_repair as t085_repair
 from sts_combat_rl.sim.torch_policy_value import (
     PolicyValueNetwork,
     load_torch_policy_value_checkpoint,
@@ -19,14 +20,17 @@ from sts_combat_rl.t085_corrected_leaf_value_search_repair import (
     T085_FORMAL_ROW_COUNT,
     T085_OPTIMIZER_STEPS,
     T085_PARENT_CHECKPOINT_PATH_BY_SEED,
+    T085FormalDataset,
     T085LeafValueExample,
     T085TrainingConfig,
     T085TrainingReport,
     T085TrainingResult,
+    _formal_example,
     audit_t085_policy_invariance,
     build_t085_batch_plan,
     load_t085_verified_parent_checkpoint,
     native_leaf_utility_from_prediction,
+    resolve_t084_formal_dataset,
     save_t085_corrected_checkpoint,
     train_t085_corrected_value_head,
 )
@@ -202,8 +206,42 @@ def test_corrected_checkpoint_round_trips_explicit_native_utility_gate(
         torch.save(raw, bad_cross)
         with pytest.raises(ValueError, match="target_mean disagrees"):
             load_torch_policy_value_checkpoint(str(bad_cross))
+
+        raw = torch.load(path, map_location="cpu", weights_only=True)
+        raw["outcome_target_kind"] = "terminal_battle_survival_probability"
+        raw["metadata"]["outcome_target_kind"] = "terminal_battle_survival_probability"
+        bad_historical = tmp_path / "bad-historical-t085-envelope.pt"
+        torch.save(raw, bad_historical)
+        with pytest.raises(ValueError, match="historical outcome_target_kind"):
+            load_torch_policy_value_checkpoint(str(bad_historical))
     finally:
         path.unlink(missing_ok=True)
+
+
+def test_corrected_top_level_requires_t085_training_provenance(tmp_path) -> None:
+    path = T085_PARENT_CHECKPOINT_PATH_BY_SEED[85001]
+    if not Path(path).is_file():
+        pytest.skip("retained T064 parent checkpoint is not mounted")
+    parent = load_torch_policy_value_checkpoint(path)
+    raw = torch.load(path, map_location="cpu", weights_only=True)
+    raw["outcome_target_kind"] = "search_v2_leaf_continuation_native_utility_v1"
+    raw["metadata"]["t085_value_target"] = {
+        "task_id": "T085",
+        "target_kind": "search_v2_leaf_continuation_native_utility_v1",
+        "native_utility_units": "BattleScumSearcher2.evaluateEndState",
+        "de_normalization": "z_pred * target_std + target_mean",
+        "target_mean": 0.0,
+        "target_std": 1.0,
+        "parent_checkpoint_sha256": (
+            "c0c38c239047f6be67e983768e53bd680007e9cba117e17c7d226583ed751193"
+        ),
+        "label_count": 960,
+    }
+    forged = tmp_path / "corrected-with-generic-provenance.pt"
+    torch.save(raw, forged)
+    assert parent.training_data_provenance.get("task_id") != "T085"
+    with pytest.raises(ValueError, match="requires T085 training provenance"):
+        load_torch_policy_value_checkpoint(str(forged))
 
 
 def test_parent_identity_is_computed_from_exact_qualified_path(tmp_path) -> None:
@@ -220,11 +258,18 @@ def test_parent_identity_is_computed_from_exact_qualified_path(tmp_path) -> None
         load_t085_verified_parent_checkpoint(alternate, repair_seed=85001)
 
 
-def test_training_requires_bound_parent_and_runs_invariance_audit() -> None:
+def test_training_requires_bound_parent_and_runs_invariance_audit(monkeypatch) -> None:
     path = T085_PARENT_CHECKPOINT_PATH_BY_SEED[85001]
     if not Path(path).is_file():
         pytest.skip("retained T064 parent checkpoint is not mounted")
     parent = load_t085_verified_parent_checkpoint(path, repair_seed=85001)
+    collector_path = Path(
+        "/mnt/d/DeadlyCatCoding/STSRL/artifacts/"
+        "t084-search-v2-internal-leaf-target-generation/"
+        "t084-native-leaf-target-generation-v13-repair.json"
+    )
+    if not collector_path.is_file():
+        pytest.skip("retained T084 collector is not mounted")
     examples = [
         T085LeafValueExample(
             state_features=(
@@ -243,6 +288,23 @@ def test_training_requires_bound_parent_and_runs_invariance_audit() -> None:
         )
         for index in range(960)
     ]
+    actual_collector_byte_count = collector_path.stat().st_size
+    real_sha256_file = t085_repair.sha256_file
+
+    def sha256_file_for_test(candidate):
+        if Path(candidate).resolve() == collector_path.resolve():
+            return T085_COLLECTOR_SHA256
+        return real_sha256_file(candidate)
+
+    monkeypatch.setattr(t085_repair, "sha256_file", sha256_file_for_test)
+    formal_dataset = T085FormalDataset(
+        examples=tuple(examples),
+        retention_manifest_path="retained/t084-retention-manifest.json",
+        collector_path=str(collector_path),
+        collector_sha256=T085_COLLECTOR_SHA256,
+        collector_byte_count=actual_collector_byte_count,
+        _verification_token=t085_repair._T085_FORMAL_DATASET_VERIFICATION_TOKEN,
+    )
     result = train_t085_corrected_value_head(
         parent.model,
         examples,
@@ -250,9 +312,10 @@ def test_training_requires_bound_parent_and_runs_invariance_audit() -> None:
         parent_checkpoint_sha256=parent.sha256,
         parent_checkpoint_path=parent.path,
         training_input_sha256=T085_COLLECTOR_SHA256,
-        training_input_path="retained/t084-collector.json",
-        training_input_byte_count=123,
+        training_input_path=str(collector_path),
+        training_input_byte_count=actual_collector_byte_count,
         parent_guidance_provenance=parent.training_data_provenance,
+        formal_dataset=formal_dataset,
     )
     assert result.invariance_audit["valid"] is True
     assert result.invariance_audit["example_count"] == T085_FORMAL_ROW_COUNT
@@ -260,6 +323,68 @@ def test_training_requires_bound_parent_and_runs_invariance_audit() -> None:
         result.training_data_provenance["parent_checkpoint_computed_sha256"]
         == parent.sha256
     )
+
+
+def test_t084_formal_dataset_collector_hash_bypass_is_rejected() -> None:
+    with pytest.raises(ValueError, match="cannot be disabled"):
+        resolve_t084_formal_dataset(
+            "/path/that-is-not-consulted.json",
+            verify_collector_hash=False,
+        )
+
+
+def _formal_row_with_replicate_mean(target_mean: float) -> dict[str, object]:
+    state = [0.0, 0.0]
+    public_model_input = {
+        "schema_id": "t084-public-torch-policy-value-input-v1",
+        "schema_version": 1,
+        "feature_schema_id": "public-tactical-v2",
+        "feature_schema_version": 2,
+        "snapshot_features": [0.0],
+        "public_context_features": [0.0],
+        "state_features": state,
+        "legal_action_features": [[0.0, 1.0]],
+        "eligible_action_indices": [0],
+        "public_context_feature_schema_id": "public-context-model-input-v1",
+        "public_context_feature_schema_version": 1,
+        "public_context_feature_size": 1,
+        "shape": {
+            "snapshot_features": [1],
+            "public_context_features": [1],
+            "state_features": [2],
+            "legal_action_features": [1, 2],
+        },
+        "hidden_state_excluded": True,
+    }
+    return {
+        "sampling_arm": "unguided_search_v2",
+        "act": 1,
+        "root_identity": "root",
+        "exact_leaf_identity": "leaf",
+        "exact_hidden_state_payload": {"opaque": True},
+        "exact_state_digest": "digest",
+        "public_projection": {"visible": True},
+        "public_model_input": public_model_input,
+        "legal_actions": [{"id": "card"}],
+        "source_complete_identity_sha256": "source",
+        "depth": 1,
+        "target_mean": target_mean,
+        "replicates": [
+            {
+                "terminal": True,
+                "cap_hit": False,
+                "transition_count": 1,
+                "terminal_evaluate_end_state": 3.0,
+            }
+            for _ in range(100)
+        ],
+    }
+
+
+def test_formal_target_mean_is_bound_to_replicate_population_mean() -> None:
+    assert _formal_example(_formal_row_with_replicate_mean(3.0)).native_utility == 3.0
+    with pytest.raises(ValueError, match="population mean"):
+        _formal_example(_formal_row_with_replicate_mean(3.0 + 1e-8))
 
 
 def test_loader_fails_closed_on_nested_stale_outcome_target_kind(tmp_path) -> None:

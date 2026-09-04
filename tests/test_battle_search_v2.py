@@ -48,6 +48,19 @@ def _checkpoint() -> SearchGuidanceCheckpointProvenance:
     )
 
 
+def test_value_prediction_preserves_legacy_positional_field_order() -> None:
+    prediction = SearchGuidanceValuePrediction(
+        0.5,
+        42.0,
+        {"gold": 3.0},
+        7.0,
+    )
+    assert prediction.battle_survival_probability == 0.5
+    assert prediction.terminal_absolute_current_hp == 42.0
+    assert prediction.structured_resource_values == {"gold": 3.0}
+    assert prediction.native_leaf_utility == 7.0
+
+
 @dataclass
 class _Scorer:
     checkpoint_provenance: SearchGuidanceCheckpointProvenance

@@ -1679,8 +1679,27 @@ def _validate_t085_checkpoint_cross_fields(
 ) -> None:
     """Keep the duplicated checkpoint envelope fields mutually authoritative."""
 
-    if training_provenance.get("task_id") != "T085":
+    outcome_target_kind = raw.get("outcome_target_kind")
+    has_t085_provenance = training_provenance.get("task_id") == "T085"
+    has_t085_metadata = T085_VALUE_TARGET_METADATA_KEY in metadata
+    if outcome_target_kind == SEARCH_V2_LEAF_NATIVE_UTILITY_TARGET_KIND:
+        if not has_t085_provenance:
+            raise ValueError(
+                "corrected outcome_target_kind requires T085 training provenance"
+            )
+    elif outcome_target_kind == OUTCOME_TARGET_KIND:
+        if has_t085_provenance or has_t085_metadata:
+            raise ValueError(
+                "historical outcome_target_kind cannot carry T085 provenance or metadata"
+            )
         return
+    elif has_t085_provenance or has_t085_metadata:
+        raise ValueError(
+            "unsupported outcome_target_kind cannot carry T085 provenance or metadata"
+        )
+    else:
+        return
+
     target = _required_mapping(
         metadata.get(T085_VALUE_TARGET_METADATA_KEY),
         f"metadata.{T085_VALUE_TARGET_METADATA_KEY}",

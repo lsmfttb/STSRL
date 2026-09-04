@@ -42,6 +42,7 @@ from sts_combat_rl.sim.torch_policy_value import (
 from sts_combat_rl.t084_search_v2_internal_leaf_target_generation import (
     _iter_collector_fields,
     validate_leaf_row,
+    validate_replicates,
 )
 
 T085_TASK_ID = "T085"
@@ -74,6 +75,9 @@ T085_PARENT_CHECKPOINT_PATH_BY_SEED = {
     85001: "/mnt/d/DeadlyCatCoding/STSRL/artifacts/t064-later-act-curriculum-transfer/training/checkpoints/static_mixture_v1-64001.pt",
     85002: "/mnt/d/DeadlyCatCoding/STSRL/artifacts/t064-later-act-curriculum-transfer/training/checkpoints/static_mixture_v1-64002.pt",
 }
+T085_TARGET_MEAN_REL_TOLERANCE = 1e-12
+T085_TARGET_MEAN_ABS_TOLERANCE = 1e-9
+_T085_FORMAL_DATASET_VERIFICATION_TOKEN = object()
 
 
 @dataclass(frozen=True)
@@ -115,6 +119,12 @@ class T085FormalDataset:
     retention_manifest_path: str
     collector_path: str
     collector_sha256: str
+    collector_byte_count: int = 0
+    _verification_token: object | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
 
 
 @dataclass(frozen=True)
@@ -266,6 +276,23 @@ def _finite_float(value: object, label: str) -> float:
 
 def _formal_example(row: Mapping[str, object]) -> T085LeafValueExample:
     validated = validate_leaf_row(row, require_replicates=100)
+    utilities, _, replicate_problems = validate_replicates(validated, 100)
+    if replicate_problems or len(utilities) != 100:
+        raise ValueError(
+            "T084 formal row must contain 100 valid terminal native-utility replicates"
+        )
+    target_mean = _finite_float(validated.get("target_mean"), "target_mean")
+    replicate_mean = math.fsum(utilities) / len(utilities)
+    if not math.isclose(
+        target_mean,
+        replicate_mean,
+        rel_tol=T085_TARGET_MEAN_REL_TOLERANCE,
+        abs_tol=T085_TARGET_MEAN_ABS_TOLERANCE,
+    ):
+        raise ValueError(
+            "T084 formal row target_mean does not match the 100-replicate "
+            "population mean within the T085 tolerance"
+        )
     public = _required_mapping(validated["public_model_input"], "public_model_input")
     state_raw = public.get("state_features")
     actions_raw = public.get("legal_action_features")
@@ -293,7 +320,7 @@ def _formal_example(row: Mapping[str, object]) -> T085LeafValueExample:
         state_features=state,
         legal_action_features=actions,
         eligible_action_indices=eligible,
-        native_utility=_finite_float(validated.get("target_mean"), "target_mean"),
+        native_utility=target_mean,
         exact_leaf_identity=_required_string(
             validated.get("exact_leaf_identity"), "exact_leaf_identity"
         ),
@@ -309,6 +336,8 @@ def resolve_t084_formal_dataset(
 ) -> T085FormalDataset:
     """Resolve formal rows only through the accepted T084 retention manifest."""
 
+    if verify_collector_hash is not True:
+        raise ValueError("T085 exact T084 identity verification cannot be disabled")
     retention_path = Path(retention_manifest_path)
     if sha256_file(retention_path) != T085_RETENTION_SHA256:
         raise ValueError("T084 retention manifest SHA-256 is not the accepted identity")
@@ -331,9 +360,14 @@ def resolve_t084_formal_dataset(
     ):
         raise ValueError("T084 formal target dataset identity is invalid")
     collector_path = Path(_required_string(formal.get("path"), "formal.path"))
+    try:
+        collector_path = collector_path.resolve(strict=True)
+    except FileNotFoundError as exc:
+        raise ValueError("T084 formal target collector is unavailable") from exc
     if not collector_path.is_file():
         raise ValueError("T084 formal target collector is unavailable")
-    if verify_collector_hash and sha256_file(collector_path) != T085_COLLECTOR_SHA256:
+    collector_sha256 = sha256_file(collector_path)
+    if collector_sha256 != T085_COLLECTOR_SHA256:
         raise ValueError(
             "T084 formal target collector SHA-256 is not the accepted identity"
         )
@@ -401,7 +435,9 @@ def resolve_t084_formal_dataset(
         examples=tuple(examples),
         retention_manifest_path=str(retention_path),
         collector_path=str(collector_path),
-        collector_sha256=T085_COLLECTOR_SHA256,
+        collector_sha256=collector_sha256,
+        collector_byte_count=collector_path.stat().st_size,
+        _verification_token=_T085_FORMAL_DATASET_VERIFICATION_TOKEN,
     )
 
 
@@ -514,6 +550,7 @@ def train_t085_corrected_value_head(
     training_input_path: str,
     training_input_byte_count: int,
     parent_guidance_provenance: Mapping[str, object],
+    formal_dataset: T085FormalDataset | None = None,
     parent_checkpoint_path: str | Path | None = None,
     policy_target_kind: str = "behavior_chosen_action_one_hot",
     policy_target_source: str = "frozen_parent_checkpoint_policy_path",
@@ -543,12 +580,59 @@ def train_t085_corrected_value_head(
         raise ValueError(
             "caller parent model is not byte-identical to the qualified T064 checkpoint"
         )
+    if formal_dataset is None:
+        raise ValueError("T085 training requires a verified T084 formal dataset object")
+    if (
+        formal_dataset._verification_token
+        is not _T085_FORMAL_DATASET_VERIFICATION_TOKEN
+    ):
+        raise ValueError(
+            "T085 formal dataset was not produced by the accepted T084 resolver"
+        )
+    if tuple(examples) != formal_dataset.examples:
+        raise ValueError(
+            "T085 training examples are not the verified T084 formal dataset"
+        )
+    try:
+        verified_input_path = Path(formal_dataset.collector_path).resolve(strict=True)
+    except FileNotFoundError as exc:
+        raise ValueError("verified T084 collector path is unavailable") from exc
+    actual_training_input_sha256 = sha256_file(verified_input_path)
+    actual_training_input_byte_count = verified_input_path.stat().st_size
+    if actual_training_input_sha256 != T085_COLLECTOR_SHA256:
+        raise ValueError(
+            "verified T084 collector bytes no longer match accepted SHA-256"
+        )
+    if (
+        formal_dataset.collector_sha256 != actual_training_input_sha256
+        or formal_dataset.collector_byte_count != actual_training_input_byte_count
+    ):
+        raise ValueError("verified T084 collector metadata does not match its bytes")
     if not _is_sha256(training_input_sha256):
         raise ValueError("training input identity must be a SHA-256 digest")
-    if training_input_sha256 != T085_COLLECTOR_SHA256:
-        raise ValueError("T085 training input is not the accepted T084 collector")
-    if training_input_byte_count <= 0:
-        raise ValueError("training input byte count must be positive")
+    try:
+        requested_input_path = Path(training_input_path).resolve(strict=True)
+    except FileNotFoundError as exc:
+        raise ValueError("caller training input path is unavailable") from exc
+    if requested_input_path != verified_input_path:
+        raise ValueError(
+            "caller training input path does not match the verified T084 collector"
+        )
+    if training_input_sha256 != actual_training_input_sha256:
+        raise ValueError(
+            "caller training input SHA-256 does not match the verified T084 collector"
+        )
+    if (
+        isinstance(training_input_byte_count, bool)
+        or not isinstance(training_input_byte_count, int)
+        or training_input_byte_count != actual_training_input_byte_count
+    ):
+        raise ValueError(
+            "caller training input byte count does not match the verified T084 collector"
+        )
+    training_input_path = str(verified_input_path)
+    training_input_sha256 = actual_training_input_sha256
+    training_input_byte_count = actual_training_input_byte_count
     _validate_parent_guidance_provenance(parent_guidance_provenance)
     if _canonical_sha256(parent_guidance_provenance) != _canonical_sha256(
         verified_parent.training_data_provenance
@@ -927,10 +1011,12 @@ def save_t085_corrected_checkpoint(
 
 
 __all__ = [
-    "T085_BATCH_SIZE",
     "T085_ARTIFACT_ROOT",
+    "T085_BATCH_SIZE",
     "T085_COLLECTOR_SHA256",
     "T085_FORMAL_ROW_COUNT",
+    "T085_TARGET_MEAN_ABS_TOLERANCE",
+    "T085_TARGET_MEAN_REL_TOLERANCE",
     "T085FormalDataset",
     "T085LeafValueExample",
     "T085TrainingConfig",

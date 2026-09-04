@@ -134,9 +134,11 @@ class SearchGuidanceValuePrediction:
     """Optional value and terminal-outcome predictions from the checkpoint."""
 
     battle_survival_probability: float | None = None
-    native_leaf_utility: float | None = None
     terminal_absolute_current_hp: float | None = None
     structured_resource_values: dict[str, float] = field(default_factory=dict)
+    # Append T085's optional field after the original positional fields.  A
+    # few framework-neutral callers construct this dataclass positionally.
+    native_leaf_utility: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
