@@ -9,6 +9,10 @@ The default threat model is **cooperative but fallible**. Protect against mistak
 stale state, information leakage, incomplete experiments, and incorrect reuse.
 Do not add hostile-producer/security machinery unless a task explicitly needs it.
 
+The repository operates **serially by default**: normally there is at most one
+active scientific task PR. The default workflow is **one task = one PR**. A
+separate specification-publication PR is optional, not the default.
+
 ## Roles
 
 ### Planner
@@ -22,10 +26,10 @@ Planner owns task meaning:
 - state/lineage rules only when they affect scientific results, reproducibility,
   or a real downstream contract;
 - resolution of genuine contract/architecture gaps;
-- publication of new task contracts through a specification-only PR;
+- publication of new task contracts on the task PR;
 - final scientific/architecture acceptance;
-- direct implementation-task landing after both final acceptances are recorded on
-  the same exact head.
+- direct task landing after both final acceptances are recorded on the same exact
+  final head.
 
 Planner does not normally own module names, function signatures, CLI spelling,
 helper layout, logging, temporary files, or test harness design.
@@ -35,9 +39,9 @@ helper layout, logging, temporary files, or test harness design.
 Maintainer owns execution coordination and repository conformance:
 
 - branch/worktree/lifecycle/merge hygiene;
-- execution-readiness review and exact-head `SPEC APPROVED`;
-- Implementer dispatch after an approved task is durably published as `READY` on
-  merged `main`;
+- execution-readiness review and exact-spec `SPEC APPROVED`;
+- Implementer dispatch after `implementation_authorized=true` is recorded for the
+  current task contract;
 - verification, runtime evidence, and artifact retention;
 - implementation review and finding classification;
 - final implementation/operational acceptance;
@@ -50,10 +54,11 @@ regime, promotion criteria, or successor science.
 
 ### Task Implementer
 
-After an approved task is merged as `READY` on `main`, Implementer owns ordinary
-implementation choices, including code/tests, module/function layout, minimal APIs,
-CLI adapters, non-material serialization, logging, temporary files,
-multiprocessing mechanics, and mechanical refactors.
+After Maintainer records exact-spec `SPEC APPROVED` with
+`implementation_authorized=true`, Implementer owns ordinary implementation
+choices, including code/tests, module/function layout, minimal APIs, CLI adapters,
+non-material serialization, logging, temporary files, multiprocessing mechanics,
+and mechanical refactors.
 
 Implementer must not stop merely because the Planner contract does not prescribe
 one exact API or representation. It stops only for a genuine semantic gap as
@@ -83,75 +88,114 @@ Acceptance tests must derive expected meaning independently of the production
 helper under test. The Implementer may create the minimal API needed by tests;
 absence of a pre-existing public function or CLI endpoint is not a contract gap.
 
-## Task Publication And Implementation Branching
+## One-Task-One-PR Default
 
 There is exactly one durable task-lifecycle list: merged
-`docs/tasks/README.md` on `main`. Do not maintain a second issue/PR-only task list.
-Open PR comments and issue comments may explain or review a proposed task, but they
-never make an unmerged task executable.
+`docs/tasks/README.md` on `main`. Do not maintain a second durable task list in an
+issue or PR.
 
-A new task uses two distinct branch/PR phases.
+However, because work is serial, the repository also recognizes one temporary
+**in-flight execution authority**: the unique open task PR whose current task
+contract has received Maintainer exact-spec `SPEC APPROVED` with
+`implementation_authorized=true`.
 
-### Phase A — task publication
+This is not a second lifecycle database. It is the single active transaction on
+top of durable `main`:
 
-1. Planner starts a fresh **specification-only** branch from synchronized `main`.
-2. The branch contains the complete task contract plus the Task Index row that
-   would make the task `READY` if merged. It contains no feature implementation,
-   training output, or scientific execution produced under that task.
-3. The publication PR may remain Draft while under review. Its proposed `READY`
-   row is not authoritative while unmerged.
-4. Maintainer reviews the exact publication head for current-`main` consistency,
-   feasibility, required inputs, and material contract gaps, then records:
+- merged `main` = landed/durable project truth;
+- unique approved open task PR = current in-flight task authority;
+- final merge commits the task result back to durable `main`.
+
+### Default task flow
+
+1. Planner synchronizes `main`, creates one fresh task branch and one task PR.
+2. The PR contains the complete task contract and may include the candidate Task
+   Index row that would represent the task while in flight. No scientific
+   execution is authorized yet.
+3. Maintainer independently reviews the exact task-contract state for feasibility,
+   required inputs, current-`main` consistency, and material contract gaps.
+4. When acceptable, Maintainer records:
 
    ```text
    SPEC APPROVED
 
    task: <task-id>
-   approved_spec_commit: <full publication-head SHA>
-   publication_authorized: true
+   approved_spec_commit: <full SHA containing the approved task contract>
+   implementation_authorized: true
    ```
 
-5. Planner may then merge that exact approved publication head. The task becomes
-   executable only when merged `main` contains its `READY` row.
+5. **Do not merge or open a second PR merely because the spec was approved.**
+   Maintainer/Implementer continues implementation on the same task branch/PR.
+6. Ordinary implementation commits do not invalidate the spec approval merely
+   because the PR head advances. The approved contract remains anchored by
+   `approved_spec_commit`.
+7. A material change to task meaning after approval invalidates the old spec
+   approval for affected work. Planner revises the contract on the same PR and
+   Maintainer records a new exact-spec approval before affected execution
+   continues.
+8. Before final acceptance, Maintainer normally places factual terminal results,
+   artifact identities, limitations, and the final lifecycle/result update on the
+   same PR head.
+9. Maintainer records final implementation/operational acceptance on the exact
+   final PR head.
+10. Planner records final scientific/architecture acceptance on that same exact
+    final PR head.
+11. Planner may then merge the task PR directly and update the research ledger /
+    successor state. No extra Maintainer merge handoff is required.
 
-A publication PR that is not approved or not merged leaves `main` unchanged and
-therefore leaves the task non-executable. `DRAFT` rows on merged `main` remain
-longer-horizon planning records; they are not the normal mechanism for publishing
-an immediately executable successor.
+### Candidate Task Index state inside an open PR
 
-### Phase B — implementation
+An open task PR may add or modify its candidate row in `docs/tasks/README.md`.
+That unmerged row is not durable project truth. During implementation, execution
+authority comes from the exact approved task contract and approval record, not
+from pretending that the candidate row is already merged.
 
-1. After the approved publication PR is merged, Maintainer synchronizes to the new
-   `main` and creates or coordinates a fresh implementation branch/PR for that
-   `READY` task.
-2. Implementation must cite the merged task contract and the Maintainer's exact
-   `SPEC APPROVED` publication evidence.
-3. The implementation PR owns code, tests, execution evidence, retained-artifact
-   reporting, and the eventual `READY -> DONE` (or other accepted terminal
-   lifecycle) landing update.
-4. A material contract change discovered during implementation requires a new
-   Planner contract amendment/publication before affected scientific work
-   continues. Do not silently edit the merged `READY` contract inside the
-   implementation PR and continue under the old approval.
+Before landing, the same PR should normally change the candidate row to the
+accepted terminal lifecycle (`DONE`, `BLOCKED`, `CANCELLED`, or other published
+terminal meaning). Therefore a serial task may legitimately move from an
+unmerged candidate `READY` state directly to a merged terminal state.
 
-This split intentionally costs one small publication PR per new executable task.
-It prevents the ambiguity where `main` says no task is `READY` while an unmerged PR
-is treated as if it were authoritative.
+### Optional two-phase publication
 
-### Maintainer start and remote-PR review gate
+A separate specification-publication PR followed by a separate implementation PR
+is allowed only when Planner explicitly chooses it because durable publication
+before implementation has real value, for example a planned cross-session/team
+handoff or implementation that will intentionally start later.
 
-At the start of maintainer work, and before reviewing a task publication or
-implementation PR, first bring the local integration line up to the current
-upstream `main` and complete the Main Synchronization Gate below. If local
-`main` is behind and its worktree is clean, advance it only with a fast-forward
-to the fetched `origin/main`; if it is dirty or cannot be fast-forwarded, stop
-and use a clean integration checkout rather than resetting or overwriting work.
+It is not the default merely to make the task visible to Maintainer. Maintainer
+session recovery must inspect open PRs as described below.
 
-After exact synchronization, query the remote open PRs whose base is `main`.
-Inspect each relevant PR's body, base/head refs, exact head commit, commits,
-files, and mergeability before deciding whether it is a specification proposal,
-implementation candidate, or unrelated work. In a WSL terminal use the native
-`gh` when available, otherwise `gh.exe`; in PowerShell use `gh` or `gh.exe`:
+### T085 migration note
+
+T085 was already published as merged `READY` under the previous two-phase default
+before this rule changed. Its current implementation remains valid. Do not reopen,
+re-publish, restart, or rerun T085 solely because of this workflow change. After
+T085, new tasks use the one-PR default unless Planner explicitly selects the
+optional two-phase mode.
+
+## Maintainer Start And Session Recovery
+
+At the start of every Maintainer session, do not infer current work from
+`docs/tasks/README.md` alone.
+
+1. Bring the local integration line to current upstream `main` and complete the
+   Main Synchronization Gate below.
+2. Read merged `docs/tasks/README.md` for durable lifecycle state.
+3. Query remote open PRs whose base is `main`.
+4. Identify task PRs and inspect each relevant PR's body, base/head refs, exact
+   head, commits, files, mergeability, task contract, and approval comments.
+5. Under the serial workflow, there should normally be at most one approved active
+   task PR. If more than one distinct scientific task PR has
+   `implementation_authorized=true`, fail closed and ask Planner which one is
+   authoritative rather than guessing.
+6. If one approved active task PR exists, resume that PR even when its candidate
+   lifecycle changes have not yet landed on `main`.
+7. If no approved active task PR exists, merged `main` is sufficient to determine
+   whether a previously published `READY` task exists or Planner must publish the
+   next task.
+
+In a WSL terminal use native `gh` when available, otherwise `gh.exe`; in
+PowerShell use `gh` or `gh.exe`:
 
 ```bash
 git status --short --branch
@@ -168,10 +212,8 @@ gh.exe pr view <number> \
 ```
 
 If native WSL `gh` exists, replace `gh.exe` in the example. A failed or
-unauthenticated CLI query is an operational blocker for remote-PR review; it
-must not be silently replaced with stale local branch metadata. An unmerged PR
-may provide review input, but only merged `docs/tasks/README.md` changes the
-task lifecycle or creates an executable `READY` task.
+unauthenticated remote PR query is an operational blocker for session recovery;
+it must not be silently replaced with stale local branch metadata.
 
 ## Review Findings
 
@@ -200,54 +242,27 @@ Reviewers should make a full pass when practical. Later genuine blockers may sti
 be raised; repeated new material classes are a reason to simplify the abstraction,
 not to keep appending rules.
 
-## Task Flow
+## Final Acceptance And Landing
 
-1. **Planner Publication Contract** — Planner writes the delta contract and
-   proposed `READY` Task Index row on a specification-only PR; no feature code.
-2. **Execution Readiness Review** — Maintainer first completes the
-   Maintainer start and remote-PR review gate below, including exact
-   synchronization and remote PR inspection, then reviews the exact
-   publication head.
-3. **Spec Publication Approved** — Maintainer records exact-head `SPEC APPROVED /
-   publication_authorized=true`.
-4. **Publish READY** — Planner merges the approved publication PR. Only now does
-   merged `main` make the task executable.
-5. **Implementation And Evidence** — Maintainer synchronizes the new `main`,
-   dispatches Implementer on a fresh implementation branch/PR, and coordinates
-   verification/evidence.
-6. **Landing Record Preparation** — before final acceptance, Maintainer normally
-   places factual terminal results, artifact identities, limitations, and required
-   task-lifecycle/result documentation on the implementation PR head. Avoid a
-   routine post-merge documentation round trip.
-7. **Dual Final Acceptance** — the same exact implementation head requires
-   Maintainer implementation/operational acceptance and Planner
-   scientific/architecture acceptance. The normal order is Maintainer first,
-   Planner last.
-8. **Implementation Landing** — once both final acceptances refer to the same exact
-   implementation head, Planner may merge immediately and update the research
-   ledger / successor state. No additional Maintainer handoff is required merely
-   to perform the merge. Maintainer may still perform the merge when explicitly
-   requested or when a repository constraint requires it.
+Final acceptance is distinct from spec approval.
 
-A material Planner-contract change after publication requires renewed Planner
-publication and Maintainer approval before affected implementation/science
-continues. Clearly non-semantic wording/spelling fixes do not require a semantic
-reset when Maintainer records them as immaterial.
+- Spec approval authorizes implementation under a frozen scientific contract.
+- Maintainer final acceptance certifies implementation/operational correctness.
+- Planner final acceptance certifies scientific/architecture correctness.
 
-Any material change to the implementation PR head after either final acceptance
-invalidates that acceptance for the new head. A clearly non-semantic landing-only
-change may retain acceptance only when both roles explicitly record that it is
-immaterial. Prefer putting landing records on the implementation PR before dual
-final acceptance so this exception is rare.
+Both final acceptances must refer to the same exact final PR head. Any material
+change to that head after either final acceptance invalidates that acceptance for
+the new head. A clearly non-semantic landing-only change may retain acceptance
+only when both roles explicitly record that it is immaterial. Prefer putting
+landing records on the PR before dual final acceptance so this exception is rare.
 
 ## Main Synchronization Gate
 
-Before a task-publication branch, implementation branch, or execution-readiness
-review begins, the responsible role must ensure that the configured upstream
-remote's `main` ref (normally `origin/main`) has been refreshed and that the local
-integration line is exactly synchronized with it. The branch creator must not
-bypass this gate with a stale local branch or an unverified moving remote ref. The
-check is:
+Before a new task branch or execution-readiness review begins, the responsible
+role must ensure that the configured upstream remote's `main` ref (normally
+`origin/main`) has been refreshed and that the local integration line is exactly
+synchronized with it. The branch creator must not bypass this gate with a stale
+local branch or an unverified moving remote ref.
 
 ```text
 git fetch <remote> main
@@ -258,17 +273,18 @@ git rev-list --left-right --count main...<remote>/main
 
 Replace `<remote>` when the repository's configured upstream is not `origin`.
 The two full commit SHAs must be identical and the ahead/behind count must be
-`0 0` for publication/implementation branch creation and execution readiness. A
-failed fetch, missing remote ref, stale local `main`, or any
-ahead/behind/divergent state blocks branch creation, exact-head approval, and
-integration work until it is resolved. Record the remote/ref, fetch result, check
-time, and both full SHAs in execution-readiness or PR evidence.
+`0 0` for new task-branch creation and initial execution readiness. A failed
+fetch, missing remote ref, stale local `main`, or divergent state blocks new task
+work until resolved.
 
-Immediately before either publication landing or implementation landing, fetch
-again, query the remote PR state again, and verify that the recorded pre-landing
-base SHA still equals current remote `main`, then verify the pending landing
-against current `main`. If `main` advanced materially, rebase/review as required
-rather than landing a stale task contract or implementation.
+For an already-active task PR, the implementation branch is expected to be ahead
+of its base. Maintainer must still refresh and inspect current remote `main` at
+session start so concurrent durable changes are visible; do not reset or overwrite
+the active task branch merely to make it equal `main`.
+
+Immediately before landing, fetch again, query remote PR state again, and compare
+the task PR with current remote `main`. If `main` advanced materially, reconcile
+and re-review as required rather than landing stale work.
 
 ## Artifacts And Runtime
 
@@ -289,6 +305,10 @@ Reuse follows semantic impact: unaffected validated outputs may remain reusable;
 affected outputs must be rerun. Architecture-rejected runtime artifacts are
 non-authoritative unless a recovery contract establishes compatibility.
 
+Long-running simulator work should use explicit parallelism/sharding where
+appropriate and report configured/effective concurrency, seed/cohort ranges,
+wall-clock cost, failures, and retained evidence according to the task contract.
+
 ## Architecture Recovery
 
 If an implementation line has the wrong abstraction, Planner may declare
@@ -296,26 +316,30 @@ If an implementation line has the wrong abstraction, Planner may declare
 reusable primitives/fixtures/utilities, and start one clean recovery branch/PR for
 the same task ID from current `main`.
 
+This is an exception to the normal one-active-task-PR rule and should explicitly
+close or supersede the failed implementation line once the recovery PR becomes
+authoritative.
+
 ## Project Truth
 
-- `main` is durable project truth.
-- Task lifecycle is authoritative only in merged `docs/tasks/README.md`.
-- An unmerged publication PR may propose a `READY` row but does not create an
-  executable task.
-- A merged `READY` row plus its approved merged task contract is the authorization
-  boundary for a fresh implementation branch.
+- `main` is durable landed project truth.
+- Task lifecycle for landed work is authoritative in merged
+  `docs/tasks/README.md`.
+- Under the serial one-PR workflow, the unique approved open task PR is the
+  temporary execution authority for the current in-flight task.
+- That temporary authority exists only when Maintainer has recorded exact-spec
+  `SPEC APPROVED` with `implementation_authorized=true`.
+- PR/issue comments do not create a second durable task list; they carry the
+  approval and evidence for the one active transaction.
 - `docs/current_status.md` is the merged result record: Maintainer owns factual
   execution/evidence reporting, and Planner owns accepted scientific
   interpretation.
-- PR comments carry task-specific findings/acceptances but do not replace merged
-  policy or merged task lifecycle.
 - Prefer inheritance/reference over duplicated normative text.
 
-Before an implementation task's final dual acceptance, Maintainer normally records
-the result, evidence, limitations, retained material artifacts, and genuine
-gaps/escalations on the implementation PR. After dual acceptance on that same
-exact head, Planner may land the implementation directly, update the research
-ledger, and decide successor work.
+Before a task's final dual acceptance, Maintainer normally records the result,
+evidence, limitations, retained material artifacts, and genuine gaps/escalations
+on the same task PR. After dual acceptance on that same exact final head, Planner
+may land the PR directly, update the research ledger, and decide successor work.
 
 Each role normally keeps one model/reasoning configuration for a task. If a role
 cannot execute within its boundary, narrow/split the work or escalate the material
