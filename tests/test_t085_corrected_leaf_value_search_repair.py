@@ -387,6 +387,17 @@ def test_formal_target_mean_is_bound_to_replicate_population_mean() -> None:
         _formal_example(_formal_row_with_replicate_mean(3.0 + 1e-8))
 
 
+def test_formal_target_mean_reads_t084_replicate_only_representation() -> None:
+    row = _formal_row_with_replicate_mean(3.0)
+    row.pop("target_mean")
+    row["target_kind"] = "formal"
+    assert _formal_example(row).native_utility == 3.0
+
+    row.pop("target_kind")
+    with pytest.raises(ValueError, match="formal target_kind"):
+        _formal_example(row)
+
+
 def test_loader_fails_closed_on_nested_stale_outcome_target_kind(tmp_path) -> None:
     path = T085_PARENT_CHECKPOINT_PATH_BY_SEED[85001]
     if not Path(path).is_file():

@@ -274,15 +274,24 @@ def _finite_float(value: object, label: str) -> float:
     return result
 
 
-def _formal_example(row: Mapping[str, object]) -> T085LeafValueExample:
-    validated = validate_leaf_row(row, require_replicates=100)
-    utilities, _, replicate_problems = validate_replicates(validated, 100)
-    if replicate_problems or len(utilities) != 100:
-        raise ValueError(
-            "T084 formal row must contain 100 valid terminal native-utility replicates"
-        )
-    target_mean = _finite_float(validated.get("target_mean"), "target_mean")
+def _formal_target_mean(row: Mapping[str, object], utilities: Sequence[float]) -> float:
+    """Resolve the accepted T084 formal target representation.
+
+    The retained T084 collector represents a formal target with the exact
+    ``target_kind`` marker and 100 validated native-utility replicates; it
+    does not repeat their population mean in a ``target_mean`` field.  A
+    legacy/materialized row may include that field, but it remains bound to
+    the same replicate population mean below.
+    """
+
     replicate_mean = math.fsum(utilities) / len(utilities)
+    if "target_mean" not in row:
+        if row.get("target_kind") != "formal":
+            raise ValueError(
+                "T084 formal row is missing target_mean and formal target_kind"
+            )
+        return replicate_mean
+    target_mean = _finite_float(row["target_mean"], "target_mean")
     if not math.isclose(
         target_mean,
         replicate_mean,
@@ -293,6 +302,17 @@ def _formal_example(row: Mapping[str, object]) -> T085LeafValueExample:
             "T084 formal row target_mean does not match the 100-replicate "
             "population mean within the T085 tolerance"
         )
+    return target_mean
+
+
+def _formal_example(row: Mapping[str, object]) -> T085LeafValueExample:
+    validated = validate_leaf_row(row, require_replicates=100)
+    utilities, _, replicate_problems = validate_replicates(validated, 100)
+    if replicate_problems or len(utilities) != 100:
+        raise ValueError(
+            "T084 formal row must contain 100 valid terminal native-utility replicates"
+        )
+    target_mean = _formal_target_mean(validated, utilities)
     public = _required_mapping(validated["public_model_input"], "public_model_input")
     state_raw = public.get("state_features")
     actions_raw = public.get("legal_action_features")
