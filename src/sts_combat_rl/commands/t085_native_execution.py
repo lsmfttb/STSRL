@@ -76,6 +76,7 @@ from sts_combat_rl.t085_corrected_leaf_value_search_evaluation import (
     build_t085_evaluation_selection_evidence,
     run_t085_paired_evaluation,
     select_search_400_subset,
+    sha256_file,
     validate_t085_evaluation_selection_evidence,
     write_t085_json_artifact,
 )
@@ -113,7 +114,7 @@ def resolve_t085_canonical_records(
 ) -> dict[str, BattleStartCheckpointRecord]:
     """Load full fixed-cohort records and bind them by exact checkpoint identity."""
     resolved = Path(path).resolve(strict=True)
-    digest = sha256(resolved.read_bytes()).hexdigest()
+    digest = sha256_file(resolved)
     if digest != expected_sha256:
         raise T085NativeExecutionError(
             "T085 canonical cohort bytes do not match the accepted SHA-256"
@@ -168,13 +169,38 @@ def restore_t085_canonical_record(
 ) -> tuple[SimulatorSnapshot, str]:
     """Restore one selected row only through the accepted canonical helpers."""
     canonical = canonical_records.get(selected.complete_source_identity)
-    if canonical is None or canonical.source_run_id != selected.source_run_identity:
+    structural = canonical.structural_metadata if canonical is not None else {}
+    identity_matches = (
+        canonical is not None
+        and canonical.source_checkpoint_id == selected.complete_source_identity
+        and canonical.source_run_id == selected.source_run_identity
+        and canonical.source_seed == selected.source_run_seed
+        and canonical.source_battle_index == _selected_battle_index(selected)
+        and structural.get("act") == selected.act
+        and str(structural.get("room_type", "")).upper() == selected.room_type
+    )
+    if not identity_matches:
         raise T085NativeExecutionError(
-            "T085 selected row is not bound to a canonical full checkpoint record"
+            "T085 selected row does not match canonical checkpoint/source/seed/battle/act/room identity"
         )
     if canonical.distribution_kind == "assisted_run":
         return restore_assisted_battle_start_record(adapter, canonical)
     return restore_battle_start_record(adapter, canonical)
+
+
+def _selected_battle_index(selected: T085BattleStartRecord) -> int:
+    prefix = f"{selected.source_run_identity}:"
+    if not selected.battle_identity.startswith(prefix):
+        raise T085NativeExecutionError(
+            "T085 battle identity is not source-run qualified"
+        )
+    try:
+        value = int(selected.battle_identity.removeprefix(prefix))
+    except ValueError as exc:
+        raise T085NativeExecutionError("T085 battle identity index is invalid") from exc
+    if value < 0:
+        raise T085NativeExecutionError("T085 battle identity index is negative")
+    return value
 
 
 def run_t085_native_restore_smoke(
@@ -209,7 +235,7 @@ def run_t085_native_restore_smoke(
     payload = {
         "schema_id": "t085-native-canonical-restore-smoke-v1",
         "task_id": "T085",
-        "canonical_sha256": sha256(Path(canonical_path).read_bytes()).hexdigest(),
+        "canonical_sha256": sha256_file(Path(canonical_path)),
         "restored_records": rows,
     }
     target = Path(output_path)
@@ -1343,6 +1369,8 @@ def run_t085_native_paired_evaluation(
     *,
     adapter_factory: Callable[[], object],
     canonical_records_path: str | Path = T085_T052_COHORT_PATH,
+    canonical_records_by_cohort: Mapping[str, Mapping[str, BattleStartCheckpointRecord]]
+    | None = None,
     arms: Mapping[str, T085NativeArm],
     selection_output_path: str | Path,
     report_output_path: str | Path,
@@ -1366,7 +1394,15 @@ def run_t085_native_paired_evaluation(
             f"unknown T085 native search backend {search_backend!r}"
         )
     native_identity = _validate_t085_native_source_manifest(search_backend)
-    canonical_records = resolve_t085_canonical_records(canonical_records_path)
+    if canonical_records_by_cohort is None:
+        canonical_records_by_cohort = {
+            "A": resolve_t085_canonical_records(canonical_records_path)
+        }
+    required_record_maps = {"A", "B", "C", "B@400"}
+    if not required_record_maps.issubset(canonical_records_by_cohort):
+        raise T085NativeExecutionError(
+            "T085 paired evaluation requires separately verified full-record maps for A/T052, B, and C"
+        )
     if search_backend != "battle_search_v2":
         raise T085NativeExecutionError("T085 arms require native battle_search_v2")
     expected_arm_names = (
@@ -1400,7 +1436,10 @@ def run_t085_native_paired_evaluation(
             policy_prior_callback=selected_arm.policy_prior_callback,
             leaf_value_callback=selected_arm.leaf_value_callback,
         )
-        restored = restore_t085_canonical_record(adapter, record, canonical_records)
+        cohort = _cohort_for_record(plan, record, arm)
+        restored = restore_t085_canonical_record(
+            adapter, record, canonical_records_by_cohort[cohort]
+        )
         if isinstance(restored, tuple):
             snapshot = restored[0]
         else:

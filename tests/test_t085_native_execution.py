@@ -549,6 +549,37 @@ def test_outcome_parser_keeps_absolute_hp_and_structured_resources_separate() ->
     assert row.structured_battle_resource_outcome == {"gold_delta": 9}
 
 
+def test_outcome_optional_provenance_fields_preserve_legacy_positional_contract() -> (
+    None
+):
+    from sts_combat_rl.t085_corrected_leaf_value_search_evaluation import (
+        T085OutcomeRecord,
+    )
+
+    row = T085OutcomeRecord(
+        "A",
+        "r",
+        "baseline",
+        True,
+        1.5,
+        42,
+        7,
+        "action",
+        8,
+        9,
+        10,
+        0.5,
+        "failure",
+        "run",
+        100,
+    )
+    assert row.failure_reason == "failure"
+    assert row.source_run_identity == "run"
+    assert row.search_budget == 100
+    encoded = row.__class__.from_mapping(row.__dict__)
+    assert encoded == row
+
+
 def test_t085_restore_smoke_is_exposed_by_cli_parser() -> None:
     args = build_parser().parse_args(
         [

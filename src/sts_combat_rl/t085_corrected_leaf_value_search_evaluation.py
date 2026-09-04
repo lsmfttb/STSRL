@@ -330,19 +330,20 @@ class T085OutcomeRecord:
     battle_survived: bool
     terminal_native_utility: float
     terminal_current_hp: float | None = None
-    structured_battle_resource_outcome: Mapping[str, object] | None = None
     turn_count: int | None = None
     selected_root_action_identity: str | None = None
     simulator_steps: int | None = None
     search_steps: int | None = None
     learned_value_callback_count: int | None = None
     wall_clock_seconds: float | None = None
-    controller_provenance: Mapping[str, object] | None = None
-    arm_provenance: Mapping[str, object] | None = None
-    inference_diagnostics: Mapping[str, object] | None = None
     failure_reason: str | None = None
     source_run_identity: str | None = None
     search_budget: int | None = None
+    # Appended fields preserve the historical positional constructor contract.
+    structured_battle_resource_outcome: Mapping[str, object] | None = None
+    controller_provenance: Mapping[str, object] | None = None
+    arm_provenance: Mapping[str, object] | None = None
+    inference_diagnostics: Mapping[str, object] | None = None
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, object]) -> T085OutcomeRecord:
