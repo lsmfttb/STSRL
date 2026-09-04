@@ -4,27 +4,29 @@ Tasks are the executable specification for feature branches and pull requests.
 Read [`../collaboration_workflow.md`](../collaboration_workflow.md) before
 starting work.
 
-The Active Backlog table below is the only authoritative source for task
-lifecycle state. Individual task documents intentionally omit mutable
-`Status:` lines; they define scope, acceptance criteria, and historical
-disposition where needed. `current_status.md` and roadmap files may summarize
-the current milestone, but they do not override this table.
+The Active Backlog table below is the only authoritative source for **landed** task
+lifecycle state. Individual task documents intentionally omit mutable `Status:`
+lines; they define scope, acceptance criteria, and historical disposition where
+needed. `current_status.md` and roadmap files may summarize the current milestone,
+but they do not override this table.
 
-New task content originates with the Planner. For a new task, the Planner creates
-a fresh specification-only publication branch and PR from synchronized `main`,
-writes the complete task contract, and proposes the lifecycle row that would make
-the task `READY` if merged. That unmerged publication PR is non-executable. The
-Maintainer independently reviews the exact publication head; only after
-`SPEC APPROVED` with `publication_authorized=true` and merge into `main` does the
-merged `READY` row authorize a fresh implementation branch/PR. The Maintainer
-does not proactively add successor tasks. Implementers are Maintainer-managed
-sub-agents and may start only from a task that is `READY` in merged `main`.
+New task content originates with the Planner. Under the default serial workflow,
+the Planner creates one fresh task branch/PR from synchronized `main`, writes the
+complete task contract there, and may include the candidate lifecycle row for that
+task. The Maintainer independently reviews the exact task-contract state and, when
+acceptable, records `SPEC APPROVED` with `implementation_authorized=true`.
+Implementation then continues on that same task PR; a separate publication PR is
+not required by default. While the task remains unmerged, the unique approved open
+task PR is the temporary in-flight execution authority. Merged `main` remains the
+durable authority for landed lifecycle state. Maintainer session recovery must
+therefore inspect both synchronized `main` and remote open task PRs.
 
-Before creating or accepting an implementation branch, the Maintainer must
-refresh the configured upstream remote's `main` ref and verify exact full-SHA
-equality between local `main` and that remote ref. A failed fetch, missing ref,
-or any ahead/behind/divergent state blocks the work. The check must be repeated
-immediately before landing against the recorded pre-landing base SHA; see the detailed
+Before creating or accepting a task branch, the responsible role must refresh the
+configured upstream remote's `main` ref and verify exact full-SHA equality between
+local `main` and that remote ref. A failed fetch, missing ref, or any
+ahead/behind/divergent state blocks new task-branch creation. An already-active
+task branch is expected to be ahead of its base; before final landing, refresh
+`main` again and reconcile any material concurrent durable changes. See the
 [`Main Synchronization Gate`](../collaboration_workflow.md#main-synchronization-gate).
 
 ## Active Backlog
@@ -117,16 +119,20 @@ immediately before landing against the recorded pre-landing base SHA; see the de
 | T084 | DONE | [Search v2 internal-leaf continuation-utility target generation](T084-search-v2-internal-leaf-target-generation.md) | T083, T082, T081, T064, T062, T070 | PR #91 accepted LEAF_CONTINUATION_UTILITY_TARGETS_READY; calibrated N=100 and retained 960 qualified public-input/native-utility internal-leaf rows; no training or outcome claim |
 | T085 | READY | [Corrected Search v2 leaf-value repair and paired evaluation](T085-corrected-leaf-value-search-repair.md) | T084, T083, T082, T081, T064, T052, T042, T070 | value-head-only native-utility repair with frozen policy/Search semantics and broader paired battle evaluation; no complete-run or non-combat claim |
 
-Use the table, not per-task files or roadmap prose, when deciding whether a task
-may receive a branch. Only `READY` rows should receive a new implementation
-branch. `DRAFT` rows describe intended direction and must be reviewed against
-latest `main` before publication. `BLOCKED` rows require their named external or
-upstream capability. `CANCELLED` rows remain as historical planning records and
-must not receive implementation branches.
+Use the table for landed lifecycle state. `DRAFT`, `BLOCKED`, `CANCELLED`, and
+terminal rows have their normal durable meanings. A merged `READY` row authorizes
+implementation from `main`, as with T085. Under the default serial one-PR flow,
+a new task may instead be in flight before its candidate lifecycle row is merged;
+in that case the unique open task PR plus exact-spec `SPEC APPROVED /
+implementation_authorized=true` is the temporary execution authority. If more
+than one distinct approved scientific task PR appears active, fail closed and ask
+the Planner which one is authoritative.
 
-Once a task is `READY`, its published acceptance criteria are the review
-contract. A material scope change requires a specification amendment/publication
-before an implementation PR can be accepted.
+Once a task contract is approved, its acceptance criteria are the review
+contract. A material scope change requires a Planner contract revision and new
+Maintainer exact-spec approval before affected implementation/science continues.
+Ordinary implementation commits on the same PR do not invalidate the approved
+contract merely because the PR head advances.
 
 ## Current Planning Direction
 
@@ -250,8 +256,8 @@ value rows (320 per occupancy arm; aggregate Act counts 534/426). The accepted
 report SHA-256 is `b6cbcb5ee96d9538adb6ee7a4849a138f6d3a3f93b6127e7ba0ff91dcae1ad1c`
 and retention-manifest SHA-256 is
 `754a9d2560fb5b01c53e7789bdd558e5ef3cc9d0eca4dd690f8f1ab8df1fb0f6`.
-This qualifies the bounded target dataset for T085. T085 is the current proposed
-`READY` task: one value-head-only corrected native-utility repair with the parent
+This qualifies the bounded target dataset for T085. T085 is the current `READY`
+task: one value-head-only corrected native-utility repair with the parent
 policy/representation and Search semantics frozen, followed by paired hard,
 broad, and current-occupancy battle evaluation. A valid T085 result closes this
 Battle value-repair round; the next Planner priority is then a minimal
@@ -298,16 +304,18 @@ and inspect again after the expected window or on request rather than continuous
 
 ## Published Queue
 
-The executable queue is exactly the set of `READY` rows in the Active Backlog.
-If this publication PR is merged, T085 is the sole `READY` task. T063 and T066
-remain `DRAFT`; T034 remains blocked on native public-consistent hidden-future
-sampling support. T064, T065, and T071--T084 are `DONE` with their recorded
-diagnostic, repair, control-plane, or target-generation outcomes.
+The landed executable queue is the set of `READY` rows in the Active Backlog.
+T085 is currently the sole merged `READY` task. T063 and T066 remain `DRAFT`;
+T034 remains blocked on native public-consistent hidden-future sampling support.
+T064, T065, and T071--T084 are `DONE` with their recorded diagnostic, repair,
+control-plane, or target-generation outcomes.
 
-While this specification-publication PR is still unmerged, however, the
-candidate `READY` row above is not yet durable project truth and authorizes no
-implementation. Only the merged version of this same Task Index controls the
-implementation queue.
+For future serial tasks using the default one-PR workflow, also inspect remote
+open task PRs: the unique open task PR with exact-spec `SPEC APPROVED /
+implementation_authorized=true` is the temporary in-flight execution authority
+even before its candidate lifecycle row lands on `main`. This does not create a
+second durable queue; the final task merge commits the accepted terminal state
+back to this Task Index.
 
 ## Standard Local Gates
 
@@ -330,6 +338,6 @@ requirements.
 Completed and cancelled task documents through T084 remain the durable
 historical record. Accepted experiment details and artifact identities remain in
 individual task documents, reports, and `current_status.md`; this index only owns
-lifecycle state and the current executable queue.
+landed lifecycle state and the current durable executable queue.
 
 New task documents should start from [`TEMPLATE.md`](TEMPLATE.md).
