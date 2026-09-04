@@ -29,12 +29,18 @@ from typing import Any, Literal
 
 from sts_combat_rl.sim.action_space import ActionSpaceConfig
 from sts_combat_rl.sim.assisted_source_generation import (
+    ASSISTED_SOURCE_POOL_FORMAT_VERSION,
+    ASSISTED_SOURCE_POOL_SCHEMA_ID,
     load_assisted_source_pool_jsonl,
     restore_assisted_battle_start_record,
 )
 from sts_combat_rl.sim.battle_search_v2 import _node_context
 from sts_combat_rl.sim.battle_start_pool import (
+    BATTLE_START_POOL_FORMAT_VERSION,
     BattleStartCheckpointRecord,
+    NaturalBattleStartPool,
+    collect_natural_battle_start_pool,
+    dump_natural_battle_start_pool_jsonl,
     load_natural_battle_start_pool_jsonl,
     record_from_manifest,
     restore_battle_start_record,
@@ -57,7 +63,12 @@ from sts_combat_rl.sim.controller_contract import (
 from sts_combat_rl.sim.decision_record import action_identity_dicts_for_actions
 from sts_combat_rl.sim.fixed_evaluation_set import load_fixed_cohort_jsonl
 from sts_combat_rl.sim.lightspeed_source import load_lightspeed_source_manifest
-from sts_combat_rl.sim.online_controller import NATIVE_SEARCH_INFORMATION_REGIME
+from sts_combat_rl.sim.non_combat_policy import ExpertNonCombatDriver
+from sts_combat_rl.sim.online_controller import (
+    NATIVE_SEARCH_INFORMATION_REGIME,
+    PolicyController,
+    RoutedRunController,
+)
 from sts_combat_rl.sim.oracle_search import (
     ORACLE_SEARCH_NATIVE_API,
     ORACLE_SEARCH_PATCH_IDENTITY,
@@ -75,9 +86,13 @@ from sts_combat_rl.sim.search_guidance_inference import (
 )
 from sts_combat_rl.sim.torch_policy_value import OUTCOME_TARGET_KIND
 from sts_combat_rl.t085_corrected_leaf_value_search_evaluation import (
+    T085_COHORT_C_RUN_COUNT,
+    T085_COHORT_C_SEED_END,
+    T085_COHORT_C_SEED_START,
     T085_INPUT_ARTIFACT_IDENTITIES,
     T085_NATIVE_IDENTITY,
     T085_SEARCH_400_ARMS,
+    T085_SOURCE_MANIFEST_SCHEMA_ID,
     T085_T052_COHORT_PATH,
     T085_T052_COHORT_SHA256,
     T085BattleStartRecord,
@@ -90,6 +105,7 @@ from sts_combat_rl.t085_corrected_leaf_value_search_evaluation import (
     select_search_400_subset,
     sha256_file,
     validate_t085_evaluation_selection_evidence,
+    validate_t085_source_generation_contract,
     write_t085_json_artifact,
 )
 from sts_combat_rl.t085_corrected_leaf_value_search_repair import T085_ARTIFACT_ROOT
@@ -101,6 +117,8 @@ T085_NATIVE_SELECTION_SCHEMA_ID = "t085-native-selection-artifact-v1"
 T085_NATIVE_OUTCOMES_SCHEMA_ID = "t085-native-outcome-records-v1"
 T085_NATIVE_EXECUTION_VERSION = "t085-native-execution-v1"
 T085_NATIVE_SHARD_SCHEMA_ID = "t085-native-shard-manifest-v1"
+T085_C_SOURCE_SHARD_MANIFEST_SCHEMA_ID = "t085-cohort-c-source-shard-manifest-v1"
+T085_C_SOURCE_POOL_SCHEMA_ID = "natural-battle-start-pool-v4-jsonl"
 T085_NATIVE_SEARCH_BACKENDS = ("battle_search", "battle_search_v2")
 T085NativeSearchBackend = Literal["battle_search", "battle_search_v2"]
 T085NativeSourceArtifactKind = Literal["fixed_cohort", "natural_pool", "assisted_pool"]
@@ -162,7 +180,92 @@ class T085NativeShardPlan:
             "partition_scheme": "sha256(selection_identity)[:8] mod shard_count",
             "merge_key": "cohort/record_identity/arm",
             "selection_identity_sha256": selection_identity_sha256,
-            "complete": True,
+            # A shard is a finished partition, not a complete scientific
+            # evaluation.  Some deterministic partitions legitimately have no
+            # rows from one or more cohorts; the merge stage owns the full
+            # support/completeness gate.
+            "artifact_scope": "paired_evaluation_shard",
+            "shard_finished": True,
+            "partial": True,
+            "complete": False,
+        }
+
+
+@dataclass(frozen=True)
+class T085CohortCSourceGenerationPlan:
+    """Fixed source-generation contract for one Cohort-C worker shard."""
+
+    shard_index: int
+    shard_count: int = 16
+    worker_count: int = 16
+
+    def __post_init__(self) -> None:
+        for value, label in (
+            (self.shard_index, "shard_index"),
+            (self.shard_count, "shard_count"),
+            (self.worker_count, "worker_count"),
+        ):
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise T085NativeExecutionError(
+                    f"T085 Cohort C {label} must be an integer"
+                )
+        if self.shard_count != 16:
+            raise T085NativeExecutionError(
+                "T085 Cohort C source generation requires exactly 16 shards"
+            )
+        if not 0 <= self.shard_index < self.shard_count:
+            raise T085NativeExecutionError(
+                "T085 Cohort C source shard_index must be in [0, 16)"
+            )
+        if self.worker_count != 16:
+            raise T085NativeExecutionError(
+                "T085 Cohort C source generation requires worker_count=16"
+            )
+
+    @property
+    def seed_inventory(self) -> tuple[int, ...]:
+        """Return the contiguous eight-seed range assigned to this shard."""
+
+        per_shard = T085_COHORT_C_RUN_COUNT // self.shard_count
+        start = T085_COHORT_C_SEED_START + self.shard_index * per_shard
+        return tuple(range(start, start + per_shard))
+
+    @property
+    def full_seed_inventory(self) -> tuple[int, ...]:
+        return tuple(range(T085_COHORT_C_SEED_START, T085_COHORT_C_SEED_END + 1))
+
+    def to_dict(self, *, native_identity: Mapping[str, object]) -> dict[str, object]:
+        return {
+            "schema_id": T085_C_SOURCE_SHARD_MANIFEST_SCHEMA_ID,
+            "task_id": "T085",
+            "cohort": "C",
+            "artifact_scope": "source_generation_shard",
+            "partial": True,
+            "complete": False,
+            "shard_index": self.shard_index,
+            "shard_count": self.shard_count,
+            "worker_count": self.worker_count,
+            "effective_worker_count": self.worker_count,
+            "partition_scheme": "contiguous_seed_ranges",
+            "source_run_seed_start": T085_COHORT_C_SEED_START,
+            "source_run_seed_end": T085_COHORT_C_SEED_END,
+            "source_run_count": T085_COHORT_C_RUN_COUNT,
+            "shard_source_run_count": len(self.seed_inventory),
+            "shard_source_run_seed_start": self.seed_inventory[0],
+            "shard_source_run_seed_end": self.seed_inventory[-1],
+            "shard_source_run_seed_inventory": list(self.seed_inventory),
+            "max_outer_steps": 500,
+            "action_space": "initial_no_potions",
+            "battle_controller": "unguided_search_v2",
+            "battle_simulations": 100,
+            "root_selection": "highest_mean",
+            "non_combat_controller": "expert_non_combat_v1",
+            "non_combat_policy_seed": 42042,
+            "assistance_level": "assist_0",
+            "assistance_policy_seed": None,
+            "policy_prior_callback": None,
+            "leaf_value_callback": None,
+            "native_identity": dict(native_identity),
         }
 
 
@@ -177,6 +280,8 @@ def resolve_t085_canonical_records(
     expected_source_run_identity_inventory: Sequence[str] | None = None,
     expected_source_run_seed_inventory: Sequence[int] | None = None,
     expected_assistance_level: str | None = None,
+    expected_source_manifest_path: str | Path | None = None,
+    expected_source_manifest_sha256: str | None = None,
 ) -> dict[str, BattleStartCheckpointRecord]:
     """Load one explicitly typed, verified full-record source artifact.
 
@@ -184,6 +289,12 @@ def resolve_t085_canonical_records(
     never be silently interpreted as the T052 fixed cohort, and vice versa.
     """
     resolved = Path(path).resolve(strict=True)
+    source_manifest_binding = _validate_t085_source_manifest_binding(
+        resolved,
+        artifact_kind=artifact_kind,
+        manifest_path=expected_source_manifest_path,
+        manifest_sha256=expected_source_manifest_sha256,
+    )
     digest = sha256_file(resolved)
     if digest != expected_sha256:
         raise T085NativeExecutionError(
@@ -298,6 +409,30 @@ def resolve_t085_canonical_records(
                 raise T085NativeExecutionError(
                     f"T085 source pool record {index} lacks controller provenance"
                 )
+        if source_manifest_binding is not None:
+            source_manifest, _ = source_manifest_binding
+            if source_manifest.get("source_run_count") != source_run_count:
+                raise T085NativeExecutionError(
+                    "T085 source manifest source_run_count does not match pool"
+                )
+            if source_manifest.get("source_run_identity_inventory") != summary_ids:
+                raise T085NativeExecutionError(
+                    "T085 source manifest source-run identities do not match pool"
+                )
+            if source_manifest.get("source_run_seed_inventory") != summary_seeds:
+                raise T085NativeExecutionError(
+                    "T085 source manifest source-run seeds do not match pool"
+                )
+            source_pool_reference = source_manifest.get("source_pool_artifact")
+            if isinstance(source_pool_reference, Mapping):
+                if source_pool_reference.get("record_count") != len(full_records):
+                    raise T085NativeExecutionError(
+                        "T085 source manifest record_count does not match pool"
+                    )
+                if source_pool_reference.get("source_run_count") != source_run_count:
+                    raise T085NativeExecutionError(
+                        "T085 source manifest source_run_count does not match pool"
+                    )
     records: dict[str, BattleStartCheckpointRecord] = {}
     for index, full in enumerate(full_records):
         if isinstance(full, BattleStartCheckpointRecord):
@@ -836,11 +971,29 @@ def _source_map_expectations(
         raise T085NativeExecutionError(
             f"T085 selection evidence {cohort} lacks complete source inventory"
         )
+    source_manifest = evidence.get("source_manifest")
+    if not isinstance(source_manifest, Mapping):
+        raise T085NativeExecutionError(
+            f"T085 selection evidence {cohort} lacks source manifest binding"
+        )
+    source_manifest_path = source_manifest.get("path")
+    source_manifest_sha256 = source_manifest.get("sha256")
+    if (
+        not isinstance(source_manifest_path, str)
+        or not source_manifest_path
+        or not isinstance(source_manifest_sha256, str)
+        or len(source_manifest_sha256) != 64
+    ):
+        raise T085NativeExecutionError(
+            f"T085 selection evidence {cohort} has an invalid source manifest binding"
+        )
     return {
         "expected_source_run_count": source_count,
         "expected_source_run_identity_inventory": tuple(source_ids),
         "expected_source_run_seed_inventory": tuple(source_seeds),
         "expected_assistance_level": ("assist_hp75_potion" if cohort == "B" else None),
+        "expected_source_manifest_path": source_manifest_path,
+        "expected_source_manifest_sha256": source_manifest_sha256,
     }
 
 
@@ -900,6 +1053,10 @@ def run_t085_native_paired_evaluation_from_paths(
     outcomes_output_path: str | Path,
 ) -> dict[str, object]:
     """Complete path-bound T085 workflow; no caller result callback exists."""
+    if b_artifact_kind != "assisted_pool" or c_artifact_kind != "natural_pool":
+        raise T085NativeExecutionError(
+            "T085 paired evaluation requires the assisted B pool and natural C pool"
+        )
     plan = load_t085_native_evaluation_plan(
         selection_path, expected_sha256=selection_sha256
     )
@@ -1751,6 +1908,433 @@ class T085UnguidedBattleSearchV2Controller:
         )
 
 
+def build_t085_cohort_c_source_controller() -> RoutedRunController:
+    """Build the exact repository-owned current-occupancy source controller."""
+
+    return RoutedRunController(
+        battle=T085UnguidedBattleSearchV2Controller(simulations=100),
+        non_combat=PolicyController(ExpertNonCombatDriver(seed=42042)),
+    )
+
+
+def _require_t085_stable_path(path: str | Path, label: str) -> Path:
+    resolved = Path(path).resolve()
+    try:
+        resolved.relative_to(T085_ARTIFACT_ROOT.resolve())
+    except ValueError as exc:
+        raise T085NativeExecutionError(
+            f"T085 {label} must be under the stable ignored T085 artifact root"
+        ) from exc
+    return resolved
+
+
+def _t085_source_pool_reference(
+    path: Path,
+    *,
+    record_count: int,
+    source_run_count: int,
+) -> dict[str, object]:
+    return {
+        "path": str(path),
+        "schema_id": T085_C_SOURCE_POOL_SCHEMA_ID,
+        "sha256": sha256_file(path),
+        "byte_count": path.stat().st_size,
+        "format_version": BATTLE_START_POOL_FORMAT_VERSION,
+        "distribution_kind": "natural_run",
+        "record_count": record_count,
+        "source_run_count": source_run_count,
+    }
+
+
+def _validate_t085_c_source_pool(
+    pool: NaturalBattleStartPool,
+    *,
+    controller: RoutedRunController,
+    expected_seeds: Sequence[int],
+) -> None:
+    """Validate source-pool metadata before it can become T085 evidence."""
+
+    if pool.format_version != 4:
+        raise T085NativeExecutionError(
+            "T085 Cohort C source pool is not current battle-start-pool v4"
+        )
+    if pool.source_run_count != len(expected_seeds):
+        raise T085NativeExecutionError(
+            "T085 Cohort C source pool run count does not match its shard"
+        )
+    if pool.source_controller_provenance != controller.provenance.to_dict():
+        raise T085NativeExecutionError(
+            "T085 Cohort C source pool controller provenance is not exact"
+        )
+    summaries = pool.source_run_summaries
+    if len(summaries) != len(expected_seeds):
+        raise T085NativeExecutionError(
+            "T085 Cohort C source pool lacks one summary per source run"
+        )
+    actual_seeds = [summary.source_seed for summary in summaries]
+    if actual_seeds != list(expected_seeds):
+        raise T085NativeExecutionError(
+            "T085 Cohort C source pool seed order/domain is not exact"
+        )
+    summary_by_run = {summary.source_run_id: summary for summary in summaries}
+    if len(summary_by_run) != len(summaries):
+        raise T085NativeExecutionError(
+            "T085 Cohort C source pool source-run identities are not unique"
+        )
+    expected_battle_provenance = controller.battle.provenance.to_dict()
+    expected_non_combat_provenance = controller.non_combat.provenance.to_dict()
+    expected_seed_set = set(expected_seeds)
+    for index, record in enumerate(pool.records):
+        if record.distribution_kind != "natural_run":
+            raise T085NativeExecutionError(
+                f"T085 Cohort C source record {index} is not natural_run"
+            )
+        if record.source_seed not in expected_seed_set:
+            raise T085NativeExecutionError(
+                f"T085 Cohort C source record {index} has a seed outside its shard"
+            )
+        summary = summary_by_run.get(record.source_run_id)
+        if summary is None or summary.source_seed != record.source_seed:
+            raise T085NativeExecutionError(
+                f"T085 Cohort C source record {index} is not bound to a source summary"
+            )
+        if record.source_battle_controller_provenance != expected_battle_provenance:
+            raise T085NativeExecutionError(
+                f"T085 Cohort C source record {index} has the wrong battle controller"
+            )
+        if (
+            record.source_non_combat_controller_provenance
+            != expected_non_combat_provenance
+        ):
+            raise T085NativeExecutionError(
+                f"T085 Cohort C source record {index} has the wrong non-combat controller"
+            )
+
+
+def _t085_cohort_c_selection_rank(
+    record: BattleStartCheckpointRecord,
+) -> tuple[str, str]:
+    """Rank a battle start by the frozen source-run/battle identity pair."""
+
+    # ``source_checkpoint_id`` is the portable complete identity of this
+    # battle-start record.  Include the source-run identity explicitly so a
+    # source artifact cannot make two runs compete only on an opaque local
+    # checkpoint label.
+    ranking_identity = f"{record.source_run_id}:{record.source_checkpoint_id}"
+    return sha256(ranking_identity.encode("utf-8")).hexdigest(), ranking_identity
+
+
+def run_t085_cohort_c_source_generation_from_paths(
+    *,
+    adapter_factory: Callable[[], object],
+    pool_output_path: str | Path,
+    shard_manifest_output_path: str | Path,
+    shard_index: int,
+    shard_count: int = 16,
+    worker_count: int = 16,
+) -> dict[str, object]:
+    """Run one exact eight-seed Cohort-C source-generation shard.
+
+    The source pool is a current ``battle-start-pool`` JSONL artifact and is
+    therefore directly consumable by :func:`resolve_t085_canonical_records`
+    after all 16 shards are merged.  This function intentionally emits a
+    partial shard manifest; it cannot claim the 128-run source contract until
+    the deterministic merge/finalization step has been completed.
+    """
+
+    if not callable(adapter_factory):
+        raise T085NativeExecutionError(
+            "T085 Cohort C source generation requires an adapter factory"
+        )
+    plan = T085CohortCSourceGenerationPlan(
+        shard_index=shard_index,
+        shard_count=shard_count,
+        worker_count=worker_count,
+    )
+    native_identity = _validate_t085_native_source_manifest("battle_search_v2")
+    controller = build_t085_cohort_c_source_controller()
+    pool = collect_natural_battle_start_pool(
+        adapter_factory(),
+        controller,
+        seeds=plan.seed_inventory,
+        max_steps=500,
+        action_space=ActionSpaceConfig.initial_no_potions(),
+    )
+    _validate_t085_c_source_pool(
+        pool,
+        controller=controller,
+        expected_seeds=plan.seed_inventory,
+    )
+    pool_path = _require_t085_stable_path(pool_output_path, "source pool output")
+    manifest_path = _require_t085_stable_path(
+        shard_manifest_output_path,
+        "source shard manifest output",
+    )
+    pool_path.parent.mkdir(parents=True, exist_ok=True)
+    with pool_path.open("w", encoding="utf-8", newline="\n") as stream:
+        dump_natural_battle_start_pool_jsonl(pool, stream)
+    source_pool_reference = _t085_source_pool_reference(
+        pool_path,
+        record_count=len(pool.records),
+        source_run_count=pool.source_run_count,
+    )
+    manifest = plan.to_dict(native_identity=native_identity)
+    manifest.update(
+        {
+            "source_pool_artifact": source_pool_reference,
+            "source_run_seed_inventory": [
+                summary.source_seed for summary in pool.source_run_summaries
+            ],
+            "source_run_identity_inventory": [
+                summary.source_run_id for summary in pool.source_run_summaries
+            ],
+            "record_count": len(pool.records),
+            "source_controller_provenance": pool.source_controller_provenance,
+        }
+    )
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_reference = write_t085_json_artifact(
+        manifest_path,
+        manifest,
+        schema_id=T085_C_SOURCE_SHARD_MANIFEST_SCHEMA_ID,
+    )
+    return {
+        "status": "partial",
+        "task_id": "T085",
+        "cohort": "C",
+        "source_generation_valid": True,
+        "pool_artifact": source_pool_reference,
+        "source_shard_manifest": manifest_reference,
+        "shard": manifest,
+    }
+
+
+def build_t085_cohort_c_source_manifest_from_paths(
+    *,
+    pool_path: str | Path,
+    pool_sha256: str,
+    manifest_output_path: str | Path,
+) -> dict[str, object]:
+    """Finalize a merged 128-run Cohort-C pool into T085 source evidence."""
+
+    resolved_pool = _require_t085_stable_path(pool_path, "merged source pool")
+    resolved_pool = resolved_pool.resolve(strict=True)
+    if sha256_file(resolved_pool) != pool_sha256:
+        raise T085NativeExecutionError(
+            "T085 Cohort C merged source pool SHA-256 mismatch"
+        )
+    with resolved_pool.open(encoding="utf-8") as stream:
+        pool = load_natural_battle_start_pool_jsonl(stream)
+    expected_seeds = tuple(range(T085_COHORT_C_SEED_START, T085_COHORT_C_SEED_END + 1))
+    controller = build_t085_cohort_c_source_controller()
+    _validate_t085_c_source_pool(
+        pool,
+        controller=controller,
+        expected_seeds=expected_seeds,
+    )
+    if pool.source_run_count != T085_COHORT_C_RUN_COUNT:
+        raise T085NativeExecutionError(
+            "T085 Cohort C source manifest requires all 128 source runs"
+        )
+    by_run: dict[str, list[BattleStartCheckpointRecord]] = {}
+    for record in pool.records:
+        by_run.setdefault(record.source_run_id, []).append(record)
+    selected_by_run: list[BattleStartCheckpointRecord] = []
+    for summary in pool.source_run_summaries:
+        candidates = by_run.get(summary.source_run_id, [])
+        if not candidates:
+            raise T085NativeExecutionError(
+                "T085 Cohort C source manifest cannot bind a run without a battle start"
+            )
+        selected_by_run.append(
+            min(
+                candidates,
+                key=_t085_cohort_c_selection_rank,
+            )
+        )
+    complete_ids = [record.source_checkpoint_id for record in selected_by_run]
+    if len(set(complete_ids)) != T085_COHORT_C_RUN_COUNT:
+        raise T085NativeExecutionError(
+            "T085 Cohort C selected source identities are not unique"
+        )
+    pool_reference = _t085_source_pool_reference(
+        resolved_pool,
+        record_count=len(pool.records),
+        source_run_count=pool.source_run_count,
+    )
+    native_identity = _validate_t085_native_source_manifest("battle_search_v2")
+    manifest_path = _require_t085_stable_path(
+        manifest_output_path,
+        "source manifest output",
+    )
+    manifest = {
+        "schema_id": T085_SOURCE_MANIFEST_SCHEMA_ID,
+        "task_id": "T085",
+        "cohort": "C",
+        "ascension": 20,
+        "max_outer_steps": 500,
+        "action_space": "initial_no_potions",
+        "battle_controller": "unguided_search_v2",
+        "battle_simulations": 100,
+        "root_selection": "highest_mean",
+        "non_combat_controller": "expert_non_combat_v1",
+        "non_combat_policy_seed": 42042,
+        "assistance_level": "assist_0",
+        "assistance_policy_seed": None,
+        "policy_prior_callback": None,
+        "leaf_value_callback": None,
+        "native_identity": native_identity,
+        "source_outcome_independent": True,
+        "repaired_checkpoint_used": False,
+        "source_manifest_frozen": True,
+        "source_run_count": T085_COHORT_C_RUN_COUNT,
+        "source_run_seeds": list(expected_seeds),
+        "source_run_seed_inventory": [
+            summary.source_seed for summary in pool.source_run_summaries
+        ],
+        "source_run_identity_inventory": [
+            summary.source_run_id for summary in pool.source_run_summaries
+        ],
+        "complete_source_identity_inventory": complete_ids,
+        "source_pool_artifact": pool_reference,
+        "selection_rule": (
+            "sha256(source_run_identity:complete_source_identity) per source run"
+        ),
+        "one_record_per_source_run": True,
+    }
+    if manifest["source_run_seed_inventory"] != list(expected_seeds):
+        raise T085NativeExecutionError(
+            "T085 Cohort C merged source summary seed order is not exact"
+        )
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    reference = write_t085_json_artifact(
+        manifest_path,
+        manifest,
+        schema_id=T085_SOURCE_MANIFEST_SCHEMA_ID,
+    )
+    bound_manifest = dict(manifest)
+    bound_manifest.update(
+        {
+            "source_manifest_path": reference["path"],
+            "source_manifest_sha256": reference["sha256"],
+            "source_manifest_byte_count": reference["byte_count"],
+        }
+    )
+    validate_t085_source_generation_contract(bound_manifest, cohort="C")
+    return bound_manifest
+
+
+def _validate_t085_source_manifest_binding(
+    pool_path: Path,
+    *,
+    artifact_kind: T085NativeSourceArtifactKind,
+    manifest_path: str | Path | None,
+    manifest_sha256: str | None,
+) -> tuple[dict[str, object], Path] | None:
+    """Bind a source pool path to its frozen T085 source manifest."""
+
+    if (manifest_path is None) != (manifest_sha256 is None):
+        raise T085NativeExecutionError(
+            "T085 source manifest path and SHA-256 must be supplied together"
+        )
+    if manifest_path is None:
+        return None
+    if artifact_kind == "fixed_cohort":
+        raise T085NativeExecutionError(
+            "fixed-cohort artifacts cannot carry a T085 source-generation manifest"
+        )
+    resolved_manifest = _require_t085_stable_path(
+        manifest_path,
+        "source-generation manifest",
+    ).resolve(strict=True)
+    actual_sha256 = sha256_file(resolved_manifest)
+    if actual_sha256 != manifest_sha256:
+        raise T085NativeExecutionError(
+            "T085 source-generation manifest SHA-256 mismatch"
+        )
+    try:
+        document = json.loads(resolved_manifest.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise T085NativeExecutionError(
+            "T085 source-generation manifest is unavailable or invalid"
+        ) from exc
+    if not isinstance(document, Mapping):
+        raise T085NativeExecutionError(
+            "T085 source-generation manifest is not an object"
+        )
+    expected_cohort = "B" if artifact_kind == "assisted_pool" else "C"
+    if (
+        document.get("schema_id") != T085_SOURCE_MANIFEST_SCHEMA_ID
+        or document.get("task_id") != "T085"
+        or document.get("cohort") != expected_cohort
+    ):
+        raise T085NativeExecutionError(
+            "T085 source-generation manifest schema/cohort identity is invalid"
+        )
+    source_pool = document.get("source_pool_artifact")
+    if not isinstance(source_pool, Mapping):
+        raise T085NativeExecutionError(
+            "T085 source-generation manifest lacks source_pool_artifact binding"
+        )
+    expected_pool_schema_id = (
+        ASSISTED_SOURCE_POOL_SCHEMA_ID
+        if artifact_kind == "assisted_pool"
+        else T085_C_SOURCE_POOL_SCHEMA_ID
+    )
+    expected_pool_format_version = (
+        ASSISTED_SOURCE_POOL_FORMAT_VERSION
+        if artifact_kind == "assisted_pool"
+        else BATTLE_START_POOL_FORMAT_VERSION
+    )
+    if (
+        Path(str(source_pool.get("path"))).resolve() != pool_path.resolve()
+        or source_pool.get("schema_id") != expected_pool_schema_id
+        or source_pool.get("sha256") != sha256_file(pool_path)
+        or source_pool.get("byte_count") != pool_path.stat().st_size
+        or source_pool.get("format_version") != expected_pool_format_version
+        or (
+            artifact_kind == "assisted_pool"
+            and source_pool.get("source_pool_format_version")
+            != BATTLE_START_POOL_FORMAT_VERSION
+        )
+        or source_pool.get("distribution_kind")
+        != ("assisted_run" if artifact_kind == "assisted_pool" else "natural_run")
+    ):
+        raise T085NativeExecutionError(
+            "T085 source-generation manifest is not bound to this source pool"
+        )
+    if artifact_kind == "natural_pool":
+        expected_native_identity = _validate_t085_native_source_manifest(
+            "battle_search_v2"
+        )
+        if document.get("native_identity") != expected_native_identity:
+            raise T085NativeExecutionError(
+                "T085 Cohort C source manifest has the wrong native identity"
+            )
+        if any(
+            document.get(callback_name) is not None
+            for callback_name in ("policy_prior_callback", "leaf_value_callback")
+        ):
+            raise T085NativeExecutionError(
+                "T085 Cohort C source manifest must disable both Search guidance callbacks"
+            )
+    bound = dict(document)
+    bound.update(
+        {
+            "source_manifest_path": str(resolved_manifest),
+            "source_manifest_sha256": actual_sha256,
+            "source_manifest_byte_count": resolved_manifest.stat().st_size,
+        }
+    )
+    try:
+        validate_t085_source_generation_contract(bound, cohort=expected_cohort)
+    except T085EvaluationIntegrityError as exc:
+        raise T085NativeExecutionError(
+            "T085 source-generation manifest failed its frozen contract"
+        ) from exc
+    return bound, resolved_manifest
+
+
 @dataclass(frozen=True)
 class T085NativeArmController:
     """Repository-owned Search v2 selector for one explicit T085 arm."""
@@ -2276,6 +2860,9 @@ def run_t085_native_paired_evaluation(
     outcomes_payload = {
         "schema_id": T085_NATIVE_OUTCOMES_SCHEMA_ID,
         "task_id": "T085",
+        "artifact_scope": "paired_evaluation_shard",
+        "partial": True,
+        "complete": False,
         "native_identity": native_identity,
         "selection_artifact": selection_reference,
         "paired_report_artifact": report_reference,
@@ -2294,7 +2881,10 @@ def run_t085_native_paired_evaluation(
         schema_id=T085_NATIVE_OUTCOMES_SCHEMA_ID,
     )
     return {
-        "status": "verified",
+        # The shard itself is verified as an execution partition, but it is
+        # never a complete T085 result.  A later merge must consume all 16
+        # partial artifacts and re-run the full selection/support gates.
+        "status": "partial",
         "task_id": "T085",
         "selection_artifact": selection_reference,
         "paired_report_artifact": report_reference,
@@ -2305,6 +2895,7 @@ def run_t085_native_paired_evaluation(
 
 
 __all__ = [
+    "T085CohortCSourceGenerationPlan",
     "T085NativeArm",
     "T085NativeArmController",
     "T085NativeEvaluationPlan",
@@ -2314,6 +2905,8 @@ __all__ = [
     "T085NativeShardPlan",
     "T085NativeTerminalSearchAdapter",
     "T085UnguidedBattleSearchV2Controller",
+    "build_t085_cohort_c_source_controller",
+    "build_t085_cohort_c_source_manifest_from_paths",
     "build_t085_native_arms",
     "build_t085_native_evaluation_plan",
     "finalize_t085_native_root_edge_label",
@@ -2321,6 +2914,7 @@ __all__ = [
     "prepare_t085_native_root_edge_label",
     "resolve_t085_canonical_records",
     "restore_t085_canonical_record",
+    "run_t085_cohort_c_source_generation_from_paths",
     "run_t085_native_paired_evaluation",
     "run_t085_native_paired_evaluation_from_paths",
     "write_t085_native_selection_artifact",

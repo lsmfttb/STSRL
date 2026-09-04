@@ -89,6 +89,8 @@ from sts_combat_rl.commands.t062_battle_search_v2 import (
     write_t062_comparison_report,
 )
 from sts_combat_rl.commands.t085_native_execution import (
+    build_t085_cohort_c_source_manifest_from_paths,
+    run_t085_cohort_c_source_generation_from_paths,
     run_t085_native_paired_evaluation_from_paths,
     run_t085_native_restore_smoke,
 )
@@ -262,6 +264,8 @@ _LIGHTSPEED_BOOL_FLAGS = (
 _LIGHTSPEED_PATH_FLAGS = (
     "lightspeed_t085_native_restore_smoke",
     "lightspeed_t085_native_paired_evaluation",
+    "lightspeed_t085_cohort_c_source_generation",
+    "lightspeed_t085_cohort_c_source_manifest",
     "lightspeed_battle_start_pool",
     "lightspeed_search_battle_start_pool",
     "lightspeed_assisted_battle_start_pool",
@@ -295,6 +299,48 @@ def run_lightspeed_command(args: argparse.Namespace) -> int:
     """Run the selected sts_lightspeed-backed command."""
 
     try:
+        if args.lightspeed_t085_cohort_c_source_generation is not None:
+            required = (
+                args.t085_c_source_manifest_output,
+                args.t085_c_source_shard_index,
+                args.t085_c_source_shard_count,
+                args.t085_c_source_worker_count,
+            )
+            if any(value is None for value in required):
+                raise ValueError(
+                    "T085 Cohort C source generation requires a shard manifest "
+                    "output and explicit 16-shard/16-worker values"
+                )
+            report = run_t085_cohort_c_source_generation_from_paths(
+                adapter_factory=lambda: LightSpeedAdapter(
+                    seed=850001,
+                    ascension=20,
+                ),
+                pool_output_path=args.lightspeed_t085_cohort_c_source_generation,
+                shard_manifest_output_path=args.t085_c_source_manifest_output,
+                shard_index=args.t085_c_source_shard_index,
+                shard_count=args.t085_c_source_shard_count,
+                worker_count=args.t085_c_source_worker_count,
+            )
+            print(json.dumps(report, sort_keys=True), file=sys.stderr)
+            return 0
+        if args.lightspeed_t085_cohort_c_source_manifest is not None:
+            required = (
+                args.t085_c_source_pool_sha256,
+                args.t085_c_source_manifest_output,
+            )
+            if any(value is None for value in required):
+                raise ValueError(
+                    "T085 Cohort C source manifest finalization requires the "
+                    "merged pool SHA-256 and manifest output"
+                )
+            manifest = build_t085_cohort_c_source_manifest_from_paths(
+                pool_path=args.lightspeed_t085_cohort_c_source_manifest,
+                pool_sha256=args.t085_c_source_pool_sha256,
+                manifest_output_path=args.t085_c_source_manifest_output,
+            )
+            print(json.dumps(manifest, sort_keys=True), file=sys.stderr)
+            return 0
         adapter = LightSpeedAdapter(seed=args.sim_seed, ascension=args.sim_ascension)
         action_space = (
             ActionSpaceConfig.include_all()

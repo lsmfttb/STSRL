@@ -295,6 +295,9 @@ def test_source_generation_contract_is_frozen_for_b_and_c(tmp_path) -> None:
         assert (
             validate_t085_source_generation_contract(c, cohort="C")["validated"] is True
         )
+        c["leaf_value_callback"] = "caller-injected"
+        with pytest.raises(ValueError, match="disable Search guidance"):
+            validate_t085_source_generation_contract(c, cohort="C")
         b["non_combat_policy_seed"] = 851001
         with pytest.raises(ValueError, match="non_combat_policy_seed"):
             validate_t085_source_generation_contract(b, cohort="B")

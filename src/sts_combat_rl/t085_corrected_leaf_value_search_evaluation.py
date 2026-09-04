@@ -834,6 +834,13 @@ def validate_t085_source_generation_contract(
             raise T085EvaluationIntegrityError(
                 f"Cohort {cohort} source-generation field {key} does not match contract"
             )
+    if cohort == "C":
+        for callback_name in ("policy_prior_callback", "leaf_value_callback"):
+            if manifest.get(callback_name) is not None:
+                raise T085EvaluationIntegrityError(
+                    "Cohort C source generation must disable Search guidance "
+                    f"{callback_name}"
+                )
     if manifest.get("source_run_seed_inventory") != expected["source_run_seeds"]:
         raise T085EvaluationIntegrityError(
             f"Cohort {cohort} source_run_seed_inventory does not match contract"
@@ -1917,6 +1924,121 @@ def build_t085_paired_evaluation_report(
     return report
 
 
+def build_t085_partial_paired_evaluation_report(
+    records: Iterable[T085OutcomeRecord | Mapping[str, object]],
+    *,
+    cohort_b_record_count: int,
+    cohort_c_record_count: int,
+) -> dict[str, object]:
+    """Build one mergeable shard report without claiming full support.
+
+    A deterministic record partition can leave a shard without one or more
+    cohorts.  The rows that are present must still contain a complete arm
+    matrix per record, but a shard must not synthesize cohort summaries or
+    claim that the frozen A/B/C/B@400 support gate is complete.  The retained
+    ``outcomes`` array is intentionally the merge primitive: a later merge can
+    validate the concatenated rows with the full selection evidence and call
+    :func:`build_t085_paired_evaluation_report`.
+    """
+
+    normalized = _validated_outcomes(records)
+    expected_arms_by_cohort = {
+        "A": set(T085_PRIMARY_ARMS),
+        "B": set(T085_PRIMARY_ARMS + T085_SECONDARY_ARMS),
+        "C": set(T085_PRIMARY_ARMS),
+        "B@400": set(T085_SEARCH_400_ARMS),
+    }
+    rows_by_cohort: dict[str, list[T085OutcomeRecord]] = defaultdict(list)
+    for record in normalized:
+        if record.cohort not in expected_arms_by_cohort:
+            raise T085EvaluationIntegrityError(
+                f"unknown T085 evaluation cohort {record.cohort!r}"
+            )
+        rows_by_cohort[record.cohort].append(record)
+    for cohort, cohort_rows in rows_by_cohort.items():
+        expected_arms = expected_arms_by_cohort[cohort]
+        actual_arms = {record.arm for record in cohort_rows}
+        if actual_arms != expected_arms:
+            missing = sorted(expected_arms - actual_arms)
+            unknown = sorted(actual_arms - expected_arms)
+            raise T085EvaluationIntegrityError(
+                f"Cohort {cohort} shard arm matrix mismatch; "
+                f"missing={missing}, unknown={unknown}"
+            )
+        seen: set[tuple[str, str]] = set()
+        by_identity: dict[str, set[str]] = defaultdict(set)
+        for record in cohort_rows:
+            identity = (record.record_identity, record.arm)
+            if identity in seen:
+                raise T085EvaluationIntegrityError(
+                    f"duplicate T085 shard row {record.record_identity}/{record.arm}"
+                )
+            seen.add(identity)
+            by_identity[record.record_identity].add(record.arm)
+        for record_identity, present in by_identity.items():
+            if present != expected_arms:
+                raise T085EvaluationIntegrityError(
+                    f"Cohort {cohort} shard record {record_identity} has an "
+                    "incomplete arm matrix"
+                )
+
+    counts = {
+        cohort: len({record.record_identity for record in rows_by_cohort[cohort]})
+        for cohort in expected_arms_by_cohort
+    }
+    if (
+        isinstance(cohort_b_record_count, bool)
+        or not isinstance(cohort_b_record_count, int)
+        or cohort_b_record_count < 0
+    ):
+        raise T085EvaluationIntegrityError(
+            "partial Cohort B record count must be a non-negative integer"
+        )
+    if (
+        isinstance(cohort_c_record_count, bool)
+        or not isinstance(cohort_c_record_count, int)
+        or cohort_c_record_count < 0
+    ):
+        raise T085EvaluationIntegrityError(
+            "partial Cohort C record count must be a non-negative integer"
+        )
+    if counts["B"] != cohort_b_record_count:
+        raise T085EvaluationIntegrityError(
+            "partial Cohort B outcome record count is incomplete"
+        )
+    if counts["C"] != cohort_c_record_count:
+        raise T085EvaluationIntegrityError(
+            "partial Cohort C outcome record count is incomplete"
+        )
+    required_cohorts = tuple(expected_arms_by_cohort)
+    present_cohorts = tuple(cohort for cohort in required_cohorts if counts[cohort] > 0)
+    missing_cohorts = tuple(
+        cohort for cohort in required_cohorts if counts[cohort] == 0
+    )
+    return {
+        "schema_id": "t085-paired-evaluation-report-v1",
+        "task_id": "T085",
+        "artifact_scope": "paired_evaluation_shard",
+        "partial": True,
+        "complete": False,
+        "required_cohorts": list(required_cohorts),
+        "present_cohorts": list(present_cohorts),
+        "missing_cohorts": list(missing_cohorts),
+        "outcomes": [asdict(record) for record in normalized],
+        "support": {
+            "partial": True,
+            "complete": False,
+            "cohort_record_counts": counts,
+            "cohort_a_exact": False,
+            "cohort_b_exact": False,
+            "cohort_c_minimum": False,
+            "search_400_exact": False,
+        },
+        "cohort_record_counts": counts,
+        "outcome_record_count": len(normalized),
+    }
+
+
 def _verify_t085_artifact_reference(
     reference_value: object,
     label: str,
@@ -2201,7 +2323,7 @@ def run_t085_paired_evaluation(
         "B@400": (T085_SEARCH_400_ARMS, T085_SEARCH_400_BUDGET),
     }
     for cohort, records in cohorts.items():
-        if not records:
+        if not records and not sharded:
             raise T085EvaluationIntegrityError(f"T085 cohort {cohort} is empty")
         for record in records:
             if not belongs_to_shard(record):
@@ -2225,26 +2347,28 @@ def run_t085_paired_evaluation(
                         "cohort, record, arm, source, and budget"
                     )
                 rows.append(row)
+    cohort_b_record_count = (
+        sum(belongs_to_shard(record) for record in cohorts["B"])
+        if sharded
+        else len(cohorts["B"])
+    )
+    cohort_c_record_count = (
+        sum(belongs_to_shard(record) for record in cohorts["C"])
+        if sharded
+        else len(cohorts["C"])
+    )
     if sharded:
-        for cohort in required_cohorts:
-            if not any(row.cohort == cohort for row in rows):
-                raise T085EvaluationIntegrityError(
-                    f"T085 shard {shard_index} has no records for Cohort {cohort}"
-                )
+        return build_t085_partial_paired_evaluation_report(
+            rows,
+            cohort_b_record_count=cohort_b_record_count,
+            cohort_c_record_count=cohort_c_record_count,
+        )
     return build_t085_paired_evaluation_report(
         rows,
-        cohort_b_record_count=(
-            sum(belongs_to_shard(record) for record in cohorts["B"])
-            if sharded
-            else len(cohorts["B"])
-        ),
-        cohort_c_record_count=(
-            sum(belongs_to_shard(record) for record in cohorts["C"])
-            if sharded
-            else len(cohorts["C"])
-        ),
-        selection_cohorts=None if sharded else cohorts,
-        selection_evidence=None if sharded else selection_evidence,
+        cohort_b_record_count=cohort_b_record_count,
+        cohort_c_record_count=cohort_c_record_count,
+        selection_cohorts=cohorts,
+        selection_evidence=selection_evidence,
     )
 
 
@@ -3028,6 +3152,7 @@ __all__ = [
     "build_t085_cohort_selection",
     "build_t085_evaluation_selection_evidence",
     "build_t085_paired_evaluation_report",
+    "build_t085_partial_paired_evaluation_report",
     "build_t085_retention_manifest",
     "build_t085_terminal_report",
     "classify_t085_terminal",

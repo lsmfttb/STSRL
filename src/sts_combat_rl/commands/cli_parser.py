@@ -67,6 +67,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run the complete repository-owned T085 paired evaluation.",
     )
     input_group.add_argument(
+        "--lightspeed-t085-cohort-c-source-generation",
+        type=Path,
+        metavar="POOL_JSONL",
+        help=(
+            "Run one explicit 16-worker Cohort-C source shard and write its "
+            "current-schema natural battle-start pool to POOL_JSONL."
+        ),
+    )
+    input_group.add_argument(
+        "--lightspeed-t085-cohort-c-source-manifest",
+        type=Path,
+        metavar="MERGED_POOL_JSONL",
+        help=(
+            "Finalize a verified merged Cohort-C natural pool into the "
+            "T085 source-generation manifest."
+        ),
+    )
+    input_group.add_argument(
         "--lightspeed-tactical-feature-audit",
         action="store_true",
         help=(
@@ -1095,6 +1113,30 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Write the T085 canonical restore smoke artifact.",
     )
+    parser.add_argument(
+        "--t085-c-source-manifest-output",
+        type=Path,
+        help=(
+            "Write the Cohort-C source shard manifest or finalized source "
+            "generation manifest."
+        ),
+    )
+    parser.add_argument(
+        "--t085-c-source-pool-sha256",
+        help="Exact SHA-256 for a merged Cohort-C natural source pool.",
+    )
+    for option, help_text in (
+        (
+            "--t085-c-source-shard-index",
+            "Zero-based Cohort-C source shard index (0-15).",
+        ),
+        ("--t085-c-source-shard-count", "Cohort-C source shard count; must be 16."),
+        (
+            "--t085-c-source-worker-count",
+            "Effective Cohort-C source worker count; must be 16.",
+        ),
+    ):
+        parser.add_argument(option, type=int, help=help_text)
     for option, help_text in (
         ("--t085-a-map", "Full T052 canonical map artifact."),
         ("--t085-b-map", "Full Cohort-B canonical map artifact."),
