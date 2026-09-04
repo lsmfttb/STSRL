@@ -16,7 +16,7 @@ import math
 import random
 from collections import Counter
 from collections.abc import Iterator, Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 import torch
@@ -34,8 +34,10 @@ from sts_combat_rl.sim.torch_policy_value import (
     TORCH_POLICY_VALUE_CHECKPOINT_FORMAT_VERSION,
     TORCH_POLICY_VALUE_CHECKPOINT_SCHEMA_ID,
     TORCH_POLICY_VALUE_MODEL_CLASS,
+    LoadedTorchPolicyValueCheckpoint,
     PolicyValueNetwork,
     TorchPolicyValueTrainingConfig,
+    load_torch_policy_value_checkpoint,
 )
 from sts_combat_rl.t084_search_v2_internal_leaf_target_generation import (
     _iter_collector_fields,
@@ -43,6 +45,9 @@ from sts_combat_rl.t084_search_v2_internal_leaf_target_generation import (
 )
 
 T085_TASK_ID = "T085"
+T085_ARTIFACT_ROOT = Path(
+    "/mnt/d/DeadlyCatCoding/STSRL/artifacts/t085-corrected-leaf-value-search-repair"
+)
 T085_FORMAL_ROW_COUNT = 960
 T085_BATCH_SIZE = 32
 T085_OPTIMIZER_STEPS = 900
@@ -65,6 +70,28 @@ T085_REPORT_SCHEMA_ID = "t084-search-v2-internal-leaf-target-generation-v1"
 T085_T084_CLASSIFICATION = "LEAF_CONTINUATION_UTILITY_TARGETS_READY"
 T085_DE_NORMALIZATION = "z_pred * target_std + target_mean"
 T085_NATIVE_UTILITY_UNITS = "BattleScumSearcher2.evaluateEndState"
+T085_PARENT_CHECKPOINT_PATH_BY_SEED = {
+    85001: "/mnt/d/DeadlyCatCoding/STSRL/artifacts/t064-later-act-curriculum-transfer/training/checkpoints/static_mixture_v1-64001.pt",
+    85002: "/mnt/d/DeadlyCatCoding/STSRL/artifacts/t064-later-act-curriculum-transfer/training/checkpoints/static_mixture_v1-64002.pt",
+}
+
+
+@dataclass(frozen=True)
+class T085VerifiedParentCheckpoint:
+    """A T064 parent whose bytes, path, and loaded model are bound together."""
+
+    repair_seed: int
+    path: str
+    sha256: str
+    loaded: LoadedTorchPolicyValueCheckpoint
+
+    @property
+    def model(self) -> PolicyValueNetwork:
+        return self.loaded.model
+
+    @property
+    def training_data_provenance(self) -> Mapping[str, object]:
+        return self.loaded.training_data_provenance
 
 
 @dataclass(frozen=True)
@@ -137,6 +164,9 @@ class T085TrainingResult:
     training_data_provenance: dict[str, object]
     policy_target_kind: str
     policy_target_source: str
+    parent_model: PolicyValueNetwork | None = None
+    parent_checkpoint_path: str | None = None
+    invariance_audit: dict[str, object] = field(default_factory=dict)
 
 
 def sha256_file(path: Path) -> str:
@@ -145,6 +175,58 @@ def sha256_file(path: Path) -> str:
         for block in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(block)
     return digest.hexdigest()
+
+
+def load_t085_verified_parent_checkpoint(
+    path: str | Path,
+    *,
+    repair_seed: int,
+) -> T085VerifiedParentCheckpoint:
+    """Load only the exact qualified T064 parent for a repair seed.
+
+    The path is deliberately part of the contract.  A caller-provided digest
+    is never accepted as the parent identity: the bytes at the qualified path
+    are hashed before the checkpoint is loaded and the computed digest is
+    carried with the returned model.
+    """
+
+    if repair_seed not in T085_REPAIR_SEEDS:
+        raise ValueError("T085 repair seed must be 85001 or 85002")
+    requested = Path(path)
+    try:
+        resolved = requested.resolve(strict=True)
+    except FileNotFoundError as exc:
+        raise ValueError("T085 parent checkpoint path is unavailable") from exc
+    expected = Path(T085_PARENT_CHECKPOINT_PATH_BY_SEED[repair_seed]).resolve()
+    if resolved != expected:
+        raise ValueError(
+            "T085 parent checkpoint must use the exact qualified T064 artifact path"
+        )
+    computed_sha256 = sha256_file(resolved)
+    expected_sha256 = T085_PARENT_CHECKPOINT_SHA256_BY_SEED[repair_seed]
+    if computed_sha256 != expected_sha256:
+        raise ValueError(
+            "T064 parent checkpoint bytes do not match the accepted SHA-256"
+        )
+    loaded = load_torch_policy_value_checkpoint(str(resolved))
+    if loaded.model.hidden_size != 16:
+        raise ValueError("T085 requires the accepted hidden-size-16 parent model")
+    if loaded.metadata.get("task_id") != "T064":
+        raise ValueError("T085 parent checkpoint is not the accepted T064 artifact")
+    if loaded.metadata.get("seed") != (64001 if repair_seed == 85001 else 64002):
+        raise ValueError("T085 parent checkpoint seed does not match its repair seed")
+    if (
+        loaded.metadata.get("outcome_target_kind")
+        != "terminal_battle_survival_probability"
+    ):
+        raise ValueError("T085 parent must retain historical survival semantics")
+    _validate_parent_guidance_provenance(loaded.training_data_provenance)
+    return T085VerifiedParentCheckpoint(
+        repair_seed=repair_seed,
+        path=str(resolved),
+        sha256=computed_sha256,
+        loaded=loaded,
+    )
 
 
 def _canonical_sha256(value: object) -> str:
@@ -432,6 +514,7 @@ def train_t085_corrected_value_head(
     training_input_path: str,
     training_input_byte_count: int,
     parent_guidance_provenance: Mapping[str, object],
+    parent_checkpoint_path: str | Path | None = None,
     policy_target_kind: str = "behavior_chosen_action_one_hot",
     policy_target_source: str = "frozen_parent_checkpoint_policy_path",
     config: T085TrainingConfig = T085_DEFAULT_TRAINING_CONFIG,
@@ -444,8 +527,22 @@ def train_t085_corrected_value_head(
         raise ValueError("T085 repair seed must be 85001 or 85002")
     if not _is_sha256(parent_checkpoint_sha256):
         raise ValueError("parent checkpoint identity must be a SHA-256 digest")
-    if parent_checkpoint_sha256 != T085_PARENT_CHECKPOINT_SHA256_BY_SEED[repair_seed]:
-        raise ValueError("T085 repair seed does not match its accepted parent")
+    if parent_checkpoint_path is None:
+        raise ValueError(
+            "T085 training requires the exact qualified T064 parent checkpoint path"
+        )
+    verified_parent = load_t085_verified_parent_checkpoint(
+        parent_checkpoint_path,
+        repair_seed=repair_seed,
+    )
+    if parent_checkpoint_sha256 != verified_parent.sha256:
+        raise ValueError(
+            "caller parent SHA-256 does not match the bytes at the qualified path"
+        )
+    if not _models_byte_identical(parent_model, verified_parent.model):
+        raise ValueError(
+            "caller parent model is not byte-identical to the qualified T064 checkpoint"
+        )
     if not _is_sha256(training_input_sha256):
         raise ValueError("training input identity must be a SHA-256 digest")
     if training_input_sha256 != T085_COLLECTOR_SHA256:
@@ -453,14 +550,21 @@ def train_t085_corrected_value_head(
     if training_input_byte_count <= 0:
         raise ValueError("training input byte count must be positive")
     _validate_parent_guidance_provenance(parent_guidance_provenance)
-    if parent_model.hidden_size != 16:
+    if _canonical_sha256(parent_guidance_provenance) != _canonical_sha256(
+        verified_parent.training_data_provenance
+    ):
+        raise ValueError(
+            "caller parent guidance provenance is not the qualified T064 provenance"
+        )
+    if verified_parent.model.hidden_size != 16:
         raise ValueError("T085 requires the accepted hidden-size-16 parent model")
     if config != T085TrainingConfig():
         raise ValueError("T085 optimizer config is fixed and cannot be tuned")
     target_mean, target_std = _target_statistics(examples)
     batch_plan = build_t085_batch_plan(repair_seed=repair_seed, config=config)
     batch_plan_sha256 = _canonical_sha256([list(batch) for batch in batch_plan])
-    model = copy.deepcopy(parent_model).cpu()
+    bound_parent_model = copy.deepcopy(verified_parent.model).cpu()
+    model = copy.deepcopy(bound_parent_model)
     _reset_outcome_head(model, repair_seed)
     for name, parameter in model.named_parameters():
         parameter.requires_grad = name.startswith("outcome_head.")
@@ -495,6 +599,16 @@ def train_t085_corrected_value_head(
         optimizer.step()
     model.eval()
     final_mse, final_mae = _diagnostic_metrics(model, examples, target_mean, target_std)
+    invariance_audit = audit_t085_policy_invariance(
+        bound_parent_model,
+        model,
+        examples,
+    )
+    if invariance_audit.get("valid") is not True:
+        raise ValueError(
+            "T085 policy/encoder/HP/resource invariance audit failed: "
+            + "; ".join(str(problem) for problem in invariance_audit["problems"])
+        )
     report = T085TrainingReport(
         training_ok=all(math.isfinite(value) for value in (final_mse, final_mae)),
         example_count=len(examples),
@@ -519,6 +633,8 @@ def train_t085_corrected_value_head(
         "target_kind": T085_TARGET_KIND,
         "target_source": "T084 formal post-first-action internal-leaf native utility",
         "parent_checkpoint_sha256": parent_checkpoint_sha256,
+        "parent_checkpoint_path": verified_parent.path,
+        "parent_checkpoint_computed_sha256": verified_parent.sha256,
         "repair_seed": repair_seed,
         "optimizer_steps": config.optimizer_steps,
         "batch_size": config.batch_size,
@@ -528,6 +644,7 @@ def train_t085_corrected_value_head(
         "policy_target_kind": policy_target_kind,
         "policy_target_source": policy_target_source,
         "parent_guidance_provenance": dict(parent_guidance_provenance),
+        "policy_invariance_audit": invariance_audit,
     }
     return T085TrainingResult(
         model=model,
@@ -536,7 +653,31 @@ def train_t085_corrected_value_head(
         training_data_provenance=provenance,
         policy_target_kind=policy_target_kind,
         policy_target_source=policy_target_source,
+        parent_model=bound_parent_model,
+        parent_checkpoint_path=verified_parent.path,
+        invariance_audit=invariance_audit,
     )
+
+
+def _models_byte_identical(
+    left: PolicyValueNetwork,
+    right: PolicyValueNetwork,
+) -> bool:
+    left_state = left.state_dict()
+    right_state = right.state_dict()
+    if set(left_state) != set(right_state):
+        return False
+    for key in left_state:
+        left_tensor = left_state[key].detach().cpu().contiguous()
+        right_tensor = right_state[key].detach().cpu().contiguous()
+        if (
+            left_tensor.dtype != right_tensor.dtype
+            or left_tensor.shape != right_tensor.shape
+        ):
+            return False
+        if left_tensor.numpy().tobytes() != right_tensor.numpy().tobytes():
+            return False
+    return True
 
 
 def audit_t085_policy_invariance(
@@ -565,6 +706,27 @@ def audit_t085_policy_invariance(
     ]
     if mismatched_tensors:
         problems.append("non-outcome tensors changed: " + ", ".join(mismatched_tensors))
+    parameter_group_keys = {
+        "policy": tuple(
+            key for key in non_outcome_keys if key.startswith("policy_head.")
+        ),
+        "encoder": tuple(
+            key
+            for key in non_outcome_keys
+            if key.startswith(("state_encoder.", "action_encoder."))
+            or key in {"state_mean", "state_std", "action_mean", "action_std"}
+        ),
+        "hp": tuple(key for key in non_outcome_keys if key.startswith("hp_head.")),
+        "resource": tuple(
+            key for key in non_outcome_keys if key.startswith("resource_head.")
+        ),
+    }
+    parameter_group_mismatch_counts = {
+        group: sum(key in mismatched_tensors for key in keys)
+        for group, keys in parameter_group_keys.items()
+    }
+    if any(parameter_group_mismatch_counts.values()):
+        problems.append("policy/encoder/HP/resource invariance group changed")
     policy_mismatches = 0
     with torch.no_grad():
         for example in examples:
@@ -585,6 +747,7 @@ def audit_t085_policy_invariance(
         "schema_id": "t085-policy-invariance-audit-v1",
         "example_count": len(examples),
         "non_outcome_tensor_count": len(non_outcome_keys),
+        "parameter_group_mismatch_counts": parameter_group_mismatch_counts,
         "policy_mismatch_count": policy_mismatches,
         "valid": not problems,
         "problems": problems,
@@ -621,15 +784,34 @@ def save_t085_corrected_checkpoint(
 
     if not result.report.training_ok:
         raise ValueError("refusing to save a failed T085 checkpoint")
+    if result.parent_model is None or result.parent_checkpoint_path is None:
+        raise ValueError(
+            "T085 checkpoint save requires the bound parent model and exact parent path"
+        )
+    if result.invariance_audit.get("valid") is not True:
+        raise ValueError("refusing to save without a passing T085 invariance audit")
+    if result.invariance_audit.get("example_count") != T085_FORMAL_ROW_COUNT:
+        raise ValueError("T085 invariance audit must cover all 960 formal inputs")
+    if result.invariance_audit.get("policy_mismatch_count") != 0:
+        raise ValueError("T085 invariance audit reports changed policy outputs")
+    group_mismatches = result.invariance_audit.get("parameter_group_mismatch_counts")
+    if not isinstance(group_mismatches, Mapping) or any(
+        group_mismatches.get(group) != 0
+        for group in ("policy", "encoder", "hp", "resource")
+    ):
+        raise ValueError("T085 invariance audit lacks policy/encoder/HP/resource proof")
     if not _is_sha256(parent_checkpoint_sha256):
         raise ValueError("parent checkpoint identity must be a SHA-256 digest")
     if result.report.repair_seed not in T085_REPAIR_SEEDS:
         raise ValueError("T085 repair seed must be 85001 or 85002")
-    if (
-        parent_checkpoint_sha256
-        != T085_PARENT_CHECKPOINT_SHA256_BY_SEED[result.report.repair_seed]
-    ):
-        raise ValueError("T085 repair seed does not match its accepted parent")
+    verified_parent = load_t085_verified_parent_checkpoint(
+        result.parent_checkpoint_path,
+        repair_seed=result.report.repair_seed,
+    )
+    if parent_checkpoint_sha256 != verified_parent.sha256:
+        raise ValueError("saved parent SHA-256 is not the computed parent identity")
+    if not _models_byte_identical(result.parent_model, verified_parent.model):
+        raise ValueError("saved parent model is not bound to the qualified parent path")
     if result.model.hidden_size != 16:
         raise ValueError("T085 requires the accepted hidden-size-16 parent model")
     if result.report.example_count != T085_FORMAL_ROW_COUNT:
@@ -641,6 +823,35 @@ def save_t085_corrected_checkpoint(
         raise ValueError(
             "parent checkpoint identity does not match training provenance"
         )
+    if (
+        result.training_data_provenance.get("parent_checkpoint_path")
+        != verified_parent.path
+    ):
+        raise ValueError("parent checkpoint path does not match training provenance")
+    if (
+        result.training_data_provenance.get("parent_checkpoint_computed_sha256")
+        != verified_parent.sha256
+    ):
+        raise ValueError("computed parent SHA-256 is missing from training provenance")
+    if (
+        result.training_data_provenance.get("training_record_count")
+        != result.report.example_count
+    ):
+        raise ValueError("training provenance record count does not match report")
+    for key in ("target_mean", "target_std"):
+        if float(result.training_data_provenance.get(key)) != float(
+            getattr(result.report, key)
+        ):
+            raise ValueError(f"training provenance {key} does not match report")
+    if result.training_data_provenance.get("repair_seed") != result.report.repair_seed:
+        raise ValueError("training provenance repair_seed does not match report")
+    if (
+        result.training_data_provenance.get("optimizer_steps")
+        != result.report.optimizer_steps
+    ):
+        raise ValueError("training provenance optimizer_steps does not match report")
+    if result.training_data_provenance.get("batch_size") != result.report.batch_size:
+        raise ValueError("training provenance batch_size does not match report")
     target_metadata = {
         "task_id": T085_TASK_ID,
         "target_kind": T085_TARGET_KIND,
@@ -650,6 +861,8 @@ def save_t085_corrected_checkpoint(
         "target_std": result.report.target_std,
         "label_count": result.report.example_count,
         "parent_checkpoint_sha256": parent_checkpoint_sha256,
+        "parent_checkpoint_path": verified_parent.path,
+        "parent_checkpoint_computed_sha256": verified_parent.sha256,
         "repair_seed": result.report.repair_seed,
         "optimizer_steps": result.report.optimizer_steps,
         "batch_size": result.report.batch_size,
@@ -702,12 +915,20 @@ def save_t085_corrected_checkpoint(
         "training_data_provenance": dict(result.training_data_provenance),
         "metadata": merged_metadata,
     }
-    Path(path).parent.mkdir(parents=True, exist_ok=True)
-    torch.save(payload, str(path))
+    checkpoint_path = Path(path).resolve()
+    try:
+        checkpoint_path.relative_to(T085_ARTIFACT_ROOT.resolve())
+    except ValueError as exc:
+        raise ValueError(
+            "T085 checkpoint outputs must be under the stable ignored T085 root"
+        ) from exc
+    checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(payload, str(checkpoint_path))
 
 
 __all__ = [
     "T085_BATCH_SIZE",
+    "T085_ARTIFACT_ROOT",
     "T085_COLLECTOR_SHA256",
     "T085_FORMAL_ROW_COUNT",
     "T085FormalDataset",
@@ -715,8 +936,10 @@ __all__ = [
     "T085TrainingConfig",
     "T085TrainingReport",
     "T085TrainingResult",
+    "T085VerifiedParentCheckpoint",
     "audit_t085_policy_invariance",
     "build_t085_batch_plan",
+    "load_t085_verified_parent_checkpoint",
     "native_leaf_utility_from_prediction",
     "resolve_t084_formal_dataset",
     "save_t085_corrected_checkpoint",

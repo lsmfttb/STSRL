@@ -79,6 +79,10 @@ PUBLIC_CONTEXT_FEATURE_NAMES = PUBLIC_CONTEXT_MODEL_INPUT_FEATURE_NAMES
 PUBLIC_CONTEXT_FEATURE_SIZE = PUBLIC_CONTEXT_MODEL_INPUT_FEATURE_SIZE
 OUTCOME_TARGET_KIND = "terminal_battle_survival_probability"
 T085_VALUE_TARGET_METADATA_KEY = "t085_value_target"
+T085_ACCEPTED_PARENT_SHA256_BY_REPAIR_SEED = {
+    85001: "c0c38c239047f6be67e983768e53bd680007e9cba117e17c7d226583ed751193",
+    85002: "32dbf18a187e8b6d465bb026d90643e3dd28624066628019c61455fcd8f5573a",
+}
 HP_TARGET_KIND = "terminal_absolute_current_hp"
 STRUCTURED_RESOURCE_TARGET_KIND = "structured_terminal_resource_components_v1"
 SEARCH_GUIDED_FIXED_EVAL_STATUS_NOT_RUN = "not_run"
@@ -1301,10 +1305,20 @@ def load_torch_policy_value_checkpoint(
         )
     if raw.get("model_class") != TORCH_POLICY_VALUE_MODEL_CLASS:
         raise ValueError("unsupported PyTorch policy/value model class")
+    metadata = _mapping(raw.get("metadata"))
+    nested_outcome_target_kind = metadata.get("outcome_target_kind")
+    if nested_outcome_target_kind is not None and nested_outcome_target_kind != raw.get(
+        "outcome_target_kind"
+    ):
+        raise ValueError(
+            "checkpoint metadata.outcome_target_kind disagrees with the "
+            "authoritative top-level outcome_target_kind"
+        )
     _validate_checkpoint_semantic_contract(raw)
     training_data_provenance = _validate_training_data_provenance(
         raw.get("training_data_provenance")
     )
+    _validate_t085_checkpoint_cross_fields(raw, metadata, training_data_provenance)
     try:
         config = TorchPolicyValueTrainingConfig(**_mapping(raw.get("training_config")))
         state_size = _positive_int(raw.get("state_feature_size"), "state_feature_size")
@@ -1351,7 +1365,6 @@ def load_torch_policy_value_checkpoint(
     except RuntimeError as exc:
         raise ValueError("checkpoint model state is incompatible") from exc
     model.eval()
-    metadata = _mapping(raw.get("metadata"))
     metadata.setdefault("outcome_target_kind", raw.get("outcome_target_kind"))
     return LoadedTorchPolicyValueCheckpoint(
         model=model,
@@ -1547,6 +1560,22 @@ def _validate_t085_training_data_provenance(
         raw.get("training_input_path"),
         "training_data_provenance.training_input_path",
     )
+    parent_path = _required_string(
+        raw.get("parent_checkpoint_path"),
+        "training_data_provenance.parent_checkpoint_path",
+    )
+    if not parent_path.startswith("/"):
+        raise ValueError(
+            "T085 training_data_provenance.parent_checkpoint_path must be absolute"
+        )
+    computed_parent_sha256 = _required_sha256(
+        raw.get("parent_checkpoint_computed_sha256"),
+        "training_data_provenance.parent_checkpoint_computed_sha256",
+    )
+    if computed_parent_sha256 != raw.get("parent_checkpoint_sha256"):
+        raise ValueError(
+            "T085 computed parent SHA-256 does not match parent checkpoint identity"
+        )
     _positive_int(
         raw.get("training_input_byte_count"),
         "training_data_provenance.training_input_byte_count",
@@ -1564,7 +1593,14 @@ def _validate_t085_training_data_provenance(
         raw.get("parent_checkpoint_sha256"),
         "training_data_provenance.parent_checkpoint_sha256",
     )
-    _positive_int(raw.get("repair_seed"), "training_data_provenance.repair_seed")
+    repair_seed = _positive_int(
+        raw.get("repair_seed"), "training_data_provenance.repair_seed"
+    )
+    parent_sha256 = raw.get("parent_checkpoint_sha256")
+    if repair_seed not in T085_ACCEPTED_PARENT_SHA256_BY_REPAIR_SEED:
+        raise ValueError("T085 repair_seed is not one of the accepted repair seeds")
+    if parent_sha256 != T085_ACCEPTED_PARENT_SHA256_BY_REPAIR_SEED[repair_seed]:
+        raise ValueError("T085 parent checkpoint SHA-256 is not the accepted parent")
     _require_exact(
         raw.get("optimizer_steps"),
         900,
@@ -1602,7 +1638,123 @@ def _validate_t085_training_data_provenance(
         raw.get("policy_target_source"),
         "training_data_provenance.policy_target_source",
     )
+    parent_guidance = raw.get("parent_guidance_provenance")
+    if not isinstance(parent_guidance, Mapping):
+        raise ValueError(
+            "T085 training_data_provenance.parent_guidance_provenance must be a mapping"
+        )
+    for key in (
+        "trainer_input_artifact_id",
+        "trainer_input_sha256",
+        "target_source_summary",
+        "information_regime_counts",
+        "source_information_regime_counts",
+    ):
+        if key not in parent_guidance:
+            raise ValueError("T085 parent_guidance_provenance is missing " + key)
+    invariance_audit = raw.get("policy_invariance_audit")
+    if not isinstance(invariance_audit, Mapping):
+        raise ValueError("T085 policy_invariance_audit must be a mapping")
+    if invariance_audit.get("valid") is not True:
+        raise ValueError("T085 policy_invariance_audit is not valid")
+    if invariance_audit.get("example_count") != 960:
+        raise ValueError("T085 policy_invariance_audit must cover 960 inputs")
+    if invariance_audit.get("policy_mismatch_count") != 0:
+        raise ValueError("T085 policy_invariance_audit reports policy changes")
+    group_mismatches = invariance_audit.get("parameter_group_mismatch_counts")
+    if not isinstance(group_mismatches, Mapping) or any(
+        group_mismatches.get(group) != 0
+        for group in ("policy", "encoder", "hp", "resource")
+    ):
+        raise ValueError(
+            "T085 policy_invariance_audit lacks policy/encoder/HP/resource proof"
+        )
     return _json_safe_value(dict(raw))
+
+
+def _validate_t085_checkpoint_cross_fields(
+    raw: Mapping[str, Any],
+    metadata: Mapping[str, Any],
+    training_provenance: Mapping[str, Any],
+) -> None:
+    """Keep the duplicated checkpoint envelope fields mutually authoritative."""
+
+    if training_provenance.get("task_id") != "T085":
+        return
+    target = _required_mapping(
+        metadata.get(T085_VALUE_TARGET_METADATA_KEY),
+        f"metadata.{T085_VALUE_TARGET_METADATA_KEY}",
+    )
+    pairs = (
+        (
+            raw.get("outcome_target_kind"),
+            training_provenance.get("target_kind"),
+            "target kind",
+        ),
+        (
+            target.get("parent_checkpoint_sha256"),
+            training_provenance.get("parent_checkpoint_sha256"),
+            "parent checkpoint SHA-256",
+        ),
+        (
+            target.get("parent_checkpoint_path"),
+            training_provenance.get("parent_checkpoint_path"),
+            "parent checkpoint path",
+        ),
+        (
+            target.get("parent_checkpoint_computed_sha256"),
+            training_provenance.get("parent_checkpoint_computed_sha256"),
+            "computed parent checkpoint SHA-256",
+        ),
+        (
+            target.get("repair_seed"),
+            training_provenance.get("repair_seed"),
+            "repair seed",
+        ),
+        (
+            target.get("optimizer_steps"),
+            training_provenance.get("optimizer_steps"),
+            "optimizer steps",
+        ),
+        (target.get("batch_size"), training_provenance.get("batch_size"), "batch size"),
+        (
+            target.get("label_count"),
+            training_provenance.get("training_record_count"),
+            "label count",
+        ),
+    )
+    for left, right, label in pairs:
+        if left != right:
+            raise ValueError(
+                f"T085 checkpoint {label} disagrees across metadata and provenance"
+            )
+    _required_sha256(
+        target.get("parent_checkpoint_computed_sha256"),
+        f"metadata.{T085_VALUE_TARGET_METADATA_KEY}.parent_checkpoint_computed_sha256",
+    )
+    for label, left, right in (
+        (
+            "target_mean",
+            target.get("target_mean"),
+            training_provenance.get("target_mean"),
+        ),
+        ("target_std", target.get("target_std"), training_provenance.get("target_std")),
+    ):
+        if float(left) != float(right):
+            raise ValueError(
+                f"T085 checkpoint {label} disagrees across metadata and provenance"
+            )
+    training_config = _mapping(raw.get("training_config"))
+    if training_config.get("seed") != training_provenance.get("repair_seed"):
+        raise ValueError("T085 checkpoint seed disagrees with repair_seed provenance")
+    training_report = _mapping(raw.get("training_report"))
+    for key in ("example_count", "repair_seed", "optimizer_steps", "batch_size"):
+        if training_report.get(key) != training_provenance.get(
+            "training_record_count" if key == "example_count" else key
+        ):
+            raise ValueError(
+                f"T085 checkpoint training_report.{key} disagrees with provenance"
+            )
 
 
 def _validate_controller_provenance_summary(value: Any) -> None:

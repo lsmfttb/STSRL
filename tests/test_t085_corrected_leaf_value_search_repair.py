@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import copy
+import shutil
+from pathlib import Path
 
 import pytest
 
@@ -11,18 +13,22 @@ from sts_combat_rl.sim.torch_policy_value import (
     load_torch_policy_value_checkpoint,
 )
 from sts_combat_rl.t085_corrected_leaf_value_search_repair import (
+    T085_ARTIFACT_ROOT,
     T085_BATCH_SIZE,
     T085_COLLECTOR_SHA256,
     T085_FORMAL_ROW_COUNT,
     T085_OPTIMIZER_STEPS,
+    T085_PARENT_CHECKPOINT_PATH_BY_SEED,
     T085LeafValueExample,
     T085TrainingConfig,
     T085TrainingReport,
     T085TrainingResult,
     audit_t085_policy_invariance,
     build_t085_batch_plan,
+    load_t085_verified_parent_checkpoint,
     native_leaf_utility_from_prediction,
     save_t085_corrected_checkpoint,
+    train_t085_corrected_value_head,
 )
 
 
@@ -89,7 +95,11 @@ def test_policy_invariance_audit_ignores_only_outcome_head() -> None:
 def test_corrected_checkpoint_round_trips_explicit_native_utility_gate(
     tmp_path,
 ) -> None:
-    model = _model()
+    parent_path = T085_PARENT_CHECKPOINT_PATH_BY_SEED[85001]
+    if not Path(parent_path).is_file():
+        pytest.skip("retained T064 parent checkpoint is not mounted")
+    parent = load_t085_verified_parent_checkpoint(parent_path, repair_seed=85001)
+    model = copy.deepcopy(parent.model)
     report = T085TrainingReport(
         training_ok=True,
         example_count=T085_FORMAL_ROW_COUNT,
@@ -122,6 +132,8 @@ def test_corrected_checkpoint_round_trips_explicit_native_utility_gate(
             "parent_checkpoint_sha256": (
                 "c0c38c239047f6be67e983768e53bd680007e9cba117e17c7d226583ed751193"
             ),
+            "parent_checkpoint_path": parent.path,
+            "parent_checkpoint_computed_sha256": parent.sha256,
             "repair_seed": 85001,
             "optimizer_steps": 900,
             "batch_size": 32,
@@ -130,28 +142,144 @@ def test_corrected_checkpoint_round_trips_explicit_native_utility_gate(
             "batch_plan_sha256": "a" * 64,
             "policy_target_kind": "behavior_chosen_action_one_hot",
             "policy_target_source": "frozen_parent_checkpoint_policy_path",
+            "parent_guidance_provenance": dict(parent.training_data_provenance),
+            "policy_invariance_audit": {
+                "schema_id": "t085-policy-invariance-audit-v1",
+                "example_count": T085_FORMAL_ROW_COUNT,
+                "policy_mismatch_count": 0,
+                "parameter_group_mismatch_counts": {
+                    "policy": 0,
+                    "encoder": 0,
+                    "hp": 0,
+                    "resource": 0,
+                },
+                "valid": True,
+            },
         },
         policy_target_kind="behavior_chosen_action_one_hot",
         policy_target_source="frozen_parent_checkpoint_policy_path",
+        parent_model=copy.deepcopy(parent.model),
+        parent_checkpoint_path=parent.path,
+        invariance_audit={
+            "schema_id": "t085-policy-invariance-audit-v1",
+            "example_count": T085_FORMAL_ROW_COUNT,
+            "policy_mismatch_count": 0,
+            "parameter_group_mismatch_counts": {
+                "policy": 0,
+                "encoder": 0,
+                "hp": 0,
+                "resource": 0,
+            },
+            "valid": True,
+        },
     )
-    path = tmp_path / "corrected.pt"
-    save_t085_corrected_checkpoint(
-        result,
-        path,
-        parent_checkpoint_sha256=(
-            "c0c38c239047f6be67e983768e53bd680007e9cba117e17c7d226583ed751193"
-        ),
+    path = T085_ARTIFACT_ROOT / f".pytest-t085-{tmp_path.name}.pt"
+    try:
+        save_t085_corrected_checkpoint(
+            result,
+            path,
+            parent_checkpoint_sha256=(
+                "c0c38c239047f6be67e983768e53bd680007e9cba117e17c7d226583ed751193"
+            ),
+        )
+        loaded = load_torch_policy_value_checkpoint(str(path))
+        assert loaded.metadata["outcome_target_kind"] == (
+            "search_v2_leaf_continuation_native_utility_v1"
+        )
+        assert loaded.metadata["t085_value_target"]["target_std"] == 4.0
+        assert loaded.training_data_provenance["task_id"] == "T085"
+
+        raw = torch.load(path, map_location="cpu", weights_only=True)
+        raw["metadata"]["t085_value_target"]["de_normalization"] = "sigmoid"
+        bad = tmp_path / "bad.pt"
+        torch.save(raw, bad)
+        with pytest.raises(ValueError, match="de_normalization"):
+            load_torch_policy_value_checkpoint(str(bad))
+
+        raw = torch.load(path, map_location="cpu", weights_only=True)
+        raw["metadata"]["t085_value_target"]["target_mean"] = 13.0
+        bad_cross = tmp_path / "bad-cross-fields.pt"
+        torch.save(raw, bad_cross)
+        with pytest.raises(ValueError, match="target_mean disagrees"):
+            load_torch_policy_value_checkpoint(str(bad_cross))
+    finally:
+        path.unlink(missing_ok=True)
+
+
+def test_parent_identity_is_computed_from_exact_qualified_path(tmp_path) -> None:
+    path = T085_PARENT_CHECKPOINT_PATH_BY_SEED[85001]
+    if not Path(path).is_file():
+        pytest.skip("retained T064 parent checkpoint is not mounted")
+    parent = load_t085_verified_parent_checkpoint(path, repair_seed=85001)
+    assert parent.sha256 == (
+        "c0c38c239047f6be67e983768e53bd680007e9cba117e17c7d226583ed751193"
     )
-    loaded = load_torch_policy_value_checkpoint(str(path))
-    assert loaded.metadata["outcome_target_kind"] == (
+    alternate = tmp_path / "static_mixture_v1-64001-copy.pt"
+    shutil.copyfile(path, alternate)
+    with pytest.raises(ValueError, match="exact qualified T064"):
+        load_t085_verified_parent_checkpoint(alternate, repair_seed=85001)
+
+
+def test_training_requires_bound_parent_and_runs_invariance_audit() -> None:
+    path = T085_PARENT_CHECKPOINT_PATH_BY_SEED[85001]
+    if not Path(path).is_file():
+        pytest.skip("retained T064 parent checkpoint is not mounted")
+    parent = load_t085_verified_parent_checkpoint(path, repair_seed=85001)
+    examples = [
+        T085LeafValueExample(
+            state_features=(
+                float(index),
+                *(0.0 for _ in range(parent.model.state_feature_size - 1)),
+            ),
+            legal_action_features=(
+                tuple(0.0 for _ in range(parent.model.action_feature_size)),
+                tuple(1.0 for _ in range(parent.model.action_feature_size)),
+            ),
+            eligible_action_indices=(0, 1),
+            native_utility=float(index % 17),
+            exact_leaf_identity=f"training-leaf-{index}",
+            sampling_arm="unguided_search_v2",
+            act=1,
+        )
+        for index in range(960)
+    ]
+    result = train_t085_corrected_value_head(
+        parent.model,
+        examples,
+        repair_seed=85001,
+        parent_checkpoint_sha256=parent.sha256,
+        parent_checkpoint_path=parent.path,
+        training_input_sha256=T085_COLLECTOR_SHA256,
+        training_input_path="retained/t084-collector.json",
+        training_input_byte_count=123,
+        parent_guidance_provenance=parent.training_data_provenance,
+    )
+    assert result.invariance_audit["valid"] is True
+    assert result.invariance_audit["example_count"] == T085_FORMAL_ROW_COUNT
+    assert (
+        result.training_data_provenance["parent_checkpoint_computed_sha256"]
+        == parent.sha256
+    )
+
+
+def test_loader_fails_closed_on_nested_stale_outcome_target_kind(tmp_path) -> None:
+    path = T085_PARENT_CHECKPOINT_PATH_BY_SEED[85001]
+    if not Path(path).is_file():
+        pytest.skip("retained T064 parent checkpoint is not mounted")
+    raw = torch.load(path, map_location="cpu", weights_only=True)
+    raw["outcome_target_kind"] = "terminal_battle_survival_probability"
+    raw["metadata"]["outcome_target_kind"] = (
         "search_v2_leaf_continuation_native_utility_v1"
     )
-    assert loaded.metadata["t085_value_target"]["target_std"] == 4.0
-    assert loaded.training_data_provenance["task_id"] == "T085"
+    stale = tmp_path / "stale_nested_corrected.pt"
+    torch.save(raw, stale)
+    with pytest.raises(ValueError, match="authoritative top-level"):
+        load_torch_policy_value_checkpoint(str(stale))
 
     raw = torch.load(path, map_location="cpu", weights_only=True)
-    raw["metadata"]["t085_value_target"]["de_normalization"] = "sigmoid"
-    bad = tmp_path / "bad.pt"
-    torch.save(raw, bad)
-    with pytest.raises(ValueError, match="de_normalization"):
-        load_torch_policy_value_checkpoint(str(bad))
+    raw["outcome_target_kind"] = "search_v2_leaf_continuation_native_utility_v1"
+    raw["metadata"]["outcome_target_kind"] = "terminal_battle_survival_probability"
+    stale = tmp_path / "stale_nested_survival.pt"
+    torch.save(raw, stale)
+    with pytest.raises(ValueError, match="authoritative top-level"):
+        load_torch_policy_value_checkpoint(str(stale))
