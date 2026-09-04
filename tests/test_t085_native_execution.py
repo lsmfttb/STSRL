@@ -10,6 +10,7 @@ import sts_combat_rl.commands.t085_native_execution as t085_execution
 from sts_combat_rl.commands.cli_parser import build_parser
 from sts_combat_rl.commands.t085_native_execution import (
     T085NativeExecutionError,
+    T085NativeShardPlan,
     T085NativeTerminalSearchAdapter,
     T085UnguidedBattleSearchV2Controller,
     build_t085_native_arms,
@@ -552,12 +553,24 @@ def test_source_resolver_requires_explicit_schema_and_accepts_full_source_pool(
     monkeypatch.setattr(
         t085_execution,
         "load_natural_battle_start_pool_jsonl",
-        lambda stream: SimpleNamespace(records=[full]),
+        lambda stream: SimpleNamespace(
+            records=[full],
+            source_run_count=1,
+            source_controller_provenance={"kind": "natural"},
+            source_run_summaries=[
+                SimpleNamespace(
+                    source_run_id=full.source_run_id, source_seed=full.source_seed
+                )
+            ],
+        ),
     )
     resolved = resolve_t085_canonical_records(
         artifact,
         expected_sha256=t085_execution.sha256_file(artifact),
         artifact_kind="natural_pool",
+        expected_source_run_count=1,
+        expected_source_run_identity_inventory=(full.source_run_id,),
+        expected_source_run_seed_inventory=(full.source_seed,),
     )
     assert resolved[full.source_checkpoint_id] is full
     with pytest.raises(T085NativeExecutionError, match="unsupported T085 source"):
@@ -565,6 +578,15 @@ def test_source_resolver_requires_explicit_schema_and_accepts_full_source_pool(
             artifact,
             expected_sha256=t085_execution.sha256_file(artifact),
             artifact_kind="not-a-schema",  # type: ignore[arg-type]
+        )
+    with pytest.raises(T085NativeExecutionError, match="count does not match"):
+        resolve_t085_canonical_records(
+            artifact,
+            expected_sha256=t085_execution.sha256_file(artifact),
+            artifact_kind="natural_pool",
+            expected_source_run_count=2,
+            expected_source_run_identity_inventory=(full.source_run_id,),
+            expected_source_run_seed_inventory=(full.source_seed,),
         )
 
 
@@ -584,6 +606,18 @@ def test_restore_base_then_prime_reset_does_not_search_or_reset() -> None:
     assert proxy.reset(seed=999) is restored
     assert events == ["restore:canonical"]
     assert proxy.legal_actions(restored) == base.actions
+
+
+def test_t085_shard_plan_requires_explicit_sixteen_worker_contract() -> None:
+    with pytest.raises(T085NativeExecutionError, match="exactly 16 shards"):
+        T085NativeShardPlan(shard_index=0, shard_count=1, worker_count=1)
+    with pytest.raises(T085NativeExecutionError, match="worker_count=16"):
+        T085NativeShardPlan(shard_index=0, shard_count=16, worker_count=1)
+    plan = T085NativeShardPlan(shard_index=3, shard_count=16, worker_count=16)
+    manifest = plan.to_dict(selection_identity_sha256="a" * 64)
+    assert manifest["shard_index"] == 3
+    assert manifest["worker_count"] == 16
+    assert manifest["complete"] is True
 
 
 def test_scorer_callbacks_bind_context_and_keep_old_vs_corrected_targets(
@@ -662,6 +696,18 @@ def test_from_paths_fails_closed_on_checkpoint_sha_before_execution(
     monkeypatch.setattr(
         t085_execution, "resolve_t085_canonical_records", lambda *a, **k: {}
     )
+    monkeypatch.setattr(t085_execution, "_source_map_expectations", lambda *a, **k: {})
+    monkeypatch.setattr(
+        t085_execution, "_validate_t085_a_map_binding", lambda *a, **k: None
+    )
+    monkeypatch.setattr(
+        t085_execution,
+        "_load_t085_training_manifest",
+        lambda *a, **k: {
+            85001: {"path": str(files[4]), "sha256": "bad"},
+            85002: {"path": str(files[6]), "sha256": "bad"},
+        },
+    )
     import sts_combat_rl.commands.model_guided_oracle_search as scorer_commands
 
     monkeypatch.setattr(
@@ -669,7 +715,7 @@ def test_from_paths_fails_closed_on_checkpoint_sha_before_execution(
         "build_torch_guidance_scorer_from_checkpoint",
         lambda path: SimpleNamespace(checkpoint_provenance=object()),
     )
-    with pytest.raises(T085NativeExecutionError, match="checkpoint SHA-256 mismatch"):
+    with pytest.raises(T085NativeExecutionError, match="accepted T064 parent identity"):
         t085_execution.run_t085_native_paired_evaluation_from_paths(
             adapter_factory=lambda: object(),
             selection_path=files[0],
@@ -688,6 +734,11 @@ def test_from_paths_fails_closed_on_checkpoint_sha_before_execution(
             corrected_checkpoint_85001_sha256="bad",
             old_checkpoint_64002_sha256="bad",
             corrected_checkpoint_85002_sha256="bad",
+            training_manifest_path=files[0],
+            training_manifest_sha256="manifest",
+            shard_index=0,
+            shard_count=16,
+            worker_count=16,
             selection_output_path=files[0],
             report_output_path=files[1],
             outcomes_output_path=files[2],
@@ -765,3 +816,28 @@ def test_t085_paired_cli_requires_explicit_full_map_inputs() -> None:
     assert args.lightspeed_t085_native_paired_evaluation.name == "selection.json"
     assert args.t085_b_map is None
     assert args.t085_c_map is None
+    assert args.t085_shard_index is None
+    assert args.t085_worker_count is None
+
+
+def test_t085_paired_cli_parses_explicit_shard_and_training_manifest_inputs() -> None:
+    args = build_parser().parse_args(
+        [
+            "--lightspeed-t085-native-paired-evaluation",
+            "selection.json",
+            "--t085-training-manifest",
+            "training.json",
+            "--t085-training-manifest-sha256",
+            "m" * 64,
+            "--t085-shard-index",
+            "7",
+            "--t085-shard-count",
+            "16",
+            "--t085-worker-count",
+            "16",
+        ]
+    )
+    assert args.t085_training_manifest.name == "training.json"
+    assert args.t085_shard_index == 7
+    assert args.t085_shard_count == 16
+    assert args.t085_worker_count == 16

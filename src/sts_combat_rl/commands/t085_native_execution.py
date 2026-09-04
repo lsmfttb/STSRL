@@ -8,11 +8,12 @@ search root edge proves the transition terminal.  The retained utility is the
 native root-edge mean verbatim; this module never reimplements
 ``evaluateEndState`` or computes a game-mechanics formula in Python.
 
-The paired runner owns restore/controller stepping.  The adapter exposes the
-repository's accepted restore helper through ``restore_t085_battle_start_record``;
-the runner performs search before every in-battle ``step`` and derives survival
-from the simulator's authoritative terminal transition.  Caller-supplied
-survival, utility, cohort, arm, budget, or provenance fields are not accepted.
+The paired runner owns restore/controller stepping.  The canonical restore
+helper is called on the unwrapped simulator adapter and its verified snapshot
+is then primed into the terminal-label proxy; the runner performs search before
+every in-battle ``step`` and derives survival from the simulator's authoritative
+terminal transition.  Caller-supplied survival, utility, cohort, arm, budget,
+or provenance fields are not accepted.
 """
 
 from __future__ import annotations
@@ -74,6 +75,7 @@ from sts_combat_rl.sim.search_guidance_inference import (
 )
 from sts_combat_rl.sim.torch_policy_value import OUTCOME_TARGET_KIND
 from sts_combat_rl.t085_corrected_leaf_value_search_evaluation import (
+    T085_INPUT_ARTIFACT_IDENTITIES,
     T085_NATIVE_IDENTITY,
     T085_SEARCH_400_ARMS,
     T085_T052_COHORT_PATH,
@@ -90,6 +92,7 @@ from sts_combat_rl.t085_corrected_leaf_value_search_evaluation import (
     validate_t085_evaluation_selection_evidence,
     write_t085_json_artifact,
 )
+from sts_combat_rl.t085_corrected_leaf_value_search_repair import T085_ARTIFACT_ROOT
 
 T085_NATIVE_V2_API = "StepSimulator.battle_search_v2.v1"
 T085_NATIVE_V2_PATCH = "sts_lightspeed_battle_search_v2_tree_internal_v1"
@@ -97,8 +100,10 @@ T085_NATIVE_TERMINAL_LABEL_SCHEMA_ID = "t085-native-terminal-root-label-v1"
 T085_NATIVE_SELECTION_SCHEMA_ID = "t085-native-selection-artifact-v1"
 T085_NATIVE_OUTCOMES_SCHEMA_ID = "t085-native-outcome-records-v1"
 T085_NATIVE_EXECUTION_VERSION = "t085-native-execution-v1"
+T085_NATIVE_SHARD_SCHEMA_ID = "t085-native-shard-manifest-v1"
 T085_NATIVE_SEARCH_BACKENDS = ("battle_search", "battle_search_v2")
 T085NativeSearchBackend = Literal["battle_search", "battle_search_v2"]
+T085NativeSourceArtifactKind = Literal["fixed_cohort", "natural_pool", "assisted_pool"]
 
 _TERMINAL_OUTCOMES = frozenset({"PLAYER_VICTORY", "PLAYER_LOSS"})
 
@@ -117,6 +122,50 @@ T085_SECONDARY_ARMS = (
 )
 
 
+@dataclass(frozen=True)
+class T085NativeShardPlan:
+    """Explicit 16-worker partition contract for restored paired evaluation."""
+
+    shard_index: int
+    shard_count: int
+    worker_count: int
+
+    def __post_init__(self) -> None:
+        for value, label in (
+            (self.shard_index, "shard_index"),
+            (self.shard_count, "shard_count"),
+            (self.worker_count, "worker_count"),
+        ):
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise T085NativeExecutionError(f"T085 {label} must be an integer")
+        if self.shard_count != 16:
+            raise T085NativeExecutionError(
+                "T085 native paired evaluation requires exactly 16 shards"
+            )
+        if not 0 <= self.shard_index < self.shard_count:
+            raise T085NativeExecutionError(
+                "T085 shard_index must be in [0, shard_count)"
+            )
+        if self.worker_count != 16:
+            raise T085NativeExecutionError(
+                "T085 native paired evaluation requires worker_count=16"
+            )
+
+    def to_dict(self, *, selection_identity_sha256: str) -> dict[str, object]:
+        return {
+            "schema_id": T085_NATIVE_SHARD_SCHEMA_ID,
+            "task_id": "T085",
+            "shard_index": self.shard_index,
+            "shard_count": self.shard_count,
+            "worker_count": self.worker_count,
+            "effective_worker_count": self.worker_count,
+            "partition_scheme": "sha256(selection_identity)[:8] mod shard_count",
+            "merge_key": "cohort/record_identity/arm",
+            "selection_identity_sha256": selection_identity_sha256,
+            "complete": True,
+        }
+
+
 def resolve_t085_canonical_records(
     path: str | Path = T085_T052_COHORT_PATH,
     *,
@@ -124,6 +173,10 @@ def resolve_t085_canonical_records(
     artifact_kind: Literal[
         "fixed_cohort", "natural_pool", "assisted_pool"
     ] = "fixed_cohort",
+    expected_source_run_count: int | None = None,
+    expected_source_run_identity_inventory: Sequence[str] | None = None,
+    expected_source_run_seed_inventory: Sequence[int] | None = None,
+    expected_assistance_level: str | None = None,
 ) -> dict[str, BattleStartCheckpointRecord]:
     """Load one explicitly typed, verified full-record source artifact.
 
@@ -140,14 +193,111 @@ def resolve_t085_canonical_records(
         if artifact_kind == "fixed_cohort":
             loaded = load_fixed_cohort_jsonl(stream)
             full_records: Iterable[object] = loaded.records
+            source_pool = None
         elif artifact_kind == "natural_pool":
-            full_records = load_natural_battle_start_pool_jsonl(stream).records
+            source_pool = load_natural_battle_start_pool_jsonl(stream)
+            full_records = source_pool.records
         elif artifact_kind == "assisted_pool":
-            full_records = load_assisted_source_pool_jsonl(stream).records
+            loaded_assisted = load_assisted_source_pool_jsonl(stream)
+            source_pool = loaded_assisted.pool
+            full_records = loaded_assisted.records
+            if (
+                expected_assistance_level is not None
+                and loaded_assisted.assistance_level != expected_assistance_level
+            ):
+                raise T085NativeExecutionError(
+                    "T085 assisted source-pool assistance level does not match "
+                    "selection evidence"
+                )
         else:  # pragma: no cover - Literal protects callers, fail closed at runtime
             raise T085NativeExecutionError(
                 f"unsupported T085 source artifact kind {artifact_kind!r}"
             )
+    if source_pool is not None:
+        source_run_count = getattr(source_pool, "source_run_count", None)
+        source_controller_provenance = getattr(
+            source_pool, "source_controller_provenance", None
+        )
+        source_run_summaries = getattr(source_pool, "source_run_summaries", None)
+        if not isinstance(source_run_count, int) or source_run_count <= 0:
+            raise T085NativeExecutionError(
+                "T085 source pool lacks a positive source_run_count"
+            )
+        if (
+            not isinstance(source_controller_provenance, Mapping)
+            or not source_controller_provenance
+        ):
+            raise T085NativeExecutionError(
+                "T085 source pool lacks controller provenance"
+            )
+        if not isinstance(source_run_summaries, Sequence) or isinstance(
+            source_run_summaries, (str, bytes)
+        ):
+            raise T085NativeExecutionError(
+                "T085 source pool lacks current source-run summaries"
+            )
+        summary_ids = [
+            getattr(summary, "source_run_id", None) for summary in source_run_summaries
+        ]
+        summary_seeds = [
+            getattr(summary, "source_seed", None) for summary in source_run_summaries
+        ]
+        if any(not isinstance(value, str) or not value for value in summary_ids):
+            raise T085NativeExecutionError(
+                "T085 source pool source-run summaries have invalid identities"
+            )
+        if any(
+            isinstance(value, bool) or not isinstance(value, int)
+            for value in summary_seeds
+        ):
+            raise T085NativeExecutionError(
+                "T085 source pool source-run summaries have invalid seeds"
+            )
+        if (
+            len(summary_ids) != source_run_count
+            or len(set(summary_ids)) != source_run_count
+        ):
+            raise T085NativeExecutionError(
+                "T085 source pool source-run summary count/uniqueness is invalid"
+            )
+        if (
+            expected_source_run_count is not None
+            and source_run_count != expected_source_run_count
+        ):
+            raise T085NativeExecutionError(
+                "T085 source pool count does not match selection evidence"
+            )
+        if expected_source_run_identity_inventory is not None and summary_ids != list(
+            expected_source_run_identity_inventory
+        ):
+            raise T085NativeExecutionError(
+                "T085 source pool source-run identities do not match selection evidence"
+            )
+        if expected_source_run_seed_inventory is not None and summary_seeds != list(
+            expected_source_run_seed_inventory
+        ):
+            raise T085NativeExecutionError(
+                "T085 source pool source-run seeds do not match selection evidence"
+            )
+        expected_distribution = (
+            "assisted_run" if artifact_kind == "assisted_pool" else "natural_run"
+        )
+        for index, record in enumerate(full_records):
+            if not isinstance(record, BattleStartCheckpointRecord):
+                raise T085NativeExecutionError(
+                    f"T085 {artifact_kind} record {index} is not a full restore record"
+                )
+            if record.distribution_kind != expected_distribution:
+                raise T085NativeExecutionError(
+                    f"T085 source pool record {index} has wrong distribution kind"
+                )
+            if (
+                not record.source_controller_provenance
+                or not record.source_battle_controller_provenance
+            ):
+                raise T085NativeExecutionError(
+                    f"T085 source pool record {index} lacks controller provenance"
+                )
     records: dict[str, BattleStartCheckpointRecord] = {}
     for index, full in enumerate(full_records):
         if isinstance(full, BattleStartCheckpointRecord):
@@ -560,6 +710,165 @@ def build_t085_native_arms(
     return arms
 
 
+def _accepted_t064_parent_sha(repair_seed: int) -> str:
+    key = f"t064_parent_{repair_seed}"
+    reference = T085_INPUT_ARTIFACT_IDENTITIES.get(key)
+    if not isinstance(reference, Mapping) or not isinstance(
+        reference.get("sha256"), str
+    ):
+        raise T085NativeExecutionError(
+            f"T085 accepted T064 parent identity is missing for {repair_seed}"
+        )
+    return str(reference["sha256"])
+
+
+def _load_t085_training_manifest(
+    path: str | Path,
+    *,
+    expected_sha256: str,
+) -> dict[int, dict[str, object]]:
+    """Load the repository-owned training manifest and its accepted checkpoints."""
+
+    resolved = Path(path).resolve(strict=True)
+    expected_path = (
+        T085_ARTIFACT_ROOT.resolve() / "training" / "t085-training-manifest.json"
+    )
+    if resolved != expected_path:
+        raise T085NativeExecutionError(
+            "T085 training manifest must be the stable repository-owned manifest"
+        )
+    if sha256_file(resolved) != expected_sha256:
+        raise T085NativeExecutionError("T085 training manifest SHA-256 mismatch")
+    try:
+        payload = json.loads(resolved.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise T085NativeExecutionError(
+            "T085 training manifest is unavailable or invalid"
+        ) from exc
+    if not isinstance(payload, Mapping):
+        raise T085NativeExecutionError("T085 training manifest is not an object")
+    if (
+        payload.get("schema_id") != "t085-corrected-value-training-manifest-v1"
+        or payload.get("task_id") != "T085"
+        or payload.get("training_completed") is not True
+    ):
+        raise T085NativeExecutionError(
+            "T085 training manifest schema/completion identity is invalid"
+        )
+    if dict(payload.get("native_identity", {})) != T085_NATIVE_IDENTITY:
+        raise T085NativeExecutionError(
+            "T085 training manifest has the wrong native identity"
+        )
+    repairs = payload.get("repairs")
+    if not isinstance(repairs, Sequence) or isinstance(repairs, (str, bytes)):
+        raise T085NativeExecutionError("T085 training manifest repairs are missing")
+    by_seed: dict[int, dict[str, object]] = {}
+    for raw_repair in repairs:
+        if not isinstance(raw_repair, Mapping):
+            raise T085NativeExecutionError("T085 training manifest repair is malformed")
+        seed = raw_repair.get("repair_seed")
+        if seed not in (85001, 85002) or seed in by_seed:
+            raise T085NativeExecutionError(
+                "T085 training manifest must contain one repair for each accepted seed"
+            )
+        checkpoint = raw_repair.get("checkpoint")
+        parent = raw_repair.get("parent_checkpoint")
+        if not isinstance(checkpoint, Mapping) or not isinstance(parent, Mapping):
+            raise T085NativeExecutionError(
+                "T085 training manifest repair lacks checkpoint/parent references"
+            )
+        if checkpoint.get("schema_id") != "torch-policy-value-checkpoint-v1":
+            raise T085NativeExecutionError(
+                "T085 corrected checkpoint reference has the wrong schema"
+            )
+        if parent.get("sha256") != _accepted_t064_parent_sha(int(seed)):
+            raise T085NativeExecutionError(
+                "T085 corrected checkpoint parent is not the accepted T064 identity"
+            )
+        expected_parent = T085_INPUT_ARTIFACT_IDENTITIES[f"t064_parent_{seed}"]
+        if parent.get("path") != expected_parent.get("path"):
+            raise T085NativeExecutionError(
+                "T085 corrected checkpoint parent path is not the accepted T064 path"
+            )
+        checkpoint_path = checkpoint.get("path")
+        checkpoint_sha = checkpoint.get("sha256")
+        if (
+            not isinstance(checkpoint_path, str)
+            or not isinstance(checkpoint_sha, str)
+            or len(checkpoint_sha) != 64
+        ):
+            raise T085NativeExecutionError(
+                "T085 corrected checkpoint reference lacks exact path/SHA"
+            )
+        try:
+            Path(checkpoint_path).resolve().relative_to(T085_ARTIFACT_ROOT.resolve())
+        except ValueError as exc:
+            raise T085NativeExecutionError(
+                "T085 corrected checkpoint reference is outside the stable T085 root"
+            ) from exc
+        by_seed[int(seed)] = dict(checkpoint)
+    if set(by_seed) != {85001, 85002}:
+        raise T085NativeExecutionError(
+            "T085 training manifest does not cover both corrected checkpoints"
+        )
+    return by_seed
+
+
+def _source_map_expectations(
+    plan: T085NativeEvaluationPlan,
+    cohort: Literal["B", "C"],
+) -> dict[str, object]:
+    evidence = plan.selection_evidence.get(cohort)
+    if not isinstance(evidence, Mapping):
+        raise T085NativeExecutionError(
+            f"T085 selection evidence {cohort} is missing source inventory"
+        )
+    source_count = evidence.get("source_run_count")
+    source_ids = evidence.get("source_run_identity_inventory")
+    source_seeds = evidence.get("source_run_seed_inventory")
+    if (
+        not isinstance(source_count, int)
+        or not isinstance(source_ids, Sequence)
+        or isinstance(source_ids, (str, bytes))
+        or not isinstance(source_seeds, Sequence)
+        or isinstance(source_seeds, (str, bytes))
+    ):
+        raise T085NativeExecutionError(
+            f"T085 selection evidence {cohort} lacks complete source inventory"
+        )
+    return {
+        "expected_source_run_count": source_count,
+        "expected_source_run_identity_inventory": tuple(source_ids),
+        "expected_source_run_seed_inventory": tuple(source_seeds),
+        "expected_assistance_level": ("assist_hp75_potion" if cohort == "B" else None),
+    }
+
+
+def _validate_t085_a_map_binding(
+    path: str | Path,
+    digest: str,
+    plan: T085NativeEvaluationPlan,
+) -> None:
+    if digest != T085_T052_COHORT_SHA256:
+        raise T085NativeExecutionError(
+            "T085 A map must use the accepted T052 fixed-cohort SHA-256"
+        )
+    evidence = plan.selection_evidence["A"]
+    artifact = evidence.get("artifact") if isinstance(evidence, Mapping) else None
+    if not isinstance(artifact, Mapping):
+        raise T085NativeExecutionError(
+            "T085 A selection evidence lacks artifact binding"
+        )
+    if (
+        artifact.get("sha256") != digest
+        or Path(str(artifact.get("path"))).resolve() != Path(path).resolve()
+        or artifact.get("schema_id") != "fixed-cohort-v3-jsonl"
+    ):
+        raise T085NativeExecutionError(
+            "T085 A map is not the exact fixed-cohort artifact in selection evidence"
+        )
+
+
 def run_t085_native_paired_evaluation_from_paths(
     *,
     adapter_factory: Callable[[], object],
@@ -579,6 +888,11 @@ def run_t085_native_paired_evaluation_from_paths(
     corrected_checkpoint_85001_sha256: str,
     old_checkpoint_64002_sha256: str,
     corrected_checkpoint_85002_sha256: str,
+    training_manifest_path: str | Path,
+    training_manifest_sha256: str,
+    shard_index: int,
+    shard_count: int,
+    worker_count: int,
     b_artifact_kind: Literal["assisted_pool", "fixed_cohort"] = "assisted_pool",
     c_artifact_kind: Literal["natural_pool", "fixed_cohort"] = "natural_pool",
     selection_output_path: str | Path,
@@ -590,15 +904,31 @@ def run_t085_native_paired_evaluation_from_paths(
         selection_path, expected_sha256=selection_sha256
     )
     maps = {
-        "A": resolve_t085_canonical_records(a_full_map_path, expected_sha256=a_sha256),
+        "A": resolve_t085_canonical_records(
+            a_full_map_path,
+            expected_sha256=a_sha256,
+            artifact_kind="fixed_cohort",
+        ),
         "B": resolve_t085_canonical_records(
-            b_full_map_path, expected_sha256=b_sha256, artifact_kind=b_artifact_kind
+            b_full_map_path,
+            expected_sha256=b_sha256,
+            artifact_kind=b_artifact_kind,
+            **_source_map_expectations(plan, "B"),
         ),
         "C": resolve_t085_canonical_records(
-            c_full_map_path, expected_sha256=c_sha256, artifact_kind=c_artifact_kind
+            c_full_map_path,
+            expected_sha256=c_sha256,
+            artifact_kind=c_artifact_kind,
+            **_source_map_expectations(plan, "C"),
         ),
     }
     maps["B@400"] = maps["B"]
+    _validate_t085_a_map_binding(a_full_map_path, a_sha256, plan)
+    shard = T085NativeShardPlan(shard_index, shard_count, worker_count)
+    training_references = _load_t085_training_manifest(
+        training_manifest_path,
+        expected_sha256=training_manifest_sha256,
+    )
     from sts_combat_rl.commands.model_guided_oracle_search import (
         build_torch_guidance_scorer_from_checkpoint,
     )
@@ -611,30 +941,69 @@ def run_t085_native_paired_evaluation_from_paths(
     # Validate each loaded scorer independently after loading.  The explicit
     # SHA arguments bind the path bytes; scorer provenance binds schema and
     # target semantics, so an arbitrary checkpoint cannot masquerade as an arm.
-    for path, expected_sha256, scorer, corrected, label in (
-        (old_checkpoint_64001, old_checkpoint_64001_sha256, old1, False, "old 64001"),
+    for path, expected_sha256, scorer, corrected, label, seed in (
+        (
+            old_checkpoint_64001,
+            old_checkpoint_64001_sha256,
+            old1,
+            False,
+            "old 64001",
+            85001,
+        ),
         (
             corrected_checkpoint_85001,
             corrected_checkpoint_85001_sha256,
             new1,
             True,
             "corrected 85001",
+            85001,
         ),
-        (old_checkpoint_64002, old_checkpoint_64002_sha256, old2, False, "old 64002"),
+        (
+            old_checkpoint_64002,
+            old_checkpoint_64002_sha256,
+            old2,
+            False,
+            "old 64002",
+            85002,
+        ),
         (
             corrected_checkpoint_85002,
             corrected_checkpoint_85002_sha256,
             new2,
             True,
             "corrected 85002",
+            85002,
         ),
     ):
+        if not corrected:
+            accepted = _accepted_t064_parent_sha(seed)
+            if expected_sha256 != accepted:
+                raise T085NativeExecutionError(
+                    f"T085 {label} SHA-256 is not the accepted T064 parent identity"
+                )
+        else:
+            manifest_reference = training_references[seed]
+            if manifest_reference["sha256"] != expected_sha256:
+                raise T085NativeExecutionError(
+                    f"T085 {label} SHA-256 is not the identity in the validated training manifest"
+                )
+            if Path(manifest_reference["path"]).resolve() != Path(path).resolve():
+                raise T085NativeExecutionError(
+                    f"T085 {label} path is not the identity in the validated training manifest"
+                )
         if sha256_file(path) != expected_sha256:
             raise T085NativeExecutionError(f"T085 {label} checkpoint SHA-256 mismatch")
         provenance = search_guidance_scorer_checkpoint_provenance(scorer, label=label)
         if provenance.checkpoint_schema_id != "torch-policy-value-checkpoint-v1":
             raise T085NativeExecutionError(
                 f"T085 {label} checkpoint schema is unsupported"
+            )
+        expected_artifact_id = (
+            f"torch-policy-value-checkpoint-v1-sha256:{expected_sha256}"
+        )
+        if provenance.checkpoint_artifact_id != expected_artifact_id:
+            raise T085NativeExecutionError(
+                f"T085 {label} scorer provenance is not bound to the checked bytes"
             )
         expected_target = (
             SEARCH_V2_LEAF_NATIVE_UTILITY_TARGET_KIND
@@ -686,6 +1055,9 @@ def run_t085_native_paired_evaluation_from_paths(
         report_output_path=report_output_path,
         outcomes_output_path=outcomes_output_path,
         search_backend="battle_search_v2",
+        shard_index=shard.shard_index,
+        shard_count=shard.shard_count,
+        worker_count=shard.worker_count,
     )
 
 
@@ -1677,6 +2049,9 @@ def run_t085_native_paired_evaluation(
     report_output_path: str | Path,
     outcomes_output_path: str | Path,
     search_backend: T085NativeSearchBackend = "battle_search",
+    shard_index: int,
+    shard_count: int,
+    worker_count: int,
 ) -> dict[str, object]:
     """Run T085 using a repository-owned restore/controller battle loop.
 
@@ -1695,6 +2070,7 @@ def run_t085_native_paired_evaluation(
             f"unknown T085 native search backend {search_backend!r}"
         )
     native_identity = _validate_t085_native_source_manifest(search_backend)
+    shard = T085NativeShardPlan(shard_index, shard_count, worker_count)
     if canonical_records_by_cohort is None:
         canonical_records_by_cohort = {
             "A": resolve_t085_canonical_records(canonical_records_path)
@@ -1741,6 +2117,17 @@ def run_t085_native_paired_evaluation(
     selection_reference = write_t085_native_selection_artifact(
         plan,
         selection_output_path,
+    )
+    shard_manifest = shard.to_dict(
+        selection_identity_sha256=sha256(
+            json.dumps(
+                {
+                    cohort: [record.selection_identity for record in records]
+                    for cohort, records in plan.cohorts.items()
+                },
+                sort_keys=True,
+            ).encode("utf-8")
+        ).hexdigest()
     )
     retained_rows: list[dict[str, object]] = []
     retained_labels: list[dict[str, object]] = []
@@ -1856,6 +2243,7 @@ def run_t085_native_paired_evaluation(
                 payload["structured_battle_resource_outcome"] = dict(resource_outcome)
         row = T085OutcomeRecord.from_mapping(payload)
         row_payload = asdict(row)
+        row_payload["shard"] = shard_manifest
         row_payload["native_terminal_utility_provenance"] = label.to_dict()
         retained_rows.append(row_payload)
         retained_labels.append(label.to_dict())
@@ -1865,10 +2253,17 @@ def run_t085_native_paired_evaluation(
         plan.cohorts,
         evaluate_record=evaluate_record,
         selection_evidence=plan.selection_evidence,
+        shard_index=shard.shard_index,
+        shard_count=shard.shard_count,
     )
     report_payload = dict(report)
     report_payload["task_id"] = "T085"
     report_payload["selection_artifact"] = selection_reference
+    report_payload["shard"] = shard_manifest
+    report_payload["selection_binding"] = {
+        "selection_artifact": selection_reference,
+        "shard": shard_manifest,
+    }
     report_payload["native_execution_provenance"] = _native_execution_provenance(
         backend=search_backend,
         native_identity=native_identity,
@@ -1884,7 +2279,8 @@ def run_t085_native_paired_evaluation(
         "native_identity": native_identity,
         "selection_artifact": selection_reference,
         "paired_report_artifact": report_reference,
-        "selection_binding": report.get("selection_binding"),
+        "selection_binding": report_payload["selection_binding"],
+        "shard": shard_manifest,
         "native_execution_provenance": _native_execution_provenance(
             backend=search_backend,
             native_identity=native_identity,
@@ -1903,6 +2299,7 @@ def run_t085_native_paired_evaluation(
         "selection_artifact": selection_reference,
         "paired_report_artifact": report_reference,
         "outcomes_artifact": outcomes_reference,
+        "shard": shard_manifest,
         "report": report,
     }
 
@@ -1914,6 +2311,7 @@ __all__ = [
     "T085NativeExecutionError",
     "T085NativeRootEdgeLabel",
     "T085NativeSearchBackend",
+    "T085NativeShardPlan",
     "T085NativeTerminalSearchAdapter",
     "T085UnguidedBattleSearchV2Controller",
     "build_t085_native_arms",

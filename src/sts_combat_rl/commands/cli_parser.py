@@ -1103,6 +1103,10 @@ def build_parser() -> argparse.ArgumentParser:
         ("--t085-corrected-checkpoint-85001", "T085 corrected/85001 checkpoint."),
         ("--t085-old-checkpoint-64002", "T064 static/64002 checkpoint."),
         ("--t085-corrected-checkpoint-85002", "T085 corrected/85002 checkpoint."),
+        (
+            "--t085-training-manifest",
+            "Validated repository-owned T085 training manifest.",
+        ),
         ("--t085-selection-output", "Retained selection artifact output."),
         ("--t085-report-output", "Paired report output."),
         ("--t085-outcomes-output", "Per-record outcomes output."),
@@ -1120,6 +1124,12 @@ def build_parser() -> argparse.ArgumentParser:
         default="natural_pool",
         help="Verified schema of the Cohort-C full source artifact.",
     )
+    for option, help_text in (
+        ("--t085-shard-index", "Zero-based T085 evaluation shard index (0-15)."),
+        ("--t085-shard-count", "T085 evaluation shard count; must be 16."),
+        ("--t085-worker-count", "Effective T085 evaluation worker count; must be 16."),
+    ):
+        parser.add_argument(option, type=int, help=help_text)
     for option, help_text in (
         ("--t085-selection-sha256", "Exact SHA-256 for the T085 selection artifact."),
         ("--t085-a-map-sha256", "Exact SHA-256 for the T052 map."),
@@ -1140,6 +1150,10 @@ def build_parser() -> argparse.ArgumentParser:
         (
             "--t085-corrected-checkpoint-85002-sha256",
             "Exact SHA-256 for T085 checkpoint 85002.",
+        ),
+        (
+            "--t085-training-manifest-sha256",
+            "Exact SHA-256 for the validated T085 training manifest.",
         ),
     ):
         parser.add_argument(option, help=help_text)

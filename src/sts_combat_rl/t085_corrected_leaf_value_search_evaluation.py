@@ -2147,6 +2147,8 @@ def run_t085_paired_evaluation(
         [T085BattleStartRecord, str, int], T085OutcomeRecord | Mapping[str, object]
     ],
     selection_evidence: Mapping[str, Mapping[str, object]] | None = None,
+    shard_index: int | None = None,
+    shard_count: int | None = None,
 ) -> dict[str, object]:
     """Execute the complete T085 arm matrix through an injected evaluator.
 
@@ -2167,6 +2169,30 @@ def run_t085_paired_evaluation(
             "T085 evaluation requires validated source/selection/parity evidence"
         )
     validate_t085_evaluation_selection_evidence(cohorts, selection_evidence)
+    if (shard_index is None) != (shard_count is None):
+        raise T085EvaluationIntegrityError(
+            "T085 shard_index and shard_count must be supplied together"
+        )
+    sharded = shard_index is not None and shard_count is not None
+    if sharded and (
+        isinstance(shard_index, bool)
+        or not isinstance(shard_index, int)
+        or isinstance(shard_count, bool)
+        or not isinstance(shard_count, int)
+        or shard_count != 16
+        or not 0 <= shard_index < shard_count
+    ):
+        raise T085EvaluationIntegrityError(
+            "T085 paired evaluation shard plan must use shard_count=16 "
+            "and shard_index in [0, 16)"
+        )
+
+    def belongs_to_shard(record: T085BattleStartRecord) -> bool:
+        if not sharded:
+            return True
+        digest = hashlib.sha256(record.selection_identity.encode("utf-8")).digest()
+        return int.from_bytes(digest[:8], "big") % shard_count == shard_index
+
     rows: list[T085OutcomeRecord] = []
     plans = {
         "A": (T085_PRIMARY_ARMS, T085_SEARCH_BUDGET),
@@ -2178,6 +2204,8 @@ def run_t085_paired_evaluation(
         if not records:
             raise T085EvaluationIntegrityError(f"T085 cohort {cohort} is empty")
         for record in records:
+            if not belongs_to_shard(record):
+                continue
             for arm in plans[cohort][0]:
                 returned = evaluate_record(record, arm, plans[cohort][1])
                 row = (
@@ -2197,12 +2225,26 @@ def run_t085_paired_evaluation(
                         "cohort, record, arm, source, and budget"
                     )
                 rows.append(row)
+    if sharded:
+        for cohort in required_cohorts:
+            if not any(row.cohort == cohort for row in rows):
+                raise T085EvaluationIntegrityError(
+                    f"T085 shard {shard_index} has no records for Cohort {cohort}"
+                )
     return build_t085_paired_evaluation_report(
         rows,
-        cohort_b_record_count=len(cohorts["B"]),
-        cohort_c_record_count=len(cohorts["C"]),
-        selection_cohorts=cohorts,
-        selection_evidence=selection_evidence,
+        cohort_b_record_count=(
+            sum(belongs_to_shard(record) for record in cohorts["B"])
+            if sharded
+            else len(cohorts["B"])
+        ),
+        cohort_c_record_count=(
+            sum(belongs_to_shard(record) for record in cohorts["C"])
+            if sharded
+            else len(cohorts["C"])
+        ),
+        selection_cohorts=None if sharded else cohorts,
+        selection_evidence=None if sharded else selection_evidence,
     )
 
 
