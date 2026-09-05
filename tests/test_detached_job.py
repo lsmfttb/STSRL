@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import signal
@@ -12,6 +13,11 @@ from pathlib import Path
 import pytest
 
 SCRIPT = Path(__file__).parents[1] / "scripts" / "run_detached_job.py"
+_SPEC = importlib.util.spec_from_file_location("_test_detached_job_script", SCRIPT)
+assert _SPEC is not None and _SPEC.loader is not None
+_DETACHED_JOB = importlib.util.module_from_spec(_SPEC)
+sys.modules[_SPEC.name] = _DETACHED_JOB
+_SPEC.loader.exec_module(_DETACHED_JOB)
 
 
 def _start(
@@ -267,6 +273,63 @@ def test_resource_admission_waits_and_records_bounded_concurrency(
     assert admission["shard_count"] is None
     assert not list(resource_root.glob("lease-*.json"))
     assert running_one["resource_admission"]["worker_count"] == 16
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="runtime resource guard uses POSIX process groups"
+)
+def test_rss_scan_ignores_non_target_stat_enoent_without_tripping(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeProcPath:
+        def __init__(self, parts: tuple[str, ...]) -> None:
+            self.parts = parts
+
+        @property
+        def name(self) -> str:
+            return self.parts[-1]
+
+        @property
+        def parent(self) -> FakeProcPath:
+            return FakeProcPath(self.parts[:-1])
+
+        def __truediv__(self, part: str) -> FakeProcPath:
+            return FakeProcPath((*self.parts, part))
+
+        def is_dir(self) -> bool:
+            return self.parts == ("proc",)
+
+        def glob(self, _pattern: str) -> list[FakeProcPath]:
+            return [
+                FakeProcPath(("proc", "123", "stat")),
+                FakeProcPath(("proc", "vanished", "stat")),
+                FakeProcPath(("proc", "456", "stat")),
+            ]
+
+        def stat(self) -> object:
+            if self.parts[1] == "vanished":
+                raise FileNotFoundError(2, "No such file or directory")
+            return object()
+
+        def with_name(self, name: str) -> FakeProcPath:
+            return FakeProcPath((*self.parts[:-1], name))
+
+    def fake_path(value: str) -> FakeProcPath:
+        assert value == "/proc"
+        return FakeProcPath(("proc",))
+
+    def fake_group_id(path: FakeProcPath) -> int:
+        if path.parent.name == "vanished":
+            raise _DETACHED_JOB.RuntimeGuardObservationError(
+                "cannot read process-group stat"
+            )
+        return 7
+
+    monkeypatch.setattr(_DETACHED_JOB, "Path", fake_path)
+    monkeypatch.setattr(_DETACHED_JOB, "_proc_stat_process_group_id", fake_group_id)
+    monkeypatch.setattr(_DETACHED_JOB, "_proc_status_rss_kib", lambda _path: 1024)
+
+    assert _DETACHED_JOB._read_process_group_rss_mib(123) == 2
 
 
 @pytest.mark.skipif(

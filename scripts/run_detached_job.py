@@ -182,6 +182,10 @@ class MissingProcessRssError(RuntimeGuardObservationError):
     """A process status document has no resident-memory field."""
 
 
+class MissingProcessEntryError(RuntimeGuardObservationError):
+    """A proc entry disappeared while its contents were being read."""
+
+
 @dataclass
 class _RuntimeGuard:
     config: ResourceAdmissionConfig
@@ -440,9 +444,27 @@ def _proc_stat_process_state(stat_path: Path) -> str:
     return fields[0]
 
 
+def _proc_entry_is_missing(path: Path) -> bool:
+    """Return true only when a proc entry is definitively gone."""
+
+    try:
+        path.stat()
+    except FileNotFoundError:
+        return True
+    except OSError as exc:
+        raise RuntimeGuardObservationError(
+            f"cannot inspect process entry {path}: {exc}"
+        ) from exc
+    return False
+
+
 def _proc_status_rss_kib(status_path: Path) -> int:
     try:
         lines = status_path.read_text(encoding="utf-8").splitlines()
+    except FileNotFoundError as exc:
+        raise MissingProcessEntryError(
+            f"process memory status disappeared: {status_path}"
+        ) from exc
     except OSError as exc:
         raise RuntimeGuardObservationError(
             f"cannot read process memory status {status_path}: {exc}"
@@ -460,6 +482,27 @@ def _proc_status_rss_kib(status_path: Path) -> int:
     raise MissingProcessRssError(f"VmRSS is missing from {status_path}")
 
 
+def _read_process_group_member_id(
+    stat_path: Path,
+) -> int | None:
+    """Read a member PGID, ignoring only a confirmed exit race."""
+
+    try:
+        return _proc_stat_process_group_id(stat_path)
+    except RuntimeGuardObservationError:
+        if _proc_entry_is_missing(stat_path):
+            return None
+        try:
+            process_state = _proc_stat_process_state(stat_path)
+        except RuntimeGuardObservationError:
+            if _proc_entry_is_missing(stat_path):
+                return None
+            raise
+        if process_state in _NON_RESIDENT_PROCESS_STATES:
+            return None
+        raise
+
+
 def _read_process_group_rss_mib(
     target_pid: int,
     *,
@@ -473,13 +516,18 @@ def _read_process_group_rss_mib(
         try:
             process_group_id = _proc_stat_process_group_id(target_stat)
         except RuntimeGuardObservationError:
-            if not target_stat.exists():
+            if _proc_entry_is_missing(target_stat):
                 return 0
             raise
         total_kib = 0
         members = 0
         for stat_path in proc_root.glob("[0-9]*/stat"):
-            if _proc_stat_process_group_id(stat_path) != process_group_id:
+            member_process_group_id = _read_process_group_member_id(stat_path)
+            if member_process_group_id is None:
+                if stat_path.parent.name == str(target_pid):
+                    return None
+                continue
+            if member_process_group_id != process_group_id:
                 continue
             member_rss_kib = _read_member_rss_kib(
                 stat_path, target_exited=target_exited
@@ -534,20 +582,25 @@ def _read_member_rss_kib(
     """Read one member's RSS, tolerating only a confirmed exit race."""
 
     status_path = stat_path.with_name("status")
-    missing_error: MissingProcessRssError | None = None
+    missing_error: RuntimeGuardObservationError | None = None
     for attempt in range(_RUNTIME_RSS_RETRIES):
         try:
             return _proc_status_rss_kib(status_path)
-        except MissingProcessRssError as exc:
+        except (MissingProcessRssError, MissingProcessEntryError) as exc:
             missing_error = exc
             if attempt + 1 < _RUNTIME_RSS_RETRIES:
                 time.sleep(_RUNTIME_RSS_RETRY_SECONDS)
 
-    if not stat_path.exists() or not status_path.exists():
+    if _proc_entry_is_missing(stat_path) or _proc_entry_is_missing(status_path):
         return None
     if target_exited is not None and target_exited():
         return None
-    process_state = _proc_stat_process_state(stat_path)
+    try:
+        process_state = _proc_stat_process_state(stat_path)
+    except RuntimeGuardObservationError:
+        if _proc_entry_is_missing(stat_path):
+            return None
+        raise
     if process_state in _NON_RESIDENT_PROCESS_STATES:
         return None
     if target_exited is not None and target_exited():
