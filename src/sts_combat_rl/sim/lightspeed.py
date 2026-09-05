@@ -54,6 +54,13 @@ class LightSpeedAdapter:
             ascension,
         )
 
+    def close(self) -> None:
+        """Release the native simulator state held by this adapter."""
+
+        simulator = getattr(self, "_sim", None)
+        self._sim = None
+        del simulator
+
     def reset(self, seed: int | None = None) -> SimulatorSnapshot:
         active_seed = self._default_seed if seed is None else int(seed)
         self._active_seed = active_seed

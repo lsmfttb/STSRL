@@ -18,6 +18,7 @@ or provenance fields are not accepted.
 
 from __future__ import annotations
 
+import ctypes
 import gc
 import json
 import math
@@ -151,6 +152,21 @@ T085_B_SOURCE_SHARD_MANIFEST_SCHEMA_ID = "t085-cohort-b-source-shard-manifest-v1
 T085_B_SOURCE_POOL_SCHEMA_ID = ASSISTED_SOURCE_POOL_SCHEMA_ID
 T085_NATIVE_SEARCH_BACKENDS = ("battle_search", "battle_search_v2")
 T085NativeSearchBackend = Literal["battle_search", "battle_search_v2"]
+
+
+def _release_t085_chunk_memory() -> None:
+    """Collect Python wrappers and return released native heap pages when able."""
+
+    gc.collect()
+    if os.name != "nt":
+        try:
+            trim = getattr(ctypes.CDLL(None), "malloc_trim", None)
+        except OSError:
+            trim = None
+        if callable(trim):
+            trim(0)
+
+
 T085NativeSourceArtifactKind = Literal["fixed_cohort", "natural_pool", "assisted_pool"]
 
 _TERMINAL_OUTCOMES = frozenset({"PLAYER_VICTORY", "PLAYER_LOSS"})
@@ -2983,7 +2999,7 @@ def run_t085_cohort_b_source_generation_from_paths(
                 elif callable(shutdown):
                     shutdown()
                 del adapter
-                gc.collect()
+                _release_t085_chunk_memory()
             if not isinstance(collected, tuple) or len(collected) != 2:
                 raise T085NativeExecutionError(
                     "T085 Cohort B source collector did not return artifact and coverage"
