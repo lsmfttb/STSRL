@@ -61,9 +61,10 @@ boundary includes explicit `LightSpeedAdapter.close()` native-state release
 and Unix `malloc_trim(0)` after each one-seed chunk. A one-shard bounded canary
 was then launched with
 the accepted Python/native identities. Its temporary chunks showed bounded
-per-seed progress and sampled RSS remained below 1 GiB while WSL retained
-approximately 21--22 GiB available memory with zero swap use. The canary is
-diagnostic only and is not a formal Cohort-B input.
+per-seed progress; sampled RSS briefly reached approximately 1.8 GiB and
+later fell back to approximately 0.3--0.9 GiB. WSL retained approximately
+21--22 GiB available memory with zero swap use and no OOM occurred. The canary
+is diagnostic only and is not a formal Cohort-B input.
 
 Formal Cohort-B generation and downstream T085 selection/evaluation remain
 unaccepted until their detached statuses reach a terminal state and their
