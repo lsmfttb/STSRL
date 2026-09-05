@@ -59,12 +59,16 @@ several files:
 ### Collaboration
 
 - [`collaboration_workflow.md`](collaboration_workflow.md): authoritative
-  Planner/Maintainer/Implementer responsibility split, one-task-one-branch
-  workflow, acceptance-first contract, contract-gap escalation, architecture
-  recovery, dual final acceptance, and merge process.
+  Planner/Maintainer/Implementer responsibility split, one-task-one-PR workflow,
+  acceptance-first contract, contract-gap escalation, architecture recovery,
+  dual final acceptance, and merge process.
 - [`sts_lightspeed_maintainer_role.md`](sts_lightspeed_maintainer_role.md):
-  operating contract for the external `sts_lightspeed` fork maintainer role,
-  branch policy, cross-repository handoff, and review evidence.
+  authoritative external-simulator integration policy: one accepted
+  `stsrl/main` lineage, temporary native work branches, manifest pinning, and
+  risk-based independent native review.
+- [`native_lineage_change_checklist.md`](native_lineage_change_checklist.md):
+  short execution checklist for tasks that change the accepted simulator
+  identity, including the ancestry/active-ref gate.
 
 ### Active Roadmaps
 
@@ -95,6 +99,9 @@ several files:
 - Put task ownership and execution/review workflow in
   `collaboration_workflow.md`; keep other summaries short and consistent with
   it.
+- Put external-simulator branch/lineage/risk-review rules in
+  `sts_lightspeed_maintainer_role.md`; use `native_lineage_change_checklist.md`
+  during execution instead of duplicating that policy inside each task.
 - Update `current_status.md` when implementation capability or the immediate
   blocker changes.
 - Put future design in the relevant roadmap; do not mix dated experiment
@@ -116,9 +123,10 @@ the bounded implementation, classifies review findings, and returns semantic or
 architectural gaps to the Planner instead of inventing local rules. The Task
 Implementer performs the mechanical implementation against the frozen contract.
 Before merge, the exact final head requires Planner scientific/architectural
-acceptance plus Maintainer implementation/operational acceptance; the Maintainer
-then owns merge and the `current_status.md` result report. Merged task lifecycle
-remains authoritative in `tasks/README.md`.
+acceptance plus Maintainer implementation/operational acceptance; after both are
+recorded on the same exact head, Planner may land the task under the current
+collaboration workflow. Merged task lifecycle remains authoritative in
+`tasks/README.md`.
 
 At the start of maintainer work and before branch creation or execution
 readiness, the Maintainer must refresh and exactly synchronize local `main`
@@ -127,8 +135,10 @@ remote open PRs against that current `main`. Immediately before landing, repeat
 the fetch and remote-PR query, compare the recorded pre-landing base SHA with
 remote `main`, and require a fast-forward. A failed fetch, unavailable PR query,
 or any ahead/behind/divergent state blocks the work. See the detailed
-[`Maintainer start and remote-PR review gate`](collaboration_workflow.md#maintainer-start-and-remote-pr-review-gate)
+[`Maintainer start and session recovery`](collaboration_workflow.md#maintainer-start-and-session-recovery)
 and [`Main Synchronization Gate`](collaboration_workflow.md#main-synchronization-gate).
 
-See `collaboration_workflow.md` for the complete contract; do not infer workflow
-from old branch names, historical documents, or stale role summaries.
+See `collaboration_workflow.md` for the complete task workflow and
+`sts_lightspeed_maintainer_role.md` for the external simulator lineage contract;
+do not infer either from old branch names, historical documents, or stale role
+summaries.
