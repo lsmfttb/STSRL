@@ -12,7 +12,7 @@ import signal
 import subprocess
 import sys
 import time
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -31,6 +31,8 @@ _RESOURCE_LEASE_SCHEMA_ID = "stsrl-detached-resource-lease-v1"
 _RUNTIME_GUARD_EXIT_CODE = 1
 _TARGET_TERMINATION_GRACE_SECONDS = 1.0
 _NON_RESIDENT_PROCESS_STATES = frozenset({"Z", "X"})
+_RUNTIME_RSS_RETRIES = 3
+_RUNTIME_RSS_RETRY_SECONDS = 0.01
 
 
 class ResourceAdmissionError(RuntimeError):
@@ -176,6 +178,10 @@ class RuntimeGuardObservationError(RuntimeError):
     """The configured runtime guard cannot obtain a trustworthy observation."""
 
 
+class MissingProcessRssError(RuntimeGuardObservationError):
+    """A process status document has no resident-memory field."""
+
+
 @dataclass
 class _RuntimeGuard:
     config: ResourceAdmissionConfig
@@ -210,12 +216,19 @@ class _RuntimeGuard:
             "sample_error": self.sample_error,
         }
 
-    def observe(self, target_pid: int) -> bool:
+    def observe(
+        self,
+        target_pid: int,
+        *,
+        target_exited: Callable[[], bool] | None = None,
+    ) -> bool:
         sampled_at = _timestamp()
         self.last_sample_at = sampled_at
         self.sample_count += 1
         try:
-            rss_mib = _read_process_group_rss_mib(target_pid)
+            rss_mib = _read_process_group_rss_mib(
+                target_pid, target_exited=target_exited
+            )
             memavailable_mib = (
                 _read_memavailable_mib()
                 if self.config.runtime_memavailable_floor_mib is not None
@@ -226,6 +239,9 @@ class _RuntimeGuard:
             self._trip(f"runtime guard observation failed closed: {self.sample_error}")
             return True
 
+        if rss_mib is None:
+            self.mark_completed()
+            return False
         self.observed_rss_mib = rss_mib
         self.peak_rss_mib = (
             rss_mib if self.peak_rss_mib is None else max(self.peak_rss_mib, rss_mib)
@@ -441,10 +457,14 @@ def _proc_status_rss_kib(status_path: Path) -> int:
                     raise RuntimeGuardObservationError(
                         f"invalid VmRSS value in {status_path}"
                     ) from exc
-    raise RuntimeGuardObservationError(f"VmRSS is missing from {status_path}")
+    raise MissingProcessRssError(f"VmRSS is missing from {status_path}")
 
 
-def _read_process_group_rss_mib(target_pid: int) -> int:
+def _read_process_group_rss_mib(
+    target_pid: int,
+    *,
+    target_exited: Callable[[], bool] | None = None,
+) -> int | None:
     """Return the target process group's aggregate resident memory in MiB."""
 
     proc_root = Path("/proc")
@@ -459,24 +479,17 @@ def _read_process_group_rss_mib(target_pid: int) -> int:
         total_kib = 0
         members = 0
         for stat_path in proc_root.glob("[0-9]*/stat"):
-            try:
-                if _proc_stat_process_group_id(stat_path) != process_group_id:
-                    continue
-                total_kib += _proc_status_rss_kib(stat_path.with_name("status"))
-                members += 1
-            except RuntimeGuardObservationError:
-                status_path = stat_path.with_name("status")
-                if not stat_path.exists() or not status_path.exists():
-                    continue
-                try:
-                    process_state = _proc_stat_process_state(stat_path)
-                except RuntimeGuardObservationError:
-                    if not stat_path.exists():
-                        continue
-                    raise
-                if process_state in _NON_RESIDENT_PROCESS_STATES:
-                    continue
-                raise
+            if _proc_stat_process_group_id(stat_path) != process_group_id:
+                continue
+            member_rss_kib = _read_member_rss_kib(
+                stat_path, target_exited=target_exited
+            )
+            if member_rss_kib is None:
+                if target_exited is not None and target_exited():
+                    return None
+                continue
+            total_kib += member_rss_kib
+            members += 1
         if members == 0:
             return 0
         return math.ceil(total_kib / 1024)
@@ -511,6 +524,37 @@ def _read_process_group_rss_mib(target_pid: int) -> int:
     process_group_id = target_row[1]
     total_kib = sum(row[2] for row in rows if row[1] == process_group_id)
     return math.ceil(total_kib / 1024)
+
+
+def _read_member_rss_kib(
+    stat_path: Path,
+    *,
+    target_exited: Callable[[], bool] | None = None,
+) -> int | None:
+    """Read one member's RSS, tolerating only a confirmed exit race."""
+
+    status_path = stat_path.with_name("status")
+    missing_error: MissingProcessRssError | None = None
+    for attempt in range(_RUNTIME_RSS_RETRIES):
+        try:
+            return _proc_status_rss_kib(status_path)
+        except MissingProcessRssError as exc:
+            missing_error = exc
+            if attempt + 1 < _RUNTIME_RSS_RETRIES:
+                time.sleep(_RUNTIME_RSS_RETRY_SECONDS)
+
+    if not stat_path.exists() or not status_path.exists():
+        return None
+    if target_exited is not None and target_exited():
+        return None
+    process_state = _proc_stat_process_state(stat_path)
+    if process_state in _NON_RESIDENT_PROCESS_STATES:
+        return None
+    if target_exited is not None and target_exited():
+        return None
+    if missing_error is not None:
+        raise missing_error
+    raise RuntimeGuardObservationError(f"unable to read process RSS from {status_path}")
 
 
 def _read_memavailable_mib() -> int:
@@ -837,6 +881,13 @@ def _wait_for_target_with_runtime_guard(
         try:
             exit_code = target.wait(timeout=runtime_guard.config.runtime_sample_seconds)
         except subprocess.TimeoutExpired:
+            polled_exit_code = target.poll()
+            if polled_exit_code is not None:
+                if cancelled():
+                    runtime_guard.mark_cancelled()
+                else:
+                    runtime_guard.mark_completed()
+                return polled_exit_code, False
             if cancelled():
                 runtime_guard.mark_cancelled()
                 return _terminate_and_reap_target_group(target), False
