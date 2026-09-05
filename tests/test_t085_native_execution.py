@@ -12,17 +12,22 @@ import sts_combat_rl.commands.t085_native_execution as t085_execution
 from sts_combat_rl.commands.cli_parser import build_parser
 from sts_combat_rl.commands.cli_validation import validate_cli_args
 from sts_combat_rl.commands.t085_native_execution import (
+    T085CohortBSourceGenerationPlan,
     T085CohortCSourceGenerationPlan,
     T085NativeExecutionError,
     T085NativeShardPlan,
     T085NativeTerminalSearchAdapter,
     T085UnguidedBattleSearchV2Controller,
+    build_t085_cohort_b_source_controller,
+    build_t085_cohort_b_source_manifest_from_paths,
     build_t085_cohort_c_source_controller,
     build_t085_cohort_c_source_manifest_from_paths,
     build_t085_native_arms,
     finalize_t085_native_root_edge_label,
+    merge_t085_cohort_b_source_pool_from_paths,
     prepare_t085_native_root_edge_label,
     resolve_t085_canonical_records,
+    run_t085_cohort_b_source_generation_from_paths,
     run_t085_cohort_c_source_generation_from_paths,
     run_t085_native_paired_evaluation,
     t085_scorer_callbacks,
@@ -609,6 +614,21 @@ def test_t085_source_manifest_binding_uses_assisted_pool_schema_for_b(
         "validate_t085_source_generation_contract",
         lambda *args, **kwargs: {"validated": True},
     )
+    monkeypatch.setattr(
+        t085_execution,
+        "_validate_t085_native_source_manifest",
+        lambda *args, **kwargs: {"commit": "fake-native"},
+    )
+    monkeypatch.setattr(
+        t085_execution,
+        "_load_t085_t042_scale_manifest",
+        lambda: {
+            "path": str(artifact_root / "t042.json"),
+            "schema_id": "t042-assisted-source-scale-manifest-v2",
+            "sha256": t085_execution.T085_T042_SCALE_MANIFEST_SHA256,
+            "byte_count": 1,
+        },
+    )
     pool_path = artifact_root / "source" / "cohort-b" / "merged.jsonl"
     pool_path.parent.mkdir(parents=True)
     pool_path.write_bytes(b"assisted-source-pool")
@@ -628,6 +648,16 @@ def test_t085_source_manifest_binding_uses_assisted_pool_schema_for_b(
                 "schema_id": "t085-source-generation-manifest-v1",
                 "task_id": "T085",
                 "cohort": "B",
+                "native_identity": {"commit": "fake-native"},
+                "policy_prior_callback": None,
+                "leaf_value_callback": None,
+                "t042_scale_manifest": {
+                    "path": str(artifact_root / "t042.json"),
+                    "schema_id": "t042-assisted-source-scale-manifest-v2",
+                    "sha256": t085_execution.T085_T042_SCALE_MANIFEST_SHA256,
+                    "byte_count": 1,
+                },
+                "t042_scale_manifest_sha256": t085_execution.T085_T042_SCALE_MANIFEST_SHA256,
                 "source_pool_artifact": source_pool,
             },
             sort_keys=True,
@@ -723,6 +753,347 @@ def test_t085_cohort_c_source_plan_is_exact_and_controller_is_unguided(
     assert controller.non_combat.provenance.config["seed"] == 42042
 
 
+def test_t085_cohort_b_source_plan_is_exact_and_uses_t042_settings(monkeypatch) -> None:
+    monkeypatch.setattr(
+        t085_execution,
+        "_validate_t085_native_source_manifest",
+        lambda *args, **kwargs: {"commit": "fake-native"},
+    )
+    first = T085CohortBSourceGenerationPlan(shard_index=0)
+    last = T085CohortBSourceGenerationPlan(shard_index=15)
+    assert first.seed_inventory == tuple(range(851001, 851065))
+    assert last.seed_inventory == tuple(range(851961, 852025))
+    anchor = {
+        "path": "/stable/t042-scale-manifest.json",
+        "schema_id": "t042-assisted-source-scale-manifest-v2",
+        "sha256": t085_execution.T085_T042_SCALE_MANIFEST_SHA256,
+        "byte_count": 8159,
+    }
+    config = first.to_dict(
+        native_identity={"commit": "fake-native"},
+        t042_anchor=anchor,
+    )
+    assert config["source_run_count"] == 1024
+    assert config["max_outer_steps"] == 500
+    assert config["battle_controller"] == "oracle_search"
+    assert config["battle_simulations"] == 20
+    assert config["root_selection"] == "highest_mean"
+    assert config["assistance_level"] == "assist_hp75_potion"
+    assert config["assistance_policy_seed"] == 42042
+    assert config["t042_scale_manifest_sha256"] == (
+        t085_execution.T085_T042_SCALE_MANIFEST_SHA256
+    )
+    assert config["policy_prior_callback"] is None
+    assert config["leaf_value_callback"] is None
+
+    controller = build_t085_cohort_b_source_controller()
+    assert controller.battle.provenance.name == "oracle_search_v1_highest_mean_s20"
+    assert controller.battle.provenance.config["native_search_api"] == (
+        "StepSimulator.battle_search.v1"
+    )
+    assert controller.non_combat.provenance.name == "expert_non_combat_v1"
+    assert controller.non_combat.provenance.config["seed"] == 42042
+
+
+def test_t085_t042_anchor_sha_is_repository_owned(monkeypatch) -> None:
+    accepted = t085_execution.T085_INPUT_ARTIFACT_IDENTITIES["t042_scale_manifest"]
+    altered = dict(t085_execution.T085_INPUT_ARTIFACT_IDENTITIES)
+    altered["t042_scale_manifest"] = {**accepted, "sha256": "0" * 64}
+    monkeypatch.setattr(t085_execution, "T085_INPUT_ARTIFACT_IDENTITIES", altered)
+    with pytest.raises(T085NativeExecutionError, match="fixed identity"):
+        t085_execution._load_t085_t042_scale_manifest()
+
+
+def test_t085_complete_b_pool_requires_verified_source_shards(monkeypatch) -> None:
+    monkeypatch.setattr(
+        t085_execution,
+        "_validate_t085_native_source_manifest",
+        lambda *args, **kwargs: {"commit": "fake-native"},
+    )
+    artifact = SimpleNamespace(
+        source_shards=(),
+        records=[],
+        pool=SimpleNamespace(source_controller_provenance={}),
+    )
+    with pytest.raises(T085NativeExecutionError, match="retain all 16 source shards"):
+        t085_execution._validate_t085_assisted_merged_source_shards(
+            artifact,
+            expected_seeds=tuple(range(851001, 852025)),
+        )
+
+
+def test_t085_cohort_b_source_generation_writes_partial_shard_manifest(
+    tmp_path, monkeypatch
+) -> None:
+    import sts_combat_rl.t085_corrected_leaf_value_search_evaluation as t085_eval
+
+    artifact_root = tmp_path / "t085-artifacts"
+    monkeypatch.setattr(t085_execution, "T085_ARTIFACT_ROOT", artifact_root)
+    monkeypatch.setattr(t085_eval, "T085_ARTIFACT_ROOT", artifact_root)
+    monkeypatch.setattr(
+        t085_execution,
+        "_validate_t085_native_source_manifest",
+        lambda *args, **kwargs: {"commit": "fake-native"},
+    )
+    monkeypatch.setattr(
+        t085_execution,
+        "_load_t085_t042_scale_manifest",
+        lambda: {
+            "path": str(artifact_root / "t042-scale.json"),
+            "schema_id": "t042-assisted-source-scale-manifest-v2",
+            "sha256": t085_execution.T085_T042_SCALE_MANIFEST_SHA256,
+            "byte_count": 8159,
+        },
+    )
+    monkeypatch.setattr(
+        t085_execution, "_validate_t085_b_source_pool", lambda *a, **k: None
+    )
+    controller = build_t085_cohort_b_source_controller()
+    plan = T085CohortBSourceGenerationPlan(shard_index=4)
+    summaries = [
+        SimpleNamespace(
+            source_seed=seed,
+            source_run_id=f"run-{seed}",
+        )
+        for seed in plan.seed_inventory
+    ]
+    records = [
+        SimpleNamespace(
+            source_run_id=summary.source_run_id,
+            source_checkpoint_id=f"checkpoint-{summary.source_seed}",
+        )
+        for summary in summaries
+    ]
+    pool = SimpleNamespace(
+        source_run_count=len(plan.seed_inventory),
+        terminal_run_count=len(plan.seed_inventory),
+        truncated_run_count=0,
+        source_controller_provenance=controller.provenance.to_dict(),
+        source_run_summaries=summaries,
+        records=records,
+    )
+    artifact = SimpleNamespace(records=records, pool=pool)
+    captured: dict[str, object] = {}
+
+    def collect(
+        adapter,
+        actual_controller,
+        *,
+        seeds,
+        max_steps,
+        action_space,
+        assistance_level,
+        policy_seed,
+    ):
+        captured.update(
+            {
+                "adapter": adapter,
+                "controller": actual_controller,
+                "seeds": tuple(seeds),
+                "max_steps": max_steps,
+                "action_space": action_space,
+                "assistance_level": assistance_level,
+                "policy_seed": policy_seed,
+            }
+        )
+        return artifact, object()
+
+    monkeypatch.setattr(t085_execution, "collect_assisted_battle_start_pool", collect)
+    monkeypatch.setattr(
+        t085_execution,
+        "dump_assisted_source_pool_jsonl",
+        lambda _artifact, stream: stream.write('{"type": "metadata"}\n'),
+    )
+    pool_path = artifact_root / "source" / "cohort-b" / "shard-04.jsonl"
+    manifest_path = artifact_root / "source" / "cohort-b" / "shard-04.json"
+    result = run_t085_cohort_b_source_generation_from_paths(
+        adapter_factory=lambda: "fake-adapter",
+        pool_output_path=pool_path,
+        shard_manifest_output_path=manifest_path,
+        shard_index=4,
+    )
+    assert captured["adapter"] == "fake-adapter"
+    assert captured["seeds"] == plan.seed_inventory
+    assert captured["max_steps"] == 500
+    assert captured["assistance_level"] == "assist_hp75_potion"
+    assert captured["policy_seed"] == 42042
+    assert captured["action_space"].to_dict() == (  # type: ignore[union-attr]
+        ActionSpaceConfig.initial_no_potions().to_dict()
+    )
+    assert result["status"] == "partial"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["schema_id"] == "t085-cohort-b-source-shard-manifest-v1"
+    assert manifest["shard_source_run_seed_inventory"] == list(plan.seed_inventory)
+    assert manifest["complete_source_identity_inventory"] == [
+        f"checkpoint-{seed}" for seed in plan.seed_inventory
+    ]
+    assert manifest["source_pool_artifact"]["schema_id"] == (
+        t085_execution.ASSISTED_SOURCE_POOL_SCHEMA_ID
+    )
+    assert manifest["partial"] is True
+    assert manifest["complete"] is False
+
+
+def test_t085_cohort_b_source_finalizer_freezes_complete_pool_identity(
+    tmp_path, monkeypatch
+) -> None:
+    import sts_combat_rl.t085_corrected_leaf_value_search_evaluation as t085_eval
+
+    artifact_root = tmp_path / "t085-artifacts"
+    monkeypatch.setattr(t085_execution, "T085_ARTIFACT_ROOT", artifact_root)
+    monkeypatch.setattr(t085_eval, "T085_ARTIFACT_ROOT", artifact_root)
+    monkeypatch.setattr(
+        t085_execution,
+        "_validate_t085_native_source_manifest",
+        lambda *args, **kwargs: {"commit": "fake-native"},
+    )
+    anchor = {
+        "path": str(artifact_root / "t042-scale.json"),
+        "schema_id": "t042-assisted-source-scale-manifest-v2",
+        "sha256": t085_execution.T085_T042_SCALE_MANIFEST_SHA256,
+        "byte_count": 8159,
+    }
+    monkeypatch.setattr(
+        t085_execution, "_load_t085_t042_scale_manifest", lambda: anchor
+    )
+    monkeypatch.setattr(
+        t085_execution, "_validate_t085_b_source_pool", lambda *a, **k: None
+    )
+    seeds = tuple(range(851001, 852025))
+    summaries = [
+        SimpleNamespace(source_seed=seed, source_run_id=f"run-{seed}") for seed in seeds
+    ]
+    records = [
+        SimpleNamespace(
+            source_run_id=f"run-{seed}",
+            source_checkpoint_id=f"checkpoint-{seed}",
+        )
+        for seed in seeds
+    ]
+    pool = SimpleNamespace(
+        source_run_count=1024,
+        terminal_run_count=1024,
+        truncated_run_count=0,
+        source_controller_provenance=build_t085_cohort_b_source_controller().provenance.to_dict(),
+        source_run_summaries=summaries,
+        records=records,
+    )
+    artifact = SimpleNamespace(records=records, pool=pool)
+    monkeypatch.setattr(
+        t085_execution,
+        "load_assisted_source_pool_jsonl",
+        lambda _stream: artifact,
+    )
+    pool_path = artifact_root / "source" / "cohort-b" / "merged.jsonl"
+    pool_path.parent.mkdir(parents=True, exist_ok=True)
+    pool_path.write_bytes(b"complete-assisted-pool\n")
+    manifest_path = artifact_root / "source" / "cohort-b" / "manifest.json"
+    manifest = build_t085_cohort_b_source_manifest_from_paths(
+        pool_path=pool_path,
+        pool_sha256=t085_execution.sha256_file(pool_path),
+        manifest_output_path=manifest_path,
+    )
+    assert manifest["schema_id"] == "t085-source-generation-manifest-v1"
+    assert manifest["source_run_count"] == 1024
+    assert manifest["source_run_seed_inventory"] == list(seeds)
+    assert manifest["complete_source_identity_inventory"] == [
+        f"checkpoint-{seed}" for seed in seeds
+    ]
+    assert manifest["t042_scale_manifest_sha256"] == (
+        t085_execution.T085_T042_SCALE_MANIFEST_SHA256
+    )
+    assert manifest["source_pool_artifact"]["schema_id"] == (
+        t085_execution.ASSISTED_SOURCE_POOL_SCHEMA_ID
+    )
+    assert manifest["source_pool_artifact"]["source_pool_format_version"] == 4
+    assert manifest["source_pool_complete"] is True
+
+
+def test_t085_cohort_b_source_merge_requires_all_ordered_shards(
+    tmp_path, monkeypatch
+) -> None:
+    artifact_root = tmp_path / "t085-artifacts"
+    monkeypatch.setattr(t085_execution, "T085_ARTIFACT_ROOT", artifact_root)
+    monkeypatch.setattr(
+        t085_execution,
+        "_load_t085_t042_scale_manifest",
+        lambda: {
+            "path": "/stable/t042.json",
+            "schema_id": "t042-assisted-source-scale-manifest-v2",
+            "sha256": t085_execution.T085_T042_SCALE_MANIFEST_SHA256,
+            "byte_count": 8159,
+        },
+    )
+    monkeypatch.setattr(
+        t085_execution,
+        "_validate_t085_native_source_manifest",
+        lambda *args, **kwargs: {"commit": "fake-native"},
+    )
+    monkeypatch.setattr(
+        t085_execution,
+        "_t085_validate_b_shard_manifest",
+        lambda manifest_path, **kwargs: json.loads(
+            manifest_path.read_text(encoding="utf-8")
+        ),
+    )
+    merged_artifact = SimpleNamespace(
+        pool=SimpleNamespace(
+            source_run_count=1024,
+            terminal_run_count=1024,
+            truncated_run_count=0,
+        ),
+        records=[],
+    )
+    monkeypatch.setattr(
+        t085_execution,
+        "dump_merged_assisted_source_pool_shards_jsonl",
+        lambda paths, stream: (
+            stream.write("merged\n"),
+            SimpleNamespace(
+                assistance_level="assist_hp75_potion",
+                source_shards=tuple(
+                    {"shard_index": index} for index in range(len(paths))
+                ),
+                source_run_count=1024,
+                terminal_run_count=1024,
+                truncated_run_count=0,
+                record_count=0,
+                assistance_decision_count=0,
+            ),
+        )[1],
+    )
+    monkeypatch.setattr(
+        t085_execution,
+        "load_assisted_source_pool_jsonl",
+        lambda _stream: merged_artifact,
+    )
+    monkeypatch.setattr(
+        t085_execution, "_validate_t085_b_source_pool", lambda *a, **k: None
+    )
+    pool_paths = []
+    manifest_paths = []
+    for index in range(16):
+        pool_path = artifact_root / "source" / "cohort-b" / f"shard-{index:02d}.jsonl"
+        manifest_path = (
+            artifact_root / "source" / "cohort-b" / f"shard-{index:02d}.json"
+        )
+        pool_path.parent.mkdir(parents=True, exist_ok=True)
+        pool_path.write_bytes(f"pool-{index}\n".encode())
+        manifest_path.write_text(json.dumps({"shard_index": index}), encoding="utf-8")
+        pool_paths.append(pool_path)
+        manifest_paths.append(manifest_path)
+    result = merge_t085_cohort_b_source_pool_from_paths(
+        shard_paths=pool_paths,
+        shard_manifest_paths=manifest_paths,
+        merged_pool_output_path=artifact_root / "source" / "cohort-b" / "merged.jsonl",
+    )
+    assert result["status"] == "merged"
+    assert result["partial"] is True
+    assert result["complete"] is False
+    assert result["pool_artifact"]["source_run_count"] == 1024
+    assert len(result["merge_summary"]["source_shards"]) == 16
+
+
 def test_t085_cohort_c_source_generation_writes_partial_shard_manifest(
     tmp_path, monkeypatch
 ) -> None:
@@ -742,12 +1113,18 @@ def test_t085_cohort_c_source_generation_writes_partial_shard_manifest(
         SimpleNamespace(
             source_seed=seed,
             source_run_id=f"seed-{seed}-run-{offset}",
+            terminal=True,
+            problem_count=0,
+            problems=(),
         )
         for offset, seed in enumerate(plan.seed_inventory)
     ]
     pool = SimpleNamespace(
         format_version=4,
         source_run_count=len(plan.seed_inventory),
+        terminal_run_count=len(plan.seed_inventory),
+        truncated_run_count=0,
+        problems=(),
         source_controller_provenance=controller.provenance.to_dict(),
         source_run_summaries=summaries,
         records=[],
@@ -824,10 +1201,27 @@ def test_t085_cohort_c_final_manifest_binds_merged_pool_for_resolver(
         "_validate_t085_c_source_pool",
         lambda *args, **kwargs: None,
     )
+    monkeypatch.setattr(
+        t085_execution,
+        "_validate_t085_c_merged_source_metadata",
+        lambda *args, **kwargs: {
+            "schema_id": "natural-battle-start-pool-shard-merge-v1",
+            "merge_version": 1,
+            "shard_count": 16,
+            "source_shards": [],
+        },
+    )
     controller = build_t085_cohort_c_source_controller()
     seeds = tuple(range(850001, 850129))
     summaries = [
-        SimpleNamespace(source_seed=seed, source_run_id=f"run-{seed}") for seed in seeds
+        SimpleNamespace(
+            source_seed=seed,
+            source_run_id=f"run-{seed}",
+            terminal=True,
+            problem_count=0,
+            problems=(),
+        )
+        for seed in seeds
     ]
     records = [
         BattleStartCheckpointRecord(
@@ -854,6 +1248,9 @@ def test_t085_cohort_c_final_manifest_binds_merged_pool_for_resolver(
     pool = SimpleNamespace(
         format_version=4,
         source_run_count=128,
+        terminal_run_count=128,
+        truncated_run_count=0,
+        problems=(),
         source_controller_provenance=controller.provenance.to_dict(),
         source_run_summaries=summaries,
         records=records,
@@ -917,6 +1314,28 @@ def test_t085_cohort_c_final_manifest_binds_merged_pool_for_resolver(
     assert set(resolved) == {f"checkpoint-{seed}" for seed in seeds}
 
 
+def test_t085_c_finalizer_rejects_unsharded_pool_metadata(tmp_path) -> None:
+    pool_path = tmp_path / "natural-pool.jsonl"
+    pool_path.write_text(
+        json.dumps(
+            {
+                "type": "metadata",
+                "metadata": {
+                    "format_version": 4,
+                    "record_count": 0,
+                },
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(T085NativeExecutionError, match="repository merge evidence"):
+        t085_execution._validate_t085_c_merged_source_metadata(
+            pool_path,
+            SimpleNamespace(records=[]),
+        )
+
+
 def test_t085_cohort_c_source_cli_requires_explicit_shard_contract() -> None:
     parser = build_parser()
     missing = parser.parse_args(
@@ -954,6 +1373,49 @@ def test_t085_cohort_c_source_cli_requires_explicit_shard_contract() -> None:
     )
 
 
+def test_t085_cohort_b_source_cli_requires_shards_and_frozen_inputs() -> None:
+    parser = build_parser()
+    missing = parser.parse_args(
+        [
+            "--lightspeed-t085-cohort-b-source-generation",
+            "pool.jsonl",
+        ]
+    )
+    assert validate_cli_args(missing).startswith(
+        "T085 Cohort B source generation requires"
+    )
+    ready = parser.parse_args(
+        [
+            "--lightspeed-t085-cohort-b-source-generation",
+            "pool.jsonl",
+            "--t085-b-source-manifest-output",
+            "shard.json",
+            "--t085-b-source-shard-index",
+            "0",
+            "--t085-b-source-shard-count",
+            "16",
+            "--t085-b-source-worker-count",
+            "16",
+        ]
+    )
+    assert validate_cli_args(ready) is None
+    merge_missing = parser.parse_args(
+        ["--lightspeed-t085-cohort-b-source-merge", "merged.jsonl"]
+    )
+    assert validate_cli_args(merge_missing).startswith(
+        "T085 Cohort B source merge requires"
+    )
+    finalizer_missing = parser.parse_args(
+        [
+            "--lightspeed-t085-cohort-b-source-manifest",
+            "merged.jsonl",
+        ]
+    )
+    assert validate_cli_args(finalizer_missing).startswith(
+        "T085 Cohort B source manifest finalization requires"
+    )
+
+
 def test_t085_cohort_c_source_finalizer_cli_routes_without_simulator(
     tmp_path, monkeypatch, capsys
 ) -> None:
@@ -981,6 +1443,40 @@ def test_t085_cohort_c_source_finalizer_cli_routes_without_simulator(
     monkeypatch.setattr(
         lightspeed_cli,
         "build_t085_cohort_c_source_manifest_from_paths",
+        lambda **kwargs: {"status": "finalized", "pool": str(kwargs["pool_path"])},
+    )
+    result = lightspeed_cli.run_lightspeed_command(args)
+    assert result == 0
+    assert '"status": "finalized"' in capsys.readouterr().err
+
+
+def test_t085_cohort_b_source_finalizer_cli_routes_without_simulator(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    from sts_combat_rl.commands import lightspeed_cli
+
+    pool_path = tmp_path / "merged.jsonl"
+    output_path = tmp_path / "manifest.json"
+    args = build_parser().parse_args(
+        [
+            "--lightspeed-t085-cohort-b-source-manifest",
+            str(pool_path),
+            "--t085-b-source-pool-sha256",
+            "a" * 64,
+            "--t085-b-source-manifest-output",
+            str(output_path),
+        ]
+    )
+    monkeypatch.setattr(
+        lightspeed_cli,
+        "LightSpeedAdapter",
+        lambda *args, **kwargs: pytest.fail(
+            "offline Cohort-B manifest finalization must not construct a simulator"
+        ),
+    )
+    monkeypatch.setattr(
+        lightspeed_cli,
+        "build_t085_cohort_b_source_manifest_from_paths",
         lambda **kwargs: {"status": "finalized", "pool": str(kwargs["pool_path"])},
     )
     result = lightspeed_cli.run_lightspeed_command(args)

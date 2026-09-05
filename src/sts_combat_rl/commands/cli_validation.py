@@ -78,6 +78,37 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
             return "--t085-shard-index must be between 0 and 15"
         if args.t085_worker_count != 16:
             return "--t085-worker-count must be 16"
+    if args.lightspeed_t085_cohort_b_source_generation is not None:
+        source_required = (
+            args.t085_b_source_manifest_output,
+            args.t085_b_source_shard_index,
+            args.t085_b_source_shard_count,
+            args.t085_b_source_worker_count,
+        )
+        if any(value is None for value in source_required):
+            return (
+                "T085 Cohort B source generation requires a shard manifest "
+                "output and explicit shard/worker values"
+            )
+        if args.t085_b_source_shard_count != 16:
+            return "--t085-b-source-shard-count must be 16"
+        if not 0 <= args.t085_b_source_shard_index < 16:
+            return "--t085-b-source-shard-index must be between 0 and 15"
+        if args.t085_b_source_worker_count != 16:
+            return "--t085-b-source-worker-count must be 16"
+    if args.lightspeed_t085_cohort_b_source_merge is not None:
+        if len(args.t085_b_source_shard) != 16:
+            return "T085 Cohort B source merge requires exactly 16 source shard pools"
+        if len(args.t085_b_source_shard_manifest) != 16:
+            return "T085 Cohort B source merge requires exactly 16 shard manifests"
+    if args.lightspeed_t085_cohort_b_source_manifest is not None and (
+        args.t085_b_source_pool_sha256 is None
+        or args.t085_b_source_manifest_output is None
+    ):
+        return (
+            "T085 Cohort B source manifest finalization requires the "
+            "merged pool SHA-256 and manifest output"
+        )
     if args.lightspeed_t085_cohort_c_source_generation is not None:
         source_required = (
             args.t085_c_source_manifest_output,

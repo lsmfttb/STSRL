@@ -67,6 +67,33 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run the complete repository-owned T085 paired evaluation.",
     )
     input_group.add_argument(
+        "--lightspeed-t085-cohort-b-source-generation",
+        type=Path,
+        metavar="POOL_JSONL",
+        help=(
+            "Run one explicit 16-worker Cohort-B assisted source shard and "
+            "write its current-schema pool to POOL_JSONL."
+        ),
+    )
+    input_group.add_argument(
+        "--lightspeed-t085-cohort-b-source-merge",
+        type=Path,
+        metavar="MERGED_POOL_JSONL",
+        help=(
+            "Merge exactly 16 verified Cohort-B assisted source shards into "
+            "one complete 1,024-run pool."
+        ),
+    )
+    input_group.add_argument(
+        "--lightspeed-t085-cohort-b-source-manifest",
+        type=Path,
+        metavar="MERGED_POOL_JSONL",
+        help=(
+            "Finalize a verified merged Cohort-B assisted pool into the "
+            "T085 source-generation manifest."
+        ),
+    )
+    input_group.add_argument(
         "--lightspeed-t085-cohort-c-source-generation",
         type=Path,
         metavar="POOL_JSONL",
@@ -1125,6 +1152,30 @@ def build_parser() -> argparse.ArgumentParser:
         "--t085-c-source-pool-sha256",
         help="Exact SHA-256 for a merged Cohort-C natural source pool.",
     )
+    parser.add_argument(
+        "--t085-b-source-manifest-output",
+        type=Path,
+        help=(
+            "Write the Cohort-B source shard manifest or finalized source "
+            "generation manifest."
+        ),
+    )
+    parser.add_argument(
+        "--t085-b-source-pool-sha256",
+        help="Exact SHA-256 for a merged Cohort-B assisted source pool.",
+    )
+    for option, help_text in (
+        (
+            "--t085-b-source-shard-index",
+            "Zero-based Cohort-B source shard index (0-15).",
+        ),
+        ("--t085-b-source-shard-count", "Cohort-B source shard count; must be 16."),
+        (
+            "--t085-b-source-worker-count",
+            "Effective Cohort-B source worker count; must be 16.",
+        ),
+    ):
+        parser.add_argument(option, type=int, help=help_text)
     for option, help_text in (
         (
             "--t085-c-source-shard-index",
@@ -1165,6 +1216,28 @@ def build_parser() -> argparse.ArgumentParser:
         choices=("natural_pool", "fixed_cohort"),
         default="natural_pool",
         help="Verified schema of the Cohort-C full source artifact.",
+    )
+    parser.add_argument(
+        "--t085-b-source-shard",
+        type=Path,
+        action="append",
+        default=[],
+        metavar="POOL_JSONL",
+        help=(
+            "One T085 Cohort-B assisted source shard for "
+            "--lightspeed-t085-cohort-b-source-merge. Repeat 16 times."
+        ),
+    )
+    parser.add_argument(
+        "--t085-b-source-shard-manifest",
+        type=Path,
+        action="append",
+        default=[],
+        metavar="MANIFEST_JSON",
+        help=(
+            "The manifest paired with one T085 Cohort-B source shard. "
+            "Repeat 16 times in the same order as --t085-b-source-shard."
+        ),
     )
     for option, help_text in (
         ("--t085-shard-index", "Zero-based T085 evaluation shard index (0-15)."),
