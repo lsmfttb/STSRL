@@ -67,4 +67,3 @@ pool, manifest, restore/parity, outcome, retention, and scientific
 classification gates are independently verified. The final accepted result
 must be recorded in `docs/current_status.md` and the T085 artifact/retention
 manifests after those gates complete.
-
