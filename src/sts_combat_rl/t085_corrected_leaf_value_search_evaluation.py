@@ -227,12 +227,53 @@ class T085SourceRunRecord:
 
     source_run_seed: int
     source_run_identity: str
-    complete_source_identity: str
+    complete_source_identity: str | None
     source_valid: bool = True
     failure_reason: str | None = None
 
+    def __post_init__(self) -> None:
+        if isinstance(self.source_run_seed, bool) or not isinstance(
+            self.source_run_seed, int
+        ):
+            raise ValueError("source_run_seed must be an integer")
+        if (
+            not isinstance(self.source_run_identity, str)
+            or not self.source_run_identity
+        ):
+            raise ValueError("source_run_identity must be a non-empty string")
+        if not isinstance(self.source_valid, bool):
+            raise ValueError("source_valid must be a boolean")
+        if self.source_valid:
+            if (
+                not isinstance(self.complete_source_identity, str)
+                or not self.complete_source_identity
+            ):
+                raise ValueError("valid source runs require a complete_source_identity")
+            if self.failure_reason is not None:
+                raise ValueError("valid source runs cannot have a failure_reason")
+        else:
+            if self.complete_source_identity is not None:
+                raise ValueError(
+                    "invalid source runs cannot have a complete_source_identity"
+                )
+            if not isinstance(self.failure_reason, str) or not self.failure_reason:
+                raise ValueError(
+                    "invalid source runs require a non-empty failure_reason"
+                )
+
     @classmethod
     def from_mapping(cls, value: Mapping[str, object]) -> T085SourceRunRecord:
+        source_valid = value.get("source_valid", True)
+        if not isinstance(source_valid, bool):
+            raise ValueError("source_valid must be a boolean")
+        complete_source_identity = value.get("complete_source_identity")
+        if complete_source_identity is not None and not isinstance(
+            complete_source_identity, str
+        ):
+            raise ValueError("complete_source_identity must be a string or null")
+        failure_reason = value.get("failure_reason")
+        if failure_reason is not None and not isinstance(failure_reason, str):
+            raise ValueError("failure_reason must be a string or null")
         return cls(
             source_run_seed=_required_int(
                 value.get("source_run_seed"), "source_run_seed"
@@ -240,15 +281,9 @@ class T085SourceRunRecord:
             source_run_identity=_required_string(
                 value.get("source_run_identity"), "source_run_identity"
             ),
-            complete_source_identity=_required_string(
-                value.get("complete_source_identity"), "complete_source_identity"
-            ),
-            source_valid=value.get("source_valid") is True,
-            failure_reason=(
-                str(value["failure_reason"])
-                if value.get("failure_reason") is not None
-                else None
-            ),
+            complete_source_identity=complete_source_identity,
+            source_valid=source_valid,
+            failure_reason=failure_reason,
         )
 
 
@@ -602,6 +637,8 @@ def _validate_source_domain(
     expected_seeds: set[int],
     expected_count: int,
     label: str,
+    *,
+    allow_invalid: bool = False,
 ) -> dict[str, object]:
     if len(source_runs) != expected_count:
         raise T085EvaluationIntegrityError(
@@ -610,15 +647,38 @@ def _validate_source_domain(
     seeds = [run.source_run_seed for run in source_runs]
     if set(seeds) != expected_seeds or len(set(seeds)) != len(seeds):
         raise T085EvaluationIntegrityError(f"{label} source seed domain is invalid")
-    identities = [run.complete_source_identity for run in source_runs]
+    source_run_identities = [run.source_run_identity for run in source_runs]
+    if len(set(source_run_identities)) != len(source_run_identities):
+        raise T085EvaluationIntegrityError(
+            f"{label} contains duplicate source_run_identity values"
+        )
+    bad = [run for run in source_runs if not run.source_valid]
+    if bad and not allow_invalid:
+        raise T085EvaluationIntegrityError(
+            f"{label} source run validity gate failed for {len(bad)} runs"
+        )
+    identities = [
+        run.complete_source_identity for run in source_runs if run.source_valid
+    ]
+    if any(not isinstance(identity, str) or not identity for identity in identities):
+        raise T085EvaluationIntegrityError(
+            f"{label} contains a valid source run without complete_source_identity"
+        )
     if len(set(identities)) != len(identities):
         raise T085EvaluationIntegrityError(
             f"{label} contains duplicate complete_source_identity values"
         )
-    bad = [run for run in source_runs if not run.source_valid]
-    if bad:
+    if any(
+        not run.source_valid
+        and (
+            run.complete_source_identity is not None
+            or not isinstance(run.failure_reason, str)
+            or not run.failure_reason
+        )
+        for run in source_runs
+    ):
         raise T085EvaluationIntegrityError(
-            f"{label} source run validity gate failed for {len(bad)} runs"
+            f"{label} invalid source run inventory is malformed"
         )
     return {
         "run_count": len(source_runs),
@@ -643,6 +703,8 @@ def _eligible_battle_starts(
             raise T085EvaluationIntegrityError(
                 f"{label} battle start is not bound to the frozen source run"
             )
+        if not source.source_valid or source.failure_reason is not None:
+            continue
         if source.complete_source_identity != record.complete_source_identity:
             raise T085EvaluationIntegrityError(
                 f"{label} complete source identity does not match source manifest"
@@ -751,7 +813,11 @@ def audit_cohort_b_source_overlap(
         raise T085EvaluationIntegrityError(
             "Cohort B overlap audit source run identities are not unique"
         )
-    b_identities = [record.complete_source_identity for record in source_records]
+    b_identities = [
+        record.complete_source_identity
+        for record in source_records
+        if record.source_valid
+    ]
     if len(set(b_identities)) != len(b_identities):
         raise T085EvaluationIntegrityError(
             "Cohort B complete_source_identity values are not unique"
@@ -777,6 +843,114 @@ def audit_cohort_b_source_overlap(
         "overlap_t052_count": len(overlap_t052),
         "zero_overlap": True,
     }
+
+
+def _validate_t085_manifest_source_run_inventory(
+    manifest: Mapping[str, object],
+    *,
+    cohort: str,
+    expected_seeds: Sequence[int],
+    source_run_ids: Sequence[object],
+    complete_source_ids: Sequence[object],
+) -> list[dict[str, object]]:
+    """Validate per-run validity without inventing invalid identities."""
+
+    expected_count = len(expected_seeds)
+    raw_inventory = manifest.get("source_run_inventory")
+    if raw_inventory is None:
+        if any(
+            not isinstance(value, str) or not value for value in complete_source_ids
+        ):
+            raise T085EvaluationIntegrityError(
+                f"Cohort {cohort} invalid runs require source_run_inventory"
+            )
+        return [
+            {
+                "source_run_seed": seed,
+                "source_run_identity": source_run_id,
+                "complete_source_identity": complete_source_id,
+                "source_valid": True,
+                "failure_reason": None,
+            }
+            for seed, source_run_id, complete_source_id in zip(
+                expected_seeds,
+                source_run_ids,
+                complete_source_ids,
+                strict=True,
+            )
+        ]
+    if not isinstance(raw_inventory, list) or len(raw_inventory) != expected_count:
+        raise T085EvaluationIntegrityError(
+            f"Cohort {cohort} source_run_inventory must contain the complete pool"
+        )
+    normalized: list[dict[str, object]] = []
+    valid_complete_ids: list[str] = []
+    for index, (seed, source_run_id, complete_source_id, raw_entry) in enumerate(
+        zip(
+            expected_seeds,
+            source_run_ids,
+            complete_source_ids,
+            raw_inventory,
+            strict=True,
+        )
+    ):
+        if not isinstance(raw_entry, Mapping):
+            raise T085EvaluationIntegrityError(
+                f"Cohort {cohort} source_run_inventory entry {index} is malformed"
+            )
+        if (
+            raw_entry.get("source_run_seed") != seed
+            or raw_entry.get("source_run_identity") != source_run_id
+        ):
+            raise T085EvaluationIntegrityError(
+                f"Cohort {cohort} source_run_inventory entry {index} is not ordered"
+            )
+        source_valid = raw_entry.get("source_valid")
+        failure_reason = raw_entry.get("failure_reason")
+        complete_identity = raw_entry.get("complete_source_identity")
+        if not isinstance(source_valid, bool):
+            raise T085EvaluationIntegrityError(
+                f"Cohort {cohort} source_run_inventory entry {index} validity is invalid"
+            )
+        if source_valid:
+            if (
+                not isinstance(complete_identity, str)
+                or not complete_identity
+                or complete_source_id != complete_identity
+                or failure_reason is not None
+            ):
+                raise T085EvaluationIntegrityError(
+                    f"Cohort {cohort} valid source_run_inventory entry {index} is invalid"
+                )
+            valid_complete_ids.append(complete_identity)
+        else:
+            if cohort != "B":
+                raise T085EvaluationIntegrityError(
+                    f"Cohort {cohort} cannot contain invalid source runs"
+                )
+            if (
+                complete_identity is not None
+                or complete_source_id is not None
+                or not isinstance(failure_reason, str)
+                or not failure_reason
+            ):
+                raise T085EvaluationIntegrityError(
+                    f"Cohort B invalid source_run_inventory entry {index} is invalid"
+                )
+        normalized.append(
+            {
+                "source_run_seed": seed,
+                "source_run_identity": source_run_id,
+                "complete_source_identity": complete_identity,
+                "source_valid": source_valid,
+                "failure_reason": failure_reason,
+            }
+        )
+    if len(set(valid_complete_ids)) != len(valid_complete_ids):
+        raise T085EvaluationIntegrityError(
+            f"Cohort {cohort} source_run_inventory contains duplicate identities"
+        )
+    return normalized
 
 
 def validate_t085_source_generation_contract(
@@ -845,26 +1019,37 @@ def validate_t085_source_generation_contract(
         raise T085EvaluationIntegrityError(
             f"Cohort {cohort} source_run_seed_inventory does not match contract"
         )
-    for key in (
-        "source_run_identity_inventory",
-        "complete_source_identity_inventory",
+    source_run_identity_inventory = manifest.get("source_run_identity_inventory")
+    complete_source_identity_inventory = manifest.get(
+        "complete_source_identity_inventory"
+    )
+    if (
+        not isinstance(source_run_identity_inventory, list)
+        or len(source_run_identity_inventory) != expected["source_run_count"]
+        or any(
+            not isinstance(value, str) or not value
+            for value in source_run_identity_inventory
+        )
+        or len(set(source_run_identity_inventory)) != len(source_run_identity_inventory)
     ):
-        inventory = manifest.get(key)
-        if (
-            not isinstance(inventory, list)
-            or len(inventory) != expected["source_run_count"]
-        ):
-            raise T085EvaluationIntegrityError(
-                f"Cohort {cohort} {key} must contain the complete source pool"
-            )
-        if any(not isinstance(value, str) or not value for value in inventory):
-            raise T085EvaluationIntegrityError(
-                f"Cohort {cohort} {key} contains an invalid identity"
-            )
-        if len(set(inventory)) != len(inventory):
-            raise T085EvaluationIntegrityError(
-                f"Cohort {cohort} {key} contains duplicate identities"
-            )
+        raise T085EvaluationIntegrityError(
+            f"Cohort {cohort} source_run_identity_inventory is invalid"
+        )
+    if (
+        not isinstance(complete_source_identity_inventory, list)
+        or len(complete_source_identity_inventory) != expected["source_run_count"]
+    ):
+        raise T085EvaluationIntegrityError(
+            f"Cohort {cohort} complete_source_identity_inventory must contain "
+            "the complete source pool"
+        )
+    source_run_inventory = _validate_t085_manifest_source_run_inventory(
+        manifest,
+        cohort=cohort,
+        expected_seeds=expected["source_run_seeds"],
+        source_run_ids=source_run_identity_inventory,
+        complete_source_ids=complete_source_identity_inventory,
+    )
     source_manifest_path = _required_string(
         manifest.get("source_manifest_path"),
         f"Cohort {cohort} source_manifest_path",
@@ -906,6 +1091,7 @@ def validate_t085_source_generation_contract(
         "source_inventory": {
             key: list(manifest[key]) for key in T085_SOURCE_INVENTORY_KEYS
         },
+        "source_run_inventory": source_run_inventory,
         "frozen_fields": dict(required_common) | dict(expected),
     }
 
@@ -960,6 +1146,11 @@ def _verify_t085_source_manifest_artifact(
         "byte_count": source.get("byte_count"),
         "frozen": True,
         **{key: list(document[key]) for key in T085_SOURCE_INVENTORY_KEYS},
+        **(
+            {"source_run_inventory": list(document["source_run_inventory"])}
+            if "source_run_inventory" in document
+            else {}
+        ),
     }
 
 
@@ -985,6 +1176,26 @@ def _validate_t085_source_inventory(
             raise T085EvaluationIntegrityError(
                 f"Cohort {cohort} source records do not match frozen {key}"
             )
+    if "source_run_inventory" in source_manifest:
+        expected_inventory = [
+            {
+                "source_run_seed": run.source_run_seed,
+                "source_run_identity": run.source_run_identity,
+                "complete_source_identity": run.complete_source_identity,
+                "source_valid": run.source_valid,
+                "failure_reason": run.failure_reason,
+            }
+            for run in source_runs
+        ]
+        if source_manifest.get("source_run_inventory") != expected_inventory:
+            raise T085EvaluationIntegrityError(
+                f"Cohort {cohort} source records do not match frozen "
+                "source_run_inventory"
+            )
+    elif any(not run.source_valid for run in source_runs):
+        raise T085EvaluationIntegrityError(
+            f"Cohort {cohort} invalid source runs require source_run_inventory"
+        )
 
 
 def _selection_identity_sha256(
@@ -1079,6 +1290,16 @@ def build_t085_cohort_selection(
             "source_run_identity_inventory": [run.source_run_identity for run in runs],
             "complete_source_identity_inventory": [
                 run.complete_source_identity for run in runs
+            ],
+            "source_run_inventory": [
+                {
+                    "source_run_seed": run.source_run_seed,
+                    "source_run_identity": run.source_run_identity,
+                    "complete_source_identity": run.complete_source_identity,
+                    "source_valid": run.source_valid,
+                    "failure_reason": run.failure_reason,
+                }
+                for run in runs
             ],
             "source_generation_valid": True,
             "source_manifest": source_reference,
@@ -1241,6 +1462,8 @@ def build_t085_evaluation_selection_evidence(
         "restore_parity": b_search["restore_parity"],
         "restore_parity_passed": b_search["restore_parity_passed"],
     }
+    if "source_run_inventory" in b_evidence:
+        search_evidence["source_run_inventory"] = b_evidence["source_run_inventory"]
     combined = {
         "A": a_evidence,
         "B": b_evidence,
@@ -1272,6 +1495,7 @@ def select_cohort_b(
         _seed_domain(T085_COHORT_B_SEED_START, T085_COHORT_B_SEED_END),
         T085_COHORT_B_RUN_COUNT,
         "Cohort B",
+        allow_invalid=True,
     )
     eligible = _eligible_battle_starts(runs, starts, label="Cohort B")
     by_act: dict[str, list[T085BattleStartRecord]] = {"act1": [], "act2_plus": []}
@@ -1286,7 +1510,9 @@ def select_cohort_b(
         )
         if len(values) < 96:
             raise T085EvaluationIntegrityError(
-                f"Cohort B {cell} cannot satisfy the fixed 96-record quota"
+                "VALUE_REPAIR_EVAL_SUPPORT_INSUFFICIENT: "
+                f"Cohort B {cell} cannot satisfy the fixed 96-record quota "
+                "after invalid source runs were filtered"
             )
     selected = tuple(by_act["act1"][:96] + by_act["act2_plus"][:96])
     if len(selected) != T085_COHORT_B_SELECTED_COUNT:
@@ -2215,6 +2441,13 @@ def validate_t085_evaluation_selection_evidence(
                         f"selection evidence {cohort} {key} does not match "
                         "the complete frozen source inventory"
                     )
+            if "source_run_inventory" in artifact and evidence.get(
+                "source_run_inventory"
+            ) != artifact.get("source_run_inventory"):
+                raise T085EvaluationIntegrityError(
+                    f"selection evidence {cohort} source_run_inventory does not "
+                    "match the complete frozen source inventory"
+                )
             seeds = evidence["source_run_seed_inventory"]
             run_ids = evidence["source_run_identity_inventory"]
             complete_ids = evidence["complete_source_identity_inventory"]

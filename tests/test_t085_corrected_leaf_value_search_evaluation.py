@@ -116,6 +116,17 @@ def _source_manifest(tmp_path, *, cohort: str) -> dict[str, object]:
             ],
         }
     )
+    if cohort == "B":
+        common["source_run_inventory"] = [
+            {
+                "source_run_seed": seed,
+                "source_run_identity": f"{prefix}-run-{seed}",
+                "complete_source_identity": f"{prefix}-source-{seed}",
+                "source_valid": True,
+                "failure_reason": None,
+            }
+            for seed in common["source_run_seeds"]
+        ]
     target = T085_ARTIFACT_ROOT / f".pytest-t085-source-{cohort}-{tmp_path.name}.json"
     write_t085_json_artifact(
         target,
@@ -262,6 +273,106 @@ def test_cohort_selection_fails_closed_without_fixed_quota() -> None:
         select_cohort_b(_b_sources(), starts)
     with pytest.raises(ValueError, match="accepted T052"):
         validate_cohort_a([], artifact_sha256="0" * 64)
+
+
+def test_cohort_b_bounded_truncation_is_invalid_inventory_not_selection_failure() -> (
+    None
+):
+    sources = _b_sources()
+    sources[0] = T085SourceRunRecord(
+        source_run_seed=851001,
+        source_run_identity="b-run-851001",
+        complete_source_identity=None,
+        source_valid=False,
+        failure_reason="bounded_run_truncated",
+    )
+    starts = [
+        *_b_starts(),
+        T085BattleStartRecord(
+            source_run_seed=851193,
+            source_run_identity="b-run-851193",
+            complete_source_identity="b-source-851193",
+            battle_identity="b-battle-851193",
+            act=1,
+            room_type="MONSTER",
+        ),
+    ]
+
+    selected, summary = select_cohort_b(sources, starts)
+
+    assert len(selected) == 192
+    assert summary["eligibility_count"] == 192
+    assert all(record.source_run_seed != 851001 for record in selected)
+
+
+def test_cohort_b_bounded_truncation_has_no_backfill_when_quota_is_short() -> None:
+    sources = _b_sources()
+    sources[0] = T085SourceRunRecord(
+        source_run_seed=851001,
+        source_run_identity="b-run-851001",
+        complete_source_identity=None,
+        source_valid=False,
+        failure_reason="bounded_run_truncated",
+    )
+    starts = _b_starts()
+
+    with pytest.raises(ValueError, match="VALUE_REPAIR_EVAL_SUPPORT_INSUFFICIENT"):
+        select_cohort_b(sources, starts)
+    assert len(starts) == 192
+    assert {record.source_run_seed for record in starts} == set(range(851001, 851193))
+
+
+def test_a_and_c_source_validity_gates_remain_strict() -> None:
+    invalid_c = list(_c_sources())
+    invalid_c[0] = T085SourceRunRecord(
+        source_run_seed=850001,
+        source_run_identity="c-run-850001",
+        complete_source_identity=None,
+        source_valid=False,
+        failure_reason="bounded_run_truncated",
+    )
+    with pytest.raises(ValueError, match="validity gate"):
+        select_cohort_c(invalid_c, _c_starts())
+    with pytest.raises(ValueError, match="validity gate"):
+        t085_evaluation._validate_source_domain(  # noqa: SLF001
+            [
+                T085SourceRunRecord(
+                    source_run_seed=1,
+                    source_run_identity="a-run-1",
+                    complete_source_identity=None,
+                    source_valid=False,
+                    failure_reason="bounded_run_truncated",
+                )
+            ],
+            {1},
+            1,
+            "Cohort A",
+        )
+
+
+def test_invalid_source_identity_and_manifest_status_fail_closed(tmp_path) -> None:
+    with pytest.raises(ValueError, match="valid source runs"):
+        T085SourceRunRecord(
+            source_run_seed=1,
+            source_run_identity="run-1",
+            complete_source_identity=None,
+        )
+    with pytest.raises(ValueError, match="failure_reason"):
+        T085SourceRunRecord(
+            source_run_seed=1,
+            source_run_identity="run-1",
+            complete_source_identity=None,
+            source_valid=False,
+        )
+    manifest = _source_manifest(tmp_path, cohort="B")
+    try:
+        manifest["source_run_inventory"][0]["complete_source_identity"] = (
+            "forged-invalid-identity"
+        )
+        with pytest.raises(ValueError, match="source_run_inventory"):
+            validate_t085_source_generation_contract(manifest, cohort="B")
+    finally:
+        Path(manifest["source_manifest_path"]).unlink(missing_ok=True)
 
 
 def test_cohort_a_is_bound_to_the_real_t052_file_and_record_ids() -> None:

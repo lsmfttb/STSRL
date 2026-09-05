@@ -76,3 +76,18 @@ pool, manifest, restore/parity, outcome, retention, and scientific
 classification gates are independently verified. The final accepted result
 must be recorded in `docs/current_status.md` and the T085 artifact/retention
 manifests after those gates complete.
+
+## Follow-up bounded-run boundary
+
+The first formal Cohort-B shard also exposed a non-OOM boundary: a normally
+bounded run can end with `terminal=false` while its ordered source summary and
+run identity remain structurally usable. The earlier validator treated every
+such truncation as a source-pool failure. The follow-up repair retains the
+complete 1,024-run inventory, records the run as `source_valid=false` with
+`failure_reason=bounded_run_truncated`, and leaves
+`complete_source_identity` null rather than inventing a checkpoint identity.
+B selection filters that run; malformed source structure, execution problems,
+provenance failures, and missing or duplicate required identities remain
+fail-closed. This makes bounded truncation a manifest-level invalid run, not a
+source-pool structural failure. Outputs from the old code that was still
+running at that observation are diagnostic only and are not accepted results.

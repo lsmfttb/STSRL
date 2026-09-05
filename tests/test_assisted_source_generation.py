@@ -207,6 +207,34 @@ def test_assisted_pool_records_hp_potion_provenance_and_restores() -> None:
     assert tuple(restored.observation) == loaded.pool.records[0].snapshot_observation
 
 
+def test_assisted_pool_round_trips_bounded_truncation_without_source_problem() -> None:
+    artifact, coverage = collect_assisted_battle_start_pool(
+        _AssistedAdapter(),
+        _controller(),
+        seeds=[7],
+        max_steps=1,
+        assistance_level=ASSIST_LEVEL_HP50,
+        policy_seed=42,
+    )
+
+    assert coverage.truncated_run_count == 1
+    assert artifact.pool.source_run_count == 1
+    assert artifact.pool.terminal_run_count == 0
+    assert artifact.pool.problems == []
+    summary = artifact.pool.source_run_summaries[0]
+    assert summary.terminal is False
+    assert summary.problem_count == 0
+    assert summary.problems == ()
+
+    stream = StringIO()
+    dump_assisted_source_pool_jsonl(artifact, stream)
+    loaded = load_assisted_source_pool_jsonl(StringIO(stream.getvalue()))
+
+    assert loaded.pool.source_run_summaries[0].terminal is False
+    assert loaded.pool.truncated_run_count == 1
+    assert loaded.pool.records == []
+
+
 def test_assisted_pool_preserves_explicit_source_run_index_offset() -> None:
     artifact, _ = collect_assisted_battle_start_pool(
         _AssistedAdapter(),

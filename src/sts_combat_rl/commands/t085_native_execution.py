@@ -156,6 +156,7 @@ T085_C_SOURCE_SHARD_MANIFEST_SCHEMA_ID = "t085-cohort-c-source-shard-manifest-v1
 T085_C_SOURCE_POOL_SCHEMA_ID = "natural-battle-start-pool-v4-jsonl"
 T085_B_SOURCE_SHARD_MANIFEST_SCHEMA_ID = "t085-cohort-b-source-shard-manifest-v1"
 T085_B_SOURCE_POOL_SCHEMA_ID = ASSISTED_SOURCE_POOL_SCHEMA_ID
+T085_BOUNDED_RUN_TRUNCATION_FAILURE_REASON = "bounded_run_truncated"
 T085_NATIVE_SEARCH_BACKENDS = ("battle_search", "battle_search_v2")
 T085NativeSearchBackend = Literal["battle_search", "battle_search_v2"]
 
@@ -2377,14 +2378,30 @@ def _validate_t085_assisted_controller_provenance(
     if (
         merge.get("merge_version") != "assisted-source-pool-shard-merge-v1"
         or merge.get("shard_count") != 16
-        or merge.get("source_run_count") != expected_source_run_count
-        or merge.get("terminal_run_count") != expected_source_run_count
-        or merge.get("truncated_run_count") != 0
         or not isinstance(merge.get("shards"), list)
         or len(merge["shards"]) != 16
     ):
         raise T085NativeExecutionError(
             "T085 Cohort B merged source controller merge provenance is incomplete"
+        )
+    merge_counts = {
+        key: merge.get(key)
+        for key in (
+            "source_run_count",
+            "terminal_run_count",
+            "truncated_run_count",
+        )
+    }
+    if any(
+        isinstance(value, bool) or not isinstance(value, int) or value < 0
+        for value in merge_counts.values()
+    ) or (
+        merge_counts["source_run_count"] != expected_source_run_count
+        or merge_counts["terminal_run_count"] + merge_counts["truncated_run_count"]
+        != expected_source_run_count
+    ):
+        raise T085NativeExecutionError(
+            "T085 Cohort B merged source controller run counts are invalid"
         )
 
 
@@ -2409,6 +2426,8 @@ def _validate_t085_assisted_merged_source_shards(
         )
     normalized_shards: list[dict[str, object]] = []
     expected_record_count = 0
+    terminal_run_count = 0
+    truncated_run_count = 0
     for shard_index, raw_shard in enumerate(raw_shards):
         if not isinstance(raw_shard, Mapping):
             raise T085NativeExecutionError(
@@ -2423,8 +2442,6 @@ def _validate_t085_assisted_merged_source_shards(
             "format_version": ASSISTED_SOURCE_POOL_FORMAT_VERSION,
             "assistance_level": "assist_hp75_potion",
             "source_run_count": 64,
-            "terminal_run_count": 64,
-            "truncated_run_count": 0,
             "source_seed_range": {
                 "min": shard_start,
                 "max": shard_end,
@@ -2435,6 +2452,17 @@ def _validate_t085_assisted_merged_source_shards(
             raise T085NativeExecutionError(
                 "T085 Cohort B merged source shard range/provenance is not exact"
             )
+        shard_terminal_run_count = raw_shard.get("terminal_run_count")
+        shard_truncated_run_count = raw_shard.get("truncated_run_count")
+        if any(
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+            for value in (shard_terminal_run_count, shard_truncated_run_count)
+        ) or (shard_terminal_run_count + shard_truncated_run_count != 64):
+            raise T085NativeExecutionError(
+                "T085 Cohort B merged source shard run counts are invalid"
+            )
+        terminal_run_count += shard_terminal_run_count
+        truncated_run_count += shard_truncated_run_count
         path_value = raw_shard.get("path")
         sha_value = raw_shard.get("sha256")
         if not isinstance(path_value, str) or not Path(path_value).is_absolute():
@@ -2470,6 +2498,13 @@ def _validate_t085_assisted_merged_source_shards(
     if expected_record_count != len(artifact.records):
         raise T085NativeExecutionError(
             "T085 Cohort B merged source shard records do not cover the pool"
+        )
+    if (
+        terminal_run_count != artifact.pool.terminal_run_count
+        or truncated_run_count != artifact.pool.truncated_run_count
+    ):
+        raise T085NativeExecutionError(
+            "T085 Cohort B merged source shard counts do not cover the pool"
         )
     provenance = artifact.pool.source_controller_provenance
     config = provenance.get("config") if isinstance(provenance, Mapping) else None
@@ -2638,12 +2673,16 @@ def _validate_t085_b_source_pool(
         raise T085NativeExecutionError(
             "T085 Cohort B source pool run count does not match its shard"
         )
+    run_counts = (pool.terminal_run_count, pool.truncated_run_count)
     if (
-        pool.terminal_run_count != pool.source_run_count
-        or pool.truncated_run_count != 0
+        any(
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+            for value in run_counts
+        )
+        or sum(run_counts) != pool.source_run_count
     ):
         raise T085NativeExecutionError(
-            "T085 Cohort B source pool must contain only complete, non-truncated runs"
+            "T085 Cohort B source pool terminal/truncated run counts are invalid"
         )
     if pool.problems:
         raise T085NativeExecutionError(
@@ -2671,11 +2710,21 @@ def _validate_t085_b_source_pool(
             "T085 Cohort B source pool source-run inventory is not exact"
         )
     if any(
-        not summary.terminal or summary.problem_count != 0 or summary.problems
+        not isinstance(summary.terminal, bool)
+        or isinstance(summary.problem_count, bool)
+        or not isinstance(summary.problem_count, int)
+        or summary.problem_count < 0
+        or summary.problem_count != len(summary.problems)
+        or summary.problems
         for summary in summaries
     ):
         raise T085NativeExecutionError(
-            "T085 Cohort B source pool source-run completeness is not proven"
+            "T085 Cohort B source pool source-run execution problems are present"
+        )
+    terminal_summary_count = sum(1 for summary in summaries if summary.terminal)
+    if terminal_summary_count != pool.terminal_run_count:
+        raise T085NativeExecutionError(
+            "T085 Cohort B source pool summary terminal count is not bound"
         )
     summary_by_run = dict(zip(summary_ids, summaries, strict=True))
     expected_battle_provenance = controller.battle.provenance.to_dict()
@@ -2842,6 +2891,99 @@ def _t085_source_run_representatives(
     return selected
 
 
+def _t085_b_source_run_representatives(
+    records: Sequence[BattleStartCheckpointRecord],
+    summaries: Sequence[object],
+) -> list[BattleStartCheckpointRecord | None]:
+    """Choose valid-run representatives and leave truncated runs unidentifiable."""
+
+    by_run: dict[str, list[BattleStartCheckpointRecord]] = {}
+    for record in records:
+        by_run.setdefault(record.source_run_id, []).append(record)
+    selected: list[BattleStartCheckpointRecord | None] = []
+    for summary in summaries:
+        source_run_id = getattr(summary, "source_run_id", None)
+        if not isinstance(source_run_id, str):
+            raise T085NativeExecutionError(
+                "T085 Cohort B source manifest has an invalid source run identity"
+            )
+        terminal = getattr(summary, "terminal", None)
+        if terminal is False:
+            selected.append(None)
+            continue
+        if terminal is not True:
+            raise T085NativeExecutionError(
+                "T085 Cohort B source manifest has an invalid run terminal flag"
+            )
+        candidates = by_run.get(source_run_id)
+        if not candidates:
+            raise T085NativeExecutionError(
+                "T085 Cohort B source manifest cannot bind a valid run "
+                "without a battle-start record"
+            )
+        selected.append(min(candidates, key=_t085_cohort_c_selection_rank))
+    complete_ids = [
+        record.source_checkpoint_id for record in selected if record is not None
+    ]
+    if len(complete_ids) != len(set(complete_ids)):
+        raise T085NativeExecutionError(
+            "T085 Cohort B complete source identities are not unique"
+        )
+    return selected
+
+
+def _t085_b_source_run_inventory(
+    summaries: Sequence[object],
+    representatives: Sequence[BattleStartCheckpointRecord | None],
+) -> list[dict[str, object]]:
+    """Serialize terminal status while retaining every ordered source run."""
+
+    if len(summaries) != len(representatives):
+        raise T085NativeExecutionError(
+            "T085 Cohort B source summary/representative counts do not match"
+        )
+    inventory: list[dict[str, object]] = []
+    for summary, representative in zip(summaries, representatives, strict=True):
+        terminal = getattr(summary, "terminal", None)
+        source_run_id = getattr(summary, "source_run_id", None)
+        source_seed = getattr(summary, "source_seed", None)
+        if (
+            not isinstance(source_run_id, str)
+            or not isinstance(source_seed, int)
+            or isinstance(source_seed, bool)
+            or not isinstance(terminal, bool)
+        ):
+            raise T085NativeExecutionError(
+                "T085 Cohort B source run inventory contains malformed summary data"
+            )
+        if terminal:
+            if representative is None:
+                raise T085NativeExecutionError(
+                    "T085 Cohort B valid source run lacks complete identity"
+                )
+            complete_source_identity: str | None = representative.source_checkpoint_id
+            source_valid = True
+            failure_reason: str | None = None
+        else:
+            if representative is not None:
+                raise T085NativeExecutionError(
+                    "T085 Cohort B invalid source run has a complete identity"
+                )
+            complete_source_identity = None
+            source_valid = False
+            failure_reason = T085_BOUNDED_RUN_TRUNCATION_FAILURE_REASON
+        inventory.append(
+            {
+                "source_run_seed": source_seed,
+                "source_run_identity": source_run_id,
+                "complete_source_identity": complete_source_identity,
+                "source_valid": source_valid,
+                "failure_reason": failure_reason,
+            }
+        )
+    return inventory
+
+
 def _t085_validate_b_shard_manifest(
     manifest_path: Path,
     *,
@@ -2975,16 +3117,30 @@ def _t085_validate_b_shard_manifest(
         raise T085NativeExecutionError(
             "T085 Cohort B source shard manifest counts are not bound to its pool"
         )
-    representatives = _t085_source_run_representatives(
+    representatives = _t085_b_source_run_representatives(
         artifact.records,
         artifact.pool.source_run_summaries,
-        cohort="B",
     )
     if document.get("complete_source_identity_inventory") != [
-        record.source_checkpoint_id for record in representatives
+        record.source_checkpoint_id if record is not None else None
+        for record in representatives
     ]:
         raise T085NativeExecutionError(
             "T085 Cohort B source shard complete-source inventory is not exact"
+        )
+    expected_source_run_inventory = _t085_b_source_run_inventory(
+        artifact.pool.source_run_summaries,
+        representatives,
+    )
+    document_source_run_inventory = document.get("source_run_inventory")
+    if document_source_run_inventory is None:
+        if any(not entry["source_valid"] for entry in expected_source_run_inventory):
+            raise T085NativeExecutionError(
+                "T085 Cohort B invalid source runs require source_run_inventory"
+            )
+    elif document_source_run_inventory != expected_source_run_inventory:
+        raise T085NativeExecutionError(
+            "T085 Cohort B source shard run validity inventory is not exact"
         )
     if document.get("source_run_identity_inventory") != [
         summary.source_run_id for summary in artifact.pool.source_run_summaries
@@ -3057,10 +3213,9 @@ def _finalize_t085_cohort_b_source_shard_from_chunks(
             dump_assisted_source_pool_jsonl(artifact, stream)
         os.replace(merged_temporary_path, pool_path)
 
-        representatives = _t085_source_run_representatives(
+        representatives = _t085_b_source_run_representatives(
             artifact.records,
             artifact.pool.source_run_summaries,
-            cohort="B",
         )
         source_pool_reference = _t085_assisted_source_pool_reference(
             pool_path,
@@ -3083,8 +3238,13 @@ def _finalize_t085_cohort_b_source_shard_from_chunks(
                     for summary in artifact.pool.source_run_summaries
                 ],
                 "complete_source_identity_inventory": [
-                    record.source_checkpoint_id for record in representatives
+                    record.source_checkpoint_id if record is not None else None
+                    for record in representatives
                 ],
+                "source_run_inventory": _t085_b_source_run_inventory(
+                    artifact.pool.source_run_summaries,
+                    representatives,
+                ),
                 "record_count": len(artifact.records),
                 "terminal_run_count": artifact.pool.terminal_run_count,
                 "truncated_run_count": artifact.pool.truncated_run_count,
@@ -3291,8 +3451,9 @@ def merge_t085_cohort_b_source_pool_from_paths(
     )
     if (
         merged_artifact.pool.source_run_count != T085_COHORT_B_RUN_COUNT
-        or merged_artifact.pool.terminal_run_count != T085_COHORT_B_RUN_COUNT
-        or merged_artifact.pool.truncated_run_count != 0
+        or merged_artifact.pool.terminal_run_count
+        + merged_artifact.pool.truncated_run_count
+        != T085_COHORT_B_RUN_COUNT
     ):
         raise T085NativeExecutionError(
             "T085 Cohort B merged source pool is not the complete 1024-run pool"
@@ -3379,10 +3540,9 @@ def _build_t085_cohort_b_source_manifest_from_paths_unlocked(
         raise T085NativeExecutionError(
             "T085 Cohort B source manifest requires all 1024 source runs"
         )
-    representatives = _t085_source_run_representatives(
+    representatives = _t085_b_source_run_representatives(
         artifact.records,
         artifact.pool.source_run_summaries,
-        cohort="B",
     )
     pool_reference = _t085_assisted_source_pool_reference(
         resolved_pool,
@@ -3394,16 +3554,10 @@ def _build_t085_cohort_b_source_manifest_from_paths_unlocked(
         "source manifest output",
     )
     source_run_summaries = artifact.pool.source_run_summaries
-    source_run_inventory = [
-        {
-            "source_run_seed": summary.source_seed,
-            "source_run_identity": summary.source_run_id,
-            "complete_source_identity": record.source_checkpoint_id,
-            "source_valid": True,
-            "failure_reason": None,
-        }
-        for summary, record in zip(source_run_summaries, representatives, strict=True)
-    ]
+    source_run_inventory = _t085_b_source_run_inventory(
+        source_run_summaries,
+        representatives,
+    )
     manifest = {
         "schema_id": T085_SOURCE_MANIFEST_SCHEMA_ID,
         "task_id": "T085",
@@ -3435,7 +3589,8 @@ def _build_t085_cohort_b_source_manifest_from_paths_unlocked(
             summary.source_run_id for summary in source_run_summaries
         ],
         "complete_source_identity_inventory": [
-            record.source_checkpoint_id for record in representatives
+            record.source_checkpoint_id if record is not None else None
+            for record in representatives
         ],
         "source_run_inventory": source_run_inventory,
         "source_pool_artifact": pool_reference,
@@ -4683,11 +4838,54 @@ def _t085_load_frozen_source_manifest_and_map(
         len(raw_run_ids) != source_count
         or len(raw_complete_ids) != source_count
         or len(set(raw_run_ids)) != source_count
-        or len(set(raw_complete_ids)) != source_count
     ):
         raise T085NativeExecutionError(
             f"T085 Cohort {cohort} source manifest inventory count is invalid"
         )
+    if cohort == "B":
+        valid_complete_ids = [
+            value for value in raw_complete_ids if isinstance(value, str)
+        ]
+        if (
+            any(
+                value is not None and not isinstance(value, str)
+                for value in raw_complete_ids
+            )
+            or any(not value for value in valid_complete_ids)
+            or len(set(valid_complete_ids)) != len(valid_complete_ids)
+        ):
+            raise T085NativeExecutionError(
+                "T085 Cohort B source manifest complete identity inventory is invalid"
+            )
+        raw_run_inventory = manifest.get("source_run_inventory")
+        if (
+            not isinstance(raw_run_inventory, list)
+            or len(raw_run_inventory) != source_count
+        ):
+            if any(value is None for value in raw_complete_ids):
+                raise T085NativeExecutionError(
+                    "T085 Cohort B invalid source runs lack source_run_inventory"
+                )
+            run_statuses = [(True, None)] * source_count
+        else:
+            run_statuses = [
+                (entry["source_valid"], entry["failure_reason"])
+                for entry in raw_run_inventory
+                if isinstance(entry, Mapping)
+            ]
+            if len(run_statuses) != source_count:
+                raise T085NativeExecutionError(
+                    "T085 Cohort B source_run_inventory is malformed"
+                )
+    else:
+        if (
+            any(not isinstance(value, str) or not value for value in raw_complete_ids)
+            or len(set(raw_complete_ids)) != source_count
+        ):
+            raise T085NativeExecutionError(
+                f"T085 Cohort {cohort} source manifest complete identity inventory is invalid"
+            )
+        run_statuses = [(True, None)] * source_count
     canonical = resolve_t085_canonical_records(
         map_path,
         expected_sha256=map_sha256,
@@ -4701,20 +4899,33 @@ def _t085_load_frozen_source_manifest_and_map(
     )
     source_runs: list[T085SourceRunRecord] = []
     battle_starts: list[T085BattleStartRecord] = []
-    for seed, run_id, complete_id in zip(
-        expected_seeds,
-        raw_run_ids,
-        raw_complete_ids,
-        strict=True,
+    for index, (seed, run_id, complete_id) in enumerate(
+        zip(
+            expected_seeds,
+            raw_run_ids,
+            raw_complete_ids,
+            strict=True,
+        )
     ):
-        if (
-            not isinstance(run_id, str)
-            or not isinstance(complete_id, str)
-            or not run_id
-            or not complete_id
-        ):
+        source_valid, failure_reason = run_statuses[index]
+        if not isinstance(run_id, str) or not run_id:
             raise T085NativeExecutionError(
                 f"T085 Cohort {cohort} source manifest inventory contains invalid identities"
+            )
+        if not source_valid:
+            source_runs.append(
+                T085SourceRunRecord(
+                    source_run_seed=seed,
+                    source_run_identity=run_id,
+                    complete_source_identity=None,
+                    source_valid=False,
+                    failure_reason=failure_reason,
+                )
+            )
+            continue
+        if not isinstance(complete_id, str) or not complete_id:
+            raise T085NativeExecutionError(
+                f"T085 Cohort {cohort} valid source run lacks complete identity"
             )
         record = canonical.get(complete_id)
         if record is None:
@@ -4733,7 +4944,9 @@ def _t085_load_frozen_source_manifest_and_map(
             )
         )
         battle_starts.append(_t085_canonical_to_battle_start(record))
-    if len(source_runs) != source_count or len(battle_starts) != source_count:
+    if len(source_runs) != source_count or (
+        cohort == "C" and len(battle_starts) != source_count
+    ):
         raise T085NativeExecutionError(
             f"T085 Cohort {cohort} full source map does not cover all source runs"
         )

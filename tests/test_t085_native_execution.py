@@ -6,6 +6,7 @@ import json
 import multiprocessing
 import time
 from dataclasses import dataclass, replace
+from io import StringIO
 from types import SimpleNamespace
 
 import pytest
@@ -35,7 +36,17 @@ from sts_combat_rl.commands.t085_native_execution import (
     t085_scorer_callbacks,
 )
 from sts_combat_rl.sim.action_space import ActionSpaceConfig
-from sts_combat_rl.sim.battle_start_pool import BattleStartCheckpointRecord
+from sts_combat_rl.sim.assisted_source_generation import (
+    AssistedSourcePoolArtifact,
+    assistance_schedule_by_level,
+    dump_assisted_source_pool_jsonl,
+    load_assisted_source_pool_jsonl,
+)
+from sts_combat_rl.sim.battle_start_pool import (
+    BattleStartCheckpointRecord,
+    NaturalBattleStartPool,
+    SourceRunSummary,
+)
 from sts_combat_rl.sim.contract import (
     SimulatorAction,
     SimulatorSnapshot,
@@ -884,6 +895,9 @@ def test_t085_cohort_b_source_generation_writes_partial_shard_manifest(
         SimpleNamespace(
             source_seed=seed,
             source_run_id=f"seed-{seed}-run-{index}",
+            terminal=seed != plan.seed_inventory[0],
+            problem_count=0,
+            problems=(),
         )
         for index, seed in enumerate(plan.seed_inventory)
     ]
@@ -893,11 +907,12 @@ def test_t085_cohort_b_source_generation_writes_partial_shard_manifest(
             source_checkpoint_id=f"checkpoint-{summary.source_seed}",
         )
         for summary in summaries
+        if summary.terminal
     ]
     pool = SimpleNamespace(
         source_run_count=len(plan.seed_inventory),
-        terminal_run_count=len(plan.seed_inventory),
-        truncated_run_count=0,
+        terminal_run_count=len(plan.seed_inventory) - 1,
+        truncated_run_count=1,
         source_controller_provenance=controller.provenance.to_dict(),
         source_run_summaries=summaries,
         records=records,
@@ -997,8 +1012,16 @@ def test_t085_cohort_b_source_generation_writes_partial_shard_manifest(
         f"seed-{seed}-run-{index}" for index, seed in enumerate(plan.seed_inventory)
     ]
     assert manifest["complete_source_identity_inventory"] == [
-        f"checkpoint-{seed}" for seed in plan.seed_inventory
+        None,
+        *(f"checkpoint-{seed}" for seed in plan.seed_inventory[1:]),
     ]
+    assert manifest["source_run_inventory"][0] == {
+        "source_run_seed": plan.seed_inventory[0],
+        "source_run_identity": f"seed-{plan.seed_inventory[0]}-run-0",
+        "complete_source_identity": None,
+        "source_valid": False,
+        "failure_reason": "bounded_run_truncated",
+    }
     assert manifest["source_pool_artifact"]["schema_id"] == (
         t085_execution.ASSISTED_SOURCE_POOL_SCHEMA_ID
     )
@@ -1035,19 +1058,28 @@ def test_t085_cohort_b_source_finalizer_freezes_complete_pool_identity(
     )
     seeds = tuple(range(851001, 852025))
     summaries = [
-        SimpleNamespace(source_seed=seed, source_run_id=f"run-{seed}") for seed in seeds
+        SimpleNamespace(
+            source_seed=seed,
+            source_run_id=f"run-{seed}",
+            terminal=True,
+            problem_count=0,
+            problems=(),
+        )
+        for seed in seeds
     ]
+    summaries[0].terminal = False
     records = [
         SimpleNamespace(
             source_run_id=f"run-{seed}",
             source_checkpoint_id=f"checkpoint-{seed}",
         )
         for seed in seeds
+        if seed != seeds[0]
     ]
     pool = SimpleNamespace(
         source_run_count=1024,
-        terminal_run_count=1024,
-        truncated_run_count=0,
+        terminal_run_count=1023,
+        truncated_run_count=1,
         source_controller_provenance=build_t085_cohort_b_source_controller().provenance.to_dict(),
         source_run_summaries=summaries,
         records=records,
@@ -1057,6 +1089,11 @@ def test_t085_cohort_b_source_finalizer_freezes_complete_pool_identity(
         t085_execution,
         "load_assisted_source_pool_jsonl",
         lambda _stream: artifact,
+    )
+    monkeypatch.setattr(
+        t085_execution,
+        "dump_assisted_source_pool_jsonl",
+        lambda _artifact, stream: stream.write('{"type": "metadata"}\n'),
     )
     pool_path = artifact_root / "source" / "cohort-b" / "merged.jsonl"
     pool_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1071,8 +1108,16 @@ def test_t085_cohort_b_source_finalizer_freezes_complete_pool_identity(
     assert manifest["source_run_count"] == 1024
     assert manifest["source_run_seed_inventory"] == list(seeds)
     assert manifest["complete_source_identity_inventory"] == [
-        f"checkpoint-{seed}" for seed in seeds
+        None,
+        *(f"checkpoint-{seed}" for seed in seeds[1:]),
     ]
+    assert manifest["source_run_inventory"][0] == {
+        "source_run_seed": seeds[0],
+        "source_run_identity": f"run-{seeds[0]}",
+        "complete_source_identity": None,
+        "source_valid": False,
+        "failure_reason": "bounded_run_truncated",
+    }
     assert manifest["t042_scale_manifest_sha256"] == (
         t085_execution.T085_T042_SCALE_MANIFEST_SHA256
     )
@@ -1081,6 +1126,57 @@ def test_t085_cohort_b_source_finalizer_freezes_complete_pool_identity(
     )
     assert manifest["source_pool_artifact"]["source_pool_format_version"] == 4
     assert manifest["source_pool_complete"] is True
+    assert manifest["terminal_run_count"] == 1023
+    assert manifest["truncated_run_count"] == 1
+
+
+def test_t085_b_validator_round_trips_pure_bounded_truncation() -> None:
+    controller = build_t085_cohort_b_source_controller()
+    summary = SourceRunSummary(
+        source_run_id="seed-851001-run-0",
+        source_seed=851001,
+        terminal=False,
+        outcome="UNDECIDED",
+        final_floor=1,
+        final_act=1,
+        final_screen_state="BATTLE",
+        final_battle_active=True,
+        captured_battle_start_count=0,
+        completed_battle_count=0,
+        max_battle_start_floor=None,
+        max_battle_start_act=None,
+        problem_count=0,
+        problems=(),
+    )
+    artifact = AssistedSourcePoolArtifact(
+        pool=NaturalBattleStartPool(
+            source_run_count=1,
+            terminal_run_count=0,
+            truncated_run_count=1,
+            source_controller_provenance=controller.provenance.to_dict(),
+            records=[],
+            source_run_summaries=[summary],
+        ),
+        assistance_level="assist_hp75_potion",
+        assistance_schedule=assistance_schedule_by_level("assist_hp75_potion"),
+        policy_seed=42042,
+    )
+
+    t085_execution._validate_t085_b_source_pool(  # noqa: SLF001
+        artifact,
+        controller=controller,
+        expected_seeds=(851001,),
+    )
+    stream = StringIO()
+    dump_assisted_source_pool_jsonl(artifact, stream)
+    loaded = load_assisted_source_pool_jsonl(StringIO(stream.getvalue()))
+    t085_execution._validate_t085_b_source_pool(  # noqa: SLF001
+        loaded,
+        controller=controller,
+        expected_seeds=(851001,),
+    )
+    assert loaded.pool.source_run_summaries[0].terminal is False
+    assert loaded.pool.truncated_run_count == 1
 
 
 def test_t085_cohort_b_source_merge_requires_all_ordered_shards(
