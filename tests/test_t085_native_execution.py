@@ -1162,7 +1162,7 @@ def test_t085_b_validator_round_trips_pure_bounded_truncation() -> None:
         policy_seed=42042,
     )
 
-    t085_execution._validate_t085_b_source_pool(  # noqa: SLF001
+    t085_execution._validate_t085_b_source_pool(
         artifact,
         controller=controller,
         expected_seeds=(851001,),
@@ -1170,7 +1170,7 @@ def test_t085_b_validator_round_trips_pure_bounded_truncation() -> None:
     stream = StringIO()
     dump_assisted_source_pool_jsonl(artifact, stream)
     loaded = load_assisted_source_pool_jsonl(StringIO(stream.getvalue()))
-    t085_execution._validate_t085_b_source_pool(  # noqa: SLF001
+    t085_execution._validate_t085_b_source_pool(
         loaded,
         controller=controller,
         expected_seeds=(851001,),

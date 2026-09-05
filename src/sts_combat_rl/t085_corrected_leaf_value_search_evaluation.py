@@ -235,14 +235,14 @@ class T085SourceRunRecord:
         if isinstance(self.source_run_seed, bool) or not isinstance(
             self.source_run_seed, int
         ):
-            raise ValueError("source_run_seed must be an integer")
+            raise TypeError("source_run_seed must be an integer")
         if (
             not isinstance(self.source_run_identity, str)
             or not self.source_run_identity
         ):
             raise ValueError("source_run_identity must be a non-empty string")
         if not isinstance(self.source_valid, bool):
-            raise ValueError("source_valid must be a boolean")
+            raise TypeError("source_valid must be a boolean")
         if self.source_valid:
             if (
                 not isinstance(self.complete_source_identity, str)
@@ -265,7 +265,7 @@ class T085SourceRunRecord:
     def from_mapping(cls, value: Mapping[str, object]) -> T085SourceRunRecord:
         source_valid = value.get("source_valid", True)
         if not isinstance(source_valid, bool):
-            raise ValueError("source_valid must be a boolean")
+            raise TypeError("source_valid must be a boolean")
         complete_source_identity = value.get("complete_source_identity")
         if complete_source_identity is not None and not isinstance(
             complete_source_identity, str

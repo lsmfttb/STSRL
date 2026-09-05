@@ -334,7 +334,7 @@ def test_a_and_c_source_validity_gates_remain_strict() -> None:
     with pytest.raises(ValueError, match="validity gate"):
         select_cohort_c(invalid_c, _c_starts())
     with pytest.raises(ValueError, match="validity gate"):
-        t085_evaluation._validate_source_domain(  # noqa: SLF001
+        t085_evaluation._validate_source_domain(
             [
                 T085SourceRunRecord(
                     source_run_seed=1,
