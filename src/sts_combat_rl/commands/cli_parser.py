@@ -67,6 +67,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="Run the complete repository-owned T085 paired evaluation.",
     )
     input_group.add_argument(
+        "--lightspeed-t085-native-selection-restore",
+        type=Path,
+        metavar="RESTORE_SHARD_JSON",
+        help=(
+            "Restore one deterministic T085 A/B/C selection shard through a "
+            "fresh native adapter and write partial parity evidence."
+        ),
+    )
+    input_group.add_argument(
+        "--lightspeed-t085-native-selection-restore-finalize",
+        type=Path,
+        metavar="RESTORE_EVIDENCE_JSON",
+        help=(
+            "Merge exactly 16 T085 selection/restore shards and freeze the "
+            "current selection artifact."
+        ),
+    )
+    input_group.add_argument(
         "--lightspeed-t085-cohort-b-source-generation",
         type=Path,
         metavar="POOL_JSONL",
@@ -109,6 +127,15 @@ def build_parser() -> argparse.ArgumentParser:
         help=(
             "Finalize a verified merged Cohort-C natural pool into the "
             "T085 source-generation manifest."
+        ),
+    )
+    input_group.add_argument(
+        "--lightspeed-t085-cohort-c-source-merge",
+        type=Path,
+        metavar="MERGED_POOL_JSONL",
+        help=(
+            "Merge exactly 16 verified Cohort-C native-v2 source shards into "
+            "one complete natural source pool."
         ),
     )
     input_group.add_argument(
@@ -1192,6 +1219,18 @@ def build_parser() -> argparse.ArgumentParser:
         ("--t085-a-map", "Full T052 canonical map artifact."),
         ("--t085-b-map", "Full Cohort-B canonical map artifact."),
         ("--t085-c-map", "Full Cohort-C canonical map artifact."),
+        (
+            "--t085-selection-input",
+            "Outcome-blind T085 selection input with T084/T052 identity inventories.",
+        ),
+        (
+            "--t085-b-source-manifest",
+            "Final frozen Cohort-B source-generation manifest.",
+        ),
+        (
+            "--t085-c-source-manifest",
+            "Final frozen Cohort-C source-generation manifest.",
+        ),
         ("--t085-old-checkpoint-64001", "T064 static/64001 checkpoint."),
         ("--t085-corrected-checkpoint-85001", "T085 corrected/85001 checkpoint."),
         ("--t085-old-checkpoint-64002", "T064 static/64002 checkpoint."),
@@ -1239,6 +1278,39 @@ def build_parser() -> argparse.ArgumentParser:
             "Repeat 16 times in the same order as --t085-b-source-shard."
         ),
     )
+    parser.add_argument(
+        "--t085-c-source-shard",
+        type=Path,
+        action="append",
+        default=[],
+        metavar="POOL_JSONL",
+        help=(
+            "One T085 Cohort-C native-v2 source shard for "
+            "--lightspeed-t085-cohort-c-source-merge. Repeat 16 times."
+        ),
+    )
+    parser.add_argument(
+        "--t085-c-source-shard-manifest",
+        type=Path,
+        action="append",
+        default=[],
+        metavar="MANIFEST_JSON",
+        help=(
+            "The manifest paired with one T085 Cohort-C source shard. "
+            "Repeat 16 times in the same order as --t085-c-source-shard."
+        ),
+    )
+    parser.add_argument(
+        "--t085-selection-restore-shard",
+        type=Path,
+        action="append",
+        default=[],
+        metavar="RESTORE_SHARD_JSON",
+        help=(
+            "One T085 selection/restore shard for finalization. Repeat exactly "
+            "16 times."
+        ),
+    )
     for option, help_text in (
         ("--t085-shard-index", "Zero-based T085 evaluation shard index (0-15)."),
         ("--t085-shard-count", "T085 evaluation shard count; must be 16."),
@@ -1247,9 +1319,21 @@ def build_parser() -> argparse.ArgumentParser:
         parser.add_argument(option, type=int, help=help_text)
     for option, help_text in (
         ("--t085-selection-sha256", "Exact SHA-256 for the T085 selection artifact."),
+        (
+            "--t085-selection-input-sha256",
+            "Exact SHA-256 for the outcome-blind T085 selection input.",
+        ),
         ("--t085-a-map-sha256", "Exact SHA-256 for the T052 map."),
         ("--t085-b-map-sha256", "Exact SHA-256 for the Cohort-B map."),
         ("--t085-c-map-sha256", "Exact SHA-256 for the Cohort-C map."),
+        (
+            "--t085-b-source-manifest-sha256",
+            "Exact SHA-256 for the final Cohort-B source manifest.",
+        ),
+        (
+            "--t085-c-source-manifest-sha256",
+            "Exact SHA-256 for the final Cohort-C source manifest.",
+        ),
         (
             "--t085-old-checkpoint-64001-sha256",
             "Exact SHA-256 for T064 checkpoint 64001.",

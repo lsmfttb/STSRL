@@ -1108,6 +1108,9 @@ def test_t085_cohort_c_source_generation_writes_partial_shard_manifest(
         lambda *args, **kwargs: {"commit": "fake-native"},
     )
     controller = build_t085_cohort_c_source_controller()
+    monkeypatch.setattr(
+        t085_execution, "_validate_t085_c_source_pool", lambda *a, **k: None
+    )
     plan = T085CohortCSourceGenerationPlan(shard_index=4)
     summaries = [
         SimpleNamespace(
@@ -1127,7 +1130,13 @@ def test_t085_cohort_c_source_generation_writes_partial_shard_manifest(
         problems=(),
         source_controller_provenance=controller.provenance.to_dict(),
         source_run_summaries=summaries,
-        records=[],
+        records=[
+            SimpleNamespace(
+                source_run_id=summary.source_run_id,
+                source_checkpoint_id=f"checkpoint-{summary.source_seed}",
+            )
+            for summary in summaries
+        ],
     )
     captured: dict[str, object] = {}
 
@@ -1175,12 +1184,111 @@ def test_t085_cohort_c_source_generation_writes_partial_shard_manifest(
     assert manifest["artifact_scope"] == "source_generation_shard"
     assert manifest["shard_index"] == 4
     assert manifest["shard_source_run_seed_inventory"] == list(plan.seed_inventory)
+    assert manifest["complete_source_identity_inventory"] == [
+        f"checkpoint-{seed}" for seed in plan.seed_inventory
+    ]
     assert manifest["max_outer_steps"] == 500
     assert manifest["battle_controller"] == "unguided_search_v2"
     assert manifest["policy_prior_callback"] is None
     assert manifest["leaf_value_callback"] is None
     assert manifest["partial"] is True
     assert manifest["complete"] is False
+
+
+def test_t085_cohort_c_source_merge_accepts_only_verified_sixteen_shards(
+    tmp_path, monkeypatch
+) -> None:
+    artifact_root = tmp_path / "t085-artifacts"
+    monkeypatch.setattr(t085_execution, "T085_ARTIFACT_ROOT", artifact_root)
+    native_identity = {"commit": "fake-native"}
+    monkeypatch.setattr(
+        t085_execution,
+        "_validate_t085_native_source_manifest",
+        lambda *args, **kwargs: native_identity,
+    )
+    controller = SimpleNamespace()
+    monkeypatch.setattr(
+        t085_execution,
+        "build_t085_cohort_c_source_controller",
+        lambda: controller,
+    )
+    validated: list[tuple[int, tuple[int, ...]]] = []
+
+    def validate_shard(manifest_path, *, pool_path, plan, **kwargs):
+        del kwargs
+        validated.append((plan.shard_index, plan.seed_inventory))
+        return json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    monkeypatch.setattr(
+        t085_execution,
+        "_validate_t085_c_shard_manifest",
+        validate_shard,
+    )
+    merged_pool = SimpleNamespace(
+        source_run_count=128,
+        terminal_run_count=128,
+        truncated_run_count=0,
+        records=[],
+    )
+    monkeypatch.setattr(
+        t085_execution,
+        "load_natural_battle_start_pool_jsonl",
+        lambda _stream: merged_pool,
+    )
+    monkeypatch.setattr(
+        t085_execution,
+        "_validate_t085_c_source_pool",
+        lambda *args, **kwargs: None,
+    )
+
+    def merge(shard_paths, stream):
+        assert [path.name for path in shard_paths] == [
+            f"shard-{index:02d}.jsonl" for index in range(16)
+        ]
+        stream.write('{"type":"metadata"}\n')
+        return SimpleNamespace(
+            schema_id="natural-battle-start-pool-shard-merge-v1",
+            merge_version=1,
+            source_shards=[{"shard_index": index} for index in range(16)],
+            source_run_count=128,
+            terminal_run_count=128,
+            truncated_run_count=0,
+            record_count=0,
+        )
+
+    monkeypatch.setattr(
+        t085_execution,
+        "dump_merged_natural_battle_start_pool_shards_jsonl",
+        merge,
+    )
+    pool_paths = []
+    manifest_paths = []
+    for index in range(16):
+        pool_path = artifact_root / "source" / "cohort-c" / f"shard-{index:02d}.jsonl"
+        manifest_path = (
+            artifact_root / "source" / "cohort-c" / f"shard-{index:02d}.json"
+        )
+        pool_path.parent.mkdir(parents=True, exist_ok=True)
+        pool_path.write_bytes(f"pool-{index}\n".encode())
+        manifest_path.write_text(
+            json.dumps({"shard_index": index}),
+            encoding="utf-8",
+        )
+        pool_paths.append(pool_path)
+        manifest_paths.append(manifest_path)
+
+    result = t085_execution.merge_t085_cohort_c_source_pool_from_paths(
+        shard_paths=pool_paths,
+        shard_manifest_paths=manifest_paths,
+        merged_pool_output_path=artifact_root / "source" / "cohort-c" / "merged.jsonl",
+    )
+
+    assert result["status"] == "merged"
+    assert result["partial"] is True
+    assert result["complete"] is False
+    assert result["pool_artifact"]["source_run_count"] == 128
+    assert len(result["merge_summary"]["source_shards"]) == 16
+    assert {index for index, _ in validated} == set(range(16))
 
 
 def test_t085_cohort_c_final_manifest_binds_merged_pool_for_resolver(
@@ -1371,6 +1479,162 @@ def test_t085_cohort_c_source_cli_requires_explicit_shard_contract() -> None:
     assert validate_cli_args(finalizer_missing).startswith(
         "T085 Cohort C source manifest finalization requires"
     )
+
+
+def test_t085_cohort_c_source_merge_cli_requires_sixteen_pairs() -> None:
+    parser = build_parser()
+    missing = parser.parse_args(
+        ["--lightspeed-t085-cohort-c-source-merge", "merged.jsonl"]
+    )
+    assert validate_cli_args(missing).startswith("T085 Cohort C source merge requires")
+    ready_args = [
+        "--lightspeed-t085-cohort-c-source-merge",
+        "merged.jsonl",
+    ]
+    for index in range(16):
+        ready_args.extend(
+            [
+                "--t085-c-source-shard",
+                f"shard-{index}.jsonl",
+                "--t085-c-source-shard-manifest",
+                f"shard-{index}.json",
+            ]
+        )
+    ready = parser.parse_args(ready_args)
+    assert validate_cli_args(ready) is None
+
+
+def test_t085_cohort_c_source_merge_cli_routes_without_simulator(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    from sts_combat_rl.commands import lightspeed_cli
+
+    args_list = [
+        "--lightspeed-t085-cohort-c-source-merge",
+        str(tmp_path / "merged.jsonl"),
+    ]
+    for index in range(16):
+        args_list.extend(
+            [
+                "--t085-c-source-shard",
+                str(tmp_path / f"shard-{index}.jsonl"),
+                "--t085-c-source-shard-manifest",
+                str(tmp_path / f"shard-{index}.json"),
+            ]
+        )
+    args = build_parser().parse_args(args_list)
+    monkeypatch.setattr(
+        lightspeed_cli,
+        "LightSpeedAdapter",
+        lambda *args, **kwargs: pytest.fail(
+            "offline Cohort-C source merge must not construct a simulator"
+        ),
+    )
+    monkeypatch.setattr(
+        lightspeed_cli,
+        "merge_t085_cohort_c_source_pool_from_paths",
+        lambda **kwargs: {
+            "status": "merged",
+            "shard_count": len(kwargs["shard_paths"]),
+        },
+    )
+
+    assert lightspeed_cli.run_lightspeed_command(args) == 0
+    assert '"shard_count": 16' in capsys.readouterr().err
+
+
+def test_t085_cohort_c_shard_manifest_is_native_v2_unguided(
+    tmp_path, monkeypatch
+) -> None:
+    artifact_root = tmp_path / "t085-artifacts"
+    monkeypatch.setattr(t085_execution, "T085_ARTIFACT_ROOT", artifact_root)
+    plan = T085CohortCSourceGenerationPlan(shard_index=2)
+    native_identity = {"commit": "fake-native"}
+    controller = SimpleNamespace()
+    pool_path = artifact_root / "source" / "cohort-c" / "shard-02.jsonl"
+    manifest_path = artifact_root / "source" / "cohort-c" / "shard-02.json"
+    pool_path.parent.mkdir(parents=True, exist_ok=True)
+    pool_path.write_bytes(b"pool\n")
+    summaries = [
+        SimpleNamespace(source_seed=seed, source_run_id=f"run-{seed}")
+        for seed in plan.seed_inventory
+    ]
+    representatives = [
+        SimpleNamespace(
+            source_run_id=summary.source_run_id,
+            source_checkpoint_id=f"checkpoint-{summary.source_seed}",
+        )
+        for summary in summaries
+    ]
+    pool = SimpleNamespace(
+        records=[],
+        source_run_count=8,
+        terminal_run_count=8,
+        truncated_run_count=0,
+        source_controller_provenance={"kind": "fake"},
+        source_run_summaries=summaries,
+    )
+    manifest = plan.to_dict(native_identity=native_identity)
+    manifest.update(
+        {
+            "source_pool_artifact": t085_execution._t085_source_pool_reference(
+                pool_path,
+                record_count=0,
+                source_run_count=8,
+            ),
+            "shard_source_run_count": 8,
+            "shard_source_run_seed_start": plan.seed_inventory[0],
+            "shard_source_run_seed_end": plan.seed_inventory[-1],
+            "shard_source_run_seed_inventory": list(plan.seed_inventory),
+            "source_run_seed_inventory": list(plan.seed_inventory),
+            "source_run_identity_inventory": [
+                summary.source_run_id for summary in summaries
+            ],
+            "complete_source_identity_inventory": [
+                record.source_checkpoint_id for record in representatives
+            ],
+            "record_count": 0,
+            "terminal_run_count": 8,
+            "truncated_run_count": 0,
+            "source_controller_provenance": pool.source_controller_provenance,
+        }
+    )
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setattr(
+        t085_execution,
+        "load_natural_battle_start_pool_jsonl",
+        lambda _stream: pool,
+    )
+    monkeypatch.setattr(
+        t085_execution,
+        "_validate_t085_c_source_pool",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        t085_execution,
+        "_t085_source_run_representatives",
+        lambda *args, **kwargs: representatives,
+    )
+
+    accepted = t085_execution._validate_t085_c_shard_manifest(
+        manifest_path,
+        pool_path=pool_path,
+        plan=plan,
+        native_identity=native_identity,
+        controller=controller,
+    )
+    assert accepted["battle_controller"] == "unguided_search_v2"
+    forged = dict(manifest)
+    forged["leaf_value_callback"] = "caller-guidance"
+    manifest_path.write_text(json.dumps(forged), encoding="utf-8")
+    with pytest.raises(T085NativeExecutionError, match="configuration is not exact"):
+        t085_execution._validate_t085_c_shard_manifest(
+            manifest_path,
+            pool_path=pool_path,
+            plan=plan,
+            native_identity=native_identity,
+            controller=controller,
+        )
 
 
 def test_t085_cohort_b_source_cli_requires_shards_and_frozen_inputs() -> None:

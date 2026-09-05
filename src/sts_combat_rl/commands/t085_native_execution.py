@@ -48,6 +48,7 @@ from sts_combat_rl.sim.battle_start_pool import (
     BattleStartCheckpointRecord,
     NaturalBattleStartPool,
     collect_natural_battle_start_pool,
+    dump_merged_natural_battle_start_pool_shards_jsonl,
     dump_natural_battle_start_pool_jsonl,
     load_natural_battle_start_pool_jsonl,
     load_natural_battle_start_pool_metadata_jsonl,
@@ -88,6 +89,7 @@ from sts_combat_rl.sim.oracle_search import (
     oracle_search_controller_metadata,
     select_oracle_root_action,
 )
+from sts_combat_rl.sim.public_context_artifacts import PUBLIC_CONTEXT_AVAILABLE
 from sts_combat_rl.sim.search_guidance_inference import (
     SEARCH_V2_LEAF_NATIVE_UTILITY_TARGET_KIND,
     SearchGuidanceScorer,
@@ -99,6 +101,8 @@ from sts_combat_rl.t085_corrected_leaf_value_search_evaluation import (
     T085_COHORT_B_RUN_COUNT,
     T085_COHORT_B_SEED_END,
     T085_COHORT_B_SEED_START,
+    T085_COHORT_B_SELECTED_COUNT,
+    T085_COHORT_C_MIN_SELECTED_COUNT,
     T085_COHORT_C_RUN_COUNT,
     T085_COHORT_C_SEED_END,
     T085_COHORT_C_SEED_START,
@@ -116,6 +120,8 @@ from sts_combat_rl.t085_corrected_leaf_value_search_evaluation import (
     build_t085_cohort_selection,
     build_t085_evaluation_selection_evidence,
     run_t085_paired_evaluation,
+    select_cohort_b,
+    select_cohort_c,
     select_search_400_subset,
     sha256_file,
     validate_t085_evaluation_selection_evidence,
@@ -128,6 +134,11 @@ T085_NATIVE_V2_API = "StepSimulator.battle_search_v2.v1"
 T085_NATIVE_V2_PATCH = "sts_lightspeed_battle_search_v2_tree_internal_v1"
 T085_NATIVE_TERMINAL_LABEL_SCHEMA_ID = "t085-native-terminal-root-label-v1"
 T085_NATIVE_SELECTION_SCHEMA_ID = "t085-native-selection-artifact-v1"
+T085_NATIVE_SELECTION_INPUT_SCHEMA_ID = "t085-native-selection-input-v1"
+T085_NATIVE_SELECTION_RESTORE_SHARD_SCHEMA_ID = "t085-native-selection-restore-shard-v1"
+T085_NATIVE_SELECTION_RESTORE_EVIDENCE_SCHEMA_ID = (
+    "t085-native-selection-restore-evidence-v1"
+)
 T085_NATIVE_OUTCOMES_SCHEMA_ID = "t085-native-outcome-records-v1"
 T085_NATIVE_EXECUTION_VERSION = "t085-native-execution-v1"
 T085_NATIVE_SHARD_SCHEMA_ID = "t085-native-shard-manifest-v1"
@@ -3315,6 +3326,11 @@ def run_t085_cohort_c_source_generation_from_paths(
     pool_path.parent.mkdir(parents=True, exist_ok=True)
     with pool_path.open("w", encoding="utf-8", newline="\n") as stream:
         dump_natural_battle_start_pool_jsonl(pool, stream)
+    representatives = _t085_source_run_representatives(
+        pool.records,
+        pool.source_run_summaries,
+        cohort="C",
+    )
     source_pool_reference = _t085_source_pool_reference(
         pool_path,
         record_count=len(pool.records),
@@ -3329,6 +3345,9 @@ def run_t085_cohort_c_source_generation_from_paths(
             ],
             "source_run_identity_inventory": [
                 summary.source_run_id for summary in pool.source_run_summaries
+            ],
+            "complete_source_identity_inventory": [
+                record.source_checkpoint_id for record in representatives
             ],
             "record_count": len(pool.records),
             "source_controller_provenance": pool.source_controller_provenance,
@@ -3348,6 +3367,272 @@ def run_t085_cohort_c_source_generation_from_paths(
         "pool_artifact": source_pool_reference,
         "source_shard_manifest": manifest_reference,
         "shard": manifest,
+    }
+
+
+def _validate_t085_c_shard_manifest(
+    manifest_path: Path,
+    *,
+    pool_path: Path,
+    plan: T085CohortCSourceGenerationPlan,
+    native_identity: Mapping[str, object],
+    controller: RoutedRunController,
+) -> dict[str, object]:
+    """Validate one C source shard before the repository-owned merge."""
+
+    try:
+        document = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise T085NativeExecutionError(
+            f"T085 Cohort C source shard manifest is unavailable: {manifest_path}"
+        ) from exc
+    if not isinstance(document, Mapping):
+        raise T085NativeExecutionError(
+            "T085 Cohort C source shard manifest is not an object"
+        )
+    if (
+        document.get("schema_id") != T085_C_SOURCE_SHARD_MANIFEST_SCHEMA_ID
+        or document.get("task_id") != "T085"
+        or document.get("cohort") != "C"
+        or document.get("artifact_scope") != "source_generation_shard"
+        or document.get("partial") is not True
+        or document.get("complete") is not False
+        or document.get("shard_count") != 16
+        or document.get("worker_count") != 16
+        or document.get("effective_worker_count") != 16
+        or document.get("partition_scheme") != "contiguous_seed_ranges"
+        or document.get("shard_index") != plan.shard_index
+    ):
+        raise T085NativeExecutionError(
+            "T085 Cohort C source shard manifest has the wrong shard contract"
+        )
+    expected_seed_inventory = list(plan.seed_inventory)
+    if (
+        document.get("shard_source_run_count") != len(expected_seed_inventory)
+        or document.get("shard_source_run_seed_start") != expected_seed_inventory[0]
+        or document.get("shard_source_run_seed_end") != expected_seed_inventory[-1]
+        or document.get("shard_source_run_seed_inventory") != expected_seed_inventory
+        or document.get("source_run_seed_inventory") != expected_seed_inventory
+    ):
+        raise T085NativeExecutionError(
+            "T085 Cohort C source shard manifest seed inventory is not exact"
+        )
+    expected_configuration = {
+        "source_run_seed_start": T085_COHORT_C_SEED_START,
+        "source_run_seed_end": T085_COHORT_C_SEED_END,
+        "source_run_count": T085_COHORT_C_RUN_COUNT,
+        "max_outer_steps": 500,
+        "action_space": "initial_no_potions",
+        "battle_controller": "unguided_search_v2",
+        "battle_simulations": 100,
+        "root_selection": "highest_mean",
+        "non_combat_controller": "expert_non_combat_v1",
+        "non_combat_policy_seed": 42042,
+        "assistance_level": "assist_0",
+        "assistance_policy_seed": None,
+        "policy_prior_callback": None,
+        "leaf_value_callback": None,
+    }
+    if any(
+        document.get(key) != expected
+        for key, expected in expected_configuration.items()
+    ):
+        raise T085NativeExecutionError(
+            "T085 Cohort C source shard manifest configuration is not exact"
+        )
+    if document.get("native_identity") != dict(native_identity):
+        raise T085NativeExecutionError(
+            "T085 Cohort C source shard manifest native identity mismatch"
+        )
+    source_pool_reference = document.get("source_pool_artifact")
+    if not isinstance(source_pool_reference, Mapping):
+        raise T085NativeExecutionError(
+            "T085 Cohort C source shard lacks source pool binding"
+        )
+    try:
+        pool_sha256 = sha256_file(pool_path)
+        pool_size = pool_path.stat().st_size
+    except OSError as exc:
+        raise T085NativeExecutionError(
+            "T085 Cohort C source shard pool is unavailable"
+        ) from exc
+    if (
+        Path(str(source_pool_reference.get("path"))).resolve() != pool_path.resolve()
+        or source_pool_reference.get("schema_id") != T085_C_SOURCE_POOL_SCHEMA_ID
+        or source_pool_reference.get("sha256") != pool_sha256
+        or source_pool_reference.get("byte_count") != pool_size
+        or source_pool_reference.get("format_version")
+        != BATTLE_START_POOL_FORMAT_VERSION
+        or source_pool_reference.get("distribution_kind") != "natural_run"
+    ):
+        raise T085NativeExecutionError(
+            "T085 Cohort C source shard is not bound to its natural pool"
+        )
+    try:
+        with pool_path.open(encoding="utf-8") as stream:
+            pool = load_natural_battle_start_pool_jsonl(stream)
+    except (OSError, ValueError) as exc:
+        raise T085NativeExecutionError(
+            "T085 Cohort C source shard pool is invalid"
+        ) from exc
+    _validate_t085_c_source_pool(
+        pool,
+        controller=controller,
+        expected_seeds=plan.seed_inventory,
+    )
+    if (
+        source_pool_reference.get("record_count") != len(pool.records)
+        or source_pool_reference.get("source_run_count") != pool.source_run_count
+        or document.get("record_count") != len(pool.records)
+        or document.get("terminal_run_count") != pool.terminal_run_count
+        or document.get("truncated_run_count") != pool.truncated_run_count
+    ):
+        raise T085NativeExecutionError(
+            "T085 Cohort C source shard manifest counts are not bound to its pool"
+        )
+    representatives = _t085_source_run_representatives(
+        pool.records,
+        pool.source_run_summaries,
+        cohort="C",
+    )
+    if document.get("complete_source_identity_inventory") != [
+        record.source_checkpoint_id for record in representatives
+    ]:
+        raise T085NativeExecutionError(
+            "T085 Cohort C source shard complete-source inventory is not exact"
+        )
+    if document.get("source_run_identity_inventory") != [
+        summary.source_run_id for summary in pool.source_run_summaries
+    ]:
+        raise T085NativeExecutionError(
+            "T085 Cohort C source shard run identity inventory is not exact"
+        )
+    if (
+        document.get("source_controller_provenance")
+        != pool.source_controller_provenance
+    ):
+        raise T085NativeExecutionError(
+            "T085 Cohort C source shard controller provenance is not exact"
+        )
+    return dict(document)
+
+
+def merge_t085_cohort_c_source_pool_from_paths(
+    *,
+    shard_paths: Sequence[str | Path],
+    shard_manifest_paths: Sequence[str | Path],
+    merged_pool_output_path: str | Path,
+) -> dict[str, object]:
+    """Merge exactly 16 verified C natural source shards."""
+
+    if len(shard_paths) != 16 or len(shard_manifest_paths) != 16:
+        raise T085NativeExecutionError(
+            "T085 Cohort C source merge requires exactly 16 pools and 16 shard manifests"
+        )
+    native_identity = _validate_t085_native_source_manifest("battle_search_v2")
+    controller = build_t085_cohort_c_source_controller()
+    pairs: list[tuple[int, Path, Path, dict[str, object]]] = []
+    for pool_path_raw, manifest_path_raw in zip(
+        shard_paths, shard_manifest_paths, strict=True
+    ):
+        pool_path = _require_t085_stable_path(pool_path_raw, "source shard pool")
+        manifest_path = _require_t085_stable_path(
+            manifest_path_raw,
+            "source shard manifest",
+        )
+        try:
+            raw_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise T085NativeExecutionError(
+                f"T085 Cohort C source shard manifest is unavailable: {manifest_path}"
+            ) from exc
+        raw_shard_index = (
+            raw_manifest.get("shard_index")
+            if isinstance(raw_manifest, Mapping)
+            else None
+        )
+        if isinstance(raw_shard_index, bool) or not isinstance(raw_shard_index, int):
+            raise T085NativeExecutionError(
+                "T085 Cohort C source shard index is invalid"
+            )
+        manifest = _validate_t085_c_shard_manifest(
+            manifest_path,
+            pool_path=pool_path,
+            plan=T085CohortCSourceGenerationPlan(shard_index=raw_shard_index),
+            native_identity=native_identity,
+            controller=controller,
+        )
+        pairs.append((raw_shard_index, pool_path, manifest_path, manifest))
+    if {item[0] for item in pairs} != set(range(16)):
+        raise T085NativeExecutionError(
+            "T085 Cohort C source merge must cover every shard index 0..15 exactly once"
+        )
+    pairs.sort(key=lambda item: item[0])
+    for expected_index, (_, pool_path, manifest_path, _manifest) in enumerate(pairs):
+        _validate_t085_c_shard_manifest(
+            manifest_path,
+            pool_path=pool_path,
+            plan=T085CohortCSourceGenerationPlan(shard_index=expected_index),
+            native_identity=native_identity,
+            controller=controller,
+        )
+    merged_path = _require_t085_stable_path(
+        merged_pool_output_path,
+        "merged Cohort C source pool output",
+    )
+    merged_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with merged_path.open("w", encoding="utf-8", newline="\n") as stream:
+            merge_summary = dump_merged_natural_battle_start_pool_shards_jsonl(
+                [item[1] for item in pairs],
+                stream,
+            )
+        with merged_path.open(encoding="utf-8") as stream:
+            merged_pool = load_natural_battle_start_pool_jsonl(stream)
+    except (OSError, ValueError) as exc:
+        raise T085NativeExecutionError(
+            "T085 Cohort C source shard merge failed"
+        ) from exc
+    _validate_t085_c_source_pool(
+        merged_pool,
+        controller=controller,
+        expected_seeds=tuple(
+            range(T085_COHORT_C_SEED_START, T085_COHORT_C_SEED_END + 1)
+        ),
+    )
+    if (
+        merged_pool.source_run_count != T085_COHORT_C_RUN_COUNT
+        or merged_pool.terminal_run_count != T085_COHORT_C_RUN_COUNT
+        or merged_pool.truncated_run_count != 0
+    ):
+        raise T085NativeExecutionError(
+            "T085 Cohort C merged source pool is not the complete 128-run pool"
+        )
+    output_reference = _t085_source_pool_reference(
+        merged_path,
+        record_count=len(merged_pool.records),
+        source_run_count=merged_pool.source_run_count,
+    )
+    return {
+        "status": "merged",
+        "task_id": "T085",
+        "cohort": "C",
+        "source_generation_valid": True,
+        "artifact_scope": "source_generation_merge",
+        "partial": True,
+        "complete": False,
+        "native_identity": native_identity,
+        "pool_artifact": output_reference,
+        "source_shards": [item[3] for item in pairs],
+        "merge_summary": {
+            "schema_id": merge_summary.schema_id,
+            "merge_version": merge_summary.merge_version,
+            "source_shards": [dict(item) for item in merge_summary.source_shards],
+            "source_run_count": merge_summary.source_run_count,
+            "terminal_run_count": merge_summary.terminal_run_count,
+            "truncated_run_count": merge_summary.truncated_run_count,
+            "record_count": merge_summary.record_count,
+        },
     }
 
 
@@ -3842,6 +4127,1091 @@ def write_t085_native_selection_artifact(
     )
 
 
+def _t085_required_sha256(value: object, label: str) -> str:
+    if (
+        not isinstance(value, str)
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise T085NativeExecutionError(f"{label} must be a SHA-256 hex digest")
+    return value
+
+
+def _sha256_json(value: object) -> str:
+    return sha256(
+        json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def _t085_required_string_list(value: object, label: str) -> tuple[str, ...]:
+    if not isinstance(value, list) or not value:
+        raise T085NativeExecutionError(f"{label} must be a non-empty list")
+    result = tuple(value)
+    if any(not isinstance(item, str) or not item for item in result):
+        raise T085NativeExecutionError(f"{label} must contain non-empty strings")
+    if len(set(result)) != len(result):
+        raise T085NativeExecutionError(f"{label} contains duplicate identities")
+    return result
+
+
+def _t085_path_reference(
+    path: str | Path,
+    *,
+    schema_id: str,
+    expected_sha256: str | None = None,
+) -> dict[str, object]:
+    resolved = Path(path).resolve(strict=True)
+    digest = sha256_file(resolved)
+    if expected_sha256 is not None and digest != expected_sha256:
+        raise T085NativeExecutionError(
+            f"T085 path-bound artifact hash mismatch: {resolved}"
+        )
+    return {
+        "path": str(resolved),
+        "schema_id": schema_id,
+        "sha256": digest,
+        "byte_count": resolved.stat().st_size,
+    }
+
+
+def _t085_validate_path_reference(
+    raw: object,
+    label: str,
+    *,
+    expected_schema_id: str | None = None,
+    require_stable_root: bool = False,
+) -> dict[str, object]:
+    if not isinstance(raw, Mapping):
+        raise T085NativeExecutionError(f"{label} must be an artifact reference")
+    path_value = raw.get("path")
+    if not isinstance(path_value, str) or not path_value:
+        raise T085NativeExecutionError(f"{label}.path is missing")
+    path = Path(path_value).resolve()
+    if require_stable_root:
+        _require_t085_stable_path(path, label)
+    schema_id = raw.get("schema_id")
+    if expected_schema_id is not None and schema_id != expected_schema_id:
+        raise T085NativeExecutionError(f"{label}.schema_id is not current")
+    if not isinstance(schema_id, str) or not schema_id:
+        raise T085NativeExecutionError(f"{label}.schema_id is missing")
+    digest = _t085_required_sha256(raw.get("sha256"), f"{label}.sha256")
+    byte_count = raw.get("byte_count")
+    if (
+        isinstance(byte_count, bool)
+        or not isinstance(byte_count, int)
+        or byte_count <= 0
+    ):
+        raise T085NativeExecutionError(f"{label}.byte_count must be positive")
+    if not path.is_file() or path.stat().st_size != byte_count:
+        raise T085NativeExecutionError(f"{label} is unavailable or changed size")
+    if sha256_file(path) != digest:
+        raise T085NativeExecutionError(f"{label} hash changed")
+    return {
+        "path": str(path),
+        "schema_id": schema_id,
+        "sha256": digest,
+        "byte_count": byte_count,
+    }
+
+
+def _load_t085_native_selection_input(
+    path: str | Path,
+    *,
+    expected_sha256: str,
+) -> tuple[dict[str, object], tuple[str, ...], tuple[str, ...]]:
+    """Load the path-bound, outcome-blind identity input for native selection.
+
+    The regular T085 input-eligibility manifest proves the accepted T084/T064
+    lineage, but it intentionally does not materialize the complete source-run
+    identity inventory needed by the B overlap gate.  This small companion
+    artifact is therefore explicit: its T084 inventory must come from the
+    retained upstream source-identity index, while its T052 inventory is
+    rechecked against the accepted fixed cohort below.  No battle outcome,
+    terminal HP, or model output is consumed here.
+    """
+
+    resolved = _require_t085_stable_path(path, "selection input")
+    resolved = resolved.resolve(strict=True)
+    actual_sha256 = sha256_file(resolved)
+    if actual_sha256 != _t085_required_sha256(expected_sha256, "selection input SHA"):
+        raise T085NativeExecutionError("T085 selection input SHA-256 mismatch")
+    try:
+        payload = json.loads(resolved.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise T085NativeExecutionError(
+            "T085 selection input is unavailable or invalid"
+        ) from exc
+    if not isinstance(payload, Mapping):
+        raise T085NativeExecutionError("T085 selection input is not an object")
+    if (
+        payload.get("schema_id") != T085_NATIVE_SELECTION_INPUT_SCHEMA_ID
+        or payload.get("task_id") != "T085"
+        or dict(payload.get("native_identity", {})) != T085_NATIVE_IDENTITY
+    ):
+        raise T085NativeExecutionError(
+            "T085 selection input schema/task/native identity is invalid"
+        )
+    accepted_inputs = payload.get("accepted_inputs")
+    if not isinstance(accepted_inputs, Mapping) or dict(accepted_inputs) != dict(
+        T085_INPUT_ARTIFACT_IDENTITIES
+    ):
+        raise T085NativeExecutionError(
+            "T085 selection input is not bound to the accepted input identities"
+        )
+    raw_inventories = payload.get("complete_source_identity_inventories")
+    if not isinstance(raw_inventories, Mapping) or set(raw_inventories) != {
+        "T084",
+        "T052",
+    }:
+        raise T085NativeExecutionError(
+            "T085 selection input must contain exact T084 and T052 inventories"
+        )
+    t084_ids = _t085_required_string_list(
+        raw_inventories.get("T084"),
+        "selection input T084 inventory",
+    )
+    t052_ids = _t085_required_string_list(
+        raw_inventories.get("T052"),
+        "selection input T052 inventory",
+    )
+    provenance = payload.get("identity_inventory_provenance")
+    if not isinstance(provenance, Mapping) or set(provenance) != {"T084", "T052"}:
+        raise T085NativeExecutionError(
+            "T085 selection input lacks identity inventory provenance"
+        )
+    for lineage in ("T084", "T052"):
+        entry = provenance.get(lineage)
+        if not isinstance(entry, Mapping):
+            raise T085NativeExecutionError(
+                f"T085 selection input {lineage} identity provenance is malformed"
+            )
+        if entry.get("source_role") != "complete_source_identity_inventory":
+            raise T085NativeExecutionError(
+                f"T085 selection input {lineage} identity source role is invalid"
+            )
+        _t085_validate_path_reference(
+            entry.get("artifact"),
+            f"selection input identity provenance {lineage}",
+        )
+    source_artifacts = payload.get("source_artifacts")
+    if not isinstance(source_artifacts, Mapping) or set(source_artifacts) != {
+        "A",
+        "B",
+        "C",
+    }:
+        raise T085NativeExecutionError(
+            "T085 selection input must bind A, B, and C source artifacts"
+        )
+    return (
+        {
+            "path": str(resolved),
+            "schema_id": T085_NATIVE_SELECTION_INPUT_SCHEMA_ID,
+            "sha256": actual_sha256,
+            "byte_count": resolved.stat().st_size,
+            "source_artifacts": {
+                str(key): dict(value)
+                for key, value in source_artifacts.items()
+                if isinstance(value, Mapping)
+            },
+        },
+        t084_ids,
+        t052_ids,
+    )
+
+
+def _t085_canonical_to_battle_start(
+    canonical: BattleStartCheckpointRecord,
+) -> T085BattleStartRecord:
+    """Project only public identity/structure from a full restore record."""
+
+    structural = canonical.structural_metadata
+    act = structural.get("act")
+    room_type = structural.get("room_type")
+    if isinstance(act, bool) or not isinstance(act, int) or act <= 0:
+        raise T085NativeExecutionError(
+            f"T085 canonical record {canonical.source_checkpoint_id} has invalid act"
+        )
+    if not isinstance(room_type, str) or not room_type:
+        raise T085NativeExecutionError(
+            f"T085 canonical record {canonical.source_checkpoint_id} has invalid room type"
+        )
+    # ``restore_ok`` denotes that the retained source record is a candidate;
+    # fresh restore/parity evidence is produced separately by the shard runner.
+    # Public-context availability is a structural eligibility gate, never an
+    # outcome gate.
+    return T085BattleStartRecord(
+        source_run_seed=canonical.source_seed,
+        source_run_identity=canonical.source_run_id,
+        complete_source_identity=canonical.source_checkpoint_id,
+        battle_identity=f"{canonical.source_run_id}:{canonical.source_battle_index}",
+        act=act,
+        room_type=room_type.upper(),
+        restore_ok=True,
+        public_context_match=canonical.public_context_status
+        == PUBLIC_CONTEXT_AVAILABLE,
+        source_valid=True,
+        failure_reason=None,
+        source_artifact_record_identity=canonical.source_checkpoint_id,
+    )
+
+
+@dataclass(frozen=True)
+class _T085SelectionRestoreInputs:
+    input_reference: Mapping[str, object]
+    source_bindings: Mapping[str, Mapping[str, object]]
+    source_manifests: Mapping[str, Mapping[str, object]]
+    canonical_records_by_cohort: Mapping[str, Mapping[str, BattleStartCheckpointRecord]]
+    source_runs: Mapping[str, tuple[T085SourceRunRecord, ...]]
+    battle_starts: Mapping[str, tuple[T085BattleStartRecord, ...]]
+    selected: Mapping[str, tuple[T085BattleStartRecord, ...]]
+    t084_complete_source_identities: tuple[str, ...]
+    t052_complete_source_identities: tuple[str, ...]
+    selection_identity_sha256: str
+
+
+def _t085_selection_source_binding(
+    input_sources: Mapping[str, object],
+    cohort: str,
+    *,
+    map_path: str | Path,
+    map_sha256: str,
+    map_schema_id: str,
+    manifest_path: str | Path | None = None,
+    manifest_sha256: str | None = None,
+) -> dict[str, object]:
+    raw = input_sources.get(cohort)
+    if not isinstance(raw, Mapping):
+        raise T085NativeExecutionError(
+            f"T085 selection input lacks {cohort} source binding"
+        )
+    supplied_map = _t085_validate_path_reference(
+        raw.get("map"),
+        f"selection input source {cohort}.map",
+        expected_schema_id=map_schema_id,
+    )
+    actual_map = _t085_path_reference(
+        map_path,
+        schema_id=map_schema_id,
+        expected_sha256=map_sha256,
+    )
+    if supplied_map != actual_map:
+        raise T085NativeExecutionError(
+            f"T085 {cohort} source map is not the map bound by selection input"
+        )
+    binding: dict[str, object] = {"map": actual_map}
+    if manifest_path is None or manifest_sha256 is None:
+        if raw.get("source_manifest") is not None:
+            raise T085NativeExecutionError(
+                f"T085 {cohort} selection binding unexpectedly carries a source manifest"
+            )
+    else:
+        supplied_manifest = _t085_validate_path_reference(
+            raw.get("source_manifest"),
+            f"selection input source {cohort}.source_manifest",
+            expected_schema_id=T085_SOURCE_MANIFEST_SCHEMA_ID,
+            require_stable_root=True,
+        )
+        actual_manifest = _t085_path_reference(
+            manifest_path,
+            schema_id=T085_SOURCE_MANIFEST_SCHEMA_ID,
+            expected_sha256=manifest_sha256,
+        )
+        if supplied_manifest != actual_manifest:
+            raise T085NativeExecutionError(
+                f"T085 {cohort} source manifest is not the manifest bound by selection input"
+            )
+        binding["source_manifest"] = actual_manifest
+    return binding
+
+
+def _t085_load_frozen_source_manifest_and_map(
+    *,
+    cohort: Literal["B", "C"],
+    map_path: str | Path,
+    map_sha256: str,
+    manifest_path: str | Path,
+    manifest_sha256: str,
+) -> tuple[
+    dict[str, object],
+    dict[str, BattleStartCheckpointRecord],
+    tuple[T085SourceRunRecord, ...],
+    tuple[T085BattleStartRecord, ...],
+]:
+    artifact_kind: Literal["assisted_pool", "natural_pool"] = (
+        "assisted_pool" if cohort == "B" else "natural_pool"
+    )
+    bound, resolved_manifest = _validate_t085_source_manifest_binding(
+        Path(map_path).resolve(strict=True),
+        artifact_kind=artifact_kind,
+        manifest_path=manifest_path,
+        manifest_sha256=manifest_sha256,
+    ) or (None, None)
+    if bound is None or resolved_manifest is None:
+        raise T085NativeExecutionError(
+            f"T085 Cohort {cohort} source manifest binding is missing"
+        )
+    manifest = dict(bound)
+    try:
+        validate_t085_source_generation_contract(manifest, cohort=cohort)
+    except T085EvaluationIntegrityError as exc:
+        raise T085NativeExecutionError(
+            f"T085 Cohort {cohort} source manifest contract is invalid"
+        ) from exc
+    if manifest.get("source_pool_complete") is not True:
+        raise T085NativeExecutionError(
+            f"T085 Cohort {cohort} source manifest is not finalized"
+        )
+    source_count = T085_COHORT_B_RUN_COUNT if cohort == "B" else T085_COHORT_C_RUN_COUNT
+    expected_seeds = tuple(
+        range(
+            T085_COHORT_B_SEED_START if cohort == "B" else T085_COHORT_C_SEED_START,
+            (T085_COHORT_B_SEED_END if cohort == "B" else T085_COHORT_C_SEED_END) + 1,
+        )
+    )
+    raw_seeds = manifest.get("source_run_seed_inventory")
+    raw_run_ids = manifest.get("source_run_identity_inventory")
+    raw_complete_ids = manifest.get("complete_source_identity_inventory")
+    if raw_seeds != list(expected_seeds) or not isinstance(raw_run_ids, list):
+        raise T085NativeExecutionError(
+            f"T085 Cohort {cohort} source manifest seed/run inventory is not exact"
+        )
+    if not isinstance(raw_complete_ids, list):
+        raise T085NativeExecutionError(
+            f"T085 Cohort {cohort} source manifest complete inventory is missing"
+        )
+    if (
+        len(raw_run_ids) != source_count
+        or len(raw_complete_ids) != source_count
+        or len(set(raw_run_ids)) != source_count
+        or len(set(raw_complete_ids)) != source_count
+    ):
+        raise T085NativeExecutionError(
+            f"T085 Cohort {cohort} source manifest inventory count is invalid"
+        )
+    canonical = resolve_t085_canonical_records(
+        map_path,
+        expected_sha256=map_sha256,
+        artifact_kind=artifact_kind,
+        expected_source_run_count=source_count,
+        expected_source_run_identity_inventory=tuple(raw_run_ids),
+        expected_source_run_seed_inventory=expected_seeds,
+        expected_assistance_level=("assist_hp75_potion" if cohort == "B" else None),
+        expected_source_manifest_path=resolved_manifest,
+        expected_source_manifest_sha256=manifest_sha256,
+    )
+    source_runs: list[T085SourceRunRecord] = []
+    battle_starts: list[T085BattleStartRecord] = []
+    for seed, run_id, complete_id in zip(
+        expected_seeds,
+        raw_run_ids,
+        raw_complete_ids,
+        strict=True,
+    ):
+        if (
+            not isinstance(run_id, str)
+            or not isinstance(complete_id, str)
+            or not run_id
+            or not complete_id
+        ):
+            raise T085NativeExecutionError(
+                f"T085 Cohort {cohort} source manifest inventory contains invalid identities"
+            )
+        record = canonical.get(complete_id)
+        if record is None:
+            raise T085NativeExecutionError(
+                f"T085 Cohort {cohort} complete identity is absent from its full map: {complete_id}"
+            )
+        if record.source_run_id != run_id or record.source_seed != seed:
+            raise T085NativeExecutionError(
+                f"T085 Cohort {cohort} complete identity has mismatched run/seed: {complete_id}"
+            )
+        source_runs.append(
+            T085SourceRunRecord(
+                source_run_seed=seed,
+                source_run_identity=run_id,
+                complete_source_identity=complete_id,
+            )
+        )
+        battle_starts.append(_t085_canonical_to_battle_start(record))
+    if len(source_runs) != source_count or len(battle_starts) != source_count:
+        raise T085NativeExecutionError(
+            f"T085 Cohort {cohort} full source map does not cover all source runs"
+        )
+    return manifest, canonical, tuple(source_runs), tuple(battle_starts)
+
+
+def _t085_prepare_selection_restore_inputs(
+    *,
+    selection_input_path: str | Path,
+    selection_input_sha256: str,
+    a_full_map_path: str | Path,
+    b_full_map_path: str | Path,
+    c_full_map_path: str | Path,
+    a_sha256: str,
+    b_sha256: str,
+    c_sha256: str,
+    b_source_manifest_path: str | Path,
+    b_source_manifest_sha256: str,
+    c_source_manifest_path: str | Path,
+    c_source_manifest_sha256: str,
+) -> _T085SelectionRestoreInputs:
+    input_reference, t084_ids, input_t052_ids = _load_t085_native_selection_input(
+        selection_input_path,
+        expected_sha256=selection_input_sha256,
+    )
+    input_sources = input_reference.get("source_artifacts")
+    if not isinstance(input_sources, Mapping):
+        raise T085NativeExecutionError(
+            "T085 selection input source bindings are missing"
+        )
+    a_map = resolve_t085_canonical_records(
+        a_full_map_path,
+        expected_sha256=a_sha256,
+        artifact_kind="fixed_cohort",
+    )
+    a_binding = _t085_selection_source_binding(
+        input_sources,
+        "A",
+        map_path=a_full_map_path,
+        map_sha256=a_sha256,
+        map_schema_id="fixed-cohort-v3-jsonl",
+    )
+    if tuple(a_map) != input_t052_ids:
+        raise T085NativeExecutionError(
+            "T085 selection input T052 inventory is not the exact A map inventory"
+        )
+    b_manifest, b_map, b_runs, b_starts = _t085_load_frozen_source_manifest_and_map(
+        cohort="B",
+        map_path=b_full_map_path,
+        map_sha256=b_sha256,
+        manifest_path=b_source_manifest_path,
+        manifest_sha256=b_source_manifest_sha256,
+    )
+    b_binding = _t085_selection_source_binding(
+        input_sources,
+        "B",
+        map_path=b_full_map_path,
+        map_sha256=b_sha256,
+        map_schema_id=ASSISTED_SOURCE_POOL_SCHEMA_ID,
+        manifest_path=b_source_manifest_path,
+        manifest_sha256=b_source_manifest_sha256,
+    )
+    c_manifest, c_map, c_runs, c_starts = _t085_load_frozen_source_manifest_and_map(
+        cohort="C",
+        map_path=c_full_map_path,
+        map_sha256=c_sha256,
+        manifest_path=c_source_manifest_path,
+        manifest_sha256=c_source_manifest_sha256,
+    )
+    c_binding = _t085_selection_source_binding(
+        input_sources,
+        "C",
+        map_path=c_full_map_path,
+        map_sha256=c_sha256,
+        map_schema_id=T085_C_SOURCE_POOL_SCHEMA_ID,
+        manifest_path=c_source_manifest_path,
+        manifest_sha256=c_source_manifest_sha256,
+    )
+    if a_sha256 != T085_T052_COHORT_SHA256:
+        raise T085NativeExecutionError(
+            "T085 A selection map must use the accepted T052 SHA-256"
+        )
+    if len(a_map) != 93:
+        raise T085NativeExecutionError("T085 A selection map must contain 93 records")
+    a_starts = tuple(
+        _t085_canonical_to_battle_start(record) for record in a_map.values()
+    )
+    selected_b, _ = select_cohort_b(b_runs, b_starts)
+    selected_c, _ = select_cohort_c(c_runs, c_starts)
+    if len(selected_b) != T085_COHORT_B_SELECTED_COUNT:
+        raise T085NativeExecutionError("T085 B selection did not produce 192 records")
+    if len(selected_c) < T085_COHORT_C_MIN_SELECTED_COUNT:
+        raise T085NativeExecutionError(
+            "T085 C selection did not produce at least 96 records"
+        )
+    selected_400, _ = select_search_400_subset(selected_b)
+    selected = {
+        "A": a_starts,
+        "B": selected_b,
+        "C": selected_c,
+        "B@400": selected_400,
+    }
+    selection_identity_sha256 = _sha256_json(
+        {
+            cohort: [record.selection_identity for record in records]
+            for cohort, records in selected.items()
+        }
+    )
+    return _T085SelectionRestoreInputs(
+        input_reference=input_reference,
+        source_bindings={"A": a_binding, "B": b_binding, "C": c_binding},
+        source_manifests={"B": b_manifest, "C": c_manifest},
+        canonical_records_by_cohort={"A": a_map, "B": b_map, "C": c_map},
+        source_runs={"B": b_runs, "C": c_runs},
+        battle_starts={"B": b_starts, "C": c_starts},
+        selected=selected,
+        t084_complete_source_identities=t084_ids,
+        t052_complete_source_identities=tuple(a_map),
+        selection_identity_sha256=selection_identity_sha256,
+    )
+
+
+def _t085_selection_shard_for(
+    cohort: str,
+    selection_identity: str,
+    *,
+    shard_count: int,
+) -> int:
+    return (
+        int(
+            sha256(f"{cohort}/{selection_identity}".encode()).hexdigest()[:8],
+            16,
+        )
+        % shard_count
+    )
+
+
+def _t085_selection_unique_records(
+    selected: Mapping[str, Sequence[T085BattleStartRecord]],
+) -> tuple[tuple[str, T085BattleStartRecord], ...]:
+    rows: list[tuple[str, T085BattleStartRecord]] = []
+    seen: set[tuple[str, str]] = set()
+    for cohort in ("A", "B", "C"):
+        for record in selected[cohort]:
+            key = (cohort, record.selection_identity)
+            if key in seen:
+                raise T085NativeExecutionError(
+                    f"T085 selection contains duplicate restore identity {key}"
+                )
+            seen.add(key)
+            rows.append((cohort, record))
+    return tuple(rows)
+
+
+def _t085_restore_selection_record(
+    *,
+    adapter_factory: Callable[[], object],
+    cohort: str,
+    record: T085BattleStartRecord,
+    canonical_records: Mapping[str, BattleStartCheckpointRecord],
+) -> dict[str, object]:
+    """Restore on a fresh base adapter; no terminal search proxy is involved."""
+
+    identity = record.selection_identity
+    try:
+        base_adapter = adapter_factory()
+        restored = restore_t085_canonical_record(
+            base_adapter,
+            record,
+            canonical_records,
+        )
+        if not isinstance(restored, tuple) or len(restored) != 2:
+            raise T085NativeExecutionError(
+                "T085 canonical restore did not return (snapshot, method)"
+            )
+        snapshot, method = restored
+        if not isinstance(snapshot, SimulatorSnapshot) or not isinstance(method, str):
+            raise T085NativeExecutionError(
+                "T085 canonical restore returned an invalid snapshot/method"
+            )
+        fingerprint = sha256(
+            json.dumps(dict(snapshot.raw), sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest()
+        return {
+            "cohort": cohort,
+            "selection_identity": identity,
+            "source_run_seed": record.source_run_seed,
+            "source_run_identity": record.source_run_identity,
+            "complete_source_identity": record.complete_source_identity,
+            "battle_identity": record.battle_identity,
+            "act": record.act,
+            "room_type": record.room_type,
+            "restore_ok": True,
+            "public_context_match": True,
+            "restore_method": method,
+            "snapshot_fingerprint": fingerprint,
+            "failure_reason": None,
+        }
+    except (AttributeError, OSError, RuntimeError, TypeError, ValueError) as exc:
+        return {
+            "cohort": cohort,
+            "selection_identity": identity,
+            "source_run_seed": record.source_run_seed,
+            "source_run_identity": record.source_run_identity,
+            "complete_source_identity": record.complete_source_identity,
+            "battle_identity": record.battle_identity,
+            "act": record.act,
+            "room_type": record.room_type,
+            "restore_ok": False,
+            "public_context_match": False,
+            "restore_method": None,
+            "snapshot_fingerprint": None,
+            "failure_reason": str(exc),
+        }
+
+
+def run_t085_native_selection_restore_from_paths(
+    *,
+    adapter_factory: Callable[[], object],
+    selection_input_path: str | Path,
+    selection_input_sha256: str,
+    a_full_map_path: str | Path,
+    b_full_map_path: str | Path,
+    c_full_map_path: str | Path,
+    a_sha256: str,
+    b_sha256: str,
+    c_sha256: str,
+    b_source_manifest_path: str | Path,
+    b_source_manifest_sha256: str,
+    c_source_manifest_path: str | Path,
+    c_source_manifest_sha256: str,
+    shard_index: int,
+    shard_count: int,
+    worker_count: int,
+    restore_output_path: str | Path,
+) -> dict[str, object]:
+    """Run one explicit restore/parity shard for outcome-blind selection.
+
+    This stage only restores the deterministically selected public identities.
+    It intentionally does not call ``execute_controlled_run`` or Search; the
+    later paired-evaluation command owns model/scorer execution.
+    """
+
+    shard = T085NativeShardPlan(shard_index, shard_count, worker_count)
+    if not callable(adapter_factory):
+        raise T085NativeExecutionError(
+            "T085 selection restore requires an adapter factory"
+        )
+    context = _t085_prepare_selection_restore_inputs(
+        selection_input_path=selection_input_path,
+        selection_input_sha256=selection_input_sha256,
+        a_full_map_path=a_full_map_path,
+        b_full_map_path=b_full_map_path,
+        c_full_map_path=c_full_map_path,
+        a_sha256=a_sha256,
+        b_sha256=b_sha256,
+        c_sha256=c_sha256,
+        b_source_manifest_path=b_source_manifest_path,
+        b_source_manifest_sha256=b_source_manifest_sha256,
+        c_source_manifest_path=c_source_manifest_path,
+        c_source_manifest_sha256=c_source_manifest_sha256,
+    )
+    assigned: list[dict[str, object]] = []
+    for cohort, record in _t085_selection_unique_records(context.selected):
+        if (
+            _t085_selection_shard_for(
+                cohort,
+                record.selection_identity,
+                shard_count=shard.shard_count,
+            )
+            != shard.shard_index
+        ):
+            continue
+        assigned.append(
+            _t085_restore_selection_record(
+                adapter_factory=adapter_factory,
+                cohort=cohort,
+                record=record,
+                canonical_records=context.canonical_records_by_cohort[cohort],
+            )
+        )
+    assigned.sort(key=lambda row: (str(row["cohort"]), str(row["selection_identity"])))
+    payload = {
+        "schema_id": T085_NATIVE_SELECTION_RESTORE_SHARD_SCHEMA_ID,
+        "task_id": "T085",
+        "artifact_scope": "selection_restore_shard",
+        "partial": True,
+        "complete": False,
+        "shard_index": shard.shard_index,
+        "shard_count": shard.shard_count,
+        "worker_count": shard.worker_count,
+        "effective_worker_count": shard.worker_count,
+        "partition_scheme": "sha256(cohort/selection_identity)[:8] mod shard_count",
+        "input_artifact": dict(context.input_reference),
+        "source_bindings": {
+            cohort: dict(binding) for cohort, binding in context.source_bindings.items()
+        },
+        "native_identity": dict(T085_NATIVE_IDENTITY),
+        "selection_identity_sha256": context.selection_identity_sha256,
+        "selected_records": {
+            cohort: [asdict(record) for record in records]
+            for cohort, records in context.selected.items()
+        },
+        "assigned_restore_evidence": assigned,
+        "assigned_record_count": len(assigned),
+        "restore_stage_complete": all(
+            row.get("restore_ok") is True and row.get("public_context_match") is True
+            for row in assigned
+        ),
+        "outcome_blind_selection": True,
+        "search_invoked": False,
+        "paired_evaluation_complete": False,
+    }
+    reference = write_t085_json_artifact(
+        restore_output_path,
+        payload,
+        schema_id=T085_NATIVE_SELECTION_RESTORE_SHARD_SCHEMA_ID,
+    )
+    return {
+        "status": "partial",
+        "task_id": "T085",
+        "restore_evidence_artifact": reference,
+        "shard": payload,
+    }
+
+
+def _load_t085_selection_restore_shard(path: str | Path) -> dict[str, object]:
+    resolved = Path(path).resolve(strict=True)
+    try:
+        payload = json.loads(resolved.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise T085NativeExecutionError(
+            f"T085 selection restore shard is unavailable or invalid: {resolved}"
+        ) from exc
+    if not isinstance(payload, Mapping):
+        raise T085NativeExecutionError("T085 selection restore shard is not an object")
+    required = {
+        "schema_id",
+        "task_id",
+        "artifact_scope",
+        "partial",
+        "complete",
+        "shard_index",
+        "shard_count",
+        "worker_count",
+        "effective_worker_count",
+        "partition_scheme",
+        "input_artifact",
+        "source_bindings",
+        "native_identity",
+        "selection_identity_sha256",
+        "selected_records",
+        "assigned_restore_evidence",
+        "assigned_record_count",
+        "restore_stage_complete",
+    }
+    if not required.issubset(payload):
+        raise T085NativeExecutionError(
+            "T085 selection restore shard is missing required fields"
+        )
+    if (
+        payload.get("schema_id") != T085_NATIVE_SELECTION_RESTORE_SHARD_SCHEMA_ID
+        or payload.get("task_id") != "T085"
+        or payload.get("artifact_scope") != "selection_restore_shard"
+        or payload.get("partial") is not True
+        or payload.get("complete") is not False
+        or payload.get("shard_count") != 16
+        or payload.get("worker_count") != 16
+        or payload.get("effective_worker_count") != 16
+        or payload.get("partition_scheme")
+        != "sha256(cohort/selection_identity)[:8] mod shard_count"
+        or payload.get("native_identity") != T085_NATIVE_IDENTITY
+    ):
+        raise T085NativeExecutionError(
+            "T085 selection restore shard contract is invalid"
+        )
+    index = payload.get("shard_index")
+    if isinstance(index, bool) or not isinstance(index, int) or not 0 <= index < 16:
+        raise T085NativeExecutionError("T085 selection restore shard index is invalid")
+    _t085_required_sha256(
+        payload.get("selection_identity_sha256"),
+        "selection restore selection identity SHA",
+    )
+    if not isinstance(payload.get("selected_records"), Mapping):
+        raise T085NativeExecutionError(
+            "T085 selection restore shard selected records are missing"
+        )
+    evidence = payload.get("assigned_restore_evidence")
+    if not isinstance(evidence, list):
+        raise T085NativeExecutionError(
+            "T085 selection restore shard evidence is not a list"
+        )
+    assigned_count = payload.get("assigned_record_count")
+    if (
+        isinstance(assigned_count, bool)
+        or not isinstance(assigned_count, int)
+        or assigned_count < 0
+        or assigned_count != len(evidence)
+    ):
+        raise T085NativeExecutionError(
+            "T085 selection restore shard assigned count is not exact"
+        )
+    stage_complete = payload.get("restore_stage_complete")
+    if not isinstance(stage_complete, bool) or stage_complete != all(
+        isinstance(row, Mapping)
+        and row.get("restore_ok") is True
+        and row.get("public_context_match") is True
+        for row in evidence
+    ):
+        raise T085NativeExecutionError(
+            "T085 selection restore shard completion flag is not exact"
+        )
+    return dict(payload)
+
+
+def finalize_t085_native_selection_restore_from_paths(
+    *,
+    shard_paths: Sequence[str | Path],
+    selection_output_path: str | Path,
+    restore_evidence_output_path: str | Path,
+) -> dict[str, object]:
+    """Merge exactly 16 restore shards and freeze the current selection artifact."""
+
+    if len(shard_paths) != 16:
+        raise T085NativeExecutionError(
+            "T085 selection restore finalization requires exactly 16 shard artifacts"
+        )
+    shards = [_load_t085_selection_restore_shard(path) for path in shard_paths]
+    indices = [int(shard["shard_index"]) for shard in shards]
+    if sorted(indices) != list(range(16)):
+        raise T085NativeExecutionError(
+            "T085 selection restore shards must cover each index 0..15 exactly once"
+        )
+    first = shards[0]
+    common_keys = (
+        "input_artifact",
+        "source_bindings",
+        "native_identity",
+        "selection_identity_sha256",
+        "selected_records",
+    )
+    for shard in shards[1:]:
+        if any(shard[key] != first[key] for key in common_keys):
+            raise T085NativeExecutionError(
+                "T085 selection restore shards are bound to different inputs/selections"
+            )
+    selected_raw = first["selected_records"]
+    if not isinstance(selected_raw, Mapping) or set(selected_raw) != {
+        "A",
+        "B",
+        "C",
+        "B@400",
+    }:
+        raise T085NativeExecutionError(
+            "T085 selection restore shard cohort matrix is incomplete"
+        )
+    selected: dict[str, tuple[T085BattleStartRecord, ...]] = {}
+    for cohort in ("A", "B", "C", "B@400"):
+        raw_records = selected_raw.get(cohort)
+        if not isinstance(raw_records, list):
+            raise T085NativeExecutionError(
+                f"T085 selection restore selected {cohort} records are malformed"
+            )
+        selected[cohort] = tuple(
+            T085BattleStartRecord.from_mapping(record)
+            for record in raw_records
+            if isinstance(record, Mapping)
+        )
+        if len(selected[cohort]) != len(raw_records):
+            raise T085NativeExecutionError(
+                f"T085 selection restore selected {cohort} records are malformed"
+            )
+    expected_selection_digest = _sha256_json(
+        {
+            cohort: [record.selection_identity for record in records]
+            for cohort, records in selected.items()
+        }
+    )
+    if first["selection_identity_sha256"] != expected_selection_digest:
+        raise T085NativeExecutionError(
+            "T085 selection restore selected identity digest is inconsistent"
+        )
+    expected_unique = {
+        (cohort, record.selection_identity)
+        for cohort, record in _t085_selection_unique_records(selected)
+    }
+    selected_by_key = {
+        (cohort, record.selection_identity): record
+        for cohort, records in selected.items()
+        if cohort != "B@400"
+        for record in records
+    }
+    combined: dict[tuple[str, str], dict[str, object]] = {}
+    for shard in shards:
+        evidence = shard["assigned_restore_evidence"]
+        assert isinstance(evidence, list)
+        for raw in evidence:
+            if not isinstance(raw, Mapping):
+                raise T085NativeExecutionError(
+                    "T085 selection restore evidence row is malformed"
+                )
+            cohort = raw.get("cohort")
+            identity = raw.get("selection_identity")
+            if not isinstance(cohort, str) or not isinstance(identity, str):
+                raise T085NativeExecutionError(
+                    "T085 selection restore evidence identity is malformed"
+                )
+            key = (cohort, identity)
+            if key not in expected_unique:
+                raise T085NativeExecutionError(
+                    "T085 selection restore evidence contains an unselected row"
+                )
+            selected_record = selected_by_key.get(key)
+            if selected_record is None or any(
+                raw.get(field_name) != getattr(selected_record, field_name)
+                for field_name in (
+                    "source_run_seed",
+                    "source_run_identity",
+                    "complete_source_identity",
+                    "battle_identity",
+                    "act",
+                    "room_type",
+                )
+            ):
+                raise T085NativeExecutionError(
+                    "T085 selection restore evidence identity does not match "
+                    "the selected record"
+                )
+            if (
+                _t085_selection_shard_for(cohort, identity, shard_count=16)
+                != shard["shard_index"]
+            ):
+                raise T085NativeExecutionError(
+                    "T085 selection restore evidence is on the wrong shard"
+                )
+            if key in combined:
+                raise T085NativeExecutionError(
+                    "T085 selection restore evidence contains a duplicate row"
+                )
+            combined[key] = dict(raw)
+    if set(combined) != expected_unique:
+        raise T085NativeExecutionError(
+            "T085 selection restore shards do not cover every selected A/B/C record"
+        )
+    failed = [
+        key
+        for key, row in combined.items()
+        if row.get("restore_ok") is not True
+        or row.get("public_context_match") is not True
+    ]
+    if failed:
+        raise T085NativeExecutionError(
+            "T085 selection restore/parity failed for "
+            + ", ".join(f"{cohort}/{identity}" for cohort, identity in failed)
+        )
+    input_artifact = first["input_artifact"]
+    source_bindings = first["source_bindings"]
+    if not isinstance(input_artifact, Mapping) or not isinstance(
+        source_bindings, Mapping
+    ):
+        raise T085NativeExecutionError(
+            "T085 selection restore input binding is malformed"
+        )
+    input_path = input_artifact.get("path")
+    input_sha = input_artifact.get("sha256")
+    a_binding = source_bindings.get("A")
+    b_binding = source_bindings.get("B")
+    c_binding = source_bindings.get("C")
+    if not all(
+        isinstance(value, Mapping) for value in (a_binding, b_binding, c_binding)
+    ):
+        raise T085NativeExecutionError(
+            "T085 selection restore source bindings are malformed"
+        )
+    # Re-run the complete path-bound resolver from the shard's embedded
+    # references.  This prevents a finalizer caller from swapping maps after
+    # the simulator restore stage.
+    a_map_ref = a_binding["map"]
+    b_map_ref = b_binding["map"]
+    c_map_ref = c_binding["map"]
+    b_manifest_ref = b_binding.get("source_manifest")
+    c_manifest_ref = c_binding.get("source_manifest")
+    if not all(
+        isinstance(value, Mapping) for value in (a_map_ref, b_map_ref, c_map_ref)
+    ):
+        raise T085NativeExecutionError(
+            "T085 selection restore map references are malformed"
+        )
+    if not isinstance(b_manifest_ref, Mapping) or not isinstance(
+        c_manifest_ref, Mapping
+    ):
+        raise T085NativeExecutionError(
+            "T085 selection restore manifest references are missing"
+        )
+    context = _t085_prepare_selection_restore_inputs(
+        selection_input_path=str(input_path),
+        selection_input_sha256=str(input_sha),
+        a_full_map_path=str(a_map_ref["path"]),
+        b_full_map_path=str(b_map_ref["path"]),
+        c_full_map_path=str(c_map_ref["path"]),
+        a_sha256=str(a_map_ref["sha256"]),
+        b_sha256=str(b_map_ref["sha256"]),
+        c_sha256=str(c_map_ref["sha256"]),
+        b_source_manifest_path=str(b_manifest_ref["path"]),
+        b_source_manifest_sha256=str(b_manifest_ref["sha256"]),
+        c_source_manifest_path=str(c_manifest_ref["path"]),
+        c_source_manifest_sha256=str(c_manifest_ref["sha256"]),
+    )
+    restore_results_by_cohort: dict[str, dict[str, Mapping[str, object]]] = {
+        "A": {},
+        "B": {},
+        "C": {},
+    }
+    for (cohort, identity), result in combined.items():
+        restore_results_by_cohort[cohort][identity] = result
+    plan = build_t085_native_evaluation_plan(
+        cohort_a_records=context.selected["A"],
+        cohort_a_restore_results=restore_results_by_cohort["A"],
+        cohort_b_source_manifest=context.source_manifests["B"],
+        cohort_b_source_runs=context.source_runs["B"],
+        cohort_b_battle_starts=context.battle_starts["B"],
+        cohort_b_restore_results=restore_results_by_cohort["B"],
+        cohort_c_source_manifest=context.source_manifests["C"],
+        cohort_c_source_runs=context.source_runs["C"],
+        cohort_c_battle_starts=context.battle_starts["C"],
+        cohort_c_restore_results=restore_results_by_cohort["C"],
+        t084_complete_source_identities=context.t084_complete_source_identities,
+        t052_complete_source_identities=context.t052_complete_source_identities,
+    )
+    selection_reference = write_t085_native_selection_artifact(
+        plan,
+        selection_output_path,
+    )
+    final_evidence = {
+        "schema_id": T085_NATIVE_SELECTION_RESTORE_EVIDENCE_SCHEMA_ID,
+        "task_id": "T085",
+        "artifact_scope": "selection_restore_evidence",
+        "partial": False,
+        "complete": True,
+        "shard_count": 16,
+        "worker_count": 16,
+        "input_artifact": dict(context.input_reference),
+        "source_bindings": {
+            cohort: dict(binding) for cohort, binding in context.source_bindings.items()
+        },
+        "native_identity": dict(T085_NATIVE_IDENTITY),
+        "selection_identity_sha256": context.selection_identity_sha256,
+        "shard_artifacts": [
+            {
+                "path": str(Path(path).resolve()),
+                "sha256": sha256_file(path),
+                "byte_count": Path(path).stat().st_size,
+            }
+            for path in shard_paths
+        ],
+        "restore_evidence": [combined[key] for key in sorted(combined)],
+        "restore_parity_passed": True,
+        "selection_artifact": selection_reference,
+        "outcome_blind_selection": True,
+        "search_invoked": False,
+        "paired_evaluation_complete": False,
+    }
+    evidence_reference = write_t085_json_artifact(
+        restore_evidence_output_path,
+        final_evidence,
+        schema_id=T085_NATIVE_SELECTION_RESTORE_EVIDENCE_SCHEMA_ID,
+    )
+    return {
+        "status": "complete",
+        "task_id": "T085",
+        "selection_artifact": selection_reference,
+        "restore_evidence_artifact": evidence_reference,
+        "record_counts": {
+            cohort: len(records) for cohort, records in plan.cohorts.items()
+        },
+    }
+
+
 def _native_execution_provenance(
     *,
     backend: T085NativeSearchBackend,
@@ -4172,6 +5542,9 @@ def run_t085_native_paired_evaluation(
 
 
 __all__ = [
+    "T085_NATIVE_SELECTION_INPUT_SCHEMA_ID",
+    "T085_NATIVE_SELECTION_RESTORE_EVIDENCE_SCHEMA_ID",
+    "T085_NATIVE_SELECTION_RESTORE_SHARD_SCHEMA_ID",
     "T085CohortBSourceGenerationPlan",
     "T085CohortCSourceGenerationPlan",
     "T085NativeArm",
@@ -4190,8 +5563,10 @@ __all__ = [
     "build_t085_native_arms",
     "build_t085_native_evaluation_plan",
     "finalize_t085_native_root_edge_label",
+    "finalize_t085_native_selection_restore_from_paths",
     "load_t085_native_evaluation_plan",
     "merge_t085_cohort_b_source_pool_from_paths",
+    "merge_t085_cohort_c_source_pool_from_paths",
     "prepare_t085_native_root_edge_label",
     "resolve_t085_canonical_records",
     "restore_t085_canonical_record",
@@ -4199,5 +5574,6 @@ __all__ = [
     "run_t085_cohort_c_source_generation_from_paths",
     "run_t085_native_paired_evaluation",
     "run_t085_native_paired_evaluation_from_paths",
+    "run_t085_native_selection_restore_from_paths",
     "write_t085_native_selection_artifact",
 ]

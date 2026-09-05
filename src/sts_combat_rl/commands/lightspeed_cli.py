@@ -91,11 +91,14 @@ from sts_combat_rl.commands.t062_battle_search_v2 import (
 from sts_combat_rl.commands.t085_native_execution import (
     build_t085_cohort_b_source_manifest_from_paths,
     build_t085_cohort_c_source_manifest_from_paths,
+    finalize_t085_native_selection_restore_from_paths,
     merge_t085_cohort_b_source_pool_from_paths,
+    merge_t085_cohort_c_source_pool_from_paths,
     run_t085_cohort_b_source_generation_from_paths,
     run_t085_cohort_c_source_generation_from_paths,
     run_t085_native_paired_evaluation_from_paths,
     run_t085_native_restore_smoke,
+    run_t085_native_selection_restore_from_paths,
 )
 from sts_combat_rl.sim.a20_battle_start_coverage import (
     format_a20_battle_start_coverage_report,
@@ -267,10 +270,13 @@ _LIGHTSPEED_BOOL_FLAGS = (
 _LIGHTSPEED_PATH_FLAGS = (
     "lightspeed_t085_native_restore_smoke",
     "lightspeed_t085_native_paired_evaluation",
+    "lightspeed_t085_native_selection_restore",
+    "lightspeed_t085_native_selection_restore_finalize",
     "lightspeed_t085_cohort_b_source_generation",
     "lightspeed_t085_cohort_b_source_merge",
     "lightspeed_t085_cohort_b_source_manifest",
     "lightspeed_t085_cohort_c_source_generation",
+    "lightspeed_t085_cohort_c_source_merge",
     "lightspeed_t085_cohort_c_source_manifest",
     "lightspeed_battle_start_pool",
     "lightspeed_search_battle_start_pool",
@@ -388,6 +394,22 @@ def run_lightspeed_command(args: argparse.Namespace) -> int:
             )
             print(json.dumps(report, sort_keys=True), file=sys.stderr)
             return 0
+        if args.lightspeed_t085_cohort_c_source_merge is not None:
+            if (
+                len(args.t085_c_source_shard) != 16
+                or len(args.t085_c_source_shard_manifest) != 16
+            ):
+                raise ValueError(
+                    "T085 Cohort C source merge requires exactly 16 pools and "
+                    "16 shard manifests"
+                )
+            report = merge_t085_cohort_c_source_pool_from_paths(
+                shard_paths=args.t085_c_source_shard,
+                shard_manifest_paths=args.t085_c_source_shard_manifest,
+                merged_pool_output_path=args.lightspeed_t085_cohort_c_source_merge,
+            )
+            print(json.dumps(report, sort_keys=True), file=sys.stderr)
+            return 0
         if args.lightspeed_t085_cohort_c_source_manifest is not None:
             required = (
                 args.t085_c_source_pool_sha256,
@@ -404,6 +426,71 @@ def run_lightspeed_command(args: argparse.Namespace) -> int:
                 manifest_output_path=args.t085_c_source_manifest_output,
             )
             print(json.dumps(manifest, sort_keys=True), file=sys.stderr)
+            return 0
+        if args.lightspeed_t085_native_selection_restore_finalize is not None:
+            if (
+                args.t085_selection_output is None
+                or len(args.t085_selection_restore_shard) != 16
+            ):
+                raise ValueError(
+                    "T085 selection restore finalization requires a selection "
+                    "output and exactly 16 restore shard artifacts"
+                )
+            report = finalize_t085_native_selection_restore_from_paths(
+                shard_paths=args.t085_selection_restore_shard,
+                selection_output_path=args.t085_selection_output,
+                restore_evidence_output_path=(
+                    args.lightspeed_t085_native_selection_restore_finalize
+                ),
+            )
+            print(json.dumps(report, sort_keys=True), file=sys.stderr)
+            return 0
+        if args.lightspeed_t085_native_selection_restore is not None:
+            required = (
+                args.t085_selection_input,
+                args.t085_selection_input_sha256,
+                args.t085_a_map,
+                args.t085_b_map,
+                args.t085_c_map,
+                args.t085_a_map_sha256,
+                args.t085_b_map_sha256,
+                args.t085_c_map_sha256,
+                args.t085_b_source_manifest,
+                args.t085_b_source_manifest_sha256,
+                args.t085_c_source_manifest,
+                args.t085_c_source_manifest_sha256,
+                args.t085_shard_index,
+                args.t085_shard_count,
+                args.t085_worker_count,
+            )
+            if any(value is None for value in required):
+                raise ValueError(
+                    "T085 selection restore requires the outcome-blind input, "
+                    "A/B/C maps, final B/C manifests, exact SHA-256 values, "
+                    "and explicit 16-shard/16-worker values"
+                )
+            report = run_t085_native_selection_restore_from_paths(
+                adapter_factory=lambda: LightSpeedAdapter(
+                    seed=args.sim_seed, ascension=args.sim_ascension
+                ),
+                selection_input_path=args.t085_selection_input,
+                selection_input_sha256=args.t085_selection_input_sha256,
+                a_full_map_path=args.t085_a_map,
+                b_full_map_path=args.t085_b_map,
+                c_full_map_path=args.t085_c_map,
+                a_sha256=args.t085_a_map_sha256,
+                b_sha256=args.t085_b_map_sha256,
+                c_sha256=args.t085_c_map_sha256,
+                b_source_manifest_path=args.t085_b_source_manifest,
+                b_source_manifest_sha256=args.t085_b_source_manifest_sha256,
+                c_source_manifest_path=args.t085_c_source_manifest,
+                c_source_manifest_sha256=args.t085_c_source_manifest_sha256,
+                shard_index=args.t085_shard_index,
+                shard_count=args.t085_shard_count,
+                worker_count=args.t085_worker_count,
+                restore_output_path=args.lightspeed_t085_native_selection_restore,
+            )
+            print(json.dumps(report, sort_keys=True), file=sys.stderr)
             return 0
         adapter = LightSpeedAdapter(seed=args.sim_seed, ascension=args.sim_ascension)
         action_space = (

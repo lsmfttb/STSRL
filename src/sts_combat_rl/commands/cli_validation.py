@@ -34,6 +34,48 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
         return "--battle-start-restore-limit must be non-negative"
     if args.battle_start_sample_count < 0:
         return "--battle-start-sample-count must be non-negative"
+    if args.lightspeed_t085_native_selection_restore is not None:
+        restore_required = (
+            args.t085_selection_input,
+            args.t085_selection_input_sha256,
+            args.t085_a_map,
+            args.t085_b_map,
+            args.t085_c_map,
+            args.t085_a_map_sha256,
+            args.t085_b_map_sha256,
+            args.t085_c_map_sha256,
+            args.t085_b_source_manifest,
+            args.t085_b_source_manifest_sha256,
+            args.t085_c_source_manifest,
+            args.t085_c_source_manifest_sha256,
+            args.t085_shard_index,
+            args.t085_shard_count,
+            args.t085_worker_count,
+        )
+        if any(value is None for value in restore_required):
+            return (
+                "T085 selection restore requires the outcome-blind input, A/B/C "
+                "maps, final B/C manifests, all exact SHA-256 values, and "
+                "explicit 16-shard/16-worker values"
+            )
+        if args.t085_b_artifact_kind != "assisted_pool":
+            return "T085 selection restore requires an assisted Cohort-B source map"
+        if args.t085_c_artifact_kind != "natural_pool":
+            return "T085 selection restore requires a natural Cohort-C source map"
+        if args.t085_shard_count != 16:
+            return "--t085-shard-count must be 16"
+        if not 0 <= args.t085_shard_index < 16:
+            return "--t085-shard-index must be between 0 and 15"
+        if args.t085_worker_count != 16:
+            return "--t085-worker-count must be 16"
+    if args.lightspeed_t085_native_selection_restore_finalize is not None and (
+        args.t085_selection_output is None
+        or len(args.t085_selection_restore_shard) != 16
+    ):
+        return (
+            "T085 selection restore finalization requires --t085-selection-output "
+            "and exactly 16 --t085-selection-restore-shard paths"
+        )
     if args.lightspeed_t085_native_paired_evaluation is not None:
         paired_required = (
             args.t085_selection_sha256,
@@ -127,6 +169,11 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
             return "--t085-c-source-shard-index must be between 0 and 15"
         if args.t085_c_source_worker_count != 16:
             return "--t085-c-source-worker-count must be 16"
+    if args.lightspeed_t085_cohort_c_source_merge is not None:
+        if len(args.t085_c_source_shard) != 16:
+            return "T085 Cohort C source merge requires exactly 16 source shard pools"
+        if len(args.t085_c_source_shard_manifest) != 16:
+            return "T085 Cohort C source merge requires exactly 16 shard manifests"
     if args.lightspeed_t085_cohort_c_source_manifest is not None and (
         args.t085_c_source_pool_sha256 is None
         or args.t085_c_source_manifest_output is None
