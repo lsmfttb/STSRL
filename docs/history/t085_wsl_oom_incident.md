@@ -108,6 +108,20 @@ scientific T085 classification is claimed. Resolving this boundary requires a
 compatible pinned native-simulator repair or an explicitly reviewed contract
 recovery; it is not solved by the WSL resource guard.
 
+## Upstream repair availability check
+
+On 2026-09-06, the maintainer checked the `lsmfttb/sts_lightspeed` repository
+before deciding whether another Cohort-B launch was justified. The available
+remote branches were `master`, `stsrl/main`, and the T079 state-utilization
+branch. `stsrl/main` still resolved exactly to the pinned native identity
+`1555348535d66e3035aac80933a60949d4bd850f`, and the repository had no open pull
+request containing a repair for this battle-boundary inconsistency. The only
+matching closed issue was the already-merged T070 tree-geometry acceptance; it
+does not change battle cleanup or legal-action enumeration. The local T084
+worktree changes likewise expose search diagnostics and do not repair this
+transition. No native identity was changed and no additional simulator run was
+launched based on this check.
+
 ## Follow-up bounded-run boundary
 
 The first formal Cohort-B shard also exposed a non-OOM boundary: a normally
