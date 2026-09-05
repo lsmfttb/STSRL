@@ -342,36 +342,39 @@ class _ResourceLease:
         ) | {"admitted_at": self.admitted_at, "released": self.released}
 
     def update_target_pid(self, target_pid: int) -> None:
-        self.target_pid = target_pid
-        self.file.seek(0)
-        self.file.truncate()
-        self.file.write(
-            json.dumps(
-                {
-                    "schema_id": _RESOURCE_LEASE_SCHEMA_ID,
-                    "lease_id": self.lease_id,
-                    "owner_pid": os.getpid(),
-                    "target_pid": target_pid,
-                    "batch_id": self.config.batch_id,
-                    "job_id": self.config.job_id,
-                    "stage": self.config.stage,
-                    "memory_budget_mib": self.config.memory_budget_mib,
-                    "memory_request_mib": self.config.memory_request_mib,
-                    "runtime_rss_limit_mib": self.config.runtime_rss_limit_mib,
-                    "runtime_memavailable_floor_mib": (
-                        self.config.runtime_memavailable_floor_mib
-                    ),
-                    "runtime_sample_seconds": self.config.runtime_sample_seconds,
-                    "worker_count": self.config.worker_count,
-                    "shard_count": self.config.shard_count,
-                    "admitted_at": self.admitted_at,
-                },
-                sort_keys=True,
+        # Readers take the registry lock before inspecting lease metadata.  Keep
+        # that order here; this lease file already holds its per-lease flock.
+        with _resource_registry_lock(self.config.root):
+            self.target_pid = target_pid
+            self.file.seek(0)
+            self.file.truncate()
+            self.file.write(
+                json.dumps(
+                    {
+                        "schema_id": _RESOURCE_LEASE_SCHEMA_ID,
+                        "lease_id": self.lease_id,
+                        "owner_pid": os.getpid(),
+                        "target_pid": target_pid,
+                        "batch_id": self.config.batch_id,
+                        "job_id": self.config.job_id,
+                        "stage": self.config.stage,
+                        "memory_budget_mib": self.config.memory_budget_mib,
+                        "memory_request_mib": self.config.memory_request_mib,
+                        "runtime_rss_limit_mib": self.config.runtime_rss_limit_mib,
+                        "runtime_memavailable_floor_mib": (
+                            self.config.runtime_memavailable_floor_mib
+                        ),
+                        "runtime_sample_seconds": self.config.runtime_sample_seconds,
+                        "worker_count": self.config.worker_count,
+                        "shard_count": self.config.shard_count,
+                        "admitted_at": self.admitted_at,
+                    },
+                    sort_keys=True,
+                )
+                + "\n"
             )
-            + "\n"
-        )
-        self.file.flush()
-        os.fsync(self.file.fileno())
+            self.file.flush()
+            os.fsync(self.file.fileno())
 
     def release(self) -> str | None:
         """Drop the lease lock and file, retaining stale-file recovery."""

@@ -6,6 +6,7 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -404,6 +405,122 @@ def test_resource_admission_rejects_duplicate_active_batch_job(
     assert "duplicate batch/job" in str(duplicate["startup_error"])
     assert first["state"] == "SUCCEEDED"
     assert not list(resource_root.glob("lease-*.json"))
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="resource admission uses POSIX file locking"
+)
+def test_resource_lease_update_is_serialized_with_active_lease_read(
+    tmp_path: Path,
+) -> None:
+    resource_root = tmp_path / "resource-admission"
+    resource_root.mkdir()
+    config = _DETACHED_JOB.ResourceAdmissionConfig(
+        root=resource_root,
+        memory_budget_mib=100,
+        memory_request_mib=100,
+        batch_id="batch",
+        job_id="lease-read-race",
+        runtime_rss_limit_mib=64,
+    )
+    lease_path = resource_root / "lease-race.json"
+    lease_file = lease_path.open("w+", encoding="utf-8")
+    _DETACHED_JOB.fcntl.flock(lease_file.fileno(), _DETACHED_JOB.fcntl.LOCK_EX)
+    lease = _DETACHED_JOB._ResourceLease(
+        config=config,
+        lease_id="lease-race",
+        path=lease_path,
+        file=lease_file,
+        active_memory_mib_at_admission=0,
+        active_lease_count_at_admission=0,
+        admitted_at="2026-09-05T00:00:00+00:00",
+    )
+
+    class BlockingLeaseFile:
+        def __init__(self, wrapped) -> None:
+            self._wrapped = wrapped
+            self.write_started = threading.Event()
+            self.allow_write = threading.Event()
+
+        def write(self, contents: str) -> int:
+            self.write_started.set()
+            assert self.allow_write.wait(5)
+            return self._wrapped.write(contents)
+
+        def __getattr__(self, name: str):
+            return getattr(self._wrapped, name)
+
+    try:
+        lease.update_target_pid(111)
+        blocking_file = BlockingLeaseFile(lease_file)
+        lease.file = blocking_file
+        writer_errors: list[BaseException] = []
+
+        def update_lease() -> None:
+            try:
+                lease.update_target_pid(222)
+            except (AssertionError, OSError) as exc:  # pragma: no cover
+                writer_errors.append(exc)
+
+        writer = threading.Thread(target=update_lease)
+        writer.start()
+        assert blocking_file.write_started.wait(5)
+
+        reader_code = """
+import importlib.util
+import json
+import pathlib
+import sys
+
+spec = importlib.util.spec_from_file_location("lease_reader", sys.argv[1])
+assert spec is not None and spec.loader is not None
+module = importlib.util.module_from_spec(spec)
+sys.modules[spec.name] = module
+spec.loader.exec_module(module)
+root = pathlib.Path(sys.argv[2])
+with module._resource_registry_lock(root):
+    print(json.dumps(module._read_active_resource_leases(root)), flush=True)
+"""
+        reader = subprocess.Popen(
+            [sys.executable, "-c", reader_code, str(SCRIPT), str(resource_root)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        time.sleep(0.2)
+        assert reader.poll() is None
+        blocking_file.allow_write.set()
+        writer.join(timeout=5)
+        assert not writer.is_alive()
+        assert not writer_errors
+        reader_stdout, reader_stderr = reader.communicate(timeout=5)
+        assert reader.returncode == 0, reader_stderr
+        active_leases = json.loads(reader_stdout)
+        assert active_leases == [
+            {
+                "admitted_at": "2026-09-05T00:00:00+00:00",
+                "batch_id": "batch",
+                "job_id": "lease-read-race",
+                "lease_id": "lease-race",
+                "memory_budget_mib": 100,
+                "memory_request_mib": 100,
+                "owner_pid": os.getpid(),
+                "runtime_memavailable_floor_mib": None,
+                "runtime_rss_limit_mib": 64,
+                "runtime_sample_seconds": 0.2,
+                "schema_id": "stsrl-detached-resource-lease-v1",
+                "shard_count": None,
+                "stage": None,
+                "target_pid": 222,
+                "worker_count": None,
+            }
+        ]
+    finally:
+        if "blocking_file" in locals():
+            blocking_file.allow_write.set()
+        if "writer" in locals():
+            writer.join(timeout=5)
+        lease.release()
 
 
 @pytest.mark.skipif(
