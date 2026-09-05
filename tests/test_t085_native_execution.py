@@ -873,7 +873,21 @@ def test_t085_cohort_b_source_generation_writes_partial_shard_manifest(
         records=records,
     )
     artifact = SimpleNamespace(records=records, pool=pool)
-    captured: dict[str, object] = {}
+    captured: dict[str, object] = {"calls": []}
+
+    class FakeAdapter:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def close(self) -> None:
+            self.closed = True
+
+    adapters: list[FakeAdapter] = []
+
+    def adapter_factory() -> FakeAdapter:
+        adapter = FakeAdapter()
+        adapters.append(adapter)
+        return adapter
 
     def collect(
         adapter,
@@ -885,7 +899,9 @@ def test_t085_cohort_b_source_generation_writes_partial_shard_manifest(
         assistance_level,
         policy_seed,
     ):
-        captured.update(
+        calls = captured["calls"]
+        assert isinstance(calls, list)
+        calls.append(
             {
                 "adapter": adapter,
                 "controller": actual_controller,
@@ -904,21 +920,39 @@ def test_t085_cohort_b_source_generation_writes_partial_shard_manifest(
         "dump_assisted_source_pool_jsonl",
         lambda _artifact, stream: stream.write('{"type": "metadata"}\n'),
     )
+    monkeypatch.setattr(
+        t085_execution,
+        "dump_merged_assisted_source_pool_shards_jsonl",
+        lambda _paths, stream: stream.write('{"type": "metadata"}\n'),
+    )
+    monkeypatch.setattr(
+        t085_execution,
+        "load_assisted_source_pool_jsonl",
+        lambda _stream: artifact,
+    )
     pool_path = artifact_root / "source" / "cohort-b" / "shard-04.jsonl"
     manifest_path = artifact_root / "source" / "cohort-b" / "shard-04.json"
     result = run_t085_cohort_b_source_generation_from_paths(
-        adapter_factory=lambda: "fake-adapter",
+        adapter_factory=adapter_factory,
         pool_output_path=pool_path,
         shard_manifest_output_path=manifest_path,
         shard_index=4,
     )
-    assert captured["adapter"] == "fake-adapter"
-    assert captured["seeds"] == plan.seed_inventory
-    assert captured["max_steps"] == 500
-    assert captured["assistance_level"] == "assist_hp75_potion"
-    assert captured["policy_seed"] == 42042
-    assert captured["action_space"].to_dict() == (  # type: ignore[union-attr]
-        ActionSpaceConfig.initial_no_potions().to_dict()
+    calls = captured["calls"]
+    assert len(calls) == len(plan.seed_inventory)
+    assert [call["seeds"] for call in calls] == [
+        (seed,) for seed in plan.seed_inventory
+    ]
+    assert [call["adapter"] for call in calls] == adapters
+    assert len({id(adapter) for adapter in adapters}) == len(adapters)
+    assert all(adapter.closed for adapter in adapters)
+    assert all(call["max_steps"] == 500 for call in calls)
+    assert all(call["assistance_level"] == "assist_hp75_potion" for call in calls)
+    assert all(call["policy_seed"] == 42042 for call in calls)
+    assert all(
+        call["action_space"].to_dict()  # type: ignore[union-attr]
+        == ActionSpaceConfig.initial_no_potions().to_dict()
+        for call in calls
     )
     assert result["status"] == "partial"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -930,6 +964,8 @@ def test_t085_cohort_b_source_generation_writes_partial_shard_manifest(
     assert manifest["source_pool_artifact"]["schema_id"] == (
         t085_execution.ASSISTED_SOURCE_POOL_SCHEMA_ID
     )
+    assert manifest["source_controller_provenance"] == controller.provenance.to_dict()
+    assert manifest["source_pool_artifact"]["path"] == str(pool_path.resolve())
     assert manifest["partial"] is True
     assert manifest["complete"] is False
 

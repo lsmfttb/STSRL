@@ -142,32 +142,20 @@ def _supervise(
                 return 1
             _atomic_write(status_path, _status_payload(**common, state="RUNNING"))
 
-            def handle_supervisor_signal(signum: int, _frame: object) -> None:
-                """Terminate the child and leave a terminal status on supervisor kill."""
+            supervisor_signal: int | None = None
 
-                if target.poll() is None:
-                    _terminate_target_group(target)
+            def handle_supervisor_signal(signum: int, _frame: object) -> None:
+                """Record the signal and interrupt the outer child wait."""
+
+                nonlocal supervisor_signal
+                supervisor_signal = signum
                 try:
-                    target.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    if os.name == "nt":
-                        target.kill()
-                    else:
-                        os.killpg(target.pid, signal.SIGKILL)
-                    target.wait()
-                _atomic_write(
-                    status_path,
-                    _status_payload(
-                        **common,
-                        state="FAILED",
-                        finished_at=_timestamp(),
-                        exit_code=128 + signum,
-                        startup_error=(
-                            f"detached supervisor terminated by signal {signum}"
-                        ),
-                    ),
-                )
-                raise SystemExit(128 + signum)
+                    _terminate_target_group(target)
+                except (ProcessLookupError, OSError):
+                    # The outer wait owns child reaping.  The target may have
+                    # exited between signal delivery and this best-effort
+                    # group termination.
+                    pass
 
             signal.signal(signal.SIGTERM, handle_supervisor_signal)
             exit_code = target.wait()
@@ -175,9 +163,22 @@ def _supervise(
             status_path,
             _status_payload(
                 **common,
-                state="SUCCEEDED" if exit_code == 0 else "FAILED",
+                state=(
+                    "FAILED"
+                    if supervisor_signal is not None or exit_code != 0
+                    else "SUCCEEDED"
+                ),
                 finished_at=_timestamp(),
-                exit_code=exit_code,
+                exit_code=(
+                    128 + supervisor_signal
+                    if supervisor_signal is not None
+                    else exit_code
+                ),
+                startup_error=(
+                    f"detached supervisor terminated by signal {supervisor_signal}"
+                    if supervisor_signal is not None
+                    else None
+                ),
             ),
         )
         return exit_code

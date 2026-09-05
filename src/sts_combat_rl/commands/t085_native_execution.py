@@ -18,8 +18,11 @@ or provenance fields are not accepted.
 
 from __future__ import annotations
 
+import gc
 import json
 import math
+import os
+import tempfile
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass, field, replace
@@ -2945,33 +2948,97 @@ def run_t085_cohort_b_source_generation_from_paths(
     t042_anchor = _load_t085_t042_scale_manifest()
     native_identity = _validate_t085_native_source_manifest("battle_search")
     controller = build_t085_cohort_b_source_controller()
-    collected = collect_assisted_battle_start_pool(
-        adapter_factory(),
-        controller,
-        seeds=plan.seed_inventory,
-        max_steps=500,
-        action_space=ActionSpaceConfig.initial_no_potions(),
-        assistance_level="assist_hp75_potion",
-        policy_seed=42042,
-    )
-    if not isinstance(collected, tuple) or len(collected) != 2:
-        raise T085NativeExecutionError(
-            "T085 Cohort B source collector did not return artifact and coverage"
-        )
-    artifact, _coverage = collected
-    _validate_t085_b_source_pool(
-        artifact,
-        controller=controller,
-        expected_seeds=plan.seed_inventory,
-    )
     pool_path = _require_t085_stable_path(pool_output_path, "source pool output")
     manifest_path = _require_t085_stable_path(
         shard_manifest_output_path,
         "source shard manifest output",
     )
     pool_path.parent.mkdir(parents=True, exist_ok=True)
-    with pool_path.open("w", encoding="utf-8", newline="\n") as stream:
-        dump_assisted_source_pool_jsonl(artifact, stream)
+    # The simulator adapter retains substantial state while collecting a run.
+    # Keep the collector lifetime bounded to one seed, then use the existing
+    # streaming merger so record indices and provenance retain shard order.
+    with tempfile.TemporaryDirectory(
+        prefix=f".t085-b-shard-{shard_index:02d}-",
+        dir=str(pool_path.parent),
+    ) as temporary_dir:
+        temporary_shards: list[Path] = []
+        for chunk_index, seed in enumerate(plan.seed_inventory):
+            adapter = adapter_factory()
+            try:
+                collected = collect_assisted_battle_start_pool(
+                    adapter,
+                    controller,
+                    seeds=(seed,),
+                    max_steps=500,
+                    action_space=ActionSpaceConfig.initial_no_potions(),
+                    assistance_level="assist_hp75_potion",
+                    policy_seed=42042,
+                )
+            finally:
+                close = getattr(adapter, "close", None)
+                shutdown = getattr(adapter, "shutdown", None)
+                if callable(close):
+                    close()
+                elif callable(shutdown):
+                    shutdown()
+                del adapter
+                gc.collect()
+            if not isinstance(collected, tuple) or len(collected) != 2:
+                raise T085NativeExecutionError(
+                    "T085 Cohort B source collector did not return artifact and coverage"
+                )
+            artifact, _coverage = collected
+            _validate_t085_b_source_pool(
+                artifact,
+                controller=controller,
+                expected_seeds=(seed,),
+            )
+            chunk_path = Path(temporary_dir) / f"chunk-{chunk_index:03d}.jsonl"
+            with chunk_path.open("w", encoding="utf-8", newline="\n") as stream:
+                dump_assisted_source_pool_jsonl(artifact, stream)
+            temporary_shards.append(chunk_path)
+
+        merged_temporary_path = Path(temporary_dir) / "merged.jsonl"
+        with merged_temporary_path.open("w", encoding="utf-8", newline="\n") as stream:
+            try:
+                dump_merged_assisted_source_pool_shards_jsonl(
+                    temporary_shards,
+                    stream,
+                )
+            except (OSError, ValueError) as exc:
+                raise T085NativeExecutionError(
+                    "T085 Cohort B source chunk merge failed"
+                ) from exc
+        with merged_temporary_path.open(encoding="utf-8") as stream:
+            try:
+                artifact = load_assisted_source_pool_jsonl(stream)
+            except (OSError, ValueError) as exc:
+                raise T085NativeExecutionError(
+                    "T085 Cohort B merged source pool is invalid"
+                ) from exc
+        # The streaming merger records every one-seed input as an internal
+        # merge shard.  This output is still one of the externally contracted
+        # 64-seed shards, so discard its temporary-path provenance and expose
+        # the original controller at this boundary.  The outer 16-shard merge
+        # adds the retained source_shards provenance.
+        if isinstance(artifact, AssistedSourcePoolArtifact):
+            artifact = replace(
+                artifact,
+                pool=replace(
+                    artifact.pool,
+                    source_controller_provenance=controller.provenance.to_dict(),
+                ),
+                source_shards=(),
+            )
+        _validate_t085_b_source_pool(
+            artifact,
+            controller=controller,
+            expected_seeds=plan.seed_inventory,
+        )
+        with merged_temporary_path.open("w", encoding="utf-8", newline="\n") as stream:
+            dump_assisted_source_pool_jsonl(artifact, stream)
+        os.replace(merged_temporary_path, pool_path)
+
     representatives = _t085_source_run_representatives(
         artifact.records,
         artifact.pool.source_run_summaries,
