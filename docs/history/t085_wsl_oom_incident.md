@@ -103,6 +103,12 @@ environment was approximately 24 GiB of WSL memory, 8 GiB of swap, and a
 jobs; it does not claim that an unguarded process or a WSL VM-layer issue is
 resolved.
 
+The three formal Cohort-B v3 shards that were already running when this patch
+was prepared were launched with the earlier admission-only wrapper. They were
+not restarted or changed by this patch and are not evidence that the runtime
+tripwire was active; their results must not be described as runtime-guard-
+validated.
+
 `scripts/run_detached_job.py` now has an opt-in POSIX resource admission lease.
 All T085 long-running shard supervisors must use one shared
 `--resource-root`, a stable `--resource-batch-id`, and a unique
@@ -120,6 +126,7 @@ python scripts/run_detached_job.py start \
   --resource-memory-budget-mib 18432 \
   --resource-memory-request-mib 6144 \
   --resource-runtime-rss-limit-mib 6144 \
+  --resource-runtime-memavailable-floor-mib 4096 \
   --resource-wait-seconds 3600 \
   --resource-worker-count 16 --resource-shard-count 16 \
   -- <the frozen 16-worker T085 command>
@@ -133,6 +140,12 @@ aggregate budgets, admission state/reason, admitted concurrency, batch/shard
 identity, and the fixed 16-worker/16-shard declaration. Lease cleanup runs on
 normal exit, target failure, supervisor exceptions, and Unix signal cleanup;
 kernel-held file locks also make a lease from a killed supervisor reclaimable.
+
+The illustrative 18 GiB aggregate reservation leaves roughly 6 GiB below the
+observed 24 GiB WSL memory limit, while the 6 GiB per-shard RSS tripwire and
+4 GiB available-memory floor are explicit operational choices rather than
+measured hard-safe limits. They should be revisited when the host or workload
+changes.
 
 Admission requires the explicit `--resource-runtime-rss-limit-mib` process-group
 RSS ceiling, and that ceiling cannot exceed the per-job
