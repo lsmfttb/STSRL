@@ -119,6 +119,7 @@ python scripts/run_detached_job.py start \
   --resource-stage t085-cohort-b-source \
   --resource-memory-budget-mib 18432 \
   --resource-memory-request-mib 6144 \
+  --resource-runtime-rss-limit-mib 7168 \
   --resource-wait-seconds 3600 \
   --resource-worker-count 16 --resource-shard-count 16 \
   -- <the frozen 16-worker T085 command>
@@ -133,9 +134,22 @@ identity, and the fixed 16-worker/16-shard declaration. Lease cleanup runs on
 normal exit, target failure, supervisor exceptions, and Unix signal cleanup;
 kernel-held file locks also make a lease from a killed supervisor reclaimable.
 
+Admission requires the explicit `--resource-runtime-rss-limit-mib` process-group
+RSS ceiling. The supervisor samples aggregate RSS for the target process group;
+if the ceiling is exceeded, it records a `TRIGGERED` runtime-guard state, sends
+`SIGTERM` to the group, escalates to `SIGKILL` only after the bounded termination
+grace period, then performs the sole outer wait/reap before releasing the lease.
+The terminal status retains the trigger reason, sample count, observed/peak RSS,
+timestamps, and final `RELEASED` lease state. An optional
+`--resource-runtime-memavailable-floor-mib` records and enforces a Linux/WSL
+`MemAvailable` floor using the same fail-closed guard. These are sampled
+runtime tripwires: they are not cgroups, do not reserve or cap unrelated WSL
+processes, and a process can briefly exceed a limit between samples. A guard
+observation failure is treated as a trip rather than silently continuing.
+
 Ordinary small detached jobs omit all resource options and retain their prior
-behavior. The guard is therefore not automatic for jobs launched outside this
-explicit wrapper, does not measure or cap unrelated WSL processes, and does
-not change T085's per-shard `worker_count=16` contract. No `.wslconfig` change
+behavior and retain the legacy disabled resource-status shape. The guard is
+therefore not automatic for jobs launched outside this explicit wrapper and
+does not change T085's per-shard `worker_count=16` contract. No `.wslconfig` change
 or `wsl --shutdown` is part of this protection, and no simulator job was
 started by this documentation/code change.

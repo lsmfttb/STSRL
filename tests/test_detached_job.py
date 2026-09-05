@@ -63,6 +63,9 @@ def _resource_args(
     job_id: str,
     budget_mib: int = 100,
     request_mib: int = 100,
+    runtime_rss_limit_mib: int | None = 128,
+    runtime_memavailable_floor_mib: int | None = None,
+    runtime_sample_seconds: float | None = None,
     wait_seconds: float = 0,
     worker_count: int | None = None,
     shard_count: int | None = None,
@@ -74,15 +77,40 @@ def _resource_args(
         str(budget_mib),
         "--resource-memory-request-mib",
         str(request_mib),
-        "--resource-batch-id",
-        batch_id,
-        "--resource-job-id",
-        job_id,
-        "--resource-wait-seconds",
-        str(wait_seconds),
-        "--resource-stage",
-        "test-stage",
     ]
+    if runtime_rss_limit_mib is not None:
+        args.extend(
+            [
+                "--resource-runtime-rss-limit-mib",
+                str(runtime_rss_limit_mib),
+            ]
+        )
+    if runtime_memavailable_floor_mib is not None:
+        args.extend(
+            [
+                "--resource-runtime-memavailable-floor-mib",
+                str(runtime_memavailable_floor_mib),
+            ]
+        )
+    if runtime_sample_seconds is not None:
+        args.extend(
+            [
+                "--resource-runtime-sample-seconds",
+                str(runtime_sample_seconds),
+            ]
+        )
+    args.extend(
+        [
+            "--resource-batch-id",
+            batch_id,
+            "--resource-job-id",
+            job_id,
+            "--resource-wait-seconds",
+            str(wait_seconds),
+            "--resource-stage",
+            "test-stage",
+        ]
+    )
     if worker_count is not None and shard_count is not None:
         args.extend(
             [
@@ -137,6 +165,11 @@ def test_start_status_success_logs_pid_cwd_and_environment(tmp_path: Path) -> No
     assert payload["cwd"] == str(Path.cwd().resolve())
     assert payload["command"] == command
     assert payload["startup_error"] is None
+    assert payload["resource_admission"] == {
+        "enabled": False,
+        "state": "DISABLED",
+        "reason": "resource admission was not requested",
+    }
     assert payload["expected_seconds"] == 4.0
     datetime.fromisoformat(str(payload["started_at"]))
     datetime.fromisoformat(str(payload["estimated_finish_at"]))
@@ -227,6 +260,8 @@ def test_resource_admission_waits_and_records_bounded_concurrency(
     assert admission["state"] == "RELEASED"
     assert admission["memory_budget_mib"] == 100
     assert admission["memory_request_mib"] == 100
+    assert admission["runtime_guard"]["state"] == "COMPLETED"
+    assert admission["runtime_guard"]["rss_limit_mib"] == 128
     assert admission["admitted_concurrency"] == 1
     assert admission["worker_count"] is None
     assert admission["shard_count"] is None
@@ -267,6 +302,8 @@ def test_resource_admission_rejects_duplicate_active_batch_job(
     assert duplicate["state"] == "FAILED"
     assert duplicate["exit_code"] == 1
     assert duplicate["resource_admission"]["state"] == "REJECTED"
+    assert duplicate["resource_admission"]["runtime_guard"]["state"] == "NOT_ADMITTED"
+    assert duplicate["resource_admission"]["active_lease_count"] == 1
     assert "duplicate batch/job" in str(duplicate["startup_error"])
     assert first["state"] == "SUCCEEDED"
     assert not list(resource_root.glob("lease-*.json"))
@@ -309,6 +346,7 @@ def test_waiting_resource_admission_signal_is_cancelled(tmp_path: Path) -> None:
     assert cancelled["state"] == "FAILED"
     assert cancelled["exit_code"] == 143
     assert cancelled["resource_admission"]["state"] == "CANCELLED"
+    assert cancelled["resource_admission"]["runtime_guard"]["state"] == "NOT_ADMITTED"
     assert "supervisor signal" in cancelled["resource_admission"]["reason"]
     assert not list(resource_root.glob("lease-*.json"))
 
@@ -352,6 +390,7 @@ def test_resource_lease_releases_after_failure_and_signal(
     assert signaled["state"] == "FAILED"
     assert signaled["exit_code"] == 143
     assert signaled["resource_admission"]["state"] == "RELEASED"
+    assert signaled["resource_admission"]["runtime_guard"]["state"] == "CANCELLED"
     assert "supervisor signal" in signaled["resource_admission"]["reason"]
     assert not list(resource_root.glob("lease-*.json"))
 
@@ -368,6 +407,93 @@ def test_resource_lease_releases_after_failure_and_signal(
     successor = _wait_for_terminal(successor_status)
     assert successor["state"] == "SUCCEEDED"
     assert not list(resource_root.glob("lease-*.json"))
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="runtime resource guard uses POSIX process groups"
+)
+def test_resource_admission_requires_explicit_runtime_rss_limit(
+    tmp_path: Path,
+) -> None:
+    resource = _resource_args(
+        tmp_path / "resource-admission",
+        batch_id="batch",
+        job_id="missing-limit",
+        runtime_rss_limit_mib=None,
+    )
+    status, started = _start(
+        tmp_path, [sys.executable, "-c", "pass"], resource_args=resource
+    )
+    assert started.returncode != 0
+    assert "resource-runtime-rss-limit-mib" in started.stderr
+    assert not status.exists()
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="runtime resource guard uses POSIX process groups"
+)
+def test_runtime_rss_limit_terminates_target_group_and_releases_lease(
+    tmp_path: Path,
+) -> None:
+    resource_root = tmp_path / "resource-admission"
+    command = [
+        sys.executable,
+        "-c",
+        (
+            "import time; data=bytearray(32 * 1024 * 1024); "
+            "data[::4096] = b'x' * (len(data) // 4096); time.sleep(30)"
+        ),
+    ]
+    status, started = _start(
+        tmp_path,
+        command,
+        resource_args=_resource_args(
+            resource_root,
+            batch_id="batch",
+            job_id="over-limit",
+            runtime_rss_limit_mib=1,
+            runtime_sample_seconds=0.05,
+        ),
+    )
+    assert started.returncode == 0, started.stderr
+    payload = _wait_for_terminal(status)
+    assert payload["state"] == "FAILED"
+    assert payload["exit_code"] == 1
+    admission = payload["resource_admission"]
+    assert admission["state"] == "RELEASED"
+    guard = admission["runtime_guard"]
+    assert guard["state"] == "TRIGGERED"
+    assert guard["trigger_reason"]
+    assert guard["peak_rss_mib"] > guard["rss_limit_mib"]
+    assert admission["released"] is True
+    assert not list(resource_root.glob("lease-*.json"))
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="runtime resource guard uses POSIX process groups"
+)
+def test_runtime_guard_records_optional_memavailable_floor_on_normal_exit(
+    tmp_path: Path,
+) -> None:
+    status, started = _start(
+        tmp_path,
+        [sys.executable, "-c", "import time; time.sleep(0.3)"],
+        resource_args=_resource_args(
+            tmp_path / "resource-admission",
+            batch_id="batch",
+            job_id="floor",
+            runtime_memavailable_floor_mib=1,
+            runtime_sample_seconds=0.05,
+        ),
+    )
+    assert started.returncode == 0, started.stderr
+    payload = _wait_for_terminal(status)
+    assert payload["state"] == "SUCCEEDED"
+    guard = payload["resource_admission"]["runtime_guard"]
+    assert guard["state"] == "COMPLETED"
+    assert guard["memavailable_floor_mib"] == 1
+    assert guard["sample_count"] > 0
+    assert guard["observed_memavailable_mib"] is not None
 
 
 @pytest.mark.skipif(
