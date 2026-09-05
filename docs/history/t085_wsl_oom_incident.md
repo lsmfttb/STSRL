@@ -53,9 +53,13 @@ directories.
 
 ## Verification boundary
 
-The repair passed the focused source-generation, assisted-source, and detached
-job tests (`60 passed`), compileall, changed-file Ruff/format checks, and the
-pinned native smoke gate. A one-shard bounded canary was then launched with
+The repair passed this focused suite (`72 passed`) using the project Python
+runtime: `test_t085_native_execution.py`, `test_assisted_source_generation.py`,
+`test_lightspeed_adapter.py`, and `test_detached_job.py`. Compileall,
+changed-file Ruff/format checks, and `git diff --check` also passed. The memory
+boundary includes explicit `LightSpeedAdapter.close()` native-state release
+and Unix `malloc_trim(0)` after each one-seed chunk. A one-shard bounded canary
+was then launched with
 the accepted Python/native identities. Its temporary chunks showed bounded
 per-seed progress and sampled RSS remained below 1 GiB while WSL retained
 approximately 21--22 GiB available memory with zero swap use. The canary is
