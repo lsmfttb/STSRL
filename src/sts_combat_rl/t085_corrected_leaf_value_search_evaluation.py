@@ -103,7 +103,7 @@ T085_INPUT_ARTIFACT_IDENTITIES = {
 T085_NATIVE_IDENTITY = {
     "repository": "lsmfttb/sts_lightspeed",
     "ref": "refs/heads/stsrl/main",
-    "commit": "1555348535d66e3035aac80933a60949d4bd850f",
+    "commit": "d62ff35579b54d70a7428afdf84743c94df3fe0c",
 }
 T085_COHORT_B_SEED_START = 851001
 T085_COHORT_B_SEED_END = 852024
