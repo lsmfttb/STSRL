@@ -206,6 +206,25 @@ def test_assisted_pool_records_hp_potion_provenance_and_restores() -> None:
     assert tuple(restored.observation) == loaded.pool.records[0].snapshot_observation
 
 
+def test_assisted_pool_preserves_explicit_source_run_index_offset() -> None:
+    artifact, _ = collect_assisted_battle_start_pool(
+        _AssistedAdapter(),
+        _controller(),
+        seeds=[7, 8],
+        max_steps=10,
+        assistance_level=ASSIST_LEVEL_HP50,
+        policy_seed=42,
+        source_run_index_offset=6,
+    )
+
+    assert [
+        summary.source_run_id for summary in artifact.pool.source_run_summaries
+    ] == [
+        "seed-7-run-6",
+        "seed-8-run-7",
+    ]
+
+
 def test_fixed_evaluation_workflow_loads_assisted_source_pool(tmp_path) -> None:
     artifact, _ = collect_assisted_battle_start_pool(
         _AssistedAdapter(),

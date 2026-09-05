@@ -853,9 +853,9 @@ def test_t085_cohort_b_source_generation_writes_partial_shard_manifest(
     summaries = [
         SimpleNamespace(
             source_seed=seed,
-            source_run_id=f"run-{seed}",
+            source_run_id=f"seed-{seed}-run-{index}",
         )
-        for seed in plan.seed_inventory
+        for index, seed in enumerate(plan.seed_inventory)
     ]
     records = [
         SimpleNamespace(
@@ -898,6 +898,7 @@ def test_t085_cohort_b_source_generation_writes_partial_shard_manifest(
         action_space,
         assistance_level,
         policy_seed,
+        source_run_index_offset,
     ):
         calls = captured["calls"]
         assert isinstance(calls, list)
@@ -910,6 +911,7 @@ def test_t085_cohort_b_source_generation_writes_partial_shard_manifest(
                 "action_space": action_space,
                 "assistance_level": assistance_level,
                 "policy_seed": policy_seed,
+                "source_run_index_offset": source_run_index_offset,
             }
         )
         return artifact, object()
@@ -949,6 +951,9 @@ def test_t085_cohort_b_source_generation_writes_partial_shard_manifest(
     assert all(call["max_steps"] == 500 for call in calls)
     assert all(call["assistance_level"] == "assist_hp75_potion" for call in calls)
     assert all(call["policy_seed"] == 42042 for call in calls)
+    assert [call["source_run_index_offset"] for call in calls] == list(
+        range(len(plan.seed_inventory))
+    )
     assert all(
         call["action_space"].to_dict()  # type: ignore[union-attr]
         == ActionSpaceConfig.initial_no_potions().to_dict()
@@ -958,6 +963,9 @@ def test_t085_cohort_b_source_generation_writes_partial_shard_manifest(
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["schema_id"] == "t085-cohort-b-source-shard-manifest-v1"
     assert manifest["shard_source_run_seed_inventory"] == list(plan.seed_inventory)
+    assert manifest["source_run_identity_inventory"] == [
+        f"seed-{seed}-run-{index}" for index, seed in enumerate(plan.seed_inventory)
+    ]
     assert manifest["complete_source_identity_inventory"] == [
         f"checkpoint-{seed}" for seed in plan.seed_inventory
     ]

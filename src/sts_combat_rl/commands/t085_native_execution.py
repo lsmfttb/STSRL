@@ -2973,6 +2973,7 @@ def run_t085_cohort_b_source_generation_from_paths(
                     action_space=ActionSpaceConfig.initial_no_potions(),
                     assistance_level="assist_hp75_potion",
                     policy_seed=42042,
+                    source_run_index_offset=chunk_index,
                 )
             finally:
                 close = getattr(adapter, "close", None)
@@ -2997,6 +2998,7 @@ def run_t085_cohort_b_source_generation_from_paths(
             with chunk_path.open("w", encoding="utf-8", newline="\n") as stream:
                 dump_assisted_source_pool_jsonl(artifact, stream)
             temporary_shards.append(chunk_path)
+            del artifact, collected, _coverage
 
         merged_temporary_path = Path(temporary_dir) / "merged.jsonl"
         with merged_temporary_path.open("w", encoding="utf-8", newline="\n") as stream:
