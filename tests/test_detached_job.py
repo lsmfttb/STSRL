@@ -270,6 +270,40 @@ def test_resource_admission_waits_and_records_bounded_concurrency(
 
 
 @pytest.mark.skipif(
+    sys.platform == "win32", reason="runtime resource guard uses POSIX process groups"
+)
+def test_runtime_guard_ignores_zombie_group_member_during_short_job(
+    tmp_path: Path,
+) -> None:
+    command = [
+        sys.executable,
+        "-c",
+        (
+            "import subprocess,sys,time; "
+            "child=subprocess.Popen([sys.executable, '-c', 'pass']); "
+            "time.sleep(0.6)"
+        ),
+    ]
+    status, started = _start(
+        tmp_path,
+        command,
+        resource_args=_resource_args(
+            tmp_path / "resource-admission",
+            batch_id="batch",
+            job_id="short-zombie-member",
+            runtime_sample_seconds=0.02,
+        ),
+    )
+    assert started.returncode == 0, started.stderr
+    payload = _wait_for_terminal(status)
+    assert payload["state"] == "SUCCEEDED"
+    guard = payload["resource_admission"]["runtime_guard"]
+    assert guard["state"] == "COMPLETED"
+    assert guard["sample_count"] > 0
+    assert guard["trigger_reason"] is None
+
+
+@pytest.mark.skipif(
     sys.platform == "win32", reason="resource admission uses POSIX file locking"
 )
 def test_resource_admission_rejects_duplicate_active_batch_job(

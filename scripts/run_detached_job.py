@@ -30,6 +30,7 @@ _RESOURCE_POLL_SECONDS = 0.2
 _RESOURCE_LEASE_SCHEMA_ID = "stsrl-detached-resource-lease-v1"
 _RUNTIME_GUARD_EXIT_CODE = 1
 _TARGET_TERMINATION_GRACE_SECONDS = 1.0
+_NON_RESIDENT_PROCESS_STATES = frozenset({"Z", "X"})
 
 
 class ResourceAdmissionError(RuntimeError):
@@ -403,6 +404,22 @@ def _proc_stat_process_group_id(stat_path: Path) -> int:
         ) from exc
 
 
+def _proc_stat_process_state(stat_path: Path) -> str:
+    try:
+        contents = stat_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise RuntimeGuardObservationError(
+            f"cannot read process state {stat_path}: {exc}"
+        ) from exc
+    closing_paren = contents.rfind(")")
+    if closing_paren < 0:
+        raise RuntimeGuardObservationError(f"malformed process state {stat_path}")
+    fields = contents[closing_paren + 2 :].split()
+    if not fields:
+        raise RuntimeGuardObservationError(f"malformed process state {stat_path}")
+    return fields[0]
+
+
 def _proc_status_rss_kib(status_path: Path) -> int:
     try:
         lines = status_path.read_text(encoding="utf-8").splitlines()
@@ -444,7 +461,16 @@ def _read_process_group_rss_mib(target_pid: int) -> int:
                 total_kib += _proc_status_rss_kib(stat_path.with_name("status"))
                 members += 1
             except RuntimeGuardObservationError:
-                if not stat_path.exists() or not stat_path.with_name("status").exists():
+                status_path = stat_path.with_name("status")
+                if not stat_path.exists() or not status_path.exists():
+                    continue
+                try:
+                    process_state = _proc_stat_process_state(stat_path)
+                except RuntimeGuardObservationError:
+                    if not stat_path.exists():
+                        continue
+                    raise
+                if process_state in _NON_RESIDENT_PROCESS_STATES:
                     continue
                 raise
         if members == 0:
