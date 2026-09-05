@@ -8,14 +8,14 @@ portable replay to reapply the same assistance before restored battle starts.
 
 from __future__ import annotations
 
-from collections import Counter
-from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, field, replace
 import hashlib
 import json
 import math
-from pathlib import Path
 import time
+from collections import Counter
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass, field, replace
+from pathlib import Path
 from typing import Any, TextIO
 
 from sts_combat_rl.sim.a20_battle_start_coverage import (
@@ -49,11 +49,11 @@ from sts_combat_rl.sim.contract import (
     SimulatorCheckpoint,
     SimulatorSnapshot,
 )
+from sts_combat_rl.sim.controlled_run import ControlledRunStep, execute_controlled_run
 from sts_combat_rl.sim.controller_contract import (
     ControllerProvenance,
     controller_provenance_from_dict,
 )
-from sts_combat_rl.sim.controlled_run import ControlledRunStep, execute_controlled_run
 from sts_combat_rl.sim.decision_record import (
     find_action_index_by_identity,
     source_metadata_from_snapshot,
@@ -78,7 +78,6 @@ from sts_combat_rl.sim.resource_outcome import (
     is_authoritative_terminal_battle_result,
     unavailable_battle_resource_outcome,
 )
-
 
 ASSISTANCE_SCHEDULE_VERSION = "assisted-run-assistance-schedule-v1"
 ASSISTED_SOURCE_POOL_SCHEMA_ID = "assisted-run-source-pool-v1"
