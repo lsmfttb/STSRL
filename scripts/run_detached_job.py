@@ -86,6 +86,10 @@ class ResourceAdmissionConfig:
             or self.runtime_rss_limit_mib <= 0
         ):
             raise ValueError("resource admission requires a positive runtime RSS limit")
+        if self.runtime_rss_limit_mib > self.memory_request_mib:
+            raise ValueError(
+                "runtime RSS limit cannot exceed the resource memory request"
+            )
         if self.runtime_memavailable_floor_mib is not None and (
             isinstance(self.runtime_memavailable_floor_mib, bool)
             or not isinstance(self.runtime_memavailable_floor_mib, int)

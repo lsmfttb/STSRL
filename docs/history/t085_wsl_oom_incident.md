@@ -119,7 +119,7 @@ python scripts/run_detached_job.py start \
   --resource-stage t085-cohort-b-source \
   --resource-memory-budget-mib 18432 \
   --resource-memory-request-mib 6144 \
-  --resource-runtime-rss-limit-mib 7168 \
+  --resource-runtime-rss-limit-mib 6144 \
   --resource-wait-seconds 3600 \
   --resource-worker-count 16 --resource-shard-count 16 \
   -- <the frozen 16-worker T085 command>
@@ -135,7 +135,9 @@ normal exit, target failure, supervisor exceptions, and Unix signal cleanup;
 kernel-held file locks also make a lease from a killed supervisor reclaimable.
 
 Admission requires the explicit `--resource-runtime-rss-limit-mib` process-group
-RSS ceiling. The supervisor samples aggregate RSS for the target process group;
+RSS ceiling, and that ceiling cannot exceed the per-job
+`--resource-memory-request-mib` reservation. The supervisor samples aggregate
+RSS for the target process group;
 if the ceiling is exceeded, it records a `TRIGGERED` runtime-guard state, sends
 `SIGTERM` to the group, escalates to `SIGKILL` only after the bounded termination
 grace period, then performs the sole outer wait/reap before releasing the lease.

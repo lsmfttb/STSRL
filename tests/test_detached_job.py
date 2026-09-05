@@ -63,7 +63,7 @@ def _resource_args(
     job_id: str,
     budget_mib: int = 100,
     request_mib: int = 100,
-    runtime_rss_limit_mib: int | None = 128,
+    runtime_rss_limit_mib: int | None = 64,
     runtime_memavailable_floor_mib: int | None = None,
     runtime_sample_seconds: float | None = None,
     wait_seconds: float = 0,
@@ -261,7 +261,7 @@ def test_resource_admission_waits_and_records_bounded_concurrency(
     assert admission["memory_budget_mib"] == 100
     assert admission["memory_request_mib"] == 100
     assert admission["runtime_guard"]["state"] == "COMPLETED"
-    assert admission["runtime_guard"]["rss_limit_mib"] == 128
+    assert admission["runtime_guard"]["rss_limit_mib"] == 64
     assert admission["admitted_concurrency"] == 1
     assert admission["worker_count"] is None
     assert admission["shard_count"] is None
@@ -460,6 +460,27 @@ def test_resource_admission_requires_explicit_runtime_rss_limit(
     )
     assert started.returncode != 0
     assert "resource-runtime-rss-limit-mib" in started.stderr
+    assert not status.exists()
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32", reason="resource admission uses POSIX file locking"
+)
+def test_resource_admission_rejects_runtime_rss_limit_above_request(
+    tmp_path: Path,
+) -> None:
+    resource = _resource_args(
+        tmp_path / "resource-admission",
+        batch_id="batch",
+        job_id="over-request",
+        request_mib=100,
+        runtime_rss_limit_mib=101,
+    )
+    status, started = _start(
+        tmp_path, [sys.executable, "-c", "pass"], resource_args=resource
+    )
+    assert started.returncode != 0
+    assert "cannot exceed the resource memory request" in started.stderr
     assert not status.exists()
 
 
