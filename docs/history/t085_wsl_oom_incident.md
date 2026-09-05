@@ -77,6 +77,37 @@ classification gates are independently verified. The final accepted result
 must be recorded in `docs/current_status.md` and the T085 artifact/retention
 manifests after those gates complete.
 
+## Formal Cohort-B outcome and remaining blocker
+
+The formal v3 batch is now terminal. The admission-only root
+`cohort-b-formal-v3-guarded-211cc58` produced 10/16 successful shards; its
+other six shards failed in the original admission/lease execution boundary.
+Because that batch started before the runtime-tripwire patch, its successful
+shards are not runtime-guard evidence. A corrected-environment retry at
+`cohort-b-formal-v3-retry-05b3f6e-envfix` produced 5/6 successful shards. The
+five completed runtime guards reached `COMPLETED` without a trip, with peak
+process-group RSS values of 1,874, 3,059, 1,965, 1,835, and 1,992 MiB under
+the 6,144 MiB tripwire. Across both batches, 15/16 source-generation shards
+published valid current-schema artifacts. WSL had approximately 22 GiB
+available memory, zero swap use, no current-boot OOM evidence, and no
+remaining T085 process after the batch ended.
+
+The remaining shard-07 failure is not an OOM. With the accepted Python/native
+pairing and the frozen `assist_hp75_potion` schedule, source seed 851450
+reproducibly reached a native snapshot reporting
+`screen_state=BATTLE`, `battle_active=true`,
+`battle_outcome=PLAYER_VICTORY`, zero living monsters,
+`battle_input_state=EXECUTING_ACTIONS`, top-level `outcome=UNDECIDED`, and an
+empty legal-action list. The pinned native source enumerates no battle actions
+for a non-`UNDECIDED` battle outcome, while the complete-run executor correctly
+fails closed when the run has no legal action and no terminal transition. No
+Python-side mechanics inference, fabricated transition, weakened validation,
+or blind shard retry was used. The exact 1,024-run Cohort-B inventory therefore
+remains incomplete, and no selection, restored evaluation, paired outcome, or
+scientific T085 classification is claimed. Resolving this boundary requires a
+compatible pinned native-simulator repair or an explicitly reviewed contract
+recovery; it is not solved by the WSL resource guard.
+
 ## Follow-up bounded-run boundary
 
 The first formal Cohort-B shard also exposed a non-OOM boundary: a normally
