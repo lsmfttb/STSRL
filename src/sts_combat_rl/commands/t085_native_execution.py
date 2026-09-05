@@ -26,10 +26,16 @@ import os
 import tempfile
 import time
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass, field, replace
 from hashlib import sha256
 from pathlib import Path
 from typing import Any, Literal
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - exercised only on Windows
+    fcntl = None
 
 from sts_combat_rl.sim.action_space import ActionSpaceConfig
 from sts_combat_rl.sim.assisted_source_generation import (
@@ -165,6 +171,61 @@ def _release_t085_chunk_memory() -> None:
             trim = None
         if callable(trim):
             trim(0)
+
+
+@contextmanager
+def _t085_cohort_b_finalization_lock(
+    artifact_root: str | Path,
+):
+    """Serialize Cohort-B artifact finalization across processes sharing a root."""
+
+    root = Path(artifact_root).resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    lock_path = root / ".t085-cohort-b-finalization.lock"
+    with lock_path.open("a+", encoding="utf-8") as lock_file:
+        if fcntl is None:  # pragma: no cover - exercised only on Windows
+            import msvcrt
+
+            lock_file.seek(0)
+            lock_file.write("0")
+            lock_file.flush()
+            msvcrt.locking(lock_file.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            if fcntl is None:  # pragma: no cover - exercised only on Windows
+                import msvcrt
+
+                lock_file.seek(0)
+                msvcrt.locking(lock_file.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+def _write_t085_json_artifact_atomically(
+    path: str | Path,
+    payload: Mapping[str, object],
+    *,
+    schema_id: str,
+) -> dict[str, object]:
+    """Write a T085 JSON artifact through a same-root temporary file."""
+
+    target = _require_t085_stable_path(path, "JSON artifact output")
+    temporary = target.with_name(f".{target.name}.{os.getpid()}.tmp")
+    try:
+        reference = write_t085_json_artifact(
+            temporary,
+            payload,
+            schema_id=schema_id,
+        )
+        os.replace(temporary, target)
+    except BaseException:
+        temporary.unlink(missing_ok=True)
+        raise
+    reference["path"] = str(target)
+    return reference
 
 
 T085NativeSourceArtifactKind = Literal["fixed_cohort", "natural_pool", "assisted_pool"]
@@ -2941,6 +3002,118 @@ def _t085_validate_b_shard_manifest(
     return dict(document)
 
 
+def _finalize_t085_cohort_b_source_shard_from_chunks(
+    *,
+    temporary_shards: Sequence[Path],
+    temporary_dir: str,
+    pool_path: Path,
+    manifest_path: Path,
+    plan: T085CohortBSourceGenerationPlan,
+    native_identity: Mapping[str, object],
+    t042_anchor: Mapping[str, object],
+    controller: RoutedRunController,
+) -> dict[str, object]:
+    """Finalize one B shard while its caller holds the root finalization lock."""
+
+    artifact: AssistedSourcePoolArtifact | None = None
+    try:
+        merged_temporary_path = Path(temporary_dir) / "merged.jsonl"
+        with merged_temporary_path.open("w", encoding="utf-8", newline="\n") as stream:
+            try:
+                dump_merged_assisted_source_pool_shards_jsonl(
+                    temporary_shards,
+                    stream,
+                )
+            except (OSError, ValueError) as exc:
+                raise T085NativeExecutionError(
+                    "T085 Cohort B source chunk merge failed"
+                ) from exc
+        with merged_temporary_path.open(encoding="utf-8") as stream:
+            try:
+                artifact = load_assisted_source_pool_jsonl(stream)
+            except (OSError, ValueError) as exc:
+                raise T085NativeExecutionError(
+                    "T085 Cohort B merged source pool is invalid"
+                ) from exc
+        # The streaming merger records every one-seed input as an internal
+        # merge shard. This output is still one externally contracted
+        # 64-seed shard, so discard temporary-path provenance and expose the
+        # original controller. The outer 16-shard merge adds source_shards.
+        if isinstance(artifact, AssistedSourcePoolArtifact):
+            artifact = replace(
+                artifact,
+                pool=replace(
+                    artifact.pool,
+                    source_controller_provenance=controller.provenance.to_dict(),
+                ),
+                source_shards=(),
+            )
+        _validate_t085_b_source_pool(
+            artifact,
+            controller=controller,
+            expected_seeds=plan.seed_inventory,
+        )
+        with merged_temporary_path.open("w", encoding="utf-8", newline="\n") as stream:
+            dump_assisted_source_pool_jsonl(artifact, stream)
+        os.replace(merged_temporary_path, pool_path)
+
+        representatives = _t085_source_run_representatives(
+            artifact.records,
+            artifact.pool.source_run_summaries,
+            cohort="B",
+        )
+        source_pool_reference = _t085_assisted_source_pool_reference(
+            pool_path,
+            record_count=len(artifact.records),
+            source_run_count=artifact.pool.source_run_count,
+        )
+        manifest = plan.to_dict(
+            native_identity=native_identity,
+            t042_anchor=t042_anchor,
+        )
+        manifest.update(
+            {
+                "source_pool_artifact": source_pool_reference,
+                "source_run_seed_inventory": [
+                    summary.source_seed
+                    for summary in artifact.pool.source_run_summaries
+                ],
+                "source_run_identity_inventory": [
+                    summary.source_run_id
+                    for summary in artifact.pool.source_run_summaries
+                ],
+                "complete_source_identity_inventory": [
+                    record.source_checkpoint_id for record in representatives
+                ],
+                "record_count": len(artifact.records),
+                "terminal_run_count": artifact.pool.terminal_run_count,
+                "truncated_run_count": artifact.pool.truncated_run_count,
+                "source_controller_provenance": (
+                    artifact.pool.source_controller_provenance
+                ),
+            }
+        )
+        manifest_path.parent.mkdir(parents=True, exist_ok=True)
+        manifest_reference = _write_t085_json_artifact_atomically(
+            manifest_path,
+            manifest,
+            schema_id=T085_B_SOURCE_SHARD_MANIFEST_SCHEMA_ID,
+        )
+        return {
+            "status": "partial",
+            "task_id": "T085",
+            "cohort": "B",
+            "source_generation_valid": True,
+            "pool_artifact": source_pool_reference,
+            "source_shard_manifest": manifest_reference,
+            "shard": manifest,
+        }
+    finally:
+        if artifact is not None:
+            del artifact
+        _release_t085_chunk_memory()
+
+
 def run_t085_cohort_b_source_generation_from_paths(
     *,
     adapter_factory: Callable[[], object],
@@ -3016,94 +3189,17 @@ def run_t085_cohort_b_source_generation_from_paths(
             temporary_shards.append(chunk_path)
             del artifact, collected, _coverage
 
-        merged_temporary_path = Path(temporary_dir) / "merged.jsonl"
-        with merged_temporary_path.open("w", encoding="utf-8", newline="\n") as stream:
-            try:
-                dump_merged_assisted_source_pool_shards_jsonl(
-                    temporary_shards,
-                    stream,
-                )
-            except (OSError, ValueError) as exc:
-                raise T085NativeExecutionError(
-                    "T085 Cohort B source chunk merge failed"
-                ) from exc
-        with merged_temporary_path.open(encoding="utf-8") as stream:
-            try:
-                artifact = load_assisted_source_pool_jsonl(stream)
-            except (OSError, ValueError) as exc:
-                raise T085NativeExecutionError(
-                    "T085 Cohort B merged source pool is invalid"
-                ) from exc
-        # The streaming merger records every one-seed input as an internal
-        # merge shard.  This output is still one of the externally contracted
-        # 64-seed shards, so discard its temporary-path provenance and expose
-        # the original controller at this boundary.  The outer 16-shard merge
-        # adds the retained source_shards provenance.
-        if isinstance(artifact, AssistedSourcePoolArtifact):
-            artifact = replace(
-                artifact,
-                pool=replace(
-                    artifact.pool,
-                    source_controller_provenance=controller.provenance.to_dict(),
-                ),
-                source_shards=(),
+        with _t085_cohort_b_finalization_lock(pool_path.parent):
+            return _finalize_t085_cohort_b_source_shard_from_chunks(
+                temporary_shards=temporary_shards,
+                temporary_dir=temporary_dir,
+                pool_path=pool_path,
+                manifest_path=manifest_path,
+                plan=plan,
+                native_identity=native_identity,
+                t042_anchor=t042_anchor,
+                controller=controller,
             )
-        _validate_t085_b_source_pool(
-            artifact,
-            controller=controller,
-            expected_seeds=plan.seed_inventory,
-        )
-        with merged_temporary_path.open("w", encoding="utf-8", newline="\n") as stream:
-            dump_assisted_source_pool_jsonl(artifact, stream)
-        os.replace(merged_temporary_path, pool_path)
-
-    representatives = _t085_source_run_representatives(
-        artifact.records,
-        artifact.pool.source_run_summaries,
-        cohort="B",
-    )
-    source_pool_reference = _t085_assisted_source_pool_reference(
-        pool_path,
-        record_count=len(artifact.records),
-        source_run_count=artifact.pool.source_run_count,
-    )
-    manifest = plan.to_dict(
-        native_identity=native_identity,
-        t042_anchor=t042_anchor,
-    )
-    manifest.update(
-        {
-            "source_pool_artifact": source_pool_reference,
-            "source_run_seed_inventory": [
-                summary.source_seed for summary in artifact.pool.source_run_summaries
-            ],
-            "source_run_identity_inventory": [
-                summary.source_run_id for summary in artifact.pool.source_run_summaries
-            ],
-            "complete_source_identity_inventory": [
-                record.source_checkpoint_id for record in representatives
-            ],
-            "record_count": len(artifact.records),
-            "terminal_run_count": artifact.pool.terminal_run_count,
-            "truncated_run_count": artifact.pool.truncated_run_count,
-            "source_controller_provenance": artifact.pool.source_controller_provenance,
-        }
-    )
-    manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    manifest_reference = write_t085_json_artifact(
-        manifest_path,
-        manifest,
-        schema_id=T085_B_SOURCE_SHARD_MANIFEST_SCHEMA_ID,
-    )
-    return {
-        "status": "partial",
-        "task_id": "T085",
-        "cohort": "B",
-        "source_generation_valid": True,
-        "pool_artifact": source_pool_reference,
-        "source_shard_manifest": manifest_reference,
-        "shard": manifest,
-    }
 
 
 def merge_t085_cohort_b_source_pool_from_paths(
@@ -3236,6 +3332,25 @@ def build_t085_cohort_b_source_manifest_from_paths(
     pool_sha256: str,
     manifest_output_path: str | Path,
 ) -> dict[str, object]:
+    """Build the complete B manifest under the root finalization lock."""
+
+    with _t085_cohort_b_finalization_lock(Path(pool_path).resolve().parent):
+        try:
+            return _build_t085_cohort_b_source_manifest_from_paths_unlocked(
+                pool_path=pool_path,
+                pool_sha256=pool_sha256,
+                manifest_output_path=manifest_output_path,
+            )
+        finally:
+            _release_t085_chunk_memory()
+
+
+def _build_t085_cohort_b_source_manifest_from_paths_unlocked(
+    *,
+    pool_path: str | Path,
+    pool_sha256: str,
+    manifest_output_path: str | Path,
+) -> dict[str, object]:
     """Finalize a merged complete Cohort-B assisted pool."""
 
     resolved_pool = _require_t085_stable_path(pool_path, "merged source pool")
@@ -3345,7 +3460,7 @@ def build_t085_cohort_b_source_manifest_from_paths(
             "T085 Cohort B merged source summary seed order is not exact"
         )
     manifest_path.parent.mkdir(parents=True, exist_ok=True)
-    reference = write_t085_json_artifact(
+    reference = _write_t085_json_artifact_atomically(
         manifest_path,
         manifest,
         schema_id=T085_SOURCE_MANIFEST_SCHEMA_ID,

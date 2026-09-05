@@ -39,6 +39,10 @@ Cohort-B shard:
 - strip temporary inner-merge provenance at the externally visible 64-seed
   shard boundary, preserve source-run identities with an explicit offset, and
   publish the final pool atomically only after validation succeeds.
+- serialize only the memory-heavy Cohort-B finalization interval with an
+  artifact-root file lock shared by processes using that root; release the
+  artifact reference and run garbage collection/native heap trimming before
+  releasing the lock. Collection remains parallel across the 16 workers.
 
 The detached-job supervisor was repaired at the same boundary. Its Unix
 signal handler now records the signal and best-effort terminates the target

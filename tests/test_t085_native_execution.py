@@ -3,6 +3,8 @@ from __future__ import annotations
 import hashlib
 import inspect
 import json
+import multiprocessing
+import time
 from dataclasses import dataclass, replace
 from types import SimpleNamespace
 
@@ -53,6 +55,12 @@ from sts_combat_rl.sim.search_guidance_inference import (
     SearchGuidanceValuePrediction,
 )
 from sts_combat_rl.sim.torch_policy_value import OUTCOME_TARGET_KIND
+
+
+def _hold_t085_finalization_lock(root: str, ready) -> None:
+    with t085_execution._t085_cohort_b_finalization_lock(root):
+        ready.set()
+        time.sleep(0.25)
 
 
 def _actions() -> list[SimulatorAction]:
@@ -820,6 +828,28 @@ def test_t085_complete_b_pool_requires_verified_source_shards(monkeypatch) -> No
             artifact,
             expected_seeds=tuple(range(851001, 852025)),
         )
+
+
+def test_t085_finalization_lock_serializes_processes_at_artifact_root(tmp_path) -> None:
+    if "fork" not in multiprocessing.get_all_start_methods():
+        pytest.skip("cross-process flock test requires Unix fork")
+    context = multiprocessing.get_context("fork")
+    ready = context.Event()
+    worker = context.Process(
+        target=_hold_t085_finalization_lock,
+        args=(str(tmp_path), ready),
+    )
+    worker.start()
+    try:
+        assert ready.wait(5)
+        started = time.monotonic()
+        with t085_execution._t085_cohort_b_finalization_lock(tmp_path):
+            elapsed = time.monotonic() - started
+        assert elapsed >= 0.15
+        assert (tmp_path / ".t085-cohort-b-finalization.lock").is_file()
+    finally:
+        worker.join(5)
+    assert worker.exitcode == 0
 
 
 def test_t085_cohort_b_source_generation_writes_partial_shard_manifest(
