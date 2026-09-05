@@ -69,6 +69,9 @@ several files:
 - [`native_lineage_change_checklist.md`](native_lineage_change_checklist.md):
   short execution checklist for tasks that change the accepted simulator
   identity, including the ancestry/active-ref gate.
+- [`implementer_coordination.md`](implementer_coordination.md): operational
+  handoff, wait, result-reading, independent-verification, and post-result
+  continuation protocol for Main Maintainer/Implementer work.
 
 ### Active Roadmaps
 

@@ -207,6 +207,10 @@ current contracts.
 - The main maintainer does not implement feature code directly. It remains the
   independent code reviewer, publishes every review or re-review conclusion on
   the pull request, and owns merge decisions.
+- Implementer handoffs must follow [`docs/implementer_coordination.md`](docs/implementer_coordination.md):
+  a wait timeout is not completion, an empty thread projection is not proof of
+  no work, and the maintainer must read/verify the result and continue the
+  authorized workflow before returning to the user.
 - One task uses one fresh branch and one pull request based on latest `main`.
 - A ready-for-review pull request must satisfy the task's published
   deliverables, required artifacts, verification, and acceptance criteria.

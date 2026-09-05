@@ -2,6 +2,13 @@
 
 This document defines the repository's task collaboration workflow.
 
+The detailed operational protocol for delegating to an Implementer, waiting for
+its terminal result, reading delegated/compacted output, and continuing the
+Maintainer workflow is in
+[`implementer_coordination.md`](implementer_coordination.md). That guide
+supplements this document without changing task authority or acceptance
+semantics.
+
 > Freeze what can change scientific or durable project meaning. Leave equivalent
 > implementation choices free.
 
