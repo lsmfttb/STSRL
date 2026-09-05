@@ -106,8 +106,8 @@ from sts_combat_rl.sim.search_guidance_inference import (
     search_guidance_scorer_checkpoint_provenance,
     validate_search_guidance_result,
 )
-from sts_combat_rl.sim.torch_policy_value import OUTCOME_TARGET_KIND
 from sts_combat_rl.t085_corrected_leaf_value_search_evaluation import (
+    T085_ARTIFACT_ROOT,
     T085_COHORT_B_RUN_COUNT,
     T085_COHORT_B_SEED_END,
     T085_COHORT_B_SEED_START,
@@ -138,7 +138,6 @@ from sts_combat_rl.t085_corrected_leaf_value_search_evaluation import (
     validate_t085_source_generation_contract,
     write_t085_json_artifact,
 )
-from sts_combat_rl.t085_corrected_leaf_value_search_repair import T085_ARTIFACT_ROOT
 
 T085_NATIVE_V2_API = "StepSimulator.battle_search_v2.v1"
 T085_NATIVE_V2_PATCH = "sts_lightspeed_battle_search_v2_tree_internal_v1"
@@ -159,6 +158,7 @@ T085_B_SOURCE_POOL_SCHEMA_ID = ASSISTED_SOURCE_POOL_SCHEMA_ID
 T085_BOUNDED_RUN_TRUNCATION_FAILURE_REASON = "bounded_run_truncated"
 T085_NATIVE_SEARCH_BACKENDS = ("battle_search", "battle_search_v2")
 T085NativeSearchBackend = Literal["battle_search", "battle_search_v2"]
+T085_HISTORICAL_OUTCOME_TARGET_KIND = "terminal_battle_survival_probability"
 
 
 def _release_t085_chunk_memory() -> None:
@@ -1403,7 +1403,7 @@ def run_t085_native_paired_evaluation_from_paths(
         expected_target = (
             SEARCH_V2_LEAF_NATIVE_UTILITY_TARGET_KIND
             if corrected
-            else OUTCOME_TARGET_KIND
+            else T085_HISTORICAL_OUTCOME_TARGET_KIND
         )
         if provenance.outcome_target_kind != expected_target:
             raise T085NativeExecutionError(

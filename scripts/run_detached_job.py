@@ -4,22 +4,385 @@
 from __future__ import annotations
 
 import argparse
+import errno
 import json
+import math
 import os
 import signal
 import subprocess
 import sys
 import time
 from collections.abc import Sequence
+from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - exercised only on Windows
+    fcntl = None
 
 STATES = {"RUNNING", "SUCCEEDED", "FAILED"}
+_RESOURCE_POLL_SECONDS = 0.2
+
+
+class ResourceAdmissionError(RuntimeError):
+    """A requested detached-job resource lease could not be admitted."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.status = status
+
+
+@dataclass(frozen=True)
+class ResourceAdmissionConfig:
+    """Explicit resource reservation and duplicate-job identity."""
+
+    root: Path
+    memory_budget_mib: int
+    memory_request_mib: int
+    batch_id: str
+    job_id: str
+    wait_seconds: float = 0.0
+    stage: str | None = None
+    worker_count: int | None = None
+    shard_count: int | None = None
+
+    def __post_init__(self) -> None:
+        if fcntl is None:
+            raise ValueError("resource admission requires POSIX file locking")
+        if self.memory_budget_mib <= 0:
+            raise ValueError("resource memory budget must be positive")
+        if self.memory_request_mib <= 0:
+            raise ValueError("resource memory request must be positive")
+        if self.memory_request_mib > self.memory_budget_mib:
+            raise ValueError("resource memory request cannot exceed its budget")
+        if not self.batch_id:
+            raise ValueError("resource batch id must be non-empty")
+        if not self.job_id:
+            raise ValueError("resource job id must be non-empty")
+        if not math.isfinite(self.wait_seconds) or self.wait_seconds < 0:
+            raise ValueError("resource wait seconds must be finite and non-negative")
+        if (self.worker_count is None) != (self.shard_count is None):
+            raise ValueError(
+                "resource worker and shard counts must be supplied together"
+            )
+        if self.worker_count is not None and (
+            self.worker_count <= 0 or self.shard_count is None or self.shard_count <= 0
+        ):
+            raise ValueError("resource worker and shard counts must be positive")
+
+    def to_status(
+        self,
+        *,
+        state: str,
+        reason: str,
+        active_memory_mib: int = 0,
+        active_lease_count: int = 0,
+        lease_id: str | None = None,
+        target_pid: int | None = None,
+        admitted_concurrency: int | None = None,
+        released_at: str | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "enabled": True,
+            "state": state,
+            "reason": reason,
+            "root": str(self.root),
+            "batch_id": self.batch_id,
+            "job_id": self.job_id,
+            "stage": self.stage,
+            "memory_budget_mib": self.memory_budget_mib,
+            "memory_request_mib": self.memory_request_mib,
+            "projected_memory_mib": active_memory_mib + self.memory_request_mib,
+            "active_memory_mib": active_memory_mib,
+            "active_lease_count": active_lease_count,
+            "admitted_concurrency": admitted_concurrency,
+            "worker_count": self.worker_count,
+            "shard_count": self.shard_count,
+            "lease_id": lease_id,
+            "target_pid": target_pid,
+            "released_at": released_at,
+        }
+
+
+@dataclass
+class _ResourceLease:
+    config: ResourceAdmissionConfig
+    lease_id: str
+    path: Path
+    file: Any
+    active_memory_mib_at_admission: int
+    active_lease_count_at_admission: int
+    admitted_at: str
+    target_pid: int | None = None
+    released_at: str | None = None
+    released: bool = False
+
+    @property
+    def admitted_concurrency(self) -> int:
+        return self.active_lease_count_at_admission + 1
+
+    def status(self, *, state: str, reason: str) -> dict[str, Any]:
+        return self.config.to_status(
+            state=state,
+            reason=reason,
+            active_memory_mib=self.active_memory_mib_at_admission,
+            active_lease_count=self.active_lease_count_at_admission,
+            lease_id=self.lease_id,
+            target_pid=self.target_pid,
+            admitted_concurrency=self.admitted_concurrency,
+            released_at=self.released_at,
+        ) | {"admitted_at": self.admitted_at, "released": self.released}
+
+    def update_target_pid(self, target_pid: int) -> None:
+        self.target_pid = target_pid
+        self.file.seek(0)
+        self.file.truncate()
+        self.file.write(
+            json.dumps(
+                {
+                    "schema_id": "stsrl-detached-resource-lease-v1",
+                    "lease_id": self.lease_id,
+                    "owner_pid": os.getpid(),
+                    "target_pid": target_pid,
+                    "batch_id": self.config.batch_id,
+                    "job_id": self.config.job_id,
+                    "stage": self.config.stage,
+                    "memory_budget_mib": self.config.memory_budget_mib,
+                    "memory_request_mib": self.config.memory_request_mib,
+                    "worker_count": self.config.worker_count,
+                    "shard_count": self.config.shard_count,
+                    "admitted_at": self.admitted_at,
+                },
+                sort_keys=True,
+            )
+            + "\n"
+        )
+        self.file.flush()
+        os.fsync(self.file.fileno())
+
+    def release(self) -> str | None:
+        """Drop the lease lock and file, retaining stale-file recovery."""
+
+        if self.released:
+            return None
+        release_error: str | None = None
+        self.released_at = _timestamp()
+        try:
+            with _resource_registry_lock(self.config.root):
+                try:
+                    self.path.unlink(missing_ok=True)
+                except OSError as exc:
+                    release_error = str(exc)[:500]
+        except OSError as exc:
+            release_error = str(exc)[:500]
+        finally:
+            try:
+                fcntl.flock(self.file.fileno(), fcntl.LOCK_UN)
+            except OSError as exc:
+                if release_error is None:
+                    release_error = str(exc)[:500]
+            try:
+                self.file.close()
+            except OSError as exc:
+                if release_error is None:
+                    release_error = str(exc)[:500]
+            self.released = True
+        return release_error
 
 
 def _timestamp() -> str:
     return datetime.now(UTC).isoformat()
+
+
+@contextmanager
+def _resource_registry_lock(root: Path):
+    """Serialize resource-lease inspection and creation for one root."""
+
+    if fcntl is None:  # pragma: no cover - guarded by ResourceAdmissionConfig
+        raise OSError("resource admission requires POSIX file locking")
+    root.mkdir(parents=True, exist_ok=True)
+    with (root / ".stsrl-resource-admission.lock").open("a+", encoding="utf-8") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
+def _read_active_resource_leases(root: Path) -> list[dict[str, Any]]:
+    """Read live leases and remove files whose kernel lock is no longer held."""
+
+    if fcntl is None:  # pragma: no cover - guarded by ResourceAdmissionConfig
+        raise OSError("resource admission requires POSIX file locking")
+    active: list[dict[str, Any]] = []
+    for path in sorted(root.glob("lease-*.json")):
+        try:
+            with path.open("r+", encoding="utf-8") as lease_file:
+                try:
+                    fcntl.flock(lease_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except OSError as exc:
+                    if exc.errno not in (errno.EACCES, errno.EAGAIN):
+                        raise
+                    lease_file.seek(0)
+                    try:
+                        metadata = json.load(lease_file)
+                    except (json.JSONDecodeError, OSError) as parse_exc:
+                        raise ResourceAdmissionError(
+                            f"active resource lease is unreadable: {path}",
+                        ) from parse_exc
+                    if not isinstance(metadata, dict):
+                        raise ResourceAdmissionError(
+                            f"active resource lease is malformed: {path}"
+                        )
+                    active.append(metadata)
+                else:
+                    fcntl.flock(lease_file.fileno(), fcntl.LOCK_UN)
+                    path.unlink(missing_ok=True)
+        except FileNotFoundError:
+            continue
+    return active
+
+
+def _resource_active_memory(leases: Sequence[dict[str, Any]]) -> int:
+    total = 0
+    for lease in leases:
+        request = lease.get("memory_request_mib")
+        if isinstance(request, bool) or not isinstance(request, int) or request <= 0:
+            raise ResourceAdmissionError(
+                "active resource lease has invalid memory request"
+            )
+        total += request
+    return total
+
+
+def _resource_wait_status(
+    config: ResourceAdmissionConfig,
+    *,
+    reason: str,
+    active_leases: Sequence[dict[str, Any]],
+    state: str = "WAITING",
+) -> dict[str, Any]:
+    active_memory = _resource_active_memory(active_leases)
+    return config.to_status(
+        state=state,
+        reason=reason,
+        active_memory_mib=active_memory,
+        active_lease_count=len(active_leases),
+        admitted_concurrency=len(active_leases),
+    )
+
+
+def _acquire_resource_lease(
+    config: ResourceAdmissionConfig,
+    *,
+    command: Sequence[str],
+    cwd: Path,
+    status_path: Path,
+    on_wait: Any,
+    cancelled: Any,
+) -> _ResourceLease:
+    """Admit one explicit reservation, waiting only up to its configured limit."""
+
+    deadline = time.monotonic() + config.wait_seconds
+    while True:
+        if cancelled():
+            raise ResourceAdmissionError(
+                "resource admission cancelled by supervisor signal",
+            )
+        with _resource_registry_lock(config.root):
+            active = _read_active_resource_leases(config.root)
+            duplicate = next(
+                (
+                    lease
+                    for lease in active
+                    if lease.get("batch_id") == config.batch_id
+                    and lease.get("job_id") == config.job_id
+                ),
+                None,
+            )
+            active_memory = _resource_active_memory(active)
+            if duplicate is not None:
+                status = _resource_wait_status(
+                    config,
+                    reason=(
+                        "duplicate batch/job is already admitted: "
+                        f"{config.batch_id}/{config.job_id}"
+                    ),
+                    active_leases=active,
+                    state="REJECTED",
+                )
+                raise ResourceAdmissionError(status["reason"], status=status)
+            if active_memory + config.memory_request_mib <= config.memory_budget_mib:
+                lease_id = uuid4().hex
+                lease_path = config.root / f"lease-{lease_id}.json"
+                lease_file = lease_path.open("x+", encoding="utf-8")
+                try:
+                    fcntl.flock(lease_file.fileno(), fcntl.LOCK_EX)
+                    admitted_at = _timestamp()
+                    metadata = {
+                        "schema_id": "stsrl-detached-resource-lease-v1",
+                        "lease_id": lease_id,
+                        "owner_pid": os.getpid(),
+                        "target_pid": None,
+                        "batch_id": config.batch_id,
+                        "job_id": config.job_id,
+                        "stage": config.stage,
+                        "memory_budget_mib": config.memory_budget_mib,
+                        "memory_request_mib": config.memory_request_mib,
+                        "worker_count": config.worker_count,
+                        "shard_count": config.shard_count,
+                        "command": list(command),
+                        "cwd": str(cwd),
+                        "status_path": str(status_path),
+                        "admitted_at": admitted_at,
+                    }
+                    lease_file.write(json.dumps(metadata, sort_keys=True) + "\n")
+                    lease_file.flush()
+                    os.fsync(lease_file.fileno())
+                except BaseException:
+                    try:
+                        fcntl.flock(lease_file.fileno(), fcntl.LOCK_UN)
+                    finally:
+                        lease_file.close()
+                        lease_path.unlink(missing_ok=True)
+                    raise
+                return _ResourceLease(
+                    config=config,
+                    lease_id=lease_id,
+                    path=lease_path,
+                    file=lease_file,
+                    active_memory_mib_at_admission=active_memory,
+                    active_lease_count_at_admission=len(active),
+                    admitted_at=admitted_at,
+                )
+            status = _resource_wait_status(
+                config,
+                reason=(
+                    "resource memory budget exhausted: "
+                    f"{active_memory}+{config.memory_request_mib} > "
+                    f"{config.memory_budget_mib} MiB"
+                ),
+                active_leases=active,
+            )
+        on_wait(status)
+        if config.wait_seconds == 0 or time.monotonic() >= deadline:
+            status["state"] = "REJECTED"
+            status["reason"] = (
+                f"{status['reason']}; admission wait limit "
+                f"{config.wait_seconds:g}s expired"
+            )
+            raise ResourceAdmissionError(status["reason"], status=status)
+        time.sleep(min(_RESOURCE_POLL_SECONDS, max(0.0, deadline - time.monotonic())))
 
 
 def _atomic_write(path: Path, payload: dict[str, Any]) -> None:
@@ -51,6 +414,8 @@ def _status_payload(
     finished_at: str | None = None,
     exit_code: int | None = None,
     startup_error: str | None = None,
+    target_pid: int | None = None,
+    resource_admission: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if state not in STATES:
         raise ValueError(f"invalid detached-job state: {state}")
@@ -62,6 +427,7 @@ def _status_payload(
         "command": list(command),
         "cwd": str(cwd),
         "pid": pid,
+        "target_pid": target_pid,
         "state": state,
         "started_at": started_at,
         "finished_at": finished_at,
@@ -71,6 +437,7 @@ def _status_payload(
         "stdout_path": str(stdout_path),
         "stderr_path": str(stderr_path),
         "startup_error": startup_error,
+        "resource_admission": resource_admission,
     }
 
 
@@ -101,6 +468,7 @@ def _supervise(
     cwd: Path,
     command: Sequence[str],
     expected_seconds: float | None,
+    resource_config: ResourceAdmissionConfig | None = None,
 ) -> int:
     pid = os.getpid()
     started_at = _timestamp()
@@ -113,87 +481,321 @@ def _supervise(
         "stdout_path": stdout_path,
         "stderr_path": stderr_path,
     }
+    target: subprocess.Popen[bytes] | None = None
+    target_reaped = False
+    lease: _ResourceLease | None = None
+    supervisor_signal: int | None = None
+    resource_status = (
+        {
+            "enabled": False,
+            "state": "DISABLED",
+            "reason": "resource admission was not requested",
+        }
+        if resource_config is None
+        else resource_config.to_status(
+            state="WAITING",
+            reason="awaiting explicit resource admission",
+        )
+    )
+    terminal_state = "FAILED"
+    terminal_exit_code = 1
+    terminal_error: str | None = None
+
+    def handle_supervisor_signal(signum: int, _frame: object) -> None:
+        """Record the signal and best-effort terminate the target group."""
+
+        nonlocal supervisor_signal
+        supervisor_signal = signum
+        if target is not None:
+            try:
+                _terminate_target_group(target)
+            except (ProcessLookupError, OSError):
+                # The outer wait owns child reaping.  The target may have
+                # exited between signal delivery and this best-effort group
+                # termination.
+                pass
+
     try:
         stdout_path.parent.mkdir(parents=True, exist_ok=True)
         stderr_path.parent.mkdir(parents=True, exist_ok=True)
+        signal.signal(signal.SIGTERM, handle_supervisor_signal)
+        _atomic_write(
+            status_path,
+            _status_payload(
+                **common,
+                state="RUNNING",
+                target_pid=None,
+                resource_admission=resource_status,
+            ),
+        )
         with stdout_path.open("ab") as stdout, stderr_path.open("ab") as stderr:
-            try:
-                target = subprocess.Popen(
-                    list(command),
-                    cwd=str(cwd),
-                    stdin=subprocess.DEVNULL,
-                    stdout=stdout,
-                    stderr=stderr,
-                    env=None,
-                    creationflags=_creation_flags(),
-                    start_new_session=os.name != "nt",
+            if resource_config is not None:
+                try:
+                    lease = _acquire_resource_lease(
+                        resource_config,
+                        command=command,
+                        cwd=cwd,
+                        status_path=status_path,
+                        on_wait=lambda status: _atomic_write(
+                            status_path,
+                            _status_payload(
+                                **common,
+                                state="RUNNING",
+                                target_pid=None,
+                                resource_admission=status,
+                            ),
+                        ),
+                        cancelled=lambda: supervisor_signal is not None,
+                    )
+                except ResourceAdmissionError as exc:
+                    resource_status = exc.status or resource_status
+                    raise
+                resource_status = lease.status(
+                    state="ADMITTED",
+                    reason="resource reservation admitted",
                 )
-            except OSError as exc:
                 _atomic_write(
                     status_path,
                     _status_payload(
                         **common,
-                        state="FAILED",
-                        finished_at=_timestamp(),
-                        exit_code=getattr(exc, "errno", None) or 1,
-                        startup_error=str(exc)[:500],
+                        state="RUNNING",
+                        target_pid=None,
+                        resource_admission=resource_status,
                     ),
                 )
-                return 1
-            _atomic_write(status_path, _status_payload(**common, state="RUNNING"))
-
-            supervisor_signal: int | None = None
-
-            def handle_supervisor_signal(signum: int, _frame: object) -> None:
-                """Record the signal and interrupt the outer child wait."""
-
-                nonlocal supervisor_signal
-                supervisor_signal = signum
-                try:
-                    _terminate_target_group(target)
-                except (ProcessLookupError, OSError):
-                    # The outer wait owns child reaping.  The target may have
-                    # exited between signal delivery and this best-effort
-                    # group termination.
-                    pass
-
-            signal.signal(signal.SIGTERM, handle_supervisor_signal)
-            exit_code = target.wait()
-        _atomic_write(
-            status_path,
-            _status_payload(
-                **common,
-                state=(
-                    "FAILED"
-                    if supervisor_signal is not None or exit_code != 0
-                    else "SUCCEEDED"
-                ),
-                finished_at=_timestamp(),
-                exit_code=(
-                    128 + supervisor_signal
-                    if supervisor_signal is not None
-                    else exit_code
-                ),
-                startup_error=(
+            if supervisor_signal is not None:
+                terminal_exit_code = 128 + supervisor_signal
+                terminal_error = (
                     f"detached supervisor terminated by signal {supervisor_signal}"
+                )
+            else:
+                try:
+                    target = subprocess.Popen(
+                        list(command),
+                        cwd=str(cwd),
+                        stdin=subprocess.DEVNULL,
+                        stdout=stdout,
+                        stderr=stderr,
+                        env=None,
+                        creationflags=_creation_flags(),
+                        start_new_session=os.name != "nt",
+                    )
+                except OSError as exc:
+                    terminal_exit_code = getattr(exc, "errno", None) or 1
+                    terminal_error = str(exc)[:500]
+                else:
+                    if lease is not None:
+                        lease.update_target_pid(target.pid)
+                        resource_status = lease.status(
+                            state="ADMITTED",
+                            reason="target started under resource reservation",
+                        )
+                    _atomic_write(
+                        status_path,
+                        _status_payload(
+                            **common,
+                            state="RUNNING",
+                            target_pid=target.pid,
+                            resource_admission=resource_status,
+                        ),
+                    )
+                    exit_code = target.wait()
+                    target_reaped = True
+                    terminal_exit_code = exit_code
+                    if supervisor_signal is not None:
+                        terminal_state = "FAILED"
+                        terminal_exit_code = 128 + supervisor_signal
+                        terminal_error = f"detached supervisor terminated by signal {supervisor_signal}"
+                    else:
+                        terminal_state = "SUCCEEDED" if exit_code == 0 else "FAILED"
+        if lease is None and resource_config is not None:
+            resource_status = resource_config.to_status(
+                state="CANCELLED" if supervisor_signal is not None else "REJECTED",
+                reason=(
+                    "resource admission cancelled by supervisor signal"
                     if supervisor_signal is not None
-                    else None
+                    else "resource admission was not granted"
                 ),
-            ),
+            ) | {"released": False}
+    except ResourceAdmissionError as exc:
+        terminal_state = "FAILED"
+        terminal_exit_code = (
+            128 + supervisor_signal if supervisor_signal is not None else 1
         )
-        return exit_code
+        terminal_error = str(exc)[:500]
     except BaseException as exc:  # noqa: BLE001 - supervisor must record all failures
-        _atomic_write(
-            status_path,
-            _status_payload(
-                **common,
-                state="FAILED",
-                finished_at=_timestamp(),
-                exit_code=1,
-                startup_error=str(exc)[:500],
-            ),
+        terminal_state = "FAILED"
+        terminal_exit_code = (
+            128 + supervisor_signal if supervisor_signal is not None else 1
         )
-        return 1
+        terminal_error = str(exc)[:500]
+    finally:
+        if target is not None and not target_reaped:
+            try:
+                _terminate_target_group(target)
+            except (ProcessLookupError, OSError):
+                pass
+            try:
+                target.wait()
+            except (OSError, subprocess.SubprocessError):
+                pass
+            target_reaped = True
+        if lease is not None:
+            release_error = lease.release()
+            resource_status = lease.status(
+                state="RELEASED",
+                reason=(
+                    "lease released after supervisor signal"
+                    if supervisor_signal is not None
+                    else "lease released after target completion"
+                ),
+            )
+            if release_error is not None:
+                resource_status["release_error"] = release_error
+        elif (
+            resource_config is not None
+            and supervisor_signal is not None
+            and resource_status.get("state") == "WAITING"
+        ):
+            resource_status = resource_config.to_status(
+                state="CANCELLED",
+                reason="resource admission cancelled by supervisor signal",
+            ) | {"released": False}
+        try:
+            _atomic_write(
+                status_path,
+                _status_payload(
+                    **common,
+                    state=terminal_state,
+                    target_pid=target.pid if target is not None else None,
+                    finished_at=_timestamp(),
+                    exit_code=terminal_exit_code,
+                    startup_error=terminal_error,
+                    resource_admission=resource_status,
+                ),
+            )
+        except BaseException:  # noqa: BLE001 - preserve the supervisor result
+            terminal_error = terminal_error or "terminal status write failed"
+    return terminal_exit_code
+
+
+def _add_resource_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--resource-root",
+        type=Path,
+        help="Shared POSIX lease root; required to enable resource admission.",
+    )
+    parser.add_argument(
+        "--resource-memory-budget-mib",
+        type=int,
+        help="Aggregate memory reservation budget for this lease root.",
+    )
+    parser.add_argument(
+        "--resource-memory-request-mib",
+        type=int,
+        help="Memory reservation requested by this job.",
+    )
+    parser.add_argument(
+        "--resource-batch-id",
+        help="Stable batch identity used for duplicate active-job detection.",
+    )
+    parser.add_argument(
+        "--resource-job-id",
+        help="Stable job/shard identity within the batch.",
+    )
+    parser.add_argument(
+        "--resource-wait-seconds",
+        type=float,
+        help="Maximum admission wait; zero rejects immediately when unavailable.",
+    )
+    parser.add_argument(
+        "--resource-stage",
+        help="Optional auditable stage name, such as t085-cohort-b-source.",
+    )
+    parser.add_argument(
+        "--resource-worker-count",
+        type=int,
+        help="Optional effective worker count recorded with the lease.",
+    )
+    parser.add_argument(
+        "--resource-shard-count",
+        type=int,
+        help="Optional total shard count recorded with the lease.",
+    )
+
+
+def _resource_config_from_args(
+    args: argparse.Namespace,
+) -> ResourceAdmissionConfig | None:
+    names = (
+        "resource_root",
+        "resource_memory_budget_mib",
+        "resource_memory_request_mib",
+        "resource_batch_id",
+        "resource_job_id",
+        "resource_wait_seconds",
+        "resource_stage",
+        "resource_worker_count",
+        "resource_shard_count",
+    )
+    if not any(getattr(args, name) is not None for name in names):
+        return None
+    required = (
+        "resource_root",
+        "resource_memory_budget_mib",
+        "resource_memory_request_mib",
+        "resource_batch_id",
+        "resource_job_id",
+    )
+    missing = [name for name in required if getattr(args, name) is None]
+    if missing:
+        raise SystemExit(
+            "resource admission requires --resource-root, "
+            "--resource-memory-budget-mib, --resource-memory-request-mib, "
+            "--resource-batch-id, and --resource-job-id"
+        )
+    return ResourceAdmissionConfig(
+        root=args.resource_root.resolve(),
+        memory_budget_mib=args.resource_memory_budget_mib,
+        memory_request_mib=args.resource_memory_request_mib,
+        batch_id=args.resource_batch_id,
+        job_id=args.resource_job_id,
+        wait_seconds=(
+            0.0 if args.resource_wait_seconds is None else args.resource_wait_seconds
+        ),
+        stage=args.resource_stage,
+        worker_count=args.resource_worker_count,
+        shard_count=args.resource_shard_count,
+    )
+
+
+def _resource_config_args(config: ResourceAdmissionConfig) -> list[str]:
+    args = [
+        "--resource-root",
+        str(config.root),
+        "--resource-memory-budget-mib",
+        str(config.memory_budget_mib),
+        "--resource-memory-request-mib",
+        str(config.memory_request_mib),
+        "--resource-batch-id",
+        config.batch_id,
+        "--resource-job-id",
+        config.job_id,
+        "--resource-wait-seconds",
+        str(config.wait_seconds),
+    ]
+    if config.stage is not None:
+        args.extend(["--resource-stage", config.stage])
+    if config.worker_count is not None and config.shard_count is not None:
+        args.extend(
+            [
+                "--resource-worker-count",
+                str(config.worker_count),
+                "--resource-shard-count",
+                str(config.shard_count),
+            ]
+        )
+    return args
 
 
 def _start(args: argparse.Namespace) -> int:
@@ -206,6 +808,7 @@ def _start(args: argparse.Namespace) -> int:
     if not cwd.is_dir():
         raise SystemExit(f"--cwd is not a directory: {cwd}")
     command = args.command[1:] if args.command[:1] == ["--"] else list(args.command)
+    resource_config = _resource_config_from_args(args)
     supervisor_args = [
         sys.executable,
         str(Path(__file__).resolve()),
@@ -221,6 +824,8 @@ def _start(args: argparse.Namespace) -> int:
     ]
     if args.expected_seconds is not None:
         supervisor_args.extend(["--expected-seconds", str(args.expected_seconds)])
+    if resource_config is not None:
+        supervisor_args.extend(_resource_config_args(resource_config))
     supervisor_args.append("--")
     supervisor_args.extend(command)
     supervisor = subprocess.Popen(
@@ -248,6 +853,7 @@ def _supervisor_parser() -> argparse.ArgumentParser:
     parser.add_argument("--stderr", type=Path, required=True)
     parser.add_argument("--cwd", type=Path, required=True)
     parser.add_argument("--expected-seconds", type=float, default=None)
+    _add_resource_arguments(parser)
     parser.add_argument("command", nargs=argparse.REMAINDER)
     return parser
 
@@ -259,6 +865,7 @@ def _start_parser() -> argparse.ArgumentParser:
     parser.add_argument("--stderr", type=Path, required=True)
     parser.add_argument("--cwd", type=Path)
     parser.add_argument("--expected-seconds", type=float, default=None)
+    _add_resource_arguments(parser)
     parser.add_argument("command", nargs=argparse.REMAINDER)
     return parser
 
@@ -271,6 +878,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if mode == "--supervise":
         args = _supervisor_parser().parse_args(values)
         command = args.command[1:] if args.command[:1] == ["--"] else args.command
+        resource_config = _resource_config_from_args(args)
         return _supervise(
             status_path=args.status,
             stdout_path=args.stdout,
@@ -278,6 +886,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             cwd=args.cwd,
             command=command,
             expected_seconds=args.expected_seconds,
+            resource_config=resource_config,
         )
     if mode == "start":
         return _start(_start_parser().parse_args(values))

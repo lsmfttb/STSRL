@@ -91,3 +91,51 @@ provenance failures, and missing or duplicate required identities remain
 fail-closed. This makes bounded truncation a manifest-level invalid run, not a
 source-pool structural failure. Outputs from the old code that was still
 running at that observation are diagnostic only and are not accepted results.
+
+## Prevention of recurrence
+
+The persistent WSL journal confirms that the earlier batch suffered repeated
+`global_oom` events, with Python processes killed as victims. Repeated shard
+and retry launches also created a risk that a second copy of the same batch
+would consume memory while the first copy was still active. The observed
+environment was approximately 24 GiB of WSL memory, 8 GiB of swap, and a
+32 GiB Windows host. This section records an operational guard for participating
+jobs; it does not claim that an unguarded process or a WSL VM-layer issue is
+resolved.
+
+`scripts/run_detached_job.py` now has an opt-in POSIX resource admission lease.
+All T085 long-running shard supervisors must use one shared
+`--resource-root`, a stable `--resource-batch-id`, and a unique
+`--resource-job-id` (the shard id). They also declare an aggregate memory
+budget and per-job reservation. For example, a T085 Cohort-B shard launch can
+use:
+
+```text
+python scripts/run_detached_job.py start \
+  --status <shard>/status.json --stdout <shard>/stdout.log \
+  --stderr <shard>/stderr.log \
+  --resource-root <t085-artifact-root>/admission \
+  --resource-batch-id t085-formal-b --resource-job-id shard-00 \
+  --resource-stage t085-cohort-b-source \
+  --resource-memory-budget-mib 18432 \
+  --resource-memory-request-mib 6144 \
+  --resource-wait-seconds 3600 \
+  --resource-worker-count 16 --resource-shard-count 16 \
+  -- <the frozen 16-worker T085 command>
+```
+
+The example reserves at most three such shards concurrently when the shared
+root has no other leases; remaining shards wait up to the explicit limit and
+then fail clearly. A duplicate active `(batch_id, job_id)` is rejected rather
+than starting a second copy. The supervisor status records the requested and
+aggregate budgets, admission state/reason, admitted concurrency, batch/shard
+identity, and the fixed 16-worker/16-shard declaration. Lease cleanup runs on
+normal exit, target failure, supervisor exceptions, and Unix signal cleanup;
+kernel-held file locks also make a lease from a killed supervisor reclaimable.
+
+Ordinary small detached jobs omit all resource options and retain their prior
+behavior. The guard is therefore not automatic for jobs launched outside this
+explicit wrapper, does not measure or cap unrelated WSL processes, and does
+not change T085's per-shard `worker_count=16` contract. No `.wslconfig` change
+or `wsl --shutdown` is part of this protection, and no simulator job was
+started by this documentation/code change.
