@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from io import StringIO
 
 from sts_combat_rl.sim.assisted_source_generation import (
@@ -12,6 +12,7 @@ from sts_combat_rl.sim.assisted_source_generation import (
     collect_assisted_battle_start_pool,
     dump_assisted_source_coverage_comparison_report_json,
     dump_assisted_source_pool_jsonl,
+    dump_merged_assisted_source_pool_shards_jsonl,
     load_assisted_source_pool_jsonl,
     merge_assisted_source_pool_shards,
     restore_assisted_battle_start_record,
@@ -223,6 +224,53 @@ def test_assisted_pool_preserves_explicit_source_run_index_offset() -> None:
         "seed-7-run-6",
         "seed-8-run-7",
     ]
+
+
+def test_inner_merge_external_shard_boundary_discards_temporary_provenance(
+    tmp_path,
+) -> None:
+    controller = _controller()
+    shard_paths = []
+    for index, seed in enumerate((7, 8)):
+        artifact, _ = collect_assisted_battle_start_pool(
+            _AssistedAdapter(),
+            controller,
+            seeds=[seed],
+            max_steps=10,
+            assistance_level=ASSIST_LEVEL_HP50,
+            policy_seed=42,
+            source_run_index_offset=index,
+        )
+        shard_path = tmp_path / f"inner-{index}.jsonl"
+        with shard_path.open("w", encoding="utf-8", newline="\n") as stream:
+            dump_assisted_source_pool_jsonl(artifact, stream)
+        shard_paths.append(shard_path)
+
+    merged_path = tmp_path / "merged.jsonl"
+    with merged_path.open("w", encoding="utf-8", newline="\n") as stream:
+        dump_merged_assisted_source_pool_shards_jsonl(shard_paths, stream)
+    with merged_path.open(encoding="utf-8") as stream:
+        merged = load_assisted_source_pool_jsonl(stream)
+
+    external = replace(
+        merged,
+        pool=replace(
+            merged.pool,
+            source_controller_provenance=controller.provenance.to_dict(),
+        ),
+        source_shards=(),
+    )
+    final_path = tmp_path / "external.jsonl"
+    with final_path.open("w", encoding="utf-8", newline="\n") as stream:
+        dump_assisted_source_pool_jsonl(external, stream)
+    with final_path.open(encoding="utf-8") as stream:
+        loaded = load_assisted_source_pool_jsonl(stream)
+
+    assert loaded.source_shards == ()
+    assert loaded.pool.source_controller_provenance == controller.provenance.to_dict()
+    assert all(
+        str(tmp_path) not in record.source_checkpoint_id for record in loaded.records
+    )
 
 
 def test_fixed_evaluation_workflow_loads_assisted_source_pool(tmp_path) -> None:
