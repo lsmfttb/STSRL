@@ -1,17 +1,19 @@
 from __future__ import annotations
 
-from collections import Counter
 import io
 import os
-from pathlib import Path
 import subprocess
 import sys
+from collections import Counter
+from pathlib import Path
+
+import pytest
 
 from sts_combat_rl.cli import build_parser, main
+from sts_combat_rl.sim.battle_start_pool import load_natural_battle_start_pool_jsonl
 from sts_combat_rl.sim.constructed_battle_start import (
     ConstructedBattleStartAuditReport,
 )
-from sts_combat_rl.sim.battle_start_pool import load_natural_battle_start_pool_jsonl
 from sts_combat_rl.sim.contract import (
     SimulatorAction,
     SimulatorCheckpoint,
@@ -628,6 +630,44 @@ def test_cli_default_import_does_not_import_torch() -> None:
     )
 
     assert result.stdout == "False\n"
+
+
+def test_cli_routes_t085_offline_manifest_without_constructing_simulator(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    from sts_combat_rl.commands import lightspeed_cli
+
+    pool_path = tmp_path / "merged.jsonl"
+    output_path = tmp_path / "manifest.json"
+    monkeypatch.setattr(
+        lightspeed_cli,
+        "LightSpeedAdapter",
+        lambda *args, **kwargs: pytest.fail(
+            "offline T085 manifest finalization must not construct a simulator"
+        ),
+    )
+    monkeypatch.setattr(
+        lightspeed_cli,
+        "build_t085_cohort_b_source_manifest_from_paths",
+        lambda **kwargs: {"status": "finalized", "pool": str(kwargs["pool_path"])},
+    )
+
+    assert (
+        main(
+            [
+                "--lightspeed-t085-cohort-b-source-manifest",
+                str(pool_path),
+                "--t085-b-source-pool-sha256",
+                "a" * 64,
+                "--t085-b-source-manifest-output",
+                str(output_path),
+                "--log-file",
+                "-",
+            ]
+        )
+        == 0
+    )
+    assert '"status": "finalized"' in capsys.readouterr().err
 
 
 def test_cli_rejects_pytorch_inference_without_trainer_input(capsys) -> None:

@@ -7,9 +7,9 @@ advance a simulator, or import PyTorch.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-import math
 from typing import Any, Protocol
 
 from sts_combat_rl.sim.features import (
@@ -20,9 +20,11 @@ from sts_combat_rl.sim.features import (
 from sts_combat_rl.sim.policy_contract import DecisionContext
 from sts_combat_rl.sim.public_context_artifacts import sanitize_public_context_artifact
 
-
 SEARCH_GUIDANCE_INFERENCE_SCHEMA_ID = "search-guidance-inference-v1"
 SEARCH_GUIDANCE_INFERENCE_SCHEMA_VERSION = 1
+SEARCH_V2_LEAF_NATIVE_UTILITY_TARGET_KIND = (
+    "search_v2_leaf_continuation_native_utility_v1"
+)
 
 
 class SearchGuidanceScorer(Protocol):
@@ -73,6 +75,12 @@ class SearchGuidanceCheckpointProvenance:
     source_information_regime_counts: dict[str, int] = field(default_factory=dict)
     oracle_like_supervision: bool = False
     training_data_provenance: dict[str, Any] = field(default_factory=dict)
+    # Historical checkpoints omit this field and retain their survival
+    # probability semantics.  Corrected T085 checkpoints declare the native
+    # Search v2 utility kind explicitly so consumers cannot reinterpret a
+    # probability as a native scalar.
+    outcome_target_kind: str | None = None
+    value_target_normalization: dict[str, float] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -94,6 +102,8 @@ class SearchGuidanceCheckpointProvenance:
             ),
             "oracle_like_supervision": self.oracle_like_supervision,
             "training_data_provenance": dict(self.training_data_provenance),
+            "outcome_target_kind": self.outcome_target_kind,
+            "value_target_normalization": dict(self.value_target_normalization),
         }
 
 
@@ -126,10 +136,14 @@ class SearchGuidanceValuePrediction:
     battle_survival_probability: float | None = None
     terminal_absolute_current_hp: float | None = None
     structured_resource_values: dict[str, float] = field(default_factory=dict)
+    # Append T085's optional field after the original positional fields.  A
+    # few framework-neutral callers construct this dataclass positionally.
+    native_leaf_utility: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "battle_survival_probability": self.battle_survival_probability,
+            "native_leaf_utility": self.native_leaf_utility,
             "terminal_absolute_current_hp": self.terminal_absolute_current_hp,
             "structured_resource_values": dict(self.structured_resource_values),
         }

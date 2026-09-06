@@ -34,6 +34,154 @@ def validate_cli_args(args: argparse.Namespace) -> str | None:
         return "--battle-start-restore-limit must be non-negative"
     if args.battle_start_sample_count < 0:
         return "--battle-start-sample-count must be non-negative"
+    if args.lightspeed_t085_native_selection_restore is not None:
+        restore_required = (
+            args.t085_selection_input,
+            args.t085_selection_input_sha256,
+            args.t085_a_map,
+            args.t085_b_map,
+            args.t085_c_map,
+            args.t085_a_map_sha256,
+            args.t085_b_map_sha256,
+            args.t085_c_map_sha256,
+            args.t085_b_source_manifest,
+            args.t085_b_source_manifest_sha256,
+            args.t085_c_source_manifest,
+            args.t085_c_source_manifest_sha256,
+            args.t085_shard_index,
+            args.t085_shard_count,
+            args.t085_worker_count,
+        )
+        if any(value is None for value in restore_required):
+            return (
+                "T085 selection restore requires the outcome-blind input, A/B/C "
+                "maps, final B/C manifests, all exact SHA-256 values, and "
+                "explicit 16-shard/16-worker values"
+            )
+        if args.t085_b_artifact_kind != "assisted_pool":
+            return "T085 selection restore requires an assisted Cohort-B source map"
+        if args.t085_c_artifact_kind != "natural_pool":
+            return "T085 selection restore requires a natural Cohort-C source map"
+        if args.t085_shard_count != 16:
+            return "--t085-shard-count must be 16"
+        if not 0 <= args.t085_shard_index < 16:
+            return "--t085-shard-index must be between 0 and 15"
+        if args.t085_worker_count != 16:
+            return "--t085-worker-count must be 16"
+    if args.lightspeed_t085_native_selection_restore_finalize is not None and (
+        args.t085_selection_output is None
+        or len(args.t085_selection_restore_shard) != 16
+    ):
+        return (
+            "T085 selection restore finalization requires --t085-selection-output "
+            "and exactly 16 --t085-selection-restore-shard paths"
+        )
+    if args.lightspeed_t085_native_paired_evaluation is not None:
+        paired_required = (
+            args.t085_selection_sha256,
+            args.t085_a_map,
+            args.t085_b_map,
+            args.t085_c_map,
+            args.t085_a_map_sha256,
+            args.t085_b_map_sha256,
+            args.t085_c_map_sha256,
+            args.t085_old_checkpoint_64001,
+            args.t085_corrected_checkpoint_85001,
+            args.t085_old_checkpoint_64002,
+            args.t085_corrected_checkpoint_85002,
+            args.t085_old_checkpoint_64001_sha256,
+            args.t085_corrected_checkpoint_85001_sha256,
+            args.t085_old_checkpoint_64002_sha256,
+            args.t085_corrected_checkpoint_85002_sha256,
+            args.t085_training_manifest,
+            args.t085_training_manifest_sha256,
+            args.t085_shard_index,
+            args.t085_shard_count,
+            args.t085_worker_count,
+            args.t085_selection_output,
+            args.t085_report_output,
+            args.t085_outcomes_output,
+        )
+        if any(value is None for value in paired_required):
+            return (
+                "T085 paired evaluation requires selection, A/B/C full maps, "
+                "all exact SHA-256 values, four checkpoints, training manifest, "
+                "explicit 16-shard/16-worker values, and three outputs"
+            )
+        if args.t085_b_artifact_kind != "assisted_pool":
+            return (
+                "T085 paired evaluation requires --t085-b-artifact-kind assisted_pool"
+            )
+        if args.t085_c_artifact_kind != "natural_pool":
+            return "T085 paired evaluation requires --t085-c-artifact-kind natural_pool"
+        if args.t085_shard_count != 16:
+            return "--t085-shard-count must be 16"
+        if not 0 <= args.t085_shard_index < 16:
+            return "--t085-shard-index must be between 0 and 15"
+        if args.t085_worker_count != 16:
+            return "--t085-worker-count must be 16"
+    if args.lightspeed_t085_cohort_b_source_generation is not None:
+        source_required = (
+            args.t085_b_source_manifest_output,
+            args.t085_b_source_shard_index,
+            args.t085_b_source_shard_count,
+            args.t085_b_source_worker_count,
+        )
+        if any(value is None for value in source_required):
+            return (
+                "T085 Cohort B source generation requires a shard manifest "
+                "output and explicit shard/worker values"
+            )
+        if args.t085_b_source_shard_count != 16:
+            return "--t085-b-source-shard-count must be 16"
+        if not 0 <= args.t085_b_source_shard_index < 16:
+            return "--t085-b-source-shard-index must be between 0 and 15"
+        if args.t085_b_source_worker_count != 16:
+            return "--t085-b-source-worker-count must be 16"
+    if args.lightspeed_t085_cohort_b_source_merge is not None:
+        if len(args.t085_b_source_shard) != 16:
+            return "T085 Cohort B source merge requires exactly 16 source shard pools"
+        if len(args.t085_b_source_shard_manifest) != 16:
+            return "T085 Cohort B source merge requires exactly 16 shard manifests"
+    if args.lightspeed_t085_cohort_b_source_manifest is not None and (
+        args.t085_b_source_pool_sha256 is None
+        or args.t085_b_source_manifest_output is None
+    ):
+        return (
+            "T085 Cohort B source manifest finalization requires the "
+            "merged pool SHA-256 and manifest output"
+        )
+    if args.lightspeed_t085_cohort_c_source_generation is not None:
+        source_required = (
+            args.t085_c_source_manifest_output,
+            args.t085_c_source_shard_index,
+            args.t085_c_source_shard_count,
+            args.t085_c_source_worker_count,
+        )
+        if any(value is None for value in source_required):
+            return (
+                "T085 Cohort C source generation requires a shard manifest "
+                "output and explicit shard/worker values"
+            )
+        if args.t085_c_source_shard_count != 16:
+            return "--t085-c-source-shard-count must be 16"
+        if not 0 <= args.t085_c_source_shard_index < 16:
+            return "--t085-c-source-shard-index must be between 0 and 15"
+        if args.t085_c_source_worker_count != 16:
+            return "--t085-c-source-worker-count must be 16"
+    if args.lightspeed_t085_cohort_c_source_merge is not None:
+        if len(args.t085_c_source_shard) != 16:
+            return "T085 Cohort C source merge requires exactly 16 source shard pools"
+        if len(args.t085_c_source_shard_manifest) != 16:
+            return "T085 Cohort C source merge requires exactly 16 shard manifests"
+    if args.lightspeed_t085_cohort_c_source_manifest is not None and (
+        args.t085_c_source_pool_sha256 is None
+        or args.t085_c_source_manifest_output is None
+    ):
+        return (
+            "T085 Cohort C source manifest finalization requires the "
+            "merged pool SHA-256 and manifest output"
+        )
     if not 0.0 <= args.battle_start_structural_fraction <= 1.0:
         return "--battle-start-structural-fraction must be between zero and one"
     if args.oracle_search_simulations <= 0:

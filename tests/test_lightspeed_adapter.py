@@ -209,6 +209,15 @@ def test_lightspeed_adapter_wraps_step_simulator_contract() -> None:
     }
 
 
+def test_lightspeed_adapter_close_releases_native_simulator_reference() -> None:
+    adapter = LightSpeedAdapter(seed=7, ascension=20, module=FakeModule)
+
+    assert adapter._sim is not None
+    adapter.close()
+
+    assert adapter._sim is None
+
+
 def test_lightspeed_adapter_rejects_non_ironclad() -> None:
     with pytest.raises(ValueError, match="IRONCLAD"):
         LightSpeedAdapter(player_class="SILENT", module=FakeModule)

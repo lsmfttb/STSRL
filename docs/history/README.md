@@ -28,6 +28,8 @@ artifact versions in old notes may no longer be current.
 - `conquer_the_spire_wsl_spike.md` and
   `decapitate_the_spire_wsl_spike.md`: rejected or secondary simulator build
   investigations.
+- `t085_wsl_oom_incident.md`: the T085 WSL global-OOM incident, bounded
+  source-generation repair, and its verification boundary.
 
 Curated, still-relevant experiment results are summarized in
 [`../experiment_log.md`](../experiment_log.md).
