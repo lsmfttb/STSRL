@@ -1425,6 +1425,9 @@ def test_t085_cohort_c_source_generation_writes_partial_shard_manifest(
     assert manifest["complete_source_identity_inventory"] == [
         f"checkpoint-{seed}" for seed in plan.seed_inventory
     ]
+    assert manifest["source_run_count"] == 128
+    assert manifest["terminal_run_count"] == len(plan.seed_inventory)
+    assert manifest["truncated_run_count"] == 0
     assert manifest["max_outer_steps"] == 500
     assert manifest["battle_controller"] == "unguided_search_v2"
     assert manifest["policy_prior_callback"] is None

@@ -4215,6 +4215,8 @@ def run_t085_cohort_c_source_generation_from_paths(
                 record.source_checkpoint_id for record in representatives
             ],
             "record_count": len(pool.records),
+            "terminal_run_count": pool.terminal_run_count,
+            "truncated_run_count": pool.truncated_run_count,
             "source_controller_provenance": pool.source_controller_provenance,
         }
     )
