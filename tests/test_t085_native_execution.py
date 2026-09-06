@@ -624,6 +624,146 @@ def test_source_resolver_requires_explicit_schema_and_accepts_full_source_pool(
         )
 
 
+def test_t085_assisted_resolver_streams_and_keeps_only_selected_records(
+    tmp_path, monkeypatch
+) -> None:
+    pool_path = tmp_path / "cohort-b.jsonl"
+    pool_path.write_bytes(b"large-assisted-pool-placeholder\n")
+    manifest_path = tmp_path / "cohort-b-manifest.json"
+    manifest_path.write_text("{}", encoding="utf-8")
+    selected_id = "checkpoint-selected"
+    source_summaries = (
+        SimpleNamespace(source_run_id="run-1", source_seed=851001),
+        SimpleNamespace(source_run_id="run-2", source_seed=851002),
+    )
+    source_run_inventory = (
+        {
+            "source_run_seed": 851001,
+            "source_run_identity": "run-1",
+            "complete_source_identity": selected_id,
+            "source_valid": True,
+            "failure_reason": None,
+        },
+        {
+            "source_run_seed": 851002,
+            "source_run_identity": "run-2",
+            "complete_source_identity": None,
+            "source_valid": False,
+            "failure_reason": "bounded_run_truncated",
+        },
+    )
+    stream_summary = SimpleNamespace(
+        source_run_summaries=source_summaries,
+        source_controller_provenance={"kind": "controller"},
+        source_shards=(),
+        source_run_count=2,
+        record_count=1000000,
+        assistance_decision_count=1000000,
+        complete_source_identity_inventory=(selected_id, None),
+        source_run_inventory=source_run_inventory,
+        selected_records={selected_id: "selected-record"},
+    )
+    manifest = {
+        "source_run_count": 2,
+        "source_run_identity_inventory": ["run-1", "run-2"],
+        "source_run_seed_inventory": [851001, 851002],
+        "complete_source_identity_inventory": [selected_id, None],
+        "source_run_inventory": list(source_run_inventory),
+        "source_pool_artifact": {
+            "record_count": 1000000,
+            "source_run_count": 2,
+        },
+        "source_controller_provenance": {"kind": "controller"},
+        "source_pool_merge": {
+            "merge_version": t085_execution.ASSISTED_SOURCE_POOL_MERGE_VERSION,
+            "shard_count": 0,
+            "source_shards": [],
+        },
+    }
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        t085_execution,
+        "_validate_t085_source_manifest_binding",
+        lambda *args, **kwargs: (manifest, manifest_path),
+    )
+    monkeypatch.setattr(
+        t085_execution,
+        "build_t085_cohort_b_source_controller",
+        lambda: "controller",
+    )
+
+    def stream_validate(path, *, controller, expected_seeds, selected_record_ids):
+        captured.update(
+            {
+                "path": path,
+                "controller": controller,
+                "expected_seeds": tuple(expected_seeds),
+                "selected_record_ids": tuple(selected_record_ids),
+            }
+        )
+        return stream_summary
+
+    monkeypatch.setattr(
+        t085_execution, "_validate_t085_b_source_pool_jsonl", stream_validate
+    )
+    monkeypatch.setattr(
+        t085_execution,
+        "load_assisted_source_pool_jsonl",
+        lambda _stream: pytest.fail("full assisted pool loader must not be used"),
+    )
+
+    resolved = resolve_t085_canonical_records(
+        pool_path,
+        expected_sha256=t085_execution.sha256_file(pool_path),
+        artifact_kind="assisted_pool",
+        expected_source_run_count=2,
+        expected_source_run_identity_inventory=("run-1", "run-2"),
+        expected_source_run_seed_inventory=(851001, 851002),
+        expected_assistance_level="assist_hp75_potion",
+        expected_source_manifest_path=manifest_path,
+        expected_source_manifest_sha256="manifest-sha-is-bound-by-test",
+        selected_source_checkpoint_ids=(selected_id,),
+    )
+
+    assert resolved == {selected_id: "selected-record"}
+    assert captured["path"] == pool_path.resolve()
+    assert captured["controller"] == "controller"
+    assert captured["expected_seeds"] == (851001, 851002)
+    assert captured["selected_record_ids"] == (selected_id,)
+
+
+def test_t085_b_stream_validator_retains_only_requested_records(
+    tmp_path, monkeypatch
+) -> None:
+    artifact_root = tmp_path / "t085-artifacts"
+    monkeypatch.setattr(t085_execution, "T085_ARTIFACT_ROOT", artifact_root)
+    monkeypatch.setattr(
+        t085_execution,
+        "_validate_t085_native_source_manifest",
+        lambda *args, **kwargs: {"commit": "fake-native"},
+    )
+    controller = build_t085_cohort_b_source_controller()
+    pool_paths = _write_small_t085_b_shards(artifact_root, controller)
+    merged_path = artifact_root / "source" / "cohort-b" / "merged.jsonl"
+    with merged_path.open("w", encoding="utf-8", newline="\n") as stream:
+        dump_merged_assisted_source_pool_shards_jsonl(pool_paths, stream)
+
+    selected_ids = (
+        "shard-0:checkpoint-851001",
+        "shard-15:checkpoint-851961",
+    )
+    summary = t085_execution._validate_t085_b_source_pool_jsonl(
+        merged_path,
+        controller=controller,
+        expected_seeds=tuple(range(851001, 852025)),
+        selected_record_ids=selected_ids,
+    )
+
+    assert tuple(summary.selected_records) == selected_ids
+    assert set(summary.selected_records) == set(selected_ids)
+    assert summary.record_count == 16
+
+
 def test_t085_source_manifest_binding_uses_assisted_pool_schema_for_b(
     tmp_path, monkeypatch
 ) -> None:
