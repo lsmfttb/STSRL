@@ -764,6 +764,303 @@ def test_t085_b_stream_validator_retains_only_requested_records(
     assert summary.record_count == 16
 
 
+def _make_t085_assisted_record(
+    controller,
+    *,
+    record_index: int,
+    source_run_id: str,
+    source_seed: int,
+    source_checkpoint_id: str,
+    act: int,
+    source_battle_index: int = 0,
+) -> BattleStartCheckpointRecord:
+    decision = {
+        "assistance_version": "assisted-run-assistance-schedule-v1",
+        "assistance_level": "assist_hp75_potion",
+        "policy_seed": 42042,
+        "distribution_kind": "assisted_run",
+        "information_regime": "full_simulator_state_oracle_like",
+        "source_run_id": source_run_id,
+        "source_seed": source_seed,
+        "source_battle_index": source_battle_index,
+        "source_checkpoint_id": source_checkpoint_id,
+        "source_record_index": record_index,
+        "before_resources": {},
+        "requested_change": {},
+        "actual_change": {},
+        "after_resources": {},
+        "native_support_status": "supported",
+    }
+    return BattleStartCheckpointRecord(
+        record_index=record_index,
+        source_checkpoint_id=source_checkpoint_id,
+        source_run_id=source_run_id,
+        source_seed=source_seed,
+        source_battle_index=source_battle_index,
+        structural_metadata={
+            "ascension": 20,
+            "act": act,
+            "floor": float(act),
+            "room_type": "MONSTER",
+            "encounter_id": "TEST",
+            "seed": source_seed,
+            "source_kind": "assisted_run",
+            "distribution_kind": "assisted_run",
+            "assistance_level": "assist_hp75_potion",
+            "source_run_id": source_run_id,
+            "source_battle_index": source_battle_index,
+        },
+        source_controller_provenance=controller.provenance.to_dict(),
+        source_battle_controller_provenance=controller.battle.provenance.to_dict(),
+        source_non_combat_controller_provenance=controller.non_combat.provenance.to_dict(),
+        action_trace=(),
+        snapshot_observation=(),
+        snapshot_raw={},
+        distribution_kind="assisted_run",
+        assistance_history=(decision,),
+    )
+
+
+def test_t085_b_projection_stream_skips_partial_truncated_runs(tmp_path) -> None:
+    controller = build_t085_cohort_b_source_controller()
+    valid_record = _make_t085_assisted_record(
+        controller,
+        record_index=0,
+        source_run_id="run-valid",
+        source_seed=851001,
+        source_checkpoint_id="checkpoint-valid",
+        act=2,
+    )
+    partial_record = _make_t085_assisted_record(
+        controller,
+        record_index=1,
+        source_run_id="run-truncated",
+        source_seed=851002,
+        source_checkpoint_id="checkpoint-partial",
+        act=2,
+    )
+    artifact = AssistedSourcePoolArtifact(
+        pool=NaturalBattleStartPool(
+            source_run_count=2,
+            terminal_run_count=1,
+            truncated_run_count=1,
+            source_controller_provenance=controller.provenance.to_dict(),
+            records=[valid_record, partial_record],
+            source_run_summaries=[
+                SourceRunSummary(
+                    source_run_id="run-valid",
+                    source_seed=851001,
+                    terminal=True,
+                    outcome="VICTORY",
+                    final_floor=2.0,
+                    final_act=2,
+                    final_screen_state="MAP",
+                    final_battle_active=False,
+                    captured_battle_start_count=1,
+                    completed_battle_count=0,
+                    max_battle_start_floor=2.0,
+                    max_battle_start_act=2,
+                    problem_count=0,
+                    problems=(),
+                ),
+                SourceRunSummary(
+                    source_run_id="run-truncated",
+                    source_seed=851002,
+                    terminal=False,
+                    outcome="UNDECIDED",
+                    final_floor=2.0,
+                    final_act=2,
+                    final_screen_state="BATTLE",
+                    final_battle_active=True,
+                    captured_battle_start_count=1,
+                    completed_battle_count=0,
+                    max_battle_start_floor=2.0,
+                    max_battle_start_act=2,
+                    problem_count=0,
+                    problems=(),
+                ),
+            ],
+        ),
+        assistance_level="assist_hp75_potion",
+        assistance_schedule=assistance_schedule_by_level("assist_hp75_potion"),
+        policy_seed=42042,
+        assistance_decisions=(
+            valid_record.assistance_history[0],
+            partial_record.assistance_history[0],
+        ),
+    )
+    pool_path = tmp_path / "projection-pool.jsonl"
+    stream = StringIO()
+    dump_assisted_source_pool_jsonl(artifact, stream)
+    pool_path.write_text(stream.getvalue(), encoding="utf-8")
+    summary = t085_execution._validate_t085_b_source_pool_jsonl(
+        pool_path,
+        controller=controller,
+        expected_seeds=(851001, 851002),
+        retain_battle_start_projections=True,
+    )
+
+    assert [
+        record.source_artifact_record_identity for record in summary.battle_starts
+    ] == ["checkpoint-valid"]
+    assert summary.battle_starts[0].act == 2
+    assert summary.battle_starts[0].complete_source_identity == "checkpoint-valid"
+    assert summary.battle_starts[0].selection_identity == "checkpoint-valid"
+
+
+def test_t085_restore_binds_full_record_by_selected_artifact_identity(
+    monkeypatch,
+) -> None:
+    controller = build_t085_cohort_b_source_controller()
+    full_record = _make_t085_assisted_record(
+        controller,
+        record_index=0,
+        source_run_id="run-valid",
+        source_seed=851001,
+        source_checkpoint_id="checkpoint-selected",
+        act=2,
+    )
+    selected = t085_execution.T085BattleStartRecord(
+        source_run_seed=851001,
+        source_run_identity="run-valid",
+        complete_source_identity="manifest-representative",
+        battle_identity="run-valid:0",
+        act=2,
+        room_type="MONSTER",
+        source_artifact_record_identity="checkpoint-selected",
+    )
+    monkeypatch.setattr(
+        t085_execution,
+        "restore_assisted_battle_start_record",
+        lambda adapter, record: (_snapshot(), "test-restore"),
+    )
+
+    restored, method = t085_execution.restore_t085_canonical_record(
+        object(),
+        selected,
+        {full_record.source_checkpoint_id: full_record},
+    )
+
+    assert restored is not None
+    assert method == "test-restore"
+
+
+def test_t085_b_selection_uses_all_valid_projections_without_full_pool_loader(
+    tmp_path, monkeypatch
+) -> None:
+    pool_path = tmp_path / "cohort-b.jsonl"
+    pool_path.write_text("streamed-pool-placeholder\n", encoding="utf-8")
+    manifest_path = tmp_path / "cohort-b-manifest.json"
+    manifest_path.write_text("manifest-placeholder\n", encoding="utf-8")
+    seeds = tuple(range(851001, 852025))
+    run_ids = tuple(f"run-{seed}" for seed in seeds)
+    valid_count = 1021
+    complete_ids = tuple(
+        [f"representative-{seed}" for seed in seeds[:valid_count]]
+        + [None] * (len(seeds) - valid_count)
+    )
+    run_inventory = tuple(
+        {
+            "source_run_seed": seed,
+            "source_run_identity": run_id,
+            "complete_source_identity": complete_id,
+            "source_valid": index < valid_count,
+            "failure_reason": None if index < valid_count else "bounded_run_truncated",
+        }
+        for index, (seed, run_id, complete_id) in enumerate(
+            zip(seeds, run_ids, complete_ids, strict=True)
+        )
+    )
+
+    def projection(
+        record_index: int,
+        run_index: int,
+        act: int,
+        battle_index: int,
+    ) -> t085_execution.T085BattleStartRecord:
+        complete_source_identity = complete_ids[run_index]
+        assert isinstance(complete_source_identity, str)
+        return t085_execution.T085BattleStartRecord(
+            source_run_seed=seeds[run_index],
+            source_run_identity=run_ids[run_index],
+            complete_source_identity=complete_source_identity,
+            battle_identity=f"{run_ids[run_index]}:{battle_index}",
+            act=act,
+            room_type="MONSTER",
+            source_artifact_record_identity=f"record-{record_index}",
+        )
+
+    projections = [
+        projection(index, index, 1 if index < 1007 else 2, 0)
+        for index in range(valid_count)
+    ]
+    projections.extend(
+        projection(valid_count + index, index, 2, 1) for index in range(82)
+    )
+    manifest = {
+        "source_pool_complete": True,
+        "source_run_count": len(seeds),
+        "source_run_identity_inventory": list(run_ids),
+        "source_run_seed_inventory": list(seeds),
+        "complete_source_identity_inventory": list(complete_ids),
+        "source_run_inventory": list(run_inventory),
+    }
+    stream_summary = SimpleNamespace(
+        complete_source_identity_inventory=complete_ids,
+        battle_starts=tuple(projections),
+    )
+
+    monkeypatch.setattr(
+        t085_execution,
+        "_validate_t085_source_manifest_binding",
+        lambda *args, **kwargs: (manifest, manifest_path),
+    )
+    monkeypatch.setattr(
+        t085_execution,
+        "validate_t085_source_generation_contract",
+        lambda *args, **kwargs: None,
+    )
+
+    def stream_verified(path, **kwargs):
+        assert path == pool_path.resolve()
+        assert kwargs["retain_battle_start_projections"] is True
+        assert "selected_record_ids" not in kwargs
+        return manifest, stream_summary
+
+    monkeypatch.setattr(
+        t085_execution,
+        "_t085_stream_verified_b_source_pool",
+        stream_verified,
+    )
+    monkeypatch.setattr(
+        t085_execution,
+        "load_assisted_source_pool_jsonl",
+        lambda _stream: pytest.fail("full assisted pool loader must not be used"),
+    )
+
+    _manifest, canonical, source_runs, battle_starts = (
+        t085_execution._t085_load_frozen_source_manifest_and_map(
+            cohort="B",
+            map_path=pool_path,
+            map_sha256="pool-sha-is-bound-by-test",
+            manifest_path=manifest_path,
+            manifest_sha256="manifest-sha-is-bound-by-test",
+        )
+    )
+    selected, selection_summary = t085_execution.select_cohort_b(
+        source_runs, battle_starts
+    )
+
+    assert canonical == {}
+    assert len(battle_starts) == 1103
+    assert sum(record.act == 1 for record in battle_starts) == 1007
+    assert sum(record.act >= 2 for record in battle_starts) == 96
+    assert len(selected) == 192
+    assert selection_summary["eligibility_count"] == 1103
+    assert selection_summary["selected_act_counts"] == {"1": 96, "2+": 96}
+    assert all(record.source_run_seed <= 852021 for record in selected)
+
+
 def test_t085_source_manifest_binding_uses_assisted_pool_schema_for_b(
     tmp_path, monkeypatch
 ) -> None:

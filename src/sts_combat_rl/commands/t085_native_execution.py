@@ -179,6 +179,7 @@ class _T085BSourcePoolStreamSummary:
     assistance_decision_count: int
     complete_source_identity_inventory: tuple[str | None, ...]
     source_run_inventory: tuple[dict[str, object], ...]
+    battle_starts: tuple[T085BattleStartRecord, ...] = ()
     selected_records: Mapping[str, BattleStartCheckpointRecord] = field(
         default_factory=dict
     )
@@ -523,129 +524,33 @@ def resolve_t085_canonical_records(
             "T085 canonical cohort bytes do not match the accepted SHA-256"
         )
     if artifact_kind == "assisted_pool" and source_manifest_binding is not None:
-        # Cohort B is a multi-gigabyte source pool.  Its source manifest and
-        # the streaming validator already bind every source row and every
-        # source-run representative.  Keep only the records required by this
-        # caller after that validation; never materialize the full pool.
-        source_manifest, _ = source_manifest_binding
-        raw_complete_ids = source_manifest.get("complete_source_identity_inventory")
-        if (
-            not isinstance(raw_complete_ids, list)
-            or len(raw_complete_ids) != source_manifest.get("source_run_count")
-            or any(
-                value is not None and not isinstance(value, str)
-                for value in raw_complete_ids
-            )
-        ):
-            raise T085NativeExecutionError(
-                "T085 Cohort B source manifest complete identity inventory is invalid"
-            )
-        manifest_complete_ids = tuple(
-            value for value in raw_complete_ids if isinstance(value, str)
-        )
-        if len(set(manifest_complete_ids)) != len(manifest_complete_ids):
-            raise T085NativeExecutionError(
-                "T085 Cohort B source manifest complete identity inventory is not unique"
-            )
         if selected_source_checkpoint_ids is None:
-            selected_ids = manifest_complete_ids
-        else:
-            selected_ids = tuple(selected_source_checkpoint_ids)
-            if any(not isinstance(value, str) or not value for value in selected_ids):
-                raise T085NativeExecutionError(
-                    "T085 selected Cohort B checkpoint identities are invalid"
-                )
-            if len(set(selected_ids)) != len(selected_ids):
-                raise T085NativeExecutionError(
-                    "T085 selected Cohort B checkpoint identities are not unique"
-                )
-            if not set(selected_ids).issubset(manifest_complete_ids):
-                raise T085NativeExecutionError(
-                    "T085 selected Cohort B checkpoint identities are not in the source manifest"
-                )
-        if expected_assistance_level not in (None, "assist_hp75_potion"):
             raise T085NativeExecutionError(
-                "T085 assisted source-pool assistance level does not match selection evidence"
+                "T085 assisted source-pool resolution requires explicit selected identities"
             )
-        expected_seeds = expected_source_run_seed_inventory
-        if expected_seeds is None:
-            raw_seeds = source_manifest.get("source_run_seed_inventory")
-            if not isinstance(raw_seeds, list):
-                raise T085NativeExecutionError(
-                    "T085 Cohort B source manifest seed inventory is missing"
-                )
-            expected_seeds = tuple(raw_seeds)
-        stream_summary = _validate_t085_b_source_pool_jsonl(
+        _source_manifest, stream_summary = _t085_stream_verified_b_source_pool(
             resolved,
-            controller=build_t085_cohort_b_source_controller(),
-            expected_seeds=tuple(expected_seeds),
-            selected_record_ids=selected_ids,
+            pool_sha256=expected_sha256,
+            source_manifest_path=expected_source_manifest_path,
+            source_manifest_sha256=expected_source_manifest_sha256,
+            expected_source_run_count=(
+                expected_source_run_count
+                if expected_source_run_count is not None
+                else int(source_manifest_binding[0]["source_run_count"])
+            ),
+            expected_source_run_identity_inventory=(
+                expected_source_run_identity_inventory
+                if expected_source_run_identity_inventory is not None
+                else tuple(source_manifest_binding[0]["source_run_identity_inventory"])
+            ),
+            expected_source_run_seed_inventory=(
+                expected_source_run_seed_inventory
+                if expected_source_run_seed_inventory is not None
+                else tuple(source_manifest_binding[0]["source_run_seed_inventory"])
+            ),
+            expected_assistance_level=expected_assistance_level,
+            selected_record_ids=selected_source_checkpoint_ids,
         )
-        if expected_source_run_count is not None and (
-            stream_summary.source_run_count != expected_source_run_count
-        ):
-            raise T085NativeExecutionError(
-                "T085 source pool count does not match selection evidence"
-            )
-        if expected_source_run_identity_inventory is not None and [
-            summary.source_run_id for summary in stream_summary.source_run_summaries
-        ] != list(expected_source_run_identity_inventory):
-            raise T085NativeExecutionError(
-                "T085 source pool source-run identities do not match selection evidence"
-            )
-        if expected_source_run_seed_inventory is not None and [
-            summary.source_seed for summary in stream_summary.source_run_summaries
-        ] != list(expected_source_run_seed_inventory):
-            raise T085NativeExecutionError(
-                "T085 source pool source-run seeds do not match selection evidence"
-            )
-        if (
-            source_manifest.get("source_run_count") != stream_summary.source_run_count
-            or source_manifest.get("source_run_identity_inventory")
-            != [
-                summary.source_run_id for summary in stream_summary.source_run_summaries
-            ]
-            or source_manifest.get("source_run_seed_inventory")
-            != [summary.source_seed for summary in stream_summary.source_run_summaries]
-            or source_manifest.get("complete_source_identity_inventory")
-            != list(stream_summary.complete_source_identity_inventory)
-            or source_manifest.get("source_run_inventory")
-            != list(stream_summary.source_run_inventory)
-        ):
-            raise T085NativeExecutionError(
-                "T085 source manifest inventory does not match the verified source pool"
-            )
-        source_pool_reference = source_manifest.get("source_pool_artifact")
-        if not isinstance(source_pool_reference, Mapping):
-            raise T085NativeExecutionError(
-                "T085 source manifest source-pool binding is missing"
-            )
-        if (
-            source_pool_reference.get("record_count") != stream_summary.record_count
-            or source_pool_reference.get("source_run_count")
-            != stream_summary.source_run_count
-        ):
-            raise T085NativeExecutionError(
-                "T085 source manifest record counts do not match the verified source pool"
-            )
-        source_controller = source_manifest.get("source_controller_provenance")
-        if (
-            source_controller is not None
-            and source_controller != stream_summary.source_controller_provenance
-        ):
-            raise T085NativeExecutionError(
-                "T085 source manifest controller provenance does not match pool"
-            )
-        source_merge = source_manifest.get("source_pool_merge")
-        actual_merge = {
-            "merge_version": ASSISTED_SOURCE_POOL_MERGE_VERSION,
-            "shard_count": len(stream_summary.source_shards),
-            "source_shards": [dict(shard) for shard in stream_summary.source_shards],
-        }
-        if isinstance(source_merge, Mapping) and dict(source_merge) != actual_merge:
-            raise T085NativeExecutionError(
-                "T085 source manifest merge provenance does not match pool"
-            )
         selected_records = dict(stream_summary.selected_records)
         if not selected_records:
             raise T085NativeExecutionError(
@@ -883,11 +788,12 @@ def restore_t085_canonical_record(
     canonical_records: Mapping[str, BattleStartCheckpointRecord],
 ) -> tuple[SimulatorSnapshot, str]:
     """Restore one selected row only through the accepted canonical helpers."""
-    canonical = canonical_records.get(selected.complete_source_identity)
+    selected_record_identity = selected.selection_identity
+    canonical = canonical_records.get(selected_record_identity)
     structural = canonical.structural_metadata if canonical is not None else {}
     identity_matches = (
         canonical is not None
-        and canonical.source_checkpoint_id == selected.complete_source_identity
+        and canonical.source_checkpoint_id == selected_record_identity
         and canonical.source_run_id == selected.source_run_identity
         and canonical.source_seed == selected.source_run_seed
         and canonical.source_battle_index == _selected_battle_index(selected)
@@ -1457,7 +1363,7 @@ def run_t085_native_paired_evaluation_from_paths(
     b_map_kwargs = _source_map_expectations(plan, "B")
     if isinstance(plan, T085NativeEvaluationPlan):
         b_map_kwargs["selected_source_checkpoint_ids"] = tuple(
-            record.complete_source_identity for record in plan.cohorts["B"]
+            record.selection_identity for record in plan.cohorts["B"]
         )
     maps = {
         "A": resolve_t085_canonical_records(
@@ -3266,6 +3172,7 @@ def _validate_t085_b_source_pool_jsonl(
     controller: RoutedRunController,
     expected_seeds: Sequence[int],
     selected_record_ids: Sequence[str] | None = None,
+    retain_battle_start_projections: bool = False,
 ) -> _T085BSourcePoolStreamSummary:
     """Validate a current assisted pool without materializing its records."""
 
@@ -3281,6 +3188,7 @@ def _validate_t085_b_source_pool_jsonl(
                 "T085 selected Cohort B checkpoint identities are not unique"
             )
     selected_records: dict[str, BattleStartCheckpointRecord] = {}
+    battle_start_projections: list[T085BattleStartRecord] = []
 
     try:
         metadata = _load_assisted_source_pool_metadata_jsonl(pool_path)
@@ -3499,6 +3407,8 @@ def _validate_t085_b_source_pool_jsonl(
                 )
             if selected_ids is not None and record.source_checkpoint_id in selected_ids:
                 selected_records[record.source_checkpoint_id] = record
+            if retain_battle_start_projections and summary.terminal:
+                battle_start_projections.append(_t085_canonical_to_battle_start(record))
             battle_identity = (record.source_run_id, record.source_battle_index)
             if battle_identity in battle_identities:
                 raise T085NativeExecutionError(
@@ -3554,6 +3464,7 @@ def _validate_t085_b_source_pool_jsonl(
                     bindings_by_checkpoint_id=bindings_by_checkpoint_id,
                     source_shard_count=len(source_shards),
                 )
+            del raw_record, record
     except T085NativeExecutionError:
         raise
     except (OSError, UnicodeError, ValueError) as exc:
@@ -3652,6 +3563,23 @@ def _validate_t085_b_source_pool_jsonl(
         source_run_summaries,
         complete_source_ids,
     )
+    representative_by_run = {
+        summary.source_run_id: complete_identity
+        for summary, complete_identity in zip(
+            source_run_summaries,
+            complete_source_ids,
+            strict=True,
+        )
+        if complete_identity is not None
+    }
+    projected_battle_starts: list[T085BattleStartRecord] = []
+    for projection in battle_start_projections:
+        representative = representative_by_run.get(projection.source_run_identity)
+        if not isinstance(representative, str) or not representative:
+            continue
+        projected_battle_starts.append(
+            replace(projection, complete_source_identity=representative)
+        )
     return _T085BSourcePoolStreamSummary(
         source_run_summaries=source_run_summaries,
         source_controller_provenance=dict(source_controller_provenance),
@@ -3663,8 +3591,200 @@ def _validate_t085_b_source_pool_jsonl(
         assistance_decision_count=assistance_decision_count,
         complete_source_identity_inventory=complete_source_ids,
         source_run_inventory=tuple(source_run_inventory),
+        battle_starts=tuple(projected_battle_starts),
         selected_records=selected_records,
     )
+
+
+def _t085_stream_verified_b_source_pool(
+    pool_path: str | Path,
+    *,
+    pool_sha256: str,
+    source_manifest_path: str | Path,
+    source_manifest_sha256: str,
+    expected_source_run_count: int,
+    expected_source_run_identity_inventory: Sequence[str],
+    expected_source_run_seed_inventory: Sequence[int],
+    expected_assistance_level: str | None,
+    selected_record_ids: Sequence[str] = (),
+    retain_battle_start_projections: bool = False,
+) -> tuple[dict[str, object], _T085BSourcePoolStreamSummary]:
+    """Validate a bound B pool and retain only the requested in-memory view."""
+
+    resolved = Path(pool_path).resolve(strict=True)
+    source_manifest_binding = _validate_t085_source_manifest_binding(
+        resolved,
+        artifact_kind="assisted_pool",
+        manifest_path=source_manifest_path,
+        manifest_sha256=source_manifest_sha256,
+    )
+    if source_manifest_binding is None:  # pragma: no cover - manifest is required
+        raise T085NativeExecutionError(
+            "T085 Cohort B source manifest binding is missing"
+        )
+    if sha256_file(resolved) != pool_sha256:
+        raise T085NativeExecutionError(
+            "T085 Cohort B merged source pool SHA-256 mismatch"
+        )
+    source_manifest, _ = source_manifest_binding
+    raw_complete_ids = source_manifest.get("complete_source_identity_inventory")
+    if (
+        not isinstance(raw_complete_ids, list)
+        or len(raw_complete_ids) != source_manifest.get("source_run_count")
+        or any(
+            value is not None and not isinstance(value, str)
+            for value in raw_complete_ids
+        )
+    ):
+        raise T085NativeExecutionError(
+            "T085 Cohort B source manifest complete identity inventory is invalid"
+        )
+    complete_ids = tuple(value for value in raw_complete_ids if isinstance(value, str))
+    if len(set(complete_ids)) != len(complete_ids):
+        raise T085NativeExecutionError(
+            "T085 Cohort B source manifest complete identity inventory is not unique"
+        )
+    selected_ids = tuple(selected_record_ids)
+    if any(not isinstance(value, str) or not value for value in selected_ids):
+        raise T085NativeExecutionError(
+            "T085 selected Cohort B checkpoint identities are invalid"
+        )
+    if len(set(selected_ids)) != len(selected_ids):
+        raise T085NativeExecutionError(
+            "T085 selected Cohort B checkpoint identities are not unique"
+        )
+    if expected_assistance_level not in (None, "assist_hp75_potion"):
+        raise T085NativeExecutionError(
+            "T085 assisted source-pool assistance level does not match selection evidence"
+        )
+    expected_seeds = tuple(expected_source_run_seed_inventory)
+    stream_kwargs: dict[str, object] = {"selected_record_ids": selected_ids}
+    if retain_battle_start_projections:
+        stream_kwargs["retain_battle_start_projections"] = True
+    stream_summary = _validate_t085_b_source_pool_jsonl(
+        resolved,
+        controller=build_t085_cohort_b_source_controller(),
+        expected_seeds=expected_seeds,
+        **stream_kwargs,
+    )
+    summary_ids = [
+        summary.source_run_id for summary in stream_summary.source_run_summaries
+    ]
+    summary_seeds = [
+        summary.source_seed for summary in stream_summary.source_run_summaries
+    ]
+    if (
+        stream_summary.source_run_count != expected_source_run_count
+        or summary_ids != list(expected_source_run_identity_inventory)
+        or summary_seeds != list(expected_seeds)
+    ):
+        raise T085NativeExecutionError(
+            "T085 source pool source-run inventory does not match selection evidence"
+        )
+    if (
+        source_manifest.get("source_run_count") != stream_summary.source_run_count
+        or source_manifest.get("source_run_identity_inventory") != summary_ids
+        or source_manifest.get("source_run_seed_inventory") != summary_seeds
+        or source_manifest.get("complete_source_identity_inventory")
+        != list(stream_summary.complete_source_identity_inventory)
+        or source_manifest.get("source_run_inventory")
+        != list(stream_summary.source_run_inventory)
+    ):
+        raise T085NativeExecutionError(
+            "T085 source manifest inventory does not match the verified source pool"
+        )
+    source_pool_reference = source_manifest.get("source_pool_artifact")
+    if not isinstance(source_pool_reference, Mapping):
+        raise T085NativeExecutionError(
+            "T085 source manifest source-pool binding is missing"
+        )
+    if (
+        source_pool_reference.get("record_count") != stream_summary.record_count
+        or source_pool_reference.get("source_run_count")
+        != stream_summary.source_run_count
+    ):
+        raise T085NativeExecutionError(
+            "T085 source manifest record counts do not match the verified source pool"
+        )
+    source_controller = source_manifest.get("source_controller_provenance")
+    if (
+        source_controller is not None
+        and source_controller != stream_summary.source_controller_provenance
+    ):
+        raise T085NativeExecutionError(
+            "T085 source manifest controller provenance does not match pool"
+        )
+    source_merge = source_manifest.get("source_pool_merge")
+    actual_merge = {
+        "merge_version": ASSISTED_SOURCE_POOL_MERGE_VERSION,
+        "shard_count": len(stream_summary.source_shards),
+        "source_shards": [dict(shard) for shard in stream_summary.source_shards],
+    }
+    if isinstance(source_merge, Mapping) and dict(source_merge) != actual_merge:
+        raise T085NativeExecutionError(
+            "T085 source manifest merge provenance does not match pool"
+        )
+    return dict(source_manifest), stream_summary
+
+
+def _t085_load_selected_b_full_records(
+    pool_path: str | Path,
+    *,
+    expected_sha256: str,
+    selected_record_ids: Sequence[str],
+) -> dict[str, BattleStartCheckpointRecord]:
+    """Load only selected B records after the outcome-blind selection pass."""
+
+    selected_ids = tuple(selected_record_ids)
+    if not selected_ids or any(
+        not isinstance(value, str) or not value for value in selected_ids
+    ):
+        raise T085NativeExecutionError(
+            "T085 selected Cohort B checkpoint identities are invalid"
+        )
+    if len(set(selected_ids)) != len(selected_ids):
+        raise T085NativeExecutionError(
+            "T085 selected Cohort B checkpoint identities are not unique"
+        )
+    resolved = Path(pool_path).resolve(strict=True)
+    if sha256_file(resolved) != expected_sha256:
+        raise T085NativeExecutionError("T085 Cohort B source pool SHA-256 mismatch")
+    selected_set = set(selected_ids)
+    records: dict[str, BattleStartCheckpointRecord] = {}
+    try:
+        for index, raw_record in enumerate(
+            _iter_assisted_source_pool_record_rows(resolved)
+        ):
+            if raw_record.get("source_checkpoint_id") not in selected_set:
+                continue
+            record = record_from_manifest(
+                raw_record,
+                label=f"{resolved} selected record {index}",
+                allowed_distribution_kinds=frozenset({"assisted_run"}),
+                allow_assistance_history=True,
+            )
+            if record.source_checkpoint_id in records:
+                raise T085NativeExecutionError(
+                    "T085 selected Cohort B checkpoint identities are duplicated"
+                )
+            records[record.source_checkpoint_id] = record
+    except T085NativeExecutionError:
+        raise
+    except (OSError, UnicodeError, ValueError) as exc:
+        raise T085NativeExecutionError(
+            "T085 selected Cohort B full records are invalid"
+        ) from exc
+    if sha256_file(resolved) != expected_sha256:
+        raise T085NativeExecutionError(
+            "T085 Cohort B source pool changed during selected-record loading"
+        )
+    if set(records) != selected_set:
+        missing = sorted(selected_set - set(records))
+        raise T085NativeExecutionError(
+            "T085 selected Cohort B full records are absent from the source pool: "
+            + ", ".join(missing)
+        )
+    return records
 
 
 def _t085_validate_b_shard_manifest(
@@ -5562,6 +5682,77 @@ def _t085_load_frozen_source_manifest_and_map(
                 f"T085 Cohort {cohort} source manifest complete identity inventory is invalid"
             )
         run_statuses = [(True, None)] * source_count
+    if cohort == "B":
+        _, stream_summary = _t085_stream_verified_b_source_pool(
+            map_path,
+            pool_sha256=map_sha256,
+            source_manifest_path=resolved_manifest,
+            source_manifest_sha256=manifest_sha256,
+            expected_source_run_count=source_count,
+            expected_source_run_identity_inventory=tuple(raw_run_ids),
+            expected_source_run_seed_inventory=expected_seeds,
+            expected_assistance_level="assist_hp75_potion",
+            retain_battle_start_projections=True,
+        )
+        source_runs: list[T085SourceRunRecord] = []
+        complete_source_ids = stream_summary.complete_source_identity_inventory
+        projected_run_bindings = {
+            (record.source_run_identity, record.complete_source_identity)
+            for record in stream_summary.battle_starts
+        }
+        for index, (seed, run_id, complete_id) in enumerate(
+            zip(
+                expected_seeds,
+                raw_run_ids,
+                raw_complete_ids,
+                strict=True,
+            )
+        ):
+            source_valid, failure_reason = run_statuses[index]
+            if not isinstance(run_id, str) or not run_id:
+                raise T085NativeExecutionError(
+                    f"T085 {cohort} source manifest inventory contains invalid identities"
+                )
+            if not source_valid:
+                source_runs.append(
+                    T085SourceRunRecord(
+                        source_run_seed=seed,
+                        source_run_identity=run_id,
+                        complete_source_identity=None,
+                        source_valid=False,
+                        failure_reason=failure_reason,
+                    )
+                )
+                continue
+            if not isinstance(complete_id, str) or not complete_id:
+                raise T085NativeExecutionError(
+                    f"T085 {cohort} valid source run lacks complete identity"
+                )
+            if complete_source_ids[index] != complete_id:
+                raise T085NativeExecutionError(
+                    f"T085 {cohort} complete identity is not bound to its source manifest"
+                )
+            if (run_id, complete_id) not in projected_run_bindings:
+                raise T085NativeExecutionError(
+                    f"T085 {cohort} valid source run has no battle-start records"
+                )
+            source_runs.append(
+                T085SourceRunRecord(
+                    source_run_seed=seed,
+                    source_run_identity=run_id,
+                    complete_source_identity=complete_id,
+                )
+            )
+        if len(source_runs) != source_count:
+            raise T085NativeExecutionError(
+                f"T085 {cohort} source manifest does not cover all source runs"
+            )
+        return (
+            manifest,
+            {},
+            tuple(source_runs),
+            stream_summary.battle_starts,
+        )
     canonical = resolve_t085_canonical_records(
         map_path,
         expected_sha256=map_sha256,
@@ -5711,6 +5902,11 @@ def _t085_prepare_selection_restore_inputs(
         _t085_canonical_to_battle_start(record) for record in a_map.values()
     )
     selected_b, _ = select_cohort_b(b_runs, b_starts)
+    b_map = _t085_load_selected_b_full_records(
+        b_full_map_path,
+        expected_sha256=b_sha256,
+        selected_record_ids=tuple(record.selection_identity for record in selected_b),
+    )
     selected_c, _ = select_cohort_c(c_runs, c_starts)
     if len(selected_b) != T085_COHORT_B_SELECTED_COUNT:
         raise T085NativeExecutionError("T085 B selection did not produce 192 records")
@@ -6403,11 +6599,12 @@ def run_t085_native_paired_evaluation(
     for cohort_name, selected_records in plan.cohorts.items():
         source_map = canonical_records_by_cohort[cohort_name]
         for selected in selected_records:
-            canonical = source_map.get(selected.complete_source_identity)
+            selected_record_identity = selected.selection_identity
+            canonical = source_map.get(selected_record_identity)
             if canonical is None:
                 raise T085NativeExecutionError(
                     f"T085 selection {cohort_name} is not bound to its full-record map: "
-                    f"{selected.complete_source_identity}"
+                    f"{selected_record_identity}"
                 )
             # Check the complete identity before any simulator work.  The
             # restore helper repeats this boundary for defense in depth.
@@ -6421,7 +6618,7 @@ def run_t085_native_paired_evaluation(
             ):
                 raise T085NativeExecutionError(
                     f"T085 selection {cohort_name} full-record identity mismatch: "
-                    f"{selected.complete_source_identity}"
+                    f"{selected_record_identity}"
                 )
     if search_backend != "battle_search_v2":
         raise T085NativeExecutionError("T085 arms require native battle_search_v2")
