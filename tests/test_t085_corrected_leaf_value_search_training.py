@@ -57,17 +57,25 @@ class _FakeTrainingConfig:
         }
 
 
-def _training_artifact_path(tmp_path, name: str) -> Path:
-    return T085_ARTIFACT_ROOT / f".pytest-t085-training-{tmp_path.name}-{name}.json"
+def _training_artifact_path(artifact_root: Path, name: str) -> Path:
+    return artifact_root / f".pytest-t085-training-{name}.json"
 
 
 def test_training_command_runs_both_repair_seeds_and_writes_only_training_artifacts(
     tmp_path, monkeypatch
 ) -> None:
+    test_artifact_root = tmp_path / "t085-artifacts"
+    canonical_sentinel = (
+        T085_ARTIFACT_ROOT / f".pytest-t085-training-sentinel-{tmp_path.name}.json"
+    )
+    sentinel_contents = b"canonical-t085-training-sentinel\n"
+    canonical_sentinel.write_bytes(sentinel_contents)
+    monkeypatch.setattr(t085_evaluation, "T085_ARTIFACT_ROOT", test_artifact_root)
+    monkeypatch.setattr(t085_repair, "T085_ARTIFACT_ROOT", test_artifact_root)
     input_paths: list[Path] = []
 
     def json_input(name: str, schema_id: str) -> dict[str, object]:
-        path = _training_artifact_path(tmp_path, name)
+        path = _training_artifact_path(test_artifact_root, name)
         reference = write_t085_json_artifact(
             path,
             {"input": name},
@@ -76,7 +84,7 @@ def test_training_command_runs_both_repair_seeds_and_writes_only_training_artifa
         input_paths.append(path)
         return reference
 
-    collector_path = _training_artifact_path(tmp_path, "collector")
+    collector_path = _training_artifact_path(test_artifact_root, "collector")
     collector_reference = write_t085_json_artifact(
         collector_path,
         {"formal_rows": []},
@@ -86,7 +94,7 @@ def test_training_command_runs_both_repair_seeds_and_writes_only_training_artifa
     report_reference = json_input(
         "report", "t084-search-v2-internal-leaf-target-generation-v1"
     )
-    retention_path = _training_artifact_path(tmp_path, "retention")
+    retention_path = _training_artifact_path(test_artifact_root, "retention")
     retention_reference = write_t085_json_artifact(
         retention_path,
         {"task_id": "T084", "outputs": {"report": report_reference}},
@@ -97,7 +105,7 @@ def test_training_command_runs_both_repair_seeds_and_writes_only_training_artifa
     parent_paths: dict[int, Path] = {}
     parent_references: dict[int, dict[str, object]] = {}
     for seed in (85001, 85002):
-        path = _training_artifact_path(tmp_path, f"parent-{seed}")
+        path = _training_artifact_path(test_artifact_root, f"parent-{seed}")
         path.write_bytes(f"parent-{seed}".encode("ascii"))
         input_paths.append(path)
         parent_paths[seed] = path
@@ -253,23 +261,25 @@ def test_training_command_runs_both_repair_seeds_and_writes_only_training_artifa
         for path in input_paths + saved_paths:
             path.unlink(missing_ok=True)
         for path in (
-            T085_ARTIFACT_ROOT / "training" / "input-eligibility-manifest.json",
-            T085_ARTIFACT_ROOT / "training" / "t085-training-manifest.json",
+            test_artifact_root / "training" / "input-eligibility-manifest.json",
+            test_artifact_root / "training" / "t085-training-manifest.json",
         ):
             path.unlink(missing_ok=True)
         for seed in (85001, 85002):
             (
-                T085_ARTIFACT_ROOT
+                test_artifact_root
                 / "training"
                 / "reports"
                 / f"t085-training-report-{seed}.json"
             ).unlink(missing_ok=True)
             (
-                T085_ARTIFACT_ROOT
+                test_artifact_root
                 / "training"
                 / "checkpoints"
                 / f"t085-corrected-value-head-{seed}.pt"
             ).unlink(missing_ok=True)
+        assert canonical_sentinel.read_bytes() == sentinel_contents
+        canonical_sentinel.unlink(missing_ok=True)
 
 
 def test_training_command_parser_requires_exact_retention_argument() -> None:
