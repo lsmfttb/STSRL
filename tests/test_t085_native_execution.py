@@ -7,6 +7,7 @@ import multiprocessing
 import time
 from dataclasses import dataclass, replace
 from io import StringIO
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -40,6 +41,7 @@ from sts_combat_rl.sim.assisted_source_generation import (
     AssistedSourcePoolArtifact,
     assistance_schedule_by_level,
     dump_assisted_source_pool_jsonl,
+    dump_merged_assisted_source_pool_shards_jsonl,
     load_assisted_source_pool_jsonl,
 )
 from sts_combat_rl.sim.battle_start_pool import (
@@ -1031,7 +1033,112 @@ def test_t085_cohort_b_source_generation_writes_partial_shard_manifest(
     assert manifest["complete"] is False
 
 
-def test_t085_cohort_b_source_finalizer_freezes_complete_pool_identity(
+def _write_small_t085_b_shards(
+    artifact_root: Path, controller, *, shard_count: int = 16
+) -> list[Path]:
+    seeds = tuple(range(851001, 852025))
+    pool_paths = []
+    for shard_index in range(shard_count):
+        shard_seeds = seeds[shard_index * 64 : (shard_index + 1) * 64]
+        valid_seed = shard_seeds[0]
+        valid_run_id = f"seed-{valid_seed}-run-{shard_index}"
+        checkpoint_id = f"checkpoint-{valid_seed}"
+        decision = {
+            "assistance_version": "assisted-run-assistance-schedule-v1",
+            "assistance_level": "assist_hp75_potion",
+            "policy_seed": 42042,
+            "distribution_kind": "assisted_run",
+            "information_regime": "full_simulator_state_oracle_like",
+            "source_run_id": valid_run_id,
+            "source_seed": valid_seed,
+            "source_battle_index": 0,
+            "source_checkpoint_id": checkpoint_id,
+            "source_record_index": 0,
+            "before_resources": {},
+            "requested_change": {},
+            "actual_change": {},
+            "after_resources": {},
+            "native_support_status": "supported",
+        }
+        record = BattleStartCheckpointRecord(
+            record_index=0,
+            source_checkpoint_id=checkpoint_id,
+            source_run_id=valid_run_id,
+            source_seed=valid_seed,
+            source_battle_index=0,
+            structural_metadata={
+                "ascension": 20,
+                "act": 1,
+                "floor": 1,
+                "room_type": "MONSTER",
+                "encounter_id": "TEST",
+                "seed": valid_seed,
+                "source_kind": "assisted_run",
+                "distribution_kind": "assisted_run",
+                "assistance_level": "assist_hp75_potion",
+                "source_run_id": valid_run_id,
+                "source_battle_index": 0,
+            },
+            source_controller_provenance=controller.provenance.to_dict(),
+            source_battle_controller_provenance=controller.battle.provenance.to_dict(),
+            source_non_combat_controller_provenance=controller.non_combat.provenance.to_dict(),
+            action_trace=(),
+            snapshot_observation=(),
+            snapshot_raw={},
+            distribution_kind="assisted_run",
+            assistance_history=(decision,),
+        )
+        summaries = [
+            SourceRunSummary(
+                source_run_id=(
+                    valid_run_id
+                    if local_index == 0
+                    else f"seed-{seed}-run-{shard_index}"
+                ),
+                source_seed=seed,
+                terminal=local_index == 0,
+                outcome="VICTORY" if local_index == 0 else "UNDECIDED",
+                final_floor=1.0,
+                final_act=1,
+                final_screen_state="MAP" if local_index == 0 else "BATTLE",
+                final_battle_active=local_index != 0,
+                captured_battle_start_count=1 if local_index == 0 else 0,
+                completed_battle_count=0,
+                max_battle_start_floor=1.0 if local_index == 0 else None,
+                max_battle_start_act=1 if local_index == 0 else None,
+                problem_count=0,
+                problems=(),
+            )
+            for local_index, seed in enumerate(shard_seeds)
+        ]
+        artifact = AssistedSourcePoolArtifact(
+            pool=NaturalBattleStartPool(
+                source_run_count=64,
+                terminal_run_count=1,
+                truncated_run_count=63,
+                source_controller_provenance=controller.provenance.to_dict(),
+                records=[record],
+                source_run_summaries=summaries,
+            ),
+            assistance_level="assist_hp75_potion",
+            assistance_schedule=assistance_schedule_by_level("assist_hp75_potion"),
+            policy_seed=42042,
+            assistance_decisions=(decision,),
+        )
+        pool_path = (
+            artifact_root
+            / "source"
+            / "cohort-b"
+            / f"input-shard-{shard_index:02d}.jsonl"
+        )
+        pool_path.parent.mkdir(parents=True, exist_ok=True)
+        with pool_path.open("w", encoding="utf-8", newline="\n") as stream:
+            dump_assisted_source_pool_jsonl(artifact, stream)
+        pool_paths.append(pool_path)
+    return pool_paths
+
+
+def test_t085_cohort_b_source_finalizer_streams_complete_pool_identity(
     tmp_path, monkeypatch
 ) -> None:
     import sts_combat_rl.t085_corrected_leaf_value_search_evaluation as t085_eval
@@ -1053,71 +1160,61 @@ def test_t085_cohort_b_source_finalizer_freezes_complete_pool_identity(
     monkeypatch.setattr(
         t085_execution, "_load_t085_t042_scale_manifest", lambda: anchor
     )
-    monkeypatch.setattr(
-        t085_execution, "_validate_t085_b_source_pool", lambda *a, **k: None
-    )
-    seeds = tuple(range(851001, 852025))
-    summaries = [
-        SimpleNamespace(
-            source_seed=seed,
-            source_run_id=f"run-{seed}",
-            terminal=True,
-            problem_count=0,
-            problems=(),
+    controller = build_t085_cohort_b_source_controller()
+    pool_paths = _write_small_t085_b_shards(artifact_root, controller)
+    merged_path = artifact_root / "source" / "cohort-b" / "merged.jsonl"
+    with merged_path.open("w", encoding="utf-8", newline="\n") as stream:
+        merge_summary = dump_merged_assisted_source_pool_shards_jsonl(
+            pool_paths, stream
         )
-        for seed in seeds
-    ]
-    summaries[0].terminal = False
-    records = [
-        SimpleNamespace(
-            source_run_id=f"run-{seed}",
-            source_checkpoint_id=f"checkpoint-{seed}",
-        )
-        for seed in seeds
-        if seed != seeds[0]
-    ]
-    pool = SimpleNamespace(
-        source_run_count=1024,
-        terminal_run_count=1023,
-        truncated_run_count=1,
-        source_controller_provenance=build_t085_cohort_b_source_controller().provenance.to_dict(),
-        source_run_summaries=summaries,
-        records=records,
-    )
-    artifact = SimpleNamespace(records=records, pool=pool)
     monkeypatch.setattr(
         t085_execution,
         "load_assisted_source_pool_jsonl",
-        lambda _stream: artifact,
+        lambda _stream: pytest.fail("full assisted pool loader must not be used"),
     )
-    monkeypatch.setattr(
-        t085_execution,
-        "dump_assisted_source_pool_jsonl",
-        lambda _artifact, stream: stream.write('{"type": "metadata"}\n'),
-    )
-    pool_path = artifact_root / "source" / "cohort-b" / "merged.jsonl"
-    pool_path.parent.mkdir(parents=True, exist_ok=True)
-    pool_path.write_bytes(b"complete-assisted-pool\n")
     manifest_path = artifact_root / "source" / "cohort-b" / "manifest.json"
     manifest = build_t085_cohort_b_source_manifest_from_paths(
-        pool_path=pool_path,
-        pool_sha256=t085_execution.sha256_file(pool_path),
+        pool_path=merged_path,
+        pool_sha256=t085_execution.sha256_file(merged_path),
         manifest_output_path=manifest_path,
     )
+    seeds = tuple(range(851001, 852025))
     assert manifest["schema_id"] == "t085-source-generation-manifest-v1"
     assert manifest["source_run_count"] == 1024
     assert manifest["source_run_seed_inventory"] == list(seeds)
     assert manifest["complete_source_identity_inventory"] == [
-        None,
-        *(f"checkpoint-{seed}" for seed in seeds[1:]),
+        (f"shard-{index // 64}:checkpoint-{seed}" if index % 64 == 0 else None)
+        for index, seed in enumerate(seeds)
     ]
     assert manifest["source_run_inventory"][0] == {
         "source_run_seed": seeds[0],
-        "source_run_identity": f"run-{seeds[0]}",
-        "complete_source_identity": None,
-        "source_valid": False,
-        "failure_reason": "bounded_run_truncated",
+        "source_run_identity": "seed-851001-run-0",
+        "complete_source_identity": "shard-0:checkpoint-851001",
+        "source_valid": True,
+        "failure_reason": None,
     }
+    assert (
+        sum(not entry["source_valid"] for entry in manifest["source_run_inventory"])
+        == 1008
+    )
+    invalid_entries = [
+        entry for entry in manifest["source_run_inventory"] if not entry["source_valid"]
+    ]
+    assert all(
+        entry["complete_source_identity"] is None
+        and entry["failure_reason"] == "bounded_run_truncated"
+        for entry in invalid_entries
+    )
+    assert (
+        manifest["source_pool_artifact"]["record_count"] == merge_summary.record_count
+    )
+    assert manifest["source_pool_merge"]["shard_count"] == 16
+    assert (
+        manifest["source_controller_provenance"]["config"][
+            "assisted_source_pool_merge"
+        ]["shards"]
+        == manifest["source_pool_merge"]["source_shards"]
+    )
     assert manifest["t042_scale_manifest_sha256"] == (
         t085_execution.T085_T042_SCALE_MANIFEST_SHA256
     )
@@ -1126,8 +1223,8 @@ def test_t085_cohort_b_source_finalizer_freezes_complete_pool_identity(
     )
     assert manifest["source_pool_artifact"]["source_pool_format_version"] == 4
     assert manifest["source_pool_complete"] is True
-    assert manifest["terminal_run_count"] == 1023
-    assert manifest["truncated_run_count"] == 1
+    assert manifest["terminal_run_count"] == 16
+    assert manifest["truncated_run_count"] == 1008
 
 
 def test_t085_b_validator_round_trips_pure_bounded_truncation() -> None:
@@ -1206,51 +1303,21 @@ def test_t085_cohort_b_source_merge_requires_all_ordered_shards(
             manifest_path.read_text(encoding="utf-8")
         ),
     )
-    merged_artifact = SimpleNamespace(
-        pool=SimpleNamespace(
-            source_run_count=1024,
-            terminal_run_count=1024,
-            truncated_run_count=0,
-        ),
-        records=[],
-    )
-    monkeypatch.setattr(
-        t085_execution,
-        "dump_merged_assisted_source_pool_shards_jsonl",
-        lambda paths, stream: (
-            stream.write("merged\n"),
-            SimpleNamespace(
-                assistance_level="assist_hp75_potion",
-                source_shards=tuple(
-                    {"shard_index": index} for index in range(len(paths))
-                ),
-                source_run_count=1024,
-                terminal_run_count=1024,
-                truncated_run_count=0,
-                record_count=0,
-                assistance_decision_count=0,
-            ),
-        )[1],
-    )
     monkeypatch.setattr(
         t085_execution,
         "load_assisted_source_pool_jsonl",
-        lambda _stream: merged_artifact,
+        lambda _stream: pytest.fail("full assisted pool loader must not be used"),
     )
-    monkeypatch.setattr(
-        t085_execution, "_validate_t085_b_source_pool", lambda *a, **k: None
-    )
-    pool_paths = []
+    controller = build_t085_cohort_b_source_controller()
+    pool_paths = _write_small_t085_b_shards(artifact_root, controller)
     manifest_paths = []
     for index in range(16):
-        pool_path = artifact_root / "source" / "cohort-b" / f"shard-{index:02d}.jsonl"
+        pool_path = pool_paths[index]
         manifest_path = (
             artifact_root / "source" / "cohort-b" / f"shard-{index:02d}.json"
         )
         pool_path.parent.mkdir(parents=True, exist_ok=True)
-        pool_path.write_bytes(f"pool-{index}\n".encode())
         manifest_path.write_text(json.dumps({"shard_index": index}), encoding="utf-8")
-        pool_paths.append(pool_path)
         manifest_paths.append(manifest_path)
     result = merge_t085_cohort_b_source_pool_from_paths(
         shard_paths=pool_paths,
@@ -1261,6 +1328,7 @@ def test_t085_cohort_b_source_merge_requires_all_ordered_shards(
     assert result["partial"] is True
     assert result["complete"] is False
     assert result["pool_artifact"]["source_run_count"] == 1024
+    assert result["pool_artifact"]["record_count"] == 16
     assert len(result["merge_summary"]["source_shards"]) == 16
 
 
