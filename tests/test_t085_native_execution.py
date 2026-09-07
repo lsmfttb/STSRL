@@ -257,7 +257,7 @@ class _SearchAdapter:
         return _terminal_transition()
 
 
-def test_guided_controller_handoff_avoids_independent_zero_visit_search() -> None:
+def test_guided_controller_handoff_fails_closed_without_no_guidance_utility() -> None:
     class SelectionThenZeroVisitAdapter(_SearchAdapter):
         def __init__(self) -> None:
             super().__init__(backend="battle_search_v2")
@@ -304,17 +304,13 @@ def test_guided_controller_handoff_avoids_independent_zero_visit_search() -> Non
     )
     snapshot = proxy.reset(seed=1)
     actions = proxy.legal_actions(snapshot)
-    decision = controller.select_action(
-        proxy, snapshot, actions, _context(), step_index=0
-    )
-    transition = proxy.step(actions[decision.selected_index])
+    with pytest.raises(T085NativeExecutionError, match="matched no-guidance"):
+        controller.select_action(proxy, snapshot, actions, _context(), step_index=0)
 
     assert adapter.search_calls == 1
     assert proxy.native_search_call_count == 1
-    assert len(proxy.native_terminal_labels) == 1
-    assert proxy.native_terminal_labels[0].visits == 2
-    assert proxy.native_terminal_labels[0].mean_value == 0.5
-    assert transition.terminal is True
+    assert proxy.native_terminal_labels == ()
+    assert "step" not in adapter.events
 
 
 def test_native_search_is_rejected_outside_battle_boundary() -> None:
@@ -553,6 +549,7 @@ def test_controller_handoff_precedes_step_and_retains_native_terminal_label() ->
     assert transition.terminal is True
     assert len(proxy.native_terminal_labels) == 1
     assert proxy.native_terminal_labels[0].terminal_outcome == "PLAYER_LOSS"
+    assert proxy.native_terminal_labels[0].mean_value == 0.5
 
 
 def test_adapter_rejects_duplicate_terminal_labels() -> None:
@@ -631,6 +628,23 @@ def test_terminal_labeler_does_not_accept_a_callback_search_report() -> None:
             simulations=100,
             backend="battle_search_v2",
         )
+
+
+def test_terminal_labeler_rejects_callback_guidance_request() -> None:
+    adapter = _SearchAdapter(backend="battle_search_v2")
+
+    with pytest.raises(T085NativeExecutionError, match="matched no-guidance"):
+        prepare_t085_native_root_edge_label(
+            adapter,
+            adapter.snapshot,
+            _actions(),
+            0,
+            simulations=100,
+            backend="battle_search_v2",
+            policy_prior_callback=lambda *_args, **_kwargs: 0.5,
+            leaf_value_callback=lambda *_args, **_kwargs: 0.5,
+        )
+    assert adapter.events == []
 
 
 def test_v2_controller_rejects_non_no_potion_action_space() -> None:
