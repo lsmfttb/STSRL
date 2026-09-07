@@ -1693,22 +1693,6 @@ def _validate_unguided_v2_telemetry(raw_search: Mapping[str, object]) -> None:
             )
 
 
-def _require_t085_native_terminal_utility_no_guidance(
-    *,
-    policy_prior_callback: Callable[..., object] | None,
-    leaf_value_callback: Callable[..., object] | None,
-) -> None:
-    """Reject guided reports when no matched native terminal utility exists."""
-
-    if policy_prior_callback is not None or leaf_value_callback is not None:
-        raise T085NativeExecutionError(
-            "T085 terminal utility requires a matched no-guidance native "
-            "report; the pinned Search v2 API exposes neither a forced-root-edge "
-            "evaluateEndState report nor another matched no-guidance utility "
-            "surface, and an independent stochastic search is not accepted"
-        )
-
-
 @dataclass(frozen=True)
 class T085NativeRootEdgeLabel:
     """Pre-action native root-edge statistics, finalized only after terminal proof."""
@@ -1879,10 +1863,6 @@ def prepare_t085_native_root_edge_label(
 ) -> T085NativeRootEdgeLabel:
     """Search the current state before stepping and select the chosen root edge."""
 
-    _require_t085_native_terminal_utility_no_guidance(
-        policy_prior_callback=policy_prior_callback,
-        leaf_value_callback=leaf_value_callback,
-    )
     if not _is_battle_snapshot(snapshot):
         raise T085NativeExecutionError(
             "T085 native terminal labeling requires a pre-action battle snapshot"
@@ -2313,6 +2293,11 @@ class T085NativeTerminalSearchAdapter:
             raise T085NativeExecutionError(
                 "T085 native controller search report is not for the current snapshot"
             )
+        if actions is not self._current_actions:
+            raise T085NativeExecutionError(
+                "T085 native controller search report is not bound to the current "
+                "legal action list"
+            )
         if call.backend != self._search_backend:
             raise T085NativeExecutionError(
                 "T085 native controller search backend changed before terminal labeling"
@@ -2354,10 +2339,6 @@ class T085NativeTerminalSearchAdapter:
             raise T085NativeExecutionError(
                 "T085 native controller search report changed before terminal labeling"
             )
-        _require_t085_native_terminal_utility_no_guidance(
-            policy_prior_callback=call.policy_prior_callback,
-            leaf_value_callback=call.leaf_value_callback,
-        )
         self._pending_root_edge_label = (
             _prepare_t085_native_root_edge_label_from_report(
                 snapshot,

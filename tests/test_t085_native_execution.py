@@ -257,7 +257,7 @@ class _SearchAdapter:
         return _terminal_transition()
 
 
-def test_guided_controller_handoff_fails_closed_without_no_guidance_utility() -> None:
+def test_guided_controller_handoff_reuses_terminal_edge_without_second_search() -> None:
     class SelectionThenZeroVisitAdapter(_SearchAdapter):
         def __init__(self) -> None:
             super().__init__(backend="battle_search_v2")
@@ -304,13 +304,136 @@ def test_guided_controller_handoff_fails_closed_without_no_guidance_utility() ->
     )
     snapshot = proxy.reset(seed=1)
     actions = proxy.legal_actions(snapshot)
-    with pytest.raises(T085NativeExecutionError, match="matched no-guidance"):
-        controller.select_action(proxy, snapshot, actions, _context(), step_index=0)
+    decision = controller.select_action(
+        proxy, snapshot, actions, _context(), step_index=0
+    )
+    transition = proxy.step(actions[decision.selected_index])
 
     assert adapter.search_calls == 1
     assert proxy.native_search_call_count == 1
+    assert len(proxy.native_terminal_labels) == 1
+    assert proxy.native_terminal_labels[0].visits == 2
+    assert proxy.native_terminal_labels[0].mean_value == 0.5
+    assert transition.terminal is True
+
+
+def test_immediate_terminal_guided_edge_is_callback_value_invariant() -> None:
+    def run_with_callback_values(
+        policy_value: float, leaf_value: float
+    ) -> tuple[float, int, int]:
+        adapter = _SearchAdapter(backend="battle_search_v2")
+        policy_calls = 0
+        leaf_calls = 0
+
+        def policy_callback(*_args, **_kwargs):
+            nonlocal policy_calls
+            policy_calls += 1
+            return [policy_value, policy_value]
+
+        def leaf_callback(*_args, **_kwargs):
+            nonlocal leaf_calls
+            leaf_calls += 1
+            return leaf_value
+
+        def immediate_terminal_search(
+            snapshot,
+            *,
+            simulations,
+            include_potions=False,
+            policy_prior_callback=None,
+            leaf_value_callback=None,
+        ):
+            assert policy_prior_callback is policy_callback
+            assert leaf_value_callback is leaf_callback
+            # Native root expansion may consult policy priors, but a root
+            # action that immediately terminates is backed up before the
+            # learned-leaf callback boundary.
+            policy_prior_callback(snapshot.raw, _actions())
+            assert leaf_value_callback is not None
+            raw = _raw_search(backend="battle_search_v2")
+            raw["root_rows"][0]["visits"] = 2
+            raw["root_rows"][0]["evaluation_sum"] = 17.0
+            raw["root_rows"][0]["mean_value"] = 8.5
+            raw["root_visits"] = 3
+            return raw
+
+        adapter.battle_search_v2 = immediate_terminal_search
+        arm = T085NativeArm(
+            "prior_corrected_85001",
+            {"checkpoint": "test"},
+            policy_callback,
+            leaf_callback,
+            "search_v2_leaf_continuation_native_utility_v1",
+        )
+        controller = T085NativeArmController(arm)
+        proxy = T085NativeTerminalSearchAdapter(
+            adapter,
+            search_simulations=100,
+            search_backend="battle_search_v2",
+            policy_prior_callback=policy_callback,
+            leaf_value_callback=leaf_callback,
+        )
+        snapshot = proxy.reset(seed=1)
+        actions = proxy.legal_actions(snapshot)
+        decision = controller.select_action(
+            proxy, snapshot, actions, _context(), step_index=0
+        )
+        transition = proxy.step(actions[decision.selected_index])
+        assert transition.terminal is True
+        assert len(proxy.native_terminal_labels) == 1
+        return (
+            proxy.native_terminal_labels[0].mean_value,
+            policy_calls,
+            leaf_calls,
+        )
+
+    first = run_with_callback_values(-100.0, -1000.0)
+    second = run_with_callback_values(100.0, 1000.0)
+
+    assert first[0] == second[0] == 8.5
+    assert first[1] == second[1] == 1
+    assert first[2] == second[2] == 0
+
+
+def test_nonterminal_guided_step_retains_no_terminal_utility() -> None:
+    adapter = _SearchAdapter(backend="battle_search_v2")
+
+    def nonterminal_step(action):
+        return SimulatorTransition(
+            snapshot=_snapshot(),
+            terminal=False,
+            info={
+                "action_id": action.action_id,
+                "action_kind": action.kind,
+                "outcome": "UNDECIDED",
+            },
+        )
+
+    adapter.step = nonterminal_step
+    leaf_callback = lambda *_args, **_kwargs: 0.7
+    arm = T085NativeArm(
+        "old_value_64001",
+        {"checkpoint": "test"},
+        None,
+        leaf_callback,
+        "terminal_battle_survival_probability",
+    )
+    controller = T085NativeArmController(arm)
+    proxy = T085NativeTerminalSearchAdapter(
+        adapter,
+        search_simulations=100,
+        search_backend="battle_search_v2",
+        leaf_value_callback=leaf_callback,
+    )
+    snapshot = proxy.reset(seed=1)
+    actions = proxy.legal_actions(snapshot)
+    decision = controller.select_action(
+        proxy, snapshot, actions, _context(), step_index=0
+    )
+    transition = proxy.step(actions[decision.selected_index])
+
+    assert transition.terminal is False
     assert proxy.native_terminal_labels == ()
-    assert "step" not in adapter.events
 
 
 def test_native_search_is_rejected_outside_battle_boundary() -> None:
@@ -569,7 +692,7 @@ def test_adapter_rejects_duplicate_terminal_labels() -> None:
     proxy.step(actions[decision.selected_index])
     # Re-presenting a battle snapshot after a terminal label must not silently
     # produce a second retained label.
-    proxy.legal_actions(base.snapshot)
+    actions = proxy.legal_actions(base.snapshot)
     controller.select_action(proxy, base.snapshot, actions, _context(), step_index=1)
     with pytest.raises(T085NativeExecutionError, match="duplicate terminal labels"):
         proxy.step(actions[0])
@@ -628,23 +751,6 @@ def test_terminal_labeler_does_not_accept_a_callback_search_report() -> None:
             simulations=100,
             backend="battle_search_v2",
         )
-
-
-def test_terminal_labeler_rejects_callback_guidance_request() -> None:
-    adapter = _SearchAdapter(backend="battle_search_v2")
-
-    with pytest.raises(T085NativeExecutionError, match="matched no-guidance"):
-        prepare_t085_native_root_edge_label(
-            adapter,
-            adapter.snapshot,
-            _actions(),
-            0,
-            simulations=100,
-            backend="battle_search_v2",
-            policy_prior_callback=lambda *_args, **_kwargs: 0.5,
-            leaf_value_callback=lambda *_args, **_kwargs: 0.5,
-        )
-    assert adapter.events == []
 
 
 def test_v2_controller_rejects_non_no_potion_action_space() -> None:
