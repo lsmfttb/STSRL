@@ -56,6 +56,7 @@ from sts_combat_rl.sim.contract import (
     SimulatorSnapshot,
     SimulatorTransition,
 )
+from sts_combat_rl.sim.controlled_run import execute_controlled_run
 from sts_combat_rl.sim.online_controller import NATIVE_SEARCH_INFORMATION_REGIME
 from sts_combat_rl.sim.oracle_search import (
     ORACLE_SEARCH_PATCH_IDENTITY,
@@ -640,8 +641,6 @@ class _ProxyBaseAdapter:
         assert snapshot is self.snapshot
         assert simulations == 100
         assert include_potions is False
-        assert policy_prior_callback is None
-        assert leaf_value_callback is None
         self.events.append("search_v2")
         return _raw_search(backend="battle_search_v2")
 
@@ -672,6 +671,40 @@ def test_controller_handoff_precedes_step_and_retains_native_terminal_label() ->
     assert transition.terminal is True
     assert len(proxy.native_terminal_labels) == 1
     assert proxy.native_terminal_labels[0].terminal_outcome == "PLAYER_LOSS"
+    assert proxy.native_terminal_labels[0].mean_value == 0.5
+
+
+def test_authoritative_executor_preserves_proxy_action_occurrences() -> None:
+    events: list[str] = []
+    base = _ProxyBaseAdapter(events)
+    leaf_callback = lambda *_args, **_kwargs: 0.3
+    arm = T085NativeArm(
+        "old_value_64001",
+        {"checkpoint": "test"},
+        None,
+        leaf_callback,
+        "terminal_battle_survival_probability",
+    )
+    proxy = T085NativeTerminalSearchAdapter(
+        base,
+        search_simulations=100,
+        search_backend="battle_search_v2",
+        leaf_value_callback=leaf_callback,
+    )
+    controller = T085NativeArmController(arm)
+
+    controlled = execute_controlled_run(
+        proxy,
+        controller,
+        seed=85001,
+        max_steps=1,
+        action_space=ActionSpaceConfig.initial_no_potions(),
+    )
+
+    assert controlled.problems == []
+    assert controlled.terminal is True
+    assert events == ["reset", "legal", "search_v2", "step"]
+    assert len(proxy.native_terminal_labels) == 1
     assert proxy.native_terminal_labels[0].mean_value == 0.5
 
 

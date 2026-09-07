@@ -2293,7 +2293,10 @@ class T085NativeTerminalSearchAdapter:
             raise T085NativeExecutionError(
                 "T085 native controller search report is not for the current snapshot"
             )
-        if actions is not self._current_actions:
+        if len(actions) != len(self._current_actions) or any(
+            action is not bound_action
+            for action, bound_action in zip(actions, self._current_actions)
+        ):
             raise T085NativeExecutionError(
                 "T085 native controller search report is not bound to the current "
                 "legal action list"
