@@ -1593,6 +1593,8 @@ def _native_search_report(
     """Run and validate one native search on the supplied current snapshot."""
 
     _positive_int(simulations, "native search simulations")
+    if not _is_battle_snapshot(snapshot):
+        raise T085NativeExecutionError("T085 native search requested outside battle")
     _validate_t085_native_source_manifest(backend)
     if backend == "battle_search":
         method_name = "battle_search"
@@ -1739,18 +1741,16 @@ class T085NativeRootEdgeLabel:
         }
 
 
-def prepare_t085_native_root_edge_label(
-    adapter: object,
+def _prepare_t085_native_root_edge_label_from_report(
     snapshot: SimulatorSnapshot,
     actions: Sequence[SimulatorAction],
     chosen_action_index: int,
     *,
     simulations: int,
-    backend: T085NativeSearchBackend = "battle_search",
-    policy_prior_callback: Callable[..., object] | None = None,
-    leaf_value_callback: Callable[..., object] | None = None,
+    backend: T085NativeSearchBackend,
+    report: OracleSearchReport,
 ) -> T085NativeRootEdgeLabel:
-    """Search the current state before stepping and select the chosen root edge."""
+    """Bind one already-validated controller report to its selected edge."""
 
     if not _is_battle_snapshot(snapshot):
         raise T085NativeExecutionError(
@@ -1766,21 +1766,38 @@ def prepare_t085_native_root_edge_label(
         or chosen_action_index >= len(action_list)
     ):
         raise T085NativeExecutionError("chosen action index is outside current actions")
-    context = build_decision_context(
-        snapshot.raw,
-        action_list,
-        ActionSpaceConfig.initial_no_potions(),
+    if backend not in T085_NATIVE_SEARCH_BACKENDS:
+        raise T085NativeExecutionError(
+            f"unknown T085 native search backend {backend!r}"
+        )
+    expected_api = (
+        ORACLE_SEARCH_NATIVE_API if backend == "battle_search" else T085_NATIVE_V2_API
     )
-    report = _native_search_report(
-        adapter,
-        snapshot,
-        action_list,
-        context,
-        simulations=simulations,
-        backend=backend,
-        policy_prior_callback=policy_prior_callback,
-        leaf_value_callback=leaf_value_callback,
+    expected_patch = (
+        ORACLE_SEARCH_PATCH_IDENTITY
+        if backend == "battle_search"
+        else T085_NATIVE_V2_PATCH
     )
+    _validate_t085_native_source_manifest(backend)
+    if not report.search_ok:
+        raise T085NativeExecutionError(
+            "T085 native controller root mapping failed: " + "; ".join(report.problems)
+        )
+    if (
+        report.schema_id != ORACLE_SEARCH_SCHEMA_ID
+        or report.native_api != expected_api
+        or report.patch_identity != expected_patch
+    ):
+        raise T085NativeExecutionError(
+            "T085 native controller root report identity is not current"
+        )
+    if (
+        report.simulations_requested != simulations
+        or report.include_potions is not False
+    ):
+        raise T085NativeExecutionError(
+            "T085 native controller root report budget/action space changed"
+        )
     identities = action_identity_dicts_for_actions(action_list)
     expected_identity = identities[chosen_action_index]
     matches = [
@@ -1830,6 +1847,58 @@ def prepare_t085_native_root_edge_label(
         mean_value=selected.mean_value,
         search_tree_present=selected.search_tree_present,
         _pre_action_snapshot_token=id(snapshot),
+    )
+
+
+def prepare_t085_native_root_edge_label(
+    adapter: object,
+    snapshot: SimulatorSnapshot,
+    actions: Sequence[SimulatorAction],
+    chosen_action_index: int,
+    *,
+    simulations: int,
+    backend: T085NativeSearchBackend = "battle_search",
+    policy_prior_callback: Callable[..., object] | None = None,
+    leaf_value_callback: Callable[..., object] | None = None,
+) -> T085NativeRootEdgeLabel:
+    """Search the current state before stepping and select the chosen root edge."""
+
+    if not _is_battle_snapshot(snapshot):
+        raise T085NativeExecutionError(
+            "T085 native terminal labeling requires a pre-action battle snapshot"
+        )
+    action_list = list(actions)
+    if not action_list:
+        raise T085NativeExecutionError("T085 native terminal labeling has no actions")
+    if (
+        isinstance(chosen_action_index, bool)
+        or not isinstance(chosen_action_index, int)
+        or chosen_action_index < 0
+        or chosen_action_index >= len(action_list)
+    ):
+        raise T085NativeExecutionError("chosen action index is outside current actions")
+    context = build_decision_context(
+        snapshot.raw,
+        action_list,
+        ActionSpaceConfig.initial_no_potions(),
+    )
+    report = _native_search_report(
+        adapter,
+        snapshot,
+        action_list,
+        context,
+        simulations=simulations,
+        backend=backend,
+        policy_prior_callback=policy_prior_callback,
+        leaf_value_callback=leaf_value_callback,
+    )
+    return _prepare_t085_native_root_edge_label_from_report(
+        snapshot,
+        action_list,
+        chosen_action_index,
+        simulations=simulations,
+        backend=backend,
+        report=report,
     )
 
 
@@ -1955,6 +2024,19 @@ def finalize_t085_native_root_edge_label(
     return replace(label, terminal_outcome=outcome)
 
 
+@dataclass(frozen=True)
+class _T085NativeSearchCall:
+    """The exact pre-action search call awaiting controller selection handoff."""
+
+    backend: T085NativeSearchBackend
+    snapshot: SimulatorSnapshot
+    simulations: int
+    include_potions: bool
+    policy_prior_callback: Callable[..., object] | None
+    leaf_value_callback: Callable[..., object] | None
+    raw: Mapping[str, object]
+
+
 class T085NativeTerminalSearchAdapter:
     """Adapter proxy that enforces pre-step native terminal labeling."""
 
@@ -1985,6 +2067,8 @@ class T085NativeTerminalSearchAdapter:
         self._step_count = 0
         self._search_call_count = 0
         self._restored_snapshot: SimulatorSnapshot | None = None
+        self._last_search_call: _T085NativeSearchCall | None = None
+        self._pending_root_edge_label: T085NativeRootEdgeLabel | None = None
         _validate_t085_native_source_manifest(search_backend)
 
     def __getattr__(self, name: str) -> Any:
@@ -2008,6 +2092,8 @@ class T085NativeTerminalSearchAdapter:
             self._restored_snapshot = None
             self._current_snapshot = snapshot
             self._current_actions = []
+            self._last_search_call = None
+            self._pending_root_edge_label = None
             self._terminal_labels.clear()
             self._step_count = 0
             self._search_call_count = 0
@@ -2020,6 +2106,8 @@ class T085NativeTerminalSearchAdapter:
             raise T085NativeExecutionError("adapter reset did not return a snapshot")
         self._current_snapshot = snapshot
         self._current_actions = []
+        self._last_search_call = None
+        self._pending_root_edge_label = None
         self._terminal_labels.clear()
         self._step_count = 0
         self._search_call_count = 0
@@ -2037,6 +2125,8 @@ class T085NativeTerminalSearchAdapter:
         self._current_snapshot = snapshot
         self._current_actions = []
         self._restored_snapshot = snapshot
+        self._last_search_call = None
+        self._pending_root_edge_label = None
         return snapshot
 
     def prime_restored_snapshot(self, snapshot: SimulatorSnapshot) -> None:
@@ -2051,15 +2141,210 @@ class T085NativeTerminalSearchAdapter:
             raise T085NativeExecutionError("cannot prime a non-snapshot restore")
         self._current_snapshot = snapshot
         self._restored_snapshot = snapshot
+        self._last_search_call = None
+        self._pending_root_edge_label = None
 
     def legal_actions(self, snapshot: SimulatorSnapshot) -> list[SimulatorAction]:
+        if self._pending_root_edge_label is not None:
+            raise T085NativeExecutionError(
+                "T085 native execution received new legal actions before stepping "
+                "the controller-selected action"
+            )
+        if self._last_search_call is not None:
+            raise T085NativeExecutionError(
+                "T085 native execution received new legal actions before the "
+                "controller search handoff"
+            )
         legal_actions = getattr(self._base_adapter, "legal_actions", None)
         if not callable(legal_actions):
             raise T085NativeExecutionError("wrapped adapter lacks legal_actions")
         actions = list(legal_actions(snapshot))
         self._current_snapshot = snapshot
         self._current_actions = actions
+        self._last_search_call = None
         return actions
+
+    def _capture_native_search(
+        self,
+        snapshot: SimulatorSnapshot,
+        *,
+        simulations: int,
+        include_potions: bool,
+        policy_prior_callback: Callable[..., object] | None,
+        leaf_value_callback: Callable[..., object] | None,
+        backend: T085NativeSearchBackend,
+    ) -> Mapping[str, object]:
+        if not _is_battle_snapshot(snapshot):
+            raise T085NativeExecutionError(
+                "T085 native search requested outside battle"
+            )
+        if simulations != self._search_simulations:
+            raise T085NativeExecutionError(
+                "T085 native search budget does not match the terminal proxy"
+            )
+        if include_potions is not False:
+            raise T085NativeExecutionError(
+                "T085 native search action space includes unsupported potions"
+            )
+        if self._pending_root_edge_label is not None:
+            raise T085NativeExecutionError(
+                "T085 native search was requested before stepping the selected edge"
+            )
+        if self._last_search_call is not None:
+            raise T085NativeExecutionError(
+                "T085 native search was requested before the previous search handoff"
+            )
+        method_name = (
+            "battle_search" if backend == "battle_search" else "battle_search_v2"
+        )
+        search = getattr(self._base_adapter, method_name, None)
+        if not callable(search):
+            raise T085NativeExecutionError(
+                f"T085 native execution is INCOMPLETE: adapter lacks {method_name}"
+            )
+        if backend == "battle_search":
+            raw_search = search(
+                snapshot,
+                simulations=simulations,
+                include_potions=include_potions,
+            )
+        else:
+            raw_search = search(
+                snapshot,
+                simulations=simulations,
+                include_potions=include_potions,
+                policy_prior_callback=policy_prior_callback,
+                leaf_value_callback=leaf_value_callback,
+            )
+        if not isinstance(raw_search, Mapping):
+            raise T085NativeExecutionError(
+                f"T085 native {method_name} did not return a mapping"
+            )
+        self._last_search_call = _T085NativeSearchCall(
+            backend=backend,
+            snapshot=snapshot,
+            simulations=simulations,
+            include_potions=include_potions,
+            policy_prior_callback=policy_prior_callback,
+            leaf_value_callback=leaf_value_callback,
+            raw=raw_search,
+        )
+        self._search_call_count += 1
+        return raw_search
+
+    def battle_search(
+        self,
+        snapshot: SimulatorSnapshot,
+        *,
+        simulations: int,
+        include_potions: bool = False,
+    ) -> Mapping[str, object]:
+        """Capture legacy native searches for the same handoff boundary."""
+
+        return self._capture_native_search(
+            snapshot,
+            simulations=simulations,
+            include_potions=include_potions,
+            policy_prior_callback=None,
+            leaf_value_callback=None,
+            backend="battle_search",
+        )
+
+    def battle_search_v2(
+        self,
+        snapshot: SimulatorSnapshot,
+        *,
+        simulations: int,
+        include_potions: bool = False,
+        policy_prior_callback: Callable[..., object] | None = None,
+        leaf_value_callback: Callable[..., object] | None = None,
+    ) -> Mapping[str, object]:
+        """Capture the controller's exact v2 report before it selects an action."""
+
+        return self._capture_native_search(
+            snapshot,
+            simulations=simulations,
+            include_potions=include_potions,
+            policy_prior_callback=policy_prior_callback,
+            leaf_value_callback=leaf_value_callback,
+            backend="battle_search_v2",
+        )
+
+    def handoff_t085_native_search_report(
+        self,
+        snapshot: SimulatorSnapshot,
+        actions: Sequence[SimulatorAction],
+        context: Any,
+        report: OracleSearchReport,
+        selected_action_index: int,
+    ) -> None:
+        """Bind the controller's exact report to the selected pre-action edge."""
+
+        call = self._last_search_call
+        if call is None:
+            raise T085NativeExecutionError(
+                "T085 native terminal labeling lacks the controller search handoff"
+            )
+        if self._pending_root_edge_label is not None:
+            raise T085NativeExecutionError(
+                "T085 native terminal labeling received duplicate search handoff"
+            )
+        if call.snapshot is not snapshot or self._current_snapshot is not snapshot:
+            raise T085NativeExecutionError(
+                "T085 native controller search report is not for the current snapshot"
+            )
+        if call.backend != self._search_backend:
+            raise T085NativeExecutionError(
+                "T085 native controller search backend changed before terminal labeling"
+            )
+        if (
+            call.simulations != self._search_simulations
+            or call.include_potions is not False
+        ):
+            raise T085NativeExecutionError(
+                "T085 native controller search contract changed before terminal labeling"
+            )
+        if (call.policy_prior_callback is None) != (
+            self._policy_prior_callback is None
+        ) or (call.leaf_value_callback is None) != (self._leaf_value_callback is None):
+            raise T085NativeExecutionError(
+                "T085 native controller callback provenance changed before terminal labeling"
+            )
+        if call.backend == "battle_search_v2":
+            if call.policy_prior_callback is None and call.leaf_value_callback is None:
+                _validate_unguided_v2_telemetry(call.raw)
+            expected_api = T085_NATIVE_V2_API
+            expected_patch = T085_NATIVE_V2_PATCH
+        else:
+            expected_api = ORACLE_SEARCH_NATIVE_API
+            expected_patch = ORACLE_SEARCH_PATCH_IDENTITY
+        try:
+            rebuilt_report = build_oracle_search_report(
+                call.raw,
+                actions,
+                context,
+                expected_native_api=expected_api,
+                expected_patch_identity=expected_patch,
+            )
+        except (TypeError, ValueError) as exc:
+            raise T085NativeExecutionError(
+                "T085 native controller search report is malformed"
+            ) from exc
+        if rebuilt_report != report:
+            raise T085NativeExecutionError(
+                "T085 native controller search report changed before terminal labeling"
+            )
+        self._pending_root_edge_label = (
+            _prepare_t085_native_root_edge_label_from_report(
+                snapshot,
+                actions,
+                selected_action_index,
+                simulations=self._search_simulations,
+                backend=call.backend,
+                report=report,
+            )
+        )
+        self._last_search_call = None
 
     def _chosen_action_index(self, action: SimulatorAction) -> int:
         identity_matches = [
@@ -2092,21 +2377,17 @@ class T085NativeTerminalSearchAdapter:
                     "native execution step has no current legal actions"
                 )
             index = self._chosen_action_index(action)
-            # This call is intentionally before base_adapter.step.  The
-            # adapter's current native snapshot is therefore the root state.
-            pending = prepare_t085_native_root_edge_label(
-                self._base_adapter,
-                self._current_snapshot,
-                self._current_actions,
-                index,
-                simulations=self._search_simulations,
-                backend=self._search_backend,
-                # Terminal utility labels are always the native no-callback
-                # evaluateEndState path, independent of controller guidance.
-                policy_prior_callback=None,
-                leaf_value_callback=None,
-            )
-            self._search_call_count += 1
+            pending = self._pending_root_edge_label
+            if pending is None:
+                raise T085NativeExecutionError(
+                    "T085 native execution requires the controller-bound "
+                    "pre-action root edge"
+                )
+            if pending.selected_legal_action_index != index:
+                raise T085NativeExecutionError(
+                    "T085 native terminal label selected action changed before step"
+                )
+            self._pending_root_edge_label = None
         step = getattr(self._base_adapter, "step", None)
         if not callable(step):
             raise T085NativeExecutionError("wrapped adapter lacks step")
@@ -2114,10 +2395,8 @@ class T085NativeTerminalSearchAdapter:
         if not isinstance(transition, SimulatorTransition):
             raise T085NativeExecutionError("adapter step did not return a transition")
         self._step_count += 1
-        if (
-            pending is not None
-            and _authoritative_terminal_outcome(transition) is not None
-        ):
+        outcome = _authoritative_terminal_outcome(transition)
+        if pending is not None and outcome is not None:
             if self._terminal_labels:
                 raise T085NativeExecutionError(
                     "T085 native execution produced duplicate terminal labels"
@@ -2131,6 +2410,8 @@ class T085NativeTerminalSearchAdapter:
                     selected_action=action,
                 )
             )
+        if outcome is not None and transition.terminal is not True:
+            transition = replace(transition, terminal=True)
         self._current_snapshot = transition.snapshot
         self._current_actions = []
         return transition
@@ -2204,6 +2485,15 @@ class T085UnguidedBattleSearchV2Controller:
             "callbacks_disabled": True,
             "native_leaf_value": "BattleScumSearcher2::evaluateEndState",
         }
+        handoff = getattr(adapter, "handoff_t085_native_search_report", None)
+        if callable(handoff):
+            handoff(
+                snapshot,
+                actions,
+                context,
+                report,
+                target.legal_action_index,
+            )
         return ControllerDecision(
             selected_index=target.legal_action_index,
             provenance=self.provenance,
@@ -5086,6 +5376,10 @@ class T085NativeArmController:
 
     def select_action(self, adapter, snapshot, actions, context, step_index):
         del step_index
+        if not _is_battle_snapshot(snapshot):
+            raise T085NativeExecutionError(
+                "T085 arm native search requested outside battle"
+            )
         search = getattr(adapter, "battle_search_v2", None)
         if not callable(search):
             raise T085NativeExecutionError("T085 arm requires battle_search_v2")
@@ -5118,6 +5412,15 @@ class T085NativeArmController:
         target = select_oracle_root_action(report, selection_rule="highest_mean")
         metadata = oracle_search_controller_metadata(report, target)
         metadata["t085_arm"] = self.arm.provenance
+        handoff = getattr(adapter, "handoff_t085_native_search_report", None)
+        if callable(handoff):
+            handoff(
+                snapshot,
+                actions,
+                context,
+                report,
+                target.legal_action_index,
+            )
         return ControllerDecision(
             target.legal_action_index,
             self.provenance,

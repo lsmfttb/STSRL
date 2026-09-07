@@ -18,6 +18,8 @@ from sts_combat_rl.commands.cli_validation import validate_cli_args
 from sts_combat_rl.commands.t085_native_execution import (
     T085CohortBSourceGenerationPlan,
     T085CohortCSourceGenerationPlan,
+    T085NativeArm,
+    T085NativeArmController,
     T085NativeExecutionError,
     T085NativeShardPlan,
     T085NativeTerminalSearchAdapter,
@@ -247,8 +249,6 @@ class _SearchAdapter:
         assert snapshot is self.snapshot
         assert simulations == 100
         assert include_potions is False
-        assert policy_prior_callback is None
-        assert leaf_value_callback is None
         self.events.append("search_v2")
         return _raw_search(backend="battle_search_v2")
 
@@ -257,19 +257,81 @@ class _SearchAdapter:
         return _terminal_transition()
 
 
-def test_guided_proxy_terminal_label_uses_no_callback_native_search() -> None:
+def test_guided_controller_handoff_avoids_independent_zero_visit_search() -> None:
+    class SelectionThenZeroVisitAdapter(_SearchAdapter):
+        def __init__(self) -> None:
+            super().__init__(backend="battle_search_v2")
+            self.search_calls = 0
+
+        def battle_search_v2(
+            self,
+            snapshot,
+            *,
+            simulations,
+            include_potions=False,
+            policy_prior_callback=None,
+            leaf_value_callback=None,
+        ):
+            self.search_calls += 1
+            result = super().battle_search_v2(
+                snapshot,
+                simulations=simulations,
+                include_potions=include_potions,
+                policy_prior_callback=policy_prior_callback,
+                leaf_value_callback=leaf_value_callback,
+            )
+            if self.search_calls > 1:
+                result["root_rows"][0]["visits"] = 0
+                result["root_rows"][0]["evaluation_sum"] = None
+                result["root_rows"][0]["mean_value"] = None
+            return result
+
+    adapter = SelectionThenZeroVisitAdapter()
+    leaf_callback = lambda *_args, **_kwargs: 0.3
+    arm = T085NativeArm(
+        "old_value_64001",
+        {"checkpoint": "test"},
+        None,
+        leaf_callback,
+        "terminal_battle_survival_probability",
+    )
+    controller = T085NativeArmController(arm)
+    proxy = T085NativeTerminalSearchAdapter(
+        adapter,
+        search_simulations=100,
+        search_backend="battle_search_v2",
+        leaf_value_callback=leaf_callback,
+    )
+    snapshot = proxy.reset(seed=1)
+    actions = proxy.legal_actions(snapshot)
+    decision = controller.select_action(
+        proxy, snapshot, actions, _context(), step_index=0
+    )
+    transition = proxy.step(actions[decision.selected_index])
+
+    assert adapter.search_calls == 1
+    assert proxy.native_search_call_count == 1
+    assert len(proxy.native_terminal_labels) == 1
+    assert proxy.native_terminal_labels[0].visits == 2
+    assert proxy.native_terminal_labels[0].mean_value == 0.5
+    assert transition.terminal is True
+
+
+def test_native_search_is_rejected_outside_battle_boundary() -> None:
     adapter = _SearchAdapter(backend="battle_search_v2")
     proxy = T085NativeTerminalSearchAdapter(
         adapter,
         search_simulations=100,
         search_backend="battle_search_v2",
-        policy_prior_callback=lambda *_args, **_kwargs: 0.2,
-        leaf_value_callback=lambda *_args, **_kwargs: 0.3,
     )
-    proxy.reset(seed=1)
-    actions = proxy.legal_actions(adapter.snapshot)
-    proxy.step(actions[0])
-    assert len(proxy.native_terminal_labels) == 1
+
+    with pytest.raises(T085NativeExecutionError, match="outside battle"):
+        proxy.battle_search_v2(
+            _snapshot(battle_active=False),
+            simulations=100,
+            include_potions=False,
+        )
+    assert adapter.events == []
 
 
 def test_terminal_utility_is_the_pre_action_selected_root_edge_mean() -> None:
@@ -447,24 +509,48 @@ class _ProxyBaseAdapter:
         self.events.append("search")
         return _raw_search()
 
+    def battle_search_v2(
+        self,
+        snapshot,
+        *,
+        simulations,
+        include_potions=False,
+        policy_prior_callback=None,
+        leaf_value_callback=None,
+    ):
+        assert snapshot is self.snapshot
+        assert simulations == 100
+        assert include_potions is False
+        assert policy_prior_callback is None
+        assert leaf_value_callback is None
+        self.events.append("search_v2")
+        return _raw_search(backend="battle_search_v2")
+
     def step(self, action):
-        assert action is self.actions[1]
+        assert action is self.actions[0]
         self.events.append("step")
         return _terminal_transition("PLAYER_LOSS")
 
 
-def test_adapter_searches_before_step_and_retains_native_terminal_label() -> None:
+def test_controller_handoff_precedes_step_and_retains_native_terminal_label() -> None:
     events: list[str] = []
+    base = _ProxyBaseAdapter(events)
     proxy = T085NativeTerminalSearchAdapter(
-        _ProxyBaseAdapter(events),
+        base,
         search_simulations=100,
+        search_backend="battle_search_v2",
     )
+    controller = T085UnguidedBattleSearchV2Controller(simulations=100)
     snapshot = proxy.reset(seed=85001)
     actions = proxy.legal_actions(snapshot)
-    transition = proxy.step(actions[1])
+    decision = controller.select_action(
+        proxy, snapshot, actions, _context(), step_index=0
+    )
+    transition = proxy.step(actions[decision.selected_index])
 
-    assert events == ["reset", "legal", "search", "step"]
+    assert events == ["reset", "legal", "search_v2", "step"]
     assert transition.info["completed_battle_outcome"] == "PLAYER_LOSS"
+    assert transition.terminal is True
     assert len(proxy.native_terminal_labels) == 1
     assert proxy.native_terminal_labels[0].terminal_outcome == "PLAYER_LOSS"
 
@@ -472,15 +558,24 @@ def test_adapter_searches_before_step_and_retains_native_terminal_label() -> Non
 def test_adapter_rejects_duplicate_terminal_labels() -> None:
     events: list[str] = []
     base = _ProxyBaseAdapter(events)
-    proxy = T085NativeTerminalSearchAdapter(base, search_simulations=100)
+    proxy = T085NativeTerminalSearchAdapter(
+        base,
+        search_simulations=100,
+        search_backend="battle_search_v2",
+    )
+    controller = T085UnguidedBattleSearchV2Controller(simulations=100)
     snapshot = proxy.reset(seed=85001)
     actions = proxy.legal_actions(snapshot)
-    proxy.step(actions[1])
+    decision = controller.select_action(
+        proxy, snapshot, actions, _context(), step_index=0
+    )
+    proxy.step(actions[decision.selected_index])
     # Re-presenting a battle snapshot after a terminal label must not silently
     # produce a second retained label.
     proxy.legal_actions(base.snapshot)
+    controller.select_action(proxy, base.snapshot, actions, _context(), step_index=1)
     with pytest.raises(T085NativeExecutionError, match="duplicate terminal labels"):
-        proxy.step(actions[1])
+        proxy.step(actions[0])
 
 
 def test_unguided_v2_controller_passes_both_callbacks_as_none() -> None:
