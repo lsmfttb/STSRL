@@ -139,11 +139,15 @@ The target is simulator-derived continuation progress. It is not a hand-written 
 
 Every candidate action within one source state uses the same ordered continuation seed set (common random numbers). Candidate actions may not be capped or subsampled.
 
-### Frozen continuation seeds
+### Frozen continuation seeds and driver semantics
+
+The continuation seeds below are the exact `ExpertNonCombatDriver` seeds, not simulator seeds:
 
 - training states: `(862001, 862002)`
 - validation states: `(862101, 862102)`
 - held-out states: `(862201, 862202, 862203, 862204)`
+
+For each candidate branch and each required continuation seed, construct/reset `ExpertNonCombatDriver(seed=<continuation_seed>)` for the retained source state's original simulator seed after restoring the exact source checkpoint and forcing the candidate action. All candidate actions from one source state use the same ordered continuation-seed tuple for that split. No continuation seed may be replaced after failure and no CLI/default seed derivation may substitute for these exact driver seeds.
 
 Missing/non-terminal branches, restore mismatch, controller failure, illegal action, non-finite target, or missing required seed row fails closed to `INCOMPLETE`. No branch or state replacement is allowed.
 
@@ -223,7 +227,17 @@ Run two matched arms on every seed:
 1. `expert_non_combat_v1`
 2. validation-selected learned policy on the four supported families, with explicit `expert_non_combat_v1` fallback elsewhere.
 
-Both arms use identical frozen Battle Search v2@100, action space, simulator/native identity, max outer steps `500`, and deterministic policy/RNG mapping. Source-run seed and Non-Combat policy RNG must be recorded separately; no CLI default may silently derive one from the other.
+Frozen run semantics for both arms:
+
+- player: `IRONCLAD`;
+- ascension: `20`;
+- standard natural start;
+- max outer controlled-run steps: `500`;
+- Battle controller/action space/native identity exactly as frozen above;
+- no assistance or restart privilege;
+- exact Non-Combat driver seed: `864002`.
+
+For the expert arm use `ExpertNonCombatDriver(seed=864002)` and reset it separately for every source-run simulator seed. For the learned arm, supported-family decisions are deterministic from the frozen checkpoint; all unsupported-screen fallback uses `ExpertNonCombatDriver(seed=864002)`, likewise reset separately for each source-run simulator seed. The simulator seed and driver seed are distinct provenance fields. No CLI/default derivation may replace `864002` or derive it from `861001..861256`.
 
 No assistance, constructed starts, learned Battle guidance, root-prior variant, restart privilege, extra run, or post-hoc seed replacement is allowed.
 
