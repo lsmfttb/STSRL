@@ -912,6 +912,9 @@ def test_t085_assisted_resolver_streams_and_keeps_only_selected_records(
         selected_records={selected_id: "selected-record"},
     )
     manifest = {
+        # Keep this fixture on the approved historical T085 identity so the
+        # resolver exercises the historical/current compatibility boundary.
+        "native_identity": dict(t085_execution.T085_NATIVE_IDENTITY),
         "source_run_count": 2,
         "source_run_identity_inventory": ["run-1", "run-2"],
         "source_run_seed_inventory": [851001, 851002],
@@ -940,13 +943,21 @@ def test_t085_assisted_resolver_streams_and_keeps_only_selected_records(
         lambda: "controller",
     )
 
-    def stream_validate(path, *, controller, expected_seeds, selected_record_ids):
+    def stream_validate(
+        path,
+        *,
+        controller,
+        expected_seeds,
+        selected_record_ids,
+        bound_native_identity,
+    ):
         captured.update(
             {
                 "path": path,
                 "controller": controller,
                 "expected_seeds": tuple(expected_seeds),
                 "selected_record_ids": tuple(selected_record_ids),
+                "bound_native_identity": dict(bound_native_identity),
             }
         )
         return stream_summary
@@ -978,6 +989,7 @@ def test_t085_assisted_resolver_streams_and_keeps_only_selected_records(
     assert captured["controller"] == "controller"
     assert captured["expected_seeds"] == (851001, 851002)
     assert captured["selected_record_ids"] == (selected_id,)
+    assert captured["bound_native_identity"] == t085_execution.T085_NATIVE_IDENTITY
 
 
 def test_t085_b_stream_validator_retains_only_requested_records(
