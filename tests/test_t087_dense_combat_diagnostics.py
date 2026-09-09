@@ -194,6 +194,28 @@ def test_raw_terminal_outcome_mismatch_fails_row_validation() -> None:
         validate_dense_diagnostic_row(row)
 
 
+def test_terminal_alive_tampering_fails_row_validation() -> None:
+    row = _row("terminal-alive-tamper", "A", win=True)
+    row["terminal"] = dict(row["terminal"])
+    row["terminal"]["enemies"] = [
+        {"id": "JawWorm", "current_hp": 0, "alive": True},
+        {"id": "Cultist", "current_hp": 0},
+    ]
+    with pytest.raises(T087IncompleteError, match="alive status"):
+        validate_dense_diagnostic_row(row)
+
+
+def test_entry_alive_tampering_fails_row_validation() -> None:
+    row = _row("entry-alive-tamper", "A", win=False)
+    row["entry"] = dict(row["entry"])
+    row["entry"]["enemies"] = [
+        {"id": "JawWorm", "current_hp": 20, "alive": False},
+        {"id": "Cultist", "current_hp": 20},
+    ]
+    with pytest.raises(T087IncompleteError, match="alive status"):
+        validate_dense_diagnostic_row(row)
+
+
 def test_action_counts_must_recompute_from_retained_trace() -> None:
     row = _row("trace-counts", "A", win=True)
     row["action_trace"] = [{"kind": "potion"}, {"kind": "attack"}]

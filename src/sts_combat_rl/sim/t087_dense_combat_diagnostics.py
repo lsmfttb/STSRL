@@ -984,16 +984,17 @@ def _validate_terminal_raw_matches_evidence(
             "terminal enemies disagree with retained raw terminal snapshot"
         )
     terminal_pairs = tuple(
-        (enemy["identity"], enemy["current_hp"]) for enemy in terminal_enemies
+        (enemy["identity"], enemy["current_hp"], _alive(enemy))
+        for enemy in terminal_enemies
     )
     raw_pairs = tuple(
-        (enemy["identity"], enemy["current_hp"])
+        (enemy["identity"], enemy["current_hp"], _alive(enemy))
         for enemy in raw_enemies
         if isinstance(enemy, Mapping)
     )
     if terminal_pairs != raw_pairs:
         raise T087IncompleteError(
-            "terminal enemy HP/occurrence order disagrees with retained raw terminal snapshot"
+            "terminal enemy HP/alive status/occurrence order disagrees with retained raw terminal snapshot"
         )
     if (
         terminal.get("enemy_occurrences_complete") is not True
@@ -1032,16 +1033,17 @@ def _validate_entry_raw_matches_evidence(
     if not isinstance(raw_enemies, Sequence):
         raise T087IncompleteError("retained raw entry enemies are unavailable")
     entry_pairs = tuple(
-        (enemy["identity"], enemy["current_hp"]) for enemy in entry_enemies
+        (enemy["identity"], enemy["current_hp"], _alive(enemy))
+        for enemy in entry_enemies
     )
     raw_pairs = tuple(
-        (enemy["identity"], enemy["current_hp"])
+        (enemy["identity"], enemy["current_hp"], _alive(enemy))
         for enemy in raw_enemies
         if isinstance(enemy, Mapping)
     )
     if entry_pairs != raw_pairs:
         raise T087IncompleteError(
-            "entry enemy HP/occurrence order disagrees with retained raw entry snapshot"
+            "entry enemy HP/alive status/occurrence order disagrees with retained raw entry snapshot"
         )
     if (
         entry.get("battle_start_total_enemy_hp")
