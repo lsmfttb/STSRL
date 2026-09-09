@@ -1,6 +1,6 @@
 # Current Status
 
-Last reviewed: 2026-09-02.
+Last reviewed: 2026-09-09.
 
 This document is the main maintainer's canonical execution-result report for
 the planner and describes the latest `main` branch only. Results from local
@@ -453,6 +453,47 @@ head. No model, training, feature, production Search/native behavior, simulator
 run, T079 work, or successor generation changed. Research ledger #85 records
 the accepted classification and the required research order; no executable
 successor is published by T083.
+
+T084 is complete after PR #91 was accepted as
+`LEAF_CONTINUATION_UTILITY_TARGETS_READY`, with the retained 960-row native
+internal-leaf dataset and its exact T084 retention identities. It remains a
+training input for T085, not an outcome claim.
+
+T085 is complete at accepted scientific head
+`5edaa255959d34d4d31bbfae7e6b6bed9758024d` on PR #97. The amended native
+execution identity is `lsmfttb/sts_lightspeed refs/heads/stsrl/main @
+d62ff35579b54d70a7428afdf84743c94df3fe0c`; the earlier
+`1555348535d66e3035aac80933a60949d4bd850f` identity remains the historical
+T084/T085 training provenance. The accepted terminal-edge clarification keeps
+the exact controller-selected root edge only when the same pre-action snapshot
+and action immediately produce the authoritative terminal transition; it does
+not add a second stochastic no-guidance search or change Search semantics.
+
+The formal run passed its artifact, checkpoint, policy-invariance,
+source/cohort, restore/parity, execution, and retention gates. It contains
+2,977 paired outcomes bound to A=93, B=192, C=128, and B@400=48, with 10,000
+paired bootstrap resamples using seed `85085`. The terminal classification is
+`CORRECTED_VALUE_SEARCH_HARM_CONFIRMED`: Cohort-B `delta_base` 95% CI is
+`[-4654.8711, -3785.6824]`, and corrected seeds 85001/85002 won `1/87` and
+`0/85` against baseline. Effective workers were 16 for B/C source generation,
+restore/parity, and paired evaluation; the final non-simulator aggregation used
+one worker.
+
+Retained evidence is under
+`/mnt/d/DeadlyCatCoding/STSRL/artifacts/t085-corrected-leaf-value-search-repair`.
+The paired report SHA-256 is
+`f756c9f4ac885c61c2a73ff9b2d0e05a15b317df2cce9c9bf5dbd374f7afcec3`, the
+terminal report SHA-256 is
+`cbf72c302d5632ac6b212fdb67af92776797769a581f9e5f41e3b47e012c0040`, the
+retention manifest SHA-256 is
+`1bbe63195f7b4e2ab88f95c1a8301cf92a797d5cec877ec41f95ff9f071f6d13`, and the
+finalization manifest SHA-256 is
+`154810a9a934a4d1ac00e1c447b87e2253661353b70f99838f78d1176dbda97a`.
+This is a bounded corrected-value Search result only: it is not a complete-run
+A20 or Heart win-rate claim. T085 closes the current Battle value-repair round;
+the accepted successor direction is a separate minimal self-generated
+Non-Combat learning task with Battle frozen to the strongest accepted
+non-learned/unguided baseline.
 
 ## Implemented On Main
 

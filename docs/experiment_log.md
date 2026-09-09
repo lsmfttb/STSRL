@@ -9,6 +9,39 @@ commit `d56e10e` and local artifacts. They are research evidence, not proof that
 the corresponding command or capability exists on the latest `main`. Current
 implementation truth is recorded only in [`current_status.md`](current_status.md).
 
+## 2026-09-09: T085 Corrected Leaf-Value Search Finalization
+
+Planner accepted the T085 scientific run at PR #97 head
+`5edaa255959d34d4d31bbfae7e6b6bed9758024d`. The accepted active native
+identity is `lsmfttb/sts_lightspeed refs/heads/stsrl/main @
+d62ff35579b54d70a7428afdf84743c94df3fe0c`; the prior
+`1555348535d66e3035aac80933a60949d4bd850f` identity remains historical T084
+training provenance. The native amendment is limited to the complete-run
+terminal transition, and the clarified terminal utility is retained only from
+the same controller-selected root edge when that exact action immediately
+produces the authoritative terminal transition.
+
+The formal evaluation completed all 16 shards and aggregated 2,977 rows with
+selection support A=93, B=192, C=128, and B@400=48. The frozen bootstrap used
+10,000 paired battle-record resamples with seed `85085`. The terminal result is
+`CORRECTED_VALUE_SEARCH_HARM_CONFIRMED`; Cohort-B `delta_base` 95% CI is
+`[-4654.8711, -3785.6824]`, with corrected seeds 85001/85002 at `1/87` and
+`0/85` wins against baseline. Effective workers were 16 for source,
+restore/parity, and evaluation stages; aggregation used one non-simulator
+worker.
+
+Retained under
+`/mnt/d/DeadlyCatCoding/STSRL/artifacts/t085-corrected-leaf-value-search-repair`:
+
+- paired report SHA-256: `f756c9f4ac885c61c2a73ff9b2d0e05a15b317df2cce9c9bf5dbd374f7afcec3`;
+- terminal report SHA-256: `cbf72c302d5632ac6b212fdb67af92776797769a581f9e5f41e3b47e012c0040`;
+- retention manifest SHA-256: `1bbe63195f7b4e2ab88f95c1a8301cf92a797d5cec877ec41f95ff9f071f6d13`;
+- finalization manifest SHA-256: `154810a9a934a4d1ac00e1c447b87e2253661353b70f99838f78d1176dbda97a`.
+
+This is a bounded Search v2 result, not a complete-run A20 or Heart win-rate
+claim. T085 closes the Battle value-repair round; the next direction is a
+separate minimal self-generated Non-Combat learning task with Battle frozen.
+
 ## 2026-06-27: T032 Narrow Teacher And Checkpoint Refresh
 
 T032 consumed the T039 narrow Boss/later-act source contract as a diagnostic

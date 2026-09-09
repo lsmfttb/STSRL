@@ -1,23 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from io import StringIO
 
-from sts_combat_rl.sim.assisted_source_generation import (
-    ASSISTANCE_LEVELS,
-    ASSIST_LEVEL_HP50,
-    ASSIST_LEVEL_HP50_POTION_ELITE_BOSS,
-    ASSISTED_RUN_DISTRIBUTION_KIND,
-    build_assisted_a20_coverage_report,
-    collect_assisted_battle_start_pool,
-    dump_assisted_source_coverage_comparison_report_json,
-    dump_assisted_source_pool_jsonl,
-    load_assisted_source_pool_jsonl,
-    merge_assisted_source_pool_shards,
-    restore_assisted_battle_start_record,
-    verify_assisted_source_pool_restores,
-    write_assisted_a20_coverage_report,
-)
 from sts_combat_rl.commands.assisted_source_generation import (
     merge_assisted_a20_coverage_from_paths,
     merge_assisted_source_pool_from_paths,
@@ -25,6 +10,22 @@ from sts_combat_rl.commands.assisted_source_generation import (
 )
 from sts_combat_rl.commands.fixed_evaluation import (
     run_fixed_evaluation_from_pool_path,
+)
+from sts_combat_rl.sim.assisted_source_generation import (
+    ASSIST_LEVEL_HP50,
+    ASSIST_LEVEL_HP50_POTION_ELITE_BOSS,
+    ASSISTANCE_LEVELS,
+    ASSISTED_RUN_DISTRIBUTION_KIND,
+    build_assisted_a20_coverage_report,
+    collect_assisted_battle_start_pool,
+    dump_assisted_source_coverage_comparison_report_json,
+    dump_assisted_source_pool_jsonl,
+    dump_merged_assisted_source_pool_shards_jsonl,
+    load_assisted_source_pool_jsonl,
+    merge_assisted_source_pool_shards,
+    restore_assisted_battle_start_record,
+    verify_assisted_source_pool_restores,
+    write_assisted_a20_coverage_report,
 )
 from sts_combat_rl.sim.contract import (
     SimulatorAction,
@@ -204,6 +205,100 @@ def test_assisted_pool_records_hp_potion_provenance_and_restores() -> None:
     )
     assert method == "assisted_seed_action_trace"
     assert tuple(restored.observation) == loaded.pool.records[0].snapshot_observation
+
+
+def test_assisted_pool_round_trips_bounded_truncation_without_source_problem() -> None:
+    artifact, coverage = collect_assisted_battle_start_pool(
+        _AssistedAdapter(),
+        _controller(),
+        seeds=[7],
+        max_steps=1,
+        assistance_level=ASSIST_LEVEL_HP50,
+        policy_seed=42,
+    )
+
+    assert coverage.truncated_run_count == 1
+    assert artifact.pool.source_run_count == 1
+    assert artifact.pool.terminal_run_count == 0
+    assert artifact.pool.problems == []
+    summary = artifact.pool.source_run_summaries[0]
+    assert summary.terminal is False
+    assert summary.problem_count == 0
+    assert summary.problems == ()
+
+    stream = StringIO()
+    dump_assisted_source_pool_jsonl(artifact, stream)
+    loaded = load_assisted_source_pool_jsonl(StringIO(stream.getvalue()))
+
+    assert loaded.pool.source_run_summaries[0].terminal is False
+    assert loaded.pool.truncated_run_count == 1
+    assert loaded.pool.records == []
+
+
+def test_assisted_pool_preserves_explicit_source_run_index_offset() -> None:
+    artifact, _ = collect_assisted_battle_start_pool(
+        _AssistedAdapter(),
+        _controller(),
+        seeds=[7, 8],
+        max_steps=10,
+        assistance_level=ASSIST_LEVEL_HP50,
+        policy_seed=42,
+        source_run_index_offset=6,
+    )
+
+    assert [
+        summary.source_run_id for summary in artifact.pool.source_run_summaries
+    ] == [
+        "seed-7-run-6",
+        "seed-8-run-7",
+    ]
+
+
+def test_inner_merge_external_shard_boundary_discards_temporary_provenance(
+    tmp_path,
+) -> None:
+    controller = _controller()
+    shard_paths = []
+    for index, seed in enumerate((7, 8)):
+        artifact, _ = collect_assisted_battle_start_pool(
+            _AssistedAdapter(),
+            controller,
+            seeds=[seed],
+            max_steps=10,
+            assistance_level=ASSIST_LEVEL_HP50,
+            policy_seed=42,
+            source_run_index_offset=index,
+        )
+        shard_path = tmp_path / f"inner-{index}.jsonl"
+        with shard_path.open("w", encoding="utf-8", newline="\n") as stream:
+            dump_assisted_source_pool_jsonl(artifact, stream)
+        shard_paths.append(shard_path)
+
+    merged_path = tmp_path / "merged.jsonl"
+    with merged_path.open("w", encoding="utf-8", newline="\n") as stream:
+        dump_merged_assisted_source_pool_shards_jsonl(shard_paths, stream)
+    with merged_path.open(encoding="utf-8") as stream:
+        merged = load_assisted_source_pool_jsonl(stream)
+
+    external = replace(
+        merged,
+        pool=replace(
+            merged.pool,
+            source_controller_provenance=controller.provenance.to_dict(),
+        ),
+        source_shards=(),
+    )
+    final_path = tmp_path / "external.jsonl"
+    with final_path.open("w", encoding="utf-8", newline="\n") as stream:
+        dump_assisted_source_pool_jsonl(external, stream)
+    with final_path.open(encoding="utf-8") as stream:
+        loaded = load_assisted_source_pool_jsonl(stream)
+
+    assert loaded.source_shards == ()
+    assert loaded.pool.source_controller_provenance == controller.provenance.to_dict()
+    assert all(
+        str(tmp_path) not in record.source_checkpoint_id for record in loaded.records
+    )
 
 
 def test_fixed_evaluation_workflow_loads_assisted_source_pool(tmp_path) -> None:

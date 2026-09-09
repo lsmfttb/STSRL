@@ -8,13 +8,13 @@ resource heads without collapsing resources into a permanent scalar reward.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
 import copy
-from dataclasses import asdict, dataclass, field
 import hashlib
 import math
-from pathlib import Path
 import random
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
 from time import perf_counter
 from typing import Any
 
@@ -32,21 +32,24 @@ from sts_combat_rl.sim.model_input import ModelInputBatch
 from sts_combat_rl.sim.model_scoring import DEFAULT_ACTION_KIND_SCORE_PRIOR
 from sts_combat_rl.sim.policy_contract import DecisionContext
 from sts_combat_rl.sim.public_context_artifacts import PUBLIC_CONTEXT_AVAILABLE
+from sts_combat_rl.sim.public_context_feature_projection import (
+    PublicContextFeatureProjection,
+    build_public_context_feature_projection,
+    validate_public_context_feature_projection,
+)
 from sts_combat_rl.sim.public_context_model_input import (
     PUBLIC_CONTEXT_MODEL_INPUT_FEATURE_NAMES,
     PUBLIC_CONTEXT_MODEL_INPUT_FEATURE_SIZE,
     PUBLIC_CONTEXT_MODEL_INPUT_SCHEMA_ID,
     PUBLIC_CONTEXT_MODEL_INPUT_SCHEMA_VERSION,
     encode_public_context_model_input,
-    public_context_features as shared_public_context_features,
 )
-from sts_combat_rl.sim.public_context_feature_projection import (
-    PublicContextFeatureProjection,
-    build_public_context_feature_projection,
-    validate_public_context_feature_projection,
+from sts_combat_rl.sim.public_context_model_input import (
+    public_context_features as shared_public_context_features,
 )
 from sts_combat_rl.sim.resource_outcome import BATTLE_RESOURCE_OUTCOME_AVAILABLE
 from sts_combat_rl.sim.search_guidance_inference import (
+    SEARCH_V2_LEAF_NATIVE_UTILITY_TARGET_KIND,
     SearchGuidanceActionScore,
     SearchGuidanceCheckpointProvenance,
     SearchGuidanceInferenceResult,
@@ -67,7 +70,6 @@ from sts_combat_rl.sim.training_gate import (
     build_training_gate_report,
 )
 
-
 TORCH_POLICY_VALUE_CHECKPOINT_SCHEMA_ID = "torch-policy-value-checkpoint-v1"
 TORCH_POLICY_VALUE_CHECKPOINT_FORMAT_VERSION = 1
 TORCH_POLICY_VALUE_MODEL_CLASS = "PublicBattlePolicyValueNetwork"
@@ -76,6 +78,11 @@ PUBLIC_CONTEXT_FEATURE_SCHEMA_VERSION = PUBLIC_CONTEXT_MODEL_INPUT_SCHEMA_VERSIO
 PUBLIC_CONTEXT_FEATURE_NAMES = PUBLIC_CONTEXT_MODEL_INPUT_FEATURE_NAMES
 PUBLIC_CONTEXT_FEATURE_SIZE = PUBLIC_CONTEXT_MODEL_INPUT_FEATURE_SIZE
 OUTCOME_TARGET_KIND = "terminal_battle_survival_probability"
+T085_VALUE_TARGET_METADATA_KEY = "t085_value_target"
+T085_ACCEPTED_PARENT_SHA256_BY_REPAIR_SEED = {
+    85001: "c0c38c239047f6be67e983768e53bd680007e9cba117e17c7d226583ed751193",
+    85002: "32dbf18a187e8b6d465bb026d90643e3dd28624066628019c61455fcd8f5573a",
+}
 HP_TARGET_KIND = "terminal_absolute_current_hp"
 STRUCTURED_RESOURCE_TARGET_KIND = "structured_terminal_resource_components_v1"
 SEARCH_GUIDED_FIXED_EVAL_STATUS_NOT_RUN = "not_run"
@@ -687,7 +694,16 @@ class TorchPolicyValueGuidanceScorer:
             for index in range(len(context.legal_action_features))
         ]
         value_prediction = SearchGuidanceValuePrediction(
-            battle_survival_probability=float(torch.sigmoid(outcome_logit).squeeze()),
+            battle_survival_probability=(
+                None
+                if self.checkpoint_provenance.outcome_target_kind
+                == SEARCH_V2_LEAF_NATIVE_UTILITY_TARGET_KIND
+                else float(torch.sigmoid(outcome_logit).squeeze())
+            ),
+            native_leaf_utility=_native_leaf_utility_prediction(
+                outcome_logit,
+                self.loaded.metadata,
+            ),
             terminal_absolute_current_hp=float(hp_value.squeeze()),
             structured_resource_values={
                 name: float(resource_values[index])
@@ -1289,10 +1305,20 @@ def load_torch_policy_value_checkpoint(
         )
     if raw.get("model_class") != TORCH_POLICY_VALUE_MODEL_CLASS:
         raise ValueError("unsupported PyTorch policy/value model class")
+    metadata = _mapping(raw.get("metadata"))
+    nested_outcome_target_kind = metadata.get("outcome_target_kind")
+    if nested_outcome_target_kind is not None and nested_outcome_target_kind != raw.get(
+        "outcome_target_kind"
+    ):
+        raise ValueError(
+            "checkpoint metadata.outcome_target_kind disagrees with the "
+            "authoritative top-level outcome_target_kind"
+        )
     _validate_checkpoint_semantic_contract(raw)
     training_data_provenance = _validate_training_data_provenance(
         raw.get("training_data_provenance")
     )
+    _validate_t085_checkpoint_cross_fields(raw, metadata, training_data_provenance)
     try:
         config = TorchPolicyValueTrainingConfig(**_mapping(raw.get("training_config")))
         state_size = _positive_int(raw.get("state_feature_size"), "state_feature_size")
@@ -1339,10 +1365,11 @@ def load_torch_policy_value_checkpoint(
     except RuntimeError as exc:
         raise ValueError("checkpoint model state is incompatible") from exc
     model.eval()
+    metadata.setdefault("outcome_target_kind", raw.get("outcome_target_kind"))
     return LoadedTorchPolicyValueCheckpoint(
         model=model,
         config=config,
-        metadata=_mapping(raw.get("metadata")),
+        metadata=metadata,
         training_data_provenance=training_data_provenance,
     )
 
@@ -1401,11 +1428,16 @@ def _validate_checkpoint_semantic_contract(raw: Mapping[str, Any]) -> None:
             "checkpoint policy_target_kind "
             f"{policy_target_kind!r} is not a current supported target kind"
         )
-    _require_exact(
-        raw.get("outcome_target_kind"),
-        OUTCOME_TARGET_KIND,
-        "outcome_target_kind",
-    )
+    outcome_target_kind = raw.get("outcome_target_kind")
+    if outcome_target_kind == OUTCOME_TARGET_KIND:
+        pass
+    elif outcome_target_kind == SEARCH_V2_LEAF_NATIVE_UTILITY_TARGET_KIND:
+        _validate_t085_value_target_metadata(raw.get("metadata"))
+    else:
+        raise ValueError(
+            "checkpoint outcome_target_kind must be historical survival or "
+            "the explicit corrected Search v2 native-utility kind"
+        )
     _require_exact(raw.get("hp_target_kind"), HP_TARGET_KIND, "hp_target_kind")
     _require_exact(
         raw.get("structured_resource_target_kind"),
@@ -1419,6 +1451,8 @@ def _validate_training_data_provenance(value: Any) -> dict[str, Any]:
         raise ValueError("training_data_provenance must be a mapping")
 
     raw = dict(value)
+    if raw.get("task_id") == "T085":
+        return _validate_t085_training_data_provenance(raw)
     trainer_input_sha256 = _required_string(
         raw.get("trainer_input_sha256"),
         "training_data_provenance.trainer_input_sha256",
@@ -1500,6 +1534,246 @@ def _validate_training_data_provenance(value: Any) -> dict[str, Any]:
     _validate_stable_source_identity_summary(raw.get("stable_source_identity_summary"))
     _required_mapping(raw.get("gate_report"), "training_data_provenance.gate_report")
     return _json_safe_value(raw)
+
+
+def _validate_t085_training_data_provenance(
+    raw: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Validate the compact provenance envelope used by corrected checkpoints."""
+
+    _require_exact(raw.get("task_id"), "T085", "training_data_provenance.task_id")
+    _required_string(
+        raw.get("training_input_artifact_id"),
+        "training_data_provenance.training_input_artifact_id",
+    )
+    input_sha = _required_sha256(
+        raw.get("training_input_sha256"),
+        "training_data_provenance.training_input_sha256",
+    )
+    expected_input_artifact_id = f"t084-formal-dataset-sha256:{input_sha}"
+    if raw.get("training_input_artifact_id") != expected_input_artifact_id:
+        raise ValueError(
+            "training_data_provenance.training_input_artifact_id must match "
+            "training_input_sha256"
+        )
+    _required_string(
+        raw.get("training_input_path"),
+        "training_data_provenance.training_input_path",
+    )
+    parent_path = _required_string(
+        raw.get("parent_checkpoint_path"),
+        "training_data_provenance.parent_checkpoint_path",
+    )
+    if not parent_path.startswith("/"):
+        raise ValueError(
+            "T085 training_data_provenance.parent_checkpoint_path must be absolute"
+        )
+    computed_parent_sha256 = _required_sha256(
+        raw.get("parent_checkpoint_computed_sha256"),
+        "training_data_provenance.parent_checkpoint_computed_sha256",
+    )
+    if computed_parent_sha256 != raw.get("parent_checkpoint_sha256"):
+        raise ValueError(
+            "T085 computed parent SHA-256 does not match parent checkpoint identity"
+        )
+    _positive_int(
+        raw.get("training_input_byte_count"),
+        "training_data_provenance.training_input_byte_count",
+    )
+    if raw.get("training_record_count") != 960:
+        raise ValueError(
+            "training_data_provenance.training_record_count must be exactly 960"
+        )
+    target_kind = _required_string(
+        raw.get("target_kind"), "training_data_provenance.target_kind"
+    )
+    if target_kind != SEARCH_V2_LEAF_NATIVE_UTILITY_TARGET_KIND:
+        raise ValueError("T085 training target kind is not corrected native utility")
+    _required_sha256(
+        raw.get("parent_checkpoint_sha256"),
+        "training_data_provenance.parent_checkpoint_sha256",
+    )
+    repair_seed = _positive_int(
+        raw.get("repair_seed"), "training_data_provenance.repair_seed"
+    )
+    parent_sha256 = raw.get("parent_checkpoint_sha256")
+    if repair_seed not in T085_ACCEPTED_PARENT_SHA256_BY_REPAIR_SEED:
+        raise ValueError("T085 repair_seed is not one of the accepted repair seeds")
+    if parent_sha256 != T085_ACCEPTED_PARENT_SHA256_BY_REPAIR_SEED[repair_seed]:
+        raise ValueError("T085 parent checkpoint SHA-256 is not the accepted parent")
+    _require_exact(
+        raw.get("optimizer_steps"),
+        900,
+        "training_data_provenance.optimizer_steps",
+    )
+    _require_exact(
+        raw.get("batch_size"),
+        32,
+        "training_data_provenance.batch_size",
+    )
+    mean = raw.get("target_mean")
+    std = raw.get("target_std")
+    if (
+        isinstance(mean, bool)
+        or not isinstance(mean, (int, float))
+        or not math.isfinite(float(mean))
+    ):
+        raise ValueError("training_data_provenance.target_mean must be finite")
+    if (
+        isinstance(std, bool)
+        or not isinstance(std, (int, float))
+        or not math.isfinite(float(std))
+        or float(std) <= 0.0
+    ):
+        raise ValueError(
+            "training_data_provenance.target_std must be finite and positive"
+        )
+    _required_string(
+        raw.get("policy_target_kind"),
+        "training_data_provenance.policy_target_kind",
+    )
+    if raw.get("policy_target_kind") not in POLICY_TARGET_KINDS:
+        raise ValueError("T085 policy_target_kind is unsupported")
+    _required_string(
+        raw.get("policy_target_source"),
+        "training_data_provenance.policy_target_source",
+    )
+    parent_guidance = raw.get("parent_guidance_provenance")
+    if not isinstance(parent_guidance, Mapping):
+        raise ValueError(
+            "T085 training_data_provenance.parent_guidance_provenance must be a mapping"
+        )
+    for key in (
+        "trainer_input_artifact_id",
+        "trainer_input_sha256",
+        "target_source_summary",
+        "information_regime_counts",
+        "source_information_regime_counts",
+    ):
+        if key not in parent_guidance:
+            raise ValueError("T085 parent_guidance_provenance is missing " + key)
+    invariance_audit = raw.get("policy_invariance_audit")
+    if not isinstance(invariance_audit, Mapping):
+        raise ValueError("T085 policy_invariance_audit must be a mapping")
+    if invariance_audit.get("valid") is not True:
+        raise ValueError("T085 policy_invariance_audit is not valid")
+    if invariance_audit.get("example_count") != 960:
+        raise ValueError("T085 policy_invariance_audit must cover 960 inputs")
+    if invariance_audit.get("policy_mismatch_count") != 0:
+        raise ValueError("T085 policy_invariance_audit reports policy changes")
+    group_mismatches = invariance_audit.get("parameter_group_mismatch_counts")
+    if not isinstance(group_mismatches, Mapping) or any(
+        group_mismatches.get(group) != 0
+        for group in ("policy", "encoder", "hp", "resource")
+    ):
+        raise ValueError(
+            "T085 policy_invariance_audit lacks policy/encoder/HP/resource proof"
+        )
+    return _json_safe_value(dict(raw))
+
+
+def _validate_t085_checkpoint_cross_fields(
+    raw: Mapping[str, Any],
+    metadata: Mapping[str, Any],
+    training_provenance: Mapping[str, Any],
+) -> None:
+    """Keep the duplicated checkpoint envelope fields mutually authoritative."""
+
+    outcome_target_kind = raw.get("outcome_target_kind")
+    has_t085_provenance = training_provenance.get("task_id") == "T085"
+    has_t085_metadata = T085_VALUE_TARGET_METADATA_KEY in metadata
+    if outcome_target_kind == SEARCH_V2_LEAF_NATIVE_UTILITY_TARGET_KIND:
+        if not has_t085_provenance:
+            raise ValueError(
+                "corrected outcome_target_kind requires T085 training provenance"
+            )
+    elif outcome_target_kind == OUTCOME_TARGET_KIND:
+        if has_t085_provenance or has_t085_metadata:
+            raise ValueError(
+                "historical outcome_target_kind cannot carry T085 provenance or metadata"
+            )
+        return
+    elif has_t085_provenance or has_t085_metadata:
+        raise ValueError(
+            "unsupported outcome_target_kind cannot carry T085 provenance or metadata"
+        )
+    else:
+        return
+
+    target = _required_mapping(
+        metadata.get(T085_VALUE_TARGET_METADATA_KEY),
+        f"metadata.{T085_VALUE_TARGET_METADATA_KEY}",
+    )
+    pairs = (
+        (
+            raw.get("outcome_target_kind"),
+            training_provenance.get("target_kind"),
+            "target kind",
+        ),
+        (
+            target.get("parent_checkpoint_sha256"),
+            training_provenance.get("parent_checkpoint_sha256"),
+            "parent checkpoint SHA-256",
+        ),
+        (
+            target.get("parent_checkpoint_path"),
+            training_provenance.get("parent_checkpoint_path"),
+            "parent checkpoint path",
+        ),
+        (
+            target.get("parent_checkpoint_computed_sha256"),
+            training_provenance.get("parent_checkpoint_computed_sha256"),
+            "computed parent checkpoint SHA-256",
+        ),
+        (
+            target.get("repair_seed"),
+            training_provenance.get("repair_seed"),
+            "repair seed",
+        ),
+        (
+            target.get("optimizer_steps"),
+            training_provenance.get("optimizer_steps"),
+            "optimizer steps",
+        ),
+        (target.get("batch_size"), training_provenance.get("batch_size"), "batch size"),
+        (
+            target.get("label_count"),
+            training_provenance.get("training_record_count"),
+            "label count",
+        ),
+    )
+    for left, right, label in pairs:
+        if left != right:
+            raise ValueError(
+                f"T085 checkpoint {label} disagrees across metadata and provenance"
+            )
+    _required_sha256(
+        target.get("parent_checkpoint_computed_sha256"),
+        f"metadata.{T085_VALUE_TARGET_METADATA_KEY}.parent_checkpoint_computed_sha256",
+    )
+    for label, left, right in (
+        (
+            "target_mean",
+            target.get("target_mean"),
+            training_provenance.get("target_mean"),
+        ),
+        ("target_std", target.get("target_std"), training_provenance.get("target_std")),
+    ):
+        if float(left) != float(right):
+            raise ValueError(
+                f"T085 checkpoint {label} disagrees across metadata and provenance"
+            )
+    training_config = _mapping(raw.get("training_config"))
+    if training_config.get("seed") != training_provenance.get("repair_seed"):
+        raise ValueError("T085 checkpoint seed disagrees with repair_seed provenance")
+    training_report = _mapping(raw.get("training_report"))
+    for key in ("example_count", "repair_seed", "optimizer_steps", "batch_size"):
+        if training_report.get(key) != training_provenance.get(
+            "training_record_count" if key == "example_count" else key
+        ):
+            raise ValueError(
+                f"T085 checkpoint training_report.{key} disagrees with provenance"
+            )
 
 
 def _validate_controller_provenance_summary(value: Any) -> None:
@@ -2139,7 +2413,12 @@ def _guidance_checkpoint_provenance(
     checkpoint_path: str | None,
 ) -> SearchGuidanceCheckpointProvenance:
     training_provenance = dict(loaded.training_data_provenance)
-    target_summary = _mapping(training_provenance.get("target_source_summary"))
+    guidance_provenance: Mapping[str, Any] = training_provenance
+    if training_provenance.get("task_id") == "T085":
+        guidance_provenance = _validate_training_data_provenance(
+            training_provenance.get("parent_guidance_provenance")
+        )
+    target_summary = _mapping(guidance_provenance.get("target_source_summary"))
     policy_target_kind = _required_string(
         target_summary.get("policy_target_kind"),
         "training_data_provenance.target_source_summary.policy_target_kind",
@@ -2149,15 +2428,20 @@ def _guidance_checkpoint_provenance(
         "training_data_provenance.target_source_summary.policy_target_source",
     )
     information_regime_counts = _required_count_mapping(
-        training_provenance.get("information_regime_counts"),
+        guidance_provenance.get("information_regime_counts"),
         "training_data_provenance.information_regime_counts",
         allow_empty=False,
     )
     source_information_regime_counts = _required_count_mapping(
-        training_provenance.get("source_information_regime_counts"),
+        guidance_provenance.get("source_information_regime_counts"),
         "training_data_provenance.source_information_regime_counts",
         allow_empty=False,
     )
+    outcome_target_kind = _required_string(
+        loaded.metadata.get("outcome_target_kind", OUTCOME_TARGET_KIND),
+        "metadata.outcome_target_kind",
+    )
+    normalization = _t085_normalization(loaded.metadata)
     return SearchGuidanceCheckpointProvenance(
         checkpoint_schema_id=TORCH_POLICY_VALUE_CHECKPOINT_SCHEMA_ID,
         checkpoint_format_version=TORCH_POLICY_VALUE_CHECKPOINT_FORMAT_VERSION,
@@ -2166,11 +2450,11 @@ def _guidance_checkpoint_provenance(
         model_class=TORCH_POLICY_VALUE_MODEL_CLASS,
         model_config=_model_provenance_config(loaded.model),
         trainer_input_artifact_id=_required_string(
-            training_provenance.get("trainer_input_artifact_id"),
+            guidance_provenance.get("trainer_input_artifact_id"),
             "training_data_provenance.trainer_input_artifact_id",
         ),
         trainer_input_sha256=_required_string(
-            training_provenance.get("trainer_input_sha256"),
+            guidance_provenance.get("trainer_input_sha256"),
             "training_data_provenance.trainer_input_sha256",
         ),
         policy_target_kind=policy_target_kind,
@@ -2190,7 +2474,86 @@ def _guidance_checkpoint_provenance(
             source_information_regime_counts,
         ),
         training_data_provenance=training_provenance,
+        outcome_target_kind=outcome_target_kind,
+        value_target_normalization=normalization,
     )
+
+
+def _t085_normalization(metadata: Mapping[str, Any]) -> dict[str, float]:
+    value = metadata.get(T085_VALUE_TARGET_METADATA_KEY)
+    if not isinstance(value, Mapping):
+        return {}
+    return {
+        "target_mean": float(value["target_mean"]),
+        "target_std": float(value["target_std"]),
+    }
+
+
+def _validate_t085_value_target_metadata(value: Any) -> dict[str, Any]:
+    metadata = _required_mapping(value, "metadata")
+    target = _required_mapping(
+        metadata.get(T085_VALUE_TARGET_METADATA_KEY),
+        f"metadata.{T085_VALUE_TARGET_METADATA_KEY}",
+    )
+    _require_exact(
+        target.get("task_id"),
+        "T085",
+        f"metadata.{T085_VALUE_TARGET_METADATA_KEY}.task_id",
+    )
+    _require_exact(
+        target.get("target_kind"),
+        SEARCH_V2_LEAF_NATIVE_UTILITY_TARGET_KIND,
+        f"metadata.{T085_VALUE_TARGET_METADATA_KEY}.target_kind",
+    )
+    _require_exact(
+        target.get("native_utility_units"),
+        "BattleScumSearcher2.evaluateEndState",
+        f"metadata.{T085_VALUE_TARGET_METADATA_KEY}.native_utility_units",
+    )
+    _require_exact(
+        target.get("de_normalization"),
+        "z_pred * target_std + target_mean",
+        f"metadata.{T085_VALUE_TARGET_METADATA_KEY}.de_normalization",
+    )
+    mean = target.get("target_mean")
+    std = target.get("target_std")
+    if (
+        isinstance(mean, bool)
+        or not isinstance(mean, (int, float))
+        or not math.isfinite(float(mean))
+    ):
+        raise ValueError("T085 target_mean must be finite")
+    if (
+        isinstance(std, bool)
+        or not isinstance(std, (int, float))
+        or not math.isfinite(float(std))
+        or float(std) <= 0.0
+    ):
+        raise ValueError("T085 target_std must be finite and positive")
+    _required_sha256(
+        target.get("parent_checkpoint_sha256"),
+        f"metadata.{T085_VALUE_TARGET_METADATA_KEY}.parent_checkpoint_sha256",
+    )
+    _positive_int(
+        target.get("label_count"),
+        f"metadata.{T085_VALUE_TARGET_METADATA_KEY}.label_count",
+    )
+    return metadata
+
+
+def _native_leaf_utility_prediction(
+    outcome_logit: Tensor,
+    metadata: Mapping[str, Any],
+) -> float | None:
+    target = metadata.get(T085_VALUE_TARGET_METADATA_KEY)
+    if not isinstance(target, Mapping):
+        return None
+    mean = float(target["target_mean"])
+    std = float(target["target_std"])
+    value = float(outcome_logit.squeeze()) * std + mean
+    if not math.isfinite(value):
+        raise ValueError("corrected native leaf utility prediction is not finite")
+    return value
 
 
 def _eligible_policy_probabilities(
@@ -2384,6 +2747,15 @@ def _required_string(value: Any, label: str) -> str:
     if not isinstance(value, str) or not value:
         raise ValueError(f"{label} must be a non-empty string")
     return value
+
+
+def _required_sha256(value: Any, label: str) -> str:
+    digest = _required_string(value, label)
+    if len(digest) != 64 or any(
+        character not in "0123456789abcdefABCDEF" for character in digest
+    ):
+        raise ValueError(f"{label} must be a SHA-256 hex digest")
+    return digest
 
 
 def _list(value: Any) -> list[Any]:

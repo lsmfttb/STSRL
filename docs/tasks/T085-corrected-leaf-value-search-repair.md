@@ -412,10 +412,72 @@ Only after Battle and Non-Combat each have at least one credible independently e
 
 `VALUE_REPAIR_EVAL_SUPPORT_INSUFFICIENT` or `INCOMPLETE` authorizes only the minimum recovery needed to complete T085; it does not authorize new Battle science.
 
-## Planner publication boundary
+## Historical Planner publication boundary
 
 This is the Phase-A specification-publication contract. The accompanying Task Index proposes `READY`, but T085 remains non-executable while this publication PR is unmerged.
 
 Publication requires Maintainer exact-head `SPEC APPROVED` with `publication_authorized=true`. After that approved head is merged, T085 becomes executable and implementation must begin on a fresh implementation branch/PR from the resulting synchronized `main`.
 
 No T085 training, source generation, simulator evaluation, or scientific execution is authorized before publication merge. A material change to the value-only freeze, training budget, evaluation source/cohorts, Search arms, or terminal classification requires renewed publication review.
+
+## Accepted execution record and lifecycle finalization
+
+The Phase-A publication text above is retained as the historical pre-execution
+boundary. The accepted execution and final lifecycle record is:
+
+- implementation/scientific head: PR #97 at
+  `5edaa255959d34d4d31bbfae7e6b6bed9758024d`;
+- historical native identity used for T084 and retained training provenance:
+  `refs/heads/stsrl/main @ 1555348535d66e3035aac80933a60949d4bd850f`;
+- active native identity for all remaining T085 simulator execution:
+  `lsmfttb/sts_lightspeed refs/heads/stsrl/main @
+  d62ff35579b54d70a7428afdf84743c94df3fe0c`.
+
+The native amendment is limited to the shared complete-run terminal transition
+and its deterministic regression. It does not change Search topology, utility,
+action policy, backup, RNG, mechanics, or learned-model semantics. The
+terminal-edge utility clarification retains a root-edge mean only when the
+exact controller-selected action is bound to the same pre-action snapshot and
+action list and immediately produces the authoritative terminal transition.
+It fails closed on identity mismatch, non-terminal transitions, missing or
+non-positive visits, non-finite means, or conflicting terminal outcomes. It
+does not run a second no-callback Search and does not reproduce
+`evaluateEndState` in Python.
+
+Planner accepted the final scientific run. All 16 formal evaluation shards
+succeeded (shard 00 was reused only after exact verification), producing 2,977
+paired outcome rows with exact selection support A=93, B=192, C=128, and
+B@400=48. The frozen Cohort-B bootstrap used 10,000 paired battle-record
+resamples with seed `85085`. The result is
+`CORRECTED_VALUE_SEARCH_HARM_CONFIRMED`: Cohort-B `delta_base` 95% CI is
+`[-4654.8711, -3785.6824]`, and corrected seeds 85001/85002 had fewer wins
+than baseline (`1 vs 87` and `0 vs 85`).
+
+Retained evidence is outside Git under
+`/mnt/d/DeadlyCatCoding/STSRL/artifacts/t085-corrected-leaf-value-search-repair`:
+
+- Cohort-B source manifest: SHA-256
+  `11b7a55cc1bca52481699c6ebe10f16af2ad1cdf1765b565fdfdbfe5aad93e06`;
+- Cohort-C source manifest: SHA-256
+  `2a9986972764197d0c9b4927617c15a71221358364823d3f0f9687433face376`;
+- selection manifest: SHA-256
+  `d5c335cd6e1f96e72ae3b302eebca17a5f6531fa0aac97ee2febec2c41c2e752`;
+- restore evidence: SHA-256
+  `0adbdc4e055bd8d53680757a395e3e7973b7242b06db1c5053281ef883b679ef`;
+- paired report: SHA-256
+  `f756c9f4ac885c61c2a73ff9b2d0e05a15b317df2cce9c9bf5dbd374f7afcec3`;
+- terminal report: SHA-256
+  `cbf72c302d5632ac6b212fdb67af92776797769a581f9e5f41e3b47e012c0040`;
+- retention manifest: SHA-256
+  `1bbe63195f7b4e2ab88f95c1a8301cf92a797d5cec877ec41f95ff9f071f6d13`;
+- finalization manifest: SHA-256
+  `154810a9a934a4d1ac00e1c447b87e2253661353b70f99838f78d1176dbda97a`.
+
+The effective worker count was 16 for Cohort-B/C source generation,
+restore/parity, and paired evaluation; one worker was used only for
+non-simulator artifact aggregation. T085 is now `DONE` and closes the Battle
+value-repair round. The claim is deliberately bounded to corrected-value
+Search v2 behavior; it does not claim complete-run A20 or Heart win-rate harm.
+The accepted successor direction is a separate minimal self-generated
+Non-Combat learning task with Battle frozen to the strongest accepted
+non-learned/unguided baseline.

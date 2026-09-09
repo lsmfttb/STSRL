@@ -39,6 +39,7 @@ from sts_combat_rl.sim.search_cost import (
     public_node_cache_key,
 )
 from sts_combat_rl.sim.search_guidance_inference import (
+    SEARCH_V2_LEAF_NATIVE_UTILITY_TARGET_KIND,
     SearchGuidanceCheckpointProvenance,
     SearchGuidanceInferenceResult,
     SearchGuidanceScorer,
@@ -465,7 +466,12 @@ class BattleSearchV2Controller:
                 sequence=callback_sequence,
                 callback_kind="value",
                 node_context=node_context,
-                required_outputs=("battle_survival_probability",),
+                required_outputs=(
+                    "native_leaf_utility"
+                    if self.checkpoint_provenance.outcome_target_kind
+                    == SEARCH_V2_LEAF_NATIVE_UTILITY_TARGET_KIND
+                    else "battle_survival_probability",
+                ),
             )
             callback_sequence += 1
             attribution["node_context_projection_ms"] += (
@@ -487,11 +493,26 @@ class BattleSearchV2Controller:
                     attribution["public_context_projection_reuse_count"] += 1.0
                 _add_inference_timing(attribution, result)
             prediction = result.value_prediction
-            value = (
-                None if prediction is None else prediction.battle_survival_probability
+            value = None
+            corrected_value_target = (
+                self.checkpoint_provenance.outcome_target_kind
+                == SEARCH_V2_LEAF_NATIVE_UTILITY_TARGET_KIND
             )
+            if prediction is not None:
+                if corrected_value_target:
+                    value = prediction.native_leaf_utility
+                else:
+                    value = prediction.battle_survival_probability
             if value is None or not math.isfinite(float(value)):
-                raise ValueError("checkpoint has no finite battle-survival value head")
+                target_label = (
+                    "corrected native leaf utility"
+                    if corrected_value_target
+                    else "battle-survival value head"
+                )
+                raise ValueError(
+                    f"checkpoint has no finite {target_label} for its declared "
+                    "Search v2 target"
+                )
             callback_counts["value"] += 1
             native_result = float(value)
             _finish_callback_trace(trace_entry, callback_started)

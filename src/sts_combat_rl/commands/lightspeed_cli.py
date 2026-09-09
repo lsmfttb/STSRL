@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 
 from sts_combat_rl.commands.a20_coverage import (
@@ -20,23 +21,23 @@ from sts_combat_rl.commands.checkpoint_pool import (
     write_checkpoint_pool,
 )
 from sts_combat_rl.commands.cli_policies import (
-    build_pytorch_gate_config,
     build_non_combat_driver_policy,
     build_online_sim_policy,
+    build_pytorch_gate_config,
     build_sim_policy,
 )
 from sts_combat_rl.commands.constructed_battle_start import (
     run_constructed_battle_start_audit,
     write_constructed_battle_start_artifact,
 )
+from sts_combat_rl.commands.de_assisted_fixed_cohort_comparison import (
+    run_de_assisted_fixed_cohort_comparison_from_cohort_path,
+    write_de_assisted_fixed_cohort_comparison_report,
+)
 from sts_combat_rl.commands.fixed_evaluation import (
     run_fixed_evaluation_from_pool_path,
     write_fixed_cohort,
     write_fixed_evaluation_report,
-)
-from sts_combat_rl.commands.de_assisted_fixed_cohort_comparison import (
-    run_de_assisted_fixed_cohort_comparison_from_cohort_path,
-    write_de_assisted_fixed_cohort_comparison_report,
 )
 from sts_combat_rl.commands.model_guided_oracle_search import (
     build_torch_guidance_scorer_from_checkpoint,
@@ -49,19 +50,9 @@ from sts_combat_rl.commands.model_guided_search_comparison import (
     write_model_guided_search_fixed_comparison_report,
     write_model_guided_search_v2_fixed_comparison_report,
 )
-from sts_combat_rl.commands.root_prior_guided_search_comparison import (
-    run_root_prior_guided_search_comparison_from_cohort_path,
-    write_root_prior_guided_search_comparison_report,
-)
-from sts_combat_rl.commands.t062_battle_search_v2 import (
-    parse_t062_arm_budgets,
-    run_t062_comparison_from_cohort_path,
-    write_t062_comparison_report,
-)
-from sts_combat_rl.commands.search_battle_controller import (
-    SEARCH_BATTLE_CONTROLLER_MODEL_GUIDED_V2,
-    SEARCH_BATTLE_CONTROLLER_ORACLE,
-    SEARCH_BATTLE_CONTROLLER_ROOT_PRIOR,
+from sts_combat_rl.commands.oracle_potion_comparison import (
+    run_oracle_potion_fixed_comparison_from_cohort_path,
+    write_oracle_potion_fixed_comparison_report,
 )
 from sts_combat_rl.commands.oracle_search import (
     collect_oracle_teacher_from_pool_path,
@@ -69,10 +60,6 @@ from sts_combat_rl.commands.oracle_search import (
     format_oracle_teacher_collection,
     run_oracle_fixed_evaluation_comparison_from_cohort_path,
     write_oracle_teacher_dataset,
-)
-from sts_combat_rl.commands.oracle_potion_comparison import (
-    run_oracle_potion_fixed_comparison_from_cohort_path,
-    write_oracle_potion_fixed_comparison_report,
 )
 from sts_combat_rl.commands.oracle_teacher_scaleup import (
     format_oracle_teacher_scaleup_command,
@@ -87,12 +74,38 @@ from sts_combat_rl.commands.resource_outcome import (
     format_battle_resource_outcome_audit_report,
     run_battle_resource_outcome_audit,
 )
-from sts_combat_rl.sim.action_space import (
-    ActionSpaceConfig,
-    choose_deterministic_action,
+from sts_combat_rl.commands.root_prior_guided_search_comparison import (
+    run_root_prior_guided_search_comparison_from_cohort_path,
+    write_root_prior_guided_search_comparison_report,
+)
+from sts_combat_rl.commands.search_battle_controller import (
+    SEARCH_BATTLE_CONTROLLER_MODEL_GUIDED_V2,
+    SEARCH_BATTLE_CONTROLLER_ORACLE,
+    SEARCH_BATTLE_CONTROLLER_ROOT_PRIOR,
+)
+from sts_combat_rl.commands.t062_battle_search_v2 import (
+    parse_t062_arm_budgets,
+    run_t062_comparison_from_cohort_path,
+    write_t062_comparison_report,
+)
+from sts_combat_rl.commands.t085_native_execution import (
+    build_t085_cohort_b_source_manifest_from_paths,
+    build_t085_cohort_c_source_manifest_from_paths,
+    finalize_t085_native_selection_restore_from_paths,
+    merge_t085_cohort_b_source_pool_from_paths,
+    merge_t085_cohort_c_source_pool_from_paths,
+    run_t085_cohort_b_source_generation_from_paths,
+    run_t085_cohort_c_source_generation_from_paths,
+    run_t085_native_paired_evaluation_from_paths,
+    run_t085_native_restore_smoke,
+    run_t085_native_selection_restore_from_paths,
 )
 from sts_combat_rl.sim.a20_battle_start_coverage import (
     format_a20_battle_start_coverage_report,
+)
+from sts_combat_rl.sim.action_space import (
+    ActionSpaceConfig,
+    choose_deterministic_action,
 )
 from sts_combat_rl.sim.assisted_source_generation import (
     collect_assisted_battle_start_pool,
@@ -111,11 +124,11 @@ from sts_combat_rl.sim.battle_agent import (
     format_battle_segment_report,
     run_battle_agent_sweep,
 )
+from sts_combat_rl.sim.battle_search_v2 import BattleSearchV2Controller
 from sts_combat_rl.sim.battle_start_pool import (
     format_battle_start_pool_coverage_report,
     format_battle_start_pool_restore_report,
 )
-from sts_combat_rl.sim.battle_search_v2 import BattleSearchV2Controller
 from sts_combat_rl.sim.calibration import (
     format_simulator_calibration_report,
     format_tactical_feature_coverage_report,
@@ -129,6 +142,13 @@ from sts_combat_rl.sim.constructed_battle_start import (
     ConstructedBattleStartPolicy,
     format_constructed_battle_start_audit_report,
 )
+from sts_combat_rl.sim.de_assisted_fixed_cohort_comparison import (
+    BASELINE_ORACLE_LABEL,
+    MODEL_GUIDED_ORACLE_V2_LABEL,
+    RAW_CHECKPOINT_POLICY_LABEL,
+    SCRIPTED_POLICY_LABEL,
+    format_de_assisted_fixed_cohort_comparison_report,
+)
 from sts_combat_rl.sim.evaluation import (
     format_policy_episode_evaluation_report,
     run_policy_episode_evaluation,
@@ -138,12 +158,13 @@ from sts_combat_rl.sim.fixed_battle_evaluation import (
 )
 from sts_combat_rl.sim.fixed_evaluation_set import format_cohort_coverage_report
 from sts_combat_rl.sim.lightspeed import LightSpeedAdapter
-from sts_combat_rl.sim.de_assisted_fixed_cohort_comparison import (
-    BASELINE_ORACLE_LABEL,
-    MODEL_GUIDED_ORACLE_V2_LABEL,
-    RAW_CHECKPOINT_POLICY_LABEL,
-    SCRIPTED_POLICY_LABEL,
-    format_de_assisted_fixed_cohort_comparison_report,
+from sts_combat_rl.sim.model_guided_oracle_search import (
+    ModelGuidedOracleSearchController,
+    ModelGuidedOracleSearchV2Controller,
+)
+from sts_combat_rl.sim.model_guided_search_comparison import (
+    format_model_guided_search_fixed_comparison_report,
+    format_model_guided_search_v2_fixed_comparison_report,
 )
 from sts_combat_rl.sim.model_input import (
     build_model_input_batch,
@@ -168,25 +189,10 @@ from sts_combat_rl.sim.non_combat_calibration import (
     run_non_combat_driver_calibration,
 )
 from sts_combat_rl.sim.online_controller import PolicyController, RoutedRunController
-from sts_combat_rl.sim.model_guided_oracle_search import (
-    ModelGuidedOracleSearchController,
-    ModelGuidedOracleSearchV2Controller,
-)
-from sts_combat_rl.sim.model_guided_search_comparison import (
-    format_model_guided_search_fixed_comparison_report,
-    format_model_guided_search_v2_fixed_comparison_report,
-)
-from sts_combat_rl.sim.oracle_search import OracleSearchController
 from sts_combat_rl.sim.oracle_potion_comparison import (
     format_oracle_potion_fixed_comparison_report,
 )
-from sts_combat_rl.sim.root_prior_guided_search import (
-    RootPriorGuidedSearchController,
-)
-from sts_combat_rl.sim.root_prior_guided_search_comparison import (
-    ROOT_PRIOR_GUIDED_LABEL,
-    format_root_prior_guided_search_comparison_report,
-)
+from sts_combat_rl.sim.oracle_search import OracleSearchController
 from sts_combat_rl.sim.policy import (
     ScoredActionPolicy,
 )
@@ -212,6 +218,13 @@ from sts_combat_rl.sim.reward_labeling import (
     format_reward_labeled_battle_decision_batch_report,
 )
 from sts_combat_rl.sim.rollout import collect_simulator_rollout, format_rollout_batch
+from sts_combat_rl.sim.root_prior_guided_search import (
+    RootPriorGuidedSearchController,
+)
+from sts_combat_rl.sim.root_prior_guided_search_comparison import (
+    ROOT_PRIOR_GUIDED_LABEL,
+    format_root_prior_guided_search_comparison_report,
+)
 from sts_combat_rl.sim.search_guidance_policy import SearchGuidancePolicyController
 from sts_combat_rl.sim.trainer_input import (
     build_trainer_input_dataset,
@@ -255,6 +268,16 @@ _LIGHTSPEED_BOOL_FLAGS = (
     "lightspeed_native_root_prior_allocation_smoke",
 )
 _LIGHTSPEED_PATH_FLAGS = (
+    "lightspeed_t085_native_restore_smoke",
+    "lightspeed_t085_native_paired_evaluation",
+    "lightspeed_t085_native_selection_restore",
+    "lightspeed_t085_native_selection_restore_finalize",
+    "lightspeed_t085_cohort_b_source_generation",
+    "lightspeed_t085_cohort_b_source_merge",
+    "lightspeed_t085_cohort_b_source_manifest",
+    "lightspeed_t085_cohort_c_source_generation",
+    "lightspeed_t085_cohort_c_source_merge",
+    "lightspeed_t085_cohort_c_source_manifest",
     "lightspeed_battle_start_pool",
     "lightspeed_search_battle_start_pool",
     "lightspeed_assisted_battle_start_pool",
@@ -288,6 +311,187 @@ def run_lightspeed_command(args: argparse.Namespace) -> int:
     """Run the selected sts_lightspeed-backed command."""
 
     try:
+        if args.lightspeed_t085_cohort_b_source_generation is not None:
+            required = (
+                args.t085_b_source_manifest_output,
+                args.t085_b_source_shard_index,
+                args.t085_b_source_shard_count,
+                args.t085_b_source_worker_count,
+            )
+            if any(value is None for value in required):
+                raise ValueError(
+                    "T085 Cohort B source generation requires a shard manifest "
+                    "output and explicit 16-shard/16-worker values"
+                )
+            report = run_t085_cohort_b_source_generation_from_paths(
+                adapter_factory=lambda: LightSpeedAdapter(
+                    seed=851001,
+                    ascension=20,
+                ),
+                pool_output_path=args.lightspeed_t085_cohort_b_source_generation,
+                shard_manifest_output_path=args.t085_b_source_manifest_output,
+                shard_index=args.t085_b_source_shard_index,
+                shard_count=args.t085_b_source_shard_count,
+                worker_count=args.t085_b_source_worker_count,
+            )
+            print(json.dumps(report, sort_keys=True), file=sys.stderr)
+            return 0
+        if args.lightspeed_t085_cohort_b_source_merge is not None:
+            if (
+                len(args.t085_b_source_shard) != 16
+                or len(args.t085_b_source_shard_manifest) != 16
+            ):
+                raise ValueError(
+                    "T085 Cohort B source merge requires exactly 16 pools and "
+                    "16 shard manifests"
+                )
+            report = merge_t085_cohort_b_source_pool_from_paths(
+                shard_paths=args.t085_b_source_shard,
+                shard_manifest_paths=args.t085_b_source_shard_manifest,
+                merged_pool_output_path=args.lightspeed_t085_cohort_b_source_merge,
+            )
+            print(json.dumps(report, sort_keys=True), file=sys.stderr)
+            return 0
+        if args.lightspeed_t085_cohort_b_source_manifest is not None:
+            required = (
+                args.t085_b_source_pool_sha256,
+                args.t085_b_source_manifest_output,
+            )
+            if any(value is None for value in required):
+                raise ValueError(
+                    "T085 Cohort B source manifest finalization requires the "
+                    "merged pool SHA-256 and manifest output"
+                )
+            manifest = build_t085_cohort_b_source_manifest_from_paths(
+                pool_path=args.lightspeed_t085_cohort_b_source_manifest,
+                pool_sha256=args.t085_b_source_pool_sha256,
+                manifest_output_path=args.t085_b_source_manifest_output,
+            )
+            print(json.dumps(manifest, sort_keys=True), file=sys.stderr)
+            return 0
+        if args.lightspeed_t085_cohort_c_source_generation is not None:
+            required = (
+                args.t085_c_source_manifest_output,
+                args.t085_c_source_shard_index,
+                args.t085_c_source_shard_count,
+                args.t085_c_source_worker_count,
+            )
+            if any(value is None for value in required):
+                raise ValueError(
+                    "T085 Cohort C source generation requires a shard manifest "
+                    "output and explicit 16-shard/16-worker values"
+                )
+            report = run_t085_cohort_c_source_generation_from_paths(
+                adapter_factory=lambda: LightSpeedAdapter(
+                    seed=850001,
+                    ascension=20,
+                ),
+                pool_output_path=args.lightspeed_t085_cohort_c_source_generation,
+                shard_manifest_output_path=args.t085_c_source_manifest_output,
+                shard_index=args.t085_c_source_shard_index,
+                shard_count=args.t085_c_source_shard_count,
+                worker_count=args.t085_c_source_worker_count,
+            )
+            print(json.dumps(report, sort_keys=True), file=sys.stderr)
+            return 0
+        if args.lightspeed_t085_cohort_c_source_merge is not None:
+            if (
+                len(args.t085_c_source_shard) != 16
+                or len(args.t085_c_source_shard_manifest) != 16
+            ):
+                raise ValueError(
+                    "T085 Cohort C source merge requires exactly 16 pools and "
+                    "16 shard manifests"
+                )
+            report = merge_t085_cohort_c_source_pool_from_paths(
+                shard_paths=args.t085_c_source_shard,
+                shard_manifest_paths=args.t085_c_source_shard_manifest,
+                merged_pool_output_path=args.lightspeed_t085_cohort_c_source_merge,
+            )
+            print(json.dumps(report, sort_keys=True), file=sys.stderr)
+            return 0
+        if args.lightspeed_t085_cohort_c_source_manifest is not None:
+            required = (
+                args.t085_c_source_pool_sha256,
+                args.t085_c_source_manifest_output,
+            )
+            if any(value is None for value in required):
+                raise ValueError(
+                    "T085 Cohort C source manifest finalization requires the "
+                    "merged pool SHA-256 and manifest output"
+                )
+            manifest = build_t085_cohort_c_source_manifest_from_paths(
+                pool_path=args.lightspeed_t085_cohort_c_source_manifest,
+                pool_sha256=args.t085_c_source_pool_sha256,
+                manifest_output_path=args.t085_c_source_manifest_output,
+            )
+            print(json.dumps(manifest, sort_keys=True), file=sys.stderr)
+            return 0
+        if args.lightspeed_t085_native_selection_restore_finalize is not None:
+            if (
+                args.t085_selection_output is None
+                or len(args.t085_selection_restore_shard) != 16
+            ):
+                raise ValueError(
+                    "T085 selection restore finalization requires a selection "
+                    "output and exactly 16 restore shard artifacts"
+                )
+            report = finalize_t085_native_selection_restore_from_paths(
+                shard_paths=args.t085_selection_restore_shard,
+                selection_output_path=args.t085_selection_output,
+                restore_evidence_output_path=(
+                    args.lightspeed_t085_native_selection_restore_finalize
+                ),
+            )
+            print(json.dumps(report, sort_keys=True), file=sys.stderr)
+            return 0
+        if args.lightspeed_t085_native_selection_restore is not None:
+            required = (
+                args.t085_selection_input,
+                args.t085_selection_input_sha256,
+                args.t085_a_map,
+                args.t085_b_map,
+                args.t085_c_map,
+                args.t085_a_map_sha256,
+                args.t085_b_map_sha256,
+                args.t085_c_map_sha256,
+                args.t085_b_source_manifest,
+                args.t085_b_source_manifest_sha256,
+                args.t085_c_source_manifest,
+                args.t085_c_source_manifest_sha256,
+                args.t085_shard_index,
+                args.t085_shard_count,
+                args.t085_worker_count,
+            )
+            if any(value is None for value in required):
+                raise ValueError(
+                    "T085 selection restore requires the outcome-blind input, "
+                    "A/B/C maps, final B/C manifests, exact SHA-256 values, "
+                    "and explicit 16-shard/16-worker values"
+                )
+            report = run_t085_native_selection_restore_from_paths(
+                adapter_factory=lambda: LightSpeedAdapter(
+                    seed=args.sim_seed, ascension=args.sim_ascension
+                ),
+                selection_input_path=args.t085_selection_input,
+                selection_input_sha256=args.t085_selection_input_sha256,
+                a_full_map_path=args.t085_a_map,
+                b_full_map_path=args.t085_b_map,
+                c_full_map_path=args.t085_c_map,
+                a_sha256=args.t085_a_map_sha256,
+                b_sha256=args.t085_b_map_sha256,
+                c_sha256=args.t085_c_map_sha256,
+                b_source_manifest_path=args.t085_b_source_manifest,
+                b_source_manifest_sha256=args.t085_b_source_manifest_sha256,
+                c_source_manifest_path=args.t085_c_source_manifest,
+                c_source_manifest_sha256=args.t085_c_source_manifest_sha256,
+                shard_index=args.t085_shard_index,
+                shard_count=args.t085_shard_count,
+                worker_count=args.t085_worker_count,
+                restore_output_path=args.lightspeed_t085_native_selection_restore,
+            )
+            print(json.dumps(report, sort_keys=True), file=sys.stderr)
+            return 0
         adapter = LightSpeedAdapter(seed=args.sim_seed, ascension=args.sim_ascension)
         action_space = (
             ActionSpaceConfig.include_all()
@@ -302,6 +506,83 @@ def run_lightspeed_command(args: argparse.Namespace) -> int:
                 action_space=action_space,
             )
             print(format_simulator_calibration_report(report), file=sys.stderr)
+        elif args.lightspeed_t085_native_paired_evaluation is not None:
+            required = (
+                args.t085_selection_sha256,
+                args.t085_a_map,
+                args.t085_b_map,
+                args.t085_c_map,
+                args.t085_a_map_sha256,
+                args.t085_b_map_sha256,
+                args.t085_c_map_sha256,
+                args.t085_old_checkpoint_64001,
+                args.t085_corrected_checkpoint_85001,
+                args.t085_old_checkpoint_64002,
+                args.t085_corrected_checkpoint_85002,
+                args.t085_old_checkpoint_64001_sha256,
+                args.t085_corrected_checkpoint_85001_sha256,
+                args.t085_old_checkpoint_64002_sha256,
+                args.t085_corrected_checkpoint_85002_sha256,
+                args.t085_training_manifest,
+                args.t085_training_manifest_sha256,
+                args.t085_shard_index,
+                args.t085_shard_count,
+                args.t085_worker_count,
+                args.t085_selection_output,
+                args.t085_report_output,
+                args.t085_outcomes_output,
+            )
+            if any(value is None for value in required):
+                raise ValueError(
+                    "T085 paired evaluation requires selection, A/B/C full maps, "
+                    "all exact SHA-256 values, four checkpoints, and three outputs"
+                )
+            report = run_t085_native_paired_evaluation_from_paths(
+                adapter_factory=lambda: LightSpeedAdapter(
+                    seed=args.sim_seed, ascension=args.sim_ascension
+                ),
+                selection_path=args.lightspeed_t085_native_paired_evaluation,
+                selection_sha256=args.t085_selection_sha256,
+                a_full_map_path=args.t085_a_map,
+                b_full_map_path=args.t085_b_map,
+                c_full_map_path=args.t085_c_map,
+                a_sha256=args.t085_a_map_sha256,
+                b_sha256=args.t085_b_map_sha256,
+                c_sha256=args.t085_c_map_sha256,
+                b_artifact_kind=args.t085_b_artifact_kind,
+                c_artifact_kind=args.t085_c_artifact_kind,
+                old_checkpoint_64001=args.t085_old_checkpoint_64001,
+                corrected_checkpoint_85001=args.t085_corrected_checkpoint_85001,
+                old_checkpoint_64002=args.t085_old_checkpoint_64002,
+                corrected_checkpoint_85002=args.t085_corrected_checkpoint_85002,
+                old_checkpoint_64001_sha256=args.t085_old_checkpoint_64001_sha256,
+                corrected_checkpoint_85001_sha256=args.t085_corrected_checkpoint_85001_sha256,
+                old_checkpoint_64002_sha256=args.t085_old_checkpoint_64002_sha256,
+                corrected_checkpoint_85002_sha256=args.t085_corrected_checkpoint_85002_sha256,
+                training_manifest_path=args.t085_training_manifest,
+                training_manifest_sha256=args.t085_training_manifest_sha256,
+                shard_index=args.t085_shard_index,
+                shard_count=args.t085_shard_count,
+                worker_count=args.t085_worker_count,
+                selection_output_path=args.t085_selection_output,
+                report_output_path=args.t085_report_output,
+                outcomes_output_path=args.t085_outcomes_output,
+            )
+            print(json.dumps(report, sort_keys=True), file=sys.stderr)
+        elif args.lightspeed_t085_native_restore_smoke is not None:
+            if args.t085_native_restore_output is None:
+                raise ValueError(
+                    "--t085-native-restore-output is required for T085 restore smoke"
+                )
+            report = run_t085_native_restore_smoke(
+                lambda: LightSpeedAdapter(
+                    seed=args.sim_seed, ascension=args.sim_ascension
+                ),
+                args.lightspeed_t085_native_restore_smoke,
+                args.t085_native_restore_output,
+                limit=args.sim_episodes,
+            )
+            print(json.dumps(report, sort_keys=True), file=sys.stderr)
         elif args.lightspeed_tactical_feature_audit:
             report = run_tactical_feature_coverage_audit(
                 adapter,
