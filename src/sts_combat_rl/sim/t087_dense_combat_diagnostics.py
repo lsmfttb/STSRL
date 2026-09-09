@@ -9,33 +9,40 @@ coupling the diagnostic formulas to a simulator wrapper.
 
 from __future__ import annotations
 
-from collections import Counter
-from collections.abc import Callable, Iterable, Mapping, Sequence
-from dataclasses import dataclass, field
 import hashlib
 import json
 import math
+from collections import Counter
+from collections.abc import Callable, Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
 from pathlib import Path
 from statistics import mean
 
-from sts_combat_rl.sim.action_space import ActionSpaceConfig
-from sts_combat_rl.sim.controlled_run import ControlledRun, execute_controlled_run
 from sts_combat_rl.commands.t085_native_execution import (
-    T085NativeTerminalSearchAdapter,
     T085NativeExecutionError,
+    T085NativeTerminalSearchAdapter,
     T085UnguidedBattleSearchV2Controller,
     restore_t085_canonical_record,
 )
+from sts_combat_rl.sim.action_space import ActionSpaceConfig
+from sts_combat_rl.sim.battle_start_pool import BattleStartCheckpointRecord
+from sts_combat_rl.sim.controlled_run import ControlledRun, execute_controlled_run
 from sts_combat_rl.t085_corrected_leaf_value_search_evaluation import (
+    T085_NATIVE_IDENTITY,
     T085BattleStartRecord,
     validate_t085_evaluation_selection_evidence,
 )
 
-
 T087_TASK_ID = "T087"
-T087_APPROVED_SPEC = "4bec26c0ea43116d2ea369e16cbffe9cc5f07e61"
+T087_APPROVED_SPEC = "22090416a55eec2b5ec5903473e64fde0dde868c"
 T087_BASE_COMMIT = "b38c0584e4aac9172f9da4426004bfb64a13a41d"
-T087_NATIVE_COMMIT = "d62ff35579b54d70a7428afdf84743c94df3fe0c"
+T085_NATIVE_COMMIT = "d62ff35579b54d70a7428afdf84743c94df3fe0c"
+T087_NATIVE_COMMIT = "96052d24b9c2c16ff25b6f7241edd972613be997"
+T087_NATIVE_IDENTITY = {
+    "repository": "lsmfttb/sts_lightspeed",
+    "ref": "refs/heads/stsrl/main",
+    "commit": T087_NATIVE_COMMIT,
+}
 T085_SCIENTIFIC_HEAD = "5edaa255959d34d4d31bbfae7e6b6bed9758024d"
 T085_SELECTION_SHA256 = "d5c335cd6e1f96e72ae3b302eebca17a5f6531fa0aac97ee2febec2c41c2e752"
 T085_RESTORE_SHA256 = "0adbdc4e055bd8d53680757a395e3e7973b7242b06db1c5053281ef883b679ef"
@@ -177,6 +184,19 @@ def _verify_artifact_reference(reference: Mapping[str, object], label: str) -> N
         raise T087IncompleteError(f"{label} reference SHA-256 is substituted")
 
 
+def _validate_gate_reference_shape(value: object, label: str) -> Mapping[str, object]:
+    """Validate the exact file-identity shape before any mapping access."""
+
+    if not isinstance(value, Mapping):
+        raise T087IncompleteError(f"{label} reference is malformed")
+    if set(value) != {"path", "sha256", "schema_id", "byte_count"}:
+        raise T087IncompleteError(f"{label} reference has an unexpected shape")
+    _verify_artifact_reference(value, label)
+    if not isinstance(value.get("schema_id"), str) or not value["schema_id"]:
+        raise T087IncompleteError(f"{label} reference schema is missing")
+    return value
+
+
 def _record_field(record: object, name: str) -> object:
     if isinstance(record, Mapping):
         return record.get(name)
@@ -250,6 +270,23 @@ def _validate_canonical_binding(
             )
 
 
+def _validate_canonical_record_map(
+    value: object, label: str
+) -> Mapping[str, BattleStartCheckpointRecord]:
+    """Admit only the full restore-record objects consumed by T085 helpers."""
+
+    if not isinstance(value, Mapping):
+        raise T087IncompleteError(f"{label} map is malformed")
+    if any(not isinstance(identity, str) or not identity for identity in value):
+        raise T087IncompleteError(f"{label} map has malformed identities")
+    if any(
+        not isinstance(record, BattleStartCheckpointRecord)
+        for record in value.values()
+    ):
+        raise T087IncompleteError(f"{label} map contains an incomplete restore record")
+    return value
+
+
 def validate_t087_t085_input_documents(
     *,
     selection_document: Mapping[str, object],
@@ -261,19 +298,64 @@ def validate_t087_t085_input_documents(
 ) -> T087T085InputGate:
     """Validate loaded T085 documents and exact canonical record bindings."""
 
+    if not all(
+        isinstance(document, Mapping)
+        for document in (selection_document, restore_document, paired_document)
+    ):
+        raise T087IncompleteError("T085 input documents are malformed")
+    expected_artifacts = {
+        "selection": (T085_SELECTION_SHA256, T085_SELECTION_SCHEMA_ID),
+        "restore": (T085_RESTORE_SHA256, T085_RESTORE_SCHEMA_ID),
+        "paired": (T085_PAIRED_REPORT_SHA256, T085_PAIRED_SCHEMA_ID),
+    }
+    if not isinstance(artifact_references, Mapping) or set(artifact_references) != set(
+        expected_artifacts
+    ):
+        raise T087IncompleteError("T085 input artifact references are incomplete")
+    for role, (expected_sha256, expected_schema_id) in expected_artifacts.items():
+        reference = _validate_gate_reference_shape(
+            artifact_references.get(role), f"T085 {role} artifact"
+        )
+        if (
+            reference.get("sha256") != expected_sha256
+            or reference.get("schema_id") != expected_schema_id
+        ):
+            raise T087IncompleteError(f"T085 {role} artifact reference is not pinned")
+    if not isinstance(canonical_records_by_cohort, Mapping) or set(
+        canonical_records_by_cohort
+    ) != {"A", "B", "C"}:
+        raise T087IncompleteError("T085 canonical record maps are incomplete")
+    if not isinstance(canonical_artifact_references, Mapping) or set(
+        canonical_artifact_references
+    ) != {"A", "B", "C"}:
+        raise T087IncompleteError("T085 canonical artifact references are incomplete")
+
+    if selection_document.get("schema_id") != T085_SELECTION_SCHEMA_ID:
+        raise T087IncompleteError("T085 selection artifact schema is not current")
+    if restore_document.get("schema_id") != T085_RESTORE_SCHEMA_ID:
+        raise T087IncompleteError("T085 restore artifact schema is not current")
+    if paired_document.get("schema_id") != T085_PAIRED_SCHEMA_ID:
+        raise T087IncompleteError("T085 paired report schema is not current")
     if selection_document.get("task_id") != "T085":
         raise T087IncompleteError("T085 selection artifact task identity is wrong")
     if restore_document.get("task_id") != "T085":
         raise T087IncompleteError("T085 restore artifact task identity is wrong")
-    if paired_document.get("task_id", "T085") not in {"T085", None}:
+    if paired_document.get("task_id") != "T085":
         raise T087IncompleteError("T085 paired report task identity is wrong")
     native = selection_document.get("native_identity")
-    if not isinstance(native, Mapping) or native.get("commit") != T087_NATIVE_COMMIT:
+    if not isinstance(native, Mapping) or dict(native) != dict(T085_NATIVE_IDENTITY):
         raise T087IncompleteError("T085 selection native identity is not pinned")
     if not isinstance(restore_document.get("native_identity"), Mapping) or dict(
         restore_document["native_identity"]
-    ) != dict(native):
+    ) != dict(T085_NATIVE_IDENTITY):
         raise T087IncompleteError("T085 restore native identity does not match selection")
+    paired_execution = paired_document.get("native_execution_provenance")
+    if (
+        not isinstance(paired_execution, Mapping)
+        or not isinstance(paired_execution.get("native_identity"), Mapping)
+        or dict(paired_execution["native_identity"]) != dict(T085_NATIVE_IDENTITY)
+    ):
+        raise T087IncompleteError("T085 paired report native identity is not pinned")
     if not isinstance(paired_document.get("selection_binding"), Mapping):
         raise T087IncompleteError("T085 paired report lacks selection binding")
     raw_cohorts = selection_document.get("cohorts")
@@ -282,14 +364,17 @@ def validate_t087_t085_input_documents(
         raise T087IncompleteError("T085 selection artifact lacks current cohorts/evidence")
     if set(raw_cohorts) != {"A", "B", "C", "B@400"}:
         raise T087IncompleteError("T085 selection cohort matrix is incomplete")
-    cohorts = {
-        str(cohort): tuple(
-            T085BattleStartRecord.from_mapping(item)
-            for item in records
-        )
-        for cohort, records in raw_cohorts.items()
-        if isinstance(records, Sequence) and not isinstance(records, (str, bytes))
-    }
+    try:
+        cohorts = {
+            str(cohort): tuple(
+                T085BattleStartRecord.from_mapping(item)
+                for item in records
+            )
+            for cohort, records in raw_cohorts.items()
+            if isinstance(records, Sequence) and not isinstance(records, (str, bytes))
+        }
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        raise T087IncompleteError("T085 selection cohort rows are malformed") from exc
     if set(cohorts) != {"A", "B", "C", "B@400"}:
         raise T087IncompleteError("T085 selection cohort rows are malformed")
     try:
@@ -347,6 +432,9 @@ def validate_t087_t085_input_documents(
         canonical = canonical_records_by_cohort.get(cohort)
         if canonical is None:
             raise T087IncompleteError(f"canonical {cohort} restore map is not supplied")
+        canonical = _validate_canonical_record_map(
+            canonical, f"T085 canonical {cohort}"
+        )
         _validate_canonical_binding(
             cohort=cohort,
             selected=cohorts[cohort],
@@ -432,50 +520,119 @@ def _revalidate_t085_gate(gate: T087T085InputGate) -> T087T085InputGate:
     changed retained file or a stale gate before a simulator call.
     """
 
-    if not isinstance(gate, T087T085InputGate) or gate._validation_token is not _T087_VERIFIED_GATE_TOKEN:
-        raise T087IncompleteError("T085 input gate was not created by the verified loader")
-    refs = gate.artifact_references
-    if set(refs) != {"selection", "restore", "paired"}:
-        raise T087IncompleteError("T085 input gate artifact reference set is incomplete")
-    selection, selection_ref = _read_hash_bound_json(
-        refs["selection"]["path"],
-        expected_sha256=T085_SELECTION_SHA256,
-        schema_id=T085_SELECTION_SCHEMA_ID,
-        label="T085 selection artifact",
-    )
-    restore, restore_ref = _read_hash_bound_json(
-        refs["restore"]["path"],
-        expected_sha256=T085_RESTORE_SHA256,
-        schema_id=T085_RESTORE_SCHEMA_ID,
-        label="T085 restore evidence",
-    )
-    paired, paired_ref = _read_hash_bound_json(
-        refs["paired"]["path"],
-        expected_sha256=T085_PAIRED_REPORT_SHA256,
-        schema_id=T085_PAIRED_SCHEMA_ID,
-        label="T085 paired report",
-    )
-    live_refs = {"selection": selection_ref, "restore": restore_ref, "paired": paired_ref}
-    if dict(refs) != live_refs:
-        raise T087IncompleteError("T085 input gate artifact references are stale or substituted")
-    if set(gate.canonical_artifact_references) != {"A", "B", "C"}:
-        raise T087IncompleteError("T085 canonical artifact reference set is incomplete")
-    live = validate_t087_t085_input_documents(
-        selection_document=selection,
-        restore_document=restore,
-        paired_document=paired,
-        artifact_references=live_refs,
-        canonical_records_by_cohort=gate.canonical_records_by_cohort,
-        canonical_artifact_references=gate.canonical_artifact_references,
-    )
-    if (
-        live.cohorts != gate.cohorts
-        or live.canonical_records_by_cohort != gate.canonical_records_by_cohort
-        or dict(live.source_selection_manifest_identity)
-        != dict(gate.source_selection_manifest_identity)
-    ):
-        raise T087IncompleteError("T085 input gate contents differ from live pinned artifacts")
-    return live
+    try:
+        if (
+            not isinstance(gate, T087T085InputGate)
+            or gate._validation_token is not _T087_VERIFIED_GATE_TOKEN
+        ):
+            raise T087IncompleteError(
+                "T085 input gate was not created by the verified loader"
+            )
+        refs = gate.artifact_references
+        if not isinstance(refs, Mapping) or set(refs) != {
+            "selection",
+            "restore",
+            "paired",
+        }:
+            raise T087IncompleteError(
+                "T085 input gate artifact reference set is incomplete"
+            )
+        expected_documents = {
+            "selection": (T085_SELECTION_SHA256, T085_SELECTION_SCHEMA_ID),
+            "restore": (T085_RESTORE_SHA256, T085_RESTORE_SCHEMA_ID),
+            "paired": (T085_PAIRED_REPORT_SHA256, T085_PAIRED_SCHEMA_ID),
+        }
+        live_documents: dict[str, dict[str, object]] = {}
+        live_refs: dict[str, dict[str, object]] = {}
+        for role, (expected_sha256, schema_id) in expected_documents.items():
+            reference = _validate_gate_reference_shape(refs.get(role), f"T085 {role} artifact")
+            if (
+                reference.get("sha256") != expected_sha256
+                or reference.get("schema_id") != schema_id
+            ):
+                raise T087IncompleteError(f"T085 {role} artifact reference is substituted")
+            document, live_reference = _read_hash_bound_json(
+                reference["path"],
+                expected_sha256=expected_sha256,
+                schema_id=schema_id,
+                label=f"T085 {role} artifact",
+            )
+            live_documents[role] = document
+            live_refs[role] = live_reference
+        if dict(refs) != live_refs:
+            raise T087IncompleteError(
+                "T085 input gate artifact references are stale or substituted"
+            )
+
+        raw_cohorts = gate.cohorts
+        if not isinstance(raw_cohorts, Mapping) or set(raw_cohorts) != {
+            "A",
+            "B",
+            "C",
+            "B@400",
+        }:
+            raise T087IncompleteError("T085 input gate cohorts are malformed")
+        for cohort, records in raw_cohorts.items():
+            if not isinstance(records, Sequence) or isinstance(records, (str, bytes)):
+                raise T087IncompleteError(f"T085 input gate cohort {cohort} is malformed")
+            if any(
+                not isinstance(record, T085BattleStartRecord)
+                for record in records
+            ):
+                raise T087IncompleteError(
+                    f"T085 input gate cohort {cohort} contains an unbound record"
+                )
+        canonical_maps = gate.canonical_records_by_cohort
+        if not isinstance(canonical_maps, Mapping) or set(canonical_maps) != {
+            "A",
+            "B",
+            "C",
+        }:
+            raise T087IncompleteError("T085 canonical record maps are malformed")
+        for cohort, records in canonical_maps.items():
+            _validate_canonical_record_map(records, f"T085 canonical {cohort}")
+        canonical_refs = gate.canonical_artifact_references
+        if not isinstance(canonical_refs, Mapping) or set(canonical_refs) != {
+            "A",
+            "B",
+            "C",
+        }:
+            raise T087IncompleteError("T085 canonical artifact reference set is incomplete")
+        for cohort, reference in canonical_refs.items():
+            _validate_gate_reference_shape(reference, f"T085 canonical {cohort} artifact")
+        source_identity = gate.source_selection_manifest_identity
+        source_reference = _validate_gate_reference_shape(
+            source_identity, "T085 selection-manifest identity"
+        )
+        if (
+            dict(source_reference) != live_refs["selection"]
+            or source_reference.get("sha256") != T085_SELECTION_SHA256
+            or source_reference.get("schema_id") != T085_SELECTION_SCHEMA_ID
+        ):
+            raise T087IncompleteError(
+                "T085 input gate source selection-manifest identity is substituted"
+            )
+        live = validate_t087_t085_input_documents(
+            selection_document=live_documents["selection"],
+            restore_document=live_documents["restore"],
+            paired_document=live_documents["paired"],
+            artifact_references=live_refs,
+            canonical_records_by_cohort=canonical_maps,
+            canonical_artifact_references=canonical_refs,
+        )
+        if (
+            live.cohorts != gate.cohorts
+            or live.canonical_records_by_cohort != gate.canonical_records_by_cohort
+            or dict(live.source_selection_manifest_identity) != dict(source_reference)
+        ):
+            raise T087IncompleteError(
+                "T085 input gate contents differ from live pinned artifacts"
+            )
+        return live
+    except T087IncompleteError:
+        raise
+    except (AttributeError, IndexError, KeyError, OSError, TypeError, ValueError) as exc:
+        raise T087IncompleteError("T085 verified gate is malformed") from exc
 
 
 def load_t087_t085_selection_binding(
@@ -490,17 +647,28 @@ def load_t087_t085_selection_binding(
         label="T085 selection artifact",
     )
     native = document.get("native_identity")
-    if document.get("task_id") != "T085" or not isinstance(native, Mapping) or native.get("commit") != T087_NATIVE_COMMIT:
+    if (
+        document.get("task_id") != "T085"
+        or not isinstance(native, Mapping)
+        or dict(native) != dict(T085_NATIVE_IDENTITY)
+    ):
         raise T087IncompleteError("T085 selection report binding is not pinned")
     raw_cohorts = document.get("cohorts")
     raw_evidence = document.get("selection_evidence")
     if not isinstance(raw_cohorts, Mapping) or not isinstance(raw_evidence, Mapping):
         raise T087IncompleteError("T085 selection report binding lacks current evidence")
-    cohorts = {
-        str(cohort): tuple(T085BattleStartRecord.from_mapping(item) for item in records)
-        for cohort, records in raw_cohorts.items()
-        if isinstance(records, Sequence) and not isinstance(records, (str, bytes))
-    }
+    try:
+        cohorts = {
+            str(cohort): tuple(
+                T085BattleStartRecord.from_mapping(item) for item in records
+            )
+            for cohort, records in raw_cohorts.items()
+            if isinstance(records, Sequence) and not isinstance(records, (str, bytes))
+        }
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        raise T087IncompleteError(
+            "T085 selection report binding cohort rows are malformed"
+        ) from exc
     try:
         validate_t085_evaluation_selection_evidence(cohorts, raw_evidence)
     except (TypeError, ValueError) as exc:
@@ -538,8 +706,9 @@ def load_t087_t085_report_binding(
     )
     if (
         restore.get("task_id") != "T085"
+        or restore.get("schema_id") != T085_RESTORE_SCHEMA_ID
         or not isinstance(restore.get("native_identity"), Mapping)
-        or restore["native_identity"].get("commit") != T087_NATIVE_COMMIT
+        or dict(restore["native_identity"]) != dict(T085_NATIVE_IDENTITY)
         or restore.get("complete") is not True
         or restore.get("partial") is not False
         or restore.get("restore_parity_passed") is not True
@@ -556,6 +725,15 @@ def load_t087_t085_report_binding(
     binding = paired.get("selection_binding")
     if not isinstance(binding, Mapping):
         raise T087IncompleteError("T085 paired report binding is missing")
+    paired_execution = paired.get("native_execution_provenance")
+    if (
+        paired.get("task_id") != "T085"
+        or paired.get("schema_id") != T085_PAIRED_SCHEMA_ID
+        or not isinstance(paired_execution, Mapping)
+        or not isinstance(paired_execution.get("native_identity"), Mapping)
+        or dict(paired_execution["native_identity"]) != dict(T085_NATIVE_IDENTITY)
+    ):
+        raise T087IncompleteError("T085 paired report binding native identity is not pinned")
     for cohort in ("A", "B", "C", "B@400"):
         cohort_binding = binding.get(cohort)
         if not isinstance(cohort_binding, Mapping) or cohort_binding.get("selected_identity_order") != list(identity_order[cohort]):
@@ -621,12 +799,21 @@ def _enemy_rows(value: object, label: str) -> list[dict[str, object]]:
     for index, raw in enumerate(value):
         if not isinstance(raw, Mapping):
             raise T087IncompleteError(f"{label}[{index}] is not an object")
-        identity = raw.get("identity", raw.get("id", raw.get("name")))
+        identity = next(
+            (
+                raw[key].strip()
+                for key in ("id_label", "identity", "monster_id", "name", "id")
+                if isinstance(raw.get(key), str) and raw[key].strip()
+            ),
+            None,
+        )
         if not isinstance(identity, str) or not identity:
             raise T087IncompleteError(f"{label}[{index}] lacks enemy identity")
         hp = _finite(raw.get("current_hp"), f"{label}[{index}].current_hp")
         if hp < 0:
             raise T087IncompleteError(f"{label}[{index}].current_hp is negative")
+        if "alive" in raw and not isinstance(raw["alive"], bool):
+            raise T087IncompleteError(f"{label}[{index}].alive is not boolean")
         item = dict(raw)
         item["identity"] = identity
         item["current_hp"] = hp
@@ -635,23 +822,42 @@ def _enemy_rows(value: object, label: str) -> list[dict[str, object]]:
 
 
 def _explicit_enemy_occurrence_metadata(
-    raw: Mapping[str, object], enemies: Sequence[Mapping[str, object]], label: str
+    raw: Mapping[str, object],
+    enemies: Sequence[Mapping[str, object]],
+    label: str,
+    *,
+    count_key: str,
+    alive_key: str | None = None,
+    require_alive: bool = False,
 ) -> tuple[int, tuple[str, ...]]:
     """Require an explicit occurrence-completeness witness from the adapter.
 
-    ``battle_monster_count`` is the accepted native occurrence count.  The
-    ordered ``battle_monsters`` entries are the accepted native occurrence
-    identities (``id``/``name`` is normalized by :func:`_enemy_rows`).  The
-    completeness proof is the explicit-count equality plus one identity for
-    every ordered native occurrence; an uncounted sequence is never enough.
+    The accepted native occurrence count and ordered monster list must come
+    from the same snapshot surface.  A terminal surface additionally carries
+    the native alive count, which is checked against the normalized rows.
+    An uncounted sequence is never enough.
     """
 
-    count = raw.get("battle_monster_count")
+    count = raw.get(count_key)
     if isinstance(count, bool) or not isinstance(count, int) or count != len(enemies):
         raise T087IncompleteError(f"{label} enemy occurrence count is absent or inconsistent")
     normalized = tuple(item.get("identity") for item in enemies)
     if len(normalized) != count or any(not isinstance(identity, str) for identity in normalized):
         raise T087IncompleteError(f"{label} native monster identities are incomplete")
+    indices = tuple(item.get("monster_index") for item in enemies)
+    if any(index is not None for index in indices) and indices != tuple(range(count)):
+        raise T087IncompleteError(f"{label} native monster occurrence order is inconsistent")
+    if alive_key is not None:
+        alive_value = raw.get(alive_key)
+        if (
+            (
+                isinstance(alive_value, bool)
+                or not isinstance(alive_value, int)
+                or alive_value != sum(_alive(enemy) for enemy in enemies)
+            )
+            and (require_alive or alive_value is not None)
+        ):
+            raise T087IncompleteError(f"{label} native alive count is absent or inconsistent")
     return count, normalized
 
 
@@ -677,8 +883,31 @@ def battle_snapshot_evidence(
 ) -> dict[str, object]:
     """Normalize accepted raw snapshot fields without inventing missing state."""
 
-    monsters = raw.get("battle_monsters", raw.get("monsters"))
-    enemies = _enemy_rows(monsters, "battle snapshot enemies")
+    if not isinstance(raw, Mapping):
+        raise T087IncompleteError("battle snapshot is not an accepted mapping")
+    completed_keys = {
+        "completed_battle_monsters",
+        "completed_battle_monster_count",
+        "completed_battle_monsters_alive",
+    }
+    if "completed_battle_outcome" in raw or completed_keys.intersection(raw):
+        if not completed_keys.issubset(raw):
+            raise T087IncompleteError(
+                "accepted terminal snapshot lacks complete post-action monster telemetry"
+            )
+        monster_key = "completed_battle_monsters"
+        count_key = "completed_battle_monster_count"
+        alive_key = "completed_battle_monsters_alive"
+        label = "completed terminal snapshot"
+        require_alive = True
+    else:
+        monster_key = "battle_monsters" if "battle_monsters" in raw else "monsters"
+        count_key = "battle_monster_count"
+        alive_key = "battle_monsters_alive"
+        label = "battle snapshot"
+        require_alive = False
+    monsters = raw.get(monster_key)
+    enemies = _enemy_rows(monsters, f"{label} enemies")
     current_hp = _finite(_player_value(raw, "current_hp"), "player current_hp")
     max_hp = _positive(_player_value(raw, "max_hp"), "player max_hp")
     total = sum(float(enemy["current_hp"]) for enemy in enemies)
@@ -687,7 +916,12 @@ def battle_snapshot_evidence(
     ):
         raise T087IncompleteError("battle_start_total_enemy_hp must be positive")
     occurrence_count, occurrence_identities = _explicit_enemy_occurrence_metadata(
-        raw, enemies, "battle snapshot"
+        raw,
+        enemies,
+        label,
+        count_key=count_key,
+        alive_key=alive_key,
+        require_alive=require_alive,
     )
     return {
         "player_current_hp": current_hp,
@@ -706,7 +940,75 @@ def battle_snapshot_evidence(
     }
 
 
+def _terminal_outcome_from_raw(raw: Mapping[str, object]) -> str:
+    """Read the accepted native terminal outcome keys without choosing silently."""
+
+    if not isinstance(raw, Mapping):
+        raise T087IncompleteError("terminal raw snapshot is not an accepted mapping")
+    values: list[str] = []
+    for key in ("completed_battle_outcome", "battle_outcome", "outcome"):
+        if key in raw:
+            value = raw[key]
+            # After exitBattle the native GameContext snapshot may retain the
+            # non-terminal game outcome label UNDECIDED.  It is not a battle
+            # outcome witness; only terminal-class values participate.
+            if value == "UNDECIDED" and key == "outcome":
+                continue
+            if not isinstance(value, str) or value not in T087_TERMINAL_CLASSES:
+                raise T087IncompleteError(f"terminal raw outcome {key} is invalid")
+            values.append(value)
+    if not values:
+        raise T087IncompleteError("terminal raw outcome is missing")
+    if len(set(values)) != 1:
+        raise T087IncompleteError("terminal raw outcome keys conflict")
+    return values[0]
+
+
+def _validate_terminal_raw_matches_evidence(
+    terminal: Mapping[str, object], raw_terminal: Mapping[str, object]
+) -> None:
+    """Require normalized terminal fields to be a lossless raw projection."""
+
+    raw_evidence = battle_snapshot_evidence(
+        raw_terminal, require_positive_enemy_hp=False
+    )
+    for key in ("player_current_hp", "player_max_hp"):
+        if terminal.get(key) != raw_evidence[key]:
+            raise T087IncompleteError(
+                f"terminal {key} disagrees with retained raw terminal snapshot"
+            )
+    terminal_enemies = _enemy_rows(terminal.get("enemies"), "terminal.enemies")
+    raw_enemies = raw_evidence["enemies"]
+    if not isinstance(raw_enemies, Sequence) or len(terminal_enemies) != len(raw_enemies):
+        raise T087IncompleteError(
+            "terminal enemies disagree with retained raw terminal snapshot"
+        )
+    terminal_pairs = tuple(
+        (enemy["identity"], enemy["current_hp"]) for enemy in terminal_enemies
+    )
+    raw_pairs = tuple(
+        (enemy["identity"], enemy["current_hp"])
+        for enemy in raw_enemies
+        if isinstance(enemy, Mapping)
+    )
+    if terminal_pairs != raw_pairs:
+        raise T087IncompleteError(
+            "terminal enemy HP/occurrence order disagrees with retained raw terminal snapshot"
+        )
+    if (
+        terminal.get("enemy_occurrences_complete") is not True
+        or terminal.get("enemy_occurrence_count") != raw_evidence["enemy_occurrence_count"]
+        or tuple(terminal.get("enemy_occurrence_identities") or ())
+        != tuple(raw_evidence["enemy_occurrence_identities"])
+    ):
+        raise T087IncompleteError(
+            "terminal occurrence metadata disagrees with retained raw terminal snapshot"
+        )
+
+
 def _alive(enemy: Mapping[str, object]) -> bool:
+    if isinstance(enemy.get("alive"), bool):
+        return enemy["alive"]
     if enemy.get("is_gone") is True or enemy.get("dead") is True:
         return False
     return float(enemy["current_hp"]) > 0.0
@@ -736,10 +1038,26 @@ def build_dense_diagnostic_row(
 ) -> dict[str, object]:
     """Build one recomputable T087 dense row from raw entry/terminal evidence."""
 
+    if not isinstance(entry, Mapping) or not isinstance(terminal, Mapping):
+        raise T087IncompleteError("entry and terminal evidence must be mappings")
     if cohort not in T087_COHORT_COUNTS:
         raise T087IncompleteError(f"unknown T087 cohort {cohort!r}")
     if outcome not in T087_TERMINAL_CLASSES:
         raise T087IncompleteError("outcome is not authoritative PLAYER_VICTORY/LOSS")
+    raw_terminal = terminal.get("raw_snapshot")
+    if not isinstance(raw_terminal, Mapping):
+        raise T087IncompleteError("retained raw terminal snapshot is missing")
+    if _terminal_outcome_from_raw(raw_terminal) != outcome:
+        raise T087IncompleteError("row outcome disagrees with retained raw terminal outcome")
+    if not {
+        "completed_battle_monsters",
+        "completed_battle_monster_count",
+        "completed_battle_monsters_alive",
+    }.issubset(raw_terminal):
+        raise T087IncompleteError(
+            "retained raw terminal lacks complete post-action monster telemetry"
+        )
+    _validate_terminal_raw_matches_evidence(terminal, raw_terminal)
     identity = selection_identity_bytes(selection_identity)
     del identity  # Validate the exact string before retaining it.
     start_enemies = _enemy_rows(entry.get("enemies"), "entry.enemies")
@@ -795,7 +1113,17 @@ def build_dense_diagnostic_row(
     if outcome == "PLAYER_LOSS" and margin > 0.0:
         raise T087IncompleteError("loss margin is positive")
 
-    trace = [dict(item) for item in action_trace]
+    if not isinstance(action_trace, Sequence) or isinstance(
+        action_trace, (str, bytes)
+    ):
+        raise T087IncompleteError("action trace must be an ordered sequence")
+    trace: list[dict[str, object]] = []
+    for index, item in enumerate(action_trace):
+        if not isinstance(item, Mapping):
+            raise T087IncompleteError(f"action trace step {index} is not an object")
+        trace.append(dict(item))
+    if provenance is not None and not isinstance(provenance, Mapping):
+        raise T087IncompleteError("execution provenance must be a mapping")
     return {
         "schema_id": "t087-dense-combat-diagnostic-row-v1",
         "task_id": T087_TASK_ID,
@@ -864,7 +1192,10 @@ def _source_selection_manifest_identity(row: Mapping[str, object]) -> dict[str, 
 
 
 def _validate_unique_rows(rows: Iterable[Mapping[str, object]]) -> tuple[dict[str, object], ...]:
-    normalized = tuple(dict(row) for row in rows)
+    raw_rows = tuple(rows)
+    if any(not isinstance(row, Mapping) for row in raw_rows):
+        raise T087IncompleteError("T087 diagnostic rows are malformed")
+    normalized = tuple(dict(row) for row in raw_rows)
     identities = [_row_identity(row) for row in normalized]
     if len(set(identities)) != len(identities):
         raise T087IncompleteError("duplicate selection_identity in T087 ranking domain")
@@ -887,15 +1218,21 @@ def validate_dense_diagnostic_row(row: Mapping[str, object]) -> None:
         raise T087IncompleteError(f"{identity}: raw entry/terminal evidence is missing")
     if not isinstance(outcome, str):
         raise T087IncompleteError(f"{identity}: authoritative outcome is missing")
+    raw_terminal = terminal.get("raw_snapshot")
+    if not isinstance(raw_terminal, Mapping):
+        raise T087IncompleteError(f"{identity}: retained raw terminal snapshot is missing")
+    if _terminal_outcome_from_raw(raw_terminal) != outcome:
+        raise T087IncompleteError(f"{identity}: row outcome disagrees with retained raw terminal outcome")
+    action_trace = row.get("action_trace")
+    if not isinstance(action_trace, Sequence) or isinstance(action_trace, (str, bytes)):
+        raise T087IncompleteError(f"{identity}: action trace is malformed")
     rebuilt = build_dense_diagnostic_row(
         selection_identity=identity,
         cohort=str(row.get("cohort", "")),
         entry=entry,
         terminal=terminal,
         outcome=outcome,
-        action_trace=row.get("action_trace", ())  # type: ignore[arg-type]
-        if isinstance(row.get("action_trace", ()), Sequence)
-        else (),
+        action_trace=action_trace,
         provenance=row.get("provenance")  # type: ignore[arg-type]
         if isinstance(row.get("provenance"), Mapping)
         else None,
@@ -904,12 +1241,19 @@ def validate_dense_diagnostic_row(row: Mapping[str, object]) -> None:
     observed = row.get("diagnostics")
     if not isinstance(observed, Mapping) or dict(observed) != dict(expected):
         raise T087IncompleteError(f"{identity}: diagnostics do not recompute from raw evidence")
+    if row.get("action_count") != len(action_trace):
+        raise T087IncompleteError(f"{identity}: action_count does not recompute from action_trace")
+    if row.get("potion_action_count") != _action_potion_count(action_trace):
+        raise T087IncompleteError(
+            f"{identity}: potion_action_count does not recompute from action_trace"
+        )
     provenance = row.get("provenance")
     if not isinstance(provenance, Mapping):
         raise T087IncompleteError(f"{identity}: execution provenance is missing")
     if provenance.get("source_selection_manifest_identity") != source_manifest_identity:
         raise T087IncompleteError(f"{identity}: source selection-manifest provenance is mismatched")
     for key, expected_value in (
+        ("task_id", T087_TASK_ID),
         ("native_commit", T087_NATIVE_COMMIT),
         ("search_api", T087_SEARCH_API),
         ("search_budget", 100),
@@ -949,6 +1293,14 @@ def select_hp_rescue_losses(
     """Select exactly eight natural losses from each A/B/C cohort."""
 
     normalized = _validate_unique_rows(rows)
+    source_manifest_identities = {
+        json.dumps(_source_selection_manifest_identity(row), sort_keys=True)
+        for row in normalized
+    }
+    if len(source_manifest_identities) != 1:
+        raise T087IncompleteError(
+            "T087 HP rescue ranking lacks one inherited T085 selection-manifest identity"
+        )
     selected: list[dict[str, object]] = []
     for cohort in ("A", "B", "C"):
         eligible = [
@@ -965,15 +1317,7 @@ def select_hp_rescue_losses(
                 selection_identity_bytes(_row_identity(row)),
             ),
         )
-        source_manifest_identities = {
-            json.dumps(_source_selection_manifest_identity(row), sort_keys=True)
-            for row in eligible
-        }
-        if len(source_manifest_identities) != 1:
-            raise T087IncompleteError(
-                f"cohort {cohort} lacks one inherited T085 selection-manifest identity"
-            )
-        source_manifest_identity = _source_selection_manifest_identity(eligible[0])
+        source_manifest_identity = _source_selection_manifest_identity(normalized[0])
         for rank, row in enumerate(ranked[:T087_HP_SAMPLE_PER_COHORT]):
             identity = _row_identity(row)
             selected.append(
@@ -1251,7 +1595,7 @@ def _terminal_raw(controlled: ControlledRun) -> Mapping[str, object]:
     return controlled.final_raw
 
 
-def run_t087_native_record(
+def _run_t087_native_record_verified(
     *,
     record: object,
     cohort: str,
@@ -1277,9 +1621,13 @@ def run_t087_native_record(
             search_backend="battle_search_v2",
             policy_prior_callback=None,
             leaf_value_callback=None,
+            expected_native_identity=T087_NATIVE_IDENTITY,
         )
         adapter.prime_restored_snapshot(restored)
-        controller = T085UnguidedBattleSearchV2Controller(simulations=100)
+        controller = T085UnguidedBattleSearchV2Controller(
+            simulations=100,
+            expected_native_identity=T087_NATIVE_IDENTITY,
+        )
         controlled = execute_controlled_run(
             adapter,
             controller,
@@ -1297,15 +1645,7 @@ def run_t087_native_record(
     terminal = battle_snapshot_evidence(
         _terminal_raw(controlled), require_positive_enemy_hp=False
     )
-    outcome = str(terminal["raw_snapshot"].get("completed_battle_outcome", ""))
-    if outcome not in T087_TERMINAL_CLASSES:
-        outcome = str(
-            terminal["raw_snapshot"].get(
-                "battle_outcome", terminal["raw_snapshot"].get("outcome", "")
-            )
-        )
-    if outcome not in T087_TERMINAL_CLASSES:
-        raise T087IncompleteError(f"{_record_identity(record)}: terminal outcome unavailable")
+    outcome = _terminal_outcome_from_raw(terminal["raw_snapshot"])
     identity = _record_identity(record)
     return build_dense_diagnostic_row(
         selection_identity=identity,
@@ -1357,6 +1697,82 @@ def _t085_record_signature(record: object) -> tuple[object, ...]:
     )
 
 
+def _assert_t085_execution_binding(
+    *,
+    gate: T087T085InputGate,
+    record: object,
+    cohort: str,
+    canonical_records: Mapping[str, object],
+    source_selection_manifest_identity: Mapping[str, object],
+) -> None:
+    """Bind one sharded execution call to the already-verified T085 gate."""
+
+    if cohort not in {"A", "B", "C"}:
+        raise T087IncompleteError(f"T087 execution cohort {cohort!r} is invalid")
+    if not isinstance(record, T085BattleStartRecord):
+        raise T087IncompleteError("T085 execution record is not a typed selected record")
+    identity = _record_identity(record)
+    gate_records = gate.cohorts.get(cohort)
+    gate_canonical = gate.canonical_records_by_cohort.get(cohort)
+    if (
+        not isinstance(gate_records, Sequence)
+        or isinstance(gate_records, (str, bytes))
+        or not isinstance(gate_canonical, Mapping)
+        or not isinstance(canonical_records, Mapping)
+    ):
+        raise T087IncompleteError(f"T085 execution binding for {cohort} is malformed")
+    _validate_canonical_record_map(
+        canonical_records, f"T085 execution canonical {cohort}"
+    )
+    matching = [
+        candidate
+        for candidate in gate_records
+        if _record_identity(candidate) == identity
+    ]
+    if len(matching) != 1 or _t085_record_signature(record) != _t085_record_signature(matching[0]):
+        raise T087IncompleteError(f"T085 execution record {identity} was substituted")
+    if dict(canonical_records) != dict(gate_canonical):
+        raise T087IncompleteError(f"T085 execution canonical map for {cohort} was substituted")
+    if (
+        not isinstance(source_selection_manifest_identity, Mapping)
+        or dict(source_selection_manifest_identity)
+        != dict(gate.source_selection_manifest_identity)
+    ):
+        raise T087IncompleteError(
+            f"T085 execution source selection artifact for {identity} was substituted"
+        )
+
+
+def run_t087_native_record(
+    *,
+    record: object,
+    cohort: str,
+    canonical_records: Mapping[str, object],
+    adapter_factory: Callable[[], object],
+    source_selection_manifest_identity: Mapping[str, object],
+    t085_input_gate: T087T085InputGate | None = None,
+) -> dict[str, object]:
+    """Run one record only after the hash-bound T085 gate is revalidated."""
+
+    if t085_input_gate is None:
+        raise T087IncompleteError("T085 hash-bound input gate is required before execution")
+    verified_gate = _revalidate_t085_gate(t085_input_gate)
+    _assert_t085_execution_binding(
+        gate=verified_gate,
+        record=record,
+        cohort=cohort,
+        canonical_records=canonical_records,
+        source_selection_manifest_identity=source_selection_manifest_identity,
+    )
+    return _run_t087_native_record_verified(
+        record=record,
+        cohort=cohort,
+        canonical_records=canonical_records,
+        adapter_factory=adapter_factory,
+        source_selection_manifest_identity=source_selection_manifest_identity,
+    )
+
+
 def run_t087_natural_evaluation(
     *,
     records_by_cohort: Mapping[str, Sequence[object]],
@@ -1369,13 +1785,22 @@ def run_t087_natural_evaluation(
     verified_gate = _revalidate_t085_gate(t085_input_gate) if t085_input_gate is not None else None
     if verified_gate is None:
         raise T087IncompleteError("T085 hash-bound input gate is required before natural execution")
+    if not isinstance(records_by_cohort, Mapping) or not isinstance(
+        canonical_records_by_cohort, Mapping
+    ):
+        raise T087IncompleteError("T087 natural execution inputs are malformed")
     if set(records_by_cohort) != set(T087_COHORT_COUNTS):
         raise T087IncompleteError("T087 natural evaluation requires exactly A, B, and C")
     if set(verified_gate.cohorts) != {"A", "B", "C", "B@400"}:
         raise T087IncompleteError("T085 input gate cohort matrix is incomplete")
     rows: list[dict[str, object]] = []
     for cohort, expected_count in T087_COHORT_COUNTS.items():
-        records = tuple(records_by_cohort[cohort])
+        supplied_records = records_by_cohort[cohort]
+        if not isinstance(supplied_records, Sequence) or isinstance(
+            supplied_records, (str, bytes)
+        ):
+            raise T087IncompleteError(f"T087 {cohort} records are malformed")
+        records = tuple(supplied_records)
         if len(records) != expected_count:
             raise T087IncompleteError(
                 f"cohort {cohort} contains {len(records)} records, expected {expected_count}"
@@ -1392,8 +1817,15 @@ def run_t087_natural_evaluation(
         ]:
             raise T087IncompleteError(f"T085 {cohort} records differ from the pinned occurrence-safe selection")
         for record in records:
+            _assert_t085_execution_binding(
+                gate=verified_gate,
+                record=record,
+                cohort=cohort,
+                canonical_records=canonical,
+                source_selection_manifest_identity=verified_gate.source_selection_manifest_identity,
+            )
             rows.append(
-                run_t087_native_record(
+                _run_t087_native_record_verified(
                     record=record,
                     cohort=cohort,
                     canonical_records=canonical,
@@ -1404,7 +1836,7 @@ def run_t087_natural_evaluation(
     return rows
 
 
-def run_t087_hp_rescue_variant(
+def _run_t087_hp_rescue_variant_verified(
     *,
     record: object,
     cohort: str,
@@ -1446,9 +1878,13 @@ def run_t087_hp_rescue_variant(
             search_backend="battle_search_v2",
             policy_prior_callback=None,
             leaf_value_callback=None,
+            expected_native_identity=T087_NATIVE_IDENTITY,
         )
         adapter.prime_restored_snapshot(entry_snapshot)
-        controller = T085UnguidedBattleSearchV2Controller(simulations=100)
+        controller = T085UnguidedBattleSearchV2Controller(
+            simulations=100,
+            expected_native_identity=T087_NATIVE_IDENTITY,
+        )
         controlled = execute_controlled_run(
             adapter,
             controller,
@@ -1466,15 +1902,7 @@ def run_t087_hp_rescue_variant(
     terminal = battle_snapshot_evidence(
         _terminal_raw(controlled), require_positive_enemy_hp=False
     )
-    terminal_raw = terminal["raw_snapshot"]
-    outcome = str(
-        terminal_raw.get(
-            "completed_battle_outcome",
-            terminal_raw.get("battle_outcome", terminal_raw.get("outcome", "")),
-        )
-    )
-    if outcome not in T087_TERMINAL_CLASSES:
-        raise T087IncompleteError(f"{identity} HP rescue +{extra_hp} lacks terminal outcome")
+    outcome = _terminal_outcome_from_raw(terminal["raw_snapshot"])
     return build_dense_diagnostic_row(
         selection_identity=identity,
         cohort=cohort,
@@ -1495,12 +1923,47 @@ def run_t087_hp_rescue_variant(
             "action_space": ActionSpaceConfig.initial_no_potions().to_dict(),
             "hp_transform": "current_hp_addition" if extra_hp else "none",
             "extra_hp": extra_hp,
+            "add_random_potion": False,
+            "encounter_id": None,
+            "intervention_scope": "current_hp_only",
             "seed": None,
             "max_steps": 200,
             "no_additional_search_seed": True,
             "restore_source_identity": identity,
             "source_selection_manifest_identity": dict(source_selection_manifest_identity),
         },
+        source_selection_manifest_identity=source_selection_manifest_identity,
+    )
+
+
+def run_t087_hp_rescue_variant(
+    *,
+    record: object,
+    cohort: str,
+    extra_hp: int,
+    canonical_records: Mapping[str, object],
+    adapter_factory: Callable[[], object],
+    source_selection_manifest_identity: Mapping[str, object],
+    t085_input_gate: T087T085InputGate | None = None,
+) -> dict[str, object]:
+    """Run one HP variant only from the verified T085 execution binding."""
+
+    if t085_input_gate is None:
+        raise T087IncompleteError("T085 hash-bound input gate is required before HP rescue")
+    verified_gate = _revalidate_t085_gate(t085_input_gate)
+    _assert_t085_execution_binding(
+        gate=verified_gate,
+        record=record,
+        cohort=cohort,
+        canonical_records=canonical_records,
+        source_selection_manifest_identity=source_selection_manifest_identity,
+    )
+    return _run_t087_hp_rescue_variant_verified(
+        record=record,
+        cohort=cohort,
+        extra_hp=extra_hp,
+        canonical_records=canonical_records,
+        adapter_factory=adapter_factory,
         source_selection_manifest_identity=source_selection_manifest_identity,
     )
 
@@ -1518,9 +1981,16 @@ def run_t087_hp_rescue(
     verified_gate = _revalidate_t085_gate(t085_input_gate) if t085_input_gate is not None else None
     if verified_gate is None:
         raise T087IncompleteError("T085 hash-bound input gate is required before HP rescue")
+    if not isinstance(records_by_identity, Mapping) or not isinstance(
+        canonical_records_by_cohort, Mapping
+    ):
+        raise T087IncompleteError("HP rescue record maps are malformed")
     if canonical_records_by_cohort != verified_gate.canonical_records_by_cohort:
         raise T087IncompleteError("HP rescue canonical restore maps were substituted")
-    rows = tuple(dict(row) for row in natural_rows)
+    raw_rows = tuple(natural_rows)
+    if any(not isinstance(row, Mapping) for row in raw_rows):
+        raise T087IncompleteError("HP rescue natural rows are malformed")
+    rows = tuple(dict(row) for row in raw_rows)
     if len(rows) != T087_NATURAL_RECORD_COUNT:
         raise T087IncompleteError("HP rescue natural rows do not contain exactly 413 records")
     expected_primary = {
@@ -1535,6 +2005,10 @@ def run_t087_hp_rescue(
             raise T087IncompleteError(f"HP rescue record {identity} was substituted")
     observed_by_cohort: dict[str, list[str]] = {"A": [], "B": [], "C": []}
     for row in rows:
+        try:
+            validate_dense_diagnostic_row(row)
+        except T087IncompleteError as exc:
+            raise T087IncompleteError("HP rescue natural evidence is invalid") from exc
         cohort = row.get("cohort")
         if cohort in observed_by_cohort:
             observed_by_cohort[cohort].append(_row_identity(row))
@@ -1568,8 +2042,15 @@ def run_t087_hp_rescue(
         ladder = hp_rescue_ladder(
             diagnostics.get("player_current_hp"), diagnostics.get("player_max_hp")
         )
+        _assert_t085_execution_binding(
+            gate=verified_gate,
+            record=record,
+            cohort=cohort,
+            canonical_records=canonical_records_by_cohort[cohort],
+            source_selection_manifest_identity=verified_gate.source_selection_manifest_identity,
+        )
         for extra_hp in ladder:
-            row = run_t087_hp_rescue_variant(
+            row = _run_t087_hp_rescue_variant_verified(
                 record=record,
                 cohort=cohort,
                 extra_hp=extra_hp,
@@ -1585,9 +2066,8 @@ def run_t087_hp_rescue(
 
 def _record_identity(record: object) -> str:
     identity = getattr(record, "selection_identity", None)
-    if not isinstance(identity, str):
-        if isinstance(record, Mapping):
-            identity = record.get("selection_identity", record.get("record_identity"))
+    if not isinstance(identity, str) and isinstance(record, Mapping):
+        identity = record.get("selection_identity", record.get("record_identity"))
     if not isinstance(identity, str) or not identity:
         raise T087IncompleteError("record lacks exact selection identity")
     return identity
@@ -1615,9 +2095,18 @@ T087_ARTIFACT_SCHEMAS = {
 
 
 def _manifest_digest_is_current(manifest: Mapping[str, object]) -> bool:
-    digest = manifest.get("canonical_sha256")
-    payload = {key: value for key, value in manifest.items() if key != "canonical_sha256"}
-    return isinstance(digest, str) and digest == hashlib.sha256(canonical_json_bytes(payload)).hexdigest()
+    try:
+        digest = manifest.get("canonical_sha256")
+        payload = {
+            key: value
+            for key, value in manifest.items()
+            if key != "canonical_sha256"
+        }
+        return isinstance(digest, str) and digest == hashlib.sha256(
+            canonical_json_bytes(payload)
+        ).hexdigest()
+    except (TypeError, ValueError):
+        return False
 
 
 def _validate_artifact_surfaces(
@@ -1625,7 +2114,11 @@ def _validate_artifact_surfaces(
     retention_inputs: Mapping[str, object] | None,
     problems: list[str],
 ) -> None:
-    references = artifact_references or {}
+    if artifact_references is not None and not isinstance(artifact_references, Mapping):
+        problems.append("T087 artifact references are malformed")
+        references: Mapping[str, Mapping[str, object]] = {}
+    else:
+        references = artifact_references or {}
     missing = T087_REQUIRED_ARTIFACT_ROLES - set(references)
     if missing:
         problems.append("required T087 artifact references are missing: " + ",".join(sorted(missing)))
@@ -1664,6 +2157,44 @@ def _validate_artifact_surfaces(
     for key in ("stable_root", "regeneration_command", "raw_deletion_condition"):
         if not isinstance(retention_inputs.get(key), str) or not retention_inputs[key]:
             problems.append(f"T087 retention input {key} is missing")
+    regeneration_command = retention_inputs.get("regeneration_command")
+    required_arguments = (
+        "--natural",
+        "--hp-ladder",
+        "--audit-traces",
+        "--t085-selection",
+        "--t085-restore",
+        "--t085-paired",
+        "--report",
+        "--artifact-root",
+    )
+    if isinstance(regeneration_command, str) and any(
+        argument not in regeneration_command for argument in required_arguments
+    ):
+        problems.append("T087 regeneration command does not bind every required input")
+    t085_references = retention_inputs.get("t085_input_artifact_references")
+    if not isinstance(t085_references, Mapping) or set(t085_references) != {
+        "selection",
+        "restore",
+        "paired",
+    }:
+        problems.append("T087 retention inputs lack all three pinned T085 references")
+    else:
+        expected_t085 = {
+            "selection": (T085_SELECTION_SHA256, T085_SELECTION_SCHEMA_ID),
+            "restore": (T085_RESTORE_SHA256, T085_RESTORE_SCHEMA_ID),
+            "paired": (T085_PAIRED_REPORT_SHA256, T085_PAIRED_SCHEMA_ID),
+        }
+        for role, (expected_sha256, expected_schema_id) in expected_t085.items():
+            reference = t085_references.get(role)
+            if not isinstance(reference, Mapping):
+                problems.append(f"T087 retention T085 {role} reference is malformed")
+                continue
+            if (
+                reference.get("sha256") != expected_sha256
+                or reference.get("schema_id") != expected_schema_id
+            ):
+                problems.append(f"T087 retention T085 {role} reference is not pinned")
 
 
 def _validate_t085_report_inputs(
@@ -1697,7 +2228,8 @@ def _validate_t085_report_inputs(
     for row in rows:
         try:
             source = _source_selection_manifest_identity(row)
-        except T087IncompleteError:
+        except T087IncompleteError as exc:
+            problems.append(str(exc))
             continue
         if (
             source.get("sha256") != selection.get("sha256")
@@ -1752,14 +2284,26 @@ def _validate_hp_surface(
         by_id[identity] = item
     for cohort in ("A", "B", "C"):
         ranks = sorted(
-            item["selected_rank"] for item in selections if item.get("cohort") == cohort
+            item["selected_rank"]
+            for item in selections
+            if item.get("cohort") == cohort
+            and isinstance(item.get("selected_rank"), int)
+            and not isinstance(item.get("selected_rank"), bool)
         )
         if ranks != list(range(8)):
             problems.append(f"HP rescue selection ranks are not exact for cohort {cohort}")
-    if set(by_id) != set(natural_by_id):
-        # The selected set is allowed to be a strict subset of natural rows.
-        if any(identity not in natural_by_id for identity in by_id):
-            problems.append("HP rescue selection contains an identity outside natural evidence")
+    # The selected set is allowed to be a strict subset of natural rows.
+    if set(by_id) != set(natural_by_id) and any(
+        identity not in natural_by_id for identity in by_id
+    ):
+        problems.append("HP rescue selection contains an identity outside natural evidence")
+    try:
+        expected_manifest = select_hp_rescue_losses(natural_by_id.values())
+    except T087IncompleteError as exc:
+        problems.append(f"HP rescue selection cannot be recomputed: {exc}")
+    else:
+        if selected != expected_manifest.get("selected"):
+            problems.append("HP rescue selection is not the frozen digest-ranked surface")
     expected_keys: set[tuple[str, int]] = set()
     observed_keys: set[tuple[str, int]] = set()
     validation_rows: list[dict[str, object]] = []
@@ -1791,12 +2335,33 @@ def _validate_hp_surface(
         selection = row.get("hp_rescue_selection")
         if not isinstance(selection, Mapping) or by_id.get(identity) != selection:
             problems.append(f"HP rescue row {identity} is not bound to the frozen selection")
+        natural = natural_by_id.get(identity)
+        if natural is not None:
+            try:
+                natural_source = _source_selection_manifest_identity(natural)
+                row_source = _source_selection_manifest_identity(row)
+            except T087IncompleteError as exc:
+                problems.append(str(exc))
+            else:
+                if row_source != natural_source:
+                    problems.append(
+                        f"HP rescue row {identity} has substituted source provenance"
+                    )
         try:
             validate_dense_diagnostic_row(row)
         except T087IncompleteError as exc:
             problems.append(str(exc))
         provenance = row.get("provenance")
-        if not isinstance(provenance, Mapping) or provenance.get("natural_selection_identity") != identity or provenance.get("extra_hp") != extra_hp:
+        expected_transform = "current_hp_addition" if extra_hp > 0 else "none"
+        if (
+            not isinstance(provenance, Mapping)
+            or provenance.get("natural_selection_identity") != identity
+            or provenance.get("extra_hp") != extra_hp
+            or provenance.get("hp_transform") != expected_transform
+            or provenance.get("add_random_potion") is not False
+            or provenance.get("encounter_id") is not None
+            or provenance.get("intervention_scope") != "current_hp_only"
+        ):
             problems.append(f"HP rescue row {identity} has invalid execution provenance")
         validation_rows.append({
             "selection_identity": identity,
@@ -1804,7 +2369,7 @@ def _validate_hp_surface(
             "outcome": row.get("outcome"),
             "selection_digest": selection_digest(identity, domain="hp") if isinstance(identity, str) else None,
         })
-    if observed_keys != expected_keys:
+    if observed_keys != expected_keys or len(rows) != len(expected_keys):
         problems.append("HP rescue ladder rows do not exactly cover the frozen integral ladders")
     return {
         "selected_count": len(by_id),
@@ -1837,6 +2402,39 @@ def _validate_audit_surface(
     ids = {item.get("selection_identity") for item in selections}
     if len(selections) != 24 or len(ids) != 24 or any(not isinstance(identity, str) for identity in ids):
         problems.append("blind audit selection identities are not exact and pairwise disjoint")
+    expected_groups = {
+        "wins": ("human_audit_win", "PLAYER_VICTORY", None),
+        "near_boundary_losses": ("human_audit_near_loss", "PLAYER_LOSS", "near"),
+        "deep_losses": ("human_audit_deep_loss", "PLAYER_LOSS", "deep"),
+    }
+    for group, (expected_role, expected_outcome, threshold_kind) in expected_groups.items():
+        group_items = [item for item in selections if item.get("audit_stratum") == group]
+        if len(group_items) != 8:
+            problems.append(f"blind audit group {group} does not contain exactly eight rows")
+        ranks = sorted(
+            item.get("selected_rank")
+            for item in group_items
+            if isinstance(item.get("selected_rank"), int)
+            and not isinstance(item.get("selected_rank"), bool)
+        )
+        if ranks != list(range(8)):
+            problems.append(f"blind audit group {group} ranks are not exact")
+        for item in group_items:
+            if item.get("selection_role") != expected_role:
+                problems.append(f"blind audit group {group} has an invalid selection role")
+            threshold = item.get("threshold")
+            if threshold_kind is None and threshold is not None:
+                problems.append("blind audit wins must not carry a threshold")
+            if threshold_kind == "near" and threshold not in T087_AUDIT_NEAR_THRESHOLDS:
+                problems.append("blind audit near-loss threshold is not frozen")
+            if threshold_kind == "deep" and threshold not in T087_AUDIT_DEEP_THRESHOLDS:
+                problems.append("blind audit deep-loss threshold is not frozen")
+            identity = item.get("selection_identity")
+            natural = natural_by_id.get(identity) if isinstance(identity, str) else None
+            if natural is not None and natural.get("outcome") != expected_outcome:
+                problems.append(
+                    f"blind audit identity {identity} has the wrong authoritative outcome"
+                )
     for item in selections:
         identity = item.get("selection_identity")
         if not isinstance(identity, str) or item.get("selection_digest") != selection_digest(identity, domain="human_audit"):
@@ -1846,11 +2444,36 @@ def _validate_audit_surface(
             problems.append("blind audit selection contains an identity outside natural evidence")
         elif item.get("source_selection_manifest_identity") != _source_selection_manifest_identity(natural):
             problems.append("blind audit selection source provenance is substituted")
-    required_ids = {str(identity) for identity in ids if isinstance(identity, str)}
-    observed_ids = {_row_identity(row) for row in trace_rows}
+    try:
+        expected_manifest = select_blind_audit_rows(natural_by_id.values())
+    except T087IncompleteError as exc:
+        problems.append(f"blind audit selection cannot be recomputed: {exc}")
+    else:
+        if selected != expected_manifest.get("selected"):
+            problems.append("blind audit selection is not the frozen threshold-ranked surface")
+    required_ids = {identity for identity in ids if isinstance(identity, str)}
+    observed_ids: set[str] = set()
+    for row in trace_rows:
+        try:
+            observed_ids.add(_row_identity(row))
+        except T087IncompleteError as exc:
+            problems.append(str(exc))
     if len(trace_rows) != 24 or observed_ids != required_ids:
         problems.append("blind audit traces do not exactly cover the frozen 24 identities")
     for row in trace_rows:
+        try:
+            identity = _row_identity(row)
+        except T087IncompleteError:
+            continue
+        natural = natural_by_id.get(identity)
+        if natural is not None:
+            try:
+                if _source_selection_manifest_identity(row) != _source_selection_manifest_identity(natural):
+                    problems.append(
+                        f"blind audit trace {identity} has substituted source provenance"
+                    )
+            except T087IncompleteError as exc:
+                problems.append(str(exc))
         try:
             validate_dense_diagnostic_row(row)
         except T087IncompleteError as exc:
@@ -1899,9 +2522,17 @@ def build_t087_report(
         problems.append(f"natural row count is {len(rows)}, expected 413")
     if t085_selection_identity_order is None:
         problems.append("T085 pinned selection identity order is missing")
+    elif not isinstance(t085_selection_identity_order, Mapping):
+        problems.append("T085 pinned selection identity order is malformed")
     else:
         if set(t085_selection_identity_order) != {"A", "B", "C", "B@400"}:
             problems.append("T085 pinned four-cohort selection identity order is incomplete")
+        for cohort in ("A", "B", "C", "B@400"):
+            supplied = t085_selection_identity_order.get(cohort)
+            if not isinstance(supplied, Sequence) or isinstance(supplied, (str, bytes)):
+                problems.append(f"T085 pinned {cohort} selection identity order is malformed")
+            elif any(not isinstance(identity, str) or not identity for identity in supplied):
+                problems.append(f"T085 pinned {cohort} selection identity is malformed")
         for cohort in ("A", "B", "C"):
             expected_ids = tuple(t085_selection_identity_order.get(cohort, ()))
             observed_ids = tuple(
@@ -1946,6 +2577,12 @@ def build_t087_report(
         )
     _validate_t085_report_inputs(t085_input_artifact_references, rows, problems)
     _validate_artifact_surfaces(artifact_references, retention_inputs, problems)
+    if (
+        isinstance(retention_inputs, Mapping)
+        and retention_inputs.get("t085_input_artifact_references")
+        != t085_input_artifact_references
+    ):
+        problems.append("T087 retention and report T085 input references are not identical")
     outcome_counts = Counter(str(row.get("outcome")) for row in rows)
     by_cohort = {
         cohort: {
@@ -1963,10 +2600,10 @@ def build_t087_report(
         "task_id": T087_TASK_ID,
         "approved_spec": T087_APPROVED_SPEC,
         "base_commit": T087_BASE_COMMIT,
+        "native_change_required": True,
+        "native_base_commit": T085_NATIVE_COMMIT,
         "native_identity": {
-            "repository": "lsmfttb/sts_lightspeed",
-            "ref": "refs/heads/stsrl/main",
-            "commit": T087_NATIVE_COMMIT,
+            **T087_NATIVE_IDENTITY,
         },
         "frozen_controller": {
             "name": "unguided_native_search_v2",
@@ -1980,6 +2617,7 @@ def build_t087_report(
         },
         "t085_binding": {
             "scientific_head": T085_SCIENTIFIC_HEAD,
+            "native_commit": T085_NATIVE_COMMIT,
             "selection_sha256": T085_SELECTION_SHA256,
             "restore_evidence_sha256": T085_RESTORE_SHA256,
             "paired_report_sha256": T085_PAIRED_REPORT_SHA256,
@@ -2047,28 +2685,30 @@ def write_t087_json_artifact(
 
 
 __all__ = [
-    "T087T085InputGate",
-    "T087IncompleteError",
+    "T085_NATIVE_COMMIT",
+    "T085_PAIRED_REPORT_SHA256",
+    "T085_RESTORE_SHA256",
+    "T085_SELECTION_SHA256",
     "T087_APPROVED_SPEC",
     "T087_NATIVE_COMMIT",
+    "T087_NATIVE_IDENTITY",
     "T087_NATURAL_RECORD_COUNT",
-    "T085_SELECTION_SHA256",
-    "T085_RESTORE_SHA256",
-    "T085_PAIRED_REPORT_SHA256",
+    "T087IncompleteError",
+    "T087T085InputGate",
     "battle_snapshot_evidence",
+    "build_blind_trace_bundle",
     "build_dense_diagnostic_row",
     "build_review_rubric",
-    "build_blind_trace_bundle",
     "build_t087_report",
     "canonical_json_bytes",
     "hp_rescue_ladder",
     "load_t087_t085_input_gate",
     "load_t087_t085_report_binding",
     "load_t087_t085_selection_binding",
-    "run_t087_native_record",
-    "run_t087_natural_evaluation",
     "run_t087_hp_rescue",
     "run_t087_hp_rescue_variant",
+    "run_t087_native_record",
+    "run_t087_natural_evaluation",
     "select_blind_audit_rows",
     "select_hp_rescue_losses",
     "selection_digest",

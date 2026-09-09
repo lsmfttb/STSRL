@@ -8,25 +8,26 @@ import pytest
 
 from sts_combat_rl.sim.t087_dense_combat_diagnostics import (
     T085_SELECTION_SCHEMA_ID,
-    T087T085InputGate,
     T087_ACTION_SPACE,
     T087_NATIVE_COMMIT,
     T087IncompleteError,
+    T087T085InputGate,
     battle_snapshot_evidence,
     build_dense_diagnostic_row,
     build_t087_report,
     canonical_json_bytes,
     hp_rescue_ladder,
+    run_t087_hp_rescue,
+    run_t087_natural_evaluation,
     select_blind_audit_rows,
     select_hp_rescue_losses,
     selection_digest,
     selection_identity_bytes,
-    run_t087_hp_rescue,
-    run_t087_natural_evaluation,
     validate_dense_diagnostic_row,
 )
-from sts_combat_rl.t085_corrected_leaf_value_search_evaluation import T085BattleStartRecord
-
+from sts_combat_rl.t085_corrected_leaf_value_search_evaluation import (
+    T085BattleStartRecord,
+)
 
 SOURCE_MANIFEST = {
     "path": "/stable/t085-native-selection.json",
@@ -58,6 +59,35 @@ def _row(identity: str, cohort: str, *, win: bool, remaining: float = 0.5):
         "enemy_occurrences_complete": True,
         "enemy_occurrence_count": 2,
         "enemy_occurrence_identities": ("JawWorm", "Cultist"),
+        "raw_snapshot": {
+            "cur_hp": 60 if win else 0,
+            "max_hp": 80,
+            "completed_battle_outcome": "PLAYER_VICTORY" if win else "PLAYER_LOSS",
+            "outcome": "UNDECIDED",
+            "completed_battle_monster_count": 2,
+            "completed_battle_monsters_alive": 0 if win else 2,
+            "completed_battle_monsters": (
+                [
+                    {"id": 1, "id_label": "JawWorm", "name": "Jaw Worm", "current_hp": 0},
+                    {"id": 2, "id_label": "Cultist", "name": "Cultist", "current_hp": 0},
+                ]
+                if win
+                else [
+                    {
+                        "id": 1,
+                        "id_label": "JawWorm",
+                        "name": "Jaw Worm",
+                        "current_hp": 20 * remaining,
+                    },
+                    {
+                        "id": 2,
+                        "id_label": "Cultist",
+                        "name": "Cultist",
+                        "current_hp": 20 * remaining,
+                    },
+                ]
+            ),
+        },
     }
     return build_dense_diagnostic_row(
         selection_identity=identity,
@@ -109,6 +139,24 @@ def test_dense_row_recomputes_authoritative_margin() -> None:
             terminal={"player_current_hp": 0, "enemies": [], "enemy_occurrences_complete": True},
             outcome="PLAYER_LOSS",
         )
+
+
+def test_raw_terminal_outcome_mismatch_fails_row_validation() -> None:
+    row = _row("outcome-mismatch", "A", win=True)
+    row["terminal"] = dict(row["terminal"])
+    row["terminal"]["raw_snapshot"] = dict(row["terminal"]["raw_snapshot"])
+    row["terminal"]["raw_snapshot"]["completed_battle_outcome"] = "PLAYER_LOSS"
+    with pytest.raises(T087IncompleteError, match="raw terminal outcome"):
+        validate_dense_diagnostic_row(row)
+
+
+def test_action_counts_must_recompute_from_retained_trace() -> None:
+    row = _row("trace-counts", "A", win=True)
+    row["action_trace"] = [{"kind": "potion"}, {"kind": "attack"}]
+    row["action_count"] = 2
+    row["potion_action_count"] = 0
+    with pytest.raises(T087IncompleteError, match="potion_action_count"):
+        validate_dense_diagnostic_row(row)
 
 
 def test_hp_and_blind_audit_selection_freezes_disjoint_identities() -> None:
@@ -171,6 +219,36 @@ def test_native_count_and_ordered_monster_identities_prove_completeness() -> Non
     assert evidence["enemy_occurrence_identities"] == ("JawWorm",)
 
 
+def test_native_integer_id_uses_existing_string_id_label() -> None:
+    evidence = battle_snapshot_evidence(
+        {
+            "battle_player": {"current_hp": 40, "max_hp": 80},
+            "battle_monsters": [
+                {
+                    "id": 1,
+                    "id_label": "JawWorm",
+                    "name": "Jaw Worm",
+                    "current_hp": 20,
+                }
+            ],
+            "battle_monster_count": 1,
+        }
+    )
+    assert evidence["enemy_occurrence_identities"] == ("JawWorm",)
+
+
+def test_terminal_snapshot_requires_post_action_monster_telemetry() -> None:
+    with pytest.raises(T087IncompleteError, match="post-action monster telemetry"):
+        battle_snapshot_evidence(
+            {
+                "cur_hp": 0,
+                "max_hp": 80,
+                "completed_battle_outcome": "PLAYER_LOSS",
+            },
+            require_positive_enemy_hp=False,
+        )
+
+
 def test_superficially_matching_fake_gate_cannot_start_natural_or_hp_execution() -> None:
     fake_gate = T087T085InputGate(
         cohorts={"A": (), "B": (), "C": (), "B@400": ()},
@@ -196,6 +274,26 @@ def test_superficially_matching_fake_gate_cannot_start_natural_or_hp_execution()
         )
 
 
+def test_token_matched_malformed_gate_fails_closed_as_t087_error() -> None:
+    from sts_combat_rl.sim import t087_dense_combat_diagnostics as diagnostics
+
+    malformed_gate = T087T085InputGate(
+        cohorts={"A": (), "B": (), "C": (), "B@400": ()},
+        canonical_records_by_cohort={"A": {}, "B": {}, "C": {}},
+        artifact_references=[],  # type: ignore[arg-type]
+        source_selection_manifest_identity=SOURCE_MANIFEST,
+        canonical_artifact_references={"A": {}, "B": {}, "C": {}},
+    )
+    object.__setattr__(malformed_gate, "_validation_token", diagnostics._T087_VERIFIED_GATE_TOKEN)
+    with pytest.raises(T087IncompleteError):
+        run_t087_natural_evaluation(
+            records_by_cohort={"A": (), "B": (), "C": ()},
+            canonical_records_by_cohort={"A": {}, "B": {}, "C": {}},
+            adapter_factory=lambda: None,
+            t085_input_gate=malformed_gate,
+        )
+
+
 def test_non_integral_hp_gap_fails_closed() -> None:
     with pytest.raises(T087IncompleteError):
         hp_rescue_ladder(73.5, 80)
@@ -209,7 +307,9 @@ def test_missing_source_manifest_identity_fails_selection() -> None:
 
 
 def test_substituted_t085_canonical_identity_fails_closed() -> None:
-    from sts_combat_rl.sim.t087_dense_combat_diagnostics import _validate_canonical_binding
+    from sts_combat_rl.sim.t087_dense_combat_diagnostics import (
+        _validate_canonical_binding,
+    )
 
     record = T085BattleStartRecord(
         source_run_seed=1,
@@ -260,6 +360,38 @@ def test_invalid_provenance_and_invalid_hp_rows_cannot_be_ready() -> None:
     )
     assert report["terminal_classification"] == "INCOMPLETE"
     assert report["problems"]
+
+
+def test_hp_surface_rejects_unauthorized_transform_provenance() -> None:
+    from sts_combat_rl.sim.t087_dense_combat_diagnostics import _validate_hp_surface
+
+    natural_rows = [
+        _row(f"{cohort}-{index}", cohort, win=False)
+        for cohort, count in (("A", 93), ("B", 192), ("C", 128))
+        for index in range(count)
+    ]
+    manifest = select_hp_rescue_losses(natural_rows)
+    natural_by_id = {row["selection_identity"]: row for row in natural_rows}
+    ladder_rows = []
+    for selected in manifest["selected"]:
+        identity = selected["selection_identity"]
+        for extra_hp in hp_rescue_ladder(40, 80):
+            row = dict(natural_by_id[identity])
+            row["hp_rescue_selection"] = dict(selected)
+            row["extra_hp"] = extra_hp
+            row["provenance"] = dict(
+                row["provenance"],
+                natural_selection_identity=identity,
+                extra_hp=extra_hp,
+                hp_transform="UNAUTHORIZED",
+                add_random_potion=False,
+                encounter_id=None,
+                intervention_scope="current_hp_only",
+            )
+            ladder_rows.append(row)
+    problems = []
+    _validate_hp_surface(manifest, ladder_rows, natural_by_id, problems)
+    assert any("invalid execution provenance" in problem for problem in problems)
 
 
 def test_complete_natural_count_is_not_premature_ready() -> None:

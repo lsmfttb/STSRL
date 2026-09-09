@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import shlex
+import sys
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -28,7 +29,9 @@ def _read_document(path: Path) -> Any:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise ValueError(f"cannot read current-schema JSON artifact {path}: {exc}") from exc
+        raise ValueError(
+            f"cannot read current-schema JSON artifact {path}: {exc}"
+        ) from exc
 
 
 def _rows(document: Any, label: str) -> list[Mapping[str, object]]:
@@ -60,11 +63,15 @@ def run_t087_report_from_paths(
         paired_report_path=t085_paired_path,
     )
     artifact_root.mkdir(parents=True, exist_ok=True)
+    repository_root = Path(__file__).resolve().parents[3]
     retention_inputs = {
         "stable_root": str(artifact_root.resolve()),
+        "t085_input_artifact_references": t085_input_references,
         "regeneration_command": shlex.join(
             [
-                "python",
+                "env",
+                f"PYTHONPATH={repository_root / 'src'}",
+                sys.executable,
                 "-m",
                 "sts_combat_rl.commands.t087_dense_combat_diagnostics",
                 "--natural",
@@ -204,11 +211,21 @@ def main(argv: list[str] | None = None) -> int:
             output_path=args.report,
             artifact_root=args.artifact_root,
         )
-    except (OSError, UnicodeDecodeError, ValueError, TypeError, json.JSONDecodeError) as exc:
+    except (
+        OSError,
+        UnicodeDecodeError,
+        ValueError,
+        TypeError,
+        json.JSONDecodeError,
+    ) as exc:
         print(f"T087 command failed: {exc}")
         return 2
     print(json.dumps(result, sort_keys=True, ensure_ascii=False))
-    return 0 if result["terminal_classification"] == "DENSE_COMBAT_DIAGNOSTICS_READY" else 1
+    return (
+        0
+        if result["terminal_classification"] == "DENSE_COMBAT_DIAGNOSTICS_READY"
+        else 1
+    )
 
 
 if __name__ == "__main__":

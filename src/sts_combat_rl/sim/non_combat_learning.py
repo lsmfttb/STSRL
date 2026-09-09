@@ -5258,7 +5258,14 @@ def _probe_native_mandatory_families(
     transition_only_keys = getattr(
         adapter, "checkpoint_fingerprint_transition_only_raw_keys", None
     )
-    if transition_only_keys != frozenset({"completed_battle_outcome"}):
+    if transition_only_keys != frozenset(
+        {
+            "completed_battle_outcome",
+            "completed_battle_monster_count",
+            "completed_battle_monsters_alive",
+            "completed_battle_monsters",
+        }
+    ):
         raise ValueError(
             "simulator runtime lacks the pinned checkpoint fingerprint "
             "transition-only boundary"

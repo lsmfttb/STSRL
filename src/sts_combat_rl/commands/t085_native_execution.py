@@ -1535,8 +1535,25 @@ def _positive_int(value: object, label: str) -> int:
 
 def _validate_t085_native_source_manifest(
     backend: T085NativeSearchBackend | None = None,
+    *,
+    expected_native_identity: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
-    """Require the repository-owned manifest to name T085's pinned native API."""
+    """Require the repository manifest to name one explicit accepted identity."""
+
+    if expected_native_identity is None:
+        expected_identity = dict(T085_NATIVE_IDENTITY)
+    elif isinstance(expected_native_identity, Mapping):
+        expected_identity = dict(expected_native_identity)
+    else:
+        raise T085NativeExecutionError(
+            "T085 native execution expected identity is malformed"
+        )
+    if set(expected_identity) != {"repository", "ref", "commit"} or any(
+        not isinstance(value, str) or not value for value in expected_identity.values()
+    ):
+        raise T085NativeExecutionError(
+            "T085 native execution expected identity is incomplete"
+        )
 
     try:
         manifest = load_lightspeed_source_manifest()
@@ -1546,13 +1563,13 @@ def _validate_t085_native_source_manifest(
             "source manifest cannot be loaded"
         ) from exc
 
-    expected_repository = f"https://github.com/{T085_NATIVE_IDENTITY['repository']}"
+    expected_repository = f"https://github.com/{expected_identity['repository']}"
     actual_repository = manifest.integration.repository_url.rstrip("/")
     actual_repository = actual_repository.removesuffix(".git")
     if (
         actual_repository != expected_repository
-        or manifest.integration.ref != T085_NATIVE_IDENTITY["ref"]
-        or manifest.integration.commit != T085_NATIVE_IDENTITY["commit"]
+        or manifest.integration.ref != expected_identity["ref"]
+        or manifest.integration.commit != expected_identity["commit"]
     ):
         raise T085NativeExecutionError(
             "T085 native execution is INCOMPLETE: source manifest is not bound "
@@ -1569,7 +1586,7 @@ def _validate_t085_native_source_manifest(
                 f"T085 native execution is INCOMPLETE: source manifest lacks "
                 f"{capability}"
             )
-    return dict(T085_NATIVE_IDENTITY)
+    return expected_identity
 
 
 def _is_battle_snapshot(snapshot: SimulatorSnapshot) -> bool:
@@ -1589,13 +1606,16 @@ def _native_search_report(
     backend: T085NativeSearchBackend,
     policy_prior_callback: Callable[..., object] | None = None,
     leaf_value_callback: Callable[..., object] | None = None,
+    expected_native_identity: Mapping[str, object] | None = None,
 ) -> OracleSearchReport:
     """Run and validate one native search on the supplied current snapshot."""
 
     _positive_int(simulations, "native search simulations")
     if not _is_battle_snapshot(snapshot):
         raise T085NativeExecutionError("T085 native search requested outside battle")
-    _validate_t085_native_source_manifest(backend)
+    _validate_t085_native_source_manifest(
+        backend, expected_native_identity=expected_native_identity
+    )
     if backend == "battle_search":
         method_name = "battle_search"
         expected_api = ORACLE_SEARCH_NATIVE_API
@@ -1749,6 +1769,7 @@ def _prepare_t085_native_root_edge_label_from_report(
     simulations: int,
     backend: T085NativeSearchBackend,
     report: OracleSearchReport,
+    expected_native_identity: Mapping[str, object] | None = None,
 ) -> T085NativeRootEdgeLabel:
     """Bind one already-validated controller report to its selected edge."""
 
@@ -1778,7 +1799,9 @@ def _prepare_t085_native_root_edge_label_from_report(
         if backend == "battle_search"
         else T085_NATIVE_V2_PATCH
     )
-    _validate_t085_native_source_manifest(backend)
+    native_identity = _validate_t085_native_source_manifest(
+        backend, expected_native_identity=expected_native_identity
+    )
     if not report.search_ok:
         raise T085NativeExecutionError(
             "T085 native controller root mapping failed: " + "; ".join(report.problems)
@@ -1837,7 +1860,7 @@ def _prepare_t085_native_root_edge_label_from_report(
         raise T085NativeExecutionError("selected native mean_value is not finite")
     return T085NativeRootEdgeLabel(
         backend=backend,
-        native_identity=_validate_t085_native_source_manifest(backend),
+        native_identity=native_identity,
         simulations=simulations,
         selected_legal_action_index=chosen_action_index,
         selected_action_identity=dict(selected.action_identity),
@@ -1860,6 +1883,7 @@ def prepare_t085_native_root_edge_label(
     backend: T085NativeSearchBackend = "battle_search",
     policy_prior_callback: Callable[..., object] | None = None,
     leaf_value_callback: Callable[..., object] | None = None,
+    expected_native_identity: Mapping[str, object] | None = None,
 ) -> T085NativeRootEdgeLabel:
     """Search the current state before stepping and select the chosen root edge."""
 
@@ -1891,6 +1915,7 @@ def prepare_t085_native_root_edge_label(
         backend=backend,
         policy_prior_callback=policy_prior_callback,
         leaf_value_callback=leaf_value_callback,
+        expected_native_identity=expected_native_identity,
     )
     return _prepare_t085_native_root_edge_label_from_report(
         snapshot,
@@ -1899,6 +1924,7 @@ def prepare_t085_native_root_edge_label(
         simulations=simulations,
         backend=backend,
         report=report,
+        expected_native_identity=expected_native_identity,
     )
 
 
@@ -2048,6 +2074,7 @@ class T085NativeTerminalSearchAdapter:
         search_backend: T085NativeSearchBackend = "battle_search",
         policy_prior_callback: Callable[..., object] | None = None,
         leaf_value_callback: Callable[..., object] | None = None,
+        expected_native_identity: Mapping[str, object] | None = None,
     ) -> None:
         _positive_int(search_simulations, "T085 native search simulations")
         if search_backend not in T085_NATIVE_SEARCH_BACKENDS:
@@ -2069,7 +2096,9 @@ class T085NativeTerminalSearchAdapter:
         self._restored_snapshot: SimulatorSnapshot | None = None
         self._last_search_call: _T085NativeSearchCall | None = None
         self._pending_root_edge_label: T085NativeRootEdgeLabel | None = None
-        _validate_t085_native_source_manifest(search_backend)
+        self._expected_native_identity = _validate_t085_native_source_manifest(
+            search_backend, expected_native_identity=expected_native_identity
+        )
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._base_adapter, name)
@@ -2350,6 +2379,7 @@ class T085NativeTerminalSearchAdapter:
                 simulations=self._search_simulations,
                 backend=call.backend,
                 report=report,
+                expected_native_identity=self._expected_native_identity,
             )
         )
         self._last_search_call = None
@@ -2433,7 +2463,13 @@ class T085UnguidedBattleSearchV2Controller:
     action_space: ActionSpaceConfig = field(
         default_factory=ActionSpaceConfig.initial_no_potions
     )
+    expected_native_identity: Mapping[str, object] | None = field(
+        default=None, repr=False, compare=False
+    )
     provenance: ControllerProvenance = field(init=False)  # type: ignore[assignment]
+    _validated_native_identity: Mapping[str, object] = field(
+        init=False, repr=False, compare=False
+    )
 
     def __post_init__(self) -> None:
         _positive_int(self.simulations, "T085 unguided v2 simulations")
@@ -2444,7 +2480,11 @@ class T085UnguidedBattleSearchV2Controller:
             raise T085NativeExecutionError(
                 "T085 unguided v2 requires initial_no_potions action space"
             )
-        native_identity = _validate_t085_native_source_manifest("battle_search_v2")
+        native_identity = _validate_t085_native_source_manifest(
+            "battle_search_v2",
+            expected_native_identity=self.expected_native_identity,
+        )
+        object.__setattr__(self, "_validated_native_identity", native_identity)
         object.__setattr__(
             self,
             "provenance",
@@ -2484,6 +2524,7 @@ class T085UnguidedBattleSearchV2Controller:
             context,
             simulations=self.simulations,
             backend="battle_search_v2",
+            expected_native_identity=self._validated_native_identity,
         )
         target = select_oracle_root_action(report, selection_rule="highest_mean")
         metadata = oracle_search_controller_metadata(report, target)

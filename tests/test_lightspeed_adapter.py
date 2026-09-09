@@ -384,3 +384,31 @@ def test_lightspeed_snapshot_fingerprint_ignores_transition_only_battle_outcome(
     )
 
     assert stateful == transition_labeled
+
+
+def test_lightspeed_snapshot_fingerprint_ignores_all_terminal_monster_annotations() -> (
+    None
+):
+    adapter = LightSpeedAdapter(seed=7, ascension=20, module=FakeModule)
+    base_raw = {"screen_state": "REWARDS", "outcome": "UNDECIDED"}
+    annotated_raw = {
+        **base_raw,
+        "completed_battle_outcome": "PLAYER_VICTORY",
+        "completed_battle_monster_count": 1,
+        "completed_battle_monsters_alive": 0,
+        "completed_battle_monsters": [{"monster_index": 0, "current_hp": 0}],
+    }
+
+    assert adapter.checkpoint_fingerprint_transition_only_raw_keys == frozenset(
+        {
+            "completed_battle_outcome",
+            "completed_battle_monster_count",
+            "completed_battle_monsters_alive",
+            "completed_battle_monsters",
+        }
+    )
+    assert LightSpeedAdapter._snapshot_fingerprint(
+        SimulatorSnapshot(observation=[11, 3], raw=base_raw)
+    ) == LightSpeedAdapter._snapshot_fingerprint(
+        SimulatorSnapshot(observation=[11, 3], raw=annotated_raw)
+    )
