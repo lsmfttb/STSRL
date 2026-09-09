@@ -115,6 +115,29 @@ the detached-job convention; record its PID/status/log paths once and monitor
 the status artifact. Never start a duplicate job because the Implementer has
 not yet posted a final message.
 
+### Heartbeat termination is a continuation event
+
+For an authorized long-running experiment or detached job, heartbeat
+termination is not the end of the Maintainer workflow. Treat every
+terminal/non-active reason as a continuation trigger, including successful
+completion, failure, cancellation, expiration, interrupted supervision, child
+disappearance, missing or corrupt status, or loss of the heartbeat itself.
+
+Immediately inspect the status artifact, exit or signal information, logs,
+reports, outcomes, manifests, provenance, and any partial artifacts.
+Independently classify what happened, then continue the authorized workflow
+from that evidence: on success start the next approved stage or its bounded
+verification; on failure or interruption diagnose and perform the
+contract-allowed repair, resume, retry, or terminal closeout. Do not return to
+the user with only a heartbeat-end status report. Do not infer success or
+failure from a wakeup, timeout, empty projection, or inactive marker alone.
+
+Only pause or remove the heartbeat after the terminal state has been inspected
+and all required follow-up work is complete. This rule applies to long-running
+experiments and jobs; ordinary waits for Planner or external review are
+separate coordination blockers and must not be turned into experiment
+heartbeats.
+
 ## 4. Read the result using the correct channel
 
 Use the strongest available read path in this order:
