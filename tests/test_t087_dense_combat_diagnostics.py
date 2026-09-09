@@ -8,6 +8,7 @@ import pytest
 
 from sts_combat_rl.sim.t087_dense_combat_diagnostics import (
     T085_SELECTION_SCHEMA_ID,
+    T087T085InputGate,
     T087_ACTION_SPACE,
     T087_NATIVE_COMMIT,
     T087IncompleteError,
@@ -20,6 +21,8 @@ from sts_combat_rl.sim.t087_dense_combat_diagnostics import (
     select_hp_rescue_losses,
     selection_digest,
     selection_identity_bytes,
+    run_t087_hp_rescue,
+    run_t087_natural_evaluation,
     validate_dense_diagnostic_row,
 )
 from sts_combat_rl.t085_corrected_leaf_value_search_evaluation import T085BattleStartRecord
@@ -42,11 +45,7 @@ def _row(identity: str, cohort: str, *, win: bool, remaining: float = 0.5):
             {"id": "Cultist", "current_hp": 20},
         ],
         "battle_start_total_enemy_hp": 40,
-        "enemy_occurrence_completeness": {
-            "complete": True,
-            "count": 2,
-            "identities": ["JawWorm", "Cultist"],
-        },
+        "battle_monster_count": 2,
     }
     terminal = {
         "player_current_hp": 60 if win else 0,
@@ -56,11 +55,9 @@ def _row(identity: str, cohort: str, *, win: bool, remaining: float = 0.5):
             if win
             else [{"id": "JawWorm", "current_hp": 20 * remaining}, {"id": "Cultist", "current_hp": 20 * remaining}]
         ),
-        "enemy_occurrence_completeness": {
-            "complete": True,
-            "count": 2,
-            "identities": ["JawWorm", "Cultist"],
-        },
+        "enemy_occurrences_complete": True,
+        "enemy_occurrence_count": 2,
+        "enemy_occurrence_identities": ("JawWorm", "Cultist"),
     }
     return build_dense_diagnostic_row(
         selection_identity=identity,
@@ -136,6 +133,21 @@ def test_report_is_incomplete_until_all_formal_surfaces_exist() -> None:
     assert report["problems"]
 
 
+def test_report_accepts_and_retains_the_four_key_t085_selection_matrix() -> None:
+    order = {
+        "A": ("only-one",),
+        "B": (),
+        "C": (),
+        "B@400": tuple(f"b400-{index}" for index in range(48)),
+    }
+    report = build_t087_report(
+        natural_rows=[_row("only-one", "A", win=True)],
+        t085_selection_identity_order=order,
+    )
+    assert report["t085_binding"]["selection_identity_order"]["B@400"] == order["B@400"]
+    assert not any("four-cohort selection identity order" in problem for problem in report["problems"])
+
+
 def test_sequence_alone_cannot_claim_enemy_occurrence_completeness() -> None:
     with pytest.raises(T087IncompleteError):
         battle_snapshot_evidence(
@@ -144,6 +156,43 @@ def test_sequence_alone_cannot_claim_enemy_occurrence_completeness() -> None:
                 "max_hp": 80,
                 "battle_monsters": [{"id": "JawWorm", "current_hp": 20}],
             }
+        )
+
+
+def test_native_count_and_ordered_monster_identities_prove_completeness() -> None:
+    evidence = battle_snapshot_evidence(
+        {
+            "battle_player": {"current_hp": 40, "max_hp": 80},
+            "battle_monsters": [{"id": "JawWorm", "current_hp": 20}],
+            "battle_monster_count": 1,
+        }
+    )
+    assert evidence["enemy_occurrences_complete"] is True
+    assert evidence["enemy_occurrence_identities"] == ("JawWorm",)
+
+
+def test_superficially_matching_fake_gate_cannot_start_natural_or_hp_execution() -> None:
+    fake_gate = T087T085InputGate(
+        cohorts={"A": (), "B": (), "C": (), "B@400": ()},
+        canonical_records_by_cohort={"A": {}, "B": {}, "C": {}},
+        artifact_references={},
+        source_selection_manifest_identity=SOURCE_MANIFEST,
+        canonical_artifact_references={},
+    )
+    with pytest.raises(T087IncompleteError):
+        run_t087_natural_evaluation(
+            records_by_cohort={"A": (), "B": (), "C": ()},
+            canonical_records_by_cohort={"A": {}, "B": {}, "C": {}},
+            adapter_factory=lambda: None,
+            t085_input_gate=fake_gate,
+        )
+    with pytest.raises(T087IncompleteError):
+        run_t087_hp_rescue(
+            natural_rows=(),
+            records_by_identity={},
+            canonical_records_by_cohort={"A": {}, "B": {}, "C": {}},
+            adapter_factory=lambda: None,
+            t085_input_gate=fake_gate,
         )
 
 
