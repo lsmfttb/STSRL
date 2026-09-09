@@ -183,13 +183,9 @@ _T085_PROVENANCE_NATIVE_IDENTITY_KEYS = frozenset(
 )
 
 
-def _validated_t085_provenance_identity(
-    value: object, label: str
-) -> dict[str, object]:
+def _validated_t085_provenance_identity(value: object, label: str) -> dict[str, object]:
     if not isinstance(value, Mapping):
-        raise T085NativeExecutionError(
-            f"{label} native identity is malformed"
-        )
+        raise T085NativeExecutionError(f"{label} native identity is malformed")
     identity = dict(value)
     if identity not in _T085_ACCEPTED_RUNTIME_IDENTITIES:
         raise T085NativeExecutionError(
@@ -214,16 +210,12 @@ def _normalize_t085_provenance_identities(
     still compared byte-for-byte by the caller.
     """
 
-    bound = _validated_t085_provenance_identity(
-        bound_native_identity, f"{label} bound"
-    )
+    bound = _validated_t085_provenance_identity(bound_native_identity, f"{label} bound")
     if isinstance(value, Mapping):
         normalized: dict[object, object] = {}
         for key, item in value.items():
             if key in _T085_PROVENANCE_NATIVE_IDENTITY_KEYS:
-                identity = _validated_t085_provenance_identity(
-                    item, f"{label}.{key}"
-                )
+                identity = _validated_t085_provenance_identity(item, f"{label}.{key}")
                 if require_bound_identity and identity != bound:
                     raise T085NativeExecutionError(
                         f"{label}.{key} is not bound to the retained artifact identity"
@@ -3415,8 +3407,7 @@ def _validate_t085_b_source_pool(
             expected_non_combat_provenance,
             bound_native_identity=bound_native_identity,
             label=(
-                f"T085 Cohort B source record {index} non-combat "
-                "controller provenance"
+                f"T085 Cohort B source record {index} non-combat controller provenance"
             ),
         ):
             raise T085NativeExecutionError(
@@ -3515,8 +3506,7 @@ def _validate_t085_c_source_pool(
             expected_non_combat_provenance,
             bound_native_identity=bound_native_identity,
             label=(
-                f"T085 Cohort C source record {index} non-combat "
-                "controller provenance"
+                f"T085 Cohort C source record {index} non-combat controller provenance"
             ),
         ):
             raise T085NativeExecutionError(
@@ -3973,8 +3963,7 @@ def _validate_t085_b_source_pool_jsonl(
                 expected_battle_provenance,
                 bound_native_identity=bound_native_identity,
                 label=(
-                    f"T085 Cohort B source record {index} battle "
-                    "controller provenance"
+                    f"T085 Cohort B source record {index} battle controller provenance"
                 ),
             ):
                 raise T085NativeExecutionError(
@@ -5924,12 +5913,9 @@ def _validate_plan(plan: T085NativeEvaluationPlan) -> None:
             "T085 native evaluation plan must cover A, B, C, and B@400"
         )
     _validate_t085_native_source_manifest()
-    try:
-        plan_identity = _validated_t085_provenance_identity(
-            plan.native_identity, "T085 evaluation plan"
-        )
-    except T085NativeExecutionError:
-        raise
+    plan_identity = _validated_t085_provenance_identity(
+        plan.native_identity, "T085 evaluation plan"
+    )
     if plan_identity not in _T085_ACCEPTED_RUNTIME_IDENTITIES:
         raise T085NativeExecutionError(
             "T085 native evaluation plan has the wrong native identity"
