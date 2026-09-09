@@ -197,6 +197,79 @@ def _validate_gate_reference_shape(value: object, label: str) -> Mapping[str, ob
     return value
 
 
+def _validate_t087_paired_report_provenance(
+    paired_document: Mapping[str, object],
+    paired_reference: Mapping[str, object] | None,
+) -> str:
+    """Validate current or the one pinned legacy T085 paired-report shape.
+
+    The legacy artifact predates the current top-level task/native provenance
+    fields.  Its row-level fields are evidence, not defaults: every retained
+    outcome row must carry the historical T085 identity before this reader
+    admits the document.
+    """
+
+    if (
+        not isinstance(paired_reference, Mapping)
+        or paired_reference.get("sha256") != T085_PAIRED_REPORT_SHA256
+        or paired_reference.get("schema_id") != T085_PAIRED_SCHEMA_ID
+    ):
+        raise T087IncompleteError(
+            "T085 paired report is not the pinned artifact for compatibility migration"
+        )
+    if paired_document.get("schema_id") != T085_PAIRED_SCHEMA_ID:
+        raise T087IncompleteError("T085 paired report schema is not current")
+
+    has_task_id = "task_id" in paired_document
+    has_native_provenance = "native_execution_provenance" in paired_document
+    if has_task_id and has_native_provenance:
+        if paired_document.get("task_id") != "T085":
+            raise T087IncompleteError("T085 paired report task identity is wrong")
+        paired_execution = paired_document.get("native_execution_provenance")
+        if (
+            not isinstance(paired_execution, Mapping)
+            or not isinstance(paired_execution.get("native_identity"), Mapping)
+            or dict(paired_execution["native_identity"]) != dict(T085_NATIVE_IDENTITY)
+        ):
+            raise T087IncompleteError("T085 paired report native identity is not pinned")
+        return "current"
+    if has_task_id or has_native_provenance:
+        raise T087IncompleteError(
+            "T085 paired report has a conflicting top-level provenance shape"
+        )
+
+    outcomes = paired_document.get("outcomes")
+    if not isinstance(outcomes, Sequence) or isinstance(outcomes, (str, bytes)):
+        raise T087IncompleteError(
+            "T085 legacy paired report outcomes are unavailable or malformed"
+        )
+    if not outcomes:
+        raise T087IncompleteError("T085 legacy paired report has no outcome rows")
+    for index, row in enumerate(outcomes):
+        if not isinstance(row, Mapping):
+            raise T087IncompleteError(
+                f"T085 legacy paired report outcome row {index} is malformed"
+            )
+        if row.get("task_id") != "T085":
+            raise T087IncompleteError(
+                f"T085 legacy paired report outcome row {index} task identity is missing or wrong"
+            )
+        row_provenance = row.get("native_execution_provenance")
+        if not isinstance(row_provenance, Mapping):
+            raise T087IncompleteError(
+                f"T085 legacy paired report outcome row {index} native provenance is missing"
+            )
+        row_native_identity = row_provenance.get("native_identity")
+        if (
+            not isinstance(row_native_identity, Mapping)
+            or dict(row_native_identity) != dict(T085_NATIVE_IDENTITY)
+        ):
+            raise T087IncompleteError(
+                f"T085 legacy paired report outcome row {index} native identity is not historical T085"
+            )
+    return "legacy"
+
+
 def _record_field(record: object, name: str) -> object:
     if isinstance(record, Mapping):
         return record.get(name)
@@ -334,8 +407,6 @@ def validate_t087_t085_input_documents(
         raise T087IncompleteError("T085 selection artifact schema is not current")
     if restore_document.get("schema_id") != T085_RESTORE_SCHEMA_ID:
         raise T087IncompleteError("T085 restore artifact schema is not current")
-    if paired_document.get("schema_id") != T085_PAIRED_SCHEMA_ID:
-        raise T087IncompleteError("T085 paired report schema is not current")
     if selection_document.get("task_id") != "T085":
         raise T087IncompleteError("T085 selection artifact task identity is wrong")
     if restore_document.get("task_id") != "T085":
@@ -349,13 +420,12 @@ def validate_t087_t085_input_documents(
         restore_document["native_identity"]
     ) != dict(T085_NATIVE_IDENTITY):
         raise T087IncompleteError("T085 restore native identity does not match selection")
-    paired_execution = paired_document.get("native_execution_provenance")
-    if (
-        not isinstance(paired_execution, Mapping)
-        or not isinstance(paired_execution.get("native_identity"), Mapping)
-        or dict(paired_execution["native_identity"]) != dict(T085_NATIVE_IDENTITY)
-    ):
-        raise T087IncompleteError("T085 paired report native identity is not pinned")
+    _validate_t087_paired_report_provenance(
+        paired_document,
+        artifact_references.get("paired")
+        if isinstance(artifact_references, Mapping)
+        else None,
+    )
     if not isinstance(paired_document.get("selection_binding"), Mapping):
         raise T087IncompleteError("T085 paired report lacks selection binding")
     raw_cohorts = selection_document.get("cohorts")
@@ -725,15 +795,7 @@ def load_t087_t085_report_binding(
     binding = paired.get("selection_binding")
     if not isinstance(binding, Mapping):
         raise T087IncompleteError("T085 paired report binding is missing")
-    paired_execution = paired.get("native_execution_provenance")
-    if (
-        paired.get("task_id") != "T085"
-        or paired.get("schema_id") != T085_PAIRED_SCHEMA_ID
-        or not isinstance(paired_execution, Mapping)
-        or not isinstance(paired_execution.get("native_identity"), Mapping)
-        or dict(paired_execution["native_identity"]) != dict(T085_NATIVE_IDENTITY)
-    ):
-        raise T087IncompleteError("T085 paired report binding native identity is not pinned")
+    _validate_t087_paired_report_provenance(paired, paired_ref)
     for cohort in ("A", "B", "C", "B@400"):
         cohort_binding = binding.get(cohort)
         if not isinstance(cohort_binding, Mapping) or cohort_binding.get("selected_identity_order") != list(identity_order[cohort]):
