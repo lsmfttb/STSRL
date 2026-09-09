@@ -13,6 +13,7 @@ from sts_combat_rl.sim.t087_dense_combat_diagnostics import (
     T085_PAIRED_SCHEMA_ID,
     T085_SELECTION_SCHEMA_ID,
     T087_ACTION_SPACE,
+    T087_APPROVED_SPEC,
     T087_NATIVE_COMMIT,
     T087IncompleteError,
     T087T085InputGate,
@@ -371,6 +372,7 @@ def test_t087_exact_legacy_paired_report_shape_passes_without_mutation(
     assert "task_id" not in paired
     assert "native_execution_provenance" not in paired
     assert repr(paired) == before
+    assert T087_APPROVED_SPEC == "bc374087c9f4db8972282a3a4c92fa6c027e5f23"
 
 
 @pytest.mark.parametrize(
