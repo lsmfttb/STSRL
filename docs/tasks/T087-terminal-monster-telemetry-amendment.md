@@ -7,6 +7,20 @@ This file is a normative material amendment to T087 and supersedes only the affe
 
 All other approved T087 scientific, cohort, ranking, evaluator, human-audit, and fail-closed rules remain unchanged.
 
+## Artifact Eligibility Contract
+
+Artifact Eligibility Required: true.
+
+Inputs: the exact T087 primary task contract and reproducibility amendment; historical accepted T085 A/B/C selected-record and restore/source identities; native base `d62ff35579b54d70a7428afdf84743c94df3fe0c`; the exact descendant native integration identity produced by this amendment; the transition-only terminal-monster telemetry; and all T087 restore/parity/native-lineage/source-verifier evidence that binds formal execution to that descendant.
+
+Reuse mode: `scientific_quality_claim` only within T087's diagnostic-validity claim. The telemetry may be reused only as raw evidence for T087 terminal monster-state diagnostics under the exact native/provenance contract; it is not a learned target, reward, Search heuristic, mechanics oracle, or independent controller-quality claim.
+
+Claim boundary: this amendment may establish only that authoritative terminal monster state is copied read-only after the terminal action has determined BattleContext outcome and before unchanged `exitBattle`, then exposed as transition-only metadata without changing simulator/Search semantics. It does not establish Battle improvement, modify T085 historical results, or authorize any mechanics/transition/Search change.
+
+Required predicates: exact native base/result lineage; low-risk read-only diff boundary; exact three new completed-battle monster fields plus existing `completed_battle_outcome`; capture before unchanged `bc.exitBattle(gc)` and attach after unchanged cleanup/snapshot path; parity of all pre-existing terminal-transition outputs; unchanged RNG/action/outcome/HP/reward/Search/utility/cleanup semantics; exact transition-only checkpoint-fingerprint key set; clean source verifier; exact 413-record restore/public/legal/source parity under the descendant native identity; and all primary T087 artifact/provenance gates.
+
+Unavailable-fact behavior: any required native identity, lineage fact, copied monster field, occurrence/order/count fact, parity fact, transition-only key, source-verifier result, restore/public/legal/source identity, artifact hash, or provenance field that is missing, malformed, conflicting, inferred, or unavailable fails closed to `INCOMPLETE`. No Python inference, pre-action substitution, replay guess, filename inference, or unauthorized native semantic change may fill the gap.
+
 ## Why this amendment is required
 
 Maintainer review of implementation head `fdda10d43f06275572dfb36e194a0473fd8dc30e` established that the accepted `sts_lightspeed` terminal transition does not expose authoritative post-action enemy HP after `BattleContext::exitBattle` clears the active battle context.
