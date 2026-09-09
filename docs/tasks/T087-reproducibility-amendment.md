@@ -6,6 +6,20 @@ It closes the reproducibility gaps identified by Maintainer review on PR #100 at
 
 No implementation or formal simulator execution is authorized until Maintainer approves an exact PR head containing this amendment.
 
+## Artifact Eligibility Contract
+
+Artifact Eligibility Required: true.
+
+Inputs: the exact T087 primary task contract; exact T085 selected-record, restore-evidence, paired-report, native, and scientific-run identities named below; and every T087 HP-rescue/blind-audit selection artifact whose reproducibility rules are amended here.
+
+Reuse mode: `scientific_quality_claim` only within the T087 diagnostic-validity claim boundary. This amendment does not authorize reuse as a learned target, reward, Search heuristic, controller-promotion score, or independent Battle-performance claim.
+
+Claim boundary: this amendment may establish only deterministic identity/ranking/serialization, restored evaluator-randomness, and blind-audit selection semantics for T087. It does not broaden the primary T087 scientific claim, alter Battle mechanics, or establish controller improvement.
+
+Required predicates: exact occurrence-safe `selection_identity`; exact UTF-8 ranking bytes; exact domain-separated hashes and tie-break order; canonical manifest serialization; exact accepted T085 artifact identities; restored native RNG with no extra reseed; `seed=None`; `max_steps=200`; exact `initial_no_potions` action space; exact Search-v2@100 `highest_mean` unguided controller; exact frozen threshold-relaxation order; pairwise-disjoint audit groups; and all primary T087 artifact/provenance gates.
+
+Unavailable-fact behavior: any required identity, bytes, artifact hash, restore/RNG fact, evaluator field, ranking input, threshold fact, provenance field, or canonical serialization fact that is unavailable, malformed, conflicting, inferred from filenames, or not independently recomputable fails closed to `INCOMPLETE`.
+
 ## 1. Canonical record-selection bytes
 
 For every T087 ranking that previously referred to `canonical_record_identity_bytes` or `canonical_run_identity_bytes`, use the exact T085 `T085BattleStartRecord.selection_identity` string for that selected record.
