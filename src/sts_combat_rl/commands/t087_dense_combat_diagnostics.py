@@ -18,6 +18,7 @@ from sts_combat_rl.sim.t087_dense_combat_diagnostics import (
     T087_APPROVED_SPEC,
     T087_TASK_ID,
     build_t087_report,
+    load_t087_t085_selection_binding,
     write_t087_json_artifact,
 )
 
@@ -41,6 +42,7 @@ def run_t087_report_from_paths(
     natural_path: Path,
     hp_ladder_path: Path,
     audit_trace_path: Path,
+    t085_selection_path: Path,
     output_path: Path,
     artifact_root: Path,
 ) -> dict[str, object]:
@@ -49,14 +51,25 @@ def run_t087_report_from_paths(
     natural_rows = _rows(_read_document(natural_path), "natural evidence")
     hp_rows = _rows(_read_document(hp_ladder_path), "HP ladder evidence")
     audit_rows = _rows(_read_document(audit_trace_path), "blind audit evidence")
+    t085_identity_order, t085_selection_reference = load_t087_t085_selection_binding(
+        t085_selection_path
+    )
     artifact_root.mkdir(parents=True, exist_ok=True)
+    retention_inputs = {
+        "stable_root": str(artifact_root.resolve()),
+        "regeneration_command": "python -m sts_combat_rl.commands.t087_dense_combat_diagnostics",
+        "raw_deletion_condition": "retain while T087 or its successor relies on the diagnostic claim",
+    }
 
     report = build_t087_report(
         natural_rows=natural_rows,
         hp_ladder_rows=hp_rows,
         audit_traces=audit_rows,
+        retention_inputs=retention_inputs,
+        t085_selection_identity_order=t085_identity_order,
     )
     references: dict[str, Mapping[str, object]] = {}
+    references["t085_selection"] = t085_selection_reference
     references["natural_evidence"] = write_t087_json_artifact(
         artifact_root / "t087-natural-evidence.json",
         {"task_id": T087_TASK_ID, "rows": natural_rows},
@@ -106,6 +119,8 @@ def run_t087_report_from_paths(
         hp_ladder_rows=hp_rows,
         audit_traces=audit_rows,
         artifact_references=references,
+        retention_inputs=retention_inputs,
+        t085_selection_identity_order=t085_identity_order,
     )
     report_reference = write_t087_json_artifact(
         output_path,
@@ -119,8 +134,9 @@ def run_t087_report_from_paths(
         "approved_spec": T087_APPROVED_SPEC,
         "terminal_classification": report["terminal_classification"],
         "artifact_references": references,
-        "regeneration_command": "python -m sts_combat_rl.commands.t087_dense_combat_diagnostics",
-        "raw_deletion_condition": "retain while T087 or its successor relies on the diagnostic claim",
+        "stable_root": str(artifact_root.resolve()),
+        "regeneration_command": retention_inputs["regeneration_command"],
+        "raw_deletion_condition": retention_inputs["raw_deletion_condition"],
     }
     retention_reference = write_t087_json_artifact(
         artifact_root / "t087-retention-manifest.json",
@@ -138,6 +154,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--natural", type=Path, required=True)
     parser.add_argument("--hp-ladder", type=Path, required=True)
     parser.add_argument("--audit-traces", type=Path, required=True)
+    parser.add_argument("--t085-selection", type=Path, required=True)
     parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--artifact-root", type=Path, required=True)
     return parser
@@ -150,6 +167,7 @@ def main(argv: list[str] | None = None) -> int:
             natural_path=args.natural,
             hp_ladder_path=args.hp_ladder,
             audit_trace_path=args.audit_traces,
+            t085_selection_path=args.t085_selection,
             output_path=args.report,
             artifact_root=args.artifact_root,
         )
