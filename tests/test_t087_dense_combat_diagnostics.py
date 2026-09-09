@@ -38,23 +38,26 @@ SOURCE_MANIFEST = {
 
 
 def _row(identity: str, cohort: str, *, win: bool, remaining: float = 0.5):
-    entry = {
-        "player_current_hp": 40,
-        "player_max_hp": 80,
-        "enemies": [
-            {"id": "JawWorm", "current_hp": 20},
-            {"id": "Cultist", "current_hp": 20},
+    raw_entry = {
+        "battle_player": {"current_hp": 40, "max_hp": 80},
+        "battle_monsters": [
+            {"id": 1, "id_label": "JawWorm", "name": "Jaw Worm", "current_hp": 20},
+            {"id": 2, "id_label": "Cultist", "name": "Cultist", "current_hp": 20},
         ],
-        "battle_start_total_enemy_hp": 40,
         "battle_monster_count": 2,
+        "battle_monsters_alive": 2,
     }
+    entry = battle_snapshot_evidence(raw_entry)
     terminal = {
         "player_current_hp": 60 if win else 0,
         "player_max_hp": 80,
         "enemies": (
             [{"id": "JawWorm", "current_hp": 0}, {"id": "Cultist", "current_hp": 0}]
             if win
-            else [{"id": "JawWorm", "current_hp": 20 * remaining}, {"id": "Cultist", "current_hp": 20 * remaining}]
+            else [
+                {"id": "JawWorm", "current_hp": 20 * remaining},
+                {"id": "Cultist", "current_hp": 20 * remaining},
+            ]
         ),
         "enemy_occurrences_complete": True,
         "enemy_occurrence_count": 2,
@@ -68,8 +71,18 @@ def _row(identity: str, cohort: str, *, win: bool, remaining: float = 0.5):
             "completed_battle_monsters_alive": 0 if win else 2,
             "completed_battle_monsters": (
                 [
-                    {"id": 1, "id_label": "JawWorm", "name": "Jaw Worm", "current_hp": 0},
-                    {"id": 2, "id_label": "Cultist", "name": "Cultist", "current_hp": 0},
+                    {
+                        "id": 1,
+                        "id_label": "JawWorm",
+                        "name": "Jaw Worm",
+                        "current_hp": 0,
+                    },
+                    {
+                        "id": 2,
+                        "id_label": "Cultist",
+                        "name": "Cultist",
+                        "current_hp": 0,
+                    },
                 ]
                 if win
                 else [
@@ -118,9 +131,10 @@ def _row(identity: str, cohort: str, *, win: bool, remaining: float = 0.5):
 def test_selection_bytes_and_domains_are_exact() -> None:
     identity = "source/é:3"
     assert selection_identity_bytes(identity) == identity.encode("utf-8")
-    assert selection_digest(identity, domain="hp") == hashlib.sha256(
-        b"T087-hp-rescue-v1\n" + identity.encode("utf-8")
-    ).hexdigest()
+    assert (
+        selection_digest(identity, domain="hp")
+        == hashlib.sha256(b"T087-hp-rescue-v1\n" + identity.encode("utf-8")).hexdigest()
+    )
     assert canonical_json_bytes({"é": 1, "a": [2, 3]}) == '{"a":[2,3],"é":1}'.encode()
     assert hp_rescue_ladder(73, 80) == (0, 5, 7)
 
@@ -136,9 +150,38 @@ def test_dense_row_recomputes_authoritative_margin() -> None:
             selection_identity="bad",
             cohort="A",
             entry={"player_current_hp": 40, "player_max_hp": 80, "enemies": []},
-            terminal={"player_current_hp": 0, "enemies": [], "enemy_occurrences_complete": True},
+            terminal={
+                "player_current_hp": 0,
+                "enemies": [],
+                "enemy_occurrences_complete": True,
+            },
             outcome="PLAYER_LOSS",
         )
+
+
+def test_entry_projection_and_enemy_fractions_use_raw_evidence() -> None:
+    row = _row("raw-entry", "A", win=False, remaining=0.25)
+    row["entry"] = dict(row["entry"])
+    row["entry"]["battle_start_total_enemy_hp"] = 1
+    with pytest.raises(T087IncompleteError, match="raw entry snapshot"):
+        validate_dense_diagnostic_row(row)
+
+    row = _row("raw-fraction", "A", win=False, remaining=0.25)
+    row["entry"] = dict(row["entry"])
+    row["terminal"] = dict(row["terminal"])
+    row["terminal"]["enemies"] = [
+        {"id": "JawWorm", "current_hp": 30},
+        {"id": "Cultist", "current_hp": 30},
+    ]
+    raw_terminal = dict(row["terminal"]["raw_snapshot"])
+    raw_terminal["completed_battle_monsters"] = [
+        {"id": 1, "id_label": "JawWorm", "name": "Jaw Worm", "current_hp": 30},
+        {"id": 2, "id_label": "Cultist", "name": "Cultist", "current_hp": 30},
+    ]
+    row["terminal"]["raw_snapshot"] = raw_terminal
+    row["raw_terminal"] = dict(raw_terminal)
+    with pytest.raises(T087IncompleteError, match="enemy_hp_remaining_fraction"):
+        validate_dense_diagnostic_row(row)
 
 
 def test_raw_terminal_outcome_mismatch_fails_row_validation() -> None:
@@ -146,6 +189,7 @@ def test_raw_terminal_outcome_mismatch_fails_row_validation() -> None:
     row["terminal"] = dict(row["terminal"])
     row["terminal"]["raw_snapshot"] = dict(row["terminal"]["raw_snapshot"])
     row["terminal"]["raw_snapshot"]["completed_battle_outcome"] = "PLAYER_LOSS"
+    row["raw_terminal"] = dict(row["terminal"]["raw_snapshot"])
     with pytest.raises(T087IncompleteError, match="raw terminal outcome"):
         validate_dense_diagnostic_row(row)
 
@@ -193,7 +237,10 @@ def test_report_accepts_and_retains_the_four_key_t085_selection_matrix() -> None
         t085_selection_identity_order=order,
     )
     assert report["t085_binding"]["selection_identity_order"]["B@400"] == order["B@400"]
-    assert not any("four-cohort selection identity order" in problem for problem in report["problems"])
+    assert not any(
+        "four-cohort selection identity order" in problem
+        for problem in report["problems"]
+    )
 
 
 def test_sequence_alone_cannot_claim_enemy_occurrence_completeness() -> None:
@@ -213,6 +260,7 @@ def test_native_count_and_ordered_monster_identities_prove_completeness() -> Non
             "battle_player": {"current_hp": 40, "max_hp": 80},
             "battle_monsters": [{"id": "JawWorm", "current_hp": 20}],
             "battle_monster_count": 1,
+            "battle_monsters_alive": 1,
         }
     )
     assert evidence["enemy_occurrences_complete"] is True
@@ -232,9 +280,23 @@ def test_native_integer_id_uses_existing_string_id_label() -> None:
                 }
             ],
             "battle_monster_count": 1,
+            "battle_monsters_alive": 1,
         }
     )
     assert evidence["enemy_occurrence_identities"] == ("JawWorm",)
+
+
+def test_entry_alive_count_is_required_and_consistent() -> None:
+    raw = {
+        "battle_player": {"current_hp": 40, "max_hp": 80},
+        "battle_monsters": [{"id": 1, "id_label": "JawWorm", "current_hp": 20}],
+        "battle_monster_count": 1,
+    }
+    with pytest.raises(T087IncompleteError, match="alive count"):
+        battle_snapshot_evidence(raw)
+    raw["battle_monsters_alive"] = 0
+    with pytest.raises(T087IncompleteError, match="alive count"):
+        battle_snapshot_evidence(raw)
 
 
 def test_terminal_snapshot_requires_post_action_monster_telemetry() -> None:
@@ -249,7 +311,9 @@ def test_terminal_snapshot_requires_post_action_monster_telemetry() -> None:
         )
 
 
-def test_superficially_matching_fake_gate_cannot_start_natural_or_hp_execution() -> None:
+def test_superficially_matching_fake_gate_cannot_start_natural_or_hp_execution() -> (
+    None
+):
     fake_gate = T087T085InputGate(
         cohorts={"A": (), "B": (), "C": (), "B@400": ()},
         canonical_records_by_cohort={"A": {}, "B": {}, "C": {}},
@@ -284,7 +348,9 @@ def test_token_matched_malformed_gate_fails_closed_as_t087_error() -> None:
         source_selection_manifest_identity=SOURCE_MANIFEST,
         canonical_artifact_references={"A": {}, "B": {}, "C": {}},
     )
-    object.__setattr__(malformed_gate, "_validation_token", diagnostics._T087_VERIFIED_GATE_TOKEN)
+    object.__setattr__(
+        malformed_gate, "_validation_token", diagnostics._T087_VERIFIED_GATE_TOKEN
+    )
     with pytest.raises(T087IncompleteError):
         run_t087_natural_evaluation(
             records_by_cohort={"A": (), "B": (), "C": ()},
@@ -300,7 +366,11 @@ def test_non_integral_hp_gap_fails_closed() -> None:
 
 
 def test_missing_source_manifest_identity_fails_selection() -> None:
-    rows = [_row(f"{cohort}-{index}", cohort, win=False) for cohort in ("A", "B", "C") for index in range(8)]
+    rows = [
+        _row(f"{cohort}-{index}", cohort, win=False)
+        for cohort in ("A", "B", "C")
+        for index in range(8)
+    ]
     rows[0].pop("source_selection_manifest_identity")
     with pytest.raises(T087IncompleteError):
         select_hp_rescue_losses(rows)
@@ -392,6 +462,116 @@ def test_hp_surface_rejects_unauthorized_transform_provenance() -> None:
     problems = []
     _validate_hp_surface(manifest, ladder_rows, natural_by_id, problems)
     assert any("invalid execution provenance" in problem for problem in problems)
+
+
+def test_report_contains_grouped_margin_and_hp_ladder_outcome_summaries() -> None:
+    natural_rows = [
+        _row(f"{cohort}-{index}", cohort, win=index % 5 == 0)
+        for cohort, count in (("A", 93), ("B", 192), ("C", 128))
+        for index in range(count)
+    ]
+    hp_manifest = select_hp_rescue_losses(natural_rows)
+    natural_by_id = {row["selection_identity"]: row for row in natural_rows}
+    hp_rows = []
+    for selected in hp_manifest["selected"]:
+        identity = selected["selection_identity"]
+        for extra_hp in hp_rescue_ladder(40, 80):
+            row = dict(natural_by_id[identity])
+            row["hp_rescue_selection"] = dict(selected)
+            row["extra_hp"] = extra_hp
+            row["provenance"] = dict(
+                row["provenance"],
+                natural_selection_identity=identity,
+                extra_hp=extra_hp,
+                hp_transform="current_hp_addition" if extra_hp else "none",
+                add_random_potion=False,
+                encounter_id=None,
+                intervention_scope="current_hp_only",
+            )
+            hp_rows.append(row)
+
+    report = build_t087_report(natural_rows=natural_rows, hp_ladder_rows=hp_rows)
+    summary = report["diagnostic_summary"]
+    margin = summary["combat_terminal_margin_v1"]
+    assert set(margin["by_cohort"]) == {"A", "B", "C"}
+    assert set(margin["by_outcome"]) == {"PLAYER_VICTORY", "PLAYER_LOSS"}
+    assert set(margin["by_cohort_outcome"]["A"]) == {
+        "PLAYER_VICTORY",
+        "PLAYER_LOSS",
+    }
+    component_names = {
+        "enemy_hp_remaining_fraction",
+        "enemy_damage_fraction",
+        "player_hp_remaining_fraction_of_max",
+        "enemy_kill_fraction",
+    }
+    assert set(margin["components"]) == component_names
+    for component in margin["components"].values():
+        assert set(component["by_cohort"]) == {"A", "B", "C"}
+        assert set(component["by_outcome"]) == {"PLAYER_VICTORY", "PLAYER_LOSS"}
+        assert set(component["by_cohort_outcome"]) == {"A", "B", "C"}
+        assert all(
+            set(outcomes) == {"PLAYER_VICTORY", "PLAYER_LOSS"}
+            for outcomes in component["by_cohort_outcome"].values()
+        )
+    assert all(
+        margin["components"][name]["by_outcome"]["PLAYER_VICTORY"][key] is None
+        for name in ("enemy_hp_remaining_fraction", "enemy_damage_fraction")
+        for key in ("p25", "p50", "p75")
+    )
+    assert all(
+        margin["components"]["player_hp_remaining_fraction_of_max"]["by_outcome"][
+            "PLAYER_LOSS"
+        ][key]
+        is None
+        for key in ("p25", "p50", "p75")
+    )
+    assert (
+        summary["enemy_kill_fraction"]["by_cohort_outcome"]["A"]["PLAYER_VICTORY"][
+            "p50"
+        ]
+        == 1.0
+    )
+    assert summary["action_count"]["p50"] == 0.0
+    assert summary["potion_action_count"]["p50"] == 0.0
+
+    validation = report["hp_rescue"]["validation"]
+    assert validation["expected_variant_count"] == 120
+    assert validation["observed_variant_count"] == 120
+    assert validation["record_count"] == 24
+    assert validation["censoring_count"] == 24
+    assert len(validation["selection_outcomes"]) == 24
+    assert all(
+        len(item["outcome_sequence"]) == 5
+        and item["min_observed_extra_hp_with_win"] is None
+        and item["censored_no_win_at_max_hp"] is True
+        for item in validation["selection_outcomes"]
+    )
+    assert all(
+        set(item) == {"extra_hp", "outcome", "terminal_margin"}
+        for item in validation["selection_outcomes"][0]["outcome_sequence"]
+    )
+
+    tampered_hp_rows = [dict(row) for row in hp_rows]
+    tampered_hp_rows[0]["diagnostics"] = dict(
+        tampered_hp_rows[0]["diagnostics"],
+        combat_terminal_margin_v1=999.0,
+    )
+    tampered_problems = []
+    from sts_combat_rl.sim.t087_dense_combat_diagnostics import _validate_hp_surface
+
+    tampered_validation = _validate_hp_surface(
+        hp_manifest,
+        tampered_hp_rows,
+        natural_by_id,
+        tampered_problems,
+    )
+    assert tampered_validation is not None
+    assert tampered_validation["validated_variant_count"] == 119
+    assert tampered_validation["record_count"] == 0
+    assert tampered_validation["selection_outcomes"] == []
+    assert tampered_validation["censoring_count"] is None
+    assert tampered_problems
 
 
 def test_complete_natural_count_is_not_premature_ready() -> None:

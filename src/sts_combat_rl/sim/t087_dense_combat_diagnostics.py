@@ -832,10 +832,10 @@ def _explicit_enemy_occurrence_metadata(
 ) -> tuple[int, tuple[str, ...]]:
     """Require an explicit occurrence-completeness witness from the adapter.
 
-    The accepted native occurrence count and ordered monster list must come
-    from the same snapshot surface.  A terminal surface additionally carries
-    the native alive count, which is checked against the normalized rows.
-    An uncounted sequence is never enough.
+    The accepted native occurrence count, ordered monster list, and alive
+    count must come from the same snapshot surface.  The alive count is
+    required for both entry and terminal snapshots; an uncounted sequence or
+    an entry without the native alive-count witness is never enough.
     """
 
     count = raw.get(count_key)
@@ -905,7 +905,7 @@ def battle_snapshot_evidence(
         count_key = "battle_monster_count"
         alive_key = "battle_monsters_alive"
         label = "battle snapshot"
-        require_alive = False
+        require_alive = True
     monsters = raw.get(monster_key)
     enemies = _enemy_rows(monsters, f"{label} enemies")
     current_hp = _finite(_player_value(raw, "current_hp"), "player current_hp")
@@ -1006,6 +1006,58 @@ def _validate_terminal_raw_matches_evidence(
         )
 
 
+def _validate_entry_raw_matches_evidence(
+    entry: Mapping[str, object], raw_entry: Mapping[str, object]
+) -> dict[str, object]:
+    """Require normalized Battle-start fields to be a lossless raw projection."""
+
+    completed_keys = {
+        "completed_battle_outcome",
+        "completed_battle_monster_count",
+        "completed_battle_monsters_alive",
+        "completed_battle_monsters",
+    }
+    if completed_keys.intersection(raw_entry):
+        raise T087IncompleteError(
+            "retained raw entry snapshot unexpectedly contains terminal telemetry"
+        )
+    raw_evidence = battle_snapshot_evidence(raw_entry)
+    for key in ("player_current_hp", "player_max_hp"):
+        if entry.get(key) != raw_evidence[key]:
+            raise T087IncompleteError(
+                f"entry {key} disagrees with retained raw entry snapshot"
+            )
+    entry_enemies = _enemy_rows(entry.get("enemies"), "entry.enemies")
+    raw_enemies = raw_evidence["enemies"]
+    if not isinstance(raw_enemies, Sequence):
+        raise T087IncompleteError("retained raw entry enemies are unavailable")
+    entry_pairs = tuple(
+        (enemy["identity"], enemy["current_hp"]) for enemy in entry_enemies
+    )
+    raw_pairs = tuple(
+        (enemy["identity"], enemy["current_hp"])
+        for enemy in raw_enemies
+        if isinstance(enemy, Mapping)
+    )
+    if entry_pairs != raw_pairs:
+        raise T087IncompleteError(
+            "entry enemy HP/occurrence order disagrees with retained raw entry snapshot"
+        )
+    if (
+        entry.get("battle_start_total_enemy_hp")
+        != raw_evidence["battle_start_total_enemy_hp"]
+        or entry.get("enemy_occurrences_complete") is not True
+        or entry.get("enemy_occurrence_count")
+        != raw_evidence["enemy_occurrence_count"]
+        or tuple(entry.get("enemy_occurrence_identities") or ())
+        != tuple(raw_evidence["enemy_occurrence_identities"])
+    ):
+        raise T087IncompleteError(
+            "entry occurrence/HP totals disagree with retained raw entry snapshot"
+        )
+    return raw_evidence
+
+
 def _alive(enemy: Mapping[str, object]) -> bool:
     if isinstance(enemy.get("alive"), bool):
         return enemy["alive"]
@@ -1047,6 +1099,9 @@ def build_dense_diagnostic_row(
     raw_terminal = terminal.get("raw_snapshot")
     if not isinstance(raw_terminal, Mapping):
         raise T087IncompleteError("retained raw terminal snapshot is missing")
+    raw_entry = entry.get("raw_snapshot")
+    if not isinstance(raw_entry, Mapping):
+        raise T087IncompleteError("retained raw entry snapshot is missing")
     if _terminal_outcome_from_raw(raw_terminal) != outcome:
         raise T087IncompleteError("row outcome disagrees with retained raw terminal outcome")
     if not {
@@ -1058,14 +1113,19 @@ def build_dense_diagnostic_row(
             "retained raw terminal lacks complete post-action monster telemetry"
         )
     _validate_terminal_raw_matches_evidence(terminal, raw_terminal)
+    entry_evidence = _validate_entry_raw_matches_evidence(entry, raw_entry)
     identity = selection_identity_bytes(selection_identity)
     del identity  # Validate the exact string before retaining it.
-    start_enemies = _enemy_rows(entry.get("enemies"), "entry.enemies")
+    start_enemies = [
+        dict(enemy)
+        for enemy in entry_evidence["enemies"]
+        if isinstance(enemy, Mapping)
+    ]
     terminal_enemies = _enemy_rows(terminal.get("enemies"), "terminal.enemies")
     if terminal.get("enemy_occurrences_complete") is not True:
         raise T087IncompleteError("terminal enemy occurrence completeness is unavailable")
     start_total = _positive(
-        entry.get("battle_start_total_enemy_hp"), "battle_start_total_enemy_hp"
+        entry_evidence["battle_start_total_enemy_hp"], "battle_start_total_enemy_hp"
     )
     terminal_total = sum(float(enemy["current_hp"]) for enemy in terminal_enemies)
     if not math.isfinite(terminal_total) or terminal_total < 0:
@@ -1108,6 +1168,14 @@ def build_dense_diagnostic_row(
             raise T087IncompleteError(f"{label} is not finite")
     if not 0.0 <= killed / initial_count <= 1.0:
         raise T087IncompleteError("enemy_kill_fraction is outside [0,1]")
+    if not 0.0 <= remaining_fraction <= 1.0:
+        raise T087IncompleteError(
+            "enemy_hp_remaining_fraction is outside [0,1] in raw evidence"
+        )
+    if not 0.0 <= damage_fraction <= 1.0:
+        raise T087IncompleteError(
+            "enemy_damage_fraction is outside [0,1] in raw evidence"
+        )
     if outcome == "PLAYER_VICTORY" and margin < 0.0:
         raise T087IncompleteError("victory margin is negative")
     if outcome == "PLAYER_LOSS" and margin > 0.0:
@@ -1132,8 +1200,8 @@ def build_dense_diagnostic_row(
         "outcome": outcome,
         "entry": dict(entry),
         "terminal": dict(terminal),
-        "raw_entry": entry.get("raw_snapshot", dict(entry)),
-        "raw_terminal": terminal.get("raw_snapshot", dict(terminal)),
+        "raw_entry": dict(raw_entry),
+        "raw_terminal": dict(raw_terminal),
         "action_trace": trace,
         "diagnostics": {
             "enemy_count_initial": initial_count,
@@ -1221,6 +1289,18 @@ def validate_dense_diagnostic_row(row: Mapping[str, object]) -> None:
     raw_terminal = terminal.get("raw_snapshot")
     if not isinstance(raw_terminal, Mapping):
         raise T087IncompleteError(f"{identity}: retained raw terminal snapshot is missing")
+    raw_entry = entry.get("raw_snapshot")
+    if not isinstance(raw_entry, Mapping):
+        raise T087IncompleteError(f"{identity}: retained raw entry snapshot is missing")
+    if (
+        not isinstance(row.get("raw_entry"), Mapping)
+        or dict(row["raw_entry"]) != dict(raw_entry)
+        or not isinstance(row.get("raw_terminal"), Mapping)
+        or dict(row["raw_terminal"]) != dict(raw_terminal)
+    ):
+        raise T087IncompleteError(
+            f"{identity}: retained raw entry/terminal surfaces are inconsistent"
+        )
     if _terminal_outcome_from_raw(raw_terminal) != outcome:
         raise T087IncompleteError(f"{identity}: row outcome disagrees with retained raw terminal outcome")
     action_trace = row.get("action_trace")
@@ -2082,6 +2162,64 @@ def _quantiles(values: Sequence[float]) -> dict[str, float | None]:
     return {"p25": pick(0.25), "p50": pick(0.50), "p75": pick(0.75)}
 
 
+def _distribution_summary(
+    rows: Sequence[Mapping[str, object]],
+    metric: str,
+    *,
+    include: Callable[[Mapping[str, object]], bool] | None = None,
+) -> dict[str, object]:
+    """Summarize one retained diagnostic across fixed cohort/outcome groups."""
+
+    def selected(values: Sequence[Mapping[str, object]]) -> list[float]:
+        return [
+            _finite(
+                row.get("diagnostics", {}).get(metric)
+                if isinstance(row.get("diagnostics"), Mapping)
+                and metric in row["diagnostics"]
+                else row.get(metric),
+                f"row summary.{metric}",
+            )
+            for row in values
+            if include is None or include(row)
+        ]
+
+    by_cohort = {
+        cohort: _quantiles(
+            selected([row for row in rows if row.get("cohort") == cohort])
+        )
+        for cohort in T087_COHORT_COUNTS
+    }
+    outcomes = ("PLAYER_VICTORY", "PLAYER_LOSS")
+    by_outcome = {
+        outcome: _quantiles(
+            selected([row for row in rows if row.get("outcome") == outcome])
+        )
+        for outcome in outcomes
+    }
+    by_cohort_outcome = {
+        cohort: {
+            outcome: _quantiles(
+                selected(
+                    [
+                        row
+                        for row in rows
+                        if row.get("cohort") == cohort
+                        and row.get("outcome") == outcome
+                    ]
+                )
+            )
+            for outcome in outcomes
+        }
+        for cohort in T087_COHORT_COUNTS
+    }
+    return {
+        **_quantiles(selected(rows)),
+        "by_cohort": by_cohort,
+        "by_outcome": by_outcome,
+        "by_cohort_outcome": by_cohort_outcome,
+    }
+
+
 T087_ARTIFACT_SCHEMAS = {
     "natural_evidence": "t087-natural-evidence-v1",
     "dense_diagnostic_table": "t087-dense-diagnostic-table-v1",
@@ -2307,6 +2445,7 @@ def _validate_hp_surface(
     expected_keys: set[tuple[str, int]] = set()
     observed_keys: set[tuple[str, int]] = set()
     validation_rows: list[dict[str, object]] = []
+    validated_variant_rows: dict[tuple[str, int], Mapping[str, object]] = {}
     for identity, item in by_id.items():
         natural = natural_by_id.get(identity)
         if natural is None or natural.get("outcome") != "PLAYER_LOSS":
@@ -2331,26 +2470,38 @@ def _validate_hp_surface(
         if not isinstance(identity, str) or isinstance(extra_hp, bool) or not isinstance(extra_hp, int):
             problems.append("HP rescue row has invalid identity or non-integral extra_hp")
             continue
-        observed_keys.add((identity, extra_hp))
+        row_is_valid = True
+        variant_key = (identity, extra_hp)
+        if variant_key in observed_keys:
+            problems.append(f"HP rescue row {identity} +{extra_hp} is duplicated")
+            row_is_valid = False
+        observed_keys.add(variant_key)
         selection = row.get("hp_rescue_selection")
         if not isinstance(selection, Mapping) or by_id.get(identity) != selection:
             problems.append(f"HP rescue row {identity} is not bound to the frozen selection")
+            row_is_valid = False
         natural = natural_by_id.get(identity)
-        if natural is not None:
+        if natural is None:
+            problems.append(f"HP rescue row {identity} is outside the natural evidence")
+            row_is_valid = False
+        else:
             try:
                 natural_source = _source_selection_manifest_identity(natural)
                 row_source = _source_selection_manifest_identity(row)
             except T087IncompleteError as exc:
                 problems.append(str(exc))
+                row_is_valid = False
             else:
                 if row_source != natural_source:
                     problems.append(
                         f"HP rescue row {identity} has substituted source provenance"
                     )
+                    row_is_valid = False
         try:
             validate_dense_diagnostic_row(row)
         except T087IncompleteError as exc:
             problems.append(str(exc))
+            row_is_valid = False
         provenance = row.get("provenance")
         expected_transform = "current_hp_addition" if extra_hp > 0 else "none"
         if (
@@ -2363,19 +2514,110 @@ def _validate_hp_surface(
             or provenance.get("intervention_scope") != "current_hp_only"
         ):
             problems.append(f"HP rescue row {identity} has invalid execution provenance")
-        validation_rows.append({
-            "selection_identity": identity,
-            "extra_hp": extra_hp,
-            "outcome": row.get("outcome"),
-            "selection_digest": selection_digest(identity, domain="hp") if isinstance(identity, str) else None,
-        })
+            row_is_valid = False
+        try:
+            terminal_margin = _diagnostic(row, "combat_terminal_margin_v1")
+        except T087IncompleteError as exc:
+            problems.append(str(exc))
+            terminal_margin = None
+            row_is_valid = False
+        if row_is_valid:
+            validated_variant_rows[variant_key] = row
+            validation_rows.append(
+                {
+                    "selection_identity": identity,
+                    "extra_hp": extra_hp,
+                    "outcome": row.get("outcome"),
+                    "terminal_margin": terminal_margin,
+                    "selection_digest": selection_digest(identity, domain="hp"),
+                }
+            )
     if observed_keys != expected_keys or len(rows) != len(expected_keys):
         problems.append("HP rescue ladder rows do not exactly cover the frozen integral ladders")
+    selection_outcomes: list[dict[str, object]] = []
+    if (
+        observed_keys == expected_keys
+        and len(rows) == len(expected_keys)
+        and len(validated_variant_rows) == len(expected_keys)
+    ):
+        try:
+            for selection in selections:
+                identity = selection["selection_identity"]
+                natural = natural_by_id[identity]
+                entry = natural.get("entry")
+                if not isinstance(entry, Mapping):
+                    raise T087IncompleteError(
+                        f"HP rescue identity {identity} lacks entry HP evidence"
+                    )
+                ladder = hp_rescue_ladder(
+                    entry.get("player_current_hp"), entry.get("player_max_hp")
+                )
+                sequence: list[dict[str, object]] = []
+                for extra_hp in ladder:
+                    variant = validated_variant_rows.get((identity, extra_hp))
+                    if variant is None:
+                        raise T087IncompleteError(
+                            f"HP rescue identity {identity} lacks ladder variant +{extra_hp}"
+                        )
+                    outcome = variant.get("outcome")
+                    if outcome not in T087_TERMINAL_CLASSES:
+                        raise T087IncompleteError(
+                            f"HP rescue identity {identity} +{extra_hp} has no authoritative outcome"
+                        )
+                    sequence.append(
+                        {
+                            "extra_hp": extra_hp,
+                            "outcome": outcome,
+                            "terminal_margin": _diagnostic(
+                                variant, "combat_terminal_margin_v1"
+                            ),
+                        }
+                    )
+                positive_wins = [
+                    item["extra_hp"]
+                    for item in sequence
+                    if item["extra_hp"] > 0
+                    and item["outcome"] == "PLAYER_VICTORY"
+                ]
+                selection_outcomes.append(
+                    {
+                        "selection_identity": identity,
+                        "cohort": selection["cohort"],
+                        "extra_hp_ladder": list(ladder),
+                        "outcome_sequence": sequence,
+                        "min_observed_extra_hp_with_win": (
+                            min(positive_wins) if positive_wins else None
+                        ),
+                        "censored_no_win_at_max_hp": sequence[-1]["outcome"]
+                        == "PLAYER_LOSS",
+                    }
+                )
+        except (KeyError, TypeError, T087IncompleteError) as exc:
+            problems.append(f"HP rescue ladder outcomes cannot be summarized: {exc}")
+            selection_outcomes = []
+    censoring_count = (
+        sum(
+            item["censored_no_win_at_max_hp"] is True
+            for item in selection_outcomes
+        )
+        if len(selection_outcomes) == 24
+        else None
+    )
     return {
         "selected_count": len(by_id),
         "expected_variant_count": len(expected_keys),
         "observed_variant_count": len(observed_keys),
-        "variants": sorted(validation_rows, key=lambda item: (str(item["selection_identity"]), int(item["extra_hp"]))),
+        "validated_variant_count": len(validated_variant_rows),
+        "variants": sorted(
+            validation_rows,
+            key=lambda item: (
+                str(item["selection_identity"]),
+                int(item["extra_hp"]),
+            ),
+        ),
+        "record_count": len(selection_outcomes),
+        "selection_outcomes": selection_outcomes,
+        "censoring_count": censoring_count,
     }
 
 
@@ -2592,9 +2834,44 @@ def build_t087_report(
         }
         for cohort in T087_COHORT_COUNTS
     }
-    margins = [_diagnostic(row, "combat_terminal_margin_v1") for row in valid_rows]
-    losses = [row for row in valid_rows if row.get("outcome") == "PLAYER_LOSS"]
-    wins = [row for row in valid_rows if row.get("outcome") == "PLAYER_VICTORY"]
+    margin_distribution = _distribution_summary(
+        valid_rows, "combat_terminal_margin_v1"
+    )
+    margin_distribution["components"] = {
+        "enemy_hp_remaining_fraction": _distribution_summary(
+            valid_rows,
+            "enemy_hp_remaining_fraction",
+            include=lambda row: row.get("outcome") == "PLAYER_LOSS",
+        ),
+        "enemy_damage_fraction": _distribution_summary(
+            valid_rows,
+            "enemy_damage_fraction",
+            include=lambda row: row.get("outcome") == "PLAYER_LOSS",
+        ),
+        "player_hp_remaining_fraction_of_max": _distribution_summary(
+            valid_rows,
+            "player_hp_remaining_fraction_of_max",
+            include=lambda row: row.get("outcome") == "PLAYER_VICTORY",
+        ),
+        "enemy_kill_fraction": _distribution_summary(
+            valid_rows, "enemy_kill_fraction"
+        ),
+    }
+    loss_enemy_distribution = _distribution_summary(
+        valid_rows,
+        "enemy_hp_remaining_fraction",
+        include=lambda row: row.get("outcome") == "PLAYER_LOSS",
+    )
+    win_player_distribution = _distribution_summary(
+        valid_rows,
+        "player_hp_remaining_fraction_of_max",
+        include=lambda row: row.get("outcome") == "PLAYER_VICTORY",
+    )
+    kill_distribution = _distribution_summary(valid_rows, "enemy_kill_fraction")
+    action_distribution = _distribution_summary(valid_rows, "action_count")
+    potion_action_distribution = _distribution_summary(
+        valid_rows, "potion_action_count"
+    )
     report = {
         "schema_id": "t087-dense-combat-diagnostics-report-v1",
         "task_id": T087_TASK_ID,
@@ -2634,11 +2911,14 @@ def build_t087_report(
             "restore_and_execution_complete": len(valid_rows) == T087_NATURAL_RECORD_COUNT,
         },
         "diagnostic_summary": {
-            "combat_terminal_margin_v1": _quantiles(margins),
-            "loss_enemy_hp_remaining_fraction": _quantiles([_diagnostic(row, "enemy_hp_remaining_fraction") for row in losses]),
-            "win_player_hp_remaining_fraction_of_max": _quantiles([_diagnostic(row, "player_hp_remaining_fraction_of_max") for row in wins]),
-            "enemy_kill_fraction": _quantiles([_diagnostic(row, "enemy_kill_fraction") for row in valid_rows]),
+            "combat_terminal_margin_v1": margin_distribution,
+            "loss_enemy_hp_remaining_fraction": loss_enemy_distribution,
+            "win_player_hp_remaining_fraction_of_max": win_player_distribution,
+            "enemy_kill_fraction": kill_distribution,
+            "action_count": action_distribution,
+            "potion_action_count": potion_action_distribution,
             "mean_action_count": mean([float(row.get("action_count", 0)) for row in valid_rows]) if valid_rows else None,
+            "mean_potion_action_count": mean([float(row.get("potion_action_count", 0)) for row in valid_rows]) if valid_rows else None,
         },
         "hp_rescue": {
             "selection_manifest": hp_manifest,

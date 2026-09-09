@@ -35,7 +35,7 @@ def test_default_lightspeed_source_manifest_names_pinned_integration() -> None:
     )
     assert manifest.integration.branch == "stsrl/main"
     assert manifest.integration.ref == "refs/heads/stsrl/main"
-    assert manifest.integration.commit == ("d62ff35579b54d70a7428afdf84743c94df3fe0c")
+    assert manifest.integration.commit == ("96052d24b9c2c16ff25b6f7241edd972613be997")
     assert set(REQUIRED_NATIVE_CAPABILITY_IDS).issubset(manifest.capability_ids)
     assert "native_battle_search_root" in manifest.capability_ids
     assert "native_root_prior_allocation" in manifest.capability_ids
