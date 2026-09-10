@@ -48,25 +48,57 @@ def run_t087_report_from_paths(
     audit_trace_path: Path,
     t085_selection_path: Path,
     t085_restore_path: Path,
-    t085_paired_path: Path,
     output_path: Path,
     artifact_root: Path,
+    t087_run_head: str | None = None,
+    native_lineage_source_verification: Mapping[str, object] | None = None,
+    native_lineage_source_verification_path: Path | None = None,
 ) -> dict[str, object]:
     """Finalize explicit T087 rows and all current-schema report artifacts."""
 
     natural_rows = _rows(_read_document(natural_path), "natural evidence")
     hp_rows = _rows(_read_document(hp_ladder_path), "HP ladder evidence")
     audit_rows = _rows(_read_document(audit_trace_path), "blind audit evidence")
+    if native_lineage_source_verification_path is not None:
+        value = _read_document(native_lineage_source_verification_path)
+        if not isinstance(value, Mapping):
+            raise ValueError(
+                "native lineage/source-verifier evidence must be a JSON object"
+            )
+        if (
+            native_lineage_source_verification is not None
+            and dict(native_lineage_source_verification) != dict(value)
+        ):
+            raise ValueError(
+                "native lineage/source-verifier evidence does not match its input path"
+            )
+        native_lineage_source_verification = dict(value)
+    elif native_lineage_source_verification is not None and not isinstance(
+        native_lineage_source_verification, Mapping
+    ):
+        raise ValueError(
+            "native lineage/source-verifier evidence must be a JSON object"
+        )
     t085_identity_order, t085_input_references = load_t087_t085_report_binding(
         selection_artifact_path=t085_selection_path,
         restore_evidence_path=t085_restore_path,
-        paired_report_path=t085_paired_path,
     )
     artifact_root.mkdir(parents=True, exist_ok=True)
     repository_root = Path(__file__).resolve().parents[3]
     retention_inputs = {
         "stable_root": str(artifact_root.resolve()),
         "t085_input_artifact_references": t085_input_references,
+        "t087_run_head": t087_run_head,
+        "native_lineage_source_verification": (
+            dict(native_lineage_source_verification)
+            if isinstance(native_lineage_source_verification, Mapping)
+            else None
+        ),
+        "native_lineage_source_verification_path": str(
+            native_lineage_source_verification_path.resolve()
+            if native_lineage_source_verification_path is not None
+            else ""
+        ),
         "regeneration_command": shlex.join(
             [
                 "env",
@@ -84,8 +116,15 @@ def run_t087_report_from_paths(
                 str(t085_selection_path.resolve()),
                 "--t085-restore",
                 str(t085_restore_path.resolve()),
-                "--t085-paired",
-                str(t085_paired_path.resolve()),
+                "--run-head",
+                str(t087_run_head or ""),
+                "--native-lineage-source-verification",
+                str(
+                    (
+                        native_lineage_source_verification_path
+                        or artifact_root / "native-lineage-source-verification.json"
+                    ).resolve()
+                ),
                 "--report",
                 str(output_path.resolve()),
                 "--artifact-root",
@@ -102,6 +141,8 @@ def run_t087_report_from_paths(
         retention_inputs=retention_inputs,
         t085_selection_identity_order=t085_identity_order,
         t085_input_artifact_references=t085_input_references,
+        t087_run_head=t087_run_head,
+        native_lineage_source_verification=native_lineage_source_verification,
     )
     references: dict[str, Mapping[str, object]] = {}
     references["natural_evidence"] = write_t087_json_artifact(
@@ -156,6 +197,8 @@ def run_t087_report_from_paths(
         retention_inputs=retention_inputs,
         t085_selection_identity_order=t085_identity_order,
         t085_input_artifact_references=t085_input_references,
+        t087_run_head=t087_run_head,
+        native_lineage_source_verification=native_lineage_source_verification,
     )
     report_reference = write_t087_json_artifact(
         output_path,
@@ -170,6 +213,13 @@ def run_t087_report_from_paths(
         "terminal_classification": report["terminal_classification"],
         "artifact_references": references,
         "t085_input_artifact_references": t085_input_references,
+        "implementation_run_head": report["implementation_run_head"],
+        "native_lineage_source_verification": report[
+            "native_lineage_source_verification"
+        ],
+        "native_lineage_source_verification_path": retention_inputs[
+            "native_lineage_source_verification_path"
+        ],
         "stable_root": str(artifact_root.resolve()),
         "regeneration_command": retention_inputs["regeneration_command"],
         "raw_deletion_condition": retention_inputs["raw_deletion_condition"],
@@ -192,7 +242,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--audit-traces", type=Path, required=True)
     parser.add_argument("--t085-selection", type=Path, required=True)
     parser.add_argument("--t085-restore", type=Path, required=True)
-    parser.add_argument("--t085-paired", type=Path, required=True)
+    parser.add_argument("--run-head", required=True)
+    parser.add_argument(
+        "--native-lineage-source-verification", type=Path, required=True
+    )
     parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--artifact-root", type=Path, required=True)
     return parser
@@ -207,9 +260,13 @@ def main(argv: list[str] | None = None) -> int:
             audit_trace_path=args.audit_traces,
             t085_selection_path=args.t085_selection,
             t085_restore_path=args.t085_restore,
-            t085_paired_path=args.t085_paired,
             output_path=args.report,
             artifact_root=args.artifact_root,
+            t087_run_head=args.run_head,
+            native_lineage_source_verification=_read_document(
+                args.native_lineage_source_verification
+            ),
+            native_lineage_source_verification_path=args.native_lineage_source_verification,
         )
     except (
         OSError,

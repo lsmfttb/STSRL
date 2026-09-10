@@ -22,6 +22,7 @@ from sts_combat_rl.commands.t085_native_execution import (
     T085NativeExecutionError,
     T085NativeTerminalSearchAdapter,
     T085UnguidedBattleSearchV2Controller,
+    _validate_t085_native_source_manifest,
     restore_t085_canonical_record,
 )
 from sts_combat_rl.sim.action_space import ActionSpaceConfig
@@ -34,7 +35,7 @@ from sts_combat_rl.t085_corrected_leaf_value_search_evaluation import (
 )
 
 T087_TASK_ID = "T087"
-T087_APPROVED_SPEC = "bc374087c9f4db8972282a3a4c92fa6c027e5f23"
+T087_APPROVED_SPEC = "64a139ae03ce4a5ca186d50b1a049d17b30a47e4"
 T087_BASE_COMMIT = "b38c0584e4aac9172f9da4426004bfb64a13a41d"
 T085_NATIVE_COMMIT = "d62ff35579b54d70a7428afdf84743c94df3fe0c"
 T087_NATIVE_COMMIT = "96052d24b9c2c16ff25b6f7241edd972613be997"
@@ -46,8 +47,9 @@ T087_NATIVE_IDENTITY = {
 T085_SCIENTIFIC_HEAD = "5edaa255959d34d4d31bbfae7e6b6bed9758024d"
 T085_SELECTION_SHA256 = "d5c335cd6e1f96e72ae3b302eebca17a5f6531fa0aac97ee2febec2c41c2e752"
 T085_RESTORE_SHA256 = "0adbdc4e055bd8d53680757a395e3e7973b7242b06db1c5053281ef883b679ef"
-T085_PAIRED_REPORT_SHA256 = "f756c9f4ac885c61c2a73ff9b2d0e05a15b317df2cce9c9bf5dbd374f7afcec3"
 T052_COHORT_SHA256 = "b7f8e9b85b53bbf8e37adfe6cc90d0579937661309b26bce2a8f2921604a8608"
+T085_B_SOURCE_MANIFEST_SHA256 = "11b7a55cc1bca52481699c6ebe10f16af2ad1cdf1765b565fdfdbfe5aad93e06"
+T085_C_SOURCE_MANIFEST_SHA256 = "2a9986972764197d0c9b4927617c15a71221358364823d3f0f9687433face376"
 T087_NATURAL_RECORD_COUNT = 413
 T087_COHORT_COUNTS = {"A": 93, "B": 192, "C": 128}
 T087_HP_SAMPLE_PER_COHORT = 8
@@ -62,7 +64,12 @@ T087_POTION_ACTION_KINDS = frozenset(
 )
 T085_SELECTION_SCHEMA_ID = "t085-native-selection-artifact-v1"
 T085_RESTORE_SCHEMA_ID = "t085-native-selection-restore-evidence-v1"
-T085_PAIRED_SCHEMA_ID = "t085-paired-evaluation-report-v1"
+T085_CANONICAL_SOURCE_SCHEMA_IDS = {
+    "A": "fixed-cohort-v3-jsonl",
+    "B": "assisted-run-source-pool-v1",
+    "C": "natural-battle-start-pool-v4-jsonl",
+}
+T085_SOURCE_MANIFEST_SCHEMA_ID = "t085-source-generation-manifest-v1"
 T087_SEARCH_API = "StepSimulator.battle_search_v2.v1"
 T087_ACTION_SPACE = ActionSpaceConfig.initial_no_potions().to_dict()
 T087_REQUIRED_ARTIFACT_ROLES = frozenset(
@@ -93,6 +100,9 @@ class T087T085InputGate:
     artifact_references: Mapping[str, Mapping[str, object]]
     source_selection_manifest_identity: Mapping[str, object]
     canonical_artifact_references: Mapping[str, Mapping[str, object]]
+    source_manifest_artifact_references: Mapping[str, Mapping[str, object]] = field(
+        default_factory=dict
+    )
     _validation_token: object | None = field(
         default=None, init=False, repr=False, compare=False
     )
@@ -105,6 +115,7 @@ def _verified_gate(
     artifact_references: Mapping[str, Mapping[str, object]],
     source_selection_manifest_identity: Mapping[str, object],
     canonical_artifact_references: Mapping[str, Mapping[str, object]],
+    source_manifest_artifact_references: Mapping[str, Mapping[str, object]],
 ) -> T087T085InputGate:
     gate = T087T085InputGate(
         cohorts=cohorts,
@@ -112,6 +123,7 @@ def _verified_gate(
         artifact_references=artifact_references,
         source_selection_manifest_identity=source_selection_manifest_identity,
         canonical_artifact_references=canonical_artifact_references,
+        source_manifest_artifact_references=source_manifest_artifact_references,
     )
     object.__setattr__(gate, "_validation_token", _T087_VERIFIED_GATE_TOKEN)
     return gate
@@ -195,79 +207,6 @@ def _validate_gate_reference_shape(value: object, label: str) -> Mapping[str, ob
     if not isinstance(value.get("schema_id"), str) or not value["schema_id"]:
         raise T087IncompleteError(f"{label} reference schema is missing")
     return value
-
-
-def _validate_t087_paired_report_provenance(
-    paired_document: Mapping[str, object],
-    paired_reference: Mapping[str, object] | None,
-) -> str:
-    """Validate current or the one pinned legacy T085 paired-report shape.
-
-    The legacy artifact predates the current top-level task/native provenance
-    fields.  Its row-level fields are evidence, not defaults: every retained
-    outcome row must carry the historical T085 identity before this reader
-    admits the document.
-    """
-
-    if (
-        not isinstance(paired_reference, Mapping)
-        or paired_reference.get("sha256") != T085_PAIRED_REPORT_SHA256
-        or paired_reference.get("schema_id") != T085_PAIRED_SCHEMA_ID
-    ):
-        raise T087IncompleteError(
-            "T085 paired report is not the pinned artifact for compatibility migration"
-        )
-    if paired_document.get("schema_id") != T085_PAIRED_SCHEMA_ID:
-        raise T087IncompleteError("T085 paired report schema is not current")
-
-    has_task_id = "task_id" in paired_document
-    has_native_provenance = "native_execution_provenance" in paired_document
-    if has_task_id and has_native_provenance:
-        if paired_document.get("task_id") != "T085":
-            raise T087IncompleteError("T085 paired report task identity is wrong")
-        paired_execution = paired_document.get("native_execution_provenance")
-        if (
-            not isinstance(paired_execution, Mapping)
-            or not isinstance(paired_execution.get("native_identity"), Mapping)
-            or dict(paired_execution["native_identity"]) != dict(T085_NATIVE_IDENTITY)
-        ):
-            raise T087IncompleteError("T085 paired report native identity is not pinned")
-        return "current"
-    if has_task_id or has_native_provenance:
-        raise T087IncompleteError(
-            "T085 paired report has a conflicting top-level provenance shape"
-        )
-
-    outcomes = paired_document.get("outcomes")
-    if not isinstance(outcomes, Sequence) or isinstance(outcomes, (str, bytes)):
-        raise T087IncompleteError(
-            "T085 legacy paired report outcomes are unavailable or malformed"
-        )
-    if not outcomes:
-        raise T087IncompleteError("T085 legacy paired report has no outcome rows")
-    for index, row in enumerate(outcomes):
-        if not isinstance(row, Mapping):
-            raise T087IncompleteError(
-                f"T085 legacy paired report outcome row {index} is malformed"
-            )
-        if row.get("task_id") != "T085":
-            raise T087IncompleteError(
-                f"T085 legacy paired report outcome row {index} task identity is missing or wrong"
-            )
-        row_provenance = row.get("native_execution_provenance")
-        if not isinstance(row_provenance, Mapping):
-            raise T087IncompleteError(
-                f"T085 legacy paired report outcome row {index} native provenance is missing"
-            )
-        row_native_identity = row_provenance.get("native_identity")
-        if (
-            not isinstance(row_native_identity, Mapping)
-            or dict(row_native_identity) != dict(T085_NATIVE_IDENTITY)
-        ):
-            raise T087IncompleteError(
-                f"T085 legacy paired report outcome row {index} native identity is not historical T085"
-            )
-    return "legacy"
 
 
 def _record_field(record: object, name: str) -> object:
@@ -360,74 +299,43 @@ def _validate_canonical_record_map(
     return value
 
 
-def validate_t087_t085_input_documents(
-    *,
+def _reference_identity(value: object, label: str) -> dict[str, object]:
+    """Project an embedded artifact reference to its authenticated identity."""
+
+    if not isinstance(value, Mapping):
+        raise T087IncompleteError(f"{label} reference is malformed")
+    required = {"path", "sha256", "schema_id", "byte_count"}
+    if not required.issubset(value):
+        raise T087IncompleteError(f"{label} reference is incomplete")
+    projected = {key: value[key] for key in required}
+    _validate_gate_reference_shape(projected, label)
+    return projected
+
+
+def _same_reference(left: object, right: object) -> bool:
+    if not isinstance(left, Mapping) or not isinstance(right, Mapping):
+        return False
+    return (
+        left.get("sha256") == right.get("sha256")
+        and left.get("schema_id") == right.get("schema_id")
+        and left.get("byte_count") == right.get("byte_count")
+        and _ref_path_equal(left.get("path"), right.get("path"))
+    )
+
+
+def _validate_t085_selection_document(
     selection_document: Mapping[str, object],
-    restore_document: Mapping[str, object],
-    paired_document: Mapping[str, object],
-    artifact_references: Mapping[str, Mapping[str, object]],
-    canonical_records_by_cohort: Mapping[str, Mapping[str, object]],
-    canonical_artifact_references: Mapping[str, Mapping[str, object]],
-) -> T087T085InputGate:
-    """Validate loaded T085 documents and exact canonical record bindings."""
+) -> dict[str, tuple[T085BattleStartRecord, ...]]:
+    """Validate the complete four-key retained T085 selection matrix."""
 
-    if not all(
-        isinstance(document, Mapping)
-        for document in (selection_document, restore_document, paired_document)
+    if (
+        selection_document.get("schema_id") != T085_SELECTION_SCHEMA_ID
+        or selection_document.get("task_id") != "T085"
     ):
-        raise T087IncompleteError("T085 input documents are malformed")
-    expected_artifacts = {
-        "selection": (T085_SELECTION_SHA256, T085_SELECTION_SCHEMA_ID),
-        "restore": (T085_RESTORE_SHA256, T085_RESTORE_SCHEMA_ID),
-        "paired": (T085_PAIRED_REPORT_SHA256, T085_PAIRED_SCHEMA_ID),
-    }
-    if not isinstance(artifact_references, Mapping) or set(artifact_references) != set(
-        expected_artifacts
-    ):
-        raise T087IncompleteError("T085 input artifact references are incomplete")
-    for role, (expected_sha256, expected_schema_id) in expected_artifacts.items():
-        reference = _validate_gate_reference_shape(
-            artifact_references.get(role), f"T085 {role} artifact"
-        )
-        if (
-            reference.get("sha256") != expected_sha256
-            or reference.get("schema_id") != expected_schema_id
-        ):
-            raise T087IncompleteError(f"T085 {role} artifact reference is not pinned")
-    if not isinstance(canonical_records_by_cohort, Mapping) or set(
-        canonical_records_by_cohort
-    ) != {"A", "B", "C"}:
-        raise T087IncompleteError("T085 canonical record maps are incomplete")
-    if not isinstance(canonical_artifact_references, Mapping) or set(
-        canonical_artifact_references
-    ) != {"A", "B", "C"}:
-        raise T087IncompleteError("T085 canonical artifact references are incomplete")
-
-    if selection_document.get("schema_id") != T085_SELECTION_SCHEMA_ID:
-        raise T087IncompleteError("T085 selection artifact schema is not current")
-    if restore_document.get("schema_id") != T085_RESTORE_SCHEMA_ID:
-        raise T087IncompleteError("T085 restore artifact schema is not current")
-    if selection_document.get("task_id") != "T085":
-        raise T087IncompleteError("T085 selection artifact task identity is wrong")
-    if restore_document.get("task_id") != "T085":
-        raise T087IncompleteError("T085 restore artifact task identity is wrong")
-    if paired_document.get("task_id") != "T085":
-        raise T087IncompleteError("T085 paired report task identity is wrong")
+        raise T087IncompleteError("T085 selection artifact schema/task identity is wrong")
     native = selection_document.get("native_identity")
     if not isinstance(native, Mapping) or dict(native) != dict(T085_NATIVE_IDENTITY):
-        raise T087IncompleteError("T085 selection native identity is not pinned")
-    if not isinstance(restore_document.get("native_identity"), Mapping) or dict(
-        restore_document["native_identity"]
-    ) != dict(T085_NATIVE_IDENTITY):
-        raise T087IncompleteError("T085 restore native identity does not match selection")
-    _validate_t087_paired_report_provenance(
-        paired_document,
-        artifact_references.get("paired")
-        if isinstance(artifact_references, Mapping)
-        else None,
-    )
-    if not isinstance(paired_document.get("selection_binding"), Mapping):
-        raise T087IncompleteError("T085 paired report lacks selection binding")
+        raise T087IncompleteError("T085 selection native identity is not historical")
     raw_cohorts = selection_document.get("cohorts")
     raw_evidence = selection_document.get("selection_evidence")
     if not isinstance(raw_cohorts, Mapping) or not isinstance(raw_evidence, Mapping):
@@ -451,15 +359,37 @@ def validate_t087_t085_input_documents(
         validate_t085_evaluation_selection_evidence(cohorts, raw_evidence)
     except (TypeError, ValueError) as exc:
         raise T087IncompleteError("T085 selection evidence failed its accepted gate") from exc
-    if any(len(cohorts[name]) != count for name, count in T087_COHORT_COUNTS.items()):
-        raise T087IncompleteError("T085 A/B/C counts do not match the pinned selection")
+    expected_counts = {**T087_COHORT_COUNTS, "B@400": 48}
+    if any(len(cohorts[name]) != count for name, count in expected_counts.items()):
+        raise T087IncompleteError("T085 four-key selection counts are not exact")
     primary_ids = [
         record.selection_identity
         for cohort in ("A", "B", "C")
         for record in cohorts[cohort]
     ]
     if len(set(primary_ids)) != T087_NATURAL_RECORD_COUNT:
-        raise T087IncompleteError("T085 A/B/C selection identities are not globally occurrence-safe")
+        raise T087IncompleteError(
+            "T085 A/B/C selection identities are not globally occurrence-safe"
+        )
+    return cohorts
+
+
+def _validate_t085_restore_document(
+    restore_document: Mapping[str, object],
+    *,
+    selection_document: Mapping[str, object],
+    selected_cohorts: Mapping[str, Sequence[T085BattleStartRecord]],
+    selection_reference: Mapping[str, object],
+) -> tuple[dict[str, dict[str, Mapping[str, object]]], dict[str, dict[str, object]], dict[str, dict[str, object]]]:
+    """Validate restore evidence and derive its canonical source chain."""
+
+    if (
+        restore_document.get("schema_id") != T085_RESTORE_SCHEMA_ID
+        or restore_document.get("task_id") != "T085"
+        or not isinstance(restore_document.get("native_identity"), Mapping)
+        or dict(restore_document["native_identity"]) != dict(T085_NATIVE_IDENTITY)
+    ):
+        raise T087IncompleteError("T085 restore artifact schema/task/native identity is wrong")
     if not (
         restore_document.get("complete") is True
         and restore_document.get("partial") is False
@@ -468,19 +398,12 @@ def validate_t087_t085_input_documents(
         and restore_document.get("search_invoked") is False
     ):
         raise T087IncompleteError("T085 restore evidence is not a complete outcome-blind gate")
-    selection_ref = restore_document.get("selection_artifact")
-    selection_path = artifact_references.get("selection")
-    if not isinstance(selection_ref, Mapping) or not isinstance(selection_path, Mapping):
-        raise T087IncompleteError("T085 selection artifact reference is missing")
-    if (
-        selection_ref.get("sha256") != T085_SELECTION_SHA256
-        or selection_path.get("sha256") != T085_SELECTION_SHA256
-        or not _ref_path_equal(selection_ref.get("path"), selection_path.get("path"))
-        or selection_ref.get("schema_id") != T085_SELECTION_SCHEMA_ID
-        or selection_ref.get("byte_count") != selection_path.get("byte_count")
-    ):
+    restore_selection = _reference_identity(
+        restore_document.get("selection_artifact"),
+        "T085 restore selection artifact",
+    )
+    if not _same_reference(restore_selection, selection_reference):
         raise T087IncompleteError("T085 restore evidence points to a different selection artifact")
-    _verify_artifact_reference(selection_path, "T085 selection artifact")
     raw_restore_rows = restore_document.get("restore_evidence")
     if not isinstance(raw_restore_rows, Sequence) or isinstance(raw_restore_rows, (str, bytes)):
         raise T087IncompleteError("T085 restore evidence rows are unavailable")
@@ -495,9 +418,168 @@ def validate_t087_t085_input_documents(
         if not isinstance(raw, Mapping) or raw.get("cohort") not in restore_by_cohort:
             raise T087IncompleteError("T085 restore evidence row is malformed")
         identity = raw.get("selection_identity")
-        if not isinstance(identity, str) or identity in restore_by_cohort[str(raw["cohort"])]:
+        cohort = str(raw["cohort"])
+        if not isinstance(identity, str) or not identity or identity in restore_by_cohort[cohort]:
             raise T087IncompleteError("T085 restore evidence contains duplicate identity")
-        restore_by_cohort[str(raw["cohort"])][identity] = dict(raw)
+        restore_by_cohort[cohort][identity] = dict(raw)
+
+    for cohort in ("A", "B", "C"):
+        selected_ids = {
+            record.selection_identity
+            for record in selected_cohorts.get(cohort, ())
+        }
+        if (
+            len(restore_by_cohort[cohort]) != T087_COHORT_COUNTS[cohort]
+            or set(restore_by_cohort[cohort]) != selected_ids
+        ):
+            raise T087IncompleteError(
+                f"T085 restore evidence does not cover the exact selected {cohort} identities"
+            )
+
+    selection_evidence = selection_document.get("selection_evidence")
+    source_bindings = restore_document.get("source_bindings")
+    if not isinstance(selected_cohorts, Mapping) or not isinstance(selection_evidence, Mapping):
+        raise T087IncompleteError("T085 selection source evidence is unavailable")
+    if not isinstance(source_bindings, Mapping) or set(source_bindings) != {"A", "B", "C"}:
+        raise T087IncompleteError("T085 restore canonical source bindings are incomplete")
+
+    canonical_refs: dict[str, dict[str, object]] = {}
+    source_manifest_refs: dict[str, dict[str, object]] = {}
+    for cohort in ("A", "B", "C"):
+        binding = source_bindings.get(cohort)
+        if not isinstance(binding, Mapping):
+            raise T087IncompleteError(f"T085 restore source binding {cohort} is malformed")
+        expected_keys = {"map"} if cohort == "A" else {"map", "source_manifest"}
+        if set(binding) != expected_keys:
+            raise T087IncompleteError(f"T085 restore source binding {cohort} is incomplete")
+        map_reference = _reference_identity(
+            binding.get("map"), f"T085 canonical {cohort} source"
+        )
+        if map_reference.get("schema_id") != T085_CANONICAL_SOURCE_SCHEMA_IDS[cohort]:
+            raise T087IncompleteError(f"T085 canonical {cohort} source schema is not current")
+        if cohort == "A":
+            evidence = selection_evidence.get("A")
+            if not isinstance(evidence, Mapping):
+                raise T087IncompleteError("T085 selection evidence A is missing")
+            a_reference = _reference_identity(
+                evidence.get("artifact"), "T085 selection evidence A artifact"
+            )
+            if not _same_reference(map_reference, a_reference) or map_reference.get(
+                "sha256"
+            ) != T052_COHORT_SHA256:
+                raise T087IncompleteError("T085 canonical A source is not the accepted T052 artifact")
+        else:
+            evidence = selection_evidence.get(cohort)
+            if not isinstance(evidence, Mapping):
+                raise T087IncompleteError(f"T085 selection evidence {cohort} is missing")
+            manifest_reference = _reference_identity(
+                binding.get("source_manifest"),
+                f"T085 canonical {cohort} source manifest",
+            )
+            evidence_manifest = _reference_identity(
+                evidence.get("source_manifest"),
+                f"T085 selection evidence {cohort} source manifest",
+            )
+            expected_manifest_sha = (
+                T085_B_SOURCE_MANIFEST_SHA256
+                if cohort == "B"
+                else T085_C_SOURCE_MANIFEST_SHA256
+            )
+            if (
+                not _same_reference(manifest_reference, evidence_manifest)
+                or manifest_reference.get("sha256") != expected_manifest_sha
+                or manifest_reference.get("schema_id") != T085_SOURCE_MANIFEST_SCHEMA_ID
+            ):
+                raise T087IncompleteError(
+                    f"T085 canonical {cohort} source manifest is substituted"
+                )
+            source_manifest_refs[cohort] = manifest_reference
+        _validate_gate_reference_shape(map_reference, f"T085 canonical {cohort} source")
+        canonical_refs[cohort] = map_reference
+    return restore_by_cohort, canonical_refs, source_manifest_refs
+
+
+def _validate_t085_document_chain(
+    *,
+    selection_document: Mapping[str, object],
+    restore_document: Mapping[str, object],
+    artifact_references: Mapping[str, Mapping[str, object]],
+) -> tuple[
+    dict[str, tuple[T085BattleStartRecord, ...]],
+    dict[str, dict[str, Mapping[str, object]]],
+    dict[str, dict[str, object]],
+    dict[str, dict[str, object]],
+    dict[str, object],
+]:
+    """Validate the minimum direct selection/restore/source dependency chain."""
+
+    if not isinstance(artifact_references, Mapping) or set(artifact_references) != {
+        "selection",
+        "restore",
+    }:
+        raise T087IncompleteError("T085 input artifact references must be selection and restore only")
+    selection_reference = _validate_gate_reference_shape(
+        artifact_references.get("selection"), "T085 selection artifact"
+    )
+    restore_reference = _validate_gate_reference_shape(
+        artifact_references.get("restore"), "T085 restore evidence"
+    )
+    if (
+        selection_reference.get("sha256") != T085_SELECTION_SHA256
+        or selection_reference.get("schema_id") != T085_SELECTION_SCHEMA_ID
+        or restore_reference.get("sha256") != T085_RESTORE_SHA256
+        or restore_reference.get("schema_id") != T085_RESTORE_SCHEMA_ID
+    ):
+        raise T087IncompleteError("T085 selection/restore artifact reference is not pinned")
+    cohorts = _validate_t085_selection_document(selection_document)
+    restore_by_cohort, canonical_refs, source_manifest_refs = _validate_t085_restore_document(
+        restore_document,
+        selection_document=selection_document,
+        selected_cohorts=cohorts,
+        selection_reference=selection_reference,
+    )
+    return (
+        cohorts,
+        restore_by_cohort,
+        canonical_refs,
+        source_manifest_refs,
+        dict(selection_reference),
+    )
+
+
+def validate_t087_t085_input_documents(
+    *,
+    selection_document: Mapping[str, object],
+    restore_document: Mapping[str, object],
+    artifact_references: Mapping[str, Mapping[str, object]],
+    canonical_records_by_cohort: Mapping[str, Mapping[str, object]],
+    canonical_artifact_references: Mapping[str, Mapping[str, object]],
+) -> T087T085InputGate:
+    """Validate loaded T085 documents and exact canonical record bindings."""
+
+    if not isinstance(selection_document, Mapping) or not isinstance(restore_document, Mapping):
+        raise T087IncompleteError("T085 input documents are malformed")
+    if not isinstance(canonical_records_by_cohort, Mapping) or set(
+        canonical_records_by_cohort
+    ) != {"A", "B", "C"}:
+        raise T087IncompleteError("T085 canonical record maps are incomplete")
+    if not isinstance(canonical_artifact_references, Mapping) or set(
+        canonical_artifact_references
+    ) != {"A", "B", "C"}:
+        raise T087IncompleteError("T085 canonical artifact references are incomplete")
+    (
+        cohorts,
+        restore_by_cohort,
+        bound_canonical_refs,
+        source_manifest_refs,
+        selection_reference,
+    ) = (
+        _validate_t085_document_chain(
+            selection_document=selection_document,
+            restore_document=restore_document,
+            artifact_references=artifact_references,
+        )
+    )
     for cohort in ("A", "B", "C"):
         canonical = canonical_records_by_cohort.get(cohort)
         if canonical is None:
@@ -511,32 +593,19 @@ def validate_t087_t085_input_documents(
             canonical=canonical,
             restore_rows=restore_by_cohort[cohort],
         )
-        expected_ref = canonical_artifact_references.get(cohort)
-        binding = restore_document.get("source_bindings", {})
-        binding = binding.get(cohort) if isinstance(binding, Mapping) else None
-        map_ref = binding.get("map") if isinstance(binding, Mapping) else None
-        if not isinstance(expected_ref, Mapping) or not isinstance(map_ref, Mapping):
-            raise T087IncompleteError(f"T085 canonical {cohort} artifact reference is missing")
-        if (
-            expected_ref.get("sha256") != map_ref.get("sha256")
-            or not _ref_path_equal(expected_ref.get("path"), map_ref.get("path"))
-            or expected_ref.get("byte_count") != map_ref.get("byte_count")
-            or expected_ref.get("schema_id") != map_ref.get("schema_id")
-        ):
+        expected_ref = _validate_gate_reference_shape(
+            canonical_artifact_references.get(cohort),
+            f"T085 canonical {cohort} artifact",
+        )
+        if not _same_reference(expected_ref, bound_canonical_refs[cohort]):
             raise T087IncompleteError(f"T085 canonical {cohort} artifact was substituted")
-        _verify_artifact_reference(expected_ref, f"T085 canonical {cohort} artifact")
-    paired_binding = paired_document["selection_binding"]
-    for cohort in ("A", "B", "C", "B@400"):
-        binding = paired_binding.get(cohort) if isinstance(paired_binding, Mapping) else None
-        expected = [record.selection_identity for record in cohorts[cohort]]
-        if not isinstance(binding, Mapping) or binding.get("selected_identity_order") != expected:
-            raise T087IncompleteError(f"T085 paired report selection binding differs for {cohort}")
     return _verified_gate(
         cohorts=cohorts,
         canonical_records_by_cohort=canonical_records_by_cohort,
         artifact_references=artifact_references,
-        source_selection_manifest_identity=dict(selection_path),
+        source_selection_manifest_identity=selection_reference,
         canonical_artifact_references=canonical_artifact_references,
+        source_manifest_artifact_references=source_manifest_refs,
     )
 
 
@@ -544,7 +613,6 @@ def load_t087_t085_input_gate(
     *,
     selection_artifact_path: str | Path,
     restore_evidence_path: str | Path,
-    paired_report_path: str | Path,
     canonical_records_by_cohort: Mapping[str, Mapping[str, object]],
     canonical_artifact_references: Mapping[str, Mapping[str, object]],
 ) -> T087T085InputGate:
@@ -562,20 +630,12 @@ def load_t087_t085_input_gate(
         schema_id=T085_RESTORE_SCHEMA_ID,
         label="T085 restore evidence",
     )
-    paired, paired_ref = _read_hash_bound_json(
-        paired_report_path,
-        expected_sha256=T085_PAIRED_REPORT_SHA256,
-        schema_id=T085_PAIRED_SCHEMA_ID,
-        label="T085 paired report",
-    )
     return validate_t087_t085_input_documents(
         selection_document=selection,
         restore_document=restore,
-        paired_document=paired,
         artifact_references={
             "selection": selection_ref,
             "restore": restore_ref,
-            "paired": paired_ref,
         },
         canonical_records_by_cohort=canonical_records_by_cohort,
         canonical_artifact_references=canonical_artifact_references,
@@ -586,8 +646,9 @@ def _revalidate_t085_gate(gate: T087T085InputGate) -> T087T085InputGate:
     """Re-open the pinned T085 files at each execution boundary.
 
     The private token prevents public dataclass construction from becoming an
-    admission path.  Re-opening the three hash-bound documents also detects a
-    changed retained file or a stale gate before a simulator call.
+    admission path.  Re-opening the hash-bound documents and every canonical
+    source reference also detects a changed retained file or stale gate before
+    a simulator call.
     """
 
     try:
@@ -599,18 +660,13 @@ def _revalidate_t085_gate(gate: T087T085InputGate) -> T087T085InputGate:
                 "T085 input gate was not created by the verified loader"
             )
         refs = gate.artifact_references
-        if not isinstance(refs, Mapping) or set(refs) != {
-            "selection",
-            "restore",
-            "paired",
-        }:
+        if not isinstance(refs, Mapping) or set(refs) != {"selection", "restore"}:
             raise T087IncompleteError(
                 "T085 input gate artifact reference set is incomplete"
             )
         expected_documents = {
             "selection": (T085_SELECTION_SHA256, T085_SELECTION_SCHEMA_ID),
             "restore": (T085_RESTORE_SHA256, T085_RESTORE_SCHEMA_ID),
-            "paired": (T085_PAIRED_REPORT_SHA256, T085_PAIRED_SCHEMA_ID),
         }
         live_documents: dict[str, dict[str, object]] = {}
         live_refs: dict[str, dict[str, object]] = {}
@@ -645,10 +701,7 @@ def _revalidate_t085_gate(gate: T087T085InputGate) -> T087T085InputGate:
         for cohort, records in raw_cohorts.items():
             if not isinstance(records, Sequence) or isinstance(records, (str, bytes)):
                 raise T087IncompleteError(f"T085 input gate cohort {cohort} is malformed")
-            if any(
-                not isinstance(record, T085BattleStartRecord)
-                for record in records
-            ):
+            if any(not isinstance(record, T085BattleStartRecord) for record in records):
                 raise T087IncompleteError(
                     f"T085 input gate cohort {cohort} contains an unbound record"
                 )
@@ -670,6 +723,16 @@ def _revalidate_t085_gate(gate: T087T085InputGate) -> T087T085InputGate:
             raise T087IncompleteError("T085 canonical artifact reference set is incomplete")
         for cohort, reference in canonical_refs.items():
             _validate_gate_reference_shape(reference, f"T085 canonical {cohort} artifact")
+        source_manifest_refs = gate.source_manifest_artifact_references
+        if not isinstance(source_manifest_refs, Mapping) or set(source_manifest_refs) != {
+            "B",
+            "C",
+        }:
+            raise T087IncompleteError("T085 source-manifest artifact reference set is incomplete")
+        for cohort, reference in source_manifest_refs.items():
+            _validate_gate_reference_shape(
+                reference, f"T085 canonical {cohort} source manifest"
+            )
         source_identity = gate.source_selection_manifest_identity
         source_reference = _validate_gate_reference_shape(
             source_identity, "T085 selection-manifest identity"
@@ -685,7 +748,6 @@ def _revalidate_t085_gate(gate: T087T085InputGate) -> T087T085InputGate:
         live = validate_t087_t085_input_documents(
             selection_document=live_documents["selection"],
             restore_document=live_documents["restore"],
-            paired_document=live_documents["paired"],
             artifact_references=live_refs,
             canonical_records_by_cohort=canonical_maps,
             canonical_artifact_references=canonical_refs,
@@ -693,6 +755,11 @@ def _revalidate_t085_gate(gate: T087T085InputGate) -> T087T085InputGate:
         if (
             live.cohorts != gate.cohorts
             or live.canonical_records_by_cohort != gate.canonical_records_by_cohort
+            or dict(live.artifact_references) != dict(gate.artifact_references)
+            or dict(live.canonical_artifact_references)
+            != dict(gate.canonical_artifact_references)
+            or dict(live.source_manifest_artifact_references)
+            != dict(gate.source_manifest_artifact_references)
             or dict(live.source_selection_manifest_identity) != dict(source_reference)
         ):
             raise T087IncompleteError(
@@ -716,35 +783,7 @@ def load_t087_t085_selection_binding(
         schema_id=T085_SELECTION_SCHEMA_ID,
         label="T085 selection artifact",
     )
-    native = document.get("native_identity")
-    if (
-        document.get("task_id") != "T085"
-        or not isinstance(native, Mapping)
-        or dict(native) != dict(T085_NATIVE_IDENTITY)
-    ):
-        raise T087IncompleteError("T085 selection report binding is not pinned")
-    raw_cohorts = document.get("cohorts")
-    raw_evidence = document.get("selection_evidence")
-    if not isinstance(raw_cohorts, Mapping) or not isinstance(raw_evidence, Mapping):
-        raise T087IncompleteError("T085 selection report binding lacks current evidence")
-    try:
-        cohorts = {
-            str(cohort): tuple(
-                T085BattleStartRecord.from_mapping(item) for item in records
-            )
-            for cohort, records in raw_cohorts.items()
-            if isinstance(records, Sequence) and not isinstance(records, (str, bytes))
-        }
-    except (AttributeError, KeyError, TypeError, ValueError) as exc:
-        raise T087IncompleteError(
-            "T085 selection report binding cohort rows are malformed"
-        ) from exc
-    try:
-        validate_t085_evaluation_selection_evidence(cohorts, raw_evidence)
-    except (TypeError, ValueError) as exc:
-        raise T087IncompleteError("T085 selection report binding failed its accepted gate") from exc
-    if set(cohorts) != {"A", "B", "C", "B@400"}:
-        raise T087IncompleteError("T085 selection report binding cohort matrix is incomplete")
+    cohorts = _validate_t085_selection_document(document)
     return (
         {cohort: tuple(record.selection_identity for record in records) for cohort, records in cohorts.items()},
         reference,
@@ -755,12 +794,14 @@ def load_t087_t085_report_binding(
     *,
     selection_artifact_path: str | Path,
     restore_evidence_path: str | Path,
-    paired_report_path: str | Path,
 ) -> tuple[dict[str, tuple[str, ...]], dict[str, dict[str, object]]]:
-    """Verify all pinned T085 report inputs and retain their references."""
+    """Verify the direct T085 selection/restore/canonical source chain."""
 
-    identity_order, selection_ref = load_t087_t085_selection_binding(
-        selection_artifact_path
+    selection, selection_ref = _read_hash_bound_json(
+        selection_artifact_path,
+        expected_sha256=T085_SELECTION_SHA256,
+        schema_id=T085_SELECTION_SCHEMA_ID,
+        label="T085 selection artifact",
     )
     restore, restore_ref = _read_hash_bound_json(
         restore_evidence_path,
@@ -768,43 +809,25 @@ def load_t087_t085_report_binding(
         schema_id=T085_RESTORE_SCHEMA_ID,
         label="T085 restore evidence",
     )
-    paired, paired_ref = _read_hash_bound_json(
-        paired_report_path,
-        expected_sha256=T085_PAIRED_REPORT_SHA256,
-        schema_id=T085_PAIRED_SCHEMA_ID,
-        label="T085 paired report",
+    cohorts, _restore_rows, canonical_refs, source_manifest_refs, selection_identity = (
+        _validate_t085_document_chain(
+            selection_document=selection,
+            restore_document=restore,
+            artifact_references={"selection": selection_ref, "restore": restore_ref},
+        )
     )
-    if (
-        restore.get("task_id") != "T085"
-        or restore.get("schema_id") != T085_RESTORE_SCHEMA_ID
-        or not isinstance(restore.get("native_identity"), Mapping)
-        or dict(restore["native_identity"]) != dict(T085_NATIVE_IDENTITY)
-        or restore.get("complete") is not True
-        or restore.get("partial") is not False
-        or restore.get("restore_parity_passed") is not True
-        or restore.get("outcome_blind_selection") is not True
-        or restore.get("search_invoked") is not False
-    ):
-        raise T087IncompleteError("T085 restore report binding is not complete and outcome-blind")
-    restore_selection = restore.get("selection_artifact")
-    if not isinstance(restore_selection, Mapping) or dict(restore_selection) != selection_ref:
-        raise T087IncompleteError("T085 restore report binding points to a substituted selection")
-    restore_rows = restore.get("restore_evidence")
-    if not isinstance(restore_rows, Sequence) or isinstance(restore_rows, (str, bytes)) or len(restore_rows) != T087_NATURAL_RECORD_COUNT:
-        raise T087IncompleteError("T085 restore report binding does not contain exactly 413 rows")
-    binding = paired.get("selection_binding")
-    if not isinstance(binding, Mapping):
-        raise T087IncompleteError("T085 paired report binding is missing")
-    _validate_t087_paired_report_provenance(paired, paired_ref)
-    for cohort in ("A", "B", "C", "B@400"):
-        cohort_binding = binding.get(cohort)
-        if not isinstance(cohort_binding, Mapping) or cohort_binding.get("selected_identity_order") != list(identity_order[cohort]):
-            raise T087IncompleteError(f"T085 paired report binding differs for {cohort}")
-    return identity_order, {
-        "selection": selection_ref,
-        "restore": restore_ref,
-        "paired": paired_ref,
-    }
+    return (
+        {
+            cohort: tuple(record.selection_identity for record in records)
+            for cohort, records in cohorts.items()
+        },
+        {
+            "selection": selection_identity,
+            "restore": dict(restore_ref),
+            "canonical": canonical_refs,
+            "source_manifests": source_manifest_refs,
+        },
+    )
 
 
 def canonical_json_bytes(value: object) -> bytes:
@@ -1739,6 +1762,71 @@ def _terminal_raw(controlled: ControlledRun) -> Mapping[str, object]:
     return controlled.final_raw
 
 
+def _validate_t087_current_native_identity() -> dict[str, object]:
+    """Re-verify the current native source at every T087 execution boundary."""
+
+    try:
+        actual = _validate_t085_native_source_manifest(
+            "battle_search_v2",
+            expected_native_identity=T087_NATIVE_IDENTITY,
+        )
+    except (T085NativeExecutionError, OSError, RuntimeError, ValueError) as exc:
+        raise T087IncompleteError(
+            "T087 current-native lineage/source verification failed"
+        ) from exc
+    if actual != T087_NATIVE_IDENTITY:
+        raise T087IncompleteError(
+            "T087 current-native identity differs from the approved 960 identity"
+        )
+    return dict(actual)
+
+
+def _validate_t087_evaluator_contract(
+    *,
+    adapter: object,
+    controller: object,
+    seed: object,
+    max_steps: object,
+    action_space: object,
+) -> None:
+    """Check the frozen Search-v2 evaluator after construction and before run."""
+
+    if seed is not None or max_steps != 200:
+        raise T087IncompleteError("T087 evaluator seed/max_steps contract drifted")
+    if not isinstance(action_space, ActionSpaceConfig) or action_space.to_dict() != T087_ACTION_SPACE:
+        raise T087IncompleteError("T087 evaluator action space drifted")
+    adapter_values = (
+        getattr(adapter, "_search_simulations", None),
+        getattr(adapter, "_search_backend", None),
+        getattr(adapter, "_policy_prior_callback", object()),
+        getattr(adapter, "_leaf_value_callback", object()),
+        getattr(adapter, "_expected_native_identity", None),
+    )
+    if adapter_values != (100, "battle_search_v2", None, None, T087_NATIVE_IDENTITY):
+        raise T087IncompleteError("T087 native Search-v2 adapter contract drifted")
+    if (
+        getattr(controller, "simulations", None) != 100
+        or not isinstance(getattr(controller, "action_space", None), ActionSpaceConfig)
+        or controller.action_space.to_dict() != T087_ACTION_SPACE
+    ):
+        raise T087IncompleteError("T087 native Search-v2 controller contract drifted")
+    provenance = getattr(controller, "provenance", None)
+    provenance_values = provenance.to_dict() if hasattr(provenance, "to_dict") else None
+    if not isinstance(provenance_values, Mapping):
+        raise T087IncompleteError("T087 evaluator controller provenance is unavailable")
+    config = provenance_values.get("config")
+    if not isinstance(config, Mapping):
+        raise T087IncompleteError("T087 evaluator controller provenance config is unavailable")
+    if (
+        config.get("search_budget") != 100
+        or config.get("root_selection_rule") != "highest_mean"
+        or config.get("policy_prior_callback") is not None
+        or config.get("leaf_value_callback") is not None
+        or config.get("native_identity") != T087_NATIVE_IDENTITY
+    ):
+        raise T087IncompleteError("T087 evaluator provenance contract drifted")
+
+
 def _run_t087_native_record_verified(
     *,
     record: object,
@@ -1753,6 +1841,7 @@ def _run_t087_native_record_verified(
     it externally.  It never supplies a simulator/controller/per-record seed.
     """
 
+    _validate_t087_current_native_identity()
     try:
         restored_adapter = adapter_factory()
         restored, restore_method = restore_t085_canonical_record(
@@ -1771,6 +1860,13 @@ def _run_t087_native_record_verified(
         controller = T085UnguidedBattleSearchV2Controller(
             simulations=100,
             expected_native_identity=T087_NATIVE_IDENTITY,
+        )
+        _validate_t087_evaluator_contract(
+            adapter=adapter,
+            controller=controller,
+            seed=None,
+            max_steps=200,
+            action_space=ActionSpaceConfig.initial_no_potions(),
         )
         controlled = execute_controlled_run(
             adapter,
@@ -1929,6 +2025,7 @@ def run_t087_natural_evaluation(
     verified_gate = _revalidate_t085_gate(t085_input_gate) if t085_input_gate is not None else None
     if verified_gate is None:
         raise T087IncompleteError("T085 hash-bound input gate is required before natural execution")
+    _validate_t087_current_native_identity()
     if not isinstance(records_by_cohort, Mapping) or not isinstance(
         canonical_records_by_cohort, Mapping
     ):
@@ -1994,6 +2091,7 @@ def _run_t087_hp_rescue_variant_verified(
     if isinstance(extra_hp, bool) or not isinstance(extra_hp, int) or extra_hp < 0:
         raise T087IncompleteError("HP rescue extra_hp must be a non-negative integer")
     identity = _record_identity(record)
+    _validate_t087_current_native_identity()
     try:
         restored_adapter = adapter_factory()
         restored, restore_method = restore_t085_canonical_record(
@@ -2028,6 +2126,13 @@ def _run_t087_hp_rescue_variant_verified(
         controller = T085UnguidedBattleSearchV2Controller(
             simulations=100,
             expected_native_identity=T087_NATIVE_IDENTITY,
+        )
+        _validate_t087_evaluator_contract(
+            adapter=adapter,
+            controller=controller,
+            seed=None,
+            max_steps=200,
+            action_space=ActionSpaceConfig.initial_no_potions(),
         )
         controlled = execute_controlled_run(
             adapter,
@@ -2125,6 +2230,7 @@ def run_t087_hp_rescue(
     verified_gate = _revalidate_t085_gate(t085_input_gate) if t085_input_gate is not None else None
     if verified_gate is None:
         raise T087IncompleteError("T085 hash-bound input gate is required before HP rescue")
+    _validate_t087_current_native_identity()
     if not isinstance(records_by_identity, Mapping) or not isinstance(
         canonical_records_by_cohort, Mapping
     ):
@@ -2311,6 +2417,116 @@ def _manifest_digest_is_current(manifest: Mapping[str, object]) -> bool:
         return False
 
 
+def _validate_reference_identity_shape(value: object) -> bool:
+    """Validate an embedded reference without rehashing a large source file."""
+
+    if not isinstance(value, Mapping) or set(value) != {
+        "path",
+        "sha256",
+        "schema_id",
+        "byte_count",
+    }:
+        return False
+    return (
+        isinstance(value.get("path"), str)
+        and bool(value.get("path"))
+        and isinstance(value.get("sha256"), str)
+        and len(value["sha256"]) == 64
+        and all(character in "0123456789abcdef" for character in value["sha256"])
+        and isinstance(value.get("schema_id"), str)
+        and bool(value.get("schema_id"))
+        and isinstance(value.get("byte_count"), int)
+        and not isinstance(value.get("byte_count"), bool)
+        and value["byte_count"] >= 0
+    )
+
+
+def _validate_t087_input_reference_container(
+    value: object,
+    label: str,
+    problems: list[str],
+) -> bool:
+    """Validate the direct T085 selection/restore/source reference shape."""
+
+    expected_keys = {"selection", "restore", "canonical", "source_manifests"}
+    if not isinstance(value, Mapping) or set(value) != expected_keys:
+        problems.append(
+            f"{label} must contain selection, restore, canonical, and source-manifests references"
+        )
+        return False
+    expected_documents = {
+        "selection": (T085_SELECTION_SHA256, T085_SELECTION_SCHEMA_ID),
+        "restore": (T085_RESTORE_SHA256, T085_RESTORE_SCHEMA_ID),
+    }
+    for role, (expected_sha, expected_schema) in expected_documents.items():
+        reference = value.get(role)
+        if not isinstance(reference, Mapping):
+            problems.append(f"{label}.{role} reference is malformed")
+            continue
+        if reference.get("sha256") != expected_sha or reference.get("schema_id") != expected_schema:
+            problems.append(f"{label}.{role} reference is not pinned")
+            continue
+        if not _validate_reference_identity_shape(reference):
+            problems.append(f"{label}.{role} reference identity is malformed")
+
+    canonical = value.get("canonical")
+    if not isinstance(canonical, Mapping) or set(canonical) != {"A", "B", "C"}:
+        problems.append(f"{label}.canonical references are incomplete")
+    else:
+        for cohort in ("A", "B", "C"):
+            reference = canonical.get(cohort)
+            if not isinstance(reference, Mapping):
+                problems.append(f"{label}.canonical.{cohort} reference is malformed")
+                continue
+            if reference.get("schema_id") != T085_CANONICAL_SOURCE_SCHEMA_IDS[cohort]:
+                problems.append(f"{label}.canonical.{cohort} schema is not current")
+            if not _validate_reference_identity_shape(reference):
+                problems.append(
+                    f"{label}.canonical.{cohort} reference identity is malformed"
+                )
+
+    manifests = value.get("source_manifests")
+    if not isinstance(manifests, Mapping) or set(manifests) != {"B", "C"}:
+        problems.append(f"{label}.source_manifests references are incomplete")
+    else:
+        expected_manifests = {
+            "B": T085_B_SOURCE_MANIFEST_SHA256,
+            "C": T085_C_SOURCE_MANIFEST_SHA256,
+        }
+        for cohort, expected_sha in expected_manifests.items():
+            reference = manifests.get(cohort)
+            if not isinstance(reference, Mapping):
+                problems.append(f"{label}.source_manifests.{cohort} reference is malformed")
+                continue
+            if (
+                reference.get("sha256") != expected_sha
+                or reference.get("schema_id") != T085_SOURCE_MANIFEST_SCHEMA_ID
+            ):
+                problems.append(f"{label}.source_manifests.{cohort} reference is not pinned")
+            if not _validate_reference_identity_shape(reference):
+                problems.append(
+                    f"{label}.source_manifests.{cohort} reference identity is malformed"
+                )
+    return True
+
+
+def _is_t087_commit_sha(value: object) -> bool:
+    return isinstance(value, str) and len(value) == 40 and all(
+        character in "0123456789abcdef" for character in value
+    )
+
+
+def _is_t087_lineage_source_verification(value: object) -> bool:
+    return (
+        isinstance(value, Mapping)
+        and value.get("passed") is True
+        and value.get("historical_native_identity") == T085_NATIVE_IDENTITY
+        and value.get("current_native_identity") == T087_NATIVE_IDENTITY
+        and value.get("historical_is_ancestor") is True
+        and value.get("source_verifier_passed") is True
+    )
+
+
 def _validate_artifact_surfaces(
     artifact_references: Mapping[str, Mapping[str, object]] | None,
     retention_inputs: Mapping[str, object] | None,
@@ -2356,9 +2572,21 @@ def _validate_artifact_surfaces(
     if not isinstance(retention_inputs, Mapping):
         problems.append("T087 retention inputs are missing")
         return
-    for key in ("stable_root", "regeneration_command", "raw_deletion_condition"):
+    for key in (
+        "stable_root",
+        "regeneration_command",
+        "raw_deletion_condition",
+        "native_lineage_source_verification_path",
+    ):
         if not isinstance(retention_inputs.get(key), str) or not retention_inputs[key]:
             problems.append(f"T087 retention input {key} is missing")
+    run_head = retention_inputs.get("t087_run_head")
+    if not _is_t087_commit_sha(run_head):
+        problems.append("T087 retention implementation/run head is missing or malformed")
+    if not _is_t087_lineage_source_verification(
+        retention_inputs.get("native_lineage_source_verification")
+    ):
+        problems.append("T087 retention lineage/source-verifier result is not the accepted chain")
     regeneration_command = retention_inputs.get("regeneration_command")
     required_arguments = (
         "--natural",
@@ -2366,7 +2594,8 @@ def _validate_artifact_surfaces(
         "--audit-traces",
         "--t085-selection",
         "--t085-restore",
-        "--t085-paired",
+        "--run-head",
+        "--native-lineage-source-verification",
         "--report",
         "--artifact-root",
     )
@@ -2375,55 +2604,74 @@ def _validate_artifact_surfaces(
     ):
         problems.append("T087 regeneration command does not bind every required input")
     t085_references = retention_inputs.get("t085_input_artifact_references")
-    if not isinstance(t085_references, Mapping) or set(t085_references) != {
-        "selection",
-        "restore",
-        "paired",
-    }:
-        problems.append("T087 retention inputs lack all three pinned T085 references")
-    else:
-        expected_t085 = {
-            "selection": (T085_SELECTION_SHA256, T085_SELECTION_SCHEMA_ID),
-            "restore": (T085_RESTORE_SHA256, T085_RESTORE_SCHEMA_ID),
-            "paired": (T085_PAIRED_REPORT_SHA256, T085_PAIRED_SCHEMA_ID),
-        }
-        for role, (expected_sha256, expected_schema_id) in expected_t085.items():
-            reference = t085_references.get(role)
-            if not isinstance(reference, Mapping):
-                problems.append(f"T087 retention T085 {role} reference is malformed")
-                continue
-            if (
-                reference.get("sha256") != expected_sha256
-                or reference.get("schema_id") != expected_schema_id
-            ):
-                problems.append(f"T087 retention T085 {role} reference is not pinned")
+    _validate_t087_input_reference_container(
+        t085_references, "T087 retention T085 input", problems
+    )
 
 
 def _validate_t085_report_inputs(
     references: Mapping[str, Mapping[str, object]] | None,
     rows: Sequence[Mapping[str, object]],
     problems: list[str],
+    selection_identity_order: Mapping[str, Sequence[str]] | None = None,
 ) -> None:
-    expected = {
-        "selection": (T085_SELECTION_SHA256, T085_SELECTION_SCHEMA_ID),
-        "restore": (T085_RESTORE_SHA256, T085_RESTORE_SCHEMA_ID),
-        "paired": (T085_PAIRED_REPORT_SHA256, T085_PAIRED_SCHEMA_ID),
-    }
-    if not isinstance(references, Mapping) or set(references) != set(expected):
-        problems.append("all three pinned T085 input artifact references are required")
+    if not _validate_t087_input_reference_container(
+        references, "T087 report T085 input", problems
+    ):
         return
-    for role, (sha256, schema_id) in expected.items():
-        reference = references.get(role)
-        if not isinstance(reference, Mapping):
-            problems.append(f"T085 {role} artifact reference is malformed")
-            continue
-        if reference.get("sha256") != sha256 or reference.get("schema_id") != schema_id:
-            problems.append(f"T085 {role} artifact reference is not pinned")
-            continue
-        try:
-            _verify_artifact_reference(reference, f"T085 {role} artifact")
-        except T087IncompleteError as exc:
-            problems.append(str(exc))
+    selection_reference = references.get("selection")
+    restore_reference = references.get("restore")
+    if not isinstance(selection_reference, Mapping) or not isinstance(restore_reference, Mapping):
+        return
+    try:
+        selection_document, live_selection = _read_hash_bound_json(
+            selection_reference["path"],
+            expected_sha256=T085_SELECTION_SHA256,
+            schema_id=T085_SELECTION_SCHEMA_ID,
+            label="T085 selection artifact",
+        )
+        restore_document, live_restore = _read_hash_bound_json(
+            restore_reference["path"],
+            expected_sha256=T085_RESTORE_SHA256,
+            schema_id=T085_RESTORE_SCHEMA_ID,
+            label="T085 restore evidence",
+        )
+        if dict(live_selection) != dict(selection_reference) or dict(live_restore) != dict(restore_reference):
+            raise T087IncompleteError("T087 report T085 selection/restore references are stale")
+        expected_order, _restore_rows, canonical_refs, source_manifest_refs, _selection = (
+            _validate_t085_document_chain(
+                selection_document=selection_document,
+                restore_document=restore_document,
+                artifact_references={
+                    "selection": dict(selection_reference),
+                    "restore": dict(restore_reference),
+                },
+            )
+        )
+        supplied_canonical = references.get("canonical")
+        supplied_manifests = references.get("source_manifests")
+        if not isinstance(supplied_canonical, Mapping) or any(
+            not _same_reference(supplied_canonical.get(cohort), canonical_refs[cohort])
+            for cohort in ("A", "B", "C")
+        ):
+            raise T087IncompleteError("T087 report canonical source references are not restore-bound")
+        if not isinstance(supplied_manifests, Mapping) or any(
+            not _same_reference(supplied_manifests.get(cohort), source_manifest_refs[cohort])
+            for cohort in ("B", "C")
+        ):
+            raise T087IncompleteError("T087 report source-manifest references are not restore-bound")
+        if selection_identity_order is not None:
+            if {
+                cohort: tuple(values)
+                for cohort, values in selection_identity_order.items()
+            } != {
+                cohort: tuple(record.selection_identity for record in records)
+                for cohort, records in expected_order.items()
+            }:
+                raise T087IncompleteError("T087 report selection order is not bound to the pinned artifact")
+    except (KeyError, TypeError, T087IncompleteError, ValueError, OSError) as exc:
+        problems.append(f"T087 report T085 direct input chain is invalid: {exc}")
+        return
     selection = references.get("selection")
     if not isinstance(selection, Mapping):
         return
@@ -2818,7 +3066,9 @@ def build_t087_report(
     artifact_references: Mapping[str, Mapping[str, object]] | None = None,
     retention_inputs: Mapping[str, object] | None = None,
     t085_selection_identity_order: Mapping[str, Sequence[str]] | None = None,
-    t085_input_artifact_references: Mapping[str, Mapping[str, object]] | None = None,
+    t085_input_artifact_references: Mapping[str, object] | None = None,
+    t087_run_head: str | None = None,
+    native_lineage_source_verification: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
     """Build a current-schema report and exactly one T087 terminal class."""
 
@@ -2881,7 +3131,12 @@ def build_t087_report(
         blind_bundle, hidden_provenance, audit_validation = _validate_audit_surface(
             audit_manifest, trace_rows, natural_by_id, problems
         )
-    _validate_t085_report_inputs(t085_input_artifact_references, rows, problems)
+    _validate_t085_report_inputs(
+        t085_input_artifact_references,
+        rows,
+        problems,
+        t085_selection_identity_order,
+    )
     _validate_artifact_surfaces(artifact_references, retention_inputs, problems)
     if (
         isinstance(retention_inputs, Mapping)
@@ -2889,6 +3144,21 @@ def build_t087_report(
         != t085_input_artifact_references
     ):
         problems.append("T087 retention and report T085 input references are not identical")
+    if not _is_t087_commit_sha(t087_run_head):
+        problems.append("T087 exact implementation/run head is missing or malformed")
+    if not isinstance(native_lineage_source_verification, Mapping):
+        problems.append("T087 native lineage/source-verifier result is missing")
+    elif not _is_t087_lineage_source_verification(
+        native_lineage_source_verification
+    ):
+        problems.append("T087 native lineage/source-verifier result is not the accepted chain")
+    if isinstance(retention_inputs, Mapping):
+        if retention_inputs.get("t087_run_head") != t087_run_head:
+            problems.append("T087 retention and report implementation/run heads differ")
+        if retention_inputs.get("native_lineage_source_verification") != native_lineage_source_verification:
+            problems.append(
+                "T087 retention and report lineage/source-verifier results differ"
+            )
     outcome_counts = Counter(str(row.get("outcome")) for row in rows)
     by_cohort = {
         cohort: {
@@ -2941,6 +3211,7 @@ def build_t087_report(
         "task_id": T087_TASK_ID,
         "approved_spec": T087_APPROVED_SPEC,
         "base_commit": T087_BASE_COMMIT,
+        "implementation_run_head": t087_run_head,
         "native_change_required": True,
         "native_base_commit": T085_NATIVE_COMMIT,
         "native_identity": {
@@ -2961,12 +3232,28 @@ def build_t087_report(
             "native_commit": T085_NATIVE_COMMIT,
             "selection_sha256": T085_SELECTION_SHA256,
             "restore_evidence_sha256": T085_RESTORE_SHA256,
-            "paired_report_sha256": T085_PAIRED_REPORT_SHA256,
             "t052_cohort_sha256": T052_COHORT_SHA256,
             "selection_identity_order_bound": t085_selection_identity_order is not None,
             "selection_identity_order": dict(t085_selection_identity_order or {}),
+            "canonical_source_artifacts": (
+                dict(t085_input_artifact_references.get("canonical", {}))
+                if isinstance(t085_input_artifact_references, Mapping)
+                and isinstance(t085_input_artifact_references.get("canonical"), Mapping)
+                else {}
+            ),
+            "source_manifest_artifacts": (
+                dict(t085_input_artifact_references.get("source_manifests", {}))
+                if isinstance(t085_input_artifact_references, Mapping)
+                and isinstance(t085_input_artifact_references.get("source_manifests"), Mapping)
+                else {}
+            ),
         },
         "t085_input_artifact_references": dict(t085_input_artifact_references or {}),
+        "native_lineage_source_verification": (
+            dict(native_lineage_source_verification)
+            if isinstance(native_lineage_source_verification, Mapping)
+            else None
+        ),
         "natural_execution": {
             "expected_count": T087_NATURAL_RECORD_COUNT,
             "observed_count": len(rows),
@@ -3030,7 +3317,6 @@ def write_t087_json_artifact(
 
 __all__ = [
     "T085_NATIVE_COMMIT",
-    "T085_PAIRED_REPORT_SHA256",
     "T085_RESTORE_SHA256",
     "T085_SELECTION_SHA256",
     "T087_APPROVED_SPEC",

@@ -3,18 +3,19 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
+from types import SimpleNamespace
 
 import pytest
 
 import sts_combat_rl.sim.t087_dense_combat_diagnostics as diagnostics
 from sts_combat_rl.sim.t087_dense_combat_diagnostics import (
     T085_NATIVE_IDENTITY,
-    T085_PAIRED_REPORT_SHA256,
-    T085_PAIRED_SCHEMA_ID,
     T085_SELECTION_SCHEMA_ID,
     T087_ACTION_SPACE,
     T087_APPROVED_SPEC,
     T087_NATIVE_COMMIT,
+    T087_NATIVE_IDENTITY,
     T087IncompleteError,
     T087T085InputGate,
     battle_snapshot_evidence,
@@ -271,48 +272,12 @@ def test_report_accepts_and_retains_the_four_key_t085_selection_matrix() -> None
     )
 
 
-def _legacy_t085_paired_report() -> dict[str, object]:
-    identity_order = {
-        "A": ["A-0"],
-        "B": [],
-        "C": [],
-        "B@400": ["B400-0"],
-    }
-    return {
-        "schema_id": T085_PAIRED_SCHEMA_ID,
-        "selection_binding": {
-            cohort: {"selected_identity_order": list(identities)}
-            for cohort, identities in identity_order.items()
-        },
-        "outcomes": [
-            {
-                "task_id": "T085",
-                "native_execution_provenance": {
-                    "native_identity": dict(T085_NATIVE_IDENTITY),
-                    "arm": "baseline",
-                },
-            }
-        ],
-    }
-
-
-def _load_test_paired_report_binding(
-    monkeypatch,
-    paired: dict[str, object],
-    *,
-    paired_sha256: str = T085_PAIRED_REPORT_SHA256,
-):
+def test_t087_direct_input_binding_has_no_paired_dependency(monkeypatch) -> None:
     selection_ref = {
         "path": "/stable/t085-selection.json",
         "sha256": "selection-sha",
         "schema_id": T085_SELECTION_SCHEMA_ID,
         "byte_count": 1,
-    }
-    identity_order = {
-        "A": ("A-0",),
-        "B": (),
-        "C": (),
-        "B@400": ("B400-0",),
     }
     restore_ref = {
         "path": "/stable/t085-restore.json",
@@ -320,122 +285,111 @@ def _load_test_paired_report_binding(
         "schema_id": "t085-native-selection-restore-evidence-v1",
         "byte_count": 1,
     }
-    restore = {
-        "task_id": "T085",
-        "schema_id": "t085-native-selection-restore-evidence-v1",
-        "native_identity": dict(T085_NATIVE_IDENTITY),
-        "complete": True,
-        "partial": False,
-        "restore_parity_passed": True,
-        "outcome_blind_selection": True,
-        "search_invoked": False,
-        "selection_artifact": selection_ref,
-        "restore_evidence": [{} for _ in range(413)],
+    documents = {
+        "T085 selection artifact": ({}, selection_ref),
+        "T085 restore evidence": ({}, restore_ref),
     }
-    paired_ref = {
-        "path": "/stable/t085-paired-report.json",
-        "sha256": paired_sha256,
-        "schema_id": T085_PAIRED_SCHEMA_ID,
-        "byte_count": 1,
-    }
-
-    monkeypatch.setattr(
-        diagnostics,
-        "load_t087_t085_selection_binding",
-        lambda _path: (identity_order, selection_ref),
-    )
+    labels: list[str] = []
 
     def read_hash_bound(_path, *, label, **_kwargs):
-        if label == "T085 restore evidence":
-            return restore, restore_ref
-        if label == "T085 paired report":
-            return paired, paired_ref
-        raise AssertionError(label)
+        labels.append(label)
+        return documents[label]
+
+    def direct_chain(**kwargs):
+        assert set(kwargs["artifact_references"]) == {"selection", "restore"}
+        cohorts = {
+            cohort: (SimpleNamespace(selection_identity=cohort),)
+            for cohort in ("A", "B", "C", "B@400")
+        }
+        return cohorts, {}, {"A": {}, "B": {}, "C": {}}, {"B": {}, "C": {}}, selection_ref
 
     monkeypatch.setattr(diagnostics, "_read_hash_bound_json", read_hash_bound)
-    return load_t087_t085_report_binding(
+    monkeypatch.setattr(diagnostics, "_validate_t085_document_chain", direct_chain)
+    identity_order, references = load_t087_t085_report_binding(
         selection_artifact_path="/stable/t085-selection.json",
         restore_evidence_path="/stable/t085-restore.json",
-        paired_report_path="/stable/t085-paired-report.json",
     )
 
-
-def test_t087_exact_legacy_paired_report_shape_passes_without_mutation(
-    monkeypatch,
-) -> None:
-    paired = _legacy_t085_paired_report()
-    before = repr(paired)
-    identity_order, references = _load_test_paired_report_binding(monkeypatch, paired)
-
-    assert identity_order["B@400"] == ("B400-0",)
-    assert references["paired"]["sha256"] == T085_PAIRED_REPORT_SHA256
-    assert "task_id" not in paired
-    assert "native_execution_provenance" not in paired
-    assert repr(paired) == before
-    assert T087_APPROVED_SPEC == "bc374087c9f4db8972282a3a4c92fa6c027e5f23"
+    assert labels == ["T085 selection artifact", "T085 restore evidence"]
+    assert set(identity_order) == {"A", "B", "C", "B@400"}
+    assert set(references) == {"selection", "restore", "canonical", "source_manifests"}
+    assert "paired" not in references
+    assert "paired_report_path" not in inspect.signature(
+        load_t087_t085_report_binding
+    ).parameters
 
 
-@pytest.mark.parametrize(
-    "case",
-    (
-        "missing_row_task_id",
-        "conflicting_row_task_id",
-        "missing_row_native_provenance",
-        "conflicting_nested_native_commit",
-        "conflicting_top_level_task_id",
-        "conflicting_top_level_native_provenance",
-        "different_sha",
-        "missing_selection_binding",
-    ),
-)
-def test_t087_legacy_paired_report_migration_fails_closed(monkeypatch, case) -> None:
-    paired = _legacy_t085_paired_report()
-    paired_sha256 = T085_PAIRED_REPORT_SHA256
-    row = paired["outcomes"][0]
-    if case == "missing_row_task_id":
-        row.pop("task_id")
-    elif case == "conflicting_row_task_id":
-        row["task_id"] = "T084"
-    elif case == "missing_row_native_provenance":
-        row.pop("native_execution_provenance")
-    elif case == "conflicting_nested_native_commit":
-        row["native_execution_provenance"] = {
-            "native_identity": dict(T085_NATIVE_IDENTITY, commit="not-d62")
-        }
-    elif case == "conflicting_top_level_task_id":
-        paired["task_id"] = "T084"
-    elif case == "conflicting_top_level_native_provenance":
-        paired["native_execution_provenance"] = {
-            "native_identity": {
-                **T085_NATIVE_IDENTITY,
-                "commit": "not-d62",
-            }
-        }
-    elif case == "different_sha":
-        paired_sha256 = "0" * 64
-    elif case == "missing_selection_binding":
-        paired.pop("selection_binding")
-    else:  # pragma: no cover - the parameter list is exhaustive
-        raise AssertionError(case)
-
+def test_t087_direct_chain_rejects_withdrawn_paired_reference() -> None:
     with pytest.raises(T087IncompleteError):
-        _load_test_paired_report_binding(
-            monkeypatch,
-            paired,
-            paired_sha256=paired_sha256,
+        diagnostics._validate_t085_document_chain(
+            selection_document={},
+            restore_document={},
+            artifact_references={
+                "selection": {},
+                "restore": {},
+                "paired": {},
+            },
         )
 
 
-def test_t087_current_paired_report_provenance_branch_remains_valid(
-    monkeypatch,
-) -> None:
-    paired = _legacy_t085_paired_report()
-    paired["task_id"] = "T085"
-    paired["native_execution_provenance"] = {
-        "native_identity": dict(T085_NATIVE_IDENTITY)
-    }
+def test_t087_command_has_no_paired_option() -> None:
+    from sts_combat_rl.commands.t087_dense_combat_diagnostics import build_parser
 
-    _load_test_paired_report_binding(monkeypatch, paired)
+    assert T087_APPROVED_SPEC == "64a139ae03ce4a5ca186d50b1a049d17b30a47e4"
+    option_strings = {
+        option
+        for action in build_parser()._actions
+        for option in action.option_strings
+    }
+    assert "--t085-paired" not in option_strings
+
+
+def test_t087_evaluator_contract_rejects_search_drift() -> None:
+    adapter = SimpleNamespace(
+        _search_simulations=100,
+        _search_backend="battle_search_v2",
+        _policy_prior_callback=None,
+        _leaf_value_callback=None,
+        _expected_native_identity=dict(T087_NATIVE_IDENTITY),
+    )
+    config = {
+        "search_budget": 100,
+        "root_selection_rule": "highest_mean",
+        "policy_prior_callback": None,
+        "leaf_value_callback": None,
+        "native_identity": dict(T087_NATIVE_IDENTITY),
+    }
+    controller = SimpleNamespace(
+        simulations=100,
+        action_space=diagnostics.ActionSpaceConfig.initial_no_potions(),
+        provenance=SimpleNamespace(to_dict=lambda: {"config": config}),
+    )
+    diagnostics._validate_t087_evaluator_contract(
+        adapter=adapter,
+        controller=controller,
+        seed=None,
+        max_steps=200,
+        action_space=diagnostics.ActionSpaceConfig.initial_no_potions(),
+    )
+    adapter._search_simulations = 99
+    with pytest.raises(T087IncompleteError):
+        diagnostics._validate_t087_evaluator_contract(
+            adapter=adapter,
+            controller=controller,
+            seed=None,
+            max_steps=200,
+            action_space=diagnostics.ActionSpaceConfig.initial_no_potions(),
+        )
+
+
+def test_t087_current_native_lineage_verification_is_fail_closed(monkeypatch) -> None:
+    monkeypatch.setattr(
+        diagnostics,
+        "_validate_t085_native_source_manifest",
+        lambda *_args, **_kwargs: dict(T087_NATIVE_IDENTITY, commit="wrong"),
+    )
+    with pytest.raises(T087IncompleteError, match="current-native"):
+        diagnostics._validate_t087_current_native_identity()
 
 
 def test_sequence_alone_cannot_claim_enemy_occurrence_completeness() -> None:
