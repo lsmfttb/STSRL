@@ -10,7 +10,6 @@ import pytest
 
 import sts_combat_rl.sim.t087_dense_combat_diagnostics as diagnostics
 from sts_combat_rl.sim.t087_dense_combat_diagnostics import (
-    T085_NATIVE_IDENTITY,
     T085_SELECTION_SCHEMA_ID,
     T087_ACTION_SPACE,
     T087_APPROVED_SPEC,
@@ -59,11 +58,42 @@ def _row(identity: str, cohort: str, *, win: bool, remaining: float = 0.5):
         "player_current_hp": 60 if win else 0,
         "player_max_hp": 80,
         "enemies": (
-            [{"id": "JawWorm", "current_hp": 0}, {"id": "Cultist", "current_hp": 0}]
+            [
+                {
+                    "id": "JawWorm",
+                    "current_hp": 0,
+                    "max_hp": 20,
+                    "alive": False,
+                    "targetable": False,
+                    "half_dead": False,
+                },
+                {
+                    "id": "Cultist",
+                    "current_hp": 0,
+                    "max_hp": 20,
+                    "alive": False,
+                    "targetable": False,
+                    "half_dead": False,
+                },
+            ]
             if win
             else [
-                {"id": "JawWorm", "current_hp": 20 * remaining},
-                {"id": "Cultist", "current_hp": 20 * remaining},
+                {
+                    "id": "JawWorm",
+                    "current_hp": 20 * remaining,
+                    "max_hp": 20,
+                    "alive": True,
+                    "targetable": True,
+                    "half_dead": False,
+                },
+                {
+                    "id": "Cultist",
+                    "current_hp": 20 * remaining,
+                    "max_hp": 20,
+                    "alive": True,
+                    "targetable": True,
+                    "half_dead": False,
+                },
             ]
         ),
         "enemy_occurrences_complete": True,
@@ -83,12 +113,20 @@ def _row(identity: str, cohort: str, *, win: bool, remaining: float = 0.5):
                         "id_label": "JawWorm",
                         "name": "Jaw Worm",
                         "current_hp": 0,
+                        "max_hp": 20,
+                        "alive": False,
+                        "targetable": False,
+                        "half_dead": False,
                     },
                     {
                         "id": 2,
                         "id_label": "Cultist",
                         "name": "Cultist",
                         "current_hp": 0,
+                        "max_hp": 20,
+                        "alive": False,
+                        "targetable": False,
+                        "half_dead": False,
                     },
                 ]
                 if win
@@ -98,12 +136,20 @@ def _row(identity: str, cohort: str, *, win: bool, remaining: float = 0.5):
                         "id_label": "JawWorm",
                         "name": "Jaw Worm",
                         "current_hp": 20 * remaining,
+                        "max_hp": 20,
+                        "alive": True,
+                        "targetable": True,
+                        "half_dead": False,
                     },
                     {
                         "id": 2,
                         "id_label": "Cultist",
                         "name": "Cultist",
                         "current_hp": 20 * remaining,
+                        "max_hp": 20,
+                        "alive": True,
+                        "targetable": True,
+                        "half_dead": False,
                     },
                 ]
             ),
@@ -135,6 +181,91 @@ def _row(identity: str, cohort: str, *, win: bool, remaining: float = 0.5):
     )
 
 
+def _custom_terminal_row(
+    identity: str,
+    *,
+    outcome: str,
+    terminal_enemies: list[dict[str, object]],
+    entry_hp: float = 20,
+) -> dict[str, object]:
+    entry_enemies = [
+        {
+            "id": index + 1,
+            "id_label": str(enemy["id"]),
+            "name": str(enemy["id"]),
+            "current_hp": entry_hp,
+            "max_hp": entry_hp,
+        }
+        for index, enemy in enumerate(terminal_enemies)
+    ]
+    raw_entry = {
+        "battle_player": {"current_hp": 40, "max_hp": 80},
+        "battle_monsters": entry_enemies,
+        "battle_monster_count": len(entry_enemies),
+        "battle_monsters_alive": len(entry_enemies),
+    }
+    entry = battle_snapshot_evidence(raw_entry)
+    raw_terminal_enemies = [dict(enemy) for enemy in terminal_enemies]
+    raw_terminal = {
+        "cur_hp": 0 if outcome == "PLAYER_LOSS" else 60,
+        "max_hp": 80,
+        "completed_battle_outcome": outcome,
+        "outcome": "UNDECIDED",
+        "completed_battle_monster_count": len(raw_terminal_enemies),
+        "completed_battle_monsters_alive": sum(
+            enemy["targetable"] is True for enemy in raw_terminal_enemies
+        ),
+        "completed_battle_monsters": raw_terminal_enemies,
+    }
+    terminal = {
+        "player_current_hp": 0 if outcome == "PLAYER_LOSS" else 60,
+        "player_max_hp": 80,
+        "enemies": [dict(enemy) for enemy in terminal_enemies],
+        "enemy_occurrences_complete": True,
+        "enemy_occurrence_count": len(terminal_enemies),
+        "enemy_occurrence_identities": tuple(
+            str(enemy["id"]) for enemy in terminal_enemies
+        ),
+        "raw_snapshot": raw_terminal,
+    }
+    provenance = dict(_row("provenance", "A", win=True)["provenance"])
+    provenance["restore_source_identity"] = identity
+    return build_dense_diagnostic_row(
+        selection_identity=identity,
+        cohort="A",
+        entry=entry,
+        terminal=terminal,
+        outcome=outcome,
+        source_selection_manifest_identity=SOURCE_MANIFEST,
+        provenance=provenance,
+    )
+
+
+def _escaped_mugger_row(*, outcome: str = "PLAYER_VICTORY") -> dict[str, object]:
+    return _custom_terminal_row(
+        "escaped-mugger",
+        outcome=outcome,
+        terminal_enemies=[
+            {
+                "id": "LOOTER",
+                "current_hp": 0,
+                "max_hp": 30,
+                "alive": False,
+                "targetable": False,
+                "half_dead": False,
+            },
+            {
+                "id": "MUGGER",
+                "current_hp": 29,
+                "max_hp": 40,
+                "alive": True,
+                "targetable": False,
+                "half_dead": False,
+            },
+        ],
+    )
+
+
 def test_selection_bytes_and_domains_are_exact() -> None:
     identity = "source/é:3"
     assert selection_identity_bytes(identity) == identity.encode("utf-8")
@@ -150,7 +281,7 @@ def test_dense_row_recomputes_authoritative_margin() -> None:
     row = _row("record-1", "A", win=False, remaining=0.25)
     assert row["outcome"] == "PLAYER_LOSS"
     assert row["diagnostics"]["enemy_hp_remaining_fraction"] == pytest.approx(0.25)
-    assert row["diagnostics"]["enemy_damage_fraction"] == pytest.approx(0.75)
+    assert row["diagnostics"]["enemy_hp_progress_fraction_v1"] == pytest.approx(0.75)
     assert row["diagnostics"]["combat_terminal_margin_v1"] == pytest.approx(-0.25)
     with pytest.raises(T087IncompleteError):
         build_dense_diagnostic_row(
@@ -164,6 +295,200 @@ def test_dense_row_recomputes_authoritative_margin() -> None:
             },
             outcome="PLAYER_LOSS",
         )
+
+
+def test_escaped_mugger_native_shape_accepts_hp_alive_distinct_from_active() -> None:
+    row = _escaped_mugger_row()
+
+    validate_dense_diagnostic_row(row)
+    diagnostics_row = row["diagnostics"]
+    assert diagnostics_row["enemy_occurrence_count_terminal"] == 2
+    assert diagnostics_row["enemy_count_active_terminal"] == 0
+    assert diagnostics_row["enemy_count_hp_alive_terminal"] == 1
+    assert diagnostics_row["enemy_count_non_targetable_hp_alive_terminal"] == 1
+    assert diagnostics_row["terminal_total_enemy_hp_all_occurrences"] == pytest.approx(
+        29
+    )
+    assert diagnostics_row["terminal_total_enemy_hp_active"] == pytest.approx(0)
+    assert diagnostics_row["combat_terminal_margin_v1"] == pytest.approx(0.75)
+
+
+def test_terminal_active_scalar_must_match_targetable_rows() -> None:
+    raw = dict(_escaped_mugger_row()["raw_terminal"])
+    raw["completed_battle_monsters_alive"] = 1
+    with pytest.raises(T087IncompleteError, match="active count"):
+        battle_snapshot_evidence(raw, require_positive_enemy_hp=False)
+
+
+def test_targetable_false_alive_row_is_rejected() -> None:
+    raw = dict(_escaped_mugger_row()["raw_terminal"])
+    monsters = [dict(monster) for monster in raw["completed_battle_monsters"]]
+    monsters[1]["targetable"] = True
+    monsters[1]["alive"] = False
+    raw["completed_battle_monsters"] = monsters
+    with pytest.raises(T087IncompleteError, match="targetable requires alive"):
+        battle_snapshot_evidence(raw, require_positive_enemy_hp=False)
+
+
+def test_terminal_monster_count_must_match_occurrence_list() -> None:
+    raw = dict(_escaped_mugger_row()["raw_terminal"])
+    raw["completed_battle_monster_count"] = 1
+    with pytest.raises(T087IncompleteError, match="occurrence count"):
+        battle_snapshot_evidence(raw, require_positive_enemy_hp=False)
+
+
+@pytest.mark.parametrize("field", ("alive", "targetable", "half_dead"))
+@pytest.mark.parametrize("mode", ("missing", "non_boolean"))
+def test_terminal_monster_state_fields_are_required_and_boolean(
+    field: str, mode: str
+) -> None:
+    raw = dict(_escaped_mugger_row()["raw_terminal"])
+    monsters = [dict(monster) for monster in raw["completed_battle_monsters"]]
+    if mode == "missing":
+        monsters[0].pop(field)
+    else:
+        monsters[0][field] = "true"
+    raw["completed_battle_monsters"] = monsters
+    with pytest.raises(T087IncompleteError, match=field):
+        battle_snapshot_evidence(raw, require_positive_enemy_hp=False)
+
+
+def test_loss_hp_metrics_separate_active_and_all_occurrence_totals() -> None:
+    row = _custom_terminal_row(
+        "loss-escaped",
+        outcome="PLAYER_LOSS",
+        terminal_enemies=[
+            {
+                "id": "ACTIVE",
+                "current_hp": 10,
+                "max_hp": 20,
+                "alive": True,
+                "targetable": True,
+                "half_dead": False,
+            },
+            {
+                "id": "ESCAPED",
+                "current_hp": 29,
+                "max_hp": 40,
+                "alive": True,
+                "targetable": False,
+                "half_dead": False,
+            },
+        ],
+    )
+    validate_dense_diagnostic_row(row)
+    diagnostics_row = row["diagnostics"]
+    assert diagnostics_row["terminal_total_enemy_hp_all_occurrences"] == pytest.approx(
+        39
+    )
+    assert diagnostics_row["terminal_total_enemy_hp_active"] == pytest.approx(10)
+    assert diagnostics_row["enemy_hp_remaining_fraction"] == pytest.approx(0.25)
+    assert diagnostics_row["combat_terminal_margin_v1"] == pytest.approx(-0.25)
+
+
+def test_loss_hp_remaining_fraction_above_one_is_not_clipped() -> None:
+    row = _custom_terminal_row(
+        "loss-healed",
+        outcome="PLAYER_LOSS",
+        entry_hp=20,
+        terminal_enemies=[
+            {
+                "id": "HEALED",
+                "current_hp": 30,
+                "max_hp": 30,
+                "alive": True,
+                "targetable": True,
+                "half_dead": False,
+            }
+        ],
+    )
+    assert row["diagnostics"]["enemy_hp_remaining_fraction"] == pytest.approx(1.5)
+    assert row["diagnostics"]["enemy_hp_progress_fraction_v1"] == pytest.approx(-0.5)
+    assert row["diagnostics"]["combat_terminal_margin_v1"] == pytest.approx(-1.5)
+    validate_dense_diagnostic_row(row)
+
+
+def test_removed_kill_fields_cannot_satisfy_current_row_schema() -> None:
+    row = _row("old-fields", "A", win=False)
+    tampered = dict(row)
+    tampered["diagnostics"] = dict(row["diagnostics"])
+    tampered["diagnostics"]["enemy_count_killed"] = 1
+    tampered["diagnostics"]["enemy_kill_fraction"] = 0.5
+    with pytest.raises(T087IncompleteError, match="diagnostics"):
+        validate_dense_diagnostic_row(tampered)
+
+
+def test_blind_audit_thresholds_use_active_unresolved_hp() -> None:
+    rows = [
+        _custom_terminal_row(
+            f"win-{index}",
+            outcome="PLAYER_VICTORY",
+            terminal_enemies=[
+                {
+                    "id": "DEAD",
+                    "current_hp": 0,
+                    "max_hp": 20,
+                    "alive": False,
+                    "targetable": False,
+                    "half_dead": False,
+                }
+            ],
+        )
+        for index in range(8)
+    ]
+    rows.extend(
+        _custom_terminal_row(
+            f"near-{index}",
+            outcome="PLAYER_LOSS",
+            terminal_enemies=[
+                {
+                    "id": "ACTIVE",
+                    "current_hp": 4,
+                    "max_hp": 20,
+                    "alive": True,
+                    "targetable": True,
+                    "half_dead": False,
+                },
+                {
+                    "id": "ESCAPED",
+                    "current_hp": 30,
+                    "max_hp": 40,
+                    "alive": True,
+                    "targetable": False,
+                    "half_dead": False,
+                },
+            ],
+        )
+        for index in range(8)
+    )
+    rows.extend(
+        _custom_terminal_row(
+            f"deep-{index}",
+            outcome="PLAYER_LOSS",
+            terminal_enemies=[
+                {
+                    "id": "ACTIVE",
+                    "current_hp": 36,
+                    "max_hp": 40,
+                    "alive": True,
+                    "targetable": True,
+                    "half_dead": False,
+                }
+            ],
+        )
+        for index in range(8)
+    )
+    audit = select_blind_audit_rows(rows)
+    near = [
+        item
+        for item in audit["selected"]
+        if item["audit_stratum"] == "near_boundary_losses"
+    ]
+    deep = [
+        item for item in audit["selected"] if item["audit_stratum"] == "deep_losses"
+    ]
+    assert {item["threshold"] for item in near} == {0.25}
+    assert {item["threshold"] for item in deep} == {0.75}
 
 
 def test_entry_projection_and_enemy_fractions_use_raw_evidence() -> None:
@@ -187,7 +512,7 @@ def test_entry_projection_and_enemy_fractions_use_raw_evidence() -> None:
     ]
     row["terminal"]["raw_snapshot"] = raw_terminal
     row["raw_terminal"] = dict(raw_terminal)
-    with pytest.raises(T087IncompleteError, match="enemy_hp_remaining_fraction"):
+    with pytest.raises(T087IncompleteError, match="max_hp"):
         validate_dense_diagnostic_row(row)
 
 
@@ -205,10 +530,24 @@ def test_terminal_alive_tampering_fails_row_validation() -> None:
     row = _row("terminal-alive-tamper", "A", win=True)
     row["terminal"] = dict(row["terminal"])
     row["terminal"]["enemies"] = [
-        {"id": "JawWorm", "current_hp": 0, "alive": True},
-        {"id": "Cultist", "current_hp": 0},
+        {
+            "id": "JawWorm",
+            "current_hp": 0,
+            "max_hp": 20,
+            "alive": True,
+            "targetable": False,
+            "half_dead": False,
+        },
+        {
+            "id": "Cultist",
+            "current_hp": 0,
+            "max_hp": 20,
+            "alive": False,
+            "targetable": False,
+            "half_dead": False,
+        },
     ]
-    with pytest.raises(T087IncompleteError, match="alive status"):
+    with pytest.raises(T087IncompleteError, match="alive/targetable"):
         validate_dense_diagnostic_row(row)
 
 
@@ -301,7 +640,13 @@ def test_t087_direct_input_binding_has_no_paired_dependency(monkeypatch) -> None
             cohort: (SimpleNamespace(selection_identity=cohort),)
             for cohort in ("A", "B", "C", "B@400")
         }
-        return cohorts, {}, {"A": {}, "B": {}, "C": {}}, {"B": {}, "C": {}}, selection_ref
+        return (
+            cohorts,
+            {},
+            {"A": {}, "B": {}, "C": {}},
+            {"B": {}, "C": {}},
+            selection_ref,
+        )
 
     monkeypatch.setattr(diagnostics, "_read_hash_bound_json", read_hash_bound)
     monkeypatch.setattr(diagnostics, "_validate_t085_document_chain", direct_chain)
@@ -314,9 +659,10 @@ def test_t087_direct_input_binding_has_no_paired_dependency(monkeypatch) -> None
     assert set(identity_order) == {"A", "B", "C", "B@400"}
     assert set(references) == {"selection", "restore", "canonical", "source_manifests"}
     assert "paired" not in references
-    assert "paired_report_path" not in inspect.signature(
-        load_t087_t085_report_binding
-    ).parameters
+    assert (
+        "paired_report_path"
+        not in inspect.signature(load_t087_t085_report_binding).parameters
+    )
 
 
 def test_t087_direct_chain_rejects_withdrawn_paired_reference() -> None:
@@ -335,11 +681,9 @@ def test_t087_direct_chain_rejects_withdrawn_paired_reference() -> None:
 def test_t087_command_has_no_paired_option() -> None:
     from sts_combat_rl.commands.t087_dense_combat_diagnostics import build_parser
 
-    assert T087_APPROVED_SPEC == "64a139ae03ce4a5ca186d50b1a049d17b30a47e4"
+    assert T087_APPROVED_SPEC == "81509bd426c9d0980e9a60ad28e9abb0ee0444e4"
     option_strings = {
-        option
-        for action in build_parser()._actions
-        for option in action.option_strings
+        option for action in build_parser()._actions for option in action.option_strings
     }
     assert "--t085-paired" not in option_strings
 
@@ -441,10 +785,10 @@ def test_entry_alive_count_is_required_and_consistent() -> None:
         "battle_monsters": [{"id": 1, "id_label": "JawWorm", "current_hp": 20}],
         "battle_monster_count": 1,
     }
-    with pytest.raises(T087IncompleteError, match="alive count"):
+    with pytest.raises(T087IncompleteError, match="active count"):
         battle_snapshot_evidence(raw)
     raw["battle_monsters_alive"] = 0
-    with pytest.raises(T087IncompleteError, match="alive count"):
+    with pytest.raises(T087IncompleteError, match="active count"):
         battle_snapshot_evidence(raw)
 
 
@@ -649,10 +993,15 @@ def test_report_contains_grouped_margin_and_hp_ladder_outcome_summaries() -> Non
         "PLAYER_LOSS",
     }
     component_names = {
+        "enemy_occurrence_count_terminal",
+        "enemy_count_active_terminal",
+        "enemy_count_hp_alive_terminal",
+        "enemy_count_non_targetable_hp_alive_terminal",
+        "terminal_total_enemy_hp_all_occurrences",
+        "terminal_total_enemy_hp_active",
         "enemy_hp_remaining_fraction",
-        "enemy_damage_fraction",
+        "enemy_hp_progress_fraction_v1",
         "player_hp_remaining_fraction_of_max",
-        "enemy_kill_fraction",
     }
     assert set(margin["components"]) == component_names
     for component in margin["components"].values():
@@ -665,7 +1014,7 @@ def test_report_contains_grouped_margin_and_hp_ladder_outcome_summaries() -> Non
         )
     assert all(
         margin["components"][name]["by_outcome"]["PLAYER_VICTORY"][key] is None
-        for name in ("enemy_hp_remaining_fraction", "enemy_damage_fraction")
+        for name in ("enemy_hp_remaining_fraction", "enemy_hp_progress_fraction_v1")
         for key in ("p25", "p50", "p75")
     )
     assert all(
@@ -676,10 +1025,10 @@ def test_report_contains_grouped_margin_and_hp_ladder_outcome_summaries() -> Non
         for key in ("p25", "p50", "p75")
     )
     assert (
-        summary["enemy_kill_fraction"]["by_cohort_outcome"]["A"]["PLAYER_VICTORY"][
-            "p50"
-        ]
-        == 1.0
+        margin["components"]["enemy_count_active_terminal"]["by_cohort_outcome"]["A"][
+            "PLAYER_VICTORY"
+        ]["p50"]
+        == 0.0
     )
     assert summary["action_count"]["p50"] == 0.0
     assert summary["potion_action_count"]["p50"] == 0.0

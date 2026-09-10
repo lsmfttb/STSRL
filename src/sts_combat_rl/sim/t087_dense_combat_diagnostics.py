@@ -35,7 +35,7 @@ from sts_combat_rl.t085_corrected_leaf_value_search_evaluation import (
 )
 
 T087_TASK_ID = "T087"
-T087_APPROVED_SPEC = "64a139ae03ce4a5ca186d50b1a049d17b30a47e4"
+T087_APPROVED_SPEC = "81509bd426c9d0980e9a60ad28e9abb0ee0444e4"
 T087_BASE_COMMIT = "b38c0584e4aac9172f9da4426004bfb64a13a41d"
 T085_NATIVE_COMMIT = "d62ff35579b54d70a7428afdf84743c94df3fe0c"
 T087_NATIVE_COMMIT = "96052d24b9c2c16ff25b6f7241edd972613be997"
@@ -877,7 +877,9 @@ def _positive(value: object, label: str) -> float:
     return result
 
 
-def _enemy_rows(value: object, label: str) -> list[dict[str, object]]:
+def _enemy_rows(
+    value: object, label: str, *, require_terminal_fields: bool = False
+) -> list[dict[str, object]]:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
         raise T087IncompleteError(f"{label} must be an ordered enemy sequence")
     result: list[dict[str, object]] = []
@@ -897,11 +899,27 @@ def _enemy_rows(value: object, label: str) -> list[dict[str, object]]:
         hp = _finite(raw.get("current_hp"), f"{label}[{index}].current_hp")
         if hp < 0:
             raise T087IncompleteError(f"{label}[{index}].current_hp is negative")
-        if "alive" in raw and not isinstance(raw["alive"], bool):
-            raise T087IncompleteError(f"{label}[{index}].alive is not boolean")
+        max_hp = raw.get("max_hp")
+        if require_terminal_fields:
+            max_hp_value = _positive(max_hp, f"{label}[{index}].max_hp")
+            for field_name in ("alive", "targetable", "half_dead"):
+                if not isinstance(raw.get(field_name), bool):
+                    raise T087IncompleteError(
+                        f"{label}[{index}].{field_name} is not boolean"
+                    )
+            if raw["targetable"] and not raw["alive"]:
+                raise T087IncompleteError(
+                    f"{label}[{index}].targetable requires alive=true"
+                )
+        elif max_hp is None:
+            max_hp_value = None
+        else:
+            max_hp_value = _positive(max_hp, f"{label}[{index}].max_hp")
         item = dict(raw)
         item["identity"] = identity
         item["current_hp"] = hp
+        if max_hp_value is not None:
+            item["max_hp"] = max_hp_value
         result.append(item)
     return result
 
@@ -914,11 +932,12 @@ def _explicit_enemy_occurrence_metadata(
     count_key: str,
     alive_key: str | None = None,
     require_alive: bool = False,
+    count_targetable: bool = False,
 ) -> tuple[int, tuple[str, ...]]:
     """Require an explicit occurrence-completeness witness from the adapter.
 
-    The accepted native occurrence count, ordered monster list, and alive
-    count must come from the same snapshot surface.  The alive count is
+    The accepted native occurrence count, ordered monster list, and active
+    count must come from the same snapshot surface.  The count is
     required for both entry and terminal snapshots; an uncounted sequence or
     an entry without the native alive-count witness is never enough.
     """
@@ -938,11 +957,17 @@ def _explicit_enemy_occurrence_metadata(
             (
                 isinstance(alive_value, bool)
                 or not isinstance(alive_value, int)
-                or alive_value != sum(_alive(enemy) for enemy in enemies)
+                or alive_value
+                != sum(
+                    bool(enemy.get("targetable"))
+                    if count_targetable
+                    else _alive(enemy)
+                    for enemy in enemies
+                )
             )
             and (require_alive or alive_value is not None)
         ):
-            raise T087IncompleteError(f"{label} native alive count is absent or inconsistent")
+            raise T087IncompleteError(f"{label} native active count is absent or inconsistent")
     return count, normalized
 
 
@@ -975,7 +1000,8 @@ def battle_snapshot_evidence(
         "completed_battle_monster_count",
         "completed_battle_monsters_alive",
     }
-    if "completed_battle_outcome" in raw or completed_keys.intersection(raw):
+    is_terminal = "completed_battle_outcome" in raw or completed_keys.intersection(raw)
+    if is_terminal:
         if not completed_keys.issubset(raw):
             raise T087IncompleteError(
                 "accepted terminal snapshot lacks complete post-action monster telemetry"
@@ -992,7 +1018,11 @@ def battle_snapshot_evidence(
         label = "battle snapshot"
         require_alive = True
     monsters = raw.get(monster_key)
-    enemies = _enemy_rows(monsters, f"{label} enemies")
+    enemies = _enemy_rows(
+        monsters,
+        f"{label} enemies",
+        require_terminal_fields=is_terminal,
+    )
     current_hp = _finite(_player_value(raw, "current_hp"), "player current_hp")
     max_hp = _positive(_player_value(raw, "max_hp"), "player max_hp")
     total = sum(float(enemy["current_hp"]) for enemy in enemies)
@@ -1007,6 +1037,7 @@ def battle_snapshot_evidence(
         count_key=count_key,
         alive_key=alive_key,
         require_alive=require_alive,
+        count_targetable=is_terminal,
     )
     return {
         "player_current_hp": current_hp,
@@ -1062,24 +1093,43 @@ def _validate_terminal_raw_matches_evidence(
             raise T087IncompleteError(
                 f"terminal {key} disagrees with retained raw terminal snapshot"
             )
-    terminal_enemies = _enemy_rows(terminal.get("enemies"), "terminal.enemies")
+    terminal_enemies = _enemy_rows(
+        terminal.get("enemies"),
+        "terminal.enemies",
+        require_terminal_fields=True,
+    )
     raw_enemies = raw_evidence["enemies"]
     if not isinstance(raw_enemies, Sequence) or len(terminal_enemies) != len(raw_enemies):
         raise T087IncompleteError(
             "terminal enemies disagree with retained raw terminal snapshot"
         )
     terminal_pairs = tuple(
-        (enemy["identity"], enemy["current_hp"], _alive(enemy))
+        (
+            enemy["identity"],
+            enemy["current_hp"],
+            enemy["max_hp"],
+            enemy["alive"],
+            enemy["targetable"],
+            enemy["half_dead"],
+        )
         for enemy in terminal_enemies
     )
     raw_pairs = tuple(
-        (enemy["identity"], enemy["current_hp"], _alive(enemy))
+        (
+            enemy["identity"],
+            enemy["current_hp"],
+            enemy["max_hp"],
+            enemy["alive"],
+            enemy["targetable"],
+            enemy["half_dead"],
+        )
         for enemy in raw_enemies
         if isinstance(enemy, Mapping)
     )
     if terminal_pairs != raw_pairs:
         raise T087IncompleteError(
-            "terminal enemy HP/alive status/occurrence order disagrees with retained raw terminal snapshot"
+            "terminal enemy HP/alive/targetable/half-dead status/occurrence order "
+            "disagrees with retained raw terminal snapshot"
         )
     if (
         terminal.get("enemy_occurrences_complete") is not True
@@ -1208,7 +1258,11 @@ def build_dense_diagnostic_row(
         for enemy in entry_evidence["enemies"]
         if isinstance(enemy, Mapping)
     ]
-    terminal_enemies = _enemy_rows(terminal.get("enemies"), "terminal.enemies")
+    terminal_enemies = _enemy_rows(
+        terminal.get("enemies"),
+        "terminal.enemies",
+        require_terminal_fields=True,
+    )
     if terminal.get("enemy_occurrences_complete") is not True:
         raise T087IncompleteError("terminal enemy occurrence completeness is unavailable")
     start_total = _positive(
@@ -1228,41 +1282,41 @@ def build_dense_diagnostic_row(
         raise T087IncompleteError(
             "terminal enemy occurrence metadata does not cover the entry occurrences"
         )
-    alive_terminal = sum(_alive(enemy) for enemy in terminal_enemies)
+    active_terminal = sum(bool(enemy["targetable"]) for enemy in terminal_enemies)
+    hp_alive_terminal = sum(bool(enemy["alive"]) for enemy in terminal_enemies)
+    non_targetable_hp_alive_terminal = sum(
+        bool(enemy["alive"]) and not bool(enemy["targetable"])
+        for enemy in terminal_enemies
+    )
     if initial_count <= 0:
         raise T087IncompleteError("enemy_count_initial must be positive")
-    killed = initial_count - alive_terminal
-    if killed < 0 or killed > initial_count:
-        raise T087IncompleteError("terminal enemy occurrence count is inconsistent")
+    active_enemy_hp = sum(
+        float(enemy["current_hp"])
+        for enemy in terminal_enemies
+        if bool(enemy["targetable"])
+    )
+    if not math.isfinite(active_enemy_hp) or active_enemy_hp < 0:
+        raise T087IncompleteError("active terminal enemy HP total is invalid")
 
     start_player_hp = _finite(entry.get("player_current_hp"), "entry.player_current_hp")
     start_max_hp = _positive(entry.get("player_max_hp"), "entry.player_max_hp")
     terminal_player_hp = _finite(
         terminal.get("player_current_hp"), "terminal.player_current_hp"
     )
-    remaining_fraction = terminal_total / start_total
-    damage_fraction = 1.0 - remaining_fraction
+    remaining_fraction = active_enemy_hp / start_total
+    progress_fraction = 1.0 - remaining_fraction
     player_fraction = terminal_player_hp / start_max_hp
     margin = player_fraction if outcome == "PLAYER_VICTORY" else -remaining_fraction
     for label, value in (
-        ("enemy_kill_fraction", killed / initial_count),
         ("enemy_hp_remaining_fraction", remaining_fraction),
-        ("enemy_damage_fraction", damage_fraction),
+        ("enemy_hp_progress_fraction_v1", progress_fraction),
         ("player_hp_remaining_fraction_of_max", player_fraction),
         ("combat_terminal_margin_v1", margin),
     ):
         if not math.isfinite(value):
             raise T087IncompleteError(f"{label} is not finite")
-    if not 0.0 <= killed / initial_count <= 1.0:
-        raise T087IncompleteError("enemy_kill_fraction is outside [0,1]")
-    if not 0.0 <= remaining_fraction <= 1.0:
-        raise T087IncompleteError(
-            "enemy_hp_remaining_fraction is outside [0,1] in raw evidence"
-        )
-    if not 0.0 <= damage_fraction <= 1.0:
-        raise T087IncompleteError(
-            "enemy_damage_fraction is outside [0,1] in raw evidence"
-        )
+    if remaining_fraction < 0.0:
+        raise T087IncompleteError("enemy_hp_remaining_fraction is negative")
     if outcome == "PLAYER_VICTORY" and margin < 0.0:
         raise T087IncompleteError("victory margin is negative")
     if outcome == "PLAYER_LOSS" and margin > 0.0:
@@ -1292,13 +1346,17 @@ def build_dense_diagnostic_row(
         "action_trace": trace,
         "diagnostics": {
             "enemy_count_initial": initial_count,
-            "enemy_count_alive_terminal": alive_terminal,
-            "enemy_count_killed": killed,
-            "enemy_kill_fraction": killed / initial_count,
+            "enemy_occurrence_count_terminal": terminal_occurrence_count,
+            "enemy_count_active_terminal": active_terminal,
+            "enemy_count_hp_alive_terminal": hp_alive_terminal,
+            "enemy_count_non_targetable_hp_alive_terminal": (
+                non_targetable_hp_alive_terminal
+            ),
             "battle_start_total_enemy_hp": start_total,
-            "terminal_total_enemy_hp": terminal_total,
+            "terminal_total_enemy_hp_all_occurrences": terminal_total,
+            "terminal_total_enemy_hp_active": active_enemy_hp,
             "enemy_hp_remaining_fraction": remaining_fraction,
-            "enemy_damage_fraction": damage_fraction,
+            "enemy_hp_progress_fraction_v1": progress_fraction,
             "player_hp_remaining_fraction_of_max": player_fraction,
             "net_player_hp_delta": terminal_player_hp - start_player_hp,
             "combat_terminal_margin_v1": margin,
@@ -2660,15 +2718,16 @@ def _validate_t085_report_inputs(
             for cohort in ("B", "C")
         ):
             raise T087IncompleteError("T087 report source-manifest references are not restore-bound")
-        if selection_identity_order is not None:
-            if {
-                cohort: tuple(values)
-                for cohort, values in selection_identity_order.items()
-            } != {
-                cohort: tuple(record.selection_identity for record in records)
-                for cohort, records in expected_order.items()
-            }:
-                raise T087IncompleteError("T087 report selection order is not bound to the pinned artifact")
+        if selection_identity_order is not None and {
+            cohort: tuple(values)
+            for cohort, values in selection_identity_order.items()
+        } != {
+            cohort: tuple(record.selection_identity for record in records)
+            for cohort, records in expected_order.items()
+        }:
+            raise T087IncompleteError(
+                "T087 report selection order is not bound to the pinned artifact"
+            )
     except (KeyError, TypeError, T087IncompleteError, ValueError, OSError) as exc:
         problems.append(f"T087 report T085 direct input chain is invalid: {exc}")
         return
@@ -3172,23 +3231,38 @@ def build_t087_report(
         valid_rows, "combat_terminal_margin_v1"
     )
     margin_distribution["components"] = {
+        "enemy_occurrence_count_terminal": _distribution_summary(
+            valid_rows, "enemy_occurrence_count_terminal"
+        ),
+        "enemy_count_active_terminal": _distribution_summary(
+            valid_rows, "enemy_count_active_terminal"
+        ),
+        "enemy_count_hp_alive_terminal": _distribution_summary(
+            valid_rows, "enemy_count_hp_alive_terminal"
+        ),
+        "enemy_count_non_targetable_hp_alive_terminal": _distribution_summary(
+            valid_rows, "enemy_count_non_targetable_hp_alive_terminal"
+        ),
+        "terminal_total_enemy_hp_all_occurrences": _distribution_summary(
+            valid_rows, "terminal_total_enemy_hp_all_occurrences"
+        ),
+        "terminal_total_enemy_hp_active": _distribution_summary(
+            valid_rows, "terminal_total_enemy_hp_active"
+        ),
         "enemy_hp_remaining_fraction": _distribution_summary(
             valid_rows,
             "enemy_hp_remaining_fraction",
             include=lambda row: row.get("outcome") == "PLAYER_LOSS",
         ),
-        "enemy_damage_fraction": _distribution_summary(
+        "enemy_hp_progress_fraction_v1": _distribution_summary(
             valid_rows,
-            "enemy_damage_fraction",
+            "enemy_hp_progress_fraction_v1",
             include=lambda row: row.get("outcome") == "PLAYER_LOSS",
         ),
         "player_hp_remaining_fraction_of_max": _distribution_summary(
             valid_rows,
             "player_hp_remaining_fraction_of_max",
             include=lambda row: row.get("outcome") == "PLAYER_VICTORY",
-        ),
-        "enemy_kill_fraction": _distribution_summary(
-            valid_rows, "enemy_kill_fraction"
         ),
     }
     loss_enemy_distribution = _distribution_summary(
@@ -3201,7 +3275,6 @@ def build_t087_report(
         "player_hp_remaining_fraction_of_max",
         include=lambda row: row.get("outcome") == "PLAYER_VICTORY",
     )
-    kill_distribution = _distribution_summary(valid_rows, "enemy_kill_fraction")
     action_distribution = _distribution_summary(valid_rows, "action_count")
     potion_action_distribution = _distribution_summary(
         valid_rows, "potion_action_count"
@@ -3212,7 +3285,7 @@ def build_t087_report(
         "approved_spec": T087_APPROVED_SPEC,
         "base_commit": T087_BASE_COMMIT,
         "implementation_run_head": t087_run_head,
-        "native_change_required": True,
+        "native_change_required": False,
         "native_base_commit": T085_NATIVE_COMMIT,
         "native_identity": {
             **T087_NATIVE_IDENTITY,
@@ -3265,7 +3338,6 @@ def build_t087_report(
             "combat_terminal_margin_v1": margin_distribution,
             "loss_enemy_hp_remaining_fraction": loss_enemy_distribution,
             "win_player_hp_remaining_fraction_of_max": win_player_distribution,
-            "enemy_kill_fraction": kill_distribution,
             "action_count": action_distribution,
             "potion_action_count": potion_action_distribution,
             "mean_action_count": mean([float(row.get("action_count", 0)) for row in valid_rows]) if valid_rows else None,
