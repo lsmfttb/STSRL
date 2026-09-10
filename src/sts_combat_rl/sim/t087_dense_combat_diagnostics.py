@@ -877,6 +877,13 @@ def _positive(value: object, label: str) -> float:
     return result
 
 
+def _nonnegative(value: object, label: str) -> float:
+    result = _finite(value, label)
+    if result < 0:
+        raise T087IncompleteError(f"{label} is negative")
+    return result
+
+
 def _enemy_rows(
     value: object, label: str, *, require_terminal_fields: bool = False
 ) -> list[dict[str, object]]:
@@ -896,12 +903,10 @@ def _enemy_rows(
         )
         if not isinstance(identity, str) or not identity:
             raise T087IncompleteError(f"{label}[{index}] lacks enemy identity")
-        hp = _finite(raw.get("current_hp"), f"{label}[{index}].current_hp")
-        if hp < 0:
-            raise T087IncompleteError(f"{label}[{index}].current_hp is negative")
+        hp = _nonnegative(raw.get("current_hp"), f"{label}[{index}].current_hp")
         max_hp = raw.get("max_hp")
         if require_terminal_fields:
-            max_hp_value = _positive(max_hp, f"{label}[{index}].max_hp")
+            max_hp_value = _nonnegative(max_hp, f"{label}[{index}].max_hp")
             for field_name in ("alive", "targetable", "half_dead"):
                 if not isinstance(raw.get(field_name), bool):
                     raise T087IncompleteError(
@@ -914,7 +919,7 @@ def _enemy_rows(
         elif max_hp is None:
             max_hp_value = None
         else:
-            max_hp_value = _positive(max_hp, f"{label}[{index}].max_hp")
+            max_hp_value = _nonnegative(max_hp, f"{label}[{index}].max_hp")
         item = dict(raw)
         item["identity"] = identity
         item["current_hp"] = hp

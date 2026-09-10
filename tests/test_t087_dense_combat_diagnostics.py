@@ -435,6 +435,50 @@ def test_terminal_monster_state_fields_are_required_and_boolean(
         battle_snapshot_evidence(raw, require_positive_enemy_hp=False)
 
 
+def test_zero_enemy_max_hp_is_retained_when_native_snapshot_reports_it() -> None:
+    entry_raw = {
+        "battle_player": {"current_hp": 40, "max_hp": 80},
+        "battle_monsters": [
+            {
+                "id": 1,
+                "id_label": "ZERO_MAX",
+                "name": "Zero Max",
+                "current_hp": 5,
+                "max_hp": 0,
+            }
+        ],
+        "battle_monster_count": 1,
+        "battle_monsters_alive": 1,
+    }
+    entry = battle_snapshot_evidence(entry_raw)
+    assert entry["enemies"][0]["max_hp"] == pytest.approx(0)
+    assert entry["battle_start_total_enemy_hp"] == pytest.approx(5)
+
+    terminal_raw = {
+        "cur_hp": 0,
+        "max_hp": 80,
+        "completed_battle_outcome": "PLAYER_LOSS",
+        "completed_battle_monster_count": 1,
+        "completed_battle_monsters_alive": 1,
+        "completed_battle_monsters": [
+            {
+                "id": 1,
+                "id_label": "ZERO_MAX",
+                "name": "Zero Max",
+                "current_hp": 5,
+                "max_hp": 0,
+                "alive": True,
+                "targetable": True,
+                "half_dead": False,
+            }
+        ],
+    }
+    terminal = battle_snapshot_evidence(
+        terminal_raw, require_positive_enemy_hp=False
+    )
+    assert terminal["enemies"][0]["max_hp"] == pytest.approx(0)
+
+
 def test_loss_hp_metrics_separate_active_and_all_occurrence_totals() -> None:
     row = _custom_terminal_row(
         "loss-escaped",
