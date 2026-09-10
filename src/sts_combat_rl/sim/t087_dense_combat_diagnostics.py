@@ -1275,12 +1275,12 @@ def build_dense_diagnostic_row(
     terminal_occurrence_count = terminal.get("enemy_occurrence_count")
     terminal_occurrence_identities = terminal.get("enemy_occurrence_identities")
     if (
-        terminal_occurrence_count != initial_count
+        terminal_occurrence_count != len(terminal_enemies)
         or tuple(terminal_occurrence_identities or ())
-        != tuple(enemy["identity"] for enemy in start_enemies)
+        != tuple(enemy["identity"] for enemy in terminal_enemies)
     ):
         raise T087IncompleteError(
-            "terminal enemy occurrence metadata does not cover the entry occurrences"
+            "terminal enemy occurrence metadata does not cover the terminal occurrences"
         )
     active_terminal = sum(bool(enemy["targetable"]) for enemy in terminal_enemies)
     hp_alive_terminal = sum(bool(enemy["alive"]) for enemy in terminal_enemies)

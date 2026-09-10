@@ -187,16 +187,18 @@ def _custom_terminal_row(
     outcome: str,
     terminal_enemies: list[dict[str, object]],
     entry_hp: float = 20,
+    entry_enemy_ids: list[str] | None = None,
 ) -> dict[str, object]:
+    entry_ids = entry_enemy_ids or [str(enemy["id"]) for enemy in terminal_enemies]
     entry_enemies = [
         {
             "id": index + 1,
-            "id_label": str(enemy["id"]),
-            "name": str(enemy["id"]),
+            "id_label": enemy_id,
+            "name": enemy_id,
             "current_hp": entry_hp,
             "max_hp": entry_hp,
         }
-        for index, enemy in enumerate(terminal_enemies)
+        for index, enemy_id in enumerate(entry_ids)
     ]
     raw_entry = {
         "battle_player": {"current_hp": 40, "max_hp": 80},
@@ -311,6 +313,86 @@ def test_escaped_mugger_native_shape_accepts_hp_alive_distinct_from_active() -> 
     )
     assert diagnostics_row["terminal_total_enemy_hp_active"] == pytest.approx(0)
     assert diagnostics_row["combat_terminal_margin_v1"] == pytest.approx(0.75)
+
+
+@pytest.mark.parametrize(
+    ("identity", "entry_enemy_ids", "terminal_enemies"),
+    [
+        (
+            "slime-boss-split",
+            ["SLIME_BOSS"],
+            [
+                {
+                    "id": "SPIKE_SLIME_L",
+                    "monster_index": 0,
+                    "current_hp": 35,
+                    "max_hp": 35,
+                    "alive": True,
+                    "targetable": True,
+                    "half_dead": False,
+                },
+                {
+                    "id": "SLIME_BOSS_SPLIT_RETAINED",
+                    "monster_index": 1,
+                    "current_hp": 0,
+                    "max_hp": 1,
+                    "alive": False,
+                    "targetable": False,
+                    "half_dead": False,
+                },
+                {
+                    "id": "ACID_SLIME_L",
+                    "monster_index": 2,
+                    "current_hp": 35,
+                    "max_hp": 35,
+                    "alive": True,
+                    "targetable": True,
+                    "half_dead": False,
+                },
+            ],
+        ),
+        (
+            "large-slime-split",
+            ["ACID_SLIME_L"],
+            [
+                {
+                    "id": "ACID_SLIME_M",
+                    "monster_index": 0,
+                    "current_hp": 20,
+                    "max_hp": 20,
+                    "alive": True,
+                    "targetable": True,
+                    "half_dead": False,
+                },
+                {
+                    "id": "ACID_SLIME_M",
+                    "monster_index": 1,
+                    "current_hp": 20,
+                    "max_hp": 20,
+                    "alive": True,
+                    "targetable": True,
+                    "half_dead": False,
+                },
+            ],
+        ),
+    ],
+)
+def test_dynamic_terminal_occurrences_may_replace_or_add_entry_monsters(
+    identity: str,
+    entry_enemy_ids: list[str],
+    terminal_enemies: list[dict[str, object]],
+) -> None:
+    row = _custom_terminal_row(
+        identity,
+        outcome="PLAYER_VICTORY",
+        entry_enemy_ids=entry_enemy_ids,
+        terminal_enemies=terminal_enemies,
+    )
+
+    validate_dense_diagnostic_row(row)
+    diagnostics_row = row["diagnostics"]
+    assert diagnostics_row["enemy_count_initial"] == len(entry_enemy_ids)
+    assert diagnostics_row["enemy_occurrence_count_terminal"] == len(terminal_enemies)
 
 
 def test_terminal_active_scalar_must_match_targetable_rows() -> None:
