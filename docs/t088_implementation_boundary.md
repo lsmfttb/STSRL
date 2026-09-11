@@ -10,17 +10,22 @@ four-arm construction surface. A/B construct the accepted
 `T085UnguidedBattleSearchV2Controller` unchanged with 100/400 simulations. C
 counts each hypothetical `adapter.step` application once, restores the root
 even on errors, and keeps ordered action indices including duplicate ids.
-D construction fails explicitly; no alternate algorithm is substituted.
+D constructs only `progressive_bias_mcts_h1_400_v1`, pinned to canonical native
+`20a6c2b3a9cea817c988178b814f083ff889853f`. It supplies no Python prior/value
+callback or root prior, validates required root/counter/H1/audit output fail
+closed, and retains the native work and progressive-bias telemetry.
 
 The controller unit tests use abstract labelled graphs only. They are not
 T087 cohort substitutes, simulator evidence, canary records, or a formal run.
-No source manifest, retained cohort, terminal diagnostic formula, native
-repository, or learned input has been changed.
+The source manifest is updated only to that accepted canonical native
+descendant and declares its minimal opt-in capability. No retained cohort,
+terminal diagnostic formula, native repository, or learned input has changed.
 
 ## Native surface required before Arm D
 
-Read-only inspection used the exact pinned native Git object
-`96052d24b9c2c16ff25b6f7241edd972613be997` in
+Read-only inspection originally used native Git object
+`96052d24b9c2c16ff25b6f7241edd972613be997`. Its governed, canonical descendant
+`20a6c2b3a9cea817c988178b814f083ff889853f` in
 `lsmfttb/sts_lightspeed`. The relevant owners are:
 
 - `include/sim/search/BattleScumSearcher2.h`: the tree `Node`/`Edge` state,
@@ -30,7 +35,7 @@ Read-only inspection used the exact pinned native Git object
 - `bindings/slaythespire.cpp`: the `StepSimulator.battle_search_v2` binding and
   returned root/tree telemetry.
 
-The bound API has no all-node child-state progressive-bias hook. Its existing
+The former bound API had no all-node child-state progressive-bias hook. Its existing
 policy callback is normalized into priors and multiplied by a parent-visit
 factor; it cannot express the required signed `0.50 * H1 / (1+n)` term.
 Its leaf-value callback replaces the required native terminal continuation.
@@ -38,7 +43,7 @@ The existing internal-leaf continuation interface requires a separate action
 seed and cannot reproduce a single native searcher's random-rollout stream.
 These are not valid substitutes for Arm D.
 
-The minimum proposed governed native delta is:
+The landed governed native delta is:
 
 1. Add an opt-in search surface with child H1 components/availability on the
    searchable tree edges. Obtain each required hypothetical child through the
@@ -67,15 +72,15 @@ Its current zero-range behavior must not be silently repaired during this
 extension. The task requires the frozen term or a separately approved material
 amendment before canary.
 
-This delta touches native search semantics and therefore needs a temporary
+This delta touched native search semantics and therefore required a temporary
 `work/T088-*` branch from the verified base, independent native semantic review,
 canonical `stsrl/main` landing, ancestry proof, and an explicitly accepted
-STSRL pin update. None of those native mutations was performed in this handoff.
+STSRL pin update. The native lane has landed canonically; this worktree makes no
+native edit and binds only that exact resulting identity.
 
-After that lane, finish D construction and its algorithm-difference tests,
-complete the matched-cohort execution/cost/statistics/audit/retention workflow,
-and independently review the full implementation before seeking canary
-authorization. No canary, formal tournament, baseline promotion, or downstream
+The matched-cohort execution/cost/statistics/audit/retention workflow remains
+unfinished and must be independently reviewed before a Maintainer can authorize
+a canary. No canary, formal tournament, baseline promotion, or downstream
 Non-Combat execution is enabled by this partial implementation.
 
 ## Local verification

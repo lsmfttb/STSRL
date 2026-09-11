@@ -11,6 +11,9 @@ from sts_combat_rl.commands.t085_native_execution import (
     T085UnguidedBattleSearchV2Controller,
 )
 from sts_combat_rl.commands.t088_classical_combat_tournament import (
+    T088_PROGRESSIVE_BIAS_AUDIT_LIMIT,
+    T088_PROGRESSIVE_BIAS_NAME,
+    ProgressiveBiasMCTSH1Controller,
     build_t088_controller,
     t088_controller_definitions,
 )
@@ -25,6 +28,7 @@ from sts_combat_rl.sim.contract import (
     SimulatorSnapshot,
     SimulatorTransition,
 )
+from sts_combat_rl.sim.policy_contract import DecisionContext
 
 
 def _raw(*, hp=50, enemies=None, turn=4, block=25):
@@ -38,6 +42,154 @@ def _raw(*, hp=50, enemies=None, turn=4, block=25):
             else enemies
         ),
     }
+
+
+def _t088_actions():
+    return [
+        SimulatorAction("battle:11", "Strike", "card", {"scope": "battle", "bits": 11}),
+        SimulatorAction(
+            "battle:22", "End turn", "end_turn", {"scope": "battle", "bits": 22}
+        ),
+    ]
+
+
+def _t088_context():
+    return DecisionContext("BATTLE", [], [], ["card", "end_turn"], [0, 1])
+
+
+def _t088_progressive_bias_report():
+    h_raw = 0.775
+    h1_value = math.tanh(h_raw)
+    bias = 0.5 * h1_value / 4
+    return {
+        "schema_id": "native-battle-search-root-v1",
+        "native_api": "StepSimulator.battle_search_v2_with_progressive_bias.v1",
+        "patch_identity": "sts_lightspeed_battle_search_v2_progressive_bias_h1_v1",
+        "information_regime": "full_simulator_state_oracle_like",
+        "simulations_requested": 400,
+        "root_visits": 3,
+        "include_potions": False,
+        "native_simulator_steps": 10,
+        "model_calls": 0,
+        "best_action_value": 1.0,
+        "min_action_value": 0.0,
+        "outcome_player_hp": 45,
+        "root_row_count": 2,
+        "search_edge_count": 2,
+        "unsearched_legal_action_count": 0,
+        "unmapped_search_edge_count": 0,
+        "root_rows": [
+            {
+                "scope": "battle",
+                "bits": 11,
+                "kind": "card",
+                "label": "Strike",
+                "idx1": 0,
+                "idx2": 0,
+                "idx3": 0,
+                "search_tree_present": True,
+                "search_edge_index": 0,
+                "visits": 2,
+                "evaluation_sum": 1.5,
+                "mean_value": 0.75,
+            },
+            {
+                "scope": "battle",
+                "bits": 22,
+                "kind": "end_turn",
+                "label": "End turn",
+                "idx1": 0,
+                "idx2": 0,
+                "idx3": 0,
+                "search_tree_present": True,
+                "search_edge_index": 1,
+                "visits": 1,
+                "evaluation_sum": 0.25,
+                "mean_value": 0.25,
+            },
+        ],
+        "work_counters": {
+            "schema_id": "native-battle-search-work-v1",
+            "action_execution_count": 10,
+            "successor_transition_count": 10,
+            "tree_and_rollout_action_execution_count": 8,
+            "heuristic_successor_transition_count": 2,
+            "tree_node_expansion_count": 1,
+            "rollout_count": 1,
+            "terminal_utility_evaluation_count": 1,
+            "model_calls": 0,
+        },
+        "progressive_bias_telemetry": {
+            "schema_id": "native-battle-search-progressive-bias-h1-v1",
+            "enabled": True,
+            "heuristic": "combat_handcrafted_h1",
+            "weight": 0.5,
+            "heuristic_available_count": 1,
+            "heuristic_terminal_unavailable_count": 1,
+            "heuristic_invalid_unavailable_count": 0,
+            "score_count": 1,
+            "audit_limit": T088_PROGRESSIVE_BIAS_AUDIT_LIMIT,
+            "audit_dropped_count": 0,
+            "audit_rows": [
+                {
+                    "parent_expansion_ordinal": 2,
+                    "parent_depth": 1,
+                    "child_edge_index": 0,
+                    "child_visit_count": 3,
+                    "h1_available": True,
+                    "h1_unavailable_reason": None,
+                    "child_h1": {
+                        "player_hp_fraction": 0.75,
+                        "active_enemy_hp_fraction": 0.4,
+                        "block_fraction": 0.2,
+                        "turn_fraction": 0.25,
+                        "h_raw": h_raw,
+                        "value": h1_value,
+                    },
+                    "base_score": 1.25,
+                    "bias_contribution": bias,
+                    "final_score": 1.25 + bias,
+                    "base_score_finite": True,
+                    "final_score_finite": True,
+                }
+            ],
+        },
+    }
+
+
+class _ProgressiveBiasAdapter:
+    def __init__(self, report):
+        self.report = report
+        self.calls = []
+
+    def battle_search_v2_with_progressive_bias(self, snapshot, **kwargs):
+        self.calls.append((snapshot, kwargs))
+        return self.report
+
+    def battle_search_v2(self, *_args, **_kwargs):
+        raise AssertionError("D must not use unchanged Search-v2 API")
+
+
+class _AcceptedABAdapter:
+    def __init__(self):
+        self.calls = []
+
+    def battle_search_v2(self, snapshot, **kwargs):
+        self.calls.append((snapshot, kwargs))
+        report = _t088_progressive_bias_report()
+        report["native_api"] = "StepSimulator.battle_search_v2.v1"
+        report["patch_identity"] = "sts_lightspeed_battle_search_v2_tree_internal_v1"
+        report["simulations_requested"] = kwargs["simulations"]
+        report["tree_internal_telemetry"] = {
+            "policy_prior_scope": "disabled",
+            "leaf_value_boundary": "disabled",
+            "policy_prior_calls": 0,
+            "leaf_value_calls": 0,
+        }
+        return report
+
+    def battle_search_v2_with_progressive_bias(self, *_args, **_kwargs):
+        raise AssertionError("A/B must not use T088 progressive-bias opt-in")
 
 
 class _Graph:
@@ -268,7 +420,7 @@ def test_beam_rejects_invalid_remaining_action_boundary_before_transition(step_i
     assert graph.executed == []
 
 
-def test_four_arm_construction_keeps_accepted_ab_and_fails_closed_for_d():
+def test_four_arm_construction_keeps_accepted_ab_and_binds_d_to_native_opt_in():
     baseline = build_t088_controller("A")
     scaling = build_t088_controller("B")
     assert type(baseline) is type(scaling) is T085UnguidedBattleSearchV2Controller
@@ -281,11 +433,96 @@ def test_four_arm_construction_keeps_accepted_ab_and_fails_closed_for_d():
         assert config["root_selection_rule"] == "highest_mean"
         assert config["information_regime"] == "full_simulator_state_oracle_like"
     assert isinstance(build_t088_controller("C"), BeamH1Controller)
-    with pytest.raises(ClassicalSearchUnavailableError, match="governed native"):
-        build_t088_controller("D")
+    progressive = build_t088_controller("D")
+    assert isinstance(progressive, ProgressiveBiasMCTSH1Controller)
+    assert progressive.provenance.name == T088_PROGRESSIVE_BIAS_NAME
+    assert progressive.provenance.config["simulations"] == 400
+    assert progressive.provenance.config["policy_prior_callback"] is None
+    assert progressive.provenance.config["root_action_priors"] is None
+    assert progressive.provenance.config["leaf_value_callback"] is None
     with pytest.raises(ValueError, match="unknown T088 arm"):
         build_t088_controller("E")
     definitions = t088_controller_definitions()
     assert definitions["arm_order"] == ["A", "B", "C", "D"]
     assert definitions["tournament_execution_ready"] is False
     assert definitions["arms"]["D"]["progressive_bias_weight"] == 0.5
+
+
+def test_ab_use_accepted_unchanged_search_v2_semantics():
+    snapshot = SimulatorSnapshot((), {"screen_state": "BATTLE", "battle_active": True})
+    for arm, simulations in (("A", 100), ("B", 400)):
+        adapter = _AcceptedABAdapter()
+        decision = build_t088_controller(arm).select_action(
+            adapter, snapshot, _t088_actions(), _t088_context(), step_index=0
+        )
+        assert decision.selected_index == 0
+        assert adapter.calls == [
+            (
+                snapshot,
+                {
+                    "simulations": simulations,
+                    "include_potions": False,
+                    "policy_prior_callback": None,
+                    "leaf_value_callback": None,
+                },
+            )
+        ]
+
+
+def test_progressive_bias_d_uses_only_fixed_native_opt_in_and_retains_cost():
+    controller = ProgressiveBiasMCTSH1Controller()
+    snapshot = SimulatorSnapshot((), {"screen_state": "BATTLE", "battle_active": True})
+    adapter = _ProgressiveBiasAdapter(_t088_progressive_bias_report())
+
+    decision = controller.select_action(
+        adapter, snapshot, _t088_actions(), _t088_context(), step_index=3
+    )
+
+    assert decision.selected_index == 0
+    assert adapter.calls == [
+        (
+            snapshot,
+            {
+                "simulations": 400,
+                "include_potions": False,
+                "bias_enabled": True,
+                "audit_limit": T088_PROGRESSIVE_BIAS_AUDIT_LIMIT,
+            },
+        )
+    ]
+    evidence = decision.metadata["t088_progressive_bias"]
+    assert evidence["callbacks_disabled"] is True
+    assert evidence["root_priors_disabled"] is True
+    assert evidence["native_work"]["work_counters"]["action_execution_count"] == 10
+    row = evidence["native_work"]["progressive_bias_telemetry"]["audit_rows"][0]
+    assert row["parent_depth"] == 1
+    assert row["bias_contribution"] == pytest.approx(
+        0.5 * row["child_h1"]["value"] / (1 + row["child_visit_count"])
+    )
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda report: report["work_counters"].update(
+            {"successor_transition_count": 9}
+        ),
+        lambda report: report["progressive_bias_telemetry"]["audit_rows"][0].update(
+            {"bias_contribution": 0.0}
+        ),
+        lambda report: report.update({"model_calls": 1}),
+    ],
+)
+def test_progressive_bias_d_fails_closed_on_malformed_native_output(mutate):
+    report = deepcopy(_t088_progressive_bias_report())
+    mutate(report)
+    controller = ProgressiveBiasMCTSH1Controller()
+    snapshot = SimulatorSnapshot((), {"screen_state": "BATTLE", "battle_active": True})
+    with pytest.raises(ClassicalSearchUnavailableError):
+        controller.select_action(
+            _ProgressiveBiasAdapter(report),
+            snapshot,
+            _t088_actions(),
+            _t088_context(),
+            step_index=0,
+        )

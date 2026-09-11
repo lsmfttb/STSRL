@@ -165,17 +165,23 @@ T085NativeSearchBackend = Literal["battle_search", "battle_search_v2"]
 T085_HISTORICAL_OUTCOME_TARGET_KIND = "terminal_battle_survival_probability"
 
 # T085 artifact identity remains historical d62.  The current repository
-# runtime may use only this approved telemetry descendant; no other native
+# runtime may use only approved telemetry descendants; no other native
 # identity is admitted by the compatibility seam.  Source-manifest-bound
 # artifact validators compare retained provenance against that manifest's
 # finite identity, while all other provenance fields remain exact.
 T085_ACTIVE_NATIVE_IDENTITY = {
     "repository": "lsmfttb/sts_lightspeed",
     "ref": "refs/heads/stsrl/main",
+    "commit": "20a6c2b3a9cea817c988178b814f083ff889853f",
+}
+T085_PRE_T088_TELEMETRY_NATIVE_IDENTITY = {
+    "repository": "lsmfttb/sts_lightspeed",
+    "ref": "refs/heads/stsrl/main",
     "commit": "96052d24b9c2c16ff25b6f7241edd972613be997",
 }
 _T085_ACCEPTED_RUNTIME_IDENTITIES = (
     dict(T085_NATIVE_IDENTITY),
+    dict(T085_PRE_T088_TELEMETRY_NATIVE_IDENTITY),
     dict(T085_ACTIVE_NATIVE_IDENTITY),
 )
 _T085_PROVENANCE_NATIVE_IDENTITY_KEYS = frozenset(
@@ -189,7 +195,7 @@ def _validated_t085_provenance_identity(value: object, label: str) -> dict[str, 
     identity = dict(value)
     if identity not in _T085_ACCEPTED_RUNTIME_IDENTITIES:
         raise T085NativeExecutionError(
-            f"{label} native identity is not an approved d62/960 identity"
+            f"{label} native identity is not an approved d62/960/20a6 identity"
         )
     return identity
 
@@ -1713,8 +1719,8 @@ def _validate_t085_native_source_manifest(
 ) -> dict[str, object]:
     """Require the manifest to name the historical or approved current identity.
 
-    T085's retained artifacts remain bound to ``T085_NATIVE_IDENTITY``.  The
-    current runtime source manifest may instead name the approved telemetry
+    T085's retained artifacts remain bound to ``T085_NATIVE_IDENTITY``. The
+    current runtime source manifest may name either approved telemetry
     descendant, and fresh runtime provenance must retain that actual identity.
     An explicit expectation is still restricted to this same finite allowlist.
     """
