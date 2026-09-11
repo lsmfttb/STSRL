@@ -1,6 +1,6 @@
 # Current Status
 
-Last reviewed: 2026-09-09.
+Last reviewed: 2026-09-11.
 
 This document is the main maintainer's canonical execution-result report for
 the planner and describes the latest `main` branch only. Results from local
@@ -494,6 +494,37 @@ A20 or Heart win-rate claim. T085 closes the current Battle value-repair round;
 the accepted successor direction is a separate minimal self-generated
 Non-Combat learning task with Battle frozen to the strongest accepted
 non-learned/unguided baseline.
+
+T087 is complete on PR #100 as a diagnostic-readiness result. Its approved
+specification is `81509bd426c9d0980e9a60ad28e9abb0ee0444e4`, implementation/run
+head is `8d7e449b2e13cdf271cbf7585f7cddbb3fee7d6e`, and current native identity
+is `lsmfttb/sts_lightspeed refs/heads/stsrl/main @
+96052d24b9c2c16ff25b6f7241edd972613be997`. The clean pinned-source verifier
+passed, and the native lineage check passed from the historical T085 identity
+`d62ff35579b54d70a7428afdf84743c94df3fe0c` to the current identity. The
+historical paired aggregate was not loaded.
+
+The amended formal natural run completed all 413 pinned records (A=93, B=192,
+C=128) with four effective workers and passed the dense-row, raw-evidence, and
+provenance audits. Its accepted evidence is retained at
+`/mnt/d/DeadlyCatCoding/STSRL/artifacts/t087-formal-natural-413-8d7e44-20260911/t087-formal-natural-evidence.json`
+with SHA-256 `7931a118a4bf921f695db769f05fd77a5ae364484f5646f02d5be05329ad297f`.
+The exact HP-rescue boundary completed 24 selected natural losses at A/B/C
+quotas 8/8/8 and 112 current-HP-only ladder rows; its evidence SHA-256 is
+`fe94dc5353391c60c3b975217bc242a4bb667641a64cf4dc4995fdfb1f1c407b`.
+
+The final report is retained at
+`/mnt/d/DeadlyCatCoding/STSRL/artifacts/t087-final-8d7e44-20260911/t087-dense-combat-diagnostics-report.json`
+with SHA-256 `9a0eba7eed03a1ba4801c3019e9d14a2aa61214a76299a63ed9ab5a0192f3ea0`;
+the retention manifest is at
+`/mnt/d/DeadlyCatCoding/STSRL/artifacts/t087-final-8d7e44-20260911/t087-retention-manifest.json`
+with SHA-256 `5afe39476965a192c9bdd8d6bed121cd0169e68925cabfe9b8366ee320938adc`.
+The retention audit verified 11 artifact roles by path, byte count, SHA-256,
+and schema, including the exact 24-trace blind-audit bundle, hidden provenance
+map, rubric, input-eligibility report, and natural-run manifest. The terminal
+classification is `DENSE_COMBAT_DIAGNOSTICS_READY`. T087 establishes only a
+reproducible dense diagnostic surface and bounded HP-rescue diagnostic; it does
+not claim controller improvement, a new reward, or natural-game utility.
 
 ## Implemented On Main
 
