@@ -23,7 +23,12 @@ from sts_combat_rl.sim.native_public_projection import (
 )
 
 _CHECKPOINT_FINGERPRINT_TRANSITION_ONLY_RAW_KEYS = frozenset(
-    {"completed_battle_outcome"}
+    {
+        "completed_battle_outcome",
+        "completed_battle_monster_count",
+        "completed_battle_monsters_alive",
+        "completed_battle_monsters",
+    }
 )
 _CHECKPOINT_TRANSITION_ONLY_METADATA_KEY = "transition_only_raw"
 
@@ -144,7 +149,7 @@ class LightSpeedAdapter:
 
         ``StepSimulator`` checkpoints own mechanics state.  A snapshot returned
         directly by ``step`` may additionally carry a one-transition public
-        annotation (currently ``completed_battle_outcome``), which the next
+        annotations (the ``completed_battle_*`` fields), which the next
         native ``snapshot`` and ``restore_checkpoint`` intentionally omit.
         Preserve that declared adapter-layer annotation with the opaque handle
         so an immediate restore recreates the same public decision snapshot.
@@ -534,7 +539,7 @@ class LightSpeedAdapter:
 
     @staticmethod
     def _snapshot_fingerprint(snapshot: SimulatorSnapshot) -> tuple[object, object]:
-        # ``completed_battle_outcome`` is a one-transition annotation returned
+        # ``completed_battle_*`` fields are one-transition annotations returned
         # by StepSimulator.step().  It is intentionally retained on the
         # transition snapshot for battle-outcome labeling, but it is not part
         # of the simulator state and disappears from the next native snapshot.

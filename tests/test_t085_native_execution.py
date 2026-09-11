@@ -912,6 +912,9 @@ def test_t085_assisted_resolver_streams_and_keeps_only_selected_records(
         selected_records={selected_id: "selected-record"},
     )
     manifest = {
+        # Keep this fixture on the approved historical T085 identity so the
+        # resolver exercises the historical/current compatibility boundary.
+        "native_identity": dict(t085_execution.T085_NATIVE_IDENTITY),
         "source_run_count": 2,
         "source_run_identity_inventory": ["run-1", "run-2"],
         "source_run_seed_inventory": [851001, 851002],
@@ -940,13 +943,21 @@ def test_t085_assisted_resolver_streams_and_keeps_only_selected_records(
         lambda: "controller",
     )
 
-    def stream_validate(path, *, controller, expected_seeds, selected_record_ids):
+    def stream_validate(
+        path,
+        *,
+        controller,
+        expected_seeds,
+        selected_record_ids,
+        bound_native_identity,
+    ):
         captured.update(
             {
                 "path": path,
                 "controller": controller,
                 "expected_seeds": tuple(expected_seeds),
                 "selected_record_ids": tuple(selected_record_ids),
+                "bound_native_identity": dict(bound_native_identity),
             }
         )
         return stream_summary
@@ -978,6 +989,7 @@ def test_t085_assisted_resolver_streams_and_keeps_only_selected_records(
     assert captured["controller"] == "controller"
     assert captured["expected_seeds"] == (851001, 851002)
     assert captured["selected_record_ids"] == (selected_id,)
+    assert captured["bound_native_identity"] == t085_execution.T085_NATIVE_IDENTITY
 
 
 def test_t085_b_stream_validator_retains_only_requested_records(
@@ -1322,8 +1334,18 @@ def test_t085_source_manifest_binding_uses_assisted_pool_schema_for_b(
     )
     monkeypatch.setattr(
         t085_execution,
-        "_validate_t085_native_source_manifest",
-        lambda *args, **kwargs: {"commit": "fake-native"},
+        "load_lightspeed_source_manifest",
+        lambda: SimpleNamespace(
+            integration=SimpleNamespace(
+                repository_url="https://github.com/lsmfttb/sts_lightspeed.git",
+                ref="refs/heads/stsrl/main",
+                commit=t085_execution.T085_ACTIVE_NATIVE_IDENTITY["commit"],
+            ),
+            capability_ids=(
+                "native_battle_search_root",
+                "native_battle_search_v2_tree_internal",
+            ),
+        ),
     )
     monkeypatch.setattr(
         t085_execution,
@@ -1354,7 +1376,7 @@ def test_t085_source_manifest_binding_uses_assisted_pool_schema_for_b(
                 "schema_id": "t085-source-generation-manifest-v1",
                 "task_id": "T085",
                 "cohort": "B",
-                "native_identity": {"commit": "fake-native"},
+                "native_identity": dict(t085_execution.T085_NATIVE_IDENTITY),
                 "policy_prior_callback": None,
                 "leaf_value_callback": None,
                 "t042_scale_manifest": {
@@ -1380,6 +1402,25 @@ def test_t085_source_manifest_binding_uses_assisted_pool_schema_for_b(
         t085_execution.ASSISTED_SOURCE_POOL_SCHEMA_ID
     )
 
+    current_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    current_manifest["native_identity"] = dict(
+        t085_execution.T085_ACTIVE_NATIVE_IDENTITY
+    )
+    manifest_path.write_text(
+        json.dumps(current_manifest, sort_keys=True),
+        encoding="utf-8",
+    )
+    current_bound, _ = t085_execution._validate_t085_source_manifest_binding(
+        pool_path,
+        artifact_kind="assisted_pool",
+        manifest_path=manifest_path,
+        manifest_sha256=t085_execution.sha256_file(manifest_path),
+        expected_native_identity=t085_execution.T085_ACTIVE_NATIVE_IDENTITY,
+    )
+    assert (
+        current_bound["native_identity"] == t085_execution.T085_ACTIVE_NATIVE_IDENTITY
+    )
+
     source_pool["schema_id"] = t085_execution.T085_C_SOURCE_POOL_SCHEMA_ID
     manifest_path.write_text(
         json.dumps(
@@ -1400,6 +1441,60 @@ def test_t085_source_manifest_binding_uses_assisted_pool_schema_for_b(
             manifest_path=manifest_path,
             manifest_sha256=t085_execution.sha256_file(manifest_path),
         )
+
+
+def test_t085_runtime_identity_boundary_accepts_only_historical_or_current(
+    monkeypatch,
+) -> None:
+    def manifest_for(commit: str) -> SimpleNamespace:
+        return SimpleNamespace(
+            integration=SimpleNamespace(
+                repository_url="https://github.com/lsmfttb/sts_lightspeed.git",
+                ref="refs/heads/stsrl/main",
+                commit=commit,
+            ),
+            capability_ids=(
+                "native_battle_search_root",
+                "native_battle_search_v2_tree_internal",
+            ),
+        )
+
+    monkeypatch.setattr(
+        t085_execution,
+        "load_lightspeed_source_manifest",
+        lambda: manifest_for(t085_execution.T085_ACTIVE_NATIVE_IDENTITY["commit"]),
+    )
+    assert (
+        t085_execution._validate_t085_native_source_manifest("battle_search_v2")
+        == t085_execution.T085_ACTIVE_NATIVE_IDENTITY
+    )
+    assert (
+        t085_execution._validate_t085_native_source_manifest(
+            "battle_search_v2",
+            expected_native_identity=t085_execution.T085_ACTIVE_NATIVE_IDENTITY,
+        )
+        == t085_execution.T085_ACTIVE_NATIVE_IDENTITY
+    )
+
+    with pytest.raises(T085NativeExecutionError, match="approved identity"):
+        t085_execution._validate_t085_native_source_manifest(
+            "battle_search_v2",
+            expected_native_identity={
+                "repository": "lsmfttb/sts_lightspeed",
+                "ref": "refs/heads/stsrl/main",
+                "commit": "arbitrary-native-commit",
+            },
+        )
+
+    monkeypatch.setattr(
+        t085_execution,
+        "load_lightspeed_source_manifest",
+        lambda: manifest_for(t085_execution.T085_NATIVE_IDENTITY["commit"]),
+    )
+    assert (
+        t085_execution._validate_t085_native_source_manifest("battle_search")
+        == t085_execution.T085_NATIVE_IDENTITY
+    )
 
 
 def test_restore_base_then_prime_reset_does_not_search_or_reset() -> None:
@@ -2225,10 +2320,11 @@ def test_t085_cohort_c_final_manifest_binds_merged_pool_for_resolver(
     artifact_root = tmp_path / "t085-artifacts"
     monkeypatch.setattr(t085_execution, "T085_ARTIFACT_ROOT", artifact_root)
     monkeypatch.setattr(t085_eval, "T085_ARTIFACT_ROOT", artifact_root)
+    native_identity = dict(t085_execution.T085_ACTIVE_NATIVE_IDENTITY)
     monkeypatch.setattr(
         t085_execution,
         "_validate_t085_native_source_manifest",
-        lambda *args, **kwargs: {"commit": "fake-native"},
+        lambda *args, **kwargs: native_identity,
     )
     monkeypatch.setattr(
         t085_execution,

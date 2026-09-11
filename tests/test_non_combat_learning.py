@@ -1505,7 +1505,12 @@ def test_runtime_family_probe_rejects_projectionless_synthetic_context(
     class Adapter:
         supports_checkpoint_restore = True
         checkpoint_fingerprint_transition_only_raw_keys = frozenset(
-            {"completed_battle_outcome"}
+            {
+                "completed_battle_outcome",
+                "completed_battle_monster_count",
+                "completed_battle_monsters_alive",
+                "completed_battle_monsters",
+            }
         )
 
         def checkpoint_fingerprint(self, snapshot):
@@ -1570,7 +1575,12 @@ def test_runtime_family_probe_proves_all_native_families_and_feature_shapes() ->
     class Adapter:
         supports_checkpoint_restore = True
         checkpoint_fingerprint_transition_only_raw_keys = frozenset(
-            {"completed_battle_outcome"}
+            {
+                "completed_battle_outcome",
+                "completed_battle_monster_count",
+                "completed_battle_monsters_alive",
+                "completed_battle_monsters",
+            }
         )
 
         def __init__(self) -> None:

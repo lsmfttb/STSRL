@@ -164,6 +164,172 @@ T085_NATIVE_SEARCH_BACKENDS = ("battle_search", "battle_search_v2")
 T085NativeSearchBackend = Literal["battle_search", "battle_search_v2"]
 T085_HISTORICAL_OUTCOME_TARGET_KIND = "terminal_battle_survival_probability"
 
+# T085 artifact identity remains historical d62.  The current repository
+# runtime may use only this approved telemetry descendant; no other native
+# identity is admitted by the compatibility seam.  Source-manifest-bound
+# artifact validators compare retained provenance against that manifest's
+# finite identity, while all other provenance fields remain exact.
+T085_ACTIVE_NATIVE_IDENTITY = {
+    "repository": "lsmfttb/sts_lightspeed",
+    "ref": "refs/heads/stsrl/main",
+    "commit": "96052d24b9c2c16ff25b6f7241edd972613be997",
+}
+_T085_ACCEPTED_RUNTIME_IDENTITIES = (
+    dict(T085_NATIVE_IDENTITY),
+    dict(T085_ACTIVE_NATIVE_IDENTITY),
+)
+_T085_PROVENANCE_NATIVE_IDENTITY_KEYS = frozenset(
+    {"native_identity", "native_source_identity"}
+)
+
+
+def _validated_t085_provenance_identity(value: object, label: str) -> dict[str, object]:
+    if not isinstance(value, Mapping):
+        raise T085NativeExecutionError(f"{label} native identity is malformed")
+    identity = dict(value)
+    if identity not in _T085_ACCEPTED_RUNTIME_IDENTITIES:
+        raise T085NativeExecutionError(
+            f"{label} native identity is not an approved d62/960 identity"
+        )
+    return identity
+
+
+def _normalize_t085_provenance_identities(
+    value: object,
+    *,
+    bound_native_identity: Mapping[str, object],
+    require_bound_identity: bool,
+    label: str,
+) -> object:
+    """Normalize only approved nested native identities for comparison.
+
+    Retained d62 artifacts must carry d62 in every native identity field.  The
+    live controller may carry the approved current 960 identity.  Replacing
+    those finite identities with the artifact-bound value makes that one
+    compatibility difference explicit while every other provenance value is
+    still compared byte-for-byte by the caller.
+    """
+
+    bound = _validated_t085_provenance_identity(bound_native_identity, f"{label} bound")
+    if isinstance(value, Mapping):
+        normalized: dict[object, object] = {}
+        for key, item in value.items():
+            if key in _T085_PROVENANCE_NATIVE_IDENTITY_KEYS:
+                identity = _validated_t085_provenance_identity(item, f"{label}.{key}")
+                if require_bound_identity and identity != bound:
+                    raise T085NativeExecutionError(
+                        f"{label}.{key} is not bound to the retained artifact identity"
+                    )
+                normalized[key] = dict(bound)
+            else:
+                normalized[key] = _normalize_t085_provenance_identities(
+                    item,
+                    bound_native_identity=bound,
+                    require_bound_identity=require_bound_identity,
+                    label=f"{label}.{key}",
+                )
+        return normalized
+    if isinstance(value, list):
+        return [
+            _normalize_t085_provenance_identities(
+                item,
+                bound_native_identity=bound,
+                require_bound_identity=require_bound_identity,
+                label=f"{label}[{index}]",
+            )
+            for index, item in enumerate(value)
+        ]
+    if isinstance(value, tuple):
+        return tuple(
+            _normalize_t085_provenance_identities(
+                item,
+                bound_native_identity=bound,
+                require_bound_identity=require_bound_identity,
+                label=f"{label}[{index}]",
+            )
+            for index, item in enumerate(value)
+        )
+    return value
+
+
+def _validate_t085_nested_provenance_identities(
+    value: object,
+    *,
+    bound_native_identity: Mapping[str, object] | None,
+    label: str,
+) -> None:
+    """Validate identity fields in merge metadata that is not compared as a whole.
+
+    The assisted-pool merge wrapper intentionally has its own structural
+    variability, so it is not passed through the controller-provenance
+    equality comparison.  Its nested identity fields still belong to the
+    finite d62/960 compatibility boundary and must be checked recursively.
+    """
+
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            item_label = f"{label}.{key}"
+            if key in _T085_PROVENANCE_NATIVE_IDENTITY_KEYS:
+                identity = _validated_t085_provenance_identity(item, item_label)
+                if bound_native_identity is not None and identity != dict(
+                    bound_native_identity
+                ):
+                    raise T085NativeExecutionError(
+                        f"{item_label} is not bound to the retained artifact identity"
+                    )
+            else:
+                _validate_t085_nested_provenance_identities(
+                    item,
+                    bound_native_identity=bound_native_identity,
+                    label=item_label,
+                )
+    elif isinstance(value, (list, tuple)):
+        for index, item in enumerate(value):
+            _validate_t085_nested_provenance_identities(
+                item,
+                bound_native_identity=bound_native_identity,
+                label=f"{label}[{index}]",
+            )
+
+
+def _t085_provenance_values_equal(
+    actual: object,
+    expected: object,
+    *,
+    bound_native_identity: Mapping[str, object] | None,
+    label: str,
+) -> bool:
+    """Compare provenance exactly, allowing only the bound d62/960 identity."""
+
+    if not isinstance(actual, Mapping) or not isinstance(expected, Mapping):
+        return False
+    if bound_native_identity is None:
+        return dict(actual) == dict(expected)
+    normalized_actual = _normalize_t085_provenance_identities(
+        actual,
+        bound_native_identity=bound_native_identity,
+        require_bound_identity=True,
+        label=f"{label} retained",
+    )
+    normalized_expected = _normalize_t085_provenance_identities(
+        expected,
+        bound_native_identity=bound_native_identity,
+        require_bound_identity=False,
+        label=f"{label} expected",
+    )
+    return normalized_actual == normalized_expected
+
+
+def _t085_source_manifest_bound_identity(
+    source_manifest: Mapping[str, object],
+) -> dict[str, object]:
+    """Return the approved native identity bound by a retained manifest."""
+
+    return _validated_t085_provenance_identity(
+        source_manifest.get("native_identity"),
+        "T085 source manifest",
+    )
+
 
 @dataclass(frozen=True)
 class _T085BSourcePoolStreamSummary:
@@ -518,6 +684,11 @@ def resolve_t085_canonical_records(
         manifest_path=expected_source_manifest_path,
         manifest_sha256=expected_source_manifest_sha256,
     )
+    bound_native_identity = (
+        _t085_source_manifest_bound_identity(source_manifest_binding[0])
+        if source_manifest_binding is not None
+        else None
+    )
     digest = sha256_file(resolved)
     if digest != expected_sha256:
         raise T085NativeExecutionError(
@@ -673,6 +844,7 @@ def resolve_t085_canonical_records(
                     loaded_assisted,
                     controller=build_t085_cohort_b_source_controller(),
                     expected_seeds=expected_pool_seeds,
+                    bound_native_identity=bound_native_identity,
                 )
             else:
                 merged_source_metadata = _validate_t085_c_merged_source_metadata(
@@ -683,6 +855,7 @@ def resolve_t085_canonical_records(
                     source_pool,
                     controller=build_t085_cohort_c_source_controller(),
                     expected_seeds=expected_pool_seeds,
+                    bound_native_identity=bound_native_identity,
                 )
         if source_manifest_binding is not None:
             source_manifest, _ = source_manifest_binding
@@ -1535,8 +1708,32 @@ def _positive_int(value: object, label: str) -> int:
 
 def _validate_t085_native_source_manifest(
     backend: T085NativeSearchBackend | None = None,
+    *,
+    expected_native_identity: Mapping[str, object] | None = None,
 ) -> dict[str, object]:
-    """Require the repository-owned manifest to name T085's pinned native API."""
+    """Require the manifest to name the historical or approved current identity.
+
+    T085's retained artifacts remain bound to ``T085_NATIVE_IDENTITY``.  The
+    current runtime source manifest may instead name the approved telemetry
+    descendant, and fresh runtime provenance must retain that actual identity.
+    An explicit expectation is still restricted to this same finite allowlist.
+    """
+
+    accepted_identities = tuple(
+        dict(identity) for identity in _T085_ACCEPTED_RUNTIME_IDENTITIES
+    )
+    if expected_native_identity is None:
+        expected_identity = None
+    elif isinstance(expected_native_identity, Mapping):
+        expected_identity = dict(expected_native_identity)
+        if expected_identity not in accepted_identities:
+            raise T085NativeExecutionError(
+                "T085 native execution expected identity is not an approved identity"
+            )
+    else:
+        raise T085NativeExecutionError(
+            "T085 native execution expected identity is malformed"
+        )
 
     try:
         manifest = load_lightspeed_source_manifest()
@@ -1546,17 +1743,22 @@ def _validate_t085_native_source_manifest(
             "source manifest cannot be loaded"
         ) from exc
 
-    expected_repository = f"https://github.com/{T085_NATIVE_IDENTITY['repository']}"
     actual_repository = manifest.integration.repository_url.rstrip("/")
     actual_repository = actual_repository.removesuffix(".git")
-    if (
-        actual_repository != expected_repository
-        or manifest.integration.ref != T085_NATIVE_IDENTITY["ref"]
-        or manifest.integration.commit != T085_NATIVE_IDENTITY["commit"]
-    ):
+    actual_identity = {
+        "repository": actual_repository.removeprefix("https://github.com/"),
+        "ref": manifest.integration.ref,
+        "commit": manifest.integration.commit,
+    }
+    if actual_identity not in accepted_identities:
         raise T085NativeExecutionError(
             "T085 native execution is INCOMPLETE: source manifest is not bound "
             "to the accepted sts_lightspeed identity"
+        )
+    if expected_identity is not None and actual_identity != expected_identity:
+        raise T085NativeExecutionError(
+            "T085 native execution is INCOMPLETE: source manifest does not match "
+            "the explicitly expected native identity"
         )
     if backend is not None:
         capability = (
@@ -1569,7 +1771,7 @@ def _validate_t085_native_source_manifest(
                 f"T085 native execution is INCOMPLETE: source manifest lacks "
                 f"{capability}"
             )
-    return dict(T085_NATIVE_IDENTITY)
+    return actual_identity
 
 
 def _is_battle_snapshot(snapshot: SimulatorSnapshot) -> bool:
@@ -1589,13 +1791,16 @@ def _native_search_report(
     backend: T085NativeSearchBackend,
     policy_prior_callback: Callable[..., object] | None = None,
     leaf_value_callback: Callable[..., object] | None = None,
+    expected_native_identity: Mapping[str, object] | None = None,
 ) -> OracleSearchReport:
     """Run and validate one native search on the supplied current snapshot."""
 
     _positive_int(simulations, "native search simulations")
     if not _is_battle_snapshot(snapshot):
         raise T085NativeExecutionError("T085 native search requested outside battle")
-    _validate_t085_native_source_manifest(backend)
+    _validate_t085_native_source_manifest(
+        backend, expected_native_identity=expected_native_identity
+    )
     if backend == "battle_search":
         method_name = "battle_search"
         expected_api = ORACLE_SEARCH_NATIVE_API
@@ -1749,6 +1954,7 @@ def _prepare_t085_native_root_edge_label_from_report(
     simulations: int,
     backend: T085NativeSearchBackend,
     report: OracleSearchReport,
+    expected_native_identity: Mapping[str, object] | None = None,
 ) -> T085NativeRootEdgeLabel:
     """Bind one already-validated controller report to its selected edge."""
 
@@ -1778,7 +1984,9 @@ def _prepare_t085_native_root_edge_label_from_report(
         if backend == "battle_search"
         else T085_NATIVE_V2_PATCH
     )
-    _validate_t085_native_source_manifest(backend)
+    native_identity = _validate_t085_native_source_manifest(
+        backend, expected_native_identity=expected_native_identity
+    )
     if not report.search_ok:
         raise T085NativeExecutionError(
             "T085 native controller root mapping failed: " + "; ".join(report.problems)
@@ -1837,7 +2045,7 @@ def _prepare_t085_native_root_edge_label_from_report(
         raise T085NativeExecutionError("selected native mean_value is not finite")
     return T085NativeRootEdgeLabel(
         backend=backend,
-        native_identity=_validate_t085_native_source_manifest(backend),
+        native_identity=native_identity,
         simulations=simulations,
         selected_legal_action_index=chosen_action_index,
         selected_action_identity=dict(selected.action_identity),
@@ -1860,6 +2068,7 @@ def prepare_t085_native_root_edge_label(
     backend: T085NativeSearchBackend = "battle_search",
     policy_prior_callback: Callable[..., object] | None = None,
     leaf_value_callback: Callable[..., object] | None = None,
+    expected_native_identity: Mapping[str, object] | None = None,
 ) -> T085NativeRootEdgeLabel:
     """Search the current state before stepping and select the chosen root edge."""
 
@@ -1891,6 +2100,7 @@ def prepare_t085_native_root_edge_label(
         backend=backend,
         policy_prior_callback=policy_prior_callback,
         leaf_value_callback=leaf_value_callback,
+        expected_native_identity=expected_native_identity,
     )
     return _prepare_t085_native_root_edge_label_from_report(
         snapshot,
@@ -1899,6 +2109,7 @@ def prepare_t085_native_root_edge_label(
         simulations=simulations,
         backend=backend,
         report=report,
+        expected_native_identity=expected_native_identity,
     )
 
 
@@ -2048,6 +2259,7 @@ class T085NativeTerminalSearchAdapter:
         search_backend: T085NativeSearchBackend = "battle_search",
         policy_prior_callback: Callable[..., object] | None = None,
         leaf_value_callback: Callable[..., object] | None = None,
+        expected_native_identity: Mapping[str, object] | None = None,
     ) -> None:
         _positive_int(search_simulations, "T085 native search simulations")
         if search_backend not in T085_NATIVE_SEARCH_BACKENDS:
@@ -2069,7 +2281,9 @@ class T085NativeTerminalSearchAdapter:
         self._restored_snapshot: SimulatorSnapshot | None = None
         self._last_search_call: _T085NativeSearchCall | None = None
         self._pending_root_edge_label: T085NativeRootEdgeLabel | None = None
-        _validate_t085_native_source_manifest(search_backend)
+        self._expected_native_identity = _validate_t085_native_source_manifest(
+            search_backend, expected_native_identity=expected_native_identity
+        )
 
     def __getattr__(self, name: str) -> Any:
         return getattr(self._base_adapter, name)
@@ -2350,6 +2564,7 @@ class T085NativeTerminalSearchAdapter:
                 simulations=self._search_simulations,
                 backend=call.backend,
                 report=report,
+                expected_native_identity=self._expected_native_identity,
             )
         )
         self._last_search_call = None
@@ -2433,7 +2648,13 @@ class T085UnguidedBattleSearchV2Controller:
     action_space: ActionSpaceConfig = field(
         default_factory=ActionSpaceConfig.initial_no_potions
     )
+    expected_native_identity: Mapping[str, object] | None = field(
+        default=None, repr=False, compare=False
+    )
     provenance: ControllerProvenance = field(init=False)  # type: ignore[assignment]
+    _validated_native_identity: Mapping[str, object] = field(
+        init=False, repr=False, compare=False
+    )
 
     def __post_init__(self) -> None:
         _positive_int(self.simulations, "T085 unguided v2 simulations")
@@ -2444,7 +2665,11 @@ class T085UnguidedBattleSearchV2Controller:
             raise T085NativeExecutionError(
                 "T085 unguided v2 requires initial_no_potions action space"
             )
-        native_identity = _validate_t085_native_source_manifest("battle_search_v2")
+        native_identity = _validate_t085_native_source_manifest(
+            "battle_search_v2",
+            expected_native_identity=self.expected_native_identity,
+        )
+        object.__setattr__(self, "_validated_native_identity", native_identity)
         object.__setattr__(
             self,
             "provenance",
@@ -2484,6 +2709,7 @@ class T085UnguidedBattleSearchV2Controller:
             context,
             simulations=self.simulations,
             backend="battle_search_v2",
+            expected_native_identity=self._validated_native_identity,
         )
         target = select_oracle_root_action(report, selection_rule="highest_mean")
         metadata = oracle_search_controller_metadata(report, target)
@@ -2704,11 +2930,19 @@ def _validate_t085_assisted_controller_provenance(
     *,
     controller: RoutedRunController,
     expected_source_run_count: int,
+    bound_native_identity: Mapping[str, object] | None = None,
 ) -> None:
     """Accept exact shard provenance or the repository merge wrapper only."""
 
     expected = controller.provenance.to_dict()
-    if dict(actual) == expected:
+    if bound_native_identity is None and dict(actual) == expected:
+        return
+    if _t085_provenance_values_equal(
+        actual,
+        expected,
+        bound_native_identity=bound_native_identity,
+        label="T085 Cohort B source controller provenance",
+    ):
         return
     if (
         actual.get("schema_version") != expected.get("schema_version")
@@ -2731,7 +2965,14 @@ def _validate_t085_assisted_controller_provenance(
         for key, value in actual_config.items()
         if key != "assisted_source_pool_merge"
     }
-    if base_config != dict(expected_config):
+    base_actual = dict(actual)
+    base_actual["config"] = base_config
+    if not _t085_provenance_values_equal(
+        base_actual,
+        expected,
+        bound_native_identity=bound_native_identity,
+        label="T085 Cohort B merged source controller provenance",
+    ):
         raise T085NativeExecutionError(
             "T085 Cohort B merged source controller changed its controller config"
         )
@@ -2740,6 +2981,11 @@ def _validate_t085_assisted_controller_provenance(
         raise T085NativeExecutionError(
             "T085 Cohort B merged source controller lacks merge provenance"
         )
+    _validate_t085_nested_provenance_identities(
+        merge,
+        bound_native_identity=bound_native_identity,
+        label="T085 Cohort B assisted_source_pool_merge",
+    )
     if (
         merge.get("merge_version") != "assisted-source-pool-shard-merge-v1"
         or merge.get("shard_count") != 16
@@ -2775,6 +3021,7 @@ def _validate_t085_assisted_merged_source_shards(
     *,
     expected_seeds: Sequence[int],
     expected_record_count: int | None = None,
+    bound_native_identity: Mapping[str, object] | None = None,
 ) -> None:
     """Require the complete B pool to retain the 16 verified source shards."""
 
@@ -2799,6 +3046,11 @@ def _validate_t085_assisted_merged_source_shards(
             raise T085NativeExecutionError(
                 "T085 Cohort B source shard provenance is malformed"
             )
+        _validate_t085_nested_provenance_identities(
+            raw_shard,
+            bound_native_identity=bound_native_identity,
+            label=f"T085 Cohort B assisted_source_pool_merge.shards[{shard_index}]",
+        )
         shard_start = expected_seed_list[shard_index * 64]
         shard_end = expected_seed_list[(shard_index + 1) * 64 - 1]
         expected = {
@@ -3013,6 +3265,7 @@ def _validate_t085_b_source_pool(
     controller: RoutedRunController,
     expected_seeds: Sequence[int],
     expected_record_count: int | None = None,
+    bound_native_identity: Mapping[str, object] | None = None,
 ) -> None:
     """Validate the actual outer/inner assisted source-pool contract."""
 
@@ -3073,11 +3326,13 @@ def _validate_t085_b_source_pool(
         pool.source_controller_provenance,
         controller=controller,
         expected_source_run_count=pool.source_run_count,
+        bound_native_identity=bound_native_identity,
     )
     _validate_t085_assisted_merged_source_shards(
         artifact,
         expected_seeds=expected_seed_list,
         expected_record_count=expected_record_count,
+        bound_native_identity=bound_native_identity,
     )
     summaries = pool.source_run_summaries
     if len(summaries) != len(expected_seed_list):
@@ -3129,17 +3384,31 @@ def _validate_t085_b_source_pool(
             raise T085NativeExecutionError(
                 f"T085 Cohort B source record {index} is not bound to a source summary"
             )
-        if record.source_controller_provenance != expected_controller:
+        if not _t085_provenance_values_equal(
+            record.source_controller_provenance,
+            expected_controller,
+            bound_native_identity=bound_native_identity,
+            label=f"T085 Cohort B source record {index} controller provenance",
+        ):
             raise T085NativeExecutionError(
                 f"T085 Cohort B source record {index} has the wrong controller"
             )
-        if record.source_battle_controller_provenance != expected_battle_provenance:
+        if not _t085_provenance_values_equal(
+            record.source_battle_controller_provenance,
+            expected_battle_provenance,
+            bound_native_identity=bound_native_identity,
+            label=f"T085 Cohort B source record {index} battle controller provenance",
+        ):
             raise T085NativeExecutionError(
                 f"T085 Cohort B source record {index} has the wrong battle controller"
             )
-        if (
-            record.source_non_combat_controller_provenance
-            != expected_non_combat_provenance
+        if not _t085_provenance_values_equal(
+            record.source_non_combat_controller_provenance,
+            expected_non_combat_provenance,
+            bound_native_identity=bound_native_identity,
+            label=(
+                f"T085 Cohort B source record {index} non-combat controller provenance"
+            ),
         ):
             raise T085NativeExecutionError(
                 f"T085 Cohort B source record {index} has the wrong non-combat controller"
@@ -3151,6 +3420,7 @@ def _validate_t085_c_source_pool(
     *,
     controller: RoutedRunController,
     expected_seeds: Sequence[int],
+    bound_native_identity: Mapping[str, object] | None = None,
 ) -> None:
     """Validate source-pool metadata before it can become T085 evidence."""
 
@@ -3172,7 +3442,12 @@ def _validate_t085_c_source_pool(
         raise T085NativeExecutionError(
             "T085 Cohort C source pool contains source-generation problems"
         )
-    if pool.source_controller_provenance != controller.provenance.to_dict():
+    if not _t085_provenance_values_equal(
+        pool.source_controller_provenance,
+        controller.provenance.to_dict(),
+        bound_native_identity=bound_native_identity,
+        label="T085 Cohort C source controller provenance",
+    ):
         raise T085NativeExecutionError(
             "T085 Cohort C source pool controller provenance is not exact"
         )
@@ -3217,13 +3492,22 @@ def _validate_t085_c_source_pool(
             raise T085NativeExecutionError(
                 f"T085 Cohort C source record {index} is not bound to a source summary"
             )
-        if record.source_battle_controller_provenance != expected_battle_provenance:
+        if not _t085_provenance_values_equal(
+            record.source_battle_controller_provenance,
+            expected_battle_provenance,
+            bound_native_identity=bound_native_identity,
+            label=f"T085 Cohort C source record {index} battle controller provenance",
+        ):
             raise T085NativeExecutionError(
                 f"T085 Cohort C source record {index} has the wrong battle controller"
             )
-        if (
-            record.source_non_combat_controller_provenance
-            != expected_non_combat_provenance
+        if not _t085_provenance_values_equal(
+            record.source_non_combat_controller_provenance,
+            expected_non_combat_provenance,
+            bound_native_identity=bound_native_identity,
+            label=(
+                f"T085 Cohort C source record {index} non-combat controller provenance"
+            ),
         ):
             raise T085NativeExecutionError(
                 f"T085 Cohort C source record {index} has the wrong non-combat controller"
@@ -3471,6 +3755,7 @@ def _validate_t085_b_source_pool_jsonl(
     expected_seeds: Sequence[int],
     selected_record_ids: Sequence[str] | None = None,
     retain_battle_start_projections: bool = False,
+    bound_native_identity: Mapping[str, object] | None = None,
 ) -> _T085BSourcePoolStreamSummary:
     """Validate a current assisted pool without materializing its records."""
 
@@ -3616,6 +3901,7 @@ def _validate_t085_b_source_pool_jsonl(
             controller=controller,
             expected_seeds=expected_seeds,
             expected_record_count=declared_record_count,
+            bound_native_identity=bound_native_identity,
         )
     except T085NativeExecutionError:
         raise
@@ -3663,17 +3949,34 @@ def _validate_t085_b_source_pool_jsonl(
                 raise T085NativeExecutionError(
                     f"T085 Cohort B source record {index} is not bound to a source summary"
                 )
-            if record.source_controller_provenance != expected_controller:
+            if not _t085_provenance_values_equal(
+                record.source_controller_provenance,
+                expected_controller,
+                bound_native_identity=bound_native_identity,
+                label=f"T085 Cohort B source record {index} controller provenance",
+            ):
                 raise T085NativeExecutionError(
                     f"T085 Cohort B source record {index} has the wrong controller"
                 )
-            if record.source_battle_controller_provenance != expected_battle_provenance:
+            if not _t085_provenance_values_equal(
+                record.source_battle_controller_provenance,
+                expected_battle_provenance,
+                bound_native_identity=bound_native_identity,
+                label=(
+                    f"T085 Cohort B source record {index} battle controller provenance"
+                ),
+            ):
                 raise T085NativeExecutionError(
                     f"T085 Cohort B source record {index} has the wrong battle controller"
                 )
-            if (
-                record.source_non_combat_controller_provenance
-                != expected_non_combat_provenance
+            if not _t085_provenance_values_equal(
+                record.source_non_combat_controller_provenance,
+                expected_non_combat_provenance,
+                bound_native_identity=bound_native_identity,
+                label=(
+                    f"T085 Cohort B source record {index} non-combat "
+                    "controller provenance"
+                ),
             ):
                 raise T085NativeExecutionError(
                     f"T085 Cohort B source record {index} has the wrong non-combat controller"
@@ -3925,6 +4228,7 @@ def _t085_stream_verified_b_source_pool(
             "T085 Cohort B merged source pool SHA-256 mismatch"
         )
     source_manifest, _ = source_manifest_binding
+    bound_native_identity = _t085_source_manifest_bound_identity(source_manifest)
     raw_complete_ids = source_manifest.get("complete_source_identity_inventory")
     if (
         not isinstance(raw_complete_ids, list)
@@ -3963,6 +4267,7 @@ def _t085_stream_verified_b_source_pool(
         resolved,
         controller=build_t085_cohort_b_source_controller(),
         expected_seeds=expected_seeds,
+        bound_native_identity=bound_native_identity,
         **stream_kwargs,
     )
     summary_ids = [
@@ -5215,8 +5520,19 @@ def _validate_t085_source_manifest_binding(
     artifact_kind: T085NativeSourceArtifactKind,
     manifest_path: str | Path | None,
     manifest_sha256: str | None,
+    expected_native_identity: Mapping[str, object] | None = None,
 ) -> tuple[dict[str, object], Path] | None:
-    """Bind a source pool path to its frozen T085 source manifest."""
+    """Bind a source pool path to its frozen T085 source manifest.
+
+    The live backend must always be one of the finite accepted historical or
+    current identities.  By default, the manifest's own identity is then
+    accepted only when it is exactly one of those same identities and is
+    returned as its artifact provenance.  This keeps retained historical
+    ``d62ff355`` source pools valid under an active ``96052d24`` runtime while
+    allowing fresh current manifests through the same resolver.  An explicit
+    expected identity additionally requires live and document identity to
+    match that exact approved value; arbitrary identities remain rejected.
+    """
 
     if (manifest_path is None) != (manifest_sha256 is None):
         raise T085NativeExecutionError(
@@ -5288,14 +5604,53 @@ def _validate_t085_source_manifest_binding(
         raise T085NativeExecutionError(
             "T085 source-generation manifest is not bound to this source pool"
         )
-    if artifact_kind == "natural_pool":
-        expected_native_identity = _validate_t085_native_source_manifest(
-            "battle_search_v2"
-        )
-        if document.get("native_identity") != expected_native_identity:
+    backend = "battle_search_v2" if artifact_kind == "natural_pool" else "battle_search"
+    document_native_identity = document.get("native_identity")
+    if expected_native_identity is None:
+        # Validate the live runtime independently of the retained artifact's
+        # identity.  Historical d62 artifacts are intentionally consumable
+        # while the active runtime is the approved telemetry descendant.
+        _validate_t085_native_source_manifest(backend)
+        if not isinstance(document_native_identity, Mapping):
             raise T085NativeExecutionError(
-                "T085 Cohort C source manifest has the wrong native identity"
+                "T085 source-generation manifest native identity is malformed"
             )
+        document_identity = dict(document_native_identity)
+        if document_identity not in _T085_ACCEPTED_RUNTIME_IDENTITIES:
+            raise T085NativeExecutionError(
+                "T085 source-generation manifest native identity is not approved"
+            )
+        bound_native_identity = document_identity
+    elif isinstance(expected_native_identity, Mapping):
+        requested_native_identity = dict(expected_native_identity)
+        if requested_native_identity not in _T085_ACCEPTED_RUNTIME_IDENTITIES:
+            raise T085NativeExecutionError(
+                "T085 source-generation manifest expected native identity is "
+                "not an approved identity"
+            )
+        live_identity = _validate_t085_native_source_manifest(
+            backend,
+            expected_native_identity=requested_native_identity,
+        )
+        if not isinstance(document_native_identity, Mapping):
+            raise T085NativeExecutionError(
+                "T085 source-generation manifest native identity is malformed"
+            )
+        if dict(document_native_identity) != live_identity:
+            raise T085NativeExecutionError(
+                "T085 source-generation manifest has the wrong native identity"
+            )
+        bound_native_identity = dict(document_native_identity)
+    else:  # pragma: no cover - the annotation protects normal callers
+        raise T085NativeExecutionError(
+            "T085 source-generation manifest expected native identity is malformed"
+        )
+    if document_native_identity != bound_native_identity:
+        cohort_label = "C" if artifact_kind == "natural_pool" else "B"
+        raise T085NativeExecutionError(
+            f"T085 Cohort {cohort_label} source manifest has the wrong native identity"
+        )
+    if artifact_kind == "natural_pool":
         if any(
             document.get(callback_name) is not None
             for callback_name in ("policy_prior_callback", "leaf_value_callback")
@@ -5304,13 +5659,6 @@ def _validate_t085_source_manifest_binding(
                 "T085 Cohort C source manifest must disable both Search guidance callbacks"
             )
     else:
-        expected_native_identity = _validate_t085_native_source_manifest(
-            "battle_search"
-        )
-        if document.get("native_identity") != expected_native_identity:
-            raise T085NativeExecutionError(
-                "T085 Cohort B source manifest has the wrong native identity"
-            )
         if any(
             document.get(callback_name) is not None
             for callback_name in ("policy_prior_callback", "leaf_value_callback")
@@ -5564,8 +5912,11 @@ def _validate_plan(plan: T085NativeEvaluationPlan) -> None:
         raise T085NativeExecutionError(
             "T085 native evaluation plan must cover A, B, C, and B@400"
         )
-    actual_identity = _validate_t085_native_source_manifest()
-    if dict(plan.native_identity) != actual_identity:
+    _validate_t085_native_source_manifest()
+    plan_identity = _validated_t085_provenance_identity(
+        plan.native_identity, "T085 evaluation plan"
+    )
+    if plan_identity not in _T085_ACCEPTED_RUNTIME_IDENTITIES:
         raise T085NativeExecutionError(
             "T085 native evaluation plan has the wrong native identity"
         )
