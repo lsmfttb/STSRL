@@ -79,8 +79,12 @@ STSRL pin update. The native lane has landed canonically; this worktree makes no
 native edit and binds only that exact resulting identity.
 
 The repository-side workflow now has a deliberately non-executing evidence
-surface in `sim/t088_tournament_workflow.py`. It validates the exact 413-record
-T087 A/B/C membership and order, produces the 413 x 4 arm plan with
+surface in `sim/t088_tournament_workflow.py`. Every workflow entry requires an
+explicit T087 cohort-binding input: the accepted formal-natural, final-report,
+and retention-manifest identities/SHA-256/schema; inherited source identity;
+T087 native provenance; and a SHA-bound ordered 413-entry commitment. It
+therefore validates the exact 413-record T087 A/B/C membership and order rather
+than merely accepting equivalent counts, produces the 413 x 4 arm plan with
 `execution_authorized: false`, and rejects partial/duplicate/substituted formal
 rows. It also makes the bounded canary selection deterministic from explicit
 T087 facts, validates no learned-model calls and retained work facts, computes

@@ -10,6 +10,7 @@ the separate Maintainer authorizations required by T088.
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import random
 from collections import Counter
@@ -18,6 +19,7 @@ from statistics import mean, median
 
 from sts_combat_rl.sim.t087_dense_combat_diagnostics import (
     T087_COHORT_COUNTS,
+    T087_NATIVE_IDENTITY,
     T087_NATURAL_RECORD_COUNT,
     T087IncompleteError,
     build_review_rubric,
@@ -29,6 +31,18 @@ T088_ARMS = ("A", "B", "C", "D")
 T088_BOOTSTRAP_SEED = 880088
 T088_BOOTSTRAP_RESAMPLES = 20_000
 T088_FORMAL_EXECUTIONS = T087_NATURAL_RECORD_COUNT * len(T088_ARMS)
+T088_T087_FORMAL_NATURAL_EVIDENCE_SHA256 = (
+    "7931a118a4bf921f695db769f05fd77a5ae364484f5646f02d5be05329ad297f"
+)
+T088_T087_FINAL_REPORT_SHA256 = (
+    "9a0eba7eed03a1ba4801c3019e9d14a2aa61214a76299a63ed9ab5a0192f3ea0"
+)
+T088_T087_RETENTION_MANIFEST_SHA256 = (
+    "5afe39476965a192c9bdd8d6bed121cd0169e68925cabfe9b8366ee320938adc"
+)
+T088_T085_SOURCE_SELECTION_SHA256 = (
+    "d5c335cd6e1f96e72ae3b302eebca17a5f6531fa0aac97ee2febec2c41c2e752"
+)
 T088_REQUIRED_ARTIFACT_ROLES = frozenset(
     {
         "specification",
@@ -77,6 +91,153 @@ def _sha_key(identity: str, domain: str) -> str:
     return hashlib.sha256(f"{domain}\n{identity}".encode()).hexdigest()
 
 
+def _order_sha256(entries: Sequence[Mapping[str, object]]) -> str:
+    encoded = json.dumps(
+        [dict(entry) for entry in entries],
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode()
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def _artifact_reference(
+    value: object, *, expected_sha256: str, expected_schema_id: str, label: str
+) -> Mapping[str, object]:
+    if not isinstance(value, Mapping):
+        raise T088IncompleteError(f"{label} artifact identity is missing")
+    required = {"path", "sha256", "size_bytes", "schema_id"}
+    if (
+        not required.issubset(value)
+        or not isinstance(value.get("path"), str)
+        or not value["path"]
+        or value.get("sha256") != expected_sha256
+        or value.get("schema_id") != expected_schema_id
+        or isinstance(value.get("size_bytes"), bool)
+        or not isinstance(value.get("size_bytes"), int)
+        or value["size_bytes"] < 0
+    ):
+        raise T088IncompleteError(f"{label} artifact identity is not accepted")
+    return value
+
+
+def _source_selection_reference(value: object) -> Mapping[str, object]:
+    """Validate the inherited T085 source identity in its established shape."""
+
+    if not isinstance(value, Mapping) or set(value) != {
+        "path",
+        "sha256",
+        "schema_id",
+        "byte_count",
+    }:
+        raise T088IncompleteError("T087 inherited source selection identity is invalid")
+    if (
+        not isinstance(value["path"], str)
+        or not value["path"]
+        or value["sha256"] != T088_T085_SOURCE_SELECTION_SHA256
+        or value["schema_id"] != "t085-native-selection-artifact-v1"
+        or isinstance(value["byte_count"], bool)
+        or not isinstance(value["byte_count"], int)
+        or value["byte_count"] < 0
+    ):
+        raise T088IncompleteError("T087 inherited source selection identity is invalid")
+    return value
+
+
+def _binding_identity(binding: Mapping[str, object]) -> dict[str, object]:
+    """Retain only the binding facts needed to associate downstream artifacts."""
+
+    return {
+        "ordered_cohort_entries_sha256": binding["ordered_cohort_entries_sha256"],
+        "t087_artifacts": dict(binding["t087_artifacts"]),
+        "source_selection_manifest_identity": dict(
+            binding["source_selection_manifest_identity"]
+        ),
+        "t087_native_identity": dict(T087_NATIVE_IDENTITY),
+    }
+
+
+def validate_t088_t087_cohort_binding(
+    binding: Mapping[str, object], cohort_rows: Iterable[Mapping[str, object]]
+) -> list[dict[str, object]]:
+    """Bind all T088 work to the accepted, ordered T087 formal evidence.
+
+    The entry list is an order commitment derived from the hash-checked T087
+    natural-evidence document.  It prevents a same-count replacement cohort
+    from entering any plan, canary, arm, report, or retention workflow.
+    """
+
+    if (
+        binding.get("schema_id") != "t088-t087-cohort-binding-v1"
+        or binding.get("task_id") != T088_TASK_ID
+        or binding.get("t087_task_id") != "T087"
+        or binding.get("t087_native_identity") != T087_NATIVE_IDENTITY
+    ):
+        raise T088IncompleteError("T087 cohort binding provenance is invalid")
+    artifacts = binding.get("t087_artifacts")
+    if not isinstance(artifacts, Mapping) or set(artifacts) != {
+        "formal_natural_evidence",
+        "final_report",
+        "retention_manifest",
+    }:
+        raise T088IncompleteError("T087 cohort binding artifact set is incomplete")
+    _artifact_reference(
+        artifacts["formal_natural_evidence"],
+        expected_sha256=T088_T087_FORMAL_NATURAL_EVIDENCE_SHA256,
+        expected_schema_id="t087-natural-evidence-v1",
+        label="T087 formal natural evidence",
+    )
+    _artifact_reference(
+        artifacts["final_report"],
+        expected_sha256=T088_T087_FINAL_REPORT_SHA256,
+        expected_schema_id="t087-dense-combat-diagnostics-report-v1",
+        label="T087 final report",
+    )
+    _artifact_reference(
+        artifacts["retention_manifest"],
+        expected_sha256=T088_T087_RETENTION_MANIFEST_SHA256,
+        expected_schema_id="t087-retention-manifest-v1",
+        label="T087 retention manifest",
+    )
+    _source_selection_reference(binding.get("source_selection_manifest_identity"))
+    entries = binding.get("ordered_cohort_entries")
+    if not isinstance(entries, Sequence) or isinstance(entries, (str, bytes)):
+        raise T088IncompleteError("T087 cohort binding ordered entries are missing")
+    normalized = [
+        {"selection_identity": _identity(entry), "cohort": _cohort(entry)}
+        for entry in entries
+        if isinstance(entry, Mapping)
+    ]
+    if len(normalized) != len(entries) or _order_sha256(normalized) != binding.get(
+        "ordered_cohort_entries_sha256"
+    ):
+        raise T088IncompleteError("T087 cohort binding order commitment is invalid")
+    cohort = _canonical_cohort_rows(cohort_rows)
+    actual = [
+        {"selection_identity": _identity(row), "cohort": _cohort(row)} for row in cohort
+    ]
+    if actual != normalized:
+        raise T088IncompleteError(
+            "cohort differs from accepted T087 identity/order binding"
+        )
+    source_identity = binding["source_selection_manifest_identity"]
+    for row in cohort:
+        if row.get("source_selection_manifest_identity") != source_identity:
+            raise T088IncompleteError(
+                "cohort row source provenance differs from T087 binding"
+            )
+        provenance = row.get("provenance")
+        if (
+            not isinstance(provenance, Mapping)
+            or provenance.get("native_commit") != T087_NATIVE_IDENTITY["commit"]
+        ):
+            raise T088IncompleteError(
+                "cohort row native provenance differs from T087 binding"
+            )
+    return cohort
+
+
 def _canonical_cohort_rows(
     rows: Iterable[Mapping[str, object]],
 ) -> list[dict[str, object]]:
@@ -97,11 +258,11 @@ def _canonical_cohort_rows(
 
 
 def build_t088_formal_plan(
-    cohort_rows: Iterable[Mapping[str, object]],
+    cohort_rows: Iterable[Mapping[str, object]], *, cohort_binding: Mapping[str, object]
 ) -> dict[str, object]:
     """Build the deterministic 413 x 4 plan; this never runs an arm."""
 
-    cohort = _canonical_cohort_rows(cohort_rows)
+    cohort = validate_t088_t087_cohort_binding(cohort_binding, cohort_rows)
     rows = [
         {
             "ordinal": ordinal,
@@ -117,6 +278,7 @@ def build_t088_formal_plan(
         "task_id": T088_TASK_ID,
         "execution_authorized": False,
         "arm_order": list(T088_ARMS),
+        "t087_cohort_binding": _binding_identity(cohort_binding),
         "record_count": len(cohort),
         "planned_execution_count": len(rows),
         "rows": rows,
@@ -126,10 +288,12 @@ def build_t088_formal_plan(
 def validate_t088_formal_plan(
     plan: Mapping[str, object],
     cohort_rows: Iterable[Mapping[str, object]],
+    *,
+    cohort_binding: Mapping[str, object],
 ) -> None:
     """Reject reordered, omitted, substituted, or prematurely-authorized plans."""
 
-    expected = build_t088_formal_plan(cohort_rows)
+    expected = build_t088_formal_plan(cohort_rows, cohort_binding=cohort_binding)
     if (
         plan.get("schema_id") != expected["schema_id"]
         or plan.get("task_id") != T088_TASK_ID
@@ -137,7 +301,13 @@ def validate_t088_formal_plan(
         raise T088IncompleteError("formal plan schema/task identity is invalid")
     if plan.get("execution_authorized") is not False:
         raise T088IncompleteError("formal plan must not claim execution authorization")
-    for name in ("arm_order", "record_count", "planned_execution_count", "rows"):
+    for name in (
+        "arm_order",
+        "t087_cohort_binding",
+        "record_count",
+        "planned_execution_count",
+        "rows",
+    ):
         if plan.get(name) != expected[name]:
             raise T088IncompleteError(
                 "formal plan differs from canonical cohort/arm order"
@@ -145,7 +315,7 @@ def validate_t088_formal_plan(
 
 
 def select_t088_canary_records(
-    cohort_rows: Iterable[Mapping[str, object]],
+    cohort_rows: Iterable[Mapping[str, object]], *, cohort_binding: Mapping[str, object]
 ) -> dict[str, object]:
     """Select the required bounded canary surface from explicit pre-run facts.
 
@@ -154,7 +324,7 @@ def select_t088_canary_records(
     prevents outcome-driven choice among multiple qualifying records.
     """
 
-    cohort = _canonical_cohort_rows(cohort_rows)
+    cohort = validate_t088_t087_cohort_binding(cohort_binding, cohort_rows)
     predicates = {
         "escaping_mugger": lambda row: row.get("is_escaping_mugger_case") is True,
         "ordinary_victory": lambda row: row.get("is_ordinary_victory") is True,
@@ -182,12 +352,16 @@ def select_t088_canary_records(
         "schema_id": "t088-canary-selection-v1",
         "task_id": T088_TASK_ID,
         "execution_authorized": False,
+        "t087_cohort_binding": _binding_identity(cohort_binding),
         "selected": selected,
     }
 
 
 def validate_t088_canary_evidence(
-    selection: Mapping[str, object], rows: Iterable[Mapping[str, object]]
+    selection: Mapping[str, object],
+    rows: Iterable[Mapping[str, object]],
+    *,
+    cohort_binding: Mapping[str, object],
 ) -> list[dict[str, object]]:
     """Validate a bounded canary without treating it as formal evidence.
 
@@ -202,6 +376,28 @@ def validate_t088_canary_evidence(
         or selection.get("execution_authorized") is not False
     ):
         raise T088IncompleteError("canary selection identity/authorization is invalid")
+    entries = cohort_binding.get("ordered_cohort_entries")
+    if not isinstance(entries, Sequence) or isinstance(entries, (str, bytes)):
+        raise T088IncompleteError("canary cohort binding entries are missing")
+    validate_t088_t087_cohort_binding(
+        cohort_binding,
+        (
+            {
+                "selection_identity": _identity(entry),
+                "cohort": _cohort(entry),
+                "source_selection_manifest_identity": cohort_binding.get(
+                    "source_selection_manifest_identity"
+                ),
+                "provenance": {"native_commit": T087_NATIVE_IDENTITY["commit"]},
+            }
+            for entry in entries
+            if isinstance(entry, Mapping)
+        ),
+    )
+    # The selected records were bound when constructed.  Require the same
+    # explicit binding at validation so a canary cannot be relabeled later.
+    if selection.get("t087_cohort_binding") != _binding_identity(cohort_binding):
+        raise T088IncompleteError("canary selection differs from T087 cohort binding")
     selected = selection.get("selected")
     if not isinstance(selected, Sequence) or isinstance(selected, (str, bytes)):
         raise T088IncompleteError("canary selection is malformed")
@@ -285,6 +481,8 @@ def _validate_work(row: Mapping[str, object]) -> None:
 def validate_t088_execution_rows(
     rows: Iterable[Mapping[str, object]],
     cohort_rows: Iterable[Mapping[str, object]],
+    *,
+    cohort_binding: Mapping[str, object],
 ) -> list[dict[str, object]]:
     """Validate complete formal evidence before any report is allowed.
 
@@ -292,13 +490,14 @@ def validate_t088_execution_rows(
     report, a retry input, or a substitute cohort.
     """
 
-    cohort = _canonical_cohort_rows(cohort_rows)
+    cohort = validate_t088_t087_cohort_binding(cohort_binding, cohort_rows)
     result = [dict(row) for row in rows]
     for arm in T088_ARMS:
         validate_t088_arm_execution_rows(
             (row for row in result if row.get("arm") == arm),
             cohort,
             arm=arm,
+            cohort_binding=cohort_binding,
         )
     if len(result) != T088_FORMAL_EXECUTIONS:
         raise T088IncompleteError("formal execution count is not exactly 1652")
@@ -310,6 +509,7 @@ def validate_t088_arm_execution_rows(
     cohort_rows: Iterable[Mapping[str, object]],
     *,
     arm: str,
+    cohort_binding: Mapping[str, object],
 ) -> list[dict[str, object]]:
     """Validate one complete, independently retained formal arm.
 
@@ -320,7 +520,7 @@ def validate_t088_arm_execution_rows(
 
     if arm not in T088_ARMS:
         raise T088IncompleteError("formal arm is invalid")
-    cohort = _canonical_cohort_rows(cohort_rows)
+    cohort = validate_t088_t087_cohort_binding(cohort_binding, cohort_rows)
     expected = {_identity(record): _cohort(record) for record in cohort}
     result = [dict(row) for row in rows]
     observed: dict[str, dict[str, object]] = {}
@@ -726,6 +926,7 @@ def validate_t088_final_report(
     *,
     formal_rows: Iterable[Mapping[str, object]],
     cohort_rows: Iterable[Mapping[str, object]],
+    cohort_binding: Mapping[str, object],
 ) -> None:
     """Require a complete formal matrix and all six precommitted comparisons."""
 
@@ -734,7 +935,9 @@ def validate_t088_final_report(
         or report.get("task_id") != T088_TASK_ID
     ):
         raise T088IncompleteError("final report schema/task identity is invalid")
-    validate_t088_execution_rows(formal_rows, cohort_rows)
+    validate_t088_execution_rows(
+        formal_rows, cohort_rows, cohort_binding=cohort_binding
+    )
     comparisons = report.get("paired_comparisons")
     if not isinstance(comparisons, Sequence) or isinstance(comparisons, (str, bytes)):
         raise T088IncompleteError("final report paired comparisons are missing")
@@ -781,4 +984,5 @@ __all__ = [
     "validate_t088_final_report",
     "validate_t088_formal_plan",
     "validate_t088_retention_manifest",
+    "validate_t088_t087_cohort_binding",
 ]

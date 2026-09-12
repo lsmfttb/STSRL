@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 
 import pytest
 
@@ -20,20 +21,82 @@ from sts_combat_rl.sim.t088_tournament_workflow import (
     validate_t088_execution_rows,
     validate_t088_formal_plan,
     validate_t088_retention_manifest,
+    validate_t088_t087_cohort_binding,
 )
 
 
 def _cohort() -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
+    source_identity = {
+        "path": "/retained/t085-selection.json",
+        "sha256": "d5c335cd6e1f96e72ae3b302eebca17a5f6531fa0aac97ee2febec2c41c2e752",
+        "schema_id": "t085-native-selection-artifact-v1",
+        "byte_count": 1,
+    }
     for cohort, count in (("A", 93), ("B", 192), ("C", 128)):
         for index in range(count):
-            rows.append({"selection_identity": f"{cohort}:{index}", "cohort": cohort})
+            rows.append(
+                {
+                    "selection_identity": f"{cohort}:{index}",
+                    "cohort": cohort,
+                    "source_selection_manifest_identity": source_identity,
+                    "provenance": {
+                        "native_commit": "96052d24b9c2c16ff25b6f7241edd972613be997"
+                    },
+                }
+            )
     rows[0].update(is_escaping_mugger_case=True, legal_root_action_count=2)
     rows[1].update(is_ordinary_victory=True, legal_root_action_count=2)
     rows[2].update(is_ordinary_loss=True, legal_root_action_count=2)
     rows[93].update(is_later_act_or_boss=True, legal_root_action_count=2)
     rows[94].update(legal_root_action_count=3)
     return rows
+
+
+def _binding(cohort: list[dict[str, object]]) -> dict[str, object]:
+    entries = [
+        {"selection_identity": row["selection_identity"], "cohort": row["cohort"]}
+        for row in cohort
+    ]
+    order = json.dumps(entries, sort_keys=True, separators=(",", ":")).encode()
+    reference = lambda sha, schema: {
+        "path": f"/retained/{schema}.json",
+        "sha256": sha,
+        "size_bytes": 1,
+        "schema_id": schema,
+    }
+    return {
+        "schema_id": "t088-t087-cohort-binding-v1",
+        "task_id": "T088",
+        "t087_task_id": "T087",
+        "t087_native_identity": {
+            "repository": "lsmfttb/sts_lightspeed",
+            "ref": "refs/heads/stsrl/main",
+            "commit": "96052d24b9c2c16ff25b6f7241edd972613be997",
+        },
+        "source_selection_manifest_identity": {
+            "path": "/retained/t085-selection.json",
+            "sha256": "d5c335cd6e1f96e72ae3b302eebca17a5f6531fa0aac97ee2febec2c41c2e752",
+            "schema_id": "t085-native-selection-artifact-v1",
+            "byte_count": 1,
+        },
+        "t087_artifacts": {
+            "formal_natural_evidence": reference(
+                "7931a118a4bf921f695db769f05fd77a5ae364484f5646f02d5be05329ad297f",
+                "t087-natural-evidence-v1",
+            ),
+            "final_report": reference(
+                "9a0eba7eed03a1ba4801c3019e9d14a2aa61214a76299a63ed9ab5a0192f3ea0",
+                "t087-dense-combat-diagnostics-report-v1",
+            ),
+            "retention_manifest": reference(
+                "5afe39476965a192c9bdd8d6bed121cd0169e68925cabfe9b8366ee320938adc",
+                "t087-retention-manifest-v1",
+            ),
+        },
+        "ordered_cohort_entries": entries,
+        "ordered_cohort_entries_sha256": hashlib.sha256(order).hexdigest(),
+    }
 
 
 def _diagnostic(
@@ -80,22 +143,24 @@ def _paired_rows() -> list[dict[str, object]]:
 
 def test_formal_plan_is_exact_413_by_four_and_rejects_reordering() -> None:
     cohort = _cohort()
-    plan = build_t088_formal_plan(cohort)
+    binding = _binding(cohort)
+    plan = build_t088_formal_plan(cohort, cohort_binding=binding)
 
     assert plan["execution_authorized"] is False
     assert plan["planned_execution_count"] == T088_FORMAL_EXECUTIONS
     assert [row["arm"] for row in plan["rows"][:413]] == ["A"] * 413
-    validate_t088_formal_plan(plan, cohort)
+    validate_t088_formal_plan(plan, cohort, cohort_binding=binding)
 
     plan["rows"] = list(reversed(plan["rows"]))
     with pytest.raises(T088IncompleteError, match="canonical cohort/arm order"):
-        validate_t088_formal_plan(plan, cohort)
+        validate_t088_formal_plan(plan, cohort, cohort_binding=binding)
 
 
 def test_canary_selection_is_sha_deterministic_and_never_authorizes_execution() -> None:
     cohort = _cohort()
-    first = select_t088_canary_records(cohort)
-    second = select_t088_canary_records(reversed(cohort))
+    binding = _binding(cohort)
+    first = select_t088_canary_records(cohort, cohort_binding=binding)
+    second = select_t088_canary_records(list(cohort), cohort_binding=binding)
 
     assert first == second
     assert first["execution_authorized"] is False
@@ -108,8 +173,29 @@ def test_canary_selection_is_sha_deterministic_and_never_authorizes_execution() 
     }
 
 
+def test_t087_binding_rejects_same_count_substitution_reordering_and_hash_drift() -> (
+    None
+):
+    cohort = _cohort()
+    binding = _binding(cohort)
+    validate_t088_t087_cohort_binding(binding, cohort)
+
+    substituted = [dict(row) for row in cohort]
+    substituted[0]["selection_identity"] = "A:substituted"
+    with pytest.raises(T088IncompleteError, match="identity/order binding"):
+        validate_t088_t087_cohort_binding(binding, substituted)
+    with pytest.raises(T088IncompleteError, match="identity/order binding"):
+        validate_t088_t087_cohort_binding(binding, list(reversed(cohort)))
+
+    binding["t087_artifacts"]["formal_natural_evidence"]["sha256"] = "0" * 64
+    with pytest.raises(T088IncompleteError, match="formal natural evidence"):
+        validate_t088_t087_cohort_binding(binding, cohort)
+
+
 def test_canary_validation_requires_each_arm_specific_audit() -> None:
-    selection = select_t088_canary_records(_cohort())
+    cohort = _cohort()
+    binding = _binding(cohort)
+    selection = select_t088_canary_records(cohort, cohort_binding=binding)
     rows = []
     for identity in {item["selection_identity"] for item in selection["selected"]}:
         for arm in T088_ARMS:
@@ -132,10 +218,12 @@ def test_canary_validation_requires_each_arm_specific_audit() -> None:
                 },
             }
             rows.append(row)
-    assert validate_t088_canary_evidence(selection, rows) == rows
+    assert (
+        validate_t088_canary_evidence(selection, rows, cohort_binding=binding) == rows
+    )
     next(row for row in rows if row["arm"] == "A")["search_v2_parity_verified"] = False
     with pytest.raises(T088IncompleteError, match="Search-v2 parity"):
-        validate_t088_canary_evidence(selection, rows)
+        validate_t088_canary_evidence(selection, rows, cohort_binding=binding)
 
 
 def test_paired_statistics_preserve_pairing_and_use_precommitted_bootstrap() -> None:
@@ -177,9 +265,13 @@ def test_blind_bundle_uses_disjoint_semantic_strata_and_hides_arm_names() -> Non
 
 def test_formal_execution_fails_closed_before_partial_rows_can_be_reported() -> None:
     with pytest.raises(T088IncompleteError, match="formal arm does not cover"):
-        validate_t088_arm_execution_rows([], _cohort(), arm="A")
+        cohort = _cohort()
+        validate_t088_arm_execution_rows(
+            [], cohort, arm="A", cohort_binding=_binding(cohort)
+        )
     with pytest.raises(T088IncompleteError, match="cover exactly 413"):
-        validate_t088_execution_rows([], _cohort())
+        cohort = _cohort()
+        validate_t088_execution_rows([], cohort, cohort_binding=_binding(cohort))
 
 
 def test_retention_requires_every_role_and_real_sha_shape() -> None:
