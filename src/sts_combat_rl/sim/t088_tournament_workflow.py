@@ -22,8 +22,8 @@ from sts_combat_rl.sim.t087_dense_combat_diagnostics import (
     T087_NATIVE_IDENTITY,
     T087_NATURAL_RECORD_COUNT,
     T087IncompleteError,
+    build_dense_diagnostic_row,
     build_review_rubric,
-    validate_dense_diagnostic_row,
 )
 
 T088_TASK_ID = "T088"
@@ -478,6 +478,56 @@ def _validate_work(row: Mapping[str, object]) -> None:
     _finite(row.get("wall_clock_time_s"), "wall_clock_time_s")
 
 
+def _validate_t088_dense_execution_diagnostic(
+    diagnostic: Mapping[str, object],
+    *,
+    identity: str,
+    cohort: str,
+    source_identity: Mapping[str, object],
+) -> None:
+    """Recompute amended T087 diagnostics without inheriting T087-only provenance.
+
+    T087's full-row validator intentionally freezes that task's controller and
+    search provenance.  T088 reuses its raw/equation semantics across four
+    different controllers, so it must recompute the same dense payload while
+    retaining each formal row's own provenance rather than pretending it was a
+    T087 Search-v2@100 execution.
+    """
+
+    if (
+        diagnostic.get("selection_identity") != identity
+        or diagnostic.get("cohort") != cohort
+        or not isinstance(diagnostic.get("entry"), Mapping)
+        or not isinstance(diagnostic.get("terminal"), Mapping)
+        or not isinstance(diagnostic.get("action_trace"), Sequence)
+        or isinstance(diagnostic.get("action_trace"), (str, bytes))
+    ):
+        raise T088IncompleteError("execution row dense diagnostic is malformed")
+    outcome = diagnostic.get("outcome")
+    if not _valid_outcome(outcome):
+        raise T088IncompleteError("execution row dense diagnostic lacks outcome")
+    provenance = diagnostic.get("provenance")
+    try:
+        rebuilt = build_dense_diagnostic_row(
+            selection_identity=identity,
+            cohort=cohort,
+            entry=diagnostic["entry"],  # type: ignore[arg-type]
+            terminal=diagnostic["terminal"],  # type: ignore[arg-type]
+            outcome=outcome,
+            action_trace=diagnostic["action_trace"],  # type: ignore[arg-type]
+            provenance=provenance if isinstance(provenance, Mapping) else None,
+            source_selection_manifest_identity=source_identity,
+        )
+    except (T087IncompleteError, TypeError, ValueError) as exc:
+        raise T088IncompleteError(
+            "execution row dense diagnostic does not recompute"
+        ) from exc
+    if dict(diagnostic) != rebuilt:
+        raise T088IncompleteError(
+            "execution row dense diagnostic has scalar or raw-evidence drift"
+        )
+
+
 def validate_t088_execution_rows(
     rows: Iterable[Mapping[str, object]],
     cohort_rows: Iterable[Mapping[str, object]],
@@ -522,6 +572,9 @@ def validate_t088_arm_execution_rows(
         raise T088IncompleteError("formal arm is invalid")
     cohort = validate_t088_t087_cohort_binding(cohort_binding, cohort_rows)
     expected = {_identity(record): _cohort(record) for record in cohort}
+    source_identity = cohort_binding.get("source_selection_manifest_identity")
+    if not isinstance(source_identity, Mapping):
+        raise T088IncompleteError("formal source identity is unavailable")
     result = [dict(row) for row in rows]
     observed: dict[str, dict[str, object]] = {}
     for row in result:
@@ -545,10 +598,12 @@ def validate_t088_arm_execution_rows(
         diagnostics = row.get("dense_diagnostic")
         if not isinstance(diagnostics, Mapping):
             raise T088IncompleteError("execution row lacks dense diagnostic row")
-        try:
-            validate_dense_diagnostic_row(diagnostics)
-        except T087IncompleteError as exc:
-            raise T088IncompleteError("T087 dense diagnostic row is invalid") from exc
+        _validate_t088_dense_execution_diagnostic(
+            diagnostics,
+            identity=identity,
+            cohort=expected[identity],
+            source_identity=source_identity,
+        )
         if (
             _identity(diagnostics) != identity
             or diagnostics.get("outcome") != row["outcome"]

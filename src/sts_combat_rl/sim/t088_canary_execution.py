@@ -505,6 +505,9 @@ class T088NativeCanaryRecordRunner:
                 "max_steps": 200,
                 "no_additional_search_seed": True,
                 "restore_source_identity": identity,
+                "source_selection_manifest_identity": record[
+                    "source_selection_manifest_identity"
+                ],
             },
             source_selection_manifest_identity=record[
                 "source_selection_manifest_identity"
