@@ -333,7 +333,7 @@ def execute_t088_canary(
         for record in records:
             try:
                 raw = runner(record, arm, controller)
-            except Exception as exc:  # noqa: BLE001 - fail closed at execution boundary
+            except Exception as exc:
                 raise T088CanaryExecutionError(
                     "T088 canary runner failed for "
                     f"{record['selection_identity']} arm {arm}"
