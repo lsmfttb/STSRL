@@ -546,9 +546,8 @@ def _default_adapter_factory() -> object:
     return LightSpeedAdapter(seed=1, ascension=20, player_class="IRONCLAD")
 
 
-def run_t088_authorized_canary_from_paths(
+def _admit_t088_canary_inputs_from_paths(
     *,
-    authorization_path: Path,
     implementation_head: str,
     t087_formal_path: Path,
     t087_report_path: Path,
@@ -560,13 +559,11 @@ def run_t088_authorized_canary_from_paths(
     c_pool_path: Path,
     b_source_manifest_path: Path,
     c_source_manifest_path: Path,
-    output_path: Path,
-    artifact_root: Path,
-    adapter_factory: Callable[[], object] | None = None,
-    runner_factory: Callable[..., object] = T088NativeCanaryRecordRunner,
-) -> dict[str, object]:
-    """Run one approved bounded canary only after complete path admission."""
+) -> tuple[dict[str, object], object, dict[str, Mapping[str, object]]]:
+    """Perform T088's full read-only retained-input admission boundary."""
 
+    if not _is_sha(implementation_head):
+        raise T088CanaryPathError("T088 implementation head must be a full SHA-1")
     formal, formal_ref = _read_t087_accepted_json(
         t087_formal_path,
         expected_sha256=T088_T087_FORMAL_NATURAL_EVIDENCE_SHA256,
@@ -618,14 +615,112 @@ def run_t088_authorized_canary_from_paths(
         )
     except (OSError, T087IncompleteError, ValueError) as exc:
         raise T088CanaryPathError(f"T087/T085 input gate failed: {exc}") from exc
-    inputs = {
-        "t087_formal": formal_ref,
-        "t087_report": report_ref,
-        "t087_retention": retention_ref,
-        "t085_selection": selection_ref,
-        "t085_restore": restore_ref,
-        "t085_canonical": canonical_refs,
+    return (
+        formal,
+        gate,
+        {
+            "t087_formal": formal_ref,
+            "t087_report": report_ref,
+            "t087_retention": retention_ref,
+            "t085_selection": selection_ref,
+            "t085_restore": restore_ref,
+            "t085_canonical": canonical_refs,
+        },
+    )
+
+
+def prepare_t088_canary_authorization_from_paths(
+    *,
+    implementation_head: str,
+    t087_formal_path: Path,
+    t087_report_path: Path,
+    t087_retention_path: Path,
+    t085_selection_path: Path,
+    t085_restore_path: Path,
+    a_pool_path: Path,
+    b_pool_path: Path,
+    c_pool_path: Path,
+    b_source_manifest_path: Path,
+    c_source_manifest_path: Path,
+) -> dict[str, object]:
+    """Prepare, but never issue, the exact authorization-v2 input binding."""
+
+    _, _, inputs = _admit_t088_canary_inputs_from_paths(
+        implementation_head=implementation_head,
+        t087_formal_path=t087_formal_path,
+        t087_report_path=t087_report_path,
+        t087_retention_path=t087_retention_path,
+        t085_selection_path=t085_selection_path,
+        t085_restore_path=t085_restore_path,
+        a_pool_path=a_pool_path,
+        b_pool_path=b_pool_path,
+        c_pool_path=c_pool_path,
+        b_source_manifest_path=b_source_manifest_path,
+        c_source_manifest_path=c_source_manifest_path,
+    )
+    digest = _canonical_sha256(inputs)
+    identity = {
+        "schema_id": T088_CANARY_PATH_AUTHORIZATION_SCHEMA_ID,
+        "task_id": "T088",
+        "authorization_kind": "bounded_canary",
+        "implementation_head": implementation_head,
+        "input_identities_sha256": digest,
     }
+    return {
+        "schema_id": "t088-canary-authorization-preparation-v1",
+        "task_id": "T088",
+        "preparation_only": True,
+        "implementation_head": implementation_head,
+        "inputs": inputs,
+        "input_identities_sha256": digest,
+        "authorization_identity": identity,
+        "authorization_v2_template": {
+            **identity,
+            "authorized": None,
+            "authorization_id": None,
+            "maintainer_attestation": {
+                "role": "maintainer",
+                "decision": "CANARY_AUTHORIZED",
+                "exact_head": implementation_head,
+            },
+        },
+    }
+
+
+def run_t088_authorized_canary_from_paths(
+    *,
+    authorization_path: Path,
+    implementation_head: str,
+    t087_formal_path: Path,
+    t087_report_path: Path,
+    t087_retention_path: Path,
+    t085_selection_path: Path,
+    t085_restore_path: Path,
+    a_pool_path: Path,
+    b_pool_path: Path,
+    c_pool_path: Path,
+    b_source_manifest_path: Path,
+    c_source_manifest_path: Path,
+    output_path: Path,
+    artifact_root: Path,
+    adapter_factory: Callable[[], object] | None = None,
+    runner_factory: Callable[..., object] = T088NativeCanaryRecordRunner,
+) -> dict[str, object]:
+    """Run one approved bounded canary only after complete path admission."""
+
+    formal, gate, inputs = _admit_t088_canary_inputs_from_paths(
+        implementation_head=implementation_head,
+        t087_formal_path=t087_formal_path,
+        t087_report_path=t087_report_path,
+        t087_retention_path=t087_retention_path,
+        t085_selection_path=t085_selection_path,
+        t085_restore_path=t085_restore_path,
+        a_pool_path=a_pool_path,
+        b_pool_path=b_pool_path,
+        c_pool_path=c_pool_path,
+        b_source_manifest_path=b_source_manifest_path,
+        c_source_manifest_path=c_source_manifest_path,
+    )
     authorization_document, _ = _read_exact_json(
         authorization_path,
         expected_sha256=None,
@@ -635,10 +730,21 @@ def run_t088_authorized_canary_from_paths(
     execution_authorization = _validate_path_authorization(
         authorization_document, implementation_head=implementation_head, inputs=inputs
     )
-    cohort = _project_t087_cohort(formal, gate.source_selection_manifest_identity, maps)
+    maps = getattr(gate, "canonical_records_by_cohort", None)
+    source_identity = getattr(gate, "source_selection_manifest_identity", None)
+    if not isinstance(maps, Mapping) or not isinstance(source_identity, Mapping):
+        raise T088CanaryPathError("T087/T085 admitted input gate is malformed")
+    formal_ref = inputs["t087_formal"]
+    report_ref = inputs["t087_report"]
+    retention_ref = inputs["t087_retention"]
+    if not all(
+        isinstance(value, Mapping) for value in (formal_ref, report_ref, retention_ref)
+    ):
+        raise T088CanaryPathError("T088 admitted T087 references are malformed")
+    cohort = _project_t087_cohort(formal, source_identity, maps)
     binding = _build_t087_cohort_binding(
         cohort,
-        source_identity=gate.source_selection_manifest_identity,
+        source_identity=source_identity,
         formal_reference=formal_ref,
         report_reference=report_ref,
         retention_reference=retention_ref,
@@ -703,7 +809,8 @@ def build_parser() -> argparse.ArgumentParser:
     """Build the explicit-only authorized-canary command line."""
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--authorization", type=Path, required=True)
+    parser.add_argument("--prepare-authorization", action="store_true")
+    parser.add_argument("--authorization", type=Path)
     parser.add_argument("--implementation-head", required=True)
     parser.add_argument("--t087-formal", type=Path, required=True)
     parser.add_argument("--t087-report", type=Path, required=True)
@@ -715,8 +822,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--c-pool", type=Path, required=True)
     parser.add_argument("--b-source-manifest", type=Path, required=True)
     parser.add_argument("--c-source-manifest", type=Path, required=True)
-    parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--artifact-root", type=Path, required=True)
+    parser.add_argument("--output", type=Path)
+    parser.add_argument("--artifact-root", type=Path)
     return parser
 
 
@@ -725,6 +832,30 @@ def main(argv: list[str] | None = None) -> int:
 
     args = build_parser().parse_args(argv)
     try:
+        if args.prepare_authorization:
+            result = prepare_t088_canary_authorization_from_paths(
+                implementation_head=args.implementation_head,
+                t087_formal_path=args.t087_formal,
+                t087_report_path=args.t087_report,
+                t087_retention_path=args.t087_retention,
+                t085_selection_path=args.t085_selection,
+                t085_restore_path=args.t085_restore,
+                a_pool_path=args.a_pool,
+                b_pool_path=args.b_pool,
+                c_pool_path=args.c_pool,
+                b_source_manifest_path=args.b_source_manifest,
+                c_source_manifest_path=args.c_source_manifest,
+            )
+            print(json.dumps(result, sort_keys=True, ensure_ascii=False))
+            return 0
+        if (
+            args.authorization is None
+            or args.output is None
+            or args.artifact_root is None
+        ):
+            raise T088CanaryPathError(
+                "authorization, output, and artifact root are required for execution"
+            )
         result = run_t088_authorized_canary_from_paths(
             authorization_path=args.authorization,
             implementation_head=args.implementation_head,
@@ -775,5 +906,6 @@ __all__ = [
     "T088CanaryPathError",
     "build_parser",
     "main",
+    "prepare_t088_canary_authorization_from_paths",
     "run_t088_authorized_canary_from_paths",
 ]

@@ -262,6 +262,79 @@ def test_input_gate_failure_preserves_root_retained_binding_message(
     assert isinstance(error.value.__cause__, command.T087IncompleteError)
 
 
+def test_authorization_preparation_runs_input_gate_without_adapter_or_runner(
+    tmp_path, monkeypatch
+):
+    refs = {
+        "formal": _reference("formal", "a" * 64, "t087-natural-evidence-v1"),
+        "report": _reference(
+            "report", "b" * 64, "t087-dense-combat-diagnostics-report-v1"
+        ),
+        "retention": _reference("retention", "c" * 64, "t087-retention-manifest-v1"),
+        "selection": _reference(
+            "selection", "d" * 64, "t085-native-selection-artifact-v1"
+        ),
+        "restore": _reference(
+            "restore", "e" * 64, "t085-native-selection-restore-evidence-v1"
+        ),
+    }
+    monkeypatch.setattr(
+        command,
+        "_read_t087_accepted_json",
+        lambda path, **_: ({}, refs[path.stem.removeprefix("t087-")]),
+    )
+    monkeypatch.setattr(
+        command,
+        "_read_exact_json",
+        lambda path, **_: ({}, refs[path.stem.removeprefix("t085-")]),
+    )
+    maps = {"A": {}, "B": {}, "C": {}}
+    canonical_refs = {"A": {}, "B": {}, "C": {}}
+    monkeypatch.setattr(
+        command, "_load_canonical_maps", lambda **_: (maps, canonical_refs)
+    )
+    gate_called = False
+
+    def load_gate(**kwargs):
+        nonlocal gate_called
+        gate_called = True
+        assert kwargs["canonical_records_by_cohort"] == maps
+        assert kwargs["canonical_artifact_references"] == canonical_refs
+        return SimpleNamespace()
+
+    monkeypatch.setattr(command, "load_t087_t085_input_gate", load_gate)
+    monkeypatch.setattr(
+        command,
+        "_default_adapter_factory",
+        lambda: pytest.fail("authorization preparation must not create an adapter"),
+    )
+    head = "f" * 40
+    prepared = command.prepare_t088_canary_authorization_from_paths(
+        implementation_head=head,
+        t087_formal_path=tmp_path / "formal",
+        t087_report_path=tmp_path / "report",
+        t087_retention_path=tmp_path / "retention",
+        t085_selection_path=tmp_path / "selection",
+        t085_restore_path=tmp_path / "restore",
+        a_pool_path=tmp_path / "a",
+        b_pool_path=tmp_path / "b",
+        c_pool_path=tmp_path / "c",
+        b_source_manifest_path=tmp_path / "b-manifest",
+        c_source_manifest_path=tmp_path / "c-manifest",
+    )
+
+    assert gate_called is True
+    assert prepared["preparation_only"] is True
+    assert prepared["implementation_head"] == head
+    assert prepared["input_identities_sha256"] == command._canonical_sha256(
+        prepared["inputs"]
+    )
+    template = prepared["authorization_v2_template"]
+    assert template["authorized"] is None
+    assert template["authorization_id"] is None
+    assert template["input_identities_sha256"] == prepared["input_identities_sha256"]
+
+
 def test_path_authorization_rejects_non_exact_head_before_runner_or_adapter():
     with pytest.raises(command.T088CanaryPathError, match="full SHA-1"):
         command._validate_path_authorization(
