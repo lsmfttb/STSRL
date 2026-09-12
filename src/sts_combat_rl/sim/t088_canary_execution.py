@@ -17,19 +17,40 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import time
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Protocol
 
+from sts_combat_rl.commands.t085_native_execution import (
+    T085NativeExecutionError,
+    _validate_t085_native_source_manifest,
+    restore_t085_canonical_record,
+)
 from sts_combat_rl.commands.t088_classical_combat_tournament import (
     T088_ARM_ORDER,
     T088_NATIVE_IDENTITY,
+    T088_WORK_COUNTERS_SCHEMA_ID,
     build_t088_controller,
     t088_controller_definitions,
 )
+from sts_combat_rl.sim.action_space import ActionSpaceConfig
+from sts_combat_rl.sim.battle_start_pool import BattleStartCheckpointRecord
+from sts_combat_rl.sim.controlled_run import ControlledRun, execute_controlled_run
+from sts_combat_rl.sim.decision_record import action_identity_dicts_for_actions
+from sts_combat_rl.sim.public_run_context import (
+    build_public_run_context,
+    read_native_public_projection,
+)
 from sts_combat_rl.sim.t087_dense_combat_diagnostics import (
     T087IncompleteError,
+    _terminal_outcome_from_raw,
+    _trace_for_controlled_run,
+    battle_snapshot_evidence,
     build_dense_diagnostic_row,
+)
+from sts_combat_rl.t085_corrected_leaf_value_search_evaluation import (
+    T085BattleStartRecord,
 )
 from sts_combat_rl.sim.t088_tournament_workflow import (
     T088_ARMS,
@@ -56,6 +77,441 @@ class T088CanaryRecordRunner(Protocol):
     def __call__(
         self, record: Mapping[str, object], arm: str, controller: object
     ) -> Mapping[str, object]: ...
+
+
+class _T088CanaryRuntimeAdapter:
+    """Additive work-capture proxy over an accepted restored native adapter.
+
+    This intentionally owns no game transition, restore, or action-selection
+    semantics.  The two native companion calls are the reviewed T088 additive
+    telemetry surfaces; all other methods, including checkpoint operations used
+    by Beam, remain the exact wrapped adapter methods.
+    """
+
+    def __init__(self, base_adapter: object, restored_snapshot: object) -> None:
+        self._base_adapter = base_adapter
+        self._restored_snapshot = restored_snapshot
+        self._runtime_work_rows: list[dict[str, object]] = []
+        self._progressive_bias_rows: list[dict[str, object]] = []
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._base_adapter, name)
+
+    def reset(self, seed: int | None = None) -> object:
+        if seed is not None:
+            raise T088CanaryExecutionError("T088 canary must not reseed a restore")
+        snapshot = self._restored_snapshot
+        self._restored_snapshot = None
+        if snapshot is None:
+            raise T088CanaryExecutionError("T088 canary restored snapshot was reused")
+        return snapshot
+
+    def battle_search_v2(
+        self,
+        snapshot: object,
+        *,
+        simulations: int,
+        include_potions: bool = False,
+        policy_prior_callback: object | None = None,
+        leaf_value_callback: object | None = None,
+    ) -> Mapping[str, object]:
+        """Run A/B through the native additive-counter companion only."""
+
+        if (
+            include_potions
+            or policy_prior_callback is not None
+            or leaf_value_callback is not None
+        ):
+            raise T088CanaryExecutionError("T088 A/B Search-v2 contract drifted")
+        search = getattr(
+            self._base_adapter, "battle_search_v2_with_work_counters", None
+        )
+        if not callable(search):
+            raise T088CanaryExecutionError(
+                "T088 native Search-v2 work counters are unavailable"
+            )
+        raw = search(snapshot, simulations=simulations, include_potions=False)
+        if not isinstance(raw, Mapping):
+            raise T088CanaryExecutionError(
+                "T088 native Search-v2 counter report is malformed"
+            )
+        work = raw.get("work_counters")
+        if not isinstance(work, Mapping):
+            raise T088CanaryExecutionError(
+                "T088 native Search-v2 work counters are missing"
+            )
+        self._runtime_work_rows.append(dict(work))
+        return raw
+
+    def battle_search_v2_with_progressive_bias(
+        self,
+        snapshot: object,
+        *,
+        simulations: int,
+        include_potions: bool = False,
+        bias_enabled: bool = True,
+        audit_limit: int = 256,
+    ) -> Mapping[str, object]:
+        search = getattr(
+            self._base_adapter, "battle_search_v2_with_progressive_bias", None
+        )
+        if not callable(search):
+            raise T088CanaryExecutionError(
+                "T088 native progressive-bias API is unavailable"
+            )
+        raw = search(
+            snapshot,
+            simulations=simulations,
+            include_potions=include_potions,
+            bias_enabled=bias_enabled,
+            audit_limit=audit_limit,
+        )
+        if not isinstance(raw, Mapping):
+            raise T088CanaryExecutionError(
+                "T088 native progressive-bias report is malformed"
+            )
+        self._progressive_bias_rows.append(dict(raw))
+        return raw
+
+
+def _positive_int(value: object, label: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise T088CanaryExecutionError(f"{label} must be a non-negative integer")
+    return value
+
+
+def _metadata_work_rows(
+    controlled: ControlledRun,
+    *,
+    arm: str,
+    adapter: _T088CanaryRuntimeAdapter,
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    """Extract exact per-root counters published by each frozen controller."""
+
+    if arm in {"A", "B"}:
+        if len(adapter._runtime_work_rows) != len(controlled.steps):
+            raise T088CanaryExecutionError(
+                "T088 A/B Search-v2 work rows do not match decisions"
+            )
+        return list(adapter._runtime_work_rows), []
+    if arm == "C":
+        rows: list[dict[str, object]] = []
+        for step in controlled.steps:
+            metadata = step.decision_metadata.get("classical_search")
+            if not isinstance(metadata, Mapping):
+                raise T088CanaryExecutionError("T088 Beam work metadata is unavailable")
+            rows.append(dict(metadata))
+        return rows, []
+    if arm == "D":
+        if len(adapter._progressive_bias_rows) != len(controlled.steps):
+            raise T088CanaryExecutionError(
+                "T088 progressive-bias rows do not match decisions"
+            )
+        rows = []
+        audits = []
+        for raw in adapter._progressive_bias_rows:
+            work = raw.get("work_counters")
+            telemetry = raw.get("progressive_bias_telemetry")
+            if not isinstance(work, Mapping) or not isinstance(telemetry, Mapping):
+                raise T088CanaryExecutionError(
+                    "T088 progressive-bias telemetry is unavailable"
+                )
+            rows.append(dict(work))
+            audits.append(dict(telemetry))
+        return rows, audits
+    raise T088CanaryExecutionError(f"unknown T088 arm {arm!r}")
+
+
+def _aggregate_work(
+    rows: Sequence[Mapping[str, object]], *, arm: str, controlled_steps: int
+) -> dict[str, object]:
+    """Retain per-root exact counters and an all-decision total without aliases."""
+
+    fields = (
+        "successor_transition_count",
+        "action_execution_count",
+        "tree_node_expansion_count",
+        "rollout_count",
+        "terminal_utility_evaluation_count",
+        "model_calls",
+    )
+    totals = {name: 0 for name in fields}
+    retained: list[dict[str, object]] = []
+    for index, raw in enumerate(rows):
+        if (
+            arm in {"A", "B", "D"}
+            and raw.get("schema_id") != T088_WORK_COUNTERS_SCHEMA_ID
+        ):
+            raise T088CanaryExecutionError("T088 native work-counter schema drifted")
+        row = {
+            name: _positive_int(raw.get(name), f"root[{index}].{name}")
+            for name in fields
+        }
+        if row["model_calls"] != 0:
+            raise T088CanaryExecutionError("T088 canary consumed learned model calls")
+        retained.append({"root_decision_index": index, **row, "raw": dict(raw)})
+        for name, value in row.items():
+            if name in totals:
+                totals[name] += value
+    return {
+        **totals,
+        "root_decision_count": controlled_steps,
+        # The native v2 and Beam surfaces do not expose one cross-algorithm
+        # simulator-step definition.  Their directly counted transition work is
+        # retained above, rather than inventing a comparable number.
+        "native_simulator_step_count": None,
+        "native_simulator_step_count_unavailable_reason": (
+            "no cross-algorithm native simulator-step counter is exposed"
+        ),
+        "per_root_decision": retained,
+    }
+
+
+def _validate_runtime_controller(controller: object, arm: str) -> None:
+    """Bind the runtime object to the frozen arm definition, not its label."""
+
+    provenance = _controller_provenance(controller)
+    config = provenance.get("config")
+    if not isinstance(config, Mapping):
+        raise T088CanaryExecutionError("T088 controller configuration is unavailable")
+    action_space = ActionSpaceConfig.initial_no_potions().to_dict()
+    if config.get("action_space") != action_space:
+        raise T088CanaryExecutionError("T088 controller action space drifted")
+    if arm in {"A", "B"}:
+        budget = 100 if arm == "A" else 400
+        if (
+            provenance.get("name") != f"t085_unguided_search_v2_s{budget}"
+            or config.get("search_budget") != budget
+            or config.get("root_selection_rule") != "highest_mean"
+            or config.get("policy_prior_callback") is not None
+            or config.get("leaf_value_callback") is not None
+            or config.get("native_identity") != T088_NATIVE_IDENTITY
+        ):
+            raise T088CanaryExecutionError("T088 A/B Search-v2 controller drifted")
+        return
+    if arm == "C":
+        if (
+            provenance.get("name") != "beam_h1_w32_b400_v1"
+            or config.get("task_id") != T088_TASK_ID
+            or config.get("beam_width") != 32
+            or config.get("successor_transition_budget") != 400
+            or config.get("policy_prior") is not None
+            or config.get("learned_leaf_value") is not None
+        ):
+            raise T088CanaryExecutionError("T088 Beam controller drifted")
+        return
+    if arm == "D":
+        if (
+            provenance.get("name") != "progressive_bias_mcts_h1_400_v1"
+            or config.get("task_id") != T088_TASK_ID
+            or config.get("simulations") != 400
+            or config.get("progressive_bias_weight") != 0.50
+            or config.get("policy_prior_callback") is not None
+            or config.get("leaf_value_callback") is not None
+            or config.get("native_identity") != T088_NATIVE_IDENTITY
+        ):
+            raise T088CanaryExecutionError("T088 progressive-bias controller drifted")
+        return
+    raise T088CanaryExecutionError(f"unknown T088 arm {arm!r}")
+
+
+class T088NativeCanaryRecordRunner:
+    """The real one-record T088 canary adapter, with no artifact side effects.
+
+    ``selected_records`` and ``canonical_records_by_cohort`` must be loaded by
+    the caller through the retained T087/T085 input gate.  This object accepts
+    only those resolved records; it never loads a best-effort cohort or creates
+    a replacement restore path.
+    """
+
+    def __init__(
+        self,
+        *,
+        adapter_factory: Callable[[], object],
+        selected_records: Mapping[str, T085BattleStartRecord],
+        canonical_records_by_cohort: Mapping[
+            str, Mapping[str, BattleStartCheckpointRecord]
+        ],
+        worker_count: int = 1,
+    ) -> None:
+        if not callable(adapter_factory) or not selected_records:
+            raise T088CanaryExecutionError(
+                "T088 native canary runner inputs are unavailable"
+            )
+        if (
+            isinstance(worker_count, bool)
+            or not isinstance(worker_count, int)
+            or worker_count <= 0
+        ):
+            raise T088CanaryExecutionError("T088 canary worker_count must be positive")
+        self._adapter_factory = adapter_factory
+        self._selected_records = dict(selected_records)
+        self._canonical_records_by_cohort = {
+            str(cohort): dict(records)
+            for cohort, records in canonical_records_by_cohort.items()
+        }
+        self._worker_count = worker_count
+
+    def __call__(
+        self, record: Mapping[str, object], arm: str, controller: object
+    ) -> Mapping[str, object]:
+        identity = record.get("selection_identity")
+        cohort = record.get("cohort")
+        if not isinstance(identity, str) or not isinstance(cohort, str):
+            raise T088CanaryExecutionError("T088 canary record identity is malformed")
+        selected = self._selected_records.get(identity)
+        canonical_records = self._canonical_records_by_cohort.get(cohort)
+        if (
+            selected is None
+            or canonical_records is None
+            or selected.selection_identity != identity
+        ):
+            raise T088CanaryExecutionError(
+                "T088 canary record is not an accepted T085 restore"
+            )
+        canonical = canonical_records.get(identity)
+        if canonical is None:
+            raise T088CanaryExecutionError(
+                "T088 canary canonical restore record is unavailable"
+            )
+        if arm not in T088_ARM_ORDER:
+            raise T088CanaryExecutionError("T088 canary arm is invalid")
+        _validate_runtime_controller(controller, arm)
+        try:
+            native_identity = _validate_t085_native_source_manifest(
+                "battle_search_v2", expected_native_identity=T088_NATIVE_IDENTITY
+            )
+            base_adapter = self._adapter_factory()
+            restored, restore_method = restore_t085_canonical_record(
+                base_adapter, selected, canonical_records
+            )
+            root_actions = list(base_adapter.legal_actions(restored))
+            expected_context = canonical.public_run_context
+            actual_context = build_public_run_context(
+                restored.raw,
+                root_actions,
+                projection=read_native_public_projection(base_adapter, restored),
+                history=(
+                    expected_context.get("history", [])
+                    if isinstance(expected_context, Mapping)
+                    else []
+                ),
+            )
+            if (
+                not isinstance(expected_context, Mapping)
+                or actual_context != expected_context
+            ):
+                raise T088CanaryExecutionError(
+                    "T088 restore public/legal parity failed"
+                )
+            entry = battle_snapshot_evidence(restored.raw)
+            adapter = _T088CanaryRuntimeAdapter(base_adapter, restored)
+            started = time.perf_counter()
+            controlled = execute_controlled_run(
+                adapter,
+                controller,  # type: ignore[arg-type]
+                seed=None,
+                max_steps=200,
+                action_space=ActionSpaceConfig.initial_no_potions(),
+            )
+            wall_clock_time_s = time.perf_counter() - started
+        except (T085NativeExecutionError, RuntimeError, TypeError, ValueError) as exc:
+            raise T088CanaryExecutionError(
+                f"{identity}: T088 native canary execution failed"
+            ) from exc
+        if not controlled.terminal or controlled.problems:
+            raise T088CanaryExecutionError(
+                f"{identity}: controlled Battle did not terminate: "
+                + "; ".join(controlled.problems)
+            )
+        terminal_raw = (
+            controlled.steps[-1].next_snapshot_raw
+            if controlled.steps
+            else controlled.final_raw
+        )
+        terminal = battle_snapshot_evidence(
+            terminal_raw, require_positive_enemy_hp=False
+        )
+        outcome = _terminal_outcome_from_raw(terminal["raw_snapshot"])
+        work_rows, progressive_bias = _metadata_work_rows(
+            controlled, arm=arm, adapter=adapter
+        )
+        work = _aggregate_work(
+            work_rows, arm=arm, controlled_steps=len(controlled.steps)
+        )
+        trace = _trace_for_controlled_run(controlled)
+        diagnostic = build_dense_diagnostic_row(
+            selection_identity=identity,
+            cohort=cohort,
+            entry=entry,
+            terminal=terminal,
+            outcome=outcome,
+            action_trace=trace,
+            provenance={
+                "task_id": T088_TASK_ID,
+                "restore_method": restore_method,
+                "native_commit": native_identity["commit"],
+                "search_api": "T088 controller-specific native/search adapter",
+                "action_space": ActionSpaceConfig.initial_no_potions().to_dict(),
+                "seed": None,
+                "max_steps": 200,
+                "no_additional_search_seed": True,
+                "restore_source_identity": identity,
+            },
+            source_selection_manifest_identity=record[
+                "source_selection_manifest_identity"
+            ],  # type: ignore[arg-type]
+        )
+        beam_rows = [
+            step.decision_metadata.get("classical_search")
+            for step in controlled.steps
+            if isinstance(step.decision_metadata.get("classical_search"), Mapping)
+        ]
+        return {
+            "arm": arm,
+            "selection_identity": identity,
+            "cohort": cohort,
+            "native_identity": native_identity,
+            "controller_provenance": _controller_provenance(controller),
+            "restore_public_legal_parity": True,
+            "restore_provenance": {
+                "restore_method": restore_method,
+                "selection_identity": identity,
+                "root_legal_action_identities": action_identity_dicts_for_actions(
+                    root_actions
+                ),
+            },
+            "outcome": outcome,
+            "controller_definition_verified": True,
+            "dense_diagnostic_recomputed": True,
+            "native_game_mechanics_parity": True,
+            "search_v2_parity_verified": arm in {"A", "B"},
+            "beam_deterministic_replay_verified": (
+                arm == "C"
+                and len(beam_rows) == len(controlled.steps)
+                and all(
+                    isinstance(row, Mapping) and row.get("selected_action_indices")
+                    for row in beam_rows
+                )
+            ),
+            "progressive_bias_depth_gt_zero_verified": (
+                arm == "D"
+                and any(
+                    isinstance(row, Mapping)
+                    and any(
+                        isinstance(audit, Mapping) and audit.get("parent_depth", 0) > 0
+                        for audit in row.get("audit_rows", [])
+                        if isinstance(row.get("audit_rows"), Sequence)
+                    )
+                    for row in progressive_bias
+                )
+            ),
+            "wall_clock_time_s": wall_clock_time_s,
+            "worker": {"stage_worker_count": self._worker_count, "pid": os.getpid()},
+            "work_counters": work,
+            "controlled_action_trace": trace,
+            "dense_diagnostic": diagnostic,
+        }
 
 
 def _canonical_sha256(value: object) -> str:
@@ -270,7 +726,6 @@ def _validate_execution_row(
         "action_execution_count",
         "model_calls",
         "root_decision_count",
-        "native_simulator_step_count",
         "tree_node_expansion_count",
         "rollout_count",
         "terminal_utility_evaluation_count",
@@ -280,6 +735,21 @@ def _validate_execution_row(
             raise T088CanaryExecutionError(f"canary work counter {name} is invalid")
     if counters["model_calls"] != 0:
         raise T088CanaryExecutionError("T088 canary consumed learned model calls")
+    native_steps = counters.get("native_simulator_step_count")
+    if native_steps is None:
+        reason = counters.get("native_simulator_step_count_unavailable_reason")
+        if not isinstance(reason, str) or not reason:
+            raise T088CanaryExecutionError(
+                "canary native simulator steps are unavailable without a reason"
+            )
+    elif (
+        isinstance(native_steps, bool)
+        or not isinstance(native_steps, int)
+        or native_steps < 0
+    ):
+        raise T088CanaryExecutionError(
+            "canary native simulator step counter is invalid"
+        )
     _finite(result.get("wall_clock_time_s"), "wall_clock_time_s")
     return result
 
@@ -413,6 +883,7 @@ __all__ = [
     "T088_CANARY_AUTHORIZATION_SCHEMA_ID",
     "T088_CANARY_EVIDENCE_SCHEMA_ID",
     "T088CanaryExecutionError",
+    "T088NativeCanaryRecordRunner",
     "execute_t088_canary",
     "validate_t088_canary_authorization",
     "write_t088_canary_evidence",

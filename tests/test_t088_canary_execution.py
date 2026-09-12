@@ -18,6 +18,8 @@ from sts_combat_rl.sim.t087_dense_combat_diagnostics import (
 )
 from sts_combat_rl.sim.t088_canary_execution import (
     T088CanaryExecutionError,
+    _T088CanaryRuntimeAdapter,
+    _aggregate_work,
     execute_t088_canary,
     write_t088_canary_evidence,
 )
@@ -288,3 +290,47 @@ def test_canary_rejects_authorization_or_amended_dense_evidence_drift() -> None:
             runner=drifting_runner,
             controller_factory=_controller,
         )
+
+
+def test_runtime_proxy_uses_only_additive_search_v2_counter_surface() -> None:
+    class FakeAdapter:
+        def battle_search_v2_with_work_counters(self, snapshot, **kwargs):
+            assert snapshot == "restored"
+            assert kwargs == {"simulations": 100, "include_potions": False}
+            return {
+                "native_api": "StepSimulator.battle_search_v2.v1",
+                "work_counters": {"schema_id": "native-battle-search-work-v1"},
+            }
+
+    proxy = _T088CanaryRuntimeAdapter(FakeAdapter(), "restored")
+    assert proxy.reset(seed=None) == "restored"
+    assert proxy.battle_search_v2("restored", simulations=100) == {
+        "native_api": "StepSimulator.battle_search_v2.v1",
+        "work_counters": {"schema_id": "native-battle-search-work-v1"},
+    }
+    assert proxy._runtime_work_rows == [
+        {"schema_id": "native-battle-search-work-v1"}
+    ]
+    with pytest.raises(T088CanaryExecutionError, match="reused"):
+        proxy.reset(seed=None)
+
+
+def test_aggregate_work_retains_exact_counts_and_marks_unavailable_steps() -> None:
+    work = _aggregate_work(
+        [
+            {
+                "schema_id": "native-battle-search-work-v1",
+                "successor_transition_count": 7,
+                "action_execution_count": 7,
+                "tree_node_expansion_count": 3,
+                "rollout_count": 2,
+                "terminal_utility_evaluation_count": 2,
+                "model_calls": 0,
+            }
+        ],
+        arm="A",
+        controlled_steps=1,
+    )
+    assert work["successor_transition_count"] == 7
+    assert work["native_simulator_step_count"] is None
+    assert "cross-algorithm" in work["native_simulator_step_count_unavailable_reason"]
