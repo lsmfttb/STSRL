@@ -211,6 +211,64 @@ def test_path_authorization_rejects_non_exact_head_before_runner_or_adapter():
         )
 
 
+def test_cli_routes_only_explicit_paths_and_emits_concise_success_json(
+    tmp_path, monkeypatch, capsys
+):
+    observed = {}
+
+    def fake_run(**kwargs):
+        observed.update(kwargs)
+        return {
+            "artifact": {
+                "path": "/retained/t088-canary.json",
+                "sha256": "a" * 64,
+                "size_bytes": 9,
+                "schema_id": "t088-canary-evidence-v1",
+            },
+            "worker_count": 1,
+            "single_worker_reason": "bounded canary has at most 20 executions",
+        }
+
+    monkeypatch.setattr(command, "run_t088_authorized_canary_from_paths", fake_run)
+    paths = {
+        "authorization": tmp_path / "authorization.json",
+        "t087-formal": tmp_path / "formal.json",
+        "t087-report": tmp_path / "report.json",
+        "t087-retention": tmp_path / "retention.json",
+        "t085-selection": tmp_path / "selection.json",
+        "t085-restore": tmp_path / "restore.json",
+        "a-pool": tmp_path / "a.jsonl",
+        "b-pool": tmp_path / "b.jsonl",
+        "c-pool": tmp_path / "c.jsonl",
+        "b-source-manifest": tmp_path / "b-manifest.json",
+        "c-source-manifest": tmp_path / "c-manifest.json",
+        "output": tmp_path / "out" / "canary.json",
+        "artifact-root": tmp_path / "out",
+    }
+    argv = ["--implementation-head", "a" * 40]
+    for flag, path in paths.items():
+        argv.extend((f"--{flag}", str(path)))
+
+    assert command.main(argv) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload == {
+        "schema_id": "t088-canary-command-result-v1",
+        "task_id": "T088",
+        "artifact": {
+            "path": "/retained/t088-canary.json",
+            "sha256": "a" * 64,
+            "size_bytes": 9,
+            "schema_id": "t088-canary-evidence-v1",
+        },
+        "worker_count": 1,
+        "single_worker_reason": "bounded canary has at most 20 executions",
+    }
+    assert observed["implementation_head"] == "a" * 40
+    assert observed["authorization_path"] == paths["authorization"]
+    assert observed["output_path"] == paths["output"]
+    assert observed["artifact_root"] == paths["artifact-root"]
+
+
 def test_hash_drift_fails_before_any_schema_is_trusted(tmp_path):
     artifact = tmp_path / "formal.json"
     artifact.write_text(json.dumps({"schema_id": "t087-natural-evidence-v1"}))

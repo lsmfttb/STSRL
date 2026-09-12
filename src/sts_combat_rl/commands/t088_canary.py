@@ -9,8 +9,10 @@ copies the large T087 evidence table.
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
+import sys
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
@@ -559,4 +561,81 @@ def run_t088_authorized_canary_from_paths(
     }
 
 
-__all__ = ["T088CanaryPathError", "run_t088_authorized_canary_from_paths"]
+def build_parser() -> argparse.ArgumentParser:
+    """Build the explicit-only authorized-canary command line."""
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--authorization", type=Path, required=True)
+    parser.add_argument("--implementation-head", required=True)
+    parser.add_argument("--t087-formal", type=Path, required=True)
+    parser.add_argument("--t087-report", type=Path, required=True)
+    parser.add_argument("--t087-retention", type=Path, required=True)
+    parser.add_argument("--t085-selection", type=Path, required=True)
+    parser.add_argument("--t085-restore", type=Path, required=True)
+    parser.add_argument("--a-pool", type=Path, required=True)
+    parser.add_argument("--b-pool", type=Path, required=True)
+    parser.add_argument("--c-pool", type=Path, required=True)
+    parser.add_argument("--b-source-manifest", type=Path, required=True)
+    parser.add_argument("--c-source-manifest", type=Path, required=True)
+    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--artifact-root", type=Path, required=True)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Route only fully explicit authorized paths; stdout is success JSON only."""
+
+    args = build_parser().parse_args(argv)
+    try:
+        result = run_t088_authorized_canary_from_paths(
+            authorization_path=args.authorization,
+            implementation_head=args.implementation_head,
+            t087_formal_path=args.t087_formal,
+            t087_report_path=args.t087_report,
+            t087_retention_path=args.t087_retention,
+            t085_selection_path=args.t085_selection,
+            t085_restore_path=args.t085_restore,
+            a_pool_path=args.a_pool,
+            b_pool_path=args.b_pool,
+            c_pool_path=args.c_pool,
+            b_source_manifest_path=args.b_source_manifest,
+            c_source_manifest_path=args.c_source_manifest,
+            output_path=args.output,
+            artifact_root=args.artifact_root,
+        )
+    except (OSError, TypeError, ValueError) as exc:
+        print(f"T088 canary command failed: {exc}", file=sys.stderr)
+        return 2
+    artifact = result.get("artifact")
+    if not isinstance(artifact, Mapping):
+        print(
+            "T088 canary command failed: retained artifact reference is missing",
+            file=sys.stderr,
+        )
+        return 2
+    print(
+        json.dumps(
+            {
+                "schema_id": "t088-canary-command-result-v1",
+                "task_id": "T088",
+                "artifact": dict(artifact),
+                "worker_count": result.get("worker_count"),
+                "single_worker_reason": result.get("single_worker_reason"),
+            },
+            sort_keys=True,
+            ensure_ascii=False,
+        )
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+
+
+__all__ = [
+    "T088CanaryPathError",
+    "build_parser",
+    "main",
+    "run_t088_authorized_canary_from_paths",
+]
