@@ -36,6 +36,8 @@ class FakeStepSimulator:
         self.geometry_calls = 0
         self.state_utilization_calls = 0
         self.leaf_collection_calls = 0
+        self.work_counter_calls = 0
+        self.progressive_bias_calls = 0
 
     def reset(self, character_class: str, seed: int, ascension: int) -> None:
         self.character_class = character_class
@@ -165,6 +167,27 @@ class FakeStepSimulator:
             "collector_callback": leaf_collector_callback is not None,
         }
 
+    def battle_search_v2_with_work_counters(
+        self, simulations: int, include_potions: bool
+    ) -> dict[str, object]:
+        self.work_counter_calls += 1
+        return {"simulations": simulations, "include_potions": include_potions}
+
+    def battle_search_v2_with_progressive_bias(
+        self,
+        simulations: int,
+        include_potions: bool,
+        bias_enabled: bool,
+        audit_limit: int,
+    ) -> dict[str, object]:
+        self.progressive_bias_calls += 1
+        return {
+            "simulations": simulations,
+            "include_potions": include_potions,
+            "bias_enabled": bias_enabled,
+            "audit_limit": audit_limit,
+        }
+
     def evaluate_leaf_continuation(
         self,
         checkpoint: object,
@@ -236,6 +259,46 @@ def test_lightspeed_adapter_wraps_native_checkpoint_restore() -> None:
     assert checkpoint.metadata["seed"] == 11
     assert restored.observation == initial.observation
     assert restored.raw == initial.raw
+
+
+def test_lightspeed_adapter_exposes_t088_opt_ins_without_callback_surface() -> None:
+    adapter = LightSpeedAdapter(seed=7, ascension=20, module=FakeModule)
+    snapshot = adapter.reset(seed=11)
+
+    work = adapter.battle_search_v2_with_work_counters(snapshot, simulations=400)
+    bias = adapter.battle_search_v2_with_progressive_bias(
+        snapshot, simulations=400, bias_enabled=True, audit_limit=256
+    )
+
+    assert work == {"simulations": 400, "include_potions": False}
+    assert bias == {
+        "simulations": 400,
+        "include_potions": False,
+        "bias_enabled": True,
+        "audit_limit": 256,
+    }
+    assert adapter._sim.work_counter_calls == 1
+    assert adapter._sim.progressive_bias_calls == 1
+
+
+@pytest.mark.parametrize("simulations", [0, -1, True])
+def test_lightspeed_adapter_rejects_invalid_t088_work_counter_budget(
+    simulations,
+) -> None:
+    adapter = LightSpeedAdapter(seed=7, ascension=20, module=FakeModule)
+    with pytest.raises(ValueError, match="positive integer"):
+        adapter.battle_search_v2_with_work_counters(
+            adapter.reset(), simulations=simulations
+        )
+
+
+@pytest.mark.parametrize("audit_limit", [-1, 4097, True])
+def test_lightspeed_adapter_rejects_invalid_t088_bias_audit_limit(audit_limit) -> None:
+    adapter = LightSpeedAdapter(seed=7, ascension=20, module=FakeModule)
+    with pytest.raises((TypeError, ValueError), match="audit_limit"):
+        adapter.battle_search_v2_with_progressive_bias(
+            adapter.reset(), simulations=400, audit_limit=audit_limit
+        )
 
 
 def test_lightspeed_checkpoint_preserves_transition_annotation() -> None:

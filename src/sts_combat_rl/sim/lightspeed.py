@@ -317,6 +317,78 @@ class LightSpeedAdapter:
             )
         )
 
+    def battle_search_v2_with_work_counters(
+        self,
+        snapshot: SimulatorSnapshot,
+        *,
+        simulations: int,
+        include_potions: bool = False,
+    ) -> dict[str, Any]:
+        """Run unchanged unguided Search-v2 with additive native work counters.
+
+        This explicit companion must not be used as a substitute for the
+        existing ``battle_search_v2`` surface. It has no callback arguments,
+        so callers cannot accidentally turn an accepted A/B search into a
+        guided search while requesting the counter report.
+        """
+
+        if not hasattr(self._sim, "battle_search_v2_with_work_counters"):
+            raise RuntimeError(
+                "slaythespire.StepSimulator does not expose "
+                "battle_search_v2_with_work_counters; build the T088 native "
+                "progressive-bias source integration"
+            )
+        _positive_native_int(
+            simulations, "battle_search_v2_with_work_counters simulations"
+        )
+        self._assert_snapshot_is_current(snapshot)
+        return dict(
+            self._sim.battle_search_v2_with_work_counters(
+                int(simulations), bool(include_potions)
+            )
+        )
+
+    def battle_search_v2_with_progressive_bias(
+        self,
+        snapshot: SimulatorSnapshot,
+        *,
+        simulations: int,
+        include_potions: bool = False,
+        bias_enabled: bool = True,
+        audit_limit: int = 256,
+    ) -> dict[str, Any]:
+        """Run only the governed fixed-H1 T088 progressive-bias opt-in.
+
+        No Python policy-prior or leaf-value callback crosses this boundary.
+        The native API owns copied-state H1 evaluation, native random rollout,
+        terminal utility, and the bounded all-node audit report.
+        """
+
+        if not hasattr(self._sim, "battle_search_v2_with_progressive_bias"):
+            raise RuntimeError(
+                "slaythespire.StepSimulator does not expose "
+                "battle_search_v2_with_progressive_bias; build the T088 native "
+                "progressive-bias source integration"
+            )
+        _positive_native_int(
+            simulations, "battle_search_v2_with_progressive_bias simulations"
+        )
+        if not isinstance(bias_enabled, bool):
+            raise TypeError("progressive bias_enabled must be a bool")
+        if isinstance(audit_limit, bool) or not isinstance(audit_limit, int):
+            raise TypeError("progressive bias audit_limit must be an integer")
+        if not 0 <= audit_limit <= 4096:
+            raise ValueError("progressive bias audit_limit must be in [0, 4096]")
+        self._assert_snapshot_is_current(snapshot)
+        return dict(
+            self._sim.battle_search_v2_with_progressive_bias(
+                int(simulations),
+                bool(include_potions),
+                bias_enabled,
+                audit_limit,
+            )
+        )
+
     def battle_search_v2_with_tree_geometry(
         self,
         snapshot: SimulatorSnapshot,
@@ -570,6 +642,12 @@ def _import_lightspeed_module() -> Any:
             "slaythespire is not importable; build the external sts_lightspeed "
             "StepSimulator shim and put its build directory on PYTHONPATH"
         ) from exc
+
+
+def _positive_native_int(value: object, label: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+        raise ValueError(f"{label} must be a positive integer")
+    return value
 
 
 def _is_terminal(snapshot: dict[str, Any]) -> bool:

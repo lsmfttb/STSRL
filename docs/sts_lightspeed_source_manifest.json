@@ -9,7 +9,7 @@
     "repository_url": "https://github.com/lsmfttb/sts_lightspeed.git",
     "branch": "stsrl/main",
     "ref": "refs/heads/stsrl/main",
-    "commit": "96052d24b9c2c16ff25b6f7241edd972613be997"
+    "commit": "20a6c2b3a9cea817c988178b814f083ff889853f"
   },
   "python_module": {
     "name": "slaythespire",
@@ -161,6 +161,20 @@
         "StepSimulator.battle_search_v2.tree_internal_telemetry",
         "StepSimulator.battle_search_v2.tree_internal_telemetry.policy_prior_calls",
         "StepSimulator.battle_search_v2.tree_internal_telemetry.leaf_value_calls"
+      ]
+    },
+    {
+      "id": "native_battle_search_v2_progressive_bias_h1",
+      "description": "Opt-in fixed-H1 progressive-bias BattleScumSearcher2 surface and additive work-counter report for the T088 classical-search tournament. The unchanged battle_search_v2 API remains the A/B path.",
+      "task_provenance": [
+        "T088"
+      ],
+      "required_python_api": [
+        "StepSimulator.battle_search_v2_with_work_counters",
+        "StepSimulator.battle_search_v2_with_work_counters.work_counters",
+        "StepSimulator.battle_search_v2_with_progressive_bias",
+        "StepSimulator.battle_search_v2_with_progressive_bias.progressive_bias_telemetry",
+        "StepSimulator.battle_search_v2_with_progressive_bias.work_counters"
       ]
     },
     {
