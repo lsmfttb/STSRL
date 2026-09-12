@@ -220,6 +220,52 @@ def _source_references(restore_document: Mapping[str, object]) -> Mapping[str, o
     return sources
 
 
+def _selected_checkpoint_ids(
+    selection_document: Mapping[str, object], cohort: str
+) -> tuple[str, ...]:
+    """Read exact selected checkpoint identities from the hash-bound T085 plan."""
+
+    selected = selection_document.get("cohorts")
+    if not isinstance(selected, Mapping):
+        raise T088CanaryPathError("T085 selection artifact has no selected cohorts")
+    rows = selected.get(cohort)
+    if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes)):
+        raise T088CanaryPathError(f"T085 {cohort} selection is malformed")
+    identities = tuple(
+        item.get("source_artifact_record_identity", item.get("source_checkpoint_id"))
+        for item in rows
+        if isinstance(item, Mapping)
+    )
+    if (
+        len(identities) != len(rows)
+        or not identities
+        or any(not isinstance(value, str) or not value for value in identities)
+        or len(set(identities)) != len(identities)
+    ):
+        raise T088CanaryPathError(f"T085 {cohort} selection identities are malformed")
+    return tuple(str(value) for value in identities)
+
+
+def _restrict_to_selected_records(
+    records: Mapping[str, object], *, selected_ids: Sequence[str], cohort: str
+) -> dict[str, object]:
+    """Keep only exact selected records after verifying the full source pool."""
+
+    selected = tuple(selected_ids)
+    if not selected or len(set(selected)) != len(selected):
+        raise T088CanaryPathError(f"T085 {cohort} selected identities are invalid")
+    if set(selected) - set(records):
+        raise T088CanaryPathError(
+            f"T085 {cohort} selected identities are absent from its verified source map"
+        )
+    result = {identity: records[identity] for identity in selected}
+    if set(result) != set(selected):
+        raise T088CanaryPathError(
+            f"T085 {cohort} canonical map does not cover exactly selected identities"
+        )
+    return result
+
+
 def _load_canonical_maps(
     *,
     restore_document: Mapping[str, object],
@@ -241,21 +287,8 @@ def _load_canonical_maps(
             raise T088CanaryPathError(f"T085 {cohort} source binding is malformed")
         refs[cohort] = _artifact_reference(source.get("map"), f"T085 {cohort} pool")
         _verify_supplied_path(path, refs[cohort], f"T085 {cohort} pool")
-    selected = selection_document.get("cohorts")
-    if not isinstance(selected, Mapping):
-        raise T088CanaryPathError("T085 selection artifact has no selected cohorts")
-    selected_b = selected.get("B")
-    if not isinstance(selected_b, Sequence) or isinstance(selected_b, (str, bytes)):
-        raise T088CanaryPathError("T085 B selection is malformed")
-    selected_b_ids = [
-        item.get("source_artifact_record_identity", item.get("source_checkpoint_id"))
-        for item in selected_b
-        if isinstance(item, Mapping)
-    ]
-    if len(selected_b_ids) != len(selected_b) or any(
-        not isinstance(value, str) or not value for value in selected_b_ids
-    ):
-        raise T088CanaryPathError("T085 B selection identities are malformed")
+    selected_b_ids = _selected_checkpoint_ids(selection_document, "B")
+    selected_c_ids = _selected_checkpoint_ids(selection_document, "C")
     manifests: dict[str, dict[str, object]] = {}
     for cohort, supplied in (
         ("B", b_source_manifest_path),
@@ -269,6 +302,13 @@ def _load_canonical_maps(
         _verify_supplied_path(supplied, reference, f"T085 {cohort} source manifest")
         manifests[cohort] = reference
     try:
+        c_full_map = resolve_t085_canonical_records(
+            c_pool_path,
+            expected_sha256=str(refs["C"]["sha256"]),
+            artifact_kind="natural_pool",
+            expected_source_manifest_path=c_source_manifest_path,
+            expected_source_manifest_sha256=str(manifests["C"]["sha256"]),
+        )
         maps = {
             "A": resolve_t085_canonical_records(
                 a_pool_path,
@@ -283,12 +323,10 @@ def _load_canonical_maps(
                 expected_source_manifest_sha256=str(manifests["B"]["sha256"]),
                 selected_source_checkpoint_ids=selected_b_ids,
             ),
-            "C": resolve_t085_canonical_records(
-                c_pool_path,
-                expected_sha256=str(refs["C"]["sha256"]),
-                artifact_kind="natural_pool",
-                expected_source_manifest_path=c_source_manifest_path,
-                expected_source_manifest_sha256=str(manifests["C"]["sha256"]),
+            "C": _restrict_to_selected_records(
+                c_full_map,
+                selected_ids=selected_c_ids,
+                cohort="C",
             ),
         }
     except (OSError, T085NativeExecutionError, ValueError) as exc:

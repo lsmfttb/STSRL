@@ -198,6 +198,28 @@ def test_restore_source_bindings_are_the_only_accepted_canonical_source_shape():
         )
 
 
+def test_canonical_c_map_is_restricted_to_exact_hash_bound_selection_identities():
+    selection = {
+        "cohorts": {
+            "C": [
+                {"source_artifact_record_identity": "C:2"},
+                {"source_artifact_record_identity": "C:1"},
+            ]
+        }
+    }
+    selected = command._selected_checkpoint_ids(selection, "C")
+    assert selected == ("C:2", "C:1")
+    assert command._restrict_to_selected_records(
+        {"C:0": object(), "C:1": object(), "C:2": object()},
+        selected_ids=selected,
+        cohort="C",
+    ).keys() == {"C:2", "C:1"}
+    with pytest.raises(command.T088CanaryPathError, match="absent"):
+        command._restrict_to_selected_records(
+            {"C:1": object()}, selected_ids=selected, cohort="C"
+        )
+
+
 def test_input_gate_failure_preserves_root_retained_binding_message(
     tmp_path, monkeypatch
 ):
