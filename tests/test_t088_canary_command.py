@@ -198,6 +198,48 @@ def test_restore_source_bindings_are_the_only_accepted_canonical_source_shape():
         )
 
 
+def test_input_gate_failure_preserves_root_retained_binding_message(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        command,
+        "_read_t087_accepted_json",
+        lambda path, **_: ({}, {"path": str(path), "sha256": "a" * 64}),
+    )
+    monkeypatch.setattr(
+        command,
+        "_read_exact_json",
+        lambda path, **_: ({}, {"path": str(path), "sha256": "a" * 64}),
+    )
+    monkeypatch.setattr(command, "_load_canonical_maps", lambda **_: ({}, {}))
+
+    def reject_gate(**_):
+        raise command.T087IncompleteError("T085 canonical C source is substituted")
+
+    monkeypatch.setattr(command, "load_t087_t085_input_gate", reject_gate)
+    with pytest.raises(
+        command.T088CanaryPathError,
+        match="T085 canonical C source is substituted",
+    ) as error:
+        command.run_t088_authorized_canary_from_paths(
+            authorization_path=tmp_path / "authorization.json",
+            implementation_head="a" * 40,
+            t087_formal_path=tmp_path / "formal.json",
+            t087_report_path=tmp_path / "report.json",
+            t087_retention_path=tmp_path / "retention.json",
+            t085_selection_path=tmp_path / "selection.json",
+            t085_restore_path=tmp_path / "restore.json",
+            a_pool_path=tmp_path / "a.jsonl",
+            b_pool_path=tmp_path / "b.jsonl",
+            c_pool_path=tmp_path / "c.jsonl",
+            b_source_manifest_path=tmp_path / "b-manifest.json",
+            c_source_manifest_path=tmp_path / "c-manifest.json",
+            output_path=tmp_path / "out" / "canary.json",
+            artifact_root=tmp_path / "out",
+        )
+    assert isinstance(error.value.__cause__, command.T087IncompleteError)
+
+
 def test_path_authorization_rejects_non_exact_head_before_runner_or_adapter():
     with pytest.raises(command.T088CanaryPathError, match="full SHA-1"):
         command._validate_path_authorization(

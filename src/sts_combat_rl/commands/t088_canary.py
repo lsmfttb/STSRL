@@ -579,7 +579,7 @@ def run_t088_authorized_canary_from_paths(
             canonical_artifact_references=canonical_refs,
         )
     except (OSError, T087IncompleteError, ValueError) as exc:
-        raise T088CanaryPathError("T087/T085 input gate failed") from exc
+        raise T088CanaryPathError(f"T087/T085 input gate failed: {exc}") from exc
     inputs = {
         "t087_formal": formal_ref,
         "t087_report": report_ref,
