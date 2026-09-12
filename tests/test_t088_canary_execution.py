@@ -308,9 +308,7 @@ def test_runtime_proxy_uses_only_additive_search_v2_counter_surface() -> None:
         "native_api": "StepSimulator.battle_search_v2.v1",
         "work_counters": {"schema_id": "native-battle-search-work-v1"},
     }
-    assert proxy._runtime_work_rows == [
-        {"schema_id": "native-battle-search-work-v1"}
-    ]
+    assert proxy._runtime_work_rows == [{"schema_id": "native-battle-search-work-v1"}]
     with pytest.raises(T088CanaryExecutionError, match="reused"):
         proxy.reset(seed=None)
 

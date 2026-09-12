@@ -49,9 +49,6 @@ from sts_combat_rl.sim.t087_dense_combat_diagnostics import (
     battle_snapshot_evidence,
     build_dense_diagnostic_row,
 )
-from sts_combat_rl.t085_corrected_leaf_value_search_evaluation import (
-    T085BattleStartRecord,
-)
 from sts_combat_rl.sim.t088_tournament_workflow import (
     T088_ARMS,
     T088_TASK_ID,
@@ -61,6 +58,9 @@ from sts_combat_rl.sim.t088_tournament_workflow import (
     select_t088_canary_records,
     validate_t088_canary_evidence,
     validate_t088_t087_cohort_binding,
+)
+from sts_combat_rl.t085_corrected_leaf_value_search_evaluation import (
+    T085BattleStartRecord,
 )
 
 T088_CANARY_AUTHORIZATION_SCHEMA_ID = "t088-maintainer-canary-authorization-v1"
