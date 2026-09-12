@@ -19,11 +19,13 @@ import json
 import os
 import time
 from collections.abc import Callable, Mapping, Sequence
+from dataclasses import replace
 from pathlib import Path
 from typing import Protocol
 
 from sts_combat_rl.commands.t085_native_execution import (
     T085NativeExecutionError,
+    _authoritative_terminal_outcome,
     _validate_t085_native_source_manifest,
     restore_t085_canonical_record,
 )
@@ -36,6 +38,7 @@ from sts_combat_rl.commands.t088_classical_combat_tournament import (
 )
 from sts_combat_rl.sim.action_space import ActionSpaceConfig
 from sts_combat_rl.sim.battle_start_pool import BattleStartCheckpointRecord
+from sts_combat_rl.sim.contract import SimulatorAction, SimulatorTransition
 from sts_combat_rl.sim.controlled_run import ControlledRun, execute_controlled_run
 from sts_combat_rl.sim.decision_record import action_identity_dicts_for_actions
 from sts_combat_rl.sim.public_run_context import (
@@ -124,6 +127,31 @@ class _T088CanaryRuntimeAdapter:
         if snapshot is None:
             raise T088CanaryExecutionError("T088 canary restored snapshot was reused")
         return snapshot
+
+    def step(self, action: SimulatorAction) -> SimulatorTransition:
+        """Preserve the accepted native battle-completion terminal boundary.
+
+        LightSpeed's generic transition flag can remain false while its same
+        transition publishes the authoritative completed-battle outcome.  The
+        existing T085 terminal adapter treats that transition as terminal, so
+        the T088 telemetry proxy must retain that boundary before the shared
+        controlled-run executor considers another controller decision.
+        """
+
+        step = getattr(self._base_adapter, "step", None)
+        if not callable(step):
+            raise T088CanaryExecutionError("T088 wrapped adapter lacks step")
+        transition = step(action)
+        if not isinstance(transition, SimulatorTransition):
+            raise T088CanaryExecutionError(
+                "T088 wrapped adapter step did not return a transition"
+            )
+        if (
+            _authoritative_terminal_outcome(transition) is not None
+            and transition.terminal is not True
+        ):
+            return replace(transition, terminal=True)
+        return transition
 
     def battle_search_v2(
         self,

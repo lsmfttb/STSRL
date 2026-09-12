@@ -12,6 +12,16 @@ from sts_combat_rl.commands.t088_classical_combat_tournament import (
     T088_NATIVE_IDENTITY,
     t088_controller_definitions,
 )
+from sts_combat_rl.sim.contract import (
+    SimulatorAction,
+    SimulatorSnapshot,
+    SimulatorTransition,
+)
+from sts_combat_rl.sim.controlled_run import execute_controlled_run
+from sts_combat_rl.sim.controller_contract import (
+    ControllerDecision,
+    ControllerProvenance,
+)
 from sts_combat_rl.sim.t087_dense_combat_diagnostics import (
     battle_snapshot_evidence,
     build_dense_diagnostic_row,
@@ -358,6 +368,93 @@ def test_runtime_proxy_uses_only_additive_search_v2_counter_surface() -> None:
     assert proxy._runtime_work_rows == [{"schema_id": "native-battle-search-work-v1"}]
     with pytest.raises(T088CanaryExecutionError, match="reused"):
         proxy.reset(seed=None)
+
+
+def test_runtime_proxy_stops_at_completed_battle_transition_without_second_search() -> (
+    None
+):
+    root = SimulatorSnapshot(
+        observation=[1.0],
+        raw={
+            "screen_state": "BATTLE",
+            "battle_active": True,
+            "outcome": "UNDECIDED",
+            "floor_num": 12,
+            "cur_hp": 40,
+            "max_hp": 80,
+            "gold": 99,
+            "potion_count": 0,
+        },
+    )
+    terminal_raw = {
+        "screen_state": "REWARDS",
+        "battle_active": False,
+        "completed_battle_outcome": "PLAYER_VICTORY",
+        "outcome": "UNDECIDED",
+        "floor_num": 12,
+        "cur_hp": 35,
+        "max_hp": 80,
+        "gold": 99,
+        "potion_count": 0,
+    }
+    action = SimulatorAction(
+        action_id="strike", label="Strike", kind="card", raw={"bits": 1}
+    )
+
+    class FakeAdapter:
+        def __init__(self) -> None:
+            self.step_calls = 0
+
+        def legal_actions(self, snapshot: SimulatorSnapshot) -> list[SimulatorAction]:
+            assert snapshot is root, "a terminal transition must not request actions"
+            return [action]
+
+        def step(self, selected: SimulatorAction) -> SimulatorTransition:
+            assert selected is action
+            self.step_calls += 1
+            return SimulatorTransition(
+                snapshot=SimulatorSnapshot(observation=[2.0], raw=terminal_raw),
+                terminal=False,
+                info={"completed_battle_outcome": "PLAYER_VICTORY"},
+            )
+
+    class CountingSearchController:
+        provenance = ControllerProvenance(
+            kind="test",
+            name="completed_battle_transition",
+            config={"information_regime": "normal_public_policy"},
+        )
+
+        def __init__(self) -> None:
+            self.search_calls = 0
+
+        def select_action(self, adapter, snapshot, actions, context, step_index):
+            del adapter, actions, context, step_index
+            assert snapshot.raw["battle_active"] is True
+            self.search_calls += 1
+            return ControllerDecision(
+                selected_index=0,
+                provenance=self.provenance,
+                reason="fake native search",
+            )
+
+    base = FakeAdapter()
+    controller = CountingSearchController()
+    run = execute_controlled_run(
+        _T088CanaryRuntimeAdapter(base, root),
+        controller,
+        seed=None,
+        max_steps=2,
+    )
+
+    assert run.terminal is True
+    assert run.problems == []
+    assert controller.search_calls == 1
+    assert base.step_calls == 1
+    assert len(run.steps) == 1
+    assert run.steps[0].terminal_after_step is True
+    assert run.steps[0].next_battle_outcome == "PLAYER_VICTORY"
+    assert run.final_raw == terminal_raw
 
 
 def test_aggregate_work_retains_exact_counts_and_marks_unavailable_steps() -> None:
