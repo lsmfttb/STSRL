@@ -78,17 +78,28 @@ canonical `stsrl/main` landing, ancestry proof, and an explicitly accepted
 STSRL pin update. The native lane has landed canonically; this worktree makes no
 native edit and binds only that exact resulting identity.
 
-The matched-cohort execution/cost/statistics/audit/retention workflow remains
-unfinished and must be independently reviewed before a Maintainer can authorize
-a canary. No canary, formal tournament, baseline promotion, or downstream
-Non-Combat execution is enabled by this partial implementation.
+The repository-side workflow now has a deliberately non-executing evidence
+surface in `sim/t088_tournament_workflow.py`. It validates the exact 413-record
+T087 A/B/C membership and order, produces the 413 x 4 arm plan with
+`execution_authorized: false`, and rejects partial/duplicate/substituted formal
+rows. It also makes the bounded canary selection deterministic from explicit
+T087 facts, validates no learned-model calls and retained work facts, computes
+the fixed 20,000-resample paired statistics, creates the separately retained
+blind bundle/provenance map, and validates report/retention identity shapes.
+The module does not import a simulator adapter or invoke a controller: a future
+authorized runner must supply actual restore/execution evidence to it.
+
+This is implementation readiness only and must be independently reviewed before
+a Maintainer can authorize a canary. No canary, formal tournament, baseline
+promotion, or downstream Non-Combat execution is enabled by this partial
+implementation.
 
 ## Local verification
 
 The existing `/home/lsmft/stsrl-spikes/py313-torch/bin/python` environment ran
-`pytest` on `test_classical_combat_search.py`, `test_t085_native_execution.py`,
-`test_t087_dense_combat_diagnostics.py`, and `test_task_docs.py`: 136 passed.
-Ruff check and format check passed on the three new Python files, and system
-Python compileall passed on those files. System Python itself has no pytest or
-Ruff installation; no dependencies were installed. No native extension,
-canary, formal cohort, or large simulator job was executed for these checks.
+the controller/T085/T087/task-document tests in the preceding implementation
+slice (136 passed), plus the independent non-simulator
+`test_t088_tournament_workflow.py` checks. Ruff check/format and compileall
+pass on the added workflow files. System Python itself has no pytest or Ruff
+installation; no dependencies were installed. No native extension, canary,
+formal cohort, or large simulator job was executed for these checks.
