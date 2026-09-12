@@ -28,6 +28,8 @@ from sts_combat_rl.sim.t087_dense_combat_diagnostics import (
     T085_RESTORE_SHA256,
     T085_SELECTION_SCHEMA_ID,
     T085_SELECTION_SHA256,
+    T087_COHORT_COUNTS,
+    T087_NATURAL_RECORD_COUNT,
     T087IncompleteError,
     load_t087_t085_input_gate,
 )
@@ -85,6 +87,101 @@ def _read_exact_json(
         "path": str(resolved),
         "sha256": actual,
         "schema_id": schema_id,
+        "byte_count": resolved.stat().st_size,
+    }
+
+
+def _validate_t087_common_document(document: Mapping[str, object], label: str) -> None:
+    if (
+        document.get("task_id") != "T087"
+        or not isinstance(document.get("approved_spec"), str)
+        or not document["approved_spec"]
+        or not isinstance(document.get("implementation_run_head"), str)
+        or len(document["implementation_run_head"]) != 40
+    ):
+        raise T088CanaryPathError(f"{label} current retained structure is invalid")
+
+
+def _validate_t087_formal_document(document: Mapping[str, object]) -> None:
+    _validate_t087_common_document(document, "T087 formal natural evidence")
+    rows = document.get("rows")
+    if (
+        document.get("record_count") != T087_NATURAL_RECORD_COUNT
+        or document.get("cohort_counts") != T087_COHORT_COUNTS
+        or document.get("formal_authorized") is not True
+        or not isinstance(rows, Sequence)
+        or isinstance(rows, (str, bytes))
+        or len(rows) != T087_NATURAL_RECORD_COUNT
+        or any(not isinstance(row, Mapping) for row in rows)
+    ):
+        raise T088CanaryPathError(
+            "T087 formal natural evidence current retained structure is invalid"
+        )
+
+
+def _validate_t087_report_document(document: Mapping[str, object]) -> None:
+    _validate_t087_common_document(document, "T087 final report")
+    if (
+        document.get("terminal_classification") != "DENSE_COMBAT_DIAGNOSTICS_READY"
+        or not isinstance(document.get("artifact_references"), Mapping)
+        or not isinstance(document.get("natural_execution"), Mapping)
+        or not isinstance(document.get("t085_binding"), Mapping)
+    ):
+        raise T088CanaryPathError(
+            "T087 final report current retained structure is invalid"
+        )
+
+
+def _validate_t087_retention_document(document: Mapping[str, object]) -> None:
+    _validate_t087_common_document(document, "T087 retention manifest")
+    if (
+        document.get("terminal_classification") != "DENSE_COMBAT_DIAGNOSTICS_READY"
+        or not isinstance(document.get("artifact_references"), Mapping)
+        or not isinstance(document.get("stable_root"), str)
+        or not document["stable_root"]
+        or not isinstance(document.get("regeneration_command"), str)
+        or not document["regeneration_command"]
+    ):
+        raise T088CanaryPathError(
+            "T087 retention manifest current retained structure is invalid"
+        )
+
+
+def _read_t087_accepted_json(
+    path: Path,
+    *,
+    expected_sha256: str,
+    reference_schema_id: str,
+    label: str,
+    validator: Callable[[Mapping[str, object]], None],
+) -> tuple[dict[str, object], dict[str, object]]:
+    """Read a fixed T087 artifact without inventing a root-schema requirement.
+
+    These three retained artifacts are admitted by their published immutable
+    SHA-256 plus their actual current document shape.  ``reference_schema_id``
+    is the downstream T088 artifact-reference contract, not a claim about the
+    JSON root's ``schema_id`` field.
+    """
+
+    resolved = path.resolve(strict=True)
+    if _sha256_file(resolved) != expected_sha256:
+        raise T088CanaryPathError(f"{label} SHA-256 differs from its accepted identity")
+    try:
+        document = json.loads(resolved.read_text(encoding="utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise T088CanaryPathError(f"{label} is not readable JSON") from exc
+    if not isinstance(document, Mapping):
+        raise T088CanaryPathError(f"{label} current retained structure is invalid")
+    try:
+        validator(document)
+    except (TypeError, ValueError) as exc:
+        raise T088CanaryPathError(
+            f"{label} current retained structure is invalid"
+        ) from exc
+    return dict(document), {
+        "path": str(resolved),
+        "sha256": expected_sha256,
+        "schema_id": reference_schema_id,
         "byte_count": resolved.stat().st_size,
     }
 
@@ -432,23 +529,26 @@ def run_t088_authorized_canary_from_paths(
 ) -> dict[str, object]:
     """Run one approved bounded canary only after complete path admission."""
 
-    formal, formal_ref = _read_exact_json(
+    formal, formal_ref = _read_t087_accepted_json(
         t087_formal_path,
         expected_sha256=T088_T087_FORMAL_NATURAL_EVIDENCE_SHA256,
-        schema_id="t087-natural-evidence-v1",
+        reference_schema_id="t087-natural-evidence-v1",
         label="T087 formal natural evidence",
+        validator=_validate_t087_formal_document,
     )
-    _report, report_ref = _read_exact_json(
+    _report, report_ref = _read_t087_accepted_json(
         t087_report_path,
         expected_sha256=T088_T087_FINAL_REPORT_SHA256,
-        schema_id="t087-dense-combat-diagnostics-report-v1",
+        reference_schema_id="t087-dense-combat-diagnostics-report-v1",
         label="T087 final report",
+        validator=_validate_t087_report_document,
     )
-    _retention, retention_ref = _read_exact_json(
+    _retention, retention_ref = _read_t087_accepted_json(
         t087_retention_path,
         expected_sha256=T088_T087_RETENTION_MANIFEST_SHA256,
-        schema_id="t087-retention-manifest-v1",
+        reference_schema_id="t087-retention-manifest-v1",
         label="T087 retention manifest",
+        validator=_validate_t087_retention_document,
     )
     selection, selection_ref = _read_exact_json(
         t085_selection_path,

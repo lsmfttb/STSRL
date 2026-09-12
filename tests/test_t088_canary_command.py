@@ -146,6 +146,11 @@ def test_bad_path_authorization_cannot_reach_adapter_creation(tmp_path, monkeypa
         command, "_read_exact_json", lambda path, **_: documents[path.name]
     )
     monkeypatch.setattr(
+        command,
+        "_read_t087_accepted_json",
+        lambda path, **_: documents[path.name],
+    )
+    monkeypatch.setattr(
         command, "_load_canonical_maps", lambda **_: (maps, {"A": {}, "B": {}, "C": {}})
     )
     monkeypatch.setattr(
@@ -279,3 +284,67 @@ def test_hash_drift_fails_before_any_schema_is_trusted(tmp_path):
             schema_id="t087-natural-evidence-v1",
             label="fake formal evidence",
         )
+
+
+def test_hash_bound_t087_documents_use_actual_structure_not_root_schema(
+    tmp_path, monkeypatch
+):
+    common = {
+        "task_id": "T087",
+        "approved_spec": "a" * 40,
+        "implementation_run_head": "b" * 40,
+    }
+    documents = (
+        (
+            "formal.json",
+            {
+                **common,
+                "record_count": 413,
+                "cohort_counts": {"A": 93, "B": 192, "C": 128},
+                "formal_authorized": True,
+                "rows": [{} for _ in range(413)],
+            },
+            T088_T087_FORMAL_NATURAL_EVIDENCE_SHA256,
+            "t087-natural-evidence-v1",
+            command._validate_t087_formal_document,
+        ),
+        (
+            "report.json",
+            {
+                **common,
+                "terminal_classification": "DENSE_COMBAT_DIAGNOSTICS_READY",
+                "artifact_references": {},
+                "natural_execution": {},
+                "t085_binding": {},
+            },
+            T088_T087_FINAL_REPORT_SHA256,
+            "t087-dense-combat-diagnostics-report-v1",
+            command._validate_t087_report_document,
+        ),
+        (
+            "retention.json",
+            {
+                **common,
+                "terminal_classification": "DENSE_COMBAT_DIAGNOSTICS_READY",
+                "artifact_references": {},
+                "stable_root": "/retained/t087",
+                "regeneration_command": "python -m retained.t087",
+            },
+            T088_T087_RETENTION_MANIFEST_SHA256,
+            "t087-retention-manifest-v1",
+            command._validate_t087_retention_document,
+        ),
+    )
+    for filename, payload, digest, reference_schema, validator in documents:
+        path = tmp_path / filename
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        monkeypatch.setattr(command, "_sha256_file", lambda _, value=digest: value)
+        document, reference = command._read_t087_accepted_json(
+            path,
+            expected_sha256=digest,
+            reference_schema_id=reference_schema,
+            label=filename,
+            validator=validator,
+        )
+        assert "schema_id" not in document
+        assert reference["schema_id"] == reference_schema
