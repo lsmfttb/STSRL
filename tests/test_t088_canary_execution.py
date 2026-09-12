@@ -18,8 +18,8 @@ from sts_combat_rl.sim.t087_dense_combat_diagnostics import (
 )
 from sts_combat_rl.sim.t088_canary_execution import (
     T088CanaryExecutionError,
-    _T088CanaryRuntimeAdapter,
     _aggregate_work,
+    _T088CanaryRuntimeAdapter,
     execute_t088_canary,
     write_t088_canary_evidence,
 )
