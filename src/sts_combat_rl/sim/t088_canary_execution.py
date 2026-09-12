@@ -164,7 +164,8 @@ def validate_t088_canary_authorization(
         or authorization.get("controller_definitions_sha256")
         != _canonical_sha256(controller_definitions)
         or not isinstance(attestation, Mapping)
-        or dict(attestation) != {
+        or dict(attestation)
+        != {
             "role": "maintainer",
             "decision": "CANARY_AUTHORIZED",
             "exact_head": implementation_head,
@@ -373,21 +374,25 @@ def write_t088_canary_evidence(
 ) -> dict[str, object]:
     """Atomically create a validated canary artifact without overwriting evidence."""
 
-    if evidence.get("schema_id") != T088_CANARY_EVIDENCE_SCHEMA_ID or evidence.get(
-        "task_id"
-    ) != T088_TASK_ID:
+    if (
+        evidence.get("schema_id") != T088_CANARY_EVIDENCE_SCHEMA_ID
+        or evidence.get("task_id") != T088_TASK_ID
+    ):
         raise T088CanaryExecutionError("T088 canary evidence schema/task is invalid")
     destination = Path(path).resolve()
     if destination.exists():
         raise T088CanaryExecutionError("refusing to overwrite retained canary evidence")
     destination.parent.mkdir(parents=True, exist_ok=True)
-    encoded = json.dumps(
-        dict(evidence),
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        allow_nan=False,
-    ).encode("utf-8") + b"\n"
+    encoded = (
+        json.dumps(
+            dict(evidence),
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+        + b"\n"
+    )
     try:
         descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
         with os.fdopen(descriptor, "wb") as stream:
