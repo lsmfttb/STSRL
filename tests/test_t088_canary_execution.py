@@ -292,6 +292,53 @@ def test_canary_rejects_authorization_or_amended_dense_evidence_drift() -> None:
         )
 
 
+def test_runner_failure_retains_safe_root_diagnostic_without_partial_evidence() -> None:
+    cohort = _cohort()
+    binding = _binding(cohort)
+    selection = select_t088_canary_records(cohort, cohort_binding=binding)
+    head = "d" * 40
+    identity = selection["selected"][0]["selection_identity"]
+
+    def failing_runner(*_):
+        raise T088CanaryExecutionError("T088 restore public/legal parity failed")
+
+    with pytest.raises(T088CanaryExecutionError) as error:
+        execute_t088_canary(
+            authorization=_authorization(
+                head=head, selection=selection, binding=binding
+            ),
+            implementation_head=head,
+            cohort_rows=cohort,
+            cohort_binding=binding,
+            selection=selection,
+            runner=failing_runner,
+            controller_factory=_controller,
+        )
+    message = str(error.value)
+    assert f"{identity} arm A" in message
+    assert (
+        "T088CanaryExecutionError: T088 restore public/legal parity failed" in message
+    )
+    assert isinstance(error.value.__cause__, T088CanaryExecutionError)
+
+    def opaque_runner(*_):
+        raise RuntimeError("hidden native state must not be retained")
+
+    with pytest.raises(T088CanaryExecutionError, match="RuntimeError") as opaque:
+        execute_t088_canary(
+            authorization=_authorization(
+                head=head, selection=selection, binding=binding
+            ),
+            implementation_head=head,
+            cohort_rows=cohort,
+            cohort_binding=binding,
+            selection=selection,
+            runner=opaque_runner,
+            controller_factory=_controller,
+        )
+    assert "hidden native state" not in str(opaque.value)
+
+
 def test_runtime_proxy_uses_only_additive_search_v2_counter_surface() -> None:
     class FakeAdapter:
         def battle_search_v2_with_work_counters(self, snapshot, **kwargs):

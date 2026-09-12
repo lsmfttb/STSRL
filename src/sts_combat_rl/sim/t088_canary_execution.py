@@ -71,6 +71,25 @@ class T088CanaryExecutionError(T088IncompleteError):
     """The canary is unapproved, incomplete, or unsuitable for retention."""
 
 
+def _safe_runner_exception_detail(exc: Exception) -> str:
+    """Retain actionable repository-bound failures without serializing state.
+
+    Native/runtime exceptions may embed arbitrary simulator representations, so
+    their messages are not surfaced.  Repository boundary errors have
+    deliberately controlled messages and can be retained in the detached-job
+    status without exposing copied simulator state.
+    """
+
+    if isinstance(
+        exc,
+        (T085NativeExecutionError, T087IncompleteError, T088CanaryExecutionError),
+    ):
+        message = " ".join(str(exc).split())
+        if message:
+            return f"{type(exc).__name__}: {message[:512]}"
+    return type(exc).__name__
+
+
 class T088CanaryRecordRunner(Protocol):
     """Restore, parity-check, and execute exactly one already-bound record."""
 
@@ -417,7 +436,8 @@ class T088NativeCanaryRecordRunner:
             wall_clock_time_s = time.perf_counter() - started
         except (T085NativeExecutionError, RuntimeError, TypeError, ValueError) as exc:
             raise T088CanaryExecutionError(
-                f"{identity}: T088 native canary execution failed"
+                f"{identity}: T088 native canary execution failed: "
+                f"{_safe_runner_exception_detail(exc)}"
             ) from exc
         if not controlled.terminal or controlled.problems:
             raise T088CanaryExecutionError(
@@ -806,7 +826,8 @@ def execute_t088_canary(
             except Exception as exc:
                 raise T088CanaryExecutionError(
                     "T088 canary runner failed for "
-                    f"{record['selection_identity']} arm {arm}"
+                    f"{record['selection_identity']} arm {arm}: "
+                    f"{_safe_runner_exception_detail(exc)}"
                 ) from exc
             if not isinstance(raw, Mapping):
                 raise T088CanaryExecutionError(
