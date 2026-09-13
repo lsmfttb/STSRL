@@ -79,3 +79,32 @@ def test_raw_stream_failure_prevents_publication(monkeypatch, tmp_path) -> None:
             binding={},
             canary_reference={},
         )
+
+
+def test_auxiliary_fallback_prefers_pairwise_quality_over_cost() -> None:
+    pairs = []
+    for candidate, reference in (
+        ("B", "A"),
+        ("C", "A"),
+        ("D", "A"),
+        ("B", "C"),
+        ("B", "D"),
+        ("C", "D"),
+    ):
+        pairs.append(
+            {
+                "candidate_arm": candidate,
+                "reference_arm": reference,
+                "binary_outcome": {
+                    "classification": "CLEAR_OUTCOME_SUPERIORITY"
+                    if (candidate, reference) in {("B", "C"), ("B", "D")}
+                    else "OUTCOME_INCONCLUSIVE"
+                },
+                "dense_diagnostics": {"classification": "DENSE_MIXED"},
+            }
+        )
+    costs = {
+        arm: {"successor_transition_count": value, "wall_clock_time_s": value}
+        for arm, value in {"B": 9, "C": 1, "D": 2}.items()
+    }
+    assert command._auxiliary_challenger(pairs, costs)[0] == "B"

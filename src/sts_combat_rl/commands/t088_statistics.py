@@ -462,6 +462,7 @@ def run_t088_statistics_from_paths(
             "schema_id": "t088-native-verifier-v1",
             "task_id": "T088",
             "t087_cohort_binding": _binding_identity(binding),
+            "native_identity": binding["t087_native_identity"],
             "formal_raw_evidence": raw_reference,
         },
     )
@@ -471,6 +472,8 @@ def run_t088_statistics_from_paths(
             "schema_id": "t088-formal-cohort-v1",
             "task_id": "T088",
             "cohort_binding": _binding_identity(binding),
+            "ordered_cohort_entries": binding["ordered_cohort_entries"],
+            "ordered_cohort_entries_sha256": binding["ordered_cohort_entries_sha256"],
         },
     )
     specification = Path(
