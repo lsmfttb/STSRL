@@ -22,6 +22,7 @@ from sts_combat_rl.sim.t087_dense_combat_diagnostics import (
     T087_NATIVE_IDENTITY,
     T087_NATURAL_RECORD_COUNT,
     T087IncompleteError,
+    _public_state,
     build_dense_diagnostic_row,
     build_review_rubric,
 )
@@ -476,6 +477,33 @@ def _validate_work(row: Mapping[str, object]) -> None:
     if counters["model_calls"] != 0:
         raise T088IncompleteError("T088 row has learned model calls")
     _finite(row.get("wall_clock_time_s"), "wall_clock_time_s")
+
+
+def t088_public_trace(row: Mapping[str, object]) -> list[dict[str, object]]:
+    """Project a retained controlled trace through T087's public allowlist."""
+
+    trace = row.get("controlled_action_trace")
+    if not isinstance(trace, Sequence) or isinstance(trace, (str, bytes)):
+        raise T088IncompleteError("blind audit requires a controlled action trace")
+    public: list[dict[str, object]] = []
+    for step in trace:
+        if not isinstance(step, Mapping):
+            raise T088IncompleteError("controlled action trace step is malformed")
+        identity = step.get("chosen_action_identity")
+        public.append(
+            {
+                "step_index": step.get("step_index"),
+                "chosen_action_kind": step.get("chosen_action_kind"),
+                "chosen_action_identity": dict(identity)
+                if isinstance(identity, Mapping)
+                else {},
+                "public_state": _public_state(step.get("snapshot_raw")),
+                "terminal_after_step": step.get("terminal_after_step"),
+            }
+        )
+    if not public:
+        raise T088IncompleteError("blind audit trace has no steps")
+    return public
 
 
 def _validate_t088_dense_execution_diagnostic(

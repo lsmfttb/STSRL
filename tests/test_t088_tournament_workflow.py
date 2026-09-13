@@ -16,6 +16,7 @@ from sts_combat_rl.sim.t088_tournament_workflow import (
     paired_t088_comparison,
     select_t088_blind_audit,
     select_t088_canary_records,
+    t088_public_trace,
     validate_t088_arm_execution_rows,
     validate_t088_canary_evidence,
     validate_t088_execution_rows,
@@ -307,3 +308,38 @@ def test_retention_requires_every_role_and_real_sha_shape() -> None:
 
 def test_arm_set_is_frozen() -> None:
     assert T088_ARMS == ("A", "B", "C", "D")
+
+
+def test_public_trace_reuses_t087_allowlist_and_excludes_raw_state() -> None:
+    trace = t088_public_trace(
+        {
+            "controlled_action_trace": [
+                {
+                    "step_index": 0,
+                    "chosen_action_kind": "card",
+                    "chosen_action_identity": {"occurrence": 0},
+                    "snapshot_raw": {
+                        "current_hp": 40,
+                        "hidden_rng_state": "forbidden",
+                        "battle_monsters": [
+                            {"name": "Cultist", "current_hp": 20, "hidden": 1}
+                        ],
+                    },
+                    "next_snapshot_raw": {"hidden_rng_state": "forbidden"},
+                    "terminal_after_step": False,
+                }
+            ]
+        }
+    )
+    assert trace == [
+        {
+            "step_index": 0,
+            "chosen_action_kind": "card",
+            "chosen_action_identity": {"occurrence": 0},
+            "public_state": {
+                "current_hp": 40,
+                "battle_monsters": [{"name": "Cultist", "current_hp": 20}],
+            },
+            "terminal_after_step": False,
+        }
+    ]
