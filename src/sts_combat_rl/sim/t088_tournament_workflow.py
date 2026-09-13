@@ -966,6 +966,151 @@ def select_t088_blind_audit(
     }
 
 
+def select_t088_challenger(
+    comparisons: Iterable[Mapping[str, object]],
+    *,
+    cost_by_arm: Mapping[str, Mapping[str, object]],
+) -> dict[str, object]:
+    """Apply T088's frozen outcome, dense, and cost selection order.
+
+    This deliberately compares only the six precommitted pairs.  It never
+    turns outcome, dense diagnostics, and cost into a scalar score: cost is
+    consulted only when a pair remains quality-tied after outcome and dense
+    evidence.
+    """
+
+    required_pairs = {
+        ("B", "A"),
+        ("C", "A"),
+        ("D", "A"),
+        ("B", "C"),
+        ("B", "D"),
+        ("C", "D"),
+    }
+    by_pair: dict[tuple[str, str], Mapping[str, object]] = {}
+    for comparison in comparisons:
+        candidate, reference = (
+            comparison.get("candidate_arm"),
+            comparison.get("reference_arm"),
+        )
+        if (
+            not isinstance(candidate, str)
+            or not isinstance(reference, str)
+            or (candidate, reference) in by_pair
+        ):
+            raise T088IncompleteError("paired comparison identity is invalid")
+        binary, dense = (
+            comparison.get("binary_outcome"),
+            comparison.get("dense_diagnostics"),
+        )
+        if not isinstance(binary, Mapping) or not isinstance(dense, Mapping):
+            raise T088IncompleteError("paired comparison classifications are missing")
+        if binary.get("classification") not in {
+            "CLEAR_OUTCOME_SUPERIORITY",
+            "CLEAR_OUTCOME_HARM",
+            "OUTCOME_INCONCLUSIVE",
+        } or dense.get("classification") not in {
+            "DENSE_DIRECTIONALLY_BETTER",
+            "DENSE_MIXED",
+        }:
+            raise T088IncompleteError("paired comparison classifications are invalid")
+        by_pair[(candidate, reference)] = comparison
+    if set(by_pair) != required_pairs:
+        raise T088IncompleteError("paired comparisons are not the frozen T088 set")
+
+    costs: dict[str, tuple[float, float]] = {}
+    for arm in T088_ARMS:
+        value = cost_by_arm.get(arm)
+        if not isinstance(value, Mapping):
+            raise T088IncompleteError(f"cost summary for arm {arm} is missing")
+        costs[arm] = (
+            _finite(value.get("successor_transition_count"), f"{arm} transition work"),
+            _finite(value.get("wall_clock_time_s"), f"{arm} wall clock"),
+        )
+
+    def quality(left: str, right: str) -> int:
+        """Return 1/0/-1 before cost, from left's perspective."""
+
+        comparison = by_pair.get((left, right))
+        reversed_pair = comparison is None
+        if comparison is None:
+            comparison = by_pair.get((right, left))
+        if comparison is None:  # Defensive: the frozen pair set was checked.
+            raise T088IncompleteError("paired comparison is missing")
+        binary = comparison["binary_outcome"]
+        dense = comparison["dense_diagnostics"]
+        assert isinstance(binary, Mapping) and isinstance(dense, Mapping)
+        outcome = binary["classification"]
+        if outcome == "CLEAR_OUTCOME_SUPERIORITY":
+            return -1 if reversed_pair else 1
+        if outcome == "CLEAR_OUTCOME_HARM":
+            return 1 if reversed_pair else -1
+        if dense["classification"] == "DENSE_DIRECTIONALLY_BETTER":
+            return -1 if reversed_pair else 1
+        return 0
+
+    def compare(left: str, right: str) -> int:
+        """Use directly observed costs only after quality evidence ties."""
+
+        quality_result = quality(left, right)
+        if quality_result:
+            return quality_result
+        if costs[left][0] != costs[right][0]:
+            return 1 if costs[left][0] < costs[right][0] else -1
+        if costs[left][1] != costs[right][1]:
+            return 1 if costs[left][1] < costs[right][1] else -1
+        return 0
+
+    eligible = [arm for arm in ("B", "C", "D") if quality(arm, "A") > 0]
+    if not eligible:
+        return {
+            "eligible_challengers": [],
+            "terminal_classification": "NO_CHALLENGER_CLEARS_PROMOTION_GATE",
+            "selected_challenger": None,
+            "tie_set": [],
+            "cost_summary": {
+                arm: {
+                    "successor_transition_count": costs[arm][0],
+                    "wall_clock_time_s": costs[arm][1],
+                }
+                for arm in T088_ARMS
+            },
+        }
+
+    pareto = [
+        arm
+        for arm in eligible
+        if not any(compare(other, arm) > 0 for other in eligible if other != arm)
+    ]
+    if len(pareto) == 1:
+        return {
+            "eligible_challengers": sorted(eligible),
+            "terminal_classification": "ANALYSIS_PREPARATION_READY",
+            "selected_challenger": pareto[0],
+            "tie_set": [],
+            "cost_summary": {
+                arm: {
+                    "successor_transition_count": costs[arm][0],
+                    "wall_clock_time_s": costs[arm][1],
+                }
+                for arm in T088_ARMS
+            },
+        }
+    return {
+        "eligible_challengers": sorted(eligible),
+        "terminal_classification": "TOURNAMENT_TIE_REQUIRES_PLANNER_DECISION",
+        "selected_challenger": None,
+        "tie_set": sorted(pareto),
+        "cost_summary": {
+            arm: {
+                "successor_transition_count": costs[arm][0],
+                "wall_clock_time_s": costs[arm][1],
+            }
+            for arm in T088_ARMS
+        },
+    }
+
+
 def build_t088_statistics_preparation(
     rows: Iterable[Mapping[str, object]],
     cohort_rows: Iterable[Mapping[str, object]],
@@ -992,33 +1137,22 @@ def build_t088_statistics_preparation(
         )
         for candidate, reference_arm in pairs
     ]
-    against_a = {
-        item["candidate_arm"]: item
-        for item in comparisons
-        if item["reference_arm"] == "A"
+    cost_by_arm = {
+        arm: {
+            "successor_transition_count": mean(
+                int(row["work_counters"]["successor_transition_count"])
+                for row in materialized
+                if row["arm"] == arm
+            ),
+            "wall_clock_time_s": mean(
+                _finite(row["wall_clock_time_s"], "wall_clock_time_s")
+                for row in materialized
+                if row["arm"] == arm
+            ),
+        }
+        for arm in T088_ARMS
     }
-    eligible = [
-        arm
-        for arm, comparison in against_a.items()
-        if comparison["binary_outcome"]["classification"] == "CLEAR_OUTCOME_SUPERIORITY"
-        or (
-            comparison["binary_outcome"]["classification"] == "OUTCOME_INCONCLUSIVE"
-            and comparison["dense_diagnostics"]["classification"]
-            == "DENSE_DIRECTIONALLY_BETTER"
-        )
-    ]
-    # A non-unique eligible set is deliberately surfaced for Planner rather
-    # than collapsed into an ex-post scalar or arbitrary arm ordering.
-    selection = {
-        "eligible_challengers": sorted(eligible),
-        "terminal_classification": (
-            "TOURNAMENT_TIE_REQUIRES_PLANNER_DECISION"
-            if len(eligible) != 1
-            else "ANALYSIS_PREPARATION_READY"
-        ),
-        "selected_challenger": eligible[0] if len(eligible) == 1 else None,
-        "tie_set": sorted(eligible) if len(eligible) > 1 else [],
-    }
+    selection = select_t088_challenger(comparisons, cost_by_arm=cost_by_arm)
     result = {
         "schema_id": "t088-statistics-preparation-v1",
         "task_id": T088_TASK_ID,
@@ -1138,6 +1272,7 @@ __all__ = [
     "paired_t088_comparison",
     "select_t088_blind_audit",
     "select_t088_canary_records",
+    "select_t088_challenger",
     "validate_t088_arm_execution_rows",
     "validate_t088_canary_evidence",
     "validate_t088_execution_rows",

@@ -16,6 +16,7 @@ from sts_combat_rl.sim.t088_tournament_workflow import (
     paired_t088_comparison,
     select_t088_blind_audit,
     select_t088_canary_records,
+    select_t088_challenger,
     t088_public_trace,
     validate_t088_arm_execution_rows,
     validate_t088_canary_evidence,
@@ -142,6 +143,55 @@ def _paired_rows() -> list[dict[str, object]]:
     return rows
 
 
+def _selection_comparisons(
+    *,
+    versus_a: dict[str, tuple[str, str]],
+    between_challengers: dict[tuple[str, str], tuple[str, str]] | None = None,
+) -> list[dict[str, object]]:
+    """Small synthetic surface for the frozen six-pair selector."""
+
+    classifications = {
+        **{(arm, "A"): value for arm, value in versus_a.items()},
+        **(between_challengers or {}),
+    }
+    return [
+        {
+            "candidate_arm": candidate,
+            "reference_arm": reference,
+            "binary_outcome": {
+                "classification": classifications[(candidate, reference)][0]
+            },
+            "dense_diagnostics": {
+                "classification": classifications[(candidate, reference)][1]
+            },
+        }
+        for candidate, reference in (
+            ("B", "A"),
+            ("C", "A"),
+            ("D", "A"),
+            ("B", "C"),
+            ("B", "D"),
+            ("C", "D"),
+        )
+    ]
+
+
+def _costs(
+    *, wall_clock: dict[str, float] | None = None, **transition_work: int
+) -> dict[str, dict[str, float]]:
+    return {
+        arm: {
+            "successor_transition_count": transition_work[arm],
+            "wall_clock_time_s": (
+                wall_clock[arm]
+                if wall_clock is not None
+                else float(transition_work[arm])
+            ),
+        }
+        for arm in T088_ARMS
+    }
+
+
 def test_formal_plan_is_exact_413_by_four_and_rejects_reordering() -> None:
     cohort = _cohort()
     binding = _binding(cohort)
@@ -244,6 +294,73 @@ def test_paired_statistics_preserve_pairing_and_use_precommitted_bootstrap() -> 
         "win->loss": 1,
     }
     assert paired_bootstrap([1.0, -1.0]) == paired_bootstrap([1.0, -1.0])
+
+
+def test_selector_reports_no_challenger_when_none_clear_a_gate() -> None:
+    selection = select_t088_challenger(
+        _selection_comparisons(
+            versus_a={
+                arm: ("OUTCOME_INCONCLUSIVE", "DENSE_MIXED") for arm in ("B", "C", "D")
+            },
+            between_challengers={
+                pair: ("OUTCOME_INCONCLUSIVE", "DENSE_MIXED")
+                for pair in (("B", "C"), ("B", "D"), ("C", "D"))
+            },
+        ),
+        cost_by_arm=_costs(A=1, B=2, C=3, D=4),
+    )
+
+    assert selection["terminal_classification"] == "NO_CHALLENGER_CLEARS_PROMOTION_GATE"
+    assert selection["selected_challenger"] is None
+    assert selection["tie_set"] == []
+
+
+def test_selector_uses_transition_work_only_after_quality_tie() -> None:
+    selection = select_t088_challenger(
+        _selection_comparisons(
+            versus_a={
+                "B": ("CLEAR_OUTCOME_SUPERIORITY", "DENSE_MIXED"),
+                "C": ("CLEAR_OUTCOME_SUPERIORITY", "DENSE_MIXED"),
+                "D": ("OUTCOME_INCONCLUSIVE", "DENSE_MIXED"),
+            },
+            between_challengers={
+                ("B", "C"): ("OUTCOME_INCONCLUSIVE", "DENSE_MIXED"),
+                ("B", "D"): ("CLEAR_OUTCOME_SUPERIORITY", "DENSE_MIXED"),
+                ("C", "D"): ("CLEAR_OUTCOME_SUPERIORITY", "DENSE_MIXED"),
+            },
+        ),
+        cost_by_arm=_costs(A=10, B=4, C=8, D=2),
+    )
+
+    assert selection["eligible_challengers"] == ["B", "C"]
+    assert selection["selected_challenger"] == "B"
+    assert selection["terminal_classification"] == "ANALYSIS_PREPARATION_READY"
+
+
+def test_selector_uses_wall_clock_after_equal_transition_work() -> None:
+    selection = select_t088_challenger(
+        _selection_comparisons(
+            versus_a={
+                "B": ("CLEAR_OUTCOME_SUPERIORITY", "DENSE_MIXED"),
+                "C": ("CLEAR_OUTCOME_SUPERIORITY", "DENSE_MIXED"),
+                "D": ("OUTCOME_INCONCLUSIVE", "DENSE_MIXED"),
+            },
+            between_challengers={
+                ("B", "C"): ("OUTCOME_INCONCLUSIVE", "DENSE_MIXED"),
+                ("B", "D"): ("CLEAR_OUTCOME_SUPERIORITY", "DENSE_MIXED"),
+                ("C", "D"): ("CLEAR_OUTCOME_SUPERIORITY", "DENSE_MIXED"),
+            },
+        ),
+        cost_by_arm=_costs(
+            A=10,
+            B=4,
+            C=4,
+            D=2,
+            wall_clock={"A": 10.0, "B": 1.0, "C": 2.0, "D": 0.5},
+        ),
+    )
+
+    assert selection["selected_challenger"] == "B"
 
 
 def test_blind_bundle_uses_disjoint_semantic_strata_and_hides_arm_names() -> None:
