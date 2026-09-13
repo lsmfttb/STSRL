@@ -966,6 +966,81 @@ def select_t088_blind_audit(
     }
 
 
+def build_t088_statistics_preparation(
+    rows: Iterable[Mapping[str, object]],
+    cohort_rows: Iterable[Mapping[str, object]],
+    *,
+    cohort_binding: Mapping[str, object],
+    formal_raw_evidence: Mapping[str, object],
+) -> dict[str, object]:
+    """Build the frozen six-comparison surface before any final publication."""
+
+    materialized = validate_t088_execution_rows(
+        rows, cohort_rows, cohort_binding=cohort_binding
+    )
+    reference = formal_raw_evidence
+    if (
+        not isinstance(reference.get("path"), str)
+        or not isinstance(reference.get("sha256"), str)
+        or reference.get("schema_id") != "t088-formal-raw-evidence-v1"
+    ):
+        raise T088IncompleteError("formal raw evidence identity is invalid")
+    pairs = (("B", "A"), ("C", "A"), ("D", "A"), ("B", "C"), ("B", "D"), ("C", "D"))
+    comparisons = [
+        paired_t088_comparison(
+            materialized, candidate_arm=candidate, reference_arm=reference_arm
+        )
+        for candidate, reference_arm in pairs
+    ]
+    against_a = {
+        item["candidate_arm"]: item
+        for item in comparisons
+        if item["reference_arm"] == "A"
+    }
+    eligible = [
+        arm
+        for arm, comparison in against_a.items()
+        if comparison["binary_outcome"]["classification"] == "CLEAR_OUTCOME_SUPERIORITY"
+        or (
+            comparison["binary_outcome"]["classification"] == "OUTCOME_INCONCLUSIVE"
+            and comparison["dense_diagnostics"]["classification"]
+            == "DENSE_DIRECTIONALLY_BETTER"
+        )
+    ]
+    # A non-unique eligible set is deliberately surfaced for Planner rather
+    # than collapsed into an ex-post scalar or arbitrary arm ordering.
+    selection = {
+        "eligible_challengers": sorted(eligible),
+        "terminal_classification": (
+            "TOURNAMENT_TIE_REQUIRES_PLANNER_DECISION"
+            if len(eligible) != 1
+            else "ANALYSIS_PREPARATION_READY"
+        ),
+        "selected_challenger": eligible[0] if len(eligible) == 1 else None,
+        "tie_set": sorted(eligible) if len(eligible) > 1 else [],
+    }
+    result = {
+        "schema_id": "t088-statistics-preparation-v1",
+        "task_id": T088_TASK_ID,
+        "formal_raw_evidence": dict(reference),
+        "t087_cohort_binding": _binding_identity(cohort_binding),
+        "comparison_order": [list(pair) for pair in pairs],
+        "paired_comparisons": comparisons,
+        "selection": selection,
+    }
+    if selection["selected_challenger"] is not None:
+        selected = str(selection["selected_challenger"])
+        public_rows = []
+        for row in materialized:
+            item = dict(row)
+            item["public_trace"] = t088_public_trace(row)
+            public_rows.append(item)
+        result["blind_audit"] = select_t088_blind_audit(
+            public_rows, candidate_arm=selected, reference_arm="A"
+        )
+    return result
+
+
 def validate_t088_retention_manifest(manifest: Mapping[str, object]) -> None:
     """Validate artifact identity surface without trusting names or defaults."""
 
@@ -1058,6 +1133,7 @@ __all__ = [
     "T088_FORMAL_EXECUTIONS",
     "T088IncompleteError",
     "build_t088_formal_plan",
+    "build_t088_statistics_preparation",
     "paired_bootstrap",
     "paired_t088_comparison",
     "select_t088_blind_audit",
