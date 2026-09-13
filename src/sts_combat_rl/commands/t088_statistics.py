@@ -403,28 +403,48 @@ def run_t088_statistics_from_paths(
         ),
         "final_report": _write_new(stage / "t088-final-report.json", final),
     }
-    controller_bytes = json.dumps(
-        t088_controller_definitions(), sort_keys=True, separators=(",", ":")
-    ).encode()
+    references["controller_definitions"] = _write_new(
+        stage / "t088-controller-definitions.json",
+        {
+            "schema_id": "t088-controller-definitions-v1",
+            "task_id": "T088",
+            "definitions": t088_controller_definitions(),
+        },
+    )
+    references["native_verifier"] = _write_new(
+        stage / "t088-native-verifier.json",
+        {
+            "schema_id": "t088-native-verifier-v1",
+            "task_id": "T088",
+            "t087_cohort_binding": _binding_identity(binding),
+            "formal_raw_evidence": raw_reference,
+        },
+    )
+    references["formal_cohort"] = _write_new(
+        stage / "t088-formal-cohort.json",
+        {
+            "schema_id": "t088-formal-cohort-v1",
+            "task_id": "T088",
+            "cohort_binding": _binding_identity(binding),
+        },
+    )
     specification = Path(
         "docs/tasks/T088-classical-combat-search-baseline-tournament.md"
     ).resolve()
     references.update(
         {
             "specification": _reference(specification, "t088-specification-v1"),
-            "controller_definitions": {
-                "path": "t088-controller-definitions-inline-v1",
-                "sha256": hashlib.sha256(controller_bytes).hexdigest(),
-                "size_bytes": len(controller_bytes),
-                "schema_id": "t088-controller-definitions-v1",
-            },
-            "native_verifier": dict(canary_reference),
-            "formal_cohort": dict(raw_reference),
             "canary_evidence": dict(canary_reference),
             "formal_rows": dict(raw_reference),
             "cost_rows": dict(references["statistics_report"]),
         }
     )
+    # Documents are written in stage, but retained references must name the
+    # final atomic directory before manifest/closure serialization.
+    for reference in references.values():
+        staged_path = Path(str(reference["path"]))
+        if staged_path.parent == stage:
+            reference["path"] = str(root_path / staged_path.name)
     manifest = {
         "schema_id": "t088-retention-manifest-v1",
         "task_id": "T088",
