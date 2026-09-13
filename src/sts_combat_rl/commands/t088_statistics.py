@@ -453,6 +453,9 @@ def run_t088_statistics_from_paths(
     references["retention_manifest"] = _write_new(
         stage / "t088-retention-manifest.json", manifest
     )
+    references["retention_manifest"]["path"] = str(
+        root_path / "t088-retention-manifest.json"
+    )
     _write_new(
         stage / "t088-retention-closure.json",
         {
