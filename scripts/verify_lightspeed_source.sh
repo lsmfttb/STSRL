@@ -177,6 +177,8 @@ for method_name in (
     "battle_search",
     "battle_search_with_root_priors",
     "battle_search_v2",
+    "battle_search_v2_with_work_counters",
+    "battle_search_v2_with_progressive_bias",
     "battle_search_v2_with_tree_geometry",
     "battle_search_v2_with_state_utilization",
     "legal_battle_start_encounters",
@@ -482,6 +484,28 @@ if leaf_telemetry.get("leaf_value_calls") != 1 or len(leaf_callback_calls) != 1:
 if leaf_value_search.get("model_calls") != 1:
     fail("native v2 leaf-only model-call total disagrees with telemetry")
 
+work_counter_search = sim.battle_search_v2_with_work_counters(1, False)
+if not isinstance(work_counter_search, dict):
+    fail("native v2 work-counter search must return a dict")
+work_counters = work_counter_search.get("work_counters")
+if not isinstance(work_counters, dict) or work_counters.get("schema_id") != "native-battle-search-work-v1":
+    fail("native v2 work-counter telemetry is missing")
+if work_counters.get("model_calls") != 0:
+    fail("native v2 work-counter search unexpectedly used a model")
+
+progressive_bias_search = sim.battle_search_v2_with_progressive_bias(1, False, True, 0)
+if not isinstance(progressive_bias_search, dict):
+    fail("native progressive-bias search must return a dict")
+if progressive_bias_search.get("native_api") != "StepSimulator.battle_search_v2_with_progressive_bias.v1":
+    fail("native progressive-bias API id mismatch")
+if progressive_bias_search.get("patch_identity") != "sts_lightspeed_battle_search_v2_progressive_bias_h1_v1":
+    fail("native progressive-bias patch identity mismatch")
+bias_telemetry = progressive_bias_search.get("progressive_bias_telemetry")
+if not isinstance(bias_telemetry, dict) or bias_telemetry.get("schema_id") != "native-battle-search-progressive-bias-h1-v1":
+    fail("native progressive-bias telemetry is missing")
+if bias_telemetry.get("enabled") is not True or bias_telemetry.get("weight") != 0.5:
+    fail("native progressive-bias fixed configuration mismatch")
+
 expected_capabilities = set(manifest.capability_ids)
 observed_capabilities = {
     "step_simulation",
@@ -494,6 +518,7 @@ observed_capabilities = {
     "native_battle_search_root",
     "native_root_prior_allocation",
     "native_battle_search_v2_tree_internal",
+    "native_battle_search_v2_progressive_bias_h1",
     "native_battle_search_v2_tree_geometry",
     "native_battle_search_v2_state_utilization",
     "native_terminal_resource_identity",

@@ -119,6 +119,7 @@ task branch is expected to be ahead of its base; before final landing, refresh
 | T084 | DONE | [Search v2 internal-leaf continuation-utility target generation](T084-search-v2-internal-leaf-target-generation.md) | T083, T082, T081, T064, T062, T070 | PR #91 accepted LEAF_CONTINUATION_UTILITY_TARGETS_READY; calibrated N=100 and retained 960 qualified public-input/native-utility internal-leaf rows; no training or outcome claim |
 | T085 | DONE | [Corrected Search v2 leaf-value repair and paired evaluation](T085-corrected-leaf-value-search-repair.md) | T084, T083, T082, T081, T064, T052, T042, T070 | PR #97 accepted at `5edaa255`; 2,977 paired outcomes and exact A=93/B=192/C=128/B@400=48 support `CORRECTED_VALUE_SEARCH_HARM_CONFIRMED`; bounded Search claim only, no complete-run or non-combat claim |
 | T087 | DONE | [Dense Combat outcome diagnostics and blind trace audit surface](T087-dense-combat-outcome-diagnostics.md) | T005, T012, T016, T018, T052, T078, T081, T085 | PR #100 accepted as `DENSE_COMBAT_DIAGNOSTICS_READY`; exact 413-row amended dense diagnostics, 24-row blind audit, and 24-loss/112-row HP rescue; diagnostic readiness only, no controller-improvement claim |
+| T088 | DONE | [Classical Combat Search Baseline Tournament](T088-classical-combat-search-baseline-tournament.md) | T005, T012, T016, T018, T052, T062, T078, T081, T085, T087 | PR #101 accepted as `STRONGER_NONLEARNED_COMBAT_BASELINE_IDENTIFIED`; Arm B unguided Search v2 @400 is frozen as the strongest accepted non-learned Battle baseline on the exact matched Battle-start cohort; no complete-run, learned-policy, or deployment claim |
 
 Use the table for landed lifecycle state. `DRAFT`, `BLOCKED`, `CANCELLED`, and
 terminal rows have their normal durable meanings. A merged `READY` row authorizes
@@ -257,13 +258,47 @@ value rows (320 per occupancy arm; aggregate Act counts 534/426). The accepted
 report SHA-256 is `b6cbcb5ee96d9538adb6ee7a4849a138f6d3a3f93b6127e7ba0ff91dcae1ad1c`
 and retention-manifest SHA-256 is
 `754a9d2560fb5b01c53e7789bdd558e5ef3cc9d0eca4dd690f8f1ab8df1fb0f6`.
-This qualifies the bounded target dataset for T085. T085 is the current `READY`
-task: one value-head-only corrected native-utility repair with the parent
-policy/representation and Search semantics frozen, followed by paired hard,
-broad, and current-occupancy battle evaluation. A valid T085 result closes this
-Battle value-repair round; the next Planner priority is then a minimal
-self-generated Non-Combat learner with Battle frozen. T063 and T066 remain
-`DRAFT` and are not implicitly promoted.
+This qualified the bounded target dataset for T085. T085 is complete: its
+value-head-only corrected native-utility repair closed the Battle value-repair
+round without a promotion claim. T063 and T066 remain `DRAFT` and are not
+implicitly promoted. T088 then completed the separate classical Battle
+baseline tournament before any new Non-Combat learner contract.
+
+T088 is complete on PR #101 with terminal classification
+`STRONGER_NONLEARNED_COMBAT_BASELINE_IDENTIFIED`. On the exact T087 matched
+413-record Battle-start cohort (1,652 formal rows across A/B/C/D), Arm B,
+unguided Search v2 with 400 simulations, is the strongest accepted
+non-learned Battle baseline. Search v2 @100 remains the historical comparator;
+Beam weighted-best-first and progressive-bias MCTS are not promoted. The
+accepted science/result head is `a7d71851e776f279b3d7280d1486dbdf73b63627`
+and the canonical native identity is
+`lsmfttb/sts_lightspeed refs/heads/stsrl/main @
+20a6c2b3a9cea817c988178b814f083ff889853f`.
+
+The retained T088 formal raw artifact is
+`/mnt/d/DeadlyCatCoding/STSRL/artifacts/t088-formal-5e48c79/t088-formal-raw-evidence-v1.json`
+with SHA-256
+`fe376c3f054c94bf30d368ec544ff85f13f9ac594e7eec4178677e7e5414acea`. The
+accepted fresh statistics root is
+`/mnt/d/DeadlyCatCoding/STSRL/artifacts/t088-statistics-a7d7185`; its final
+statistics report `t088-statistics-report.json` has SHA-256
+`1f535b0e38fc9114867c829be69063a80c6594293e55731951e418bf73e2080e`, final
+report `t088-final-report.json` has SHA-256
+`8ddc125e156f9ec4c8abf4e64044d4a36f485267eeaf9e61c658fc9492294331`,
+retention manifest `t088-retention-manifest.json` has SHA-256
+`c6abdbc3872063607c1d0e4783f9760848a189d560b248726975461ad17352b6`, and
+retention closure `t088-retention-closure.json` has SHA-256
+`060b1e17039c787acc955c44ba53aefa0cbe8be94cd542ca2dc3e4344f95d8cb`.
+These artifacts support only comparative Battle-controller evidence on the
+fixed matched Battle-start distribution and freezing a simulator-side
+non-learned Battle baseline. They do not claim complete-run A20 or Heart
+improvement, learned Battle/value-target improvement, live-game deployment
+quality, or universal Battle dominance.
+
+The next research direction is to re-publish or materially re-review the
+self-generated Non-Combat learner with Battle frozen to Search v2 @400. T086
+and PR #99/T086 remain deferred and must not be resumed under their old
+contract.
 
 ## Task Boundary And Artifact Rules
 
@@ -306,10 +341,13 @@ and inspect again after the expected window or on request rather than continuous
 ## Published Queue
 
 The landed executable queue is the set of `READY` rows in the Active Backlog.
-T085 is currently the sole merged `READY` task. T063 and T066 remain `DRAFT`;
-T034 remains blocked on native public-consistent hidden-future sampling support.
-T064, T065, and T071--T084 are `DONE` with their recorded diagnostic, repair,
-control-plane, or target-generation outcomes.
+There are currently no `READY` rows. T063 and T066 remain `DRAFT`; T034
+remains blocked on native public-consistent hidden-future sampling support.
+T064, T065, and T071--T088 are `DONE` with their recorded diagnostic, repair,
+control-plane, target-generation, or accepted baseline-selection outcomes.
+The next direction is a separately specified and reviewed self-generated
+Non-Combat learner with Battle frozen to T088's Search v2 @400 baseline; this
+direction is not yet an executable task contract.
 
 For future serial tasks using the default one-PR workflow, also inspect remote
 open task PRs: the unique open task PR with exact-spec `SPEC APPROVED /

@@ -1,6 +1,6 @@
 # Current Status
 
-Last reviewed: 2026-09-11.
+Last reviewed: 2026-09-13.
 
 This document is the main maintainer's canonical execution-result report for
 the planner and describes the latest `main` branch only. Results from local
@@ -14,7 +14,10 @@ Build the foundations for an A20 battle agent. Search remains the intended
 primary battle policy, and learned policies or values are expected to guide or
 accelerate search. Non-combat decisions remain outside the trainable agent;
 T065 ended as an invalid-experiment diagnostic and did not change that
-capability claim.
+capability claim. T088 now freezes unguided Search v2 @400 as the strongest
+accepted non-learned Battle baseline on the exact matched Battle-start
+distribution. Search v2 @100 is retained as the historical comparator, while
+Beam weighted-best-first and progressive-bias MCTS are not promoted.
 
 The task index lists the canonical lifecycle state for the published backlog.
 The M1 model-guided Oracle search sandbox is complete through synthesis. It
@@ -492,8 +495,8 @@ finalization manifest SHA-256 is
 This is a bounded corrected-value Search result only: it is not a complete-run
 A20 or Heart win-rate claim. T085 closes the current Battle value-repair round;
 the accepted successor direction is a separate minimal self-generated
-Non-Combat learning task with Battle frozen to the strongest accepted
-non-learned/unguided baseline.
+Non-Combat learning task with Battle frozen to the newly accepted Search v2
+@400 baseline.
 
 T087 is complete on PR #100 as a diagnostic-readiness result. Its approved
 specification is `81509bd426c9d0980e9a60ad28e9abb0ee0444e4`, implementation/run
@@ -525,6 +528,39 @@ map, rubric, input-eligibility report, and natural-run manifest. The terminal
 classification is `DENSE_COMBAT_DIAGNOSTICS_READY`. T087 establishes only a
 reproducible dense diagnostic surface and bounded HP-rescue diagnostic; it does
 not claim controller improvement, a new reward, or natural-game utility.
+
+T088 is complete on PR #101 at accepted science/result head
+`a7d71851e776f279b3d7280d1486dbdf73b63627`. Its terminal classification is
+`STRONGER_NONLEARNED_COMBAT_BASELINE_IDENTIFIED`: on the exact T087 matched
+413-record Battle-start cohort, Arm B (unguided Search v2 @400) is the
+strongest accepted non-learned Battle baseline. The canonical native identity
+is `lsmfttb/sts_lightspeed refs/heads/stsrl/main @
+20a6c2b3a9cea817c988178b814f083ff889853f`. The formal raw artifact is retained
+at `/mnt/d/DeadlyCatCoding/STSRL/artifacts/t088-formal-5e48c79/t088-formal-raw-evidence-v1.json`
+with SHA-256
+`fe376c3f054c94bf30d368ec544ff85f13f9ac594e7eec4178677e7e5414acea`.
+
+The accepted fresh statistics root is
+`/mnt/d/DeadlyCatCoding/STSRL/artifacts/t088-statistics-a7d7185`. Its exact
+retained outputs are:
+
+- `t088-statistics-report.json` — SHA-256
+  `1f535b0e38fc9114867c829be69063a80c6594293e55731951e418bf73e2080e`;
+- `t088-final-report.json` — SHA-256
+  `8ddc125e156f9ec4c8abf4e64044d4a36f485267eeaf9e61c658fc9492294331`;
+- `t088-retention-manifest.json` — SHA-256
+  `c6abdbc3872063607c1d0e4783f9760848a189d560b248726975461ad17352b6`;
+- `t088-retention-closure.json` — SHA-256
+  `060b1e17039c787acc955c44ba53aefa0cbe8be94cd542ca2dc3e4344f95d8cb`.
+
+This result is bounded to comparative Battle-controller evidence on the fixed
+matched Battle-start distribution and freezing a simulator-side non-learned
+Battle baseline. It does not claim complete-run A20 or Heart improvement,
+learned Battle/value-target improvement, live-game deployment quality, or
+universal Battle dominance. The next research direction is to re-publish or
+materially re-review the self-generated Non-Combat learner with Battle frozen
+to Search v2 @400; PR #99/T086 remains deferred and must not be resumed under
+its old contract.
 
 ## Implemented On Main
 
