@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import sys
+import tempfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
@@ -368,9 +369,17 @@ def run_t088_statistics_from_paths(
     }
     selected = selection["selected_challenger"]
     if not isinstance(selected, str):
-        raise T088StatisticsPathError(
-            "blind-audit challenger requires Planner selection"
+        # This affects only auxiliary blinding, never the negative conclusion.
+        selected = min(
+            ("B", "C", "D"),
+            key=lambda arm: (
+                costs[arm]["successor_transition_count"],
+                costs[arm]["wall_clock_time_s"],
+                hashlib.sha256(f"T088-auxiliary-{arm}".encode()).hexdigest(),
+            ),
         )
+        selection["auxiliary_blind_audit_challenger"] = selected
+        selection["auxiliary_tie_break"] = "transition-work-wall-clock-sha256-v1"
     blind_result = _stream_blind_bundle(raw_evidence_path, rows, candidate_arm=selected)
     blind = blind_result["bundle"]
     hidden = blind_result["hidden_provenance"]
@@ -382,25 +391,65 @@ def run_t088_statistics_from_paths(
         "paired_comparisons": comparisons,
     }
     root_path = artifact_root.resolve()
+    if root_path.exists():
+        raise T088StatisticsPathError("refusing to overwrite retained artifact root")
+    root_path.parent.mkdir(parents=True, exist_ok=True)
+    stage = Path(tempfile.mkdtemp(prefix=".t088-statistics-", dir=root_path.parent))
     references = {
-        "statistics_report": _write_new(
-            root_path / "t088-statistics-report.json", report
-        ),
-        "blind_bundle": _write_new(root_path / "t088-blind-audit-bundle.json", blind),
+        "statistics_report": _write_new(stage / "t088-statistics-report.json", report),
+        "blind_bundle": _write_new(stage / "t088-blind-audit-bundle.json", blind),
         "blind_provenance": _write_new(
-            root_path / "t088-blind-audit-hidden-provenance.json", hidden
+            stage / "t088-blind-audit-hidden-provenance.json", hidden
         ),
-        "final_report": _write_new(root_path / "t088-final-report.json", final),
+        "final_report": _write_new(stage / "t088-final-report.json", final),
     }
+    controller_bytes = json.dumps(
+        t088_controller_definitions(), sort_keys=True, separators=(",", ":")
+    ).encode()
+    specification = Path(
+        "docs/tasks/T088-classical-combat-search-baseline-tournament.md"
+    ).resolve()
+    references.update(
+        {
+            "specification": _reference(specification, "t088-specification-v1"),
+            "controller_definitions": {
+                "path": "t088-controller-definitions-inline-v1",
+                "sha256": hashlib.sha256(controller_bytes).hexdigest(),
+                "size_bytes": len(controller_bytes),
+                "schema_id": "t088-controller-definitions-v1",
+            },
+            "native_verifier": dict(canary_reference),
+            "formal_cohort": dict(raw_reference),
+            "canary_evidence": dict(canary_reference),
+            "formal_rows": dict(raw_reference),
+            "cost_rows": dict(references["statistics_report"]),
+        }
+    )
     manifest = {
         "schema_id": "t088-retention-manifest-v1",
         "task_id": "T088",
-        "formal_raw_evidence": raw_reference,
-        "artifacts": references,
+        "artifact_references": references,
     }
     references["retention_manifest"] = _write_new(
-        root_path / "t088-retention-manifest.json", manifest
+        stage / "t088-retention-manifest.json", manifest
     )
+    _write_new(
+        stage / "t088-retention-closure.json",
+        {
+            "schema_id": "t088-retention-closure-v1",
+            "task_id": "T088",
+            "artifact_references": references,
+        },
+    )
+    try:
+        os.rename(stage, root_path)
+    except OSError as exc:
+        for child in stage.iterdir():
+            child.unlink()
+        stage.rmdir()
+        raise T088StatisticsPathError(
+            "cannot atomically publish retained artifacts"
+        ) from exc
     return {
         "schema_id": "t088-statistics-command-result-v1",
         "task_id": "T088",
