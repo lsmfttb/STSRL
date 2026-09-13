@@ -127,18 +127,43 @@ def _stream_compact_rows(
                     raise T088StatisticsPathError(
                         "raw evidence row lacks required analysis field"
                     )
+            dense = row["dense_diagnostic"]
+            counters = row["work_counters"]
+            if (
+                not isinstance(dense, Mapping)
+                or not isinstance(dense.get("diagnostics"), Mapping)
+                or not isinstance(counters, Mapping)
+            ):
+                raise T088StatisticsPathError(
+                    "raw evidence analysis fields are malformed"
+                )
             compact.append(
                 {
-                    key: row[key]
-                    for key in (
-                        "arm",
-                        "selection_identity",
-                        "cohort",
-                        "outcome",
-                        "dense_diagnostic",
-                        "work_counters",
-                        "wall_clock_time_s",
-                    )
+                    "arm": row["arm"],
+                    "selection_identity": row["selection_identity"],
+                    "cohort": row["cohort"],
+                    "outcome": row["outcome"],
+                    # Raw dense rows contain the controlled trace.  The first
+                    # pass retains only the three precommitted scalar metrics.
+                    "dense_diagnostic": {
+                        "diagnostics": {
+                            name: dense["diagnostics"][name]
+                            for name in (
+                                "enemy_hp_remaining_fraction",
+                                "player_hp_remaining_fraction_of_max",
+                                "combat_terminal_margin_v1",
+                            )
+                        }
+                    },
+                    "work_counters": {
+                        name: counters[name]
+                        for name in (
+                            "successor_transition_count",
+                            "action_execution_count",
+                            "model_calls",
+                        )
+                    },
+                    "wall_clock_time_s": row["wall_clock_time_s"],
                 }
             )
         metadata = reader.metadata
