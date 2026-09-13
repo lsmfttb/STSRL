@@ -13,8 +13,10 @@ import json
 import math
 import random
 import statistics
+import time
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -26,6 +28,7 @@ from sts_combat_rl.sim.non_combat_learning import (
     T065_SPLITS,
     T065_STAGE6_REPORT_SCHEMA_ID,
     T065_STAGE6_SHARD_COUNT,
+    T065CompleteRunArmReport,
     T065CounterfactualTarget,
     T065ModelRun,
     T065SourceState,
@@ -795,7 +798,13 @@ def run_t089_complete_run_arm(
     battle_controller_factory: Callable[[], Any] | None = None,
     simulator_identity: Mapping[str, Any] | None = None,
 ) -> Any:
-    """Run one explicitly-authorized T089 fresh arm through shared execution."""
+    """Run one explicitly-authorized T089 fresh arm through 16 real shards.
+
+    The shared T065 executor owns one shard's complete-run semantics.  T089
+    owns this outer orchestration so its exact fresh cohort is visibly split
+    into sixteen concurrent, sixteen-seed shards without changing T065's
+    defaults or schemas.
+    """
 
     if arm not in {"baseline", "candidate"}:
         raise T089ContractError("T089 fresh arm must be baseline or candidate")
@@ -805,28 +814,151 @@ def run_t089_complete_run_arm(
         )
     if arm == "candidate" and model_run is None:
         raise T089Incomplete("T089 candidate arm requires the selected checkpoint")
-    report = run_complete_run_arm(
-        adapter_factory,
-        arm="expert" if arm == "baseline" else "learned",
-        seeds=seeds,
-        model_run=model_run,
-        driver_seed=T089_FRESH_DRIVER_SEED,
-        max_steps=T089_MAX_STEPS,
-        battle_controller_factory=battle_controller_factory,
-        learned_policy_factory=lambda run: T089LearnedNonCombatPolicy(run),
-        allowed_seed_range=T089_FRESH_SEED_RANGE,
-        allowed_driver_seed=T089_FRESH_DRIVER_SEED,
-        simulator_identity=simulator_identity
+    requested = t089_fresh_simulator_seeds() if seeds is None else tuple(seeds)
+    if requested != t089_fresh_simulator_seeds():
+        raise T089Incomplete("T089 fresh execution requires the exact 256-seed cohort")
+    native_identity = dict(
+        simulator_identity
         or {
             "repository": T089_NATIVE_REPOSITORY,
             "ref": T089_NATIVE_REF,
             "commit": T089_NATIVE_COMMIT,
-        },
+        }
     )
-    events_by_seed: dict[int, list[Mapping[str, Any]]] = defaultdict(list)
-    for event in report.decision_events:
+    shard_ranges = _t089_fresh_shard_ranges()
+
+    def run_shard(
+        shard_index: int, seed_start: int, seed_end: int
+    ) -> T065CompleteRunArmReport:
+        return run_complete_run_arm(
+            adapter_factory,
+            arm="expert" if arm == "baseline" else "learned",
+            seeds=range(seed_start, seed_end + 1),
+            model_run=model_run,
+            driver_seed=T089_FRESH_DRIVER_SEED,
+            max_steps=T089_MAX_STEPS,
+            worker_count=T089_WORKER_COUNT,
+            shard_count=T089_SHARD_COUNT,
+            battle_controller_factory=battle_controller_factory,
+            learned_policy_factory=lambda run: T089LearnedNonCombatPolicy(run),
+            allowed_seed_range=T089_FRESH_SEED_RANGE,
+            allowed_driver_seed=T089_FRESH_DRIVER_SEED,
+            simulator_identity=native_identity,
+        )
+
+    started = time.perf_counter()
+    shard_reports: dict[int, T065CompleteRunArmReport] = {}
+    with ThreadPoolExecutor(max_workers=T089_WORKER_COUNT) as executor:
+        futures = {
+            executor.submit(run_shard, index, seed_start, seed_end): index
+            for index, (seed_start, seed_end) in enumerate(shard_ranges)
+        }
+        for future in as_completed(futures):
+            shard_reports[futures[future]] = future.result()
+
+    decorated_reports = [
+        _decorate_t089_shard_report(shard_reports[index], arm=arm)
+        for index in range(T089_SHARD_COUNT)
+    ]
+    first = decorated_reports[0]
+    for report in decorated_reports[1:]:
+        if (
+            dict(report.simulator_identity) != dict(first.simulator_identity)
+            or dict(report.action_space) != dict(first.action_space)
+            or dict(report.controller_provenance) != dict(first.controller_provenance)
+            or dict(report.driver_provenance) != dict(first.driver_provenance)
+        ):
+            raise T089Incomplete("T089 fresh shard provenance is inconsistent")
+    shard_specs: list[dict[str, Any]] = []
+    for index, ((seed_start, seed_end), report) in enumerate(
+        zip(shard_ranges, decorated_reports, strict=True)
+    ):
+        expected_shard_seeds = tuple(range(seed_start, seed_end + 1))
+        if (
+            report.requested_seeds != expected_shard_seeds
+            or report.worker_count != T089_WORKER_COUNT
+            or report.shard_count != T089_SHARD_COUNT
+        ):
+            raise T089Incomplete("T089 fresh shard report topology is invalid")
+        completed_seeds = [
+            int(row["simulator_seed"])
+            for row in report.rows
+            if isinstance(row, Mapping)
+            and isinstance(row.get("simulator_seed"), int)
+            and not isinstance(row.get("simulator_seed"), bool)
+        ]
+        cost: dict[str, float] = {}
+        for row in report.rows:
+            row_cost = row.get("simulator_cost")
+            if isinstance(row_cost, Mapping):
+                for key, value in row_cost.items():
+                    if isinstance(value, (int, float)) and not isinstance(value, bool):
+                        cost[key] = cost.get(key, 0.0) + float(value)
+        shard_specs.append(
+            {
+                "arm": arm,
+                "shard_index": index,
+                "seed_start": seed_start,
+                "seed_end": seed_end,
+                "seed_count": seed_end - seed_start + 1,
+                "worker_count": T089_WORKER_COUNT,
+                "requested_seeds": list(report.requested_seeds),
+                "requested_seed_count": len(report.requested_seeds),
+                "completed_seeds": completed_seeds,
+                "completed_seed_count": len(completed_seeds),
+                "completed_row_count": len(report.rows),
+                "decision_count": len(report.decision_events),
+                "wall_clock_seconds": report.wall_clock_seconds,
+                "problem_count": len(report.problems),
+                "problems": list(report.problems),
+                "simulator_cost": cost,
+            }
+        )
+    return T065CompleteRunArmReport(
+        arm=arm,
+        driver_seed=T089_FRESH_DRIVER_SEED,
+        requested_seeds=tuple(
+            seed for report in decorated_reports for seed in report.requested_seeds
+        ),
+        rows=tuple(row for report in decorated_reports for row in report.rows),
+        decision_events=tuple(
+            event for report in decorated_reports for event in report.decision_events
+        ),
+        wall_clock_seconds=time.perf_counter() - started,
+        worker_count=T089_WORKER_COUNT,
+        shard_count=T089_SHARD_COUNT,
+        shard_specs=tuple(shard_specs),
+        problems=tuple(
+            problem for report in decorated_reports for problem in report.problems
+        ),
+        simulator_identity=dict(first.simulator_identity),
+        action_space=dict(first.action_space),
+        controller_provenance=dict(first.controller_provenance),
+        driver_provenance=dict(first.driver_provenance),
+    )
+
+
+def _t089_fresh_shard_ranges() -> tuple[tuple[int, int], ...]:
+    start, end = T089_FRESH_SEED_RANGE
+    cohort_size = end - start + 1
+    if cohort_size % T089_SHARD_COUNT:
+        raise T089ContractError("T089 fresh cohort cannot form exact shards")
+    shard_size = cohort_size // T089_SHARD_COUNT
+    return tuple(
+        (start + index * shard_size, start + (index + 1) * shard_size - 1)
+        for index in range(T089_SHARD_COUNT)
+    )
+
+
+def _decorate_t089_shard_report(
+    report: T065CompleteRunArmReport, *, arm: str
+) -> T065CompleteRunArmReport:
+    events_by_seed: dict[int, list[dict[str, Any]]] = defaultdict(list)
+    for raw_event in report.decision_events:
+        event = dict(raw_event)
         seed = event.get("simulator_seed")
         if isinstance(seed, int) and not isinstance(seed, bool):
+            event["decision_ordinal"] = len(events_by_seed[seed])
             events_by_seed[seed].append(event)
     rows: list[Mapping[str, Any]] = []
     for raw in report.rows:
@@ -848,18 +980,35 @@ def run_t089_complete_run_arm(
             event.get("status") == "learned_success" for event in events
         )
         row["fallback_decisions_by_family"] = {
-            family: sum(
-                event.get("screen_family") == family
-                and event.get("status") == "unsupported_fallback"
-                for event in events
+            family: count
+            for family in sorted(
+                {
+                    event.get("screen_family")
+                    for event in events
+                    if event.get("status") == "unsupported_fallback"
+                    and isinstance(event.get("screen_family"), str)
+                }
             )
-            for family in T089_SUPPORTED_FAMILIES
+            if (
+                count := sum(
+                    event.get("screen_family") == family
+                    and event.get("status") == "unsupported_fallback"
+                    for event in events
+                )
+            )
         }
         row["supported_inference_failures"] = sum(
             event.get("status") == "learned_failure" for event in events
         )
         rows.append(row)
-    return replace(report, arm=arm, rows=tuple(rows))
+    return replace(
+        report,
+        arm=arm,
+        rows=tuple(rows),
+        decision_events=tuple(
+            event for events in events_by_seed.values() for event in events
+        ),
+    )
 
 
 def _require_finite_nonnegative(value: Any, label: str) -> float:
@@ -883,16 +1032,68 @@ def _require_finite_number(value: Any, label: str) -> float:
 def _validate_t089_shard_specs(value: Any, *, arm: str) -> tuple[dict[str, Any], ...]:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
         raise T089Incomplete(f"T089 {arm} shard evidence is missing")
+    if len(value) != T089_SHARD_COUNT:
+        raise T089Incomplete(
+            f"T089 {arm} shard evidence must contain exactly {T089_SHARD_COUNT} shards"
+        )
+    expected_ranges = _t089_fresh_shard_ranges()
     validated: list[dict[str, Any]] = []
-    for spec in value:
+    for expected_index, (expected_start, expected_end) in enumerate(expected_ranges):
+        spec = value[expected_index]
         if not isinstance(spec, Mapping):
             raise T089Incomplete(f"T089 {arm} shard evidence is invalid")
-        for key in ("shard_index", "seed_start", "seed_end", "worker_count"):
+        for key in (
+            "shard_index",
+            "seed_start",
+            "seed_end",
+            "seed_count",
+            "worker_count",
+            "requested_seed_count",
+            "completed_seed_count",
+            "completed_row_count",
+            "decision_count",
+            "problem_count",
+        ):
             item = spec.get(key)
             if isinstance(item, bool) or not isinstance(item, int):
                 raise T089Incomplete(f"T089 {arm} shard field {key} is invalid")
-        if spec["seed_start"] > spec["seed_end"] or spec["worker_count"] <= 0:
-            raise T089Incomplete(f"T089 {arm} shard range is invalid")
+        if (
+            spec.get("arm") != arm
+            or spec["shard_index"] != expected_index
+            or spec["seed_start"] != expected_start
+            or spec["seed_end"] != expected_end
+            or spec["seed_count"] != expected_end - expected_start + 1
+            or spec["worker_count"] != T089_WORKER_COUNT
+            or spec["requested_seed_count"] != spec["seed_count"]
+            or spec["completed_seed_count"] != spec["seed_count"]
+            or spec["completed_row_count"] != spec["seed_count"]
+            or spec["decision_count"] < 0
+            or spec["problem_count"] < 0
+        ):
+            raise T089Incomplete(f"T089 {arm} shard topology or completion is invalid")
+        expected_seeds = list(range(expected_start, expected_end + 1))
+        if spec.get("requested_seeds") != expected_seeds:
+            raise T089Incomplete(f"T089 {arm} shard requested seeds are invalid")
+        if spec.get("completed_seeds") != expected_seeds:
+            raise T089Incomplete(f"T089 {arm} shard completed seeds are invalid")
+        _require_finite_nonnegative(
+            spec.get("wall_clock_seconds"),
+            f"T089 {arm} shard {expected_index} wall clock",
+        )
+        problems = spec.get("problems")
+        if not isinstance(problems, Sequence) or isinstance(problems, (str, bytes)):
+            raise T089Incomplete(f"T089 {arm} shard problems are invalid")
+        if len(problems) != spec["problem_count"]:
+            raise T089Incomplete(f"T089 {arm} shard problem count is invalid")
+        if problems:
+            raise T089Incomplete(f"T089 {arm} shard contains execution problems")
+        cost = spec.get("simulator_cost")
+        if not isinstance(cost, Mapping) or not cost:
+            raise T089Incomplete(f"T089 {arm} shard cost is missing")
+        for key, cost_value in cost.items():
+            _require_finite_nonnegative(
+                cost_value, f"T089 {arm} shard {expected_index} cost {key}"
+            )
         validated.append(dict(spec))
     return tuple(validated)
 
@@ -968,6 +1169,162 @@ def _validate_t089_search_controller_provenance(
     ):
         raise T089Incomplete(f"T089 {arm} Non-Combat driver seed is invalid")
     return dict(value)
+
+
+def _validate_t089_decision_events(
+    events: Sequence[Any],
+    rows_by_seed: Mapping[int, Mapping[str, Any]],
+    *,
+    expected_arm: str,
+) -> dict[int, tuple[Mapping[str, Any], ...]]:
+    """Recompute every learned/fallback counter from explicit event evidence."""
+
+    events_by_seed: dict[int, list[Mapping[str, Any]]] = defaultdict(list)
+    seen_event_keys: set[tuple[int, int]] = set()
+    seen_event_payloads: set[str] = set()
+    allowed_statuses = {
+        "learned_success",
+        "learned_failure",
+        "unsupported_fallback",
+    }
+    expected_seeds = set(rows_by_seed)
+    for raw_event in events:
+        if not isinstance(raw_event, Mapping):
+            raise T089Incomplete(f"T089 {expected_arm} decision event is invalid")
+        event = dict(raw_event)
+        seed = event.get("simulator_seed")
+        if (
+            isinstance(seed, bool)
+            or not isinstance(seed, int)
+            or seed not in expected_seeds
+        ):
+            raise T089Incomplete(f"T089 {expected_arm} event seed is invalid")
+        family = event.get("screen_family")
+        status = event.get("status")
+        ordinal = event.get("decision_ordinal")
+        if not isinstance(family, str) or not family:
+            raise T089Incomplete(f"T089 {expected_arm} event family is invalid")
+        if status not in allowed_statuses:
+            raise T089Incomplete(f"T089 {expected_arm} event status is invalid")
+        if isinstance(ordinal, bool) or not isinstance(ordinal, int) or ordinal < 0:
+            raise T089Incomplete(f"T089 {expected_arm} event ordinal is invalid")
+        event_key = (seed, ordinal)
+        if event_key in seen_event_keys:
+            raise T089Incomplete(f"T089 {expected_arm} duplicate event ordinal")
+        try:
+            payload_key = json.dumps(
+                event, sort_keys=True, separators=(",", ":"), allow_nan=False
+            )
+        except (TypeError, ValueError) as exc:
+            raise T089Incomplete(
+                f"T089 {expected_arm} event payload is not serializable"
+            ) from exc
+        if payload_key in seen_event_payloads:
+            raise T089Incomplete(f"T089 {expected_arm} duplicate decision event")
+        seen_event_keys.add(event_key)
+        seen_event_payloads.add(payload_key)
+        if status in {"learned_success", "learned_failure"}:
+            if family not in T089_SUPPORTED_FAMILIES:
+                raise T089Incomplete(
+                    f"T089 {expected_arm} supported event family is invalid"
+                )
+        elif family in T089_SUPPORTED_FAMILIES:
+            raise T089Incomplete(
+                f"T089 {expected_arm} supported family cannot use fallback"
+            )
+        if status in {"learned_success", "unsupported_fallback"}:
+            action_index = event.get("action_index")
+            if (
+                isinstance(action_index, bool)
+                or not isinstance(action_index, int)
+                or action_index < 0
+            ):
+                raise T089Incomplete(
+                    f"T089 {expected_arm} selected action evidence is invalid"
+                )
+        if status == "learned_success":
+            _require_finite_number(event.get("score"), f"T089 {expected_arm} score")
+        if status == "learned_failure" and (
+            not isinstance(event.get("error"), str) or not event["error"]
+        ):
+            raise T089Incomplete(f"T089 {expected_arm} learned failure is unreported")
+        events_by_seed[seed].append(event)
+
+    for seed, seed_events in events_by_seed.items():
+        if [event["decision_ordinal"] for event in seed_events] != list(
+            range(len(seed_events))
+        ):
+            raise T089Incomplete(
+                f"T089 {expected_arm} event ordinals are not contiguous"
+            )
+
+    for seed, row in rows_by_seed.items():
+        seed_events = events_by_seed.get(seed, [])
+        learned_count_value = row.get("learned_decision_count")
+        failure_count_value = row.get("supported_inference_failures")
+        learned_family_value = row.get("learned_decisions_by_family")
+        fallback_family_value = row.get("fallback_decisions_by_family")
+        if (
+            isinstance(learned_count_value, bool)
+            or not isinstance(learned_count_value, int)
+            or learned_count_value < 0
+            or isinstance(failure_count_value, bool)
+            or not isinstance(failure_count_value, int)
+            or failure_count_value < 0
+            or not isinstance(learned_family_value, Mapping)
+            or set(learned_family_value) != set(T089_SUPPORTED_FAMILIES)
+            or not isinstance(fallback_family_value, Mapping)
+        ):
+            raise T089Incomplete(f"T089 {expected_arm} row counters are malformed")
+        if any(
+            isinstance(count, bool) or not isinstance(count, int) or count < 0
+            for count in learned_family_value.values()
+        ) or any(
+            not isinstance(family, str)
+            or isinstance(count, bool)
+            or not isinstance(count, int)
+            or count < 0
+            for family, count in fallback_family_value.items()
+        ):
+            raise T089Incomplete(f"T089 {expected_arm} row family counters are invalid")
+        learned_by_family = {
+            family: sum(
+                event.get("screen_family") == family
+                and event.get("status") == "learned_success"
+                for event in seed_events
+            )
+            for family in T089_SUPPORTED_FAMILIES
+        }
+        fallback_by_family: dict[str, int] = {}
+        for event in seed_events:
+            if event.get("status") == "unsupported_fallback":
+                family = str(event["screen_family"])
+                fallback_by_family[family] = fallback_by_family.get(family, 0) + 1
+        learned_count = sum(
+            event.get("status") == "learned_success" for event in seed_events
+        )
+        failure_count = sum(
+            event.get("status") == "learned_failure" for event in seed_events
+        )
+        if expected_arm == "baseline" and seed_events:
+            raise T089Incomplete("T089 baseline cannot claim learned decisions")
+        if learned_count_value != learned_count:
+            raise T089Incomplete(
+                f"T089 {expected_arm} learned decision count disagrees with events"
+            )
+        if learned_family_value != learned_by_family:
+            raise T089Incomplete(
+                f"T089 {expected_arm} learned family counts disagree with events"
+            )
+        if failure_count_value != failure_count:
+            raise T089Incomplete(
+                f"T089 {expected_arm} supported failure count disagrees with events"
+            )
+        if fallback_family_value != fallback_by_family:
+            raise T089Incomplete(
+                f"T089 {expected_arm} fallback family counts disagree with events"
+            )
+    return {seed: tuple(seed_events) for seed, seed_events in events_by_seed.items()}
 
 
 def _validate_t089_fresh_arm_report(
@@ -1102,11 +1459,40 @@ def _validate_t089_fresh_arm_report(
         rows_by_seed[seed] = dict(raw_row)
     if tuple(sorted(rows_by_seed)) != expected_seeds:
         raise T089Incomplete(f"T089 {expected_arm} arm does not cover exact seeds")
+    events_by_seed = _validate_t089_decision_events(
+        events, rows_by_seed, expected_arm=expected_arm
+    )
+    expected_event_count = 0
+    for spec in shard_specs:
+        shard_seeds = set(range(int(spec["seed_start"]), int(spec["seed_end"]) + 1))
+        shard_event_count = sum(
+            len(seed_events)
+            for seed, seed_events in events_by_seed.items()
+            if seed in shard_seeds
+        )
+        if spec["decision_count"] != shard_event_count:
+            raise T089Incomplete(
+                f"T089 {expected_arm} shard decision count disagrees with events"
+            )
+        expected_event_count += shard_event_count
+        expected_cost: dict[str, float] = {}
+        for seed in shard_seeds:
+            for key, cost_value in rows_by_seed[seed]["simulator_cost"].items():
+                expected_cost[key] = expected_cost.get(key, 0.0) + float(cost_value)
+        if dict(spec["simulator_cost"]) != expected_cost:
+            raise T089Incomplete(
+                f"T089 {expected_arm} shard cost disagrees with completed rows"
+            )
+    if expected_event_count != len(events):
+        raise T089Incomplete(f"T089 {expected_arm} event aggregate is invalid")
     per_run_provenance = {
         str(seed): {
+            "simulator_seed": seed,
             "arm": expected_arm,
             "controller_provenance": dict(row["controller_provenance"]),
             "action_space": dict(row["action_space"]),
+            "simulator_steps": row["simulator_steps"],
+            "simulator_cost": dict(row["simulator_cost"]),
         }
         for seed, row in rows_by_seed.items()
     }
@@ -1123,6 +1509,17 @@ def _validate_t089_fresh_arm_report(
         "shard_specs": [dict(spec) for spec in shard_specs],
         "wall_clock_seconds": wall_clock,
         "per_run_provenance": per_run_provenance,
+        "per_run_decision_evidence": {
+            str(seed): {
+                "learned_decision_count": row["learned_decision_count"],
+                "learned_decisions_by_family": dict(row["learned_decisions_by_family"]),
+                "supported_inference_failures": row["supported_inference_failures"],
+                "fallback_decisions_by_family": dict(
+                    row["fallback_decisions_by_family"]
+                ),
+            }
+            for seed, row in rows_by_seed.items()
+        },
     }
     return tuple(rows_by_seed[seed] for seed in expected_seeds), summary
 
@@ -1186,7 +1583,7 @@ def _validate_t089_fresh_arm_summary(
         raise T089Incomplete(
             f"T089 retained {expected_arm} worker/shard topology is invalid"
         )
-    _validate_t089_shard_specs(value.get("shard_specs"), arm=expected_arm)
+    shard_specs = _validate_t089_shard_specs(value.get("shard_specs"), arm=expected_arm)
     _require_finite_nonnegative(
         value.get("wall_clock_seconds"), f"T089 retained {expected_arm} wall clock"
     )
@@ -1203,11 +1600,98 @@ def _validate_t089_fresh_arm_summary(
             raise T089Incomplete(
                 f"T089 retained {expected_arm} per-run identity is invalid"
             )
+        if item.get("simulator_seed") != seed:
+            raise T089Incomplete(
+                f"T089 retained {expected_arm} per-run seed provenance is invalid"
+            )
         if item.get("controller_provenance") != controller or item.get(
             "action_space"
         ) != value.get("action_space"):
             raise T089Incomplete(
                 f"T089 retained {expected_arm} per-run provenance is invalid"
+            )
+        steps = item.get("simulator_steps")
+        if isinstance(steps, bool) or not isinstance(steps, int) or steps < 0:
+            raise T089Incomplete(
+                f"T089 retained {expected_arm} per-run steps are invalid"
+            )
+        cost = item.get("simulator_cost")
+        if not isinstance(cost, Mapping) or not cost:
+            raise T089Incomplete(
+                f"T089 retained {expected_arm} per-run cost is missing"
+            )
+        for key, cost_value in cost.items():
+            _require_finite_nonnegative(
+                cost_value, f"T089 retained {expected_arm} per-run cost {key}"
+            )
+    decision_evidence = value.get("per_run_decision_evidence")
+    if not isinstance(decision_evidence, Mapping) or set(decision_evidence) != {
+        str(seed) for seed in expected_seeds
+    }:
+        raise T089Incomplete(
+            f"T089 retained {expected_arm} decision evidence is incomplete"
+        )
+    zero_fallback = expected_arm == "baseline"
+    for seed in expected_seeds:
+        evidence = decision_evidence[str(seed)]
+        if not isinstance(evidence, Mapping):
+            raise T089Incomplete(
+                f"T089 retained {expected_arm} decision evidence is invalid"
+            )
+        learned_by_family = evidence.get("learned_decisions_by_family")
+        fallback_by_family = evidence.get("fallback_decisions_by_family")
+        learned_count = evidence.get("learned_decision_count")
+        failure_count = evidence.get("supported_inference_failures")
+        if (
+            not isinstance(learned_by_family, Mapping)
+            or set(learned_by_family) != set(T089_SUPPORTED_FAMILIES)
+            or not isinstance(fallback_by_family, Mapping)
+            or (zero_fallback and fallback_by_family)
+            or isinstance(learned_count, bool)
+            or not isinstance(learned_count, int)
+            or learned_count < 0
+            or isinstance(failure_count, bool)
+            or not isinstance(failure_count, int)
+            or failure_count < 0
+        ):
+            raise T089Incomplete(
+                f"T089 retained {expected_arm} decision evidence is malformed"
+            )
+        if any(
+            isinstance(count, bool) or not isinstance(count, int) or count < 0
+            for count in learned_by_family.values()
+        ) or any(
+            isinstance(count, bool) or not isinstance(count, int) or count < 0
+            for count in fallback_by_family.values()
+        ):
+            raise T089Incomplete(
+                f"T089 retained {expected_arm} decision evidence counts are invalid"
+            )
+        if expected_arm == "baseline" and (learned_count or failure_count):
+            raise T089Incomplete("T089 baseline retained learned evidence is invalid")
+        if sum(learned_by_family.values()) != learned_count:
+            raise T089Incomplete(
+                f"T089 retained {expected_arm} learned evidence total is invalid"
+            )
+    for spec in shard_specs:
+        shard_seeds = range(int(spec["seed_start"]), int(spec["seed_end"]) + 1)
+        expected_cost: dict[str, float] = {}
+        expected_decisions = 0
+        for seed in shard_seeds:
+            item = per_run[str(seed)]
+            for key, cost_value in item["simulator_cost"].items():
+                expected_cost[key] = expected_cost.get(key, 0.0) + float(cost_value)
+            evidence = decision_evidence[str(seed)]
+            expected_decisions += evidence["learned_decision_count"]
+            expected_decisions += evidence["supported_inference_failures"]
+            expected_decisions += sum(evidence["fallback_decisions_by_family"].values())
+        if dict(spec["simulator_cost"]) != expected_cost:
+            raise T089Incomplete(
+                f"T089 retained {expected_arm} shard cost aggregate is invalid"
+            )
+        if spec["decision_count"] != expected_decisions:
+            raise T089Incomplete(
+                f"T089 retained {expected_arm} shard decision aggregate is invalid"
             )
 
 

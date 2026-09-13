@@ -356,7 +356,9 @@ def continuation_seeds_for_split(
         values = tuple(selected[split])
     except KeyError as exc:
         raise ValueError(f"unsupported T065 split {split!r}") from exc
-    if not values or any(isinstance(seed, bool) or not isinstance(seed, int) for seed in values):
+    if not values or any(
+        isinstance(seed, bool) or not isinstance(seed, int) for seed in values
+    ):
         raise ValueError(f"invalid continuation seed tuple for split {split!r}")
     return values
 
@@ -864,9 +866,7 @@ class T065TargetTable:
         expected_expert_provenance = {
             "name": "expert_non_combat_v1",
             "version": 1,
-            "seed": self.expert_action_provenance.get(
-                "seed", T065_SOURCE_DRIVER_SEED
-            ),
+            "seed": self.expert_action_provenance.get("seed", T065_SOURCE_DRIVER_SEED),
             "reset_rule": (
                 "reset_for_run(simulator_seed) at replayed source state"
                 if self.expert_action_provenance.get("seed", T065_SOURCE_DRIVER_SEED)
@@ -982,7 +982,8 @@ class T065TargetTable:
             "continuation_seed_map": {
                 split: list(seeds)
                 for split, seeds in (
-                    self.continuation_seed_map or {
+                    self.continuation_seed_map
+                    or {
                         "train": T065_TRAIN_CONTINUATION_SEEDS,
                         "validation": T065_VALIDATION_CONTINUATION_SEEDS,
                         "heldout": T065_HELDOUT_CONTINUATION_SEEDS,
@@ -1698,7 +1699,9 @@ def select_validation_checkpoint(
 ) -> T065ModelRun:
     """Choose only by validation MAE, then lower model seed on exact ties."""
 
-    if tuple(sorted(run.model_seed for run in runs)) != tuple(sorted(expected_model_seeds)):
+    if tuple(sorted(run.model_seed for run in runs)) != tuple(
+        sorted(expected_model_seeds)
+    ):
         raise ValueError("checkpoint selection requires both frozen model seeds")
     for run in runs:
         schema_problems = _checkpoint_schema_problems(
@@ -6122,7 +6125,9 @@ def read_target_table(
     if expected_continuation_seed_map is not None and raw_seed_map is None:
         raise ValueError("target table continuation_seed_map is missing")
     seed_map = {
-        split: continuation_seeds_for_split(split, seed_map=expected_continuation_seed_map)
+        split: continuation_seeds_for_split(
+            split, seed_map=expected_continuation_seed_map
+        )
         for split in T065_SPLITS
     }
     if raw_seed_map is not None:

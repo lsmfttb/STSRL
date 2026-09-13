@@ -5,8 +5,10 @@ import json
 
 import pytest
 
+import sts_combat_rl.sim.t089_non_combat_policy as t089_module
 from sts_combat_rl.commands.t089_non_combat_policy import main
 from sts_combat_rl.sim.action_space import ActionSpaceConfig
+from sts_combat_rl.sim.non_combat_learning import T065CompleteRunArmReport
 from sts_combat_rl.sim.t089_non_combat_policy import (
     T089_FRESH_DRIVER_SEED,
     T089_NATIVE_COMMIT,
@@ -104,6 +106,7 @@ def _fresh_arm(offset: float, *, learned: bool, arm: str) -> dict[str, object]:
     action_space = ActionSpaceConfig.initial_no_potions().to_dict()
     controller = _fresh_controller_provenance(arm)
     rows = []
+    decision_events = []
     for seed in range(891001, 891257):
         family_counts = {
             "MAP_SCREEN": 32 if learned and 891001 <= seed <= 891004 else 0,
@@ -124,13 +127,56 @@ def _fresh_arm(offset: float, *, learned: bool, arm: str) -> dict[str, object]:
                 "learned_decision_count": sum(family_counts.values()),
                 "learned_decisions_by_family": family_counts,
                 "supported_inference_failures": 0,
+                "fallback_decisions_by_family": {},
                 "controller_provenance": controller,
                 "action_space": action_space,
                 "simulator_steps": 4,
                 "simulator_cost": {"simulator_steps": 4.0},
             }
         )
+        ordinal = 0
+        for family, count in family_counts.items():
+            for _ in range(count):
+                decision_events.append(
+                    {
+                        "simulator_seed": seed,
+                        "decision_ordinal": ordinal,
+                        "screen_family": family,
+                        "status": "learned_success",
+                        "action_index": 0,
+                        "score": 1.0,
+                    }
+                )
+                ordinal += 1
     driver_name = "learned_non_combat_t089_v1" if learned else "expert_non_combat_v1"
+    shard_specs = []
+    for shard_index in range(16):
+        seed_start = 891001 + shard_index * 16
+        seed_end = seed_start + 15
+        shard_seeds = list(range(seed_start, seed_end + 1))
+        shard_decisions = sum(
+            event["simulator_seed"] in shard_seeds for event in decision_events
+        )
+        shard_specs.append(
+            {
+                "arm": arm,
+                "shard_index": shard_index,
+                "seed_start": seed_start,
+                "seed_end": seed_end,
+                "seed_count": 16,
+                "worker_count": 16,
+                "requested_seeds": shard_seeds,
+                "requested_seed_count": 16,
+                "completed_seeds": shard_seeds,
+                "completed_seed_count": 16,
+                "completed_row_count": 16,
+                "decision_count": shard_decisions,
+                "wall_clock_seconds": 1.0,
+                "problem_count": 0,
+                "problems": [],
+                "simulator_cost": {"simulator_steps": 64.0},
+            }
+        )
     return {
         "schema_id": "t065-complete-run-report-v1",
         "schema_version": 1,
@@ -138,11 +184,11 @@ def _fresh_arm(offset: float, *, learned: bool, arm: str) -> dict[str, object]:
         "driver_seed": T089_FRESH_DRIVER_SEED,
         "requested_seeds": list(range(891001, 891257)),
         "rows": rows,
-        "decision_events": [],
+        "decision_events": decision_events,
         "wall_clock_seconds": 1.0,
         "worker_count": 16,
         "shard_count": 16,
-        "shard_specs": [],
+        "shard_specs": shard_specs,
         "problems": [],
         "simulator_identity": {
             "repository": T089_NATIVE_REPOSITORY,
@@ -172,6 +218,78 @@ def test_t089_fresh_gate_is_paired_and_support_is_not_expandable() -> None:
             _fresh_arm(0.0, learned=False, arm="baseline") | {"rows": []},
             _fresh_arm(1.0, learned=True, arm="candidate"),
         )
+
+
+def test_t089_fresh_arm_requires_event_evidence_for_reported_decisions() -> None:
+    baseline = _fresh_arm(0.0, learned=False, arm="baseline")
+    candidate = _fresh_arm(1.0, learned=True, arm="candidate")
+    candidate["decision_events"] = []
+    with pytest.raises(T089Incomplete):
+        build_t089_fresh_report(baseline, candidate)
+
+
+def test_t089_fresh_arm_rejects_pseudo_serial_shard_evidence() -> None:
+    baseline = _fresh_arm(0.0, learned=False, arm="baseline")
+    baseline["shard_specs"] = []
+    with pytest.raises(T089Incomplete):
+        build_t089_fresh_report(
+            baseline, _fresh_arm(1.0, learned=True, arm="candidate")
+        )
+
+
+def test_t089_fresh_execution_uses_exact_parallel_shards(monkeypatch) -> None:
+    calls: list[tuple[int, ...]] = []
+
+    def fake_run_complete_run_arm(adapter_factory, **kwargs):
+        shard_seeds = tuple(kwargs["seeds"])
+        calls.append(shard_seeds)
+        rows = tuple(
+            {
+                "simulator_seed": seed,
+                "terminal": True,
+                "terminal_floor": 1.0,
+                "terminal_status": "VICTORY",
+                "truncated": False,
+                "controller_error": False,
+                "act2_entry": False,
+                "simulator_steps": 1,
+                "simulator_cost": {"simulator_steps": 1.0},
+            }
+            for seed in shard_seeds
+        )
+        return T065CompleteRunArmReport(
+            arm="expert",
+            driver_seed=T089_FRESH_DRIVER_SEED,
+            requested_seeds=shard_seeds,
+            rows=rows,
+            wall_clock_seconds=1.0,
+            worker_count=16,
+            shard_count=16,
+            simulator_identity={
+                "repository": T089_NATIVE_REPOSITORY,
+                "ref": T089_NATIVE_REF,
+                "commit": T089_NATIVE_COMMIT,
+            },
+            action_space=ActionSpaceConfig.initial_no_potions().to_dict(),
+            controller_provenance={"shard": "test"},
+            driver_provenance={"name": "expert_non_combat_v1"},
+        )
+
+    monkeypatch.setattr(t089_module, "run_complete_run_arm", fake_run_complete_run_arm)
+    report = t089_module.run_t089_complete_run_arm(
+        lambda: None,
+        arm="baseline",
+        battle_controller_factory=lambda: None,
+    )
+    assert len(calls) == 16
+    assert sorted(calls) == [
+        tuple(range(891001 + index * 16, 891001 + (index + 1) * 16))
+        for index in range(16)
+    ]
+    assert report.requested_seeds == tuple(range(891001, 891257))
+    assert len(report.shard_specs) == 16
+    assert [spec["worker_count"] for spec in report.shard_specs] == [16] * 16
+    assert [spec["seed_count"] for spec in report.shard_specs] == [16] * 16
 
 
 def test_t089_fresh_and_terminal_evidence_fail_closed() -> None:
