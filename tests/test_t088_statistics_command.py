@@ -129,3 +129,33 @@ def test_private_stage_cleanup_never_creates_final_root(tmp_path) -> None:
     command._cleanup_stage(stage)
     assert not stage.exists()
     assert not (tmp_path / "published").exists()
+
+
+def test_staged_publication_cleans_private_stage_on_injected_write_failure(
+    monkeypatch, tmp_path
+) -> None:
+    root = tmp_path / "published"
+    real_write = command._write_new
+    calls = 0
+
+    def fail_second_write(path, document):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise command.T088StatisticsPathError(
+                "injected manifest/closure write failure"
+            )
+        return real_write(path, document)
+
+    monkeypatch.setattr(command, "_write_new", fail_second_write)
+
+    def writer(stage):
+        command._write_new(stage / "first.json", {"schema_id": "fixture-v1"})
+        command._write_new(stage / "manifest.json", {"schema_id": "fixture-v1"})
+        raise AssertionError("injected write failure must stop before closure")
+
+    with pytest.raises(command.T088StatisticsPathError, match="injected"):
+        command._publish_private_stage(root_path=root, writer=writer)
+
+    assert not root.exists()
+    assert list(tmp_path.glob(".t088-statistics-*")) == []

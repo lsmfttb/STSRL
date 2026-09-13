@@ -6,9 +6,10 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 import sys
 import tempfile
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 
 from sts_combat_rl.commands import t088_canary as canary_paths
@@ -142,11 +143,30 @@ def _write_new(path: Path, document: Mapping[str, object]) -> dict[str, object]:
 def _cleanup_stage(stage: Path) -> None:
     """Best-effort cleanup of private, never-published staged documents."""
 
-    if not stage.exists():
-        return
-    for child in stage.iterdir():
-        child.unlink()
-    stage.rmdir()
+    if stage.exists():
+        shutil.rmtree(stage, ignore_errors=True)
+
+
+def _publish_private_stage(
+    *, root_path: Path, writer: Callable[[Path], dict[str, Mapping[str, object]]]
+) -> dict[str, Mapping[str, object]]:
+    """Publish a completely written private stage, cleaning it on every error."""
+
+    stage = Path(tempfile.mkdtemp(prefix=".t088-statistics-", dir=root_path.parent))
+    try:
+        references = writer(stage)
+        try:
+            os.rename(stage, root_path)
+        except OSError as exc:
+            raise T088StatisticsPathError(
+                "cannot atomically publish retained artifacts"
+            ) from exc
+        return references
+    except BaseException:
+        # The stage is private until rename succeeds.  Cleanup must cover every
+        # write, manifest, closure, and rename failure without publishing root.
+        _cleanup_stage(stage)
+        raise
 
 
 def _stream_compact_rows(
@@ -449,86 +469,87 @@ def run_t088_statistics_from_paths(
     if root_path.exists():
         raise T088StatisticsPathError("refusing to overwrite retained artifact root")
     root_path.parent.mkdir(parents=True, exist_ok=True)
-    stage = Path(tempfile.mkdtemp(prefix=".t088-statistics-", dir=root_path.parent))
-    references = {
-        "statistics_report": _write_new(stage / "t088-statistics-report.json", report),
-        "blind_bundle": _write_new(stage / "t088-blind-audit-bundle.json", blind),
-        "blind_provenance": _write_new(
-            stage / "t088-blind-audit-hidden-provenance.json", hidden
-        ),
-        "final_report": _write_new(stage / "t088-final-report.json", final),
-    }
-    references["controller_definitions"] = _write_new(
-        stage / "t088-controller-definitions.json",
-        {
-            "schema_id": "t088-controller-definitions-v1",
-            "task_id": "T088",
-            "definitions": t088_controller_definitions(),
-        },
-    )
-    references["native_verifier"] = _write_new(
-        stage / "t088-native-verifier.json",
-        {
-            "schema_id": "t088-native-verifier-v1",
-            "task_id": "T088",
-            "t087_cohort_binding": _binding_identity(binding),
-            "native_identity": binding["t087_native_identity"],
-            "formal_raw_evidence": raw_reference,
-        },
-    )
-    references["formal_cohort"] = _write_new(
-        stage / "t088-formal-cohort.json",
-        {
-            "schema_id": "t088-formal-cohort-v1",
-            "task_id": "T088",
-            "cohort_binding": _binding_identity(binding),
-            "ordered_cohort_entries": binding["ordered_cohort_entries"],
-            "ordered_cohort_entries_sha256": binding["ordered_cohort_entries_sha256"],
-        },
-    )
-    specification = Path(
-        "docs/tasks/T088-classical-combat-search-baseline-tournament.md"
-    ).resolve()
-    references.update(
-        {
-            "specification": _reference(specification, "t088-specification-v1"),
-            "canary_evidence": dict(canary_reference),
-            "formal_rows": dict(raw_reference),
-            "cost_rows": dict(references["statistics_report"]),
+
+    def write_stage(stage: Path) -> dict[str, Mapping[str, object]]:
+        references: dict[str, Mapping[str, object]] = {
+            "statistics_report": _write_new(
+                stage / "t088-statistics-report.json", report
+            ),
+            "blind_bundle": _write_new(stage / "t088-blind-audit-bundle.json", blind),
+            "blind_provenance": _write_new(
+                stage / "t088-blind-audit-hidden-provenance.json", hidden
+            ),
+            "final_report": _write_new(stage / "t088-final-report.json", final),
         }
-    )
-    # Documents are written in stage, but retained references must name the
-    # final atomic directory before manifest/closure serialization.
-    for reference in references.values():
-        staged_path = Path(str(reference["path"]))
-        if staged_path.parent == stage:
-            reference["path"] = str(root_path / staged_path.name)
-    manifest = {
-        "schema_id": "t088-retention-manifest-v1",
-        "task_id": "T088",
-        "artifact_references": references,
-    }
-    references["retention_manifest"] = _write_new(
-        stage / "t088-retention-manifest.json", manifest
-    )
-    references["retention_manifest"]["path"] = str(
-        root_path / "t088-retention-manifest.json"
-    )
-    _write_new(
-        stage / "t088-retention-closure.json",
-        {
-            "schema_id": "t088-retention-closure-v1",
+        references["controller_definitions"] = _write_new(
+            stage / "t088-controller-definitions.json",
+            {
+                "schema_id": "t088-controller-definitions-v1",
+                "task_id": "T088",
+                "definitions": t088_controller_definitions(),
+            },
+        )
+        references["native_verifier"] = _write_new(
+            stage / "t088-native-verifier.json",
+            {
+                "schema_id": "t088-native-verifier-v1",
+                "task_id": "T088",
+                "t087_cohort_binding": _binding_identity(binding),
+                "native_identity": binding["t087_native_identity"],
+                "formal_raw_evidence": raw_reference,
+            },
+        )
+        references["formal_cohort"] = _write_new(
+            stage / "t088-formal-cohort.json",
+            {
+                "schema_id": "t088-formal-cohort-v1",
+                "task_id": "T088",
+                "cohort_binding": _binding_identity(binding),
+                "ordered_cohort_entries": binding["ordered_cohort_entries"],
+                "ordered_cohort_entries_sha256": binding[
+                    "ordered_cohort_entries_sha256"
+                ],
+            },
+        )
+        specification = Path(
+            "docs/tasks/T088-classical-combat-search-baseline-tournament.md"
+        ).resolve()
+        references.update(
+            {
+                "specification": _reference(specification, "t088-specification-v1"),
+                "canary_evidence": dict(canary_reference),
+                "formal_rows": dict(raw_reference),
+                "cost_rows": dict(references["statistics_report"]),
+            }
+        )
+        # Documents are written in stage, but retained references must name the
+        # final atomic directory before manifest/closure serialization.
+        for reference in references.values():
+            staged_path = Path(str(reference["path"]))
+            if staged_path.parent == stage:
+                reference["path"] = str(root_path / staged_path.name)
+        manifest = {
+            "schema_id": "t088-retention-manifest-v1",
             "task_id": "T088",
             "artifact_references": references,
-        },
-    )
-    try:
-        os.rename(stage, root_path)
-    except OSError as exc:
-        _cleanup_stage(stage)
-        raise T088StatisticsPathError(
-            "cannot atomically publish retained artifacts"
-        ) from exc
+        }
+        references["retention_manifest"] = _write_new(
+            stage / "t088-retention-manifest.json", manifest
+        )
+        references["retention_manifest"]["path"] = str(
+            root_path / "t088-retention-manifest.json"
+        )
+        _write_new(
+            stage / "t088-retention-closure.json",
+            {
+                "schema_id": "t088-retention-closure-v1",
+                "task_id": "T088",
+                "artifact_references": references,
+            },
+        )
+        return references
+
+    references = _publish_private_stage(root_path=root_path, writer=write_stage)
     return {
         "schema_id": "t088-statistics-command-result-v1",
         "task_id": "T088",
