@@ -340,17 +340,25 @@ def inclusive_range(bounds: tuple[int, int]) -> tuple[int, ...]:
     return tuple(range(start, end + 1))
 
 
-def continuation_seeds_for_split(split: str) -> tuple[int, ...]:
+def continuation_seeds_for_split(
+    split: str,
+    *,
+    seed_map: Mapping[str, Sequence[int]] | None = None,
+) -> tuple[int, ...]:
     """Return the immutable expert continuation seed tuple for one split."""
 
+    selected = seed_map or {
+        "train": T065_TRAIN_CONTINUATION_SEEDS,
+        "validation": T065_VALIDATION_CONTINUATION_SEEDS,
+        "heldout": T065_HELDOUT_CONTINUATION_SEEDS,
+    }
     try:
-        return {
-            "train": T065_TRAIN_CONTINUATION_SEEDS,
-            "validation": T065_VALIDATION_CONTINUATION_SEEDS,
-            "heldout": T065_HELDOUT_CONTINUATION_SEEDS,
-        }[split]
+        values = tuple(selected[split])
     except KeyError as exc:
         raise ValueError(f"unsupported T065 split {split!r}") from exc
+    if not values or any(isinstance(seed, bool) or not isinstance(seed, int) for seed in values):
+        raise ValueError(f"invalid continuation seed tuple for split {split!r}")
+    return values
 
 
 def split_for_source_seed(seed: int) -> str:
@@ -828,6 +836,13 @@ class T065TargetTable:
     execution_evidence: Mapping[str, Any] = field(default_factory=dict)
     expert_action_indices: Mapping[int, int] = field(default_factory=dict)
     expert_action_provenance: Mapping[str, Any] = field(default_factory=dict)
+    # These fields keep the current T065 wire schema reusable for later
+    # experiments.  T065 defaults remain unchanged; newer workflows bind their
+    # own task/config/seed contract at construction and strict read time.
+    task_id: str = T065_TASK_ID
+    approved_spec_commit: str = T065_APPROVED_SPEC_COMMIT
+    frozen_config: Mapping[str, Any] | None = None
+    continuation_seed_map: Mapping[str, Sequence[int]] | None = None
     schema_id: str = T065_TARGET_TABLE_SCHEMA_ID
     schema_version: int = 1
 
@@ -849,8 +864,15 @@ class T065TargetTable:
         expected_expert_provenance = {
             "name": "expert_non_combat_v1",
             "version": 1,
-            "seed": T065_SOURCE_DRIVER_SEED,
-            "reset_rule": "reset_for_run(simulator_seed) at replayed source state",
+            "seed": self.expert_action_provenance.get(
+                "seed", T065_SOURCE_DRIVER_SEED
+            ),
+            "reset_rule": (
+                "reset_for_run(simulator_seed) at replayed source state"
+                if self.expert_action_provenance.get("seed", T065_SOURCE_DRIVER_SEED)
+                == T065_SOURCE_DRIVER_SEED
+                else "reset_for_run(simulator_seed) separately at each replayed source state"
+            ),
             "purpose": "heldout comparison only; never a training feature or target",
         }
         if not self.expert_action_indices:
@@ -878,7 +900,9 @@ class T065TargetTable:
                     f"state {state.selected_state_index}: target action rows "
                     f"{observed_actions!r} != eligible {expected_actions!r}"
                 )
-            expected_seeds = continuation_seeds_for_split(state.split)
+            expected_seeds = continuation_seeds_for_split(
+                state.split, seed_map=self.continuation_seed_map
+            )
             for row in rows:
                 if row.family != state.family or row.split != state.split:
                     problems.append(
@@ -939,9 +963,13 @@ class T065TargetTable:
         return {
             "schema_id": self.schema_id,
             "schema_version": self.schema_version,
-            "task_id": T065_TASK_ID,
-            "approved_spec_commit": T065_APPROVED_SPEC_COMMIT,
-            "frozen_config": T065ExperimentConfig().to_dict(),
+            "task_id": self.task_id,
+            "approved_spec_commit": self.approved_spec_commit,
+            "frozen_config": dict(
+                self.frozen_config
+                if self.frozen_config is not None
+                else T065ExperimentConfig().to_dict()
+            ),
             "model_input_schema": non_combat_model_input_schema(),
             "source_artifact_identity": dict(self.source_artifact_identity),
             "simulator_identity": dict(self.simulator_identity),
@@ -951,6 +979,16 @@ class T065TargetTable:
                 for index, action_index in self.expert_action_indices.items()
             },
             "expert_action_provenance": dict(self.expert_action_provenance),
+            "continuation_seed_map": {
+                split: list(seeds)
+                for split, seeds in (
+                    self.continuation_seed_map or {
+                        "train": T065_TRAIN_CONTINUATION_SEEDS,
+                        "validation": T065_VALIDATION_CONTINUATION_SEEDS,
+                        "heldout": T065_HELDOUT_CONTINUATION_SEEDS,
+                    }
+                ).items()
+            },
             "states": [state.to_dict() for state in self.states],
             "targets": [target.to_dict() for target in self.targets],
         }
@@ -1434,11 +1472,15 @@ def train_non_combat_ranker(
     source_artifact_identity: Mapping[str, Any] | None = None,
     target_artifact_identity: Mapping[str, Any] | None = None,
     checkpoint_path: Path | None = None,
+    allowed_model_seeds: Sequence[int] = T065_MODEL_SEEDS,
+    model_class: str = "T065ActionConditionedRanker",
+    source_driver_seed: int = T065_SOURCE_DRIVER_SEED,
+    battle_controller_name: str = T065_FROZEN_BATTLE_CONTROLLER_NAME,
 ) -> T065ModelRun:
     """Train one model with the exact frozen 1500-step CPU procedure."""
 
-    if model_seed not in T065_MODEL_SEEDS:
-        raise ValueError(f"T065 model seed {model_seed} is not frozen")
+    if model_seed not in tuple(allowed_model_seeds):
+        raise ValueError(f"model seed {model_seed} is not frozen")
     identity_problems = _checkpoint_artifact_identity_problems(
         source_artifact_identity, "source_artifact_identity"
     ) + _checkpoint_artifact_identity_problems(
@@ -1545,6 +1587,10 @@ def train_non_combat_ranker(
             "all_eligible_actions": True,
             "continuation_policy": "expert_non_combat_v1",
         },
+        model_seeds=allowed_model_seeds,
+        model_class=model_class,
+        source_driver_seed=source_driver_seed,
+        battle_controller_name=battle_controller_name,
     )
     run = T065ModelRun(
         model_seed=model_seed,
@@ -1554,7 +1600,14 @@ def train_non_combat_ranker(
         metadata=metadata,
     )
     if checkpoint_path is not None:
-        save_non_combat_checkpoint(run, checkpoint_path)
+        save_non_combat_checkpoint(
+            run,
+            checkpoint_path,
+            expected_model_seeds=allowed_model_seeds,
+            expected_model_class=model_class,
+            expected_source_driver_seed=source_driver_seed,
+            expected_battle_controller_name=battle_controller_name,
+        )
         object.__setattr__(run, "checkpoint_path", str(checkpoint_path))
         object.__setattr__(
             run,
@@ -1571,6 +1624,10 @@ def train_frozen_model_seeds(
     source_artifact_identity: Mapping[str, Any] | None = None,
     target_artifact_identity: Mapping[str, Any] | None = None,
     checkpoint_directory: Path | None = None,
+    model_seeds: Sequence[int] = T065_MODEL_SEEDS,
+    model_class: str = "T065ActionConditionedRanker",
+    source_driver_seed: int = T065_SOURCE_DRIVER_SEED,
+    battle_controller_name: str = T065_FROZEN_BATTLE_CONTROLLER_NAME,
 ) -> tuple[T065ModelRun, ...]:
     """Fit exactly model seeds 653001 and 653002 from shared normalizers."""
 
@@ -1604,7 +1661,10 @@ def train_frozen_model_seeds(
         )
     normalizers = fit_training_normalizers(training_states, targets)
     runs = []
-    for model_seed in T065_MODEL_SEEDS:
+    ordered_model_seeds = tuple(model_seeds)
+    if len(ordered_model_seeds) != 2 or len(set(ordered_model_seeds)) != 2:
+        raise ValueError("exactly two distinct model seeds are required")
+    for model_seed in ordered_model_seeds:
         path = (
             checkpoint_directory / f"model-{model_seed}.pt"
             if checkpoint_directory is not None
@@ -1619,18 +1679,35 @@ def train_frozen_model_seeds(
                 source_artifact_identity=source_artifact_identity,
                 target_artifact_identity=target_artifact_identity,
                 checkpoint_path=path,
+                allowed_model_seeds=ordered_model_seeds,
+                model_class=model_class,
+                source_driver_seed=source_driver_seed,
+                battle_controller_name=battle_controller_name,
             )
         )
     return tuple(runs)
 
 
-def select_validation_checkpoint(runs: Sequence[T065ModelRun]) -> T065ModelRun:
+def select_validation_checkpoint(
+    runs: Sequence[T065ModelRun],
+    *,
+    expected_model_seeds: Sequence[int] = T065_MODEL_SEEDS,
+    expected_model_class: str = "T065ActionConditionedRanker",
+    expected_source_driver_seed: int = T065_SOURCE_DRIVER_SEED,
+    expected_battle_controller_name: str = T065_FROZEN_BATTLE_CONTROLLER_NAME,
+) -> T065ModelRun:
     """Choose only by validation MAE, then lower model seed on exact ties."""
 
-    if tuple(sorted(run.model_seed for run in runs)) != tuple(sorted(T065_MODEL_SEEDS)):
-        raise ValueError("T065 checkpoint selection requires both frozen model seeds")
+    if tuple(sorted(run.model_seed for run in runs)) != tuple(sorted(expected_model_seeds)):
+        raise ValueError("checkpoint selection requires both frozen model seeds")
     for run in runs:
-        schema_problems = _checkpoint_schema_problems(run.metadata)
+        schema_problems = _checkpoint_schema_problems(
+            run.metadata,
+            expected_model_seeds=expected_model_seeds,
+            expected_model_class=expected_model_class,
+            expected_source_driver_seed=expected_source_driver_seed,
+            expected_battle_controller_name=expected_battle_controller_name,
+        )
         if schema_problems:
             raise ValueError("; ".join(schema_problems))
     if any(not math.isfinite(run.validation_mae) for run in runs):
@@ -1638,7 +1715,15 @@ def select_validation_checkpoint(runs: Sequence[T065ModelRun]) -> T065ModelRun:
     return min(runs, key=lambda run: (run.validation_mae, run.model_seed))
 
 
-def save_non_combat_checkpoint(run: T065ModelRun, path: Path) -> None:
+def save_non_combat_checkpoint(
+    run: T065ModelRun,
+    path: Path,
+    *,
+    expected_model_seeds: Sequence[int] = T065_MODEL_SEEDS,
+    expected_model_class: str = "T065ActionConditionedRanker",
+    expected_source_driver_seed: int = T065_SOURCE_DRIVER_SEED,
+    expected_battle_controller_name: str = T065_FROZEN_BATTLE_CONTROLLER_NAME,
+) -> None:
     """Persist model weights plus the complete frozen input provenance."""
 
     torch = _require_torch()
@@ -1654,7 +1739,13 @@ def save_non_combat_checkpoint(run: T065ModelRun, path: Path) -> None:
             "normalizers": run.normalizers.to_dict(),
         }
     )
-    schema_problems = _checkpoint_schema_problems(metadata)
+    schema_problems = _checkpoint_schema_problems(
+        metadata,
+        expected_model_seeds=expected_model_seeds,
+        expected_model_class=expected_model_class,
+        expected_source_driver_seed=expected_source_driver_seed,
+        expected_battle_controller_name=expected_battle_controller_name,
+    )
     if schema_problems:
         raise ValueError("; ".join(schema_problems))
     torch.save(
@@ -1672,7 +1763,14 @@ def save_non_combat_checkpoint(run: T065ModelRun, path: Path) -> None:
     )
 
 
-def load_non_combat_checkpoint(path: Path) -> T065ModelRun:
+def load_non_combat_checkpoint(
+    path: Path,
+    *,
+    expected_model_seeds: Sequence[int] = T065_MODEL_SEEDS,
+    expected_model_class: str = "T065ActionConditionedRanker",
+    expected_source_driver_seed: int = T065_SOURCE_DRIVER_SEED,
+    expected_battle_controller_name: str = T065_FROZEN_BATTLE_CONTROLLER_NAME,
+) -> T065ModelRun:
     """Load a checkpoint strictly; schema mismatches fail closed."""
 
     torch = _require_torch()
@@ -1689,7 +1787,13 @@ def load_non_combat_checkpoint(path: Path) -> T065ModelRun:
     metadata = raw.get("metadata")
     if not isinstance(metadata, Mapping):
         raise ValueError("T065 checkpoint metadata is missing")
-    schema_problems = _checkpoint_schema_problems(metadata)
+    schema_problems = _checkpoint_schema_problems(
+        metadata,
+        expected_model_seeds=expected_model_seeds,
+        expected_model_class=expected_model_class,
+        expected_source_driver_seed=expected_source_driver_seed,
+        expected_battle_controller_name=expected_battle_controller_name,
+    )
     if schema_problems:
         raise ValueError("; ".join(schema_problems))
     if raw.get("model_seed") != metadata.get("model_seed"):
@@ -1708,8 +1812,8 @@ def load_non_combat_checkpoint(path: Path) -> T065ModelRun:
     model_seed = raw.get("model_seed")
     if isinstance(model_seed, bool) or not isinstance(model_seed, int):
         raise ValueError("T065 checkpoint model seed is invalid")
-    if model_seed not in T065_MODEL_SEEDS:
-        raise ValueError("T065 checkpoint model seed is not frozen")
+    if model_seed not in tuple(expected_model_seeds):
+        raise ValueError("checkpoint model seed is not frozen")
     model = _build_ranker_module()
     state_dict = raw.get("state_dict")
     if not isinstance(state_dict, Mapping):
@@ -2595,6 +2699,12 @@ def generate_counterfactual_targets(
     require_contiguous_indices: bool = True,
     source_artifact_identity: Mapping[str, Any] | None = None,
     simulator_identity: Mapping[str, Any] | None = None,
+    continuation_seed_map: Mapping[str, Sequence[int]] | None = None,
+    expert_comparator_seed: int = T065_SOURCE_DRIVER_SEED,
+    battle_controller_factory: Callable[[], Any] | None = None,
+    task_id: str = T065_TASK_ID,
+    approved_spec_commit: str = T065_APPROVED_SPEC_COMMIT,
+    frozen_config: Mapping[str, Any] | None = None,
 ) -> T065TargetTable:
     """Evaluate every eligible action and every split-specific continuation seed."""
 
@@ -2620,10 +2730,27 @@ def generate_counterfactual_targets(
                 "replay",
                 [f"state {state.selected_state_index}: eligible action mismatch"],
             )
-        expert_action_indices[state.selected_state_index] = (
-            _expert_comparison_action_index(context, state.simulator_seed)
+        if state.split == "heldout":
+            # T089 binds the independent comparator only for held-out states.
+            # Training/validation rows carry a deterministic legal action for
+            # wire-schema completeness but are never consumed as comparator
+            # evidence.
+            expert_action_indices[state.selected_state_index] = (
+                _expert_comparison_action_index(
+                    context, state.simulator_seed, seed=expert_comparator_seed
+                )
+            )
+        elif state.behavior_action_index in state.eligible_action_indices:
+            expert_action_indices[state.selected_state_index] = int(
+                state.behavior_action_index
+            )
+        else:
+            expert_action_indices[state.selected_state_index] = int(
+                state.eligible_action_indices[0]
+            )
+        continuation_seeds = continuation_seeds_for_split(
+            state.split, seed_map=continuation_seed_map
         )
-        continuation_seeds = continuation_seeds_for_split(state.split)
         for action_index in state.eligible_action_indices:
             row_started = time.perf_counter()
             terminal_floors: list[float] = []
@@ -2698,7 +2825,11 @@ def generate_counterfactual_targets(
                     continuation_run = None
                 else:
                     continuation_controller = RoutedRunController(
-                        battle=build_frozen_battle_controller(),
+                        battle=(
+                            battle_controller_factory()
+                            if battle_controller_factory is not None
+                            else build_frozen_battle_controller()
+                        ),
                         non_combat=PolicyController(
                             ExpertNonCombatDriver(seed=continuation_seed)
                         ),
@@ -2802,9 +2933,20 @@ def generate_counterfactual_targets(
         expert_action_provenance={
             "name": "expert_non_combat_v1",
             "version": 1,
-            "seed": T065_SOURCE_DRIVER_SEED,
-            "reset_rule": "reset_for_run(simulator_seed) at replayed source state",
+            "seed": expert_comparator_seed,
+            "reset_rule": (
+                "reset_for_run(simulator_seed) at replayed source state"
+                if expert_comparator_seed == T065_SOURCE_DRIVER_SEED
+                else "reset_for_run(simulator_seed) separately at each replayed source state"
+            ),
             "purpose": "heldout comparison only; never a training feature or target",
+        },
+        task_id=task_id,
+        approved_spec_commit=approved_spec_commit,
+        frozen_config=frozen_config,
+        continuation_seed_map={
+            split: continuation_seeds_for_split(split, seed_map=continuation_seed_map)
+            for split in T065_SPLITS
         },
     )
     table.validate_complete(require_contiguous_indices=require_contiguous_indices)
@@ -4576,6 +4718,11 @@ def run_complete_run_arm(
     max_steps: int = T065_MAX_STEPS,
     worker_count: int = T065_MAX_WORKERS,
     shard_count: int = T065_STAGE6_SHARD_COUNT,
+    battle_controller_factory: Callable[[], Any] | None = None,
+    learned_policy_factory: Callable[[T065ModelRun], Any] | None = None,
+    allowed_seed_range: tuple[int, int] = T065_STAGE6_SEED_RANGE,
+    allowed_driver_seed: int = T065_STAGE6_DRIVER_SEED,
+    simulator_identity: Mapping[str, Any] | None = None,
 ) -> T065CompleteRunArmReport:
     """Run one complete-run arm using the canonical executor.
 
@@ -4587,20 +4734,20 @@ def run_complete_run_arm(
 
     if arm not in {"stochastic", "expert", "learned"}:
         raise ValueError(f"unsupported T065 complete-run arm {arm!r}")
-    if driver_seed != T065_STAGE6_DRIVER_SEED:
-        raise ValueError("T065 Stage 6 driver seed is frozen at 654002")
+    if driver_seed != allowed_driver_seed:
+        raise ValueError("complete-run driver seed is frozen")
     if max_steps != T065_MAX_STEPS:
         raise ValueError("T065 Stage 6 step cap is frozen at 500")
     _validate_workers(worker_count)
     if shard_count != T065_STAGE6_SHARD_COUNT:
         raise ValueError("T065 Stage 6 shard count is frozen at 16")
     run_seeds = tuple(
-        inclusive_range(T065_STAGE6_SEED_RANGE) if seeds is None else tuple(seeds)
+        inclusive_range(allowed_seed_range) if seeds is None else tuple(seeds)
     )
     if tuple(sorted(run_seeds)) != run_seeds or len(set(run_seeds)) != len(run_seeds):
         raise ValueError("T065 Stage 6 seeds must be sorted and unique")
-    if any(seed not in inclusive_range(T065_STAGE6_SEED_RANGE) for seed in run_seeds):
-        raise ValueError("T065 Stage 6 seed is outside the frozen range")
+    if any(seed not in inclusive_range(allowed_seed_range) for seed in run_seeds):
+        raise ValueError("complete-run seed is outside the frozen range")
     if arm == "learned" and model_run is None:
         raise ValueError("learned Stage 6 arm requires the validation-selected model")
     rows: list[Mapping[str, Any]] = []
@@ -4617,13 +4764,21 @@ def run_complete_run_arm(
         elif arm == "expert":
             non_combat_policy = ExpertNonCombatDriver(seed=driver_seed)
         else:
-            learned_policy = LearnedNonCombatPolicy(
-                model_run,
-                fallback=ExpertNonCombatDriver(seed=driver_seed),
+            learned_policy = (
+                learned_policy_factory(model_run)
+                if learned_policy_factory is not None
+                else LearnedNonCombatPolicy(
+                    model_run,
+                    fallback=ExpertNonCombatDriver(seed=driver_seed),
+                )
             )
             non_combat_policy = learned_policy
         controller = RoutedRunController(
-            battle=build_frozen_battle_controller(),
+            battle=(
+                battle_controller_factory()
+                if battle_controller_factory is not None
+                else build_frozen_battle_controller()
+            ),
             non_combat=PolicyController(non_combat_policy),
         )
         if not arm_controller_provenance:
@@ -4739,7 +4894,11 @@ def run_complete_run_arm(
         worker_count=worker_count,
         shard_count=shard_count,
         problems=tuple(problems),
-        simulator_identity=lightspeed_source_identity_dict(),
+        simulator_identity=dict(
+            simulator_identity
+            if simulator_identity is not None
+            else lightspeed_source_identity_dict()
+        ),
         action_space=frozen_action_space().to_dict(),
         controller_provenance=dict(arm_controller_provenance),
         driver_provenance=dict(arm_driver_provenance),
@@ -5909,7 +6068,14 @@ def write_target_table(path: Path, table: T065TargetTable) -> str:
     return file_sha256(path)
 
 
-def read_target_table(path: Path) -> T065TargetTable:
+def read_target_table(
+    path: Path,
+    *,
+    expected_task_id: str = T065_TASK_ID,
+    expected_approved_spec_commit: str = T065_APPROVED_SPEC_COMMIT,
+    expected_frozen_config: Mapping[str, Any] | None = None,
+    expected_continuation_seed_map: Mapping[str, Sequence[int]] | None = None,
+) -> T065TargetTable:
     """Read a current target table; no legacy fields are guessed."""
 
     value = json.loads(path.read_text(encoding="utf-8"))
@@ -5919,12 +6085,17 @@ def read_target_table(path: Path) -> T065TargetTable:
         raise ValueError("unsupported T065 target-table schema")
     if value.get("schema_version") != 1:
         raise ValueError("unsupported T065 target-table schema version")
-    if value.get("task_id") != T065_TASK_ID:
-        raise ValueError("T065 target table task id is invalid")
-    if value.get("approved_spec_commit") != T065_APPROVED_SPEC_COMMIT:
-        raise ValueError("T065 target table approved spec commit is invalid")
-    if value.get("frozen_config") != T065ExperimentConfig().to_dict():
-        raise ValueError("T065 target table frozen configuration is invalid")
+    if value.get("task_id") != expected_task_id:
+        raise ValueError("target table task id is invalid")
+    if value.get("approved_spec_commit") != expected_approved_spec_commit:
+        raise ValueError("target table approved spec commit is invalid")
+    expected_config = (
+        dict(expected_frozen_config)
+        if expected_frozen_config is not None
+        else T065ExperimentConfig().to_dict()
+    )
+    if value.get("frozen_config") != expected_config:
+        raise ValueError("target table frozen configuration is invalid")
     schema_problems = _schema_from_document(value.get("model_input_schema"))
     if schema_problems:
         raise ValueError("; ".join(schema_problems))
@@ -5947,6 +6118,22 @@ def read_target_table(path: Path) -> T065TargetTable:
     ):
         if key not in value or not isinstance(value[key], Mapping):
             raise ValueError(f"T065 target table field {key!r} is missing")
+    raw_seed_map = value.get("continuation_seed_map")
+    if expected_continuation_seed_map is not None and raw_seed_map is None:
+        raise ValueError("target table continuation_seed_map is missing")
+    seed_map = {
+        split: continuation_seeds_for_split(split, seed_map=expected_continuation_seed_map)
+        for split in T065_SPLITS
+    }
+    if raw_seed_map is not None:
+        if not isinstance(raw_seed_map, Mapping):
+            raise ValueError("target table continuation_seed_map is invalid")
+        observed_seed_map = {
+            split: continuation_seeds_for_split(split, seed_map=raw_seed_map)
+            for split in T065_SPLITS
+        }
+        if observed_seed_map != seed_map:
+            raise ValueError("target table continuation seed map is invalid")
     states = tuple(
         T065SourceState.from_dict(row) for row in raw_states if isinstance(row, Mapping)
     )
@@ -5967,6 +6154,10 @@ def read_target_table(path: Path) -> T065TargetTable:
         expert_action_provenance=_mapping_or_empty(
             value.get("expert_action_provenance")
         ),
+        task_id=str(value["task_id"]),
+        approved_spec_commit=str(value["approved_spec_commit"]),
+        frozen_config=_mapping_or_empty(value.get("frozen_config")),
+        continuation_seed_map=seed_map,
     )
     table.validate_complete()
     return table
@@ -6137,10 +6328,16 @@ def _target_rows_for_states(
 def _expert_comparison_action_index(
     context: DecisionContext,
     simulator_seed: int,
+    *,
+    seed: int = T065_SOURCE_DRIVER_SEED,
 ) -> int:
     """Select the frozen expert comparison action without entering training."""
 
-    expert = ExpertNonCombatDriver(seed=T065_SOURCE_DRIVER_SEED)
+    expert = ExpertNonCombatDriver(seed=seed)
+    # The constructor seed is the independent T089 comparator stream.  Each
+    # source state still gets the normal per-run reset keyed by its simulator
+    # seed, matching the shared T065 driver semantics without consuming a
+    # continuation-target draw.
     expert.reset_for_run(simulator_seed)
     decision = expert.select_action(context)
     if decision.legal_action_index not in context.eligible_action_indices:
@@ -6243,6 +6440,10 @@ def _checkpoint_metadata(
     split_provenance: Mapping[str, Mapping[str, Any]],
     source_provenance: Mapping[str, Any],
     target_provenance: Mapping[str, Any],
+    model_seeds: Sequence[int] = T065_MODEL_SEEDS,
+    model_class: str = "T065ActionConditionedRanker",
+    source_driver_seed: int = T065_SOURCE_DRIVER_SEED,
+    battle_controller_name: str = T065_FROZEN_BATTLE_CONTROLLER_NAME,
 ) -> dict[str, Any]:
     return {
         **non_combat_model_input_schema(),
@@ -6255,7 +6456,7 @@ def _checkpoint_metadata(
             "DecisionContext.legal_action_features[0:92] from encode_simulator_actions",
         ],
         "public_context_feature_names": list(PUBLIC_CONTEXT_MODEL_INPUT_FEATURE_NAMES),
-        "model_class": "T065ActionConditionedRanker",
+        "model_class": model_class,
         "model_seed": model_seed,
         "training_config": _frozen_training_config(model_seed),
         "target_identity": "q_floor=mean(max(0,terminal_floor-source_floor))",
@@ -6268,16 +6469,23 @@ def _checkpoint_metadata(
         "source_provenance": dict(source_provenance),
         "target_provenance": dict(target_provenance),
         "behavior_provenance": {
-            "source_driver_seed": T065_SOURCE_DRIVER_SEED,
+            "source_driver_seed": source_driver_seed,
             "continuation_policy": "expert_non_combat_v1",
-            "battle_controller": T065_FROZEN_BATTLE_CONTROLLER_NAME,
+            "battle_controller": battle_controller_name,
             "human_or_expert_action_supervision": False,
         },
         "normalizers": normalizers.to_dict(),
     }
 
 
-def _checkpoint_schema_problems(metadata: Mapping[str, Any]) -> list[str]:
+def _checkpoint_schema_problems(
+    metadata: Mapping[str, Any],
+    *,
+    expected_model_seeds: Sequence[int] = T065_MODEL_SEEDS,
+    expected_model_class: str = "T065ActionConditionedRanker",
+    expected_source_driver_seed: int = T065_SOURCE_DRIVER_SEED,
+    expected_battle_controller_name: str = T065_FROZEN_BATTLE_CONTROLLER_NAME,
+) -> list[str]:
     problems = _schema_from_document(metadata)
     if metadata.get("non_combat_model_input_schema_id") != (
         NON_COMBAT_MODEL_INPUT_SCHEMA_ID
@@ -6291,13 +6499,13 @@ def _checkpoint_schema_problems(metadata: Mapping[str, Any]) -> list[str]:
     if (
         isinstance(model_seed, bool)
         or not isinstance(model_seed, int)
-        or model_seed not in T065_MODEL_SEEDS
+        or model_seed not in tuple(expected_model_seeds)
     ):
         problems.append("T065 checkpoint model seed is not frozen")
     else:
         if metadata.get("training_config") != _frozen_training_config(model_seed):
             problems.append("T065 checkpoint training configuration is not frozen")
-    if metadata.get("model_class") != "T065ActionConditionedRanker":
+    if metadata.get("model_class") != expected_model_class:
         problems.append("T065 checkpoint model class is unsupported")
     if metadata.get("training_steps") != 1500:
         problems.append("T065 checkpoint training step count is not 1500")
@@ -6306,9 +6514,9 @@ def _checkpoint_schema_problems(metadata: Mapping[str, Any]) -> list[str]:
     ):
         problems.append("T065 checkpoint target identity is unsupported")
     if metadata.get("behavior_provenance") != {
-        "source_driver_seed": T065_SOURCE_DRIVER_SEED,
+        "source_driver_seed": expected_source_driver_seed,
         "continuation_policy": "expert_non_combat_v1",
-        "battle_controller": T065_FROZEN_BATTLE_CONTROLLER_NAME,
+        "battle_controller": expected_battle_controller_name,
         "human_or_expert_action_supervision": False,
     }:
         problems.append("T065 checkpoint behavior provenance is not frozen")
