@@ -39,6 +39,57 @@ class T088StatisticsPathError(ValueError):
     """A retained T088 input or publication boundary failed closed."""
 
 
+def _auxiliary_challenger(
+    comparisons: Sequence[Mapping[str, object]],
+    costs: Mapping[str, Mapping[str, object]],
+) -> tuple[str, list[str]]:
+    """Rank non-A arms with the frozen pairwise quality/cost order only."""
+
+    by_pair = {
+        (str(item["candidate_arm"]), str(item["reference_arm"])): item
+        for item in comparisons
+    }
+
+    def compare(left: str, right: str) -> int:
+        item = by_pair.get((left, right)) or by_pair[(right, left)]
+        reversed_pair = (left, right) not in by_pair
+        outcome = item["binary_outcome"]["classification"]
+        dense = item["dense_diagnostics"]["classification"]
+        quality = 0
+        if outcome == "CLEAR_OUTCOME_SUPERIORITY":
+            quality = 1
+        elif outcome == "CLEAR_OUTCOME_HARM":
+            quality = -1
+        elif dense == "DENSE_DIRECTIONALLY_BETTER":
+            quality = 1
+        if reversed_pair:
+            quality = -quality
+        if quality:
+            return quality
+        work = float(costs[left]["successor_transition_count"]) - float(
+            costs[right]["successor_transition_count"]
+        )
+        if work:
+            return 1 if work < 0 else -1
+        wall = float(costs[left]["wall_clock_time_s"]) - float(
+            costs[right]["wall_clock_time_s"]
+        )
+        if wall:
+            return 1 if wall < 0 else -1
+        return 0
+
+    arms = ("B", "C", "D")
+    winners = [
+        arm
+        for arm in arms
+        if not any(compare(other, arm) > 0 for other in arms if other != arm)
+    ]
+    return min(
+        winners,
+        key=lambda arm: hashlib.sha256(f"T088-auxiliary-{arm}".encode()).hexdigest(),
+    ), sorted(winners)
+
+
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as stream:
@@ -370,16 +421,10 @@ def run_t088_statistics_from_paths(
     selected = selection["selected_challenger"]
     if not isinstance(selected, str):
         # This affects only auxiliary blinding, never the negative conclusion.
-        selected = min(
-            ("B", "C", "D"),
-            key=lambda arm: (
-                costs[arm]["successor_transition_count"],
-                costs[arm]["wall_clock_time_s"],
-                hashlib.sha256(f"T088-auxiliary-{arm}".encode()).hexdigest(),
-            ),
-        )
+        selected, auxiliary_tie_set = _auxiliary_challenger(comparisons, costs)
         selection["auxiliary_blind_audit_challenger"] = selected
-        selection["auxiliary_tie_break"] = "transition-work-wall-clock-sha256-v1"
+        selection["auxiliary_tie_set"] = auxiliary_tie_set
+        selection["auxiliary_tie_break"] = "pairwise-quality-cost-sha256-v1"
     blind_result = _stream_blind_bundle(raw_evidence_path, rows, candidate_arm=selected)
     blind = blind_result["bundle"]
     hidden = blind_result["hidden_provenance"]
