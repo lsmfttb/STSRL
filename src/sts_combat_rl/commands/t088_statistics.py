@@ -28,7 +28,9 @@ from sts_combat_rl.sim.t088_tournament_workflow import (
     _binding_identity,
     build_t088_formal_plan,
     paired_t088_comparison,
+    select_t088_blind_audit,
     select_t088_challenger,
+    t088_public_trace,
 )
 
 
@@ -166,6 +168,107 @@ def _stream_compact_rows(
     return compact
 
 
+def _blind_candidates(
+    rows: Sequence[Mapping[str, object]], *, candidate_arm: str
+) -> set[str]:
+    """Select only the 24 trace identities before the public second pass."""
+
+    paired: dict[str, dict[str, Mapping[str, object]]] = {}
+    for row in rows:
+        if row["arm"] in {"A", candidate_arm}:
+            paired.setdefault(str(row["selection_identity"]), {})[str(row["arm"])] = row
+    strata: dict[str, list[tuple[float, str]]] = {
+        "outcome_discordant": [],
+        "both_loss": [],
+        "both_win": [],
+    }
+    for identity, pair in paired.items():
+        candidate, reference = pair[candidate_arm], pair["A"]
+        c_win, a_win = (
+            candidate["outcome"] == "PLAYER_VICTORY",
+            reference["outcome"] == "PLAYER_VICTORY",
+        )
+        diagnostics = candidate["dense_diagnostic"], reference["dense_diagnostic"]
+        if c_win != a_win:
+            strata["outcome_discordant"].append((0.0, identity))
+        elif not c_win:
+            strata["both_loss"].append(
+                (
+                    abs(
+                        float(
+                            diagnostics[0]["diagnostics"]["enemy_hp_remaining_fraction"]
+                        )
+                        - float(
+                            diagnostics[1]["diagnostics"]["enemy_hp_remaining_fraction"]
+                        )
+                    ),
+                    identity,
+                )
+            )
+        else:
+            strata["both_win"].append(
+                (
+                    abs(
+                        float(
+                            diagnostics[0]["diagnostics"][
+                                "player_hp_remaining_fraction_of_max"
+                            ]
+                        )
+                        - float(
+                            diagnostics[1]["diagnostics"][
+                                "player_hp_remaining_fraction_of_max"
+                            ]
+                        )
+                    ),
+                    identity,
+                )
+            )
+    return {
+        identity
+        for candidates in strata.values()
+        for _, identity in sorted(
+            candidates,
+            key=lambda item: (
+                -item[0],
+                hashlib.sha256(f"T088-blind-{item[1]}".encode()).hexdigest(),
+            ),
+        )[:8]
+    }
+
+
+def _stream_blind_bundle(
+    path: Path, rows: Sequence[Mapping[str, object]], *, candidate_arm: str
+) -> dict[str, object]:
+    """Second pass retains public projections only for the preselected <=24 ids."""
+
+    identities = _blind_candidates(rows, candidate_arm=candidate_arm)
+    selected: list[dict[str, object]] = []
+    reader = _StreamingShardJson(path.resolve(strict=True))
+    try:
+        for row in reader.rows():
+            if row.get("selection_identity") in identities and row.get("arm") in {
+                "A",
+                candidate_arm,
+            }:
+                selected.append(
+                    {
+                        "selection_identity": row["selection_identity"],
+                        "arm": row["arm"],
+                        "cohort": row["cohort"],
+                        "outcome": row["outcome"],
+                        "dense_diagnostic": row["dense_diagnostic"],
+                        "public_trace": t088_public_trace(row),
+                    }
+                )
+    finally:
+        reader.close()
+    if len(selected) != 2 * len(identities):
+        raise T088StatisticsPathError("blind trace second pass is incomplete")
+    return select_t088_blind_audit(
+        selected, candidate_arm=candidate_arm, reference_arm="A"
+    )
+
+
 def run_t088_statistics_from_paths(
     *,
     authorization_path: Path,
@@ -238,15 +341,14 @@ def run_t088_statistics_from_paths(
         "paired_comparisons": comparisons,
         "selection": selection,
     }
-    # Validate everything before the first publication.  These schemas retain an
-    # explicit empty blind bundle when no unique challenger is available.
     selected = selection["selected_challenger"]
-    blind = {
-        "schema_id": "t088-blind-audit-bundle-v1",
-        "pairs": [],
-        "selected_challenger": selected,
-    }
-    hidden = {"schema_id": "t088-blind-audit-hidden-provenance-v1", "pairs": []}
+    if not isinstance(selected, str):
+        raise T088StatisticsPathError(
+            "blind-audit challenger requires Planner selection"
+        )
+    blind_result = _stream_blind_bundle(raw_evidence_path, rows, candidate_arm=selected)
+    blind = blind_result["bundle"]
+    hidden = blind_result["hidden_provenance"]
     final = {
         "schema_id": "t088-final-tournament-report-v1",
         "task_id": "T088",
