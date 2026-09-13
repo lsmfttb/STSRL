@@ -271,7 +271,9 @@ For each state compare:
 q_floor(model-selected action) - q_floor(expert-selected action)
 ```
 
-where `expert-selected action` is the action selected by the frozen `expert_non_combat_v1` behavior for the retained state under the task-defined evaluation driver binding. The expert action is a comparator only and never a supervised target.
+The held-out expert comparator action is frozen independently of the continuation-target seeds: for each held-out source state, restore the exact state, reset `ExpertNonCombatDriver(seed=895001)`, invoke it exactly once on the exact ordered legal-action list, and record the selected action identity/index. The driver is reset to `895001` separately for every held-out source state. No second draw, retry, alternate seed, or behavior-action substitution is allowed. An invalid/missing expert selection is `INCOMPLETE`.
+
+This `895001` call chooses only the comparator action. It does not generate a target and does not replace the held-out continuation seeds `(892201, 892202, 892203, 892204)`. The expert action is a comparator only and never a supervised target.
 
 The validation-selected model passes the held-out local gate only if all hold:
 
@@ -424,7 +426,7 @@ Retain and hash at minimum:
 3. complete counterfactual target manifest/table with state/action/continuation-seed linkage and Battle-controller provenance;
 4. training normalizers, deterministic batch plans, both checkpoints, and training reports;
 5. validation checkpoint-selection report frozen before held-out evaluation;
-6. held-out paired action-value report and stratified bootstrap;
+6. held-out expert-comparator binding plus paired action-value report and stratified bootstrap;
 7. if authorized, exact 256-seed fresh-run source/arm manifests and per-run outcomes;
 8. fresh-run bootstrap/support/classification report;
 9. terminal report with claim boundary and downstream decision;
@@ -454,7 +456,7 @@ Large raw artifacts remain outside Git under a stable ignored artifact root. Fin
 3. T089 targets are generated fresh for every eligible action and required continuation seed; historical target artifacts are not substituted.
 4. Non-Combat model input remains exactly public `non-combat-model-input-v1`; no expert/hidden/target leakage enters inference.
 5. The T065 ranker architecture and frozen two-seed optimization contract are used without held-out tuning.
-6. Held-out local improvement is evaluated exactly before any fresh complete-run execution.
+6. Held-out expert comparator uses exactly driver seed `895001` reset per state; held-out local improvement is evaluated exactly before any fresh complete-run execution.
 7. Fresh evaluation, if authorized, uses exactly the 256 matched seeds, frozen driver seed, exact Battle baseline, and explicit unsupported-screen fallback.
 8. Terminal classification follows the frozen rules above and does not promote T066 or claim deployment/Heart improvement outside scope.
 9. All required artifacts and execution-cost facts are retained with exact identity and fail-closed eligibility.
@@ -469,6 +471,7 @@ Before implementation acceptance, run the standard repository compile/lint/forma
 - complete action enumeration and common-random-number target branching;
 - exact Search-v2@400 Battle provenance in target and fresh-run paths;
 - deterministic model training/batch/checkpoint selection;
+- exact held-out expert-comparator seed/reset semantics;
 - no supported-family silent fallback;
 - held-out/fresh bootstrap determinism;
 - artifact eligibility and retention round trips.
