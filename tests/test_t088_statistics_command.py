@@ -7,6 +7,10 @@ import json
 import pytest
 
 from sts_combat_rl.commands import t088_statistics as command
+from sts_combat_rl.sim.t088_tournament_workflow import (
+    T088_REQUIRED_ARTIFACT_ROLES,
+    T088_RETENTION_MANIFEST_EXTERNAL_ROLES,
+)
 
 
 def _paths() -> list[str]:
@@ -108,3 +112,20 @@ def test_auxiliary_fallback_prefers_pairwise_quality_over_cost() -> None:
         for arm, value in {"B": 9, "C": 1, "D": 2}.items()
     }
     assert command._auxiliary_challenger(pairs, costs)[0] == "B"
+
+
+def test_retention_closure_has_external_manifest_roles_plus_self() -> None:
+    assert T088_RETENTION_MANIFEST_EXTERNAL_ROLES == T088_REQUIRED_ARTIFACT_ROLES - {
+        "retention_manifest"
+    }
+    assert len(T088_RETENTION_MANIFEST_EXTERNAL_ROLES) == 11
+    assert len(T088_REQUIRED_ARTIFACT_ROLES) == 12
+
+
+def test_private_stage_cleanup_never_creates_final_root(tmp_path) -> None:
+    stage = tmp_path / ".stage"
+    stage.mkdir()
+    (stage / "partial.json").write_text("{}", encoding="utf-8")
+    command._cleanup_stage(stage)
+    assert not stage.exists()
+    assert not (tmp_path / "published").exists()

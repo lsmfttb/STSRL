@@ -139,6 +139,16 @@ def _write_new(path: Path, document: Mapping[str, object]) -> dict[str, object]:
     }
 
 
+def _cleanup_stage(stage: Path) -> None:
+    """Best-effort cleanup of private, never-published staged documents."""
+
+    if not stage.exists():
+        return
+    for child in stage.iterdir():
+        child.unlink()
+    stage.rmdir()
+
+
 def _stream_compact_rows(
     path: Path,
     *,
@@ -515,9 +525,7 @@ def run_t088_statistics_from_paths(
     try:
         os.rename(stage, root_path)
     except OSError as exc:
-        for child in stage.iterdir():
-            child.unlink()
-        stage.rmdir()
+        _cleanup_stage(stage)
         raise T088StatisticsPathError(
             "cannot atomically publish retained artifacts"
         ) from exc
