@@ -133,8 +133,8 @@ def test_t089_revalidation_executes_exact_parallel_shards(monkeypatch) -> None:
         "encode_non_combat_decision_context",
         lambda context: SimpleNamespace(
             state_features=(0.0,),
-            public_context_features=(0.0,),
             eligible_action_indices=(0,),
+            context_missingness_summary={},
         ),
     )
 

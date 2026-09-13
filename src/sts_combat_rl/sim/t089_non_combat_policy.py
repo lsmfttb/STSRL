@@ -49,6 +49,7 @@ from sts_combat_rl.sim.non_combat_model_input import (
     NON_COMBAT_ACTION_FEATURE_SIZE,
     NON_COMBAT_MODEL_INPUT_SCHEMA_ID,
     NON_COMBAT_MODEL_INPUT_SCHEMA_VERSION,
+    NON_COMBAT_SNAPSHOT_FEATURE_SIZE,
     NON_COMBAT_STATE_FEATURE_SIZE,
     encode_non_combat_decision_context,
     non_combat_model_input_schema,
@@ -650,7 +651,9 @@ def revalidate_t089_cohort(
                 observed = {
                     **_state_identity_payload(state),
                     "state_features": list(encoded.state_features),
-                    "public_context_features": list(encoded.public_context_features),
+                    "public_context_features": list(
+                        encoded.state_features[NON_COMBAT_SNAPSHOT_FEATURE_SIZE:]
+                    ),
                     "eligible_action_indices": list(encoded.eligible_action_indices),
                     "ordered_legal_action_identities": [
                         dict(item) for item in context.legal_action_identities
