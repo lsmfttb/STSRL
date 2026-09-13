@@ -85,6 +85,11 @@ def _auxiliary_challenger(
         for arm in arms
         if not any(compare(other, arm) > 0 for other in arms if other != arm)
     ]
+    if not winners:
+        # Pairwise quality/cost ordering can form a Condorcet cycle.  T088
+        # forbids inventing an ex-post score, so retain the complete B/C/D
+        # Pareto/tie set and use SHA only for the auxiliary blind bundle.
+        winners = list(arms)
     return min(
         winners,
         key=lambda arm: hashlib.sha256(f"T088-auxiliary-{arm}".encode()).hexdigest(),

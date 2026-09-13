@@ -114,6 +114,32 @@ def test_auxiliary_fallback_prefers_pairwise_quality_over_cost() -> None:
     assert command._auxiliary_challenger(pairs, costs)[0] == "B"
 
 
+def test_auxiliary_fallback_keeps_full_tie_set_for_pairwise_cycle() -> None:
+    pairs = [
+        {
+            "candidate_arm": candidate,
+            "reference_arm": reference,
+            "binary_outcome": {"classification": classification},
+            "dense_diagnostics": {"classification": "DENSE_MIXED"},
+        }
+        for candidate, reference, classification in (
+            ("B", "C", "CLEAR_OUTCOME_SUPERIORITY"),
+            ("C", "D", "CLEAR_OUTCOME_SUPERIORITY"),
+            ("B", "D", "CLEAR_OUTCOME_HARM"),
+        )
+    ]
+    costs = {
+        arm: {"successor_transition_count": 1, "wall_clock_time_s": 1}
+        for arm in ("B", "C", "D")
+    }
+
+    selected, tie_set = command._auxiliary_challenger(pairs, costs)
+
+    assert tie_set == ["B", "C", "D"]
+    assert selected in tie_set
+    assert (selected, tie_set) == command._auxiliary_challenger(pairs, costs)
+
+
 def test_retention_closure_has_external_manifest_roles_plus_self() -> None:
     assert T088_RETENTION_MANIFEST_EXTERNAL_ROLES == T088_REQUIRED_ARTIFACT_ROLES - {
         "retention_manifest"
