@@ -33,6 +33,7 @@ from sts_combat_rl.sim.non_combat_learning import (
     T065ModelRun,
     T065SourceState,
     T065TargetTable,
+    action_identity_dicts_for_actions,
     canonical_source_selection_key,
     continuation_seeds_for_split,
     evaluate_model_on_split,
@@ -655,9 +656,9 @@ def revalidate_t089_cohort(
                         encoded.state_features[NON_COMBAT_SNAPSHOT_FEATURE_SIZE:]
                     ),
                     "eligible_action_indices": list(encoded.eligible_action_indices),
-                    "ordered_legal_action_identities": [
-                        dict(item) for item in context.legal_action_identities
-                    ],
+                    "ordered_legal_action_identities": action_identity_dicts_for_actions(
+                        _actions
+                    ),
                 }
                 completed_indices.append(state.selected_state_index)
             except (OSError, RuntimeError, TypeError, ValueError) as exc:

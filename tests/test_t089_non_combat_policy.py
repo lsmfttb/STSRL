@@ -124,7 +124,8 @@ def test_t089_revalidation_executes_exact_parallel_shards(monkeypatch) -> None:
 
     def fake_replay(adapter, state):
         replayed.append(state.selected_state_index)
-        return None, (), SimpleNamespace(legal_action_identities=({"action": 0},)), None
+        actions = (SimpleNamespace(action_id=0, label="test", kind="test"),)
+        return None, actions, SimpleNamespace(), None
 
     monkeypatch.setattr(t089_module, "validate_t089_selected_cohort", lambda value: {})
     monkeypatch.setattr(t089_module, "replay_source_state", fake_replay)
