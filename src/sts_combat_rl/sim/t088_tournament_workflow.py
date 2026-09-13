@@ -60,6 +60,9 @@ T088_REQUIRED_ARTIFACT_ROLES = frozenset(
         "retention_manifest",
     }
 )
+T088_RETENTION_MANIFEST_EXTERNAL_ROLES = T088_REQUIRED_ARTIFACT_ROLES - {
+    "retention_manifest"
+}
 
 
 class T088IncompleteError(ValueError):
@@ -1186,7 +1189,7 @@ def validate_t088_retention_manifest(manifest: Mapping[str, object]) -> None:
     artifacts = manifest.get("artifact_references")
     if (
         not isinstance(artifacts, Mapping)
-        or set(artifacts) != T088_REQUIRED_ARTIFACT_ROLES
+        or set(artifacts) != T088_RETENTION_MANIFEST_EXTERNAL_ROLES
     ):
         raise T088IncompleteError("retention manifest artifact roles are incomplete")
     for role, reference in artifacts.items():
