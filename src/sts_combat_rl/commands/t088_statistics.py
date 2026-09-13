@@ -25,6 +25,7 @@ from sts_combat_rl.sim.t088_tournament_workflow import (
     T088_ARMS,
     T088_FORMAL_EXECUTIONS,
     T088IncompleteError,
+    _binding_identity,
     build_t088_formal_plan,
     paired_t088_comparison,
     select_t088_challenger,
@@ -151,7 +152,7 @@ def _stream_compact_rows(
         "authorization": dict(authorization),
         "input_identities_sha256": _canonical_sha256(inputs),
         "canary_evidence": dict(canary_reference),
-        "t087_cohort_binding": binding.get("ordered_cohort_entries_sha256"),
+        "t087_cohort_binding": _binding_identity(binding),
         "controller_definitions": t088_controller_definitions(),
         "formal_plan_sha256": _canonical_sha256(plan),
     }
