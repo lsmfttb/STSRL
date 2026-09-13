@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -55,6 +56,155 @@ def test_t089_reuses_exact_public_model_input_contract() -> None:
             state_features=[0.0] * 4737,
             action_features=[0.0] * 92,
             context={"checkpoint_payload": "hidden"},
+        )
+
+
+def _fake_revalidation_states() -> tuple[SimpleNamespace, ...]:
+    return tuple(
+        SimpleNamespace(
+            selected_state_index=index,
+            family="MAP_SCREEN",
+            split="train",
+            simulator_seed=100000 + index,
+            public_state_identity={"state": index},
+            state_features=(0.0,),
+            public_context_features=(0.0,),
+            legal_action_identities=({"action": index},),
+            eligible_action_indices=(0,),
+            selection_digest=f"digest-{index}",
+            selection_canonical_json=f"canonical-{index}",
+        )
+        for index in range(320)
+    )
+
+
+def _fake_revalidation_execution_evidence() -> dict[str, object]:
+    specs = []
+    for shard_index in range(16):
+        start = shard_index * 20
+        end = start + 19
+        indices = list(range(start, end + 1))
+        specs.append(
+            {
+                "shard_index": shard_index,
+                "selected_state_start": start,
+                "selected_state_end": end,
+                "selected_state_count": 20,
+                "requested_state_indices": indices,
+                "requested_state_count": 20,
+                "completed_state_indices": indices,
+                "completed_state_count": 20,
+                "wall_clock_seconds": 1.0,
+                "problem_count": 0,
+                "problems": [],
+            }
+        )
+    return {
+        "schema_id": "t089-current-native-revalidation-execution-v1",
+        "schema_version": 1,
+        "worker_count": 16,
+        "shard_count": 16,
+        "requested_state_count": 320,
+        "completed_state_count": 320,
+        "wall_clock_seconds": 1.0,
+        "shard_specs": specs,
+    }
+
+
+def test_t089_revalidation_executes_exact_parallel_shards(monkeypatch) -> None:
+    states = _fake_revalidation_states()
+    replayed: list[int] = []
+    adapter_calls = 0
+    captured: dict[str, object] = {}
+
+    def fake_adapter_factory():
+        nonlocal adapter_calls
+        adapter_calls += 1
+        return object()
+
+    def fake_replay(adapter, state):
+        replayed.append(state.selected_state_index)
+        return None, (), SimpleNamespace(legal_action_identities=({"action": 0},)), None
+
+    monkeypatch.setattr(t089_module, "validate_t089_selected_cohort", lambda value: {})
+    monkeypatch.setattr(t089_module, "replay_source_state", fake_replay)
+    monkeypatch.setattr(
+        t089_module,
+        "encode_non_combat_decision_context",
+        lambda context: SimpleNamespace(
+            state_features=(0.0,),
+            public_context_features=(0.0,),
+            eligible_action_indices=(0,),
+        ),
+    )
+
+    def capture_validation(rows, states, *, native_identity, execution_evidence):
+        captured["rows"] = rows
+        captured["execution_evidence"] = execution_evidence
+        return {"passed": True, "execution_evidence": execution_evidence}
+
+    monkeypatch.setattr(
+        t089_module, "validate_t089_revalidation_rows", capture_validation
+    )
+    report = t089_module.revalidate_t089_cohort(
+        fake_adapter_factory,
+        states,
+        native_identity={
+            "repository": T089_NATIVE_REPOSITORY,
+            "ref": T089_NATIVE_REF,
+            "commit": T089_NATIVE_COMMIT,
+        },
+    )
+    assert report["passed"] is True
+    assert adapter_calls == 320
+    assert sorted(replayed) == list(range(320))
+    evidence = captured["execution_evidence"]
+    assert evidence["worker_count"] == 16
+    assert evidence["shard_count"] == 16
+    assert [
+        (spec["selected_state_start"], spec["selected_state_end"])
+        for spec in evidence["shard_specs"]
+    ] == [(index * 20, index * 20 + 19) for index in range(16)]
+
+
+def test_t089_revalidation_rejects_missing_or_misaligned_topology(monkeypatch) -> None:
+    states = _fake_revalidation_states()
+    rows = [t089_module._state_identity_payload(state) for state in states]
+    identity = {
+        "repository": T089_NATIVE_REPOSITORY,
+        "ref": T089_NATIVE_REF,
+        "commit": T089_NATIVE_COMMIT,
+    }
+    monkeypatch.setattr(t089_module, "validate_t089_selected_cohort", lambda value: {})
+    evidence = _fake_revalidation_execution_evidence()
+    report = t089_module.validate_t089_revalidation_rows(
+        rows,
+        states,
+        native_identity=identity,
+        execution_evidence=evidence,
+    )
+    assert report["passed"] is True
+    with pytest.raises(T089Incomplete):
+        t089_module.validate_t089_revalidation_rows(
+            rows, states, native_identity=identity
+        )
+    missing_shard = copy.deepcopy(evidence)
+    missing_shard["shard_specs"] = missing_shard["shard_specs"][:-1]
+    with pytest.raises(T089Incomplete):
+        t089_module.validate_t089_revalidation_rows(
+            rows,
+            states,
+            native_identity=identity,
+            execution_evidence=missing_shard,
+        )
+    misaligned = copy.deepcopy(evidence)
+    misaligned["shard_specs"][3]["selected_state_start"] = 61
+    with pytest.raises(T089Incomplete):
+        t089_module.validate_t089_revalidation_rows(
+            rows,
+            states,
+            native_identity=identity,
+            execution_evidence=misaligned,
         )
 
 

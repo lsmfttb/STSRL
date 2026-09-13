@@ -140,17 +140,33 @@ def _run_preflight(args: argparse.Namespace) -> int:
 def _run_revalidate(args: argparse.Namespace) -> int:
     states = read_source_states(args.states)
     validate_t089_selected_cohort(states)
-    rows = _json(args.rows)
-    if not isinstance(rows, list):
-        raise TypeError("revalidation rows must be a JSON array")
+    payload = _json(args.rows)
+    if not isinstance(payload, dict):
+        raise TypeError(
+            "revalidation input must be a serialized report with rows and execution_evidence"
+        )
+    if (
+        payload.get("schema_id") != "t089-current-native-revalidation-v1"
+        or payload.get("schema_version") != 1
+        or payload.get("task_id") != T089_TASK_ID
+    ):
+        raise TypeError("revalidation input has an unsupported report schema")
+    rows = payload.get("rows")
+    execution_evidence = payload.get("execution_evidence")
+    native_identity = payload.get("native_identity")
+    if (
+        not isinstance(rows, list)
+        or not isinstance(execution_evidence, dict)
+        or not isinstance(native_identity, dict)
+    ):
+        raise TypeError(
+            "revalidation input must contain rows, native_identity, and execution_evidence"
+        )
     report = validate_t089_revalidation_rows(
         rows,
         states,
-        native_identity={
-            "repository": T089_NATIVE_REPOSITORY,
-            "ref": T089_NATIVE_REF,
-            "commit": T089_NATIVE_COMMIT,
-        },
+        native_identity=native_identity,
+        execution_evidence=execution_evidence,
     )
     _write(args.output, report)
     return 0

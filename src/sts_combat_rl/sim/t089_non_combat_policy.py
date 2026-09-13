@@ -83,6 +83,8 @@ T089_MAX_STEPS = 500
 T089_BATTLE_SIMULATIONS = 400
 T089_WORKER_COUNT = T065_MAX_WORKERS
 T089_SHARD_COUNT = T065_STAGE6_SHARD_COUNT
+T089_REVALIDATION_STATE_COUNT = 320
+T089_REVALIDATION_STATES_PER_SHARD = T089_REVALIDATION_STATE_COUNT // T089_SHARD_COUNT
 T089_SUPPORTED_FAMILIES = T065_MANDATORY_FAMILIES
 T089_CONTINUATION_SEED_MAP: Mapping[str, tuple[int, ...]] = {
     "train": T089_TRAIN_CONTINUATION_SEEDS,
@@ -476,16 +478,99 @@ def _revalidation_diff(
     return differences
 
 
+def _t089_revalidation_shard_ranges() -> tuple[tuple[int, int], ...]:
+    if T089_REVALIDATION_STATE_COUNT % T089_SHARD_COUNT:
+        raise T089ContractError("T089 revalidation cohort cannot form exact shards")
+    return tuple(
+        (
+            index * T089_REVALIDATION_STATES_PER_SHARD,
+            (index + 1) * T089_REVALIDATION_STATES_PER_SHARD - 1,
+        )
+        for index in range(T089_SHARD_COUNT)
+    )
+
+
+def _validate_t089_revalidation_execution_evidence(
+    value: Mapping[str, Any],
+) -> dict[str, Any]:
+    if (
+        value.get("schema_id") != "t089-current-native-revalidation-execution-v1"
+        or value.get("schema_version") != 1
+        or value.get("worker_count") != T089_WORKER_COUNT
+        or value.get("shard_count") != T089_SHARD_COUNT
+        or value.get("requested_state_count") != T089_REVALIDATION_STATE_COUNT
+        or value.get("completed_state_count") != T089_REVALIDATION_STATE_COUNT
+    ):
+        raise T089Incomplete("T089 revalidation execution topology is invalid")
+    _require_finite_nonnegative(
+        value.get("wall_clock_seconds"), "T089 revalidation total wall clock"
+    )
+    specs = value.get("shard_specs")
+    if not isinstance(specs, Sequence) or isinstance(specs, (str, bytes)):
+        raise T089Incomplete("T089 revalidation shard evidence is missing")
+    expected_ranges = _t089_revalidation_shard_ranges()
+    if len(specs) != len(expected_ranges):
+        raise T089Incomplete("T089 revalidation shard count is invalid")
+    for expected_index, (expected_start, expected_end) in enumerate(expected_ranges):
+        spec = specs[expected_index]
+        if not isinstance(spec, Mapping):
+            raise T089Incomplete("T089 revalidation shard evidence is invalid")
+        integer_fields = (
+            "shard_index",
+            "selected_state_start",
+            "selected_state_end",
+            "selected_state_count",
+            "requested_state_count",
+            "completed_state_count",
+            "problem_count",
+        )
+        for key in integer_fields:
+            field = spec.get(key)
+            if isinstance(field, bool) or not isinstance(field, int):
+                raise T089Incomplete(f"T089 revalidation shard field {key} is invalid")
+        if (
+            spec.get("shard_index") != expected_index
+            or spec.get("selected_state_start") != expected_start
+            or spec.get("selected_state_end") != expected_end
+            or spec.get("selected_state_count") != expected_end - expected_start + 1
+            or spec.get("requested_state_count") != T089_REVALIDATION_STATES_PER_SHARD
+            or spec.get("completed_state_count") != T089_REVALIDATION_STATES_PER_SHARD
+            or spec.get("problem_count") != 0
+        ):
+            raise T089Incomplete("T089 revalidation shard topology is invalid")
+        expected_indices = list(range(expected_start, expected_end + 1))
+        if spec.get("requested_state_indices") != expected_indices:
+            raise T089Incomplete("T089 revalidation requested indices are invalid")
+        if spec.get("completed_state_indices") != expected_indices:
+            raise T089Incomplete("T089 revalidation completed indices are invalid")
+        _require_finite_nonnegative(
+            spec.get("wall_clock_seconds"),
+            f"T089 revalidation shard {expected_index} wall clock",
+        )
+        problems = spec.get("problems")
+        if not isinstance(problems, Sequence) or isinstance(problems, (str, bytes)):
+            raise T089Incomplete("T089 revalidation shard problems are invalid")
+        if problems or len(problems) != spec["problem_count"]:
+            raise T089Incomplete("T089 revalidation shard contains problems")
+    return dict(value)
+
+
 def validate_t089_revalidation_rows(
     rows: Iterable[Mapping[str, Any]],
     states: Sequence[T065SourceState],
     *,
     native_identity: Mapping[str, Any] | None = None,
+    execution_evidence: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Validate a complete current-native revalidation report without replacement."""
 
     expected_states = tuple(states)
     validate_t089_selected_cohort(expected_states)
+    if execution_evidence is None:
+        raise T089Incomplete("T089 revalidation execution evidence is missing")
+    validated_execution = _validate_t089_revalidation_execution_evidence(
+        execution_evidence
+    )
     by_index: dict[int, Mapping[str, Any]] = {}
     for row in rows:
         index = row.get("selected_state_index")
@@ -494,7 +579,7 @@ def validate_t089_revalidation_rows(
                 "current-native revalidation has duplicate/invalid state index"
             )
         by_index[index] = row
-    if tuple(sorted(by_index)) != tuple(range(320)):
+    if tuple(sorted(by_index)) != tuple(range(T089_REVALIDATION_STATE_COUNT)):
         raise T089Incomplete(
             "current-native revalidation does not cover all 320 states"
         )
@@ -521,11 +606,16 @@ def validate_t089_revalidation_rows(
         "schema_version": 1,
         "task_id": T089_TASK_ID,
         "native_identity": identity,
-        "state_count": 320,
+        "state_count": T089_REVALIDATION_STATE_COUNT,
         "mismatch_count": 0,
         "replacement_performed": False,
         "dropped_state_count": 0,
         "split_movement_count": 0,
+        "wall_clock_seconds": validated_execution["wall_clock_seconds"],
+        "execution_evidence": validated_execution,
+        "rows": [
+            dict(by_index[index]) for index in range(T089_REVALIDATION_STATE_COUNT)
+        ],
         "passed": True,
     }
 
@@ -536,34 +626,90 @@ def revalidate_t089_cohort(
     *,
     native_identity: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Replay every retained state and compare public/legal identity exactly."""
+    """Replay every retained state in sixteen explicit native shards."""
 
     expected = tuple(states)
     validate_t089_selected_cohort(expected)
-    rows: list[dict[str, Any]] = []
-    for state in expected:
-        try:
-            _snapshot, _actions, context, _checkpoint = replay_source_state(
-                adapter_factory(), state
-            )
-            encoded = encode_non_combat_decision_context(context)
-            observed = {
-                **_state_identity_payload(state),
-                "state_features": list(encoded.state_features),
-                "public_context_features": list(encoded.public_context_features),
-                "eligible_action_indices": list(encoded.eligible_action_indices),
-                "ordered_legal_action_identities": [
-                    dict(item) for item in context.legal_action_identities
-                ],
-            }
-        except (OSError, RuntimeError, TypeError, ValueError) as exc:
-            observed = {
-                "selected_state_index": state.selected_state_index,
-                "error": str(exc),
-            }
-        rows.append(observed)
+    if len(expected) != T089_REVALIDATION_STATE_COUNT:
+        raise T089Incomplete("T089 revalidation cohort is not exactly 320 states")
+
+    def run_shard(
+        shard_index: int, start: int, end: int
+    ) -> tuple[int, list[dict[str, Any]], dict[str, Any]]:
+        started = time.perf_counter()
+        requested_indices = list(range(start, end + 1))
+        shard_rows: list[dict[str, Any]] = []
+        problems: list[str] = []
+        completed_indices: list[int] = []
+        for state in expected[start : end + 1]:
+            try:
+                _snapshot, _actions, context, _checkpoint = replay_source_state(
+                    adapter_factory(), state
+                )
+                encoded = encode_non_combat_decision_context(context)
+                observed = {
+                    **_state_identity_payload(state),
+                    "state_features": list(encoded.state_features),
+                    "public_context_features": list(encoded.public_context_features),
+                    "eligible_action_indices": list(encoded.eligible_action_indices),
+                    "ordered_legal_action_identities": [
+                        dict(item) for item in context.legal_action_identities
+                    ],
+                }
+                completed_indices.append(state.selected_state_index)
+            except (OSError, RuntimeError, TypeError, ValueError) as exc:
+                problems.append(f"state {state.selected_state_index}: {exc}")
+                observed = {
+                    "selected_state_index": state.selected_state_index,
+                    "error": str(exc),
+                }
+            shard_rows.append(observed)
+        return (
+            shard_index,
+            shard_rows,
+            {
+                "shard_index": shard_index,
+                "selected_state_start": start,
+                "selected_state_end": end,
+                "selected_state_count": len(requested_indices),
+                "requested_state_indices": requested_indices,
+                "requested_state_count": len(requested_indices),
+                "completed_state_indices": completed_indices,
+                "completed_state_count": len(completed_indices),
+                "wall_clock_seconds": time.perf_counter() - started,
+                "problem_count": len(problems),
+                "problems": problems,
+            },
+        )
+
+    started = time.perf_counter()
+    shard_results: dict[int, tuple[list[dict[str, Any]], dict[str, Any]]] = {}
+    with ThreadPoolExecutor(max_workers=T089_WORKER_COUNT) as executor:
+        futures = {
+            executor.submit(run_shard, index, start, end): index
+            for index, (start, end) in enumerate(_t089_revalidation_shard_ranges())
+        }
+        for future in as_completed(futures):
+            index, shard_rows, shard_spec = future.result()
+            shard_results[index] = (shard_rows, shard_spec)
+    rows = [row for index in range(T089_SHARD_COUNT) for row in shard_results[index][0]]
+    execution_evidence = {
+        "schema_id": "t089-current-native-revalidation-execution-v1",
+        "schema_version": 1,
+        "worker_count": T089_WORKER_COUNT,
+        "shard_count": T089_SHARD_COUNT,
+        "requested_state_count": T089_REVALIDATION_STATE_COUNT,
+        "completed_state_count": sum(
+            spec["completed_state_count"] for _, spec in shard_results.values()
+        ),
+        "wall_clock_seconds": time.perf_counter() - started,
+        "shard_specs": [shard_results[index][1] for index in range(T089_SHARD_COUNT)],
+    }
     return validate_t089_revalidation_rows(
-        rows, expected, native_identity=native_identity
+        rows,
+        expected,
+        native_identity=native_identity,
+        execution_evidence=execution_evidence,
     )
 
 
