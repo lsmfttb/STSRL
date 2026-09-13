@@ -85,6 +85,23 @@ def test_raw_stream_failure_prevents_publication(monkeypatch, tmp_path) -> None:
         )
 
 
+def test_statistics_validates_against_authorized_formal_root_not_its_own_root(
+    tmp_path,
+) -> None:
+    formal_root = tmp_path / "t088-formal-accepted"
+    statistics_root = tmp_path / "t088-statistics-new"
+
+    assert command._formal_output_root_for_statistics(
+        {"output_root": str(formal_root)}, statistics_root=statistics_root
+    ) == str(formal_root.resolve())
+    assert not statistics_root.exists()
+
+    with pytest.raises(command.T088StatisticsPathError, match="independent"):
+        command._formal_output_root_for_statistics(
+            {"output_root": str(statistics_root)}, statistics_root=statistics_root
+        )
+
+
 def test_auxiliary_fallback_prefers_pairwise_quality_over_cost() -> None:
     pairs = []
     for candidate, reference in (

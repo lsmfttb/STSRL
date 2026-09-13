@@ -174,6 +174,22 @@ def _publish_private_stage(
         raise
 
 
+def _formal_output_root_for_statistics(
+    authorization: Mapping[str, object], *, statistics_root: Path
+) -> str:
+    """Use the root bound by formal authorization, never statistics publication."""
+
+    formal_root = authorization.get("output_root")
+    if not isinstance(formal_root, str) or not formal_root:
+        raise T088StatisticsPathError("formal authorization output root is missing")
+    resolved_formal = Path(formal_root).resolve()
+    if resolved_formal == statistics_root.resolve():
+        raise T088StatisticsPathError(
+            "statistics artifact root must be independent from formal output root"
+        )
+    return str(resolved_formal)
+
+
 def _stream_compact_rows(
     path: Path,
     *,
@@ -399,7 +415,8 @@ def run_t088_statistics_from_paths(
         label="T088 formal authorization",
     )
     canary, canary_reference = t088_formal._canary_reference(canary_evidence_path)
-    root = str(artifact_root.resolve())
+    root_path = artifact_root.resolve()
+    root = _formal_output_root_for_statistics(authorization, statistics_root=root_path)
     try:
         validate_t088_formal_authorization(
             authorization,
@@ -470,7 +487,6 @@ def run_t088_statistics_from_paths(
         "selected_challenger": selected,
         "paired_comparisons": comparisons,
     }
-    root_path = artifact_root.resolve()
     if root_path.exists():
         raise T088StatisticsPathError("refusing to overwrite retained artifact root")
     root_path.parent.mkdir(parents=True, exist_ok=True)
