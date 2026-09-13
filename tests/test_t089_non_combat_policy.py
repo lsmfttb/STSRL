@@ -314,6 +314,28 @@ def test_t089_fresh_and_terminal_evidence_fail_closed() -> None:
     assert incomplete["classification"] == "INCOMPLETE"
 
 
+def test_t089_reduced_support_evidence_cannot_be_forged() -> None:
+    fresh = build_t089_fresh_report(
+        _fresh_arm(0.0, learned=False, arm="baseline"),
+        _fresh_arm(1.0, learned=True, arm="candidate"),
+    )
+    forged_failure = copy.deepcopy(fresh)
+    candidate = forged_failure["arm_reports"]["candidate"]
+    evidence = candidate["per_run_decision_evidence"]["891001"]
+    evidence["supported_inference_failures"] = 1
+    candidate["shard_specs"][0]["decision_count"] += 1
+    with pytest.raises(T089Incomplete):
+        validate_t089_fresh_report(forged_failure)
+
+    forged_fallback = copy.deepcopy(fresh)
+    candidate = forged_fallback["arm_reports"]["candidate"]
+    evidence = candidate["per_run_decision_evidence"]["891001"]
+    evidence["fallback_decisions_by_family"]["MAP_SCREEN"] = 1
+    candidate["shard_specs"][0]["decision_count"] += 1
+    with pytest.raises(T089Incomplete):
+        validate_t089_fresh_report(forged_fallback)
+
+
 def test_t089_cli_rejects_bare_fresh_rows_and_missing_finalize_evidence(
     tmp_path,
 ) -> None:

@@ -1661,11 +1661,19 @@ def _validate_t089_fresh_arm_summary(
             isinstance(count, bool) or not isinstance(count, int) or count < 0
             for count in learned_by_family.values()
         ) or any(
-            isinstance(count, bool) or not isinstance(count, int) or count < 0
-            for count in fallback_by_family.values()
+            not isinstance(family, str)
+            or not family
+            or isinstance(count, bool)
+            or not isinstance(count, int)
+            or count < 0
+            for family, count in fallback_by_family.items()
         ):
             raise T089Incomplete(
                 f"T089 retained {expected_arm} decision evidence counts are invalid"
+            )
+        if any(family in T089_SUPPORTED_FAMILIES for family in fallback_by_family):
+            raise T089Incomplete(
+                f"T089 retained {expected_arm} supported family fallback is invalid"
             )
         if expected_arm == "baseline" and (learned_count or failure_count):
             raise T089Incomplete("T089 baseline retained learned evidence is invalid")
@@ -2023,6 +2031,68 @@ def _validate_t089_support_report(value: Mapping[str, Any]) -> None:
         raise T089Incomplete("T089 fresh support classification is invalid")
 
 
+def _recompute_t089_retained_support(
+    baseline_summary: Mapping[str, Any], candidate_summary: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Recompute the support gate from retained per-run evidence only."""
+
+    expected_seeds = t089_fresh_simulator_seeds()
+    baseline_evidence = baseline_summary["per_run_decision_evidence"]
+    candidate_evidence = candidate_summary["per_run_decision_evidence"]
+    baseline_families = {family: 0 for family in T089_SUPPORTED_FAMILIES}
+    for seed in expected_seeds:
+        evidence = baseline_evidence[str(seed)]
+        learned_by_family = evidence["learned_decisions_by_family"]
+        if (
+            evidence["learned_decision_count"] != 0
+            or evidence["supported_inference_failures"] != 0
+            or evidence["fallback_decisions_by_family"]
+            or any(learned_by_family.values())
+        ):
+            raise T089Incomplete("T089 baseline retained support evidence is nonzero")
+        for family in T089_SUPPORTED_FAMILIES:
+            baseline_families[family] += learned_by_family[family]
+    if any(baseline_families.values()):
+        raise T089Incomplete("T089 baseline retained support totals are nonzero")
+
+    learned_total = 0
+    learned_by_family = {family: 0 for family in T089_SUPPORTED_FAMILIES}
+    failure_seeds: list[int] = []
+    for seed in expected_seeds:
+        evidence = candidate_evidence[str(seed)]
+        if evidence["supported_inference_failures"]:
+            failure_seeds.append(seed)
+        if any(
+            family in T089_SUPPORTED_FAMILIES
+            for family in evidence["fallback_decisions_by_family"]
+        ):
+            raise T089Incomplete("T089 candidate has supported family fallback")
+        learned_total += evidence["learned_decision_count"]
+        for family in T089_SUPPORTED_FAMILIES:
+            learned_by_family[family] += evidence["learned_decisions_by_family"][family]
+    if failure_seeds:
+        raise T089Incomplete("T089 candidate has supported inference failures")
+    passed = (
+        learned_total >= 128
+        and learned_by_family["MAP_SCREEN"] >= 32
+        and learned_by_family["REWARDS"] >= 32
+        and learned_by_family["REST_ROOM"] >= 1
+        and learned_by_family["TREASURE_ROOM"] >= 1
+        and not failure_seeds
+    )
+    return {
+        "schema_id": "t089-fresh-support-report-v1",
+        "schema_version": 1,
+        "task_id": T089_TASK_ID,
+        "run_count": 256,
+        "learned_decision_count": learned_total,
+        "learned_decisions_by_family": learned_by_family,
+        "supported_inference_failure_seeds": failure_seeds,
+        "passed": passed,
+        "classification": None if passed else "NON_COMBAT_EVAL_SUPPORT_INSUFFICIENT",
+    }
+
+
 def validate_t089_fresh_report(value: Mapping[str, Any]) -> None:
     """Validate a reduced fresh report before it can enter terminal evidence."""
 
@@ -2038,8 +2108,10 @@ def validate_t089_fresh_report(value: Mapping[str, Any]) -> None:
         "candidate",
     }:
         raise T089Incomplete("T089 fresh arm provenance is missing")
-    _validate_t089_fresh_arm_summary(arm_reports["baseline"], expected_arm="baseline")
-    _validate_t089_fresh_arm_summary(arm_reports["candidate"], expected_arm="candidate")
+    baseline_summary = arm_reports["baseline"]
+    candidate_summary = arm_reports["candidate"]
+    _validate_t089_fresh_arm_summary(baseline_summary, expected_arm="baseline")
+    _validate_t089_fresh_arm_summary(candidate_summary, expected_arm="candidate")
     if value.get("battle_provenance") != t089_battle_provenance():
         raise T089Incomplete("T089 fresh Battle provenance is invalid")
     expected_seeds = t089_fresh_simulator_seeds()
@@ -2126,6 +2198,11 @@ def validate_t089_fresh_report(value: Mapping[str, Any]) -> None:
     if not isinstance(support, Mapping):
         raise T089Incomplete("T089 fresh support report is missing")
     _validate_t089_support_report(support)
+    expected_support = _recompute_t089_retained_support(
+        baseline_summary, candidate_summary
+    )
+    if dict(support) != expected_support:
+        raise T089Incomplete("T089 fresh support report is not evidence-derived")
     candidate_invalid = value.get("candidate_invalid_or_truncated")
     baseline_invalid = value.get("baseline_invalid_or_truncated")
     candidate_act2 = value.get("candidate_act2_plus")
