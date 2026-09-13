@@ -1231,9 +1231,6 @@ def validate_t088_final_report(
         or report.get("task_id") != T088_TASK_ID
     ):
         raise T088IncompleteError("final report schema/task identity is invalid")
-    validate_t088_execution_rows(
-        formal_rows, cohort_rows, cohort_binding=cohort_binding
-    )
     comparisons = report.get("paired_comparisons")
     if not isinstance(comparisons, Sequence) or isinstance(comparisons, (str, bytes)):
         raise T088IncompleteError("final report paired comparisons are missing")
@@ -1254,13 +1251,130 @@ def validate_t088_final_report(
         raise T088IncompleteError(
             "final report does not contain exactly six required paired comparisons"
         )
-    if report.get("terminal_classification") not in {
+    terminal = report.get("terminal_classification")
+    if terminal not in {
         "STRONGER_NONLEARNED_COMBAT_BASELINE_IDENTIFIED",
         "NO_CHALLENGER_CLEARS_PROMOTION_GATE",
         "TOURNAMENT_TIE_REQUIRES_PLANNER_DECISION",
         "INCOMPLETE",
     }:
         raise T088IncompleteError("final report terminal classification is invalid")
+    selection = report.get("selection_provenance")
+    decision = report.get("baseline_decision")
+    eligible, tie_set = report.get("eligible_challengers"), report.get("tie_set")
+    selected, blind = (
+        report.get("selected_challenger"),
+        report.get("blind_audit_challenger"),
+    )
+    if (
+        not isinstance(selection, Mapping)
+        or not isinstance(decision, Mapping)
+        or not isinstance(eligible, Sequence)
+        or isinstance(eligible, (str, bytes))
+        or not isinstance(tie_set, Sequence)
+        or isinstance(tie_set, (str, bytes))
+        or blind not in {"B", "C", "D"}
+        or selection.get("eligible_challengers") != list(eligible)
+        or selection.get("tie_set") != list(tie_set)
+    ):
+        raise T088IncompleteError("final report selection provenance is incomplete")
+    if terminal == "STRONGER_NONLEARNED_COMBAT_BASELINE_IDENTIFIED":
+        if (
+            selected not in {"B", "C", "D"}
+            or selection.get("terminal_classification") != "ANALYSIS_PREPARATION_READY"
+            or selection.get("selected_challenger") != selected
+            or decision.get("selected_arm") != selected
+            or not isinstance(
+                decision.get("selected_controller_configuration"), Mapping
+            )
+            or decision.get("improvement_source")
+            not in {
+                "Search-v2 higher compute",
+                "Beam weighted-best-first",
+                "progressive-bias MCTS",
+            }
+        ):
+            raise T088IncompleteError(
+                "stronger baseline terminal provenance is invalid"
+            )
+    elif terminal == "NO_CHALLENGER_CLEARS_PROMOTION_GATE":
+        if (
+            selected is not None
+            or selection.get("terminal_classification")
+            != "NO_CHALLENGER_CLEARS_PROMOTION_GATE"
+            or selection.get("selected_challenger") is not None
+            or decision.get("frozen_baseline_arm") != "A"
+            or not isinstance(decision.get("frozen_controller_configuration"), Mapping)
+        ):
+            raise T088IncompleteError("negative terminal provenance is invalid")
+    elif terminal == "TOURNAMENT_TIE_REQUIRES_PLANNER_DECISION" and (
+        selected is not None
+        or selection.get("terminal_classification")
+        != "TOURNAMENT_TIE_REQUIRES_PLANNER_DECISION"
+        or selection.get("selected_challenger") is not None
+        or decision.get("tie_set") != list(tie_set)
+        or not tie_set
+    ):
+        raise T088IncompleteError("tie terminal provenance is invalid")
+    _validate_t088_execution_rows_streaming(
+        formal_rows, cohort_rows, cohort_binding=cohort_binding
+    )
+
+
+def _validate_t088_execution_rows_streaming(
+    rows: Iterable[Mapping[str, object]],
+    cohort_rows: Iterable[Mapping[str, object]],
+    *,
+    cohort_binding: Mapping[str, object],
+) -> None:
+    """Validate canonical formal raw rows in one pass without retaining traces."""
+
+    cohort = validate_t088_t087_cohort_binding(cohort_binding, cohort_rows)
+    source_identity = cohort_binding.get("source_selection_manifest_identity")
+    if not isinstance(source_identity, Mapping):
+        raise T088IncompleteError("formal source identity is unavailable")
+    plan = build_t088_formal_plan(cohort, cohort_binding=cohort_binding)
+    expected = plan.get("rows")
+    if not isinstance(expected, Sequence):
+        raise T088IncompleteError("formal plan rows are unavailable")
+    count = 0
+    for count, raw in enumerate(rows, start=1):
+        if not isinstance(raw, Mapping) or count > len(expected):
+            raise T088IncompleteError("formal raw rows exceed canonical plan")
+        planned = expected[count - 1]
+        if (
+            not isinstance(planned, Mapping)
+            or raw.get("arm") != planned.get("arm")
+            or _identity(raw) != planned.get("selection_identity")
+            or _cohort(raw) != planned.get("cohort")
+        ):
+            raise T088IncompleteError("formal raw row is not in canonical plan order")
+        if raw.get("restore_public_legal_parity") is not True:
+            raise T088IncompleteError("execution row lacks restore/public/legal parity")
+        if not isinstance(raw.get("controller_provenance"), Mapping):
+            raise T088IncompleteError("execution row lacks controller provenance")
+        if not isinstance(raw.get("native_identity"), Mapping):
+            raise T088IncompleteError("execution row lacks native identity")
+        if not _valid_outcome(raw.get("outcome")):
+            raise T088IncompleteError(
+                "execution row lacks authoritative terminal outcome"
+            )
+        diagnostic = raw.get("dense_diagnostic")
+        if not isinstance(diagnostic, Mapping):
+            raise T088IncompleteError("execution row lacks dense diagnostic row")
+        _validate_t088_dense_execution_diagnostic(
+            diagnostic,
+            identity=_identity(raw),
+            cohort=str(planned["cohort"]),
+            source_identity=source_identity,
+        )
+        if diagnostic.get("outcome") != raw.get("outcome"):
+            raise T088IncompleteError(
+                "dense diagnostic identity/outcome differs from execution"
+            )
+        _validate_work(raw)
+    if count != T088_FORMAL_EXECUTIONS:
+        raise T088IncompleteError("formal execution count is not exactly 1652")
 
 
 __all__ = [

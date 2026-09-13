@@ -9,7 +9,7 @@ import os
 import shutil
 import sys
 import tempfile
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from pathlib import Path
 
 from sts_combat_rl.commands import t088_canary as canary_paths
@@ -33,6 +33,7 @@ from sts_combat_rl.sim.t088_tournament_workflow import (
     select_t088_blind_audit,
     select_t088_challenger,
     t088_public_trace,
+    validate_t088_final_report,
 )
 
 
@@ -188,6 +189,90 @@ def _formal_output_root_for_statistics(
             "statistics artifact root must be independent from formal output root"
         )
     return str(resolved_formal)
+
+
+def _final_tournament_report(
+    *,
+    selection: Mapping[str, object],
+    comparisons: Sequence[Mapping[str, object]],
+    blind_audit_challenger: str,
+) -> dict[str, object]:
+    """Convert selection preparation into one of the four T088 terminal forms."""
+
+    definitions = t088_controller_definitions()
+    arms = definitions.get("arms")
+    if not isinstance(arms, Mapping):
+        raise T088StatisticsPathError("T088 controller definitions are malformed")
+    selected = selection.get("selected_challenger")
+    selection_class = selection.get("terminal_classification")
+    eligible = selection.get("eligible_challengers")
+    tie_set = selection.get("tie_set")
+    if not isinstance(eligible, list) or not isinstance(tie_set, list):
+        raise T088StatisticsPathError("T088 selection provenance is malformed")
+    if selection_class == "ANALYSIS_PREPARATION_READY" and selected in {"B", "C", "D"}:
+        arm = str(selected)
+        source = {
+            "B": "Search-v2 higher compute",
+            "C": "Beam weighted-best-first",
+            "D": "progressive-bias MCTS",
+        }[arm]
+        terminal = "STRONGER_NONLEARNED_COMBAT_BASELINE_IDENTIFIED"
+        decision = {
+            "decision": "promotion_eligible_unique_challenger",
+            "selected_arm": arm,
+            "selected_controller_configuration": dict(arms[arm]),
+            "improvement_source": source,
+        }
+    elif selection_class == "NO_CHALLENGER_CLEARS_PROMOTION_GATE" and selected is None:
+        terminal = "NO_CHALLENGER_CLEARS_PROMOTION_GATE"
+        decision = {
+            "decision": "accepted_baseline_remains_frozen",
+            "frozen_baseline_arm": "A",
+            "frozen_controller_configuration": dict(arms["A"]),
+            "improvement_source": "none",
+            "no_challenger_clears_promotion_gate": True,
+        }
+    elif (
+        selection_class == "TOURNAMENT_TIE_REQUIRES_PLANNER_DECISION"
+        and selected is None
+    ):
+        terminal = "TOURNAMENT_TIE_REQUIRES_PLANNER_DECISION"
+        decision = {
+            "decision": "planner_decision_required",
+            "tie_set": list(tie_set),
+            "selected_controller_configuration": None,
+            "improvement_source": "unresolved_tie",
+        }
+    else:
+        raise T088StatisticsPathError(
+            "T088 selection cannot form a valid terminal report"
+        )
+    return {
+        "schema_id": "t088-final-tournament-report-v1",
+        "task_id": "T088",
+        "terminal_classification": terminal,
+        # This is formal promotion selection only; it never becomes the
+        # fallback label needed to produce an auxiliary blind-audit bundle.
+        "selected_challenger": selected,
+        "blind_audit_challenger": blind_audit_challenger,
+        "selection_provenance": dict(selection),
+        "eligible_challengers": list(eligible),
+        "tie_set": list(tie_set),
+        "baseline_decision": decision,
+        "paired_comparisons": list(comparisons),
+    }
+
+
+def _iter_full_formal_rows_for_final_validation(
+    path: Path,
+) -> Iterator[Mapping[str, object]]:
+    """Yield raw formal rows once for validation, closing the stream on exit."""
+
+    reader = _StreamingShardJson(path.resolve(strict=True))
+    try:
+        yield from reader.rows()
+    finally:
+        reader.close()
 
 
 def _stream_compact_rows(
@@ -471,22 +556,35 @@ def run_t088_statistics_from_paths(
         "selection": selection,
     }
     selected = selection["selected_challenger"]
-    if not isinstance(selected, str):
+    if isinstance(selected, str):
+        blind_audit_challenger = selected
+    else:
         # This affects only auxiliary blinding, never the negative conclusion.
-        selected, auxiliary_tie_set = _auxiliary_challenger(comparisons, costs)
-        selection["auxiliary_blind_audit_challenger"] = selected
+        blind_audit_challenger, auxiliary_tie_set = _auxiliary_challenger(
+            comparisons, costs
+        )
+        selection["auxiliary_blind_audit_challenger"] = blind_audit_challenger
         selection["auxiliary_tie_set"] = auxiliary_tie_set
         selection["auxiliary_tie_break"] = "pairwise-quality-cost-sha256-v1"
-    blind_result = _stream_blind_bundle(raw_evidence_path, rows, candidate_arm=selected)
+    blind_result = _stream_blind_bundle(
+        raw_evidence_path, rows, candidate_arm=blind_audit_challenger
+    )
     blind = blind_result["bundle"]
     hidden = blind_result["hidden_provenance"]
-    final = {
-        "schema_id": "t088-final-tournament-report-v1",
-        "task_id": "T088",
-        "terminal_classification": selection["terminal_classification"],
-        "selected_challenger": selected,
-        "paired_comparisons": comparisons,
-    }
+    final = _final_tournament_report(
+        selection=selection,
+        comparisons=comparisons,
+        blind_audit_challenger=blind_audit_challenger,
+    )
+    try:
+        validate_t088_final_report(
+            final,
+            formal_rows=_iter_full_formal_rows_for_final_validation(raw_evidence_path),
+            cohort_rows=cohort,
+            cohort_binding=binding,
+        )
+    except (T088IncompleteError, TypeError, ValueError) as exc:
+        raise T088StatisticsPathError("final T088 report is not valid") from exc
     if root_path.exists():
         raise T088StatisticsPathError("refusing to overwrite retained artifact root")
     root_path.parent.mkdir(parents=True, exist_ok=True)

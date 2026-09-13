@@ -157,6 +157,99 @@ def test_auxiliary_fallback_keeps_full_tie_set_for_pairwise_cycle() -> None:
     assert (selected, tie_set) == command._auxiliary_challenger(pairs, costs)
 
 
+def test_final_report_maps_unique_preparation_to_terminal_with_exact_arm() -> None:
+    final = command._final_tournament_report(
+        selection={
+            "terminal_classification": "ANALYSIS_PREPARATION_READY",
+            "selected_challenger": "B",
+            "eligible_challengers": ["B"],
+            "tie_set": [],
+        },
+        comparisons=[],
+        blind_audit_challenger="B",
+    )
+
+    assert (
+        final["terminal_classification"]
+        == "STRONGER_NONLEARNED_COMBAT_BASELINE_IDENTIFIED"
+    )
+    assert final["selected_challenger"] == "B"
+    assert final["blind_audit_challenger"] == "B"
+    assert final["baseline_decision"] == {
+        "decision": "promotion_eligible_unique_challenger",
+        "selected_arm": "B",
+        "selected_controller_configuration": {
+            "controller": "Search-v2",
+            "simulations": 400,
+        },
+        "improvement_source": "Search-v2 higher compute",
+    }
+
+
+@pytest.mark.parametrize(
+    ("selection", "blind", "terminal"),
+    [
+        (
+            {
+                "terminal_classification": "NO_CHALLENGER_CLEARS_PROMOTION_GATE",
+                "selected_challenger": None,
+                "eligible_challengers": [],
+                "tie_set": [],
+            },
+            "C",
+            "NO_CHALLENGER_CLEARS_PROMOTION_GATE",
+        ),
+        (
+            {
+                "terminal_classification": "TOURNAMENT_TIE_REQUIRES_PLANNER_DECISION",
+                "selected_challenger": None,
+                "eligible_challengers": ["B", "C"],
+                "tie_set": ["B", "C"],
+            },
+            "B",
+            "TOURNAMENT_TIE_REQUIRES_PLANNER_DECISION",
+        ),
+    ],
+)
+def test_final_report_keeps_auxiliary_blind_choice_out_of_formal_selection(
+    selection, blind, terminal
+) -> None:
+    final = command._final_tournament_report(
+        selection=selection, comparisons=[], blind_audit_challenger=blind
+    )
+
+    assert final["terminal_classification"] == terminal
+    assert final["selected_challenger"] is None
+    assert final["blind_audit_challenger"] == blind
+    assert final["selection_provenance"]["selected_challenger"] is None
+
+
+def test_final_validation_raw_iterator_closes_reader_on_early_exit(
+    monkeypatch, tmp_path
+) -> None:
+    closed = False
+
+    class FakeReader:
+        def __init__(self, _path):
+            pass
+
+        def rows(self):
+            yield {"row": 1}
+            yield {"row": 2}
+
+        def close(self):
+            nonlocal closed
+            closed = True
+
+    monkeypatch.setattr(command, "_StreamingShardJson", FakeReader)
+    raw_path = tmp_path / "raw.json"
+    raw_path.write_text("{}", encoding="utf-8")
+    rows = command._iter_full_formal_rows_for_final_validation(raw_path)
+    assert next(rows) == {"row": 1}
+    rows.close()
+    assert closed is True
+
+
 def test_retention_closure_has_external_manifest_roles_plus_self() -> None:
     assert T088_RETENTION_MANIFEST_EXTERNAL_ROLES == T088_REQUIRED_ARTIFACT_ROLES - {
         "retention_manifest"
