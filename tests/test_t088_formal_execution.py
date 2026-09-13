@@ -23,6 +23,7 @@ from sts_combat_rl.sim.t088_formal_execution import (
     T088FormalExecutionError,
     _canonical_sha256,
     execute_t088_authorized_formal_shard,
+    merge_t088_authorized_formal_shard_paths,
     merge_t088_authorized_formal_shards,
     validate_t088_formal_shard,
     write_t088_formal_shard,
@@ -391,3 +392,48 @@ def test_finalizer_requires_every_shard_and_reorders_to_full_canonical_matrix():
     assert evidence["execution_count"] == 1652
     assert [row["arm"] for row in evidence["rows"][:413]] == ["A"] * 413
     assert evidence["rows"][0]["selection_identity"] == "A:0"
+
+
+def test_streaming_finalizer_accepts_reversed_complete_shards_without_row_matrix(
+    tmp_path,
+):
+    cohort = _cohort()
+    binding = _binding(cohort)
+    canary, canary_reference = _canary_evidence(cohort, binding)
+    inputs, authorization = _authorization(cohort, binding, canary_reference)
+    shard_paths = []
+    for index in range(16):
+        shard = execute_t088_authorized_formal_shard(
+            authorization=authorization,
+            implementation_head="a" * 40,
+            input_identities=inputs,
+            canary_evidence_reference=canary_reference,
+            canary_evidence=canary,
+            cohort_rows=cohort,
+            cohort_binding=binding,
+            shard_index=index,
+            shard_count=16,
+            worker_count=16,
+            output_root="/retained",
+            runner=_runner,
+            controller_factory=_controller,
+        )
+        path = tmp_path / f"shard-{index}.json"
+        write_t088_formal_shard(path, shard)
+        shard_paths.append(path)
+    reference = merge_t088_authorized_formal_shard_paths(
+        authorization=authorization,
+        implementation_head="a" * 40,
+        input_identities=inputs,
+        canary_evidence_reference=canary_reference,
+        canary_evidence=canary,
+        cohort_rows=cohort,
+        cohort_binding=binding,
+        output_root="/retained",
+        shard_paths=list(reversed(shard_paths)),
+        output_path=tmp_path / "merged.json",
+    )
+    assert reference["schema_id"] == "t088-formal-raw-evidence-v1"
+    merged = json.loads((tmp_path / "merged.json").read_text(encoding="utf-8"))
+    assert merged["execution_count"] == 1652
+    assert [row["arm"] for row in merged["rows"][:413]] == ["A"] * 413

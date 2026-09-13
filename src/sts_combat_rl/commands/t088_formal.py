@@ -17,13 +17,11 @@ from sts_combat_rl.sim.t088_formal_execution import (
     T088_FORMAL_AUTHORIZATION_SCHEMA_ID,
     T088_FORMAL_DEFAULT_SHARD_COUNT,
     T088_FORMAL_SHARD_ASSIGNMENT,
-    T088_FORMAL_SHARD_SCHEMA_ID,
     _canonical_sha256,
     execute_t088_authorized_formal_shard,
-    merge_t088_authorized_formal_shards,
+    merge_t088_authorized_formal_shard_paths,
     validate_t088_accepted_canary_evidence,
     validate_t088_formal_authorization,
-    write_t088_formal_raw_evidence,
     write_t088_formal_shard,
 )
 from sts_combat_rl.sim.t088_tournament_workflow import (
@@ -261,16 +259,7 @@ def finalize_t088_formal_from_paths(
     )
     canary_evidence, canary_reference = _canary_reference(canary_evidence_path)
     destination, root = _output_path(output_path, artifact_root, "formal raw evidence")
-    shards = [
-        canary_paths._read_exact_json(
-            path,
-            expected_sha256=None,
-            schema_id=T088_FORMAL_SHARD_SCHEMA_ID,
-            label="T088 formal shard",
-        )[0]
-        for path in shard_paths
-    ]
-    evidence = merge_t088_authorized_formal_shards(
+    reference = merge_t088_authorized_formal_shard_paths(
         authorization=authorization,
         implementation_head=paths["implementation_head"],  # type: ignore[arg-type]
         input_identities=inputs,
@@ -279,12 +268,10 @@ def finalize_t088_formal_from_paths(
         cohort_rows=cohort,
         cohort_binding=binding,
         output_root=root,
-        shards=shards,
+        shard_paths=shard_paths,
+        output_path=destination,
     )
-    return {
-        "artifact": write_t088_formal_raw_evidence(destination, evidence),
-        "evidence": evidence,
-    }
+    return {"artifact": reference}
 
 
 def build_parser() -> argparse.ArgumentParser:

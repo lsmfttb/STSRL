@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import tempfile
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from types import SimpleNamespace
@@ -547,6 +548,393 @@ def merge_t088_authorized_formal_shards(
     }
 
 
+class _StreamingShardJson:
+    """Small stdlib-only decoder for one shard object with a large ``rows`` list."""
+
+    _CHUNK_SIZE = 1024 * 1024
+
+    def __init__(self, path: Path) -> None:
+        self._stream = path.open(encoding="utf-8")
+        self._buffer = ""
+        self._position = 0
+        self.metadata: dict[str, object] = {}
+        self._decoder = json.JSONDecoder()
+
+    def close(self) -> None:
+        self._stream.close()
+
+    def _fill(self) -> bool:
+        chunk = self._stream.read(self._CHUNK_SIZE)
+        if not chunk:
+            return False
+        self._buffer += chunk
+        return True
+
+    def _trim(self) -> None:
+        if self._position >= self._CHUNK_SIZE:
+            self._buffer = self._buffer[self._position :]
+            self._position = 0
+
+    def _whitespace(self) -> None:
+        while True:
+            while (
+                self._position < len(self._buffer)
+                and self._buffer[self._position].isspace()
+            ):
+                self._position += 1
+            if self._position < len(self._buffer) or not self._fill():
+                return
+
+    def _consume(self, expected: str) -> None:
+        self._whitespace()
+        if (
+            self._position >= len(self._buffer)
+            or self._buffer[self._position] != expected
+        ):
+            raise T088FormalExecutionError("formal shard JSON is malformed")
+        self._position += 1
+        self._trim()
+
+    def _decode(self) -> object:
+        while True:
+            self._whitespace()
+            try:
+                value, end = self._decoder.raw_decode(self._buffer, self._position)
+            except json.JSONDecodeError as exc:
+                if self._fill():
+                    continue
+                raise T088FormalExecutionError(
+                    "formal shard JSON is malformed"
+                ) from exc
+            self._position = end
+            self._trim()
+            return value
+
+    def rows(self):
+        """Yield row mappings while retaining only non-row top-level metadata."""
+
+        self._consume("{")
+        first = True
+        saw_rows = False
+        while True:
+            self._whitespace()
+            if self._position >= len(self._buffer):
+                if not self._fill():
+                    raise T088FormalExecutionError("formal shard JSON is malformed")
+                continue
+            if self._buffer[self._position] == "}":
+                self._position += 1
+                break
+            if not first:
+                self._consume(",")
+            first = False
+            key = self._decode()
+            if not isinstance(key, str):
+                raise T088FormalExecutionError("formal shard JSON key is malformed")
+            self._consume(":")
+            if key != "rows":
+                self.metadata[key] = self._decode()
+                continue
+            if saw_rows:
+                raise T088FormalExecutionError("formal shard JSON has duplicate rows")
+            saw_rows = True
+            self._consume("[")
+            first_row = True
+            while True:
+                self._whitespace()
+                if self._position >= len(self._buffer):
+                    if not self._fill():
+                        raise T088FormalExecutionError(
+                            "formal shard rows are malformed"
+                        )
+                    continue
+                if self._buffer[self._position] == "]":
+                    self._position += 1
+                    self._trim()
+                    break
+                if not first_row:
+                    self._consume(",")
+                first_row = False
+                row = self._decode()
+                if not isinstance(row, Mapping):
+                    raise T088FormalExecutionError("formal shard row is malformed")
+                yield dict(row)
+        self._whitespace()
+        if self._position != len(self._buffer) or self._fill():
+            raise T088FormalExecutionError("formal shard JSON has trailing content")
+        if not saw_rows:
+            raise T088FormalExecutionError("formal shard rows are unavailable")
+
+
+def _validate_streamed_shard_metadata(
+    metadata: Mapping[str, object],
+    *,
+    row_count: int,
+    authorization: Mapping[str, object],
+    implementation_head: str,
+    input_identities: Mapping[str, object],
+    canary_evidence_reference: Mapping[str, object],
+    cohort_binding: Mapping[str, object],
+    plan: Mapping[str, object],
+    topology: Mapping[str, object],
+) -> None:
+    required = {
+        "schema_id",
+        "task_id",
+        "formal_execution_authorized",
+        "implementation_head",
+        "authorization",
+        "input_identities_sha256",
+        "canary_evidence",
+        "t087_cohort_binding",
+        "controller_definitions",
+        "formal_plan_sha256",
+        "shard",
+        "execution_count",
+    }
+    if (
+        set(metadata) != required
+        or metadata.get("schema_id") != T088_FORMAL_SHARD_SCHEMA_ID
+        or metadata.get("task_id") != T088_TASK_ID
+        or metadata.get("formal_execution_authorized") is not True
+        or metadata.get("implementation_head") != implementation_head
+        or metadata.get("authorization") != authorization
+        or metadata.get("input_identities_sha256")
+        != _canonical_sha256(input_identities)
+        or metadata.get("canary_evidence") != canary_evidence_reference
+        or metadata.get("t087_cohort_binding") != _binding_identity(cohort_binding)
+        or metadata.get("controller_definitions") != t088_controller_definitions()
+        or metadata.get("formal_plan_sha256") != _canonical_sha256(plan)
+        or metadata.get("shard") != topology
+        or metadata.get("execution_count") != row_count
+    ):
+        raise T088FormalExecutionError("formal shard identity is invalid")
+
+
+def merge_t088_authorized_formal_shard_paths(
+    *,
+    authorization: Mapping[str, object],
+    implementation_head: str,
+    input_identities: Mapping[str, object],
+    canary_evidence_reference: Mapping[str, object],
+    canary_evidence: Mapping[str, object],
+    cohort_rows: Sequence[Mapping[str, object]],
+    cohort_binding: Mapping[str, object],
+    output_root: str,
+    shard_paths: Sequence[Path],
+    output_path: Path,
+) -> dict[str, object]:
+    """Stream the complete shard matrix into one atomically published artifact.
+
+    No full shard or 1,652-row matrix is materialized.  Every row is checked
+    against its canonical global-ordinal plan before it reaches a private
+    temporary file.  Metadata and row counts are then checked before a hard
+    link atomically publishes the completed output without overwrite.
+    """
+
+    topology = authorization.get("shard_topology")
+    if not isinstance(topology, Mapping):
+        raise T088FormalExecutionError("formal authorization topology is unavailable")
+    shard_count = topology.get("shard_count")
+    worker_count = topology.get("worker_count")
+    if (
+        not all(
+            isinstance(value, int) and not isinstance(value, bool)
+            for value in (shard_count, worker_count)
+        )
+        or len(shard_paths) != shard_count
+    ):
+        raise T088FormalExecutionError("formal shard set is incomplete")
+    cohort = validate_t088_t087_cohort_binding(cohort_binding, cohort_rows)
+    admitted = validate_t088_formal_authorization(
+        authorization,
+        implementation_head=implementation_head,
+        input_identities=input_identities,
+        canary_evidence_reference=canary_evidence_reference,
+        canary_evidence=canary_evidence,
+        cohort_rows=cohort,
+        cohort_binding=cohort_binding,
+        shard_index=0,
+        shard_count=shard_count,
+        worker_count=worker_count,
+        output_root=output_root,
+    )
+    plan = admitted["plan"]
+    if not isinstance(plan, Mapping):
+        raise T088FormalExecutionError("admitted formal plan is malformed")
+    destination = output_path.resolve()
+    if destination.exists():
+        raise T088FormalExecutionError(
+            "refusing to overwrite retained formal raw evidence"
+        )
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    paths_by_index: dict[int, Path] = {}
+    for path in shard_paths:
+        reader = _StreamingShardJson(path.resolve(strict=True))
+        try:
+            row_count = sum(1 for _ in reader.rows())
+            shard_metadata = reader.metadata.get("shard")
+            if not isinstance(shard_metadata, Mapping):
+                raise T088FormalExecutionError("formal shard topology is unavailable")
+            index = shard_metadata.get("shard_index")
+            if (
+                isinstance(index, bool)
+                or not isinstance(index, int)
+                or index in paths_by_index
+            ):
+                raise T088FormalExecutionError(
+                    "formal shards contain a duplicate index"
+                )
+            _validate_streamed_shard_metadata(
+                reader.metadata,
+                row_count=row_count,
+                authorization=authorization,
+                implementation_head=implementation_head,
+                input_identities=input_identities,
+                canary_evidence_reference=canary_evidence_reference,
+                cohort_binding=cohort_binding,
+                plan=plan,
+                topology={
+                    "shard_index": index,
+                    "shard_count": shard_count,
+                    "worker_count": worker_count,
+                    "assignment": T088_FORMAL_SHARD_ASSIGNMENT,
+                },
+            )
+            paths_by_index[index] = path.resolve(strict=True)
+        finally:
+            reader.close()
+    if set(paths_by_index) != set(range(shard_count)):
+        raise T088FormalExecutionError("formal shard set is incomplete")
+    readers = [
+        _StreamingShardJson(paths_by_index[index]) for index in range(shard_count)
+    ]
+    iterators = [reader.rows() for reader in readers]
+    counts = [0] * shard_count
+    by_identity = {str(record["selection_identity"]): record for record in cohort}
+    header = {
+        "schema_id": T088_FORMAL_RAW_EVIDENCE_SCHEMA_ID,
+        "task_id": T088_TASK_ID,
+        "formal_execution_authorized": True,
+        "implementation_head": implementation_head,
+        "authorization": dict(authorization),
+        "input_identities_sha256": _canonical_sha256(input_identities),
+        "canary_evidence": dict(canary_evidence_reference),
+        "t087_cohort_binding": _binding_identity(cohort_binding),
+        "controller_definitions": t088_controller_definitions(),
+        "formal_plan_sha256": _canonical_sha256(plan),
+        "shard_topology": dict(topology),
+        "execution_count": len(plan["rows"]),  # type: ignore[arg-type]
+    }
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=".t088-formal-", suffix=".json", dir=str(destination.parent)
+    )
+    temporary = Path(temporary_name)
+    digest = hashlib.sha256()
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            prefix = json.dumps(
+                header,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+            if not prefix.endswith(b"}"):
+                raise T088FormalExecutionError(
+                    "formal raw evidence header is malformed"
+                )
+            prefix = prefix[:-1] + b',"rows":['
+            stream.write(prefix)
+            digest.update(prefix)
+            for ordinal, planned in enumerate(plan["rows"]):  # type: ignore[index]
+                if not isinstance(planned, Mapping):
+                    raise T088FormalExecutionError("formal plan row is malformed")
+                shard_index = ordinal % shard_count
+                try:
+                    raw = next(iterators[shard_index])
+                except StopIteration as exc:
+                    raise T088FormalExecutionError(
+                        "formal shard row count is incomplete"
+                    ) from exc
+                identity, arm = planned.get("selection_identity"), planned.get("arm")
+                if not isinstance(identity, str) or not isinstance(arm, str):
+                    raise T088FormalExecutionError("formal plan row is malformed")
+                record = by_identity.get(identity)
+                provenance = raw.get("controller_provenance")
+                if record is None or not isinstance(provenance, Mapping):
+                    raise T088FormalExecutionError(
+                        "formal shard row lacks bound provenance"
+                    )
+                try:
+                    row = _validate_execution_row(
+                        raw,
+                        record=record,
+                        arm=arm,
+                        controller=SimpleNamespace(provenance=provenance),
+                        cohort_binding=cohort_binding,
+                    )
+                except (T088CanaryExecutionError, TypeError, ValueError) as exc:
+                    raise T088FormalExecutionError(
+                        "formal shard row is invalid"
+                    ) from exc
+                encoded = json.dumps(
+                    row,
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                ).encode("utf-8")
+                if ordinal:
+                    stream.write(b",")
+                    digest.update(b",")
+                stream.write(encoded)
+                digest.update(encoded)
+                counts[shard_index] += 1
+            stream.write(b"]}\n")
+            digest.update(b"]}\n")
+        for index, iterator in enumerate(iterators):
+            try:
+                next(iterator)
+            except StopIteration:
+                pass
+            else:
+                raise T088FormalExecutionError("formal shard rows exceed their plan")
+            _validate_streamed_shard_metadata(
+                readers[index].metadata,
+                row_count=counts[index],
+                authorization=authorization,
+                implementation_head=implementation_head,
+                input_identities=input_identities,
+                canary_evidence_reference=canary_evidence_reference,
+                cohort_binding=cohort_binding,
+                plan=plan,
+                topology={
+                    "shard_index": index,
+                    "shard_count": shard_count,
+                    "worker_count": worker_count,
+                    "assignment": T088_FORMAL_SHARD_ASSIGNMENT,
+                },
+            )
+        try:
+            os.link(temporary, destination)
+        except OSError as exc:
+            raise T088FormalExecutionError(
+                "cannot atomically create retained formal raw evidence"
+            ) from exc
+        return {
+            "path": str(destination),
+            "sha256": digest.hexdigest(),
+            "size_bytes": destination.stat().st_size,
+            "schema_id": T088_FORMAL_RAW_EVIDENCE_SCHEMA_ID,
+        }
+    finally:
+        for reader in readers:
+            reader.close()
+        if temporary.exists():
+            temporary.unlink()
+
+
 def _write_new_json(
     path: str | Path, document: Mapping[str, object], *, label: str
 ) -> dict[str, object]:
@@ -606,6 +994,7 @@ __all__ = [
     "T088_FORMAL_SHARD_SCHEMA_ID",
     "T088FormalExecutionError",
     "execute_t088_authorized_formal_shard",
+    "merge_t088_authorized_formal_shard_paths",
     "merge_t088_authorized_formal_shards",
     "validate_t088_accepted_canary_evidence",
     "validate_t088_formal_authorization",
