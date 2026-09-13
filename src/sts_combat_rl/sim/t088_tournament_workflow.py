@@ -57,6 +57,7 @@ T088_REQUIRED_ARTIFACT_ROLES = frozenset(
         "blind_bundle",
         "blind_provenance",
         "final_report",
+        "retention_manifest",
     }
 )
 

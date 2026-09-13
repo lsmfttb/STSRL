@@ -288,6 +288,7 @@ def test_retention_requires_every_role_and_real_sha_shape() -> None:
         "blind_bundle",
         "blind_provenance",
         "final_report",
+        "retention_manifest",
     )
     reference = {
         "path": "/retained/evidence.json",
@@ -302,6 +303,12 @@ def test_retention_requires_every_role_and_real_sha_shape() -> None:
     }
     validate_t088_retention_manifest(manifest)
     manifest["artifact_references"] = {"formal_rows": reference}
+    with pytest.raises(T088IncompleteError, match="artifact roles"):
+        validate_t088_retention_manifest(manifest)
+
+    manifest["artifact_references"] = {
+        role: reference for role in roles if role != "retention_manifest"
+    }
     with pytest.raises(T088IncompleteError, match="artifact roles"):
         validate_t088_retention_manifest(manifest)
 
