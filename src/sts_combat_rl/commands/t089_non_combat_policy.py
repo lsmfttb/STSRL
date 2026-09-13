@@ -245,8 +245,8 @@ def _run_heldout(args: argparse.Namespace) -> int:
 def _run_fresh(args: argparse.Namespace) -> int:
     baseline = _json(args.baseline)
     candidate = _json(args.candidate)
-    if not isinstance(baseline, list) or not isinstance(candidate, list):
-        raise TypeError("fresh arm artifacts must be JSON arrays")
+    if not isinstance(baseline, dict) or not isinstance(candidate, dict):
+        raise TypeError("fresh arm artifacts must be serialized arm reports")
     report = build_t089_fresh_report(baseline, candidate)
     _write(args.output, report)
     return (

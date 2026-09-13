@@ -22,7 +22,10 @@ from typing import Any
 from sts_combat_rl.sim.action_space import ActionSpaceConfig
 from sts_combat_rl.sim.non_combat_learning import (
     T065_MANDATORY_FAMILIES,
+    T065_MAX_WORKERS,
     T065_SPLITS,
+    T065_STAGE6_REPORT_SCHEMA_ID,
+    T065_STAGE6_SHARD_COUNT,
     T065CounterfactualTarget,
     T065ModelRun,
     T065SourceState,
@@ -75,6 +78,8 @@ T089_FRESH_BOOTSTRAP_SEED = 891089
 T089_BOOTSTRAP_REPLICATES = 10_000
 T089_MAX_STEPS = 500
 T089_BATTLE_SIMULATIONS = 400
+T089_WORKER_COUNT = T065_MAX_WORKERS
+T089_SHARD_COUNT = T065_STAGE6_SHARD_COUNT
 T089_SUPPORTED_FAMILIES = T065_MANDATORY_FAMILIES
 T089_CONTINUATION_SEED_MAP: Mapping[str, tuple[int, ...]] = {
     "train": T089_TRAIN_CONTINUATION_SEEDS,
@@ -857,6 +862,355 @@ def run_t089_complete_run_arm(
     return replace(report, arm=arm, rows=tuple(rows))
 
 
+def _require_finite_nonnegative(value: Any, label: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise T089Incomplete(f"{label} is not numeric")
+    result = float(value)
+    if not math.isfinite(result) or result < 0:
+        raise T089Incomplete(f"{label} is not finite and non-negative")
+    return result
+
+
+def _require_finite_number(value: Any, label: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise T089Incomplete(f"{label} is not numeric")
+    result = float(value)
+    if not math.isfinite(result):
+        raise T089Incomplete(f"{label} is not finite")
+    return result
+
+
+def _validate_t089_shard_specs(value: Any, *, arm: str) -> tuple[dict[str, Any], ...]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        raise T089Incomplete(f"T089 {arm} shard evidence is missing")
+    validated: list[dict[str, Any]] = []
+    for spec in value:
+        if not isinstance(spec, Mapping):
+            raise T089Incomplete(f"T089 {arm} shard evidence is invalid")
+        for key in ("shard_index", "seed_start", "seed_end", "worker_count"):
+            item = spec.get(key)
+            if isinstance(item, bool) or not isinstance(item, int):
+                raise T089Incomplete(f"T089 {arm} shard field {key} is invalid")
+        if spec["seed_start"] > spec["seed_end"] or spec["worker_count"] <= 0:
+            raise T089Incomplete(f"T089 {arm} shard range is invalid")
+        validated.append(dict(spec))
+    return tuple(validated)
+
+
+def _validate_t089_search_controller_provenance(
+    value: Mapping[str, Any],
+    *,
+    arm: str,
+    simulator_identity: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Validate the complete routed Search-v2@400 controller provenance."""
+
+    expected_non_combat_name = (
+        "expert_non_combat_v1" if arm == "baseline" else "learned_non_combat_t089_v1"
+    )
+    expected_name = "oracle_search_v1_highest_mean_s400+" + expected_non_combat_name
+    if (
+        value.get("schema_version") != 1
+        or value.get("kind") != "routed_run"
+        or value.get("name") != expected_name
+    ):
+        raise T089Incomplete(f"T089 {arm} controller provenance identity is invalid")
+    config = value.get("config")
+    if not isinstance(config, Mapping) or config.get("reproducible") is not True:
+        raise T089Incomplete(f"T089 {arm} controller reproducibility is invalid")
+    battle = config.get("battle")
+    non_combat = config.get("non_combat")
+    if not isinstance(battle, Mapping) or not isinstance(non_combat, Mapping):
+        raise T089Incomplete(f"T089 {arm} routed controller children are missing")
+    if (
+        battle.get("schema_version") != 1
+        or battle.get("kind") != "oracle_battle_search"
+        or battle.get("name") != "oracle_search_v1_highest_mean_s400"
+    ):
+        raise T089Incomplete(f"T089 {arm} Search-v2 controller identity is invalid")
+    battle_config = battle.get("config")
+    if not isinstance(battle_config, Mapping):
+        raise T089Incomplete(f"T089 {arm} Search-v2 controller config is missing")
+    if battle_config.get("information_regime") != "full_simulator_state_oracle_like":
+        raise T089Incomplete(f"T089 {arm} Battle information regime is invalid")
+    if not _t089_native_identity_matches(
+        battle_config.get("native_source_identity", {})
+        if isinstance(battle_config.get("native_source_identity"), Mapping)
+        else {}
+    ) or not _t089_native_identity_matches(simulator_identity):
+        raise T089Incomplete(f"T089 {arm} Battle native identity is invalid")
+    if battle_config.get("search_budget") != {
+        "simulations": T089_BATTLE_SIMULATIONS,
+        "budget_unit": "native_random_terminal_playouts",
+    }:
+        raise T089Incomplete(f"T089 {arm} Battle search budget is invalid")
+    if battle_config.get("root_selection_rule") != "highest_mean":
+        raise T089Incomplete(f"T089 {arm} Battle root selection is invalid")
+    if (
+        battle_config.get("action_space")
+        != ActionSpaceConfig.initial_no_potions().to_dict()
+    ):
+        raise T089Incomplete(f"T089 {arm} Battle action space is invalid")
+    if battle_config.get("include_potions") is not False:
+        raise T089Incomplete(f"T089 {arm} Battle potion scope is invalid")
+    if battle_config.get("rollout_configuration") != {
+        "rollout_policy": "BattleScumSearcher2::playoutRandom",
+        "leaf_value": "BattleScumSearcher2::evaluateEndState",
+        "model_calls": 0,
+    }:
+        raise T089Incomplete(f"T089 {arm} Battle rollout provenance is invalid")
+    if non_combat.get("name") != expected_non_combat_name:
+        raise T089Incomplete(f"T089 {arm} Non-Combat controller identity is invalid")
+    non_combat_config = non_combat.get("config")
+    if (
+        not isinstance(non_combat_config, Mapping)
+        or non_combat_config.get("seed") != T089_FRESH_DRIVER_SEED
+    ):
+        raise T089Incomplete(f"T089 {arm} Non-Combat driver seed is invalid")
+    return dict(value)
+
+
+def _validate_t089_fresh_arm_report(
+    value: Mapping[str, Any], *, expected_arm: str
+) -> tuple[tuple[Mapping[str, Any], ...], dict[str, Any]]:
+    """Validate one complete serializable arm before any paired reduction."""
+
+    if not isinstance(value, Mapping):
+        raise T089Incomplete(f"T089 {expected_arm} arm is not a serialized report")
+    if value.get("schema_id") != T065_STAGE6_REPORT_SCHEMA_ID:
+        raise T089Incomplete(f"T089 {expected_arm} arm schema is invalid")
+    if value.get("schema_version") != 1 or value.get("arm") != expected_arm:
+        raise T089Incomplete(f"T089 {expected_arm} arm identity is invalid")
+    if value.get("driver_seed") != T089_FRESH_DRIVER_SEED:
+        raise T089Incomplete(f"T089 {expected_arm} arm driver seed is invalid")
+    expected_seeds = t089_fresh_simulator_seeds()
+    requested = value.get("requested_seeds")
+    if (
+        not isinstance(requested, Sequence)
+        or isinstance(requested, (str, bytes))
+        or tuple(requested) != expected_seeds
+    ):
+        raise T089Incomplete(f"T089 {expected_arm} arm seed manifest is invalid")
+    simulator_identity = value.get("simulator_identity")
+    if not isinstance(simulator_identity, Mapping) or not _t089_native_identity_matches(
+        simulator_identity
+    ):
+        raise T089Incomplete(f"T089 {expected_arm} arm native identity is invalid")
+    action_space = value.get("action_space")
+    expected_action_space = ActionSpaceConfig.initial_no_potions().to_dict()
+    if action_space != expected_action_space:
+        raise T089Incomplete(f"T089 {expected_arm} arm action space is invalid")
+    controller_provenance = value.get("controller_provenance")
+    if not isinstance(controller_provenance, Mapping):
+        raise T089Incomplete(
+            f"T089 {expected_arm} arm controller provenance is missing"
+        )
+    validated_controller = _validate_t089_search_controller_provenance(
+        controller_provenance,
+        arm=expected_arm,
+        simulator_identity=simulator_identity,
+    )
+    driver_provenance = value.get("driver_provenance")
+    if not isinstance(driver_provenance, Mapping):
+        raise T089Incomplete(f"T089 {expected_arm} arm driver provenance is missing")
+    driver_config = driver_provenance.get("config")
+    expected_driver_name = (
+        "expert_non_combat_v1"
+        if expected_arm == "baseline"
+        else "learned_non_combat_t089_v1"
+    )
+    if (
+        driver_provenance.get("name") != expected_driver_name
+        or driver_provenance.get("version") != 1
+        or not isinstance(driver_config, Mapping)
+        or driver_config.get("seed") != T089_FRESH_DRIVER_SEED
+    ):
+        raise T089Incomplete(f"T089 {expected_arm} arm driver provenance is invalid")
+    if (
+        isinstance(value.get("worker_count"), bool)
+        or value.get("worker_count") != T089_WORKER_COUNT
+        or isinstance(value.get("shard_count"), bool)
+        or value.get("shard_count") != T089_SHARD_COUNT
+    ):
+        raise T089Incomplete(f"T089 {expected_arm} worker/shard topology is invalid")
+    shard_specs = _validate_t089_shard_specs(value.get("shard_specs"), arm=expected_arm)
+    wall_clock = _require_finite_nonnegative(
+        value.get("wall_clock_seconds"),
+        f"T089 {expected_arm} wall clock",
+    )
+    problems = value.get("problems")
+    if not isinstance(problems, Sequence) or isinstance(problems, (str, bytes)):
+        raise T089Incomplete(f"T089 {expected_arm} problem evidence is missing")
+    if problems:
+        raise T089Incomplete(f"T089 {expected_arm} arm contains execution problems")
+    events = value.get("decision_events")
+    if not isinstance(events, Sequence) or isinstance(events, (str, bytes)):
+        raise T089Incomplete(f"T089 {expected_arm} decision events are missing")
+    raw_rows = value.get("rows")
+    if not isinstance(raw_rows, Sequence) or isinstance(raw_rows, (str, bytes)):
+        raise T089Incomplete(f"T089 {expected_arm} arm rows are missing")
+    if len(raw_rows) != len(expected_seeds):
+        raise T089Incomplete(f"T089 {expected_arm} arm row count is not 256")
+    rows_by_seed: dict[int, Mapping[str, Any]] = {}
+    for raw_row in raw_rows:
+        if not isinstance(raw_row, Mapping):
+            raise T089Incomplete(f"T089 {expected_arm} arm row is not an object")
+        seed = raw_row.get("simulator_seed")
+        if (
+            isinstance(seed, bool)
+            or not isinstance(seed, int)
+            or seed in rows_by_seed
+            or seed not in expected_seeds
+        ):
+            raise T089Incomplete(
+                f"T089 {expected_arm} arm row seed manifest is invalid"
+            )
+        if raw_row.get("arm") != expected_arm:
+            raise T089Incomplete(f"T089 {expected_arm} per-run arm identity is invalid")
+        if raw_row.get("terminal") is not True:
+            raise T089Incomplete(f"T089 {expected_arm} run is not terminal")
+        if (
+            raw_row.get("truncated") is not False
+            or raw_row.get("controller_failure") is not False
+        ):
+            raise T089Incomplete(
+                f"T089 {expected_arm} run has invalid completion status"
+            )
+        floor = raw_row.get("terminal_floor")
+        if (
+            isinstance(floor, bool)
+            or not isinstance(floor, (int, float))
+            or not math.isfinite(float(floor))
+        ):
+            raise T089Incomplete(f"T089 {expected_arm} terminal floor is invalid")
+        if not isinstance(raw_row.get("terminal_status"), str):
+            raise T089Incomplete(f"T089 {expected_arm} terminal status is missing")
+        if raw_row.get("controller_provenance") != validated_controller:
+            raise T089Incomplete(
+                f"T089 {expected_arm} per-run controller provenance is invalid"
+            )
+        if raw_row.get("action_space") != expected_action_space:
+            raise T089Incomplete(f"T089 {expected_arm} per-run action space is invalid")
+        steps = raw_row.get("simulator_steps")
+        if isinstance(steps, bool) or not isinstance(steps, int) or steps < 0:
+            raise T089Incomplete(f"T089 {expected_arm} simulator step count is invalid")
+        cost = raw_row.get("simulator_cost")
+        if not isinstance(cost, Mapping) or not cost:
+            raise T089Incomplete(f"T089 {expected_arm} simulator cost is missing")
+        for key, cost_value in cost.items():
+            _require_finite_nonnegative(cost_value, f"T089 {expected_arm} cost {key}")
+        rows_by_seed[seed] = dict(raw_row)
+    if tuple(sorted(rows_by_seed)) != expected_seeds:
+        raise T089Incomplete(f"T089 {expected_arm} arm does not cover exact seeds")
+    per_run_provenance = {
+        str(seed): {
+            "arm": expected_arm,
+            "controller_provenance": dict(row["controller_provenance"]),
+            "action_space": dict(row["action_space"]),
+        }
+        for seed, row in rows_by_seed.items()
+    }
+    summary = {
+        "arm": expected_arm,
+        "driver_seed": T089_FRESH_DRIVER_SEED,
+        "requested_seeds": list(expected_seeds),
+        "simulator_identity": dict(simulator_identity),
+        "action_space": dict(action_space),
+        "controller_provenance": validated_controller,
+        "driver_provenance": dict(driver_provenance),
+        "worker_count": T089_WORKER_COUNT,
+        "shard_count": T089_SHARD_COUNT,
+        "shard_specs": [dict(spec) for spec in shard_specs],
+        "wall_clock_seconds": wall_clock,
+        "per_run_provenance": per_run_provenance,
+    }
+    return tuple(rows_by_seed[seed] for seed in expected_seeds), summary
+
+
+def _validate_t089_fresh_arm_summary(
+    value: Mapping[str, Any], *, expected_arm: str
+) -> None:
+    """Validate retained provenance after the raw arm rows are reduced."""
+
+    if not isinstance(value, Mapping):
+        raise T089Incomplete(f"T089 retained {expected_arm} arm is not an object")
+    if (
+        value.get("arm") != expected_arm
+        or value.get("driver_seed") != T089_FRESH_DRIVER_SEED
+    ):
+        raise T089Incomplete(f"T089 retained {expected_arm} arm identity is invalid")
+    expected_seeds = t089_fresh_simulator_seeds()
+    requested = value.get("requested_seeds")
+    if (
+        not isinstance(requested, Sequence)
+        or isinstance(requested, (str, bytes))
+        or tuple(requested) != expected_seeds
+    ):
+        raise T089Incomplete(f"T089 retained {expected_arm} seed manifest is invalid")
+    simulator_identity = value.get("simulator_identity")
+    if not isinstance(simulator_identity, Mapping) or not _t089_native_identity_matches(
+        simulator_identity
+    ):
+        raise T089Incomplete(f"T089 retained {expected_arm} native identity is invalid")
+    if value.get("action_space") != ActionSpaceConfig.initial_no_potions().to_dict():
+        raise T089Incomplete(f"T089 retained {expected_arm} action space is invalid")
+    controller = value.get("controller_provenance")
+    if not isinstance(controller, Mapping):
+        raise T089Incomplete(
+            f"T089 retained {expected_arm} controller provenance is missing"
+        )
+    _validate_t089_search_controller_provenance(
+        controller, arm=expected_arm, simulator_identity=simulator_identity
+    )
+    driver = value.get("driver_provenance")
+    driver_config = driver.get("config") if isinstance(driver, Mapping) else None
+    if (
+        not isinstance(driver, Mapping)
+        or driver.get("name")
+        != (
+            "expert_non_combat_v1"
+            if expected_arm == "baseline"
+            else "learned_non_combat_t089_v1"
+        )
+        or driver.get("version") != 1
+        or not isinstance(driver_config, Mapping)
+        or driver_config.get("seed") != T089_FRESH_DRIVER_SEED
+    ):
+        raise T089Incomplete(
+            f"T089 retained {expected_arm} driver provenance is invalid"
+        )
+    if (
+        value.get("worker_count") != T089_WORKER_COUNT
+        or value.get("shard_count") != T089_SHARD_COUNT
+    ):
+        raise T089Incomplete(
+            f"T089 retained {expected_arm} worker/shard topology is invalid"
+        )
+    _validate_t089_shard_specs(value.get("shard_specs"), arm=expected_arm)
+    _require_finite_nonnegative(
+        value.get("wall_clock_seconds"), f"T089 retained {expected_arm} wall clock"
+    )
+    per_run = value.get("per_run_provenance")
+    if not isinstance(per_run, Mapping) or set(per_run) != {
+        str(seed) for seed in expected_seeds
+    }:
+        raise T089Incomplete(
+            f"T089 retained {expected_arm} per-run provenance is incomplete"
+        )
+    for seed in expected_seeds:
+        item = per_run[str(seed)]
+        if not isinstance(item, Mapping) or item.get("arm") != expected_arm:
+            raise T089Incomplete(
+                f"T089 retained {expected_arm} per-run identity is invalid"
+            )
+        if item.get("controller_provenance") != controller or item.get(
+            "action_space"
+        ) != value.get("action_space"):
+            raise T089Incomplete(
+                f"T089 retained {expected_arm} per-run provenance is invalid"
+            )
+
+
 def _bootstrap_interval(
     rows: Sequence[Mapping[str, Any]],
     *,
@@ -1042,11 +1396,17 @@ def validate_t089_fresh_support(
 
 
 def build_t089_fresh_report(
-    baseline_rows: Sequence[Mapping[str, Any]],
-    candidate_rows: Sequence[Mapping[str, Any]],
+    baseline_arm: Mapping[str, Any],
+    candidate_arm: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Build the paired 256-seed fresh-run report and terminal classification."""
+    """Build a paired report only from validated complete-run arm artifacts."""
 
+    baseline_rows, baseline_summary = _validate_t089_fresh_arm_report(
+        baseline_arm, expected_arm="baseline"
+    )
+    candidate_rows, candidate_summary = _validate_t089_fresh_arm_report(
+        candidate_arm, expected_arm="candidate"
+    )
     expected_seeds = t089_fresh_simulator_seeds()
     baseline_by_seed = {row.get("simulator_seed"): row for row in baseline_rows}
     candidate_by_seed = {row.get("simulator_seed"): row for row in candidate_rows}
@@ -1119,7 +1479,7 @@ def build_t089_fresh_report(
         classification = "NON_COMBAT_POLICY_HARM_CONFIRMED"
     else:
         classification = "NON_COMBAT_POLICY_IMPROVEMENT_NOT_ESTABLISHED"
-    return {
+    report = {
         "schema_id": "t089-fresh-run-report-v1",
         "schema_version": 1,
         "task_id": T089_TASK_ID,
@@ -1140,7 +1500,351 @@ def build_t089_fresh_report(
         "baseline_act2_plus": baseline_act2,
         "classification": classification,
         "battle_provenance": t089_battle_provenance(),
+        "arm_reports": {
+            "baseline": baseline_summary,
+            "candidate": candidate_summary,
+        },
     }
+    validate_t089_fresh_report(report)
+    return report
+
+
+def _validate_t089_support_report(value: Mapping[str, Any]) -> None:
+    if (
+        value.get("schema_id") != "t089-fresh-support-report-v1"
+        or value.get("schema_version") != 1
+        or value.get("task_id") != T089_TASK_ID
+        or value.get("run_count") != 256
+    ):
+        raise T089Incomplete("T089 fresh support report identity is invalid")
+    total = value.get("learned_decision_count")
+    if isinstance(total, bool) or not isinstance(total, int) or total < 0:
+        raise T089Incomplete("T089 fresh support total is invalid")
+    counts = value.get("learned_decisions_by_family")
+    if not isinstance(counts, Mapping) or set(counts) != set(T089_SUPPORTED_FAMILIES):
+        raise T089Incomplete("T089 fresh support family cells are invalid")
+    for family in T089_SUPPORTED_FAMILIES:
+        count = counts[family]
+        if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+            raise T089Incomplete("T089 fresh support family count is invalid")
+    failures = value.get("supported_inference_failure_seeds")
+    if not isinstance(failures, Sequence) or isinstance(failures, (str, bytes)):
+        raise T089Incomplete("T089 fresh support failure cells are invalid")
+    if not isinstance(value.get("passed"), bool):
+        raise T089Incomplete("T089 fresh support passed flag is invalid")
+    expected_classification = (
+        None if value["passed"] else "NON_COMBAT_EVAL_SUPPORT_INSUFFICIENT"
+    )
+    if value.get("classification") != expected_classification:
+        raise T089Incomplete("T089 fresh support classification is invalid")
+
+
+def validate_t089_fresh_report(value: Mapping[str, Any]) -> None:
+    """Validate a reduced fresh report before it can enter terminal evidence."""
+
+    if (
+        value.get("schema_id") != "t089-fresh-run-report-v1"
+        or value.get("schema_version") != 1
+        or value.get("task_id") != T089_TASK_ID
+    ):
+        raise T089Incomplete("T089 fresh report identity is invalid")
+    arm_reports = value.get("arm_reports")
+    if not isinstance(arm_reports, Mapping) or set(arm_reports) != {
+        "baseline",
+        "candidate",
+    }:
+        raise T089Incomplete("T089 fresh arm provenance is missing")
+    _validate_t089_fresh_arm_summary(arm_reports["baseline"], expected_arm="baseline")
+    _validate_t089_fresh_arm_summary(arm_reports["candidate"], expected_arm="candidate")
+    if value.get("battle_provenance") != t089_battle_provenance():
+        raise T089Incomplete("T089 fresh Battle provenance is invalid")
+    expected_seeds = t089_fresh_simulator_seeds()
+    pairs = value.get("paired_rows")
+    if (
+        not isinstance(pairs, Sequence)
+        or isinstance(pairs, (str, bytes))
+        or len(pairs) != 256
+    ):
+        raise T089Incomplete("T089 fresh paired rows are incomplete")
+    pair_by_seed: dict[int, Mapping[str, Any]] = {}
+    for pair in pairs:
+        if not isinstance(pair, Mapping):
+            raise T089Incomplete("T089 fresh paired row is not an object")
+        seed = pair.get("simulator_seed")
+        if (
+            isinstance(seed, bool)
+            or not isinstance(seed, int)
+            or seed in pair_by_seed
+            or seed not in expected_seeds
+        ):
+            raise T089Incomplete("T089 fresh paired seed identity is invalid")
+        if pair.get("family") != "ALL":
+            raise T089Incomplete("T089 fresh paired family is invalid")
+        for key in ("baseline_terminal_floor", "candidate_terminal_floor", "delta"):
+            if (
+                isinstance(pair.get(key), bool)
+                or not isinstance(pair.get(key), (int, float))
+                or not math.isfinite(float(pair[key]))
+            ):
+                raise T089Incomplete(f"T089 fresh paired metric {key} is invalid")
+        if not isinstance(pair.get("candidate_act2_plus"), bool) or not isinstance(
+            pair.get("baseline_act2_plus"), bool
+        ):
+            raise T089Incomplete("T089 fresh Act-2 cells are invalid")
+        expected_delta = float(pair["candidate_terminal_floor"]) - float(
+            pair["baseline_terminal_floor"]
+        )
+        if not math.isclose(float(pair["delta"]), expected_delta):
+            raise T089Incomplete("T089 fresh paired delta is inconsistent")
+        pair_by_seed[seed] = pair
+    if tuple(sorted(pair_by_seed)) != expected_seeds:
+        raise T089Incomplete("T089 fresh paired rows do not cover exact seeds")
+    deltas = [float(pair_by_seed[seed]["delta"]) for seed in expected_seeds]
+    if not math.isclose(
+        _require_finite_number(
+            value.get("mean_terminal_floor_delta"), "T089 fresh mean delta"
+        ),
+        statistics.fmean(deltas),
+    ):
+        raise T089Incomplete("T089 fresh mean delta is inconsistent")
+    if not math.isclose(
+        _require_finite_number(
+            value.get("median_terminal_floor_delta"), "T089 fresh median delta"
+        ),
+        statistics.median(deltas),
+    ):
+        raise T089Incomplete("T089 fresh median delta is inconsistent")
+    bootstrap = value.get("bootstrap")
+    if (
+        not isinstance(bootstrap, Mapping)
+        or bootstrap.get("seed") != T089_FRESH_BOOTSTRAP_SEED
+        or bootstrap.get("replicates") != T089_BOOTSTRAP_REPLICATES
+        or bootstrap.get("sampling_unit") != "simulator_seed"
+    ):
+        raise T089Incomplete("T089 fresh bootstrap identity is invalid")
+    low, high = _bootstrap_interval(
+        [{"family": "ALL", "delta": delta} for delta in deltas],
+        delta_key="delta",
+        families=("ALL",),
+        per_family=256,
+        seed=T089_FRESH_BOOTSTRAP_SEED,
+        replicates=T089_BOOTSTRAP_REPLICATES,
+    )
+    if not math.isclose(
+        _require_finite_number(bootstrap.get("lower_95"), "T089 fresh lower CI"),
+        low,
+    ) or not math.isclose(
+        _require_finite_number(bootstrap.get("upper_95"), "T089 fresh upper CI"),
+        high,
+    ):
+        raise T089Incomplete("T089 fresh bootstrap interval is inconsistent")
+    support = value.get("support")
+    if not isinstance(support, Mapping):
+        raise T089Incomplete("T089 fresh support report is missing")
+    _validate_t089_support_report(support)
+    candidate_invalid = value.get("candidate_invalid_or_truncated")
+    baseline_invalid = value.get("baseline_invalid_or_truncated")
+    candidate_act2 = value.get("candidate_act2_plus")
+    baseline_act2 = value.get("baseline_act2_plus")
+    if any(
+        isinstance(item, bool) or not isinstance(item, int) or item < 0
+        for item in (candidate_invalid, baseline_invalid, candidate_act2, baseline_act2)
+    ):
+        raise T089Incomplete("T089 fresh summary counts are invalid")
+    expected_candidate_act2 = sum(
+        bool(pair_by_seed[seed]["candidate_act2_plus"]) for seed in expected_seeds
+    )
+    expected_baseline_act2 = sum(
+        bool(pair_by_seed[seed]["baseline_act2_plus"]) for seed in expected_seeds
+    )
+    if (
+        candidate_act2 != expected_candidate_act2
+        or baseline_act2 != expected_baseline_act2
+    ):
+        raise T089Incomplete("T089 fresh Act-2 counts are inconsistent")
+    if candidate_invalid != 0 or baseline_invalid != 0:
+        raise T089Incomplete("T089 fresh invalid-run counts are not zero")
+    if support["passed"]:
+        expected_classification = (
+            "NON_COMBAT_POLICY_IMPROVEMENT_ESTABLISHED"
+            if low > 0
+            and candidate_invalid <= baseline_invalid
+            and candidate_act2 >= baseline_act2
+            else "NON_COMBAT_POLICY_HARM_CONFIRMED"
+            if high < 0
+            else "NON_COMBAT_POLICY_IMPROVEMENT_NOT_ESTABLISHED"
+        )
+    else:
+        expected_classification = "NON_COMBAT_EVAL_SUPPORT_INSUFFICIENT"
+    if value.get("classification") != expected_classification:
+        raise T089Incomplete("T089 fresh terminal classification is inconsistent")
+
+
+def _validate_t089_heldout_report(value: Mapping[str, Any]) -> None:
+    """Validate the serialized held-out gate and recompute its frozen metrics."""
+
+    if (
+        value.get("schema_id") != "t089-heldout-gate-report-v1"
+        or value.get("schema_version") != 1
+        or value.get("task_id") != T089_TASK_ID
+        or value.get("model_seeds") != list(T089_MODEL_SEEDS)
+    ):
+        raise T089Incomplete("T089 held-out report identity is invalid")
+    selected_seed = value.get("selected_model_seed")
+    if selected_seed not in T089_MODEL_SEEDS:
+        raise T089Incomplete("T089 held-out selected model seed is invalid")
+    selected_mae = value.get("selected_validation_mae")
+    if (
+        isinstance(selected_mae, bool)
+        or not isinstance(selected_mae, (int, float))
+        or not math.isfinite(float(selected_mae))
+    ):
+        raise T089Incomplete("T089 held-out selected validation MAE is invalid")
+    results = value.get("model_results")
+    if not isinstance(results, Mapping) or set(results) != {
+        str(seed) for seed in T089_MODEL_SEEDS
+    }:
+        raise T089Incomplete("T089 held-out model result cells are incomplete")
+    selected_rows = results[str(selected_seed)]
+    non_selected_seed = (
+        T089_MODEL_SEEDS[0]
+        if selected_seed == T089_MODEL_SEEDS[1]
+        else T089_MODEL_SEEDS[1]
+    )
+    non_selected_rows = results[str(non_selected_seed)]
+    if (
+        not isinstance(selected_rows, Sequence)
+        or isinstance(selected_rows, (str, bytes))
+        or len(selected_rows) != 64
+    ):
+        raise T089Incomplete("T089 held-out selected rows are incomplete")
+    if (
+        not isinstance(non_selected_rows, Sequence)
+        or isinstance(non_selected_rows, (str, bytes))
+        or len(non_selected_rows) != 64
+    ):
+        raise T089Incomplete("T089 held-out non-selected rows are incomplete")
+    selected_metrics: list[dict[str, Any]] = []
+    family_counts = {family: 0 for family in T089_SUPPORTED_FAMILIES}
+    for row in selected_rows:
+        if not isinstance(row, Mapping) or row.get("family") not in family_counts:
+            raise T089Incomplete("T089 held-out selected row identity is invalid")
+        delta = row.get("delta")
+        if (
+            isinstance(delta, bool)
+            or not isinstance(delta, (int, float))
+            or not math.isfinite(float(delta))
+        ):
+            raise T089Incomplete("T089 held-out delta is invalid")
+        family_counts[row["family"]] += 1
+        selected_metrics.append({"family": row["family"], "delta": float(delta)})
+    if family_counts != {family: 16 for family in T089_SUPPORTED_FAMILIES}:
+        raise T089Incomplete("T089 held-out family cells are invalid")
+    non_selected_counts = {family: 0 for family in T089_SUPPORTED_FAMILIES}
+    for row in non_selected_rows:
+        if not isinstance(row, Mapping) or row.get("family") not in family_counts:
+            raise T089Incomplete("T089 held-out non-selected row identity is invalid")
+        if (
+            isinstance(row.get("delta"), bool)
+            or not isinstance(row.get("delta"), (int, float))
+            or not math.isfinite(float(row["delta"]))
+        ):
+            raise T089Incomplete("T089 held-out non-selected delta is invalid")
+        non_selected_counts[row["family"]] += 1
+    if non_selected_counts != {family: 16 for family in T089_SUPPORTED_FAMILIES}:
+        raise T089Incomplete("T089 held-out non-selected family cells are invalid")
+    aggregate = statistics.fmean(row["delta"] for row in selected_metrics)
+    median = statistics.median(row["delta"] for row in selected_metrics)
+    family_means = {
+        family: statistics.fmean(
+            row["delta"] for row in selected_metrics if row["family"] == family
+        )
+        for family in T089_SUPPORTED_FAMILIES
+    }
+    non_selected_mean = statistics.fmean(
+        float(row["delta"]) for row in non_selected_rows
+    )
+    if (
+        not math.isclose(
+            _require_finite_number(
+                value.get("aggregate_mean_delta"),
+                "T089 held-out aggregate mean",
+            ),
+            aggregate,
+        )
+        or not math.isclose(
+            _require_finite_number(value.get("median_delta"), "T089 held-out median"),
+            median,
+        )
+        or not math.isclose(
+            _require_finite_number(
+                value.get("non_selected_model_mean_delta"),
+                "T089 held-out non-selected mean",
+            ),
+            non_selected_mean,
+        )
+        or value.get("family_mean_deltas") != family_means
+    ):
+        raise T089Incomplete("T089 held-out summary metrics are inconsistent")
+    bootstrap = value.get("bootstrap")
+    if (
+        not isinstance(bootstrap, Mapping)
+        or bootstrap.get("seed") != T089_HELDOUT_BOOTSTRAP_SEED
+        or bootstrap.get("replicates") != T089_BOOTSTRAP_REPLICATES
+        or bootstrap.get("sampling_unit") != "source_state"
+    ):
+        raise T089Incomplete("T089 held-out bootstrap identity is invalid")
+    low, high = _bootstrap_interval(
+        selected_metrics,
+        delta_key="delta",
+        families=T089_SUPPORTED_FAMILIES,
+        per_family=16,
+        seed=T089_HELDOUT_BOOTSTRAP_SEED,
+        replicates=T089_BOOTSTRAP_REPLICATES,
+    )
+    if not math.isclose(
+        _require_finite_number(bootstrap.get("lower_95"), "T089 held-out lower CI"),
+        low,
+    ) or not math.isclose(
+        _require_finite_number(bootstrap.get("upper_95"), "T089 held-out upper CI"),
+        high,
+    ):
+        raise T089Incomplete("T089 held-out bootstrap interval is inconsistent")
+    violations = value.get("violations")
+    problems = value.get("problems")
+    if (
+        not isinstance(violations, Sequence)
+        or isinstance(violations, (str, bytes))
+        or not all(isinstance(item, str) for item in violations)
+    ):
+        raise T089Incomplete("T089 held-out violations are invalid")
+    if (
+        not isinstance(problems, Sequence)
+        or isinstance(problems, (str, bytes))
+        or not all(isinstance(item, str) for item in problems)
+    ):
+        raise T089Incomplete("T089 held-out problems are invalid")
+    conditions = (
+        (aggregate > 0, "aggregate mean delta is not positive"),
+        (median >= 0, "median delta is negative"),
+        (
+            sum(value >= 0 for value in family_means.values()) >= 3,
+            "fewer than three family means are non-negative",
+        ),
+        (low > 0, "held-out bootstrap lower bound is not positive"),
+        (
+            non_selected_mean >= 0,
+            "non-selected model seed has a negative aggregate delta",
+        ),
+        (not violations, "identity/schema/restore/legal-action/fallback violation"),
+    )
+    expected_problems = [message for condition, message in conditions if not condition]
+    if (
+        list(problems) != expected_problems
+        or value.get("passed") != (not expected_problems)
+        or value.get("fresh_evaluation_authorized") != (not expected_problems)
+    ):
+        raise T089Incomplete("T089 held-out gate classification is inconsistent")
 
 
 def t089_terminal_report(
@@ -1152,8 +1856,38 @@ def t089_terminal_report(
 ) -> dict[str, Any]:
     if classification not in T089_TERMINAL_CLASSIFICATIONS:
         raise T089ContractError("unknown T089 terminal classification")
-    if classification == "NON_COMBAT_POLICY_IMPROVEMENT_ESTABLISHED" and fresh is None:
-        raise T089ContractError("established improvement requires fresh evidence")
+    if classification == "INCOMPLETE":
+        if not reason or heldout is not None or fresh is not None:
+            raise T089ContractError(
+                "INCOMPLETE requires an explicit missing/invalid-evidence reason"
+            )
+    else:
+        if heldout is None:
+            raise T089ContractError(f"{classification} requires held-out evidence")
+        if not isinstance(heldout, Mapping):
+            raise T089ContractError("held-out evidence must be an object")
+        _validate_t089_heldout_report(heldout)
+        heldout_passed = bool(heldout["passed"])
+        if (
+            classification == "NON_COMBAT_POLICY_IMPROVEMENT_NOT_ESTABLISHED"
+            and not heldout_passed
+        ):
+            if fresh is not None:
+                raise T089ContractError(
+                    "fresh evidence is forbidden after a failed held-out gate"
+                )
+        else:
+            if not heldout_passed:
+                raise T089ContractError(
+                    "fresh terminal classifications require a passing held-out gate"
+                )
+            if fresh is None or not isinstance(fresh, Mapping):
+                raise T089ContractError(f"{classification} requires fresh evidence")
+            validate_t089_fresh_report(fresh)
+            if fresh.get("classification") != classification:
+                raise T089ContractError(
+                    "terminal classification does not match fresh evidence"
+                )
     return {
         "schema_id": "t089-terminal-report-v1",
         "schema_version": 1,
