@@ -1,9 +1,9 @@
 """Small file-based command surface for offline T090 materialization.
 
 The command intentionally has no simulator adapter option.  It can build a
-frozen split manifest and validate/reduce already materialized teacher rows,
-but target collection, canaries, and formal execution remain explicit
-Maintainer-authorized Python workflows.
+frozen split manifest, validate/reduce already materialized teacher rows, and
+validate already-produced bounded-canary records.  It never starts a simulator
+job; native canary execution remains an explicit authorized Python workflow.
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ from sts_combat_rl.sim.t090_battle_student import (
     build_t090_split_manifest,
     materialize_t090_targets,
 )
+from sts_combat_rl.sim.t090_canary import build_t090_canary_evidence_from_records
 
 
 def _read(path: Path) -> Any:
@@ -49,6 +50,15 @@ def build_parser() -> argparse.ArgumentParser:
     targets.add_argument("--native-source-manifest", type=Path, required=True)
     targets.add_argument("--source-execution-ledger", type=Path, required=True)
     targets.add_argument("--output", type=Path, required=True)
+    canary = operations.add_parser(
+        "canary-evidence",
+        help="validate bounded T090 canary records without running native work",
+    )
+    canary.add_argument("--execution-records", type=Path, required=True)
+    canary.add_argument("--split-manifest", type=Path, required=True)
+    canary.add_argument("--native-source-manifest", type=Path, required=True)
+    canary.add_argument("--start-offset", type=int, required=True)
+    canary.add_argument("--output", type=Path, required=True)
     return parser
 
 
@@ -88,6 +98,28 @@ def main(argv: list[str] | None = None) -> int:
                 manifest,
                 native_source_manifest=native_manifest,
                 source_execution_ledger=execution_ledger,
+            ),
+        )
+        return 0
+    if args.operation == "canary-evidence":
+        records = _read(args.execution_records)
+        manifest = _read(args.split_manifest)
+        native_manifest = _read(args.native_source_manifest)
+        if (
+            not isinstance(records, list)
+            or not isinstance(manifest, dict)
+            or not isinstance(native_manifest, dict)
+        ):
+            raise TypeError(
+                "T090 canary inputs must be records list and split/native manifest mappings"
+            )
+        _write(
+            args.output,
+            build_t090_canary_evidence_from_records(
+                split_manifest=manifest,
+                native_source_manifest=native_manifest,
+                start_offset=args.start_offset,
+                execution_records=records,
             ),
         )
         return 0
