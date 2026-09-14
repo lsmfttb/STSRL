@@ -9,6 +9,7 @@ transition.
 from __future__ import annotations
 
 import math
+import sys
 import time
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
@@ -214,6 +215,24 @@ class T090NativeCanaryRunner:
         self._worker = dict(worker)
 
     def __call__(self, source: T090SplitEntry) -> Mapping[str, object]:
+        base_adapter = self._adapter_factory()
+        try:
+            return self._run_source(source, base_adapter)
+        finally:
+            close = getattr(base_adapter, "close", None)
+            if callable(close):
+                try:
+                    close()
+                except BaseException:
+                    # Do not replace the restore/Search/controlled-run failure
+                    # that caused this cleanup.  On a successful run, however,
+                    # a failed close remains a fail-closed runner failure.
+                    if sys.exc_info()[0] is None:
+                        raise
+
+    def _run_source(
+        self, source: T090SplitEntry, base_adapter: object
+    ) -> Mapping[str, object]:
         selected = self._source_records.get(source.source_identity)
         canonical = self._canonical_records.get(source.source_identity)
         if selected is None or canonical is None:
@@ -223,7 +242,6 @@ class T090NativeCanaryRunner:
         native_identity = _validate_t085_native_source_manifest(
             "battle_search_v2", expected_native_identity=T090_NATIVE_IDENTITY
         )
-        base_adapter = self._adapter_factory()
         restored, restore_method = restore_t085_canonical_record(
             base_adapter,
             selected,
@@ -487,9 +505,27 @@ def _validate_decision_provenance(
             record.get("selected_action_identity"), "selected action identity"
         )
         root_rows = _sequence(teacher.get("root_rows"), "canary root rows")
-        ranked: list[tuple[float, Mapping[str, object]]] = []
+        public_input = _mapping(teacher.get("public_input"), "canary public input")
+        legal_identities = _sequence(
+            public_input.get("legal_action_identities"),
+            "public legal action identities",
+        )
+        roots_by_identity: dict[str, Mapping[str, object]] = {}
         for root_raw in root_rows:
             root = _mapping(root_raw, "canary root row")
+            identity = _mapping(root.get("legal_action_identity"), "root identity")
+            identity_key = canonical_sha256(identity)
+            if identity_key in roots_by_identity:
+                raise T090CanaryError(
+                    "T090 canary root action identities are duplicated"
+                )
+            roots_by_identity[identity_key] = root
+        ranked: list[tuple[float, int, int, Mapping[str, object]]] = []
+        for legal_index, identity_raw in enumerate(legal_identities):
+            identity = _mapping(identity_raw, "public legal action identity")
+            root = roots_by_identity.get(canonical_sha256(identity))
+            if root is None:
+                raise T090CanaryError("T090 canary root action map is incomplete")
             visits = root.get("visits")
             mean = root.get("mean_value")
             if (
@@ -503,15 +539,17 @@ def _validate_decision_provenance(
                 ranked.append(
                     (
                         float(mean),
-                        _mapping(root.get("legal_action_identity"), "root identity"),
+                        visits,
+                        legal_index,
+                        identity,
                     )
                 )
         if not ranked:
             raise T090CanaryError("T090 canary cannot prove highest_mean selection")
-        best_mean = max(item[0] for item in ranked)
-        if not any(
-            identity == selected and mean == best_mean for mean, identity in ranked
-        ):
+        _, _, _, expected_selected = max(
+            ranked, key=lambda item: (item[0], item[1], -item[2])
+        )
+        if selected != expected_selected:
             raise T090CanaryError("T090 canary selected action is not highest_mean")
         retained.append(dict(record))
     return retained

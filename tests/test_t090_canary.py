@@ -272,6 +272,23 @@ def test_t090_canary_rejects_zero_or_unbound_root_decision_counts() -> None:
             runner=non_highest_mean_runner,
         )
 
+    def noncanonical_tie_runner(source):
+        record = _runner_record(source)
+        record["teacher_rows"][0]["root_rows"][1]["visits"] = 3
+        record["teacher_rows"][0]["root_rows"][1]["mean_value"] = 1.0
+        record["decision_provenance"][0]["selected_action_identity"] = {
+            "action_id": "b"
+        }
+        return record
+
+    with pytest.raises(T090CanaryError, match="not highest_mean"):
+        execute_t090_canary(
+            split_manifest=manifest,
+            native_source_manifest=native,
+            start_offset=0,
+            runner=noncanonical_tie_runner,
+        )
+
 
 def test_t090_native_canary_runner_uses_injected_t085_and_controlled_run_seams(
     monkeypatch,
@@ -329,7 +346,16 @@ def test_t090_native_canary_runner_uses_injected_t085_and_controlled_run_seams(
         native_terminal_labels = (SimpleNamespace(terminal_outcome="PLAYER_VICTORY"),)
 
     restored = SimpleNamespace(raw={})
-    base_adapter = SimpleNamespace(legal_actions=lambda snapshot: actions)
+    closed: list[str] = []
+
+    class BaseAdapter:
+        def legal_actions(self, snapshot):
+            return actions
+
+        def close(self) -> None:
+            closed.append("closed")
+
+    base_adapter = BaseAdapter()
     monkeypatch.setattr(
         t090_canary,
         "_validate_t085_native_source_manifest",
@@ -380,3 +406,12 @@ def test_t090_native_canary_runner_uses_injected_t085_and_controlled_run_seams(
         record["decision_provenance"][0]["native_search"]["native_identity"]
         == T090_NATIVE_IDENTITY
     )
+    assert closed == ["closed"]
+
+    def failing_restore(*args, **kwargs):
+        raise RuntimeError("restore failure")
+
+    monkeypatch.setattr(t090_canary, "restore_t085_canonical_record", failing_restore)
+    with pytest.raises(RuntimeError, match="restore failure"):
+        runner(source)
+    assert closed == ["closed", "closed"]
