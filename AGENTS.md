@@ -10,7 +10,9 @@ documents before making architectural changes:
 5. the relevant active roadmap under `docs/`
 
 Historical files under `docs/history/` explain past decisions but are not
-current contracts.
+current contracts. For task-role ownership, acceptance order, lifecycle
+finalization, and landing authority, `docs/collaboration_workflow.md` is the
+authoritative source and overrides shorter summaries elsewhere.
 
 ## Shell And GitHub CLI
 
@@ -174,17 +176,20 @@ current contracts.
 
 ## Parallel Development
 
-- The planner owns new task proposals. For each new task it creates one fresh
-  branch and one draft pull request from current `main`, writes the complete task
-  specification and proposed lifecycle changes there, and responds to
-  specification review on that same PR. Planner write authority is limited to
-  this specification/control-plane phase.
-- The main maintainer independently reviews and approves the exact task
-  specification, manages lifecycle state, dispatches the implementer on the same
-  branch/PR, and maintains `docs/current_status.md` as the planner-facing result
-  report. It does not proactively originate new tasks.
+- The Planner owns new task proposals and task meaning. For each new task it
+  creates one fresh branch and one draft pull request from synchronized current
+  `main`, writes the complete scientific/architectural contract and proposed
+  lifecycle changes there, owns any material contract amendments, and records
+  final scientific/architecture acceptance.
+- The Main Maintainer independently reviews and approves the exact task
+  specification, manages execution/lifecycle coordination, dispatches the
+  Implementer on the same branch/PR, verifies evidence and repository
+  conformance, prepares factual lifecycle/result landing records on the same PR
+  before final acceptance whenever practical, and records final
+  implementation/operational acceptance. It does not proactively originate new
+  scientific tasks or directly implement feature code.
 - Before a task branch is created, execution readiness begins, or
-  integration/merge work starts, the maintainer must ensure the configured
+  integration/merge work starts, the Maintainer must ensure the configured
   upstream remote's `main` ref (normally `origin/main`) has been refreshed and
   that local `main` has the exact same full commit SHA. A branch creator must
   not bypass this gate with a stale local branch or an unverified moving remote
@@ -193,23 +198,31 @@ current contracts.
   Immediately before landing, fetch again and verify that the recorded
   pre-landing base SHA still equals remote `main` and that the pending landing
   is a fast-forward; record that base/remote comparison as well.
-- A task implementer starts only after a valid exact-commit specification
-  approval. Task lifecycle state is authoritative only in
-  `docs/tasks/README.md`; an empty executable queue is valid while awaiting
-  planner direction.
-- The task implementer is a sub-agent of the main maintainer. The maintainer
+- A task Implementer starts only after a valid exact-commit specification
+  approval with `implementation_authorized=true`. Task lifecycle state for
+  landed work is authoritative only in merged `docs/tasks/README.md`; the
+  unique approved open task PR is temporary in-flight authority under the
+  serial workflow.
+- The task Implementer is a sub-agent of the Main Maintainer. The Maintainer
   prioritizes the highest-cost-effectiveness current model that is sufficiently
   capable for the task, including inexpensive options such as Luna when
   appropriate, and escalates only for justified complexity, risk, or observed
   failure. Expected rework and downstream rerun cost count alongside model
-  price. The maintainer calibrates reasoning effort and manages the
+  price. The Maintainer calibrates reasoning effort and manages the
   implementation handoff.
-- The main maintainer does not implement feature code directly. It remains the
-  independent code reviewer, publishes every review or re-review conclusion on
-  the pull request, and owns merge decisions.
+- The Main Maintainer does not implement feature code directly. It remains the
+  independent code reviewer and publishes every review or re-review conclusion
+  on the pull request. Merge hygiene and pre-landing synchronization are
+  Maintainer responsibilities, but task landing is not authorized by Maintainer
+  acceptance alone.
+- Both final acceptances must refer to the same exact final PR head: Maintainer
+  implementation/operational acceptance and Planner scientific/architecture
+  acceptance. Any material head change after either acceptance requires
+  re-acceptance for the new head. After both are recorded, the Planner may land
+  the task directly under `docs/collaboration_workflow.md`.
 - Implementer handoffs must follow [`docs/implementer_coordination.md`](docs/implementer_coordination.md):
   a wait timeout is not completion, an empty thread projection is not proof of
-  no work, and the maintainer must read/verify the result and continue the
+  no work, and the Maintainer must read/verify the result and continue the
   authorized workflow before returning to the user.
 - One task uses one fresh branch and one pull request based on latest `main`.
 - A ready-for-review pull request must satisfy the task's published
@@ -219,13 +232,15 @@ current contracts.
 - `main` is the only integration line.
 - Use isolated worktrees for parallel tasks; never switch branches in a shared
   worktree.
-- Project-level implementation reporting and final merged lifecycle state are
-  owned by the main maintainer; the planner owns proposed task content during
-  the specification phase.
+- `docs/current_status.md` is the merged result record: Maintainer owns factual
+  execution/evidence reporting, while Planner owns accepted scientific
+  interpretation and successor science. The final landed lifecycle state must
+  normally be prepared on the task PR before dual final acceptance rather than
+  added as a routine post-merge follow-up.
 - Do not revert or overwrite changes from other branches or agents.
-- Before merging, review behavior, provenance, artifact compatibility, tests,
-  and documentation impact.
-- After merging, prune obsolete review worktrees and delete local/remote task
+- Before landing, review behavior, provenance, artifact compatibility, tests,
+  documentation impact, exact-head dual acceptance, and current remote `main`.
+- After landing, prune obsolete review worktrees and delete local/remote task
   branches that are merged and no longer needed. Preserve active worktrees,
   unmerged branches, and explicitly retained historical references.
 - Keep current contracts and current status in their authoritative documents;
