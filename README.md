@@ -137,13 +137,18 @@ task documents until merged.
 
 ## Collaboration
 
-`main` is the only integration line. Each published task uses one fresh branch
-and one pull request based on the latest `main`. The read-only planner proposes
-new task content to the main maintainer. The main maintainer publishes and
-manages tasks, selects and directs an implementer sub-agent, maintains
-planner-facing result reports, reviews code, and merges accepted pull requests.
-The maintainer does not proactively propose new tasks or directly implement
-feature code.
+`main` is the only integration line. Under the default serial workflow, the
+Planner creates one fresh task branch and one task pull request from synchronized
+`main`, owns the scientific/architectural contract and any material amendments,
+and records final scientific/architecture acceptance. The Main Maintainer
+independently approves the exact specification, coordinates implementation,
+verifies evidence and repository conformance, prepares factual lifecycle/result
+landing records on the same PR when practical, and records final
+implementation/operational acceptance. Both final acceptances must refer to the
+same exact final head; only then may the Planner land the task. See
+[`docs/collaboration_workflow.md`](docs/collaboration_workflow.md) for the
+authoritative workflow and do not infer role ownership from older summaries or
+historical task contracts.
 
 The large legacy commit `d56e10e` is a read-only recovery reference. It is not
 an integration line and will not be merged wholesale. Its useful work is mapped
