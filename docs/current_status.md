@@ -595,6 +595,12 @@ training provenance is `training-attempt-4/training-provenance.json` with SHA-25
 `93a9888483990afc699e8af4c8d84660fba411aa5a3045317d935fe2609f138e`.
 No successor is implicitly authorized; any future Battle-student update must be
 separately specified and reviewed before reconsidering alternating improvement.
+Focused T089/task-document checks passed (`98`); compileall and diff checks
+passed, and T089-only Ruff/format checks passed. The final full suite was
+`1309 passed, 2 skipped, 3 failed`; all three failures were pre-existing
+baseline assertions independently reproduced on clean `main` (the WSL-mount
+artifact-path fixture, the legacy `.claude/worktrees/` regeneration-command
+assertion, and the T077 source-manifest lineage assertion).
 
 ## Implemented On Main
 
