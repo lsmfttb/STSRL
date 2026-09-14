@@ -947,7 +947,9 @@ def _wait_for_target_with_runtime_guard(
             if cancelled():
                 runtime_guard.mark_cancelled()
                 return _terminate_and_reap_target_group(target), False
-            if not runtime_guard.observe(target.pid):
+            if not runtime_guard.observe(
+                target.pid, target_exited=lambda: target.poll() is not None
+            ):
                 continue
             try:
                 _terminate_target_group(target)

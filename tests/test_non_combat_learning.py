@@ -2003,6 +2003,11 @@ def test_two_frozen_torch_seeds_checkpoint_and_normalizer_contract(tmp_path) -> 
     )
     assert tuple(run.model_seed for run in runs) == (653001, 653002)
     assert all(run.training_steps == 1500 for run in runs)
+    assert all(run.metadata["training_steps"] == 1500 for run in runs)
+    from sts_combat_rl.sim.non_combat_learning import select_validation_checkpoint
+
+    selected = select_validation_checkpoint(runs)
+    assert selected.model_seed in {653001, 653002}
     assert runs[0].normalizers == runs[1].normalizers
     for seed in (653001, 653002):
         checkpoint = load_non_combat_checkpoint(tmp_path / f"model-{seed}.pt")

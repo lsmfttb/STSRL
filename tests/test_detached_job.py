@@ -368,6 +368,58 @@ def test_runtime_guard_ignores_zombie_group_member_during_short_job(
 
 
 @pytest.mark.skipif(
+    sys.platform == "win32", reason="runtime resource guard uses POSIX process groups"
+)
+def test_runtime_guard_allows_missing_rss_when_target_exits_during_observation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = _DETACHED_JOB.ResourceAdmissionConfig(
+        root=tmp_path / "resource-admission",
+        memory_budget_mib=100,
+        memory_request_mib=100,
+        batch_id="batch",
+        job_id="exit-race",
+        runtime_rss_limit_mib=64,
+        runtime_sample_seconds=0.01,
+    )
+    guard = _DETACHED_JOB._RuntimeGuard(config)
+
+    class FakeTarget:
+        pid = 123
+
+        def __init__(self) -> None:
+            self.wait_calls = 0
+            self.poll_calls = 0
+
+        def wait(self, timeout=None) -> int:
+            self.wait_calls += 1
+            if self.wait_calls == 1:
+                raise subprocess.TimeoutExpired("target", timeout)
+            return 0
+
+        def poll(self) -> int | None:
+            self.poll_calls += 1
+            return None if self.poll_calls == 1 else 0
+
+    target = FakeTarget()
+
+    def fake_group_rss(target_pid: int, *, target_exited=None) -> None:
+        assert target_pid == target.pid
+        assert target_exited is not None
+        assert target_exited() is True
+
+    monkeypatch.setattr(_DETACHED_JOB, "_read_process_group_rss_mib", fake_group_rss)
+    exit_code, runtime_tripped = _DETACHED_JOB._wait_for_target_with_runtime_guard(
+        target, guard, cancelled=lambda: False
+    )
+
+    assert exit_code == 0
+    assert runtime_tripped is False
+    assert guard.state == "COMPLETED"
+    assert guard.sample_error is None
+
+
+@pytest.mark.skipif(
     sys.platform == "win32", reason="resource admission uses POSIX file locking"
 )
 def test_resource_admission_rejects_duplicate_active_batch_job(
