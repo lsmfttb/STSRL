@@ -17,7 +17,10 @@ STALE_WORKFLOW_PHRASES = (
     "repository-read-only planner",
     "owns merge decisions",
     "maintainer publishes and manages tasks",
-    "main maintainer owns project documentation, task publication and lifecycle state",
+    (
+        "main maintainer owns project documentation, task publication "
+        "and lifecycle state"
+    ),
 )
 
 
@@ -26,9 +29,15 @@ def test_authoritative_workflow_keeps_dual_acceptance_before_planner_landing() -
         encoding="utf-8"
     )
 
-    assert "Both final acceptances must refer to the same exact final PR head." in workflow
+    assert (
+        "Both final acceptances must refer to the same exact final PR head."
+        in workflow
+    )
     assert "Planner may then merge the task PR directly" in workflow
-    assert "Before final acceptance, Maintainer normally places factual terminal results" in workflow
+    assert (
+        "Before final acceptance, Maintainer normally places factual terminal results"
+        in workflow
+    )
 
 
 def test_current_workflow_summaries_do_not_reintroduce_stale_role_ownership() -> None:
