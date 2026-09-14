@@ -120,6 +120,7 @@ task branch is expected to be ahead of its base; before final landing, refresh
 | T085 | DONE | [Corrected Search v2 leaf-value repair and paired evaluation](T085-corrected-leaf-value-search-repair.md) | T084, T083, T082, T081, T064, T052, T042, T070 | PR #97 accepted at `5edaa255`; 2,977 paired outcomes and exact A=93/B=192/C=128/B@400=48 support `CORRECTED_VALUE_SEARCH_HARM_CONFIRMED`; bounded Search claim only, no complete-run or non-combat claim |
 | T087 | DONE | [Dense Combat outcome diagnostics and blind trace audit surface](T087-dense-combat-outcome-diagnostics.md) | T005, T012, T016, T018, T052, T078, T081, T085 | PR #100 accepted as `DENSE_COMBAT_DIAGNOSTICS_READY`; exact 413-row amended dense diagnostics, 24-row blind audit, and 24-loss/112-row HP rescue; diagnostic readiness only, no controller-improvement claim |
 | T088 | DONE | [Classical Combat Search Baseline Tournament](T088-classical-combat-search-baseline-tournament.md) | T005, T012, T016, T018, T052, T062, T078, T081, T085, T087 | PR #101 accepted as `STRONGER_NONLEARNED_COMBAT_BASELINE_IDENTIFIED`; Arm B unguided Search v2 @400 is frozen as the strongest accepted non-learned Battle baseline on the exact matched Battle-start cohort; no complete-run, learned-policy, or deployment claim |
+| T089 | DONE | [Frozen-Search Self-Generated Non-Combat Policy Improvement](T089-frozen-search-self-generated-non-combat-policy.md) | T033, T040, T065, T075, T076, T078, T081, T085, T088 | PR #102 merged at `dc7a109`; valid fresh matched evaluation terminal classification `NON_COMBAT_POLICY_IMPROVEMENT_NOT_ESTABLISHED`; no learned Non-Combat promotion or T066 continuation |
 
 Use the table for landed lifecycle state. `DRAFT`, `BLOCKED`, `CANCELLED`, and
 terminal rows have their normal durable meanings. A merged `READY` row authorizes
@@ -343,11 +344,12 @@ and inspect again after the expected window or on request rather than continuous
 The landed executable queue is the set of `READY` rows in the Active Backlog.
 There are currently no `READY` rows. T063 and T066 remain `DRAFT`; T034
 remains blocked on native public-consistent hidden-future sampling support.
-T064, T065, and T071--T088 are `DONE` with their recorded diagnostic, repair,
+T064, T065, and T071--T089 are `DONE` with their recorded diagnostic, repair,
 control-plane, target-generation, or accepted baseline-selection outcomes.
-The next direction is a separately specified and reviewed self-generated
-Non-Combat learner with Battle frozen to T088's Search v2 @400 baseline; this
-direction is not yet an executable task contract.
+T089's valid fresh evaluation did not establish Non-Combat improvement, so no
+learned-controller promotion or T066 continuation is authorized. Any future
+Battle-student update or alternating experiment requires a separately specified
+and reviewed task contract.
 
 For future serial tasks using the default one-PR workflow, also inspect remote
 open task PRs: the unique open task PR with exact-spec `SPEC APPROVED /

@@ -1,6 +1,6 @@
 # Current Status
 
-Last reviewed: 2026-09-13.
+Last reviewed: 2026-09-14.
 
 This document is the main maintainer's canonical execution-result report for
 the planner and describes the latest `main` branch only. Results from local
@@ -18,6 +18,10 @@ capability claim. T088 now freezes unguided Search v2 @400 as the strongest
 accepted non-learned Battle baseline on the exact matched Battle-start
 distribution. Search v2 @100 is retained as the historical comparator, while
 Beam weighted-best-first and progressive-bias MCTS are not promoted.
+T089 is now merged as the bounded self-generated Non-Combat learner diagnostic
+with Battle held at that frozen baseline; its valid fresh matched evaluation
+did not establish improvement, so no learned Non-Combat promotion or T066
+continuation is authorized.
 
 The task index lists the canonical lifecycle state for the published backlog.
 The M1 model-guided Oracle search sandbox is complete through synthesis. It
@@ -557,10 +561,40 @@ This result is bounded to comparative Battle-controller evidence on the fixed
 matched Battle-start distribution and freezing a simulator-side non-learned
 Battle baseline. It does not claim complete-run A20 or Heart improvement,
 learned Battle/value-target improvement, live-game deployment quality, or
-universal Battle dominance. The next research direction is to re-publish or
-materially re-review the self-generated Non-Combat learner with Battle frozen
-to Search v2 @400; PR #99/T086 remains deferred and must not be resumed under
-its old contract.
+universal Battle dominance. T089 was the separately reviewed self-generated
+Non-Combat direction with Battle frozen to Search v2 @400; PR #99/T086 remains
+deferred and must not be resumed under its old contract.
+
+T089 is complete after PR #102 merged at
+`dc7a109c700ed5915fbfc7ffa32e951c29cd46f4`. Its approved specification commit
+was `afffcdda5cebfe47a2cfa1624911d916191bab76`, and its accepted implementation
+head was `95abc8b1afe7d84e567aa70fb7225eba09fdff25`, based on the synchronized
+publication base `6b739ee3f9b4bbd113aac141c755401d2a865252`. The canonical native
+identity remained `lsmfttb/sts_lightspeed refs/heads/stsrl/main @
+20a6c2b3a9cea817c988178b814f083ff889853f` and Battle remained the T088
+unguided Search-v2@400 controller throughout.
+
+The formal target table passed exact 320-state/current-native provenance and
+contained 1,111 eligible-action rows and 2,664 continuation branches. Fixed
+two-seed training selected seed `893002` from validation MAE only; the held-out
+paired gate passed with aggregate delta `0.49609375` and 95% stratified bootstrap
+CI `[0.08984375, 0.9375]`. The conditional fresh matched A20 run then completed
+all 256 baseline and 256 candidate seeds with 8 effective workers over 16
+shards. Candidate support passed, but the paired terminal-floor delta was
+`+0.20703125` with 95% bootstrap CI `[-0.41796875, 0.82421875]`; the accepted
+terminal classification is `NON_COMBAT_POLICY_IMPROVEMENT_NOT_ESTABLISHED`.
+The evidence is simulator-side and privileged by the restored-future target
+boundary; it does not establish normal-information optimality, Heart/live-game
+improvement, or a joint Battle/Non-Combat update operator.
+
+The stable ignored evidence root is
+`/mnt/d/DeadlycatCoding/STSRL/artifacts/t089-frozen-search-self-generated-non-combat-policy`.
+Its retention manifest is `t089-retention-manifest.json` with SHA-256
+`c29145e102089432ff920102ef9a1e56056e05f32e4e6b4ddd19c8dfdb7b4a1f`, and the
+training provenance is `training-attempt-4/training-provenance.json` with SHA-256
+`93a9888483990afc699e8af4c8d84660fba411aa5a3045317d935fe2609f138e`.
+No successor is implicitly authorized; any future Battle-student update must be
+separately specified and reviewed before reconsidering alternating improvement.
 
 ## Implemented On Main
 
