@@ -244,7 +244,7 @@ def test_target_materialization_rejects_non_public_or_unmapped_teacher_rows() ->
 
     unmapped = _teacher_row(chosen[0].source_identity, chosen[0].source_group, 10.0)
     unmapped["root_rows"][1]["legal_action_identity"] = {"action_id": "other"}  # type: ignore[index]
-    with pytest.raises(ValueError, match="one-to-one"):
+    with pytest.raises(ValueError, match="unexpected legal action"):
         materialize_t090_targets(
             [unmapped],
             manifest,
@@ -291,7 +291,7 @@ def test_ineligible_multi_action_rows_are_retained_in_raw_eligibility_denominato
     ]
     eligible = _teacher_row(chosen[0].source_identity, chosen[0].source_group, 1.0)
     ineligible = _teacher_row(chosen[1].source_identity, chosen[1].source_group, 2.0)
-    ineligible["root_rows"][1]["visits"] = 0  # type: ignore[index]
+    ineligible["root_rows"].pop()  # type: ignore[index]
     target = materialize_t090_targets(
         [eligible, ineligible],
         manifest,
@@ -303,6 +303,9 @@ def test_ineligible_multi_action_rows_are_retained_in_raw_eligibility_denominato
     assert coverage["observed_multi_action_count"] == 2  # type: ignore[index]
     assert coverage["raw_target_eligible_multi_action_count"] == 1  # type: ignore[index]
     assert coverage["target_eligibility_rate"] == 0.5  # type: ignore[index]
+    assert target["observed_decisions"][1]["ineligible_reasons"] == [  # type: ignore[index]
+        "action_1_missing_root_row"
+    ]
     validate_t090_target_table(
         target,
         expected_split_manifest=manifest,

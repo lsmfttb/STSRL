@@ -621,24 +621,30 @@ def materialize_t090_decision(
     if len({len(item) for item in action_features}) != 1:
         raise T090Incomplete("public action features have inconsistent widths")
     root_rows = _sequence(row.get("root_rows"), "root_rows")
-    if len(root_rows) != len(action_identities):
-        raise T090Incomplete("Search root rows do not cover every legal action")
-    means: list[float] = []
-    ineligible_reasons: list[str] = []
-    row_identities: set[str] = set()
-    for action_index, (action_identity, root_raw) in enumerate(
-        zip(action_identities, root_rows, strict=True)
-    ):
+    legal_action_keys: list[str] = []
+    for action_identity in action_identities:
+        action_key = _identity(action_identity, "public action identity")
+        if action_key in legal_action_keys:
+            raise T090Incomplete("public legal actions are not uniquely identified")
+        legal_action_keys.append(action_key)
+    root_by_action: dict[str, Mapping[str, object]] = {}
+    for root_raw in root_rows:
         root = _mapping(root_raw, "root_row")
         root_identity = _identity(
             root.get("legal_action_identity"), "root row action identity"
         )
-        action_key = _identity(action_identity, "public action identity")
-        if root_identity != action_key or root_identity in row_identities:
-            raise T090Incomplete(
-                "Search root rows are not a one-to-one legal action map"
-            )
-        row_identities.add(root_identity)
+        if root_identity in root_by_action:
+            raise T090Incomplete("Search root rows contain a duplicate action identity")
+        if root_identity not in legal_action_keys:
+            raise T090Incomplete("Search root rows contain an unexpected legal action")
+        root_by_action[root_identity] = root
+    means: list[float] = []
+    ineligible_reasons: list[str] = []
+    for action_index, action_key in enumerate(legal_action_keys):
+        root = root_by_action.get(action_key)
+        if root is None:
+            ineligible_reasons.append(f"action_{action_index}_missing_root_row")
+            continue
         visits = root.get("visits")
         if isinstance(visits, bool) or not isinstance(visits, int) or visits <= 0:
             ineligible_reasons.append(f"action_{action_index}_unvisited")
