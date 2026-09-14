@@ -198,10 +198,11 @@ def _run_train(args: argparse.Namespace) -> int:
     source_identity = dict(table.source_artifact_identity)
     if not source_identity:
         raise T089Incomplete("T089 training source artifact identity is missing")
+    repository_root = args.target_table.parents[2]
     target_identity = t089_artifact_identity(
         args.target_table,
         role="target_table",
-        repository_root=args.target_table.parents[2],
+        repository_root=repository_root,
     )
     target_identity["record_count"] = len(table.targets)
     runs = train_t089_model_seeds(
@@ -216,7 +217,7 @@ def _run_train(args: argparse.Namespace) -> int:
         t089_artifact_identity(
             args.checkpoint_directory / f"model-{run.model_seed}.pt",
             role=f"checkpoint_{run.model_seed}",
-            repository_root=args.checkpoint_directory.parents[2],
+            repository_root=repository_root,
         )
         for run in runs
     ]

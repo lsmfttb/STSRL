@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import sts_combat_rl.commands.t089_non_combat_policy as t089_command
 import sts_combat_rl.sim.t089_non_combat_policy as t089_module
 from sts_combat_rl.commands.t089_non_combat_policy import main
 from sts_combat_rl.sim.action_space import ActionSpaceConfig
@@ -521,6 +522,71 @@ def test_t089_cli_rejects_bare_fresh_rows_and_missing_finalize_evidence(
         )
         == 2
     )
+
+
+def test_t089_train_uses_target_repository_root_for_nested_checkpoints(
+    tmp_path, monkeypatch
+) -> None:
+    repository_root = tmp_path / "repository"
+    target_path = repository_root / "artifacts" / "t089" / "target-table.json"
+    checkpoint_directory = (
+        repository_root / "artifacts" / "t089" / "training-attempt-2" / "checkpoints"
+    )
+    output_path = repository_root / "artifacts" / "t089" / "training.json"
+    observed_roots = []
+    runs = (
+        SimpleNamespace(model_seed=893001, validation_mae=1.0),
+        SimpleNamespace(model_seed=893002, validation_mae=2.0),
+    )
+
+    monkeypatch.setattr(t089_command, "read_source_states", lambda _path: ())
+    monkeypatch.setattr(
+        t089_command,
+        "read_target_table",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            source_artifact_identity={"sha256": "a" * 64}, targets=("target",)
+        ),
+    )
+    monkeypatch.setattr(t089_command, "validate_t089_target_table", lambda _table: {})
+    monkeypatch.setattr(
+        t089_command,
+        "train_t089_model_seeds",
+        lambda **kwargs: observed_roots.append(kwargs["checkpoint_directory"]) or runs,
+    )
+    monkeypatch.setattr(
+        t089_command,
+        "select_t089_validation_checkpoint",
+        lambda values: values[0],
+    )
+
+    def fake_artifact_identity(path, *, role, repository_root):
+        observed_roots.append(repository_root)
+        return {
+            "role": role,
+            "path": str(path),
+            "sha256": "b" * 64,
+            "size_bytes": 1,
+        }
+
+    monkeypatch.setattr(t089_command, "t089_artifact_identity", fake_artifact_identity)
+    args = SimpleNamespace(
+        states=repository_root / "states.jsonl",
+        target_table=target_path,
+        checkpoint_directory=checkpoint_directory,
+        output=output_path,
+    )
+
+    assert t089_command._run_train(args) == 0
+    assert observed_roots[0] == repository_root
+    assert observed_roots[1] == checkpoint_directory
+    assert observed_roots[2:] == [repository_root, repository_root]
+    report = json.loads(output_path.read_text(encoding="utf-8"))
+    assert report["selected_model_seed"] == 893001
+    assert report["training_steps"] == 1500
+    assert [item["role"] for item in report["checkpoints"]] == [
+        "checkpoint_893001",
+        "checkpoint_893002",
+    ]
 
 
 def test_t089_retention_requires_all_roles() -> None:
