@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from types import SimpleNamespace
 
 import pytest
 
+from sts_combat_rl.sim import t090_canary
 from sts_combat_rl.sim.t090_battle_student import (
+    T090_NATIVE_IDENTITY,
     T090_TEACHER_CONFIG,
     build_t090_split_manifest,
     canonical_sha256,
@@ -16,6 +19,7 @@ from sts_combat_rl.sim.t090_battle_student import (
 from sts_combat_rl.sim.t090_canary import (
     T090_CANARY_START_COUNT,
     T090CanaryError,
+    T090NativeCanaryRunner,
     build_t090_canary_evidence_from_records,
     execute_t090_canary,
     select_t090_canary_sources,
@@ -71,6 +75,7 @@ def _runner_record(source) -> dict[str, object]:
         "source_group": source.source_group,
         "split": source.split,
         "canonical_position": source.canonical_position,
+        "native_identity": T090_NATIVE_IDENTITY,
         "teacher_config": T090_TEACHER_CONFIG,
         "restore_public_legal_parity": True,
         "completed": True,
@@ -112,6 +117,21 @@ def _runner_record(source) -> dict[str, object]:
                         "mean_value": -1.0,
                     },
                 ],
+            }
+        ],
+        "decision_provenance": [
+            {
+                "decision_identity": f"{source.source_identity}-decision",
+                "selected_action_identity": actions[0],
+                "selection_rule": "highest_mean",
+                "native_search": {
+                    "native_identity": T090_NATIVE_IDENTITY,
+                    "native_api": "StepSimulator.battle_search_v2.v1",
+                    "simulations": 400,
+                    "include_potions": False,
+                    "policy_prior_callback": None,
+                    "leaf_value_callback": None,
+                },
             }
         ],
     }
@@ -195,3 +215,168 @@ def test_t090_canary_rejects_missing_or_duplicate_selected_source_records() -> N
             split_manifest=manifest,
             native_source_manifest=native,
         )
+
+
+def test_t090_canary_rejects_zero_or_unbound_root_decision_counts() -> None:
+    manifest = _split_manifest()
+    native = _native_source_manifest()
+
+    def zero_root_runner(source):
+        record = _runner_record(source)
+        record["teacher_rows"] = []
+        record["decision_provenance"] = []
+        record["cost"] = {
+            "wall_clock_time_s": 0.25,
+            "root_decision_count": 0,
+            "search_simulation_count": 0,
+        }
+        return record
+
+    with pytest.raises(T090CanaryError, match="requires a root decision"):
+        execute_t090_canary(
+            split_manifest=manifest,
+            native_source_manifest=native,
+            start_offset=0,
+            runner=zero_root_runner,
+        )
+
+    def mismatched_root_runner(source):
+        record = _runner_record(source)
+        record["cost"] = {
+            "wall_clock_time_s": 0.25,
+            "root_decision_count": 2,
+            "search_simulation_count": 800,
+        }
+        return record
+
+    with pytest.raises(T090CanaryError, match="does not match captured teacher rows"):
+        execute_t090_canary(
+            split_manifest=manifest,
+            native_source_manifest=native,
+            start_offset=0,
+            runner=mismatched_root_runner,
+        )
+
+    def non_highest_mean_runner(source):
+        record = _runner_record(source)
+        record["decision_provenance"][0]["selected_action_identity"] = {
+            "action_id": "b"
+        }
+        return record
+
+    with pytest.raises(T090CanaryError, match="not highest_mean"):
+        execute_t090_canary(
+            split_manifest=manifest,
+            native_source_manifest=native,
+            start_offset=0,
+            runner=non_highest_mean_runner,
+        )
+
+
+def test_t090_native_canary_runner_uses_injected_t085_and_controlled_run_seams(
+    monkeypatch,
+) -> None:
+    manifest = _split_manifest()
+    source = select_t090_canary_sources(manifest, start_offset=0)[0]
+    actions = [{"action_id": "a"}, {"action_id": "b"}]
+    step = SimpleNamespace(
+        battle_active=True,
+        feature_schema_id="public-tactical-v2",
+        snapshot_features=[1.0, 2.0],
+        legal_action_features=[[0.0, 1.0], [1.0, 0.0]],
+        legal_action_identities=actions,
+        legal_action_kinds=["card", "end_turn"],
+        step_index=3,
+        next_battle_outcome="PLAYER_VICTORY",
+        next_player_hp=40.0,
+        decision_metadata={
+            "oracle_search_decision_reports": [
+                {
+                    "native_api": "StepSimulator.battle_search_v2.v1",
+                    "simulations_requested": 400,
+                    "include_potions": False,
+                    "selection_rule": "highest_mean",
+                    "selected_action_identity": actions[0],
+                    "root_actions": [
+                        {
+                            "legal_action_index": 0,
+                            "action_identity": actions[0],
+                            "visits": 3,
+                            "mean_value": 1.0,
+                        },
+                        {
+                            "legal_action_index": 1,
+                            "action_identity": actions[1],
+                            "visits": 2,
+                            "mean_value": -1.0,
+                        },
+                    ],
+                }
+            ]
+        },
+    )
+    controlled = SimpleNamespace(
+        terminal=True,
+        problems=[],
+        steps=[step],
+        final_raw={"completed_battle_outcome": "PLAYER_VICTORY"},
+    )
+
+    class FakeAdapter:
+        def prime_restored_snapshot(self, snapshot) -> None:
+            assert snapshot is restored
+
+        native_terminal_labels = (SimpleNamespace(terminal_outcome="PLAYER_VICTORY"),)
+
+    restored = SimpleNamespace(raw={})
+    base_adapter = SimpleNamespace(legal_actions=lambda snapshot: actions)
+    monkeypatch.setattr(
+        t090_canary,
+        "_validate_t085_native_source_manifest",
+        lambda *args, **kwargs: dict(T090_NATIVE_IDENTITY),
+    )
+    monkeypatch.setattr(
+        t090_canary,
+        "restore_t085_canonical_record",
+        lambda *args, **kwargs: (restored, "native_checkpoint"),
+    )
+    monkeypatch.setattr(t090_canary, "read_native_public_projection", lambda *args: {})
+    monkeypatch.setattr(
+        t090_canary,
+        "build_public_run_context",
+        lambda *args, **kwargs: {"history": []},
+    )
+    monkeypatch.setattr(
+        t090_canary,
+        "T085NativeTerminalSearchAdapter",
+        lambda *args, **kwargs: FakeAdapter(),
+    )
+    monkeypatch.setattr(
+        t090_canary, "T085UnguidedBattleSearchV2Controller", lambda **kwargs: object()
+    )
+    monkeypatch.setattr(
+        t090_canary, "execute_controlled_run", lambda *args, **kwargs: controlled
+    )
+    runner = T090NativeCanaryRunner(
+        adapter_factory=lambda: base_adapter,
+        source_records={
+            source.source_identity: SimpleNamespace(selection_identity="record")
+        },
+        canonical_records={
+            source.source_identity: SimpleNamespace(public_run_context={"history": []})
+        },
+        worker={
+            "stage_worker_count": 1,
+            "worker_index": 0,
+            "shard_count": 1,
+            "shard_index": 0,
+        },
+    )
+    record = runner(source)
+    assert record["cost"]["root_decision_count"] == 1
+    assert record["cost"]["search_simulation_count"] == 400
+    assert record["decision_provenance"][0]["selected_action_identity"] == actions[0]
+    assert (
+        record["decision_provenance"][0]["native_search"]["native_identity"]
+        == T090_NATIVE_IDENTITY
+    )
