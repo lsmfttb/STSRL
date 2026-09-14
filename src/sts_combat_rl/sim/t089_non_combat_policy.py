@@ -947,13 +947,14 @@ def run_t089_complete_run_arm(
     seeds: Iterable[int] | None = None,
     battle_controller_factory: Callable[[], Any] | None = None,
     simulator_identity: Mapping[str, Any] | None = None,
+    worker_count: int | None = None,
 ) -> Any:
     """Run one explicitly-authorized T089 fresh arm through 16 real shards.
 
     The shared T065 executor owns one shard's complete-run semantics.  T089
     owns this outer orchestration so its exact fresh cohort is visibly split
-    into sixteen concurrent, sixteen-seed shards without changing T065's
-    defaults or schemas.
+    into sixteen sixteen-seed shards.  ``worker_count`` controls the effective
+    executor concurrency while remaining bounded by the frozen T065 maximum.
     """
 
     if arm not in {"baseline", "candidate"}:
@@ -967,6 +968,13 @@ def run_t089_complete_run_arm(
     requested = t089_fresh_simulator_seeds() if seeds is None else tuple(seeds)
     if requested != t089_fresh_simulator_seeds():
         raise T089Incomplete("T089 fresh execution requires the exact 256-seed cohort")
+    effective_worker_count = (
+        T089_WORKER_COUNT
+        if worker_count is None
+        else _validate_t089_effective_worker_count(
+            worker_count, label="T089 fresh effective worker_count"
+        )
+    )
     native_identity = dict(
         simulator_identity
         or {
@@ -987,7 +995,7 @@ def run_t089_complete_run_arm(
             model_run=model_run,
             driver_seed=T089_FRESH_DRIVER_SEED,
             max_steps=T089_MAX_STEPS,
-            worker_count=T089_WORKER_COUNT,
+            worker_count=effective_worker_count,
             shard_count=T089_SHARD_COUNT,
             battle_controller_factory=battle_controller_factory,
             learned_policy_factory=lambda run: T089LearnedNonCombatPolicy(run),
@@ -998,7 +1006,7 @@ def run_t089_complete_run_arm(
 
     started = time.perf_counter()
     shard_reports: dict[int, T065CompleteRunArmReport] = {}
-    with ThreadPoolExecutor(max_workers=T089_WORKER_COUNT) as executor:
+    with ThreadPoolExecutor(max_workers=effective_worker_count) as executor:
         futures = {
             executor.submit(run_shard, index, seed_start, seed_end): index
             for index, (seed_start, seed_end) in enumerate(shard_ranges)
@@ -1026,7 +1034,7 @@ def run_t089_complete_run_arm(
         expected_shard_seeds = tuple(range(seed_start, seed_end + 1))
         if (
             report.requested_seeds != expected_shard_seeds
-            or report.worker_count != T089_WORKER_COUNT
+            or report.worker_count != effective_worker_count
             or report.shard_count != T089_SHARD_COUNT
         ):
             raise T089Incomplete("T089 fresh shard report topology is invalid")
@@ -1051,7 +1059,7 @@ def run_t089_complete_run_arm(
                 "seed_start": seed_start,
                 "seed_end": seed_end,
                 "seed_count": seed_end - seed_start + 1,
-                "worker_count": T089_WORKER_COUNT,
+                "worker_count": effective_worker_count,
                 "requested_seeds": list(report.requested_seeds),
                 "requested_seed_count": len(report.requested_seeds),
                 "completed_seeds": completed_seeds,
@@ -1075,7 +1083,7 @@ def run_t089_complete_run_arm(
             event for report in decorated_reports for event in report.decision_events
         ),
         wall_clock_seconds=time.perf_counter() - started,
-        worker_count=T089_WORKER_COUNT,
+        worker_count=effective_worker_count,
         shard_count=T089_SHARD_COUNT,
         shard_specs=tuple(shard_specs),
         problems=tuple(
@@ -1179,7 +1187,21 @@ def _require_finite_number(value: Any, label: str) -> float:
     return result
 
 
-def _validate_t089_shard_specs(value: Any, *, arm: str) -> tuple[dict[str, Any], ...]:
+def _validate_t089_effective_worker_count(value: Any, *, label: str) -> int:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not 1 <= value <= T089_WORKER_COUNT
+    ):
+        raise T089Incomplete(
+            f"{label} must be an integer between 1 and {T089_WORKER_COUNT}"
+        )
+    return value
+
+
+def _validate_t089_shard_specs(
+    value: Any, *, arm: str, worker_count: int
+) -> tuple[dict[str, Any], ...]:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
         raise T089Incomplete(f"T089 {arm} shard evidence is missing")
     if len(value) != T089_SHARD_COUNT:
@@ -1213,7 +1235,7 @@ def _validate_t089_shard_specs(value: Any, *, arm: str) -> tuple[dict[str, Any],
             or spec["seed_start"] != expected_start
             or spec["seed_end"] != expected_end
             or spec["seed_count"] != expected_end - expected_start + 1
-            or spec["worker_count"] != T089_WORKER_COUNT
+            or spec["worker_count"] != worker_count
             or spec["requested_seed_count"] != spec["seed_count"]
             or spec["completed_seed_count"] != spec["seed_count"]
             or spec["completed_row_count"] != spec["seed_count"]
@@ -1533,14 +1555,19 @@ def _validate_t089_fresh_arm_report(
         or driver_config.get("seed") != T089_FRESH_DRIVER_SEED
     ):
         raise T089Incomplete(f"T089 {expected_arm} arm driver provenance is invalid")
+    effective_worker_count = _validate_t089_effective_worker_count(
+        value.get("worker_count"), label=f"T089 {expected_arm} worker_count"
+    )
     if (
-        isinstance(value.get("worker_count"), bool)
-        or value.get("worker_count") != T089_WORKER_COUNT
-        or isinstance(value.get("shard_count"), bool)
+        isinstance(value.get("shard_count"), bool)
         or value.get("shard_count") != T089_SHARD_COUNT
     ):
         raise T089Incomplete(f"T089 {expected_arm} worker/shard topology is invalid")
-    shard_specs = _validate_t089_shard_specs(value.get("shard_specs"), arm=expected_arm)
+    shard_specs = _validate_t089_shard_specs(
+        value.get("shard_specs"),
+        arm=expected_arm,
+        worker_count=effective_worker_count,
+    )
     wall_clock = _require_finite_nonnegative(
         value.get("wall_clock_seconds"),
         f"T089 {expected_arm} wall clock",
@@ -1654,7 +1681,7 @@ def _validate_t089_fresh_arm_report(
         "action_space": dict(action_space),
         "controller_provenance": validated_controller,
         "driver_provenance": dict(driver_provenance),
-        "worker_count": T089_WORKER_COUNT,
+        "worker_count": effective_worker_count,
         "shard_count": T089_SHARD_COUNT,
         "shard_specs": [dict(spec) for spec in shard_specs],
         "wall_clock_seconds": wall_clock,
@@ -1726,14 +1753,18 @@ def _validate_t089_fresh_arm_summary(
         raise T089Incomplete(
             f"T089 retained {expected_arm} driver provenance is invalid"
         )
-    if (
-        value.get("worker_count") != T089_WORKER_COUNT
-        or value.get("shard_count") != T089_SHARD_COUNT
-    ):
+    effective_worker_count = _validate_t089_effective_worker_count(
+        value.get("worker_count"), label=f"T089 retained {expected_arm} worker_count"
+    )
+    if value.get("shard_count") != T089_SHARD_COUNT:
         raise T089Incomplete(
             f"T089 retained {expected_arm} worker/shard topology is invalid"
         )
-    shard_specs = _validate_t089_shard_specs(value.get("shard_specs"), arm=expected_arm)
+    shard_specs = _validate_t089_shard_specs(
+        value.get("shard_specs"),
+        arm=expected_arm,
+        worker_count=effective_worker_count,
+    )
     _require_finite_nonnegative(
         value.get("wall_clock_seconds"), f"T089 retained {expected_arm} wall clock"
     )

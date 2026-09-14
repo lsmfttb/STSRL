@@ -389,7 +389,10 @@ def test_t089_fresh_arm_rejects_pseudo_serial_shard_evidence() -> None:
         )
 
 
-def test_t089_fresh_execution_uses_exact_parallel_shards(monkeypatch) -> None:
+@pytest.mark.parametrize("effective_worker_count", [16, 8])
+def test_t089_fresh_execution_uses_exact_parallel_shards(
+    monkeypatch, effective_worker_count
+) -> None:
     calls: list[tuple[int, ...]] = []
 
     def fake_run_complete_run_arm(adapter_factory, **kwargs):
@@ -415,7 +418,7 @@ def test_t089_fresh_execution_uses_exact_parallel_shards(monkeypatch) -> None:
             requested_seeds=shard_seeds,
             rows=rows,
             wall_clock_seconds=1.0,
-            worker_count=16,
+            worker_count=kwargs["worker_count"],
             shard_count=16,
             simulator_identity={
                 "repository": T089_NATIVE_REPOSITORY,
@@ -432,6 +435,7 @@ def test_t089_fresh_execution_uses_exact_parallel_shards(monkeypatch) -> None:
         lambda: None,
         arm="baseline",
         battle_controller_factory=lambda: None,
+        worker_count=effective_worker_count,
     )
     assert len(calls) == 16
     assert sorted(calls) == [
@@ -440,8 +444,25 @@ def test_t089_fresh_execution_uses_exact_parallel_shards(monkeypatch) -> None:
     ]
     assert report.requested_seeds == tuple(range(891001, 891257))
     assert len(report.shard_specs) == 16
-    assert [spec["worker_count"] for spec in report.shard_specs] == [16] * 16
+    assert report.worker_count == effective_worker_count
+    assert [spec["worker_count"] for spec in report.shard_specs] == [
+        effective_worker_count
+    ] * 16
     assert [spec["seed_count"] for spec in report.shard_specs] == [16] * 16
+
+
+def test_t089_fresh_validators_accept_effective_worker_count_8() -> None:
+    baseline = _fresh_arm(0.0, learned=False, arm="baseline")
+    candidate = _fresh_arm(1.0, learned=True, arm="candidate")
+    for arm in (baseline, candidate):
+        arm["worker_count"] = 8
+        for spec in arm["shard_specs"]:
+            spec["worker_count"] = 8
+
+    fresh = build_t089_fresh_report(baseline, candidate)
+    validate_t089_fresh_report(fresh)
+    assert fresh["arm_reports"]["baseline"]["worker_count"] == 8
+    assert fresh["arm_reports"]["candidate"]["worker_count"] == 8
 
 
 def test_t089_fresh_and_terminal_evidence_fail_closed() -> None:
