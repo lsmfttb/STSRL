@@ -26,7 +26,12 @@ several files:
 8. Operational guides: commands and environment details.
 9. [`history/`](history/README.md): past investigations and superseded plans.
 
-`README.md` is the project entry point, not an exhaustive specification.
+`README.md` is the project entry point, not an exhaustive specification. For
+questions about task-role ownership, acceptance order, lifecycle finalization,
+or landing authority, `collaboration_workflow.md` overrides any shorter summary
+elsewhere in current documentation. Historical task contracts remain evidence
+of the workflow that governed those tasks and do not override the current
+workflow.
 
 ## Current Documents
 
