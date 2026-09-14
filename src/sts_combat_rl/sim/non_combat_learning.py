@@ -6463,6 +6463,7 @@ def _checkpoint_metadata(
         "public_context_feature_names": list(PUBLIC_CONTEXT_MODEL_INPUT_FEATURE_NAMES),
         "model_class": model_class,
         "model_seed": model_seed,
+        "training_steps": 1500,
         "training_config": _frozen_training_config(model_seed),
         "target_identity": "q_floor=mean(max(0,terminal_floor-source_floor))",
         "source_artifact_identity": dict(source_artifact_identity),
