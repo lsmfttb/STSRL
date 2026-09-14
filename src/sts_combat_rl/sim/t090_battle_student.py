@@ -836,7 +836,10 @@ def validate_t090_target_table(
         or value.get("task_id") != T090_TASK_ID
     ):
         raise T090Incomplete("unsupported T090 target schema")
-    validate_t090_split_manifest(expected_split_manifest)
+    split_entries = {
+        entry.source_identity: entry
+        for entry in validate_t090_split_manifest(expected_split_manifest)
+    }
     if value.get("split_manifest_sha256") != canonical_sha256(expected_split_manifest):
         raise T090Incomplete(
             "T090 target table is not bound to the supplied split manifest"
@@ -848,6 +851,26 @@ def validate_t090_target_table(
         native_source_manifest=expected_native_source_manifest,
     )
     examples = deserialize_t090_examples(value)
+    seen_decisions: set[tuple[str, str]] = set()
+    for example in examples:
+        expected_entry = split_entries.get(example.source_identity)
+        if expected_entry is None:
+            raise T090Incomplete(
+                "T090 target example source is outside the frozen split"
+            )
+        if (
+            example.source_group != expected_entry.source_group
+            or example.split != expected_entry.split
+        ):
+            raise T090Incomplete(
+                "T090 target example split/group differs from frozen split"
+            )
+        decision_key = (example.source_identity, example.decision_identity)
+        if decision_key in seen_decisions:
+            raise T090Incomplete(
+                "T090 target decision identity is not unique per source"
+            )
+        seen_decisions.add(decision_key)
     collision = _mapping(value.get("collision_deduplication"), "collision report")
     if collision.get("fingerprint_schema_id") != T090_FINGERPRINT_SCHEMA_ID:
         raise T090Incomplete("T090 collision report fingerprint schema is invalid")
@@ -1151,6 +1174,7 @@ def load_t090_checkpoint(
         or expected_identity.get("size_bytes") != resolved.stat().st_size
         or expected_identity.get("schema_id") != T090_CHECKPOINT_SCHEMA_ID
         or expected_identity.get("role") != expected_role
+        or expected_identity.get("seed") not in T090_MODEL_SEEDS
     ):
         raise T090Incomplete("T090 checkpoint artifact identity is invalid")
     examples, target_identity = _target_table_identity(
@@ -1169,6 +1193,7 @@ def load_t090_checkpoint(
         or payload.get("task_id") != T090_TASK_ID
         or payload.get("role") != expected_role
         or payload.get("seed") not in T090_MODEL_SEEDS
+        or payload.get("seed") != expected_identity.get("seed")
         or payload.get("target_identity") != target_identity
     ):
         raise T090Incomplete("T090 checkpoint payload binding is invalid")
@@ -1275,6 +1300,10 @@ def t090_rank_metrics(
                 "student_action": selected,
                 "teacher_means": list(item.teacher_means),
                 "scores": scores,
+                "legal_action_identities": [
+                    dict(identity) for identity in item.legal_action_identities
+                ],
+                "legal_action_kinds": list(item.legal_action_kinds),
                 "regret": regret,
                 "top1": float(selected == teacher_best),
             }
@@ -1311,13 +1340,27 @@ def _metric_summary_from_rows(
             _finite(value, "student score")
             for value in _sequence(row.get("scores"), "scores")
         ]
+        action_identities = [
+            dict(_mapping(value, "legal action identity"))
+            for value in _sequence(
+                row.get("legal_action_identities"), "legal_action_identities"
+            )
+        ]
+        action_kinds = [
+            _string(value, "legal action kind")
+            for value in _sequence(row.get("legal_action_kinds"), "legal_action_kinds")
+        ]
         if (
             len(means) < 2
             or len(means) != len(scores)
+            or len(means) != len(action_identities)
+            or len(means) != len(action_kinds)
             or selected < 0
             or selected >= len(scores)
         ):
             raise T090Incomplete("T090 metric action rows are invalid")
+        if selected_kind != action_kinds[selected]:
+            raise T090Incomplete("T090 metric selected action kind is inconsistent")
         best_mean = max(means)
         teacher_best = min(
             index for index, value in enumerate(means) if value == best_mean
@@ -1503,6 +1546,7 @@ def _validate_checkpoint_reference(
         value.get("schema_id") != T090_CHECKPOINT_SCHEMA_ID
         or value.get("role") != role
         or value.get("target_table_sha256") != target_identity["target_table_sha256"]
+        or value.get("seed") not in T090_MODEL_SEEDS
         or not isinstance(value.get("path"), str)
         or not value["path"]
         or not isinstance(value.get("sha256"), str)
@@ -1535,7 +1579,7 @@ def validate_t090_heldout_report(
         or value.get("task_id") != T090_TASK_ID
     ):
         raise T090Incomplete("unsupported T090 held-out report")
-    _, target_identity = _target_table_identity(
+    target_examples, target_identity = _target_table_identity(
         expected_target_table,
         expected_split_manifest=expected_split_manifest,
         expected_native_source_manifest=expected_native_source_manifest,
@@ -1575,6 +1619,26 @@ def validate_t090_heldout_report(
         row.get("decision_identity") for row in control_rows
     ]:
         raise T090Incomplete("T090 held-out per-state rows are not paired")
+    expected_heldout = [
+        example
+        for example in target_examples
+        if example.split == "heldout" and example.eligible
+    ]
+    if len(student_rows) != len(expected_heldout):
+        raise T090Incomplete("T090 held-out rows do not cover the target table")
+    for model_rows in (student_rows, control_rows):
+        for row, expected in zip(model_rows, expected_heldout, strict=True):
+            if (
+                row.get("decision_identity") != expected.decision_identity
+                or row.get("source_group") != expected.source_group
+                or row.get("teacher_means") != list(expected.teacher_means)
+                or row.get("legal_action_identities")
+                != [dict(identity) for identity in expected.legal_action_identities]
+                or row.get("legal_action_kinds") != list(expected.legal_action_kinds)
+            ):
+                raise T090Incomplete(
+                    "T090 held-out per-state row differs from the validated target table"
+                )
     expected_regret = [
         _finite(control["regret"], "control regret")
         - _finite(student["regret"], "student regret")

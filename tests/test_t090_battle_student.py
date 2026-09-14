@@ -155,6 +155,14 @@ def test_target_materialization_rejects_non_public_or_unmapped_teacher_rows() ->
             expected_split_manifest=manifest,
             expected_native_source_manifest=native,
         )
+    forged_source = deepcopy(result)
+    forged_source["examples"][0]["source_identity"] = "forged-source"
+    with pytest.raises(ValueError, match="outside the frozen split"):
+        validate_t090_target_table(
+            forged_source,
+            expected_split_manifest=manifest,
+            expected_native_source_manifest=native,
+        )
 
     hidden = _teacher_row(chosen[0].source_identity, chosen[0].source_group, 10.0)
     hidden["public_input"]["rng_state"] = "forbidden"  # type: ignore[index]
@@ -282,6 +290,17 @@ def test_checkpoint_and_selection_bind_target_config_and_exact_seed_set(
         expected_target_table=target,
     )
     assert loaded.config == scorer.config
+    wrong_seed_identity = deepcopy(identity)
+    wrong_seed_identity["seed"] = 900092
+    with pytest.raises(ValueError, match="checkpoint payload binding"):
+        load_t090_checkpoint(
+            identity["path"],
+            expected_identity=wrong_seed_identity,
+            expected_role="student",
+            expected_split_manifest=manifest,
+            expected_native_source_manifest=native,
+            expected_target_table=target,
+        )
     duplicate_results = [
         (scorer, {**report, "seed": 900091}),
         (scorer, {**report, "seed": 900091}),
@@ -368,6 +387,20 @@ def test_heldout_validator_recomputes_secondary_and_requires_boundaries(
     with pytest.raises(ValueError, match="information or split"):
         validate_t090_heldout_report(
             tampered,
+            expected_target_table=target,
+            expected_split_manifest=manifest,
+            expected_native_source_manifest=native,
+            expected_student_checkpoint=student_identity,
+            expected_control_checkpoint=control_identity,
+        )
+    forged_row = deepcopy(report)
+    forged_row["student"]["per_state"][0]["decision_identity"] = "forged-decision"
+    forged_row["shuffled_target_control"]["per_state"][0]["decision_identity"] = (
+        "forged-decision"
+    )
+    with pytest.raises(ValueError, match="differs from the validated target"):
+        validate_t090_heldout_report(
+            forged_row,
             expected_target_table=target,
             expected_split_manifest=manifest,
             expected_native_source_manifest=native,
