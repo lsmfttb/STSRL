@@ -7,6 +7,7 @@ from copy import deepcopy
 import pytest
 
 from sts_combat_rl.sim.t090_battle_student import (
+    T090_SOURCE_EXECUTION_SCHEMA_ID,
     T090DecisionExample,
     build_t090_heldout_report,
     build_t090_split_manifest,
@@ -76,6 +77,13 @@ def _selection_provenance(role: str, seed: int) -> dict[str, object]:
             "900093": "3" * 64,
         },
         "validation_summaries_sha256": "4" * 64,
+        "validation_target_sha256": "5" * 64,
+        "validation_target_regime": (
+            "shuffled_validation_teacher_means"
+            if role == "shuffled_target_control"
+            else "true_teacher_means"
+        ),
+        "validation_target_seed": 900190 if role == "shuffled_target_control" else None,
     }
 
 
@@ -84,6 +92,29 @@ def _split_manifest() -> dict[str, object]:
     return build_t090_split_manifest(
         records, t087_source_cohort_identity=_cohort_identity(records)
     )
+
+
+def _source_execution_ledger(manifest: dict[str, object]) -> dict[str, object]:
+    entries = [
+        {
+            "source_identity": entry["source_identity"],
+            "source_group": entry["source_group"],
+            "split": entry["split"],
+            "canonical_position": entry["canonical_position"],
+            "restore_public_legal_parity": True,
+            "completed": True,
+            "terminal_reached": True,
+            "status": "COMPLETED_VALID",
+        }
+        for entry in manifest["entries"]
+    ]
+    return {
+        "schema_id": T090_SOURCE_EXECUTION_SCHEMA_ID,
+        "schema_version": 1,
+        "task_id": "T090",
+        "entries": entries,
+        "entries_sha256": canonical_sha256(entries),
+    }
 
 
 def _teacher_row(
@@ -134,7 +165,12 @@ def test_target_materialization_rejects_non_public_or_unmapped_teacher_rows() ->
         for index, item in enumerate(chosen)
     ]
     native = _native_source_manifest()
-    result = materialize_t090_targets(rows, manifest, native_source_manifest=native)
+    result = materialize_t090_targets(
+        rows,
+        manifest,
+        native_source_manifest=native,
+        source_execution_ledger=_source_execution_ledger(manifest),
+    )
     assert result["schema_id"] == "t090-search-v2-action-utility-targets-v1"
     assert len(result["examples"]) == 3
     assert (
@@ -164,10 +200,34 @@ def test_target_materialization_rejects_non_public_or_unmapped_teacher_rows() ->
             expected_native_source_manifest=native,
         )
 
+    incomplete_ledger = _source_execution_ledger(manifest)
+    incomplete_ledger["entries"][0]["completed"] = False  # type: ignore[index]
+    incomplete_ledger["entries_sha256"] = canonical_sha256(incomplete_ledger["entries"])
+    with pytest.raises(ValueError, match="ledger differs|incomplete"):
+        materialize_t090_targets(
+            rows,
+            manifest,
+            native_source_manifest=native,
+            source_execution_ledger=incomplete_ledger,
+        )
+    missing_ledger = deepcopy(result)
+    missing_ledger.pop("source_execution_ledger")
+    with pytest.raises(ValueError, match="source execution ledger"):
+        validate_t090_target_table(
+            missing_ledger,
+            expected_split_manifest=manifest,
+            expected_native_source_manifest=native,
+        )
+
     hidden = _teacher_row(chosen[0].source_identity, chosen[0].source_group, 10.0)
     hidden["public_input"]["rng_state"] = "forbidden"  # type: ignore[index]
     with pytest.raises(ValueError, match="unknown fields|forbidden non-public"):
-        materialize_t090_targets([hidden], manifest, native_source_manifest=native)
+        materialize_t090_targets(
+            [hidden],
+            manifest,
+            native_source_manifest=native,
+            source_execution_ledger=_source_execution_ledger(manifest),
+        )
 
     for forbidden_key in ("hidden_state", "hiddenState", "simulator_state"):
         non_public = _teacher_row(
@@ -176,13 +236,21 @@ def test_target_materialization_rejects_non_public_or_unmapped_teacher_rows() ->
         non_public["public_input"][forbidden_key] = "forbidden"  # type: ignore[index]
         with pytest.raises(ValueError, match="unknown fields|forbidden non-public"):
             materialize_t090_targets(
-                [non_public], manifest, native_source_manifest=native
+                [non_public],
+                manifest,
+                native_source_manifest=native,
+                source_execution_ledger=_source_execution_ledger(manifest),
             )
 
     unmapped = _teacher_row(chosen[0].source_identity, chosen[0].source_group, 10.0)
     unmapped["root_rows"][1]["legal_action_identity"] = {"action_id": "other"}  # type: ignore[index]
     with pytest.raises(ValueError, match="one-to-one"):
-        materialize_t090_targets([unmapped], manifest, native_source_manifest=native)
+        materialize_t090_targets(
+            [unmapped],
+            manifest,
+            native_source_manifest=native,
+            source_execution_ledger=_source_execution_ledger(manifest),
+        )
 
 
 def _example(split: str, decision: str, state: float) -> T090DecisionExample:
@@ -211,6 +279,37 @@ def test_cross_split_fingerprint_is_excluded_and_shuffle_is_deterministic() -> N
     assert shuffled_teacher_means(train) == shuffled_teacher_means(train)
 
 
+def test_ineligible_multi_action_rows_are_retained_in_raw_eligibility_denominator() -> (
+    None
+):
+    manifest = _split_manifest()
+    native = _native_source_manifest()
+    entries = validate_t090_split_manifest(manifest)
+    chosen = [
+        next(item for item in entries if item.split == "train"),
+        next(item for item in entries if item.split == "validation"),
+    ]
+    eligible = _teacher_row(chosen[0].source_identity, chosen[0].source_group, 1.0)
+    ineligible = _teacher_row(chosen[1].source_identity, chosen[1].source_group, 2.0)
+    ineligible["root_rows"][1]["visits"] = 0  # type: ignore[index]
+    target = materialize_t090_targets(
+        [eligible, ineligible],
+        manifest,
+        native_source_manifest=native,
+        source_execution_ledger=_source_execution_ledger(manifest),
+    )
+    coverage = target["coverage"]
+    assert len(target["examples"]) == 1  # type: ignore[arg-type]
+    assert coverage["observed_multi_action_count"] == 2  # type: ignore[index]
+    assert coverage["raw_target_eligible_multi_action_count"] == 1  # type: ignore[index]
+    assert coverage["target_eligibility_rate"] == 0.5  # type: ignore[index]
+    validate_t090_target_table(
+        target,
+        expected_split_manifest=manifest,
+        expected_native_source_manifest=native,
+    )
+
+
 def test_config_and_small_public_only_training_surface() -> None:
     pytest.importorskip("torch")
     examples = tuple(
@@ -228,6 +327,24 @@ def test_config_and_small_public_only_training_surface() -> None:
     scorer, report = train_t090_scorer(examples, seed=900091)
     assert report["validation"]["mean_teacher_regret"] >= 0.0  # type: ignore[index]
     assert scorer.provenance_config["search_calls_at_inference"] == 0
+    _control, control_report = train_t090_scorer(examples, seed=900091, shuffled=True)
+    assert (
+        control_report["validation_target_regime"]
+        == "shuffled_validation_teacher_means"
+    )
+    assert control_report["validation_target_seed"] == 900190
+    true_rows = report["validation"]["per_state"]  # type: ignore[index]
+    shuffled_rows = control_report["validation"]["per_state"]  # type: ignore[index]
+    assert [row["teacher_means"] for row in true_rows] != [  # type: ignore[index]
+        row["teacher_means"]
+        for row in shuffled_rows  # type: ignore[index]
+    ]
+    assert (
+        control_report["validation"]["mean_teacher_regret"]
+        != report["validation"][  # type: ignore[index]
+            "mean_teacher_regret"
+        ]
+    )
     coverage = t090_coverage_report(examples)
     assert coverage["passed"] is False
     assert (
@@ -262,6 +379,7 @@ def test_checkpoint_and_selection_bind_target_config_and_exact_seed_set(
         ],
         manifest,
         native_source_manifest=native,
+        source_execution_ledger=_source_execution_ledger(manifest),
     )
     examples = validate_t090_target_table(
         target,
@@ -307,7 +425,24 @@ def test_checkpoint_and_selection_bind_target_config_and_exact_seed_set(
         (scorer, {**report, "seed": 900093}),
     ]
     with pytest.raises(ValueError, match="exactly once"):
-        select_t090_validation_checkpoint(duplicate_results)
+        select_t090_validation_checkpoint(
+            duplicate_results,
+            expected_validation_target_regime="true_teacher_means",
+            expected_validation_target_sha256=report["validation_target_sha256"],
+        )
+    wrong_regime_results = [
+        (scorer, {**report, "seed": seed}) for seed in (900091, 900092, 900093)
+    ]
+    wrong_regime_results[1][1]["validation_target_regime"] = (
+        "shuffled_validation_teacher_means"
+    )
+    wrong_regime_results[1][1]["validation_target_seed"] = 900190
+    with pytest.raises(ValueError, match="target regime"):
+        select_t090_validation_checkpoint(
+            wrong_regime_results,
+            expected_validation_target_regime="true_teacher_means",
+            expected_validation_target_sha256=report["validation_target_sha256"],
+        )
 
 
 def test_heldout_validator_recomputes_secondary_and_requires_boundaries(
@@ -336,6 +471,7 @@ def test_heldout_validator_recomputes_secondary_and_requires_boundaries(
         ],
         manifest,
         native_source_manifest=native,
+        source_execution_ledger=_source_execution_ledger(manifest),
     )
     examples = validate_t090_target_table(
         target,

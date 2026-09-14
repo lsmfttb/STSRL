@@ -47,6 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
     targets.add_argument("--rows", type=Path, required=True)
     targets.add_argument("--split-manifest", type=Path, required=True)
     targets.add_argument("--native-source-manifest", type=Path, required=True)
+    targets.add_argument("--source-execution-ledger", type=Path, required=True)
     targets.add_argument("--output", type=Path, required=True)
     return parser
 
@@ -73,12 +74,20 @@ def main(argv: list[str] | None = None) -> int:
                 "T090 target inputs must be a rows list and split manifest mapping"
             )
         native_manifest = _read(args.native_source_manifest)
-        if not isinstance(native_manifest, dict):
-            raise TypeError("T090 native source manifest must be a JSON mapping")
+        execution_ledger = _read(args.source_execution_ledger)
+        if not isinstance(native_manifest, dict) or not isinstance(
+            execution_ledger, dict
+        ):
+            raise TypeError(
+                "T090 native source manifest and execution ledger must be JSON mappings"
+            )
         _write(
             args.output,
             materialize_t090_targets(
-                rows, manifest, native_source_manifest=native_manifest
+                rows,
+                manifest,
+                native_source_manifest=native_manifest,
+                source_execution_ledger=execution_ledger,
             ),
         )
         return 0

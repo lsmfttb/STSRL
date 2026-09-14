@@ -15,7 +15,7 @@ import random
 import statistics
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import Any
 
@@ -47,6 +47,7 @@ T090_CONFIG_SCHEMA_ID = "t090-battle-student-training-config-v1"
 T090_HELDOUT_SCHEMA_ID = "t090-battle-student-heldout-report-v1"
 T090_FINGERPRINT_SCHEMA_ID = "t090-public-decision-fingerprint-v1"
 T090_CHECKPOINT_SCHEMA_ID = "t090-public-action-scorer-checkpoint-v1"
+T090_SOURCE_EXECUTION_SCHEMA_ID = "t090-source-execution-ledger-v1"
 T090_SOURCE_MANIFEST_SCHEMA_ID = "sts-lightspeed-source-manifest-v1"
 T090_NATIVE_IDENTITY = {
     "repository": "lsmfttb/sts_lightspeed",
@@ -210,6 +211,21 @@ class T090DecisionExample:
     @property
     def eligible(self) -> bool:
         return len(self.teacher_means) > 1
+
+
+@dataclass(frozen=True)
+class T090ObservedDecision:
+    """Raw observed decision retained even when its Search target is ineligible."""
+
+    source_identity: str
+    source_group: str
+    split: str
+    decision_identity: str
+    public_fingerprint: str
+    legal_action_count: int
+    multi_action: bool
+    target_eligible: bool
+    ineligible_reasons: tuple[str, ...]
 
 
 @dataclass(frozen=True)
@@ -436,6 +452,45 @@ def validate_t090_split_manifest(
     return tuple(entries)
 
 
+def validate_t090_source_execution_ledger(
+    value: Mapping[str, object],
+    *,
+    split_manifest: Mapping[str, object],
+) -> None:
+    """Require one valid terminal execution for every frozen source start."""
+
+    if (
+        value.get("schema_id") != T090_SOURCE_EXECUTION_SCHEMA_ID
+        or value.get("schema_version") != 1
+        or value.get("task_id") != T090_TASK_ID
+    ):
+        raise T090Incomplete("unsupported T090 source execution ledger schema")
+    rows = _sequence(value.get("entries"), "source execution entries")
+    if value.get("entries_sha256") != canonical_sha256(rows):
+        raise T090Incomplete("T090 source execution ledger entry hash mismatch")
+    entries = validate_t090_split_manifest(split_manifest)
+    if len(rows) != len(entries):
+        raise T090Incomplete(
+            "T090 source execution ledger must cover exactly 413 starts"
+        )
+    for expected, raw in zip(entries, rows, strict=True):
+        row = _mapping(raw, "source execution row")
+        if (
+            _identity(row.get("source_identity"), "source_identity")
+            != expected.source_identity
+            or row.get("source_group") != expected.source_group
+            or row.get("split") != expected.split
+            or row.get("canonical_position") != expected.canonical_position
+            or row.get("restore_public_legal_parity") is not True
+            or row.get("completed") is not True
+            or row.get("terminal_reached") is not True
+            or row.get("status") != "COMPLETED_VALID"
+        ):
+            raise T090Incomplete(
+                "T090 source execution ledger differs from frozen split or is incomplete"
+            )
+
+
 def public_decision_fingerprint(
     state_features: Sequence[float],
     legal_action_identities: Sequence[Mapping[str, object]],
@@ -519,7 +574,7 @@ def validate_t090_target_provenance(
 
 def materialize_t090_decision(
     row: Mapping[str, object], *, split_entry: T090SplitEntry
-) -> T090DecisionExample:
+) -> tuple[T090DecisionExample | None, T090ObservedDecision]:
     """Validate an action-aligned Search target row and discard hidden inputs."""
 
     if (
@@ -569,8 +624,11 @@ def materialize_t090_decision(
     if len(root_rows) != len(action_identities):
         raise T090Incomplete("Search root rows do not cover every legal action")
     means: list[float] = []
+    ineligible_reasons: list[str] = []
     row_identities: set[str] = set()
-    for action_identity, root_raw in zip(action_identities, root_rows, strict=True):
+    for action_index, (action_identity, root_raw) in enumerate(
+        zip(action_identities, root_rows, strict=True)
+    ):
         root = _mapping(root_raw, "root_row")
         root_identity = _identity(
             root.get("legal_action_identity"), "root row action identity"
@@ -583,22 +641,44 @@ def materialize_t090_decision(
         row_identities.add(root_identity)
         visits = root.get("visits")
         if isinstance(visits, bool) or not isinstance(visits, int) or visits <= 0:
-            raise T090Incomplete("Search root row has no visits")
-        means.append(_finite(root.get("mean_value"), "Search root mean"))
+            ineligible_reasons.append(f"action_{action_index}_unvisited")
+        try:
+            mean = _finite(root.get("mean_value"), "Search root mean")
+        except T090Incomplete:
+            ineligible_reasons.append(f"action_{action_index}_nonfinite_mean")
+        else:
+            means.append(mean)
+    decision_identity = _identity(row.get("decision_identity"), "decision_identity")
+    fingerprint = public_decision_fingerprint(state_features, action_identities)
+    multi_action = len(action_identities) > 1
+    target_eligible = multi_action and not ineligible_reasons
+    observed = T090ObservedDecision(
+        source_identity=split_entry.source_identity,
+        source_group=split_entry.source_group,
+        split=split_entry.split,
+        decision_identity=decision_identity,
+        public_fingerprint=fingerprint,
+        legal_action_count=len(action_identities),
+        multi_action=multi_action,
+        target_eligible=target_eligible,
+        ineligible_reasons=tuple(
+            ineligible_reasons or (() if multi_action else ("single_action",))
+        ),
+    )
+    if not target_eligible:
+        return None, observed
     return T090DecisionExample(
         source_identity=split_entry.source_identity,
         source_group=split_entry.source_group,
         split=split_entry.split,
-        decision_identity=_identity(row.get("decision_identity"), "decision_identity"),
+        decision_identity=decision_identity,
         public_state_features=state_features,
         legal_action_features=action_features,
         legal_action_identities=action_identities,
         legal_action_kinds=action_kinds,
         teacher_means=tuple(means),
-        public_fingerprint=public_decision_fingerprint(
-            state_features, action_identities
-        ),
-    )
+        public_fingerprint=fingerprint,
+    ), observed
 
 
 def materialize_t090_targets(
@@ -606,6 +686,7 @@ def materialize_t090_targets(
     split_manifest: Mapping[str, object],
     *,
     native_source_manifest: Mapping[str, object],
+    source_execution_ledger: Mapping[str, object],
 ) -> dict[str, object]:
     target_provenance = build_t090_target_provenance(
         split_manifest, native_source_manifest=native_source_manifest
@@ -614,30 +695,62 @@ def materialize_t090_targets(
         entry.source_identity: entry
         for entry in validate_t090_split_manifest(split_manifest)
     }
+    validate_t090_source_execution_ledger(
+        source_execution_ledger, split_manifest=split_manifest
+    )
     examples: list[T090DecisionExample] = []
+    observed: list[T090ObservedDecision] = []
+    observed_keys: set[tuple[str, str]] = set()
     for row in rows:
         source = _identity(row.get("source_identity"), "source_identity")
         if source not in entries:
             raise T090Incomplete("teacher row is not in the exact T090 source cohort")
-        examples.append(materialize_t090_decision(row, split_entry=entries[source]))
+        example, observed_row = materialize_t090_decision(
+            row, split_entry=entries[source]
+        )
+        decision_key = (observed_row.source_identity, observed_row.decision_identity)
+        if decision_key in observed_keys:
+            raise T090Incomplete("T090 observed decision identity is duplicated")
+        observed_keys.add(decision_key)
+        observed.append(observed_row)
+        if example is not None:
+            examples.append(example)
     deduped, collision_report = deduplicate_t090_examples(examples)
-    collision_report["materialized_decision_count"] = len(examples)
+    collision_report["materialized_decision_count"] = len(observed)
     collision_report["materialized_eligible_multi_action_count"] = sum(
-        item.eligible for item in examples
+        item.target_eligible and item.multi_action for item in observed
     )
-    # The gate is deliberately computed after leakage exclusion/deduplication:
-    # the final target table, rather than its raw precursor, is the learner's
-    # effective support.
-    coverage = t090_coverage_report(deduped)
+    # State-count quotas use final leakage-excluded/deduplicated support.  The
+    # eligibility denominator deliberately remains every raw observed
+    # multi-action decision, before that deduplication.
+    coverage = t090_coverage_report(deduped, observed_decisions=observed)
     return {
         "schema_id": T090_TARGET_SCHEMA_ID,
         "schema_version": 1,
         "task_id": T090_TASK_ID,
         "split_manifest_sha256": canonical_sha256(split_manifest),
         "target_provenance": target_provenance,
+        "source_execution_ledger": dict(source_execution_ledger),
+        "observed_decisions": [
+            serialize_t090_observed_decision(item) for item in observed
+        ],
         "examples": [serialize_t090_example(item) for item in deduped],
         "collision_deduplication": collision_report,
         "coverage": coverage,
+    }
+
+
+def serialize_t090_observed_decision(item: T090ObservedDecision) -> dict[str, object]:
+    return {
+        "source_identity": item.source_identity,
+        "source_group": item.source_group,
+        "split": item.split,
+        "decision_identity": item.decision_identity,
+        "public_fingerprint": item.public_fingerprint,
+        "legal_action_count": item.legal_action_count,
+        "multi_action": item.multi_action,
+        "target_eligible": item.target_eligible,
+        "ineligible_reasons": list(item.ineligible_reasons),
     }
 
 
@@ -723,11 +836,27 @@ def deduplicate_t090_examples(
 def t090_coverage_report(
     examples: Sequence[T090DecisionExample],
     *,
-    observed_examples: Sequence[T090DecisionExample] | None = None,
+    observed_decisions: Sequence[T090ObservedDecision] | None = None,
 ) -> dict[str, object]:
-    observed = tuple(observed_examples or examples)
+    observed = tuple(observed_decisions or ())
+    if not observed:
+        observed = tuple(
+            T090ObservedDecision(
+                source_identity=item.source_identity,
+                source_group=item.source_group,
+                split=item.split,
+                decision_identity=item.decision_identity,
+                public_fingerprint=item.public_fingerprint,
+                legal_action_count=len(item.legal_action_identities),
+                multi_action=item.eligible,
+                target_eligible=item.eligible,
+                ineligible_reasons=(),
+            )
+            for item in examples
+        )
     eligible = [item for item in examples if item.eligible]
-    observed_multi = [item for item in observed if item.eligible]
+    observed_multi = [item for item in observed if item.multi_action]
+    raw_eligible_multi = [item for item in observed_multi if item.target_eligible]
     per_split = {
         split: [item for item in eligible if item.split == split]
         for split in T090_SPLITS
@@ -736,7 +865,7 @@ def t090_coverage_report(
         split: sorted({item.source_group for item in values})
         for split, values in per_split.items()
     }
-    rate = len(eligible) / len(observed_multi) if observed_multi else 0.0
+    rate = len(raw_eligible_multi) / len(observed_multi) if observed_multi else 0.0
     passed = (
         len(eligible) >= 1500
         and len(per_split["train"]) >= 750
@@ -748,6 +877,7 @@ def t090_coverage_report(
     return {
         "eligible_multi_action_count": len(eligible),
         "observed_multi_action_count": len(observed_multi),
+        "raw_target_eligible_multi_action_count": len(raw_eligible_multi),
         "target_eligibility_rate": rate,
         "eligible_by_split": {
             split: len(values) for split, values in per_split.items()
@@ -850,6 +980,10 @@ def validate_t090_target_table(
         split_manifest=expected_split_manifest,
         native_source_manifest=expected_native_source_manifest,
     )
+    ledger = _mapping(value.get("source_execution_ledger"), "source execution ledger")
+    validate_t090_source_execution_ledger(
+        ledger, split_manifest=expected_split_manifest
+    )
     examples = deserialize_t090_examples(value)
     seen_decisions: set[tuple[str, str]] = set()
     for example in examples:
@@ -871,6 +1005,37 @@ def validate_t090_target_table(
                 "T090 target decision identity is not unique per source"
             )
         seen_decisions.add(decision_key)
+    observed = deserialize_t090_observed_decisions(value)
+    observed_keys: set[tuple[str, str]] = set()
+    eligible_keys: set[tuple[str, str]] = set()
+    eligible_observed_by_key: dict[tuple[str, str], T090ObservedDecision] = {}
+    for item in observed:
+        expected_entry = split_entries.get(item.source_identity)
+        if expected_entry is None or (
+            item.source_group != expected_entry.source_group
+            or item.split != expected_entry.split
+        ):
+            raise T090Incomplete("T090 observed decision differs from frozen split")
+        key = (item.source_identity, item.decision_identity)
+        if key in observed_keys:
+            raise T090Incomplete("T090 observed decision identity is duplicated")
+        observed_keys.add(key)
+        if item.target_eligible:
+            eligible_keys.add(key)
+            eligible_observed_by_key[key] = item
+    if not seen_decisions.issubset(eligible_keys):
+        raise T090Incomplete("T090 retained target lacks an eligible observed decision")
+    for example in examples:
+        observed_item = eligible_observed_by_key[
+            (example.source_identity, example.decision_identity)
+        ]
+        if (
+            observed_item.public_fingerprint != example.public_fingerprint
+            or observed_item.legal_action_count != len(example.legal_action_identities)
+        ):
+            raise T090Incomplete(
+                "T090 observed decision does not bind the retained target payload"
+            )
     collision = _mapping(value.get("collision_deduplication"), "collision report")
     if collision.get("fingerprint_schema_id") != T090_FINGERPRINT_SCHEMA_ID:
         raise T090Incomplete("T090 collision report fingerprint schema is invalid")
@@ -880,11 +1045,60 @@ def validate_t090_target_table(
         raise T090Incomplete(
             "T090 target table still contains duplicate public fingerprints"
         )
-    expected_coverage = t090_coverage_report(examples)
+    expected_coverage = t090_coverage_report(examples, observed_decisions=observed)
     coverage = _mapping(value.get("coverage"), "coverage report")
     if dict(coverage) != expected_coverage:
         raise T090Incomplete("T090 target coverage report is inconsistent")
     return examples
+
+
+def deserialize_t090_observed_decisions(
+    value: Mapping[str, object],
+) -> tuple[T090ObservedDecision, ...]:
+    observed: list[T090ObservedDecision] = []
+    for raw in _sequence(value.get("observed_decisions"), "observed decisions"):
+        row = _mapping(raw, "observed decision")
+        legal_action_count = row.get("legal_action_count")
+        if (
+            isinstance(legal_action_count, bool)
+            or not isinstance(legal_action_count, int)
+            or legal_action_count < 1
+        ):
+            raise T090Incomplete("T090 observed decision legal action count is invalid")
+        multi_action = row.get("multi_action")
+        target_eligible = row.get("target_eligible")
+        if not isinstance(multi_action, bool) or not isinstance(target_eligible, bool):
+            raise T090Incomplete("T090 observed decision eligibility flags are invalid")
+        reasons = tuple(
+            _string(item, "ineligible reason")
+            for item in _sequence(row.get("ineligible_reasons"), "ineligible reasons")
+        )
+        if multi_action != (legal_action_count > 1):
+            raise T090Incomplete("T090 observed decision multi-action flag is invalid")
+        if target_eligible and (not multi_action or reasons):
+            raise T090Incomplete("T090 eligible observed decision has invalid reasons")
+        if not target_eligible and not reasons:
+            raise T090Incomplete("T090 ineligible observed decision lacks a reason")
+        observed.append(
+            T090ObservedDecision(
+                source_identity=_identity(
+                    row.get("source_identity"), "source_identity"
+                ),
+                source_group=_string(row.get("source_group"), "source_group"),
+                split=_string(row.get("split"), "split"),
+                decision_identity=_identity(
+                    row.get("decision_identity"), "decision_identity"
+                ),
+                public_fingerprint=_string(
+                    row.get("public_fingerprint"), "public_fingerprint"
+                ),
+                legal_action_count=legal_action_count,
+                multi_action=multi_action,
+                target_eligible=target_eligible,
+                ineligible_reasons=reasons,
+            )
+        )
+    return tuple(observed)
 
 
 def build_t090_training_config(
@@ -908,6 +1122,22 @@ def shuffled_teacher_means(item: T090DecisionExample) -> tuple[float, ...]:
     values = list(item.teacher_means)
     random.Random(f"{T090_SHUFFLE_SEED}:{item.public_fingerprint}").shuffle(values)
     return tuple(values)
+
+
+def t090_validation_target_sha256(
+    examples: Sequence[T090DecisionExample],
+) -> str:
+    """Identify the exact validation labels used for seed selection."""
+
+    return canonical_sha256(
+        [
+            {
+                "public_fingerprint": item.public_fingerprint,
+                "teacher_means": list(item.teacher_means),
+            }
+            for item in examples
+        ]
+    )
 
 
 class T090TorchScorer:
@@ -1043,12 +1273,28 @@ def train_t090_scorer(
                 losses.append(float(batch_loss.detach()))
         epoch_losses.append(statistics.fmean(losses) if losses else 0.0)
     scorer = T090TorchScorer(model, config)
-    validation_metrics = t090_rank_metrics(validation, scorer)
+    validation_target_regime = (
+        "shuffled_validation_teacher_means" if shuffled else "true_teacher_means"
+    )
+    validation_target_examples = (
+        tuple(
+            replace(item, teacher_means=shuffled_teacher_means(item))
+            for item in validation
+        )
+        if shuffled
+        else tuple(validation)
+    )
+    validation_metrics = t090_rank_metrics(validation_target_examples, scorer)
     return scorer, {
         "schema_id": "t090-battle-student-training-summary-v1",
         "task_id": T090_TASK_ID,
         "seed": seed,
         "shuffled_target_control": shuffled,
+        "validation_target_regime": validation_target_regime,
+        "validation_target_seed": T090_SHUFFLE_SEED if shuffled else None,
+        "validation_target_sha256": t090_validation_target_sha256(
+            validation_target_examples
+        ),
         "config": config.to_dict(),
         "epoch_pairwise_losses": epoch_losses,
         "validation": validation_metrics,
@@ -1130,6 +1376,10 @@ def save_t090_checkpoint(
         "seed": seed,
         "target_table_sha256": target_identity["target_table_sha256"],
         "training_config_sha256": canonical_sha256(scorer.config.to_dict()),
+        "validation_target_regime": selection_provenance["validation_target_regime"],
+        "validation_target_seed": selection_provenance["validation_target_seed"],
+        "validation_target_sha256": selection_provenance["validation_target_sha256"],
+        "selection_provenance_sha256": canonical_sha256(selection_provenance),
     }
 
 
@@ -1152,6 +1402,16 @@ def _validate_selection_provenance(
         )
         or not isinstance(value.get("validation_summaries_sha256"), str)
         or len(value["validation_summaries_sha256"]) != 64
+        or not isinstance(value.get("validation_target_sha256"), str)
+        or len(value["validation_target_sha256"]) != 64
+        or value.get("validation_target_regime")
+        != (
+            "shuffled_validation_teacher_means"
+            if role == "shuffled_target_control"
+            else "true_teacher_means"
+        )
+        or value.get("validation_target_seed")
+        != (T090_SHUFFLE_SEED if role == "shuffled_target_control" else None)
     ):
         raise T090Incomplete("T090 checkpoint selection provenance is invalid")
 
@@ -1220,9 +1480,22 @@ def load_t090_checkpoint(
 
 def select_t090_validation_checkpoint(
     results: Sequence[tuple[T090TorchScorer, Mapping[str, object]]],
+    *,
+    expected_validation_target_regime: str,
+    expected_validation_target_sha256: str,
 ) -> tuple[T090TorchScorer, Mapping[str, object]]:
     if len(results) != len(T090_MODEL_SEEDS):
         raise T090Incomplete("T090 must select among all three preregistered seeds")
+    if expected_validation_target_regime not in {
+        "true_teacher_means",
+        "shuffled_validation_teacher_means",
+    }:
+        raise T090ContractError("T090 selection validation target regime is invalid")
+    if (
+        not isinstance(expected_validation_target_sha256, str)
+        or len(expected_validation_target_sha256) != 64
+    ):
+        raise T090ContractError("T090 selection validation target identity is invalid")
 
     seeds: list[int] = []
     for _, raw_report in results:
@@ -1231,6 +1504,23 @@ def select_t090_validation_checkpoint(
         if isinstance(seed, bool) or not isinstance(seed, int):
             raise T090Incomplete("T090 training summary seed is invalid")
         seeds.append(seed)
+        if report.get("validation_target_regime") != expected_validation_target_regime:
+            raise T090Incomplete(
+                "T090 selection validation target regime is inconsistent"
+            )
+        expected_seed = (
+            T090_SHUFFLE_SEED
+            if expected_validation_target_regime == "shuffled_validation_teacher_means"
+            else None
+        )
+        if report.get("validation_target_seed") != expected_seed:
+            raise T090Incomplete(
+                "T090 selection validation target seed is inconsistent"
+            )
+        if report.get("validation_target_sha256") != expected_validation_target_sha256:
+            raise T090Incomplete(
+                "T090 selection validation target identity is inconsistent"
+            )
     if tuple(sorted(seeds)) != T090_MODEL_SEEDS:
         raise T090Incomplete(
             "T090 selection requires each preregistered seed exactly once"
@@ -1556,6 +1846,18 @@ def _validate_checkpoint_reference(
         or value["size_bytes"] < 0
         or not isinstance(value.get("training_config_sha256"), str)
         or len(value["training_config_sha256"]) != 64
+        or value.get("validation_target_regime")
+        != (
+            "shuffled_validation_teacher_means"
+            if role == "shuffled_target_control"
+            else "true_teacher_means"
+        )
+        or value.get("validation_target_seed")
+        != (T090_SHUFFLE_SEED if role == "shuffled_target_control" else None)
+        or not isinstance(value.get("validation_target_sha256"), str)
+        or len(value["validation_target_sha256"]) != 64
+        or not isinstance(value.get("selection_provenance_sha256"), str)
+        or len(value["selection_provenance_sha256"]) != 64
     ):
         raise T090Incomplete(f"T090 {role} checkpoint reference is invalid")
 
@@ -1717,11 +2019,13 @@ __all__ = [
     "T090_CONFIG_SCHEMA_ID",
     "T090_HELDOUT_SCHEMA_ID",
     "T090_MODEL_SEEDS",
+    "T090_SOURCE_EXECUTION_SCHEMA_ID",
     "T090_SPLIT_SCHEMA_ID",
     "T090_TARGET_SCHEMA_ID",
     "T090ContractError",
     "T090DecisionExample",
     "T090Incomplete",
+    "T090ObservedDecision",
     "T090TorchScorer",
     "T090TrainingConfig",
     "build_t090_heldout_report",
@@ -1742,8 +2046,10 @@ __all__ = [
     "shuffled_teacher_means",
     "t090_coverage_report",
     "t090_rank_metrics",
+    "t090_validation_target_sha256",
     "train_t090_scorer",
     "validate_t090_heldout_report",
+    "validate_t090_source_execution_ledger",
     "validate_t090_split_manifest",
     "validate_t090_t087_source_cohort_identity",
     "validate_t090_target_provenance",
