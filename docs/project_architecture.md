@@ -358,37 +358,30 @@ boundary.
 
 ## Branch Collaboration
 
-`main` is the only integration line. The authoritative workflow is
-[`collaboration_workflow.md`](collaboration_workflow.md).
+`main` is the only integration line. Task-role ownership, exact-spec approval,
+execution authority, lifecycle finalization, dual final acceptance, and landing
+order are owned exclusively by
+[`collaboration_workflow.md`](collaboration_workflow.md); this architecture
+document does not define a second workflow.
 
-- One published task corresponds to one fresh branch and one pull request.
-- Every task branch starts from latest `main`.
-- Before readiness or branch creation, refresh the configured upstream remote's
-  `main` ref and require exact full-SHA equality with local `main`; a failed
-  fetch, missing ref, or any ahead/behind/divergent state blocks the work. Before
-  landing, repeat the fetch and compare the recorded pre-landing base SHA with
-  remote `main`, then require a fast-forward and record both SHAs. See the detailed
-  [`Main Synchronization Gate`](collaboration_workflow.md#main-synchronization-gate).
-- Parallel tasks use isolated worktrees and never switch branches in a shared
-  worktree.
-- The repository-read-only planner proposes new task content and priority to
-  the main maintainer; planner proposals do not authorize implementation.
-- The main maintainer owns project documentation, task publication and
-  lifecycle state, implementer dispatch, execution-result reporting, review,
-  and merging. It does not proactively originate new tasks or directly
-  implement feature code.
-- Task implementers are maintainer-managed sub-agents. The maintainer defaults
-  to the highest-cost-effectiveness current model that is sufficiently capable
-  for the task, including inexpensive options such as Luna when appropriate,
-  and escalates only when complexity, risk, or observed failure justifies it.
-  Expected rework and downstream rerun cost count alongside model price. The
-  maintainer also calibrates reasoning effort to task risk, and implementers own
-  only their assigned task branch while reporting documentation impact rather
-  than rewriting authoritative project documents.
-- `current_status.md` is the maintainer report that returns accepted execution
-  results, evidence, limitations, and blockers to the planner.
-- Unmerged branches and artifacts are not implemented project capabilities.
-- Do not revert or overwrite unrelated changes from other tasks.
+Architecture-level collaboration invariants are limited to:
+
+- one task uses one fresh branch and one pull request by default;
+- every task branch starts from synchronized current `main`;
+- before readiness or branch creation, refresh the configured upstream remote's
+  `main` ref and require exact full-SHA equality with local `main`; before
+  landing, repeat the synchronization/fast-forward gate as specified by the
+  [`Main Synchronization Gate`](collaboration_workflow.md#main-synchronization-gate);
+- parallel work uses isolated worktrees and never switches branches in a shared
+  worktree;
+- task Implementers remain bounded to the approved task contract and do not
+  create a second project integration line;
+- unmerged branches and artifacts are not implemented project capabilities;
+- do not revert or overwrite unrelated changes from other tasks.
+
+Do not duplicate Planner/Maintainer merge ownership or acceptance-order rules
+here. If a shorter summary conflicts with `collaboration_workflow.md`, the
+collaboration workflow controls.
 
 Phase gates verify the actual generating controller and provenance, not only
 the shape of an output artifact.
