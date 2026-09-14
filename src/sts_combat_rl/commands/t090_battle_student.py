@@ -39,12 +39,14 @@ def build_parser() -> argparse.ArgumentParser:
         "split", help="materialize the frozen T090 source split"
     )
     split.add_argument("--records", type=Path, required=True)
+    split.add_argument("--t087-source-cohort", type=Path, required=True)
     split.add_argument("--output", type=Path, required=True)
     targets = operations.add_parser(
         "targets", help="validate/reduce existing teacher rows"
     )
     targets.add_argument("--rows", type=Path, required=True)
     targets.add_argument("--split-manifest", type=Path, required=True)
+    targets.add_argument("--native-source-manifest", type=Path, required=True)
     targets.add_argument("--output", type=Path, required=True)
     return parser
 
@@ -55,7 +57,13 @@ def main(argv: list[str] | None = None) -> int:
         records = _read(args.records)
         if not isinstance(records, list):
             raise TypeError("T090 split records must be a JSON list")
-        _write(args.output, build_t090_split_manifest(records))
+        cohort = _read(args.t087_source_cohort)
+        if not isinstance(cohort, dict):
+            raise TypeError("T090 T087 source cohort identity must be a JSON mapping")
+        _write(
+            args.output,
+            build_t090_split_manifest(records, t087_source_cohort_identity=cohort),
+        )
         return 0
     if args.operation == "targets":
         rows = _read(args.rows)
@@ -64,7 +72,15 @@ def main(argv: list[str] | None = None) -> int:
             raise TypeError(
                 "T090 target inputs must be a rows list and split manifest mapping"
             )
-        _write(args.output, materialize_t090_targets(rows, manifest))
+        native_manifest = _read(args.native_source_manifest)
+        if not isinstance(native_manifest, dict):
+            raise TypeError("T090 native source manifest must be a JSON mapping")
+        _write(
+            args.output,
+            materialize_t090_targets(
+                rows, manifest, native_source_manifest=native_manifest
+            ),
+        )
         return 0
     raise AssertionError(f"unknown T090 operation {args.operation!r}")
 

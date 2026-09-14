@@ -16,8 +16,10 @@ import statistics
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Any
 
+from sts_combat_rl.sim.action_space import ActionSpaceConfig
 from sts_combat_rl.sim.features import (
     TACTICAL_FEATURE_SCHEMA_ID,
     TACTICAL_FEATURE_SCHEMA_VERSION,
@@ -44,26 +46,65 @@ T090_SPLIT_SCHEMA_ID = "t090-battle-start-split-manifest-v1"
 T090_CONFIG_SCHEMA_ID = "t090-battle-student-training-config-v1"
 T090_HELDOUT_SCHEMA_ID = "t090-battle-student-heldout-report-v1"
 T090_FINGERPRINT_SCHEMA_ID = "t090-public-decision-fingerprint-v1"
+T090_CHECKPOINT_SCHEMA_ID = "t090-public-action-scorer-checkpoint-v1"
+T090_SOURCE_MANIFEST_SCHEMA_ID = "sts-lightspeed-source-manifest-v1"
+T090_NATIVE_IDENTITY = {
+    "repository": "lsmfttb/sts_lightspeed",
+    "ref": "refs/heads/stsrl/main",
+    "commit": "20a6c2b3a9cea817c988178b814f083ff889853f",
+}
+T090_TEACHER_CONFIG = {
+    "implementation": "BattleScumSearcher2",
+    "search_api": "StepSimulator.battle_search_v2",
+    "information_regime": "full_simulator_state_oracle_like",
+    "simulations": 400,
+    "root_selection": "highest_mean",
+    "policy_prior": None,
+    "learned_leaf_value": None,
+    "rollout": "playoutRandom",
+    "terminal_utility": "evaluateEndState",
+    "action_space": ActionSpaceConfig.initial_no_potions().to_dict(),
+}
+T090_PUBLIC_INPUT_CONTRACT = {
+    "schema_id": TACTICAL_FEATURE_SCHEMA_ID,
+    "schema_version": TACTICAL_FEATURE_SCHEMA_VERSION,
+    "legal_action_identity_contract": "ordered-public-legal-action-identity-v1",
+    "action_features": "public-tactical-v2-derived",
+}
+T090_PUBLIC_INPUT_FIELDS = frozenset(
+    {
+        "schema_id",
+        "schema_version",
+        "state_features",
+        "legal_action_features",
+        "legal_action_identities",
+        "legal_action_kinds",
+    }
+)
 T090_FORBIDDEN_PUBLIC_KEYS = frozenset(
     {
         "checkpoint",
-        "checkpoint_bytes",
+        "checkpointbytes",
         "rng",
-        "rng_state",
-        "hidden_rng",
-        "draw_order",
+        "rngstate",
+        "hiddenrng",
+        "draworder",
         "unrevealed",
         "future",
-        "future_encounter",
+        "futureencounter",
         "tree",
-        "root_rows",
-        "root_visits",
-        "mean_value",
-        "teacher_mean",
-        "teacher_means",
+        "rootrows",
+        "rootvisits",
+        "meanvalue",
+        "teachermean",
+        "teachermeans",
         "split",
-        "terminal_outcome",
+        "terminaloutcome",
         "terminal",
+        "hiddenstate",
+        "simulatorstate",
+        "fullsimulatorstate",
+        "hiddensimulatorstate",
     }
 )
 
@@ -124,7 +165,9 @@ def _check_public_tree(value: object, *, path: str = "public") -> None:
 
     if isinstance(value, Mapping):
         for key, child in value.items():
-            normalized = str(key).lower()
+            normalized = "".join(
+                character for character in str(key).lower() if character.isalnum()
+            )
             if normalized in T090_FORBIDDEN_PUBLIC_KEYS:
                 raise T090Incomplete(f"forbidden non-public field at {path}.{key}")
             _check_public_tree(child, path=f"{path}.{key}")
@@ -182,6 +225,7 @@ class T090TrainingConfig:
     hidden_layers: int = 2
     activation: str = "relu"
     output: str = "scalar_action_score"
+    normalization: str = "identity_public_features_v1"
     optimizer: str = "AdamW"
     learning_rate: float = 1e-3
     weight_decay: float = 1e-4
@@ -201,7 +245,11 @@ class T090TrainingConfig:
             raise T090ContractError(
                 "T090 architecture is frozen to two ReLU 256 layers"
             )
-        if self.output != "scalar_action_score" or self.optimizer != "AdamW":
+        if (
+            self.output != "scalar_action_score"
+            or self.optimizer != "AdamW"
+            or self.normalization != "identity_public_features_v1"
+        ):
             raise T090ContractError("T090 scorer/optimizer contract is frozen")
         if (
             self.learning_rate,
@@ -221,14 +269,60 @@ class T090TrainingConfig:
         return value
 
 
+def _source_identity_digests(
+    records: Sequence[Mapping[str, object]],
+) -> tuple[str, str]:
+    identities = [
+        _identity(row.get("source_identity"), "source_identity") for row in records
+    ]
+    return canonical_sha256(identities), canonical_sha256(sorted(identities))
+
+
+def validate_t090_t087_source_cohort_identity(
+    value: Mapping[str, object], *, records: Sequence[Mapping[str, object]]
+) -> None:
+    """Bind a T090 split to one retained, exact T087 source artifact."""
+
+    expected_ordered, expected_set = _source_identity_digests(records)
+    if (
+        value.get("task_id") != "T087"
+        or value.get("record_count") != 413
+        or value.get("source_group_counts") != {"A": 93, "B": 192, "C": 128}
+        or value.get("ordered_source_identities_sha256") != expected_ordered
+        or value.get("source_identity_set_sha256") != expected_set
+    ):
+        raise T090Incomplete(
+            "T090 source cohort is not the exact T087 413-record identity"
+        )
+    artifact = _mapping(value.get("artifact"), "T087 source cohort artifact")
+    if (
+        not isinstance(artifact.get("path"), str)
+        or not artifact["path"]
+        or not isinstance(artifact.get("sha256"), str)
+        or len(artifact["sha256"]) != 64
+        or not isinstance(artifact.get("schema_id"), str)
+        or not artifact["schema_id"]
+        or isinstance(artifact.get("size_bytes"), bool)
+        or not isinstance(artifact.get("size_bytes"), int)
+        or artifact["size_bytes"] < 0
+    ):
+        raise T090Incomplete("T087 source cohort artifact identity is incomplete")
+
+
 def build_t090_split_manifest(
     records: Iterable[Mapping[str, object]],
+    *,
+    t087_source_cohort_identity: Mapping[str, object],
 ) -> dict[str, object]:
     """Materialize the preregistered group-local split before labels are used."""
 
+    record_list = list(records)
+    validate_t090_t087_source_cohort_identity(
+        t087_source_cohort_identity, records=record_list
+    )
     grouped: dict[str, list[str]] = {group: [] for group in T090_SOURCE_GROUPS}
     seen: set[str] = set()
-    for row in records:
+    for row in record_list:
         source_identity = _identity(row.get("source_identity"), "source_identity")
         source_group = _string(row.get("source_group"), "source_group")
         if source_group not in grouped:
@@ -266,6 +360,10 @@ def build_t090_split_manifest(
         "schema_version": 1,
         "task_id": T090_TASK_ID,
         "split_seed": T090_SPLIT_SEED,
+        "t087_source_cohort_identity": dict(t087_source_cohort_identity),
+        "t087_ordered_source_identities_sha256": _source_identity_digests(record_list)[
+            0
+        ],
         "entries": entries,
     }
     payload["entries_sha256"] = canonical_sha256(entries)
@@ -318,6 +416,23 @@ def validate_t090_split_manifest(
         for split in T090_SPLITS
     ):
         raise T090Incomplete("T090 split quotas are not exact")
+    identity = _mapping(
+        value.get("t087_source_cohort_identity"), "T087 source cohort identity"
+    )
+    expected_set = canonical_sha256(sorted(entry.source_identity for entry in entries))
+    if (
+        identity.get("task_id") != "T087"
+        or identity.get("record_count") != 413
+        or identity.get("source_group_counts") != {"A": 93, "B": 192, "C": 128}
+        or identity.get("source_identity_set_sha256") != expected_set
+        or value.get("t087_ordered_source_identities_sha256")
+        != identity.get("ordered_source_identities_sha256")
+        or not isinstance(identity.get("ordered_source_identities_sha256"), str)
+    ):
+        raise T090Incomplete("T090 split manifest T087 cohort binding is invalid")
+    artifact = _mapping(identity.get("artifact"), "T087 source cohort artifact")
+    if not isinstance(artifact.get("sha256"), str) or len(artifact["sha256"]) != 64:
+        raise T090Incomplete("T090 split manifest lacks T087 artifact identity")
     return tuple(entries)
 
 
@@ -336,6 +451,72 @@ def public_decision_fingerprint(
     return canonical_sha256(public)
 
 
+def _validate_public_input_fields(public_input: Mapping[str, object]) -> None:
+    unknown = set(public_input) - T090_PUBLIC_INPUT_FIELDS
+    if unknown:
+        raise T090Incomplete(
+            "T090 public input has unknown fields: " + ", ".join(sorted(unknown))
+        )
+    _check_public_tree(public_input)
+
+
+def build_t090_target_provenance(
+    split_manifest: Mapping[str, object],
+    *,
+    native_source_manifest: Mapping[str, object],
+) -> dict[str, object]:
+    """Freeze the non-row identities required to consume a target table."""
+
+    validate_t090_split_manifest(split_manifest)
+    if native_source_manifest.get("schema_id") != T090_SOURCE_MANIFEST_SCHEMA_ID:
+        raise T090Incomplete("T090 native source manifest schema is unsupported")
+    integration = _mapping(
+        native_source_manifest.get("integration"), "native integration"
+    )
+    if (
+        integration.get("repository_url")
+        not in {
+            "https://github.com/lsmfttb/sts_lightspeed",
+            "https://github.com/lsmfttb/sts_lightspeed.git",
+        }
+        or integration.get("ref") != T090_NATIVE_IDENTITY["ref"]
+        or integration.get("commit") != T090_NATIVE_IDENTITY["commit"]
+    ):
+        raise T090Incomplete("T090 native source manifest does not bind current native")
+    value = {
+        "task_id": T090_TASK_ID,
+        "approved_spec_commit": T090_APPROVED_SPEC_COMMIT,
+        "publication_base": T090_PUBLICATION_BASE,
+        "split_manifest_sha256": canonical_sha256(split_manifest),
+        "split_entries_sha256": split_manifest["entries_sha256"],
+        "t087_source_cohort_identity": dict(
+            split_manifest["t087_source_cohort_identity"]
+        ),
+        "native_source_manifest": {
+            "schema_id": T090_SOURCE_MANIFEST_SCHEMA_ID,
+            "sha256": canonical_sha256(native_source_manifest),
+            "native_identity": dict(T090_NATIVE_IDENTITY),
+        },
+        "teacher_config": dict(T090_TEACHER_CONFIG),
+        "public_input_contract": dict(T090_PUBLIC_INPUT_CONTRACT),
+    }
+    value["provenance_sha256"] = canonical_sha256(value)
+    return value
+
+
+def validate_t090_target_provenance(
+    value: Mapping[str, object],
+    *,
+    split_manifest: Mapping[str, object],
+    native_source_manifest: Mapping[str, object],
+) -> None:
+    expected = build_t090_target_provenance(
+        split_manifest, native_source_manifest=native_source_manifest
+    )
+    if dict(value) != expected:
+        raise T090Incomplete("T090 target provenance is not the expected exact binding")
+
+
 def materialize_t090_decision(
     row: Mapping[str, object], *, split_entry: T090SplitEntry
 ) -> T090DecisionExample:
@@ -349,7 +530,7 @@ def materialize_t090_decision(
     if _string(row.get("source_group"), "source_group") != split_entry.source_group:
         raise T090Incomplete("teacher row source group differs from frozen split")
     public_input = _mapping(row.get("public_input"), "public_input")
-    _check_public_tree(public_input)
+    _validate_public_input_fields(public_input)
     if (
         public_input.get("schema_id") != TACTICAL_FEATURE_SCHEMA_ID
         or public_input.get("schema_version") != TACTICAL_FEATURE_SCHEMA_VERSION
@@ -421,8 +602,14 @@ def materialize_t090_decision(
 
 
 def materialize_t090_targets(
-    rows: Iterable[Mapping[str, object]], split_manifest: Mapping[str, object]
+    rows: Iterable[Mapping[str, object]],
+    split_manifest: Mapping[str, object],
+    *,
+    native_source_manifest: Mapping[str, object],
 ) -> dict[str, object]:
+    target_provenance = build_t090_target_provenance(
+        split_manifest, native_source_manifest=native_source_manifest
+    )
     entries = {
         entry.source_identity: entry
         for entry in validate_t090_split_manifest(split_manifest)
@@ -447,6 +634,7 @@ def materialize_t090_targets(
         "schema_version": 1,
         "task_id": T090_TASK_ID,
         "split_manifest_sha256": canonical_sha256(split_manifest),
+        "target_provenance": target_provenance,
         "examples": [serialize_t090_example(item) for item in deduped],
         "collision_deduplication": collision_report,
         "coverage": coverage,
@@ -584,7 +772,7 @@ def deserialize_t090_examples(
     for raw in _sequence(value.get("examples"), "T090 examples"):
         row = _mapping(raw, "T090 example")
         public = _mapping(row.get("public_input"), "public_input")
-        _check_public_tree(public)
+        _validate_public_input_fields(public)
         state = _feature_vector(public.get("state_features"), "state_features")
         identities = tuple(
             dict(_mapping(item, "legal action identity"))
@@ -636,6 +824,9 @@ def deserialize_t090_examples(
 
 def validate_t090_target_table(
     value: Mapping[str, object],
+    *,
+    expected_split_manifest: Mapping[str, object],
+    expected_native_source_manifest: Mapping[str, object],
 ) -> tuple[T090DecisionExample, ...]:
     """Validate the current target schema without trusting its summaries."""
 
@@ -645,9 +836,17 @@ def validate_t090_target_table(
         or value.get("task_id") != T090_TASK_ID
     ):
         raise T090Incomplete("unsupported T090 target schema")
-    split_hash = value.get("split_manifest_sha256")
-    if not isinstance(split_hash, str) or len(split_hash) != 64:
-        raise T090Incomplete("T090 target table has no split-manifest identity")
+    validate_t090_split_manifest(expected_split_manifest)
+    if value.get("split_manifest_sha256") != canonical_sha256(expected_split_manifest):
+        raise T090Incomplete(
+            "T090 target table is not bound to the supplied split manifest"
+        )
+    provenance = _mapping(value.get("target_provenance"), "target provenance")
+    validate_t090_target_provenance(
+        provenance,
+        split_manifest=expected_split_manifest,
+        native_source_manifest=expected_native_source_manifest,
+    )
     examples = deserialize_t090_examples(value)
     collision = _mapping(value.get("collision_deduplication"), "collision report")
     if collision.get("fingerprint_schema_id") != T090_FINGERPRINT_SCHEMA_ID:
@@ -833,11 +1032,184 @@ def train_t090_scorer(
     }
 
 
+def sha256_file(path: str | Path) -> str:
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _target_table_identity(
+    target_table: Mapping[str, object],
+    *,
+    expected_split_manifest: Mapping[str, object],
+    expected_native_source_manifest: Mapping[str, object],
+) -> tuple[tuple[T090DecisionExample, ...], dict[str, object]]:
+    examples = validate_t090_target_table(
+        target_table,
+        expected_split_manifest=expected_split_manifest,
+        expected_native_source_manifest=expected_native_source_manifest,
+    )
+    return examples, {
+        "target_table_sha256": canonical_sha256(target_table),
+        "target_provenance": dict(target_table["target_provenance"]),
+    }
+
+
+def save_t090_checkpoint(
+    scorer: T090TorchScorer,
+    path: str | Path,
+    *,
+    role: str,
+    seed: int,
+    target_table: Mapping[str, object],
+    expected_split_manifest: Mapping[str, object],
+    expected_native_source_manifest: Mapping[str, object],
+    selection_provenance: Mapping[str, object],
+) -> dict[str, object]:
+    """Serialize a selected public scorer with all target/config bindings."""
+
+    if role not in {"student", "shuffled_target_control"}:
+        raise T090ContractError("T090 checkpoint role is invalid")
+    if seed not in T090_MODEL_SEEDS:
+        raise T090ContractError("T090 checkpoint seed is not preregistered")
+    examples, target_identity = _target_table_identity(
+        target_table,
+        expected_split_manifest=expected_split_manifest,
+        expected_native_source_manifest=expected_native_source_manifest,
+    )
+    if scorer.config != build_t090_training_config(examples):
+        raise T090Incomplete("T090 checkpoint scorer config differs from target table")
+    _validate_selection_provenance(selection_provenance, role=role, seed=seed)
+    import torch
+
+    destination = Path(path)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "schema_id": T090_CHECKPOINT_SCHEMA_ID,
+        "schema_version": 1,
+        "task_id": T090_TASK_ID,
+        "role": role,
+        "seed": seed,
+        "training_config": scorer.config.to_dict(),
+        "target_identity": target_identity,
+        "selection_provenance": dict(selection_provenance),
+        "model_state_dict": scorer.model.state_dict(),
+    }
+    torch.save(payload, destination)
+    return {
+        "path": str(destination.resolve()),
+        "sha256": sha256_file(destination),
+        "size_bytes": destination.stat().st_size,
+        "schema_id": T090_CHECKPOINT_SCHEMA_ID,
+        "role": role,
+        "seed": seed,
+        "target_table_sha256": target_identity["target_table_sha256"],
+        "training_config_sha256": canonical_sha256(scorer.config.to_dict()),
+    }
+
+
+def _validate_selection_provenance(
+    value: Mapping[str, object], *, role: str, seed: int
+) -> None:
+    candidates = _mapping(
+        value.get("candidate_checkpoint_sha256_by_seed"),
+        "candidate checkpoint hashes",
+    )
+    if (
+        value.get("selection_split") != "validation"
+        or value.get("selection_metric") != "mean_teacher_regret"
+        or value.get("selected_seed") != seed
+        or value.get("role") != role
+        or set(candidates) != {str(item) for item in T090_MODEL_SEEDS}
+        or any(
+            not isinstance(digest, str) or len(digest) != 64
+            for digest in candidates.values()
+        )
+        or not isinstance(value.get("validation_summaries_sha256"), str)
+        or len(value["validation_summaries_sha256"]) != 64
+    ):
+        raise T090Incomplete("T090 checkpoint selection provenance is invalid")
+
+
+def load_t090_checkpoint(
+    path: str | Path,
+    *,
+    expected_identity: Mapping[str, object],
+    expected_role: str,
+    expected_split_manifest: Mapping[str, object],
+    expected_native_source_manifest: Mapping[str, object],
+    expected_target_table: Mapping[str, object],
+) -> T090TorchScorer:
+    """Load only a checkpoint whose bytes and scientific bindings are exact."""
+
+    resolved = Path(path).resolve(strict=True)
+    if (
+        expected_identity.get("path") != str(resolved)
+        or expected_identity.get("sha256") != sha256_file(resolved)
+        or expected_identity.get("size_bytes") != resolved.stat().st_size
+        or expected_identity.get("schema_id") != T090_CHECKPOINT_SCHEMA_ID
+        or expected_identity.get("role") != expected_role
+    ):
+        raise T090Incomplete("T090 checkpoint artifact identity is invalid")
+    examples, target_identity = _target_table_identity(
+        expected_target_table,
+        expected_split_manifest=expected_split_manifest,
+        expected_native_source_manifest=expected_native_source_manifest,
+    )
+    import torch
+
+    payload = torch.load(resolved, map_location="cpu", weights_only=True)
+    if not isinstance(payload, Mapping):
+        raise T090Incomplete("T090 checkpoint payload is not a mapping")
+    if (
+        payload.get("schema_id") != T090_CHECKPOINT_SCHEMA_ID
+        or payload.get("schema_version") != 1
+        or payload.get("task_id") != T090_TASK_ID
+        or payload.get("role") != expected_role
+        or payload.get("seed") not in T090_MODEL_SEEDS
+        or payload.get("target_identity") != target_identity
+    ):
+        raise T090Incomplete("T090 checkpoint payload binding is invalid")
+    config_raw = _mapping(payload.get("training_config"), "checkpoint training config")
+    config = T090TrainingConfig(
+        **{
+            key: tuple(value) if key == "model_seeds" else value
+            for key, value in config_raw.items()
+        }
+    )
+    if config != build_t090_training_config(examples):
+        raise T090Incomplete("T090 checkpoint training config differs from target")
+    selection = _mapping(payload.get("selection_provenance"), "selection provenance")
+    _validate_selection_provenance(
+        selection, role=expected_role, seed=int(payload["seed"])
+    )
+    model = _torch_model(config, seed=int(payload["seed"]))
+    state_dict = payload.get("model_state_dict")
+    if not isinstance(state_dict, Mapping):
+        raise T090Incomplete("T090 checkpoint lacks model parameters")
+    model.load_state_dict(state_dict)
+    return T090TorchScorer(model, config)
+
+
 def select_t090_validation_checkpoint(
     results: Sequence[tuple[T090TorchScorer, Mapping[str, object]]],
 ) -> tuple[T090TorchScorer, Mapping[str, object]]:
     if len(results) != len(T090_MODEL_SEEDS):
         raise T090Incomplete("T090 must select among all three preregistered seeds")
+
+    seeds: list[int] = []
+    for _, raw_report in results:
+        report = _mapping(raw_report, "training summary")
+        seed = report.get("seed")
+        if isinstance(seed, bool) or not isinstance(seed, int):
+            raise T090Incomplete("T090 training summary seed is invalid")
+        seeds.append(seed)
+    if tuple(sorted(seeds)) != T090_MODEL_SEEDS:
+        raise T090Incomplete(
+            "T090 selection requires each preregistered seed exactly once"
+        )
 
     def key(result: tuple[T090TorchScorer, Mapping[str, object]]) -> tuple[float, int]:
         report = _mapping(result[1], "training summary")
@@ -885,13 +1257,7 @@ def t090_rank_metrics(
     eligible = [item for item in examples if item.eligible]
     if not eligible:
         raise T090Incomplete("T090 metrics require eligible multi-action states")
-    agreements: list[float] = []
-    regrets: list[float] = []
-    accuracies: list[float] = []
-    margins: list[float] = []
-    ties = 0
-    group: dict[str, list[float]] = defaultdict(list)
-    action_kind: dict[str, list[float]] = defaultdict(list)
+    rows: list[dict[str, object]] = []
     for item in eligible:
         selected, scores = _selection_and_scores(item, scorer)
         best_mean = max(item.teacher_means)
@@ -901,24 +1267,85 @@ def t090_rank_metrics(
             if value == best_mean
         )
         regret = best_mean - item.teacher_means[selected]
-        agreements.append(float(selected == teacher_best))
+        rows.append(
+            {
+                "decision_identity": item.decision_identity,
+                "source_group": item.source_group,
+                "selected_action_kind": item.legal_action_kinds[selected],
+                "student_action": selected,
+                "teacher_means": list(item.teacher_means),
+                "scores": scores,
+                "regret": regret,
+                "top1": float(selected == teacher_best),
+            }
+        )
+    return _metric_summary_from_rows(rows)
+
+
+def _metric_summary_from_rows(
+    rows: Sequence[Mapping[str, object]],
+) -> dict[str, object]:
+    if not rows:
+        raise T090Incomplete("T090 metrics require rows")
+    agreements: list[float] = []
+    regrets: list[float] = []
+    accuracies: list[float] = []
+    margins: list[float] = []
+    ties = 0
+    group: dict[str, list[float]] = defaultdict(list)
+    action_kind: dict[str, list[float]] = defaultdict(list)
+    normalized_rows: list[dict[str, object]] = []
+    for raw in rows:
+        row = _mapping(raw, "metric row")
+        _identity(row.get("decision_identity"), "decision_identity")
+        source_group = _string(row.get("source_group"), "source_group")
+        selected_kind = _string(row.get("selected_action_kind"), "selected_action_kind")
+        selected = row.get("student_action")
+        if isinstance(selected, bool) or not isinstance(selected, int):
+            raise T090Incomplete("T090 metric selected action is invalid")
+        means = [
+            _finite(value, "teacher mean")
+            for value in _sequence(row.get("teacher_means"), "teacher_means")
+        ]
+        scores = [
+            _finite(value, "student score")
+            for value in _sequence(row.get("scores"), "scores")
+        ]
+        if (
+            len(means) < 2
+            or len(means) != len(scores)
+            or selected < 0
+            or selected >= len(scores)
+        ):
+            raise T090Incomplete("T090 metric action rows are invalid")
+        best_mean = max(means)
+        teacher_best = min(
+            index for index, value in enumerate(means) if value == best_mean
+        )
+        regret = best_mean - means[selected]
+        top1 = float(selected == teacher_best)
+        if row.get("regret") != regret or row.get("top1") != top1:
+            raise T090Incomplete("T090 metric row regret/agreement is inconsistent")
+        agreements.append(top1)
         regrets.append(regret)
-        group[item.source_group].append(regret)
-        action_kind[item.legal_action_kinds[selected]].append(regret)
+        group[source_group].append(regret)
+        action_kind[selected_kind].append(regret)
         ordered_scores = sorted(scores, reverse=True)
         margin = ordered_scores[0] - ordered_scores[1]
         margins.append(margin)
         ties += int(abs(margin) <= 1e-12)
-        pairs = []
         for left in range(len(scores)):
             for right in range(left + 1, len(scores)):
-                if abs(item.teacher_means[left] - item.teacher_means[right]) > 1e-9:
-                    expected = item.teacher_means[left] > item.teacher_means[right]
-                    actual = scores[left] > scores[right]
-                    pairs.append(float(expected == actual))
-        accuracies.extend(pairs)
+                if abs(means[left] - means[right]) > 1e-9:
+                    accuracies.append(
+                        float(
+                            (means[left] > means[right])
+                            == (scores[left] > scores[right])
+                        )
+                    )
+        normalized_rows.append(dict(row))
     return {
-        "state_count": len(eligible),
+        "state_count": len(normalized_rows),
         "top1_teacher_agreement": statistics.fmean(agreements),
         "pairwise_ranking_accuracy": statistics.fmean(accuracies)
         if accuracies
@@ -938,18 +1365,8 @@ def t090_rank_metrics(
             "median": statistics.median(margins),
             "p90": _percentile(margins, 0.90),
         },
-        "tie_rate": ties / len(eligible),
-        "per_state": [
-            {
-                "decision_identity": item.decision_identity,
-                "student_action": _selection_and_scores(item, scorer)[0],
-                "regret": regret,
-                "top1": agreement,
-            }
-            for item, regret, agreement in zip(
-                eligible, regrets, agreements, strict=True
-            )
-        ],
+        "tie_rate": ties / len(normalized_rows),
+        "per_state": normalized_rows,
     }
 
 
@@ -977,7 +1394,30 @@ def build_t090_heldout_report(
     examples: Sequence[T090DecisionExample],
     student: T090TorchScorer,
     control: T090TorchScorer,
+    *,
+    target_table: Mapping[str, object],
+    expected_split_manifest: Mapping[str, object],
+    expected_native_source_manifest: Mapping[str, object],
+    student_checkpoint: Mapping[str, object],
+    control_checkpoint: Mapping[str, object],
 ) -> dict[str, object]:
+    target_examples, target_identity = _target_table_identity(
+        target_table,
+        expected_split_manifest=expected_split_manifest,
+        expected_native_source_manifest=expected_native_source_manifest,
+    )
+    if tuple(examples) != target_examples:
+        raise T090Incomplete(
+            "T090 held-out examples are not the validated target table"
+        )
+    _validate_checkpoint_reference(
+        student_checkpoint, role="student", target_identity=target_identity
+    )
+    _validate_checkpoint_reference(
+        control_checkpoint,
+        role="shuffled_target_control",
+        target_identity=target_identity,
+    )
     heldout = [item for item in examples if item.split == "heldout" and item.eligible]
     if not heldout:
         raise T090Incomplete("T090 held-out examples are required")
@@ -1006,54 +1446,187 @@ def build_t090_heldout_report(
         and student_metrics["top1_teacher_agreement"]
         > control_metrics["top1_teacher_agreement"]
     )
+    boundary_evidence = {
+        "target_provenance_validated": True,
+        "public_input_contract": target_table["target_provenance"][
+            "public_input_contract"
+        ],
+        "teacher_config": target_table["target_provenance"]["teacher_config"],
+        "student_inference_search_calls": 0,
+        "control_inference_search_calls": 0,
+    }
+    split_evidence = {
+        "target_table_validated": True,
+        "unique_retained_public_fingerprints": len(
+            {item.public_fingerprint for item in target_examples}
+        )
+        == len(target_examples),
+        "heldout_source_groups": sorted({item.source_group for item in heldout}),
+    }
     return {
         "schema_id": T090_HELDOUT_SCHEMA_ID,
         "schema_version": 1,
         "task_id": T090_TASK_ID,
+        "target_table_sha256": target_identity["target_table_sha256"],
+        "target_provenance": target_identity["target_provenance"],
+        "student_checkpoint": dict(student_checkpoint),
+        "shuffled_target_control_checkpoint": dict(control_checkpoint),
         "student": student_metrics,
         "shuffled_target_control": control_metrics,
         "paired_delta_regret": regrets,
         "paired_delta_top1_agreement": agreements,
         "paired_bootstrap_mean_delta_regret": regret_bootstrap,
         "paired_bootstrap_top1_agreement": agreement_bootstrap,
-        "information_boundary_valid": True,
-        "split_leakage_valid": True,
+        "information_boundary_evidence": boundary_evidence,
+        "information_boundary_valid": all(
+            value is True or value == 0
+            for key, value in boundary_evidence.items()
+            if key != "public_input_contract" and key != "teacher_config"
+        )
+        and boundary_evidence["public_input_contract"] == T090_PUBLIC_INPUT_CONTRACT
+        and boundary_evidence["teacher_config"] == T090_TEACHER_CONFIG,
+        "split_leakage_evidence": split_evidence,
+        "split_leakage_valid": all(
+            value is True or value == list(T090_SOURCE_GROUPS)
+            for value in split_evidence.values()
+        ),
         "terminal_classification": "BATTLE_STUDENT_DISTILLATION_SIGNAL_ESTABLISHED"
         if passed
         else "BATTLE_STUDENT_DISTILLATION_SIGNAL_NOT_ESTABLISHED",
     }
 
 
+def _validate_checkpoint_reference(
+    value: Mapping[str, object], *, role: str, target_identity: Mapping[str, object]
+) -> None:
+    if (
+        value.get("schema_id") != T090_CHECKPOINT_SCHEMA_ID
+        or value.get("role") != role
+        or value.get("target_table_sha256") != target_identity["target_table_sha256"]
+        or not isinstance(value.get("path"), str)
+        or not value["path"]
+        or not isinstance(value.get("sha256"), str)
+        or len(value["sha256"]) != 64
+        or isinstance(value.get("size_bytes"), bool)
+        or not isinstance(value.get("size_bytes"), int)
+        or value["size_bytes"] < 0
+        or not isinstance(value.get("training_config_sha256"), str)
+        or len(value["training_config_sha256"]) != 64
+    ):
+        raise T090Incomplete(f"T090 {role} checkpoint reference is invalid")
+
+
 def _mapping_rows(value: object) -> list[Mapping[str, object]]:
     return [_mapping(item, "metric row") for item in _sequence(value, "metric rows")]
 
 
-def validate_t090_heldout_report(value: Mapping[str, object]) -> None:
+def validate_t090_heldout_report(
+    value: Mapping[str, object],
+    *,
+    expected_target_table: Mapping[str, object],
+    expected_split_manifest: Mapping[str, object],
+    expected_native_source_manifest: Mapping[str, object],
+    expected_student_checkpoint: Mapping[str, object],
+    expected_control_checkpoint: Mapping[str, object],
+) -> None:
     if (
         value.get("schema_id") != T090_HELDOUT_SCHEMA_ID
         or value.get("schema_version") != 1
         or value.get("task_id") != T090_TASK_ID
     ):
         raise T090Incomplete("unsupported T090 held-out report")
+    _, target_identity = _target_table_identity(
+        expected_target_table,
+        expected_split_manifest=expected_split_manifest,
+        expected_native_source_manifest=expected_native_source_manifest,
+    )
+    if (
+        value.get("target_table_sha256") != target_identity["target_table_sha256"]
+        or value.get("target_provenance") != target_identity["target_provenance"]
+    ):
+        raise T090Incomplete("T090 held-out report target provenance is invalid")
+    student_checkpoint = _mapping(value.get("student_checkpoint"), "student checkpoint")
+    control_checkpoint = _mapping(
+        value.get("shuffled_target_control_checkpoint"), "control checkpoint"
+    )
+    _validate_checkpoint_reference(
+        student_checkpoint, role="student", target_identity=target_identity
+    )
+    _validate_checkpoint_reference(
+        control_checkpoint,
+        role="shuffled_target_control",
+        target_identity=target_identity,
+    )
+    if dict(student_checkpoint) != dict(expected_student_checkpoint) or dict(
+        control_checkpoint
+    ) != dict(expected_control_checkpoint):
+        raise T090Incomplete("T090 held-out report checkpoint identities differ")
+    summaries: dict[str, Mapping[str, object]] = {}
     for name in ("student", "shuffled_target_control"):
         metrics = _mapping(value.get(name), name)
-        for key in (
-            "top1_teacher_agreement",
-            "mean_teacher_regret",
-            "pairwise_ranking_accuracy",
-            "tie_rate",
-        ):
-            _finite(metrics.get(key), f"{name}.{key}")
-    delta = _sequence(value.get("paired_delta_regret"), "paired_delta_regret")
+        rows = _mapping_rows(metrics.get("per_state"))
+        expected_metrics = _metric_summary_from_rows(rows)
+        if dict(metrics) != expected_metrics:
+            raise T090Incomplete(f"T090 {name} metric distributions are inconsistent")
+        summaries[name] = metrics
+    student_rows = _mapping_rows(summaries["student"]["per_state"])
+    control_rows = _mapping_rows(summaries["shuffled_target_control"]["per_state"])
+    if [row.get("decision_identity") for row in student_rows] != [
+        row.get("decision_identity") for row in control_rows
+    ]:
+        raise T090Incomplete("T090 held-out per-state rows are not paired")
+    expected_regret = [
+        _finite(control["regret"], "control regret")
+        - _finite(student["regret"], "student regret")
+        for student, control in zip(student_rows, control_rows, strict=True)
+    ]
+    expected_agreement = [
+        _finite(student["top1"], "student agreement")
+        - _finite(control["top1"], "control agreement")
+        for student, control in zip(student_rows, control_rows, strict=True)
+    ]
+    delta = [
+        _finite(item, "delta regret")
+        for item in _sequence(value.get("paired_delta_regret"), "paired_delta_regret")
+    ]
+    agreement_delta = [
+        _finite(item, "delta agreement")
+        for item in _sequence(
+            value.get("paired_delta_top1_agreement"), "paired_delta_top1_agreement"
+        )
+    ]
+    if delta != expected_regret or agreement_delta != expected_agreement:
+        raise T090Incomplete("T090 held-out paired deltas are inconsistent")
     bootstrap = _mapping(
         value.get("paired_bootstrap_mean_delta_regret"), "paired bootstrap"
     )
-    expected = paired_t090_bootstrap([_finite(item, "delta regret") for item in delta])
-    if dict(bootstrap) != expected:
+    if dict(bootstrap) != paired_t090_bootstrap(delta):
         raise T090Incomplete("T090 regret bootstrap does not match paired values")
+    secondary = _mapping(
+        value.get("paired_bootstrap_top1_agreement"), "paired top1 bootstrap"
+    )
+    if dict(secondary) != paired_t090_bootstrap(agreement_delta):
+        raise T090Incomplete("T090 top1 bootstrap does not match paired values")
+    boundary = _mapping(
+        value.get("information_boundary_evidence"), "information boundary evidence"
+    )
+    split = _mapping(value.get("split_leakage_evidence"), "split leakage evidence")
+    if (
+        value.get("information_boundary_valid") is not True
+        or value.get("split_leakage_valid") is not True
+        or boundary.get("target_provenance_validated") is not True
+        or boundary.get("public_input_contract") != T090_PUBLIC_INPUT_CONTRACT
+        or boundary.get("teacher_config") != T090_TEACHER_CONFIG
+        or boundary.get("student_inference_search_calls") != 0
+        or boundary.get("control_inference_search_calls") != 0
+        or split.get("target_table_validated") is not True
+        or split.get("unique_retained_public_fingerprints") is not True
+        or split.get("heldout_source_groups") != list(T090_SOURCE_GROUPS)
+    ):
+        raise T090Incomplete("T090 information or split-leakage evidence is invalid")
     lower = _sequence(bootstrap.get("ci_95"), "bootstrap ci")[0]
-    student = _mapping(value["student"], "student")
-    control = _mapping(value["shuffled_target_control"], "control")
+    student = summaries["student"]
+    control = summaries["shuffled_target_control"]
     passed = (
         _finite(lower, "bootstrap lower") > 0
         and _finite(student["mean_teacher_regret"], "student regret")
@@ -1076,6 +1649,7 @@ __all__ = [
     "T090_APPROVED_SPEC_COMMIT",
     "T090_BOOTSTRAP_REPLICATES",
     "T090_BOOTSTRAP_SEED",
+    "T090_CHECKPOINT_SCHEMA_ID",
     "T090_CONFIG_SCHEMA_ID",
     "T090_HELDOUT_SCHEMA_ID",
     "T090_MODEL_SEEDS",
@@ -1088,20 +1662,26 @@ __all__ = [
     "T090TrainingConfig",
     "build_t090_heldout_report",
     "build_t090_split_manifest",
+    "build_t090_target_provenance",
     "build_t090_training_config",
     "canonical_sha256",
     "deduplicate_t090_examples",
     "deserialize_t090_examples",
+    "load_t090_checkpoint",
     "materialize_t090_decision",
     "materialize_t090_targets",
     "paired_t090_bootstrap",
     "public_decision_fingerprint",
+    "save_t090_checkpoint",
     "select_t090_validation_checkpoint",
+    "sha256_file",
     "shuffled_teacher_means",
     "t090_coverage_report",
     "t090_rank_metrics",
     "train_t090_scorer",
     "validate_t090_heldout_report",
     "validate_t090_split_manifest",
+    "validate_t090_t087_source_cohort_identity",
+    "validate_t090_target_provenance",
     "validate_t090_target_table",
 ]
