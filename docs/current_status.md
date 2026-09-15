@@ -49,6 +49,34 @@ not establish that a public Battle student is unlearnable; it establishes that
 the frozen complete-root-utility target construction is too sparse under
 Search-v2@400 for the preregistered distillation experiment.
 
+T091 is complete on the same exact retained T090 formal evidence and ran no
+new simulator work. Its offline validator independently verified all six
+accepted input file hashes, exact T087 cohort/split/native/teacher provenance,
+and the S0 reference result of 309/6,210 complete roots (4.9758%). The
+partial root surface is materially denser at `n_min=4` (4,074 pair-supported
+roots and 49,378 ordered non-tie pairs; after fingerprint cross-split
+exclusion and deterministic within-split deduplication, 3,534 examples and
+44,846 pairs). It nevertheless ends
+`ROOT_PARTIAL_SUPERVISION_TOO_SPARSE_OR_BIASED`: raw pair-supported coverage
+is 65.6039%, below the preregistered 70% requirement, median
+supported/legal coverage is 0.25, below 0.40, and only 3/5 high-frequency
+public action kinds participate in an `n_min=4` pair because potion and
+potion-discard actions have no positive visits. The static current-native
+audit concludes `CURRENT_SEARCH_INTERNAL_SURFACE_FEASIBLE`: only reconstructed
+nonterminal `PLAYER_NORMAL`/`CARD_SELECT` tree nodes qualify, and a future
+read-only telemetry companion could attach public projection, legal actions,
+path/source provenance, and existing child visits/means without changing
+Search semantics. T091 implemented no such export, student, or Search change;
+it does not establish student learnability, normal-information optimality, or
+controller improvement. Its local retained outputs are under
+`/mnt/d/DeadlyCatCoding/STSRL/artifacts/t091-battle-teacher-data-surface-audit-20260915/`:
+the deterministic data-surface report SHA-256 is
+`a55e3205ec456a54592820cc9bea4b8d21833d680deec613780d593cbfd17d3c`, the
+internal-feasibility audit SHA-256 is
+`9821bdd245decd0274006de8b1683d496776ad349f06f3d9150fdcb19e864383`, and the
+retention manifest SHA-256 is
+`b2b3f8f8323479b85d687525bdb50092dcf0fdd4b64a6eaabadcd5258607ed24`.
+
 The task index lists the canonical lifecycle state for the published backlog.
 The M1 model-guided Oracle search sandbox is complete through synthesis. It
 validated Oracle-like search plumbing but did not demonstrate controller
