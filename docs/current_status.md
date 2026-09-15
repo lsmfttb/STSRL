@@ -51,7 +51,7 @@ Search-v2@400 for the preregistered distillation experiment.
 
 T091 is complete on the same exact retained T090 formal evidence and ran no
 new simulator work. Its offline validator independently verified all six
-accepted input file hashes, the frozen native/teacher/provenance identities,
+accepted input file hashes, exact T087 cohort/split/native/teacher provenance,
 and the S0 reference result of 309/6,210 complete roots (4.9758%). The
 partial root surface is materially denser at `n_min=4` (4,074 pair-supported
 roots and 49,378 ordered non-tie pairs; after fingerprint cross-split
@@ -71,11 +71,11 @@ it does not establish student learnability, normal-information optimality, or
 controller improvement. Its local retained outputs are under
 `/mnt/d/DeadlyCatCoding/STSRL/artifacts/t091-battle-teacher-data-surface-audit-20260915/`:
 the deterministic data-surface report SHA-256 is
-`497cfe4b712b62904fc459929c5a2c0d81dc07f951317c05dd3f25badb1eeb58`, the
+`a55e3205ec456a54592820cc9bea4b8d21833d680deec613780d593cbfd17d3c`, the
 internal-feasibility audit SHA-256 is
 `9821bdd245decd0274006de8b1683d496776ad349f06f3d9150fdcb19e864383`, and the
 retention manifest SHA-256 is
-`1bc1534bc4760315adbb0151859bd20d3a62ec36ee1078a38b297f4cce57891e`.
+`b2b3f8f8323479b85d687525bdb50092dcf0fdd4b64a6eaabadcd5258607ed24`.
 
 The task index lists the canonical lifecycle state for the published backlog.
 The M1 model-guided Oracle search sandbox is complete through synthesis. It

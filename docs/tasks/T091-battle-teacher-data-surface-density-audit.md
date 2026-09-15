@@ -87,6 +87,17 @@ Required accepted dependencies:
 
 Artifact Eligibility Required: true.
 
+### Required predicates
+
+Before formal analysis, T091 must verify the exact accepted T090 raw-artifact
+identities, the frozen upstream T087 cohort/source identities, split manifest
+and split-entry identities, pinned native identity, frozen Search-v2@400
+teacher configuration, public-input schema, exact action mapping, retained
+public-fingerprint schema where used, and retained Search-cost provenance.
+Missing or conflicting source, native, teacher, split, action, fingerprint,
+cost, or information-boundary facts fail closed; T091 must neither infer nor
+reconstruct them from simulator/private state.
+
 ### Primary input
 
 The primary scientific input is the **exact accepted T090 formal 413-start raw target-generation evidence** that produced the accepted terminal statistics:

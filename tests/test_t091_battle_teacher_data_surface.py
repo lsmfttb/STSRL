@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from pathlib import Path
+
+import pytest
 
 from sts_combat_rl.sim.t091_battle_teacher_data_surface import (
     T091_N_MINS,
+    T091_T090_TARGET_PROVENANCE,
+    T091Incomplete,
     _iter_json_array,
     _selection_summary,
     _static_internal_audit,
     _Stats,
+    _validate_t090_target_provenance,
 )
 
 
@@ -81,3 +87,13 @@ def test_selection_summary_does_not_impute_depth_and_internal_audit_is_bounded()
     assert summary["terminal_outcome_source_level_descriptive"] == {"PLAYER_VICTORY": 1}
     assert audit["conclusion"] == "CURRENT_SEARCH_INTERNAL_SURFACE_FEASIBLE"
     assert "does not add" in audit["implementation_boundary"]
+
+
+def test_t090_upstream_provenance_is_exact_and_fail_closed() -> None:
+    expected = deepcopy(T091_T090_TARGET_PROVENANCE)
+    assert _validate_t090_target_provenance(expected) == expected
+
+    conflicting = deepcopy(expected)
+    conflicting["teacher_config"]["simulations"] = 399
+    with pytest.raises(T091Incomplete, match="upstream source/native/teacher/split"):
+        _validate_t090_target_provenance(conflicting)

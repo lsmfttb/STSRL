@@ -36,6 +36,62 @@ T091_INPUT_HASHES = {
     "status.json": "3933f6a55b2a8705dea72f8be83b3b47575542a8dff4d87b37826eae94933e6f",
     "shard-reuse-provenance.json": "52837d3c40269fe8ee18b401364326557258a3ad8db8d182cec83f5c8fd19caf",
 }
+T091_T090_TARGET_PROVENANCE = {
+    "approved_spec_commit": "6d9fd862e166d747dcb3f6edba03b979be1038f7",
+    "native_source_manifest": {
+        "native_identity": T091_NATIVE_IDENTITY,
+        "schema_id": "sts-lightspeed-source-manifest-v1",
+        "sha256": "3e4730631478ed147868e7958dfdc3dda05906ba10ad002853bbb83655ab51e8",
+    },
+    "provenance_sha256": "eeb01b9b1d66002f1b45b6fbe7d4f04263c7e13cfdc8966c2950d74232dff5c8",
+    "public_input_contract": {
+        "action_features": "public-tactical-v2-derived",
+        "legal_action_identity_contract": "ordered-public-legal-action-identity-v1",
+        "schema_id": "public-tactical-v2",
+        "schema_version": 2,
+    },
+    "publication_base": "76897afc17410dc1f03072596328873dc906ce0b",
+    "split_entries_sha256": "d5cb2d94db99e4d9c210f025921d0e4a06ded759c8c58aa4a5fe047c7806c2a0",
+    "split_manifest_sha256": "bea93eed1b0f0eba8830200f995f7d0bd93ed5bcff146fc7feec8237c930f8bc",
+    "t087_source_cohort_identity": {
+        "artifact": {
+            "path": "/mnt/d/DeadlyCatCoding/STSRL/artifacts/t087-formal-natural-413-8d7e44-20260911/t087-formal-natural-evidence.json",
+            "schema_id": "t087-formal-natural-evidence-v1",
+            "sha256": "7931a118a4bf921f695db769f05fd77a5ae364484f5646f02d5be05329ad297f",
+            "size_bytes": 402943396,
+        },
+        "ordered_source_identities_sha256": "aaa3fe7742b1317fe80bcd93149a79335f3ed06118c48e20207398af9cd6e56a",
+        "record_count": 413,
+        "source_group_counts": {"A": 93, "B": 192, "C": 128},
+        "source_identity_set_sha256": "81a5b1e105c359de88aa88ff45b667afce6f2c2e7fd99e3e1fe36f4eab3568f5",
+        "task_id": "T087",
+    },
+    "task_id": "T090",
+    "teacher_config": {
+        "action_space": {
+            "allow_excluded_fallback": True,
+            "excluded_kinds": [
+                "game_potion_discard",
+                "game_potion_use",
+                "potion",
+                "potion_discard",
+                "reward_potion",
+                "shop_reward_potion",
+            ],
+            "include_non_combat_potions": True,
+            "preferred_kinds": ["card", "end_turn"],
+        },
+        "implementation": "BattleScumSearcher2",
+        "information_regime": "full_simulator_state_oracle_like",
+        "learned_leaf_value": None,
+        "policy_prior": None,
+        "rollout": "playoutRandom",
+        "root_selection": "highest_mean",
+        "search_api": "StepSimulator.battle_search_v2",
+        "simulations": 400,
+        "terminal_utility": "evaluateEndState",
+    },
+}
 
 
 class T091Incomplete(ValueError):
@@ -252,6 +308,16 @@ def _read_mapping(path: Path) -> Mapping[str, Any]:
     return value
 
 
+def _validate_t090_target_provenance(value: object) -> dict[str, Any]:
+    """Require the complete accepted upstream provenance, without inference."""
+
+    if not isinstance(value, Mapping) or dict(value) != T091_T090_TARGET_PROVENANCE:
+        raise T091Incomplete(
+            "target table upstream source/native/teacher/split provenance differs from accepted T090"
+        )
+    return dict(value)
+
+
 def _validate_inputs(
     root: Path,
 ) -> tuple[dict[str, dict[str, Any]], list[Any], Mapping[str, Any], Mapping[str, Any]]:
@@ -406,16 +472,9 @@ def analyze_t090_teacher_surface(t090_root: Path) -> dict[str, Any]:
         or target.get("schema_id") != "t090-search-v2-action-utility-targets-v1"
     ):
         raise T091Incomplete("target table schema identity differs from T090")
-    target_provenance = target.get("target_provenance")
-    if not isinstance(target_provenance, Mapping) or target_provenance.get(
-        "public_input_contract"
-    ) != {
-        "action_features": "public-tactical-v2-derived",
-        "legal_action_identity_contract": "ordered-public-legal-action-identity-v1",
-        "schema_id": "public-tactical-v2",
-        "schema_version": 2,
-    }:
-        raise T091Incomplete("target table public input provenance differs from T090")
+    target_provenance = _validate_t090_target_provenance(
+        target.get("target_provenance")
+    )
     fingerprints: dict[str, tuple[str, str, str, str]] = {}
     for row in observed:
         if not isinstance(row, Mapping):
@@ -877,10 +936,12 @@ def analyze_t090_teacher_surface(t090_root: Path) -> dict[str, Any]:
         "approved_spec_commit": T091_APPROVED_SPEC_COMMIT,
         "publication_base": T091_PUBLICATION_BASE,
         "input_artifacts": identities,
+        "accepted_t090_target_provenance": target_provenance,
         "pinned_native_identity": T091_NATIVE_IDENTITY,
         "validation": {
             "valid": not integrity,
             "violations": integrity,
+            "accepted_t090_target_provenance_exact": True,
             "s0_reproduction": {
                 "expected": {
                     "complete_roots": 309,
@@ -998,6 +1059,9 @@ def write_t091_artifacts(t090_root: Path, output_dir: Path) -> dict[str, Path]:
             "publication_base": T091_PUBLICATION_BASE,
             "approved_spec_commit": T091_APPROVED_SPEC_COMMIT,
             "t090_inputs": report["input_artifacts"],
+            "accepted_t090_target_provenance": report[
+                "accepted_t090_target_provenance"
+            ],
             "native_identity": T091_NATIVE_IDENTITY,
         },
         "outputs": outputs,
