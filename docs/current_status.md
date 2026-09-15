@@ -23,10 +23,9 @@ with Battle held at that frozen baseline; its valid fresh matched evaluation
 did not establish improvement, so no learned Non-Combat promotion or T066
 continuation is authorized.
 
-T090 has completed its authorized execution on open PR #104 at exact head
-`2bfcb279256de4e241742e34f44822a2c512f0b2` but is not yet on `main`. The
-bounded canary independently passed (12/12 starts, 228 roots, 91,200 native
-Search-v2@400 simulations) as mechanics/coverage-only evidence. The formal
+T090 is complete after PR #104. The bounded canary independently passed
+(12/12 starts, 228 roots, 91,200 native Search-v2@400 simulations) as
+mechanics/coverage-only evidence. The formal
 native collection produced six exact reusable shards for all 413 frozen T087
 starts; after canonical-order aggregation, the exact source ledger and target
 table validated under current T090/native provenance. Raw observed coverage was
@@ -45,8 +44,10 @@ the target-table canonical SHA-256 is
 `81e064557f628742b10ff7a4fbc0acb5f5775ba1abb6dff8ef5eafbcba584f13`. The
 8-worker attempt tripped its configured RSS guard; the 6-worker run completed
 all shards before an exited-worker `VmRSS` observation failure, and exact-shard
-reuse plus aggregation completed with no host OOM. Final Planner scientific /
-architecture acceptance and Planner landing remain pending on this exact head.
+reuse plus aggregation completed with no host OOM. The accepted result does
+not establish that a public Battle student is unlearnable; it establishes that
+the frozen complete-root-utility target construction is too sparse under
+Search-v2@400 for the preregistered distillation experiment.
 
 The task index lists the canonical lifecycle state for the published backlog.
 The M1 model-guided Oracle search sandbox is complete through synthesis. It
