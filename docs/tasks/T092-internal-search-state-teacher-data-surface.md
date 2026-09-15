@@ -134,6 +134,85 @@ Required accepted dependencies:
 - T091: accepted root data-surface density audit and static internal-surface
   feasibility result.
 
+## Artifact Eligibility Contract
+
+Artifact Eligibility Required: true.
+
+### Inputs
+
+Scientific-quality consumption must bind exactly:
+
+- the T087 413-start occurrence-safe source identities and restore artifacts;
+- the accepted T090 source/split ledger and exact root evidence;
+- the accepted T091 report/reference identities and hashes, including the
+  root-only `n_min=4` reference of 3,534 leakage-safe unique examples and 44,846
+  retained ordered non-tie pairs;
+- the publication STSRL base
+  `7872b1462ef231c3fc1dcdbb4ba02bc16daec8bb`;
+- the publication native base
+  `20a6c2b3a9cea817c988178b814f083ff889853f` and, after implementation, the
+  exact task-scoped telemetry-native commit descended from it;
+- the frozen Search-v2@400 teacher configuration;
+- the accepted public projection, action-identity, action-kind and public
+  fingerprint schemas;
+- the exact canary and formal configuration identities and source selections.
+
+Smoke/canary artifacts are never substitutes for formal representative evidence.
+A regenerated or reselected cohort is not equivalent to the accepted input.
+
+### Reuse mode
+
+`scientific_quality_claim`.
+
+T092 may reuse the exact accepted T087/T090/T091 scientific artifacts and their
+registered source/split identities. Reuse does not authorize a fresh Search run,
+new source selection, or a different native/teacher configuration unless the
+stage is separately authorized by this contract.
+
+### Claim boundary
+
+T092 may claim only:
+
+- whether the opt-in internal telemetry is semantically passive relative to the
+  frozen Search-v2@400 controller;
+- the density, diversity, source balance, action-kind support, leakage-safe
+  uniqueness, cost and observed ambiguity lower bounds of stable internal
+  Search-state supervision on the exact T087/T090 413-start distribution; and
+- whether that internal data surface passes the preregistered T092 viability
+  gate relative to the accepted T091 root-only surface.
+
+T092 does **not** claim that a Battle student is learnable, that any student
+improves Search, that internal means are unbiased Q-values, that complete A20
+runs improve, that the teacher is normal-information optimal, or that T066 is
+authorized.
+
+### Unavailable fact behavior
+
+Missing, malformed, inferred, filename-derived, default-inferred, regenerated
+substitute, smoke-only, or conflicting source/native/teacher/split/action/
+fingerprint/cost/provenance facts fail closed to `INCOMPLETE`.
+
+If a required fact is not retained in an accepted artifact, T092 must report it
+as unavailable and must not reconstruct or impute it from checkpoint bytes,
+private simulator state, RNG, hidden draw order, Search path, or any other
+privileged field unless that reconstruction is explicitly part of the approved
+read-only telemetry implementation and the exported result still satisfies the
+public-information boundary.
+
+Scientific-quality outputs must retain or durably reference:
+
+- exact canary pair manifest and semantic-parity report;
+- exact formal 413-start source/worker ledger if formal collection is authorized;
+- root-reproduction report against T090/T091;
+- internal compact occurrence/shard manifest;
+- leakage-safe fingerprint/deduplication report;
+- density/diversity/cost report for all registered `n_min` values;
+- public teacher-excluded action-space report;
+- ambiguity lower-bound report;
+- exact native source identity and source diff/provenance;
+- artifact SHA-256 and sizes;
+- terminal classification and successor decision.
+
 ## Frozen Teacher
 
 The scientific teacher/controller remains exactly:
@@ -406,38 +485,6 @@ fractions. Its exclusion frequency is reported separately.
 
 The full `n_min` sensitivity curve and telemetry throughput are required context
 for interpretation even though `n_min=4` is the frozen promotion surface.
-
-## Artifact Eligibility Contract
-
-Artifact Eligibility Required: true.
-
-Scientific-quality inputs must bind exactly:
-
-- T087 413-start source identities and restore artifacts;
-- accepted T090 source/split ledger and root evidence;
-- accepted T091 report/reference hashes;
-- publication STSRL base;
-- publication native base plus exact task-scoped telemetry native commit;
-- frozen Search-v2@400 teacher configuration;
-- public projection/action identity/fingerprint schemas;
-- canary and formal configuration identities.
-
-Missing, malformed, inferred, regenerated substitute, smoke-only, or conflicting
-identity/provenance facts fail closed to `INCOMPLETE`.
-
-Scientific-quality outputs must retain or durably reference:
-
-- exact canary pair manifest and semantic-parity report;
-- exact formal 413-start source/worker ledger;
-- root-reproduction report against T090/T091;
-- internal compact occurrence/shard manifest;
-- leakage-safe fingerprint/deduplication report;
-- density/diversity/cost report for all registered `n_min` values;
-- public teacher-excluded action-space report;
-- ambiguity lower-bound report;
-- exact native source identity and source diff/provenance;
-- artifact SHA-256 and sizes;
-- terminal classification and successor decision.
 
 ## Information Boundary
 
