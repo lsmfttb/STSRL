@@ -1,6 +1,6 @@
 # Current Status
 
-Last reviewed: 2026-09-14.
+Last reviewed: 2026-09-15.
 
 This document is the main maintainer's canonical execution-result report for
 the planner and describes the latest `main` branch only. Results from local
@@ -22,6 +22,32 @@ T089 is now merged as the bounded self-generated Non-Combat learner diagnostic
 with Battle held at that frozen baseline; its valid fresh matched evaluation
 did not establish improvement, so no learned Non-Combat promotion or T066
 continuation is authorized.
+
+T090 is complete after PR #104. The bounded canary independently passed
+(12/12 starts, 228 roots, 91,200 native Search-v2@400 simulations) as
+mechanics/coverage-only evidence. The formal
+native collection produced six exact reusable shards for all 413 frozen T087
+starts; after canonical-order aggregation, the exact source ledger and target
+table validated under current T090/native provenance. Raw observed coverage was
+6,210 multi-action decisions with 309 target-eligible (4.9758%); 293
+deduplicated eligible examples remained (train/validation/heldout 200/46/47),
+below the preregistered 95% eligibility and per-split scale gates. The formal
+terminal classification is
+`BATTLE_STUDENT_TARGET_COVERAGE_INSUFFICIENT`; training, checkpoint selection,
+held-out evaluation, and optional counterfactual diagnostics were correctly
+not run. No learned student or Search integration claim is made. Retained
+formal artifacts are under
+`/mnt/d/DeadlyCatCoding/STSRL/artifacts/t090-formal-413-2bfcb27-20260915-retry1/order-repair/`;
+the target-table canonical SHA-256 is
+`ad97fa365ebce61b52fb33803afc360a98c812c3893facc5cca55ff6af9ca351`, and the
+413-entry ledger canonical SHA-256 is
+`81e064557f628742b10ff7a4fbc0acb5f5775ba1abb6dff8ef5eafbcba584f13`. The
+8-worker attempt tripped its configured RSS guard; the 6-worker run completed
+all shards before an exited-worker `VmRSS` observation failure, and exact-shard
+reuse plus aggregation completed with no host OOM. The accepted result does
+not establish that a public Battle student is unlearnable; it establishes that
+the frozen complete-root-utility target construction is too sparse under
+Search-v2@400 for the preregistered distillation experiment.
 
 The task index lists the canonical lifecycle state for the published backlog.
 The M1 model-guided Oracle search sandbox is complete through synthesis. It
