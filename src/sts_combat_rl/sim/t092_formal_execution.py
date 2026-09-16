@@ -196,7 +196,13 @@ def _formal_input_identities(value: object) -> dict[str, Any]:
         raise T092FormalError("T092 formal input identities are incomplete")
     result = dict(value)
     for key in ("formal_restore_manifest", "t087_source_cohort", "t090_source_ledger", "t091_reference", "task_native_provenance"):
-        _artifact(result[key], key)
+        artifact = _artifact(result[key], key)
+        try:
+            raw = Path(artifact["path"]).read_bytes()
+        except OSError as exc:
+            raise T092FormalError(f"{key} artifact is unavailable") from exc
+        if hashlib.sha256(raw).hexdigest() != artifact["sha256"] or len(raw) != artifact["size_bytes"]:
+            raise T092FormalError(f"{key} artifact hash mismatches")
     specs = result["arm_process_specs"]
     if not isinstance(specs, Mapping) or set(specs) != {"ON"} or not isinstance(specs["ON"], Mapping) or specs["ON"].get("native_identity") != T092_NATIVE_IDENTITY:
         raise T092FormalError("T092 formal ON native process identity is invalid")
@@ -446,6 +452,13 @@ def _metric_summary(row: T092Occurrence) -> dict[str, Any]:
         "branching": len(row.searchable_actions),
         "searchable_kinds": tuple(item["action"]["kind"] for item in row.searchable_actions),
         "excluded_kinds": tuple(item["action"]["kind"] for item in row.excluded_actions),
+        "supported": {
+            str(n): sum(
+                item["visits"] >= n and _finite(item["mean_value"])
+                for item in row.searchable_actions
+            )
+            for n in T092_N_MINS
+        },
         "pairs": {str(n): len(support_pairs(row, n)) for n in T092_N_MINS},
         "paired_kinds": {
             str(n): tuple(sorted({item["action"]["kind"] for pair in support_pairs(row, n) for item in pair}))
@@ -488,8 +501,15 @@ def _metrics(rows: Sequence[Mapping[str, Any]], ledger: Sequence[Mapping[str, An
             )
         total_sims = sum(group_sims.values())
         by_group = Counter(str(row["source_group"]) for row in retained)
+        raw_supported = [int(row["supported"][str(minimum)]) for row in rows]
+        fractions = [count / int(row["branching"]) for count, row in zip(raw_supported, rows, strict=True)]
         thresholds[str(minimum)] = {"raw_occurrences_with_pairs": len(eligible), "leakage_safe_unique_examples": len(retained),
+            "nodes_with_at_least_two_supported_actions": sum(count >= 2 for count in raw_supported),
+            "total_supported_actions": sum(raw_supported),
+            "supported_teacher_searchable_fraction": _distribution(fractions),
             "retained_ordered_non_tie_pairs": sum(int(r["pairs"][str(minimum)]) for r in retained),
+            "raw_examples_by_depth_bucket": dict(sorted(Counter(_depth_bucket(int(r["depth"])) for r in eligible).items())),
+            "raw_examples_by_branching_bucket": dict(sorted(Counter(_branch_bucket(int(r["branching"])) for r in eligible).items())),
             "by_source_group": dict(sorted(by_group.items())),
             "by_depth_bucket": dict(sorted(Counter(_depth_bucket(int(r["depth"])) for r in retained).items())),
             "by_branching_bucket": dict(sorted(Counter(_branch_bucket(int(r["branching"])) for r in retained).items())),
@@ -503,7 +523,11 @@ def _metrics(rows: Sequence[Mapping[str, Any]], ledger: Sequence[Mapping[str, An
             },
         }
     search_simulations = sum(int(item["terminal"].get("battle_decision_count", 0)) * 400 for item in ledger)
-    return {"schema_id": "t092-internal-search-state-formal-metrics-v1", "internal_occurrence_count": len(rows),
+    starts = len(ledger)
+    single = sum(int(row["branching"]) == 1 for row in rows)
+    multi = len(rows) - single
+    return {"schema_id": "t092-internal-search-state-formal-metrics-v2", "internal_occurrence_count": len(rows),
+            "node_totals": {"depth_zero_root_count": 0, "stable_internal_player_decision_nodes": len(rows), "stable_internal_single_action_nodes": single, "stable_internal_multi_action_nodes": multi, "expanded_tree_nodes": "UNAVAILABLE_FROM_RETAINED_T092_ARM_SCHEMA"},
             "depth_zero_root_count": 0, "depth_distribution": dict(sorted(depth.items())), "branching_distribution": dict(sorted(branching.items())),
             "raw_multi_action_by_branching_bucket": dict(sorted(raw_multi_branching.items())),
             "teacher_searchable_action_kinds": dict(sorted(kinds.items())), "teacher_excluded_action_kinds": dict(sorted(excluded.items())),
@@ -511,9 +535,19 @@ def _metrics(rows: Sequence[Mapping[str, Any]], ledger: Sequence[Mapping[str, An
             "thresholds": thresholds, "cost": {"frozen_search_simulations": search_simulations,
                 "controller_wall_clock_time_s": sum(float(item["cost"]["wall_clock_time_s"]) for item in ledger),
                 "telemetry_extraction_transition_count": sum(int(r["telemetry_transitions"]) for r in rows),
-                "retained_occurrence_count": len(rows)},
+                "retained_occurrence_count": len(rows), "retained_bytes": "AVAILABLE_FROM_RETENTION_MANIFEST", "peak_memory_mib": "AVAILABLE_FROM_DETACHED_STATUS"},
+            "rates": {"internal_occurrences_per_battle_start": len(rows) / starts if starts else None,
+                "internal_occurrences_per_1000_search_simulations": len(rows) * 1000 / search_simulations if search_simulations else None},
             "ambiguity_lower_bound": {"repeated_public_fingerprint_count": sum(len(group) > 1 for group in by_fp.values()), "cross_split_excluded_count": len(collisions)},
-            "t091_primary_reference": {"n_min": 4, "leakage_safe_unique_examples": 3534, "retained_ordered_non_tie_pairs": 44846}}
+            "t091_primary_reference": {"n_min": 4, "leakage_safe_unique_examples": 3534, "retained_ordered_non_tie_pairs": 44846,
+                "comparison": {"t092_unique_example_multiple": thresholds["4"]["leakage_safe_unique_examples"] / 3534 if 3534 else None, "t092_pair_multiple": thresholds["4"]["retained_ordered_non_tie_pairs"] / 44846 if 44846 else None}}}
+
+
+def _distribution(values: Sequence[float]) -> dict[str, float | int | None]:
+    if not values:
+        return {"count": 0, "min": None, "median": None, "max": None}
+    ordered = sorted(values)
+    return {"count": len(ordered), "min": ordered[0], "median": ordered[(len(ordered) - 1) // 2], "max": ordered[-1]}
 
 
 def write_t092_formal_json(path: str | Path, value: Mapping[str, Any], *, schema_id: str) -> dict[str, Any]:

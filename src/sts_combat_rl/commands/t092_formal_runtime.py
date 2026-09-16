@@ -40,6 +40,18 @@ def build_t092_formal_restore_payloads(
     )
     if not isinstance(implementation_head, str) or len(implementation_head) != 40:
         raise T092CanaryProcessError("T092 formal implementation head is invalid")
+    required_upstream = {"t087_source_cohort", "t090_source_ledger", "t091_reference", "task_native_provenance"}
+    if not isinstance(upstream_identities, Mapping) or set(upstream_identities) != required_upstream:
+        raise T092CanaryProcessError("T092 formal upstream artifact identities are incomplete")
+    for key, value in upstream_identities.items():
+        if not isinstance(value, Mapping) or set(value) != {"path", "sha256", "size_bytes", "schema_id"}:
+            raise T092CanaryProcessError("T092 formal upstream artifact identity is malformed")
+        try:
+            raw = Path(str(value["path"])).read_bytes()
+        except OSError as exc:
+            raise T092CanaryProcessError("T092 formal upstream artifact is unavailable") from exc
+        if hashlib.sha256(raw).hexdigest() != value.get("sha256") or len(raw) != value.get("size_bytes"):
+            raise T092CanaryProcessError("T092 formal upstream artifact hash mismatches")
     split = _read_split()
     try:
         _formal, gate, _upstream = _admit_t088_canary_inputs_from_paths(
@@ -66,9 +78,6 @@ def build_t092_formal_restore_payloads(
             "implementation_head": implementation_head, "source": asdict(entry),
             "source_record": asdict(selected), "canonical_record": record_to_manifest(canonical),
         }
-    required = {"t087_source_cohort", "t090_source_ledger", "t091_reference", "task_native_provenance"}
-    if not isinstance(upstream_identities, Mapping) or set(upstream_identities) != required:
-        raise T092CanaryProcessError("T092 formal upstream artifact identities are incomplete")
     return {
         "schema_id": T092_FORMAL_RESTORE_MANIFEST_SCHEMA_ID,
         "schema_version": 1,
