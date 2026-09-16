@@ -13,8 +13,10 @@ root `BattleContext`. The replay transition count is emitted as
 `native_simulator_steps`. The replay does not access or mutate Search RNG,
 the searched context, the tree, action ordering, or edge statistics.
 
-Only expanded, nonterminal nodes whose input state is `PLAYER_NORMAL` or
-`CARD_SELECT` are emitted. A row contains the pre-existing public tactical
+Only expanded, nonterminal nodes at `tree_depth >= 1` whose input state is
+`PLAYER_NORMAL` or `CARD_SELECT` are emitted. The depth-0 root is deliberately
+absent from internal rows, while its normal root report remains available for
+OFF/ON parity and T090/T091 reproduction. A row contains the pre-existing public tactical
 projection, ordered teacher-searchable public actions, final child visits and
 finite means (or null mean for zero visits), and separately reported public
 actions excluded by the frozen teacher. The Python consumer rejects
@@ -26,8 +28,13 @@ than student input.
 The task-native source descends from
 `20a6c2b3a9cea817c988178b814f083ff889853f`; the exact task commit, ancestry,
 binary-diff hash, schema, and frozen configuration are pinned in
-`docs/t092_task_scoped_native_provenance.json` before any canary. This document
-does not change the merged `docs/sts_lightspeed_source_manifest.json` pin.
+`docs/t092_task_scoped_native_provenance.json` before any canary. The native
+report also carries a complete `t092-frozen-search-v2-teacher-config-v1`
+envelope; the STSRL parser requires its exact schema, Oracle-like information
+regime, 400 simulations, no-potion setting, highest-mean root rule, no policy
+prior/leaf value, and rollout/terminal-utility identities. Missing or
+conflicting report or task-native facts fail closed. This document does not
+change the merged `docs/sts_lightspeed_source_manifest.json` pin.
 
 ## Harnesses
 

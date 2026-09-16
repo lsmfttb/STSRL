@@ -7,7 +7,9 @@ from copy import deepcopy
 import pytest
 
 from sts_combat_rl.sim.t092_internal_search_state import (
+    T092_FROZEN_TEACHER_CONFIG,
     T092Incomplete,
+    T092_NATIVE_IDENTITY,
     compare_semantic_parity,
     parse_native_occurrences,
     select_t092_canary_sources,
@@ -22,11 +24,15 @@ def _action(bits: int, kind: str = "card") -> dict[str, object]:
 
 def _report() -> dict[str, object]:
     return {
+        "schema_id": "native-battle-search-root-v1",
         "native_api": "StepSimulator.battle_search_v2_with_internal_teacher_telemetry.v1",
         "patch_identity": "sts_lightspeed_battle_search_v2_internal_teacher_telemetry_v1",
+        "information_regime": "full_simulator_state_oracle_like",
         "root_visits": 400,
         "native_simulator_steps": 1200,
         "simulations_requested": 400,
+        "include_potions": False,
+        "teacher_config": dict(T092_FROZEN_TEACHER_CONFIG),
         "tree_internal_telemetry": {
             "internal_teacher_telemetry": {
                 "schema_id": "native-battle-search-v2-internal-teacher-telemetry-v1",
@@ -58,7 +64,7 @@ def _report() -> dict[str, object]:
 
 
 def _parse(report: dict[str, object] | None = None):
-    return parse_native_occurrences(report or _report(), source_identity="source-1", source_group="A", split="train", parent_root_decision_identity="root-1")
+    return parse_native_occurrences(report or _report(), source_identity="source-1", source_group="A", split="train", parent_root_decision_identity="root-1", native_identity=T092_NATIVE_IDENTITY)
 
 
 def test_zero_visit_child_remains_unknown_and_excluded_potions_are_separate() -> None:
@@ -79,6 +85,29 @@ def test_hidden_fields_are_rejected_before_candidate_materialization() -> None:
     assert isinstance(rows, list)
     rows[0]["public_battle_projection"]["rng_state"] = "forbidden"
     with pytest.raises(T092Incomplete, match="forbidden private field"):
+        _parse(report)
+
+
+def test_report_teacher_envelope_and_task_scoped_native_identity_fail_closed() -> None:
+    report = _report()
+    report["simulations_requested"] = 399
+    with pytest.raises(T092Incomplete, match="frozen Search-v2@400"):
+        _parse(report)
+
+    report = _report()
+    report["teacher_config"]["root_selection"] = "most_visits"
+    with pytest.raises(T092Incomplete, match="teacher configuration"):
+        _parse(report)
+
+    with pytest.raises(T092Incomplete, match="native identity"):
+        parse_native_occurrences(_report(), source_identity="source-1", source_group="A", split="train", parent_root_decision_identity="root-1", native_identity={})
+
+
+def test_depth_zero_root_is_not_an_internal_occurrence() -> None:
+    report = _report()
+    native = report["tree_internal_telemetry"]["internal_teacher_telemetry"]
+    native["rows"][0]["tree_depth"] = 0
+    with pytest.raises(T092Incomplete, match="tree metadata"):
         _parse(report)
 
 

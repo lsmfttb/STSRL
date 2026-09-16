@@ -3,13 +3,13 @@
   "task_id": "T092",
   "repository": "lsmfttb/sts_lightspeed",
   "base_commit": "20a6c2b3a9cea817c988178b814f083ff889853f",
-  "telemetry_commit": "7d6a47d08bd364547bbb584f37c839d112dfaff1",
+  "telemetry_commit": "07e1770cf0710d8c26719c153383d09e3bfd7686",
   "telemetry_branch": "planner/t092-internal-search-state-telemetry",
   "ancestry_verified": true,
   "source_diff": {
     "base_commit": "20a6c2b3a9cea817c988178b814f083ff889853f",
-    "commit": "7d6a47d08bd364547bbb584f37c839d112dfaff1",
-    "sha256_of_git_diff_binary": "cc584d32c9d1cba9fdbe10bef97ad03d30d074b9fec6e7ee32290a72d237d40b",
+    "commit": "07e1770cf0710d8c26719c153383d09e3bfd7686",
+    "sha256_of_git_diff_binary": "ab280fa45a2233b8c9f365c33c0f3d67d64d8717471e67d3142706456c110d41",
     "changed_files": [
       "bindings/slaythespire.cpp",
       "scripts/test_battle_search_v2_internal_teacher_telemetry.py"

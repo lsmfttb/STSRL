@@ -34,6 +34,11 @@ def build_parser() -> argparse.ArgumentParser:
     validate.add_argument("--source-group", required=True, choices=("A", "B", "C"))
     validate.add_argument("--split", required=True)
     validate.add_argument("--parent-root-decision-identity", required=True)
+    validate.add_argument(
+        "--native-identity",
+        required=True,
+        help="JSON identity bound to the task-scoped native telemetry commit",
+    )
     validate.add_argument("--output", required=True)
     return parser
 
@@ -52,6 +57,7 @@ def main(argv: list[str] | None = None) -> int:
         source_group=args.source_group,
         split=args.split,
         parent_root_decision_identity=args.parent_root_decision_identity,
+        native_identity=_read_json(args.native_identity),
     )
     _write_json(args.output, summarize_occurrences(rows))
     return 0

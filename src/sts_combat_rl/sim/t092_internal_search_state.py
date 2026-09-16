@@ -21,6 +21,24 @@ T092_N_MINS = (1, 2, 4, 8, 16)
 T092_CANARY_DOMAIN_SEPARATOR = 900492
 T092_NATIVE_API = "StepSimulator.battle_search_v2_with_internal_teacher_telemetry.v1"
 T092_NATIVE_PATCH_IDENTITY = "sts_lightspeed_battle_search_v2_internal_teacher_telemetry_v1"
+T092_NATIVE_IDENTITY = {
+    "repository": "lsmfttb/sts_lightspeed",
+    "ref": "refs/heads/planner/t092-internal-search-state-telemetry",
+    "commit": "07e1770cf0710d8c26719c153383d09e3bfd7686",
+}
+T092_FROZEN_TEACHER_CONFIG = {
+    "schema_id": "t092-frozen-search-v2-teacher-config-v1",
+    "implementation": "BattleScumSearcher2",
+    "search_api": "StepSimulator.battle_search_v2",
+    "information_regime": "full_simulator_state_oracle_like",
+    "simulations": 400,
+    "root_selection": "highest_mean",
+    "include_potions": False,
+    "policy_prior": None,
+    "learned_leaf_value": None,
+    "rollout": "playoutRandom",
+    "terminal_utility": "evaluateEndState",
+}
 T092_PUBLIC_FORBIDDEN_TOKENS = (
     "checkpoint", "rng", "draw_order", "draworder", "actionqueue",
     "action_queue", "private", "native_node", "node_pointer", "uct",
@@ -87,6 +105,8 @@ def public_fingerprint(public_projection: Mapping[str, Any], actions: Sequence[M
 
 @dataclass(frozen=True)
 class T092Occurrence:
+    native_identity: Mapping[str, Any]
+    frozen_teacher_config: Mapping[str, Any]
     source_identity: str
     source_group: str
     split: str
@@ -110,12 +130,23 @@ class T092Occurrence:
 
 def parse_native_occurrences(
     native_report: Mapping[str, Any], *, source_identity: str, source_group: str,
-    split: str, parent_root_decision_identity: str,
+    split: str, parent_root_decision_identity: str, native_identity: Mapping[str, Any] | None,
 ) -> list[T092Occurrence]:
     """Bind one native result to immutable source provenance and sanitize rows."""
 
+    if native_report.get("schema_id") != "native-battle-search-root-v1":
+        raise T092Incomplete("native report schema is not the accepted root schema")
     if native_report.get("native_api") != T092_NATIVE_API or native_report.get("patch_identity") != T092_NATIVE_PATCH_IDENTITY:
         raise T092Incomplete("native telemetry identity is not the T092 companion")
+    if native_report.get("information_regime") != "full_simulator_state_oracle_like":
+        raise T092Incomplete("native report information regime is not frozen Search-v2")
+    if native_report.get("simulations_requested") != 400 or native_report.get("include_potions") is not False:
+        raise T092Incomplete("native report is not frozen Search-v2@400 no-potion evidence")
+    if native_identity is None or dict(native_identity) != T092_NATIVE_IDENTITY:
+        raise T092Incomplete("exact task-scoped native identity is missing or conflicting")
+    teacher_config = _mapping(native_report.get("teacher_config"), "frozen teacher configuration")
+    if dict(teacher_config) != T092_FROZEN_TEACHER_CONFIG:
+        raise T092Incomplete("frozen teacher configuration is missing or conflicting")
     telemetry_root = _mapping(native_report.get("tree_internal_telemetry"), "tree telemetry")
     native = _mapping(telemetry_root.get("internal_teacher_telemetry"), "internal telemetry")
     if native.get("schema_id") != T092_NATIVE_SCHEMA_ID or native.get("schema_version") != 1:
@@ -150,7 +181,7 @@ def parse_native_occurrences(
         if row.get("input_state") not in {"PLAYER_NORMAL", "CARD_SELECT"}:
             raise T092Incomplete("candidate is not a stable player-decision state")
         depth, ordinal = row.get("tree_depth"), row.get("expansion_ordinal")
-        if not isinstance(depth, int) or depth < 0 or not isinstance(ordinal, int) or ordinal <= 0:
+        if not isinstance(depth, int) or depth < 1 or not isinstance(ordinal, int) or ordinal <= 0:
             raise T092Incomplete("candidate tree metadata is invalid")
         projection = _mapping(row.get("public_battle_projection"), "public projection")
         _assert_public_only(projection)
@@ -180,7 +211,7 @@ def parse_native_occurrences(
             if not isinstance(reason, str) or not reason:
                 raise T092Incomplete("teacher-excluded action lacks a reason")
             excluded.append({"action": _action(item.get("action"), "teacher-excluded action"), "exclusion_reason": reason})
-        result.append(T092Occurrence(source_identity, source_group, split, parent_root_decision_identity, occurrence, depth, ordinal, dict(projection), tuple(actions), tuple(excluded), search_work, telemetry_cost))
+        result.append(T092Occurrence(dict(native_identity), dict(teacher_config), source_identity, source_group, split, parent_root_decision_identity, occurrence, depth, ordinal, dict(projection), tuple(actions), tuple(excluded), search_work, telemetry_cost))
     if native.get("candidate_count") != len(result):
         raise T092Incomplete("native candidate count disagrees with rows")
     return result
