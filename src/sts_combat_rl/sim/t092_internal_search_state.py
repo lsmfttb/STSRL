@@ -130,7 +130,8 @@ class T092Occurrence:
 
 def parse_native_occurrences(
     native_report: Mapping[str, Any], *, source_identity: str, source_group: str,
-    split: str, parent_root_decision_identity: str, native_identity: Mapping[str, Any] | None,
+    split: str, parent_root_decision_identity: str,
+    native_identity: Mapping[str, Any] | None = None,
 ) -> list[T092Occurrence]:
     """Bind one native result to immutable source provenance and sanitize rows."""
 

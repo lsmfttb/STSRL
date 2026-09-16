@@ -101,6 +101,14 @@ def test_report_teacher_envelope_and_task_scoped_native_identity_fail_closed() -
 
     with pytest.raises(T092Incomplete, match="native identity"):
         parse_native_occurrences(_report(), source_identity="source-1", source_group="A", split="train", parent_root_decision_identity="root-1", native_identity={})
+    with pytest.raises(T092Incomplete, match="native identity"):
+        parse_native_occurrences(
+            _report(),
+            source_identity="source-1",
+            source_group="A",
+            split="train",
+            parent_root_decision_identity="root-1",
+        )
 
 
 def test_depth_zero_root_is_not_an_internal_occurrence() -> None:
