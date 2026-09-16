@@ -12,7 +12,7 @@ import os
 import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from typing import Any, Protocol
 
 from sts_combat_rl.commands.t085_native_execution import (
@@ -29,6 +29,7 @@ from sts_combat_rl.sim.controller_contract import (
     ControllerDecision,
     ControllerProvenance,
 )
+from sts_combat_rl.sim.contract import SimulatorTransition
 from sts_combat_rl.sim.oracle_search import (
     build_oracle_search_report,
     select_oracle_root_action,
@@ -379,7 +380,7 @@ def run_t092_native_canary_arm(
 
 
 class _RestoredAdapter:
-    """Expose exactly one already-restored snapshot to controlled-run reset."""
+    """Expose one restored snapshot and preserve Battle completion terminality."""
 
     def __init__(self, base_adapter: object, restored: object) -> None:
         self._base_adapter = base_adapter
@@ -391,8 +392,59 @@ class _RestoredAdapter:
         snapshot, self._restored = self._restored, None
         return snapshot
 
+    def step(self, action: object) -> SimulatorTransition:
+        """Stop at an authoritative Battle completion, including a victory.
+
+        ``LightSpeedAdapter`` reserves its generic terminal flag for terminal
+        runs.  A won Battle instead advances to rewards with
+        ``outcome=UNDECIDED`` while publishing ``completed_battle_outcome`` on
+        that same transition.  T085/T088 already treat that outcome as the
+        Battle-terminal boundary; T092 must do the same before the shared
+        executor could route another decision outside the restored Battle.
+        """
+
+        step = getattr(self._base_adapter, "step", None)
+        if not callable(step):
+            raise T092CanaryError("T092 canary adapter lacks step")
+        transition = step(action)
+        if not isinstance(transition, SimulatorTransition):
+            raise T092CanaryError("T092 canary adapter step returned an invalid transition")
+        if (
+            _authoritative_battle_completion(transition) is not None
+            and not transition.terminal
+        ):
+            return replace(transition, terminal=True)
+        return transition
+
     def __getattr__(self, name: str) -> Any:
         return getattr(self._base_adapter, name)
+
+
+def _authoritative_battle_completion(transition: SimulatorTransition) -> str | None:
+    """Return one simulator-published completed-Battle outcome, if present."""
+
+    candidates: list[object] = []
+    if isinstance(transition.info, Mapping):
+        candidates.extend(
+            transition.info.get(key)
+            for key in ("completed_battle_outcome", "battle_outcome")
+            if key in transition.info
+        )
+    raw = transition.snapshot.raw
+    if isinstance(raw, Mapping):
+        candidates.extend(
+            raw.get(key)
+            for key in ("completed_battle_outcome", "battle_outcome")
+            if key in raw
+        )
+    outcomes = {
+        value
+        for value in candidates
+        if isinstance(value, str) and value in {"PLAYER_VICTORY", "PLAYER_LOSS"}
+    }
+    if len(outcomes) > 1:
+        raise T092CanaryError("T092 canary transition has conflicting Battle outcomes")
+    return next(iter(outcomes), None)
 
 
 def _collect_arm_records(

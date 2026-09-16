@@ -10,7 +10,11 @@ from sts_combat_rl.sim.battle_search_v2 import (
     BATTLE_SEARCH_V2_NATIVE_API,
     BATTLE_SEARCH_V2_PATCH_IDENTITY,
 )
-from sts_combat_rl.sim.contract import SimulatorAction
+from sts_combat_rl.sim.contract import (
+    SimulatorAction,
+    SimulatorSnapshot,
+    SimulatorTransition,
+)
 from sts_combat_rl.sim.policy_contract import DecisionContext
 from sts_combat_rl.sim.t090_battle_student import T090SplitEntry
 from sts_combat_rl.sim.t092_canary import (
@@ -18,6 +22,7 @@ from sts_combat_rl.sim.t092_canary import (
     T092_CANARY_EXECUTION_CONFIG,
     T092CanaryError,
     T092_PUBLICATION_NATIVE_IDENTITY,
+    _RestoredAdapter,
     execute_t092_canary,
 )
 from sts_combat_rl.sim.t092_internal_search_state import (
@@ -149,6 +154,38 @@ def test_pair_arm_uses_exactly_one_native_api_per_decision() -> None:
     assert on.provenance.config["native_identity"]["commit"] == "07e1770cf0710d8c26719c153383d09e3bfd7686"
     assert off.metadata["t092_canary_decision"]["native_report"] is None
     assert on.metadata["t092_canary_decision"]["native_report"]["teacher_config"] == T092_FROZEN_TEACHER_CONFIG
+
+
+@pytest.mark.parametrize("outcome", ("PLAYER_VICTORY", "PLAYER_LOSS"))
+def test_restored_adapter_promotes_completed_battle_outcome_to_terminal(outcome: str) -> None:
+    """A completed Battle ends T092 before rewards/non-Battle routing."""
+
+    class Adapter:
+        def __init__(self) -> None:
+            self.step_calls = 0
+
+        def step(self, _action: object) -> SimulatorTransition:
+            self.step_calls += 1
+            return SimulatorTransition(
+                snapshot=SimulatorSnapshot(
+                    observation=[],
+                    raw={
+                        "screen_state": "REWARDS",
+                        "battle_active": False,
+                        "completed_battle_outcome": outcome,
+                        "outcome": "UNDECIDED",
+                    },
+                ),
+                terminal=False,
+                info={"completed_battle_outcome": outcome},
+            )
+
+    adapter = Adapter()
+    transition = _RestoredAdapter(adapter, object()).step(object())
+
+    assert adapter.step_calls == 1
+    assert transition.terminal is True
+    assert transition.snapshot.raw["completed_battle_outcome"] == outcome
 
 
 def test_pair_evidence_rejects_one_root_mismatch(monkeypatch) -> None:
