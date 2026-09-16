@@ -134,8 +134,23 @@ def test_retained_occurrence_revalidates_metadata_depth_and_public_firewall() ->
         validate_retained_occurrence(payload)
 
     payload = asdict(row)
+    payload["schema_version"] = 2
+    with pytest.raises(T092Incomplete, match="schema"):
+        validate_retained_occurrence(payload)
+
+    payload = asdict(row)
+    payload["input_state"] = "ENEMY_TURN"
+    with pytest.raises(T092Incomplete, match="input state"):
+        validate_retained_occurrence(payload)
+
+    payload = asdict(row)
     payload["public_battle_projection"]["hidden_draw_order"] = [1]
     with pytest.raises(T092Incomplete, match="forbidden private field"):
+        validate_retained_occurrence(payload)
+
+    payload = asdict(row)
+    payload["searchable_actions"][0]["action"]["bits"] = "one"
+    with pytest.raises(T092Incomplete, match="invalid bits"):
         validate_retained_occurrence(payload)
 
 

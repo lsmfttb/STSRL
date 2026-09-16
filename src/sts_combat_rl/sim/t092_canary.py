@@ -607,6 +607,8 @@ def _validate_arm_record(
         raise T092CanaryError(f"T092 {arm} arm terminal outcome is unavailable")
     if isinstance(terminal["battle_decision_count"], bool) or not isinstance(terminal["battle_decision_count"], int) or terminal["battle_decision_count"] <= 0:
         raise T092CanaryError(f"T092 {arm} arm terminal decision count is invalid")
+    if len(decisions) != terminal["battle_decision_count"]:
+        raise T092CanaryError(f"T092 {arm} arm terminal decision count disagrees with records")
     hp = terminal["terminal_current_hp"]
     if hp is not None and (isinstance(hp, bool) or not isinstance(hp, (int, float))):
         raise T092CanaryError(f"T092 {arm} arm terminal HP is invalid")

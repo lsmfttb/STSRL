@@ -24,6 +24,8 @@ from sts_combat_rl.sim.t092_internal_search_state import (
     T092_NATIVE_API,
     T092_NATIVE_IDENTITY,
     T092_NATIVE_PATCH_IDENTITY,
+    T092_SCHEMA_ID,
+    T092_SCHEMA_VERSION,
 )
 
 
@@ -202,11 +204,12 @@ def test_pair_evidence_rejects_hidden_or_malformed_retained_occurrence(monkeypat
             "teacher_config": dict(T092_FROZEN_TEACHER_CONFIG),
         }
         occurrence = {
+            "schema_id": T092_SCHEMA_ID, "schema_version": T092_SCHEMA_VERSION,
             "native_identity": dict(T092_NATIVE_IDENTITY), "frozen_teacher_config": dict(T092_FROZEN_TEACHER_CONFIG),
             "source_identity": source.source_identity, "source_group": source.source_group, "split": source.split,
             "parent_root_decision_identity": decisions[0]["decision_identity"], "occurrence_identity": "internal-1",
             "tree_depth": 1, "expansion_ordinal": 1,
-            "public_battle_projection": {"rng_state": "hidden"}, "searchable_actions": [], "excluded_actions": [],
+            "public_battle_projection": {"rng_state": "hidden"}, "input_state": "PLAYER_NORMAL", "searchable_actions": [], "excluded_actions": [],
             "search_work": {"root_visits": 400, "native_simulator_steps": 1, "simulations_requested": 400},
             "telemetry_cost": {"telemetry_extraction_transition_count": 0, "collection_phase": "post_search_private_state_replay"},
         }
@@ -249,4 +252,31 @@ def test_pair_evidence_rejects_nonfinite_root_values(monkeypatch) -> None:
         }
 
     with pytest.raises(T092CanaryError, match="root action values are invalid"):
+        execute_t092_canary(split_manifest={}, runner=runner)
+
+
+def test_pair_evidence_rejects_terminal_decision_count_mismatch(monkeypatch) -> None:
+    selected = tuple(T090SplitEntry(f"source-{index}", "A", "train", index) for index in range(12))
+    monkeypatch.setattr("sts_combat_rl.sim.t092_canary.select_t092_canary_entries", lambda _manifest: selected)
+
+    def runner(source: T090SplitEntry):
+        decisions = [{"decision_identity": f"{source.source_identity}:battle-decision:0", "root_semantics": _root_semantics()}]
+        arm = {
+            "restore_method": "checkpoint_restore", "restored_snapshot_present": True,
+            "restore_public_legal_parity": True, "decision_records": decisions,
+            "terminal": {"outcome": "PLAYER_VICTORY", "terminal_current_hp": 50, "battle_decision_count": 2},
+            "internal_occurrences": [], "cost": {"wall_clock_time_s": 0.1},
+            "teacher_config": dict(T092_FROZEN_TEACHER_CONFIG),
+        }
+        return {
+            "source_identity": source.source_identity, "source_group": source.source_group,
+            "split": source.split, "canonical_position": source.canonical_position,
+            "arm_native_identities": {"OFF": T092_PUBLICATION_NATIVE_IDENTITY, "ON": T092_NATIVE_IDENTITY},
+            "teacher_config": dict(T092_FROZEN_TEACHER_CONFIG),
+            "worker": {"stage_worker_count": 12, "worker_index": 0, "shard_count": 12, "shard_index": 0},
+            "off": {**arm, "arm": "OFF", "native_identity": T092_PUBLICATION_NATIVE_IDENTITY},
+            "on": {**arm, "arm": "ON", "native_identity": T092_NATIVE_IDENTITY},
+        }
+
+    with pytest.raises(T092CanaryError, match="decision count disagrees"):
         execute_t092_canary(split_manifest={}, runner=runner)

@@ -16,6 +16,7 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 T092_SCHEMA_ID = "t092-internal-search-state-occurrence-v1"
+T092_SCHEMA_VERSION = 1
 T092_NATIVE_SCHEMA_ID = "native-battle-search-v2-internal-teacher-telemetry-v1"
 T092_N_MINS = (1, 2, 4, 8, 16)
 T092_CANARY_DOMAIN_SEPARATOR = 900492
@@ -74,6 +75,13 @@ def _action(value: object, label: str) -> dict[str, Any]:
         raise T092Incomplete(f"{label} is not a Battle public action")
     if not isinstance(action["kind"], str) or not action["kind"]:
         raise T092Incomplete(f"{label} has invalid kind")
+    if not isinstance(action["label"], str) or not action["label"]:
+        raise T092Incomplete(f"{label} has invalid label")
+    for key in ("bits", "idx1", "idx2", "idx3"):
+        if isinstance(action[key], bool) or not isinstance(action[key], int):
+            raise T092Incomplete(f"{label} has invalid {key}")
+    if action["bits"] < 0:
+        raise T092Incomplete(f"{label} has invalid bits")
     return {key: action[key] for key in required}
 
 
@@ -106,6 +114,8 @@ def public_fingerprint(public_projection: Mapping[str, Any], actions: Sequence[M
 
 @dataclass(frozen=True)
 class T092Occurrence:
+    schema_id: str
+    schema_version: int
     native_identity: Mapping[str, Any]
     frozen_teacher_config: Mapping[str, Any]
     source_identity: str
@@ -116,6 +126,7 @@ class T092Occurrence:
     tree_depth: int
     expansion_ordinal: int
     public_battle_projection: Mapping[str, Any]
+    input_state: str
     searchable_actions: tuple[Mapping[str, Any], ...]
     excluded_actions: tuple[Mapping[str, Any], ...]
     search_work: Mapping[str, Any]
@@ -142,14 +153,16 @@ def validate_retained_occurrence(
     """
 
     required = {
-        "native_identity", "frozen_teacher_config", "source_identity",
+        "schema_id", "schema_version", "native_identity", "frozen_teacher_config", "source_identity",
         "source_group", "split", "parent_root_decision_identity",
         "occurrence_identity", "tree_depth", "expansion_ordinal",
-        "public_battle_projection", "searchable_actions", "excluded_actions",
+        "public_battle_projection", "input_state", "searchable_actions", "excluded_actions",
         "search_work", "telemetry_cost",
     }
     if set(value) != required:
         raise T092Incomplete("retained internal occurrence fields are incomplete")
+    if value["schema_id"] != T092_SCHEMA_ID or value["schema_version"] != T092_SCHEMA_VERSION:
+        raise T092Incomplete("retained occurrence schema is unsupported")
     if dict(_mapping(value["native_identity"], "occurrence native identity")) != T092_NATIVE_IDENTITY:
         raise T092Incomplete("retained occurrence native identity is conflicting")
     if dict(_mapping(value["frozen_teacher_config"], "occurrence teacher configuration")) != T092_FROZEN_TEACHER_CONFIG:
@@ -176,6 +189,8 @@ def validate_retained_occurrence(
         raise T092Incomplete("retained occurrence tree metadata is invalid")
     projection = _mapping(value["public_battle_projection"], "retained public projection")
     _assert_public_only(projection)
+    if value["input_state"] not in {"PLAYER_NORMAL", "CARD_SELECT"}:
+        raise T092Incomplete("retained occurrence input state is invalid")
     raw_actions = value["searchable_actions"]
     if not isinstance(raw_actions, Sequence) or isinstance(raw_actions, (str, bytes, bytearray)):
         raise T092Incomplete("retained teacher-searchable actions are unavailable")
@@ -233,8 +248,9 @@ def validate_retained_occurrence(
     ):
         raise T092Incomplete("retained telemetry cost metadata is invalid")
     return T092Occurrence(
-        dict(value["native_identity"]), dict(value["frozen_teacher_config"]), identity,
-        group, retained_split, parent, occurrence, depth, ordinal, dict(projection),
+        str(value["schema_id"]), value["schema_version"], dict(value["native_identity"]),
+        dict(value["frozen_teacher_config"]), identity, group, retained_split, parent,
+        occurrence, depth, ordinal, dict(projection), str(value["input_state"]),
         tuple(actions), tuple(excluded), dict(search_work), dict(telemetry_cost),
     )
 
@@ -324,6 +340,8 @@ def parse_native_occurrences(
                 raise T092Incomplete("teacher-excluded action lacks a reason")
             excluded.append({"action": _action(item.get("action"), "teacher-excluded action"), "exclusion_reason": reason})
         normalized = T092Occurrence(
+            T092_SCHEMA_ID,
+            T092_SCHEMA_VERSION,
             dict(native_identity),
             dict(teacher_config),
             source_identity,
@@ -334,6 +352,7 @@ def parse_native_occurrences(
             depth,
             ordinal,
             dict(projection),
+            str(row["input_state"]),
             tuple(actions),
             tuple(excluded),
             search_work,

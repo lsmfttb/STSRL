@@ -37,9 +37,12 @@ conflicting report or task-native facts fail closed. This document does not
 change the merged `docs/sts_lightspeed_source_manifest.json` pin.
 
 Retained occurrence JSON is independently revalidated before canary evidence
-is accepted: exact occurrence/child/cost field sets, task-native identity,
-frozen teacher envelope, source/split/parent-decision binding, `tree_depth >=
-1`, finite supported means, zero-visit unknowns, and the recursive public
+is accepted. Every row carries exact
+`t092-internal-search-state-occurrence-v1` / version `1` metadata and its
+original `PLAYER_NORMAL` or `CARD_SELECT` input state. Exact occurrence/child/
+cost field sets, task-native identity, frozen teacher envelope,
+source/split/parent-decision binding, `tree_depth >= 1`, public-action scalar
+types, finite supported means, zero-visit unknowns, and the recursive public
 firewall all fail closed. This prevents a file-only evidence reader from
 accepting injected private or malformed internal rows.
 
