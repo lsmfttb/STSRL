@@ -3,11 +3,17 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from sts_combat_rl.sim.t090_battle_student import T090SplitEntry
-from sts_combat_rl.sim.t092_canary import T092_PUBLICATION_NATIVE_IDENTITY
+from sts_combat_rl.sim.t092_canary import (
+    T092_CANARY_EXECUTION_CONFIG,
+    T092_CANARY_MAX_STEPS,
+    T092_PUBLICATION_NATIVE_IDENTITY,
+    run_t092_native_canary_arm,
+)
 from sts_combat_rl.sim.t092_canary_execution import (
     T092CanaryExecutionError,
     build_t092_canary_authorization_template,
@@ -45,6 +51,7 @@ def _pair(source: T090SplitEntry) -> dict[str, object]:
         "terminal": {"outcome": "PLAYER_VICTORY", "terminal_current_hp": 50, "battle_decision_count": 1},
         "internal_occurrences": [], "cost": {"wall_clock_time_s": 0.0},
         "teacher_config": dict(T092_FROZEN_TEACHER_CONFIG),
+        "execution_config": dict(T092_CANARY_EXECUTION_CONFIG),
     }
     def complete(arm_name: str, native: dict[str, object], pid: int) -> dict[str, object]:
         return {
@@ -65,6 +72,7 @@ def _pair(source: T090SplitEntry) -> dict[str, object]:
         "split": source.split, "canonical_position": source.canonical_position,
         "arm_native_identities": {"OFF": T092_PUBLICATION_NATIVE_IDENTITY, "ON": T092_NATIVE_IDENTITY},
         "teacher_config": dict(T092_FROZEN_TEACHER_CONFIG),
+        "execution_config": dict(T092_CANARY_EXECUTION_CONFIG),
         "worker": {"stage_worker_count": 12, "worker_index": 0, "shard_count": 12, "shard_index": 0},
         "arm_artifacts": {"OFF": {"path": "/off.json", "sha256": "a" * 64, "size_bytes": 1, "schema_id": "t092-paired-canary-arm-record-v1"}, "ON": {"path": "/on.json", "sha256": "b" * 64, "size_bytes": 1, "schema_id": "t092-paired-canary-arm-record-v1"}},
         "off": complete("OFF", T092_PUBLICATION_NATIVE_IDENTITY, 101),
@@ -107,6 +115,29 @@ def test_authorized_t092_shard_binds_one_exact_start(monkeypatch, tmp_path) -> N
     )
     assert shard["pair"]["source_identity"] == "source-0"
     assert shard["topology"]["assignment"] == "canonical-selected-ordinal-v1"
+
+
+def test_authorized_t092_shard_rejects_tampered_execution_cap(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr("sts_combat_rl.sim.t092_canary.select_t092_canary_entries", lambda _manifest: _selected())
+    monkeypatch.setattr("sts_combat_rl.sim.t092_canary_execution.select_t092_canary_entries", lambda _manifest: _selected())
+    prepared = build_t092_canary_authorization_template(
+        implementation_head="a" * 40, split_manifest={},
+        runtime_input_identities={"restore_maps": "fixed"}, output_root=tmp_path,
+    )
+    authorization = dict(prepared["authorization_template"])
+    authorization.update({"authorized": True, "authorization_id": "mock-maintainer-auth"})
+
+    def wrong_cap(source: T090SplitEntry) -> dict[str, object]:
+        pair = _pair(source)
+        pair["on"]["execution_config"]["max_steps"] = 200
+        return pair
+
+    with pytest.raises(T092CanaryExecutionError, match="shard pair is incomplete"):
+        execute_t092_authorized_canary_shard(
+            authorization=authorization, implementation_head="a" * 40, split_manifest={},
+            runtime_input_identities={"restore_maps": "fixed"}, output_root=tmp_path,
+            shard_index=0, shard_count=12, worker_count=12, runner=wrong_cap,
+        )
 
 
 def test_native_mismatch_cannot_spawn_an_isolated_arm(monkeypatch, tmp_path) -> None:
@@ -172,3 +203,72 @@ def test_child_failure_detail_relays_only_controlled_t092_boundary_text() -> Non
     assert _child_failure_detail("native private state: <opaque>") == (
         "unclassified: child_stderr_not_safe_for_retention"
     )
+
+
+def test_native_arm_records_and_uses_the_bounded_500_step_canary_cap(
+    monkeypatch,
+) -> None:
+    """Cap provenance is exact and an exhausted cap is still never terminal."""
+
+    import sts_combat_rl.sim.t092_canary as canary
+
+    captured: dict[str, object] = {}
+
+    class Adapter:
+        def legal_actions(self, _snapshot):
+            return []
+
+        def close(self) -> None:
+            return None
+
+    source = _selected()[0]
+    selected = SimpleNamespace(selection_identity=source.source_identity)
+    canonical = SimpleNamespace(
+        source_checkpoint_id=source.source_identity,
+        source_run_id="run",
+        source_seed=1,
+        source_battle_index=0,
+        public_run_context={"history": []},
+    )
+    monkeypatch.setattr(
+        canary,
+        "restore_t085_canonical_record",
+        lambda *_args: (SimpleNamespace(raw=object()), "checkpoint_restore"),
+    )
+    monkeypatch.setattr(canary, "read_native_public_projection", lambda *_args: {})
+    monkeypatch.setattr(
+        canary, "build_public_run_context", lambda *_args, **_kwargs: {"history": []}
+    )
+    monkeypatch.setattr(
+        canary,
+        "execute_controlled_run",
+        lambda *_args, **kwargs: captured.update(kwargs) or object(),
+    )
+    monkeypatch.setattr(
+        canary,
+        "_collect_arm_records",
+        lambda *_args, **_kwargs: ([{"decision_identity": "decision", "root_semantics": {}}], []),
+    )
+    monkeypatch.setattr(
+        canary,
+        "_terminal_record",
+        lambda *_args: {
+            "outcome": "PLAYER_VICTORY", "terminal_current_hp": 50,
+            "battle_decision_count": 1,
+        },
+    )
+
+    record = run_t092_native_canary_arm(
+        source=source,
+        selected=selected,
+        canonical=canonical,
+        telemetry_enabled=False,
+        adapter_factory=Adapter,
+        worker={"stage_worker_count": 12, "worker_index": 0, "shard_count": 12, "shard_index": 0},
+        implementation_head="a" * 40,
+        native_binary={"path": "/off.so", "sha256": "a" * 64, "size_bytes": 1},
+    )
+
+    assert captured["seed"] is None
+    assert captured["max_steps"] == T092_CANARY_MAX_STEPS == 500
+    assert record["execution_config"] == T092_CANARY_EXECUTION_CONFIG

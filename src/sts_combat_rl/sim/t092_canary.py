@@ -63,6 +63,17 @@ T092_CANARY_PLAN_SCHEMA_ID = "t092-paired-canary-plan-v1"
 T092_CANARY_ARM_RECORD_SCHEMA_ID = "t092-paired-canary-arm-record-v1"
 T092_CANARY_START_COUNT = 12
 T092_CANARY_CLASSIFICATION = "MECHANICS_INFORMATION_BOUNDARY_ONLY"
+# This is a canary runner boundary, not a Search parameter.  The inherited
+# T087 evaluator's 200-decision cap proved too small for several of the fixed
+# restored battles.  A cap exhaustion remains INCOMPLETE; the larger, explicit
+# cap merely permits the paired arms to reach their already-required terminal
+# evidence.  T085's accepted source collection uses the same 500-step bound.
+T092_CANARY_MAX_STEPS = 500
+T092_CANARY_EXECUTION_CONFIG = {
+    "restore_rng_mode": "exact_checkpoint_no_reseed",
+    "max_steps": T092_CANARY_MAX_STEPS,
+    "action_space": ActionSpaceConfig.initial_no_potions().to_dict(),
+}
 T092_PUBLICATION_NATIVE_IDENTITY = {
     "repository": "lsmfttb/sts_lightspeed",
     "ref": "refs/heads/stsrl/main",
@@ -118,6 +129,7 @@ def build_t092_canary_plan(split_manifest: Mapping[str, Any]) -> dict[str, Any]:
             "ON": dict(T092_NATIVE_IDENTITY),
         },
         "teacher_config": dict(T092_FROZEN_TEACHER_CONFIG),
+        "execution_config": dict(T092_CANARY_EXECUTION_CONFIG),
         "worker_plan": {
             "stage_worker_count": 12,
             "shard_count": 12,
@@ -309,7 +321,7 @@ def run_t092_native_canary_arm(
             restored_adapter,
             T092CanaryArmController(telemetry_enabled=telemetry_enabled),
             seed=None,
-            max_steps=200,
+            max_steps=T092_CANARY_MAX_STEPS,
             action_space=ActionSpaceConfig.initial_no_potions(),
         )
         elapsed = time.perf_counter() - started
@@ -342,6 +354,7 @@ def run_t092_native_canary_arm(
                 T092_NATIVE_API if telemetry_enabled else BATTLE_SEARCH_V2_NATIVE_API
             ),
             "teacher_config": dict(T092_FROZEN_TEACHER_CONFIG),
+            "execution_config": dict(T092_CANARY_EXECUTION_CONFIG),
             "process_identity": {
                 "pid": os.getpid(),
                 "python_executable": sys.executable,
@@ -476,6 +489,7 @@ def execute_t092_canary(
             "ON": dict(T092_NATIVE_IDENTITY),
         },
         "teacher_config": dict(T092_FROZEN_TEACHER_CONFIG),
+        "execution_config": dict(T092_CANARY_EXECUTION_CONFIG),
         "source_execution_entries": entries,
         "source_execution_entries_sha256": canonical_sha256(entries),
         "semantic_parity": {"passed": True, "mismatch_count": 0},
@@ -501,6 +515,7 @@ def validate_t092_canary_evidence(
         or evidence.get("arm_native_identities")
         != {"OFF": T092_PUBLICATION_NATIVE_IDENTITY, "ON": T092_NATIVE_IDENTITY}
         or evidence.get("teacher_config") != T092_FROZEN_TEACHER_CONFIG
+        or evidence.get("execution_config") != T092_CANARY_EXECUTION_CONFIG
     ):
         raise T092CanaryError("T092 paired canary evidence provenance is invalid")
     selected = select_t092_canary_entries(split_manifest)
@@ -527,6 +542,7 @@ def _validate_pair_record(raw: Mapping[str, Any], source: T090SplitEntry) -> dic
         "canonical_position",
         "arm_native_identities",
         "teacher_config",
+        "execution_config",
         "worker",
         "arm_artifacts",
         "off",
@@ -544,6 +560,7 @@ def _validate_pair_record(raw: Mapping[str, Any], source: T090SplitEntry) -> dic
             "ON": T092_NATIVE_IDENTITY,
         },
         "teacher_config": T092_FROZEN_TEACHER_CONFIG,
+        "execution_config": T092_CANARY_EXECUTION_CONFIG,
     }.items():
         if raw.get(key) != expected:
             raise T092CanaryError(f"T092 canary pair provenance mismatch: {key}")
@@ -594,6 +611,8 @@ def _validate_pair_record(raw: Mapping[str, Any], source: T090SplitEntry) -> dic
         or on.get("worker") != raw.get("worker")
         or off.get("implementation_head") != on.get("implementation_head")
         or off.get("restore_binding") != on.get("restore_binding")
+        or off.get("execution_config") != raw.get("execution_config")
+        or on.get("execution_config") != raw.get("execution_config")
         or off.get("process_identity", {}).get("pid")
         == on.get("process_identity", {}).get("pid")
     ):
@@ -627,6 +646,7 @@ def _validate_arm_record(
         "native_binary",
         "native_api",
         "teacher_config",
+        "execution_config",
         "process_identity",
         "worker",
         "restore_method",
@@ -652,6 +672,7 @@ def _validate_arm_record(
         or arm_record.get("native_identity") != expected_native_identity
         or arm_record.get("native_api") != expected_api
         or arm_record.get("teacher_config") != T092_FROZEN_TEACHER_CONFIG
+        or arm_record.get("execution_config") != T092_CANARY_EXECUTION_CONFIG
         or arm_record.get("restored_snapshot_present") is not True
         or arm_record.get("restore_public_legal_parity") is not True
         or not isinstance(arm_record.get("restore_method"), str)

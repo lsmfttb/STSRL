@@ -19,6 +19,7 @@ from typing import Any
 from sts_combat_rl.sim.t090_battle_student import canonical_sha256
 from sts_combat_rl.sim.t092_canary import (
     T092_CANARY_EVIDENCE_SCHEMA_ID,
+    T092_CANARY_EXECUTION_CONFIG,
     T092_CANARY_START_COUNT,
     T092_PUBLICATION_NATIVE_IDENTITY,
     T092CanaryError,
@@ -100,6 +101,7 @@ def build_t092_canary_authorization_template(
             "ON": dict(T092_NATIVE_IDENTITY),
         },
         "teacher_config": dict(T092_FROZEN_TEACHER_CONFIG),
+        "execution_config": dict(T092_CANARY_EXECUTION_CONFIG),
         "shard_topology": {
             "shard_count": T092_CANARY_START_COUNT,
             "worker_count": T092_CANARY_START_COUNT,
@@ -146,6 +148,7 @@ def validate_t092_canary_authorization(
         "schema_id", "task_id", "authorization_kind", "authorized", "authorization_id",
         "implementation_head", "split_manifest_sha256", "canary_plan_sha256",
         "runtime_input_identities_sha256", "arm_native_identities", "teacher_config",
+        "execution_config",
         "shard_topology", "output_root", "maintainer_attestation",
     }
     if set(authorization) != required:
@@ -172,6 +175,7 @@ def validate_t092_canary_authorization(
         != canonical_sha256(dict(runtime_input_identities))
         or authorization.get("arm_native_identities") != expected_arms
         or authorization.get("teacher_config") != T092_FROZEN_TEACHER_CONFIG
+        or authorization.get("execution_config") != T092_CANARY_EXECUTION_CONFIG
         or authorization.get("shard_topology") != expected_topology
         or authorization.get("output_root") != expected_output
         or attestation != {
@@ -312,6 +316,7 @@ def _build_evidence(*, split_manifest: Mapping[str, Any], entries: Sequence[Mapp
             "OFF": dict(T092_PUBLICATION_NATIVE_IDENTITY), "ON": dict(T092_NATIVE_IDENTITY),
         },
         "teacher_config": dict(T092_FROZEN_TEACHER_CONFIG),
+        "execution_config": dict(T092_CANARY_EXECUTION_CONFIG),
         "source_execution_entries": normalized,
         "source_execution_entries_sha256": canonical_sha256(normalized),
         "semantic_parity": {"passed": True, "mismatch_count": 0},

@@ -133,6 +133,16 @@ accepts only all twelve canonical shard positions and writes one
 written once with its SHA-256, size, and schema returned for the eventual
 retention manifest. Outputs are ignored artifacts, never Git inputs.
 
+Each arm's plan, authorization and immutable retained arm record bind the
+canary-only execution envelope: exact checkpoint restore with no reseed,
+`initial_no_potions`, and `max_steps=500`. The previous inherited 200-decision
+cap left several fixed restored battles nonterminal. This operational bound
+does not change Search-v2@400, the terminal predicate, or parity: an arm that
+reaches 500 decisions without a clean terminal remains `INCOMPLETE` and is not
+accepted as canary evidence. The 500-decision bound matches the accepted T085
+source-collection cap and must be independently reauthorized with the exact
+new canary plan hash.
+
 The launcher retains all 12 logical shard positions but requires explicit
 `T092_CANARY_RESOURCE_*` budget, per-shard reservation, RSS-limit, and
 MemAvailable-floor values. Its detached resource leases admit only the number
