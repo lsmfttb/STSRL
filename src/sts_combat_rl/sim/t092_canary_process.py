@@ -26,6 +26,7 @@ from sts_combat_rl.sim.battle_start_pool import (
 from sts_combat_rl.sim.t090_battle_student import T090SplitEntry
 from sts_combat_rl.sim.t092_canary import (
     T092_CANARY_ARM_RECORD_SCHEMA_ID,
+    T092_CANARY_EXECUTION_CONFIG,
     T092_PUBLICATION_NATIVE_IDENTITY,
     T092CanaryError,
     _validate_arm_record,
@@ -285,6 +286,7 @@ class T092IsolatedCanaryRunner:
             "canonical_position": source.canonical_position,
             "arm_native_identities": {"OFF": dict(T092_PUBLICATION_NATIVE_IDENTITY), "ON": dict(T092_NATIVE_IDENTITY)},
             "teacher_config": records["OFF"]["teacher_config"],
+            "execution_config": dict(T092_CANARY_EXECUTION_CONFIG),
             "worker": dict(self._worker),
             "arm_artifacts": artifacts,
             "off": records["OFF"],

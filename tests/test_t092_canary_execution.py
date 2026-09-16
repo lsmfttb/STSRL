@@ -21,6 +21,7 @@ from sts_combat_rl.sim.t092_canary_execution import (
 )
 from sts_combat_rl.sim.t092_canary_process import (
     T092CanaryProcessError,
+    T092IsolatedCanaryRunner,
     _child_failure_detail,
     execute_t092_isolated_arm,
 )
@@ -138,6 +139,30 @@ def test_authorized_t092_shard_rejects_tampered_execution_cap(monkeypatch, tmp_p
             runtime_input_identities={"restore_maps": "fixed"}, output_root=tmp_path,
             shard_index=0, shard_count=12, worker_count=12, runner=wrong_cap,
         )
+
+
+def test_isolated_runner_carries_execution_config_to_the_pair(monkeypatch, tmp_path) -> None:
+    """The strict pair validator receives the arm execution envelope."""
+
+    import sts_combat_rl.sim.t092_canary_process as process
+
+    source = _selected()[0]
+    expected = _pair(source)
+    runner = object.__new__(T092IsolatedCanaryRunner)
+    runner._source_records = {source.source_identity: object()}
+    runner._canonical_records = {source.source_identity: object()}
+    runner._specs = {"OFF": {}, "ON": {}}
+    runner._worker = expected["worker"]
+    runner._implementation_head = "a" * 40
+    runner._output_root = tmp_path
+
+    def arm_record(*, arm, **_kwargs):
+        return expected[arm.lower()], expected["arm_artifacts"][arm]
+
+    monkeypatch.setattr(process, "execute_t092_isolated_arm", arm_record)
+    pair = runner(source)
+
+    assert pair["execution_config"] == T092_CANARY_EXECUTION_CONFIG
 
 
 def test_native_mismatch_cannot_spawn_an_isolated_arm(monkeypatch, tmp_path) -> None:
