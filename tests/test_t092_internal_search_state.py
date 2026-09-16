@@ -16,6 +16,7 @@ from sts_combat_rl.sim.t092_internal_search_state import (
     select_t092_canary_sources,
     summarize_occurrences,
     support_pairs,
+    validate_parent_bound_occurrence_identities,
     validate_retained_occurrence,
 )
 
@@ -152,6 +153,26 @@ def test_retained_occurrence_revalidates_metadata_depth_and_public_firewall() ->
     payload["searchable_actions"][0]["action"]["bits"] = "one"
     with pytest.raises(T092Incomplete, match="invalid bits"):
         validate_retained_occurrence(payload)
+
+
+def test_occurrence_identity_is_unique_within_its_parent_root_search() -> None:
+    """Native tree paths restart at every Battle decision's root Search."""
+
+    first = _parse()[0]
+    second = parse_native_occurrences(
+        _report(),
+        source_identity="source-1",
+        source_group="A",
+        split="train",
+        parent_root_decision_identity="root-2",
+        native_identity=T092_NATIVE_IDENTITY,
+    )[0]
+    assert first.occurrence_identity == second.occurrence_identity == "root.0"
+    validate_parent_bound_occurrence_identities([first, second])
+
+    duplicate_same_parent = _parse()[0]
+    with pytest.raises(T092Incomplete, match="parent-bound occurrence identity is duplicate"):
+        validate_parent_bound_occurrence_identities([first, duplicate_same_parent])
 
 
 def test_cross_split_fingerprint_excludes_every_occurrence() -> None:

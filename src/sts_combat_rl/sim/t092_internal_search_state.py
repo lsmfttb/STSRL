@@ -255,6 +255,30 @@ def validate_retained_occurrence(
     )
 
 
+def validate_parent_bound_occurrence_identities(
+    occurrences: Sequence[T092Occurrence],
+) -> None:
+    """Require uniqueness inside each root Search, never across decisions.
+
+    Native occurrence identifiers are deterministic tree paths (for example
+    ``root.0``) and intentionally restart at every root Search invocation.
+    The retained parent root-decision identity is therefore part of the unique
+    occurrence binding.
+    """
+
+    bindings: set[tuple[str, str]] = set()
+    for occurrence in occurrences:
+        binding = (
+            occurrence.parent_root_decision_identity,
+            occurrence.occurrence_identity,
+        )
+        if binding in bindings:
+            raise T092Incomplete(
+                "retained parent-bound occurrence identity is duplicate"
+            )
+        bindings.add(binding)
+
+
 def parse_native_occurrences(
     native_report: Mapping[str, Any], *, source_identity: str, source_group: str,
     split: str, parent_root_decision_identity: str,

@@ -51,6 +51,7 @@ from sts_combat_rl.sim.t092_internal_search_state import (
     T092_NATIVE_PATCH_IDENTITY,
     parse_native_occurrences,
     select_t092_canary_sources,
+    validate_parent_bound_occurrence_identities,
     validate_retained_occurrence,
 )
 from sts_combat_rl.t085_corrected_leaf_value_search_evaluation import (
@@ -749,7 +750,7 @@ def _validate_arm_record(
             for item in decisions
             if isinstance(item, Mapping)
         }
-        occurrence_ids: set[str] = set()
+        validated_occurrences = []
         for raw in occurrences:
             if not isinstance(raw, Mapping):
                 raise T092CanaryError("T092 ON arm occurrence is malformed")
@@ -765,9 +766,13 @@ def _validate_arm_record(
                 raise T092CanaryError(
                     "T092 ON arm occurrence violates retained schema/firewall"
                 ) from exc
-            if occurrence.occurrence_identity in occurrence_ids:
-                raise T092CanaryError("T092 ON arm occurrence identity is duplicate")
-            occurrence_ids.add(occurrence.occurrence_identity)
+            validated_occurrences.append(occurrence)
+        try:
+            validate_parent_bound_occurrence_identities(validated_occurrences)
+        except T092Incomplete as exc:
+            raise T092CanaryError(
+                "T092 ON arm parent-bound occurrence identity is duplicate"
+            ) from exc
 
 
 def _validate_root_semantics(value: object, *, arm: str) -> None:
