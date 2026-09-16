@@ -8,6 +8,7 @@ repository ships no command that can silently start a formal collection.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib
 import json
 from pathlib import Path
@@ -35,6 +36,19 @@ def _mapping(path: Path, label: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise TypeError(f"{label} must be a JSON object")
     return value
+
+
+def _artifact_identity(path: Path, schema_id: str) -> dict[str, Any]:
+    """Describe an immutable input without trusting its filename."""
+
+    resolved = path.resolve(strict=True)
+    encoded = resolved.read_bytes()
+    return {
+        "path": str(resolved),
+        "sha256": hashlib.sha256(encoded).hexdigest(),
+        "size_bytes": len(encoded),
+        "schema_id": schema_id,
+    }
 
 
 def _within(path: Path, root: Path) -> None:
@@ -126,11 +140,18 @@ def main(argv: list[str] | None = None) -> int:
         provenance = _read(args.decision_provenance)
         if not isinstance(teacher_rows, list) or not isinstance(provenance, list):
             raise TypeError("T090 root-reference inputs must be JSON lists")
+        teacher_identity = _artifact_identity(args.teacher_rows, "t090-root-teacher-rows-v1")
+        provenance_identity = _artifact_identity(args.decision_provenance, "t090-root-decision-provenance-v1")
+        source_ledger_identity = _artifact_identity(
+            args.source_ledger_reference, "t090-source-execution-ledger-v1"
+        )
         reference = build_t092_t090_root_reference(
             teacher_rows=teacher_rows,
             decision_provenance=provenance,
-            source_ledger=_mapping(args.source_ledger_reference, "T090 source ledger reference"),
+            source_ledger=source_ledger_identity,
             split_manifest=_mapping(args.split_manifest, "split manifest"),
+            teacher_rows_artifact=teacher_identity,
+            decision_provenance_artifact=provenance_identity,
         )
         write_t092_formal_json(args.output, reference, schema_id=reference["schema_id"])
         return 0

@@ -61,7 +61,12 @@ from sts_combat_rl.t085_corrected_leaf_value_search_evaluation import (
 
 T092_CANARY_EVIDENCE_SCHEMA_ID = "t092-paired-semantic-parity-canary-v1"
 T092_CANARY_PLAN_SCHEMA_ID = "t092-paired-canary-plan-v1"
-T092_CANARY_ARM_RECORD_SCHEMA_ID = "t092-paired-canary-arm-record-v1"
+T092_CANARY_ARM_RECORD_SCHEMA_LEGACY_ID = "t092-paired-canary-arm-record-v1"
+T092_CANARY_ARM_RECORD_SCHEMA_ID = "t092-paired-canary-arm-record-v2"
+T092_CANARY_ARM_RECORD_SCHEMA_IDS = frozenset({
+    T092_CANARY_ARM_RECORD_SCHEMA_LEGACY_ID,
+    T092_CANARY_ARM_RECORD_SCHEMA_ID,
+})
 T092_CANARY_START_COUNT = 12
 T092_CANARY_CLASSIFICATION = "MECHANICS_INFORMATION_BOUNDARY_ONLY"
 # This is a canary runner boundary, not a Search parameter.  The inherited
@@ -368,6 +373,9 @@ def run_t092_native_canary_arm(
             "terminal": terminal,
             "internal_occurrences": occurrences,
             "cost": {"wall_clock_time_s": elapsed},
+            "tree_geometry": _collect_tree_geometry_records(
+                controlled, source=source, telemetry_enabled=telemetry_enabled
+            ),
         }
     finally:
         close = getattr(base_adapter, "close", None)
@@ -484,6 +492,100 @@ def _collect_arm_records(
     if not decisions:
         raise T092CanaryError("T092 canary arm has no Battle decisions")
     return decisions, occurrences
+
+
+def _validate_tree_geometry(value: object) -> dict[str, Any]:
+    """Validate the compact native tree-geometry companion report."""
+
+    if not isinstance(value, Mapping) or set(value) != {
+        "schema_id", "schema_version", "root_depth", "total_expanded_node_count",
+        "total_discovered_child_edge_count", "total_visited_child_edge_count",
+        "max_expanded_depth", "depth_rows",
+    }:
+        raise T092CanaryError("T092 native tree geometry fields are incomplete")
+    if value.get("schema_id") != "native-battle-search-v2-tree-geometry-v1" or value.get("schema_version") != 1 or value.get("root_depth") != 0:
+        raise T092CanaryError("T092 native tree geometry identity is invalid")
+    rows = value.get("depth_rows")
+    if not isinstance(rows, Sequence) or isinstance(rows, (str, bytes)):
+        raise T092CanaryError("T092 native tree geometry depth rows are invalid")
+    totals = {key: 0 for key in ("expanded_node_count", "discovered_child_edge_count", "visited_child_edge_count")}
+    for depth, raw in enumerate(rows):
+        if not isinstance(raw, Mapping) or set(raw) != {
+            "depth", "expanded_node_count", "discovered_child_edge_count",
+            "visited_child_edge_count", "branching_histogram",
+        } or raw.get("depth") != depth:
+            raise T092CanaryError("T092 native tree geometry depth row is invalid")
+        counts = {key: raw[key] for key in totals}
+        if any(isinstance(count, bool) or not isinstance(count, int) or count < 0 for count in counts.values()) or counts["visited_child_edge_count"] > counts["discovered_child_edge_count"]:
+            raise T092CanaryError("T092 native tree geometry counts are invalid")
+        histogram = raw["branching_histogram"]
+        if not isinstance(histogram, Sequence) or isinstance(histogram, (str, bytes)):
+            raise T092CanaryError("T092 native tree geometry branching histogram is invalid")
+        previous = -1
+        histogram_nodes = histogram_edges = 0
+        for bucket in histogram:
+            if not isinstance(bucket, Mapping) or set(bucket) != {"child_count", "node_count"}:
+                raise T092CanaryError("T092 native tree geometry histogram bucket is invalid")
+            child_count, node_count = bucket["child_count"], bucket["node_count"]
+            if (isinstance(child_count, bool) or not isinstance(child_count, int) or child_count < 0
+                    or isinstance(node_count, bool) or not isinstance(node_count, int) or node_count < 0
+                    or child_count <= previous):
+                raise T092CanaryError("T092 native tree geometry histogram is not canonical")
+            previous = child_count
+            histogram_nodes += node_count
+            histogram_edges += child_count * node_count
+        if histogram_nodes != counts["expanded_node_count"] or histogram_edges != counts["discovered_child_edge_count"]:
+            raise T092CanaryError("T092 native tree geometry histogram totals mismatch")
+        for key, count in counts.items():
+            totals[key] += count
+    if any(value.get(f"total_{key}") != total for key, total in totals.items()):
+        raise T092CanaryError("T092 native tree geometry totals mismatch")
+    max_depth = -1 if not rows else len(rows) - 1
+    if value.get("max_expanded_depth") != max_depth:
+        raise T092CanaryError("T092 native tree geometry maximum depth mismatch")
+    return dict(value)
+
+
+def _collect_tree_geometry_records(
+    controlled: Any, *, source: T090SplitEntry, telemetry_enabled: bool,
+) -> list[dict[str, Any]]:
+    """Retain only per-decision geometry totals, never native reports."""
+
+    if not telemetry_enabled:
+        return []
+    result: list[dict[str, Any]] = []
+    for step in getattr(controlled, "steps", []):
+        metadata = getattr(step, "decision_metadata", {})
+        decision = metadata.get("t092_canary_decision") if isinstance(metadata, Mapping) else None
+        if not isinstance(decision, Mapping):
+            continue
+        identity = f"{source.source_identity}:battle-decision:{getattr(step, 'step_index', -1)}"
+        raw = decision.get("native_report")
+        telemetry = raw.get("tree_internal_telemetry") if isinstance(raw, Mapping) else None
+        expanded = telemetry.get("expanded_nodes") if isinstance(telemetry, Mapping) else None
+        if isinstance(expanded, bool) or not isinstance(expanded, int) or expanded < 0:
+            raise T092CanaryError("T092 native expanded-node count is unavailable")
+        geometry = telemetry.get("tree_geometry") if isinstance(telemetry, Mapping) else None
+        if geometry is None:
+            result.append({
+                "decision_identity": identity,
+                "availability": "unavailable",
+                "expanded_node_count": expanded,
+                "geometry": None,
+                "unavailable_reason": "native_report_omitted_tree_internal_telemetry_tree_geometry",
+            })
+        else:
+            validated = _validate_tree_geometry(geometry)
+            if validated["total_expanded_node_count"] != expanded:
+                raise T092CanaryError("T092 native tree geometry expanded-node count disagrees with telemetry")
+            result.append({
+                "decision_identity": identity,
+                "availability": "available",
+                "expanded_node_count": expanded,
+                "geometry": validated,
+                "unavailable_reason": None,
+            })
+    return result
 
 
 def _terminal_record(controlled: Any) -> dict[str, Any]:
@@ -636,7 +738,7 @@ def _validate_pair_record(raw: Mapping[str, Any], source: T090SplitEntry) -> dic
             or not isinstance(digest, str) or len(digest) != 64
             or any(character not in "0123456789abcdef" for character in digest)
             or isinstance(size, bool) or not isinstance(size, int) or size <= 0
-            or schema != T092_CANARY_ARM_RECORD_SCHEMA_ID
+            or schema not in T092_CANARY_ARM_RECORD_SCHEMA_IDS
         ):
             raise T092CanaryError("T092 canary arm artifact identity is invalid")
         artifact_paths.add(path)
@@ -683,7 +785,7 @@ def _validate_arm_record(
     arm_record: Mapping[str, Any], *, arm: str,
     expected_native_identity: Mapping[str, Any], source: T090SplitEntry,
 ) -> None:
-    required = {
+    base_required = {
         "schema_id",
         "schema_version",
         "task_id",
@@ -709,11 +811,13 @@ def _validate_arm_record(
         "internal_occurrences",
         "cost",
     }
-    if set(arm_record) != required:
+    schema_id = arm_record.get("schema_id")
+    required = base_required | ({"tree_geometry"} if schema_id == T092_CANARY_ARM_RECORD_SCHEMA_ID else set())
+    if schema_id not in T092_CANARY_ARM_RECORD_SCHEMA_IDS or set(arm_record) != required:
         raise T092CanaryError(f"T092 {arm} arm fields are incomplete")
     expected_api = T092_NATIVE_API if arm == "ON" else BATTLE_SEARCH_V2_NATIVE_API
     if (
-        arm_record.get("schema_id") != T092_CANARY_ARM_RECORD_SCHEMA_ID
+        arm_record.get("schema_id") not in T092_CANARY_ARM_RECORD_SCHEMA_IDS
         or arm_record.get("schema_version") != 1
         or arm_record.get("task_id") != "T092"
         or arm_record.get("arm") != arm
@@ -780,12 +884,14 @@ def _validate_arm_record(
     decisions = arm_record.get("decision_records")
     if not isinstance(decisions, Sequence) or isinstance(decisions, (str, bytes)) or not decisions:
         raise T092CanaryError(f"T092 {arm} arm decision records are unavailable")
+    seen_decisions: set[str] = set()
     for item in decisions:
         if not isinstance(item, Mapping) or set(item) != {"decision_identity", "root_semantics"}:
             raise T092CanaryError(f"T092 {arm} arm decision record is malformed")
         decision_identity = item["decision_identity"]
-        if not isinstance(decision_identity, str) or not decision_identity:
+        if not isinstance(decision_identity, str) or not decision_identity or decision_identity in seen_decisions:
             raise T092CanaryError(f"T092 {arm} arm decision identity is invalid")
+        seen_decisions.add(decision_identity)
         _validate_root_semantics(item["root_semantics"], arm=arm)
     terminal = arm_record.get("terminal")
     if not isinstance(terminal, Mapping) or set(terminal) != {
@@ -846,6 +952,40 @@ def _validate_arm_record(
             raise T092CanaryError(
                 "T092 ON arm parent-bound occurrence identity is duplicate"
             ) from exc
+    if schema_id == T092_CANARY_ARM_RECORD_SCHEMA_ID:
+        geometry_records = arm_record.get("tree_geometry")
+        if not isinstance(geometry_records, Sequence) or isinstance(geometry_records, (str, bytes)):
+            raise T092CanaryError(f"T092 {arm} arm tree geometry retention is invalid")
+        if arm == "ON" and len(geometry_records) != len(decisions):
+            raise T092CanaryError("T092 ON arm tree geometry decision count disagrees")
+        seen_geometry: set[str] = set()
+        expected_decisions = [item["decision_identity"] for item in decisions]
+        for item in geometry_records:
+            if not isinstance(item, Mapping) or set(item) != {
+                "decision_identity", "availability", "expanded_node_count",
+                "geometry", "unavailable_reason",
+            }:
+                raise T092CanaryError("T092 arm tree geometry record is malformed")
+            identity = item["decision_identity"]
+            expanded = item["expanded_node_count"]
+            if not isinstance(identity, str) or not identity or identity in seen_geometry or identity not in expected_decisions:
+                raise T092CanaryError("T092 arm tree geometry decision identity is invalid")
+            if isinstance(expanded, bool) or not isinstance(expanded, int) or expanded < 0:
+                raise T092CanaryError("T092 arm expanded-node count is invalid")
+            seen_geometry.add(identity)
+            if item["availability"] == "available":
+                if item["unavailable_reason"] is not None:
+                    raise T092CanaryError("T092 available tree geometry has an unavailable reason")
+                geometry = _validate_tree_geometry(item["geometry"])
+                if geometry["total_expanded_node_count"] != expanded:
+                    raise T092CanaryError("T092 arm tree geometry count disagrees")
+            elif item["availability"] == "unavailable":
+                if item["geometry"] is not None or not isinstance(item["unavailable_reason"], str) or not item["unavailable_reason"]:
+                    raise T092CanaryError("T092 unavailable tree geometry record is malformed")
+            else:
+                raise T092CanaryError("T092 arm tree geometry availability is invalid")
+        if arm == "ON" and seen_geometry != set(expected_decisions):
+            raise T092CanaryError("T092 ON arm tree geometry retention is incomplete")
 
 
 def _validate_root_semantics(value: object, *, arm: str) -> None:
@@ -936,7 +1076,9 @@ def _validate_root_semantics(value: object, *, arm: str) -> None:
 
 __all__ = [
     "T092_CANARY_EVIDENCE_SCHEMA_ID",
+    "T092_CANARY_ARM_RECORD_SCHEMA_LEGACY_ID",
     "T092_CANARY_ARM_RECORD_SCHEMA_ID",
+    "T092_CANARY_ARM_RECORD_SCHEMA_IDS",
     "T092_CANARY_PLAN_SCHEMA_ID",
     "T092_CANARY_START_COUNT",
     "T092CanaryArmController",

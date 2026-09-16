@@ -26,6 +26,7 @@ from sts_combat_rl.sim.battle_start_pool import (
 from sts_combat_rl.sim.t090_battle_student import T090SplitEntry
 from sts_combat_rl.sim.t092_canary import (
     T092_CANARY_ARM_RECORD_SCHEMA_ID,
+    T092_CANARY_ARM_RECORD_SCHEMA_IDS,
     T092_CANARY_EXECUTION_CONFIG,
     T092_PUBLICATION_NATIVE_IDENTITY,
     T092CanaryError,
@@ -154,7 +155,7 @@ def _read_immutable_arm_record(
         "path": str(resolved),
         "sha256": hashlib.sha256(raw).hexdigest(),
         "size_bytes": len(raw),
-        "schema_id": T092_CANARY_ARM_RECORD_SCHEMA_ID,
+        "schema_id": record["schema_id"] if record["schema_id"] in T092_CANARY_ARM_RECORD_SCHEMA_IDS else T092_CANARY_ARM_RECORD_SCHEMA_ID,
     }
 
 
