@@ -126,11 +126,40 @@ def validate_t092_t090_root_reference(value: Mapping[str, Any], *, split_manifes
     return dict(value)
 
 
+def build_t092_t090_root_reference(
+    *, teacher_rows: Sequence[Mapping[str, Any]], decision_provenance: Sequence[Mapping[str, Any]],
+    source_ledger: Mapping[str, Any], split_manifest: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Materialize the exact root comparison table from accepted T090 rows."""
+    ledger = _artifact(source_ledger, "T090 source ledger")
+    provenance = {row.get("decision_identity"): row for row in decision_provenance if isinstance(row, Mapping)}
+    rows: list[dict[str, Any]] = []
+    for raw in teacher_rows:
+        if not isinstance(raw, Mapping):
+            raise T092FormalError("T090 teacher row is malformed")
+        decision = raw.get("decision_identity")
+        root_rows = raw.get("root_rows")
+        details = provenance.get(decision)
+        if not isinstance(decision, str) or not isinstance(root_rows, Sequence) or isinstance(root_rows, (str, bytes)) or not isinstance(details, Mapping) or details.get("selection_rule") != "highest_mean" or not isinstance(details.get("selected_action_identity"), Mapping):
+            raise T092FormalError("T090 root evidence is incomplete")
+        actions: list[dict[str, Any]] = []
+        for action in root_rows:
+            if not isinstance(action, Mapping) or set(action) != {"legal_action_identity", "visits", "mean_value"} or not isinstance(action.get("legal_action_identity"), Mapping) or isinstance(action.get("visits"), bool) or not isinstance(action.get("visits"), int) or action["visits"] < 0 or (action["visits"] == 0 and action.get("mean_value") is not None) or (action["visits"] > 0 and not _finite(action.get("mean_value"))):
+                raise T092FormalError("T090 root action evidence is malformed")
+            actions.append({"action_identity": dict(action["legal_action_identity"]), "visits": action["visits"], "mean_value": action["mean_value"]})
+        rows.append({"decision_identity": decision, "ordered_root_actions": actions, "selected_action_identity": dict(details["selected_action_identity"])})
+    result = {"schema_id": T092_T090_ROOT_REFERENCE_SCHEMA_ID, "schema_version": 1, "task_id": "T092", "split_manifest_sha256": canonical_sha256(split_manifest), "source_ledger": ledger, "rows": rows, "rows_sha256": canonical_sha256(rows)}
+    validate_t092_t090_root_reference(result, split_manifest=split_manifest)
+    return result
+
+
 def _finite(value: object) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(float(value))
 
 
-def _accepted_canary_reference(value: object, *, split_manifest: Mapping[str, Any]) -> dict[str, Any]:
+def _accepted_canary_reference(
+    value: object, *, split_manifest: Mapping[str, Any], implementation_head: str
+) -> dict[str, Any]:
     """Hash-read the retained parity evidence; a filename is never evidence."""
     reference = _artifact(value, "accepted T092 canary")
     if reference["schema_id"] != "t092-paired-semantic-parity-canary-v1":
@@ -146,6 +175,16 @@ def _accepted_canary_reference(value: object, *, split_manifest: Mapping[str, An
         validate_t092_canary_evidence(evidence, split_manifest=split_manifest)
     except (T092CanaryError, TypeError, ValueError) as exc:
         raise T092FormalError("accepted T092 canary evidence is invalid") from exc
+    entries = evidence.get("source_execution_entries")
+    if not isinstance(entries, Sequence) or any(
+        not isinstance(entry, Mapping)
+        or not isinstance(entry.get("off"), Mapping)
+        or not isinstance(entry.get("on"), Mapping)
+        or entry["off"].get("implementation_head") != implementation_head
+        or entry["on"].get("implementation_head") != implementation_head
+        for entry in entries
+    ):
+        raise T092FormalError("accepted T092 canary is not bound to this exact implementation head")
     return reference
 
 
@@ -174,7 +213,11 @@ def build_t092_formal_authorization_template(*, implementation_head: str, split_
     inputs = _formal_input_identities(input_identities)
     plan = build_t092_formal_plan(split_manifest, shard_count=shard_count, worker_count=worker_count)
     reference = validate_t092_t090_root_reference(root_reference, split_manifest=split_manifest)
-    canary_ref = _accepted_canary_reference(canary_evidence, split_manifest=split_manifest)
+    canary_ref = _accepted_canary_reference(
+        canary_evidence,
+        split_manifest=split_manifest,
+        implementation_head=implementation_head,
+    )
     identity = {
         "schema_id": T092_FORMAL_AUTHORIZATION_SCHEMA_ID, "task_id": "T092", "authorization_kind": "formal_413_telemetry",
         "implementation_head": implementation_head, "split_manifest_sha256": canonical_sha256(split_manifest),
@@ -347,13 +390,24 @@ def finalize_t092_formal_shards(*, authorization: Mapping[str, Any] | None, impl
             split_manifest=split_manifest, root_reference=reference, canary_evidence=canary_evidence,
             input_identities=input_identities, output_root=output_root, shard_index=index,
             shard_count=shard_count, worker_count=worker_count)
-        if not isinstance(shard, Mapping) or set(shard) != {"schema_id", "schema_version", "task_id", "authorization_id", "implementation_head", "formal_plan_sha256", "topology", "records", "records_sha256"} or shard.get("schema_id") != T092_FORMAL_SHARD_SCHEMA_ID or shard.get("schema_version") != 1 or shard.get("task_id") != "T092" or shard.get("authorization_id") != authorization["authorization_id"] or shard.get("implementation_head") != implementation_head or shard.get("formal_plan_sha256") != canonical_sha256(plan) or shard.get("topology") != topology or not isinstance(shard.get("records"), Sequence) or shard.get("records_sha256") != canonical_sha256(shard["records"]):
+        if not isinstance(shard, Mapping) or set(shard) != {"schema_id", "schema_version", "task_id", "authorization_id", "implementation_head", "formal_plan_sha256", "topology", "source_artifacts", "source_artifacts_sha256"} or shard.get("schema_id") != T092_FORMAL_SHARD_SCHEMA_ID or shard.get("schema_version") != 1 or shard.get("task_id") != "T092" or shard.get("authorization_id") != authorization["authorization_id"] or shard.get("implementation_head") != implementation_head or shard.get("formal_plan_sha256") != canonical_sha256(plan) or shard.get("topology") != topology or not isinstance(shard.get("source_artifacts"), Sequence) or shard.get("source_artifacts_sha256") != canonical_sha256(shard["source_artifacts"]):
             raise T092FormalError("T092 formal shard provenance is invalid")
         expected_sources = [s for ordinal, s in enumerate(plan["sources"]) if ordinal % shard_count == index]
-        if len(shard["records"]) != len(expected_sources):
+        if len(shard["source_artifacts"]) != len(expected_sources):
             raise T092FormalError("T092 formal shard record count is incomplete")
         worker = {"stage_worker_count": worker_count, "worker_index": index, "shard_count": shard_count, "shard_index": index}
-        for record, source in zip(shard["records"], expected_sources, strict=True):
+        for reference, source in zip(shard["source_artifacts"], expected_sources, strict=True):
+            artifact = _artifact(reference, "formal source record")
+            try:
+                encoded = Path(artifact["path"]).read_bytes()
+                record = json.loads(encoded)
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise T092FormalError("T092 formal source record is unavailable") from exc
+            if (hashlib.sha256(encoded).hexdigest() != artifact["sha256"]
+                    or len(encoded) != artifact["size_bytes"]
+                    or artifact["schema_id"] != T092_CANARY_ARM_RECORD_SCHEMA_ID
+                    or not isinstance(record, Mapping)):
+                raise T092FormalError("T092 formal source record identity mismatches")
             arm = _formal_arm(record, source, worker, implementation_head)
             observed_roots.extend(_root_projection(arm))
             ledger.append({"source_identity": source["source_identity"], "source_group": source["source_group"], "split": source["split"], "canonical_position": source["canonical_position"], "worker": worker, "terminal": arm["terminal"], "cost": arm["cost"]})
@@ -361,7 +415,7 @@ def finalize_t092_formal_shards(*, authorization: Mapping[str, Any] | None, impl
             rows = [validate_retained_occurrence(row, source_identity=source["source_identity"], source_group=source["source_group"], split=source["split"], parent_root_decision_identities=decision_ids) for row in arm["internal_occurrences"]]
             validate_parent_bound_occurrence_identities(rows)
             metric_rows.extend(_metric_summary(row) for row in rows)
-        artifacts.append({"shard_index": index, "records_sha256": shard["records_sha256"], "record_count": len(shard["records"])})
+        artifacts.append({"shard_index": index, "source_artifacts": list(shard["source_artifacts"]), "source_artifacts_sha256": shard["source_artifacts_sha256"], "record_count": len(shard["source_artifacts"])})
     expected = list(reference["rows"])
     root_ok = observed_roots == expected
     if not root_ok:
@@ -407,7 +461,7 @@ def _metrics(rows: Sequence[Mapping[str, Any]], ledger: Sequence[Mapping[str, An
     depth, branching, raw_multi_branching = Counter(), Counter(), Counter()
     excluded, kinds = Counter(), Counter()
     for row in rows:
-        by_fp[row.fingerprint].append(row)
+        by_fp[str(row["fingerprint"])].append(row)
         depth[_depth_bucket(int(row["depth"]))] += 1
         branching[_branch_bucket(int(row["branching"]))] += 1
         if int(row["branching"]) > 1:

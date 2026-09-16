@@ -17,6 +17,7 @@ from sts_combat_rl.sim.t092_formal_execution import (
     T092_FORMAL_EVIDENCE_SCHEMA_ID,
     T092_FORMAL_SHARD_SCHEMA_ID,
     build_t092_formal_authorization_template,
+    build_t092_t090_root_reference,
     execute_t092_authorized_formal_shard,
     finalize_t092_formal_shards,
     write_t092_formal_json,
@@ -60,6 +61,13 @@ def build_parser() -> argparse.ArgumentParser:
     compact.add_argument("--artifact-root", type=Path, required=True)
     compact.add_argument("--manifest-output", type=Path, required=True)
     compact.add_argument("--runtime-input-identities-output", type=Path, required=True)
+    root = commands.add_parser("prepare-root-reference")
+    root.add_argument("--split-manifest", type=Path, required=True)
+    root.add_argument("--teacher-rows", type=Path, required=True)
+    root.add_argument("--decision-provenance", type=Path, required=True)
+    root.add_argument("--source-ledger-reference", type=Path, required=True)
+    root.add_argument("--artifact-root", type=Path, required=True)
+    root.add_argument("--output", type=Path, required=True)
     for name in ("prepare-authorization", "run-shard", "finalize"):
         item = commands.add_parser(name)
         item.add_argument("--implementation-head", required=True)
@@ -111,6 +119,20 @@ def main(argv: list[str] | None = None) -> int:
             runtime_inputs,
             schema_id="t092-formal-runtime-input-identities-v1",
         )
+        return 0
+    if args.operation == "prepare-root-reference":
+        _within(args.output, args.artifact_root)
+        teacher_rows = _read(args.teacher_rows)
+        provenance = _read(args.decision_provenance)
+        if not isinstance(teacher_rows, list) or not isinstance(provenance, list):
+            raise TypeError("T090 root-reference inputs must be JSON lists")
+        reference = build_t092_t090_root_reference(
+            teacher_rows=teacher_rows,
+            decision_provenance=provenance,
+            source_ledger=_mapping(args.source_ledger_reference, "T090 source ledger reference"),
+            split_manifest=_mapping(args.split_manifest, "split manifest"),
+        )
+        write_t092_formal_json(args.output, reference, schema_id=reference["schema_id"])
         return 0
     _within(args.output, args.artifact_root)
     split = _mapping(args.split_manifest, "split manifest")
