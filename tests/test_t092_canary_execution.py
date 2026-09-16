@@ -17,6 +17,7 @@ from sts_combat_rl.sim.t092_canary_process import (
     T092CanaryProcessError,
     execute_t092_isolated_arm,
 )
+from sts_combat_rl.commands.t092_canary_runtime import T092_CANARY_ARM_PROCESS_SPECS
 from sts_combat_rl.sim.t092_internal_search_state import (
     T092_FROZEN_TEACHER_CONFIG,
     T092_NATIVE_IDENTITY,
@@ -129,9 +130,31 @@ def test_native_mismatch_cannot_spawn_an_isolated_arm(monkeypatch, tmp_path) -> 
                 "extension_path": str(extension), "extension_sha256": "0" * 64,
                 "extension_size_bytes": extension.stat().st_size,
                 "native_identity": T092_PUBLICATION_NATIVE_IDENTITY,
-                "stsrl_source_root": str(Path(__file__).parents[1] / "src"),
+                "stsrl_source_root": str(Path(__file__).parents[1]),
             },
             source=source, selected=object(), canonical=object(),
+            worker={"stage_worker_count": 12, "worker_index": 0, "shard_count": 12, "shard_index": 0},
+            implementation_head="a" * 40, output_path=tmp_path / "arm.json",
+        )
+    assert invoked is False
+
+
+def test_source_root_head_mismatch_cannot_spawn_an_isolated_arm(monkeypatch, tmp_path) -> None:
+    invoked = False
+
+    def guarded(command, *_args, **_kwargs):
+        nonlocal invoked
+        if command[:3] == ["git", "-C", T092_CANARY_ARM_PROCESS_SPECS["OFF"]["stsrl_source_root"]]:
+            return __import__("subprocess").CompletedProcess(command, 0, stdout="0" * 40 + "\n")
+        invoked = True
+        raise AssertionError("child process must not start")
+
+    monkeypatch.setattr("sts_combat_rl.sim.t092_canary_process.subprocess.run", guarded)
+    source = _selected()[0]
+    with pytest.raises(T092CanaryProcessError, match="Git head does not match"):
+        execute_t092_isolated_arm(
+            arm="OFF", spec=T092_CANARY_ARM_PROCESS_SPECS["OFF"], source=source,
+            selected=object(), canonical=object(),
             worker={"stage_worker_count": 12, "worker_index": 0, "shard_count": 12, "shard_index": 0},
             implementation_head="a" * 40, output_path=tmp_path / "arm.json",
         )

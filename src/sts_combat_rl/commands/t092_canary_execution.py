@@ -17,7 +17,9 @@ from pathlib import Path
 from typing import Any
 
 from sts_combat_rl.commands.t092_canary_runtime import (
-    t092_canary_runtime_input_identities,
+    build_t092_compact_restore_inputs,
+    build_t092_runtime_input_identities,
+    validate_t092_runtime_input_identities,
 )
 from sts_combat_rl.sim.t092_canary_process import T092IsolatedCanaryRunner
 from sts_combat_rl.sim.t092_canary_execution import (
@@ -51,7 +53,7 @@ def _within_root(path: Path, root: Path) -> None:
 
 def _runtime_runner(
     factory_path: str, *, worker: Mapping[str, int], implementation_head: str,
-    output_root: Path,
+    output_root: Path, runtime_input_identities: Mapping[str, Any],
 ) -> T092IsolatedCanaryRunner:
     module_name, separator, attribute = factory_path.partition(":")
     if not separator or not module_name or not attribute:
@@ -59,7 +61,7 @@ def _runtime_runner(
     factory = getattr(importlib.import_module(module_name), attribute, None)
     if not callable(factory):
         raise T092CanaryExecutionError("runtime factory is unavailable")
-    runtime = factory()
+    runtime = factory(runtime_input_identities, implementation_head)
     if not isinstance(runtime, Mapping) or set(runtime) != {
         "arm_process_specs",
         "source_records",
@@ -97,15 +99,38 @@ def build_parser() -> argparse.ArgumentParser:
     merge.add_argument("--authorization", type=Path, required=True)
     merge.add_argument("--shard", type=Path, action="append", required=True)
     merge.set_defaults(mode="merge")
+    compact = commands.add_parser("prepare-restore-inputs")
+    compact.add_argument("--implementation-head", required=True)
+    compact.add_argument("--artifact-root", type=Path, required=True)
+    compact.add_argument("--output", type=Path, required=True)
+    compact.add_argument("--runtime-input-identities-output", type=Path, required=True)
+    compact.set_defaults(mode="compact")
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    if args.mode == "compact":
+        _within_root(args.output, args.artifact_root)
+        _within_root(args.runtime_input_identities_output, args.artifact_root)
+        compact = build_t092_compact_restore_inputs(
+            implementation_head=args.implementation_head
+        )
+        reference = write_t092_canary_json(
+            args.output, compact, schema_id=compact["schema_id"]
+        )
+        identities = build_t092_runtime_input_identities(reference)
+        write_t092_canary_json(
+            args.runtime_input_identities_output,
+            identities,
+            schema_id="t092-canary-runtime-input-identities-v3",
+        )
+        return 0
     split = _object(_read_json(args.split_manifest), "split manifest")
     inputs = _object(_read_json(args.runtime_input_identities), "runtime input identities")
-    if inputs != t092_canary_runtime_input_identities():
-        raise T092CanaryExecutionError("T092 runtime input identity map is not the approved recipe")
+    validate_t092_runtime_input_identities(
+        inputs, implementation_head=args.implementation_head
+    )
     _within_root(args.output, args.artifact_root)
     if args.mode == "prepare":
         prepared = build_t092_canary_authorization_template(
@@ -138,6 +163,7 @@ def main(argv: list[str] | None = None) -> int:
             worker=worker,
             implementation_head=args.implementation_head,
             output_root=args.artifact_root,
+            runtime_input_identities=inputs,
         )
         shard = execute_t092_authorized_canary_shard(
             authorization=authorization,

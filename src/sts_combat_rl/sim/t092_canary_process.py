@@ -52,7 +52,7 @@ def _sha256_file(path: Path) -> str:
 
 
 def validate_t092_arm_process_spec(
-    spec: Mapping[str, Any], *, arm: str
+    spec: Mapping[str, Any], *, arm: str, implementation_head: str | None = None
 ) -> dict[str, Any]:
     """Validate an arm's pinned interpreter and exactly one extension binary."""
 
@@ -71,7 +71,7 @@ def validate_t092_arm_process_spec(
         not executable.is_file()
         or not os.access(executable, os.X_OK)
         or not extension.is_file()
-        or not source_root.joinpath("sts_combat_rl").is_dir()
+        or not source_root.joinpath("src/sts_combat_rl").is_dir()
         or result.get("native_identity") != expected_identity
         or not isinstance(result.get("extension_sha256"), str)
         or len(result["extension_sha256"]) != 64
@@ -82,6 +82,25 @@ def validate_t092_arm_process_spec(
         or _sha256_file(extension) != result["extension_sha256"]
     ):
         raise T092CanaryProcessError("T092 arm native identity/binary does not match")
+    if implementation_head is not None:
+        if (
+            not isinstance(implementation_head, str)
+            or len(implementation_head) != 40
+            or any(character not in "0123456789abcdef" for character in implementation_head)
+        ):
+            raise T092CanaryProcessError("T092 implementation head is invalid")
+        try:
+            resolved_head = subprocess.run(
+                ["git", "-C", str(source_root), "rev-parse", "HEAD"],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+            ).stdout.strip()
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise T092CanaryProcessError("T092 source root Git identity is unavailable") from exc
+        if resolved_head != implementation_head:
+            raise T092CanaryProcessError("T092 source root Git head does not match authorization")
     result["python_executable"] = str(executable)
     result["extension_path"] = str(extension)
     result["stsrl_source_root"] = str(source_root)
@@ -127,7 +146,9 @@ def execute_t092_isolated_arm(
 
     if arm not in {"OFF", "ON"}:
         raise T092CanaryProcessError("T092 process arm must be OFF or ON")
-    validated_spec = validate_t092_arm_process_spec(spec, arm=arm)
+    validated_spec = validate_t092_arm_process_spec(
+        spec, arm=arm, implementation_head=implementation_head
+    )
     worker_identity = _validate_worker(worker)
     destination = Path(output_path).resolve()
     if destination.exists():
@@ -146,7 +167,7 @@ def execute_t092_isolated_arm(
     }
     environment = {
         "PATH": os.environ.get("PATH", ""),
-        "PYTHONPATH": f"{Path(validated_spec['extension_path']).parent}:{validated_spec['stsrl_source_root']}",
+        "PYTHONPATH": f"{Path(validated_spec['extension_path']).parent}:{Path(validated_spec['stsrl_source_root']) / 'src'}",
         "PYTHONNOUSERSITE": "1",
     }
     completed = subprocess.run(
@@ -195,7 +216,9 @@ class T092IsolatedCanaryRunner:
         if not isinstance(arm_process_specs, Mapping) or set(arm_process_specs) != {"OFF", "ON"}:
             raise T092CanaryProcessError("T092 isolated runner requires both arm specifications")
         self._specs = {
-            arm: validate_t092_arm_process_spec(arm_process_specs[arm], arm=arm)
+            arm: validate_t092_arm_process_spec(
+                arm_process_specs[arm], arm=arm, implementation_head=implementation_head
+            )
             for arm in ("OFF", "ON")
         }
         self._source_records = dict(source_records)

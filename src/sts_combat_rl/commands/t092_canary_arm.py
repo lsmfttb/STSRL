@@ -63,10 +63,14 @@ def _request(raw: object) -> dict[str, Any]:
     return dict(raw)
 
 
-def _verified_native_binary(spec: Mapping[str, Any], *, arm: str) -> dict[str, Any]:
+def _verified_native_binary(
+    spec: Mapping[str, Any], *, arm: str, implementation_head: str
+) -> dict[str, Any]:
     """Resolve exactly one extension before any adapter/simulator construction."""
 
-    validated = validate_t092_arm_process_spec(spec, arm=arm)
+    validated = validate_t092_arm_process_spec(
+        spec, arm=arm, implementation_head=implementation_head
+    )
     if "slaythespire" in sys.modules:
         raise T092CanaryProcessError("T092 arm process already imported a native extension")
     module = importlib.import_module("slaythespire")
@@ -88,7 +92,9 @@ def execute_one_arm(request: Mapping[str, Any]) -> dict[str, Any]:
 
     raw = _request(request)
     arm = str(raw["arm"])
-    binary = _verified_native_binary(raw["spec"], arm=arm)
+    binary = _verified_native_binary(
+        raw["spec"], arm=arm, implementation_head=str(raw["implementation_head"])
+    )
     try:
         source = T090SplitEntry(**dict(raw["source"]))
         selected = T085BattleStartRecord.from_mapping(raw["selected"])

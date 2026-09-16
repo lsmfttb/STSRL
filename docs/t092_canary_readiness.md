@@ -68,8 +68,29 @@ It validates those facts before a runtime factory or adapter is imported.
 The pinned native-free restore recipe is
 `sts_combat_rl.commands.t092_canary_runtime:t092_canary_runtime`, and its
 exact map is [t092_canary_runtime_identity_map.json](t092_canary_runtime_identity_map.json).
-After authorization the callable returns exactly `arm_process_specs`,
-`source_records`, and `canonical_records`; it returns no native adapter or
+Before authorization preparation, one native-free, single-worker admission
+must produce a private, immutable selected-12 restore payload and a derived
+runtime identity map. It verifies the full accepted T087/T085 inputs exactly
+once, records wall time and maximum RSS, and retains only the twelve selected
+source/checkpoint records. It does not create a simulator, native extension,
+or canary result:
+
+```bash
+PYTHONPATH=src /usr/bin/python3.14 -m sts_combat_rl.commands.t092_canary_execution prepare-restore-inputs \
+  --implementation-head <exact-STSRL-head> \
+  --artifact-root /mnt/d/DeadlyCatCoding/STSRL/artifacts/t092-canary-12-<authorization-id> \
+  --output /mnt/d/DeadlyCatCoding/STSRL/artifacts/t092-canary-12-<authorization-id>/private/t092-selected-restore-inputs.json \
+  --runtime-input-identities-output /mnt/d/DeadlyCatCoding/STSRL/artifacts/t092-canary-12-<authorization-id>/t092-runtime-input-identities.json
+```
+
+The prior read-only probe reached about 2.5 GB RSS and took multiple minutes,
+so this admission is deliberately one worker only. Its recorded observed cost,
+not a forecast, is the required resource evidence. The later twelve canary
+shards read only the compact hash-bound payload; they must not reopen or parse
+the 402 MB T087 evidence, 183 MB report, or multi-GB T085 pools. After the
+compact map is bound into authorization, the callable returns exactly `arm_process_specs`,
+`source_records`, and `canonical_records`. The command invokes the recipe with
+the hash-bound runtime identity map and authorized implementation head; it returns no native adapter or
 factory. The launcher validates each arm's interpreter, one extension path,
 size, SHA-256, and native identity before spawning that arm. The child repeats
 the binary check before constructing `LightSpeedAdapter`, writes its immutable
@@ -82,7 +103,7 @@ non-authorizing template:
 PYTHONPATH=src python3 -m sts_combat_rl.commands.t092_canary_execution prepare-authorization \
   --implementation-head <exact-STSRL-head> \
   --split-manifest /mnt/d/DeadlyCatCoding/STSRL/artifacts/t090-formal-413-2bfcb27-20260915-retry1/t090-split-manifest.json \
-  --runtime-input-identities /mnt/d/DeadlyCatCoding/STSRL-T092/docs/t092_canary_runtime_identity_map.json \
+  --runtime-input-identities /mnt/d/DeadlyCatCoding/STSRL/artifacts/t092-canary-12-<authorization-id>/t092-runtime-input-identities.json \
   --artifact-root /mnt/d/DeadlyCatCoding/STSRL/artifacts/t092-canary-12-<authorization-id> \
   --output /mnt/d/DeadlyCatCoding/STSRL/artifacts/t092-canary-12-<authorization-id>/t092-canary-authorization-preparation.json
 ```
@@ -97,7 +118,7 @@ scripts/run_t092_canary_detached.sh \
   <exact-STSRL-head> \
   /mnt/d/DeadlyCatCoding/STSRL/artifacts/t092-canary-12-<authorization-id>/t092-canary-authorization.json \
   /mnt/d/DeadlyCatCoding/STSRL/artifacts/t090-formal-413-2bfcb27-20260915-retry1/t090-split-manifest.json \
-  /mnt/d/DeadlyCatCoding/STSRL-T092/docs/t092_canary_runtime_identity_map.json \
+  /mnt/d/DeadlyCatCoding/STSRL/artifacts/t092-canary-12-<authorization-id>/t092-runtime-input-identities.json \
   sts_combat_rl.commands.t092_canary_runtime:t092_canary_runtime \
   /mnt/d/DeadlyCatCoding/STSRL/artifacts/t092-canary-12-<authorization-id>
 ```
@@ -111,3 +132,17 @@ accepts only all twelve canonical shard positions and writes one
 `t092-paired-semantic-parity-canary-v1` evidence JSON; every retained JSON is
 written once with its SHA-256, size, and schema returned for the eventual
 retention manifest. Outputs are ignored artifacts, never Git inputs.
+
+The launcher retains all 12 logical shard positions but requires explicit
+`T092_CANARY_RESOURCE_*` budget, per-shard reservation, RSS-limit, and
+MemAvailable-floor values. Its detached resource leases admit only the number
+of workers justified by those values; remaining shard supervisors wait rather
+than oversubscribing memory. The values must be selected from the compact
+admission record and the separately authorized resource plan, never inferred
+from CPU count or silently defaulted to twelve concurrent simulators.
+
+The process specification binds `/mnt/d/DeadlyCatCoding/STSRL-T092` as the
+actual STSRL source root. Both parent and child run `git -C <source-root>
+rev-parse HEAD` and fail closed before simulator construction unless it equals
+the authorization's implementation head. The arm child's `PYTHONPATH` is that
+same root's `src/` plus exactly one arm extension directory.

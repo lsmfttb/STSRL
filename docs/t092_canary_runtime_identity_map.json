@@ -1,9 +1,10 @@
 {
-  "schema_id": "t092-canary-runtime-input-identities-v2",
-  "schema_version": 2,
+  "schema_id": "t092-canary-runtime-input-identities-v3",
+  "schema_version": 3,
   "task_id": "T092",
   "execution_authorized": false,
   "runtime_factory": "sts_combat_rl.commands.t092_canary_runtime:t092_canary_runtime",
+  "compact_restore_input_schema_id": "t092-selected-restore-inputs-v1",
   "split_manifest": {
     "path": "/mnt/d/DeadlyCatCoding/STSRL/artifacts/t090-formal-413-2bfcb27-20260915-retry1/t090-split-manifest.json",
     "sha256": "b5bb43792a811fcedde684649938ac735dc5b05029d77423132b8b258b467b93",
@@ -18,7 +19,7 @@
     "t085_restore": {"path": "/mnt/d/DeadlyCatCoding/STSRL/artifacts/t085-corrected-leaf-value-search-repair/selection/t085-native-selection-restore-evidence.json", "sha256": "0adbdc4e055bd8d53680757a395e3e7973b7242b06db1c5053281ef883b679ef", "size_bytes": 254155}
   },
   "arm_process_specs": {
-    "OFF": {"native_commit": "20a6c2b3a9cea817c988178b814f083ff889853f", "extension_sha256": "b996f949e77b3d76a3991c4e24977c80722f0e09e1e0f235384a4158ee6351bb", "extension_size_bytes": 1632040},
-    "ON": {"native_commit": "07e1770cf0710d8c26719c153383d09e3bfd7686", "extension_sha256": "0a9ba8127c3970a7b3bf2093f005527f1d567e37d3062fa116d1729be621e7af", "extension_size_bytes": 1648424}
+    "OFF": {"native_commit": "20a6c2b3a9cea817c988178b814f083ff889853f", "extension_sha256": "b996f949e77b3d76a3991c4e24977c80722f0e09e1e0f235384a4158ee6351bb", "extension_size_bytes": 1632040, "stsrl_source_root": "/mnt/d/DeadlyCatCoding/STSRL-T092"},
+    "ON": {"native_commit": "07e1770cf0710d8c26719c153383d09e3bfd7686", "extension_sha256": "0a9ba8127c3970a7b3bf2093f005527f1d567e37d3062fa116d1729be621e7af", "extension_size_bytes": 1648424, "stsrl_source_root": "/mnt/d/DeadlyCatCoding/STSRL-T092"}
   }
 }
