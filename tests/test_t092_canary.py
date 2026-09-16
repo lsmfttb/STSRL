@@ -16,6 +16,7 @@ from sts_combat_rl.sim.t090_battle_student import T090SplitEntry
 from sts_combat_rl.sim.t092_canary import (
     T092CanaryArmController,
     T092CanaryError,
+    T092_PUBLICATION_NATIVE_IDENTITY,
     execute_t092_canary,
 )
 from sts_combat_rl.sim.t092_internal_search_state import (
@@ -23,6 +24,26 @@ from sts_combat_rl.sim.t092_internal_search_state import (
     T092_NATIVE_API,
     T092_NATIVE_PATCH_IDENTITY,
 )
+
+
+def _root_semantics() -> dict[str, object]:
+    return {
+        "ordered_root_actions": [
+            {
+                "action_identity": {"stable_id": "a"},
+                "visits": 400,
+                "evaluation_sum": 100.0,
+                "mean_value": 0.25,
+            }
+        ],
+        "root_visits": 400,
+        "native_simulator_steps": 100,
+        "best_action_value": 0.25,
+        "min_action_value": 0.25,
+        "outcome_player_hp": 50,
+        "selected_action_identity": {"stable_id": "a"},
+        "selection_rule": "highest_mean",
+    }
 
 
 def _actions() -> list[SimulatorAction]:
@@ -93,6 +114,8 @@ def test_pair_arm_uses_exactly_one_native_api_per_decision() -> None:
 
     assert adapter.calls == ["OFF", "ON"]
     assert off.selected_index == on.selected_index == 0
+    assert off.provenance.config["native_identity"] == T092_PUBLICATION_NATIVE_IDENTITY
+    assert on.provenance.config["native_identity"]["commit"] == "07e1770cf0710d8c26719c153383d09e3bfd7686"
     assert off.metadata["t092_canary_decision"]["native_report"] is None
     assert on.metadata["t092_canary_decision"]["native_report"]["teacher_config"] == T092_FROZEN_TEACHER_CONFIG
 
@@ -102,25 +125,62 @@ def test_pair_evidence_rejects_one_root_mismatch(monkeypatch) -> None:
     monkeypatch.setattr("sts_combat_rl.sim.t092_canary.select_t092_canary_entries", lambda _manifest: selected)
 
     def runner(source: T090SplitEntry):
-        decisions = [{"decision_identity": f"{source.source_identity}:battle-decision:0", "root_semantics": {"selected_action_identity": {"stable_id": "a"}}}]
+        decisions = [{"decision_identity": f"{source.source_identity}:battle-decision:0", "root_semantics": _root_semantics()}]
+        arm_base = {
+            "restore_method": "checkpoint_restore",
+            "restored_snapshot_present": True,
+            "restore_public_legal_parity": True,
+            "decision_records": decisions,
+            "terminal": {"outcome": "PLAYER_VICTORY", "terminal_current_hp": 50, "battle_decision_count": 1},
+            "internal_occurrences": [],
+            "cost": {"wall_clock_time_s": 0.1},
+            "teacher_config": dict(T092_FROZEN_TEACHER_CONFIG),
+        }
         return {
             "source_identity": source.source_identity,
             "source_group": source.source_group,
             "split": source.split,
             "canonical_position": source.canonical_position,
-            "native_identity": {"repository": "lsmfttb/sts_lightspeed", "ref": "refs/heads/planner/t092-internal-search-state-telemetry", "commit": "07e1770cf0710d8c26719c153383d09e3bfd7686"},
+            "arm_native_identities": {"OFF": T092_PUBLICATION_NATIVE_IDENTITY, "ON": {"repository": "lsmfttb/sts_lightspeed", "ref": "refs/heads/planner/t092-internal-search-state-telemetry", "commit": "07e1770cf0710d8c26719c153383d09e3bfd7686"}},
             "teacher_config": dict(T092_FROZEN_TEACHER_CONFIG),
             "worker": {"stage_worker_count": 12, "worker_index": 0, "shard_count": 12, "shard_index": 0},
-            "off": {"decision_records": decisions, "terminal": {"outcome": "PLAYER_VICTORY"}},
-            "on": {"decision_records": deepcopy(decisions), "terminal": {"outcome": "PLAYER_VICTORY"}, "internal_occurrences": []},
+            "off": {**arm_base, "arm": "OFF", "native_identity": T092_PUBLICATION_NATIVE_IDENTITY},
+            "on": {**arm_base, "arm": "ON", "native_identity": {"repository": "lsmfttb/sts_lightspeed", "ref": "refs/heads/planner/t092-internal-search-state-telemetry", "commit": "07e1770cf0710d8c26719c153383d09e3bfd7686"}, "decision_records": deepcopy(decisions)},
         }
 
     assert execute_t092_canary(split_manifest={}, runner=runner)["semantic_parity"]["passed"] is True
 
     def mismatched(source: T090SplitEntry):
         record = runner(source)
-        record["on"]["decision_records"][0]["root_semantics"] = {"selected_action_identity": {"stable_id": "b"}}
+        record["on"]["decision_records"][0]["root_semantics"]["selected_action_identity"] = {"stable_id": "b"}
         return record
 
     with pytest.raises(T092CanaryError, match="SEMANTIC_PARITY_INVALID"):
         execute_t092_canary(split_manifest={}, runner=mismatched)
+
+
+def test_pair_evidence_fails_closed_on_restore_or_arm_provenance(monkeypatch) -> None:
+    selected = tuple(T090SplitEntry(f"source-{index}", "A", "train", index) for index in range(12))
+    monkeypatch.setattr("sts_combat_rl.sim.t092_canary.select_t092_canary_entries", lambda _manifest: selected)
+
+    def malformed(source: T090SplitEntry):
+        decisions = [{"decision_identity": f"{source.source_identity}:battle-decision:0", "root_semantics": _root_semantics()}]
+        base = {
+            "restore_method": "checkpoint_restore", "restored_snapshot_present": True,
+            "restore_public_legal_parity": True, "decision_records": decisions,
+            "terminal": {"outcome": "PLAYER_VICTORY", "terminal_current_hp": 50, "battle_decision_count": 1},
+            "internal_occurrences": [], "cost": {"wall_clock_time_s": 0.1},
+            "teacher_config": dict(T092_FROZEN_TEACHER_CONFIG),
+        }
+        return {
+            "source_identity": source.source_identity, "source_group": source.source_group,
+            "split": source.split, "canonical_position": source.canonical_position,
+            "arm_native_identities": {"OFF": T092_PUBLICATION_NATIVE_IDENTITY, "ON": {"repository": "wrong"}},
+            "teacher_config": dict(T092_FROZEN_TEACHER_CONFIG),
+            "worker": {"stage_worker_count": 12, "worker_index": 0, "shard_count": 12, "shard_index": 0},
+            "off": {**base, "arm": "OFF", "native_identity": T092_PUBLICATION_NATIVE_IDENTITY},
+            "on": {**base, "arm": "ON", "native_identity": {"repository": "wrong"}, "restore_public_legal_parity": False},
+        }
+
+    with pytest.raises(T092CanaryError, match="pair provenance mismatch"):
+        execute_t092_canary(split_manifest={}, runner=malformed)

@@ -7,6 +7,7 @@ only by a separately authorized execution entrypoint.
 
 from __future__ import annotations
 
+import math
 import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -57,6 +58,11 @@ T092_CANARY_EVIDENCE_SCHEMA_ID = "t092-paired-semantic-parity-canary-v1"
 T092_CANARY_PLAN_SCHEMA_ID = "t092-paired-canary-plan-v1"
 T092_CANARY_START_COUNT = 12
 T092_CANARY_CLASSIFICATION = "MECHANICS_INFORMATION_BOUNDARY_ONLY"
+T092_PUBLICATION_NATIVE_IDENTITY = {
+    "repository": "lsmfttb/sts_lightspeed",
+    "ref": "refs/heads/stsrl/main",
+    "commit": "20a6c2b3a9cea817c988178b814f083ff889853f",
+}
 
 
 class T092CanaryError(ValueError):
@@ -102,7 +108,10 @@ def build_t092_canary_plan(split_manifest: Mapping[str, Any]) -> dict[str, Any]:
         "execution_authorized": False,
         "selection_domain_separator": 900492,
         "split_manifest_sha256": canonical_sha256(split_manifest),
-        "native_identity": dict(T092_NATIVE_IDENTITY),
+        "arm_native_identities": {
+            "OFF": dict(T092_PUBLICATION_NATIVE_IDENTITY),
+            "ON": dict(T092_NATIVE_IDENTITY),
+        },
         "teacher_config": dict(T092_FROZEN_TEACHER_CONFIG),
         "worker_plan": {
             "stage_worker_count": 12,
@@ -134,7 +143,11 @@ class T092CanaryArmController:
                 config={
                     "task_id": "T092",
                     "arm": "ON" if self.telemetry_enabled else "OFF",
-                    "native_identity": dict(T092_NATIVE_IDENTITY),
+                    "native_identity": dict(
+                        T092_NATIVE_IDENTITY
+                        if self.telemetry_enabled
+                        else T092_PUBLICATION_NATIVE_IDENTITY
+                    ),
                     "teacher_config": dict(T092_FROZEN_TEACHER_CONFIG),
                 },
             ),
@@ -228,14 +241,16 @@ class T092NativeCanaryRunner:
     def __init__(
         self,
         *,
-        adapter_factory: Callable[[], object],
+        off_adapter_factory: Callable[[], object],
+        on_adapter_factory: Callable[[], object],
         source_records: Mapping[str, T085BattleStartRecord],
         canonical_records: Mapping[str, BattleStartCheckpointRecord],
         worker: Mapping[str, Any],
     ) -> None:
-        if not callable(adapter_factory):
-            raise T092CanaryError("T092 canary adapter factory is unavailable")
-        self._adapter_factory = adapter_factory
+        if not callable(off_adapter_factory) or not callable(on_adapter_factory):
+            raise T092CanaryError("T092 canary arm adapter factories are unavailable")
+        self._off_adapter_factory = off_adapter_factory
+        self._on_adapter_factory = on_adapter_factory
         self._source_records = dict(source_records)
         self._canonical_records = dict(canonical_records)
         self._worker = _validate_worker(worker)
@@ -252,7 +267,10 @@ class T092NativeCanaryRunner:
             "source_group": source.source_group,
             "split": source.split,
             "canonical_position": source.canonical_position,
-            "native_identity": dict(T092_NATIVE_IDENTITY),
+            "arm_native_identities": {
+                "OFF": dict(T092_PUBLICATION_NATIVE_IDENTITY),
+                "ON": dict(T092_NATIVE_IDENTITY),
+            },
             "teacher_config": dict(T092_FROZEN_TEACHER_CONFIG),
             "worker": dict(self._worker),
             "off": off,
@@ -267,7 +285,9 @@ class T092NativeCanaryRunner:
         *,
         telemetry_enabled: bool,
     ) -> dict[str, Any]:
-        base_adapter = self._adapter_factory()
+        base_adapter = (
+            self._on_adapter_factory() if telemetry_enabled else self._off_adapter_factory()
+        )
         try:
             restored, restore_method = restore_t085_canonical_record(
                 base_adapter, selected, {selected.selection_identity: canonical}
@@ -306,6 +326,13 @@ class T092NativeCanaryRunner:
             )
             terminal = _terminal_record(controlled)
             return {
+                "arm": "ON" if telemetry_enabled else "OFF",
+                "native_identity": dict(
+                    T092_NATIVE_IDENTITY
+                    if telemetry_enabled
+                    else T092_PUBLICATION_NATIVE_IDENTITY
+                ),
+                "teacher_config": dict(T092_FROZEN_TEACHER_CONFIG),
                 "restore_method": restore_method,
                 "restored_snapshot_present": restored is not None,
                 "restore_public_legal_parity": True,
@@ -430,7 +457,10 @@ def execute_t092_canary(
         "formal_execution_authorized": False,
         "training_eligible": False,
         "split_manifest_sha256": canonical_sha256(split_manifest),
-        "native_identity": dict(T092_NATIVE_IDENTITY),
+        "arm_native_identities": {
+            "OFF": dict(T092_PUBLICATION_NATIVE_IDENTITY),
+            "ON": dict(T092_NATIVE_IDENTITY),
+        },
         "teacher_config": dict(T092_FROZEN_TEACHER_CONFIG),
         "source_execution_entries": entries,
         "source_execution_entries_sha256": canonical_sha256(entries),
@@ -454,7 +484,8 @@ def validate_t092_canary_evidence(
         or evidence.get("formal_execution_authorized") is not False
         or evidence.get("training_eligible") is not False
         or evidence.get("split_manifest_sha256") != canonical_sha256(split_manifest)
-        or evidence.get("native_identity") != T092_NATIVE_IDENTITY
+        or evidence.get("arm_native_identities")
+        != {"OFF": T092_PUBLICATION_NATIVE_IDENTITY, "ON": T092_NATIVE_IDENTITY}
         or evidence.get("teacher_config") != T092_FROZEN_TEACHER_CONFIG
     ):
         raise T092CanaryError("T092 paired canary evidence provenance is invalid")
@@ -475,19 +506,46 @@ def validate_t092_canary_evidence(
 def _validate_pair_record(raw: Mapping[str, Any], source: T090SplitEntry) -> dict[str, Any]:
     if not isinstance(raw, Mapping):
         raise T092CanaryError("T092 canary runner did not return a mapping")
+    required = {
+        "source_identity",
+        "source_group",
+        "split",
+        "canonical_position",
+        "arm_native_identities",
+        "teacher_config",
+        "worker",
+        "off",
+        "on",
+    }
+    if set(raw) != required:
+        raise T092CanaryError("T092 canary pair fields are incomplete")
     for key, expected in {
         "source_identity": source.source_identity,
         "source_group": source.source_group,
         "split": source.split,
         "canonical_position": source.canonical_position,
-        "native_identity": T092_NATIVE_IDENTITY,
+        "arm_native_identities": {
+            "OFF": T092_PUBLICATION_NATIVE_IDENTITY,
+            "ON": T092_NATIVE_IDENTITY,
+        },
         "teacher_config": T092_FROZEN_TEACHER_CONFIG,
     }.items():
         if raw.get(key) != expected:
             raise T092CanaryError(f"T092 canary pair provenance mismatch: {key}")
+    _validate_worker(raw["worker"])
     off, on = raw.get("off"), raw.get("on")
     if not isinstance(off, Mapping) or not isinstance(on, Mapping):
         raise T092CanaryError("T092 canary pair lacks OFF/ON arms")
+    _validate_arm_record(
+        off,
+        arm="OFF",
+        expected_native_identity=T092_PUBLICATION_NATIVE_IDENTITY,
+    )
+    _validate_arm_record(
+        on,
+        arm="ON",
+        expected_native_identity=T092_NATIVE_IDENTITY,
+    )
     off_decisions, on_decisions = off.get("decision_records"), on.get("decision_records")
     if not isinstance(off_decisions, Sequence) or not isinstance(on_decisions, Sequence) or list(off_decisions) != list(on_decisions):
         raise T092CanaryError("INTERNAL_TELEMETRY_SEMANTIC_PARITY_INVALID: root mismatch")
@@ -496,6 +554,101 @@ def _validate_pair_record(raw: Mapping[str, Any], source: T090SplitEntry) -> dic
     if not isinstance(on.get("internal_occurrences"), Sequence):
         raise T092CanaryError("T092 ON arm lacks internal occurrence retention")
     return dict(raw)
+
+
+def _validate_arm_record(
+    arm_record: Mapping[str, Any], *, arm: str, expected_native_identity: Mapping[str, Any]
+) -> None:
+    required = {
+        "arm",
+        "native_identity",
+        "teacher_config",
+        "restore_method",
+        "restored_snapshot_present",
+        "restore_public_legal_parity",
+        "decision_records",
+        "terminal",
+        "internal_occurrences",
+        "cost",
+    }
+    if set(arm_record) != required:
+        raise T092CanaryError(f"T092 {arm} arm fields are incomplete")
+    if (
+        arm_record.get("arm") != arm
+        or arm_record.get("native_identity") != expected_native_identity
+        or arm_record.get("teacher_config") != T092_FROZEN_TEACHER_CONFIG
+        or arm_record.get("restored_snapshot_present") is not True
+        or arm_record.get("restore_public_legal_parity") is not True
+        or not isinstance(arm_record.get("restore_method"), str)
+        or not arm_record.get("restore_method")
+    ):
+        raise T092CanaryError(f"T092 {arm} arm provenance/restore parity is invalid")
+    decisions = arm_record.get("decision_records")
+    if not isinstance(decisions, Sequence) or isinstance(decisions, (str, bytes)) or not decisions:
+        raise T092CanaryError(f"T092 {arm} arm decision records are unavailable")
+    for item in decisions:
+        if not isinstance(item, Mapping) or set(item) != {"decision_identity", "root_semantics"}:
+            raise T092CanaryError(f"T092 {arm} arm decision record is malformed")
+        decision_identity = item["decision_identity"]
+        if not isinstance(decision_identity, str) or not decision_identity:
+            raise T092CanaryError(f"T092 {arm} arm decision identity is invalid")
+        _validate_root_semantics(item["root_semantics"], arm=arm)
+    terminal = arm_record.get("terminal")
+    if not isinstance(terminal, Mapping) or set(terminal) != {
+        "outcome", "terminal_current_hp", "battle_decision_count"
+    }:
+        raise T092CanaryError(f"T092 {arm} arm terminal evidence is malformed")
+    if not isinstance(terminal["outcome"], str) or not terminal["outcome"]:
+        raise T092CanaryError(f"T092 {arm} arm terminal outcome is unavailable")
+    if isinstance(terminal["battle_decision_count"], bool) or not isinstance(terminal["battle_decision_count"], int) or terminal["battle_decision_count"] <= 0:
+        raise T092CanaryError(f"T092 {arm} arm terminal decision count is invalid")
+    hp = terminal["terminal_current_hp"]
+    if hp is not None and (isinstance(hp, bool) or not isinstance(hp, (int, float))):
+        raise T092CanaryError(f"T092 {arm} arm terminal HP is invalid")
+    cost = arm_record.get("cost")
+    if not isinstance(cost, Mapping) or set(cost) != {"wall_clock_time_s"}:
+        raise T092CanaryError(f"T092 {arm} arm cost fields are invalid")
+    wall = cost["wall_clock_time_s"]
+    if (
+        isinstance(wall, bool)
+        or not isinstance(wall, (int, float))
+        or not math.isfinite(float(wall))
+        or wall < 0
+    ):
+        raise T092CanaryError(f"T092 {arm} arm wall-clock cost is invalid")
+    occurrences = arm_record.get("internal_occurrences")
+    if not isinstance(occurrences, Sequence) or isinstance(occurrences, (str, bytes)):
+        raise T092CanaryError(f"T092 {arm} arm occurrence payload is invalid")
+    if arm == "OFF" and occurrences:
+        raise T092CanaryError("T092 OFF arm must not retain internal telemetry rows")
+
+
+def _validate_root_semantics(value: object, *, arm: str) -> None:
+    """Retain only the exact root-parity envelope emitted by this runner."""
+
+    if not isinstance(value, Mapping) or set(value) != {
+        "ordered_root_actions",
+        "root_visits",
+        "native_simulator_steps",
+        "best_action_value",
+        "min_action_value",
+        "outcome_player_hp",
+        "selected_action_identity",
+        "selection_rule",
+    }:
+        raise T092CanaryError(f"T092 {arm} arm root semantic evidence is malformed")
+    actions = value["ordered_root_actions"]
+    if not isinstance(actions, Sequence) or isinstance(actions, (str, bytes)):
+        raise T092CanaryError(f"T092 {arm} arm root actions are malformed")
+    for action in actions:
+        if not isinstance(action, Mapping) or set(action) != {
+            "action_identity", "visits", "evaluation_sum", "mean_value"
+        }:
+            raise T092CanaryError(f"T092 {arm} arm root action evidence is malformed")
+    if value["selection_rule"] != "highest_mean" or not isinstance(
+        value["selected_action_identity"], Mapping
+    ):
+        raise T092CanaryError(f"T092 {arm} arm root selection evidence is invalid")
 
 
 __all__ = [
