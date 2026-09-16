@@ -15,6 +15,7 @@ from sts_combat_rl.sim.t092_canary_execution import (
 )
 from sts_combat_rl.sim.t092_canary_process import (
     T092CanaryProcessError,
+    _child_failure_detail,
     execute_t092_isolated_arm,
 )
 from sts_combat_rl.commands.t092_canary_runtime import T092_CANARY_ARM_PROCESS_SPECS
@@ -159,3 +160,15 @@ def test_source_root_head_mismatch_cannot_spawn_an_isolated_arm(monkeypatch, tmp
             implementation_head="a" * 40, output_path=tmp_path / "arm.json",
         )
     assert invoked is False
+
+
+def test_child_failure_detail_relays_only_controlled_t092_boundary_text() -> None:
+    assert _child_failure_detail(
+        "noise\nT092_CHILD_FAILURE: T092CanaryError: T092 canary restore public/legal parity failed\n"
+    ) == "T092CanaryError: T092 canary restore public/legal parity failed"
+    assert _child_failure_detail(
+        "T092_CHILD_FAILURE: unclassified: RuntimeError\n"
+    ) == "unclassified: RuntimeError"
+    assert _child_failure_detail("native private state: <opaque>") == (
+        "unclassified: child_stderr_not_safe_for_retention"
+    )

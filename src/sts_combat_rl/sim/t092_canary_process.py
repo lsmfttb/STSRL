@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 from collections.abc import Mapping
@@ -41,6 +42,31 @@ T092_CANARY_ARM_REQUEST_SCHEMA_ID = "t092-paired-canary-arm-request-v1"
 
 class T092CanaryProcessError(T092CanaryError):
     """An arm process is not a valid isolated T092 execution boundary."""
+
+
+def _child_failure_detail(stderr: str) -> str:
+    """Relay only the child's explicit, public-safe failure envelope.
+
+    Native exception text can include simulator representations.  The child
+    therefore prints controlled T092 boundary errors only; every other stderr
+    shape becomes an unclassified exception type rather than a retained native
+    string.
+    """
+
+    for line in stderr.splitlines():
+        match = re.fullmatch(
+            r"T092_CHILD_FAILURE: ([A-Za-z_][A-Za-z0-9_]{0,127}): ([A-Za-z0-9 ._:/-]{1,512})",
+            line,
+        )
+        if match is not None:
+            return f"{match.group(1)}: {match.group(2)}"
+        match = re.fullmatch(
+            r"T092_CHILD_FAILURE: unclassified: ([A-Za-z_][A-Za-z0-9_]{0,127})",
+            line,
+        )
+        if match is not None:
+            return f"unclassified: {match.group(1)}"
+    return "unclassified: child_stderr_not_safe_for_retention"
 
 
 def _sha256_file(path: Path) -> str:
@@ -183,7 +209,10 @@ def execute_t092_isolated_arm(
         check=False,
     )
     if completed.returncode != 0:
-        raise T092CanaryProcessError("T092 isolated arm process failed before retention")
+        detail = _child_failure_detail(completed.stderr)
+        raise T092CanaryProcessError(
+            f"T092 isolated arm process failed before retention ({detail})"
+        )
     record, artifact = _read_immutable_arm_record(destination, arm=arm, source=source)
     expected_binary = {
         "path": validated_spec["extension_path"],
@@ -271,6 +300,7 @@ __all__ = [
     "T092_CANARY_ARM_REQUEST_SCHEMA_ID",
     "T092CanaryProcessError",
     "T092IsolatedCanaryRunner",
+    "_child_failure_detail",
     "execute_t092_isolated_arm",
     "validate_t092_arm_process_spec",
 ]

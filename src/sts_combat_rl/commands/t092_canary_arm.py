@@ -19,7 +19,7 @@ from typing import Any
 
 from sts_combat_rl.sim.battle_start_pool import record_from_manifest
 from sts_combat_rl.sim.t090_battle_student import T090SplitEntry
-from sts_combat_rl.sim.t092_canary import run_t092_native_canary_arm
+from sts_combat_rl.sim.t092_canary import T092CanaryError, run_t092_native_canary_arm
 from sts_combat_rl.sim.t092_canary_execution import write_t092_canary_json
 from sts_combat_rl.sim.t092_canary_process import (
     T092_CANARY_ARM_REQUEST_SCHEMA_ID,
@@ -132,8 +132,30 @@ def main(argv: list[str] | None = None) -> int:
         request = json.loads(sys.stdin.read())
         record = execute_one_arm(request)
         write_t092_canary_json(args.output, record, schema_id=record["schema_id"])
-    except (json.JSONDecodeError, OSError, T092CanaryProcessError, ValueError) as exc:
-        print(f"T092 isolated arm failed: {type(exc).__name__}", file=sys.stderr)
+    except (
+        json.JSONDecodeError,
+        OSError,
+        T092CanaryError,
+        T092CanaryProcessError,
+        ValueError,
+    ) as exc:
+        if isinstance(exc, (T092CanaryError, T092CanaryProcessError)):
+            detail = " ".join(str(exc).split())
+            if detail and len(detail) <= 512:
+                print(
+                    f"T092_CHILD_FAILURE: {type(exc).__name__}: {detail}",
+                    file=sys.stderr,
+                )
+            else:
+                print(
+                    f"T092_CHILD_FAILURE: unclassified: {type(exc).__name__}",
+                    file=sys.stderr,
+                )
+        else:
+            print(
+                f"T092_CHILD_FAILURE: unclassified: {type(exc).__name__}",
+                file=sys.stderr,
+            )
         return 2
     return 0
 
