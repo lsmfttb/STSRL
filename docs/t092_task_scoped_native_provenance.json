@@ -1,0 +1,37 @@
+{
+  "schema_id": "t092-task-scoped-native-telemetry-provenance-v1",
+  "task_id": "T092",
+  "repository": "lsmfttb/sts_lightspeed",
+  "base_commit": "20a6c2b3a9cea817c988178b814f083ff889853f",
+  "telemetry_commit": "7d6a47d08bd364547bbb584f37c839d112dfaff1",
+  "telemetry_branch": "planner/t092-internal-search-state-telemetry",
+  "ancestry_verified": true,
+  "source_diff": {
+    "base_commit": "20a6c2b3a9cea817c988178b814f083ff889853f",
+    "commit": "7d6a47d08bd364547bbb584f37c839d112dfaff1",
+    "sha256_of_git_diff_binary": "cc584d32c9d1cba9fdbe10bef97ad03d30d074b9fec6e7ee32290a72d237d40b",
+    "changed_files": [
+      "bindings/slaythespire.cpp",
+      "scripts/test_battle_search_v2_internal_teacher_telemetry.py"
+    ]
+  },
+  "native_api": "StepSimulator.battle_search_v2_with_internal_teacher_telemetry.v1",
+  "patch_identity": "sts_lightspeed_battle_search_v2_internal_teacher_telemetry_v1",
+  "telemetry_schema_id": "native-battle-search-v2-internal-teacher-telemetry-v1",
+  "default_off": true,
+  "frozen_teacher": {
+    "implementation": "BattleScumSearcher2",
+    "simulations": 400,
+    "root_selection": "highest_mean",
+    "include_potions": false,
+    "policy_prior": null,
+    "learned_leaf_value": null,
+    "rollout": "playoutRandom",
+    "terminal_utility": "evaluateEndState"
+  },
+  "execution_authorization": {
+    "native_unit_smoke_only": true,
+    "paired_12_start_canary_started": false,
+    "formal_413_start_collection_started": false
+  }
+}
