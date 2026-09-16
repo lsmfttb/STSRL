@@ -136,7 +136,20 @@ def main(argv: list[str] | None = None) -> int:
     evidence = finalize_t092_formal_shards(authorization=authorization, implementation_head=args.implementation_head,
         split_manifest=split, root_reference=reference, canary_evidence=canary, input_identities=inputs,
         output_root=args.artifact_root, shards=shards)
-    write_t092_formal_json(args.output, evidence, schema_id=T092_FORMAL_EVIDENCE_SCHEMA_ID)
+    evidence_reference = write_t092_formal_json(
+        args.output, evidence, schema_id=T092_FORMAL_EVIDENCE_SCHEMA_ID
+    )
+    write_t092_formal_json(
+        args.output.with_name("t092-formal-retention-manifest.json"),
+        {
+            "schema_id": "t092-formal-retention-manifest-v1",
+            "schema_version": 1,
+            "task_id": "T092",
+            "formal_evidence": evidence_reference,
+            "source_shards": evidence["internal_shard_manifest"],
+        },
+        schema_id="t092-formal-retention-manifest-v1",
+    )
     return 0
 
 

@@ -10,6 +10,7 @@ from sts_combat_rl.sim.t092_formal_execution import (
     validate_t092_t090_root_reference,
 )
 from sts_combat_rl.sim.t090_battle_student import canonical_sha256
+from sts_combat_rl.commands.t092_formal import build_parser
 
 
 def _root_reference(*, complete_s0: bool = True) -> dict[str, object]:
@@ -51,3 +52,8 @@ def test_formal_authorization_failure_cannot_invoke_runner() -> None:
             split_manifest={}, root_reference={}, canary_evidence={}, input_identities={"x": "y"},
             output_root="/tmp/t092", shard_index=0, shard_count=8, worker_count=8, runner=runner)
     assert invoked is False
+
+
+def test_formal_command_exposes_native_free_restore_preparation() -> None:
+    parser = build_parser()
+    assert "prepare-restore-inputs" in parser._subparsers._group_actions[0].choices

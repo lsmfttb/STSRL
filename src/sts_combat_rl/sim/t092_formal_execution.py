@@ -235,19 +235,24 @@ def execute_t092_authorized_formal_shard(*, authorization: Mapping[str, Any] | N
     plan = build_t092_formal_plan(split_manifest, shard_count=shard_count, worker_count=worker_count)
     worker = {"stage_worker_count": worker_count, "worker_index": shard_index, "shard_count": shard_count, "shard_index": shard_index}
     sources = [source for index, source in enumerate(plan["sources"]) if index % shard_count == shard_index]
-    records: list[dict[str, Any]] = []
-    for source in sources:
+    source_artifacts: list[dict[str, Any]] = []
+    for ordinal, source in enumerate(sources):
         try:
             raw = runner(source, worker)
         except Exception as exc:
             raise T092FormalError("T092 formal runner failed before complete shard retention") from exc
-        records.append(_formal_arm(raw, source, worker, implementation_head))
-    if len(records) != len(sources):
+        record = _formal_arm(raw, source, worker, implementation_head)
+        source_artifacts.append(write_t092_formal_json(
+            Path(output_root) / "source-records" / f"shard-{shard_index:02d}" / f"source-{ordinal:03d}.json",
+            record,
+            schema_id=T092_CANARY_ARM_RECORD_SCHEMA_ID,
+        ))
+    if len(source_artifacts) != len(sources):
         raise T092FormalError("T092 formal shard is incomplete")
     return {"schema_id": T092_FORMAL_SHARD_SCHEMA_ID, "schema_version": 1, "task_id": "T092",
             "authorization_id": authorization["authorization_id"], "implementation_head": implementation_head,
-            "formal_plan_sha256": canonical_sha256(plan), "topology": topology, "records": records,
-            "records_sha256": canonical_sha256(records)}
+            "formal_plan_sha256": canonical_sha256(plan), "topology": topology, "source_artifacts": source_artifacts,
+            "source_artifacts_sha256": canonical_sha256(source_artifacts)}
 
 
 def _root_projection(record: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -303,7 +308,7 @@ def _classification(metrics: Mapping[str, Any], *, root_ok: bool, canary_ok: boo
 def finalize_t092_formal_shards(*, authorization: Mapping[str, Any] | None, implementation_head: str,
                                 split_manifest: Mapping[str, Any], root_reference: Mapping[str, Any],
                                 canary_evidence: Mapping[str, Any], input_identities: Mapping[str, Any], output_root: str | Path,
-                                shards: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+                                shards: Sequence[Mapping[str, Any] | Path]) -> dict[str, Any]:
     """Offline, fail-closed finalizer. Processes one shard at a time conceptually.
 
     The retained compact shards, not an in-memory native tree corpus, are the
@@ -325,7 +330,17 @@ def finalize_t092_formal_shards(*, authorization: Mapping[str, Any] | None, impl
     observed_roots: list[dict[str, Any]] = []
     ledger: list[dict[str, Any]] = []
     artifacts: list[dict[str, Any]] = []
-    for index, shard in enumerate(shards):
+    for index, shard_input in enumerate(shards):
+        if isinstance(shard_input, Path):
+            try:
+                shard_value = json.loads(shard_input.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError) as exc:
+                raise T092FormalError("T092 formal shard is unavailable") from exc
+            if not isinstance(shard_value, Mapping):
+                raise T092FormalError("T092 formal shard is malformed")
+            shard: Mapping[str, Any] = shard_value
+        else:
+            shard = shard_input
         topology = validate_t092_formal_authorization(authorization, implementation_head=implementation_head,
             split_manifest=split_manifest, root_reference=reference, canary_evidence=canary_evidence,
             input_identities=input_identities, output_root=output_root, shard_index=index,
