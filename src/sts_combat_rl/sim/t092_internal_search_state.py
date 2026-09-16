@@ -12,7 +12,7 @@ import json
 import math
 from collections import Counter, defaultdict
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any
 
 T092_SCHEMA_ID = "t092-internal-search-state-occurrence-v1"
@@ -67,8 +67,9 @@ def _mapping(value: object, label: str) -> Mapping[str, Any]:
 def _action(value: object, label: str) -> dict[str, Any]:
     action = _mapping(value, label)
     required = ("scope", "bits", "kind", "idx1", "idx2", "idx3", "label")
-    if any(key not in action for key in required):
+    if set(action) != set(required):
         raise T092Incomplete(f"{label} lacks public action identity")
+    _assert_public_only(action, label)
     if not isinstance(action["scope"], str) or action["scope"] != "battle":
         raise T092Incomplete(f"{label} is not a Battle public action")
     if not isinstance(action["kind"], str) or not action["kind"]:
@@ -126,6 +127,116 @@ class T092Occurrence:
             self.public_battle_projection,
             [row["action"] for row in self.searchable_actions],
         )
+
+
+def validate_retained_occurrence(
+    value: Mapping[str, Any], *, source_identity: str | None = None,
+    source_group: str | None = None, split: str | None = None,
+    parent_root_decision_identities: set[str] | None = None,
+) -> T092Occurrence:
+    """Revalidate one serialized occurrence without native execution.
+
+    This is the retained-artifact boundary used by the canary validator as well
+    as the native-report parser. It admits exactly the dataclass surface, not a
+    superset with private or inferred fields.
+    """
+
+    required = {
+        "native_identity", "frozen_teacher_config", "source_identity",
+        "source_group", "split", "parent_root_decision_identity",
+        "occurrence_identity", "tree_depth", "expansion_ordinal",
+        "public_battle_projection", "searchable_actions", "excluded_actions",
+        "search_work", "telemetry_cost",
+    }
+    if set(value) != required:
+        raise T092Incomplete("retained internal occurrence fields are incomplete")
+    if dict(_mapping(value["native_identity"], "occurrence native identity")) != T092_NATIVE_IDENTITY:
+        raise T092Incomplete("retained occurrence native identity is conflicting")
+    if dict(_mapping(value["frozen_teacher_config"], "occurrence teacher configuration")) != T092_FROZEN_TEACHER_CONFIG:
+        raise T092Incomplete("retained occurrence teacher configuration is conflicting")
+    identity = value["source_identity"]
+    group = value["source_group"]
+    retained_split = value["split"]
+    parent = value["parent_root_decision_identity"]
+    occurrence = value["occurrence_identity"]
+    if (
+        not all(isinstance(item, str) and item for item in (identity, group, retained_split, parent, occurrence))
+        or group not in {"A", "B", "C"}
+        or (source_identity is not None and identity != source_identity)
+        or (source_group is not None and group != source_group)
+        or (split is not None and retained_split != split)
+        or (parent_root_decision_identities is not None and parent not in parent_root_decision_identities)
+    ):
+        raise T092Incomplete("retained occurrence source provenance is incomplete")
+    depth, ordinal = value["tree_depth"], value["expansion_ordinal"]
+    if (
+        isinstance(depth, bool) or not isinstance(depth, int) or depth < 1
+        or isinstance(ordinal, bool) or not isinstance(ordinal, int) or ordinal <= 0
+    ):
+        raise T092Incomplete("retained occurrence tree metadata is invalid")
+    projection = _mapping(value["public_battle_projection"], "retained public projection")
+    _assert_public_only(projection)
+    raw_actions = value["searchable_actions"]
+    if not isinstance(raw_actions, Sequence) or isinstance(raw_actions, (str, bytes, bytearray)):
+        raise T092Incomplete("retained teacher-searchable actions are unavailable")
+    actions: list[Mapping[str, Any]] = []
+    action_keys: set[str] = set()
+    for child in raw_actions:
+        child_mapping = _mapping(child, "retained teacher-searchable child")
+        if set(child_mapping) != {"action", "visits", "mean_value"}:
+            raise T092Incomplete("retained teacher-searchable child fields are incomplete")
+        action = _action(child_mapping["action"], "retained teacher-searchable action")
+        key = _canonical(action)
+        if key in action_keys:
+            raise T092Incomplete("retained teacher-searchable action identity is duplicate")
+        action_keys.add(key)
+        visits, mean = child_mapping["visits"], child_mapping["mean_value"]
+        if (
+            isinstance(visits, bool) or not isinstance(visits, int) or visits < 0
+            or (visits == 0 and mean is not None)
+            or (visits > 0 and not _finite(mean))
+        ):
+            raise T092Incomplete("retained child visit/mean contract is invalid")
+        actions.append({"action": action, "visits": visits, "mean_value": None if visits == 0 else float(mean)})
+    raw_excluded = value["excluded_actions"]
+    if not isinstance(raw_excluded, Sequence) or isinstance(raw_excluded, (str, bytes, bytearray)):
+        raise T092Incomplete("retained teacher-excluded actions are unavailable")
+    excluded: list[Mapping[str, Any]] = []
+    for entry in raw_excluded:
+        item = _mapping(entry, "retained teacher-excluded action")
+        if set(item) != {"action", "exclusion_reason"}:
+            raise T092Incomplete("retained teacher-excluded action fields are incomplete")
+        reason = item["exclusion_reason"]
+        if not isinstance(reason, str) or not reason:
+            raise T092Incomplete("retained teacher-excluded action lacks a reason")
+        excluded.append({"action": _action(item["action"], "retained teacher-excluded action"), "exclusion_reason": reason})
+    search_work = _mapping(value["search_work"], "retained Search work")
+    if set(search_work) != {"root_visits", "native_simulator_steps", "simulations_requested"}:
+        raise T092Incomplete("retained Search work fields are incomplete")
+    if (
+        search_work["simulations_requested"] != 400
+        or any(
+            isinstance(search_work[key], bool)
+            or not isinstance(search_work[key], int)
+            or search_work[key] < 0
+            for key in ("root_visits", "native_simulator_steps")
+        )
+    ):
+        raise T092Incomplete("retained Search work metadata is invalid")
+    telemetry_cost = _mapping(value["telemetry_cost"], "retained telemetry cost")
+    if set(telemetry_cost) != {"telemetry_extraction_transition_count", "collection_phase"}:
+        raise T092Incomplete("retained telemetry cost fields are incomplete")
+    transitions = telemetry_cost["telemetry_extraction_transition_count"]
+    if (
+        isinstance(transitions, bool) or not isinstance(transitions, int) or transitions < 0
+        or telemetry_cost["collection_phase"] != "post_search_private_state_replay"
+    ):
+        raise T092Incomplete("retained telemetry cost metadata is invalid")
+    return T092Occurrence(
+        dict(value["native_identity"]), dict(value["frozen_teacher_config"]), identity,
+        group, retained_split, parent, occurrence, depth, ordinal, dict(projection),
+        tuple(actions), tuple(excluded), dict(search_work), dict(telemetry_cost),
+    )
 
 
 def parse_native_occurrences(
@@ -212,7 +323,31 @@ def parse_native_occurrences(
             if not isinstance(reason, str) or not reason:
                 raise T092Incomplete("teacher-excluded action lacks a reason")
             excluded.append({"action": _action(item.get("action"), "teacher-excluded action"), "exclusion_reason": reason})
-        result.append(T092Occurrence(dict(native_identity), dict(teacher_config), source_identity, source_group, split, parent_root_decision_identity, occurrence, depth, ordinal, dict(projection), tuple(actions), tuple(excluded), search_work, telemetry_cost))
+        normalized = T092Occurrence(
+            dict(native_identity),
+            dict(teacher_config),
+            source_identity,
+            source_group,
+            split,
+            parent_root_decision_identity,
+            occurrence,
+            depth,
+            ordinal,
+            dict(projection),
+            tuple(actions),
+            tuple(excluded),
+            search_work,
+            telemetry_cost,
+        )
+        result.append(
+            validate_retained_occurrence(
+                asdict(normalized),
+                source_identity=source_identity,
+                source_group=source_group,
+                split=split,
+                parent_root_decision_identities={parent_root_decision_identity},
+            )
+        )
     if native.get("candidate_count") != len(result):
         raise T092Incomplete("native candidate count disagrees with rows")
     return result

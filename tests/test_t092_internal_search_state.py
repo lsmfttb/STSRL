@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import asdict
 
 import pytest
 
@@ -15,6 +16,7 @@ from sts_combat_rl.sim.t092_internal_search_state import (
     select_t092_canary_sources,
     summarize_occurrences,
     support_pairs,
+    validate_retained_occurrence,
 )
 
 
@@ -117,6 +119,24 @@ def test_depth_zero_root_is_not_an_internal_occurrence() -> None:
     native["rows"][0]["tree_depth"] = 0
     with pytest.raises(T092Incomplete, match="tree metadata"):
         _parse(report)
+
+
+def test_retained_occurrence_revalidates_metadata_depth_and_public_firewall() -> None:
+    row = _parse()[0]
+    payload = asdict(row)
+    payload["tree_depth"] = 0
+    with pytest.raises(T092Incomplete, match="tree metadata"):
+        validate_retained_occurrence(payload)
+
+    payload = asdict(row)
+    payload["native_identity"]["commit"] = "0" * 40
+    with pytest.raises(T092Incomplete, match="native identity"):
+        validate_retained_occurrence(payload)
+
+    payload = asdict(row)
+    payload["public_battle_projection"]["hidden_draw_order"] = [1]
+    with pytest.raises(T092Incomplete, match="forbidden private field"):
+        validate_retained_occurrence(payload)
 
 
 def test_cross_split_fingerprint_excludes_every_occurrence() -> None:

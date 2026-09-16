@@ -36,6 +36,13 @@ prior/leaf value, and rollout/terminal-utility identities. Missing or
 conflicting report or task-native facts fail closed. This document does not
 change the merged `docs/sts_lightspeed_source_manifest.json` pin.
 
+Retained occurrence JSON is independently revalidated before canary evidence
+is accepted: exact occurrence/child/cost field sets, task-native identity,
+frozen teacher envelope, source/split/parent-decision binding, `tree_depth >=
+1`, finite supported means, zero-visit unknowns, and the recursive public
+firewall all fail closed. This prevents a file-only evidence reader from
+accepting injected private or malformed internal rows.
+
 ## Harnesses
 
 `python -m sts_combat_rl.commands.t092_internal_search_state canary-select`

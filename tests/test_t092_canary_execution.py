@@ -23,7 +23,10 @@ def _selected() -> tuple[T090SplitEntry, ...]:
 
 def _pair(source: T090SplitEntry) -> dict[str, object]:
     semantics = {
-        "ordered_root_actions": [], "root_visits": 400, "native_simulator_steps": 1,
+        "ordered_root_actions": [{
+            "action_identity": {"stable_id": "a"}, "visits": 400,
+            "evaluation_sum": 0.0, "mean_value": 0.0,
+        }], "root_visits": 400, "native_simulator_steps": 1,
         "best_action_value": 0.0, "min_action_value": 0.0, "outcome_player_hp": 50,
         "selected_action_identity": {"stable_id": "a"}, "selection_rule": "highest_mean",
     }

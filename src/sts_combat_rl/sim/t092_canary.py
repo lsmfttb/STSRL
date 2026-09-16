@@ -44,11 +44,13 @@ from sts_combat_rl.sim.t090_battle_student import (
 )
 from sts_combat_rl.sim.t092_internal_search_state import (
     T092_FROZEN_TEACHER_CONFIG,
+    T092Incomplete,
     T092_NATIVE_API,
     T092_NATIVE_IDENTITY,
     T092_NATIVE_PATCH_IDENTITY,
     parse_native_occurrences,
     select_t092_canary_sources,
+    validate_retained_occurrence,
 )
 from sts_combat_rl.t085_corrected_leaf_value_search_evaluation import (
     T085BattleStartRecord,
@@ -540,11 +542,13 @@ def _validate_pair_record(raw: Mapping[str, Any], source: T090SplitEntry) -> dic
         off,
         arm="OFF",
         expected_native_identity=T092_PUBLICATION_NATIVE_IDENTITY,
+        source=source,
     )
     _validate_arm_record(
         on,
         arm="ON",
         expected_native_identity=T092_NATIVE_IDENTITY,
+        source=source,
     )
     off_decisions, on_decisions = off.get("decision_records"), on.get("decision_records")
     if not isinstance(off_decisions, Sequence) or not isinstance(on_decisions, Sequence) or list(off_decisions) != list(on_decisions):
@@ -557,7 +561,8 @@ def _validate_pair_record(raw: Mapping[str, Any], source: T090SplitEntry) -> dic
 
 
 def _validate_arm_record(
-    arm_record: Mapping[str, Any], *, arm: str, expected_native_identity: Mapping[str, Any]
+    arm_record: Mapping[str, Any], *, arm: str,
+    expected_native_identity: Mapping[str, Any], source: T090SplitEntry,
 ) -> None:
     required = {
         "arm",
@@ -621,6 +626,31 @@ def _validate_arm_record(
         raise T092CanaryError(f"T092 {arm} arm occurrence payload is invalid")
     if arm == "OFF" and occurrences:
         raise T092CanaryError("T092 OFF arm must not retain internal telemetry rows")
+    if arm == "ON":
+        decision_ids = {
+            str(item["decision_identity"])
+            for item in decisions
+            if isinstance(item, Mapping)
+        }
+        occurrence_ids: set[str] = set()
+        for raw in occurrences:
+            if not isinstance(raw, Mapping):
+                raise T092CanaryError("T092 ON arm occurrence is malformed")
+            try:
+                occurrence = validate_retained_occurrence(
+                    raw,
+                    source_identity=source.source_identity,
+                    source_group=source.source_group,
+                    split=source.split,
+                    parent_root_decision_identities=decision_ids,
+                )
+            except T092Incomplete as exc:
+                raise T092CanaryError(
+                    "T092 ON arm occurrence violates retained schema/firewall"
+                ) from exc
+            if occurrence.occurrence_identity in occurrence_ids:
+                raise T092CanaryError("T092 ON arm occurrence identity is duplicate")
+            occurrence_ids.add(occurrence.occurrence_identity)
 
 
 def _validate_root_semantics(value: object, *, arm: str) -> None:
@@ -638,15 +668,73 @@ def _validate_root_semantics(value: object, *, arm: str) -> None:
     }:
         raise T092CanaryError(f"T092 {arm} arm root semantic evidence is malformed")
     actions = value["ordered_root_actions"]
-    if not isinstance(actions, Sequence) or isinstance(actions, (str, bytes)):
+    if (
+        not isinstance(actions, Sequence)
+        or isinstance(actions, (str, bytes))
+        or not actions
+    ):
         raise T092CanaryError(f"T092 {arm} arm root actions are malformed")
+    action_identities: list[Mapping[str, Any]] = []
     for action in actions:
         if not isinstance(action, Mapping) or set(action) != {
             "action_identity", "visits", "evaluation_sum", "mean_value"
         }:
             raise T092CanaryError(f"T092 {arm} arm root action evidence is malformed")
-    if value["selection_rule"] != "highest_mean" or not isinstance(
-        value["selected_action_identity"], Mapping
+        identity = action["action_identity"]
+        visits, evaluation_sum, mean_value = (
+            action["visits"],
+            action["evaluation_sum"],
+            action["mean_value"],
+        )
+        if (
+            not isinstance(identity, Mapping)
+            or not identity
+            or isinstance(visits, bool)
+            or not isinstance(visits, int)
+            or visits < 0
+            or (
+                evaluation_sum is not None
+                and (
+                    isinstance(evaluation_sum, bool)
+                    or not isinstance(evaluation_sum, (int, float))
+                    or not math.isfinite(float(evaluation_sum))
+                )
+            )
+            or (visits == 0 and mean_value is not None)
+            or (
+                visits > 0
+                and (
+                    isinstance(mean_value, bool)
+                    or not isinstance(mean_value, (int, float))
+                    or not math.isfinite(float(mean_value))
+                )
+            )
+        ):
+            raise T092CanaryError(f"T092 {arm} arm root action values are invalid")
+        action_identities.append(identity)
+    if (
+        isinstance(value["root_visits"], bool)
+        or not isinstance(value["root_visits"], int)
+        or value["root_visits"] < 0
+        or isinstance(value["native_simulator_steps"], bool)
+        or not isinstance(value["native_simulator_steps"], int)
+        or value["native_simulator_steps"] < 0
+    ):
+        raise T092CanaryError(f"T092 {arm} arm root counters are invalid")
+    for key in ("best_action_value", "min_action_value", "outcome_player_hp"):
+        scalar = value[key]
+        if scalar is not None and (
+            isinstance(scalar, bool)
+            or not isinstance(scalar, (int, float))
+            or not math.isfinite(float(scalar))
+        ):
+            raise T092CanaryError(f"T092 {arm} arm root scalar {key} is invalid")
+    selected = value["selected_action_identity"]
+    if (
+        value["selection_rule"] != "highest_mean"
+        or not isinstance(selected, Mapping)
+        or not selected
+        or not any(dict(selected) == dict(identity) for identity in action_identities)
     ):
         raise T092CanaryError(f"T092 {arm} arm root selection evidence is invalid")
 
