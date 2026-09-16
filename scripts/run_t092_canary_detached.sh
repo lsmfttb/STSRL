@@ -26,7 +26,7 @@ for shard_index in $(seq 0 11); do
     --stderr "$job_root/t092-canary-shard-${shard_index}.stderr.log" \
     --cwd "$repo_root" \
     --expected-seconds 900 \
-    -- env PYTHONPATH=src python3 -m sts_combat_rl.commands.t092_canary_execution run-shard \
+    -- env PYTHONPATH=src /usr/bin/python3.14 -m sts_combat_rl.commands.t092_canary_execution run-shard \
       --implementation-head "$implementation_head" \
       --authorization "$authorization" \
       --split-manifest "$split_manifest" \

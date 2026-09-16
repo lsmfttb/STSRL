@@ -35,9 +35,11 @@ the matching `BattleStartCheckpointRecord` map, native identity
 Search-v2@400 configuration. Missing maps, restore parity, native identity, or
 teacher envelope fail closed.
 
-The worker plan is 12 shards / 12 workers, one selected start per shard, with
-each worker running both arms serially for its own restored start. This is
-capped by canary shard count and keeps paired restore state isolated. The
+The worker plan is 12 shards / 12 workers, one selected start per shard. Each
+shard launches two fresh, distinct Python OS processes: OFF loads only the
+publication extension and ON loads only the task extension. They share no
+interpreter, module cache, simulator object, RNG object, or mutable restore
+state; their only output pairing channel is two immutable arm records. The
 future output root is the ignored path shown above. It must contain the plan,
 the exact pair evidence schema
 `t092-paired-semantic-parity-canary-v1`, a source-entry SHA-256 ledger, ON-arm
@@ -63,18 +65,24 @@ SHA-256, exact restore-input identity map SHA-256, both arm native identities,
 the frozen teacher envelope, 12-worker/12-shard topology, and output root.
 It validates those facts before a runtime factory or adapter is imported.
 
-An approved restore harness must expose a `module:callable` runtime factory
-that returns exactly `off_adapter_factory`, `on_adapter_factory`,
-`source_records`, and `canonical_records`. The OFF factory loads the exact
-publication-native `20a6…` build and the ON factory loads the exact task-native
-`07e…` build; T092 neither guesses those maps nor reconstructs them from
-checkpoint bytes. It must first write a non-authorizing template:
+The pinned native-free restore recipe is
+`sts_combat_rl.commands.t092_canary_runtime:t092_canary_runtime`, and its
+exact map is [t092_canary_runtime_identity_map.json](t092_canary_runtime_identity_map.json).
+After authorization the callable returns exactly `arm_process_specs`,
+`source_records`, and `canonical_records`; it returns no native adapter or
+factory. The launcher validates each arm's interpreter, one extension path,
+size, SHA-256, and native identity before spawning that arm. The child repeats
+the binary check before constructing `LightSpeedAdapter`, writes its immutable
+`t092-paired-canary-arm-record-v1` JSON once, and the parent independently
+reads/validates both records before offline pairing. T092 neither guesses maps
+nor reconstructs them from checkpoint bytes. It must first write a
+non-authorizing template:
 
 ```bash
 PYTHONPATH=src python3 -m sts_combat_rl.commands.t092_canary_execution prepare-authorization \
   --implementation-head <exact-STSRL-head> \
   --split-manifest /mnt/d/DeadlyCatCoding/STSRL/artifacts/t090-formal-413-2bfcb27-20260915-retry1/t090-split-manifest.json \
-  --runtime-input-identities /mnt/d/DeadlyCatCoding/STSRL/artifacts/t092-canary-12-<authorization-id>/runtime-input-identities.json \
+  --runtime-input-identities /mnt/d/DeadlyCatCoding/STSRL-T092/docs/t092_canary_runtime_identity_map.json \
   --artifact-root /mnt/d/DeadlyCatCoding/STSRL/artifacts/t092-canary-12-<authorization-id> \
   --output /mnt/d/DeadlyCatCoding/STSRL/artifacts/t092-canary-12-<authorization-id>/t092-canary-authorization-preparation.json
 ```
@@ -89,15 +97,16 @@ scripts/run_t092_canary_detached.sh \
   <exact-STSRL-head> \
   /mnt/d/DeadlyCatCoding/STSRL/artifacts/t092-canary-12-<authorization-id>/t092-canary-authorization.json \
   /mnt/d/DeadlyCatCoding/STSRL/artifacts/t090-formal-413-2bfcb27-20260915-retry1/t090-split-manifest.json \
-  /mnt/d/DeadlyCatCoding/STSRL/artifacts/t092-canary-12-<authorization-id>/runtime-input-identities.json \
-  <approved_restore_runtime_module:factory> \
+  /mnt/d/DeadlyCatCoding/STSRL-T092/docs/t092_canary_runtime_identity_map.json \
+  sts_combat_rl.commands.t092_canary_runtime:t092_canary_runtime \
   /mnt/d/DeadlyCatCoding/STSRL/artifacts/t092-canary-12-<authorization-id>
 ```
 
-The launcher writes one immutable `t092-paired-canary-shard-v1` JSON per shard
-under `shards/` and detached status/stdout/stderr files under `jobs/`. Each
-shard includes the canonical selected source, pair SHA-256, arm identities,
-worker topology, input-map SHA-256, and exact authorization ID. The merger
+The launcher writes two immutable arm records under `arms/`, then one immutable
+`t092-paired-canary-shard-v1` JSON per shard under `shards/`, plus detached
+status/stdout/stderr files under `jobs/`. Each pair includes the canonical
+selected source, two distinct arm artifact paths/SHA-256s, pair SHA-256, arm
+identities, worker topology, input-map SHA-256, and exact authorization ID. The merger
 accepts only all twelve canonical shard positions and writes one
 `t092-paired-semantic-parity-canary-v1` evidence JSON; every retained JSON is
 written once with its SHA-256, size, and schema returned for the eventual

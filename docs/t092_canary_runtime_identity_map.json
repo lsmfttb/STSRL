@@ -1,0 +1,24 @@
+{
+  "schema_id": "t092-canary-runtime-input-identities-v2",
+  "schema_version": 2,
+  "task_id": "T092",
+  "execution_authorized": false,
+  "runtime_factory": "sts_combat_rl.commands.t092_canary_runtime:t092_canary_runtime",
+  "split_manifest": {
+    "path": "/mnt/d/DeadlyCatCoding/STSRL/artifacts/t090-formal-413-2bfcb27-20260915-retry1/t090-split-manifest.json",
+    "sha256": "b5bb43792a811fcedde684649938ac735dc5b05029d77423132b8b258b467b93",
+    "size_bytes": 68305,
+    "schema_id": "t090-battle-start-split-manifest-v1"
+  },
+  "accepted_restore_inputs": {
+    "t087_formal": {"path": "/mnt/d/DeadlyCatCoding/STSRL/artifacts/t087-formal-natural-413-8d7e44-20260911/t087-formal-natural-evidence.json", "sha256": "7931a118a4bf921f695db769f05fd77a5ae364484f5646f02d5be05329ad297f", "size_bytes": 402943396},
+    "t087_report": {"path": "/mnt/d/DeadlyCatCoding/STSRL/artifacts/t087-final-8d7e44-20260911/t087-dense-combat-diagnostics-report.json", "sha256": "9a0eba7eed03a1ba4801c3019e9d14a2aa61214a76299a63ed9ab5a0192f3ea0", "size_bytes": 183310576},
+    "t087_retention": {"path": "/mnt/d/DeadlyCatCoding/STSRL/artifacts/t087-final-8d7e44-20260911/t087-retention-manifest.json", "sha256": "5afe39476965a192c9bdd8d6bed121cd0169e68925cabfe9b8366ee320938adc", "size_bytes": 9034},
+    "t085_selection": {"path": "/mnt/d/DeadlyCatCoding/STSRL/artifacts/t085-corrected-leaf-value-search-repair/selection/t085-native-selection.json", "sha256": "d5c335cd6e1f96e72ae3b302eebca17a5f6531fa0aac97ee2febec2c41c2e752", "size_bytes": 2554884},
+    "t085_restore": {"path": "/mnt/d/DeadlyCatCoding/STSRL/artifacts/t085-corrected-leaf-value-search-repair/selection/t085-native-selection-restore-evidence.json", "sha256": "0adbdc4e055bd8d53680757a395e3e7973b7242b06db1c5053281ef883b679ef", "size_bytes": 254155}
+  },
+  "arm_process_specs": {
+    "OFF": {"native_commit": "20a6c2b3a9cea817c988178b814f083ff889853f", "extension_sha256": "b996f949e77b3d76a3991c4e24977c80722f0e09e1e0f235384a4158ee6351bb", "extension_size_bytes": 1632040},
+    "ON": {"native_commit": "07e1770cf0710d8c26719c153383d09e3bfd7686", "extension_sha256": "0a9ba8127c3970a7b3bf2093f005527f1d567e37d3062fa116d1729be621e7af", "extension_size_bytes": 1648424}
+  }
+}

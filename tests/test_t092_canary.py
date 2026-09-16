@@ -56,6 +56,32 @@ def _actions() -> list[SimulatorAction]:
     ]
 
 
+def _complete_arm(
+    source: T090SplitEntry, base: dict[str, object], arm: str,
+    native: dict[str, object], pid: int,
+) -> dict[str, object]:
+    return {
+        "schema_id": "t092-paired-canary-arm-record-v1", "schema_version": 1,
+        "task_id": "T092", "arm": arm, "source_identity": source.source_identity,
+        "source_group": source.source_group, "split": source.split,
+        "canonical_position": source.canonical_position,
+        "restore_binding": {"selection_identity": source.source_identity, "source_checkpoint_id": source.source_identity, "source_run_identity": "run", "source_seed": 1, "source_battle_index": 0},
+        "implementation_head": "a" * 40, "native_identity": native,
+        "native_binary": {"path": f"/{arm}.so", "sha256": ("a" if arm == "OFF" else "b") * 64, "size_bytes": 1},
+        "native_api": T092_NATIVE_API if arm == "ON" else BATTLE_SEARCH_V2_NATIVE_API,
+        "process_identity": {"pid": pid, "python_executable": "/usr/bin/python3.14"},
+        "worker": {"stage_worker_count": 12, "worker_index": 0, "shard_count": 12, "shard_index": 0},
+        **base,
+    }
+
+
+def _arm_artifacts() -> dict[str, object]:
+    return {
+        "OFF": {"path": "/off.json", "sha256": "a" * 64, "size_bytes": 1, "schema_id": "t092-paired-canary-arm-record-v1"},
+        "ON": {"path": "/on.json", "sha256": "b" * 64, "size_bytes": 1, "schema_id": "t092-paired-canary-arm-record-v1"},
+    }
+
+
 def _raw(*, telemetry: bool) -> dict[str, object]:
     report: dict[str, object] = {
         "schema_id": "native-battle-search-root-v1",
@@ -147,8 +173,9 @@ def test_pair_evidence_rejects_one_root_mismatch(monkeypatch) -> None:
             "arm_native_identities": {"OFF": T092_PUBLICATION_NATIVE_IDENTITY, "ON": {"repository": "lsmfttb/sts_lightspeed", "ref": "refs/heads/planner/t092-internal-search-state-telemetry", "commit": "07e1770cf0710d8c26719c153383d09e3bfd7686"}},
             "teacher_config": dict(T092_FROZEN_TEACHER_CONFIG),
             "worker": {"stage_worker_count": 12, "worker_index": 0, "shard_count": 12, "shard_index": 0},
-            "off": {**arm_base, "arm": "OFF", "native_identity": T092_PUBLICATION_NATIVE_IDENTITY},
-            "on": {**arm_base, "arm": "ON", "native_identity": {"repository": "lsmfttb/sts_lightspeed", "ref": "refs/heads/planner/t092-internal-search-state-telemetry", "commit": "07e1770cf0710d8c26719c153383d09e3bfd7686"}, "decision_records": deepcopy(decisions)},
+            "arm_artifacts": _arm_artifacts(),
+            "off": _complete_arm(source, arm_base, "OFF", T092_PUBLICATION_NATIVE_IDENTITY, 101),
+            "on": _complete_arm(source, {**arm_base, "decision_records": deepcopy(decisions)}, "ON", T092_NATIVE_IDENTITY, 102),
         }
 
     assert execute_t092_canary(split_manifest={}, runner=runner)["semantic_parity"]["passed"] is True
@@ -181,8 +208,9 @@ def test_pair_evidence_fails_closed_on_restore_or_arm_provenance(monkeypatch) ->
             "arm_native_identities": {"OFF": T092_PUBLICATION_NATIVE_IDENTITY, "ON": {"repository": "wrong"}},
             "teacher_config": dict(T092_FROZEN_TEACHER_CONFIG),
             "worker": {"stage_worker_count": 12, "worker_index": 0, "shard_count": 12, "shard_index": 0},
-            "off": {**base, "arm": "OFF", "native_identity": T092_PUBLICATION_NATIVE_IDENTITY},
-            "on": {**base, "arm": "ON", "native_identity": {"repository": "wrong"}, "restore_public_legal_parity": False},
+            "arm_artifacts": _arm_artifacts(),
+            "off": _complete_arm(source, base, "OFF", T092_PUBLICATION_NATIVE_IDENTITY, 101),
+            "on": _complete_arm(source, {**base, "restore_public_legal_parity": False}, "ON", {"repository": "wrong"}, 102),
         }
 
     with pytest.raises(T092CanaryError, match="pair provenance mismatch"):
@@ -219,8 +247,9 @@ def test_pair_evidence_rejects_hidden_or_malformed_retained_occurrence(monkeypat
             "arm_native_identities": {"OFF": T092_PUBLICATION_NATIVE_IDENTITY, "ON": T092_NATIVE_IDENTITY},
             "teacher_config": dict(T092_FROZEN_TEACHER_CONFIG),
             "worker": {"stage_worker_count": 12, "worker_index": 0, "shard_count": 12, "shard_index": 0},
-            "off": {**arm, "arm": "OFF", "native_identity": T092_PUBLICATION_NATIVE_IDENTITY},
-            "on": {**arm, "arm": "ON", "native_identity": T092_NATIVE_IDENTITY, "internal_occurrences": [occurrence]},
+            "arm_artifacts": _arm_artifacts(),
+            "off": _complete_arm(source, arm, "OFF", T092_PUBLICATION_NATIVE_IDENTITY, 101),
+            "on": _complete_arm(source, {**arm, "internal_occurrences": [occurrence]}, "ON", T092_NATIVE_IDENTITY, 102),
         }
 
     with pytest.raises(T092CanaryError, match="occurrence violates retained schema/firewall"):
@@ -247,8 +276,9 @@ def test_pair_evidence_rejects_nonfinite_root_values(monkeypatch) -> None:
             "arm_native_identities": {"OFF": T092_PUBLICATION_NATIVE_IDENTITY, "ON": T092_NATIVE_IDENTITY},
             "teacher_config": dict(T092_FROZEN_TEACHER_CONFIG),
             "worker": {"stage_worker_count": 12, "worker_index": 0, "shard_count": 12, "shard_index": 0},
-            "off": {**arm, "arm": "OFF", "native_identity": T092_PUBLICATION_NATIVE_IDENTITY},
-            "on": {**arm, "arm": "ON", "native_identity": T092_NATIVE_IDENTITY},
+            "arm_artifacts": _arm_artifacts(),
+            "off": _complete_arm(source, arm, "OFF", T092_PUBLICATION_NATIVE_IDENTITY, 101),
+            "on": _complete_arm(source, arm, "ON", T092_NATIVE_IDENTITY, 102),
         }
 
     with pytest.raises(T092CanaryError, match="root action values are invalid"):
@@ -274,8 +304,9 @@ def test_pair_evidence_rejects_terminal_decision_count_mismatch(monkeypatch) -> 
             "arm_native_identities": {"OFF": T092_PUBLICATION_NATIVE_IDENTITY, "ON": T092_NATIVE_IDENTITY},
             "teacher_config": dict(T092_FROZEN_TEACHER_CONFIG),
             "worker": {"stage_worker_count": 12, "worker_index": 0, "shard_count": 12, "shard_index": 0},
-            "off": {**arm, "arm": "OFF", "native_identity": T092_PUBLICATION_NATIVE_IDENTITY},
-            "on": {**arm, "arm": "ON", "native_identity": T092_NATIVE_IDENTITY},
+            "arm_artifacts": _arm_artifacts(),
+            "off": _complete_arm(source, arm, "OFF", T092_PUBLICATION_NATIVE_IDENTITY, 101),
+            "on": _complete_arm(source, arm, "ON", T092_NATIVE_IDENTITY, 102),
         }
 
     with pytest.raises(T092CanaryError, match="decision count disagrees"):

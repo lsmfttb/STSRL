@@ -16,7 +16,10 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from sts_combat_rl.sim.t092_canary import T092NativeCanaryRunner
+from sts_combat_rl.commands.t092_canary_runtime import (
+    t092_canary_runtime_input_identities,
+)
+from sts_combat_rl.sim.t092_canary_process import T092IsolatedCanaryRunner
 from sts_combat_rl.sim.t092_canary_execution import (
     T092_CANARY_EVIDENCE_SCHEMA_ID,
     T092_CANARY_SHARD_SCHEMA_ID,
@@ -46,7 +49,10 @@ def _within_root(path: Path, root: Path) -> None:
         raise T092CanaryExecutionError("T092 canary output must remain under output root") from exc
 
 
-def _runtime_runner(factory_path: str, *, worker: Mapping[str, int]) -> T092NativeCanaryRunner:
+def _runtime_runner(
+    factory_path: str, *, worker: Mapping[str, int], implementation_head: str,
+    output_root: Path,
+) -> T092IsolatedCanaryRunner:
     module_name, separator, attribute = factory_path.partition(":")
     if not separator or not module_name or not attribute:
         raise T092CanaryExecutionError("runtime factory must be module:callable")
@@ -55,18 +61,18 @@ def _runtime_runner(factory_path: str, *, worker: Mapping[str, int]) -> T092Nati
         raise T092CanaryExecutionError("runtime factory is unavailable")
     runtime = factory()
     if not isinstance(runtime, Mapping) or set(runtime) != {
-        "off_adapter_factory",
-        "on_adapter_factory",
+        "arm_process_specs",
         "source_records",
         "canonical_records",
     }:
-        raise T092CanaryExecutionError("runtime factory did not supply exact restore maps")
-    return T092NativeCanaryRunner(
-        off_adapter_factory=runtime["off_adapter_factory"],
-        on_adapter_factory=runtime["on_adapter_factory"],
+        raise T092CanaryExecutionError("runtime factory did not supply isolated arm maps")
+    return T092IsolatedCanaryRunner(
+        arm_process_specs=runtime["arm_process_specs"],
         source_records=runtime["source_records"],
         canonical_records=runtime["canonical_records"],
         worker=worker,
+        implementation_head=implementation_head,
+        output_root=output_root,
     )
 
 
@@ -98,6 +104,8 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     split = _object(_read_json(args.split_manifest), "split manifest")
     inputs = _object(_read_json(args.runtime_input_identities), "runtime input identities")
+    if inputs != t092_canary_runtime_input_identities():
+        raise T092CanaryExecutionError("T092 runtime input identity map is not the approved recipe")
     _within_root(args.output, args.artifact_root)
     if args.mode == "prepare":
         prepared = build_t092_canary_authorization_template(
@@ -119,11 +127,18 @@ def main(argv: list[str] | None = None) -> int:
         output_root=args.artifact_root,
     )
     if args.mode == "run":
+        if args.runtime_factory != "sts_combat_rl.commands.t092_canary_runtime:t092_canary_runtime":
+            raise T092CanaryExecutionError("T092 canary runtime factory is not the approved recipe")
         worker = {
             "stage_worker_count": 12, "worker_index": args.shard_index,
             "shard_count": 12, "shard_index": args.shard_index,
         }
-        runner = _runtime_runner(args.runtime_factory, worker=worker)
+        runner = _runtime_runner(
+            args.runtime_factory,
+            worker=worker,
+            implementation_head=args.implementation_head,
+            output_root=args.artifact_root,
+        )
         shard = execute_t092_authorized_canary_shard(
             authorization=authorization,
             implementation_head=args.implementation_head,

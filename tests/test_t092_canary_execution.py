@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from sts_combat_rl.sim.t090_battle_student import T090SplitEntry
@@ -10,6 +12,10 @@ from sts_combat_rl.sim.t092_canary_execution import (
     T092CanaryExecutionError,
     build_t092_canary_authorization_template,
     execute_t092_authorized_canary_shard,
+)
+from sts_combat_rl.sim.t092_canary_process import (
+    T092CanaryProcessError,
+    execute_t092_isolated_arm,
 )
 from sts_combat_rl.sim.t092_internal_search_state import (
     T092_FROZEN_TEACHER_CONFIG,
@@ -38,14 +44,29 @@ def _pair(source: T090SplitEntry) -> dict[str, object]:
         "internal_occurrences": [], "cost": {"wall_clock_time_s": 0.0},
         "teacher_config": dict(T092_FROZEN_TEACHER_CONFIG),
     }
+    def complete(arm_name: str, native: dict[str, object], pid: int) -> dict[str, object]:
+        return {
+            "schema_id": "t092-paired-canary-arm-record-v1", "schema_version": 1,
+            "task_id": "T092", "arm": arm_name, "source_identity": source.source_identity,
+            "source_group": source.source_group, "split": source.split,
+            "canonical_position": source.canonical_position,
+            "restore_binding": {"selection_identity": source.source_identity, "source_checkpoint_id": source.source_identity, "source_run_identity": "run", "source_seed": 1, "source_battle_index": 0},
+            "implementation_head": "a" * 40, "native_identity": native,
+            "native_binary": {"path": f"/{arm_name}.so", "sha256": ("a" if arm_name == "OFF" else "b") * 64, "size_bytes": 1},
+            "native_api": "StepSimulator.battle_search_v2_with_internal_teacher_telemetry.v1" if arm_name == "ON" else "StepSimulator.battle_search_v2.v1",
+            "process_identity": {"pid": pid, "python_executable": "/usr/bin/python3.14"},
+            "worker": {"stage_worker_count": 12, "worker_index": 0, "shard_count": 12, "shard_index": 0},
+            **arm,
+        }
     return {
         "source_identity": source.source_identity, "source_group": source.source_group,
         "split": source.split, "canonical_position": source.canonical_position,
         "arm_native_identities": {"OFF": T092_PUBLICATION_NATIVE_IDENTITY, "ON": T092_NATIVE_IDENTITY},
         "teacher_config": dict(T092_FROZEN_TEACHER_CONFIG),
         "worker": {"stage_worker_count": 12, "worker_index": 0, "shard_count": 12, "shard_index": 0},
-        "off": {**arm, "arm": "OFF", "native_identity": T092_PUBLICATION_NATIVE_IDENTITY},
-        "on": {**arm, "arm": "ON", "native_identity": T092_NATIVE_IDENTITY},
+        "arm_artifacts": {"OFF": {"path": "/off.json", "sha256": "a" * 64, "size_bytes": 1, "schema_id": "t092-paired-canary-arm-record-v1"}, "ON": {"path": "/on.json", "sha256": "b" * 64, "size_bytes": 1, "schema_id": "t092-paired-canary-arm-record-v1"}},
+        "off": complete("OFF", T092_PUBLICATION_NATIVE_IDENTITY, 101),
+        "on": complete("ON", T092_NATIVE_IDENTITY, 102),
     }
 
 
@@ -84,3 +105,34 @@ def test_authorized_t092_shard_binds_one_exact_start(monkeypatch, tmp_path) -> N
     )
     assert shard["pair"]["source_identity"] == "source-0"
     assert shard["topology"]["assignment"] == "canonical-selected-ordinal-v1"
+
+
+def test_native_mismatch_cannot_spawn_an_isolated_arm(monkeypatch, tmp_path) -> None:
+    """The parent rejects the binary before a child could build a simulator."""
+
+    extension = tmp_path / "slaythespire.so"
+    extension.write_bytes(b"not-the-pinned-extension")
+    invoked = False
+
+    def forbidden(*_args, **_kwargs):
+        nonlocal invoked
+        invoked = True
+        raise AssertionError("subprocess must not start")
+
+    monkeypatch.setattr("sts_combat_rl.sim.t092_canary_process.subprocess.run", forbidden)
+    source = _selected()[0]
+    with pytest.raises(T092CanaryProcessError, match="identity/binary"):
+        execute_t092_isolated_arm(
+            arm="OFF",
+            spec={
+                "python_executable": "/usr/bin/python3.14",
+                "extension_path": str(extension), "extension_sha256": "0" * 64,
+                "extension_size_bytes": extension.stat().st_size,
+                "native_identity": T092_PUBLICATION_NATIVE_IDENTITY,
+                "stsrl_source_root": str(Path(__file__).parents[1] / "src"),
+            },
+            source=source, selected=object(), canonical=object(),
+            worker={"stage_worker_count": 12, "worker_index": 0, "shard_count": 12, "shard_index": 0},
+            implementation_head="a" * 40, output_path=tmp_path / "arm.json",
+        )
+    assert invoked is False

@@ -1,13 +1,14 @@
 """Authorized-only paired T092 semantic-parity canary seam.
 
 The file-level readiness helpers do not restore a checkpoint or invoke native
-Search.  ``T092NativeCanaryRunner`` is intentionally injectable and is called
-only by a separately authorized execution entrypoint.
+Search.  Native work is performed one arm per fresh process by the separately
+authorized process-isolated execution entrypoint.
 """
 
 from __future__ import annotations
 
 import math
+import os
 import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -58,6 +59,7 @@ from sts_combat_rl.t085_corrected_leaf_value_search_evaluation import (
 
 T092_CANARY_EVIDENCE_SCHEMA_ID = "t092-paired-semantic-parity-canary-v1"
 T092_CANARY_PLAN_SCHEMA_ID = "t092-paired-canary-plan-v1"
+T092_CANARY_ARM_RECORD_SCHEMA_ID = "t092-paired-canary-arm-record-v1"
 T092_CANARY_START_COUNT = 12
 T092_CANARY_CLASSIFICATION = "MECHANICS_INFORMATION_BOUNDARY_ONLY"
 T092_PUBLICATION_NATIVE_IDENTITY = {
@@ -237,120 +239,129 @@ def _root_semantic_record(report: Any, target: Mapping[str, Any]) -> dict[str, A
     }
 
 
-class T092NativeCanaryRunner:
-    """Production paired restore/run seam using T090's accepted restore path."""
+def run_t092_native_canary_arm(
+    *,
+    source: T090SplitEntry,
+    selected: T085BattleStartRecord,
+    canonical: BattleStartCheckpointRecord,
+    telemetry_enabled: bool,
+    adapter_factory: Callable[[], object],
+    worker: Mapping[str, Any],
+    implementation_head: str,
+    native_binary: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Restore and execute exactly one arm in its already-isolated process.
 
-    def __init__(
-        self,
-        *,
-        off_adapter_factory: Callable[[], object],
-        on_adapter_factory: Callable[[], object],
-        source_records: Mapping[str, T085BattleStartRecord],
-        canonical_records: Mapping[str, BattleStartCheckpointRecord],
-        worker: Mapping[str, Any],
-    ) -> None:
-        if not callable(off_adapter_factory) or not callable(on_adapter_factory):
-            raise T092CanaryError("T092 canary arm adapter factories are unavailable")
-        self._off_adapter_factory = off_adapter_factory
-        self._on_adapter_factory = on_adapter_factory
-        self._source_records = dict(source_records)
-        self._canonical_records = dict(canonical_records)
-        self._worker = _validate_worker(worker)
+    The caller owns process isolation.  This deliberately has no OFF/ON
+    companion factory: allowing both extensions in one interpreter is forbidden
+    by the T092 process-isolation amendment.
+    """
 
-    def __call__(self, source: T090SplitEntry) -> Mapping[str, Any]:
-        selected = self._source_records.get(source.source_identity)
-        canonical = self._canonical_records.get(source.source_identity)
-        if selected is None or canonical is None:
-            raise T092CanaryError("T092 canary source restore binding is missing")
-        off = self._run_arm(source, selected, canonical, telemetry_enabled=False)
-        on = self._run_arm(source, selected, canonical, telemetry_enabled=True)
+    if not callable(adapter_factory):
+        raise T092CanaryError("T092 isolated arm adapter factory is unavailable")
+    if not isinstance(implementation_head, str) or len(implementation_head) != 40:
+        raise T092CanaryError("T092 isolated arm implementation identity is invalid")
+    worker_identity = _validate_worker(worker)
+    expected_native_identity = (
+        T092_NATIVE_IDENTITY if telemetry_enabled else T092_PUBLICATION_NATIVE_IDENTITY
+    )
+    if not isinstance(native_binary, Mapping) or set(native_binary) != {
+        "path", "sha256", "size_bytes"
+    }:
+        raise T092CanaryError("T092 isolated arm native binary evidence is invalid")
+    if (
+        not isinstance(native_binary["path"], str)
+        or not native_binary["path"]
+        or not isinstance(native_binary["sha256"], str)
+        or len(native_binary["sha256"]) != 64
+        or any(character not in "0123456789abcdef" for character in native_binary["sha256"])
+        or isinstance(native_binary["size_bytes"], bool)
+        or not isinstance(native_binary["size_bytes"], int)
+        or native_binary["size_bytes"] <= 0
+    ):
+        raise T092CanaryError("T092 isolated arm native binary evidence is malformed")
+    base_adapter = adapter_factory()
+    try:
+        restored, restore_method = restore_t085_canonical_record(
+            base_adapter, selected, {selected.selection_identity: canonical}
+        )
+        legal_actions = getattr(base_adapter, "legal_actions", None)
+        if not callable(legal_actions):
+            raise T092CanaryError("T092 canary adapter lacks legal_actions")
+        root_actions = list(legal_actions(restored))
+        expected_context = canonical.public_run_context
+        actual_context = build_public_run_context(
+            restored.raw,
+            root_actions,
+            projection=read_native_public_projection(base_adapter, restored),
+            history=(
+                expected_context.get("history", [])
+                if isinstance(expected_context, Mapping)
+                else []
+            ),
+        )
+        if not isinstance(expected_context, Mapping) or actual_context != expected_context:
+            raise T092CanaryError("T092 canary restore public/legal parity failed")
+        restored_adapter = _RestoredAdapter(base_adapter, restored)
+        started = time.perf_counter()
+        controlled = execute_controlled_run(
+            restored_adapter,
+            T092CanaryArmController(telemetry_enabled=telemetry_enabled),
+            seed=None,
+            max_steps=200,
+            action_space=ActionSpaceConfig.initial_no_potions(),
+        )
+        elapsed = time.perf_counter() - started
+        decisions, occurrences = _collect_arm_records(
+            controlled,
+            source=source,
+            telemetry_enabled=telemetry_enabled,
+        )
+        terminal = _terminal_record(controlled)
         return {
+            "schema_id": T092_CANARY_ARM_RECORD_SCHEMA_ID,
+            "schema_version": 1,
+            "task_id": "T092",
+            "arm": "ON" if telemetry_enabled else "OFF",
             "source_identity": source.source_identity,
             "source_group": source.source_group,
             "split": source.split,
             "canonical_position": source.canonical_position,
-            "arm_native_identities": {
-                "OFF": dict(T092_PUBLICATION_NATIVE_IDENTITY),
-                "ON": dict(T092_NATIVE_IDENTITY),
+            "restore_binding": {
+                "selection_identity": selected.selection_identity,
+                "source_checkpoint_id": canonical.source_checkpoint_id,
+                "source_run_identity": canonical.source_run_id,
+                "source_seed": canonical.source_seed,
+                "source_battle_index": canonical.source_battle_index,
             },
+            "implementation_head": implementation_head,
+            "native_identity": dict(expected_native_identity),
+            "native_binary": dict(native_binary),
+            "native_api": (
+                T092_NATIVE_API if telemetry_enabled else BATTLE_SEARCH_V2_NATIVE_API
+            ),
             "teacher_config": dict(T092_FROZEN_TEACHER_CONFIG),
-            "worker": dict(self._worker),
-            "off": off,
-            "on": on,
+            "process_identity": {
+                "pid": os.getpid(),
+                "python_executable": sys.executable,
+            },
+            "worker": worker_identity,
+            "restore_method": restore_method,
+            "restored_snapshot_present": restored is not None,
+            "restore_public_legal_parity": True,
+            "decision_records": decisions,
+            "terminal": terminal,
+            "internal_occurrences": occurrences,
+            "cost": {"wall_clock_time_s": elapsed},
         }
-
-    def _run_arm(
-        self,
-        source: T090SplitEntry,
-        selected: T085BattleStartRecord,
-        canonical: BattleStartCheckpointRecord,
-        *,
-        telemetry_enabled: bool,
-    ) -> dict[str, Any]:
-        base_adapter = (
-            self._on_adapter_factory() if telemetry_enabled else self._off_adapter_factory()
-        )
-        try:
-            restored, restore_method = restore_t085_canonical_record(
-                base_adapter, selected, {selected.selection_identity: canonical}
-            )
-            legal_actions = getattr(base_adapter, "legal_actions", None)
-            if not callable(legal_actions):
-                raise T092CanaryError("T092 canary adapter lacks legal_actions")
-            root_actions = list(legal_actions(restored))
-            expected_context = canonical.public_run_context
-            actual_context = build_public_run_context(
-                restored.raw,
-                root_actions,
-                projection=read_native_public_projection(base_adapter, restored),
-                history=(
-                    expected_context.get("history", [])
-                    if isinstance(expected_context, Mapping)
-                    else []
-                ),
-            )
-            if not isinstance(expected_context, Mapping) or actual_context != expected_context:
-                raise T092CanaryError("T092 canary restore public/legal parity failed")
-            restored_adapter = _RestoredAdapter(base_adapter, restored)
-            started = time.perf_counter()
-            controlled = execute_controlled_run(
-                restored_adapter,
-                T092CanaryArmController(telemetry_enabled=telemetry_enabled),
-                seed=None,
-                max_steps=200,
-                action_space=ActionSpaceConfig.initial_no_potions(),
-            )
-            elapsed = time.perf_counter() - started
-            decisions, occurrences = _collect_arm_records(
-                controlled,
-                source=source,
-                telemetry_enabled=telemetry_enabled,
-            )
-            terminal = _terminal_record(controlled)
-            return {
-                "arm": "ON" if telemetry_enabled else "OFF",
-                "native_identity": dict(
-                    T092_NATIVE_IDENTITY
-                    if telemetry_enabled
-                    else T092_PUBLICATION_NATIVE_IDENTITY
-                ),
-                "teacher_config": dict(T092_FROZEN_TEACHER_CONFIG),
-                "restore_method": restore_method,
-                "restored_snapshot_present": restored is not None,
-                "restore_public_legal_parity": True,
-                "decision_records": decisions,
-                "terminal": terminal,
-                "internal_occurrences": occurrences,
-                "cost": {"wall_clock_time_s": elapsed},
-            }
-        finally:
-            close = getattr(base_adapter, "close", None)
-            if callable(close):
-                try:
-                    close()
-                except BaseException:
-                    if sys.exc_info()[0] is None:
-                        raise
+    finally:
+        close = getattr(base_adapter, "close", None)
+        if callable(close):
+            try:
+                close()
+            except BaseException:
+                if sys.exc_info()[0] is None:
+                    raise
 
 
 class _RestoredAdapter:
@@ -516,6 +527,7 @@ def _validate_pair_record(raw: Mapping[str, Any], source: T090SplitEntry) -> dic
         "arm_native_identities",
         "teacher_config",
         "worker",
+        "arm_artifacts",
         "off",
         "on",
     }
@@ -535,6 +547,32 @@ def _validate_pair_record(raw: Mapping[str, Any], source: T090SplitEntry) -> dic
         if raw.get(key) != expected:
             raise T092CanaryError(f"T092 canary pair provenance mismatch: {key}")
     _validate_worker(raw["worker"])
+    artifacts = raw.get("arm_artifacts")
+    if not isinstance(artifacts, Mapping) or set(artifacts) != {"OFF", "ON"}:
+        raise T092CanaryError("T092 canary pair arm artifact bindings are incomplete")
+    artifact_paths: set[str] = set()
+    artifact_hashes: set[str] = set()
+    for arm in ("OFF", "ON"):
+        artifact = artifacts[arm]
+        if not isinstance(artifact, Mapping) or set(artifact) != {
+            "path", "sha256", "size_bytes", "schema_id"
+        }:
+            raise T092CanaryError("T092 canary arm artifact binding is malformed")
+        path, digest, size, schema = (
+            artifact["path"], artifact["sha256"], artifact["size_bytes"], artifact["schema_id"]
+        )
+        if (
+            not isinstance(path, str) or not path
+            or not isinstance(digest, str) or len(digest) != 64
+            or any(character not in "0123456789abcdef" for character in digest)
+            or isinstance(size, bool) or not isinstance(size, int) or size <= 0
+            or schema != T092_CANARY_ARM_RECORD_SCHEMA_ID
+        ):
+            raise T092CanaryError("T092 canary arm artifact identity is invalid")
+        artifact_paths.add(path)
+        artifact_hashes.add(digest)
+    if len(artifact_paths) != 2 or len(artifact_hashes) != 2:
+        raise T092CanaryError("T092 canary arms must retain distinct immutable artifacts")
     off, on = raw.get("off"), raw.get("on")
     if not isinstance(off, Mapping) or not isinstance(on, Mapping):
         raise T092CanaryError("T092 canary pair lacks OFF/ON arms")
@@ -550,6 +588,15 @@ def _validate_pair_record(raw: Mapping[str, Any], source: T090SplitEntry) -> dic
         expected_native_identity=T092_NATIVE_IDENTITY,
         source=source,
     )
+    if (
+        off.get("worker") != raw.get("worker")
+        or on.get("worker") != raw.get("worker")
+        or off.get("implementation_head") != on.get("implementation_head")
+        or off.get("restore_binding") != on.get("restore_binding")
+        or off.get("process_identity", {}).get("pid")
+        == on.get("process_identity", {}).get("pid")
+    ):
+        raise T092CanaryError("T092 canary arms are not independently paired")
     off_decisions, on_decisions = off.get("decision_records"), on.get("decision_records")
     if not isinstance(off_decisions, Sequence) or not isinstance(on_decisions, Sequence) or list(off_decisions) != list(on_decisions):
         raise T092CanaryError("INTERNAL_TELEMETRY_SEMANTIC_PARITY_INVALID: root mismatch")
@@ -565,9 +612,22 @@ def _validate_arm_record(
     expected_native_identity: Mapping[str, Any], source: T090SplitEntry,
 ) -> None:
     required = {
+        "schema_id",
+        "schema_version",
+        "task_id",
         "arm",
+        "source_identity",
+        "source_group",
+        "split",
+        "canonical_position",
+        "restore_binding",
+        "implementation_head",
         "native_identity",
+        "native_binary",
+        "native_api",
         "teacher_config",
+        "process_identity",
+        "worker",
         "restore_method",
         "restored_snapshot_present",
         "restore_public_legal_parity",
@@ -578,9 +638,18 @@ def _validate_arm_record(
     }
     if set(arm_record) != required:
         raise T092CanaryError(f"T092 {arm} arm fields are incomplete")
+    expected_api = T092_NATIVE_API if arm == "ON" else BATTLE_SEARCH_V2_NATIVE_API
     if (
-        arm_record.get("arm") != arm
+        arm_record.get("schema_id") != T092_CANARY_ARM_RECORD_SCHEMA_ID
+        or arm_record.get("schema_version") != 1
+        or arm_record.get("task_id") != "T092"
+        or arm_record.get("arm") != arm
+        or arm_record.get("source_identity") != source.source_identity
+        or arm_record.get("source_group") != source.source_group
+        or arm_record.get("split") != source.split
+        or arm_record.get("canonical_position") != source.canonical_position
         or arm_record.get("native_identity") != expected_native_identity
+        or arm_record.get("native_api") != expected_api
         or arm_record.get("teacher_config") != T092_FROZEN_TEACHER_CONFIG
         or arm_record.get("restored_snapshot_present") is not True
         or arm_record.get("restore_public_legal_parity") is not True
@@ -588,6 +657,52 @@ def _validate_arm_record(
         or not arm_record.get("restore_method")
     ):
         raise T092CanaryError(f"T092 {arm} arm provenance/restore parity is invalid")
+    implementation_head = arm_record.get("implementation_head")
+    if (
+        not isinstance(implementation_head, str)
+        or len(implementation_head) != 40
+        or any(character not in "0123456789abcdef" for character in implementation_head)
+    ):
+        raise T092CanaryError(f"T092 {arm} arm implementation identity is invalid")
+    restore = arm_record.get("restore_binding")
+    if not isinstance(restore, Mapping) or set(restore) != {
+        "selection_identity", "source_checkpoint_id", "source_run_identity",
+        "source_seed", "source_battle_index",
+    } or restore.get("selection_identity") != source.source_identity:
+        raise T092CanaryError(f"T092 {arm} arm restore binding is invalid")
+    if (
+        not isinstance(restore.get("source_checkpoint_id"), str)
+        or not restore["source_checkpoint_id"]
+        or not isinstance(restore.get("source_run_identity"), str)
+        or not restore["source_run_identity"]
+        or isinstance(restore.get("source_seed"), bool)
+        or not isinstance(restore.get("source_seed"), int)
+        or isinstance(restore.get("source_battle_index"), bool)
+        or not isinstance(restore.get("source_battle_index"), int)
+        or restore["source_battle_index"] < 0
+    ):
+        raise T092CanaryError(f"T092 {arm} arm restore binding is malformed")
+    binary = arm_record.get("native_binary")
+    if not isinstance(binary, Mapping) or set(binary) != {"path", "sha256", "size_bytes"}:
+        raise T092CanaryError(f"T092 {arm} arm binary provenance is invalid")
+    if (
+        not isinstance(binary.get("path"), str) or not binary["path"]
+        or not isinstance(binary.get("sha256"), str) or len(binary["sha256"]) != 64
+        or any(character not in "0123456789abcdef" for character in binary["sha256"])
+        or isinstance(binary.get("size_bytes"), bool)
+        or not isinstance(binary.get("size_bytes"), int) or binary["size_bytes"] <= 0
+    ):
+        raise T092CanaryError(f"T092 {arm} arm binary provenance is malformed")
+    process = arm_record.get("process_identity")
+    if not isinstance(process, Mapping) or set(process) != {"pid", "python_executable"}:
+        raise T092CanaryError(f"T092 {arm} arm process identity is invalid")
+    if (
+        isinstance(process.get("pid"), bool) or not isinstance(process.get("pid"), int)
+        or process["pid"] <= 0 or not isinstance(process.get("python_executable"), str)
+        or not process["python_executable"]
+    ):
+        raise T092CanaryError(f"T092 {arm} arm process identity is malformed")
+    _validate_worker(arm_record["worker"])
     decisions = arm_record.get("decision_records")
     if not isinstance(decisions, Sequence) or isinstance(decisions, (str, bytes)) or not decisions:
         raise T092CanaryError(f"T092 {arm} arm decision records are unavailable")
@@ -743,11 +858,12 @@ def _validate_root_semantics(value: object, *, arm: str) -> None:
 
 __all__ = [
     "T092_CANARY_EVIDENCE_SCHEMA_ID",
+    "T092_CANARY_ARM_RECORD_SCHEMA_ID",
     "T092_CANARY_PLAN_SCHEMA_ID",
     "T092_CANARY_START_COUNT",
     "T092CanaryArmController",
     "T092CanaryError",
-    "T092NativeCanaryRunner",
+    "run_t092_native_canary_arm",
     "build_t092_canary_plan",
     "execute_t092_canary",
     "select_t092_canary_entries",
