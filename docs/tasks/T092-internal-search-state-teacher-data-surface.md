@@ -83,6 +83,15 @@ space**. A public legal action excluded by the frozen teacher configuration is
 reported separately as `teacher_action_space_excluded`; it is never counted as
 an unvisited Search action and never enters a Search support denominator.
 
+For T092, **internal means `tree_depth >= 1`**. The Search root at
+`tree_depth=0` is not an internal candidate and is excluded from every internal
+occurrence count, public-fingerprint/deduplication count, partial-pair count,
+action-kind participation count, ambiguity diagnostic, density metric and
+viability predicate. The depth-0 root remains part of the existing root
+controller evidence used for telemetry OFF/ON semantic parity and exact
+T090/T091 root reproduction. This prevents accepted T091 root-only supervision
+from being double-counted as incremental internal-surface gain.
+
 The task must not repeat the T090/T091 mistake of turning "every internal node
 must have dense child support" into a Search-quality target. Search is allowed
 to concentrate its finite budget. Internal-surface viability is judged by the
@@ -200,6 +209,9 @@ predicates remain satisfied exactly:
   publication native base, is opt-in/default-off, and changes no Search
   selection, expansion, rollout, backup, evaluation, root-selection, action
   ordering, simulator transition, or RNG semantics;
+- internal candidate rows are restricted to stable expanded player-decision
+  nodes with `tree_depth >= 1`; the depth-0 root is excluded from every internal
+  candidate/viability count and remains only in root parity/reproduction evidence;
 - the paired 12-start telemetry OFF/ON canary, when authorized, has exact
   root/terminal semantic parity under the published predicates and any mismatch
   yields `INTERNAL_TELEMETRY_SEMANTIC_PARITY_INVALID`;
@@ -286,19 +298,23 @@ capability must satisfy all of the following:
    ordering.
 3. A candidate internal state is exportable only when it is a reconstructed,
    nonterminal player-decision state with native input state exactly
-   `PLAYER_NORMAL` or `CARD_SELECT`.
-4. Transient ActionQueue execution states, terminal states, rollout-only
+   `PLAYER_NORMAL` or `CARD_SELECT` **and `tree_depth >= 1`**.
+4. The `tree_depth=0` Search root is never emitted or retained as an internal
+   candidate row and never enters internal density/diversity/ambiguity/viability
+   accounting. Root evidence remains on the existing root telemetry path used
+   for parity and T090/T091 reproduction.
+5. Transient ActionQueue execution states, terminal states, rollout-only
    temporary states, and unexpanded tree nodes are not training candidates.
-5. Internal path/source identity is provenance metadata only. It is not an
+6. Internal path/source identity is provenance metadata only. It is not an
    exact-transposition identity and must not be used as student input.
-6. Child visit/evaluation statistics are read from the final Search tree. For a
+7. Child visit/evaluation statistics are read from the final Search tree. For a
    child with `visits > 0`, teacher mean is
    `evaluationSum / simulationCount`; zero-visit children remain unknown.
-7. Any replay of an action path solely to reconstruct a public projection must
+8. Any replay of an action path solely to reconstruct a public projection must
    operate on a private copied state after/beside Search, must not affect Search
    counters or RNG, and its telemetry-extraction transition cost must be
    accounted separately from controller Search cost.
-8. No raw `BattleContext`, checkpoint bytes, RNG state, hidden draw order,
+9. No raw `BattleContext`, checkpoint bytes, RNG state, hidden draw order,
    ActionQueue function objects, private monster RNG/future values, or full
    simulator serialization may leave the native/private telemetry boundary.
 
@@ -310,7 +326,8 @@ renewed exact-head approval.
 
 ## Internal Telemetry Row Contract
 
-Every retained internal decision occurrence must bind at minimum:
+Every retained internal decision occurrence must have `tree_depth >= 1` and bind
+at minimum:
 
 - T092 schema/version;
 - exact native identity and frozen teacher configuration;
@@ -318,7 +335,7 @@ Every retained internal decision occurrence must bind at minimum:
 - inherited T090 train/validation/held-out split;
 - parent root decision identity;
 - deterministic occurrence identity within that root Search;
-- tree depth and expansion ordinal/path provenance;
+- positive tree depth and expansion ordinal/path provenance;
 - accepted public Battle projection / public feature identity needed to produce
   a versioned public fingerprint;
 - ordered **teacher-searchable** legal-action identities and public action kinds;
@@ -348,6 +365,8 @@ The fingerprint must not include source id, split, Search path, hidden simulator
 state, child visits/means, terminal outcome, or future-derived fields.
 
 All occurrences inherit the split of their exact T087/T090 source start.
+Depth-0 root occurrences are outside this internal fingerprint corpus and must
+not participate in internal collision, multiplicity or deduplication counts.
 
 For leakage-safe unique-example counts:
 
@@ -364,7 +383,8 @@ bounds only; low conflict does not remove the T034 hidden-future warning.
 
 ## Internal Partial-Pair Surface
 
-For every stable internal multi-action node, evaluate support thresholds:
+For every stable internal multi-action node with `tree_depth >= 1`, evaluate
+support thresholds:
 
 `n_min in {1, 2, 4, 8, 16}`
 
@@ -448,10 +468,12 @@ not eligible for the internal data-surface claim.
 
 ## Required Density, Diversity And Cost Metrics
 
-Report for all stable internal nodes and separately by source group A/B/C:
+Report for all stable internal nodes with `tree_depth >= 1` and separately by
+source group A/B/C:
 
-1. total tree nodes observed, expanded nodes, stable player-decision nodes,
-   single-action and multi-action stable nodes;
+1. total tree nodes observed, expanded nodes, stable internal player-decision
+   nodes, single-action and multi-action stable internal nodes; depth-0 root
+   counts may be reported separately but never included in internal totals;
 2. node depth distribution and branching-factor distribution;
 3. number of teacher-searchable actions and separately number/kinds of public
    legal actions excluded by frozen teacher configuration;
@@ -486,10 +508,10 @@ canonical schema identity and SHA-256 hashes are required.
 
 ## Internal-Surface Viability Gate
 
-This gate asks whether the internal surface is **materially more useful as a
-training-data source than the accepted root-only surface**. It is not a Search
-performance metric and does not require a high fraction of all expanded nodes to
-be usable.
+This gate asks whether the **depth>=1 internal surface** is materially more
+useful as a training-data source than the accepted root-only surface. It is not
+a Search performance metric and does not require a high fraction of all expanded
+nodes to be usable. Depth-0 root evidence is excluded from every predicate below.
 
 At primary `n_min=4`, after cross-split fingerprint exclusion and deterministic
 within-split deduplication, all of the following must hold:
@@ -654,9 +676,10 @@ before landing.
 
 A positive T092 result means only:
 
-> Frozen Search-v2@400 already visits enough stable internal public decision
-> states, with enough Search-supported action comparisons, to justify testing
-> whether a public student can learn from this larger self-generated surface.
+> Frozen Search-v2@400 already visits enough stable **depth>=1 internal** public
+> decision states, with enough Search-supported action comparisons, to justify
+> testing whether a public student can learn from this larger self-generated
+> surface beyond the already-counted root-only evidence.
 
 It does not mean the student is learnable, that internal means are unbiased Q
 values, that a student improves Search, that complete runs improve, or that the
@@ -664,8 +687,8 @@ privileged teacher is normal-information optimal.
 
 A negative T092 result means only:
 
-> Even after harvesting stable internal Search tree states, the current frozen
-> Search process remains an inefficient or biased data source under the
+> Even after harvesting stable depth>=1 internal Search tree states, the current
+> frozen Search process remains an inefficient or biased data source under the
 > preregistered comparable-support definition.
 
 That negative result would justify moving to a dedicated training-oriented
