@@ -326,7 +326,9 @@ def finalize_t092_formal_shards(*, authorization: Mapping[str, Any] | None, impl
     if len(shards) != shard_count:
         raise T092FormalError("T092 formal finalization requires every planned shard")
     reference = validate_t092_t090_root_reference(root_reference, split_manifest=split_manifest)
-    all_occurrences: list[T092Occurrence] = []
+    # Never retain public projections, child means, or full occurrence payloads
+    # across sources.  The finalizer keeps only these fixed metric summaries.
+    metric_rows: list[dict[str, Any]] = []
     observed_roots: list[dict[str, Any]] = []
     ledger: list[dict[str, Any]] = []
     artifacts: list[dict[str, Any]] = []
@@ -358,13 +360,13 @@ def finalize_t092_formal_shards(*, authorization: Mapping[str, Any] | None, impl
             decision_ids = {item["decision_identity"] for item in arm["decision_records"]}
             rows = [validate_retained_occurrence(row, source_identity=source["source_identity"], source_group=source["source_group"], split=source["split"], parent_root_decision_identities=decision_ids) for row in arm["internal_occurrences"]]
             validate_parent_bound_occurrence_identities(rows)
-            all_occurrences.extend(rows)
+            metric_rows.extend(_metric_summary(row) for row in rows)
         artifacts.append({"shard_index": index, "records_sha256": shard["records_sha256"], "record_count": len(shard["records"])})
     expected = list(reference["rows"])
     root_ok = observed_roots == expected
     if not root_ok:
         raise T092FormalError("INTERNAL_TELEMETRY_SEMANTIC_PARITY_INVALID: formal root reproduction mismatch")
-    metrics = _metrics(all_occurrences, ledger)
+    metrics = _metrics(metric_rows, ledger)
     classification = _classification(metrics, root_ok=root_ok, canary_ok=True, firewall_ok=True)
     return {"schema_id": T092_FORMAL_EVIDENCE_SCHEMA_ID, "schema_version": 1, "task_id": "T092",
             "formal_execution_authorized": True, "training_eligible": False,
@@ -377,32 +379,53 @@ def finalize_t092_formal_shards(*, authorization: Mapping[str, Any] | None, impl
             "successor_decision": "Planner may consider a separate public-only distillation task" if classification == "INTERNAL_SEARCH_SURFACE_DENSE_ENOUGH" else "Do not weaken T092 thresholds; use the contract-specified successor boundary"}
 
 
-def _metrics(rows: Sequence[T092Occurrence], ledger: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+def _metric_summary(row: T092Occurrence) -> dict[str, Any]:
+    """Discard full student-visible payload after boundary validation."""
+    return {
+        "fingerprint": row.fingerprint,
+        "split": row.split,
+        "source_group": row.source_group,
+        "source_identity": row.source_identity,
+        "parent": row.parent_root_decision_identity,
+        "occurrence": row.occurrence_identity,
+        "depth": row.tree_depth,
+        "branching": len(row.searchable_actions),
+        "searchable_kinds": tuple(item["action"]["kind"] for item in row.searchable_actions),
+        "excluded_kinds": tuple(item["action"]["kind"] for item in row.excluded_actions),
+        "pairs": {str(n): len(support_pairs(row, n)) for n in T092_N_MINS},
+        "paired_kinds": {
+            str(n): tuple(sorted({item["action"]["kind"] for pair in support_pairs(row, n) for item in pair}))
+            for n in T092_N_MINS
+        },
+        "telemetry_transitions": row.telemetry_cost["telemetry_extraction_transition_count"],
+    }
+
+
+def _metrics(rows: Sequence[Mapping[str, Any]], ledger: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     """Compute deterministic formal reports; candidates are depth>=1 by validator."""
-    by_fp: dict[str, list[T092Occurrence]] = defaultdict(list)
+    by_fp: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
     depth, branching, raw_multi_branching = Counter(), Counter(), Counter()
     excluded, kinds = Counter(), Counter()
     for row in rows:
         by_fp[row.fingerprint].append(row)
-        depth[_depth_bucket(row.tree_depth)] += 1
-        branching[_branch_bucket(len(row.searchable_actions))] += 1
-        if len(row.searchable_actions) > 1:
-            raw_multi_branching[_branch_bucket(len(row.searchable_actions))] += 1
-        kinds.update(action["action"]["kind"] for action in row.searchable_actions)
-        excluded.update(action["action"]["kind"] for action in row.excluded_actions)
-    collisions = {fp for fp, grouped in by_fp.items() if len({r.split for r in grouped}) > 1}
+        depth[_depth_bucket(int(row["depth"]))] += 1
+        branching[_branch_bucket(int(row["branching"]))] += 1
+        if int(row["branching"]) > 1:
+            raw_multi_branching[_branch_bucket(int(row["branching"]))] += 1
+        kinds.update(row["searchable_kinds"])
+        excluded.update(row["excluded_kinds"])
+    collisions = {fp for fp, grouped in by_fp.items() if len({r["split"] for r in grouped}) > 1}
     thresholds: dict[str, Any] = {}
     for minimum in T092_N_MINS:
-        eligible = [r for fp, group in by_fp.items() if fp not in collisions for r in group if support_pairs(r, minimum)]
-        canonical: dict[tuple[str, str], T092Occurrence] = {}
-        for row in sorted(eligible, key=lambda r: (r.split, r.source_identity, r.parent_root_decision_identity, r.occurrence_identity)):
-            canonical.setdefault((row.split, row.fingerprint), row)
+        eligible = [r for fp, group in by_fp.items() if fp not in collisions for r in group if r["pairs"][str(minimum)] > 0]
+        canonical: dict[tuple[str, str], Mapping[str, Any]] = {}
+        for row in sorted(eligible, key=lambda r: (r["split"], r["source_identity"], r["parent"], r["occurrence"])):
+            canonical.setdefault((str(row["split"]), str(row["fingerprint"])), row)
         retained = list(canonical.values())
         pair_kinds = Counter(
-            action["action"]["kind"]
+            kind
             for row in retained
-            for pair in support_pairs(row, minimum)
-            for action in pair
+            for kind in row["paired_kinds"][str(minimum)]
         )
         group_sims: Counter[str] = Counter()
         for item in ledger:
@@ -410,12 +433,12 @@ def _metrics(rows: Sequence[T092Occurrence], ledger: Sequence[Mapping[str, Any]]
                 int(item["terminal"].get("battle_decision_count", 0)) * 400
             )
         total_sims = sum(group_sims.values())
-        by_group = Counter(row.source_group for row in retained)
+        by_group = Counter(str(row["source_group"]) for row in retained)
         thresholds[str(minimum)] = {"raw_occurrences_with_pairs": len(eligible), "leakage_safe_unique_examples": len(retained),
-            "retained_ordered_non_tie_pairs": sum(len(support_pairs(r, minimum)) for r in retained),
+            "retained_ordered_non_tie_pairs": sum(int(r["pairs"][str(minimum)]) for r in retained),
             "by_source_group": dict(sorted(by_group.items())),
-            "by_depth_bucket": dict(sorted(Counter(_depth_bucket(r.tree_depth) for r in retained).items())),
-            "by_branching_bucket": dict(sorted(Counter(_branch_bucket(len(r.searchable_actions)) for r in retained).items())),
+            "by_depth_bucket": dict(sorted(Counter(_depth_bucket(int(r["depth"])) for r in retained).items())),
+            "by_branching_bucket": dict(sorted(Counter(_branch_bucket(int(r["branching"])) for r in retained).items())),
             "action_kinds_with_retained_pairs": sorted(pair_kinds),
             "usable_examples_per_1000_search_simulations": {
                 "overall": (len(retained) * 1_000 / total_sims) if total_sims else None,
@@ -433,7 +456,7 @@ def _metrics(rows: Sequence[T092Occurrence], ledger: Sequence[Mapping[str, Any]]
             "public_fingerprint_count": len(by_fp), "cross_split_fingerprint_count": len(collisions),
             "thresholds": thresholds, "cost": {"frozen_search_simulations": search_simulations,
                 "controller_wall_clock_time_s": sum(float(item["cost"]["wall_clock_time_s"]) for item in ledger),
-                "telemetry_extraction_transition_count": sum(r.telemetry_cost["telemetry_extraction_transition_count"] for r in rows),
+                "telemetry_extraction_transition_count": sum(int(r["telemetry_transitions"]) for r in rows),
                 "retained_occurrence_count": len(rows)},
             "ambiguity_lower_bound": {"repeated_public_fingerprint_count": sum(len(group) > 1 for group in by_fp.values()), "cross_split_excluded_count": len(collisions)},
             "t091_primary_reference": {"n_min": 4, "leakage_safe_unique_examples": 3534, "retained_ordered_non_tie_pairs": 44846}}
