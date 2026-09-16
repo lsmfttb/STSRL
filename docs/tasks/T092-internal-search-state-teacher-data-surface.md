@@ -186,6 +186,40 @@ improves Search, that internal means are unbiased Q-values, that complete A20
 runs improve, that the teacher is normal-information optimal, or that T066 is
 authorized.
 
+### Required predicates
+
+Scientific-quality T092 evidence is eligible only when all applicable published
+predicates remain satisfied exactly:
+
+- source identity, source group, inherited split, publication STSRL base,
+  publication/task-scoped native identity, frozen Search-v2@400 teacher
+  configuration, action identity/kind schema, public fingerprint schema, Search
+  cost provenance, and telemetry-extraction cost provenance are exact and
+  internally consistent;
+- the task-scoped native telemetry implementation descends from the pinned
+  publication native base, is opt-in/default-off, and changes no Search
+  selection, expansion, rollout, backup, evaluation, root-selection, action
+  ordering, simulator transition, or RNG semantics;
+- the paired 12-start telemetry OFF/ON canary, when authorized, has exact
+  root/terminal semantic parity under the published predicates and any mismatch
+  yields `INTERNAL_TELEMETRY_SEMANTIC_PARITY_INVALID`;
+- the formal 413-start collection, when authorized, reproduces the accepted
+  T090/T091 root controller evidence exactly before any internal-surface claim;
+- teacher-searchable actions are distinguished from public actions excluded by
+  the frozen no-potion teacher configuration, and excluded actions never enter
+  Search-support denominators;
+- exported candidate student content satisfies the public-information boundary,
+  while privileged/internal fields remain metadata/targets only where allowed;
+- public-fingerprint cross-split exclusion and deterministic within-split
+  deduplication are applied exactly before leakage-safe unique-example claims;
+- `n_min={1,2,4,8,16}` remains the registered sensitivity set, with `n_min=4`
+  the frozen viability surface and no post-result threshold substitution;
+- the published Internal-Surface Viability Gate predicates and terminal
+  classification logic remain unchanged; and
+- missing, malformed, inferred, reconstructed substitute, smoke-only, or
+  conflicting required identities/provenance fail closed rather than being
+  imputed or silently repaired.
+
 ### Unavailable fact behavior
 
 Missing, malformed, inferred, filename-derived, default-inferred, regenerated
