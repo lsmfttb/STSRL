@@ -56,4 +56,6 @@ def test_formal_authorization_failure_cannot_invoke_runner() -> None:
 
 def test_formal_command_exposes_native_free_restore_preparation() -> None:
     parser = build_parser()
-    assert "prepare-restore-inputs" in parser._subparsers._group_actions[0].choices
+    operations = parser._subparsers._group_actions[0].choices
+    assert "prepare-restore-inputs" in operations
+    assert "prepare-root-reference" in operations
