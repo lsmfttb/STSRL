@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from sts_combat_rl.sim.t092_formal_execution import (
@@ -59,3 +61,10 @@ def test_formal_command_exposes_native_free_restore_preparation() -> None:
     operations = parser._subparsers._group_actions[0].choices
     assert "prepare-restore-inputs" in operations
     assert "prepare-root-reference" in operations
+
+
+def test_detached_formal_launcher_waits_before_finalization() -> None:
+    script = (Path(__file__).parents[1] / "scripts/run_t092_formal_detached.sh").read_text()
+    assert "wait_for_success" in script
+    assert script.index("wait_for_success \"$ARTIFACT_ROOT/jobs") < script.index("formal finalize")
+    assert "env PYTHONPATH=src /usr/bin/python3.14 -m sts_combat_rl.commands.t092_formal finalize" in script
