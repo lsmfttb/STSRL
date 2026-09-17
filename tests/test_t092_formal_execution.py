@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,7 @@ import pytest
 from sts_combat_rl.sim.t092_formal_execution import (
     T092FormalError,
     _canonical_root_rows,
+    _accepted_canary_reference,
     _classification,
     _metrics,
     _tree_geometry_metrics,
@@ -141,6 +143,38 @@ def test_formal_geometry_absence_is_not_classified_as_a_usable_surface() -> None
     assert _classification(
         {}, root_ok=True, canary_ok=True, firewall_ok=True, geometry_ok=False
     ) == "INCOMPLETE"
+
+
+def test_formal_worker_canary_reference_streams_hash_without_materializing_payload(tmp_path: Path) -> None:
+    path = tmp_path / "accepted-canary.json"
+    payload = b"this is intentionally not JSON; worker validation must not parse it"
+    path.write_bytes(payload)
+    reference = {
+        "path": str(path),
+        "sha256": hashlib.sha256(payload).hexdigest(),
+        "size_bytes": len(payload),
+        "schema_id": "t092-paired-semantic-parity-canary-v1",
+    }
+    with pytest.raises(T092FormalError, match="unavailable"):
+        _accepted_canary_reference(
+            reference,
+            split_manifest={},
+            implementation_head="a" * 40,
+        )
+    assert _accepted_canary_reference(
+        reference,
+        split_manifest={},
+        implementation_head="a" * 40,
+        validate_payload=False,
+    ) == reference
+    path.write_bytes(b"mutated")
+    with pytest.raises(T092FormalError, match="hash mismatches"):
+        _accepted_canary_reference(
+            reference,
+            split_manifest={},
+            implementation_head="a" * 40,
+            validate_payload=False,
+        )
 
 
 def test_formal_authorization_failure_cannot_invoke_runner() -> None:

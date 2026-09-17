@@ -329,12 +329,33 @@ def _finite(value: object) -> bool:
 
 
 def _accepted_canary_reference(
-    value: object, *, split_manifest: Mapping[str, Any], implementation_head: str
+    value: object, *, split_manifest: Mapping[str, Any], implementation_head: str,
+    validate_payload: bool = True,
 ) -> dict[str, Any]:
-    """Hash-read the retained parity evidence; a filename is never evidence."""
+    """Validate the retained parity evidence reference.
+
+    Authorization preparation performs the full semantic validation once. A
+    worker revalidates the exact reference and streams its hash, but does not
+    materialize the already-authorized canary JSON again. The worker path is
+    safe only when checking an exact authorization binding; preparation keeps
+    the default full payload validation.
+    """
     reference = _artifact(value, "accepted T092 canary")
     if reference["schema_id"] != "t092-paired-semantic-parity-canary-v1":
         raise T092FormalError("accepted T092 canary has an unexpected schema")
+    if not validate_payload:
+        digest = hashlib.sha256()
+        size = 0
+        try:
+            with Path(reference["path"]).open("rb") as stream:
+                for block in iter(lambda: stream.read(1024 * 1024), b""):
+                    digest.update(block)
+                    size += len(block)
+        except OSError as exc:
+            raise T092FormalError("accepted T092 canary evidence is unavailable") from exc
+        if digest.hexdigest() != reference["sha256"] or size != reference["size_bytes"]:
+            raise T092FormalError("accepted T092 canary evidence hash mismatches")
+        return reference
     try:
         raw = Path(reference["path"]).read_bytes()
         evidence = json.loads(raw)
@@ -410,7 +431,8 @@ def build_t092_formal_authorization_template(*, implementation_head: str, split_
                                              root_reference: Mapping[str, Any], canary_evidence: Mapping[str, Any],
                                              input_identities: Mapping[str, Any], output_root: str | Path,
                                              shard_count: int = T092_FORMAL_DEFAULT_SHARDS,
-                                             worker_count: int = T092_FORMAL_DEFAULT_WORKERS) -> dict[str, Any]:
+                                             worker_count: int = T092_FORMAL_DEFAULT_WORKERS,
+                                             validate_canary_evidence: bool = True) -> dict[str, Any]:
     if not _sha(implementation_head):
         raise T092FormalError("T092 formal implementation/input identity is invalid")
     inputs = _formal_input_identities(input_identities)
@@ -422,6 +444,7 @@ def build_t092_formal_authorization_template(*, implementation_head: str, split_
         canary_evidence,
         split_manifest=split_manifest,
         implementation_head=implementation_head,
+        validate_payload=validate_canary_evidence,
     )
     identity = {
         "schema_id": T092_FORMAL_AUTHORIZATION_SCHEMA_ID, "task_id": "T092", "authorization_kind": "formal_413_telemetry",
@@ -446,7 +469,7 @@ def validate_t092_formal_authorization(authorization: Mapping[str, Any] | None, 
         raise T092FormalError("explicit T092 Maintainer formal authorization is required")
     prepared = build_t092_formal_authorization_template(implementation_head=implementation_head, split_manifest=split_manifest,
         root_reference=root_reference, canary_evidence=canary_evidence, input_identities=input_identities, output_root=output_root,
-        shard_count=shard_count, worker_count=worker_count)
+        shard_count=shard_count, worker_count=worker_count, validate_canary_evidence=False)
     identity = prepared["authorization_identity"]
     expected = {**identity, "authorized": True, "authorization_id": authorization.get("authorization_id"),
                 "maintainer_attestation": {"role": "maintainer", "decision": "FORMAL_AUTHORIZED", "exact_head": implementation_head}}
