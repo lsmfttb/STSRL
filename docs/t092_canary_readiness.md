@@ -14,7 +14,7 @@ public/legal parity, malformed cost, or missing/extra pair or arm fields.
 Provenance is arm-specific: OFF is bound to publication native
 `20a6c2b3a9cea817c988178b814f083ff889853f` on `refs/heads/stsrl/main`; ON is
 bound to the task telemetry native
-`07e1770cf0710d8c26719c153383d09e3bfd7686` on
+`a439c70b568eab78dea42fe857dab56fa27cda3f` on
 `refs/heads/planner/t092-internal-search-state-telemetry`. Both arms bind the
 full `t092-frozen-search-v2-teacher-config-v1` envelope. The frozen envelope
 is still Search-v2@400, no potions, highest-mean root selection, no policy
@@ -31,7 +31,7 @@ PYTHONPATH=src python3 -m sts_combat_rl.commands.t092_internal_search_state cana
 Inputs for a later authorized runner are that exact immutable split manifest,
 the accepted occurrence-safe T087/T090 source-to-`T085BattleStartRecord` map,
 the matching `BattleStartCheckpointRecord` map, native identity
-`07e1770cf0710d8c26719c153383d09e3bfd7686`, and the frozen no-potion
+`a439c70b568eab78dea42fe857dab56fa27cda3f`, and the frozen no-potion
 Search-v2@400 configuration. Missing maps, restore parity, native identity, or
 teacher envelope fail closed.
 

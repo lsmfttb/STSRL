@@ -13,7 +13,7 @@ head and reviews a valid retained 12-start canary evidence artifact.
 - a formal restore-input manifest containing one immutable T087/T090 restore
   payload per source; and
 - the ON native process specification for
-  `07e1770cf0710d8c26719c153383d09e3bfd7686`.
+  `a439c70b568eab78dea42fe857dab56fa27cda3f`.
 
 `formal-input-identities.json` has exactly these fields:
 `formal_restore_manifest`, `arm_process_specs`, `t087_source_cohort`,

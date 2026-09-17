@@ -55,11 +55,11 @@ T092_CANARY_ARM_PROCESS_SPECS = {
     "ON": {
         "python_executable": "/usr/bin/python3.14",
         "extension_path": "/mnt/d/DeadlyCatCoding/sts_lightspeed-T092/build-t092-py/slaythespire.cpython-314-x86_64-linux-gnu.so",
-        "extension_sha256": "0a9ba8127c3970a7b3bf2093f005527f1d567e37d3062fa116d1729be621e7af",
+        "extension_sha256": "1deacad6192e48ab0dd6a63abd7b40d20e226311db7dcc4234e0038df79f6ccb",
         "extension_size_bytes": 1648424,
         "native_identity": {
             "repository": "lsmfttb/sts_lightspeed", "ref": "refs/heads/planner/t092-internal-search-state-telemetry",
-            "commit": "07e1770cf0710d8c26719c153383d09e3bfd7686",
+            "commit": "a439c70b568eab78dea42fe857dab56fa27cda3f",
         },
         "stsrl_source_root": "/mnt/d/DeadlyCatCoding/STSRL-T092",
     },

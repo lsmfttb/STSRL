@@ -25,7 +25,7 @@ T092_NATIVE_PATCH_IDENTITY = "sts_lightspeed_battle_search_v2_internal_teacher_t
 T092_NATIVE_IDENTITY = {
     "repository": "lsmfttb/sts_lightspeed",
     "ref": "refs/heads/planner/t092-internal-search-state-telemetry",
-    "commit": "07e1770cf0710d8c26719c153383d09e3bfd7686",
+    "commit": "a439c70b568eab78dea42fe857dab56fa27cda3f",
 }
 T092_FROZEN_TEACHER_CONFIG = {
     "schema_id": "t092-frozen-search-v2-teacher-config-v1",

@@ -151,7 +151,7 @@ def test_pair_arm_uses_exactly_one_native_api_per_decision() -> None:
     assert adapter.calls == ["OFF", "ON"]
     assert off.selected_index == on.selected_index == 0
     assert off.provenance.config["native_identity"] == T092_PUBLICATION_NATIVE_IDENTITY
-    assert on.provenance.config["native_identity"]["commit"] == "07e1770cf0710d8c26719c153383d09e3bfd7686"
+    assert on.provenance.config["native_identity"] == T092_NATIVE_IDENTITY
     assert off.metadata["t092_canary_decision"]["native_report"] is None
     assert on.metadata["t092_canary_decision"]["native_report"]["teacher_config"] == T092_FROZEN_TEACHER_CONFIG
 
@@ -209,7 +209,7 @@ def test_pair_evidence_rejects_one_root_mismatch(monkeypatch) -> None:
             "source_group": source.source_group,
             "split": source.split,
             "canonical_position": source.canonical_position,
-            "arm_native_identities": {"OFF": T092_PUBLICATION_NATIVE_IDENTITY, "ON": {"repository": "lsmfttb/sts_lightspeed", "ref": "refs/heads/planner/t092-internal-search-state-telemetry", "commit": "07e1770cf0710d8c26719c153383d09e3bfd7686"}},
+            "arm_native_identities": {"OFF": T092_PUBLICATION_NATIVE_IDENTITY, "ON": T092_NATIVE_IDENTITY},
             "teacher_config": dict(T092_FROZEN_TEACHER_CONFIG),
             "execution_config": dict(T092_CANARY_EXECUTION_CONFIG),
             "worker": {"stage_worker_count": 12, "worker_index": 0, "shard_count": 12, "shard_index": 0},

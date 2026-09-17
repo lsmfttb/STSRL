@@ -22,7 +22,7 @@ The paired canary preserves the existing arm semantics:
 - **OFF arm:** publication native `lsmfttb/sts_lightspeed refs/heads/stsrl/main @ 20a6c2b3a9cea817c988178b814f083ff889853f`, using the unchanged publication `battle_search_v2` API and telemetry disabled/nonexistent;
 - **ON arm:** the exact task-scoped telemetry-native commit descended from the publication native base and pinned on PR #106 before canary authorization, using the reviewed telemetry API with telemetry enabled.
 
-The current reviewed task-scoped native identity at publication of this amendment is `07e1770cf0710d8c26719c153383d09e3bfd7686`. If that native identity changes before the real canary, the replacement identity/diff must receive the normal Maintainer implementation review before canary authorization.
+The current reviewed task-scoped native identity at publication of this amendment is `a439c70b568eab78dea42fe857dab56fa27cda3f`, descended from the previously reviewed telemetry head `07e1770cf0710d8c26719c153383d09e3bfd7686` and ultimately from publication base `20a6c2b3a9cea817c988178b814f083ff889853f`. If that native identity changes before the real canary, the replacement identity/diff must receive the normal Maintainer implementation review before canary authorization.
 
 T092 does **not** relax the canary to permit both arms to use the task-scoped telemetry-native binary. Keeping OFF on the accepted publication native provides the stronger and already-published semantic-parity comparator.
 
