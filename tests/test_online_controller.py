@@ -814,6 +814,24 @@ class TestExecuteControlledRun:
         assert len(result.steps) == 3
         assert result.terminal is False
 
+    def test_step_retention_can_be_disabled_for_streaming_observer(self) -> None:
+        adapter = FakeAdapter([("BATTLE", False), ("BATTLE", True)])
+        ctrl = AlwaysFirstController()
+        observed: list[int] = []
+
+        result = execute_controlled_run(
+            adapter,
+            ctrl,
+            seed=1,
+            max_steps=10,
+            after_transition=lambda step: observed.append(step.step_index),
+            retain_steps=False,
+        )
+
+        assert observed == [0, 1]
+        assert result.steps == []
+        assert result.terminal is True
+
     def test_step_fields(self) -> None:
         adapter = FakeAdapter([("BATTLE", True)])
         ctrl = AlwaysFirstController()

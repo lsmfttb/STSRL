@@ -337,20 +337,26 @@ def run_t092_native_canary_arm(
         expected_context = None
         restored_adapter = _RestoredAdapter(base_adapter, restored)
         started = time.perf_counter()
+        retention = _T092ArmRetention(
+            source=source,
+            telemetry_enabled=telemetry_enabled,
+        )
         controlled = execute_controlled_run(
             restored_adapter,
             T092CanaryArmController(telemetry_enabled=telemetry_enabled),
             seed=None,
             max_steps=T092_CANARY_MAX_STEPS,
             action_space=ActionSpaceConfig.initial_no_potions(),
+            after_transition=retention,
+            retain_steps=False,
         )
         elapsed = time.perf_counter() - started
-        decisions, occurrences = _collect_arm_records(
-            controlled,
-            source=source,
-            telemetry_enabled=telemetry_enabled,
-        )
-        terminal = _terminal_record(controlled)
+        if not controlled.terminal or controlled.problems:
+            raise T092CanaryError("T092 canary arm did not reach a clean terminal")
+        decisions, occurrences = retention.decisions, retention.occurrences
+        if not decisions:
+            raise T092CanaryError("T092 canary arm has no Battle decisions")
+        terminal = retention.terminal_record()
         return {
             "schema_id": T092_CANARY_ARM_RECORD_SCHEMA_ID,
             "schema_version": 1,
@@ -381,9 +387,7 @@ def run_t092_native_canary_arm(
             "terminal": terminal,
             "internal_occurrences": occurrences,
             "cost": {"wall_clock_time_s": elapsed},
-            "tree_geometry": _collect_tree_geometry_records(
-                controlled, source=source, telemetry_enabled=telemetry_enabled
-            ),
+            "tree_geometry": retention.geometry,
         }
     finally:
         close = getattr(base_adapter, "close", None)
@@ -463,6 +467,91 @@ def _authoritative_battle_completion(transition: SimulatorTransition) -> str | N
     return next(iter(outcomes), None)
 
 
+class _T092ArmRetention:
+    """Consume one arm's decision evidence without retaining simulator steps.
+
+    ``ControlledRunStep`` intentionally contains complete raw snapshot and
+    public-context bookends.  Retaining those for a long restored battle
+    duplicates the native simulator state and can cross the formal worker RSS
+    boundary.  The T092 arm only needs its compact decision/occurrence/
+    geometry evidence, so the authoritative executor streams each step here.
+    """
+
+    def __init__(self, *, source: T090SplitEntry, telemetry_enabled: bool) -> None:
+        self._source = source
+        self._telemetry_enabled = telemetry_enabled
+        self.decisions: list[dict[str, Any]] = []
+        self.occurrences: list[dict[str, Any]] = []
+        self.geometry: list[dict[str, Any]] = []
+        self._last_step: Any | None = None
+        self._battle_decision_count = 0
+
+    def __call__(self, step: Any) -> None:
+        self._last_step = step
+        self._battle_decision_count += int(
+            getattr(step, "battle_active", False) is True
+        )
+        _retain_arm_step(
+            step,
+            source=self._source,
+            telemetry_enabled=self._telemetry_enabled,
+            decisions=self.decisions,
+            occurrences=self.occurrences,
+        )
+        geometry = _tree_geometry_record_for_step(
+            step, source=self._source, telemetry_enabled=self._telemetry_enabled
+        )
+        if geometry is not None:
+            self.geometry.append(geometry)
+
+    def terminal_record(self) -> dict[str, Any]:
+        step = self._last_step
+        outcome = getattr(step, "next_battle_outcome", None) if step is not None else None
+        if not isinstance(outcome, str) or not outcome:
+            raise T092CanaryError("T092 canary terminal Battle outcome is unavailable")
+        return {
+            "outcome": outcome,
+            "terminal_current_hp": getattr(step, "next_player_hp", None),
+            "battle_decision_count": self._battle_decision_count,
+        }
+
+
+def _retain_arm_step(
+    step: Any,
+    *,
+    source: T090SplitEntry,
+    telemetry_enabled: bool,
+    decisions: list[dict[str, Any]],
+    occurrences: list[dict[str, Any]],
+) -> None:
+    metadata = getattr(step, "decision_metadata", {})
+    record = metadata.get("t092_canary_decision") if isinstance(metadata, Mapping) else None
+    if not isinstance(record, Mapping):
+        return
+    if record.get("arm") != ("ON" if telemetry_enabled else "OFF"):
+        raise T092CanaryError("T092 canary arm decision provenance drifted")
+    semantic = record.get("root_semantics")
+    if not isinstance(semantic, Mapping):
+        raise T092CanaryError("T092 canary decision lacks root semantics")
+    decision_identity = f"{source.source_identity}:battle-decision:{getattr(step, 'step_index', -1)}"
+    decisions.append({"decision_identity": decision_identity, "root_semantics": dict(semantic)})
+    if telemetry_enabled:
+        raw = record.get("native_report")
+        if not isinstance(raw, Mapping):
+            raise T092CanaryError("T092 ON arm lacks its native telemetry report")
+        occurrences.extend(
+            asdict(item)
+            for item in parse_native_occurrences(
+                raw,
+                source_identity=source.source_identity,
+                source_group=source.source_group,
+                split=source.split,
+                parent_root_decision_identity=decision_identity,
+                native_identity=T092_NATIVE_IDENTITY,
+            )
+        )
+
+
 def _collect_arm_records(
     controlled: Any, *, source: T090SplitEntry, telemetry_enabled: bool
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -471,32 +560,13 @@ def _collect_arm_records(
     decisions: list[dict[str, Any]] = []
     occurrences: list[dict[str, Any]] = []
     for step in getattr(controlled, "steps", []):
-        metadata = getattr(step, "decision_metadata", {})
-        record = metadata.get("t092_canary_decision") if isinstance(metadata, Mapping) else None
-        if not isinstance(record, Mapping):
-            continue
-        if record.get("arm") != ("ON" if telemetry_enabled else "OFF"):
-            raise T092CanaryError("T092 canary arm decision provenance drifted")
-        semantic = record.get("root_semantics")
-        if not isinstance(semantic, Mapping):
-            raise T092CanaryError("T092 canary decision lacks root semantics")
-        decision_identity = f"{source.source_identity}:battle-decision:{getattr(step, 'step_index', -1)}"
-        decisions.append({"decision_identity": decision_identity, "root_semantics": dict(semantic)})
-        if telemetry_enabled:
-            raw = record.get("native_report")
-            if not isinstance(raw, Mapping):
-                raise T092CanaryError("T092 ON arm lacks its native telemetry report")
-            occurrences.extend(
-                asdict(item)
-                for item in parse_native_occurrences(
-                    raw,
-                    source_identity=source.source_identity,
-                    source_group=source.source_group,
-                    split=source.split,
-                    parent_root_decision_identity=decision_identity,
-                    native_identity=T092_NATIVE_IDENTITY,
-                )
-            )
+        _retain_arm_step(
+            step,
+            source=source,
+            telemetry_enabled=telemetry_enabled,
+            decisions=decisions,
+            occurrences=occurrences,
+        )
     if not decisions:
         raise T092CanaryError("T092 canary arm has no Battle decisions")
     return decisions, occurrences
@@ -563,37 +633,48 @@ def _collect_tree_geometry_records(
         return []
     result: list[dict[str, Any]] = []
     for step in getattr(controlled, "steps", []):
-        metadata = getattr(step, "decision_metadata", {})
-        decision = metadata.get("t092_canary_decision") if isinstance(metadata, Mapping) else None
-        if not isinstance(decision, Mapping):
-            continue
-        identity = f"{source.source_identity}:battle-decision:{getattr(step, 'step_index', -1)}"
-        raw = decision.get("native_report")
-        telemetry = raw.get("tree_internal_telemetry") if isinstance(raw, Mapping) else None
-        expanded = telemetry.get("expanded_nodes") if isinstance(telemetry, Mapping) else None
-        if isinstance(expanded, bool) or not isinstance(expanded, int) or expanded < 0:
-            raise T092CanaryError("T092 native expanded-node count is unavailable")
-        geometry = telemetry.get("tree_geometry") if isinstance(telemetry, Mapping) else None
-        if geometry is None:
-            result.append({
-                "decision_identity": identity,
-                "availability": "unavailable",
-                "expanded_node_count": expanded,
-                "geometry": None,
-                "unavailable_reason": "native_report_omitted_tree_internal_telemetry_tree_geometry",
-            })
-        else:
-            validated = _validate_tree_geometry(geometry)
-            if validated["total_expanded_node_count"] != expanded:
-                raise T092CanaryError("T092 native tree geometry expanded-node count disagrees with telemetry")
-            result.append({
-                "decision_identity": identity,
-                "availability": "available",
-                "expanded_node_count": expanded,
-                "geometry": validated,
-                "unavailable_reason": None,
-            })
+        geometry = _tree_geometry_record_for_step(
+            step, source=source, telemetry_enabled=telemetry_enabled
+        )
+        if geometry is not None:
+            result.append(geometry)
     return result
+
+
+def _tree_geometry_record_for_step(
+    step: Any, *, source: T090SplitEntry, telemetry_enabled: bool
+) -> dict[str, Any] | None:
+    if not telemetry_enabled:
+        return None
+    metadata = getattr(step, "decision_metadata", {})
+    decision = metadata.get("t092_canary_decision") if isinstance(metadata, Mapping) else None
+    if not isinstance(decision, Mapping):
+        return None
+    identity = f"{source.source_identity}:battle-decision:{getattr(step, 'step_index', -1)}"
+    raw = decision.get("native_report")
+    telemetry = raw.get("tree_internal_telemetry") if isinstance(raw, Mapping) else None
+    expanded = telemetry.get("expanded_nodes") if isinstance(telemetry, Mapping) else None
+    if isinstance(expanded, bool) or not isinstance(expanded, int) or expanded < 0:
+        raise T092CanaryError("T092 native expanded-node count is unavailable")
+    geometry = telemetry.get("tree_geometry") if isinstance(telemetry, Mapping) else None
+    if geometry is None:
+        return {
+            "decision_identity": identity,
+            "availability": "unavailable",
+            "expanded_node_count": expanded,
+            "geometry": None,
+            "unavailable_reason": "native_report_omitted_tree_internal_telemetry_tree_geometry",
+        }
+    validated = _validate_tree_geometry(geometry)
+    if validated["total_expanded_node_count"] != expanded:
+        raise T092CanaryError("T092 native tree geometry expanded-node count disagrees with telemetry")
+    return {
+        "decision_identity": identity,
+        "availability": "available",
+        "expanded_node_count": expanded,
+        "geometry": validated,
+        "unavailable_reason": None,
+    }
 
 
 def _terminal_record(controlled: Any) -> dict[str, Any]:
