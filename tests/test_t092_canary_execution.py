@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -216,6 +218,62 @@ def test_source_root_head_mismatch_cannot_spawn_an_isolated_arm(monkeypatch, tmp
             implementation_head="a" * 40, output_path=tmp_path / "arm.json",
         )
     assert invoked is False
+
+
+def test_isolated_arm_uses_file_backed_restore_stdin_without_parent_input_copy(monkeypatch, tmp_path) -> None:
+    import sts_combat_rl.sim.t092_canary_process as process
+
+    source = _selected()[0]
+    spec = {
+        "python_executable": "/usr/bin/python3.14",
+        "extension_path": "/tmp/slaythespire.so",
+        "extension_sha256": "a" * 64,
+        "extension_size_bytes": 1,
+        "native_identity": T092_PUBLICATION_NATIVE_IDENTITY,
+        "stsrl_source_root": str(Path(__file__).parents[1]),
+    }
+    monkeypatch.setattr(process, "validate_t092_arm_process_spec", lambda *_args, **_kwargs: dict(spec))
+    record = {
+        "native_binary": {
+            "path": spec["extension_path"],
+            "sha256": spec["extension_sha256"],
+            "size_bytes": spec["extension_size_bytes"],
+        },
+        "native_identity": spec["native_identity"],
+        "process_identity": {"python_executable": spec["python_executable"]},
+    }
+    monkeypatch.setattr(
+        process,
+        "_read_immutable_arm_record",
+        lambda *_args, **_kwargs: (record, {"schema_id": "test"}),
+    )
+    observed: dict[str, object] = {}
+
+    def fake_run(command, **kwargs):
+        assert "input" not in kwargs
+        request = json.load(kwargs["stdin"])
+        observed["request"] = request
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(process.subprocess, "run", fake_run)
+    restore_payloads = {
+        "selected": {"selected": "payload"},
+        "canonical": {"canonical": "payload"},
+    }
+    process.execute_t092_isolated_arm(
+        arm="OFF",
+        spec=spec,
+        source=source,
+        selected=None,
+        canonical=None,
+        restore_payloads=restore_payloads,
+        worker={"stage_worker_count": 12, "worker_index": 0, "shard_count": 12, "shard_index": 0},
+        implementation_head="a" * 40,
+        output_path=tmp_path / "arm.json",
+    )
+    assert restore_payloads == {}
+    assert observed["request"]["selected"] == {"selected": "payload"}
+    assert observed["request"]["canonical"] == {"canonical": "payload"}
 
 
 def test_child_failure_detail_relays_only_controlled_t092_boundary_text() -> None:

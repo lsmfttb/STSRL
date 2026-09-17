@@ -14,7 +14,8 @@ import os
 import re
 import subprocess
 import sys
-from collections.abc import Mapping
+import tempfile
+from collections.abc import Mapping, MutableMapping
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -164,11 +165,12 @@ def execute_t092_isolated_arm(
     arm: str,
     spec: Mapping[str, Any],
     source: T090SplitEntry,
-    selected: T085BattleStartRecord,
-    canonical: BattleStartCheckpointRecord,
+    selected: T085BattleStartRecord | None,
+    canonical: BattleStartCheckpointRecord | None,
     worker: Mapping[str, Any],
     implementation_head: str,
     output_path: str | Path,
+    restore_payloads: MutableMapping[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Spawn one fresh interpreter and return its independently checked record."""
 
@@ -181,6 +183,19 @@ def execute_t092_isolated_arm(
     destination = Path(output_path).resolve()
     if destination.exists():
         raise T092CanaryProcessError("refusing to overwrite a T092 arm record")
+    if restore_payloads is None:
+        if selected is None or canonical is None:
+            raise T092CanaryProcessError("T092 isolated arm restore payload is missing")
+        restore_payloads = {
+            "selected": asdict(selected),
+            "canonical": record_to_manifest(canonical),
+        }
+    elif (
+        set(restore_payloads) != {"selected", "canonical"}
+        or not isinstance(restore_payloads["selected"], Mapping)
+        or not isinstance(restore_payloads["canonical"], Mapping)
+    ):
+        raise T092CanaryProcessError("T092 isolated arm restore payload is malformed")
     request = {
         "schema_id": T092_CANARY_ARM_REQUEST_SCHEMA_ID,
         "schema_version": 1,
@@ -190,26 +205,46 @@ def execute_t092_isolated_arm(
         "worker": worker_identity,
         "spec": validated_spec,
         "source": asdict(source),
-        "selected": asdict(selected),
-        "canonical": record_to_manifest(canonical),
+        "selected": restore_payloads["selected"],
+        "canonical": restore_payloads["canonical"],
     }
     environment = {
         "PATH": os.environ.get("PATH", ""),
         "PYTHONPATH": f"{Path(validated_spec['extension_path']).parent}:{Path(validated_spec['stsrl_source_root']) / 'src'}",
         "PYTHONNOUSERSITE": "1",
     }
-    completed = subprocess.run(
-        [
-            validated_spec["python_executable"], "-m",
-            "sts_combat_rl.commands.t092_canary_arm", "--output", str(destination),
-        ],
-        input=json.dumps(request, sort_keys=True, separators=(",", ":"), allow_nan=False),
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        env=environment,
-        check=False,
-    )
+    # Keep the parent-side restore objects and serialized request out of the
+    # process-group RSS while the native child is running.  Passing
+    # ``input=...`` makes ``subprocess`` retain another full JSON copy in the
+    # parent; a temporary stdin file preserves the exact request without that
+    # duplication.  The child still performs its normal full request parse and
+    # provenance validation before native import.
+    with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as request_stream:
+        json.dump(
+            request,
+            request_stream,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+        request_stream.flush()
+        request_stream.seek(0)
+        restore_payloads.clear()
+        del request
+        selected = None
+        canonical = None
+        completed = subprocess.run(
+            [
+                validated_spec["python_executable"], "-m",
+                "sts_combat_rl.commands.t092_canary_arm", "--output", str(destination),
+            ],
+            stdin=request_stream,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env=environment,
+            check=False,
+        )
     if completed.returncode != 0:
         detail = _child_failure_detail(completed.stderr)
         raise T092CanaryProcessError(

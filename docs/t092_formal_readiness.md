@@ -40,6 +40,9 @@ native/source-root checks pass. Authorization preparation performs the full
 canary, upstream, and root-input schema validation once; each formal worker
 rechecks the exact hash-bound references by streaming their bytes and does not
 materialize the large accepted canary, teacher, provenance, or T091 JSON again.
+The ON worker hands the selected restore manifests to its fresh child through a
+temporary stdin file, releases the parent-side checkpoint graphs before native
+execution, and the child drops the raw request mappings after restore.
 
 The formal topology is eight canonical-ordinal-modulo shards and eight effective
 workers.  The operational limit is 2 GiB per worker (16 GiB aggregate); this

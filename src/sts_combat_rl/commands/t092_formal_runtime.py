@@ -123,15 +123,32 @@ class _FormalRunner:
         if set(payload) != required or payload.get("schema_id") != T092_FORMAL_RESTORE_SHARD_SCHEMA_ID or payload.get("schema_version") != 1 or payload.get("task_id") != "T092" or payload.get("implementation_head") != self._head or payload.get("source") != asdict(entry):
             raise T092CanaryProcessError("T092 formal restore shard provenance is malformed")
         try:
-            selected = T085BattleStartRecord.from_mapping(payload["source_record"])
-            canonical = record_from_manifest(payload["canonical_record"], label="T092 formal canonical checkpoint", allowed_distribution_kinds=frozenset({"natural_run", "assisted_run"}), allow_assistance_history=True)
+            selected_payload = payload["source_record"]
+            canonical_payload = payload["canonical_record"]
+            selected = T085BattleStartRecord.from_mapping(selected_payload)
+            canonical = record_from_manifest(canonical_payload, label="T092 formal canonical checkpoint", allowed_distribution_kinds=frozenset({"natural_run", "assisted_run"}), allow_assistance_history=True)
         except (KeyError, TypeError, ValueError) as exc:
             raise T092CanaryProcessError("T092 formal restore shard is malformed") from exc
         if selected.selection_identity != entry.source_identity or canonical.source_checkpoint_id != entry.source_identity:
             raise T092CanaryProcessError("T092 formal restore identity mismatches")
+        # Drop the parsed restore objects before the native child starts.  The
+        # child receives the same validated manifests from this mutable handoff
+        # container; the isolated launcher clears it after writing stdin so
+        # parent and child do not retain duplicate checkpoint graphs.
+        restore_payloads = {
+            "selected": selected_payload,
+            "canonical": canonical_payload,
+        }
+        raw = None
+        payload = None
+        selected_payload = None
+        canonical_payload = None
+        selected = None
+        canonical = None
         digest = hashlib.sha256(entry.source_identity.encode("utf-8")).hexdigest()[:16]
         record, _artifact = execute_t092_isolated_arm(arm="ON", spec=self._spec, source=entry,
-            selected=selected, canonical=canonical, worker=worker, implementation_head=self._head,
+            selected=None, canonical=None, restore_payloads=restore_payloads,
+            worker=worker, implementation_head=self._head,
             output_path=self._root / "formal-arms" / f"shard-{worker['shard_index']}-{digest}-on.json")
         return record
 

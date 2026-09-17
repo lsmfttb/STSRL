@@ -300,15 +300,23 @@ def run_t092_native_canary_arm(
     ):
         raise T092CanaryError("T092 isolated arm native binary evidence is malformed")
     base_adapter = adapter_factory()
+    selection_identity = selected.selection_identity
+    restore_binding = {
+        "selection_identity": selection_identity,
+        "source_checkpoint_id": canonical.source_checkpoint_id,
+        "source_run_identity": canonical.source_run_id,
+        "source_seed": canonical.source_seed,
+        "source_battle_index": canonical.source_battle_index,
+    }
+    expected_context = canonical.public_run_context
     try:
         restored, restore_method = restore_t085_canonical_record(
-            base_adapter, selected, {selected.selection_identity: canonical}
+            base_adapter, selected, {selection_identity: canonical}
         )
         legal_actions = getattr(base_adapter, "legal_actions", None)
         if not callable(legal_actions):
             raise T092CanaryError("T092 canary adapter lacks legal_actions")
         root_actions = list(legal_actions(restored))
-        expected_context = canonical.public_run_context
         actual_context = build_public_run_context(
             restored.raw,
             root_actions,
@@ -321,6 +329,12 @@ def run_t092_native_canary_arm(
         )
         if not isinstance(expected_context, Mapping) or actual_context != expected_context:
             raise T092CanaryError("T092 canary restore public/legal parity failed")
+        # The validated checkpoint is now represented by the native restored
+        # snapshot.  Release the portable selected/canonical graphs before the
+        # capped battle loop and retain only the compact binding above.
+        selected = None
+        canonical = None
+        expected_context = None
         restored_adapter = _RestoredAdapter(base_adapter, restored)
         started = time.perf_counter()
         controlled = execute_controlled_run(
@@ -346,13 +360,7 @@ def run_t092_native_canary_arm(
             "source_group": source.source_group,
             "split": source.split,
             "canonical_position": source.canonical_position,
-            "restore_binding": {
-                "selection_identity": selected.selection_identity,
-                "source_checkpoint_id": canonical.source_checkpoint_id,
-                "source_run_identity": canonical.source_run_id,
-                "source_seed": canonical.source_seed,
-                "source_battle_index": canonical.source_battle_index,
-            },
+            "restore_binding": restore_binding,
             "implementation_head": implementation_head,
             "native_identity": dict(expected_native_identity),
             "native_binary": dict(native_binary),

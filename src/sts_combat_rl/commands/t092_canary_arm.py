@@ -60,7 +60,10 @@ def _request(raw: object) -> dict[str, Any]:
         or not isinstance(raw.get("canonical"), Mapping)
     ):
         raise T092CanaryProcessError("T092 isolated arm request is invalid")
-    return dict(raw)
+    # ``json.loads(sys.stdin.read())`` already returns a private dict.  Keep
+    # that object so execute_one_arm can release the large restore mappings
+    # from the main-command frame before native battle execution begins.
+    return raw if isinstance(raw, dict) else dict(raw)
 
 
 def _verified_native_binary(
@@ -92,14 +95,13 @@ def execute_one_arm(request: Mapping[str, Any]) -> dict[str, Any]:
 
     raw = _request(request)
     arm = str(raw["arm"])
-    binary = _verified_native_binary(
-        raw["spec"], arm=arm, implementation_head=str(raw["implementation_head"])
-    )
     try:
         source = T090SplitEntry(**dict(raw["source"]))
-        selected = T085BattleStartRecord.from_mapping(raw["selected"])
+        selected_payload = raw["selected"]
+        canonical_payload = raw["canonical"]
+        selected = T085BattleStartRecord.from_mapping(selected_payload)
         canonical = record_from_manifest(
-            raw["canonical"],
+            canonical_payload,
             label="T092 isolated arm canonical checkpoint",
             allowed_distribution_kinds=frozenset({"natural_run", "assisted_run"}),
             allow_assistance_history=True,
@@ -108,6 +110,17 @@ def execute_one_arm(request: Mapping[str, Any]) -> dict[str, Any]:
         raise T092CanaryProcessError("T092 isolated arm restore request is malformed") from exc
     if selected.selection_identity != source.source_identity or canonical.source_checkpoint_id != source.source_identity:
         raise T092CanaryProcessError("T092 isolated arm source/restore identity mismatches")
+    raw.pop("selected", None)
+    raw.pop("canonical", None)
+    selected_payload = None
+    canonical_payload = None
+    # Restore parsing is native-free.  Complete it before loading the
+    # extension so the child never holds the raw restore graph and native
+    # library footprint at the same time; the binary check still precedes any
+    # adapter/simulator construction below.
+    binary = _verified_native_binary(
+        raw["spec"], arm=arm, implementation_head=str(raw["implementation_head"])
+    )
     # Imported only after the extension check above.  Construction occurs in the
     # arm runner and therefore cannot happen on a binary identity mismatch.
     from sts_combat_rl.sim.lightspeed import LightSpeedAdapter
@@ -129,7 +142,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
     try:
-        request = json.loads(sys.stdin.read())
+        request_text = sys.stdin.read()
+        try:
+            request = json.loads(request_text)
+        finally:
+            request_text = ""
         record = execute_one_arm(request)
         write_t092_canary_json(args.output, record, schema_id=record["schema_id"])
     except (
