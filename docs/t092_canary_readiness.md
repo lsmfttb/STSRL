@@ -94,7 +94,7 @@ the hash-bound runtime identity map and authorized implementation head; it retur
 factory. The launcher validates each arm's interpreter, one extension path,
 size, SHA-256, and native identity before spawning that arm. The child repeats
 the binary check before constructing `LightSpeedAdapter`, writes its immutable
-`t092-paired-canary-arm-record-v1` JSON once, and the parent independently
+`t092-paired-canary-arm-record-v2` JSON once, and the parent independently
 reads/validates both records before offline pairing. T092 neither guesses maps
 nor reconstructs them from checkpoint bytes. It must first write a
 non-authorizing template:
