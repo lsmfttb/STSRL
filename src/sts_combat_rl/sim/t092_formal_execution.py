@@ -736,6 +736,29 @@ def finalize_t092_formal_shards(*, authorization: Mapping[str, Any] | None, impl
                                 split_manifest: Mapping[str, Any], root_reference: Mapping[str, Any],
                                 canary_evidence: Mapping[str, Any], input_identities: Mapping[str, Any], output_root: str | Path,
                                 shards: Sequence[Mapping[str, Any] | Path]) -> dict[str, Any]:
+    """Finalize formal shards with guaranteed cleanup of the spill store."""
+
+    metric_rows = _MetricRowStore(output_root)
+    try:
+        return _finalize_t092_formal_shards_impl(
+            authorization=authorization,
+            implementation_head=implementation_head,
+            split_manifest=split_manifest,
+            root_reference=root_reference,
+            canary_evidence=canary_evidence,
+            input_identities=input_identities,
+            output_root=output_root,
+            shards=shards,
+            metric_rows=metric_rows,
+        )
+    finally:
+        metric_rows.close()
+
+
+def _finalize_t092_formal_shards_impl(*, authorization: Mapping[str, Any] | None, implementation_head: str,
+                                      split_manifest: Mapping[str, Any], root_reference: Mapping[str, Any],
+                                      canary_evidence: Mapping[str, Any], input_identities: Mapping[str, Any], output_root: str | Path,
+                                      shards: Sequence[Mapping[str, Any] | Path], metric_rows: _MetricRowStore) -> dict[str, Any]:
     """Offline, fail-closed finalizer. Processes one shard at a time conceptually.
 
     The retained compact shards, not an in-memory native tree corpus, are the
@@ -771,7 +794,6 @@ def finalize_t092_formal_shards(*, authorization: Mapping[str, Any] | None, impl
     reference = dict(root_reference)
     # Never retain public projections, child means, or full occurrence payloads
     # across sources.  The finalizer keeps only these fixed metric summaries.
-    metric_rows = _MetricRowStore(output_root)
     observed_roots_by_source: dict[str, list[dict[str, Any]]] = {}
     geometry_observations: list[dict[str, Any]] = []
     ledger: list[dict[str, Any]] = []
@@ -834,14 +856,13 @@ def finalize_t092_formal_shards(*, authorization: Mapping[str, Any] | None, impl
     expected = list(reference["rows"])
     observed_roots = _canonical_root_rows(plan["sources"], observed_roots_by_source)
     root_ok = observed_roots == expected
+    root_reference_sha256 = canonical_sha256(reference)
     if not root_ok:
-        metric_rows.close()
         raise T092FormalError("INTERNAL_TELEMETRY_SEMANTIC_PARITY_INVALID: formal root reproduction mismatch")
     # Root parity is complete.  Do not carry its 6369-row expected/observed
     # projections into the independent global metric aggregation pass.
     del expected, observed_roots, observed_roots_by_source, reference
     metrics = _metrics(metric_rows, ledger, geometry_observations)
-    metric_rows.close()
     geometry_report = metrics["node_totals"]["tree_geometry"]
     classification = _classification(
         metrics,
@@ -853,7 +874,7 @@ def finalize_t092_formal_shards(*, authorization: Mapping[str, Any] | None, impl
     return {"schema_id": T092_FORMAL_EVIDENCE_SCHEMA_ID, "schema_version": 1, "task_id": "T092",
             "formal_execution_authorized": True, "training_eligible": False,
             "implementation_head": implementation_head, "formal_plan_sha256": canonical_sha256(plan),
-            "root_reference_sha256": canonical_sha256(reference),
+            "root_reference_sha256": root_reference_sha256,
             "input_identities_sha256": canonical_sha256(input_identities),
             "native_identity": dict(T092_NATIVE_IDENTITY), "teacher_config": dict(T092_FROZEN_TEACHER_CONFIG),
             "execution_config": dict(T092_CANARY_EXECUTION_CONFIG), "source_worker_ledger": ledger,

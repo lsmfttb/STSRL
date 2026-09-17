@@ -228,6 +228,80 @@ def test_finalizer_metric_store_matches_in_memory_metrics() -> None:
         store.close()
 
 
+def test_finalizer_returns_root_reference_digest_after_parity_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sts_combat_rl.sim.t092_formal_execution as formal
+
+    plan = {
+        "sources": [],
+        "worker_plan": {"shard_count": 1, "worker_count": 1},
+    }
+    monkeypatch.setattr(formal, "build_t092_formal_plan", lambda *args, **kwargs: plan)
+    monkeypatch.setattr(formal, "validate_t092_formal_authorization", lambda **kwargs: {
+        "shard_index": 0,
+        "shard_count": 1,
+        "worker_count": 1,
+        "assignment": formal.T092_FORMAL_SHARD_ASSIGNMENT,
+    })
+    monkeypatch.setattr(formal, "_metrics", lambda *args, **kwargs: {
+        "node_totals": {"tree_geometry": {"availability": "available"}},
+    })
+    monkeypatch.setattr(formal, "_classification", lambda *args, **kwargs: "INCOMPLETE")
+    root_reference = {"rows": []}
+    authorization = {
+        "authorization_id": "auth",
+        "shard_topology": {"shard_count": 1, "worker_count": 1},
+    }
+    shard = {
+        "schema_id": formal.T092_FORMAL_SHARD_SCHEMA_ID,
+        "schema_version": 1,
+        "task_id": "T092",
+        "authorization_id": "auth",
+        "implementation_head": "a" * 40,
+        "formal_plan_sha256": canonical_sha256(plan),
+        "topology": {
+            "shard_index": 0,
+            "shard_count": 1,
+            "worker_count": 1,
+            "assignment": formal.T092_FORMAL_SHARD_ASSIGNMENT,
+        },
+        "source_artifacts": [],
+        "source_artifacts_sha256": canonical_sha256([]),
+    }
+
+    result = formal.finalize_t092_formal_shards(
+        authorization=authorization,
+        implementation_head="a" * 40,
+        split_manifest={},
+        root_reference=root_reference,
+        canary_evidence={},
+        input_identities={},
+        output_root=tmp_path,
+        shards=[shard],
+    )
+
+    assert result["root_reference_sha256"] == canonical_sha256(root_reference)
+    assert not list(tmp_path.glob("t092-metrics-*.sqlite3"))
+
+    def fail_metrics(*args: object, **kwargs: object) -> dict[str, object]:
+        raise RuntimeError("synthetic metrics failure")
+
+    monkeypatch.setattr(formal, "_metrics", fail_metrics)
+    with pytest.raises(RuntimeError, match="synthetic metrics failure"):
+        formal.finalize_t092_formal_shards(
+            authorization=authorization,
+            implementation_head="a" * 40,
+            split_manifest={},
+            root_reference=root_reference,
+            canary_evidence={},
+            input_identities={},
+            output_root=tmp_path,
+            shards=[shard],
+        )
+    assert not list(tmp_path.glob("t092-metrics-*.sqlite3"))
+
+
 def test_formal_geometry_absence_is_not_classified_as_a_usable_surface() -> None:
     assert _classification(
         {}, root_ok=True, canary_ok=True, firewall_ok=True, geometry_ok=False
