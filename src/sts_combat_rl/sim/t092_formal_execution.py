@@ -74,6 +74,24 @@ def _artifact(value: object, label: str) -> dict[str, Any]:
     return result
 
 
+def _stream_artifact_hash(value: object, label: str) -> dict[str, Any]:
+    """Verify an artifact identity without retaining its payload in memory."""
+
+    artifact = _artifact(value, label)
+    digest = hashlib.sha256()
+    size = 0
+    try:
+        with Path(artifact["path"]).open("rb") as stream:
+            for block in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(block)
+                size += len(block)
+    except OSError as exc:
+        raise T092FormalError(f"{label} artifact is unavailable") from exc
+    if digest.hexdigest() != artifact["sha256"] or size != artifact["size_bytes"]:
+        raise T092FormalError(f"{label} artifact hash mismatches")
+    return artifact
+
+
 def _topology(*, shard_index: int, shard_count: int, worker_count: int) -> dict[str, int | str]:
     if (any(isinstance(x, bool) or not isinstance(x, int) for x in (shard_index, shard_count, worker_count))
             or shard_count <= 0 or worker_count <= 0 or worker_count > shard_count
@@ -199,15 +217,18 @@ def validate_t092_t090_root_reference(
     value: Mapping[str, Any], *, split_manifest: Mapping[str, Any],
     require_input_artifacts: bool = False, verify_input_artifacts: bool = True,
 ) -> dict[str, Any]:
-    """Require the canonical T090 root comparison table, never inferred rows."""
+    """Require the canonical T090 root table, never inferred rows.
+
+    With required artifacts and ``verify_input_artifacts=False``, the worker
+    path still checks every bound file's schema identity, alias separation,
+    size, and hash, but streams bytes instead of parsing the large payloads.
+    """
     required = {"schema_id", "schema_version", "task_id", "split_manifest_sha256", "source_ledger", "rows", "rows_sha256"}
     allowed = required | _T092_ROOT_REFERENCE_ARTIFACT_KEYS
     if not isinstance(value, Mapping) or not set(value).issubset(allowed) or not required.issubset(value) or value.get("schema_id") != T092_T090_ROOT_REFERENCE_SCHEMA_ID or value.get("schema_version") != 1 or value.get("task_id") != "T092" or value.get("split_manifest_sha256") != canonical_sha256(split_manifest):
         raise T092FormalError("T092 T090 root reference is malformed")
     if require_input_artifacts and not _T092_ROOT_REFERENCE_ARTIFACT_KEYS.issubset(value):
         raise T092FormalError("T092 root reference lacks hash-bound teacher/provenance artifacts")
-    if require_input_artifacts and not verify_input_artifacts:
-        raise T092FormalError("T092 required root artifacts must be hash-verified")
     source_ledger = _artifact(value.get("source_ledger"), "T090 source ledger")
     if source_ledger["schema_id"] != "t090-source-execution-ledger-v1":
         raise T092FormalError("T090 source ledger schema is not accepted")
@@ -216,17 +237,18 @@ def validate_t092_t090_root_reference(
         provenance_artifact = _artifact(value["decision_provenance_artifact"], "T090 decision provenance")
         if teacher_artifact["schema_id"] != "t090-root-teacher-rows-v1" or provenance_artifact["schema_id"] != "t090-root-decision-provenance-v1":
             raise T092FormalError("T090 root input artifact schemas are invalid")
+        _reject_artifact_aliases(
+            [source_ledger, teacher_artifact, provenance_artifact],
+            "T092 root input",
+        )
+        if require_input_artifacts and not verify_input_artifacts:
+            _stream_artifact_hash(source_ledger, "T090 source ledger")
+            _stream_artifact_hash(teacher_artifact, "T090 teacher rows")
+            _stream_artifact_hash(provenance_artifact, "T090 decision provenance")
+            return _validate_t092_root_rows(value)
         if not verify_input_artifacts:
             return _validate_t092_root_rows(value)
         _read_t090_source_ledger(source_ledger, split_manifest=split_manifest)
-        _reject_artifact_aliases(
-            [
-                source_ledger,
-                teacher_artifact,
-                provenance_artifact,
-            ],
-            "T092 root input",
-        )
         teacher_rows = _read_artifact_json(value["teacher_rows_artifact"], "T090 teacher rows")
         provenance_rows = _read_artifact_json(value["decision_provenance_artifact"], "T090 decision provenance")
         if not isinstance(teacher_rows, list) or not isinstance(provenance_rows, list):
@@ -344,18 +366,7 @@ def _accepted_canary_reference(
     if reference["schema_id"] != "t092-paired-semantic-parity-canary-v1":
         raise T092FormalError("accepted T092 canary has an unexpected schema")
     if not validate_payload:
-        digest = hashlib.sha256()
-        size = 0
-        try:
-            with Path(reference["path"]).open("rb") as stream:
-                for block in iter(lambda: stream.read(1024 * 1024), b""):
-                    digest.update(block)
-                    size += len(block)
-        except OSError as exc:
-            raise T092FormalError("accepted T092 canary evidence is unavailable") from exc
-        if digest.hexdigest() != reference["sha256"] or size != reference["size_bytes"]:
-            raise T092FormalError("accepted T092 canary evidence hash mismatches")
-        return reference
+        return _stream_artifact_hash(reference, "accepted T092 canary evidence")
     try:
         raw = Path(reference["path"]).read_bytes()
         evidence = json.loads(raw)
@@ -388,7 +399,9 @@ def _accepted_canary_reference(
     return reference
 
 
-def _formal_input_identities(value: object) -> dict[str, Any]:
+def _formal_input_identities(
+    value: object, *, validate_payload: bool = True
+) -> dict[str, Any]:
     """Bind every accepted upstream fact; no filename/default substitutes."""
     required = {"formal_restore_manifest", "arm_process_specs", "t087_source_cohort",
                 "t090_source_ledger", "t091_reference", "task_native_provenance"}
@@ -397,6 +410,9 @@ def _formal_input_identities(value: object) -> dict[str, Any]:
     result = dict(value)
     for key in ("formal_restore_manifest", "t087_source_cohort", "t090_source_ledger", "t091_reference", "task_native_provenance"):
         artifact = _artifact(result[key], key)
+        if not validate_payload:
+            _stream_artifact_hash(artifact, key)
+            continue
         try:
             raw = Path(artifact["path"]).read_bytes()
         except OSError as exc:
@@ -432,13 +448,19 @@ def build_t092_formal_authorization_template(*, implementation_head: str, split_
                                              input_identities: Mapping[str, Any], output_root: str | Path,
                                              shard_count: int = T092_FORMAL_DEFAULT_SHARDS,
                                              worker_count: int = T092_FORMAL_DEFAULT_WORKERS,
-                                             validate_canary_evidence: bool = True) -> dict[str, Any]:
+                                             validate_canary_evidence: bool = True,
+                                             validate_input_payloads: bool = True) -> dict[str, Any]:
     if not _sha(implementation_head):
         raise T092FormalError("T092 formal implementation/input identity is invalid")
-    inputs = _formal_input_identities(input_identities)
+    inputs = _formal_input_identities(
+        input_identities, validate_payload=validate_input_payloads
+    )
     plan = build_t092_formal_plan(split_manifest, shard_count=shard_count, worker_count=worker_count)
     reference = validate_t092_t090_root_reference(
-        root_reference, split_manifest=split_manifest, require_input_artifacts=True
+        root_reference,
+        split_manifest=split_manifest,
+        require_input_artifacts=True,
+        verify_input_artifacts=validate_input_payloads,
     )
     canary_ref = _accepted_canary_reference(
         canary_evidence,
@@ -467,9 +489,16 @@ def validate_t092_formal_authorization(authorization: Mapping[str, Any] | None, 
                                        output_root: str | Path, shard_index: int, shard_count: int, worker_count: int) -> dict[str, Any]:
     if not isinstance(authorization, Mapping):
         raise T092FormalError("explicit T092 Maintainer formal authorization is required")
+    # Preparation already performed full payload validation.  This exact
+    # authorization identity lets each worker recheck bindings without
+    # retaining the large upstream/canary JSON objects in its RSS.
     prepared = build_t092_formal_authorization_template(implementation_head=implementation_head, split_manifest=split_manifest,
         root_reference=root_reference, canary_evidence=canary_evidence, input_identities=input_identities, output_root=output_root,
-        shard_count=shard_count, worker_count=worker_count, validate_canary_evidence=False)
+        shard_count=shard_count,
+        worker_count=worker_count,
+        validate_canary_evidence=False,
+        validate_input_payloads=False,
+    )
     identity = prepared["authorization_identity"]
     expected = {**identity, "authorized": True, "authorization_id": authorization.get("authorization_id"),
                 "maintainer_attestation": {"role": "maintainer", "decision": "FORMAL_AUTHORIZED", "exact_head": implementation_head}}

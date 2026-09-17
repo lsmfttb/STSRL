@@ -12,12 +12,14 @@ from sts_combat_rl.sim.t092_formal_execution import (
     _canonical_root_rows,
     _accepted_canary_reference,
     _classification,
+    _formal_input_identities,
     _metrics,
     _tree_geometry_metrics,
     execute_t092_authorized_formal_shard,
     validate_t092_t090_root_reference,
 )
 from sts_combat_rl.sim.t090_battle_student import canonical_sha256
+from sts_combat_rl.sim.t092_internal_search_state import T092_NATIVE_IDENTITY
 from sts_combat_rl.commands.t092_formal import build_parser
 
 
@@ -45,6 +47,62 @@ def test_t092_root_reference_requires_frozen_6369_6210_309_counts() -> None:
     assert validate_t092_t090_root_reference(_root_reference(), split_manifest=split)["rows_sha256"]
     with pytest.raises(T092FormalError, match="frozen T090 counts"):
         validate_t092_t090_root_reference(_root_reference(complete_s0=False), split_manifest=split)
+
+
+def test_formal_worker_root_identity_streams_bound_inputs(tmp_path: Path) -> None:
+    split = {"entries": []}
+    reference = _root_reference()
+    artifacts = {
+        "source_ledger": ("ledger.bin", b"ledger", "t090-source-execution-ledger-v1"),
+        "teacher_rows_artifact": ("teacher.bin", b"teacher-rows", "t090-root-teacher-rows-v1"),
+        "decision_provenance_artifact": ("provenance.bin", b"provenance", "t090-root-decision-provenance-v1"),
+    }
+    for key, (name, payload, schema_id) in artifacts.items():
+        path = tmp_path / name
+        path.write_bytes(payload)
+        reference[key] = {
+            "path": str(path),
+            "sha256": hashlib.sha256(payload).hexdigest(),
+            "size_bytes": len(payload),
+            "schema_id": schema_id,
+        }
+    assert validate_t092_t090_root_reference(
+        reference,
+        split_manifest=split,
+        require_input_artifacts=True,
+        verify_input_artifacts=False,
+    )["rows_sha256"]
+    (tmp_path / "teacher.bin").write_bytes(b"mutated")
+    with pytest.raises(T092FormalError, match="hash mismatches"):
+        validate_t092_t090_root_reference(
+            reference,
+            split_manifest=split,
+            require_input_artifacts=True,
+            verify_input_artifacts=False,
+        )
+
+
+def test_formal_worker_upstream_identities_stream_without_payload_materialization(tmp_path: Path) -> None:
+    identities: dict[str, object] = {
+        "arm_process_specs": {"ON": {"native_identity": dict(T092_NATIVE_IDENTITY)}},
+    }
+    for index, key in enumerate((
+        "formal_restore_manifest", "t087_source_cohort", "t090_source_ledger",
+        "t091_reference", "task_native_provenance",
+    )):
+        payload = f"not-json-upstream-{index}".encode()
+        path = tmp_path / f"upstream-{index}.bin"
+        path.write_bytes(payload)
+        identities[key] = {
+            "path": str(path),
+            "sha256": hashlib.sha256(payload).hexdigest(),
+            "size_bytes": len(payload),
+            "schema_id": f"{key}-v1",
+        }
+    assert _formal_input_identities(identities, validate_payload=False) == identities
+    (tmp_path / "upstream-3.bin").write_bytes(b"mutated")
+    with pytest.raises(T092FormalError, match="hash mismatches"):
+        _formal_input_identities(identities, validate_payload=False)
 
 
 def test_formal_root_reproduction_reorders_interleaved_shards_to_global_source_order() -> None:

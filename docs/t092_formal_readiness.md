@@ -37,9 +37,9 @@ only the one source restore payload needed by the current shard, verifies its
 hash and source identity, then delegates to the existing fresh-process ON arm
 boundary.  It cannot construct a simulator before the exact authorization and
 native/source-root checks pass. Authorization preparation performs the full
-canary schema/geometry validation once; each formal worker rechecks the exact
-hash-bound canary reference by streaming its bytes and does not materialize the
-large accepted canary JSON again.
+canary, upstream, and root-input schema validation once; each formal worker
+rechecks the exact hash-bound references by streaming their bytes and does not
+materialize the large accepted canary, teacher, provenance, or T091 JSON again.
 
 The formal topology is eight canonical-ordinal-modulo shards and eight effective
 workers.  The operational limit is 2 GiB per worker (16 GiB aggregate); this
