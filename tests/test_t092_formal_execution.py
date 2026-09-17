@@ -13,6 +13,7 @@ from sts_combat_rl.sim.t092_formal_execution import (
     _accepted_canary_reference,
     _classification,
     _formal_input_identities,
+    _MetricRowStore,
     _metrics,
     _tree_geometry_metrics,
     execute_t092_authorized_formal_shard,
@@ -195,6 +196,36 @@ def test_repeated_fingerprint_disagreement_is_bound_to_support_threshold() -> No
     assert metrics["ambiguity_lower_bound"]["by_n_min"]["4"][
         "groups_with_best_supported_action_disagreement"
     ] == 0
+
+
+def test_finalizer_metric_store_matches_in_memory_metrics() -> None:
+    row = {
+        "fingerprint": "same",
+        "split": "train",
+        "source_group": "A",
+        "source_identity": "source",
+        "parent": "parent",
+        "occurrence": "one",
+        "depth": 1,
+        "branching": 2,
+        "searchable_kinds": ("card", "card"),
+        "excluded_kinds": (),
+        "supported": {"1": 2, "2": 0, "4": 0, "8": 0, "16": 0},
+        "pairs": {"1": 1, "2": 0, "4": 0, "8": 0, "16": 0},
+        "paired_kinds": {"1": ("card",), "2": (), "4": (), "8": (), "16": ()},
+        "supported_action_values": (("a", 1, 0.9), ("b", 1, 0.8)),
+        "telemetry_transitions": 0,
+    }
+    rows = [row, {**row, "occurrence": "two", "supported_action_values": (("a", 1, 0.8), ("b", 1, 0.9))}]
+    ledger = [{"source_group": "A", "source_identity": "source", "terminal": {"battle_decision_count": 1}, "cost": {"wall_clock_time_s": 0}}]
+    geometry = [{"source_group": "A", "availability": "unavailable", "expanded_node_count": 1, "geometry": None}]
+    store = _MetricRowStore()
+    try:
+        for item in rows:
+            store.add(item)
+        assert _metrics(rows, ledger, geometry) == _metrics(store, ledger, geometry)
+    finally:
+        store.close()
 
 
 def test_formal_geometry_absence_is_not_classified_as_a_usable_surface() -> None:

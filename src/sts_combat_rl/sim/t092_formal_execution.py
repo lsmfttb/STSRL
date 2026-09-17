@@ -12,6 +12,9 @@ import hashlib
 import json
 import math
 import os
+import sqlite3
+import tempfile
+from array import array
 from collections import Counter, defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict
@@ -768,7 +771,7 @@ def finalize_t092_formal_shards(*, authorization: Mapping[str, Any] | None, impl
     reference = dict(root_reference)
     # Never retain public projections, child means, or full occurrence payloads
     # across sources.  The finalizer keeps only these fixed metric summaries.
-    metric_rows: list[dict[str, Any]] = []
+    metric_rows = _MetricRowStore(output_root)
     observed_roots_by_source: dict[str, list[dict[str, Any]]] = {}
     geometry_observations: list[dict[str, Any]] = []
     ledger: list[dict[str, Any]] = []
@@ -820,14 +823,25 @@ def finalize_t092_formal_shards(*, authorization: Mapping[str, Any] | None, impl
             decision_ids = {item["decision_identity"] for item in arm["decision_records"]}
             rows = [validate_retained_occurrence(row, source_identity=source["source_identity"], source_group=source["source_group"], split=source["split"], parent_root_decision_identities=decision_ids) for row in arm["internal_occurrences"]]
             validate_parent_bound_occurrence_identities(rows)
-            metric_rows.extend(_metric_summary(row) for row in rows)
+            for row in rows:
+                metric_rows.add(_metric_summary(row))
+            # The store now owns only the compact scalar/action summaries.
+            # Drop the last decoded arm before root comparison and the second
+            # metrics pass; otherwise one ~100 MiB source JSON remains live
+            # while the finalizer starts its global aggregation.
+            del rows, arm, record, encoded
         artifacts.append({"shard_index": index, "source_artifacts": list(shard["source_artifacts"]), "source_artifacts_sha256": shard["source_artifacts_sha256"], "record_count": len(shard["source_artifacts"])})
     expected = list(reference["rows"])
     observed_roots = _canonical_root_rows(plan["sources"], observed_roots_by_source)
     root_ok = observed_roots == expected
     if not root_ok:
+        metric_rows.close()
         raise T092FormalError("INTERNAL_TELEMETRY_SEMANTIC_PARITY_INVALID: formal root reproduction mismatch")
+    # Root parity is complete.  Do not carry its 6369-row expected/observed
+    # projections into the independent global metric aggregation pass.
+    del expected, observed_roots, observed_roots_by_source, reference
     metrics = _metrics(metric_rows, ledger, geometry_observations)
+    metric_rows.close()
     geometry_report = metrics["node_totals"]["tree_geometry"]
     classification = _classification(
         metrics,
@@ -892,11 +906,162 @@ def _metric_summary(row: T092Occurrence) -> dict[str, Any]:
     }
 
 
+class _MetricRowStore:
+    """Disk-backed compact metric rows for the 413-start finalizer.
+
+    The retained arm artifacts are intentionally large and the formal corpus
+    contains more than a million internal occurrences.  Keeping one Python
+    mapping per occurrence makes an offline finalizer exceed the same frozen
+    2 GiB process-group boundary used by workers.  SQLite is part of the
+    Python standard library and gives the finalizer deterministic fingerprint
+    ordering while keeping row payloads on the retention filesystem.
+    """
+
+    _COLUMNS = (
+        "fingerprint", "split", "source_group", "source_identity", "parent",
+        "occurrence", "depth", "branching", "searchable_kinds", "excluded_kinds",
+        "supported", "pairs", "paired_kinds", "supported_action_values",
+        "telemetry_transitions",
+    )
+
+    def __init__(self, directory: str | Path | None = None) -> None:
+        descriptor, raw_path = tempfile.mkstemp(
+            prefix="t092-metrics-",
+            suffix=".sqlite3",
+            dir=str(directory) if directory is not None else None,
+        )
+        os.close(descriptor)
+        self._path = raw_path
+        self._connection = sqlite3.connect(raw_path)
+        self._connection.execute(
+            """CREATE TABLE metric_rows (
+                id INTEGER PRIMARY KEY,
+                fingerprint TEXT NOT NULL,
+                split TEXT NOT NULL,
+                source_group TEXT NOT NULL,
+                source_identity TEXT NOT NULL,
+                parent TEXT NOT NULL,
+                occurrence TEXT NOT NULL,
+                depth INTEGER NOT NULL,
+                branching INTEGER NOT NULL,
+                searchable_kinds TEXT NOT NULL,
+                excluded_kinds TEXT NOT NULL,
+                supported TEXT NOT NULL,
+                pairs TEXT NOT NULL,
+                paired_kinds TEXT NOT NULL,
+                supported_action_values TEXT NOT NULL,
+                telemetry_transitions INTEGER NOT NULL
+            )"""
+        )
+        self._connection.execute(
+            "CREATE INDEX metric_rows_fingerprint ON metric_rows(fingerprint)"
+        )
+        self._pending = 0
+        self._count = 0
+
+    @property
+    def count(self) -> int:
+        return self._count
+
+    def add(self, row: Mapping[str, Any]) -> None:
+        encoded = {
+            key: json.dumps(row[key], sort_keys=True, separators=(",", ":"))
+            for key in (
+                "searchable_kinds", "excluded_kinds", "supported", "pairs",
+                "paired_kinds", "supported_action_values",
+            )
+        }
+        self._connection.execute(
+            """INSERT INTO metric_rows (
+                fingerprint, split, source_group, source_identity, parent,
+                occurrence, depth, branching, searchable_kinds, excluded_kinds,
+                supported, pairs, paired_kinds, supported_action_values,
+                telemetry_transitions
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                str(row["fingerprint"]), str(row["split"]), str(row["source_group"]),
+                str(row["source_identity"]), str(row["parent"]), str(row["occurrence"]),
+                int(row["depth"]), int(row["branching"]), encoded["searchable_kinds"],
+                encoded["excluded_kinds"], encoded["supported"], encoded["pairs"],
+                encoded["paired_kinds"], encoded["supported_action_values"],
+                int(row["telemetry_transitions"]),
+            ),
+        )
+        self._pending += 1
+        self._count += 1
+        if self._pending >= 10_000:
+            self._connection.commit()
+            self._pending = 0
+
+    def iter_groups(self):
+        self._connection.commit()
+        cursor = self._connection.execute(
+            "SELECT fingerprint, split, source_group, source_identity, parent, "
+            "occurrence, depth, branching, searchable_kinds, excluded_kinds, "
+            "supported, pairs, paired_kinds, supported_action_values, "
+            "telemetry_transitions FROM metric_rows ORDER BY fingerprint"
+        )
+        current: list[dict[str, Any]] = []
+        current_fingerprint: str | None = None
+        for raw in cursor:
+            fingerprint = str(raw[0])
+            row = {
+                "fingerprint": fingerprint,
+                "split": str(raw[1]),
+                "source_group": str(raw[2]),
+                "source_identity": str(raw[3]),
+                "parent": str(raw[4]),
+                "occurrence": str(raw[5]),
+                "depth": int(raw[6]),
+                "branching": int(raw[7]),
+                "searchable_kinds": tuple(json.loads(raw[8])),
+                "excluded_kinds": tuple(json.loads(raw[9])),
+                "supported": json.loads(raw[10]),
+                "pairs": json.loads(raw[11]),
+                "paired_kinds": {
+                    str(key): tuple(value)
+                    for key, value in json.loads(raw[12]).items()
+                },
+                "supported_action_values": tuple(
+                    tuple(value) for value in json.loads(raw[13])
+                ),
+                "telemetry_transitions": int(raw[14]),
+            }
+            if current_fingerprint is not None and fingerprint != current_fingerprint:
+                yield current_fingerprint, current
+                current = []
+            current_fingerprint = fingerprint
+            current.append(row)
+        if current_fingerprint is not None:
+            yield current_fingerprint, current
+
+    def close(self) -> None:
+        connection = getattr(self, "_connection", None)
+        if connection is None:
+            return
+        self._connection.commit()
+        connection.close()
+        self._connection = None
+        try:
+            os.unlink(self._path)
+        except FileNotFoundError:
+            pass
+
+    def __del__(self) -> None:  # pragma: no cover - best-effort exceptional cleanup
+        try:
+            self.close()
+        except (OSError, sqlite3.Error):
+            pass
+
+
 def _metrics(
     rows: Sequence[Mapping[str, Any]], ledger: Sequence[Mapping[str, Any]],
     geometry_observations: Sequence[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Compute every registered report from bounded compact row summaries."""
+
+    if isinstance(rows, _MetricRowStore):
+        return _metrics_from_store(rows, ledger, geometry_observations)
 
     by_fp: dict[str, list[Mapping[str, Any]]] = defaultdict(list)
     depth, branching, raw_multi_branching = Counter(), Counter(), Counter()
@@ -1139,6 +1304,395 @@ def _metrics(
         },
         "rates": {"internal_occurrences_per_battle_start": len(rows) / starts if starts else None, "internal_occurrences_per_1000_search_simulations": len(rows) * 1000 / search_simulations if search_simulations else None, "by_n_min": {n: {"usable_examples_per_battle_start": thresholds[n]["usable_examples_per_battle_start"], "usable_pairs_per_battle_start": thresholds[n]["usable_pairs_per_battle_start"], "usable_examples_per_1000_search_simulations": thresholds[n]["usable_examples_per_1000_search_simulations"]["overall"], "usable_pairs_per_1000_search_simulations": thresholds[n]["usable_pairs_per_1000_search_simulations"]["overall"]} for n in thresholds}},
         "t091_primary_reference": {"n_min": 4, "leakage_safe_unique_examples": 3534, "retained_ordered_non_tie_pairs": 44846, "comparison": {"t092_unique_example_multiple": thresholds["4"]["leakage_safe_unique_examples"] / 3534 if 3534 else None, "t092_pair_multiple": thresholds["4"]["retained_ordered_non_tie_pairs"] / 44846 if 44846 else None, "t092_unique_example_delta": thresholds["4"]["leakage_safe_unique_examples"] - 3534, "t092_pair_delta": thresholds["4"]["retained_ordered_non_tie_pairs"] - 44846}},
+    }
+
+
+def _metrics_from_store(
+    store: _MetricRowStore,
+    ledger: Sequence[Mapping[str, Any]],
+    geometry_observations: Sequence[Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Compute the formal report while retaining only one fingerprint group."""
+
+    thresholds: dict[str, Any] = {}
+    states: dict[str, dict[str, Any]] = {}
+    raw_fractions: dict[str, array] = {}
+    group_fractions: dict[tuple[str, str], array] = {}
+    for minimum in T092_N_MINS:
+        key = str(minimum)
+        states[key] = {
+            "eligible": 0,
+            "retained": 0,
+            "supported2": 0,
+            "total_supported": 0,
+            "pair_count": 0,
+            "raw_depth": Counter(),
+            "raw_branch": Counter(),
+            "ret_depth": Counter(),
+            "ret_branch": Counter(),
+            "pair_depth": Counter(),
+            "pair_branch": Counter(),
+            "pair_kinds": Counter(),
+            "group": {
+                group: {
+                    "eligible": 0,
+                    "retained": 0,
+                    "supported2": 0,
+                    "total_supported": 0,
+                    "pair_count": 0,
+                    "ret_depth": Counter(),
+                    "ret_branch": Counter(),
+                    "pair_depth": Counter(),
+                    "pair_branch": Counter(),
+                }
+                for group in ("A", "B", "C")
+            },
+        }
+        raw_fractions[key] = array("d")
+        for group in ("A", "B", "C"):
+            group_fractions[(key, group)] = array("d")
+
+    depth = Counter()
+    branching = Counter()
+    raw_multi_branching = Counter()
+    single_action_by_group: Counter[str] = Counter()
+    excluded = Counter()
+    kinds = Counter()
+    depth_by_group = {group: Counter() for group in ("A", "B", "C")}
+    branching_by_group = {group: Counter() for group in ("A", "B", "C")}
+    kinds_by_group = {group: Counter() for group in ("A", "B", "C")}
+    excluded_by_group = {group: Counter() for group in ("A", "B", "C")}
+    teacher_actions_by_group: Counter[str] = Counter()
+    excluded_actions_by_group: Counter[str] = Counter()
+    group_occurrences: Counter[str] = Counter()
+    telemetry_transition_count = 0
+    collisions = 0
+    repeated_groups = 0
+    multiplicity: Counter[int] = Counter()
+    within_split: Counter[str] = Counter()
+    disagreement: dict[str, dict[str, int]] = {
+        str(minimum): {
+            "repeated_fingerprint_groups": 0,
+            "groups_with_defined_best_supported_action": 0,
+            "groups_with_best_supported_action_disagreement": 0,
+            "repeated_supported_pair_comparisons": 0,
+            "pairwise_mean_sign_conflict_pairs": 0,
+            "fingerprint_groups_with_pairwise_mean_sign_conflict": 0,
+        }
+        for minimum in T092_N_MINS
+    }
+
+    for _fingerprint, group in store.iter_groups():
+        group.sort(
+            key=lambda row: (
+                str(row["split"]), str(row["source_identity"]),
+                str(row["parent"]), str(row["occurrence"]),
+            )
+        )
+        multiplicity[len(group)] += 1
+        if len(group) > 1:
+            repeated_groups += 1
+        splits = {str(row["split"]) for row in group}
+        collision = len(splits) > 1
+        if collision:
+            collisions += 1
+        else:
+            within_split[next(iter(splits))] += len(group) - 1
+
+        for row in group:
+            group_name = str(row["source_group"])
+            telemetry_transition_count += int(row["telemetry_transitions"])
+            group_occurrences[group_name] += 1
+            depth_key = _depth_bucket(int(row["depth"]))
+            branch_key = _branch_bucket(int(row["branching"]))
+            depth[depth_key] += 1
+            branching[branch_key] += 1
+            depth_by_group[group_name][depth_key] += 1
+            branching_by_group[group_name][branch_key] += 1
+            if int(row["branching"]) == 1:
+                single_action_by_group[group_name] += 1
+            if int(row["branching"]) > 1:
+                raw_multi_branching[branch_key] += 1
+            teacher_actions_by_group[group_name] += int(row["branching"])
+            excluded_actions_by_group[group_name] += len(row["excluded_kinds"])
+            kinds.update(row["searchable_kinds"])
+            excluded.update(row["excluded_kinds"])
+            kinds_by_group[group_name].update(row["searchable_kinds"])
+            excluded_by_group[group_name].update(row["excluded_kinds"])
+            for minimum in T092_N_MINS:
+                key = str(minimum)
+                supported = int(row["supported"][key])
+                states[key]["total_supported"] += supported
+                states[key]["supported2"] += supported >= 2
+                states[key]["group"][group_name]["total_supported"] += supported
+                states[key]["group"][group_name]["supported2"] += supported >= 2
+                fraction = supported / int(row["branching"])
+                raw_fractions[key].append(fraction)
+                group_fractions[(key, group_name)].append(fraction)
+
+        for minimum in T092_N_MINS:
+            key = str(minimum)
+            state = states[key]
+            eligible = (
+                []
+                if collision
+                else [row for row in group if int(row["pairs"][key]) > 0]
+            )
+            state["eligible"] += len(eligible)
+            state["raw_depth"].update(_depth_bucket(int(row["depth"])) for row in eligible)
+            state["raw_branch"].update(_branch_bucket(int(row["branching"])) for row in eligible)
+            for row in eligible:
+                state["group"][str(row["source_group"])] ["eligible"] += 1
+            retained = [] if collision or not eligible else [eligible[0]]
+            state["retained"] += len(retained)
+            for row in retained:
+                group_name = str(row["source_group"])
+                row_depth = _depth_bucket(int(row["depth"]))
+                row_branch = _branch_bucket(int(row["branching"]))
+                pairs = int(row["pairs"][key])
+                state["pair_count"] += pairs
+                state["ret_depth"][row_depth] += 1
+                state["ret_branch"][row_branch] += 1
+                state["pair_depth"][row_depth] += pairs
+                state["pair_branch"][row_branch] += pairs
+                state["pair_kinds"].update(row["paired_kinds"][key])
+                group_state = state["group"][group_name]
+                group_state["retained"] += 1
+                group_state["pair_count"] += pairs
+                group_state["ret_depth"][row_depth] += 1
+                group_state["ret_branch"][row_branch] += 1
+                group_state["pair_depth"][row_depth] += pairs
+                group_state["pair_branch"][row_branch] += pairs
+
+        if len(group) > 1:
+            for minimum in T092_N_MINS:
+                key = str(minimum)
+                report = disagreement[key]
+                report["repeated_fingerprint_groups"] += 1
+                best: set[str] = set()
+                pair_observations: Counter[str] = Counter()
+                preferences: dict[str, set[str]] = defaultdict(set)
+                for row in group:
+                    supported = [
+                        (action, visits, mean)
+                        for action, visits, mean in row["supported_action_values"]
+                        if int(visits) >= minimum
+                    ]
+                    if supported:
+                        best.add(min(supported, key=lambda item: (-float(item[2]), item[0]))[0])
+                    for left_index, left in enumerate(supported):
+                        for right in supported[left_index + 1:]:
+                            delta = float(left[2]) - float(right[2])
+                            if abs(delta) <= 1e-9:
+                                continue
+                            action_a, action_b = sorted((left[0], right[0]))
+                            pair_key = f"{action_a}|{action_b}"
+                            pair_observations[pair_key] += 1
+                            preferences[pair_key].add(left[0] if delta > 0 else right[0])
+                if best:
+                    report["groups_with_defined_best_supported_action"] += 1
+                if len(best) >= 2:
+                    report["groups_with_best_supported_action_disagreement"] += 1
+                group_conflict = False
+                for pair_key, signs in preferences.items():
+                    if pair_observations[pair_key] >= 2:
+                        report["repeated_supported_pair_comparisons"] += 1
+                    if pair_observations[pair_key] >= 2 and len(signs) >= 2:
+                        report["pairwise_mean_sign_conflict_pairs"] += 1
+                        group_conflict = True
+                if group_conflict:
+                    report["fingerprint_groups_with_pairwise_mean_sign_conflict"] += 1
+
+    group_sims: Counter[str] = Counter()
+    starts_by_group: Counter[str] = Counter()
+    for item in ledger:
+        group_name = str(item["source_group"])
+        group_sims[group_name] += int(item["terminal"].get("battle_decision_count", 0)) * 400
+        starts_by_group[group_name] += 1
+    total_sims = sum(group_sims.values())
+    starts = len(ledger)
+    for minimum in T092_N_MINS:
+        key = str(minimum)
+        state = states[key]
+        group_detail: dict[str, Any] = {}
+        by_group = Counter()
+        for group_name in ("A", "B", "C"):
+            gs = state["group"][group_name]
+            if gs["retained"]:
+                by_group[group_name] = gs["retained"]
+            group_detail[group_name] = {
+                "internal_occurrence_count": group_occurrences[group_name],
+                "raw_occurrences_with_pairs": gs["eligible"],
+                "leakage_safe_unique_examples": gs["retained"],
+                "nodes_with_at_least_two_supported_actions": gs["supported2"],
+                "total_supported_actions": gs["total_supported"],
+                "retained_ordered_non_tie_pairs": gs["pair_count"],
+                "supported_teacher_searchable_fraction": _distribution(
+                    group_fractions[(key, group_name)]
+                ),
+                "by_depth_bucket": dict(sorted(gs["ret_depth"].items())),
+                "by_branching_bucket": dict(sorted(gs["ret_branch"].items())),
+                "pairs_by_depth_bucket": dict(sorted(gs["pair_depth"].items())),
+                "pairs_by_branching_bucket": dict(sorted(gs["pair_branch"].items())),
+                "usable_examples_per_1000_search_simulations": (
+                    gs["retained"] * 1_000 / group_sims[group_name]
+                    if group_sims[group_name] else None
+                ),
+                "usable_pairs_per_1000_search_simulations": (
+                    gs["pair_count"] * 1_000 / group_sims[group_name]
+                    if group_sims[group_name] else None
+                ),
+                "usable_examples_per_battle_start": (
+                    gs["retained"] / starts_by_group[group_name]
+                    if starts_by_group[group_name] else None
+                ),
+                "usable_pairs_per_battle_start": (
+                    gs["pair_count"] / starts_by_group[group_name]
+                    if starts_by_group[group_name] else None
+                ),
+            }
+        thresholds[key] = {
+            "raw_occurrences_with_pairs": state["eligible"],
+            "leakage_safe_unique_examples": state["retained"],
+            "nodes_with_at_least_two_supported_actions": state["supported2"],
+            "total_supported_actions": state["total_supported"],
+            "supported_teacher_searchable_fraction": _distribution(raw_fractions[key]),
+            "retained_ordered_non_tie_pairs": state["pair_count"],
+            "raw_examples_by_depth_bucket": dict(sorted(state["raw_depth"].items())),
+            "raw_examples_by_branching_bucket": dict(sorted(state["raw_branch"].items())),
+            "by_source_group": dict(sorted(by_group.items())),
+            "by_source_group_detail": group_detail,
+            "by_depth_bucket": dict(sorted(state["ret_depth"].items())),
+            "by_branching_bucket": dict(sorted(state["ret_branch"].items())),
+            "pairs_by_depth_bucket": dict(sorted(state["pair_depth"].items())),
+            "pairs_by_branching_bucket": dict(sorted(state["pair_branch"].items())),
+            "action_kinds_with_retained_pairs": sorted(state["pair_kinds"]),
+            "usable_examples_per_1000_search_simulations": {
+                "overall": state["retained"] * 1_000 / total_sims if total_sims else None,
+                "by_source_group": {
+                    group: group_detail[group]["usable_examples_per_1000_search_simulations"]
+                    for group in ("A", "B", "C")
+                },
+            },
+            "usable_pairs_per_1000_search_simulations": {
+                "overall": state["pair_count"] * 1_000 / total_sims if total_sims else None,
+                "by_source_group": {
+                    group: group_detail[group]["usable_pairs_per_1000_search_simulations"]
+                    for group in ("A", "B", "C")
+                },
+            },
+            "usable_examples_per_battle_start": state["retained"] / starts if starts else None,
+            "usable_pairs_per_battle_start": state["pair_count"] / starts if starts else None,
+            "ambiguity_lower_bound": disagreement[key],
+        }
+
+    single = sum(single_action_by_group.values())
+    group_node_totals = {
+        group: {
+            "stable_internal_player_decision_nodes": group_occurrences[group],
+            "stable_internal_single_action_nodes": single_action_by_group[group],
+            "stable_internal_multi_action_nodes": group_occurrences[group] - single_action_by_group[group],
+        }
+        for group in ("A", "B", "C")
+    }
+    repeated_occurrences = sum(
+        occurrence_count * count
+        for occurrence_count, count in multiplicity.items()
+        if occurrence_count > 1
+    )
+    repeated_count = sum(
+        count for occurrence_count, count in multiplicity.items()
+        if occurrence_count > 1
+    )
+    return {
+        "schema_id": "t092-internal-search-state-formal-metrics-v3",
+        "internal_occurrence_count": store.count,
+        "node_totals": {
+            "depth_zero_root_count": 0,
+            "stable_internal_player_decision_nodes": store.count,
+            "stable_internal_single_action_nodes": single,
+            "stable_internal_multi_action_nodes": store.count - single,
+            "by_source_group": group_node_totals,
+            "tree_geometry": _tree_geometry_metrics(geometry_observations or []),
+        },
+        "depth_zero_root_count": 0,
+        "depth_distribution": dict(sorted(depth.items())),
+        "depth_distribution_by_source_group": {
+            group: dict(sorted(depth_by_group[group].items())) for group in ("A", "B", "C")
+        },
+        "branching_distribution": dict(sorted(branching.items())),
+        "branching_distribution_by_source_group": {
+            group: dict(sorted(branching_by_group[group].items())) for group in ("A", "B", "C")
+        },
+        "raw_multi_action_by_branching_bucket": dict(sorted(raw_multi_branching.items())),
+        "teacher_searchable_action_count": sum(teacher_actions_by_group.values()),
+        "teacher_searchable_action_count_by_source_group": dict(sorted(teacher_actions_by_group.items())),
+        "teacher_searchable_action_kinds": dict(sorted(kinds.items())),
+        "teacher_searchable_action_kinds_by_source_group": {
+            group: dict(sorted(kinds_by_group[group].items())) for group in ("A", "B", "C")
+        },
+        "teacher_excluded_action_kinds": dict(sorted(excluded.items())),
+        "teacher_excluded_action_count": sum(excluded.values()),
+        "teacher_excluded_action_count_by_source_group": {
+            group: excluded_actions_by_group[group]
+            for group in sorted(excluded_actions_by_group)
+        },
+        "teacher_excluded_action_kinds_by_source_group": {
+            group: dict(sorted(excluded_by_group[group].items())) for group in ("A", "B", "C")
+        },
+        "public_fingerprint_count": sum(multiplicity.values()),
+        "fingerprint_multiplicity": {
+            "by_occurrence_count": dict(sorted(multiplicity.items())),
+            "repeated_fingerprint_count": repeated_count,
+            "repeated_group_count": repeated_count,
+            "repeated_occurrence_count": repeated_occurrences,
+            "max_multiplicity": max(multiplicity, default=0),
+        },
+        "within_split_deduplication": {
+            "by_split": dict(sorted(within_split.items())),
+            "total_discarded_duplicate_occurrences": sum(within_split.values()),
+        },
+        "cross_split_fingerprint_count": collisions,
+        "ambiguity_lower_bound": {
+            "repeated_public_fingerprint_count": repeated_groups,
+            "cross_split_excluded_count": collisions,
+            "by_n_min": disagreement,
+        },
+        "thresholds": thresholds,
+        "cost": {
+            "frozen_search_simulations": total_sims,
+            "controller_wall_clock_time_s": sum(float(item["cost"]["wall_clock_time_s"]) for item in ledger),
+            "telemetry_extraction_transition_count": telemetry_transition_count,
+            "telemetry_extraction_cpu_time_s": "UNAVAILABLE_FROM_RETAINED_T092_ARM_SCHEMA",
+            "telemetry_extraction_wall_clock_time_s": "UNAVAILABLE_FROM_RETAINED_T092_ARM_SCHEMA",
+            "retained_occurrence_count": store.count,
+            "retained_bytes": "AVAILABLE_FROM_RETENTION_MANIFEST",
+            "peak_memory_mib": "AVAILABLE_FROM_DETACHED_STATUS",
+        },
+        "rates": {
+            "internal_occurrences_per_battle_start": store.count / starts if starts else None,
+            "internal_occurrences_per_1000_search_simulations": store.count * 1000 / total_sims if total_sims else None,
+            "by_n_min": {
+                key: {
+                    "usable_examples_per_battle_start": thresholds[key]["usable_examples_per_battle_start"],
+                    "usable_pairs_per_battle_start": thresholds[key]["usable_pairs_per_battle_start"],
+                    "usable_examples_per_1000_search_simulations": thresholds[key]["usable_examples_per_1000_search_simulations"]["overall"],
+                    "usable_pairs_per_1000_search_simulations": thresholds[key]["usable_pairs_per_1000_search_simulations"]["overall"],
+                }
+                for key in thresholds
+            },
+        },
+        "t091_primary_reference": {
+            "n_min": 4,
+            "leakage_safe_unique_examples": 3534,
+            "retained_ordered_non_tie_pairs": 44846,
+            "comparison": {
+                "t092_unique_example_multiple": thresholds["4"]["leakage_safe_unique_examples"] / 3534,
+                "t092_pair_multiple": thresholds["4"]["retained_ordered_non_tie_pairs"] / 44846,
+                "t092_unique_example_delta": thresholds["4"]["leakage_safe_unique_examples"] - 3534,
+                "t092_pair_delta": thresholds["4"]["retained_ordered_non_tie_pairs"] - 44846,
+            },
+        },
     }
 
 

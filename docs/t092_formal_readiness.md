@@ -59,7 +59,10 @@ checkpoint restoration/no reseed and the inherited explicit 500-step envelope.
 Cap exhaustion remains a failure, never a successful terminal.
 
 The formal finalizer validates every shard, replays the canonical root evidence
-comparison before internal-surface metrics, applies cross-split exclusion and
+comparison before internal-surface metrics, then spills compact metric rows to
+a temporary SQLite store and aggregates one fingerprint group at a time. This
+keeps finalization bounded without dropping any row or changing ordering,
+cross-split exclusion, or deduplication. It applies cross-split exclusion and
 within-split deterministic fingerprint deduplication for every registered
 `n_min={1,2,4,8,16}`, and emits the source/worker ledger, shard identities,
 cost/density/diversity/action-space/ambiguity reports, terminal classification,
