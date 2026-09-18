@@ -234,12 +234,15 @@ def test_conflict_classification_requires_validated_fixed_bootstrap_evidence():
         {"source_identity": f"{group}-{index}", "source_group": group, "singleton_true": .9, "singleton_label": .1, "singleton_ablated": .1, "conflict_true": .1}
         for group in ("A", "B", "C") for index in range(15)
     ]
+    groups = ("A", "B", "C")
     evidence = {"adequacy": {"passed": True}, "paired_source_start_rows": rows,
-                "canonical_fingerprint_counts": {"conflict_bearing": 500, "singleton_or_no_observed_conflict": 500},
-                "contributing_start_counts": {"conflict_bearing": 15, "singleton_or_no_observed_conflict": 15}}
+                "stratum_fingerprint_owners": {
+                    name: [{"public_fingerprint": f"{name}-{index}", "source_identity": f"{groups[index % 3]}-{index % 15}", "source_group": groups[index % 3], "split": "heldout"} for index in range(500)]
+                    for name in ("conflict_bearing", "singleton_or_no_observed_conflict")
+                }}
     assert conflict_limiting_gate(evidence)["passed"] is True
     assert classify_t093(**common, conflict_diagnostic=evidence) == "INTERNAL_STATE_STUDENT_REPEATED_PUBLIC_CONFLICT_LIMITING"
-    evidence["canonical_fingerprint_counts"]["conflict_bearing"] = 499
+    evidence["stratum_fingerprint_owners"]["conflict_bearing"].pop()
     assert conflict_limiting_gate(evidence)["passed"] is False
 
 

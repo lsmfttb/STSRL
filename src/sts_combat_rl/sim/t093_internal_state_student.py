@@ -932,28 +932,40 @@ def conflict_limiting_gate(evidence: Mapping[str, object]) -> dict[str, object]:
 
     adequacy = evidence.get("adequacy")
     rows = evidence.get("paired_source_start_rows")
-    counts = evidence.get("canonical_fingerprint_counts")
-    starts = evidence.get("contributing_start_counts")
+    owners = evidence.get("stratum_fingerprint_owners")
     if (
         not isinstance(adequacy, Mapping) or adequacy.get("passed") is not True
-        or not isinstance(rows, Sequence) or not isinstance(counts, Mapping)
-        or not isinstance(starts, Mapping)
-        or counts.get("conflict_bearing", 0) < 500
-        or counts.get("singleton_or_no_observed_conflict", 0) < 500
-        or starts.get("conflict_bearing", 0) < 15
-        or starts.get("singleton_or_no_observed_conflict", 0) < 15
+        or not isinstance(rows, Sequence) or not isinstance(owners, Mapping)
     ):
         return {"validated": True, "passed": False, "reason": "required adequacy/stratum evidence is unavailable"}
+    owner_sources: dict[str, set[str]] = {}
+    owner_counts: dict[str, int] = {}
+    all_fingerprints: set[str] = set()
+    for stratum in ("conflict_bearing", "singleton_or_no_observed_conflict"):
+        values = owners.get(stratum)
+        if not isinstance(values, Sequence):
+            raise T093Error("conflict diagnostic fingerprint ownership is missing")
+        sources: set[str] = set(); fingerprints: set[str] = set()
+        for value in values:
+            if not isinstance(value, Mapping) or value.get("split") != "heldout" or value.get("source_group") not in T093_SOURCE_GROUPS or not isinstance(value.get("source_identity"), str) or not isinstance(value.get("public_fingerprint"), str):
+                raise T093Error("conflict diagnostic fingerprint ownership is ambiguous")
+            fingerprint = str(value["public_fingerprint"])
+            if fingerprint in fingerprints or fingerprint in all_fingerprints:
+                raise T093Error("conflict diagnostic fingerprint ownership overlaps")
+            fingerprints.add(fingerprint); all_fingerprints.add(fingerprint); sources.add(str(value["source_identity"]))
+        owner_sources[stratum] = sources; owner_counts[stratum] = len(fingerprints)
+    if owner_counts["conflict_bearing"] < 500 or owner_counts["singleton_or_no_observed_conflict"] < 500 or any(len(owner_sources[name]) < 15 for name in owner_sources):
+        return {"validated": True, "passed": False, "reason": "derived stratum support is insufficient"}
     groups: dict[str, str] = {}
     values: dict[str, dict[str, float]] = {name: {} for name in (
         "singleton_true", "singleton_label", "singleton_ablated", "conflict_true",
         "singleton_minus_label", "singleton_minus_ablated", "singleton_minus_conflict",
     )}
     for row in rows:
-        if not isinstance(row, Mapping) or not isinstance(row.get("source_identity"), str) or row.get("source_group") not in T093_SOURCE_GROUPS:
+        if not isinstance(row, Mapping) or row.get("split") != "heldout" or not isinstance(row.get("source_identity"), str) or row.get("source_group") not in T093_SOURCE_GROUPS:
             raise T093Error("conflict diagnostic source-start row is ambiguous")
         source = str(row["source_identity"])
-        if source in groups:
+        if source in groups or source not in owner_sources["conflict_bearing"] | owner_sources["singleton_or_no_observed_conflict"]:
             raise T093Error("conflict diagnostic source-start row is duplicate")
         groups[source] = str(row["source_group"])
         for name in ("singleton_true", "singleton_label", "singleton_ablated", "conflict_true"):
@@ -961,6 +973,8 @@ def conflict_limiting_gate(evidence: Mapping[str, object]) -> dict[str, object]:
         values["singleton_minus_label"][source] = values["singleton_true"][source] - values["singleton_label"][source]
         values["singleton_minus_ablated"][source] = values["singleton_true"][source] - values["singleton_ablated"][source]
         values["singleton_minus_conflict"][source] = values["singleton_true"][source] - values["conflict_true"][source]
+    if set(groups) != owner_sources["conflict_bearing"] | owner_sources["singleton_or_no_observed_conflict"]:
+        raise T093Error("conflict diagnostic source-start rows do not cover owned strata")
     bootstrap = stratified_start_bootstrap({**values, "__groups__": groups})
     arms = bootstrap["arms"]
     passed = (
@@ -970,6 +984,8 @@ def conflict_limiting_gate(evidence: Mapping[str, object]) -> dict[str, object]:
         and arms["singleton_minus_conflict"]["ci_95"][0] > 0
     )
     return {"validated": True, "passed": passed, "bootstrap": bootstrap,
+            "derived_canonical_fingerprint_counts": owner_counts,
+            "derived_contributing_start_counts": {name: len(value) for name, value in owner_sources.items()},
             "diagnostic_only": True, "no_student_input_or_reweight": True}
 
 
