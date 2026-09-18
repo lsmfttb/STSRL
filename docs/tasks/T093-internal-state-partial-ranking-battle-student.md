@@ -111,7 +111,32 @@ safely reuse the scientific result.
 
 ## Artifact Eligibility Contract
 
-Reuse mode: `scientific_quality_claim`.
+### Inputs
+
+Inputs are the exact retained T092 formal scientific-quality corpus and manifest
+already frozen in `## Inputs And Artifacts`, including the accepted T092 evidence
+and retention hashes, exact inherited T090/T092 split assignments, the public
+fingerprint contract, the frozen `n_min=4` support definition, and the exact
+teacher-searchable/public-excluded action boundary. No substitute corpus or
+ordinary Search recollection is eligible.
+
+### Reuse mode
+
+`scientific_quality_claim`.
+
+### Claim boundary
+
+T093 may claim only whether the fixed public-only action-conditioned Battle
+student learns a generalizable state-dependent action-preference signal from the
+frozen Search-v2@400 internal `n_min=4` partial-ranking supervision on
+leakage-safe held-out T087/T090 Battle starts under the preregistered controls
+and gates.
+
+T093 does not claim Battle-outcome improvement, Search improvement, complete-run
+improvement, equivalence to a normal-information-optimal teacher, deployment
+readiness, a solved T034 information-set ambiguity, or authorization of T066.
+
+### Required predicates
 
 The exact T092 retained corpus is eligible only if all of the following remain
 true:
@@ -129,6 +154,8 @@ true:
 - no hidden/private simulator field enters student-visible input;
 - required corpus, configuration, checkpoint and evaluation identities are
   explicit and internally consistent.
+
+### Unavailable-fact behavior
 
 Missing, conflicting, inferred, regenerated-substitute or unverifiable material
 facts fail closed to `INCOMPLETE`.
