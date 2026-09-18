@@ -39,6 +39,7 @@ T095_N_MIN = 4
 T095_SUPPORT_LEVELS = (2, 4, 8, 16)
 T095_TIE_TOLERANCE = 1e-9
 T095_SPLIT_DOMAIN = "T095-PUBLIC-AGGREGATION-SPLIT-V1"
+T095_PUBLIC_FINGERPRINT_SCHEMA_ID = "t095-public-fingerprint-from-t092-v1"
 
 
 class T095Incomplete(ValueError):
@@ -59,7 +60,10 @@ def _sha256_file(path: Path) -> tuple[str, int]:
 
 
 def _read_bound_json(path: Path, expected_sha256: str, label: str) -> dict[str, object]:
-    actual, _ = _sha256_file(path)
+    try:
+        actual, _ = _sha256_file(path)
+    except OSError as error:
+        raise T095Incomplete(f"{label} is unavailable") from error
     if actual != expected_sha256:
         raise T095Incomplete(f"{label} SHA-256 is not the accepted identity")
     try:
@@ -112,6 +116,45 @@ def _public_action_identity(action: Mapping[str, object]) -> dict[str, object]:
         "label": action["label"],
         "parameters": {key: action[key] for key in ("idx1", "idx2", "idx3")},
     }
+
+
+def _public_fingerprint_from_t092(occurrence: object) -> str:
+    """Derive T095's grouping key from T092's public projection and actions.
+
+    T092 retained ``bits`` in its historical fingerprint, while T093 established
+    that ``bits`` is a simulator-native action identifier and not a public
+    student action field.  T095 therefore validates the exact T092 occurrence
+    first, then derives its grouping key only from the projection and ordered
+    T093-compatible public action identities.  The raw T092 hash is neither a
+    grouping key nor a split input.
+    """
+
+    projection = getattr(occurrence, "public_battle_projection", None)
+    actions = getattr(occurrence, "searchable_actions", None)
+    if not isinstance(projection, Mapping) or not isinstance(actions, Sequence):
+        raise T095Incomplete(
+            "validated T092 occurrence lacks public fingerprint inputs"
+        )
+    identities: list[dict[str, object]] = []
+    for row in actions:
+        if not isinstance(row, Mapping) or not isinstance(row.get("action"), Mapping):
+            raise T095Incomplete(
+                "validated T092 occurrence lacks public action identity"
+            )
+        identities.append(_public_action_identity(row["action"]))
+    if len({_canonical(identity) for identity in identities}) != len(identities):
+        raise T095Incomplete(
+            "T092 occurrence has actions distinguishable only by native bits"
+        )
+    return hashlib.sha256(
+        _canonical(
+            {
+                "schema_id": T095_PUBLIC_FINGERPRINT_SCHEMA_ID,
+                "public_tactical_v2": projection,
+                "teacher_searchable_public_actions": identities,
+            }
+        ).encode("utf-8")
+    ).hexdigest()
 
 
 def _sign(value: float) -> int:
@@ -270,6 +313,7 @@ def _audit_records(
                     raise T095Incomplete(
                         "retained occurrence ownership differs from accepted source"
                     )
+                fingerprint = _public_fingerprint_from_t092(occurrence)
                 supported = [
                     (
                         _canonical(_public_action_identity(dict(row["action"]))),
@@ -295,7 +339,7 @@ def _audit_records(
                         connection.execute(
                             "INSERT INTO cells VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?) ON CONFLICT(fingerprint,pair_identity,source_identity) DO UPDATE SET occurrence_count=occurrence_count+1,total=total+excluded.total,minimum=MIN(minimum,excluded.minimum),maximum=MAX(maximum,excluded.maximum),positive=positive+excluded.positive,tie=tie+excluded.tie,negative=negative+excluded.negative",
                             (
-                                occurrence.fingerprint,
+                                fingerprint,
                                 pair_identity,
                                 source,
                                 occurrence.source_group,
@@ -471,6 +515,8 @@ def _audit_records(
             "successor_recommendation": recommendation,
             "claim_boundary": "observed T092 Oracle-conditioned empirical deltas only; not hidden-future posterior sampling, public-only continuation values, normal-information optimality, student learnability, controller improvement, or T034 closure",
             "audit_definition": {
+                "public_fingerprint_schema_id": T095_PUBLIC_FINGERPRINT_SCHEMA_ID,
+                "public_fingerprint_definition": "exact T092 public tactical projection plus ordered T093-compatible teacher-searchable public action identities; native bits are validated but excluded",
                 "source_macro_weighting": "each (public fingerprint, public action pair, source start) contributes exactly one arithmetic-mean cell",
                 "n_min": T095_N_MIN,
                 "support_levels": list(T095_SUPPORT_LEVELS),
@@ -542,8 +588,11 @@ def audit_t095_from_paths(
         raw_path = artifact.get("path")
         if not isinstance(raw_path, str):
             raise T095Incomplete("T092 source artifact lacks a path")
-        path = Path(raw_path).resolve(strict=True)
-        actual, size = _sha256_file(path)
+        try:
+            path = Path(raw_path).resolve(strict=True)
+            actual, size = _sha256_file(path)
+        except OSError as error:
+            raise T095Incomplete("T092 source artifact is unavailable") from error
         if (
             actual != artifact.get("sha256")
             or size != artifact.get("size_bytes")

@@ -13,6 +13,7 @@ from sts_combat_rl.sim.t092_internal_search_state import (
 from sts_combat_rl.sim.t095_public_aggregation import (
     _audit_records,
     _public_action_identity,
+    _public_fingerprint_from_t092,
     _split_half,
     write_t095_artifacts,
 )
@@ -30,7 +31,12 @@ def _action(kind: str, index: int) -> dict[str, object]:
     }
 
 
-def _occurrence(source: str, node: str, delta: float) -> dict[str, object]:
+def _occurrence(
+    source: str, node: str, delta: float, *, native_bits_offset: int = 0
+) -> dict[str, object]:
+    left, right = _action("card", 0), _action("end", 1)
+    left["bits"] = int(left["bits"]) + native_bits_offset
+    right["bits"] = int(right["bits"]) + native_bits_offset
     return {
         "schema_id": "t092-internal-search-state-occurrence-v1",
         "schema_version": 1,
@@ -54,8 +60,8 @@ def _occurrence(source: str, node: str, delta: float) -> dict[str, object]:
         },
         "input_state": "PLAYER_NORMAL",
         "searchable_actions": [
-            {"action": _action("card", 0), "visits": 4, "mean_value": delta},
-            {"action": _action("end", 1), "visits": 4, "mean_value": 0.0},
+            {"action": left, "visits": 4, "mean_value": delta},
+            {"action": right, "visits": 4, "mean_value": 0.0},
         ],
         "excluded_actions": [],
         "search_work": {
@@ -104,7 +110,12 @@ def _fixture(monkeypatch, tmp_path):
         records[source] = _record(
             source,
             [
-                _occurrence(source, f"{source}-{node}", delta)
+                _occurrence(
+                    source,
+                    f"{source}-{node}",
+                    delta,
+                    native_bits_offset=index * 100,
+                )
                 for node, delta in enumerate(deltas)
             ],
         )
@@ -161,6 +172,55 @@ def test_t095_private_native_bits_do_not_enter_public_action_pair_identity():
     changed = deepcopy(action)
     changed["bits"] = 2_147_483_647
     assert _public_action_identity(action) == _public_action_identity(changed)
+
+
+def test_t095_private_native_bits_do_not_split_public_fingerprint():
+    first = _occurrence("one", "node", 1.0)
+    second = _occurrence("two", "node", 1.0, native_bits_offset=100)
+    from sts_combat_rl.sim.t092_internal_search_state import (
+        validate_retained_occurrence,
+    )
+
+    first_row = validate_retained_occurrence(first)
+    second_row = validate_retained_occurrence(second)
+    assert first_row.fingerprint != second_row.fingerprint
+    assert _public_fingerprint_from_t092(first_row) == _public_fingerprint_from_t092(
+        second_row
+    )
+
+
+def test_t095_missing_accepted_source_bytes_write_incomplete(tmp_path, monkeypatch):
+    import sts_combat_rl.sim.t095_public_aggregation as aggregation
+
+    retention, evidence = tmp_path / "retention.json", tmp_path / "evidence.json"
+    retention.write_text("{}", encoding="utf-8")
+    evidence.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(aggregation, "T095_SOURCE_RECORD_COUNT", 1)
+    monkeypatch.setattr(aggregation, "T095_SOURCE_GROUP_COUNTS", {"A": 1})
+    monkeypatch.setattr(aggregation, "_read_bound_json", lambda *args: {})
+    monkeypatch.setattr(
+        aggregation,
+        "_validate_t093_inputs",
+        lambda *_: (
+            [{"path": str(tmp_path / "missing-source.json")}],
+            {
+                "source": {
+                    "source_identity": "source",
+                    "source_group": "A",
+                    "split": "train",
+                    "canonical_position": 1,
+                    "terminal": {"battle_decision_count": 0},
+                }
+            },
+        ),
+    )
+    report = write_t095_artifacts(
+        t092_retention_manifest_path=retention,
+        t092_evidence_path=evidence,
+        output_dir=tmp_path / "out-source-missing",
+    )
+    assert report["terminal_classification"] == "INCOMPLETE"
+    assert report["incomplete_reason"] == "T092 source artifact is unavailable"
 
 
 def test_t095_missing_exact_lineage_writes_incomplete_artifacts(tmp_path):
