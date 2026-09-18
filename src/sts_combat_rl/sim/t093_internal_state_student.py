@@ -927,6 +927,52 @@ def heldout_t093_gate(
             "passed": passed}
 
 
+def conflict_limiting_gate(evidence: Mapping[str, object]) -> dict[str, object]:
+    """Validate T093's sole preregistered conflict-limiting diagnosis path."""
+
+    adequacy = evidence.get("adequacy")
+    rows = evidence.get("paired_source_start_rows")
+    counts = evidence.get("canonical_fingerprint_counts")
+    starts = evidence.get("contributing_start_counts")
+    if (
+        not isinstance(adequacy, Mapping) or adequacy.get("passed") is not True
+        or not isinstance(rows, Sequence) or not isinstance(counts, Mapping)
+        or not isinstance(starts, Mapping)
+        or counts.get("conflict_bearing", 0) < 500
+        or counts.get("singleton_or_no_observed_conflict", 0) < 500
+        or starts.get("conflict_bearing", 0) < 15
+        or starts.get("singleton_or_no_observed_conflict", 0) < 15
+    ):
+        return {"validated": True, "passed": False, "reason": "required adequacy/stratum evidence is unavailable"}
+    groups: dict[str, str] = {}
+    values: dict[str, dict[str, float]] = {name: {} for name in (
+        "singleton_true", "singleton_label", "singleton_ablated", "conflict_true",
+        "singleton_minus_label", "singleton_minus_ablated", "singleton_minus_conflict",
+    )}
+    for row in rows:
+        if not isinstance(row, Mapping) or not isinstance(row.get("source_identity"), str) or row.get("source_group") not in T093_SOURCE_GROUPS:
+            raise T093Error("conflict diagnostic source-start row is ambiguous")
+        source = str(row["source_identity"])
+        if source in groups:
+            raise T093Error("conflict diagnostic source-start row is duplicate")
+        groups[source] = str(row["source_group"])
+        for name in ("singleton_true", "singleton_label", "singleton_ablated", "conflict_true"):
+            values[name][source] = _finite(row.get(name), name)
+        values["singleton_minus_label"][source] = values["singleton_true"][source] - values["singleton_label"][source]
+        values["singleton_minus_ablated"][source] = values["singleton_true"][source] - values["singleton_ablated"][source]
+        values["singleton_minus_conflict"][source] = values["singleton_true"][source] - values["conflict_true"][source]
+    bootstrap = stratified_start_bootstrap({**values, "__groups__": groups})
+    arms = bootstrap["arms"]
+    passed = (
+        arms["singleton_true"]["ci_95"][0] > .5
+        and arms["singleton_minus_label"]["ci_95"][0] > 0
+        and arms["singleton_minus_ablated"]["ci_95"][0] > 0
+        and arms["singleton_minus_conflict"]["ci_95"][0] > 0
+    )
+    return {"validated": True, "passed": passed, "bootstrap": bootstrap,
+            "diagnostic_only": True, "no_student_input_or_reweight": True}
+
+
 def source_start_macro_accuracy(
     examples: Sequence[T093Example], score: Mapping[str, Sequence[float]],
 ) -> dict[str, object]:
@@ -986,7 +1032,7 @@ def stratified_start_bootstrap(
 def classify_t093(
     *, information_valid: bool, evidence_valid: bool, diversity: Mapping[str, object],
     adequacy: Mapping[str, object], heldout: Mapping[str, object] | None = None,
-    conflict_limited: bool = False,
+    conflict_diagnostic: Mapping[str, object] | None = None,
 ) -> str:
     if not information_valid:
         return "INTERNAL_STATE_STUDENT_INFORMATION_BOUNDARY_INVALID"
@@ -1000,7 +1046,9 @@ def classify_t093(
         raise T093Error("held-out result is required after adequacy admission")
     if heldout.get("passed") is True:
         return "INTERNAL_STATE_BATTLE_STUDENT_SIGNAL_ESTABLISHED"
-    return "INTERNAL_STATE_STUDENT_REPEATED_PUBLIC_CONFLICT_LIMITING" if conflict_limited else "INTERNAL_STATE_STUDENT_GENERALIZATION_NOT_ESTABLISHED"
+    if conflict_diagnostic is not None and conflict_limiting_gate(conflict_diagnostic).get("passed") is True:
+        return "INTERNAL_STATE_STUDENT_REPEATED_PUBLIC_CONFLICT_LIMITING"
+    return "INTERNAL_STATE_STUDENT_GENERALIZATION_NOT_ESTABLISHED"
 
 
 __all__ = [
@@ -1009,6 +1057,6 @@ __all__ = [
     "classify_t093", "effective_diversity_report", "example_from_t092_occurrence",
     "evaluate_t093_scorer", "heldout_t093_gate", "label_destruction_means",
     "materialize_t093_from_paths", "source_start_macro_accuracy", "stratified_start_bootstrap",
-    "repeated_public_state_diagnostics", "secondary_stratified_report", "t093_checkpoint_identity",
+    "conflict_limiting_gate", "repeated_public_state_diagnostics", "secondary_stratified_report", "t093_checkpoint_identity",
     "train_t093_scorer", "train_validation_adequacy", "validate_t093_source_record",
 ]

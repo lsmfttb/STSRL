@@ -18,6 +18,7 @@ from sts_combat_rl.sim.t093_internal_state_student import (
     _canonicalize,
     _validate_t093_inputs,
     build_t093_training_config,
+    conflict_limiting_gate,
     classify_t093,
     example_from_t092_occurrence,
     label_destruction_means,
@@ -224,6 +225,22 @@ def test_terminal_precedence_and_heldout_admission_are_frozen():
     assert classify_t093(information_valid=True, evidence_valid=True, diversity={"passed": True}, adequacy={"passed": False}) == "INTERNAL_STATE_STUDENT_MODEL_OR_TARGET_INADEQUATE"
     with pytest.raises(T093Error, match="held-out result"):
         classify_t093(information_valid=True, evidence_valid=True, diversity={"passed": True}, adequacy={"passed": True})
+
+
+def test_conflict_classification_requires_validated_fixed_bootstrap_evidence():
+    common = {"information_valid": True, "evidence_valid": True, "diversity": {"passed": True}, "adequacy": {"passed": True}, "heldout": {"passed": False}}
+    assert classify_t093(**common) == "INTERNAL_STATE_STUDENT_GENERALIZATION_NOT_ESTABLISHED"
+    rows = [
+        {"source_identity": f"{group}-{index}", "source_group": group, "singleton_true": .9, "singleton_label": .1, "singleton_ablated": .1, "conflict_true": .1}
+        for group in ("A", "B", "C") for index in range(15)
+    ]
+    evidence = {"adequacy": {"passed": True}, "paired_source_start_rows": rows,
+                "canonical_fingerprint_counts": {"conflict_bearing": 500, "singleton_or_no_observed_conflict": 500},
+                "contributing_start_counts": {"conflict_bearing": 15, "singleton_or_no_observed_conflict": 15}}
+    assert conflict_limiting_gate(evidence)["passed"] is True
+    assert classify_t093(**common, conflict_diagnostic=evidence) == "INTERNAL_STATE_STUDENT_REPEATED_PUBLIC_CONFLICT_LIMITING"
+    evidence["canonical_fingerprint_counts"]["conflict_bearing"] = 499
+    assert conflict_limiting_gate(evidence)["passed"] is False
 
 
 def test_t093_cli_has_only_retained_file_inputs():
