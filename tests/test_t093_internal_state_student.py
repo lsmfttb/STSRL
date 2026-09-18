@@ -10,6 +10,7 @@ import pytest
 from sts_combat_rl.commands.t093_internal_state_student import build_parser
 from sts_combat_rl.sim.t092_internal_search_state import (
     T092_FROZEN_TEACHER_CONFIG,
+    T092_NATIVE_API,
     T092_NATIVE_IDENTITY,
 )
 from sts_combat_rl.sim.t093_internal_state_student import (
@@ -19,7 +20,10 @@ from sts_combat_rl.sim.t093_internal_state_student import (
     classify_t093,
     example_from_t092_occurrence,
     label_destruction_means,
+    repeated_public_state_diagnostics,
+    secondary_stratified_report,
     source_start_macro_accuracy,
+    validate_t093_source_record,
 )
 from sts_combat_rl.sim.t090_battle_student import canonical_sha256
 
@@ -150,6 +154,43 @@ def test_t093_rejects_private_public_projection_before_encoding():
     occurrence["public_battle_projection"]["hidden_rng"] = 7
     with pytest.raises(ValueError, match="forbidden private"):
         example_from_t092_occurrence(occurrence)
+
+
+def test_t093_source_record_provenance_is_checked_beyond_hashes():
+    expected = {"source_identity": "source-a", "source_group": "A", "split": "train", "canonical_position": 0, "terminal": {"battle_decision_count": 0}}
+    record = {
+        "schema_id": "t092-paired-canary-arm-record-v2", "schema_version": 1,
+        "task_id": "T092", "arm": "ON", "implementation_head": "1e3dff2665d38dfd6acc786666c1889bc8327508",
+        "native_identity": dict(T092_NATIVE_IDENTITY), "native_api": T092_NATIVE_API,
+        "teacher_config": dict(T092_FROZEN_TEACHER_CONFIG), **expected,
+        "decision_records": [], "internal_occurrences": [],
+    }
+    artifact = {"schema_id": "t092-paired-canary-arm-record-v2"}
+    validate_t093_source_record(record, artifact=artifact, expected_source=expected)
+    record["arm"] = "OFF"
+    with pytest.raises(T093Error, match="accepted T092"):
+        validate_t093_source_record(record, artifact=artifact, expected_source=expected)
+
+
+def test_t093_repeated_public_conflict_and_secondary_reports_are_diagnostic_only():
+    first = _occurrence(source="source-a", node="one")
+    second = deepcopy(first)
+    second["source_identity"] = "source-b"
+    second["parent_root_decision_identity"] = "source-b:root"
+    second["occurrence_identity"] = "two"
+    second["searchable_actions"][0]["mean_value"] = 0.0
+    second["searchable_actions"][1]["mean_value"] = 1.0
+    diagnostic = repeated_public_state_diagnostics([first, second])
+    assert diagnostic["repeated_canonical_fingerprint_count"] == 1
+    assert diagnostic["pair_sign_conflict_count"] == 1
+    assert diagnostic["student_input_or_weight_use"] == "forbidden"
+    example = example_from_t092_occurrence(first)
+    assert example is not None
+    report = secondary_stratified_report(
+        [example], scores_by_arm={"true": {example.public_fingerprint: [1.0, 0.0]}}, split="train"
+    )
+    assert report["promotion_gate"] is False
+    assert report["chance_reference"] == 0.5
 
 
 def test_source_start_metric_uses_equal_starts_not_pair_count():

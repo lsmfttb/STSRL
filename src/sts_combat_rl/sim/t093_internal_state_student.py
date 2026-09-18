@@ -25,6 +25,7 @@ from sts_combat_rl.sim.features import encode_lightspeed_battle_snapshot, encode
 from sts_combat_rl.sim.t090_battle_student import canonical_sha256
 from sts_combat_rl.sim.t092_internal_search_state import (
     T092_FROZEN_TEACHER_CONFIG,
+    T092_NATIVE_API,
     T092_NATIVE_IDENTITY,
     validate_retained_occurrence,
 )
@@ -53,6 +54,8 @@ T093_MIN_CONTRIBUTING_STARTS = {
     "validation": {"A": 11, "B": 23, "C": 15},
     "heldout": {"A": 16, "B": 33, "C": 22},
 }
+T093_ACCEPTED_T092_IMPLEMENTATION_HEAD = "1e3dff2665d38dfd6acc786666c1889bc8327508"
+T093_T092_SOURCE_RECORD_SCHEMA_ID = "t092-paired-canary-arm-record-v2"
 
 
 class T093Error(ValueError):
@@ -258,6 +261,35 @@ def _validate_t093_inputs(
     return artifacts, by_source
 
 
+def validate_t093_source_record(
+    record: Mapping[str, object], *, artifact: Mapping[str, object],
+    expected_source: Mapping[str, object],
+) -> None:
+    """Check T092 internal consistency in addition to retention file hashes."""
+
+    if (
+        record.get("schema_id") != T093_T092_SOURCE_RECORD_SCHEMA_ID
+        or record.get("schema_version") != 1
+        or record.get("task_id") != "T092"
+        or record.get("arm") != "ON"
+        or record.get("implementation_head") != T093_ACCEPTED_T092_IMPLEMENTATION_HEAD
+        or record.get("native_identity") != T092_NATIVE_IDENTITY
+        or record.get("native_api") != T092_NATIVE_API
+        or record.get("teacher_config") != T092_FROZEN_TEACHER_CONFIG
+        or record.get("schema_id") != artifact.get("schema_id")
+        or record.get("source_identity") != expected_source.get("source_identity")
+        or record.get("source_group") != expected_source.get("source_group")
+        or record.get("split") != expected_source.get("split")
+        or record.get("canonical_position") != expected_source.get("canonical_position")
+        or not isinstance(record.get("decision_records"), list)
+        or not isinstance(expected_source.get("terminal"), Mapping)
+        or len(record["decision_records"])
+        != expected_source["terminal"].get("battle_decision_count")
+        or not isinstance(record.get("internal_occurrences"), list)
+    ):
+        raise T093Error("retained source record provenance mismatches accepted T092")
+
+
 def materialize_t093_from_paths(
     *, retention_manifest_path: str | Path, formal_evidence_path: str | Path,
     output_path: str | Path,
@@ -310,13 +342,11 @@ def materialize_t093_from_paths(
             if (
                 expected is None
                 or source in seen_sources
-                or record.get("schema_id") != artifact.get("schema_id")
-                or record.get("source_group") != expected.get("source_group")
-                or record.get("split") != expected.get("split")
-                or record.get("canonical_position") != expected.get("canonical_position")
-                or not isinstance(record.get("internal_occurrences"), list)
             ):
                 raise T093Error("retained source record provenance mismatches evidence")
+            validate_t093_source_record(
+                record, artifact=artifact, expected_source=expected
+            )
             seen_sources.add(source)
             processed_records += 1
             for occurrence in record["internal_occurrences"]:
@@ -453,6 +483,123 @@ def effective_diversity_report(examples: Sequence[T093Example]) -> dict[str, obj
         "required_minima": {"fingerprints": dict(T093_MIN_FINGERPRINTS), "source_starts": T093_MIN_CONTRIBUTING_STARTS},
         "passed": passed,
     }
+
+
+def _occurrence_key(example: T093Example) -> str:
+    return _canonical(
+        [example.source_identity, example.parent_root_decision_identity, example.occurrence_identity]
+    )
+
+
+def repeated_public_state_diagnostics(
+    occurrences: Sequence[Mapping[str, object]], *,
+    performance_rows: Sequence[Mapping[str, object]] = (),
+) -> dict[str, object]:
+    """Diagnostic-only T034 ambiguity lower bounds on pre-dedup n_min=4 rows.
+
+    Conflict/multiplicity are reporting fields only: this function never
+    returns weights or model inputs, and callers must not feed them to training.
+    """
+
+    grouped: dict[str, list[T093Example]] = defaultdict(list)
+    for raw in occurrences:
+        if not isinstance(raw, Mapping):
+            raise T093Error("ambiguity occurrence is malformed")
+        example = example_from_t092_occurrence(raw)
+        if example is not None:
+            grouped[example.public_fingerprint].append(example)
+    repeated = {key: rows for key, rows in grouped.items() if len(rows) > 1}
+    conflict: set[str] = set()
+    best_disagreement = 0
+    pair_support, pair_conflicts = 0, 0
+    for fingerprint, rows in repeated.items():
+        best_sets = {
+            tuple(sorted(_canonical(row.action_identities[index]) for index, mean in enumerate(row.teacher_means) if mean == max(row.teacher_means)))
+            for row in rows
+        }
+        best_disagreement += int(len(best_sets) > 1)
+        signs: dict[tuple[str, str], set[int]] = defaultdict(set)
+        for row in rows:
+            for high, low in row.pairs:
+                key = tuple(sorted((_canonical(row.action_identities[high]), _canonical(row.action_identities[low]))))
+                signs[key].add(1 if key[0] == _canonical(row.action_identities[high]) else -1)
+        pair_support += len(signs)
+        conflicts = sum(len(value) > 1 for value in signs.values())
+        pair_conflicts += conflicts
+        if conflicts:
+            conflict.add(fingerprint)
+    strata: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+    for row in performance_rows:
+        if not isinstance(row, Mapping) or not isinstance(row.get("public_fingerprint"), str) or not isinstance(row.get("arm"), str):
+            raise T093Error("ambiguity performance row is malformed")
+        value = _finite(row.get("source_start_macro_accuracy"), "ambiguity performance")
+        category = "conflict_bearing" if row["public_fingerprint"] in conflict else "singleton_or_no_observed_conflict"
+        strata[str(row["arm"])][category].append(value)
+    return {
+        "surface": "pre_dedup_t092_n_min_4_diagnostic_only",
+        "student_input_or_weight_use": "forbidden",
+        "canonical_fingerprint_count": len(grouped),
+        "repeated_canonical_fingerprint_count": len(repeated),
+        "repeated_canonical_fingerprint_fraction": len(repeated) / len(grouped) if grouped else 0.0,
+        "best_supported_action_disagreement_count": best_disagreement,
+        "supported_public_action_pair_count": pair_support,
+        "pair_sign_conflict_count": pair_conflicts,
+        "pair_sign_conflict_rate": pair_conflicts / pair_support if pair_support else 0.0,
+        "conflict_bearing_fingerprint_count": len(conflict),
+        "performance_by_arm_and_stratum": {
+            arm: {stratum: statistics.fmean(values) for stratum, values in values_by_stratum.items() if values}
+            for arm, values_by_stratum in strata.items()
+        },
+    }
+
+
+def secondary_stratified_report(
+    examples: Sequence[T093Example], *, scores_by_arm: Mapping[str, Mapping[str, Sequence[float]]],
+    split: str, seed_metrics: Mapping[str, Sequence[float]] | None = None,
+) -> dict[str, object]:
+    """Required descriptive metrics; none of these create a promotion gate."""
+
+    rows = [example for example in examples if example.split == split]
+    if split not in T093_SPLITS or not rows:
+        raise T093Error("secondary report needs one non-empty registered split")
+    result: dict[str, object] = {"split": split, "chance_reference": 0.5, "promotion_gate": False, "arms": {}}
+    for arm, score_rows in scores_by_arm.items():
+        per_group: dict[str, list[float]] = defaultdict(list)
+        per_depth: dict[str, list[float]] = defaultdict(list)
+        per_branching: dict[str, list[float]] = defaultdict(list)
+        per_kind: dict[str, list[float]] = defaultdict(list)
+        per_margin: dict[str, list[float]] = defaultdict(list)
+        regrets: list[float] = []; agreements: list[float] = []; accuracies: list[float] = []
+        per_start: dict[str, int] = defaultdict(int)
+        for example in rows:
+            scores = score_rows.get(example.public_fingerprint)
+            if scores is None or len(scores) != len(example.teacher_means):
+                raise T093Error("secondary score rows do not align with supported actions")
+            selected = max(range(len(scores)), key=lambda index: (float(scores[index]), -index))
+            best = max(example.teacher_means)
+            top_set = {index for index, value in enumerate(example.teacher_means) if value == best}
+            accuracy = statistics.fmean(float(scores[high]) > float(scores[low]) for high, low in example.pairs)
+            regret = best - example.teacher_means[selected]
+            margin = max(example.teacher_means) - min(example.teacher_means)
+            bucket = "0-0.01" if margin <= .01 else "0.01-0.1" if margin <= .1 else ">0.1"
+            agreements.append(float(selected in top_set)); regrets.append(regret); accuracies.append(accuracy)
+            per_group[example.source_group].append(accuracy); per_depth[str(example.tree_depth)].append(accuracy)
+            per_branching[str(len(example.teacher_means))].append(accuracy); per_kind[example.action_kinds[selected]].append(accuracy)
+            per_margin[bucket].append(accuracy); per_start[example.source_identity] += 1
+        result["arms"][arm] = {
+            "pairwise_ranking_accuracy": statistics.fmean(accuracies),
+            "supported_action_top_set_agreement": statistics.fmean(agreements),
+            "supported_action_teacher_regret": statistics.fmean(regrets),
+            "source_group": {key: statistics.fmean(value) for key, value in per_group.items()},
+            "depth": {key: statistics.fmean(value) for key, value in per_depth.items()},
+            "supported_branching": {key: statistics.fmean(value) for key, value in per_branching.items()},
+            "teacher_action_kind": {key: statistics.fmean(value) for key, value in per_kind.items()},
+            "teacher_margin": {key: statistics.fmean(value) for key, value in per_margin.items()},
+            "per_start_example_concentration": dict(per_start),
+            "mean_examples_per_start": statistics.fmean(per_start.values()),
+        }
+    result["seed_variation"] = {arm: {"count": len(values), "min": min(values), "max": max(values)} for arm, values in (seed_metrics or {}).items() if values}
+    return result
 
 
 @dataclass(frozen=True)
@@ -804,5 +951,6 @@ __all__ = [
     "classify_t093", "effective_diversity_report", "example_from_t092_occurrence",
     "evaluate_t093_scorer", "heldout_t093_gate", "label_destruction_means",
     "materialize_t093_from_paths", "source_start_macro_accuracy", "stratified_start_bootstrap",
-    "train_t093_scorer", "train_validation_adequacy",
+    "repeated_public_state_diagnostics", "secondary_stratified_report",
+    "train_t093_scorer", "train_validation_adequacy", "validate_t093_source_record",
 ]
