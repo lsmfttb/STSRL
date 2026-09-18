@@ -70,16 +70,38 @@ motivates T095 but does not itself define the aggregation target.
 
 ### What one repeated public state means
 
-Use the accepted T092 public fingerprint:
+T095 uses a task-specific **public aggregation fingerprint** rather than the raw
+historical T092 `occurrence.fingerprint`.
+
+The T095 public aggregation fingerprint is exactly:
 
 ```text
-(public-tactical-v2 student-visible Battle state,
- ordered teacher-searchable public action identities)
+exact accepted T092 public_battle_projection
++
+ordered teacher-searchable public action identities using only:
+  scope, kind, idx1, idx2, idx3, label
 ```
 
-Two occurrences with the same fingerprint are indistinguishable under this
-student-visible representation, even if their private simulator state, hidden
-draw order, RNG state, Search path, or other hidden future facts differ.
+Native action `bits` is explicitly excluded from the T095 public action
+identity and therefore from the T095 aggregation fingerprint, action-pair
+identity, source-macro grouping, and split-half assignment. T093 already
+established that native `bits` identifies an internal replay action and must
+not influence public encoding or a public action-identity hash.
+
+The raw historical T092 fingerprint remains part of accepted T092 provenance
+and may be reported diagnostically, but it is not a T095 grouping key. T095
+does not retroactively alter T092, T093, or T094 results.
+
+No other T092 public action field may be removed, rewritten, or inferred. If
+two teacher-searchable native actions within one validated occurrence become
+identical after removing only `bits`, the occurrence is scientifically
+ambiguous for T095 and the audit must fail closed to `INCOMPLETE`; T095 may
+not silently merge those actions.
+
+Two occurrences with the same T095 public aggregation fingerprint are therefore
+indistinguishable under the already-established student-visible
+representation, even if their private simulator state, hidden draw order, RNG
+state, Search path, native replay bits, or other hidden future facts differ.
 
 T095 treats different Oracle-conditioned values attached to such repeated
 public states as **observed conditional variation**, not as invalid labels.
@@ -174,8 +196,15 @@ T095 may not claim:
   validate;
 - all 413 accepted source starts preserve source group and inherited provenance;
 - only accepted stable depth>=1 T092 public decision occurrences are used;
-- public fingerprint and teacher-searchable action identities are exactly the
-  accepted T092 schema;
+- the T095 public aggregation fingerprint uses the exact accepted T092
+  `public_battle_projection` plus ordered T093-compatible public action
+  identities `scope/kind/idx1/idx2/idx3/label`, with native `bits`
+  excluded and no other action field removed or inferred;
+- the raw historical T092 fingerprint is not used for T095 grouping,
+  action-pair identity, weighting, or split-half assignment;
+- no validated occurrence contains two teacher-searchable actions that collapse
+  to the same T095 public action identity after excluding only `bits`; such a
+  collision fails closed to `INCOMPLETE`;
 - primary action support remains frozen at `n_min=4`;
 - each pair delta uses finite accepted T092 child means for both actions;
 - no hidden/private field enters grouping, weighting, split-half assignment,
@@ -195,13 +224,16 @@ substitute, or unverifiable material facts fail closed to `INCOMPLETE`.
 
 ### Occurrence-level observation
 
-For every public fingerprint and every unordered pair of teacher-searchable
-actions where both actions have:
+For every T095 public aggregation fingerprint and every unordered pair of
+teacher-searchable public actions where both actions have:
 
 - child visits >= 4;
 - finite teacher mean;
 
-retain the signed pair delta under deterministic action-identity ordering.
+retain the signed pair delta under deterministic ordering of the exact T095
+bits-excluded public action identities defined above. Native `bits` may be
+validated as part of the retained T092 occurrence but may not enter the pair
+identity.
 
 Teacher ties with `abs(delta) <= 1e-9` are retained as zero/tie observations
 for distribution reporting but do not count as positive or negative signs.
@@ -459,10 +491,11 @@ Ordinary streaming/storage/report-schema/CLI/helper/process details are
 Maintainer/Implementer execution choices unless they change the scientific
 meaning above.
 
-A material change to the accepted T092 input identity, public fingerprint,
-`n_min=4` support rule, source-start macro weighting, `k_min` set, split-half
-definition, feasibility thresholds, terminal classification, or successor
-meaning requires Planner amendment and renewed Maintainer exact-head approval.
+A material change to the accepted T092 input identity, the T095 public
+aggregation fingerprint or public action identity, `n_min=4` support rule,
+source-start macro weighting, `k_min` set, split-half definition, feasibility
+thresholds, terminal classification, or successor meaning requires Planner
+amendment and renewed Maintainer exact-head approval.
 
 ## Acceptance Criteria
 
