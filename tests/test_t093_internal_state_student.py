@@ -231,7 +231,7 @@ def test_conflict_classification_requires_validated_fixed_bootstrap_evidence():
     common = {"information_valid": True, "evidence_valid": True, "diversity": {"passed": True}, "adequacy": {"passed": True}, "heldout": {"passed": False}}
     assert classify_t093(**common) == "INTERNAL_STATE_STUDENT_GENERALIZATION_NOT_ESTABLISHED"
     rows = [
-        {"source_identity": f"{group}-{index}", "source_group": group, "singleton_true": .9, "singleton_label": .1, "singleton_ablated": .1, "conflict_true": .1}
+        {"source_identity": f"{group}-{index}", "source_group": group, "split": "heldout", "singleton_true": .9, "singleton_label": .1, "singleton_ablated": .1, "conflict_true": .1}
         for group in ("A", "B", "C") for index in range(15)
     ]
     groups = ("A", "B", "C")
