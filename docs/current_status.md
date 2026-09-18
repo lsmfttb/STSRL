@@ -122,6 +122,34 @@ Non-Combat update, or T066 work was performed or authorized. The result is a
 post-leakage surface diagnosis, not evidence that public Battle learning is
 impossible.
 
+T094 is complete on PR #109 at exact implementation head
+`6c81b8c086c274234c1747033d3871b89f51eb45`. Its authorized detached offline
+audit consumed only the hash-verified retained T092 source records/evidence and
+the retained T093 corpus identity. The job used one non-simulator streaming
+aggregation process, ran for approximately 27 minutes 14 seconds, completed
+with `SUCCEEDED`, and produced no stderr/stdout output. The report reproduced
+the exact T093 S3 counts `25,825/5,842/8,383` and source-start cells
+train/validation/heldout A/B/C = `30/119/77`, `6/30/20`, and `9/43/27`.
+
+Across all splits, A contributed `93/93/93` starts at S1 `n_min=1/2/4`, then
+fell to `59` after exact cross-split fingerprint exclusion and `45` in final
+S3 canonical ownership. B remained `192` starts through every stage. C
+contributed `125/124/124` at S1 `n_min=1/2/4` and `124` through S2/S3. The
+terminal classification is
+`A_COHORT_CANONICALIZATION_LIMITING`: the accepted route is a future
+leakage-safe split/fingerprint/canonical-ownership redesign, without weakening
+the public-information or leakage firewalls. The retained report is
+`/mnt/d/DeadlyCatCoding/STSRL/artifacts/t094-a-cohort-supervision-attrition-6c81b8c-20260918/t094-a-cohort-attrition-report.json`
+(SHA-256
+`bad75c299da9345df6aa02a0235411a8718e776f5ad9772b5d9bde5fe7722d88`,
+21,298 bytes), and its retention manifest is
+`/mnt/d/DeadlyCatCoding/STSRL/artifacts/t094-a-cohort-supervision-attrition-6c81b8c-20260918/t094-retention-manifest.json`
+(SHA-256
+`283ef46a4eace93a515e57a7676cdc02bcfc57acf477146b4f35d0bd378082e8`). No
+simulator/Search run, student training, controller integration, complete-run
+evaluation, Non-Combat update, or T066 authorization occurred; T034 remains
+unresolved.
+
 The task index lists the canonical lifecycle state for the published backlog.
 The M1 model-guided Oracle search sandbox is complete through synthesis. It
 validated Oracle-like search plumbing but did not demonstrate controller
