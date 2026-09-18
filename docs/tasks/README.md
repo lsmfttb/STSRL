@@ -126,6 +126,7 @@ task branch is expected to be ahead of its base; before final landing, refresh
 | T092 | DONE | [Internal Search-State Teacher Data-Surface Gate](T092-internal-search-state-teacher-data-surface.md) | T011, T016, T017, T020, T025, T062, T078, T081, T087, T088, T090, T091 | PR #106 formal evidence on exact head `1e3dff2` completed 8/8 shards with root reproduction passed (6,369 decisions), classification `INTERNAL_SEARCH_SURFACE_DENSE_ENOUGH`, and no Search change, training, or student claim; retained evidence and manifest are under `/mnt/d/DeadlyCatCoding/STSRL/artifacts/t092-formal-413-1e3dff2-20260918/`. |
 | T093 | DONE | [Internal-State Partial-Ranking Public Battle-Student Distillation Gate](T093-internal-state-partial-ranking-battle-student.md) | T011, T016, T025, T062, T078, T081, T087, T088, T090, T091, T092 | PR #108 exact head `66fe372`; exact T092 413-start materialization completed, but post-leakage source-start diversity failed the frozen A-cell minima (train/validation/heldout A = `30/6/9` vs `44/11/16`), so terminal classification is `INTERNAL_STATE_STUDENT_EFFECTIVE_DIVERSITY_INSUFFICIENT`; training, controls, held-out evaluation, and Search integration were not run. Retained external corpus and manifest are under `/mnt/d/DeadlyCatCoding/STSRL/artifacts/t093-internal-state-student-66fe372-20260918/`. |
 | T094 | DONE | [A-Cohort Supervision Attrition Decision Audit](T094-a-cohort-supervision-attrition-decision-audit.md) | T052, T085, T087, T090, T092, T093 | PR #109 exact head `6c81b8c`; exact S3 reproduced and terminal classification `A_COHORT_CANONICALIZATION_LIMITING`: A was `93/93/93` at S1 `n_min=1/2/4`, `59` after cross-split exclusion, and `45` at final S3; B/C same-pipeline controls remained broad. Retained report/manifest are under `/mnt/d/DeadlyCatCoding/STSRL/artifacts/t094-a-cohort-supervision-attrition-6c81b8c-20260918/`; no Search rerun, student training, controller integration, Non-Combat update, or T066. |
+| T095 | DONE | [Repeated-Public-State Oracle Aggregation Feasibility Audit](T095-repeated-public-state-oracle-aggregation-feasibility.md) | T033, T092, T094 | PR #110 exact head `181b531`; exact 413-start retained-T092 audit classified `EMPIRICAL_PUBLIC_AGGREGATION_TOO_SPARSE`: `k_min=2` had 4,551 fingerprints/26,996 aggregates (all A-only), while `k_min=4/8/16` had zero support, so every primary `k_min=8` predicate failed. No simulator/Search run, training, native/controller integration, T034 closure, Non-Combat update, or T066. |
 
 Use the table for landed lifecycle state. `DRAFT`, `BLOCKED`, `CANCELLED`, and
 terminal rows have their normal durable meanings. A merged `READY` row authorizes
@@ -347,8 +348,9 @@ and inspect again after the expected window or on request rather than continuous
 ## Published Queue
 
 The landed executable queue is the set of `READY` rows in the Active Backlog.
-There are currently no `READY` rows. T063 and T066 remain `DRAFT`; T034
-remains blocked on native public-consistent hidden-future sampling support.
+T095 is complete on this publication branch with
+`EMPIRICAL_PUBLIC_AGGREGATION_TOO_SPARSE`; T063 and T066 remain `DRAFT`, and
+T034 remains blocked on native public-consistent hidden-future sampling support.
 T064, T065, and T071--T089 are `DONE` with their recorded diagnostic, repair,
 control-plane, target-generation, or accepted baseline-selection outcomes.
 T089's valid fresh evaluation did not establish Non-Combat improvement, so no

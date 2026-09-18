@@ -150,6 +150,39 @@ simulator/Search run, student training, controller integration, complete-run
 evaluation, Non-Combat update, or T066 authorization occurred; T034 remains
 unresolved.
 
+T095 is complete on PR #110 at exact implementation/contract head
+`181b53152619d06f271c72d3d777ba4e79999374`. Its authorized detached offline
+audit consumed only the exact retained T092 evidence/retention lineage and all
+413 accepted source starts (A/B/C = `93/192/128`). The input evidence and
+retention SHA-256 values were respectively
+`ac6d03ccce403c3474a75221e547a6058d5b7f419af7d8df9ddd8dbb225c562a` and
+`32f4b04f31c91cf58928503d51023ba53c98f310bcb96644503040b2fd9d18b7`; the
+verified source-artifact inventory SHA-256 was
+`a83c190255bde23ab1aaae124557a8733dbcfe10e5638f770685768ae74e29f`.
+
+The single non-simulator streaming aggregation completed with exit code `0` in
+approximately 32 minutes; its detached status is
+`/mnt/d/DeadlyCatCoding/STSRL/artifacts/t095-repeated-public-state-oracle-aggregation-181b531-20260919/jobs/t095-audit.status.json`.
+Resource admission was disabled, so no peak-RSS result is recorded. The audit
+retained 569,206 occurrence-level pair observations. At `k_min=2`, it found
+4,551 public aggregation fingerprints and 26,996 fingerprint/action-pair
+aggregates, all A-only. At `k_min=4`, `8`, and `16`, both the fingerprint and
+aggregate counts were zero. Consequently the primary `k_min=8` surface was
+empty and all five preregistered primary-gate predicates were false. The sole
+terminal classification is `EMPIRICAL_PUBLIC_AGGREGATION_TOO_SPARSE`.
+
+The retained report is
+`/mnt/d/DeadlyCatCoding/STSRL/artifacts/t095-repeated-public-state-oracle-aggregation-181b531-20260919/t095-repeated-public-state-oracle-aggregation-report.json`
+(SHA-256 `c052f6534b04d7c764c22161478c3d46be9d6fa5c8a713070f68ccb9681de091`,
+216,445 bytes), and the retention manifest is
+`/mnt/d/DeadlyCatCoding/STSRL/artifacts/t095-repeated-public-state-oracle-aggregation-181b531-20260919/t095-retention-manifest.json`
+(SHA-256 `d8c36715d1a1c628812cb866da76732951b946c9c4cfc5ca067a5ee267ac9217`,
+841 bytes). The report/manifest binding was independently parsed and the report
+hash and size matched. This result does not infer that hidden-future averaging
+is wrong; Planner decides whether a separately specified sampler/data effort is
+justified. No simulator/Search, training, native, controller, Non-Combat,
+T034-closure, or T066 work was performed or authorized.
+
 The task index lists the canonical lifecycle state for the published backlog.
 The M1 model-guided Oracle search sandbox is complete through synthesis. It
 validated Oracle-like search plumbing but did not demonstrate controller
