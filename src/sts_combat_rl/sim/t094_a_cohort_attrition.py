@@ -506,6 +506,7 @@ def audit_t094_from_paths(
     t092_evidence_path: str | Path,
     t093_retention_manifest_path: str | Path,
     t093_corpus_path: str | Path,
+    spill_directory: str | Path | None = None,
 ) -> dict[str, object]:
     """Validate exact artifacts and calculate the three-stage audit report."""
 
@@ -559,11 +560,17 @@ def audit_t094_from_paths(
             raise T094Incomplete("T092 source artifact is not a JSON object")
         return record
 
+    spill_path = (
+        Path(tempfile.gettempdir())
+        if spill_directory is None
+        else Path(spill_directory).resolve()
+    )
+    spill_path.mkdir(parents=True, exist_ok=True)
     report = _audit_records(
         artifacts=artifacts,
         ledger=ledger,
         load_record=load_record,
-        spill_directory=corpus_path.parent,
+        spill_directory=spill_path,
     )
     report["input_identities"] = {
         "t092_formal_evidence": {
@@ -602,6 +609,7 @@ def write_t094_artifacts(
             t092_evidence_path=t092_evidence_path,
             t093_retention_manifest_path=t093_retention_manifest_path,
             t093_corpus_path=t093_corpus_path,
+            spill_directory=destination,
         )
     except T094Incomplete as error:
         report = {
