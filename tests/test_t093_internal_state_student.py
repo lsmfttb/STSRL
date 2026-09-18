@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import asdict
 
 import pytest
 
@@ -13,12 +14,14 @@ from sts_combat_rl.sim.t092_internal_search_state import (
 )
 from sts_combat_rl.sim.t093_internal_state_student import (
     T093Error,
+    _canonicalize,
+    _validate_t093_inputs,
     classify_t093,
     example_from_t092_occurrence,
     label_destruction_means,
-    materialize_t093_corpus,
     source_start_macro_accuracy,
 )
+from sts_combat_rl.sim.t090_battle_student import canonical_sha256
 
 
 def _occurrence(*, source="source-a", group="A", split="train", node="node"):
@@ -57,6 +60,44 @@ def _manifest():
     return {"schema_id": "t092-formal-retention-manifest-v1", "formal_evidence": {"sha256": "ac6d03ccce403c3474a75221e547a6058d5b7f419af7d8df9ddd8dbb225c562a"}}
 
 
+def _bound_inputs():
+    groups = ("A", "B", "C")
+    splits = ("train", "validation", "heldout")
+    ledger = [
+        {
+            "source_identity": f"source-{index}",
+            "source_group": groups[index % 3],
+            "split": splits[index % 3],
+            "canonical_position": index,
+        }
+        for index in range(413)
+    ]
+    artifacts = [
+        {
+            "path": f"/retained/source-{index}.json",
+            "sha256": f"{index:064x}",
+            "size_bytes": 1,
+            "schema_id": "t092-paired-canary-arm-record-v2",
+        }
+        for index in range(413)
+    ]
+    shard = {"record_count": 413, "source_artifacts": artifacts}
+    shard["source_artifacts_sha256"] = canonical_sha256(artifacts)
+    return (
+        {
+            "schema_id": "t092-formal-retention-manifest-v1",
+            "formal_evidence": {"sha256": "ac6d03ccce403c3474a75221e547a6058d5b7f419af7d8df9ddd8dbb225c562a"},
+            "source_shards": [shard],
+        },
+        {
+            "schema_id": "t092-formal-telemetry-evidence-v1",
+            "terminal_classification": "INTERNAL_SEARCH_SURFACE_DENSE_ENOUGH",
+            "source_worker_ledger": ledger,
+            "internal_shard_manifest": [shard],
+        },
+    )
+
+
 def test_t093_uses_public_tactical_encoding_without_native_bits():
     example = example_from_t092_occurrence(_occurrence())
     assert example is not None
@@ -64,15 +105,44 @@ def test_t093_uses_public_tactical_encoding_without_native_bits():
     # Action encoding is derived through the public contract, rather than the
     # T092 `bits` field that may only identify a native action.
     assert all(value != 1.0 for value in example.action_features[0][-3:])
+    assert all("bits" not in action for action in example.action_identities)
+    assert all("private" not in key.lower() for action in example.action_identities for key in action)
+    assert '"bits"' not in str(asdict(example))
     assert label_destruction_means(example) != example.teacher_means
 
 
 def test_t093_cross_split_fingerprint_is_excluded_everywhere():
     other = deepcopy(_occurrence(split="heldout", source="source-b", group="A"))
-    corpus = materialize_t093_corpus([_occurrence(), other], t092_evidence=_evidence(), t092_retention_manifest=_manifest())
-    assert corpus["examples"] == []
-    assert len(corpus["deduplication"]["cross_split_excluded"]) == 1
-    assert corpus["effective_diversity"]["passed"] is False
+    first = example_from_t092_occurrence(_occurrence())
+    second = example_from_t092_occurrence(other)
+    assert first is not None and second is not None
+    retained, report = _canonicalize([first, second])
+    assert retained == []
+    assert len(report["cross_split_excluded"]) == 1
+
+
+def test_t093_rejects_incomplete_or_aliased_retention_inventory():
+    manifest, evidence = _bound_inputs()
+    artifacts, ledger = _validate_t093_inputs(manifest, evidence)
+    assert len(artifacts) == len(ledger) == 413
+    incomplete = deepcopy(manifest)
+    incomplete["source_shards"][0]["source_artifacts"].pop()
+    incomplete["source_shards"][0]["record_count"] = 412
+    incomplete["source_shards"][0]["source_artifacts_sha256"] = canonical_sha256(
+        incomplete["source_shards"][0]["source_artifacts"]
+    )
+    with pytest.raises(T093Error, match="413"):
+        _validate_t093_inputs(incomplete, evidence)
+    aliased, evidence = _bound_inputs()
+    aliased["source_shards"][0]["source_artifacts"][1]["path"] = aliased[
+        "source_shards"
+    ][0]["source_artifacts"][0]["path"]
+    aliased["source_shards"][0]["source_artifacts_sha256"] = canonical_sha256(
+        aliased["source_shards"][0]["source_artifacts"]
+    )
+    evidence["internal_shard_manifest"] = aliased["source_shards"]
+    with pytest.raises(T093Error, match="aliased"):
+        _validate_t093_inputs(aliased, evidence)
 
 
 def test_t093_rejects_private_public_projection_before_encoding():
@@ -105,5 +175,6 @@ def test_terminal_precedence_and_heldout_admission_are_frozen():
 def test_t093_cli_has_only_retained_file_inputs():
     actions = build_parser()._actions
     destinations = {action.dest for action in actions}
-    assert {"retention_manifest", "formal_evidence", "source_record", "output"} <= destinations
+    assert {"retention_manifest", "formal_evidence", "output"} <= destinations
+    assert "source_record" not in destinations
     assert "simulator" not in destinations and "search" not in destinations

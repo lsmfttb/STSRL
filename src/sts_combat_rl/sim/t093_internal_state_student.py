@@ -8,12 +8,16 @@ admission facts, while the scorer receives only public-tactical-v2 encodings.
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import random
+import sqlite3
 import statistics
+import tempfile
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Any
 
 from sts_combat_rl.sim.contract import SimulatorAction
@@ -53,6 +57,10 @@ T093_MIN_CONTRIBUTING_STARTS = {
 
 class T093Error(ValueError):
     """A retained-artifact, public-boundary, or gate violation."""
+
+
+def _canonical(value: object) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 
 
 def _finite(value: object, label: str) -> float:
@@ -106,10 +114,26 @@ def _public_action(action: Mapping[str, object]) -> SimulatorAction:
     raw = {key: action[key] for key in ("scope", "idx1", "idx2", "idx3")}
     if not all(isinstance(raw[key], int) and not isinstance(raw[key], bool) for key in ("idx1", "idx2", "idx3")):
         raise T093Error("T092 public action parameters are invalid")
+    public_identity = _public_action_identity(action)
     return SimulatorAction(
-        action_id=canonical_sha256({"public_action": dict(action)}),
+        action_id=canonical_sha256(public_identity),
         label=str(action["label"]), kind=str(action["kind"]), raw=raw,
     )
+
+
+def _public_action_identity(action: Mapping[str, object]) -> dict[str, object]:
+    """Return the entire persisted student-side action surface.
+
+    Native ``bits`` identifies an internal replay action and must not influence
+    either the public encoding or an action identity hash.
+    """
+
+    return {
+        "scope": str(action["scope"]),
+        "kind": str(action["kind"]),
+        "label": str(action["label"]),
+        "parameters": {key: int(action[key]) for key in ("idx1", "idx2", "idx3")},
+    }
 
 
 def example_from_t092_occurrence(value: Mapping[str, object]) -> T093Example | None:
@@ -135,7 +159,7 @@ def example_from_t092_occurrence(value: Mapping[str, object]) -> T093Example | N
         occurrence.source_identity, occurrence.source_group, occurrence.split,
         occurrence.parent_root_decision_identity, occurrence.occurrence_identity,
         occurrence.fingerprint, occurrence.tree_depth, state, action_features,
-        tuple(dict(row["action"]) for row in supported),
+        tuple(_public_action_identity(row["action"]) for row in supported),
         tuple(str(row["action"]["kind"]) for row in supported), means,
     )
     return result if result.pairs else None
@@ -161,37 +185,255 @@ def _canonicalize(examples: Sequence[T093Example]) -> tuple[list[T093Example], d
     return retained, {"cross_split_excluded": collisions, "within_split_deduplicated": duplicates}
 
 
-def materialize_t093_corpus(
-    occurrences: Sequence[Mapping[str, object]], *, t092_evidence: Mapping[str, object],
-    t092_retention_manifest: Mapping[str, object],
-) -> dict[str, object]:
-    """Materialize rows after exact T092 evidence/manifest bindings are checked."""
+def _sha256_file(path: Path) -> tuple[str, int]:
+    digest, size = hashlib.sha256(), 0
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+            size += len(block)
+    return digest.hexdigest(), size
 
-    if t092_evidence.get("schema_id") != "t092-formal-telemetry-evidence-v1" or t092_evidence.get("terminal_classification") != "INTERNAL_SEARCH_SURFACE_DENSE_ENOUGH":
-        raise T093Error("T092 evidence is not the accepted dense internal surface")
-    if t092_retention_manifest.get("schema_id") != "t092-formal-retention-manifest-v1":
-        raise T093Error("T092 retention manifest schema is invalid")
-    evidence = t092_retention_manifest.get("formal_evidence")
-    if not isinstance(evidence, Mapping) or evidence.get("sha256") != T093_EXACT_T092_EVIDENCE_SHA256:
-        raise T093Error("T092 retention manifest does not bind accepted evidence")
-    raw: list[T093Example] = []
-    for occurrence in occurrences:
-        if not isinstance(occurrence, Mapping):
-            raise T093Error("T092 occurrence is malformed")
-        example = example_from_t092_occurrence(occurrence)
-        if example is not None:
-            raw.append(example)
-    examples, deduplication = _canonicalize(raw)
-    report = effective_diversity_report(examples)
-    return {
-        "schema_id": T093_MATERIALIZATION_SCHEMA_ID, "schema_version": 1, "task_id": T093_TASK_ID,
-        "primary_n_min": T093_N_MIN, "pair_tolerance": T093_PAIR_TOLERANCE,
-        "t092_evidence_sha256": T093_EXACT_T092_EVIDENCE_SHA256,
-        "t092_retention_manifest_sha256": T093_EXACT_T092_RETENTION_SHA256,
-        "t092_native_identity": dict(T092_NATIVE_IDENTITY), "teacher_config": dict(T092_FROZEN_TEACHER_CONFIG),
-        "raw_pair_bearing_occurrence_count": len(raw), "examples": [asdict(item) for item in examples],
-        "deduplication": deduplication, "effective_diversity": report,
-    }
+
+def _read_bound_json(path: Path, expected_sha: str, label: str) -> dict[str, object]:
+    digest, _ = _sha256_file(path)
+    if digest != expected_sha:
+        raise T093Error(f"{label} is not the accepted T092 artifact")
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise T093Error(f"{label} must be a JSON object")
+    return value
+
+
+def _validate_t093_inputs(
+    retention_manifest: Mapping[str, object], evidence: Mapping[str, object]
+) -> tuple[list[Mapping[str, object]], dict[str, Mapping[str, object]]]:
+    if (
+        retention_manifest.get("schema_id") != "t092-formal-retention-manifest-v1"
+        or evidence.get("schema_id") != "t092-formal-telemetry-evidence-v1"
+        or evidence.get("terminal_classification")
+        != "INTERNAL_SEARCH_SURFACE_DENSE_ENOUGH"
+    ):
+        raise T093Error("T092 accepted evidence/retention schema is invalid")
+    bound = retention_manifest.get("formal_evidence")
+    shards = retention_manifest.get("source_shards")
+    ledger = evidence.get("source_worker_ledger")
+    if (
+        not isinstance(bound, Mapping)
+        or bound.get("sha256") != T093_EXACT_T092_EVIDENCE_SHA256
+        or not isinstance(shards, list)
+        or not isinstance(ledger, list)
+        or evidence.get("internal_shard_manifest") != shards
+        or len(ledger) != 413
+        or sum(shard.get("record_count", -1) for shard in shards if isinstance(shard, Mapping)) != 413
+    ):
+        raise T093Error("T092 corpus does not bind the exact 413-start retention set")
+    by_source: dict[str, Mapping[str, object]] = {}
+    for row in ledger:
+        if not isinstance(row, Mapping) or not isinstance(row.get("source_identity"), str):
+            raise T093Error("T092 evidence source ledger is malformed")
+        source = str(row["source_identity"])
+        if source in by_source or row.get("source_group") not in T093_SOURCE_GROUPS or row.get("split") not in T093_SPLITS:
+            raise T093Error("T092 evidence source ownership is invalid")
+        by_source[source] = row
+    if len(by_source) != 413:
+        raise T093Error("T092 evidence does not own exactly 413 source starts")
+    artifacts: list[Mapping[str, object]] = []
+    paths: set[str] = set()
+    for shard in shards:
+        if not isinstance(shard, Mapping) or not isinstance(shard.get("source_artifacts"), list):
+            raise T093Error("T092 retention shard is malformed")
+        rows = shard["source_artifacts"]
+        if shard.get("record_count") != len(rows) or shard.get("source_artifacts_sha256") != canonical_sha256(rows):
+            raise T093Error("T092 retention shard count/hash is invalid")
+        for artifact in rows:
+            if not isinstance(artifact, Mapping) or not isinstance(artifact.get("path"), str):
+                raise T093Error("T092 retained source artifact is malformed")
+            path = str(Path(str(artifact["path"])).resolve())
+            if path in paths:
+                raise T093Error("T092 retention source artifact is aliased")
+            paths.add(path)
+            artifacts.append(artifact)
+    if len(artifacts) != 413:
+        raise T093Error("T092 retention manifest does not contain all 413 source records")
+    return artifacts, by_source
+
+
+def materialize_t093_from_paths(
+    *, retention_manifest_path: str | Path, formal_evidence_path: str | Path,
+    output_path: str | Path,
+) -> dict[str, object]:
+    """Stream the exact retained 413-record corpus through a SQLite spill store.
+
+    This is the only scientific materialization API.  It verifies bound file
+    bytes before decoding each source record, processes one record at a time,
+    and keeps only canonical fingerprints in the spill database.
+    """
+
+    retention_path = Path(retention_manifest_path).resolve(strict=True)
+    evidence_path = Path(formal_evidence_path).resolve(strict=True)
+    retention = _read_bound_json(
+        retention_path, T093_EXACT_T092_RETENTION_SHA256, "retention manifest"
+    )
+    evidence = _read_bound_json(
+        evidence_path, T093_EXACT_T092_EVIDENCE_SHA256, "formal evidence"
+    )
+    artifacts, ledger = _validate_t093_inputs(retention, evidence)
+    destination = Path(output_path).resolve()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        prefix="t093-materialization-", suffix=".sqlite3", dir=destination.parent,
+        delete=False,
+    ) as temporary:
+        database_path = Path(temporary.name)
+    connection = sqlite3.connect(database_path)
+    raw_pair_bearing, processed_records = 0, 0
+    try:
+        connection.execute(
+            "CREATE TABLE candidate (fingerprint TEXT PRIMARY KEY, split TEXT NOT NULL, "
+            "collision INTEGER NOT NULL, ordering TEXT, payload TEXT)"
+        )
+        seen_sources: set[str] = set()
+        for artifact in artifacts:
+            path = Path(str(artifact["path"])).resolve(strict=True)
+            digest, size = _sha256_file(path)
+            if (
+                digest != artifact.get("sha256")
+                or size != artifact.get("size_bytes")
+                or artifact.get("schema_id") != "t092-paired-canary-arm-record-v2"
+            ):
+                raise T093Error("retained source record hash/size/schema mismatches")
+            record = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(record, Mapping):
+                raise T093Error("retained source record is malformed")
+            source = record.get("source_identity")
+            expected = ledger.get(source) if isinstance(source, str) else None
+            if (
+                expected is None
+                or source in seen_sources
+                or record.get("schema_id") != artifact.get("schema_id")
+                or record.get("source_group") != expected.get("source_group")
+                or record.get("split") != expected.get("split")
+                or record.get("canonical_position") != expected.get("canonical_position")
+                or not isinstance(record.get("internal_occurrences"), list)
+            ):
+                raise T093Error("retained source record provenance mismatches evidence")
+            seen_sources.add(source)
+            processed_records += 1
+            for occurrence in record["internal_occurrences"]:
+                if not isinstance(occurrence, Mapping):
+                    raise T093Error("retained internal occurrence is malformed")
+                if (
+                    occurrence.get("source_identity") != source
+                    or occurrence.get("source_group") != expected.get("source_group")
+                    or occurrence.get("split") != expected.get("split")
+                ):
+                    raise T093Error("internal occurrence source ownership mismatches record")
+                example = example_from_t092_occurrence(occurrence)
+                if example is None:
+                    continue
+                raw_pair_bearing += 1
+                ordering = _canonical(
+                    [example.source_identity, example.parent_root_decision_identity, example.occurrence_identity]
+                )
+                payload = _canonical(asdict(example))
+                prior = connection.execute(
+                    "SELECT split, collision, ordering FROM candidate WHERE fingerprint = ?",
+                    (example.public_fingerprint,),
+                ).fetchone()
+                if prior is None:
+                    connection.execute(
+                        "INSERT INTO candidate VALUES (?, ?, 0, ?, ?)",
+                        (example.public_fingerprint, example.split, ordering, payload),
+                    )
+                elif prior[1]:
+                    continue
+                elif prior[0] != example.split:
+                    connection.execute(
+                        "UPDATE candidate SET collision = 1, ordering = NULL, payload = NULL "
+                        "WHERE fingerprint = ?", (example.public_fingerprint,)
+                    )
+                elif ordering < prior[2]:
+                    connection.execute(
+                        "UPDATE candidate SET ordering = ?, payload = ? WHERE fingerprint = ?",
+                        (ordering, payload, example.public_fingerprint),
+                    )
+            del record
+        if set(seen_sources) != set(ledger) or processed_records != 413:
+            raise T093Error("T093 did not process the complete exact source set")
+        connection.commit()
+        split_counts = {
+            split: connection.execute(
+                "SELECT COUNT(*) FROM candidate WHERE collision = 0 AND split = ?", (split,)
+            ).fetchone()[0]
+            for split in T093_SPLITS
+        }
+        source_counts = {
+            split: {
+                group: connection.execute(
+                    "SELECT COUNT(DISTINCT json_extract(payload, '$.source_identity')) "
+                    "FROM candidate WHERE collision = 0 AND split = ? "
+                    "AND json_extract(payload, '$.source_group') = ?", (split, group),
+                ).fetchone()[0]
+                for group in T093_SOURCE_GROUPS
+            }
+            for split in T093_SPLITS
+        }
+        diversity = {
+            "canonical_pair_bearing_fingerprints": split_counts,
+            "contributing_source_starts": source_counts,
+            "required_minima": {
+                "fingerprints": dict(T093_MIN_FINGERPRINTS),
+                "source_starts": T093_MIN_CONTRIBUTING_STARTS,
+            },
+            "passed": all(split_counts[s] >= T093_MIN_FINGERPRINTS[s] for s in T093_SPLITS)
+            and all(source_counts[s][g] >= T093_MIN_CONTRIBUTING_STARTS[s][g] for s in T093_SPLITS for g in T093_SOURCE_GROUPS),
+        }
+        deduplication = {
+            "cross_split_excluded_count": connection.execute(
+                "SELECT COUNT(*) FROM candidate WHERE collision = 1"
+            ).fetchone()[0],
+            "within_split_canonicalized_count": raw_pair_bearing - sum(split_counts.values()),
+        }
+        report = {
+            "schema_id": T093_MATERIALIZATION_SCHEMA_ID, "schema_version": 1,
+            "task_id": T093_TASK_ID, "primary_n_min": T093_N_MIN,
+            "pair_tolerance": T093_PAIR_TOLERANCE,
+            "t092_evidence_sha256": T093_EXACT_T092_EVIDENCE_SHA256,
+            "t092_retention_manifest_sha256": T093_EXACT_T092_RETENTION_SHA256,
+            "t092_native_identity": dict(T092_NATIVE_IDENTITY),
+            "teacher_config": dict(T092_FROZEN_TEACHER_CONFIG),
+            "raw_pair_bearing_occurrence_count": raw_pair_bearing,
+            "deduplication": deduplication, "effective_diversity": diversity,
+            "resource_topology": {
+                "source_record_count": processed_records,
+                "materialization_workers": 1,
+                "processing_mode": "one_hash_verified_source_record_then_one_occurrence",
+                "canonicalization_store": "sqlite_temp_spill",
+                "max_retained_python_source_records": 1,
+                "spill_database_path": str(database_path),
+            },
+        }
+        with destination.open("w", encoding="utf-8") as stream:
+            stream.write("{")
+            for index, key in enumerate(sorted(report)):
+                if index:
+                    stream.write(",")
+                stream.write(json.dumps(key)); stream.write(":")
+                json.dump(report[key], stream, sort_keys=True)
+            stream.write(',"examples":[')
+            cursor = connection.execute(
+                "SELECT payload FROM candidate WHERE collision = 0 ORDER BY split, "
+                "json_extract(payload, '$.source_group'), json_extract(payload, '$.source_identity'), ordering"
+            )
+            for index, (payload,) in enumerate(cursor):
+                if index:
+                    stream.write(",")
+                stream.write(payload)
+            stream.write("]}\n")
+        return report
+    finally:
+        connection.close()
+        database_path.unlink(missing_ok=True)
 
 
 def effective_diversity_report(examples: Sequence[T093Example]) -> dict[str, object]:
@@ -560,6 +802,6 @@ __all__ = [
     "T093Error", "T093Example", "T093TrainingConfig", "build_t093_training_config",
     "classify_t093", "effective_diversity_report", "example_from_t092_occurrence",
     "evaluate_t093_scorer", "heldout_t093_gate", "label_destruction_means",
-    "materialize_t093_corpus", "source_start_macro_accuracy", "stratified_start_bootstrap",
+    "materialize_t093_from_paths", "source_start_macro_accuracy", "stratified_start_bootstrap",
     "train_t093_scorer", "train_validation_adequacy",
 ]
