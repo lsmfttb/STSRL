@@ -253,16 +253,11 @@ Successor direction: inspect and redesign the split/fingerprint/canonical
 ownership construction while preserving the public-information and leakage
 firewalls before another learnability experiment.
 
-### `A_COHORT_T093_ATTRITION_NOT_REPRODUCED`
-
-Use only if all input identities validate but the accepted T093 S3 result cannot
-be reproduced byte/number-equivalently under its published rules.
-
-This is an evidence inconsistency and blocks successor interpretation.
-
 ### `INCOMPLETE`
 
-Required accepted artifacts or material facts are unavailable or invalid.
+Required accepted artifacts or material facts are unavailable or invalid, or
+the accepted T093 S3 result cannot be reproduced exactly under its published
+rules. No successor interpretation is allowed from a non-equivalent pipeline.
 
 ## Controls Against Over-Interpretation
 
