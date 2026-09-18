@@ -40,6 +40,8 @@ T093_LABEL_DOMAIN = "T093-LABEL-DESTRUCTION-V1"
 T093_MATERIALIZATION_SCHEMA_ID = "t093-internal-partial-ranking-corpus-v1"
 T093_CONFIG_SCHEMA_ID = "t093-internal-state-student-config-v1"
 T093_REPORT_SCHEMA_ID = "t093-internal-state-student-report-v1"
+T093_CHECKPOINT_SCHEMA_ID = "t093-public-action-scorer-checkpoint-v1"
+T093_RETENTION_SCHEMA_ID = "t093-internal-state-student-retention-manifest-v1"
 T093_SOURCE_GROUPS = ("A", "B", "C")
 T093_SPLITS = ("train", "validation", "heldout")
 T093_EXACT_T092_EVIDENCE_SHA256 = (
@@ -64,6 +66,31 @@ class T093Error(ValueError):
 
 def _canonical(value: object) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def t093_checkpoint_identity(
+    state_dict: Mapping[str, object], *, config: T093TrainingConfig,
+    arm: str, seed: int, selected_epoch: int,
+) -> dict[str, object]:
+    """Stable selected-checkpoint identity; serialization remains external/Git-ignored."""
+
+    if arm not in {"true", "label_destruction", "state_ablated"} or seed not in T093_MODEL_SEEDS or selected_epoch not in range(1, 31):
+        raise T093Error("checkpoint identity has invalid frozen arm/seed/epoch")
+    digest = hashlib.sha256()
+    for key in sorted(state_dict):
+        value = state_dict[key]
+        digest.update(key.encode()); digest.update(b"\0")
+        if hasattr(value, "detach"):
+            value = value.detach().cpu().contiguous().numpy().tobytes()
+        if isinstance(value, bytes):
+            digest.update(value)
+        else:
+            digest.update(_canonical(value).encode())
+    return {"schema_id": T093_CHECKPOINT_SCHEMA_ID, "task_id": T093_TASK_ID,
+            "arm": arm, "seed": seed, "selected_epoch": selected_epoch,
+            "training_config_sha256": canonical_sha256(config.to_dict()),
+            "state_dict_sha256": digest.hexdigest(), "external_checkpoint_required": True,
+            "retention": "write serialized checkpoint outside Git and bind its file identity before scientific evaluation"}
 
 
 def _finite(value: object, label: str) -> float:
@@ -461,6 +488,24 @@ def materialize_t093_from_paths(
                     stream.write(",")
                 stream.write(payload)
             stream.write("]}\n")
+        output_sha, output_size = _sha256_file(destination)
+        retention_path = destination.with_name("t093-retention-manifest.json")
+        retention = {
+            "schema_id": T093_RETENTION_SCHEMA_ID, "schema_version": 1,
+            "task_id": T093_TASK_ID,
+            "derived_corpus": {"path": str(destination), "sha256": output_sha,
+                               "size_bytes": output_size,
+                               "schema_id": T093_MATERIALIZATION_SCHEMA_ID},
+            "t092_evidence_sha256": T093_EXACT_T092_EVIDENCE_SHA256,
+            "t092_retention_manifest_sha256": T093_EXACT_T092_RETENTION_SHA256,
+            "source_artifact_inventory_sha256": canonical_sha256(artifacts),
+            "training_config": "t093-internal-state-student-config-v1",
+            "regeneration_command": "python -m sts_combat_rl.commands.t093_internal_state_student --retention-manifest <accepted-t092-retention> --formal-evidence <accepted-t092-evidence> --output <derived-corpus>",
+            "retention_reason": "scientific-quality T093 materialized n_min=4 corpus",
+            "resource_topology": report["resource_topology"],
+        }
+        retention_path.write_text(json.dumps(retention, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+        report["retention_manifest"] = {"path": str(retention_path), "sha256": _sha256_file(retention_path)[0], "schema_id": T093_RETENTION_SCHEMA_ID}
         return report
     finally:
         connection.close()
@@ -512,19 +557,23 @@ def repeated_public_state_diagnostics(
     conflict: set[str] = set()
     best_disagreement = 0
     pair_support, pair_conflicts = 0, 0
+    pair_sign_support: dict[str, dict[str, int]] = {}
     for fingerprint, rows in repeated.items():
         best_sets = {
             tuple(sorted(_canonical(row.action_identities[index]) for index, mean in enumerate(row.teacher_means) if mean == max(row.teacher_means)))
             for row in rows
         }
         best_disagreement += int(len(best_sets) > 1)
-        signs: dict[tuple[str, str], set[int]] = defaultdict(set)
+        signs: dict[tuple[str, str], dict[int, int]] = defaultdict(lambda: defaultdict(int))
         for row in rows:
             for high, low in row.pairs:
                 key = tuple(sorted((_canonical(row.action_identities[high]), _canonical(row.action_identities[low]))))
-                signs[key].add(1 if key[0] == _canonical(row.action_identities[high]) else -1)
+                signs[key][1 if key[0] == _canonical(row.action_identities[high]) else -1] += 1
         pair_support += len(signs)
         conflicts = sum(len(value) > 1 for value in signs.values())
+        for pair, values in signs.items():
+            key = _canonical([fingerprint, *pair])
+            pair_sign_support[key] = {"positive": values[1], "negative": values[-1], "support_count": sum(values.values())}
         pair_conflicts += conflicts
         if conflicts:
             conflict.add(fingerprint)
@@ -542,9 +591,12 @@ def repeated_public_state_diagnostics(
         "repeated_canonical_fingerprint_count": len(repeated),
         "repeated_canonical_fingerprint_fraction": len(repeated) / len(grouped) if grouped else 0.0,
         "best_supported_action_disagreement_count": best_disagreement,
+        "best_supported_action_disagreement_fraction": best_disagreement / len(repeated) if repeated else 0.0,
         "supported_public_action_pair_count": pair_support,
         "pair_sign_conflict_count": pair_conflicts,
         "pair_sign_conflict_rate": pair_conflicts / pair_support if pair_support else 0.0,
+        "pair_sign_support_by_public_pair": pair_sign_support,
+        "ownership": "each row remains bound to source_identity/source_group/split; diagnostics never reassign ownership",
         "conflict_bearing_fingerprint_count": len(conflict),
         "performance_by_arm_and_stratum": {
             arm: {stratum: statistics.fmean(values) for stratum, values in values_by_stratum.items() if values}
@@ -562,7 +614,9 @@ def secondary_stratified_report(
     rows = [example for example in examples if example.split == split]
     if split not in T093_SPLITS or not rows:
         raise T093Error("secondary report needs one non-empty registered split")
-    result: dict[str, object] = {"split": split, "chance_reference": 0.5, "promotion_gate": False, "arms": {}}
+    result: dict[str, object] = {"split": split, "chance_reference": 0.5, "promotion_gate": False,
+                                  "metric_identity": "true_n_min_4_supported_action_pairwise_source_start_macro",
+                                  "arms": {}}
     for arm, score_rows in scores_by_arm.items():
         per_group: dict[str, list[float]] = defaultdict(list)
         per_depth: dict[str, list[float]] = defaultdict(list)
@@ -598,7 +652,7 @@ def secondary_stratified_report(
             "per_start_example_concentration": dict(per_start),
             "mean_examples_per_start": statistics.fmean(per_start.values()),
         }
-    result["seed_variation"] = {arm: {"count": len(values), "min": min(values), "max": max(values)} for arm, values in (seed_metrics or {}).items() if values}
+    result["seed_arm_summaries"] = {arm: {"count": len(values), "min": min(values), "max": max(values), "mean": statistics.fmean(values)} for arm, values in (seed_metrics or {}).items() if values}
     return result
 
 
@@ -769,12 +823,16 @@ def train_t093_scorer(
         raise T093Error("T093 checkpoint selection failed")
     model.load_state_dict(selected_state)
     scorer = T093TorchScorer(model, config, arm=arm)
+    checkpoint = t093_checkpoint_identity(
+        model.state_dict(), config=config, arm=arm, seed=seed,
+        selected_epoch=selected_epoch,
+    )
     return scorer, {"schema_id": "t093-training-summary-v1", "task_id": T093_TASK_ID,
                     "arm": arm, "seed": seed, "selected_epoch": selected_epoch,
                     "selection_split": "validation", "selection_metric": "pairwise_logistic_ranking_loss",
                     "selection_labels": "destroyed" if arm == "label_destruction" else "true",
                     "learning_curve": curves, "selected_validation_loss": selected_loss,
-                    "training_config": config.to_dict()}
+                    "training_config": config.to_dict(), "selected_checkpoint": checkpoint}
 
 
 def evaluate_t093_scorer(examples: Sequence[T093Example], scorer: T093TorchScorer) -> dict[str, object]:
@@ -946,11 +1004,11 @@ def classify_t093(
 
 
 __all__ = [
-    "T093_BOOTSTRAP_REPLICATES", "T093_BOOTSTRAP_SEED", "T093_CONFIG_SCHEMA_ID",
+    "T093_BOOTSTRAP_REPLICATES", "T093_BOOTSTRAP_SEED", "T093_CHECKPOINT_SCHEMA_ID", "T093_CONFIG_SCHEMA_ID",
     "T093Error", "T093Example", "T093TrainingConfig", "build_t093_training_config",
     "classify_t093", "effective_diversity_report", "example_from_t092_occurrence",
     "evaluate_t093_scorer", "heldout_t093_gate", "label_destruction_means",
     "materialize_t093_from_paths", "source_start_macro_accuracy", "stratified_start_bootstrap",
-    "repeated_public_state_diagnostics", "secondary_stratified_report",
+    "repeated_public_state_diagnostics", "secondary_stratified_report", "t093_checkpoint_identity",
     "train_t093_scorer", "train_validation_adequacy", "validate_t093_source_record",
 ]

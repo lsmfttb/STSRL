@@ -17,6 +17,7 @@ from sts_combat_rl.sim.t093_internal_state_student import (
     T093Error,
     _canonicalize,
     _validate_t093_inputs,
+    build_t093_training_config,
     classify_t093,
     example_from_t092_occurrence,
     label_destruction_means,
@@ -24,6 +25,7 @@ from sts_combat_rl.sim.t093_internal_state_student import (
     secondary_stratified_report,
     source_start_macro_accuracy,
     validate_t093_source_record,
+    t093_checkpoint_identity,
 )
 from sts_combat_rl.sim.t090_battle_student import canonical_sha256
 
@@ -183,6 +185,7 @@ def test_t093_repeated_public_conflict_and_secondary_reports_are_diagnostic_only
     diagnostic = repeated_public_state_diagnostics([first, second])
     assert diagnostic["repeated_canonical_fingerprint_count"] == 1
     assert diagnostic["pair_sign_conflict_count"] == 1
+    assert diagnostic["pair_sign_support_by_public_pair"]
     assert diagnostic["student_input_or_weight_use"] == "forbidden"
     example = example_from_t092_occurrence(first)
     assert example is not None
@@ -191,6 +194,16 @@ def test_t093_repeated_public_conflict_and_secondary_reports_are_diagnostic_only
     )
     assert report["promotion_gate"] is False
     assert report["chance_reference"] == 0.5
+
+
+def test_t093_checkpoint_identity_is_deterministic_and_external():
+    example = example_from_t092_occurrence(_occurrence())
+    assert example is not None
+    config = build_t093_training_config([example])
+    first = t093_checkpoint_identity({"weight": [1.0, 2.0]}, config=config, arm="true", seed=930093, selected_epoch=1)
+    second = t093_checkpoint_identity({"weight": [1.0, 2.0]}, config=config, arm="true", seed=930093, selected_epoch=1)
+    assert first == second
+    assert first["external_checkpoint_required"] is True
 
 
 def test_source_start_metric_uses_equal_starts_not_pair_count():
