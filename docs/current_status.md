@@ -1,6 +1,6 @@
 # Current Status
 
-Last reviewed: 2026-09-15.
+Last reviewed: 2026-09-18.
 
 This document is the main maintainer's canonical execution-result report for
 the planner and describes the latest `main` branch only. Results from local
@@ -76,6 +76,27 @@ internal-feasibility audit SHA-256 is
 `9821bdd245decd0274006de8b1683d496776ad349f06f3d9150fdcb19e864383`, and the
 retention manifest SHA-256 is
 `b2b3f8f8323479b85d687525bdb50092dcf0fdd4b64a6eaabadcd5258607ed24`.
+
+T092 is complete on PR #106 at exact implementation head
+`1e3dff2665d38dfd6acc786666c1889bc8327508`. The fresh exact-head paired
+canary passed all 12/12 logical starts with root/terminal parity mismatch 0;
+the authorized formal run then completed all 8 shards and its coordinator
+finalizer successfully reproduced the accepted T090 root evidence (6,369
+decisions). The formal evidence reports 1,656,822 retained internal
+occurrences across the 413-start cohort, terminal classification
+`INTERNAL_SEARCH_SURFACE_DENSE_ENOUGH`, and successor decision limited to a
+separate public-only distillation consideration. Coordinator peak RSS was
+1,141 MiB with minimum MemAvailable 15,420 MiB; all shard guards completed
+without trips. The retained formal evidence is
+`/mnt/d/DeadlyCatCoding/STSRL/artifacts/t092-formal-413-1e3dff2-20260918/t092-formal-evidence.json`
+(SHA-256
+`ac6d03ccce403c3474a75221e547a6058d5b7f419af7d8df9ddd8dbb225c562a`), and
+the retention manifest is
+`/mnt/d/DeadlyCatCoding/STSRL/artifacts/t092-formal-413-1e3dff2-20260918/t092-formal-retention-manifest.json`
+(SHA-256
+`32f4b04f31c91cf58928503d51023ba53c98f310bcb96644503040b2fd9d18b7`). T092
+does not claim Battle-student learnability or policy improvement, and no
+student training, Search modification, or merge was performed.
 
 The task index lists the canonical lifecycle state for the published backlog.
 The M1 model-guided Oracle search sandbox is complete through synthesis. It
