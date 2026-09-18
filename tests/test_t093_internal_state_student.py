@@ -237,7 +237,7 @@ def test_conflict_classification_requires_validated_fixed_bootstrap_evidence():
     groups = ("A", "B", "C")
     evidence = {"adequacy": {"passed": True}, "paired_source_start_rows": rows,
                 "stratum_fingerprint_owners": {
-                    name: [{"public_fingerprint": f"{name}-{index}", "source_identity": f"{groups[index % 3]}-{index % 15}", "source_group": groups[index % 3], "split": "heldout"} for index in range(500)]
+                    name: [{"public_fingerprint": f"{name}-{index}", "source_identity": f"{groups[(index // 15) % 3]}-{index % 15}", "source_group": groups[(index // 15) % 3], "split": "heldout"} for index in range(500)]
                     for name in ("conflict_bearing", "singleton_or_no_observed_conflict")
                 }}
     assert conflict_limiting_gate(evidence)["passed"] is True
