@@ -178,8 +178,11 @@ Before training, the exact materialized `n_min=4` corpus must satisfy all of:
 - at least 10,000 canonical pair-bearing train fingerprints;
 - at least 2,000 canonical pair-bearing validation fingerprints;
 - at least 3,000 canonical pair-bearing held-out fingerprints;
-- in every `(split, source-group A/B/C)` cell, at least 75% of inherited source
-  starts contribute at least one canonical pair-bearing fingerprint;
+- in every `(split, source-group A/B/C)` cell, at least
+  `ceil(0.75 * inherited_cell_start_count)` source starts contribute at least
+  one canonical pair-bearing fingerprint. Under the inherited T090 split this
+  means exact minima: train A/B/C = `44/90/60`, validation = `11/23/15`, and
+  held-out = `16/33/22`;
 - every retained pair and fingerprint has exact source-start ownership needed
   for source-start-macro evaluation.
 
@@ -240,9 +243,32 @@ Formal optimization is fixed:
 - weight decay `1e-4`;
 - maximum 30 epochs;
 - three initialization seeds: `930093`, `930094`, `930095`;
-- for each seed/arm, select one checkpoint using validation macro ranking loss
-  only;
+- for each seed/arm, select one checkpoint using that arm's validation ranking
+  loss only; the label-destruction arm therefore selects on its destroyed
+  validation labels, while the true and state-ablated arms select on true
+  validation labels;
 - no hyperparameter sweep and no held-out selection.
+
+### Train/validation model-target adequacy check
+
+After checkpoint selection, evaluate all three selected arms against the **true**
+teacher labels on train and validation. This diagnostic evaluation does not
+change any selected checkpoint; in particular, the label-destruction checkpoint
+remains the one selected without access to true validation labels.
+
+Before held-out evaluation is opened, require both:
+
+1. at least two of the three true-student seeds reach source-start-macro train
+   pairwise accuracy >= `0.70`;
+2. for at least two of the three matched seeds, the true student's validation
+   source-start-macro point estimate is > `0.50` and strictly exceeds both the
+   label-destruction and state-ablated controls evaluated on the same true
+   validation labels.
+
+If either predicate fails, terminate as
+`INTERNAL_STATE_STUDENT_MODEL_OR_TARGET_INADEQUATE` without using held-out data
+for diagnosis or model revision. This is a preregistered scientific early stop,
+not a Planner execution-authorization gate.
 
 Batch layout, gradient accumulation, checkpoint serialization, module names and
 ordinary training-process mechanics are implementation freedom provided the
@@ -295,13 +321,20 @@ For each model seed:
 2. macro-average fingerprints within each source Battle start;
 3. report source-start values and the mean across held-out starts.
 
-The primary arm statistic averages the three seed-specific source-start values.
-Seed-specific results remain separately reported.
+Only held-out source starts with at least one canonical pair-bearing fingerprint
+contribute a defined source-start metric; non-contributing inherited starts remain
+explicitly reported and are constrained by the effective-diversity admission.
+The primary arm statistic averages the three seed-specific value for each
+contributing source start and then gives every contributing source start equal
+weight. Seed-specific results remain separately reported.
 
 ### Primary held-out gate
 
-Use a stratified paired bootstrap over held-out source Battle starts, preserving
-source-group A/B/C strata:
+Use a stratified paired bootstrap over contributing held-out source Battle
+starts. Within each A/B/C source group, resample contributing starts with
+replacement at that group's observed contributing-start count; concatenate the
+three resampled strata and compute the equal-source-start mean. Student/control
+contrasts are paired on the same resampled starts.
 
 - 20,000 replicates;
 - seed `930293`;
@@ -331,7 +364,8 @@ Battle wins and does not promote the student as a controller.
 
 Report, without creating extra promotion gates:
 
-- train, validation and held-out pairwise ranking accuracy for every seed/arm;
+- train and validation pairwise ranking accuracy for every seed/arm, plus held-out
+  accuracy when the train/validation adequacy check admits held-out evaluation;
 - learning curves and selected epoch for every seed/arm;
 - supported-action top-set agreement;
 - teacher regret among supported `n_min=4` actions;
@@ -377,11 +411,12 @@ following diagnostic conditions hold:
 - both the conflict-bearing and singleton/no-observed-conflict held-out strata
   contain at least 500 canonical fingerprints from at least 15 held-out source
   starts;
-- on the singleton/no-observed-conflict stratum, the true student passes the
-  same chance and both-control directional comparisons as the primary gate;
-- the paired source-start bootstrap lower bound for the difference in
-  true-student advantage
-  `(no-observed-conflict minus conflict-bearing)` is strictly greater than 0.
+- on the singleton/no-observed-conflict stratum, under the same start-clustered
+  bootstrap, the 95% CI lower bound for true-student accuracy is > `0.50` and
+  the lower bounds for true-student minus each learned control are both > `0`;
+- under the same source-start-clustered resampling, the 95% CI lower bound for
+  `true_student_accuracy(no_observed_conflict) -
+  true_student_accuracy(conflict_bearing)` is strictly greater than `0`.
 
 This classification means observed repeated-public-state teacher conflict is
 consistent with limiting public distillation. It does not prove that privileged
@@ -389,8 +424,11 @@ teacher ambiguity is the sole cause or solve T034.
 
 ## Failure Diagnosis And Terminal Classifications
 
-Exactly one terminal classification must be recorded, using this precedence
-after provenance/information validation.
+Exactly one terminal classification must be recorded. Precedence is:
+information-boundary violation; missing/invalid required evidence; effective
+diversity; train/validation model-target adequacy; then, only if held-out is
+admitted, held-out success, repeated-public-conflict diagnosis, or generalization
+not established.
 
 ### `INTERNAL_STATE_BATTLE_STUDENT_SIGNAL_ESTABLISHED`
 
@@ -408,15 +446,15 @@ Consequence: do not infer that Battle learning is impossible. Diagnose which
 split/source-start or pair-structure bottleneck remains before changing the
 teacher-data generator.
 
-### `INTERNAL_STATE_STUDENT_MODEL_OR_OPTIMIZATION_INADEQUATE`
+### `INTERNAL_STATE_STUDENT_MODEL_OR_TARGET_INADEQUATE`
 
-The dataset is valid and sufficiently diverse, but the true-label student cannot
-fit the training supervision: fewer than two of the three seeds reach
-source-start-macro training pairwise accuracy of `0.70`.
+The dataset is valid and sufficiently diverse, but either the frozen training-fit
+predicate or the frozen validation transfer-sanity predicate fails.
 
-Consequence: the current fixed model/optimization capacity is not an adequate
-test of whether the supervision can generalize. Do not interpret the result as
-absence of learnable Battle signal.
+Consequence: the current fixed model/optimization/target construction is not an
+adequate basis for a held-out learnability claim. Do not inspect held-out data to
+tune this task, and do not interpret the result as absence of learnable Battle
+signal.
 
 ### `INTERNAL_STATE_STUDENT_REPEATED_PUBLIC_CONFLICT_LIMITING`
 
@@ -447,8 +485,10 @@ boundaries cannot be established.
 
 ### `INCOMPLETE`
 
-Required retained corpus, provenance, model/control training, held-out report or
-other mandatory scientific evidence is missing or invalid.
+Required retained corpus, provenance, model/control training, or other mandatory
+scientific evidence is missing or invalid. A held-out report is mandatory only
+when the preregistered train/validation adequacy check admits held-out
+evaluation.
 
 ## Scope
 
@@ -485,8 +525,11 @@ Before final acceptance, the task PR must contain or durably reference:
 - frozen student/control scientific configuration;
 - all three seeds of true-student, label-destruction and state-ablated training
   summaries and selected checkpoint identities;
-- complete held-out source-start-macro primary statistics and bootstrap report;
-- required repeated-public-state conflict diagnostics;
+- complete held-out source-start-macro primary statistics and bootstrap report
+  when held-out evaluation is admitted, or the exact train/validation early-stop
+  evidence otherwise;
+- required repeated-public-state conflict diagnostics when held-out evaluation is
+  admitted;
 - required secondary stratified diagnostics;
 - scientific-quality retention manifest for large external artifacts;
 - factual terminal classification and bounded interpretation;
@@ -554,7 +597,7 @@ authorize it automatically and must not implement it in the same PR.
 If T093 fails, successor reasoning must follow the observed failure class:
 
 - effective-diversity failure -> diagnose data/pair/source-start structure;
-- model/optimization inadequacy -> revise the bounded learner test rather than
+- model/target inadequacy -> revise the bounded learner/target test rather than
   reject Battle learning;
 - repeated-public-state conflict limitation -> address information-set/target
   ambiguity;
