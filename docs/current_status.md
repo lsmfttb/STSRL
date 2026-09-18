@@ -98,6 +98,30 @@ the retention manifest is
 does not claim Battle-student learnability or policy improvement, and no
 student training, Search modification, or merge was performed.
 
+T093 is complete on PR #108 at exact implementation head
+`66fe3724745d70a5a8b23f274015d9035ea7a26f`. The accepted T092 evidence and
+retention manifest were independently hash-verified, all 413 retained source
+records were processed once through the public-only `n_min=4`, depth>=1
+materializer, and the derived corpus was retained outside Git at
+`/mnt/d/DeadlyCatCoding/STSRL/artifacts/t093-internal-state-student-66fe372-20260918/`.
+The materialized corpus SHA-256 is
+`c6ea76b149b54502eed1da0741914b80ca13cdd84cad5e518eae410399c90ca9`, with
+size 854,505,301 bytes; its T093 retention manifest is
+`/mnt/d/DeadlyCatCoding/STSRL/artifacts/t093-internal-state-student-66fe372-20260918/t093-retention-manifest.json`
+(SHA-256 `5c42482003611878a0c56108fea0a3c8f8a287e6ec7ab1d1f8817bd741fb71b6`).
+The detached job used one non-simulator aggregation worker, completed with
+peak RSS 822 MiB and minimum MemAvailable 21,268 MiB, and cleaned its SQLite
+spill store. Effective-diversity counts were train/validation/heldout
+25,825/5,842/8,383 canonical pair-bearing fingerprints. Source-start cells
+were train A/B/C `30/119/77`, validation `6/30/20`, and held-out `9/43/27`;
+the A cells fail the frozen `44/90/60`, `11/23/15`, and `16/33/22` minima.
+T093 therefore terminates before training or held-out evaluation as
+`INTERNAL_STATE_STUDENT_EFFECTIVE_DIVERSITY_INSUFFICIENT`. No PyTorch
+training, checkpoint selection, Search integration, complete-run promotion,
+Non-Combat update, or T066 work was performed or authorized. The result is a
+post-leakage surface diagnosis, not evidence that public Battle learning is
+impossible.
+
 The task index lists the canonical lifecycle state for the published backlog.
 The M1 model-guided Oracle search sandbox is complete through synthesis. It
 validated Oracle-like search plumbing but did not demonstrate controller
