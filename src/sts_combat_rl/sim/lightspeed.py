@@ -461,6 +461,31 @@ class LightSpeedAdapter:
             )
         )
 
+    def battle_search_v2_with_internal_teacher_telemetry(
+        self,
+        snapshot: SimulatorSnapshot,
+        *,
+        simulations: int,
+        include_potions: bool = False,
+    ) -> dict[str, Any]:
+        """Run frozen unguided Search-v2 with T092's opt-in read-only export."""
+
+        if not hasattr(self._sim, "battle_search_v2_with_internal_teacher_telemetry"):
+            raise RuntimeError(
+                "slaythespire.StepSimulator does not expose "
+                "battle_search_v2_with_internal_teacher_telemetry; build the "
+                "T092 task-scoped native telemetry source integration"
+            )
+        _positive_native_int(
+            simulations, "battle_search_v2_with_internal_teacher_telemetry simulations"
+        )
+        self._assert_snapshot_is_current(snapshot)
+        return dict(
+            self._sim.battle_search_v2_with_internal_teacher_telemetry(
+                int(simulations), bool(include_potions)
+            )
+        )
+
     def battle_search_v2_with_leaf_collection(
         self,
         snapshot: SimulatorSnapshot,

@@ -180,6 +180,7 @@ def execute_controlled_run(
     before_decision_transform: BeforeDecisionTransform | None = None,
     before_decision: BeforeDecisionObserver | None = None,
     after_transition: AfterTransitionObserver | None = None,
+    retain_steps: bool = True,
 ) -> ControlledRun:
     """Advance one simulator cursor through the single authoritative control path.
 
@@ -206,6 +207,10 @@ def execute_controlled_run(
             terminate the run.
         after_transition: optional observer called after each successful
             transition. Exceptions terminate the run.
+        retain_steps: whether to retain full per-step records in the returned
+            run. Set this to ``False`` only when ``after_transition`` consumes
+            the records as a bounded stream; control and observer order remain
+            unchanged.
 
     Returns:
         A ``ControlledRun`` with every step, full provenance, and any problems.
@@ -378,7 +383,8 @@ def execute_controlled_run(
             battle_outcome=_battle_outcome(snapshot.raw),
             next_battle_outcome=_battle_outcome(next_raw),
         )
-        steps.append(step)
+        if retain_steps:
+            steps.append(step)
 
         if after_transition is not None:
             try:

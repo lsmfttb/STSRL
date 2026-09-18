@@ -35,6 +35,7 @@ class FakeStepSimulator:
         self.root_prior_calls = 0
         self.geometry_calls = 0
         self.state_utilization_calls = 0
+        self.internal_teacher_telemetry_calls = 0
         self.leaf_collection_calls = 0
         self.work_counter_calls = 0
         self.progressive_bias_calls = 0
@@ -147,6 +148,12 @@ class FakeStepSimulator:
             "policy_enabled": policy_prior_callback is not None,
             "value_enabled": leaf_value_callback is not None,
         }
+
+    def battle_search_v2_with_internal_teacher_telemetry(
+        self, simulations: int, include_potions: bool
+    ) -> dict[str, object]:
+        self.internal_teacher_telemetry_calls += 1
+        return {"simulations": simulations, "include_potions": include_potions}
 
     def battle_search_v2_with_leaf_collection(
         self,
@@ -371,6 +378,16 @@ def test_lightspeed_adapter_wraps_state_utilization_companion() -> None:
     assert report["policy_enabled"] is True
     assert report["value_enabled"] is True
     assert adapter._sim.state_utilization_calls == 1
+
+
+def test_lightspeed_adapter_wraps_t092_opt_in_without_callbacks() -> None:
+    adapter = LightSpeedAdapter(seed=7, ascension=20, module=FakeModule)
+    report = adapter.battle_search_v2_with_internal_teacher_telemetry(
+        adapter.reset(seed=11), simulations=400
+    )
+
+    assert report == {"simulations": 400, "include_potions": False}
+    assert adapter._sim.internal_teacher_telemetry_calls == 1
 
 
 def test_lightspeed_adapter_exposes_explicit_t084_collector_surface() -> None:
