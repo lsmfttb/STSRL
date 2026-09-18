@@ -392,7 +392,7 @@ def materialize_t093_from_paths(
             "cross_split_excluded_count": connection.execute(
                 "SELECT COUNT(*) FROM candidate WHERE collision = 1"
             ).fetchone()[0],
-            "within_split_canonicalized_count": raw_pair_bearing - sum(split_counts.values()),
+            "raw_candidate_discard_count": raw_pair_bearing - sum(split_counts.values()),
         }
         report = {
             "schema_id": T093_MATERIALIZATION_SCHEMA_ID, "schema_version": 1,
@@ -410,7 +410,8 @@ def materialize_t093_from_paths(
                 "processing_mode": "one_hash_verified_source_record_then_one_occurrence",
                 "canonicalization_store": "sqlite_temp_spill",
                 "max_retained_python_source_records": 1,
-                "spill_database_path": str(database_path),
+                "spill_database_retained": False,
+                "spill_database_cleanup": "removed after output serialization",
             },
         }
         with destination.open("w", encoding="utf-8") as stream:
