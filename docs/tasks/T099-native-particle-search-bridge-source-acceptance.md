@@ -196,7 +196,7 @@ The capability must explicitly reject these claims:
 
 ## Artifact Eligibility Contract
 
-None. T099 consumes source lineage and native capability evidence, not a learned checkpoint or generated scientific dataset.
+None. T099 consumes source lineage and native capability evidence only; it does not consume learned-model inputs or generated scientific corpora.
 
 ## Required Verification
 
