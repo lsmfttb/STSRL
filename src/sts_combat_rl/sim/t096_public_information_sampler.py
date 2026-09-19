@@ -16,14 +16,15 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 T096_TASK_ID = "T096"
-T096_PUBLIC_INFORMATION_SCHEMA_ID = "native-battle-public-information-v1"
+T096_PUBLIC_INFORMATION_SCHEMA_ID = "native-battle-public-information-v2"
+T096_LEGACY_PUBLIC_INFORMATION_SCHEMA_ID = "native-battle-public-information-v1"
 T096_SAMPLER_SCHEMA_ID = "native-hidden-future-sampler-v1"
 T096_ANCHOR_METADATA_SCHEMA_ID = "native-battle-anchor-distribution-audit-v1"
 T096_SPLIT_DOMAIN = "T096-PUBLIC-INFORMATION-SAMPLER-V1"
 T096_PARTICLES_PER_ANCHOR = 8192
 T096_TV_LIMIT = 0.05
 
-_REQUIRED_PROJECTION_KEYS = frozenset(
+_REQUIRED_PROJECTION_KEYS_V1 = frozenset(
     {
         "schema_id",
         "information_regime",
@@ -44,6 +45,12 @@ _REQUIRED_PROJECTION_KEYS = frozenset(
         "visibility",
         "ordered_public_legal_actions",
         "draw_pile_membership",
+    }
+)
+_REQUIRED_PROJECTION_KEYS_V2 = _REQUIRED_PROJECTION_KEYS_V1 | frozenset(
+    {
+        "information_fidelity",
+        "draw_knowledge_unsupported_reasons",
     }
 )
 _FORBIDDEN_PRIVATE_KEY_FRAGMENTS = (
@@ -74,15 +81,20 @@ def validate_public_information_projection(value: object) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         raise T096SamplerError("T096 public projection must be a mapping")
     projection = dict(value)
-    unknown = set(projection) - _REQUIRED_PROJECTION_KEYS
-    missing = _REQUIRED_PROJECTION_KEYS - set(projection)
+    schema_id = projection.get("schema_id")
+    if schema_id == T096_PUBLIC_INFORMATION_SCHEMA_ID:
+        required_keys = _REQUIRED_PROJECTION_KEYS_V2
+    elif schema_id == T096_LEGACY_PUBLIC_INFORMATION_SCHEMA_ID:
+        required_keys = _REQUIRED_PROJECTION_KEYS_V1
+    else:
+        raise T096SamplerError("T096 projection schema is not current")
+    unknown = set(projection) - required_keys
+    missing = required_keys - set(projection)
     if unknown or missing:
         raise T096SamplerError(
             f"T096 projection keys mismatch; missing={sorted(missing)}, "
             f"unknown={sorted(unknown)}"
         )
-    if projection["schema_id"] != T096_PUBLIC_INFORMATION_SCHEMA_ID:
-        raise T096SamplerError("T096 projection schema is not current")
     if projection["information_regime"] != "normal_information":
         raise T096SamplerError("T096 projection has the wrong information regime")
     if projection["screen_identity"] != "BATTLE":
@@ -91,12 +103,35 @@ def validate_public_information_projection(value: object) -> dict[str, Any]:
     visibility = projection["visibility"]
     if not isinstance(visibility, Mapping):
         raise T096SamplerError("T096 projection visibility must be a mapping")
-    _require_classification(visibility, "draw_order", "hidden")
-    _require_classification(visibility, "enemy_intent", "public_exact")
-    _require_classification(visibility, "draw_knowledge", "unsupported_fidelity")
-    _require_classification(
-        visibility, "intent_hidden_mechanics", "unsupported_fidelity"
-    )
+    if schema_id == T096_LEGACY_PUBLIC_INFORMATION_SCHEMA_ID:
+        _require_classification(visibility, "draw_order", "hidden")
+        _require_classification(visibility, "enemy_intent", "public_exact")
+        _require_classification(visibility, "draw_knowledge", "unsupported_fidelity")
+        _require_classification(
+            visibility, "intent_hidden_mechanics", "unsupported_fidelity"
+        )
+    else:
+        _require_one_of(
+            visibility,
+            "draw_order",
+            {
+                "hidden",
+                "known_prefix",
+                "known_positions",
+                "full_public_exact",
+                "unsupported_fidelity",
+            },
+        )
+        _require_one_of(visibility, "enemy_intent", {"public_exact", "hidden"})
+        if not isinstance(projection["information_fidelity"], str):
+            raise T096SamplerError("T096 information fidelity must be text")
+        reasons = projection["draw_knowledge_unsupported_reasons"]
+        if not isinstance(reasons, list) or any(
+            not isinstance(reason, str) or not reason for reason in reasons
+        ):
+            raise T096SamplerError(
+                "T096 draw-knowledge unsupported reasons must be text list"
+            )
     actions = projection["ordered_public_legal_actions"]
     if not isinstance(actions, list):
         raise T096SamplerError("T096 ordered public actions must be a list")
@@ -141,6 +176,16 @@ def _require_classification(
         )
 
 
+def _require_one_of(
+    visibility: Mapping[str, Any], field: str, expected: set[str]
+) -> None:
+    value = visibility.get(field)
+    if not isinstance(value, Mapping) or value.get("classification") not in expected:
+        raise T096SamplerError(
+            f"T096 visibility.{field} must be classified as one of {sorted(expected)!r}"
+        )
+
+
 def public_visibility_fidelity_gaps(
     projection: Mapping[str, Any],
 ) -> list[str]:
@@ -148,13 +193,22 @@ def public_visibility_fidelity_gaps(
 
     visibility = projection["visibility"]
     gaps: list[str] = []
-    for field in ("draw_knowledge", "intent_hidden_mechanics"):
-        value = visibility.get(field)
-        if (
-            isinstance(value, Mapping)
-            and value.get("classification") == "unsupported_fidelity"
-        ):
-            gaps.append(f"{field}:unsupported_fidelity")
+    if "draw_knowledge" in visibility or "intent_hidden_mechanics" in visibility:
+        for field in ("draw_knowledge", "intent_hidden_mechanics"):
+            value = visibility.get(field)
+            if (
+                isinstance(value, Mapping)
+                and value.get("classification") == "unsupported_fidelity"
+            ):
+                gaps.append(f"{field}:unsupported_fidelity")
+    elif projection.get("information_fidelity") == "unsupported_fidelity":
+        gaps.append("visibility:unsupported_fidelity")
+    draw_order = visibility.get("draw_order")
+    if (
+        isinstance(draw_order, Mapping)
+        and draw_order.get("classification") == "unsupported_fidelity"
+    ):
+        gaps.append("draw_knowledge:unsupported_fidelity")
     return gaps
 
 
@@ -255,10 +309,20 @@ def validate_anchor_distribution_metadata(value: object) -> dict[str, Any]:
     for field in bool_fields:
         if not isinstance(metadata.get(field), bool):
             raise T096SamplerError(f"T096 anchor metadata {field} is not boolean")
-    if metadata.get("draw_order_visibility") != "hidden":
-        raise T096SamplerError("T096 anchor draw order is not classified hidden")
-    if metadata.get("draw_knowledge_fidelity") != "ordinary-hidden-draw-only":
-        raise T096SamplerError("T096 anchor draw knowledge fidelity is unsupported")
+    if metadata.get("draw_order_visibility") not in {
+        "hidden",
+        "known_prefix",
+        "known_positions",
+        "full_public_exact",
+        "unsupported_fidelity",
+    }:
+        raise T096SamplerError("T096 anchor draw order classification is invalid")
+    if metadata.get("draw_knowledge_fidelity") not in {
+        "ordinary-hidden-draw-only",
+        "native-current-information-v2",
+        "unsupported_fidelity",
+    }:
+        raise T096SamplerError("T096 anchor draw knowledge fidelity is invalid")
     for field in (
         "deck_size",
         "hand_size",

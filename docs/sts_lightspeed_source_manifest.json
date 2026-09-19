@@ -9,7 +9,7 @@
     "repository_url": "https://github.com/lsmfttb/sts_lightspeed.git",
     "branch": "stsrl/main",
     "ref": "refs/heads/stsrl/main",
-    "commit": "970fc15b67167bcf996fc20defd7b4a376583bc7"
+    "commit": "d309170198e21e57041a84dcfdbc255cdda4052e"
   },
   "python_module": {
     "name": "slaythespire",
@@ -235,18 +235,37 @@
     },
     {
       "id": "native_t096_public_information_hidden_future_sampler",
-      "description": "Native-owned T096 Battle public-information projection, frozen-anchor distribution metadata, and reproducible hidden-future particle sampler. Private diversity and next-card fields are audit-only and are not normal controller/model inputs; draw-knowledge and hidden-intent mechanics remain explicitly unsupported unless native visibility is extended.",
+      "description": "Native-owned T096 Battle native-battle-public-information-v2 current-player-information projection and reproducible hidden-future particle sampler. The versioned projection exposes exact known top/position constraints, full public draw order under Frozen Eye, Runic Dome current-intent hiding with observed move/history and semantic statuses retained, typed unsupported draw reasons, private-only hidden-state omission, semantic public counters, and fail-closed mixed/timing-mixed counter cases. Private diversity and next-card fields remain audit-only and are not normal controller/model inputs; unsupported anchors are rejected rather than labeled as supported.",
       "task_provenance": [
         "T096"
       ],
       "required_python_api": [
         "StepSimulator.t096_public_information_projection",
         "StepSimulator.t096_public_information_projection.schema_id",
+        "StepSimulator.t096_public_information_projection.visibility.draw_order",
+        "StepSimulator.t096_public_information_projection.visibility.enemy_intent",
+        "StepSimulator.t096_public_information_projection.draw_knowledge_unsupported_reasons",
         "StepSimulator.t096_anchor_distribution_metadata",
         "StepSimulator.t096_anchor_distribution_metadata.schema_id",
         "StepSimulator.sample_hidden_future_particles",
         "StepSimulator.sample_hidden_future_particles.particle_start",
-        "StepSimulator.sample_hidden_future_particles.particle_count"
+        "StepSimulator.sample_hidden_future_particles.particle_count",
+        "StepSimulator.t096_visibility_audit",
+        "StepSimulator.t096_visibility_audit.schema_id",
+        "StepSimulator.t096_visibility_audit.headbutt_known_prefix",
+        "StepSimulator.t096_visibility_audit.rebound_establishes_known_top",
+        "StepSimulator.t096_visibility_audit.forethought_known_position_preserved",
+        "StepSimulator.t096_visibility_audit.draw_knowledge_reason_typed",
+        "StepSimulator.t096_visibility_audit.subset_reveal_sampler_fails_closed",
+        "StepSimulator.t096_visibility_audit.frozen_eye_full_order",
+        "StepSimulator.t096_visibility_audit.runic_dome_hides_current_intent",
+        "StepSimulator.t096_visibility_audit.runic_dome_preserves_previous_move",
+        "StepSimulator.t096_visibility_audit.runic_dome_hidden_counter_timing_invariant",
+        "StepSimulator.t096_visibility_audit.runic_dome_mixed_counter_sampler_fails_closed",
+        "StepSimulator.t096_visibility_audit.private_hidden_state_projection_invariant",
+        "StepSimulator.t096_visibility_audit.runic_dome_looter_public_counter_preserved",
+        "StepSimulator.t096_visibility_audit.private_hidden_misc_sampler_supported",
+        "StepSimulator.t096_visibility_audit.runic_dome_direct_misc_fail_closed"
       ]
     }
   ],

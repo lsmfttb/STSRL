@@ -291,3 +291,69 @@ After that approval, ordinary implementation changes on the same PR do not requi
 Final landing requires Maintainer final implementation/operational acceptance and Planner final architecture/provenance acceptance on the same exact final PR head.
 
 T034 scientific closure, particle convergence, model training, controller promotion, Non-Combat work, and T066 remain unauthorized.
+
+## Candidate Result Record
+
+Candidate lifecycle: `DONE`
+
+Terminal classification: `NATIVE_PUBLIC_INFORMATION_CAPABILITY_ACCEPTED`
+
+The exact STSRL source manifest now pins:
+
+```text
+repository: https://github.com/lsmfttb/sts_lightspeed.git
+branch: stsrl/main
+ref: refs/heads/stsrl/main
+commit: d309170198e21e57041a84dcfdbc255cdda4052e
+```
+
+Native lineage was verified against the actual Git graph. The previous pin
+`970fc15b67167bcf996fc20defd7b4a376583bc7` is an ancestor of the pinned result,
+the fetched `refs/pull/18/head` resolves to the independently reviewed head
+`433abc1392076a80329c4625c57439d6bd062580`, that reviewed head is an ancestor
+of the pinned result, and a fresh fetch of `refs/heads/stsrl/main` resolves
+exactly to `d309170198e21e57041a84dcfdbc255cdda4052e`.
+
+The canonical verifier was run with a fresh detached native worktree and fresh
+`build-stsrl-source-py` directory created by the verifier:
+
+```text
+STSRL_LIGHTSPEED_BUILD_JOBS=16 bash scripts/verify_lightspeed_source.sh \
+  /mnt/d/DeadlyCatCoding/sts_lightspeed
+```
+
+The successful run built the exact pinned native source with GCC 15.2.0 and
+Python 3.14.4, imported the verifier-built extension from
+`/tmp/stsrl-lightspeed-source.CmAbuY/build-stsrl-source-py`, and passed the
+full STSRL native API assertions. The focused native sampler smoke passed with
+`step=4`, `particles=8`, and `distinct_hidden=8`. The deterministic native
+visibility audit passed all required fields, including known top/position
+constraints, Frozen Eye full-order preservation, Runic Dome current-intent and
+previous-history behavior, typed unsupported draw reasons, private-only hidden
+state omission, semantic public counters, mixed-counter fail-closed behavior,
+and direct unsupported-anchor rejection. Native Search-v2 tree-geometry smoke
+also passed.
+
+The fresh evidence logs are retained outside the review worktree under
+`/mnt/d/DeadlyCatCoding/STSRL-T097-evidence/`:
+
+- `native-lineage-proof.log`
+- `verify_lightspeed_lineage.log`
+- `verify_lightspeed_source-rerun.log`
+- `verifier-rerun-exit.txt`
+
+No simulator-scale or scientific T096 run was started. No native source was
+modified. This result accepts the exact native capability as a reproducible
+normal-information/no-SL build input; it does not reverse T096's scientific
+pilot terminal, establish posterior correctness or particle-count sufficiency,
+close T034, or authorize Search, training, controller, complete-run,
+Non-Combat, or T066 work. A focused T096 fidelity re-entry remains a separate
+successor task.
+
+Repository checks on the final candidate tree passed for `git diff --check`,
+shell syntax, Python compileall, changed-file Ruff checks, the 21 focused
+manifest/T096 tests, and both mock CLI fixtures. The full repository suite
+completed with 1,374 passed, 2 skipped, and 33 failed; the failures are outside
+the T097 acceptance surface (historical exact-native-identity guards, the
+pre-existing WSL artifact-path fixture, and pre-existing task/workflow
+documentation assertions). No T097-focused test failed.
