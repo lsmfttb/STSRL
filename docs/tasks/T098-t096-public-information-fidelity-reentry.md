@@ -430,6 +430,25 @@ The compact report is retained at
 `/mnt/d/DeadlyCatCoding/STSRL/artifacts/t098-public-information-fidelity-reentry-v1/t098-public-information-fidelity-reentry-v1.json`
 (12,259 bytes, SHA-256
 `92ce6df0ed178c2dde3d98d6de949153fbffe65872e4711bd4c3269b4024bc0b`).
+
+The durable report-validation entrypoint is:
+
+```text
+cd /mnt/d/DeadlyCatCoding/STSRL-T098
+PYTHONPATH=src python -m sts_combat_rl.commands.t098_public_information_fidelity \
+  --input-report /mnt/d/DeadlyCatCoding/STSRL/artifacts/t098-public-information-fidelity-reentry-v1/t098-public-information-fidelity-reentry-v1.json
+```
+
+It consumes the input JSON report with schema
+`t098-public-information-fidelity-reentry-v1`, verifies the frozen native
+identity `lsmfttb/sts_lightspeed refs/heads/stsrl/main @
+d309170198e21e57041a84dcfdbc255cdda4052e`, and requires the explicit
+`intentional_unsupported_witness` evidence from
+`StepSimulator.t096_visibility_audit` (`native-battle-visibility-audit-v1`).
+The exact-source native build used by the report remains the T097 disposable
+build (`STSRL_LIGHTSPEED_BUILD_JOBS=16`); this validator does not rebuild or
+mutate native source.
+
 The exact-source native build log is `native-build.log` (SHA-256
 `91e8154831a0b5ea8e903d074b67d90470b6721a57add8d3e050ce3ff2f9e629`),
 and the witness execution log is `runtime-evidence.log` (SHA-256

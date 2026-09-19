@@ -8,6 +8,7 @@ It does not construct or mutate hidden simulator mechanics in Python.
 
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 from collections.abc import Callable, Mapping, Sequence
@@ -73,6 +74,15 @@ _NATIVE_AUDIT_BOOLEAN_FIELDS = frozenset(
         "runic_dome_retains_visible_power",
         "runic_dome_direct_misc_fail_closed",
     }
+)
+
+_T098_UNSUPPORTED_AUDIT_EVIDENCE_FIELDS = (
+    "runic_dome_hides_current_intent",
+    "runic_dome_preserves_previous_move",
+    "runic_dome_sanitizes_roll_misc",
+    "runic_dome_hidden_counter_timing_invariant",
+    "runic_dome_mixed_counter_sampler_fails_closed",
+    "private_hidden_state_projection_invariant",
 )
 
 
@@ -418,7 +428,16 @@ def audit_t098_supported_witness(
 def build_t098_unsupported_witness(
     audit: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Summarize the native-owned timing-mixed fail-closed witness."""
+    """Record the native-owned timing-mixed fail-closed witness.
+
+    ``t096_visibility_audit`` is the only supported native surface that can
+    construct this timing-mixed Runic Dome state.  Preserve the relevant raw
+    audit evidence and the exact native API/case identity in the witness;
+    derived booleans alone are not a runtime witness.
+    """
+    evidence = {
+        field: audit[field] for field in _T098_UNSUPPORTED_AUDIT_EVIDENCE_FIELDS
+    }
 
     passed = all(
         audit.get(field) is True
@@ -436,18 +455,112 @@ def build_t098_unsupported_witness(
         "family": "intentional_timing_mixed_unsupported",
         "status": "PASS" if passed else "FAIL",
         "witness_provenance": {
-            "source": "StepSimulator.t096_visibility_audit",
-            "native_constructed_case": "Runic Dome Book of Stabbing timing-mixed counter",
+            "native_api": "StepSimulator.t096_visibility_audit",
+            "native_api_schema_id": T098_NATIVE_AUDIT_SCHEMA_ID,
+            "native_constructed_case": (
+                "Runic Dome Book of Stabbing timing-mixed counter"
+            ),
+            "witness_kind": "native_owned_actual_witness",
         },
         "information_fidelity": "unsupported_fidelity",
-        "current_intent_hidden": audit.get("runic_dome_hides_current_intent"),
-        "previous_move_retained": audit.get("runic_dome_preserves_previous_move"),
-        "raw_hidden_roll_leaked": not bool(audit.get("runic_dome_sanitizes_roll_misc")),
-        "sampler_rejected": audit.get("runic_dome_mixed_counter_sampler_fails_closed"),
-        "private_variant_projection_invariant": audit.get(
+        "native_audit_evidence": evidence,
+        # Keep the direct contract fields alongside the source evidence for
+        # consumers that do not need to understand the audit's full schema.
+        "current_intent_hidden": evidence["runic_dome_hides_current_intent"],
+        "previous_move_retained": evidence["runic_dome_preserves_previous_move"],
+        "raw_hidden_roll_leaked": not evidence["runic_dome_sanitizes_roll_misc"],
+        "sampler_rejected": evidence["runic_dome_mixed_counter_sampler_fails_closed"],
+        "private_variant_projection_invariant": evidence[
             "runic_dome_hidden_counter_timing_invariant"
-        ),
+        ],
+        "projection_evidence": {
+            "classification": "unsupported_fidelity",
+            "current_intent_hidden": evidence["runic_dome_hides_current_intent"],
+            "previous_move_retained": evidence["runic_dome_preserves_previous_move"],
+            "raw_hidden_roll_leaked": not evidence["runic_dome_sanitizes_roll_misc"],
+            "private_variant_projection_invariant": evidence[
+                "runic_dome_hidden_counter_timing_invariant"
+            ],
+        },
+        "sampler_evidence": {
+            "rejected": evidence["runic_dome_mixed_counter_sampler_fails_closed"],
+            "accepted_particle_count": 0,
+        },
     }
+
+
+def validate_t098_report(value: object) -> dict[str, Any]:
+    """Validate a retained T098 report and its explicit unsupported witness."""
+
+    if not isinstance(value, Mapping):
+        raise T096SamplerError("T098 report must be a mapping")
+    report = dict(value)
+    if report.get("schema_id") != T098_REPORT_SCHEMA_ID:
+        raise T096SamplerError("T098 report schema mismatch")
+    native = report.get("native_identity")
+    if not isinstance(native, Mapping) or native.get("commit") != T098_NATIVE_COMMIT:
+        raise T096SamplerError("T098 report native identity mismatch")
+    witness = report.get("intentional_unsupported_witness")
+    if not isinstance(witness, Mapping):
+        raise T096SamplerError("T098 report lacks intentional unsupported witness")
+    provenance = witness.get("witness_provenance")
+    if not isinstance(provenance, Mapping) or provenance.get("native_api") != (
+        "StepSimulator.t096_visibility_audit"
+    ):
+        raise T096SamplerError("T098 unsupported witness native API is not explicit")
+    evidence = witness.get("native_audit_evidence")
+    if not isinstance(evidence, Mapping) or any(
+        evidence.get(field) is not True
+        for field in _T098_UNSUPPORTED_AUDIT_EVIDENCE_FIELDS
+    ):
+        raise T096SamplerError("T098 unsupported witness audit evidence is incomplete")
+    projection = witness.get("projection_evidence")
+    sampler = witness.get("sampler_evidence")
+    if (
+        not isinstance(projection, Mapping)
+        or projection.get("classification") != "unsupported_fidelity"
+        or projection.get("raw_hidden_roll_leaked") is not False
+        or not isinstance(sampler, Mapping)
+        or sampler.get("rejected") is not True
+        or sampler.get("accepted_particle_count") != 0
+    ):
+        raise T096SamplerError("T098 unsupported witness is not fail-closed")
+    return report
+
+
+def validate_t098_report_file(path: Path) -> dict[str, Any]:
+    """Load and validate one retained T098 JSON report."""
+
+    with path.open(encoding="utf-8") as stream:
+        return validate_t098_report(json.load(stream))
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build the durable report-validation command parser."""
+
+    parser = argparse.ArgumentParser(
+        prog="python -m sts_combat_rl.commands.t098_public_information_fidelity"
+    )
+    parser.add_argument("--input-report", type=Path, required=True)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
+    report = validate_t098_report_file(args.input_report)
+    print(
+        json.dumps(
+            {
+                "path": str(args.input_report.resolve()),
+                "schema_id": report["schema_id"],
+                "native_commit": report["native_identity"]["commit"],
+                "terminal_classification": report.get("terminal_classification"),
+                "unsupported_witness": "native_audit_fail_closed",
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
 
 
 def classify_t098(
@@ -629,3 +742,7 @@ def run_t098_fidelity_reentry(
         witnesses=witnesses,
         input_references=input_references,
     )
+
+
+if __name__ == "__main__":  # pragma: no cover
+    raise SystemExit(main())

@@ -11,6 +11,7 @@ from sts_combat_rl.commands.t098_public_information_fidelity import (
     build_t098_report,
     classify_t098,
     validate_t098_native_visibility_audit,
+    validate_t098_report,
 )
 from sts_combat_rl.sim.t096_public_information_sampler import T096SamplerError
 
@@ -247,6 +248,24 @@ def test_report_reaches_ready_only_with_all_four_and_fail_closed() -> None:
         == "PUBLIC_HIDDEN_FUTURE_SAMPLER_FIDELITY_READY"
     )
     assert report["private_field_leak_detected"] is False
+    unsupported = report["intentional_unsupported_witness"]
+    assert unsupported["witness_provenance"]["native_api"] == (
+        "StepSimulator.t096_visibility_audit"
+    )
+    assert unsupported["witness_provenance"]["witness_kind"] == (
+        "native_owned_actual_witness"
+    )
+    assert (
+        unsupported["native_audit_evidence"][
+            "runic_dome_mixed_counter_sampler_fails_closed"
+        ]
+        is True
+    )
+    assert unsupported["sampler_evidence"] == {
+        "rejected": True,
+        "accepted_particle_count": 0,
+    }
+    assert validate_t098_report(report) == report
     assert classify_t098(witnesses[:3], report["intentional_unsupported_witness"]) == (
         "INTENT_VISIBILITY_FIDELITY_INSUFFICIENT"
     )
