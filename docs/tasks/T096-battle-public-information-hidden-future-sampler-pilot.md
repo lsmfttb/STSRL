@@ -386,6 +386,26 @@ no unrecorded local native state.
 
 `scientific_quality_claim`.
 
+### Claim boundary
+
+T096 may claim only that, on the bounded retained pilot surface:
+
+- one versioned visibility-aware current Battle public-information projection
+  was implemented and validated;
+- native-owned particle generation preserved exact public-information and
+  public legal-action parity on accepted anchors;
+- accepted particles exhibited future-dynamics-relevant hidden-state diversity;
+- the mandatory bounded distribution-sanity reference passed or failed as
+  reported; and
+- the resulting evidence supports exactly one of the frozen T096 terminal
+  classifications.
+
+T096 may not claim an exact deterministic-seed posterior, arbitrary-mid-Battle
+coverage, information-set-optimal Q-values, particle-count sufficiency, policy
+learnability or improvement, Search improvement, complete-run improvement,
+deployment readiness, T034 completion, Non-Combat improvement, or T066
+authorization.
+
 ### Required predicates
 
 Before a successful T096 terminal, all of the following must hold:
