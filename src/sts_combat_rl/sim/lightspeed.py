@@ -289,6 +289,20 @@ class LightSpeedAdapter:
         self._assert_snapshot_is_current(snapshot)
         return dict(self._sim.t096_anchor_distribution_metadata())
 
+    def t096_visibility_audit(self) -> dict[str, Any]:
+        """Return the native deterministic T096 visibility audit.
+
+        The audit constructs and restores its mechanics witnesses entirely
+        inside the pinned simulator.  It exposes only the versioned boolean
+        result surface and does not make native state available to Python.
+        """
+
+        if not hasattr(self._sim, "t096_visibility_audit"):
+            raise RuntimeError(
+                "slaythespire.StepSimulator does not expose the T096 visibility audit"
+            )
+        return dict(self._sim.t096_visibility_audit())
+
     def battle_search(
         self,
         snapshot: SimulatorSnapshot,
