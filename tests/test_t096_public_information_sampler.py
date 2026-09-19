@@ -5,21 +5,21 @@ from types import SimpleNamespace
 
 import pytest
 
-from sts_combat_rl.sim.t096_public_information_sampler import (
-    T096SamplerError,
-    analytic_next_card_multiset,
-    audit_native_particles,
-    classify_t096,
-    total_variation,
-    validate_anchor_distribution_metadata,
-    validate_public_information_projection,
-)
 from sts_combat_rl.commands.t096_public_information_sampler import (
     T096_T087_RECORD_COUNT,
     T096_T087_SOURCE_PROVENANCE,
     _mechanics_evidence_gaps,
     run_t096_anchor_audits,
     select_first_four_frozen_t087_anchors,
+)
+from sts_combat_rl.sim.t096_public_information_sampler import (
+    T096SamplerError,
+    analytic_next_card_multiset,
+    audit_native_particles,
+    classify_t096,
+    public_visibility_fidelity_gaps,
+    total_variation,
+    validate_public_information_projection,
 )
 
 
@@ -74,6 +74,25 @@ def test_projection_firewall_rejects_private_rng_or_sampler_fields() -> None:
     value["visibility"] = {"draw_order": {"classification": "hidden", "rng_counter": 2}}
     with pytest.raises(T096SamplerError, match="private key"):
         validate_public_information_projection(value)
+
+
+def test_visibility_aware_v2_projection_accepts_supported_current_information() -> None:
+    value = _projection()
+    value["schema_id"] = "native-battle-public-information-v2"
+    value["information_fidelity"] = "supported"
+    value["draw_knowledge_unsupported_reasons"] = []
+    value["visibility"] = {
+        "draw_order": {
+            "classification": "known_prefix",
+            "constraint": "public deterministic top-of-draw-pile placement",
+        },
+        "enemy_intent": {"classification": "public_exact"},
+    }
+
+    validated = validate_public_information_projection(value)
+
+    assert validated["schema_id"] == "native-battle-public-information-v2"
+    assert public_visibility_fidelity_gaps(validated) == []
 
 
 def test_analytic_reference_preserves_multiset_partition() -> None:

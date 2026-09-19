@@ -215,6 +215,28 @@ retention manifest
 therefore remains blocked pending native visibility/fidelity work; T096 does
 not authorize particle convergence, Search, training, or controller use.
 
+T097 is complete on PR #113 at implementation head
+`25ed9347521f0002e226703a1ea0091e99b97014` pending the required dual final
+acceptance. It accepts the exact native `stsrl/main` result
+`d309170198e21e57041a84dcfdbc255cdda4052e` in the canonical STSRL source
+manifest. Fresh Git-graph evidence proves that the previous pin
+`970fc15b67167bcf996fc20defd7b4a376583bc7` and reviewed native PR #18 head
+`433abc1392076a80329c4625c57439d6bd062580` are ancestors of the result, and
+that the active ref resolves exactly to the pinned commit.
+
+The canonical verifier rebuilt that exact source in a disposable detached
+worktree with `STSRL_LIGHTSPEED_BUILD_JOBS=16`, then passed the native API
+smoke, deterministic visibility audit, focused T096 particle smoke, and
+Battle Search-v2 tree-geometry smoke. Focused manifest/T096 tests (21),
+compileall, diff checks, changed-file Ruff, and both mock CLI fixtures passed.
+Evidence is retained under
+`/mnt/d/DeadlyCatCoding/STSRL-T097-evidence/`. An initial cache-path verifier
+attempt failed on an invalid script argument; it was repaired and the final
+fresh-source rerun passed. No scientific T096 rerun, Search convergence,
+training, controller promotion, Non-Combat update, T034 closure, or T066 work
+was performed. T097 accepts a reproducible native capability input only; it
+does not reverse T096's scientific terminal or authorize downstream work.
+
 The task index lists the canonical lifecycle state for the published backlog.
 The M1 model-guided Oracle search sandbox is complete through synthesis. It
 validated Oracle-like search plumbing but did not demonstrate controller

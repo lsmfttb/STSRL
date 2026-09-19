@@ -13,7 +13,7 @@ repo_root=$(cd "$(dirname "$0")/.." && pwd)
 manifest_path="${2:-$repo_root/docs/sts_lightspeed_source_manifest.json}"
 
 manifest_output=$(
-    PYTHONPATH="$repo_root/src${PYTHONPATH:+:$PYTHONPATH}" python3 - "$manifest_path" <<'PY'
+    PYTHONPATH="$repo_root/src" python3 - "$manifest_path" <<'PY'
 from pathlib import Path
 import sys
 
@@ -108,6 +108,13 @@ trap cleanup EXIT
 
 git -C "$source_checkout" worktree add --detach "$worktree" "$integration_commit" >/dev/null
 
+# The build input is this fresh detached worktree, never the caller's checked
+# out files or build directory.
+if [[ -n "$(git -C "$worktree" status --porcelain --untracked-files=all)" ]]; then
+    echo "fresh source worktree is not clean: $worktree" >&2
+    exit 2
+fi
+
 cd "$worktree"
 for submodule in "${submodules[@]}"; do
     expected_submodule_commit=$(
@@ -128,7 +135,7 @@ done
 cmake -S . -B "$build_dir" -DCMAKE_POLICY_VERSION_MINIMUM="$cmake_policy_version_minimum"
 cmake --build "$build_dir" --target "$cmake_target" -j "${STSRL_LIGHTSPEED_BUILD_JOBS:-2}"
 
-PYTHONPATH="$worktree/$build_dir:$repo_root/src${PYTHONPATH:+:$PYTHONPATH}" python3 - \
+PYTHONPATH="$worktree/$build_dir:$repo_root/src" python3 - \
     "$manifest_path" \
     "$module_name" \
     "$simulator_class" \
@@ -183,6 +190,7 @@ for method_name in (
     "battle_search_v2_with_state_utilization",
     "t096_public_information_projection",
     "t096_anchor_distribution_metadata",
+    "t096_visibility_audit",
     "sample_hidden_future_particles",
     "legal_battle_start_encounters",
     "rebuild_battle_start",
@@ -337,7 +345,7 @@ if battle_snapshot.get("battle_input_state") != "PLAYER_NORMAL":
 t096_projection = sim.t096_public_information_projection()
 if not isinstance(t096_projection, dict):
     fail("T096 public-information projection must be a dict")
-if t096_projection.get("schema_id") != "native-battle-public-information-v1":
+if t096_projection.get("schema_id") != "native-battle-public-information-v2":
     fail("T096 public-information projection schema id mismatch")
 for key in (
     "information_regime",
@@ -346,6 +354,8 @@ for key in (
     "visibility",
     "ordered_public_legal_actions",
     "draw_pile_membership",
+    "information_fidelity",
+    "draw_knowledge_unsupported_reasons",
 ):
     if key not in t096_projection:
         fail(f"T096 projection missing required field {key!r}")
@@ -358,9 +368,12 @@ if visibility.get("draw_order", {}).get("classification") != "hidden":
     fail("T096 projection draw order must be hidden")
 if visibility.get("enemy_intent", {}).get("classification") != "public_exact":
     fail("T096 projection enemy intent must be public_exact")
-for key in ("draw_knowledge", "intent_hidden_mechanics"):
-    if visibility.get(key, {}).get("classification") != "unsupported_fidelity":
-        fail(f"T096 projection {key} fidelity classification changed unexpectedly")
+if "draw_knowledge" in visibility or "intent_hidden_mechanics" in visibility:
+    fail("T096 projection retains obsolete visibility-fidelity fields")
+if not isinstance(t096_projection["draw_knowledge_unsupported_reasons"], list):
+    fail("T096 projection draw-knowledge reasons must be a list")
+if t096_projection["draw_knowledge_unsupported_reasons"]:
+    fail("ordinary T096 smoke unexpectedly reports unsupported draw knowledge")
 for action in t096_projection["ordered_public_legal_actions"]:
     if not isinstance(action, dict) or "bits=" in str(action.get("label", "")):
         fail("T096 public action labels must exclude replay-only bits")
@@ -394,6 +407,50 @@ if any(
     for row in t096_particles
 ):
     fail("T096 public projection exposes private top-level fields")
+
+visibility_audit = sim.t096_visibility_audit()
+if not isinstance(visibility_audit, dict):
+    fail("T096 visibility audit must be a dict")
+if visibility_audit.get("schema_id") != "native-battle-visibility-audit-v1":
+    fail("T096 visibility audit schema id mismatch")
+required_visibility_audit_fields = (
+    "headbutt_known_prefix",
+    "native_snapshot_contract",
+    "checkpoint_preserves_known_prefix",
+    "sampler_preserves_known_prefix",
+    "sampler_public_information_invariant",
+    "sampler_private_remainder_diverse",
+    "havoc_consumes_top_preserves_suffix",
+    "rebound_establishes_known_top",
+    "forethought_known_position_preserved",
+    "subset_reveal_fails_closed",
+    "subset_reveal_shuffle_stays_unsupported",
+    "subset_reveal_sampler_fails_closed",
+    "draw_knowledge_reason_typed",
+    "frozen_eye_full_order",
+    "frozen_eye_sampler_preserves_order",
+    "runic_dome_hides_current_intent",
+    "runic_dome_preserves_previous_move",
+    "runic_dome_sanitizes_roll_misc",
+    "runic_dome_hidden_counter_timing_invariant",
+    "runic_dome_mixed_counter_sampler_fails_closed",
+    "runic_dome_hides_louse_misc",
+    "private_hidden_state_projection_invariant",
+    "runic_dome_looter_public_counter_preserved",
+    "private_hidden_misc_sampler_supported",
+    "runic_dome_retains_visible_power",
+    "runic_dome_direct_misc_fail_closed",
+)
+failed_visibility_audit = [
+    field
+    for field in required_visibility_audit_fields
+    if visibility_audit.get(field) is not True
+]
+if failed_visibility_audit:
+    fail(
+        "T096 visibility audit failed: "
+        + ", ".join(failed_visibility_audit)
+    )
 
 encounter_candidates = sim.legal_battle_start_encounters()
 if not isinstance(encounter_candidates, list) or not encounter_candidates:
@@ -599,6 +656,9 @@ print("native API capability assertions passed")
 PY
 
 python3 scripts/stsrl_api_smoke.py --build-dir "$build_dir"
+PYTHONPATH="$worktree/$build_dir" python3 scripts/test_t096_public_information_sampler.py
+PYTHONPATH="$worktree/$build_dir" python3 scripts/test_t096_visibility_transitions.py \
+    --build-dir "$build_dir"
 python3 scripts/test_battle_search_v2_tree_geometry.py --build-dir "$build_dir"
 
 echo "clean sts_lightspeed pinned-source build passed"

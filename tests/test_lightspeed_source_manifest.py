@@ -35,7 +35,9 @@ def test_default_lightspeed_source_manifest_names_pinned_integration() -> None:
     )
     assert manifest.integration.branch == "stsrl/main"
     assert manifest.integration.ref == "refs/heads/stsrl/main"
-    assert manifest.integration.commit == ("970fc15b67167bcf996fc20defd7b4a376583bc7")
+    assert manifest.integration.commit == (
+        "d309170198e21e57041a84dcfdbc255cdda4052e"
+    )
     assert set(REQUIRED_NATIVE_CAPABILITY_IDS).issubset(manifest.capability_ids)
     assert "native_battle_search_root" in manifest.capability_ids
     assert "native_root_prior_allocation" in manifest.capability_ids
@@ -71,9 +73,15 @@ def test_t096_native_capability_declares_sampler_boundary() -> None:
         if item.capability_id == "native_t096_public_information_hidden_future_sampler"
     )
     assert capability.task_provenance == ("T096",)
+    assert "native-battle-public-information-v2" in capability.description
+    assert "draw-knowledge and hidden-intent mechanics remain explicitly unsupported" not in capability.description
     assert "StepSimulator.t096_public_information_projection" in capability.required_python_api
     assert "StepSimulator.t096_anchor_distribution_metadata" in capability.required_python_api
     assert "StepSimulator.sample_hidden_future_particles.particle_count" in capability.required_python_api
+    assert "StepSimulator.t096_visibility_audit" in capability.required_python_api
+    assert "StepSimulator.t096_visibility_audit.frozen_eye_full_order" in capability.required_python_api
+    assert "StepSimulator.t096_visibility_audit.runic_dome_mixed_counter_sampler_fails_closed" in capability.required_python_api
+    assert "StepSimulator.t096_visibility_audit.private_hidden_state_projection_invariant" in capability.required_python_api
 
 
 def test_lightspeed_source_identity_manifest_path_is_cwd_stable(
