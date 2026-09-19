@@ -223,6 +223,72 @@ class LightSpeedAdapter:
         self._assert_snapshot_is_current(snapshot)
         return parse_native_public_projection(dict(self._sim.public_projection()))
 
+    def t096_public_information_projection(
+        self, snapshot: SimulatorSnapshot
+    ) -> dict[str, Any]:
+        """Return the versioned T096 battle information state.
+
+        This surface is intentionally separate from the older T014 capability
+        projection.  It is an audit/sampler boundary, not a normal controller
+        feature encoder, and the native implementation owns visibility and
+        hidden-state semantics.
+        """
+
+        if not hasattr(self._sim, "t096_public_information_projection"):
+            raise RuntimeError(
+                "slaythespire.StepSimulator does not expose the T096 "
+                "public-information projection"
+            )
+        self._assert_snapshot_is_current(snapshot)
+        return dict(self._sim.t096_public_information_projection())
+
+    def sample_hidden_future_particles(
+        self,
+        snapshot: SimulatorSnapshot,
+        *,
+        sampler_seed: int,
+        particle_count: int,
+        particle_start: int = 0,
+    ) -> list[dict[str, Any]]:
+        """Ask native code for public-consistent hidden-future particles.
+
+        The returned private audit fields are consumed only by the T096 pilot;
+        this method is not part of controller/model selection.
+        """
+
+        if not hasattr(self._sim, "sample_hidden_future_particles"):
+            raise RuntimeError(
+                "slaythespire.StepSimulator does not expose the T096 native "
+                "hidden-future sampler"
+            )
+        if isinstance(sampler_seed, bool) or not isinstance(sampler_seed, int):
+            raise TypeError("T096 sampler_seed must be an integer")
+        if isinstance(particle_start, bool) or not isinstance(particle_start, int):
+            raise TypeError("T096 particle_start must be an integer")
+        if particle_start < 0:
+            raise ValueError("T096 particle_start must be non-negative")
+        _positive_native_int(particle_count, "T096 particle_count")
+        self._assert_snapshot_is_current(snapshot)
+        return [
+            dict(row)
+            for row in self._sim.sample_hidden_future_particles(
+                int(sampler_seed), int(particle_start), int(particle_count)
+            )
+        ]
+
+    def t096_anchor_distribution_metadata(
+        self, snapshot: SimulatorSnapshot
+    ) -> dict[str, Any]:
+        """Return native-owned eligibility/reference evidence for a T096 anchor."""
+
+        if not hasattr(self._sim, "t096_anchor_distribution_metadata"):
+            raise RuntimeError(
+                "slaythespire.StepSimulator does not expose the T096 native "
+                "anchor distribution metadata"
+            )
+        self._assert_snapshot_is_current(snapshot)
+        return dict(self._sim.t096_anchor_distribution_metadata())
+
     def battle_search(
         self,
         snapshot: SimulatorSnapshot,

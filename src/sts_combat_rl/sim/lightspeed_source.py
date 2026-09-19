@@ -29,6 +29,7 @@ REQUIRED_NATIVE_CAPABILITY_IDS = (
     "native_battle_search_v2_state_utilization",
     "native_terminal_resource_identity",
     "constructed_battle_start_transforms",
+    "native_t096_public_information_hidden_future_sampler",
 )
 _COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 

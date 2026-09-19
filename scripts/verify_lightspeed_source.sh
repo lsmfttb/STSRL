@@ -181,6 +181,9 @@ for method_name in (
     "battle_search_v2_with_progressive_bias",
     "battle_search_v2_with_tree_geometry",
     "battle_search_v2_with_state_utilization",
+    "t096_public_information_projection",
+    "t096_anchor_distribution_metadata",
+    "sample_hidden_future_particles",
     "legal_battle_start_encounters",
     "rebuild_battle_start",
 ):
@@ -328,6 +331,69 @@ for _ in range(200):
         fail("StepSimulator.step() must return a dict while reaching battle")
 else:
     fail("could not reach a battle to verify StepSimulator.battle_search")
+
+if battle_snapshot.get("battle_input_state") != "PLAYER_NORMAL":
+    fail("could not reach an ordinary T096 player decision")
+t096_projection = sim.t096_public_information_projection()
+if not isinstance(t096_projection, dict):
+    fail("T096 public-information projection must be a dict")
+if t096_projection.get("schema_id") != "native-battle-public-information-v1":
+    fail("T096 public-information projection schema id mismatch")
+for key in (
+    "information_regime",
+    "screen_identity",
+    "draw_pile_size",
+    "visibility",
+    "ordered_public_legal_actions",
+    "draw_pile_membership",
+):
+    if key not in t096_projection:
+        fail(f"T096 projection missing required field {key!r}")
+if t096_projection.get("information_regime") != "normal_information":
+    fail("T096 projection information regime mismatch")
+visibility = t096_projection.get("visibility")
+if not isinstance(visibility, dict):
+    fail("T096 projection visibility must be an object")
+if visibility.get("draw_order", {}).get("classification") != "hidden":
+    fail("T096 projection draw order must be hidden")
+if visibility.get("enemy_intent", {}).get("classification") != "public_exact":
+    fail("T096 projection enemy intent must be public_exact")
+for key in ("draw_knowledge", "intent_hidden_mechanics"):
+    if visibility.get(key, {}).get("classification") != "unsupported_fidelity":
+        fail(f"T096 projection {key} fidelity classification changed unexpectedly")
+for action in t096_projection["ordered_public_legal_actions"]:
+    if not isinstance(action, dict) or "bits=" in str(action.get("label", "")):
+        fail("T096 public action labels must exclude replay-only bits")
+t096_metadata = sim.t096_anchor_distribution_metadata()
+if not isinstance(t096_metadata, dict):
+    fail("T096 anchor distribution metadata must be a dict")
+if t096_metadata.get("schema_id") != "native-battle-anchor-distribution-audit-v1":
+    fail("T096 anchor distribution metadata schema id mismatch")
+if not t096_metadata.get("eligible"):
+    fail("T096 ordinary Battle smoke is not a frozen distribution anchor")
+if not isinstance(t096_metadata.get("remaining_unseen_card_counts"), dict):
+    fail("T096 anchor metadata lacks authoritative unseen-card multiset")
+t096_particles = sim.sample_hidden_future_particles(17, 0, 2)
+if not isinstance(t096_particles, list) or len(t096_particles) != 2:
+    fail("T096 bounded particle batch has the wrong size")
+if any(
+    not isinstance(row, dict)
+    or row.get("public_information_projection") != t096_projection
+    or not isinstance(row.get("hidden_future_fingerprint"), str)
+    or row.get("next_draw_card_id") is None
+    for row in t096_particles
+):
+    fail("T096 bounded particles failed public parity or audit-field checks")
+if len({row["hidden_future_fingerprint"] for row in t096_particles}) < 2:
+    fail("T096 bounded particles lack hidden future diversity")
+if any(
+    any(
+        key.casefold() in {"rng", "seed", "hidden_state", "private_state"}
+        for key in row["public_information_projection"]
+    )
+    for row in t096_particles
+):
+    fail("T096 public projection exposes private top-level fields")
 
 encounter_candidates = sim.legal_battle_start_encounters()
 if not isinstance(encounter_candidates, list) or not encounter_candidates:
@@ -523,6 +589,7 @@ observed_capabilities = {
     "native_battle_search_v2_state_utilization",
     "native_terminal_resource_identity",
     "constructed_battle_start_transforms",
+    "native_t096_public_information_hidden_future_sampler",
 }
 missing = sorted(observed_capabilities.difference(expected_capabilities))
 if missing:

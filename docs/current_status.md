@@ -183,6 +183,38 @@ is wrong; Planner decides whether a separately specified sampler/data effort is
 justified. No simulator/Search, training, native, controller, Non-Combat,
 T034-closure, or T066 work was performed or authorized.
 
+T096 is complete on PR #111 with implementation head
+`d767a299dbb15ca21bf29812ac9420a65407516e`, with native result
+`lsmfttb/sts_lightspeed refs/heads/stsrl/main @
+970fc15b67167bcf996fc20defd7b4a376583bc7`. The authorized pilot consumed the
+exact accepted T087 413-record A/B/C canonical order and selected the first
+four eligible ordinary first-player anchors at canonical positions 0, 1, 3,
+and 4. Each anchor completed exactly 8,192 accepted particles (32,768 total),
+with zero rejections, public projection parity 32,768/32,768, ordered public
+legal-action parity 32,768/32,768, and distinct hidden-future fingerprints
+`8183/8192/8192/8192`. The preregistered next-card TV values were
+`0.01022949/0.02124023/0.00869141/0.00869141`, all within the `0.05` gate.
+
+The frozen terminal is
+`NATIVE_PUBLIC_VISIBILITY_FIDELITY_INSUFFICIENT`: the native sampler and
+ordinary hidden-draw/visible-intent parity/diversity/distribution surface
+completed, while native visibility explicitly classifies draw knowledge and
+hidden intent mechanics as unsupported fidelity. The pilot used eight forked
+restore workers for ordered eligibility waves and one stateful native sampler
+worker per anchor; wall time was 184.8 seconds and peak process RSS was
+2,305.6 MiB. It ran no Search, training, broad data generation, controller
+promotion, T034 closure, Non-Combat update, or T066 work. Retained evidence is
+the report
+`/mnt/d/DeadlyCatCoding/STSRL/artifacts/t096-formal-4x8192-d767a29-20260919-retry3/t096-formal-pilot-report.json`
+(SHA-256
+`a545cd106c75bee6da084b4792425bdc8270f076b08421042b5043f820e16180`) and
+retention manifest
+`/mnt/d/DeadlyCatCoding/STSRL/artifacts/t096-formal-4x8192-d767a29-20260919-retry3/t096-retention-manifest.json`
+(SHA-256
+`34bc782d982bab7e202360318b15ee09558e65c4e10b0a576e4c99870ca740d1`). T034
+therefore remains blocked pending native visibility/fidelity work; T096 does
+not authorize particle convergence, Search, training, or controller use.
+
 The task index lists the canonical lifecycle state for the published backlog.
 The M1 model-guided Oracle search sandbox is complete through synthesis. It
 validated Oracle-like search plumbing but did not demonstrate controller
