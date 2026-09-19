@@ -344,24 +344,123 @@ Public parity and hidden diversity are necessary but not sufficient.
 A sampler that always chooses one arbitrary hidden future can preserve the
 public state while badly distorting the game distribution.
 
-T096 must therefore retain at least one bounded reference check where the
-future-randomization distribution can be independently assessed.
+T096 therefore freezes the following mandatory draw-order reference before
+implementation.
 
-At minimum:
+### Frozen reference family
 
-- include one draw-order reference family in which the currently visible cards
-  are fixed and the distribution of one or more still-hidden next-card events
-  has an independently computable or native-brute-force reference;
-- compare sampler frequencies with that reference using a preregistered,
-  reported statistical distance or confidence check;
-- include enough samples for the check to detect a grossly biased sampler, but
-  keep the run local-first and bounded.
+Use the exact accepted T087 413-record Battle-start cohort and its accepted
+canonical source ordering.
+
+Scan that ordering from first to last and select the first **four** anchors that
+satisfy all of the following at the first ordinary player Battle decision:
+
+- draw order is hidden under the T096 public-information projection;
+- there is no stronger current public constraint on draw order, such as a known
+  top card or fully revealed order;
+- discard and exhaust are empty;
+- every current hand card and every private draw-pile card maps one-to-one to a
+  persistent deck card instance, with no temporary/generated/inserted Battle
+  cards;
+- the multiset union of current hand plus private draw pile equals the
+  persistent deck multiset exactly;
+- after removing the visible hand from the persistent deck multiset, the
+  remaining unseen multiset is non-empty;
+- the remaining unseen multiset contains between 2 and 32 distinct public card
+  identities inclusive.
+
+These restrictions define only the distribution-sanity reference family. They
+do not redefine general T096 sampler support.
+
+Anchor selection must not inspect sampler outcomes, hidden-state diversity
+scores, or distribution-test results. If fewer than four T087 anchors satisfy
+the frozen eligibility rules, T096 terminates `INCOMPLETE`; the implementation
+may not substitute a different cohort or weaken the rules.
+
+### Analytic next-card reference
+
+For one eligible anchor, let the remaining unseen deck multiset contain
+`M > 0` cards after subtracting the visible opening hand from the persistent
+deck.
+
+For each public card identity `i`, let `m_i` be its multiplicity in that
+remaining unseen multiset.
+
+The frozen reference probability for the next hidden draw-pile card identity is:
+
+```text
+p_i = m_i / M
+```
+
+This reference is valid only for the frozen eligibility family above, where the
+native initial shuffle is an unbiased permutation and no accepted anchor has an
+additional draw-order constraint or Battle-time insertion.
+
+The implementation may use private native audit access to read the particle's
+actual next hidden card identity for this check. That identity must never enter
+the normal controller/model input.
+
+### Frozen sample budget
+
+For each of the four selected anchors, generate exactly:
+
+`N = 8192`
+
+accepted public-parity particles under the task sampler.
+
+Rejected/invalid particles do not count toward `N` and must be reported
+separately. The sampler seed/domain and deterministic particle-index mapping
+must be reported so the 8192 draws are reproducible.
+
+The task may run additional debugging samples, but only the frozen 8192
+accepted particles per anchor enter the mandatory reference statistic.
+
+### Frozen statistic and pass criterion
+
+For each anchor, form the empirical next-card identity distribution
+`hat p_i` over its 8192 accepted particles.
+
+Compute total variation distance:
+
+```text
+TV = 0.5 * sum_i |hat_p_i - p_i|
+```
+
+over the complete union of identities appearing in the analytic or empirical
+distribution.
+
+The anchor passes iff:
+
+```text
+TV <= 0.05
+```
+
+All four frozen anchors must pass.
+
+Therefore:
+
+- four anchors selected and all four `TV <= 0.05` -> mandatory
+  distribution-sanity gate passes;
+- any selected anchor with `TV > 0.05` ->
+  `PUBLIC_HIDDEN_FUTURE_SAMPLER_DISTRIBUTION_INVALID`;
+- inability to obtain four eligible anchors or the required 8192 accepted
+  public-parity particles per selected anchor -> `INCOMPLETE`, unless another
+  earlier frozen terminal condition already applies.
+
+No post-hoc pooling across anchors is allowed to rescue a failed anchor.
+
+The chosen 8192-particle budget and 0.05 TV tolerance are deliberately a
+gross-distortion gate, not a precision claim about the full hidden-future
+distribution. With at most 32 identity categories, the budget is large enough
+that ordinary multinomial sampling noise should be much smaller than the
+allowed 0.05 TV error; the task is intended to reject materially distorted
+sampling, not harmless Monte Carlo fluctuation.
 
 A second non-draw RNG reference is encouraged where the native mechanics make a
 clean independent comparison possible, but it is not a mandatory scientific
-gate for T096.
+gate for T096 and cannot compensate for failure of the frozen draw-order gate.
 
-The reference check validates only the bounded tested marginal. It does not
+The reference check validates only this bounded next-card marginal. It does not
 prove that the full particle distribution is the exact deterministic-seed
 posterior.
 
