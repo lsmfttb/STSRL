@@ -237,6 +237,40 @@ training, controller promotion, Non-Combat update, T034 closure, or T066 work
 was performed. T097 accepts a reproducible native capability input only; it
 does not reverse T096's scientific terminal or authorize downstream work.
 
+T098 is a final candidate on PR #114 with implementation/evidence head
+`b6140ac9ae9821d1ef6ddf6a4ac8a92ef9428ebb`, pending the required exact-head
+dual final acceptance. Against the unchanged native source
+`lsmfttb/sts_lightspeed refs/heads/stsrl/main @
+d309170198e21e57041a84dcfdbc255cdda4052e`, its bounded focused re-entry passed
+all four supported runtime witnesses at exactly 32 particles each. Ordinary
+hidden draw, Headbutt known-top, Frozen Eye full-public order, and supported
+Runic Dome hidden intent each had 32/32 exact public-projection and 32/32
+ordered-public-legal-action parity. Hidden fingerprints were respectively
+31/6/1/31; Frozen Eye correctly carries no hidden draw-order diversity claim.
+The Headbutt witness preserved the selected known top while its unconstrained
+remainder varied. The supported Runic Dome witness omitted current move,
+attack category, and current-intent damage while retaining previous-move and
+public-status surfaces.
+
+The separate native timing-mixed Runic Dome witness failed closed as
+`unsupported_fidelity`, leaked no raw hidden roll, and rejected sampling. No
+private RNG, native hidden-state storage, or audit-only fingerprint entered the
+public projection. The terminal is
+`PUBLIC_HIDDEN_FUTURE_SAMPLER_FIDELITY_READY`, which closes only T096's
+representative native visibility/fidelity blocker and permits Planner to
+consider a separate particle-count convergence task. It does not establish
+particle sufficiency, exact posterior correctness, arbitrary-state support,
+Search/model/controller improvement, or T034 completion.
+
+The compact report is retained at
+`/mnt/d/DeadlyCatCoding/STSRL/artifacts/t098-public-information-fidelity-reentry-v1/t098-public-information-fidelity-reentry-v1.json`
+(SHA-256
+`92ce6df0ed178c2dde3d98d6de949153fbffe65872e4711bd4c3269b4024bc0b`,
+12,259 bytes). Its exact-source build used 16 build workers for 42 seconds; the
+small deterministic witness replay used one stateful worker for 85 seconds.
+No formal T096 rerun, convergence ladder, Search, training, native change,
+controller promotion, Non-Combat update, T034 closure, or T066 work occurred.
+
 The task index lists the canonical lifecycle state for the published backlog.
 The M1 model-guided Oracle search sandbox is complete through synthesis. It
 validated Oracle-like search plumbing but did not demonstrate controller

@@ -381,3 +381,79 @@ Planner final scientific/architecture acceptance on the same exact final PR head
 
 Particle convergence, T034 closure, Search, training, controller promotion,
 Non-Combat work, and T066 remain unauthorized.
+
+## Candidate Result Record
+
+Candidate lifecycle: `DONE`
+
+Terminal classification: `PUBLIC_HIDDEN_FUTURE_SAMPLER_FIDELITY_READY`
+
+Implementation/evidence head:
+`b6140ac9ae9821d1ef6ddf6a4ac8a92ef9428ebb`
+
+The focused re-entry used the unchanged T097 native identity:
+
+```text
+repository: lsmfttb/sts_lightspeed
+ref: refs/heads/stsrl/main
+commit: d309170198e21e57041a84dcfdbc255cdda4052e
+```
+
+Four explicit portable assisted-run Battle anchors were replayed through the
+repository's existing authoritative restore path. Each supported witness then
+called the actual native `t096_public_information_projection` and
+`sample_hidden_future_particles` APIs with exactly `N=32`:
+
+- ordinary hidden draw / public exact intent: 32/32 public parity, 32/32
+  ordered-public-legal-action parity, 31 hidden fingerprints;
+- Headbutt exact known top: a native-legal bounded driver played Headbutt and
+  selected Defend from discard, after which the projection classified a
+  one-card `known_prefix`; 32/32 public parity, 32/32 legal parity, and 6
+  hidden fingerprints showed that the unconstrained remainder still varied;
+- Frozen Eye: the complete 14-card visible order was classified
+  `full_public_exact` and remained identical for all 32 particles; one hidden
+  fingerprint was observed and no hidden draw-order diversity is claimed;
+- supported Runic Dome: current intent and current move/damage fields were
+  absent, prior move and public-status surfaces remained present, and all
+  32 particles preserved public/legal parity with 31 hidden fingerprints.
+
+The native deterministic visibility audit separately exercised its Book of
+Stabbing timing-mixed Runic Dome counter. It classified the surface
+`unsupported_fidelity`, omitted the raw hidden roll, retained observed prior
+move semantics, and rejected sampling. The complete audit also passed the
+Headbutt/Rebound/Forethought, Frozen Eye, private-state firewall, semantic
+counter, and supported private-misc cases. No raw RNG, sampler seed, hidden
+fingerprint, or private native state entered a public projection or normal
+controller/model input.
+
+The compact report is retained at
+`/mnt/d/DeadlyCatCoding/STSRL/artifacts/t098-public-information-fidelity-reentry-v1/t098-public-information-fidelity-reentry-v1.json`
+(12,259 bytes, SHA-256
+`92ce6df0ed178c2dde3d98d6de949153fbffe65872e4711bd4c3269b4024bc0b`).
+The exact-source native build log is `native-build.log` (SHA-256
+`91e8154831a0b5ea8e903d074b67d90470b6721a57add8d3e050ce3ff2f9e629`),
+and the witness execution log is `runtime-evidence.log` (SHA-256
+`1db4d3363a5d11eb876bbf3441fdb7ade5ec94ee3422c76707371e5d620d7298`)
+in the same directory. The disposable exact-source build used 16 build workers
+and took 42 seconds. The bounded witness replay used one worker for 85 seconds;
+single-worker execution was appropriate because this was one small,
+deterministic, stateful witness sequence rather than source generation,
+coverage, evaluation, comparison, or a formal cohort.
+
+This result closes only the representative native visibility/fidelity blocker
+that terminated T096. It does not establish particle-count sufficiency, an
+exact posterior, arbitrary-mid-Battle universal support, Search or model
+improvement, controller promotion, complete-run improvement, T034 completion,
+Non-Combat improvement, deployment readiness, or T066 authorization. No
+formal T096 4×8192 rerun, convergence ladder, Search, training, controller,
+Non-Combat, or native-source change was performed.
+
+Focused T098/T096/adapter/source-manifest verification passed 47 tests. Python
+compileall, changed-file Ruff checks and format checks, `git diff --check`, and
+both mock CLI fixtures passed. The task-doc/focused group passed 52 tests and
+had one unrelated baseline failure for the pre-existing `Status:` field in
+`docs/t092_canary_process_isolation_amendment.md`. The full WSL/Torch suite
+completed with 1,379 passed, 2 skipped, and 33 failed. Those 33 are existing
+baseline failures in historical exact-native-identity guards, the WSL
+artifact-path fixture, T092 legacy assertions, and workflow documentation; no
+T098-focused test failed.
