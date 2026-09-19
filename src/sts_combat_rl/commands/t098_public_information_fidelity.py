@@ -639,10 +639,13 @@ def main(argv: list[str] | None = None) -> int:
             ),
             implementation_head=args.implementation_head,
         )
+    report_path = (
+        args.input_report if args.input_report is not None else args.output_report
+    )
     print(
         json.dumps(
             {
-                "path": str(args.input_report.resolve()),
+                "path": str(report_path.resolve()),
                 "schema_id": report["schema_id"],
                 "native_commit": report["native_identity"]["commit"],
                 "terminal_classification": report.get("terminal_classification"),

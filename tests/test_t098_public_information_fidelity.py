@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from types import SimpleNamespace
+import json
+import sys
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -11,6 +13,7 @@ from sts_combat_rl.commands.t098_public_information_fidelity import (
     build_t098_report,
     classify_t098,
     generate_t098_report_from_portable_pool,
+    main,
     validate_t098_native_visibility_audit,
     validate_t098_report,
 )
@@ -321,3 +324,43 @@ def test_generation_entrypoint_wraps_explicit_pool_and_report_workflow(
     assert report["schema_id"] == "t098-public-information-fidelity-reentry-v1"
     assert observed["indices"] == [0, 73, 828, 475]
     assert observed["write"][1] == output
+
+
+def test_generation_cli_reports_output_path_without_input_report(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    fake_native = ModuleType("sts_combat_rl.sim.lightspeed")
+    fake_native.LightSpeedAdapter = object  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "sts_combat_rl.sim.lightspeed", fake_native)
+    report = {
+        "schema_id": "t098-public-information-fidelity-reentry-v1",
+        "native_identity": {"commit": "d309170198e21e57041a84dcfdbc255cdda4052e"},
+        "terminal_classification": "PUBLIC_HIDDEN_FUTURE_SAMPLER_FIDELITY_READY",
+    }
+    monkeypatch.setattr(
+        "sts_combat_rl.commands.t098_public_information_fidelity.generate_t098_report_from_portable_pool",
+        lambda **kwargs: report,
+    )
+    output = tmp_path / "generated.json"
+    assert (
+        main(
+            [
+                "--portable-pool",
+                str(tmp_path / "pool.jsonl"),
+                "--output-report",
+                str(output),
+                "--implementation-head",
+                "a" * 40,
+                "--ordinary-record-index",
+                "0",
+                "--headbutt-record-index",
+                "73",
+                "--frozen-eye-record-index",
+                "828",
+                "--runic-dome-record-index",
+                "475",
+            ]
+        )
+        == 0
+    )
+    assert json.loads(capsys.readouterr().out)["path"] == str(output.resolve())
