@@ -127,7 +127,7 @@ task branch is expected to be ahead of its base; before final landing, refresh
 | T093 | DONE | [Internal-State Partial-Ranking Public Battle-Student Distillation Gate](T093-internal-state-partial-ranking-battle-student.md) | T011, T016, T025, T062, T078, T081, T087, T088, T090, T091, T092 | PR #108 exact head `66fe372`; exact T092 413-start materialization completed, but post-leakage source-start diversity failed the frozen A-cell minima (train/validation/heldout A = `30/6/9` vs `44/11/16`), so terminal classification is `INTERNAL_STATE_STUDENT_EFFECTIVE_DIVERSITY_INSUFFICIENT`; training, controls, held-out evaluation, and Search integration were not run. Retained external corpus and manifest are under `/mnt/d/DeadlyCatCoding/STSRL/artifacts/t093-internal-state-student-66fe372-20260918/`. |
 | T094 | DONE | [A-Cohort Supervision Attrition Decision Audit](T094-a-cohort-supervision-attrition-decision-audit.md) | T052, T085, T087, T090, T092, T093 | PR #109 exact head `6c81b8c`; exact S3 reproduced and terminal classification `A_COHORT_CANONICALIZATION_LIMITING`: A was `93/93/93` at S1 `n_min=1/2/4`, `59` after cross-split exclusion, and `45` at final S3; B/C same-pipeline controls remained broad. Retained report/manifest are under `/mnt/d/DeadlyCatCoding/STSRL/artifacts/t094-a-cohort-supervision-attrition-6c81b8c-20260918/`; no Search rerun, student training, controller integration, Non-Combat update, or T066. |
 | T095 | DONE | [Repeated-Public-State Oracle Aggregation Feasibility Audit](T095-repeated-public-state-oracle-aggregation-feasibility.md) | T033, T092, T094 | PR #110 exact head `181b531`; exact 413-start retained-T092 audit classified `EMPIRICAL_PUBLIC_AGGREGATION_TOO_SPARSE`: `k_min=2` had 4,551 fingerprints/26,996 aggregates (all A-only), while `k_min=4/8/16` had zero support, so every primary `k_min=8` predicate failed. No simulator/Search run, training, native/controller integration, T034 closure, Non-Combat update, or T066. |
-| T096 | READY | [Battle Public-Information Hidden-Future Sampler Pilot](T096-battle-public-information-hidden-future-sampler-pilot.md) | T014, T015, T016, T020, T034, T076, T078, T079, T095 | Candidate visibility-aware current-information-state and native hidden-future sampler correctness pilot; freezes public parity, hidden diversity, native mechanics ownership, bounded distribution sanity, and no-PRNG-cracking semantics. No implementation before Maintainer exact-head `SPEC APPROVED`; no Search convergence, model training, controller promotion, T034 closure, Non-Combat update, or T066. |
+| T096 | DONE | [Battle Public-Information Hidden-Future Sampler Pilot](T096-battle-public-information-hidden-future-sampler-pilot.md) | T014, T015, T016, T020, T034, T076, T078, T079, T095 | PR #111 implementation head `d767a29`; exact T087 413-record frozen-order pilot selected four ordinary first-player anchors and completed 4×8,192 accepted particles with 100% public/legal-action parity, hidden diversity, and TV ≤ 0.05. Terminal `NATIVE_PUBLIC_VISIBILITY_FIDELITY_INSUFFICIENT`: native draw-knowledge and hidden-intent mechanics remain explicit fidelity gaps. No Search convergence, model training, controller promotion, T034 closure, Non-Combat update, or T066. |
 
 Use the table for landed lifecycle state. `DRAFT`, `BLOCKED`, `CANCELLED`, and
 terminal rows have their normal durable meanings. A merged `READY` row authorizes
@@ -352,6 +352,21 @@ The landed executable queue is the set of `READY` rows in the Active Backlog.
 T095 is complete on this publication branch with
 `EMPIRICAL_PUBLIC_AGGREGATION_TOO_SPARSE`; T063 and T066 remain `DRAFT`, and
 T034 remains blocked on native public-consistent hidden-future sampling support.
+T096 is complete on PR #111 with implementation head
+`d767a299dbb15ca21bf29812ac9420a65407516e`. Its bounded native pilot used the
+exact accepted T087 413-record canonical order, selected positions 0/1/3/4,
+and completed 8,192 accepted particles per anchor (32,768 total) with
+public/legal-action parity 32,768/32,768 and TV values
+`0.01022949/0.02124023/0.00869141/0.00869141`. The terminal is
+`NATIVE_PUBLIC_VISIBILITY_FIDELITY_INSUFFICIENT`: the native projection
+explicitly reports unsupported draw-knowledge and hidden-intent mechanics, so
+T096 does not close T034 or authorize particle convergence, Search, training,
+controller promotion, Non-Combat work, or T066. Retained evidence is under
+`/mnt/d/DeadlyCatCoding/STSRL/artifacts/t096-formal-4x8192-d767a29-20260919-retry3/`;
+the report SHA-256 is
+`a545cd106c75bee6da084b4792425bdc8270f076b08421042b5043f820e16180` and the
+retention-manifest SHA-256 is
+`34bc782d982bab7e202360318b15ee09558e65c4e10b0a576e4c99870ca740d1`.
 T064, T065, and T071--T089 are `DONE` with their recorded diagnostic, repair,
 control-plane, target-generation, or accepted baseline-selection outcomes.
 T089's valid fresh evaluation did not establish Non-Combat improvement, so no
