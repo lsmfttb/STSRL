@@ -9,7 +9,7 @@
     "repository_url": "https://github.com/lsmfttb/sts_lightspeed.git",
     "branch": "stsrl/main",
     "ref": "refs/heads/stsrl/main",
-    "commit": "20a6c2b3a9cea817c988178b814f083ff889853f"
+    "commit": "970fc15b67167bcf996fc20defd7b4a376583bc7"
   },
   "python_module": {
     "name": "slaythespire",
@@ -231,6 +231,22 @@
       "required_python_api": [
         "StepSimulator.legal_battle_start_encounters",
         "StepSimulator.rebuild_battle_start"
+      ]
+    },
+    {
+      "id": "native_t096_public_information_hidden_future_sampler",
+      "description": "Native-owned T096 Battle public-information projection, frozen-anchor distribution metadata, and reproducible hidden-future particle sampler. Private diversity and next-card fields are audit-only and are not normal controller/model inputs; draw-knowledge and hidden-intent mechanics remain explicitly unsupported unless native visibility is extended.",
+      "task_provenance": [
+        "T096"
+      ],
+      "required_python_api": [
+        "StepSimulator.t096_public_information_projection",
+        "StepSimulator.t096_public_information_projection.schema_id",
+        "StepSimulator.t096_anchor_distribution_metadata",
+        "StepSimulator.t096_anchor_distribution_metadata.schema_id",
+        "StepSimulator.sample_hidden_future_particles",
+        "StepSimulator.sample_hidden_future_particles.particle_start",
+        "StepSimulator.sample_hidden_future_particles.particle_count"
       ]
     }
   ],

@@ -35,7 +35,7 @@ def test_default_lightspeed_source_manifest_names_pinned_integration() -> None:
     )
     assert manifest.integration.branch == "stsrl/main"
     assert manifest.integration.ref == "refs/heads/stsrl/main"
-    assert manifest.integration.commit == ("20a6c2b3a9cea817c988178b814f083ff889853f")
+    assert manifest.integration.commit == ("970fc15b67167bcf996fc20defd7b4a376583bc7")
     assert set(REQUIRED_NATIVE_CAPABILITY_IDS).issubset(manifest.capability_ids)
     assert "native_battle_search_root" in manifest.capability_ids
     assert "native_root_prior_allocation" in manifest.capability_ids
@@ -45,6 +45,7 @@ def test_default_lightspeed_source_manifest_names_pinned_integration() -> None:
     assert "native_battle_search_v2_state_utilization" in manifest.capability_ids
     assert "native_terminal_resource_identity" in manifest.capability_ids
     assert "constructed_battle_start_transforms" in manifest.capability_ids
+    assert "native_t096_public_information_hidden_future_sampler" in manifest.capability_ids
     assert manifest.legacy_patch_stack.status == "retired_provenance"
 
 
@@ -60,6 +61,19 @@ def test_lightspeed_source_identity_is_json_safe_and_reportable() -> None:
     assert "sts_lightspeed source identity" in text
     assert manifest.integration.commit in text
     assert "canonical verifier: scripts/verify_lightspeed_source.sh" in text
+
+
+def test_t096_native_capability_declares_sampler_boundary() -> None:
+    manifest = load_lightspeed_source_manifest()
+    capability = next(
+        item
+        for item in manifest.supported_native_capabilities
+        if item.capability_id == "native_t096_public_information_hidden_future_sampler"
+    )
+    assert capability.task_provenance == ("T096",)
+    assert "StepSimulator.t096_public_information_projection" in capability.required_python_api
+    assert "StepSimulator.t096_anchor_distribution_metadata" in capability.required_python_api
+    assert "StepSimulator.sample_hidden_future_particles.particle_count" in capability.required_python_api
 
 
 def test_lightspeed_source_identity_manifest_path_is_cwd_stable(
