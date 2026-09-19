@@ -194,6 +194,140 @@ independently reproducing the experimental idea, the consuming PR must pin the
 exact upstream revision and preserve the applicable MIT copyright/license notice
 and any transitive third-party attribution requirements.
 
+
+## Spire Pilot
+
+Spire Pilot is a public, actively developed Slay the Spire research agent whose
+published engineering notes provide a close external comparison for several
+STSRL design choices. It was reviewed from the public project site on
+2026-09-19.
+
+Project references:
+
+- Project overview: https://www.spirepilot.com/
+- Combat-system deep dive: https://www.spirepilot.com/combat_model
+- Out-of-combat-system deep dive:
+  https://www.spirepilot.com/out_of_combat_model
+- Training loop: https://www.spirepilot.com/training
+
+The public design describes a hierarchical system with a dedicated combat brain
+and out-of-combat brain. The combat side uses entity-token state representation,
+engine-computed tactical arithmetic, a small Transformer, determinized
+information-set MCTS, distributional/risk-aware value estimates, and a stronger
+search teacher whose labels are marginalized across multiple determinizations.
+The out-of-combat side enumerates legal candidates from the engine, uses exact
+dynamic programming where the structure permits it, and trains learned judgment
+from same-state paired counterfactual continuations rather than only absolute
+run outcomes.
+
+Several reported negative results are also directly useful to STSRL: a single
+global combat network retained systematic flat-value failures that motivated
+encounter specialization; naive absolute run-value regression was dominated by
+progress/floor confounding; and aggregate model metrics could miss regressions
+on decisive tactical states. The project's committed regression-case "ratchet"
+is therefore an external engineering reference for preserving previously solved
+behavior while search/model components evolve.
+
+### Relevance to STSRL
+
+Spire Pilot strengthens, but does not independently prove, several working
+directions already present in STSRL:
+
+- keep battle and long-horizon run decisions as separate modules that exchange
+  structured outcome/danger information;
+- consider entity-token encoders and dynamic candidate/pointer-style action
+  scoring for future battle models;
+- expose simulator-computed public arithmetic such as legal actions and
+  modifier-applied tactical quantities instead of asking a network to relearn
+  deterministic game mechanics;
+- preserve distributional battle outcomes and low-tail/death risk rather than
+  collapsing every fight into one mean scalar;
+- prioritize same-state paired counterfactual evidence for long-horizon
+  decisions where unpaired run outcomes have excessive variance;
+- maintain frozen tactical/regression cohorts so a new search/model version
+  cannot silently forget previously solved decisions.
+
+These are architecture and experiment-design references, not commitments to
+Spire Pilot's exact per-encounter specialization, CVaR rule, network size, or
+training schedule.
+
+The public site reports one verified A20 Heart clear in the real client, but
+STSRL treats that as an upstream project report rather than independently
+replicated evidence. The published material also does not fully specify the
+same current-knowledge semantics that STSRL requires for every mechanic such as
+partial draw-position knowledge, Frozen Eye, and Runic Dome. It therefore does
+not replace STSRL's normal-public visibility and hidden-future acceptance work.
+
+No Spire Pilot source code or weights have been copied into STSRL. At the time
+of review, the useful material was public technical documentation; any future
+source reuse would require a separate license/provenance review.
+
+## Unreleased Bilibili AlphaZero-Style Slay the Spire Agent Demo
+
+A separate unreleased Slay the Spire agent demonstrated on Bilibili materially
+informed the 2026-09-19 competitive-design review.
+
+Project reference:
+
+- Bilibili demo: https://www.bilibili.com/video/BV1BBY86eEi7/
+
+The demo/project description presents a hierarchical design with an
+AlphaZero-style combat-distillation layer using an entity Transformer and
+cosine pointer network, plus a long-horizon actor-critic layer using candidate
+scoring and bilinear interaction. It also demonstrates game-client/mod
+integration and reports Ascension-0 wins.
+
+This source is intentionally recorded with a weaker evidence status than an
+open repository or reproducible paper. At review time the implementation was
+not publicly available, and the reported architecture and performance could
+not be independently reproduced from source. STSRL therefore uses it as:
+
+- evidence that the battle/macro hierarchical decomposition and dynamic
+  candidate-scoring family are being explored independently;
+- motivation to include entity-token plus pointer/candidate heads and explicit
+  context-candidate interaction among future architecture comparisons;
+- a competitive benchmark for engineering completeness and live-game
+  integration, not as a numerical performance baseline.
+
+No source code, weights, or implementation text from this project have been
+used by STSRL.
+
+## AttemorySystem/spire-agent
+
+The public `AttemorySystem/spire-agent` project is an external engineering and
+deployment comparator. It was reviewed on 2026-09-19 at README blob
+`7b03175719070af104cac36c1436d6c5830775d9`.
+
+Project references:
+
+- GitHub: https://github.com/AttemorySystem/spire-agent
+- License: https://github.com/AttemorySystem/spire-agent/blob/main/LICENSE
+
+The project separates map, build, and combat decision modules, uses
+CommunicationMod-compatible live-game integration, records replayable runs, and
+uses `sts_lightspeed` MCTS for combat. Its README reports multiple A20 Heart
+wins for Ironclad and Defect.
+
+The reported results are useful evidence that a modular simulator-backed agent
+can operate end-to-end in the real game, but they are not directly comparable
+to STSRL's final research claim. The default build path explicitly uses expert
+winning-deck templates and contextual expert evidence, some unresolved
+decisions use an LLM, and the combat tool receives complete combat state.
+Those choices are valid for that project's objective but lie outside STSRL's
+tabula-rasa training-signal and final normal-public information boundaries.
+
+For STSRL, the useful lessons are therefore mainly engineering ones:
+stable domain boundaries, replayable decision provenance, deterministic
+protocol handling, and real-client regression/integration coverage. The project
+also sharpens why STSRL must report its human-knowledge and hidden-information
+regimes separately rather than comparing headline A20H counts without matching
+conditions.
+
+The reviewed repository is MIT licensed. Current STSRL use is reference-only;
+no source or weights have been copied. Any future reuse must pin the exact
+upstream revision and preserve the applicable MIT notice plus any transitive
+third-party obligations.
+
 ## Publication Requirement
 
 Before a public research release, paper-like technical report, or polished
@@ -205,6 +339,15 @@ open-source announcement, maintainers must verify that:
   STSRL combat-search research;
 - `Jialeiv/sts-rl-agent` is cited wherever its public non-combat learning result or
   combat-learning negative evidence materially informs STSRL experimental design;
+- Spire Pilot is cited wherever its public combat/search, counterfactual
+  out-of-combat training, risk modeling, or regression-ratchet design materially
+  informs STSRL architecture or experiment design;
+- the Bilibili AlphaZero-style agent demo `BV1BBY86eEi7` is cited when its
+  hierarchical/entity-pointer/candidate-interaction design materially informs an
+  STSRL comparison, while preserving its unreleased/non-reproduced evidence status;
+- `AttemorySystem/spire-agent` is cited wherever its modular live-game
+  integration, replay, or deployment engineering materially informs STSRL, with
+  its expert/LLM/full-state regime kept distinct from STSRL's final claim;
 - implementation provenance is kept separate from conceptual attribution;
 - every copied, modified, linked, or redistributed third-party component has a
   verified compatible license or written permission and the required notices;
