@@ -303,6 +303,74 @@ class LightSpeedAdapter:
             )
         return dict(self._sim.t096_visibility_audit())
 
+    def sample_hidden_future_particles_search(
+        self,
+        snapshot: SimulatorSnapshot,
+        *,
+        sampler_seed: int,
+        particle_count: int,
+        search_simulations: int,
+        particle_start: int = 0,
+        include_potions: bool = False,
+    ) -> dict[str, Any]:
+        """Run unchanged Search-v2 separately inside native T096 particles.
+
+        This is a bounded capability bridge, not a controller.  Native code owns
+        particle state and Search mechanics; Python receives only the sanitized
+        per-particle report and performs no cross-particle aggregation.
+        """
+
+        if not hasattr(self._sim, "sample_hidden_future_particles_search"):
+            raise RuntimeError(
+                "slaythespire.StepSimulator does not expose the STSRL-006 "
+                "particle-to-Search bridge"
+            )
+        if isinstance(sampler_seed, bool) or not isinstance(sampler_seed, int):
+            raise TypeError("T099 sampler_seed must be an integer")
+        if isinstance(particle_start, bool) or not isinstance(particle_start, int):
+            raise TypeError("T099 particle_start must be an integer")
+        if particle_start < 0:
+            raise ValueError("T099 particle_start must be non-negative")
+        _positive_native_int(particle_count, "T099 particle_count")
+        if particle_count > 64:
+            raise ValueError("T099 particle_count must be at most 64")
+        _positive_native_int(search_simulations, "T099 search_simulations")
+        if not isinstance(include_potions, bool):
+            raise TypeError("T099 include_potions must be a bool")
+        self._assert_snapshot_is_current(snapshot)
+
+        from sts_combat_rl.sim.t099_particle_search_bridge import (
+            validate_t099_particle_search_bridge,
+        )
+
+        return validate_t099_particle_search_bridge(
+            dict(
+                self._sim.sample_hidden_future_particles_search(
+                    int(sampler_seed),
+                    int(particle_start),
+                    int(particle_count),
+                    int(search_simulations),
+                    include_potions,
+                )
+            )
+        )
+
+    def stsr006_particle_search_audit(self) -> dict[str, Any]:
+        """Return and validate the native-owned STSRL-006 capability audit."""
+
+        if not hasattr(self._sim, "stsr006_particle_search_audit"):
+            raise RuntimeError(
+                "slaythespire.StepSimulator does not expose the STSRL-006 "
+                "particle-to-Search audit"
+            )
+        from sts_combat_rl.sim.t099_particle_search_bridge import (
+            validate_t099_particle_search_audit,
+        )
+
+        return validate_t099_particle_search_audit(
+            dict(self._sim.stsr006_particle_search_audit())
+        )
+
     def battle_search(
         self,
         snapshot: SimulatorSnapshot,

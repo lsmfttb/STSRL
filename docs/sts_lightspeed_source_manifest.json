@@ -9,7 +9,7 @@
     "repository_url": "https://github.com/lsmfttb/sts_lightspeed.git",
     "branch": "stsrl/main",
     "ref": "refs/heads/stsrl/main",
-    "commit": "d309170198e21e57041a84dcfdbc255cdda4052e"
+    "commit": "97f59b620efe5ee1571f8da298c99d1e21c1149b"
   },
   "python_module": {
     "name": "slaythespire",
@@ -266,6 +266,48 @@
         "StepSimulator.t096_visibility_audit.runic_dome_looter_public_counter_preserved",
         "StepSimulator.t096_visibility_audit.private_hidden_misc_sampler_supported",
         "StepSimulator.t096_visibility_audit.runic_dome_direct_misc_fail_closed"
+      ]
+    },
+    {
+      "id": "native_stsr006_particle_search_bridge",
+      "description": "Native STSRL-006 bridge from the accepted public-consistent hidden-future sampler to unchanged per-particle Search-v2. The outer distribution is native public-consistent sampling; each ephemeral particle continuation is full_simulator_state_oracle_like; returned per-particle values are full_state_continuation_strategy_fusion_proxy. The bridge performs no cross-particle aggregation or action selection and rejects exact Q_public, executable no-SL continuation, information-set-optimal Search, exact Bayesian/deterministic-seed posterior expectation, and IID posterior-sampling claims. It preserves exact public projection and ordered public legal-action parity, maps every Search-v2 root row back to a public action occurrence with explicit direct or mechanically deduplicated duplicate-card provenance, sanitizes replay-only action bits, reports Search work counters, and fails closed on unsupported anchors and incomplete or ambiguous mappings.",
+      "task_provenance": [
+        "T099"
+      ],
+      "required_python_api": [
+        "StepSimulator.sample_hidden_future_particles_search",
+        "StepSimulator.sample_hidden_future_particles_search.schema_id",
+        "StepSimulator.sample_hidden_future_particles_search.native_api",
+        "StepSimulator.sample_hidden_future_particles_search.information_regime",
+        "StepSimulator.sample_hidden_future_particles_search.semantic_boundary.outer_particle_distribution",
+        "StepSimulator.sample_hidden_future_particles_search.semantic_boundary.continuation",
+        "StepSimulator.sample_hidden_future_particles_search.semantic_boundary.aggregation",
+        "StepSimulator.sample_hidden_future_particles_search.semantic_boundary.q_public_claim",
+        "StepSimulator.sample_hidden_future_particles_search.particles.public_information_projection",
+        "StepSimulator.sample_hidden_future_particles_search.particles.public_projection_equal",
+        "StepSimulator.sample_hidden_future_particles_search.particles.ordered_public_legal_actions_equal",
+        "StepSimulator.sample_hidden_future_particles_search.particles.search_value_semantics",
+        "StepSimulator.sample_hidden_future_particles_search.particles.root_action_mapping_complete",
+        "StepSimulator.sample_hidden_future_particles_search.particles.root_action_mapping_ambiguous",
+        "StepSimulator.sample_hidden_future_particles_search.particles.root_evaluation.information_regime",
+        "StepSimulator.sample_hidden_future_particles_search.particles.root_evaluation.work_counters",
+        "StepSimulator.sample_hidden_future_particles_search.particles.root_evaluation.root_action_mapping_schema",
+        "StepSimulator.sample_hidden_future_particles_search.particles.root_evaluation.root_action_mapping.public_action_ordinal",
+        "StepSimulator.sample_hidden_future_particles_search.particles.root_evaluation.root_action_mapping.public_action",
+        "StepSimulator.sample_hidden_future_particles_search.particles.root_evaluation.root_action_mapping.search_edge_index",
+        "StepSimulator.sample_hidden_future_particles_search.particles.root_evaluation.root_action_mapping.mapping_mode",
+        "StepSimulator.sample_hidden_future_particles_search.particles.root_evaluation.root_action_mapping.source_action",
+        "StepSimulator.sample_hidden_future_particles_search.particles.root_evaluation.root_action_mapping.edge_public_occurrence_count",
+        "StepSimulator.stsr006_particle_search_audit",
+        "StepSimulator.stsr006_particle_search_audit.schema_id",
+        "StepSimulator.stsr006_particle_search_audit.direct_sampler_parity",
+        "StepSimulator.stsr006_particle_search_audit.value_semantics_labeled",
+        "StepSimulator.stsr006_particle_search_audit.root_work_counters_complete",
+        "StepSimulator.stsr006_particle_search_audit.hidden_particle_diversity",
+        "StepSimulator.stsr006_particle_search_audit.duplicate_occurrence_mapping",
+        "StepSimulator.stsr006_particle_search_audit.frozen_eye_search_compatibility",
+        "StepSimulator.stsr006_particle_search_audit.known_draw_constraint_preserved",
+        "StepSimulator.stsr006_particle_search_audit.unsupported_anchor_fails_closed"
       ]
     }
   ],

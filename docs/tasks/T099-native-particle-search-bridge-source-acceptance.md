@@ -364,3 +364,108 @@ After that approval, ordinary implementation changes on the same PR do not requi
 Final landing requires Maintainer final implementation/operational acceptance and Planner final architecture/provenance acceptance on the same exact final PR head.
 
 Particle convergence, cross-particle aggregation/action selection, Search changes, training, controller promotion, T034 closure, Non-Combat work, and T066 remain unauthorized until a later task explicitly permits them.
+
+## Candidate Result Record
+
+Candidate lifecycle: `DONE`
+
+Terminal classification:
+`NATIVE_PARTICLE_SEARCH_BRIDGE_CAPABILITY_ACCEPTED`
+
+The canonical source manifest now pins exactly:
+
+```text
+repository: https://github.com/lsmfttb/sts_lightspeed.git
+branch: stsrl/main
+ref: refs/heads/stsrl/main
+commit: 97f59b620efe5ee1571f8da298c99d1e21c1149b
+```
+
+Fresh Git-graph evidence verified that previous pin
+`d309170198e21e57041a84dcfdbc255cdda4052e` and independently reviewed native
+PR #20 head `84fc8fd6d7e5a2d14170ac46f791a2a3fe6efaba` are both ancestors of the
+pinned result. A fresh fetch of `refs/heads/stsrl/main` resolved exactly to
+`97f59b620efe5ee1571f8da298c99d1e21c1149b`; the result is the merge commit
+whose two parents are those exact previous-pin and reviewed-head commits.
+
+The canonical verifier ran from the T099 STSRL worktree with the required
+build-worker setting:
+
+```text
+STSRL_LIGHTSPEED_BUILD_JOBS=16 bash scripts/verify_lightspeed_source.sh \
+  /home/lsmft/stsrl-spikes/sts_lightspeed
+```
+
+It fetched the active ref, created a clean disposable detached native
+worktree at the exact pin, initialized the pinned `json` and `pybind11`
+submodules, and built only that worktree's fresh
+`build-stsrl-source-py` module. The successful run used 16 build workers,
+GCC 15.2.0, Python 3.14.4, and took 18.96 seconds wall clock. It imported
+`slaythespire.cpython-314-x86_64-linux-gnu.so` from the disposable build path
+and passed the native API smoke.
+
+The same exact-source verifier then passed:
+
+- the existing T096 sampler smoke (`particles=8`, `distinct_hidden=8`) and
+  every T096/T098 native visibility predicate;
+- every boolean in `stsr006_particle_search_audit()`:
+  direct sampler parity, mixed value-semantics labeling, complete Search work
+  counters, hidden-particle diversity, duplicate-occurrence mapping, Frozen
+  Eye/direct-Search compatibility, known-draw preservation, and unsupported
+  anchor fail-closed behavior;
+- a bounded ordinary two-particle, one-Search-simulation bridge call through
+  `sample_hidden_future_particles_search` with exact anchor/particle public
+  projection and ordered public legal-action parity;
+- sanitized per-occurrence root rows and explicit mapping records carrying the
+  public ordinal and identity, source Search edge, direct-versus-mechanical
+  duplicate mapping mode, source public action identity, and shared-occurrence
+  count, with no replay-only native action bits;
+- fail-closed report validation for incomplete or ambiguous mappings and
+  unsupported fidelity, plus Search work-counter and unchanged unguided
+  Search-v2 configuration checks; and
+- the existing Battle Search-v2 tree-geometry compatibility smoke.
+
+The accepted capability preserves the deliberately mixed regime. The outer
+distribution is the native public-consistent hidden-future sampler; each
+ephemeral particle runs a `full_simulator_state_oracle_like` Search-v2
+continuation; and returned per-particle values are labeled
+`full_state_continuation_strategy_fusion_proxy`. The bridge performs no
+cross-particle aggregation or action selection. It makes no exact
+`Q_public(I,a)`, executable no-SL continuation, information-set-optimal,
+exact Bayesian/deterministic-seed posterior, or IID posterior-sampling claim.
+No full native particle state or opaque restore handle crosses into STSRL Python.
+
+Retained evidence is outside the disposable review worktree under
+`/mnt/d/DeadlyCatCoding/STSRL-T099-evidence/`. The final successful logs are:
+
+- `native-lineage-proof.log` — SHA-256
+  `3ba50ea2a9e0734b59651d2559d400944f061d0c5c115493f69ec576df8474ca`;
+- `verify_lightspeed_source.log` — SHA-256
+  `200ea7ca16858a870caffa32daa2275a9a015f2e000caecaed09eb3c4371f42a`;
+- `final-verification.log` — SHA-256
+  `b31a32cf31deb567cebf45bbabe860956aea76c788b4a9843c7f43ae3bd82bcf`.
+
+Two earlier clean-build verifier attempts are retained as
+`verify_lightspeed_source-attempt1.log` and
+`verify_lightspeed_source-attempt2.log`. Both built the exact source but
+correctly stopped in the new STSRL-side report validator while its unvisited
+root-row handling was brought into agreement with the reviewed native schema;
+neither changed native source or produced scientific output.
+
+Focused manifest, verifier-wiring, adapter, bridge-helper, T096 sampler, T098
+fidelity, and existing adapter checks passed 63 tests. Compileall, shell
+syntax, Git diff checks, both mock fixtures, changed-file format checks, and
+changed-file Ruff checks with the three pre-existing `TRY004` findings in
+`lightspeed_source.py` excluded passed. The supported local full-suite run
+completed with 1,284 passed, 31 skipped, and 11 failures: six historical
+exact-native-identity guards expectedly reject the newly advanced manifest;
+the remaining five are pre-existing path, T092, task-doc, and workflow-summary
+baseline failures. The unconstrained Windows collection additionally cannot
+import optional Torch or Unix `resource` for four test modules. Full Ruff and
+format remain at the existing repository baseline (528 diagnostics and 24
+files). No T099-focused test failed.
+
+No simulator-scale job, formal cohort, 2/4/8/16/32 convergence ladder,
+cross-particle aggregation or action selection, Search algorithm change,
+training, controller promotion, T034 closure, Non-Combat update, or T066 work
+was started or authorized.
