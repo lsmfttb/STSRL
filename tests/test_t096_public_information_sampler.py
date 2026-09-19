@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from types import SimpleNamespace
 
 import pytest
@@ -209,7 +210,9 @@ class _SelectionAdapter(_FakeAdapter):
         return metadata
 
 
-def test_frozen_selector_uses_first_four_eligible_canonical_rows() -> None:
+def test_frozen_selector_uses_first_four_eligible_canonical_rows(
+    monkeypatch,
+) -> None:  # type: ignore[no-untyped-def]
     rows = [
         {
             "selection_identity": f"row-{index}",
@@ -220,6 +223,16 @@ def test_frozen_selector_uses_first_four_eligible_canonical_rows() -> None:
 
     def loader(row):  # type: ignore[no-untyped-def]
         return _SelectionAdapter(row["selection_identity"] != "row-1"), object()
+
+    for cohort, ids in {
+        cohort: [row["selection_identity"] for row in rows if row["cohort"] == cohort]
+        for cohort in ("A", "B", "C")
+    }.items():
+        monkeypatch.setitem(
+            T096_T087_SOURCE_PROVENANCE["selection_identity_orders_sha256"],
+            cohort,
+            hashlib.sha256("\n".join(ids).encode()).hexdigest(),
+        )
 
     selection = select_first_four_frozen_t087_anchors(
         ordered_rows=rows,
@@ -233,6 +246,25 @@ def test_frozen_selector_uses_first_four_eligible_canonical_rows() -> None:
         3,
         4,
     ]
+
+
+def test_frozen_selector_rejects_identity_order_digest_mismatch() -> None:
+    rows = [
+        {
+            "selection_identity": f"row-{index}",
+            "cohort": "A" if index < 93 else "B" if index < 285 else "C",
+        }
+        for index in range(T096_T087_RECORD_COUNT)
+    ]
+    selection = select_first_four_frozen_t087_anchors(
+        ordered_rows=rows,
+        anchor_loader=lambda row: (_SelectionAdapter(True), object()),
+        source_provenance=T096_T087_SOURCE_PROVENANCE,
+    )
+    assert selection["terminal_classification"] == "INCOMPLETE"
+    assert selection["failure_reason"] == (
+        "T096 T087 selection identity order digest mismatch"
+    )
 
 
 def test_frozen_selector_rejects_short_or_duplicate_unprovenanced_cohorts() -> None:

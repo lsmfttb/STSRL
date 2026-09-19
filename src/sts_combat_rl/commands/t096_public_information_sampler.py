@@ -91,6 +91,7 @@ def select_first_four_frozen_t087_anchors(
         return incomplete("T096 requires exactly the accepted 413-row T087 cohort")
     identities: list[str] = []
     cohorts: list[str] = []
+    identities_by_cohort: dict[str, list[str]] = {"A": [], "B": [], "C": []}
     for candidate in ordered_rows:
         if not isinstance(candidate, Mapping):
             return incomplete("T096 T087 canonical row is not a mapping")
@@ -102,11 +103,21 @@ def select_first_four_frozen_t087_anchors(
             return incomplete("T096 T087 row lacks an accepted A/B/C cohort")
         identities.append(identity)
         cohorts.append(str(cohort))
+        identities_by_cohort[str(cohort)].append(identity)
     if len(set(identities)) != T096_T087_RECORD_COUNT:
         return incomplete("T096 T087 canonical rows contain duplicate identities")
     expected_cohorts = ["A"] * 93 + ["B"] * 192 + ["C"] * 128
     if cohorts != expected_cohorts:
         return incomplete("T096 T087 rows are not in canonical A/B/C order")
+    expected_hashes = T096_T087_SOURCE_PROVENANCE[
+        "selection_identity_orders_sha256"
+    ]
+    if any(
+        hashlib.sha256("\n".join(identities_by_cohort[cohort]).encode()).hexdigest()
+        != expected_hashes[cohort]
+        for cohort in ("A", "B", "C")
+    ):
+        return incomplete("T096 T087 selection identity order digest mismatch")
 
     scanned: list[dict[str, Any]] = []
     selected: list[dict[str, Any]] = []
