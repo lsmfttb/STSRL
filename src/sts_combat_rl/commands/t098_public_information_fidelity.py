@@ -40,6 +40,11 @@ T098_WITNESS_SCHEMA_ID = "t098-public-information-runtime-witness-v1"
 T098_PARTICLE_COUNT = 32
 T098_NATIVE_COMMIT = "d309170198e21e57041a84dcfdbc255cdda4052e"
 T098_NATIVE_AUDIT_SCHEMA_ID = "native-battle-visibility-audit-v1"
+T098_NATIVE_IDENTITY = {
+    "repository": "lsmfttb/sts_lightspeed",
+    "ref": "refs/heads/stsrl/main",
+    "commit": T098_NATIVE_COMMIT,
+}
 _T098_ALLOWED_DISTRIBUTIONS = frozenset(
     {NATURAL_DISTRIBUTION_KIND, ASSISTED_RUN_DISTRIBUTION_KIND}
 )
@@ -535,19 +540,105 @@ def validate_t098_report_file(path: Path) -> dict[str, Any]:
         return validate_t098_report(json.load(stream))
 
 
+def generate_t098_report_from_portable_pool(
+    *,
+    portable_pool_path: Path,
+    output_path: Path,
+    record_indices: Mapping[str, int],
+    adapter_factory: Callable[[], Any],
+    implementation_head: str,
+) -> dict[str, Any]:
+    """Run the bounded witness workflow from explicit retained pool inputs."""
+
+    required = {"ordinary", "headbutt", "frozen_eye", "runic_dome"}
+    if set(record_indices) != required:
+        raise ValueError(f"T098 record families must be exactly {sorted(required)}")
+    with portable_pool_path.open(encoding="utf-8") as stream:
+        loaded = load_portable_battle_start_records(
+            stream, record_indices=list(record_indices.values())
+        )
+    records = {family: loaded[index] for family, index in record_indices.items()}
+    report = run_t098_fidelity_reentry(
+        adapter_factory=adapter_factory,
+        records=records,
+        implementation_head=implementation_head,
+        native_identity=T098_NATIVE_IDENTITY,
+        input_references={
+            "portable_pool": {
+                "path": str(portable_pool_path.resolve()),
+                "schema_id": "assisted-run-source-pool-v1",
+            },
+            "witness_record_indices": dict(record_indices),
+        },
+    )
+    write_t098_report(report, output_path)
+    return report
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the durable report-validation command parser."""
 
     parser = argparse.ArgumentParser(
         prog="python -m sts_combat_rl.commands.t098_public_information_fidelity"
     )
-    parser.add_argument("--input-report", type=Path, required=True)
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--input-report", type=Path)
+    mode.add_argument("--portable-pool", type=Path)
+    parser.add_argument("--output-report", type=Path)
+    parser.add_argument("--implementation-head")
+    parser.add_argument("--ordinary-record-index", type=int)
+    parser.add_argument("--headbutt-record-index", type=int)
+    parser.add_argument("--frozen-eye-record-index", type=int)
+    parser.add_argument("--runic-dome-record-index", type=int)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    report = validate_t098_report_file(args.input_report)
+    if args.input_report is not None:
+        if any(
+            value is not None
+            for value in (
+                args.output_report,
+                args.implementation_head,
+                args.ordinary_record_index,
+                args.headbutt_record_index,
+                args.frozen_eye_record_index,
+                args.runic_dome_record_index,
+            )
+        ):
+            raise SystemExit("generation arguments cannot accompany --input-report")
+        report = validate_t098_report_file(args.input_report)
+    else:
+        generation_values = {
+            "output_report": args.output_report,
+            "implementation_head": args.implementation_head,
+            "ordinary_record_index": args.ordinary_record_index,
+            "headbutt_record_index": args.headbutt_record_index,
+            "frozen_eye_record_index": args.frozen_eye_record_index,
+            "runic_dome_record_index": args.runic_dome_record_index,
+        }
+        if any(value is None for value in generation_values.values()):
+            raise SystemExit(
+                "generation mode requires --output-report, --implementation-head, "
+                "and all four record indices"
+            )
+        from sts_combat_rl.sim.lightspeed import LightSpeedAdapter
+
+        report = generate_t098_report_from_portable_pool(
+            portable_pool_path=args.portable_pool,
+            output_path=args.output_report,
+            record_indices={
+                "ordinary": args.ordinary_record_index,
+                "headbutt": args.headbutt_record_index,
+                "frozen_eye": args.frozen_eye_record_index,
+                "runic_dome": args.runic_dome_record_index,
+            },
+            adapter_factory=lambda: LightSpeedAdapter(
+                seed=1, ascension=20, player_class="IRONCLAD"
+            ),
+            implementation_head=args.implementation_head,
+        )
     print(
         json.dumps(
             {

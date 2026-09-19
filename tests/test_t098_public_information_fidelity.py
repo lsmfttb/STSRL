@@ -10,6 +10,7 @@ from sts_combat_rl.commands.t098_public_information_fidelity import (
     audit_t098_supported_witness,
     build_t098_report,
     classify_t098,
+    generate_t098_report_from_portable_pool,
     validate_t098_native_visibility_audit,
     validate_t098_report,
 )
@@ -269,3 +270,54 @@ def test_report_reaches_ready_only_with_all_four_and_fail_closed() -> None:
     assert classify_t098(witnesses[:3], report["intentional_unsupported_witness"]) == (
         "INTENT_VISIBILITY_FIDELITY_INSUFFICIENT"
     )
+
+
+def test_generation_entrypoint_wraps_explicit_pool_and_report_workflow(
+    tmp_path, monkeypatch
+) -> None:
+    pool = tmp_path / "pool.jsonl"
+    pool.write_text("{}\n", encoding="utf-8")
+    output = tmp_path / "report.json"
+    records = {index: object() for index in (0, 73, 475, 828)}
+    observed: dict[str, object] = {}
+
+    def fake_load(stream, *, record_indices):
+        observed["indices"] = record_indices
+        return records
+
+    def fake_run(**kwargs):
+        observed["run"] = kwargs
+        return {"schema_id": "t098-public-information-fidelity-reentry-v1"}
+
+    def fake_write(report, path):
+        observed["write"] = (report, path)
+        return {}
+
+    monkeypatch.setattr(
+        "sts_combat_rl.commands.t098_public_information_fidelity.load_portable_battle_start_records",
+        fake_load,
+    )
+    monkeypatch.setattr(
+        "sts_combat_rl.commands.t098_public_information_fidelity.run_t098_fidelity_reentry",
+        fake_run,
+    )
+    monkeypatch.setattr(
+        "sts_combat_rl.commands.t098_public_information_fidelity.write_t098_report",
+        fake_write,
+    )
+    report = generate_t098_report_from_portable_pool(
+        portable_pool_path=pool,
+        output_path=output,
+        record_indices={
+            "ordinary": 0,
+            "headbutt": 73,
+            "frozen_eye": 828,
+            "runic_dome": 475,
+        },
+        adapter_factory=lambda: object(),
+        implementation_head="a" * 40,
+    )
+
+    assert report["schema_id"] == "t098-public-information-fidelity-reentry-v1"
+    assert observed["indices"] == [0, 73, 828, 475]
+    assert observed["write"][1] == output

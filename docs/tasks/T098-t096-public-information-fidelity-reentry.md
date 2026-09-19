@@ -448,6 +448,27 @@ d309170198e21e57041a84dcfdbc255cdda4052e`, and requires the explicit
 The exact-source native build used by the report remains the T097 disposable
 build (`STSRL_LIGHTSPEED_BUILD_JOBS=16`); this validator does not rebuild or
 mutate native source.
+
+The same module has a durable generation mode. With the exact pinned native
+build directory on `PYTHONPATH`, the retained report is reproducible from the
+explicit portable-pool records with:
+
+```text
+cd /mnt/d/DeadlyCatCoding/STSRL-T098
+PYTHONPATH=<exact-d309170-build-dir>:src python3 -m sts_combat_rl.commands.t098_public_information_fidelity \
+  --portable-pool /mnt/d/DeadlyCatCoding/STSRL/artifacts/t085-corrected-leaf-value-search-repair/source/cohort-b-formal-d62ff35579b54d70a7428afdf84743c94df3fe0c/cohort-b-merged.pool.jsonl \
+  --output-report /mnt/d/DeadlyCatCoding/STSRL/artifacts/t098-public-information-fidelity-reentry-v1/t098-public-information-fidelity-reentry-v1.json \
+  --implementation-head 7f6adda6470e462f50b40ba7de269d6a3fccbabc \
+  --ordinary-record-index 0 --headbutt-record-index 73 \
+  --frozen-eye-record-index 828 --runic-dome-record-index 475
+```
+
+Generation calls the existing `run_t098_fidelity_reentry` and
+`write_t098_report` workflow, uses the fixed native identity
+`d309170198e21e57041a84dcfdbc255cdda4052e`, and records the pool path and
+indices in the report's `input_references`. `<exact-d309170-build-dir>` is the
+`build-stsrl-source-py` directory produced by the pinned-source verifier; no
+native source mutation is part of this command.
 The successful validator output is retained as
 `report-validation.log` (SHA-256
 `70972562a0e8978e1cf68ca06d2e34ebc5ed08ce522027a1a82379c2251d9567`) beside
