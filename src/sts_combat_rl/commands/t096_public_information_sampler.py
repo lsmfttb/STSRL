@@ -126,8 +126,10 @@ def run_t096_anchor_audits(
         selected_anchors = (
             selected_value if isinstance(selected_value, Sequence) else ()
         )
-    if len(selected_anchors) != 4 or (
-        selection is not None and selection.get("selection_complete") is not True
+    if (
+        selection is None
+        or len(selected_anchors) != 4
+        or selection.get("selection_complete") is not True
     ):
         return {
             "schema_id": "t096-public-information-sampler-report-v1",
