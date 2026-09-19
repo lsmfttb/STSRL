@@ -448,6 +448,10 @@ d309170198e21e57041a84dcfdbc255cdda4052e`, and requires the explicit
 The exact-source native build used by the report remains the T097 disposable
 build (`STSRL_LIGHTSPEED_BUILD_JOBS=16`); this validator does not rebuild or
 mutate native source.
+The successful validator output is retained as
+`report-validation.log` (SHA-256
+`70972562a0e8978e1cf68ca06d2e34ebc5ed08ce522027a1a82379c2251d9567`) beside
+the report.
 
 The exact-source native build log is `native-build.log` (SHA-256
 `b5282e19e16acae8b926f9e7bb8bd909c3829c611b659b0f5b2d953b4b08318d`),

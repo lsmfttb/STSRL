@@ -272,6 +272,9 @@ The refreshed runtime-evidence log is retained at
 `/mnt/d/DeadlyCatCoding/STSRL/artifacts/t098-public-information-fidelity-reentry-v1/runtime-evidence.log`
 (SHA-256
 `e0c31a5d1cbee6fa6f5c9496382f1aa5ff3a66d7a027ccb9f5186589f17af5ec`).
+The durable report validator also passed; its output is retained as
+`report-validation.log` (SHA-256
+`70972562a0e8978e1cf68ca06d2e34ebc5ed08ce522027a1a82379c2251d9567`).
 No formal T096 rerun, convergence ladder, Search, training, native change,
 controller promotion, Non-Combat update, T034 closure, or T066 work occurred.
 
