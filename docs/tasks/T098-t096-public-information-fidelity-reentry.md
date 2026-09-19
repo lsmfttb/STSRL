@@ -389,7 +389,7 @@ Candidate lifecycle: `DONE`
 Terminal classification: `PUBLIC_HIDDEN_FUTURE_SAMPLER_FIDELITY_READY`
 
 Implementation/evidence head:
-`b6140ac9ae9821d1ef6ddf6a4ac8a92ef9428ebb`
+`7f6adda6470e462f50b40ba7de269d6a3fccbabc`
 
 The focused re-entry used the unchanged T097 native identity:
 
