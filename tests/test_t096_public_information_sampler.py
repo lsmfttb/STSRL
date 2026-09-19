@@ -10,7 +10,12 @@ from sts_combat_rl.sim.t096_public_information_sampler import (
     audit_native_particles,
     classify_t096,
     total_variation,
+    validate_anchor_distribution_metadata,
     validate_public_information_projection,
+)
+from sts_combat_rl.commands.t096_public_information_sampler import (
+    run_t096_anchor_audits,
+    select_first_four_frozen_t087_anchors,
 )
 
 
@@ -90,12 +95,40 @@ class _FakeAdapter:
         self.projection = projection
         self.particles = particles
 
-    def t096_public_information_projection(self, snapshot):  # type: ignore[no-untyped-def]
+    def t096_public_information_projection(  # type: ignore[no-untyped-def]
+        self, snapshot
+    ):
         return self.projection
 
-    def sample_hidden_future_particles(self, snapshot, *, sampler_seed, particle_count):  # type: ignore[no-untyped-def]
+    def t096_anchor_distribution_metadata(  # type: ignore[no-untyped-def]
+        self, snapshot
+    ):
+        return {
+            "schema_id": "native-battle-anchor-distribution-audit-v1",
+            "eligible": True,
+            "first_ordinary_player_decision": True,
+            "draw_order_visibility": "hidden",
+            "stronger_draw_constraint": False,
+            "draw_knowledge_fidelity": "ordinary-hidden-draw-only",
+            "discard_empty": True,
+            "exhaust_empty": True,
+            "deck_size": 4,
+            "hand_size": 1,
+            "draw_pile_size": 3,
+            "all_cards_persistent_deck_instances": True,
+            "no_temporary_generated_inserted_cards": True,
+            "multiset_union_exact": True,
+            "remaining_unseen_card_counts": {2: 2, 3: 1},
+            "remaining_unseen_card_identity_count": 2,
+            "remaining_unseen_nonempty": True,
+        }
+
+    def sample_hidden_future_particles(  # type: ignore[no-untyped-def]
+        self, snapshot, *, sampler_seed, particle_start, particle_count
+    ):
         assert sampler_seed == 7
         assert particle_count == len(self.particles)
+        assert particle_start == 0
         return self.particles
 
 
@@ -105,11 +138,15 @@ def test_native_audit_keeps_private_rows_out_of_projection_and_checks_diversity(
     projection = _projection()
     particles = [
         {
+            "particle_index": 0,
+            "sampler_seed": 101,
             "public_information_projection": projection,
             "hidden_future_fingerprint": "a",
             "next_draw_card_id": 2,
         },
         {
+            "particle_index": 1,
+            "sampler_seed": 102,
             "public_information_projection": projection,
             "hidden_future_fingerprint": "b",
             "next_draw_card_id": 3,
@@ -134,8 +171,65 @@ def test_native_audit_keeps_private_rows_out_of_projection_and_checks_diversity(
     assert result["distribution_pass"] is False
 
 
+def test_public_action_identity_rejects_native_replay_bits() -> None:
+    value = _projection()
+    value["ordered_public_legal_actions"][0]["label"] = (
+        "end bits=123"
+    )  # type: ignore[index]
+    with pytest.raises(T096SamplerError, match="replay-only native bits"):
+        validate_public_information_projection(value)
+
+
 def test_classification_fails_closed_for_missing_four_anchor_gate() -> None:
     assert (
         classify_t096([{"particle_count": 8192, "distribution_pass": True}])
         == "INCOMPLETE"
     )
+
+
+class _SelectionAdapter(_FakeAdapter):
+    def __init__(self, eligible: bool) -> None:
+        super().__init__(_projection(), [])
+        self.eligible = eligible
+
+    def t096_anchor_distribution_metadata(  # type: ignore[no-untyped-def]
+        self, snapshot
+    ):
+        metadata = super().t096_anchor_distribution_metadata(snapshot)
+        metadata["eligible"] = self.eligible
+        if not self.eligible:
+            metadata["remaining_unseen_card_identity_count"] = 1
+        return metadata
+
+
+def test_frozen_selector_uses_first_four_eligible_canonical_rows() -> None:
+    rows = [{"selection_identity": f"row-{index}"} for index in range(5)]
+
+    def loader(row):  # type: ignore[no-untyped-def]
+        return _SelectionAdapter(row["selection_identity"] != "row-1"), object()
+
+    selection = select_first_four_frozen_t087_anchors(
+        ordered_rows=rows,
+        anchor_loader=loader,
+    )
+    assert selection["selection_complete"] is True
+    assert [row["canonical_position"] for row in selection["selected_anchors"]] == [
+        0,
+        2,
+        3,
+        4,
+    ]
+
+
+def test_audit_workflow_is_incomplete_without_four_frozen_anchors() -> None:
+    selection = select_first_four_frozen_t087_anchors(
+        ordered_rows=[{"selection_identity": "only"}],
+        anchor_loader=lambda row: (_SelectionAdapter(True), object()),
+    )
+    report = run_t096_anchor_audits(
+        anchor_loader=lambda row: (_SelectionAdapter(True), object()),
+        anchor_selection=selection,
+        sampler_seed=7,
+        particle_count=2,
+    )
+    assert report["terminal_classification"] == "INCOMPLETE"

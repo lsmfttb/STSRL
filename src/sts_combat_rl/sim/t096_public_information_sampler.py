@@ -18,6 +18,7 @@ from typing import Any
 T096_TASK_ID = "T096"
 T096_PUBLIC_INFORMATION_SCHEMA_ID = "native-battle-public-information-v1"
 T096_SAMPLER_SCHEMA_ID = "native-hidden-future-sampler-v1"
+T096_ANCHOR_METADATA_SCHEMA_ID = "native-battle-anchor-distribution-audit-v1"
 T096_SPLIT_DOMAIN = "T096-PUBLIC-INFORMATION-SAMPLER-V1"
 T096_PARTICLES_PER_ANCHOR = 8192
 T096_TV_LIMIT = 0.05
@@ -106,6 +107,12 @@ def validate_public_information_projection(value: object) -> dict[str, Any]:
         if set(action) != expected:
             raise T096SamplerError(
                 f"T096 action {index} identity keys are not public-only"
+            )
+        if not isinstance(action.get("label"), str):
+            raise T096SamplerError(f"T096 action {index} label is not text")
+        if "bits=" in action["label"]:
+            raise T096SamplerError(
+                f"T096 action {index} label contains replay-only native bits"
             )
     return projection
 
@@ -207,6 +214,113 @@ def total_variation(
     )
 
 
+def validate_anchor_distribution_metadata(value: object) -> dict[str, Any]:
+    """Validate native-owned proof for the frozen distribution family."""
+
+    if not isinstance(value, Mapping):
+        raise T096SamplerError("T096 anchor distribution metadata must be a mapping")
+    metadata = dict(value)
+    if metadata.get("schema_id") != T096_ANCHOR_METADATA_SCHEMA_ID:
+        raise T096SamplerError(
+            "T096 anchor distribution metadata schema is not current"
+        )
+    bool_fields = (
+        "eligible",
+        "first_ordinary_player_decision",
+        "stronger_draw_constraint",
+        "discard_empty",
+        "exhaust_empty",
+        "all_cards_persistent_deck_instances",
+        "no_temporary_generated_inserted_cards",
+        "multiset_union_exact",
+        "remaining_unseen_nonempty",
+    )
+    for field in bool_fields:
+        if not isinstance(metadata.get(field), bool):
+            raise T096SamplerError(f"T096 anchor metadata {field} is not boolean")
+    if metadata.get("draw_order_visibility") != "hidden":
+        raise T096SamplerError("T096 anchor draw order is not classified hidden")
+    if metadata.get("draw_knowledge_fidelity") != "ordinary-hidden-draw-only":
+        raise T096SamplerError("T096 anchor draw knowledge fidelity is unsupported")
+    for field in (
+        "deck_size",
+        "hand_size",
+        "draw_pile_size",
+        "remaining_unseen_card_identity_count",
+    ):
+        value_int = metadata.get(field)
+        if (
+            isinstance(value_int, bool)
+            or not isinstance(value_int, int)
+            or value_int < 0
+        ):
+            raise T096SamplerError(f"T096 anchor metadata {field} is invalid")
+    if metadata["hand_size"] + metadata["draw_pile_size"] != metadata["deck_size"]:
+        raise T096SamplerError("T096 hand and draw sizes do not partition the deck")
+    counts = metadata.get("remaining_unseen_card_counts")
+    if not isinstance(counts, Mapping):
+        raise T096SamplerError("T096 anchor metadata lacks unseen-card multiset")
+    normalized_counts: dict[int, int] = {}
+    for identity, count in counts.items():
+        if isinstance(identity, bool) or not isinstance(identity, int):
+            raise T096SamplerError("T096 unseen card identity is not an integer")
+        if isinstance(count, bool) or not isinstance(count, int) or count <= 0:
+            raise T096SamplerError("T096 unseen card multiplicity is invalid")
+        normalized_counts[int(identity)] = int(count)
+    if metadata["remaining_unseen_card_identity_count"] != len(normalized_counts):
+        raise T096SamplerError("T096 unseen identity count disagrees with multiset")
+    if metadata["draw_pile_size"] != sum(normalized_counts.values()):
+        raise T096SamplerError("T096 unseen multiset disagrees with draw-pile size")
+    if not 2 <= len(normalized_counts) <= 32:
+        raise T096SamplerError(
+            "T096 anchor is outside the frozen 2..32 identity family"
+        )
+    required_true = (
+        "eligible",
+        "first_ordinary_player_decision",
+        "discard_empty",
+        "exhaust_empty",
+        "all_cards_persistent_deck_instances",
+        "no_temporary_generated_inserted_cards",
+        "multiset_union_exact",
+        "remaining_unseen_nonempty",
+    )
+    if any(not metadata[field] for field in required_true):
+        raise T096SamplerError("T096 native anchor metadata does not prove eligibility")
+    if metadata["stronger_draw_constraint"]:
+        raise T096SamplerError("T096 anchor has a stronger draw-order constraint")
+    metadata["remaining_unseen_card_counts"] = dict(sorted(normalized_counts.items()))
+    return metadata
+
+
+def _incomplete_particle_result(
+    *,
+    sampler_seed: int,
+    particle_count: int,
+    attempted: int = 0,
+    rejected: int = 0,
+    rejection_reasons: Mapping[str, int] | None = None,
+    failure_code: str,
+    failure_message: str,
+) -> dict[str, Any]:
+    return {
+        "schema_id": T096_SAMPLER_SCHEMA_ID,
+        "status": "INCOMPLETE",
+        "terminal_hint": "INCOMPLETE",
+        "failure_code": failure_code,
+        "failure_message": failure_message,
+        "sampler_seed": sampler_seed,
+        "particle_count": particle_count,
+        "accepted_particle_count": 0,
+        "attempted_particle_count": attempted,
+        "rejected_particle_count": rejected,
+        "rejection_reason_counts": dict(sorted((rejection_reasons or {}).items())),
+        "public_parity_pass_count": 0,
+        "legal_action_parity_pass_count": 0,
+        "distribution_pass": None,
+    }
+
+
 def audit_native_particles(
     adapter: Any,
     snapshot: Any,
@@ -214,84 +328,204 @@ def audit_native_particles(
     sampler_seed: int,
     particle_count: int,
     require_distribution_reference: bool = True,
+    max_attempts: int | None = None,
 ) -> dict[str, Any]:
-    """Audit one native anchor without exposing private rows to controllers."""
+    """Audit one native anchor, retaining exactly ``particle_count`` accepts."""
 
-    if (
-        isinstance(particle_count, bool)
-        or not isinstance(particle_count, int)
-        or particle_count <= 0
-    ):
-        raise T096SamplerError("T096 particle_count must be positive")
-    anchor = validate_public_information_projection(
-        adapter.t096_public_information_projection(snapshot)
-    )
-    particles = adapter.sample_hidden_future_particles(
-        snapshot,
-        sampler_seed=sampler_seed,
-        particle_count=particle_count,
-    )
-    if len(particles) != particle_count:
-        raise T096SamplerError("native sampler returned the wrong particle count")
-    action_parity_passes = 0
-    public_parity_passes = 0
-    fingerprints: set[str] = set()
-    next_cards: Counter[int] = Counter()
-    rejected = 0
-    for index, row in enumerate(particles):
-        if not isinstance(row, Mapping):
-            raise T096SamplerError(f"native particle {index} is not a mapping")
-        projection = validate_public_information_projection(
-            row.get("public_information_projection")
+    try:
+        if (
+            isinstance(particle_count, bool)
+            or not isinstance(particle_count, int)
+            or particle_count <= 0
+        ):
+            raise T096SamplerError("T096 particle_count must be positive")
+        if max_attempts is None:
+            max_attempts = particle_count * 4
+        if (
+            isinstance(max_attempts, bool)
+            or not isinstance(max_attempts, int)
+            or max_attempts < particle_count
+        ):
+            raise T096SamplerError("T096 max_attempts must be at least particle_count")
+        anchor = validate_public_information_projection(
+            adapter.t096_public_information_projection(snapshot)
         )
-        if compare_public_information(anchor, projection):
-            public_parity_passes += 1
-        else:
-            rejected += 1
-            continue
-        if public_action_identities(anchor) == public_action_identities(projection):
-            action_parity_passes += 1
-        else:
-            rejected += 1
-            continue
-        fingerprint = row.get("hidden_future_fingerprint")
-        if not isinstance(fingerprint, str) or not fingerprint:
-            raise T096SamplerError(
-                f"native particle {index} lacks private diversity digest"
+        metadata = validate_anchor_distribution_metadata(
+            adapter.t096_anchor_distribution_metadata(snapshot)
+        )
+        reference = metadata["remaining_unseen_card_counts"]
+        accepted: list[Mapping[str, Any]] = []
+        fingerprints: set[str] = set()
+        accepted_indices: set[int] = set()
+        accepted_seeds: list[int] = []
+        next_cards: Counter[int] = Counter()
+        rejection_reasons: Counter[str] = Counter()
+        attempted = 0
+        particle_start = 0
+        while len(accepted) < particle_count and attempted < max_attempts:
+            request_count = min(
+                1024,
+                particle_count - len(accepted),
+                max_attempts - attempted,
             )
-        fingerprints.add(fingerprint)
-        card_id = row.get("next_draw_card_id")
-        if card_id is not None:
-            if isinstance(card_id, bool) or not isinstance(card_id, int):
-                raise T096SamplerError(f"native particle {index} has invalid next card")
-            next_cards[card_id] += 1
-
-    if public_parity_passes != particle_count or action_parity_passes != particle_count:
-        raise T096SamplerError("T096 public or legal-action parity failed")
-    if len(fingerprints) < 2:
-        raise T096SamplerError("T096 particles lack future-dynamics hidden diversity")
-    result: dict[str, Any] = {
-        "schema_id": T096_SAMPLER_SCHEMA_ID,
-        "sampler_seed": sampler_seed,
-        "particle_count": particle_count,
-        "public_parity_pass_count": public_parity_passes,
-        "legal_action_parity_pass_count": action_parity_passes,
-        "rejected_particle_count": rejected,
-        "distinct_hidden_future_fingerprint_count": len(fingerprints),
-        "next_card_empirical_counts": dict(sorted(next_cards.items())),
-        "public_projection_sha256": canonical_sha256(anchor),
-    }
-    if require_distribution_reference:
-        reference = analytic_next_card_multiset(dict(snapshot.raw))
-        if sum(next_cards.values()) != particle_count:
-            raise T096SamplerError("T096 particle next-card evidence is incomplete")
-        tv = total_variation(next_cards, reference)
-        result["analytic_next_card_counts"] = dict(sorted(reference.items()))
-        result["next_card_total_variation"] = tv
-        result["distribution_pass"] = bool(tv <= T096_TV_LIMIT)
-    else:
-        result["distribution_pass"] = None
-    return result
+            try:
+                particles = adapter.sample_hidden_future_particles(
+                    snapshot,
+                    sampler_seed=sampler_seed,
+                    particle_start=particle_start,
+                    particle_count=request_count,
+                )
+            except Exception as exc:  # noqa: BLE001 - fail-closed audit boundary
+                return _incomplete_particle_result(
+                    sampler_seed=sampler_seed,
+                    particle_count=particle_count,
+                    attempted=attempted,
+                    rejected=attempted,
+                    rejection_reasons={"native_sampler_exception": attempted or 1},
+                    failure_code="native_sampler_exception",
+                    failure_message=str(exc),
+                )
+            if not isinstance(particles, Sequence) or isinstance(
+                particles, (str, bytes)
+            ):
+                return _incomplete_particle_result(
+                    sampler_seed=sampler_seed,
+                    particle_count=particle_count,
+                    attempted=attempted,
+                    rejected=attempted,
+                    failure_code="malformed_native_batch",
+                    failure_message="native sampler batch is not a sequence",
+                )
+            if not particles:
+                break
+            attempted += len(particles)
+            particle_start += len(particles)
+            for index, row in enumerate(particles):
+                reason = ""
+                if not isinstance(row, Mapping):
+                    reason = "malformed_particle"
+                else:
+                    try:
+                        projection = validate_public_information_projection(
+                            row.get("public_information_projection")
+                        )
+                        if not compare_public_information(anchor, projection):
+                            reason = "public_projection_mismatch"
+                        elif public_action_identities(anchor) != (
+                            public_action_identities(projection)
+                        ):
+                            reason = "legal_action_mismatch"
+                        elif not isinstance(
+                            row.get("hidden_future_fingerprint"), str
+                        ) or not row.get("hidden_future_fingerprint"):
+                            reason = "missing_hidden_digest"
+                        elif row.get("next_draw_card_id") is None:
+                            reason = "missing_next_card"
+                        elif isinstance(
+                            row.get("next_draw_card_id"), bool
+                        ) or not isinstance(row.get("next_draw_card_id"), int):
+                            reason = "invalid_next_card"
+                        elif (
+                            isinstance(row.get("particle_index"), bool)
+                            or not isinstance(row.get("particle_index"), int)
+                            or row.get("particle_index") < 0
+                        ):
+                            reason = "invalid_particle_index"
+                        elif row.get("particle_index") in accepted_indices:
+                            reason = "duplicate_particle_index"
+                        elif (
+                            isinstance(row.get("sampler_seed"), bool)
+                            or not isinstance(row.get("sampler_seed"), int)
+                        ):
+                            reason = "invalid_particle_seed"
+                    except Exception:  # noqa: BLE001 - malformed native row is rejected
+                        reason = "malformed_particle"
+                if reason:
+                    rejection_reasons[reason] += 1
+                    continue
+                accepted.append(row)
+                fingerprints.add(str(row["hidden_future_fingerprint"]))
+                next_cards[int(row["next_draw_card_id"])] += 1
+                accepted_indices.add(int(row["particle_index"]))
+                accepted_seeds.append(int(row["sampler_seed"]))
+                if len(accepted) >= particle_count:
+                    break
+        if len(accepted) < particle_count:
+            return _incomplete_particle_result(
+                sampler_seed=sampler_seed,
+                particle_count=particle_count,
+                attempted=attempted,
+                rejected=sum(rejection_reasons.values()),
+                rejection_reasons=rejection_reasons,
+                failure_code="insufficient_accepted_particles",
+                failure_message=(
+                    f"accepted {len(accepted)} of required {particle_count} "
+                    f"within max_attempts={max_attempts}"
+                ),
+            )
+        if len(fingerprints) < 2:
+            return _incomplete_particle_result(
+                sampler_seed=sampler_seed,
+                particle_count=particle_count,
+                attempted=attempted,
+                rejected=sum(rejection_reasons.values()),
+                rejection_reasons=rejection_reasons,
+                failure_code="hidden_future_diversity_failure",
+                failure_message="accepted particles have fewer than two hidden digests",
+            )
+        result: dict[str, Any] = {
+            "schema_id": T096_SAMPLER_SCHEMA_ID,
+            "status": "COMPLETE",
+            "terminal_hint": "COMPLETE",
+            "sampler_seed": sampler_seed,
+            "particle_count": particle_count,
+            "accepted_particle_count": particle_count,
+            "attempted_particle_count": attempted,
+            "rejected_particle_count": sum(rejection_reasons.values()),
+            "rejection_reason_counts": dict(sorted(rejection_reasons.items())),
+            "accepted_particle_indices": [
+                int(row["particle_index"]) for row in accepted
+            ],
+            "accepted_particle_seeds": accepted_seeds,
+            "particle_seed_mapping": {
+                "domain": T096_SPLIT_DOMAIN,
+                "sampler_seed": sampler_seed,
+                "particle_indices": [int(row["particle_index"]) for row in accepted],
+            },
+            "public_parity_pass_count": particle_count,
+            "legal_action_parity_pass_count": particle_count,
+            "distinct_hidden_future_fingerprint_count": len(fingerprints),
+            "next_card_empirical_counts": dict(sorted(next_cards.items())),
+            "public_projection_sha256": canonical_sha256(anchor),
+            "anchor_distribution_metadata": metadata,
+        }
+        if require_distribution_reference:
+            if sum(next_cards.values()) != particle_count:
+                return _incomplete_particle_result(
+                    sampler_seed=sampler_seed,
+                    particle_count=particle_count,
+                    attempted=attempted,
+                    rejected=sum(rejection_reasons.values()),
+                    rejection_reasons=rejection_reasons,
+                    failure_code="missing_next_card_evidence",
+                    failure_message=(
+                        "accepted particles do not have complete next-card evidence"
+                    ),
+                )
+            tv = total_variation(next_cards, reference)
+            result["analytic_next_card_counts"] = dict(sorted(reference.items()))
+            result["next_card_total_variation"] = tv
+            result["distribution_pass"] = bool(tv <= T096_TV_LIMIT)
+        else:
+            result["distribution_pass"] = None
+        return result
+    except Exception as exc:  # noqa: BLE001 - deterministic fail-closed report
+        return _incomplete_particle_result(
+            sampler_seed=sampler_seed,
+            particle_count=particle_count if isinstance(particle_count, int) else 0,
+            failure_code="audit_exception",
+            failure_message=str(exc),
+        )
 
 
 def classify_t096(
@@ -300,6 +534,8 @@ def classify_t096(
     """Apply the frozen terminal order to already validated anchor reports."""
 
     if not results:
+        return "INCOMPLETE"
+    if any(row.get("status") == "INCOMPLETE" for row in results):
         return "INCOMPLETE"
     required = {
         "public_parity_pass_count",
