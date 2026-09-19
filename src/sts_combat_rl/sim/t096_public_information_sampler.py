@@ -141,6 +141,23 @@ def _require_classification(
         )
 
 
+def public_visibility_fidelity_gaps(
+    projection: Mapping[str, Any],
+) -> list[str]:
+    """Return explicit unsupported visibility surfaces in a validated projection."""
+
+    visibility = projection["visibility"]
+    gaps: list[str] = []
+    for field in ("draw_knowledge", "intent_hidden_mechanics"):
+        value = visibility.get(field)
+        if (
+            isinstance(value, Mapping)
+            and value.get("classification") == "unsupported_fidelity"
+        ):
+            gaps.append(f"{field}:unsupported_fidelity")
+    return gaps
+
+
 def compare_public_information(anchor: Mapping[str, Any], particle: object) -> bool:
     """Compare two already validated public projections exactly."""
 
@@ -350,6 +367,7 @@ def audit_native_particles(
         anchor = validate_public_information_projection(
             adapter.t096_public_information_projection(snapshot)
         )
+        visibility_gaps = public_visibility_fidelity_gaps(anchor)
         metadata = validate_anchor_distribution_metadata(
             adapter.t096_anchor_distribution_metadata(snapshot)
         )
@@ -497,6 +515,7 @@ def audit_native_particles(
             "distinct_hidden_future_fingerprint_count": len(fingerprints),
             "next_card_empirical_counts": dict(sorted(next_cards.items())),
             "public_projection_sha256": canonical_sha256(anchor),
+            "visibility_fidelity_gaps": visibility_gaps,
             "anchor_distribution_metadata": metadata,
         }
         if require_distribution_reference:

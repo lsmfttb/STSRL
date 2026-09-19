@@ -14,6 +14,9 @@ from sts_combat_rl.sim.t096_public_information_sampler import (
     validate_public_information_projection,
 )
 from sts_combat_rl.commands.t096_public_information_sampler import (
+    T096_T087_RECORD_COUNT,
+    T096_T087_SOURCE_PROVENANCE,
+    _mechanics_evidence_gaps,
     run_t096_anchor_audits,
     select_first_four_frozen_t087_anchors,
 )
@@ -169,6 +172,10 @@ def test_native_audit_keeps_private_rows_out_of_projection_and_checks_diversity(
     assert result["legal_action_parity_pass_count"] == 2
     assert result["distinct_hidden_future_fingerprint_count"] == 2
     assert result["distribution_pass"] is False
+    assert result["visibility_fidelity_gaps"] == [
+        "draw_knowledge:unsupported_fidelity",
+        "intent_hidden_mechanics:unsupported_fidelity",
+    ]
 
 
 def test_public_action_identity_rejects_native_replay_bits() -> None:
@@ -203,7 +210,13 @@ class _SelectionAdapter(_FakeAdapter):
 
 
 def test_frozen_selector_uses_first_four_eligible_canonical_rows() -> None:
-    rows = [{"selection_identity": f"row-{index}"} for index in range(5)]
+    rows = [
+        {
+            "selection_identity": f"row-{index}",
+            "cohort": "A" if index < 93 else "B" if index < 285 else "C",
+        }
+        for index in range(T096_T087_RECORD_COUNT)
+    ]
 
     def loader(row):  # type: ignore[no-untyped-def]
         return _SelectionAdapter(row["selection_identity"] != "row-1"), object()
@@ -211,6 +224,7 @@ def test_frozen_selector_uses_first_four_eligible_canonical_rows() -> None:
     selection = select_first_four_frozen_t087_anchors(
         ordered_rows=rows,
         anchor_loader=loader,
+        source_provenance=T096_T087_SOURCE_PROVENANCE,
     )
     assert selection["selection_complete"] is True
     assert [row["canonical_position"] for row in selection["selected_anchors"]] == [
@@ -219,6 +233,45 @@ def test_frozen_selector_uses_first_four_eligible_canonical_rows() -> None:
         3,
         4,
     ]
+
+
+def test_frozen_selector_rejects_short_or_duplicate_unprovenanced_cohorts() -> None:
+    short_rows = [{"selection_identity": f"row-{index}"} for index in range(4)]
+    short = select_first_four_frozen_t087_anchors(
+        ordered_rows=short_rows,
+        anchor_loader=lambda row: (_SelectionAdapter(True), object()),
+        source_provenance=T096_T087_SOURCE_PROVENANCE,
+    )
+    assert short["terminal_classification"] == "INCOMPLETE"
+    assert short["failure_code"] == "invalid_t087_canonical_input"
+
+    duplicate_rows = [
+        {
+            "selection_identity": f"row-{index}",
+            "cohort": "A" if index < 93 else "B" if index < 285 else "C",
+        }
+        for index in range(T096_T087_RECORD_COUNT)
+    ]
+    duplicate_rows[-1]["selection_identity"] = duplicate_rows[0]["selection_identity"]
+    duplicate = select_first_four_frozen_t087_anchors(
+        ordered_rows=duplicate_rows,
+        anchor_loader=lambda row: (_SelectionAdapter(True), object()),
+        source_provenance=T096_T087_SOURCE_PROVENANCE,
+    )
+    assert duplicate["terminal_classification"] == "INCOMPLETE"
+    assert duplicate["failure_code"] == "invalid_t087_canonical_input"
+
+    unprovenanced = select_first_four_frozen_t087_anchors(
+        ordered_rows=[
+            {
+                "selection_identity": f"row-{index}",
+                "cohort": "A" if index < 93 else "B" if index < 285 else "C",
+            }
+            for index in range(T096_T087_RECORD_COUNT)
+        ],
+        anchor_loader=lambda row: (_SelectionAdapter(True), object()),
+    )
+    assert unprovenanced["terminal_classification"] == "INCOMPLETE"
 
 
 def test_audit_workflow_is_incomplete_without_four_frozen_anchors() -> None:
@@ -233,3 +286,12 @@ def test_audit_workflow_is_incomplete_without_four_frozen_anchors() -> None:
         particle_count=2,
     )
     assert report["terminal_classification"] == "INCOMPLETE"
+
+
+def test_mechanics_evidence_cannot_default_to_ready() -> None:
+    assert _mechanics_evidence_gaps([], set()) == {
+        "missing_mechanics_case_evidence"
+    }
+    assert _mechanics_evidence_gaps(
+        [{"case": "draw_knowledge", "status": "supported"}], set()
+    ) == {"intent_visibility:missing_evidence"}

@@ -20,17 +20,37 @@ from sts_combat_rl.sim.t096_public_information_sampler import (
     canonical_json,
     canonical_sha256,
     classify_t096,
+    public_visibility_fidelity_gaps,
     validate_anchor_distribution_metadata,
     validate_public_information_projection,
 )
 
 T096_ANCHOR_SELECTION_SCHEMA_ID = "t096-frozen-t087-anchor-selection-v1"
+T096_T087_RECORD_COUNT = 413
+T096_T087_SOURCE_PROVENANCE = {
+    "task_id": "T087",
+    "schema_id": "t087-natural-evidence-v1",
+    "manifest_schema_id": "t087-formal-natural-run-manifest-v1",
+    "cohort_id": "t087-formal-natural-413-8d7e44-20260911",
+    "record_count": T096_T087_RECORD_COUNT,
+    "canonical_order": "cohort-major ordered A/B/C; global_index mod shard_count",
+    "cohort_counts": {"A": 93, "B": 192, "C": 128},
+    "selection_identity_orders_sha256": {
+        "A": "b1b23c932495e301d06eb1ffaec45b893fb9af8c1f72c1193e3150726623ecb0",
+        "B": "7e67ba092bef8afbc53c78a9a140a2efd78fe9a578047312b668fd63802b3c54",
+        "C": "655102f87a6d7a88f52b4689a21ab34eba13a013e2fcc4a6537896fb56a21ac3",
+    },
+    "artifact_sha256": (
+        "7931a118a4bf921f695db769f05fd77a5ae364484f5646f02d5be05329ad297f"
+    ),
+}
 
 
 def select_first_four_frozen_t087_anchors(
     *,
     ordered_rows: Sequence[Mapping[str, Any]],
     anchor_loader: Callable[[Mapping[str, Any]], tuple[Any, Any]],
+    source_provenance: Mapping[str, Any] | None = None,
     required_count: int = 4,
 ) -> dict[str, Any]:
     """Select the first eligible rows in the accepted T087 canonical order.
@@ -38,6 +58,55 @@ def select_first_four_frozen_t087_anchors(
     Selection only reads native current-state visibility/partition evidence.  It
     never reads sampler rows, outcomes, diversity, or distribution statistics.
     """
+
+    def incomplete(reason: str) -> dict[str, Any]:
+        return {
+            "schema_id": T096_ANCHOR_SELECTION_SCHEMA_ID,
+            "source": "accepted T087 413-record canonical order",
+            "source_provenance": dict(source_provenance or {}),
+            "required_count": 4,
+            "scanned_count": 0,
+            "eligible_count": 0,
+            "selected_anchors": [],
+            "scanned": [],
+            "selection_complete": False,
+            "status": "INCOMPLETE",
+            "terminal_classification": "INCOMPLETE",
+            "failure_code": "invalid_t087_canonical_input",
+            "failure_reason": reason,
+        }
+
+    if required_count != 4:
+        return incomplete("T096 frozen selection requires exactly four anchors")
+    if not isinstance(source_provenance, Mapping):
+        return incomplete("T096 requires explicit T087 cohort/schema provenance")
+    for key, expected in T096_T087_SOURCE_PROVENANCE.items():
+        if source_provenance.get(key) != expected:
+            return incomplete(f"T096 T087 provenance mismatch for {key}")
+    if (
+        not isinstance(ordered_rows, Sequence)
+        or isinstance(ordered_rows, (str, bytes))
+        or len(ordered_rows) != T096_T087_RECORD_COUNT
+    ):
+        return incomplete("T096 requires exactly the accepted 413-row T087 cohort")
+    identities: list[str] = []
+    cohorts: list[str] = []
+    for candidate in ordered_rows:
+        if not isinstance(candidate, Mapping):
+            return incomplete("T096 T087 canonical row is not a mapping")
+        identity = candidate.get("selection_identity")
+        if not isinstance(identity, str) or not identity:
+            return incomplete("T096 T087 row lacks explicit selection_identity")
+        cohort = candidate.get("cohort")
+        if cohort not in {"A", "B", "C"}:
+            return incomplete("T096 T087 row lacks an accepted A/B/C cohort")
+        identities.append(identity)
+        cohorts.append(str(cohort))
+    if len(set(identities)) != T096_T087_RECORD_COUNT:
+        return incomplete("T096 T087 canonical rows contain duplicate identities")
+    expected_cohorts = ["A"] * 93 + ["B"] * 192 + ["C"] * 128
+    if cohorts != expected_cohorts:
+        return incomplete("T096 T087 rows are not in canonical A/B/C order")
 
     scanned: list[dict[str, Any]] = []
     selected: list[dict[str, Any]] = []
@@ -62,6 +131,9 @@ def select_first_four_frozen_t087_anchors(
                 adapter.t096_anchor_distribution_metadata(snapshot)
             )
             evidence["projection_sha256"] = canonical_sha256(projection)
+            evidence["visibility_fidelity_gaps"] = public_visibility_fidelity_gaps(
+                projection
+            )
             evidence["native_metadata"] = metadata
             evidence["eligible"] = True
             if len(selected) < required_count:
@@ -84,6 +156,7 @@ def select_first_four_frozen_t087_anchors(
     return {
         "schema_id": T096_ANCHOR_SELECTION_SCHEMA_ID,
         "source": "accepted T087 413-record canonical order",
+        "source_provenance": dict(source_provenance),
         "required_count": required_count,
         "scanned_count": len(scanned),
         "eligible_count": sum(1 for row in scanned if row.get("eligible") is True),
@@ -103,6 +176,41 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _mechanics_evidence_gaps(
+    mechanics_evidence: Sequence[Mapping[str, Any]],
+    automatic_gaps: set[str],
+) -> set[str]:
+    required_cases = {"draw_knowledge", "intent_visibility"}
+    if not mechanics_evidence:
+        if not any(
+            any(gap.startswith(f"{case}:") for gap in automatic_gaps)
+            for case in required_cases
+        ):
+            return {"missing_mechanics_case_evidence"}
+        return set()
+    seen_cases: dict[str, str] = {}
+    gaps: set[str] = set()
+    for item in mechanics_evidence:
+        if not isinstance(item, Mapping):
+            gaps.add("malformed_mechanics_case_evidence")
+            continue
+        case = item.get("case")
+        status = item.get("status")
+        if case not in required_cases or status not in {
+            "supported",
+            "unsupported_fidelity",
+        }:
+            gaps.add("malformed_mechanics_case_evidence")
+            continue
+        seen_cases[str(case)] = str(status)
+        if status == "unsupported_fidelity":
+            gaps.add(f"{case}:unsupported_fidelity")
+    for case in required_cases - seen_cases.keys():
+        if not any(gap.startswith(f"{case}:") for gap in automatic_gaps):
+            gaps.add(f"{case}:missing_evidence")
+    return gaps
+
+
 def run_t096_anchor_audits(
     *,
     anchor_loader: Callable[[Mapping[str, Any]], tuple[Any, Any]],
@@ -110,6 +218,7 @@ def run_t096_anchor_audits(
     sampler_seed: int,
     particle_count: int = T096_PARTICLES_PER_ANCHOR,
     fidelity_gaps: Sequence[str] = (),
+    mechanics_evidence: Sequence[Mapping[str, Any]] = (),
     anchor_selection: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run explicit anchor audits using native adapter/restore callbacks.
@@ -146,6 +255,7 @@ def run_t096_anchor_audits(
             "anchor_count": 0,
             "anchors": [],
             "anchor_selection": selection,
+            "mechanics_evidence": [dict(item) for item in mechanics_evidence],
             "selection_complete": False,
             "fidelity_gaps": list(fidelity_gaps),
             "terminal_classification": "INCOMPLETE",
@@ -197,6 +307,14 @@ def run_t096_anchor_audits(
         row["anchor_index"] = index
         row["anchor_identity"] = dict(anchor) if isinstance(anchor, Mapping) else {}
         rows.append(row)
+    automatic_gaps = {
+        str(gap)
+        for row in rows
+        for gap in row.get("visibility_fidelity_gaps", [])
+        if isinstance(gap, str)
+    }
+    automatic_gaps |= _mechanics_evidence_gaps(mechanics_evidence, automatic_gaps)
+    all_fidelity_gaps = sorted({str(gap) for gap in fidelity_gaps} | automatic_gaps)
     return {
         "schema_id": "t096-public-information-sampler-report-v1",
         "task_id": T096_TASK_ID,
@@ -213,8 +331,11 @@ def run_t096_anchor_audits(
         "anchors": rows,
         "anchor_selection": selection,
         "selection_complete": True,
-        "fidelity_gaps": list(fidelity_gaps),
-        "terminal_classification": classify_t096(rows, fidelity_gaps=fidelity_gaps),
+        "mechanics_evidence": [dict(item) for item in mechanics_evidence],
+        "fidelity_gaps": all_fidelity_gaps,
+        "terminal_classification": classify_t096(
+            rows, fidelity_gaps=all_fidelity_gaps
+        ),
         "private_audit_firewall": {
             "hidden_future_fingerprint_used_for": "diversity evidence only",
             "next_draw_card_id_used_for": "distribution statistic only",
