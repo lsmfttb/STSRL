@@ -238,7 +238,7 @@ was performed. T097 accepts a reproducible native capability input only; it
 does not reverse T096's scientific terminal or authorize downstream work.
 
 T098 is a final candidate on PR #114 with implementation/evidence head
-`b6140ac9ae9821d1ef6ddf6a4ac8a92ef9428ebb`, pending the required exact-head
+`7f6adda6470e462f50b40ba7de269d6a3fccbabc`, pending the required exact-head
 dual final acceptance. Against the unchanged native source
 `lsmfttb/sts_lightspeed refs/heads/stsrl/main @
 d309170198e21e57041a84dcfdbc255cdda4052e`, its bounded focused re-entry passed
@@ -265,9 +265,13 @@ Search/model/controller improvement, or T034 completion.
 The compact report is retained at
 `/mnt/d/DeadlyCatCoding/STSRL/artifacts/t098-public-information-fidelity-reentry-v1/t098-public-information-fidelity-reentry-v1.json`
 (SHA-256
-`92ce6df0ed178c2dde3d98d6de949153fbffe65872e4711bd4c3269b4024bc0b`,
-12,259 bytes). Its exact-source build used 16 build workers for 42 seconds; the
-small deterministic witness replay used one stateful worker for 85 seconds.
+`7f399304980025a3b3c1009b18cd7c2af113e67231d46746dbc460e0914e72fd`,
+12,576 bytes). Its exact-source build used 16 build workers; the small
+deterministic witness replay used one stateful worker for 58.680 seconds.
+The refreshed runtime-evidence log is retained at
+`/mnt/d/DeadlyCatCoding/STSRL/artifacts/t098-public-information-fidelity-reentry-v1/runtime-evidence.log`
+(SHA-256
+`e0c31a5d1cbee6fa6f5c9496382f1aa5ff3a66d7a027ccb9f5186589f17af5ec`).
 No formal T096 rerun, convergence ladder, Search, training, native change,
 controller promotion, Non-Combat update, T034 closure, or T066 work occurred.
 

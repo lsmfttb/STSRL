@@ -428,8 +428,8 @@ controller/model input.
 
 The compact report is retained at
 `/mnt/d/DeadlyCatCoding/STSRL/artifacts/t098-public-information-fidelity-reentry-v1/t098-public-information-fidelity-reentry-v1.json`
-(12,259 bytes, SHA-256
-`92ce6df0ed178c2dde3d98d6de949153fbffe65872e4711bd4c3269b4024bc0b`).
+(12,576 bytes, SHA-256
+`7f399304980025a3b3c1009b18cd7c2af113e67231d46746dbc460e0914e72fd`).
 
 The durable report-validation entrypoint is:
 
@@ -450,11 +450,12 @@ build (`STSRL_LIGHTSPEED_BUILD_JOBS=16`); this validator does not rebuild or
 mutate native source.
 
 The exact-source native build log is `native-build.log` (SHA-256
-`91e8154831a0b5ea8e903d074b67d90470b6721a57add8d3e050ce3ff2f9e629`),
+`b5282e19e16acae8b926f9e7bb8bd909c3829c611b659b0f5b2d953b4b08318d`),
 and the witness execution log is `runtime-evidence.log` (SHA-256
-`1db4d3363a5d11eb876bbf3441fdb7ade5ec94ee3422c76707371e5d620d7298`)
+`e0c31a5d1cbee6fa6f5c9496382f1aa5ff3a66d7a027ccb9f5186589f17af5ec`)
 in the same directory. The disposable exact-source build used 16 build workers
-and took 42 seconds. The bounded witness replay used one worker for 85 seconds;
+and passed the pinned-source verifier. The bounded witness replay used one
+worker for 58.680 seconds;
 single-worker execution was appropriate because this was one small,
 deterministic, stateful witness sequence rather than source generation,
 coverage, evaluation, comparison, or a formal cohort.
