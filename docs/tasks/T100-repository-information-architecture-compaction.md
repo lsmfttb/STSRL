@@ -408,7 +408,11 @@ T100 must not pre-specify that experiment beyond preserving the already accepted
 
 T100 is now the unique next STSRL maintenance task candidate.
 
-Implementation remains unauthorized until Maintainer independently reviews the exact post-T099 spec head and records exact-head `SPEC APPROVED` with `implementation_authorized=true`.
+A task implementation requires Maintainer review of the exact task-specification
+head and an exact-head `SPEC APPROVED` record with
+`implementation_authorized=true`. The PR transaction records whether this
+requirement is satisfied for a given head; this task contract does not narrate
+that transient state.
 
 Any material change to:
 
