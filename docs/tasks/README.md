@@ -30,20 +30,16 @@ authority for landed lifecycle state; this README is convenience/derived
 navigation only. A task's PR owns its exact execution, review, and approval
 transaction.
 
-## Current and parked navigation
+## Selected contract navigation
 
 Lifecycle states live only in [`ARCHIVE.md`](ARCHIVE.md). This table is a
 stable shortcut to current contracts and planning context.
 
 | ID | Task | Contract | Navigation |
 |---|---|---|---|
-| T034 | Public-consistent hidden-future sampler boundary | [contract](T034-public-consistent-hidden-future-sampler.md) | current blocker and information boundary in `current_status.md` |
-| T063 | Oracle-guided public battle learning | [contract](T063-oracle-guided-public-battle-learning.md) | parked simulator-only direction |
-| T066 | Alternating joint policy improvement and natural scale gate | [contract](T066-alternating-joint-policy-improvement-and-natural-scale-gate.md) | parked separate Battle/Non-Combat direction |
-
-The next scientific successor after the documentation maintenance boundary is
-T101, the separately specified bounded particle-count convergence task. T100
-does not publish, authorize, or pre-specify that experiment.
+| T034 | Public-consistent hidden-future sampler boundary | [contract](T034-public-consistent-hidden-future-sampler.md) | science: `current_status.md`; lifecycle/terminal: `ARCHIVE.md` |
+| T063 | Oracle-guided public battle learning | [contract](T063-oracle-guided-public-battle-learning.md) | science: `current_status.md`; lifecycle/terminal: `ARCHIVE.md` |
+| T066 | Alternating joint policy improvement and natural scale gate | [contract](T066-alternating-joint-policy-improvement-and-natural-scale-gate.md) | science: `current_status.md`; lifecycle/terminal: `ARCHIVE.md` |
 
 ## Recently completed
 
@@ -88,20 +84,6 @@ Task documents do not carry mutable `Status:` lines. `DRAFT`, `BLOCKED`,
 `CANCELLED`, and terminal states retain their established meanings. Do not
 renumber tasks, delete contracts, rewrite accepted terminal classifications,
 or infer a successor from a historical result.
-
-## Current planning direction
-
-STSRL remains a simulator-only self-generated policy-improvement project with
-separate Battle and Non-Combat decision modules and training-time Oracle
-assistance. See [`../training_paradigm.md`](../training_paradigm.md) and
-[`../current_status.md`](../current_status.md) for current boundaries.
-
-T088 freezes unguided Search v2 @400 as the strongest accepted non-learned
-Battle baseline on the matched Battle-start distribution. T089 did not
-establish learned Non-Combat improvement. T090--T095 diagnose supervision and
-aggregation limits without changing Search or promoting a student. T096--T099
-establish the accepted native visibility and particle/Search bridge inputs;
-they do not claim convergence, posterior exactness, or controller improvement.
 
 ## Standard local gates
 

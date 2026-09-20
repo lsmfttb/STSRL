@@ -1,12 +1,10 @@
 # sts_lightspeed WSL Operations
 
-This guide lists simulator operations available on the latest `main`.
-Checkpoint verification, portable battle-start pools, fixed structural
-evaluation, Oracle-like native search teacher collection, Oracle fixed-cohort
-comparison, structured battle resource outcome auditing with native terminal
-resource identities, conservative constructed battle-start supplements, native
-root-prior allocation, and the pinned external source integration are current
-capabilities.
+This guide lists simulator operations available on the latest `main`. The
+canonical source identity and supported native capability inventory live in
+[`sts_lightspeed_source_manifest.json`](sts_lightspeed_source_manifest.json);
+this operational guide does not duplicate a moving native commit or capability
+claim.
 
 ## Boundary
 
@@ -131,11 +129,9 @@ The canonical day-to-day source integration is recorded in
 
 ```text
 upstream:     https://github.com/gamerpuppy/sts_lightspeed.git
-base commit:  7476a81954020087da31d41d16fddf475746ec2d
 integration:  https://github.com/lsmfttb/sts_lightspeed.git
 branch:       stsrl/main
 ref:          refs/heads/stsrl/main
-commit:       9dd8f75bd5d2b1aa8a8b5cf1db18f899825f326a
 module:       slaythespire.StepSimulator
 ```
 
@@ -153,10 +149,9 @@ review in the fork, and then advance `stsrl/main` through a reviewed STSRL
 manifest update that records the new exact commit. Do not rely on local
 unrecorded branch state for repository gates.
 
-The current pinned `stsrl/main` commit advances beyond the old T020
-maintenance-line commit with the T046 root-prior allocation native API. It
-preserves existing native `battle_search` behavior and adds
-`StepSimulator.battle_search_with_root_priors` plus root allocation metadata.
+Historical T046 evidence documents the root-prior allocation diagnostic and
+its native API. It is retained as task provenance; the manifest, not this
+historical note, owns the current capability inventory.
 
 Verify the pinned source in a disposable worktree:
 
@@ -179,6 +174,15 @@ directory:
 
 ```bash
 source=/home/lsmft/stsrl-spikes/sts_lightspeed
+manifest=/mnt/d/DeadlycatCoding/STSRL/docs/sts_lightspeed_source_manifest.json
+commit=$(python3 - "$manifest" <<'PY'
+import json
+import sys
+
+with open(sys.argv[1], encoding="utf-8") as handle:
+    print(json.load(handle)["integration"]["commit"])
+PY
+)
 worktree=$(mktemp -d /tmp/stsrl-rebuild-source.XXXXXX)
 cleanup() {
   git -C "$source" worktree remove --force "$worktree" >/dev/null 2>&1 || true
@@ -186,7 +190,7 @@ cleanup() {
 }
 trap cleanup EXIT
 git -C "$source" fetch https://github.com/lsmfttb/sts_lightspeed.git refs/heads/stsrl/main
-git -C "$source" worktree add --detach "$worktree" 9dd8f75bd5d2b1aa8a8b5cf1db18f899825f326a >/dev/null
+git -C "$source" worktree add --detach "$worktree" "$commit" >/dev/null
 cd "$worktree"
 git submodule update --init json pybind11
 if [ -d "$source/build-py" ]; then

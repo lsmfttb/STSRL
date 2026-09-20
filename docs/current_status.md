@@ -97,16 +97,17 @@ support, exact posterior correctness, Search improvement, or T034 completion.
 T099 accepted the native particle/Search bridge and its occurrence-equivalence
 mapping, public/legal-action parity, sanitized rows, audit counters, and
 fail-closed unsupported/ambiguous mappings. It remains a capability input, not
-a convergence result. T034 remains `BLOCKED` in the task archive while the
-broader native public-consistent hidden-future boundary is unresolved.
+a convergence result. The broader native public-consistent hidden-future
+boundary remains unresolved. See [`tasks/ARCHIVE.md`](tasks/ARCHIVE.md) for
+the exact lifecycle and terminal meaning of T034 and related tasks.
 
 ## Active scientific boundary
 
-The next possible scientific successor is T101, a separately specified bounded
-particle-count convergence task. T100's repository-maintenance work does not
-publish, authorize, or pre-specify that experiment. T063 and T066 remain draft
-directions; no task is promoted merely by appearing in a document or Planner
-Issue.
+No task is promoted merely by appearing in a document or Planner Issue. T063
+and T066 remain non-active scientific directions; see
+[`tasks/ARCHIVE.md`](tasks/ARCHIVE.md) for their exact lifecycle and terminal
+meanings. T100's repository-maintenance work does not publish or authorize a
+successor experiment.
 
 The retained closed-route conclusions remain available through the task archive
 and contracts, including the earlier Oracle-guided Search, later-act reach,

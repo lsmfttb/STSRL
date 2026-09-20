@@ -1,8 +1,10 @@
 # T092 Formal 413-Start Collection Readiness
 
-> Legacy T092 support record retained for reproducibility and provenance. It is
-> not current authorization or lifecycle state; the T092 task contract and its
-> exact PR own current semantics and transaction state.
+> Legacy T092 support record retained for reproducibility and provenance. The
+> T092 task contract, including its historical amendment, remains authoritative
+> for T092 semantics. The historical T092 PR transaction and acceptance record
+> remain preserved for provenance; neither is the current project transaction
+> or lifecycle state.
 
 This is an execution recipe only.  It is not a formal authorization and must
 not be used until the Maintainer records `FORMAL_AUTHORIZED` for the exact PR

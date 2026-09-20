@@ -3,9 +3,11 @@
 Battle-agent research infrastructure for Slay the Spire.
 
 The project uses the external `sts_lightspeed` simulator as the authoritative
-game implementation. The final objective is A20 Heart victory. The current
-trainable scope is battle decisions; non-combat decisions remain under a
-separate seeded driver.
+game implementation. The final objective is A20 Heart victory. Battle
+decisions and Non-Combat decisions are separate named surfaces; read
+[`docs/current_status.md`](docs/current_status.md) and
+[`docs/project_architecture.md`](docs/project_architecture.md) for accepted
+scope and current boundaries.
 
 ## Read First
 

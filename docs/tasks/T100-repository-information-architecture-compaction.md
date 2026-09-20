@@ -379,8 +379,8 @@ compacted as follows:
 
 | Surface | Before | After |
 |---|---:|---:|
-| `docs/current_status.md` | 2,504 lines / 166,161 bytes | 157 lines / 8,270 bytes |
-| `docs/tasks/README.md` | 410 lines / 45,088 bytes | 133 lines / 7,867 bytes |
+| `docs/current_status.md` | 2,504 lines / 166,161 bytes | 158 lines / 8,330 bytes |
+| `docs/tasks/README.md` | 410 lines / 45,088 bytes | 115 lines / 6,913 bytes |
 | `docs/tasks/ARCHIVE.md` | not present | 128 lines / 19,514 bytes |
 
 The archive retains every published task ID and primary contract link, plus
