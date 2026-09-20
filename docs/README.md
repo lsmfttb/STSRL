@@ -33,6 +33,33 @@ elsewhere in current documentation. Historical task contracts remain evidence
 of the workflow that governed those tasks and do not override the current
 workflow.
 
+## Information lifecycle and default reading order
+
+STSRL deliberately keeps four layers separate:
+
+1. **Hot Planner memory:** the [Planner Operating Dashboard issue #107](https://github.com/lsmfttb/STSRL/issues/107)
+   is the concise operating/startup card; the Planner research-direction ledger
+   issue [#85](https://github.com/lsmfttb/STSRL/issues/85) is low-friction
+   working memory for hypotheses, route changes, and cross-session context.
+   Neither Issue authorizes implementation.
+2. **Active transaction:** the task contract defines durable task meaning, and
+   the exact open task PR records execution, review, approvals, and lifecycle
+   events. The unique approved open task PR is temporary authority until it
+   lands.
+3. **Durable current truth:** `current_status.md`, the architecture and
+   collaboration documents, and the compact current task index describe what
+   is true on merged `main`.
+4. **Retained history:** [`tasks/ARCHIVE.md`](tasks/ARCHIVE.md), individual
+   task contracts, experiment records, PRs, and Git history preserve past
+   reasoning and evidence.
+
+For a new session, read the relevant Planner memory only when context is
+needed, then the active task contract/PR, then `current_status.md` and the
+authoritative architecture/workflow documents. Follow links into history only
+for provenance or a specific prior decision. This ordering keeps current work
+cheap to recover without collapsing Planner memory, task meaning, PR state, or
+landed project truth into one document.
+
 ## Current Documents
 
 ### Contract
@@ -56,6 +83,8 @@ workflow.
   immediate work.
 - [`tasks/README.md`](tasks/README.md): executable task backlog, dependencies,
   and readiness.
+- [`tasks/ARCHIVE.md`](tasks/ARCHIVE.md): compact historical task IDs, lifecycle
+  states, contract links, and lookup notes.
 - [`m1_model_guided_search_sandbox_synthesis.md`](m1_model_guided_search_sandbox_synthesis.md):
   M1 evidence synthesis and post-M1 task-batch recommendation.
 - [`experiment_log.md`](experiment_log.md): curated dated results. Results
@@ -119,6 +148,16 @@ workflow.
   instructions in place.
 - Prefer links over duplicating long commands, measurements, or design
   arguments across several files.
+- Keep `current_status.md` merge-stable: record accepted state, limitations,
+  evidence identity, and the successor boundary, not a PR's transient approval
+  phase. Exact-head approvals and final acceptance belong to the PR transaction
+  timeline; no repository edit should be required only to replace a transient
+  phrase after approval.
+- Place new task-specific support material under
+  `docs/tasks/support/Txxx/` when a stable repository path is required. Keep
+  existing root-level documents at their established paths when moving them
+  would create broad link churn; do not perform a mass historical migration for
+  cosmetic organization.
 
 ## Branch Workflow
 

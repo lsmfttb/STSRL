@@ -371,6 +371,33 @@ This terminal means the repository has a lower-cost default reading/navigation s
 
 It does not authorize or imply any scientific result.
 
+## Implementation record
+
+The documentation projection is based on the synchronized post-T099 base
+`80c4497b9901b7d9eb0cac456b416d5ce1ff9bcf`. The major navigation surfaces were
+compacted as follows:
+
+| Surface | Before | After |
+|---|---:|---:|
+| `docs/current_status.md` | 2,504 lines / 166,161 bytes | 159 lines / 8,363 bytes |
+| `docs/tasks/README.md` | 410 lines / 45,088 bytes | 125 lines / 8,152 bytes |
+| `docs/tasks/ARCHIVE.md` | not present | 127 lines / 19,439 bytes |
+
+The archive retains every published task ID and primary contract link, plus
+the additional T065 and T087 same-ID contract/amendment files. Internal
+Markdown paths resolve, and the durable current-state guard contains no
+approval-phase wording. Planner Dashboard issue #107 and research ledger #85
+remain external low-friction memory surfaces; no Issue content was copied into
+the repository and neither role was removed or deprecated.
+
+The ordinary repository checks completed with these environment-bound results:
+`compileall` passed; both mock fixtures passed; the focused workflow-document
+tests passed 3/3; the supported pytest run passed 1,285 tests with 31 skips and
+10 repository-baseline/environment failures. Full pytest collection additionally
+lacks optional Torch and Windows `resource` support. Full Ruff check/format
+retain existing repository-wide diagnostics. T100 made no runtime, native, simulator, model,
+Search, training, or scientific-result change and performed no path migration.
+
 ## Successor
 
 After T100 lands without changing the scientific queue, Planner may publish the bounded particle-count convergence task as T101.

@@ -150,6 +150,26 @@ top of durable `main`:
 11. Planner may then merge the task PR directly and update the research ledger /
     successor state. No extra Maintainer merge handoff is required.
 
+### Merge-stable repository projection and PR transaction state
+
+Repository current-state files are a merge-stable projection of landed project
+truth. When Maintainer prepares a factual result on the task PR before the
+dual acceptance, it must be phrased as the state and evidence that this exact
+head contributes if landed. It must not narrate the live approval phase.
+
+The task PR owns transient transaction state, including `SPEC APPROVED`,
+implementation authorization, Maintainer or Planner acceptance, merge
+readiness, and requests for review. The Planner Issues remain low-friction
+operating and research memory; they do not authorize implementation or replace
+the PR transaction.
+
+This separation prevents a self-invalidating loop: final acceptance must not
+require a follow-up repository edit whose only purpose is to replace wording
+such as "pending acceptance" with "accepted". A repository result record can
+be written before dual acceptance, but it must already be merge-stable. A
+material change to the result or contract after either final acceptance still
+requires re-acceptance on the new exact head.
+
 ### Candidate Task Index state inside an open PR
 
 An open task PR may add or modify its candidate row in `docs/tasks/README.md`.
@@ -338,9 +358,10 @@ authoritative.
   `SPEC APPROVED` with `implementation_authorized=true`.
 - PR/issue comments do not create a second durable task list; they carry the
   approval and evidence for the one active transaction.
-- `docs/current_status.md` is the merged result record: Maintainer owns factual
-  execution/evidence reporting, and Planner owns accepted scientific
-  interpretation.
+- `docs/current_status.md` is the merge-stable landed-state projection:
+  Maintainer owns factual execution/evidence reporting, and Planner owns
+  accepted scientific interpretation. Transient approval and lifecycle state
+  belongs to the PR transaction, not this file.
 - Prefer inheritance/reference over duplicated normative text.
 
 Before a task's final dual acceptance, Maintainer normally records the result,
