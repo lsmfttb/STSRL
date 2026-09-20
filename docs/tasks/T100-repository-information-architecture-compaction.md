@@ -391,8 +391,8 @@ remain external low-friction memory surfaces; no Issue content was copied into
 the repository and neither role was removed or deprecated.
 
 The ordinary repository checks completed with these environment-bound results:
-`compileall` passed; both mock fixtures passed; the focused workflow-document
-tests passed 3/3; the supported pytest run passed 1,285 tests with 31 skips and
+`compileall` passed; both mock fixtures passed; the focused workflow/task-document
+tests passed 9/9; the supported pytest run passed 1,285 tests with 31 skips and
 10 repository-baseline/environment failures. Full pytest collection additionally
 lacks optional Torch and Windows `resource` support. Full Ruff check/format
 retain existing repository-wide diagnostics. T100 made no runtime, native, simulator, model,

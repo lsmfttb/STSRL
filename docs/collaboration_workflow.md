@@ -119,9 +119,10 @@ top of durable `main`:
 ### Default task flow
 
 1. Planner synchronizes `main`, creates one fresh task branch and one task PR.
-2. The PR contains the complete task contract and may include candidate
-   navigation/registry rows that would represent the task while in flight. No
-   scientific execution is authorized yet.
+2. The PR contains the complete task contract and may include the candidate
+   lifecycle row in `docs/tasks/ARCHIVE.md`, plus stable README shortcuts if
+   useful. Only the archive row represents lifecycle state; no scientific
+   execution is authorized yet.
 3. Maintainer independently reviews the exact task-contract state for feasibility,
    required inputs, current-`main` consistency, and material contract gaps.
 4. When acceptable, Maintainer records:
@@ -175,15 +176,17 @@ requires re-acceptance on the new exact head.
 
 ### Candidate task-index state inside an open PR
 
-An open task PR may add or modify a candidate row in `docs/tasks/ARCHIVE.md` and
-the corresponding compact navigation row in `docs/tasks/README.md`. Neither
-unmerged row is durable project truth. During implementation, execution
-authority comes from the exact approved task contract and approval record, not
-from pretending that a candidate row is already merged.
+An open task PR may add or modify the candidate row in the authoritative
+`docs/tasks/ARCHIVE.md`. That unmerged row is not durable project truth until
+the PR lands. `docs/tasks/README.md` need not mirror lifecycle state; it may
+retain only stable ID/title/link shortcuts or route readers to
+`current_status.md`, `ARCHIVE.md`, or the active PR. During implementation,
+execution authority comes from the exact approved task contract and approval
+record, not from pretending that a candidate row is already merged.
 
-Before landing, the same PR should normally change the candidate registry row
-to the accepted terminal lifecycle (`DONE`, `BLOCKED`, `CANCELLED`, or other
-published terminal meaning) and keep the compact navigation consistent.
+Before landing, the same PR should normally change the candidate archive row to
+the accepted terminal lifecycle (`DONE`, `BLOCKED`, `CANCELLED`, or other
+published terminal meaning). There is no README lifecycle-sync requirement.
 Therefore a serial task may legitimately move from an unmerged candidate
 `READY` state directly to a merged terminal state.
 

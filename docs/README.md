@@ -1,8 +1,15 @@
 # Documentation Guide
 
-This directory separates current contracts, current status, active roadmaps,
-operational guides, and historical records. A document's role determines how
-it should be used during implementation and review.
+This directory separates current contracts, current status, long-horizon design
+and retained synthesis, operational guides, and historical records. A
+document's role determines how it should be used during implementation and
+review.
+
+Roadmaps and retained synthesis provide design or historical context, not
+current-state or task-lifecycle authority. Read `current_status.md` for
+accepted current state, `tasks/ARCHIVE.md` for landed lifecycle, and the unique
+approved open task PR for in-flight work; old "active", "current", or "next"
+wording in these documents cannot authorize or select a new task.
 
 ## Authority Order
 
@@ -22,7 +29,8 @@ several files:
    requirements.
 6. [`current_status.md`](current_status.md): implemented capabilities, known
    gaps, and current priorities.
-7. Active roadmap documents: intended future work within the architecture.
+7. Long-horizon design and retained synthesis: future design and historical
+   context, not current-state or task-lifecycle authority.
 8. Operational guides: commands and environment details.
 9. [`history/`](history/README.md): past investigations and superseded plans.
 
@@ -127,14 +135,17 @@ landed project truth into one document.
   handoff, wait, result-reading, independent-verification, and post-result
   continuation protocol for Main Maintainer/Implementer work.
 
-### Active Roadmaps
+### Long-horizon design and retained synthesis
 
 - [`battle_dataset_search_and_sl_plan.md`](battle_dataset_search_and_sl_plan.md):
-  dataset distributions, evaluation, search development, and the separately
-  evaluated SL-enabled branch.
+  long-horizon dataset distributions, evaluation, search development, and the
+  separately evaluated SL-enabled branch; it is not a task queue.
 - [`normal_information_search_and_resource_value_plan.md`](normal_information_search_and_resource_value_plan.md):
-  normal-information search, Oracle-to-normal transfer, complete public run
-  context, and continuation value.
+  long-horizon normal-information search, Oracle-to-normal transfer, complete
+  public run context, and continuation value; it is not current-state truth.
+- [`m1_model_guided_search_sandbox_synthesis.md`](m1_model_guided_search_sandbox_synthesis.md):
+  retained historical synthesis and planning context, not current task
+  authority.
 
 ### Operations
 
