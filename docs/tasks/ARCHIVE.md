@@ -55,7 +55,7 @@ meaning. The archive intentionally does not duplicate long experiment reports.
 | T045 | DONE | [Post-T044 failure analysis and guidance path selection](T045-post-t044-failure-analysis.md) | T043, T044 | failure taxonomy and guidance path |
 | T046 | DONE | [Native root-prior allocation search surface](T046-native-root-prior-allocation.md) | T045, T017, T020 | native root-prior allocation surface |
 | T047 | DONE | [Root-prior guided search comparison](T047-root-prior-guided-search-comparison.md) | T046, T043, T044 | equal-source comparison |
-| T048 | DONE | [Root-prior guided scale-up](T048-root-prior-guided-scale-up.md) | T047 | matched-cohort scale-up |
+| T048 | DONE | [Root-prior guided search scale-up](T048-root-prior-guided-scale-up.md) | T047 | matched-cohort scale-up |
 | T049 | DONE | [Root-prior complete-run reachability probe](T049-root-prior-complete-run-reachability-probe.md) | T048, T036, T037 | complete-run reachability plumbing |
 | T050 | DONE | [Root-prior reachability scale-up and shard merge](T050-root-prior-reachability-scaleup-and-shard-merge.md) | T049, T048, T036, T037 | sharded reachability scale pass |
 | T051 | DONE | [A20 search-controlled later-act source collection](T051-a20-search-controlled-later-act-source-collection.md) | T050, T049, T048, T036, T037 | broader later-act source collection |
@@ -95,7 +95,7 @@ meaning. The archive intentionally does not duplicate long experiment reports.
 | T085 | DONE | [Corrected Search v2 leaf-value repair and paired evaluation](T085-corrected-leaf-value-search-repair.md) | T084, T083, T082, T081, T064, T052, T042, T070 | `CORRECTED_VALUE_SEARCH_HARM_CONFIRMED`; bounded claim |
 | T087 | DONE | [Dense Combat outcome diagnostics and blind trace audit surface](T087-dense-combat-outcome-diagnostics.md) | T005, T012, T016, T018, T052, T078, T081, T085 | `DENSE_COMBAT_DIAGNOSTICS_READY`; diagnostic only |
 | T088 | DONE | [Classical Combat Search Baseline Tournament](T088-classical-combat-search-baseline-tournament.md) | T005, T012, T016, T018, T052, T062, T078, T081, T085, T087 | `STRONGER_NONLEARNED_COMBAT_BASELINE_IDENTIFIED`; Search v2 @400 frozen |
-| T089 | DONE | [Frozen-Search Self-Generated Non-Combat Policy](T089-frozen-search-self-generated-non-combat-policy.md) | T033, T040, T065, T075, T076, T078, T081, T085, T088 | `NON_COMBAT_POLICY_IMPROVEMENT_NOT_ESTABLISHED` |
+| T089 | DONE | [Frozen-Search Self-Generated Non-Combat Policy Improvement](T089-frozen-search-self-generated-non-combat-policy.md) | T033, T040, T065, T075, T076, T078, T081, T085, T088 | `NON_COMBAT_POLICY_IMPROVEMENT_NOT_ESTABLISHED` |
 | T090 | DONE | [Search-v2 Action-Utility Battle Student](T090-search-v2-action-utility-battle-student.md) | T033, T062, T078, T081, T085, T087, T088 | `BATTLE_STUDENT_TARGET_COVERAGE_INSUFFICIENT` |
 | T091 | DONE | [Battle Teacher Data-Surface Density Audit](T091-battle-teacher-data-surface-density-audit.md) | T011, T016, T025, T062, T078, T081, T087, T088, T090 | `ROOT_PARTIAL_SUPERVISION_TOO_SPARSE_OR_BIASED` |
 | T092 | DONE | [Internal Search-State Teacher Data-Surface Gate](T092-internal-search-state-teacher-data-surface.md) | T011, T016, T017, T020, T025, T062, T078, T081, T087, T088, T090, T091 | `INTERNAL_SEARCH_SURFACE_DENSE_ENOUGH`; 8/8 shards |

@@ -46,7 +46,7 @@ every task is in [`ARCHIVE.md`](ARCHIVE.md).
 
 | ID | State | Contract | Durable result |
 |---|---|---|---|
-| T089 | DONE | [Frozen-Search Self-Generated Non-Combat Policy](T089-frozen-search-self-generated-non-combat-policy.md) | `NON_COMBAT_POLICY_IMPROVEMENT_NOT_ESTABLISHED`; no promotion or T066 continuation |
+| T089 | DONE | [Frozen-Search Self-Generated Non-Combat Policy Improvement](T089-frozen-search-self-generated-non-combat-policy.md) | `NON_COMBAT_POLICY_IMPROVEMENT_NOT_ESTABLISHED`; no promotion or T066 continuation |
 | T090 | DONE | [Search-v2 Action-Utility Battle Student](T090-search-v2-action-utility-battle-student.md) | `BATTLE_STUDENT_TARGET_COVERAGE_INSUFFICIENT`; no training or promotion |
 | T091 | DONE | [Battle Teacher Data-Surface Density Audit](T091-battle-teacher-data-surface-density-audit.md) | `ROOT_PARTIAL_SUPERVISION_TOO_SPARSE_OR_BIASED`; internal surface remains feasible |
 | T092 | DONE | [Internal Search-State Teacher Data-Surface Gate](T092-internal-search-state-teacher-data-surface.md) | `INTERNAL_SEARCH_SURFACE_DENSE_ENOUGH`; no Search change or student claim |

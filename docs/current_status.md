@@ -122,7 +122,7 @@ They are summarized here only to preserve current boundaries:
 - T064's exposure-order curriculum did not pass the frozen transfer gates.
 - T065's source selection ended as a valid leakage/duplicate diagnostic rather
   than a policy result.
-- T079--T084 repaired and audited value-target semantics and produced qualified
+- T080--T084 repaired and audited value-target semantics and produced qualified
   internal-leaf target data; T085 measured bounded value-search harm.
 
 ## Durable information layout
