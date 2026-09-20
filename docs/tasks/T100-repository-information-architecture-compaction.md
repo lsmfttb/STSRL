@@ -380,8 +380,8 @@ compacted as follows:
 | Surface | Before | After |
 |---|---:|---:|
 | `docs/current_status.md` | 2,504 lines / 166,161 bytes | 159 lines / 8,363 bytes |
-| `docs/tasks/README.md` | 410 lines / 45,088 bytes | 125 lines / 8,152 bytes |
-| `docs/tasks/ARCHIVE.md` | not present | 127 lines / 19,439 bytes |
+| `docs/tasks/README.md` | 410 lines / 45,088 bytes | 125 lines / 8,164 bytes |
+| `docs/tasks/ARCHIVE.md` | not present | 127 lines / 19,458 bytes |
 
 The archive retains every published task ID and primary contract link, plus
 the additional T065 and T087 same-ID contract/amendment files. Internal
