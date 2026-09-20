@@ -1,5 +1,10 @@
 # T007 Review Handoff
 
+> Legacy historical handoff retained for provenance. It is not current project
+> status, task lifecycle authority, or implementation authorization; use
+> [`current_status.md`](current_status.md), [`tasks/ARCHIVE.md`](tasks/ARCHIVE.md),
+> and the exact active task PR for current decisions.
+
 Date: 2026-06-22.
 
 This is the current handoff record for the next main maintainer. It reviews

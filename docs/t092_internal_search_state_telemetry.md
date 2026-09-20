@@ -1,5 +1,11 @@
 # T092 internal Search-state telemetry implementation boundary
 
+> Legacy T092 support record retained for reproducibility and provenance. The
+> T092 task contract, including its historical amendment, remains authoritative
+> for T092 semantics. The historical T092 PR transaction and acceptance record
+> remain preserved for provenance; neither is the current project transaction
+> or lifecycle state.
+
 T092 adds one task-scoped native companion API,
 `StepSimulator.battle_search_v2_with_internal_teacher_telemetry`. It is opt-in
 and the existing `battle_search_v2` API remains the default-off, unchanged

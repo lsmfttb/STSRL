@@ -1,8 +1,15 @@
 # Documentation Guide
 
-This directory separates current contracts, current status, active roadmaps,
-operational guides, and historical records. A document's role determines how
-it should be used during implementation and review.
+This directory separates current contracts, current status, long-horizon design
+and retained synthesis, operational guides, and historical records. A
+document's role determines how it should be used during implementation and
+review.
+
+Roadmaps and retained synthesis provide design or historical context, not
+current-state or task-lifecycle authority. Read `current_status.md` for
+accepted current state, `tasks/ARCHIVE.md` for landed lifecycle, and the unique
+approved open task PR for in-flight work; old "active", "current", or "next"
+wording in these documents cannot authorize or select a new task.
 
 ## Authority Order
 
@@ -22,7 +29,8 @@ several files:
    requirements.
 6. [`current_status.md`](current_status.md): implemented capabilities, known
    gaps, and current priorities.
-7. Active roadmap documents: intended future work within the architecture.
+7. Long-horizon design and retained synthesis: future design and historical
+   context, not current-state or task-lifecycle authority.
 8. Operational guides: commands and environment details.
 9. [`history/`](history/README.md): past investigations and superseded plans.
 
@@ -32,6 +40,45 @@ or landing authority, `collaboration_workflow.md` overrides any shorter summary
 elsewhere in current documentation. Historical task contracts remain evidence
 of the workflow that governed those tasks and do not override the current
 workflow.
+
+## Single-owner rule for volatile facts
+
+Keep each fact in one owning surface: `tasks/ARCHIVE.md` owns landed task
+lifecycle; the exact task PR owns in-flight execution and approval state;
+`current_status.md` owns accepted current science and the successor boundary;
+`sts_lightspeed_source_manifest.json` owns the exact native identity; task
+contracts own task semantics; and `collaboration_workflow.md` plus
+`project_architecture.md` own governance and architecture. `README.md`,
+`docs/README.md`, `AGENTS.md`, and the Planner Dashboard provide navigation or
+stable reminders only. They must link to the owner rather than maintain a
+mutable duplicate.
+
+## Information lifecycle and default reading order
+
+STSRL deliberately keeps four layers separate:
+
+1. **Hot Planner memory:** the [Planner Operating Dashboard issue #107](https://github.com/lsmfttb/STSRL/issues/107)
+   is the concise operating/startup card; the Planner research-direction ledger
+   issue [#85](https://github.com/lsmfttb/STSRL/issues/85) is low-friction
+   working memory for hypotheses, route changes, and cross-session context.
+   Neither Issue authorizes implementation.
+2. **Active transaction:** the task contract defines durable task meaning, and
+   the exact open task PR records execution, review, approvals, and lifecycle
+   events. The unique approved open task PR is temporary authority until it
+   lands.
+3. **Durable current truth:** `current_status.md`, the architecture and
+   collaboration documents, the compact current task navigation, and the
+   complete `tasks/ARCHIVE.md` registry describe what is true on merged `main`.
+4. **Retained history:** [`tasks/ARCHIVE.md`](tasks/ARCHIVE.md), individual
+   task contracts, experiment records, PRs, and Git history preserve past
+   reasoning and evidence.
+
+For a new session, read the relevant Planner memory only when context is
+needed, then the active task contract/PR, then `current_status.md` and the
+authoritative architecture/workflow documents. Follow links into history only
+for provenance or a specific prior decision. This ordering keeps current work
+cheap to recover without collapsing Planner memory, task meaning, PR state, or
+landed project truth into one document.
 
 ## Current Documents
 
@@ -54,12 +101,22 @@ workflow.
 
 - [`current_status.md`](current_status.md): concise state of implementation and
   immediate work.
-- [`tasks/README.md`](tasks/README.md): executable task backlog, dependencies,
-  and readiness.
-- [`m1_model_guided_search_sandbox_synthesis.md`](m1_model_guided_search_sandbox_synthesis.md):
-  M1 evidence synthesis and post-M1 task-batch recommendation.
+- [`tasks/README.md`](tasks/README.md): compact current/recent/parked task
+  navigation and planning context.
+- [`tasks/ARCHIVE.md`](tasks/ARCHIVE.md): complete durable task lifecycle
+  registry with historical IDs, states, contract links, and lookup notes.
 - [`experiment_log.md`](experiment_log.md): curated dated results. Results
   explain evidence; they do not create architectural rules.
+
+### Long-horizon design and retained synthesis
+
+- [`battle_dataset_search_and_sl_plan.md`](battle_dataset_search_and_sl_plan.md):
+  long-horizon Battle/search and SL design roadmap, not current-state truth.
+- [`normal_information_search_and_resource_value_plan.md`](normal_information_search_and_resource_value_plan.md):
+  long-horizon normal-information design plan, not current-state truth.
+- [`m1_model_guided_search_sandbox_synthesis.md`](m1_model_guided_search_sandbox_synthesis.md):
+  retained historical synthesis and planning context, not the current task
+  queue or an implementation authority.
 
 ### Collaboration
 
@@ -77,15 +134,6 @@ workflow.
 - [`implementer_coordination.md`](implementer_coordination.md): operational
   handoff, wait, result-reading, independent-verification, and post-result
   continuation protocol for Main Maintainer/Implementer work.
-
-### Active Roadmaps
-
-- [`battle_dataset_search_and_sl_plan.md`](battle_dataset_search_and_sl_plan.md):
-  dataset distributions, evaluation, search development, and the separately
-  evaluated SL-enabled branch.
-- [`normal_information_search_and_resource_value_plan.md`](normal_information_search_and_resource_value_plan.md):
-  normal-information search, Oracle-to-normal transfer, complete public run
-  context, and continuation value.
 
 ### Operations
 
@@ -112,13 +160,28 @@ workflow.
   during execution instead of duplicating that policy inside each task.
 - Update `current_status.md` when implementation capability or the immediate
   blocker changes.
-- Put future design in the relevant roadmap; do not mix dated experiment
-  narratives into roadmaps.
+- Put future design in the relevant long-horizon roadmap; do not mix dated
+  experiment narratives into roadmaps.
 - Put dated measurements in `experiment_log.md`.
 - Move superseded plans to `history/` instead of leaving contradictory current
   instructions in place.
 - Prefer links over duplicating long commands, measurements, or design
   arguments across several files.
+- Keep `current_status.md` merge-stable: record accepted state, limitations,
+  evidence identity, and the successor boundary, not a PR's transient approval
+  phase. Exact-head approvals and final acceptance belong to the PR transaction
+  timeline; no repository edit should be required only to replace a transient
+  phrase after approval.
+- Place new task-specific support material under
+  `docs/tasks/support/Txxx/` when a stable repository path is required. Keep
+  existing root-level documents at their established paths when moving them
+  would create broad link churn; do not perform a mass historical migration for
+  cosmetic organization.
+- Existing root-level `tNNN_*` handoffs, readiness notes, implementation
+  boundaries, and task-scoped support files are retained legacy paths. They are
+  not current-status surfaces or lifecycle authorities; link them from the
+  owning task or archive when historical context is needed. New task support
+  belongs under `docs/tasks/support/Txxx/`.
 
 ## Branch Workflow
 
@@ -134,7 +197,8 @@ Before merge, the exact final head requires Planner scientific/architectural
 acceptance plus Maintainer implementation/operational acceptance; after both are
 recorded on the same exact head, Planner may land the task under the current
 collaboration workflow. Merged task lifecycle remains authoritative in
-`tasks/README.md`.
+`tasks/ARCHIVE.md`; `tasks/README.md` is compact current/recent/parked
+navigation only.
 
 At the start of maintainer work and before branch creation or execution
 readiness, the Maintainer must refresh and exactly synchronize local `main`

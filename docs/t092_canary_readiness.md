@@ -1,5 +1,11 @@
 # T092 paired 12-start canary readiness
 
+> Legacy T092 support record retained for reproducibility and provenance. The
+> T092 task contract, including its historical amendment, remains authoritative
+> for T092 semantics. The historical T092 PR transaction and acceptance record
+> remain preserved for provenance; neither is the current project transaction
+> or lifecycle state.
+
 This is plumbing only. It does not authorize, start, or imply a canary run.
 The future approved runner restores every selected T087/T090 checkpoint twice:
 OFF uses the unchanged `battle_search_v2` API and ON uses

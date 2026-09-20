@@ -3,16 +3,20 @@
 Battle-agent research infrastructure for Slay the Spire.
 
 The project uses the external `sts_lightspeed` simulator as the authoritative
-game implementation. The final objective is A20 Heart victory. The current
-trainable scope is battle decisions; non-combat decisions remain under a
-separate seeded driver.
+game implementation. The final objective is A20 Heart victory. Battle
+decisions and Non-Combat decisions are separate named surfaces; read
+[`docs/current_status.md`](docs/current_status.md) and
+[`docs/project_architecture.md`](docs/project_architecture.md) for accepted
+scope and current boundaries.
 
 ## Read First
 
 - [`docs/current_status.md`](docs/current_status.md): capabilities actually
   present on the latest `main`.
-- [`docs/tasks/README.md`](docs/tasks/README.md): published implementation
-  tasks, dependencies, and readiness.
+- [`docs/tasks/README.md`](docs/tasks/README.md): compact current/recent/parked
+  task navigation.
+- [`docs/tasks/ARCHIVE.md`](docs/tasks/ARCHIVE.md): complete landed task
+  lifecycle registry and contract lookup.
 - [`docs/collaboration_workflow.md`](docs/collaboration_workflow.md): branch,
   pull-request, review, and merge process.
 - [`docs/project_architecture.md`](docs/project_architecture.md): authoritative
@@ -46,12 +50,9 @@ mechanically adapt its source code. Exact references and the release checklist
 are maintained in
 [`docs/research_inspirations_and_attribution.md`](docs/research_inspirations_and_attribution.md).
 
-## Current Main
+## Repository shape
 
-`main` contains the current battle-agent research foundation through the
-forward-surface maintenance gate after the assisted source-generation and
-de-assisted evaluation batch. The high-level
-shape is:
+The stable architecture and information flow are:
 
 ```text
 external sts_lightspeed simulator
@@ -69,15 +70,11 @@ controlled runs, source pools, fixed cohorts, and restored evaluation
 teacher data, trainer/model-input contracts, checkpoints, and search reports
 ```
 
-The implemented surface includes checkpoint pools, Oracle-like native search
-and teacher plumbing, optional PyTorch search-guidance training/inference,
-public-context artifact propagation, assisted source-pool workflows, and
-diagnostic fixed-cohort comparisons. The current gaps are still important:
-`main` does not contain broad A20 neural training, promoted model-guided search
-improvement, normal-information belief search, or interactive live-game A20
-performance validation. See [`docs/current_status.md`](docs/current_status.md)
-for the full implemented-capability list and [`docs/tasks/README.md`](docs/tasks/README.md)
-for the authoritative task queue.
+For accepted capabilities, scientific gaps, and the successor boundary, read
+[`docs/current_status.md`](docs/current_status.md). For landed task lifecycle,
+read [`docs/tasks/ARCHIVE.md`](docs/tasks/ARCHIVE.md); for compact planning
+navigation, read [`docs/tasks/README.md`](docs/tasks/README.md). The exact open
+task PR is the only in-flight execution transaction.
 
 ## Boundaries
 
@@ -152,7 +149,8 @@ historical task contracts.
 
 The large legacy commit `d56e10e` is a read-only recovery reference. It is not
 an integration line and will not be merged wholesale. Its useful work is mapped
-to focused tasks in [`docs/tasks/README.md`](docs/tasks/README.md).
+to focused tasks in [`docs/tasks/ARCHIVE.md`](docs/tasks/ARCHIVE.md) and the
+compact navigation in [`docs/tasks/README.md`](docs/tasks/README.md).
 
 Generated artifacts belong under the ignored `artifacts/` directory. Do not
 commit large datasets or model checkpoints.

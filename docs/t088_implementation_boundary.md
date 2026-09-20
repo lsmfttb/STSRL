@@ -1,5 +1,11 @@
 # T088 implementation boundary
 
+> Legacy implementation-boundary record retained for historical provenance. It
+> is not current project status or lifecycle authority; use the
+> [T088 task contract](tasks/T088-classical-combat-search-baseline-tournament.md),
+> [`current_status.md`](current_status.md), and [`tasks/ARCHIVE.md`](tasks/ARCHIVE.md)
+> for current meaning.
+
 This is implementation evidence for the approved task at
 `b31162fa8df84a02ea45555e6e65055bed986494`, not a task-contract amendment or
 an execution authorization. T088 remains incomplete.

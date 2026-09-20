@@ -1,5 +1,11 @@
 # M1 Model-Guided Search Sandbox Synthesis
 
+> Retained historical synthesis and planning context; it is not current
+> project status or task authority. Read [`current_status.md`](current_status.md)
+> for accepted state, [`tasks/ARCHIVE.md`](tasks/ARCHIVE.md) for landed
+> lifecycle, and the unique approved open task PR for in-flight work. Historical
+> "active"/"next" wording below does not authorize a task.
+
 Last reviewed: 2026-06-26.
 
 This document closes the M1 model-guided Oracle search sandbox at the planning

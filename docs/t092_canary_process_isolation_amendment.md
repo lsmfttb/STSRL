@@ -1,8 +1,12 @@
 # T092 Canary Process-Isolation Contract Amendment
 
-Status: authoritative T092 execution-contract amendment.
-
-This amendment is part of the T092 scientific contract on PR #106. It supersedes only the process/native-loading semantics of the `## Semantic-Parity Canary` and related execution-authorization text in `docs/tasks/T092-internal-search-state-teacher-data-surface.md`. All other T092 scientific predicates, thresholds, candidate-state semantics, source cohort, action-space accounting, information boundary, terminal classifications, and successor logic remain unchanged.
+This amendment is the authoritative T092 execution-contract amendment on PR
+#106. It supersedes only the process/native-loading semantics of the
+`## Semantic-Parity Canary` and related execution-authorization text in
+`docs/tasks/T092-internal-search-state-teacher-data-surface.md`. All other T092
+scientific predicates, thresholds, candidate-state semantics, source cohort,
+action-space accounting, information boundary, terminal classifications, and
+successor logic remain unchanged.
 
 ## Reason for amendment
 

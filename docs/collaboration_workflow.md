@@ -97,8 +97,11 @@ absence of a pre-existing public function or CLI endpoint is not a contract gap.
 
 ## One-Task-One-PR Default
 
-There is exactly one durable task-lifecycle list: merged
-`docs/tasks/README.md` on `main`. Do not maintain a second durable task list in an
+There is exactly one complete durable task-lifecycle registry: merged
+`docs/tasks/ARCHIVE.md` on `main`. It contains every published or landed task
+ID, state, and contract link. `docs/tasks/README.md` is compact current/recent/
+parked navigation derived from that registry and planning context; it is not a
+second lifecycle authority. Do not maintain another durable registry in an
 issue or PR.
 
 However, because work is serial, the repository also recognizes one temporary
@@ -116,8 +119,9 @@ top of durable `main`:
 ### Default task flow
 
 1. Planner synchronizes `main`, creates one fresh task branch and one task PR.
-2. The PR contains the complete task contract and may include the candidate Task
-   Index row that would represent the task while in flight. No scientific
+2. The PR contains the complete task contract and may include the candidate
+   lifecycle row in `docs/tasks/ARCHIVE.md`, plus stable README shortcuts if
+   useful. Only the archive row represents lifecycle state; no scientific
    execution is authorized yet.
 3. Maintainer independently reviews the exact task-contract state for feasibility,
    required inputs, current-`main` consistency, and material contract gaps.
@@ -150,17 +154,41 @@ top of durable `main`:
 11. Planner may then merge the task PR directly and update the research ledger /
     successor state. No extra Maintainer merge handoff is required.
 
-### Candidate Task Index state inside an open PR
+### Merge-stable repository projection and PR transaction state
 
-An open task PR may add or modify its candidate row in `docs/tasks/README.md`.
-That unmerged row is not durable project truth. During implementation, execution
-authority comes from the exact approved task contract and approval record, not
-from pretending that the candidate row is already merged.
+Repository current-state files are a merge-stable projection of landed project
+truth. When Maintainer prepares a factual result on the task PR before the
+dual acceptance, it must be phrased as the state and evidence that this exact
+head contributes if landed. It must not narrate the live approval phase.
 
-Before landing, the same PR should normally change the candidate row to the
-accepted terminal lifecycle (`DONE`, `BLOCKED`, `CANCELLED`, or other published
-terminal meaning). Therefore a serial task may legitimately move from an
-unmerged candidate `READY` state directly to a merged terminal state.
+The task PR owns transient transaction state, including `SPEC APPROVED`,
+implementation authorization, Maintainer or Planner acceptance, merge
+readiness, and requests for review. The Planner Issues remain low-friction
+operating and research memory; they do not authorize implementation or replace
+the PR transaction.
+
+This separation prevents a self-invalidating loop: final acceptance must not
+require a follow-up repository edit whose only purpose is to replace wording
+such as "pending acceptance" with "accepted". A repository result record can
+be written before dual acceptance, but it must already be merge-stable. A
+material change to the result or contract after either final acceptance still
+requires re-acceptance on the new exact head.
+
+### Candidate task-index state inside an open PR
+
+An open task PR may add or modify the candidate row in the authoritative
+`docs/tasks/ARCHIVE.md`. That unmerged row is not durable project truth until
+the PR lands. `docs/tasks/README.md` need not mirror lifecycle state; it may
+retain only stable ID/title/link shortcuts or route readers to
+`current_status.md`, `ARCHIVE.md`, or the active PR. During implementation,
+execution authority comes from the exact approved task contract and approval
+record, not from pretending that a candidate row is already merged.
+
+Before landing, the same PR should normally change the candidate archive row to
+the accepted terminal lifecycle (`DONE`, `BLOCKED`, `CANCELLED`, or other
+published terminal meaning). There is no README lifecycle-sync requirement.
+Therefore a serial task may legitimately move from an unmerged candidate
+`READY` state directly to a merged terminal state.
 
 ### Optional two-phase publication
 
@@ -182,12 +210,15 @@ optional two-phase mode.
 
 ## Maintainer Start And Session Recovery
 
-At the start of every Maintainer session, do not infer current work from
-`docs/tasks/README.md` alone.
+At the start of every Maintainer session, do not infer current work from the
+compact navigation page alone. The merged lifecycle registry is
+`docs/tasks/ARCHIVE.md`; `docs/tasks/README.md` is a convenience view and may
+be incomplete while a PR is in flight.
 
 1. Bring the local integration line to current upstream `main` and complete the
    Main Synchronization Gate below.
-2. Read merged `docs/tasks/README.md` for durable lifecycle state.
+2. Read merged `docs/tasks/ARCHIVE.md` for durable lifecycle state, then use
+   `docs/tasks/README.md` for current/recent/parked navigation context.
 3. Query remote open PRs whose base is `main`.
 4. Identify task PRs and inspect each relevant PR's body, base/head refs, exact
    head, commits, files, mergeability, task contract, and approval comments.
@@ -196,10 +227,10 @@ At the start of every Maintainer session, do not infer current work from
    `implementation_authorized=true`, fail closed and ask Planner which one is
    authoritative rather than guessing.
 6. If one approved active task PR exists, resume that PR even when its candidate
-   lifecycle changes have not yet landed on `main`.
-7. If no approved active task PR exists, merged `main` is sufficient to determine
-   whether a previously published `READY` task exists or Planner must publish the
-   next task.
+   registry or navigation changes have not yet landed on `main`.
+7. If no approved active task PR exists, the merged archive on `main` determines
+   whether a previously published `READY` task exists or Planner must publish
+   the next task.
 
 In a WSL terminal use native `gh` when available, otherwise `gh.exe`; in
 PowerShell use `gh` or `gh.exe`:
@@ -331,16 +362,18 @@ authoritative.
 
 - `main` is durable landed project truth.
 - Task lifecycle for landed work is authoritative in merged
-  `docs/tasks/README.md`.
+  `docs/tasks/ARCHIVE.md`; `docs/tasks/README.md` is compact current/recent/
+  parked navigation and is not lifecycle authority.
 - Under the serial one-PR workflow, the unique approved open task PR is the
   temporary execution authority for the current in-flight task.
 - That temporary authority exists only when Maintainer has recorded exact-spec
   `SPEC APPROVED` with `implementation_authorized=true`.
 - PR/issue comments do not create a second durable task list; they carry the
   approval and evidence for the one active transaction.
-- `docs/current_status.md` is the merged result record: Maintainer owns factual
-  execution/evidence reporting, and Planner owns accepted scientific
-  interpretation.
+- `docs/current_status.md` is the merge-stable landed-state projection:
+  Maintainer owns factual execution/evidence reporting, and Planner owns
+  accepted scientific interpretation. Transient approval and lifecycle state
+  belongs to the PR transaction, not this file.
 - Prefer inheritance/reference over duplicated normative text.
 
 Before a task's final dual acceptance, Maintainer normally records the result,
