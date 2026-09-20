@@ -135,18 +135,6 @@ landed project truth into one document.
   handoff, wait, result-reading, independent-verification, and post-result
   continuation protocol for Main Maintainer/Implementer work.
 
-### Long-horizon design and retained synthesis
-
-- [`battle_dataset_search_and_sl_plan.md`](battle_dataset_search_and_sl_plan.md):
-  long-horizon dataset distributions, evaluation, search development, and the
-  separately evaluated SL-enabled branch; it is not a task queue.
-- [`normal_information_search_and_resource_value_plan.md`](normal_information_search_and_resource_value_plan.md):
-  long-horizon normal-information search, Oracle-to-normal transfer, complete
-  public run context, and continuation value; it is not current-state truth.
-- [`m1_model_guided_search_sandbox_synthesis.md`](m1_model_guided_search_sandbox_synthesis.md):
-  retained historical synthesis and planning context, not current task
-  authority.
-
 ### Operations
 
 - [`sts_lightspeed_wsl_spike.md`](sts_lightspeed_wsl_spike.md): current external
