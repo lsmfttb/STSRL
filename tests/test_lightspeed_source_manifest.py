@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -35,9 +36,7 @@ def test_default_lightspeed_source_manifest_names_pinned_integration() -> None:
     )
     assert manifest.integration.branch == "stsrl/main"
     assert manifest.integration.ref == "refs/heads/stsrl/main"
-    assert manifest.integration.commit == (
-        "d309170198e21e57041a84dcfdbc255cdda4052e"
-    )
+    assert manifest.integration.commit == ("97f59b620efe5ee1571f8da298c99d1e21c1149b")
     assert set(REQUIRED_NATIVE_CAPABILITY_IDS).issubset(manifest.capability_ids)
     assert "native_battle_search_root" in manifest.capability_ids
     assert "native_root_prior_allocation" in manifest.capability_ids
@@ -47,7 +46,11 @@ def test_default_lightspeed_source_manifest_names_pinned_integration() -> None:
     assert "native_battle_search_v2_state_utilization" in manifest.capability_ids
     assert "native_terminal_resource_identity" in manifest.capability_ids
     assert "constructed_battle_start_transforms" in manifest.capability_ids
-    assert "native_t096_public_information_hidden_future_sampler" in manifest.capability_ids
+    assert (
+        "native_t096_public_information_hidden_future_sampler"
+        in manifest.capability_ids
+    )
+    assert "native_stsr006_particle_search_bridge" in manifest.capability_ids
     assert manifest.legacy_patch_stack.status == "retired_provenance"
 
 
@@ -74,14 +77,87 @@ def test_t096_native_capability_declares_sampler_boundary() -> None:
     )
     assert capability.task_provenance == ("T096",)
     assert "native-battle-public-information-v2" in capability.description
-    assert "draw-knowledge and hidden-intent mechanics remain explicitly unsupported" not in capability.description
-    assert "StepSimulator.t096_public_information_projection" in capability.required_python_api
-    assert "StepSimulator.t096_anchor_distribution_metadata" in capability.required_python_api
-    assert "StepSimulator.sample_hidden_future_particles.particle_count" in capability.required_python_api
+    assert (
+        "draw-knowledge and hidden-intent mechanics remain explicitly unsupported"
+        not in capability.description
+    )
+    assert (
+        "StepSimulator.t096_public_information_projection"
+        in capability.required_python_api
+    )
+    assert (
+        "StepSimulator.t096_anchor_distribution_metadata"
+        in capability.required_python_api
+    )
+    assert (
+        "StepSimulator.sample_hidden_future_particles.particle_count"
+        in capability.required_python_api
+    )
     assert "StepSimulator.t096_visibility_audit" in capability.required_python_api
-    assert "StepSimulator.t096_visibility_audit.frozen_eye_full_order" in capability.required_python_api
-    assert "StepSimulator.t096_visibility_audit.runic_dome_mixed_counter_sampler_fails_closed" in capability.required_python_api
-    assert "StepSimulator.t096_visibility_audit.private_hidden_state_projection_invariant" in capability.required_python_api
+    assert (
+        "StepSimulator.t096_visibility_audit.frozen_eye_full_order"
+        in capability.required_python_api
+    )
+    assert (
+        "StepSimulator.t096_visibility_audit.runic_dome_mixed_counter_sampler_fails_closed"
+        in capability.required_python_api
+    )
+    assert (
+        "StepSimulator.t096_visibility_audit.private_hidden_state_projection_invariant"
+        in capability.required_python_api
+    )
+
+
+def test_t099_native_capability_declares_particle_search_boundary() -> None:
+    manifest = load_lightspeed_source_manifest()
+    capability = next(
+        item
+        for item in manifest.supported_native_capabilities
+        if item.capability_id == "native_stsr006_particle_search_bridge"
+    )
+
+    assert capability.task_provenance == ("T099",)
+    for required_semantic in (
+        "native public-consistent sampling",
+        "full_simulator_state_oracle_like",
+        "full_state_continuation_strategy_fusion_proxy",
+        "no cross-particle aggregation or action selection",
+        "exact Q_public",
+        "information-set-optimal Search",
+        "exact Bayesian/deterministic-seed posterior expectation",
+        "IID posterior-sampling claims",
+        "incomplete or ambiguous mappings",
+    ):
+        assert required_semantic in capability.description
+    for required_api in (
+        "StepSimulator.sample_hidden_future_particles_search",
+        "StepSimulator.sample_hidden_future_particles_search.particles.root_evaluation.root_action_mapping.public_action_ordinal",
+        "StepSimulator.sample_hidden_future_particles_search.particles.root_evaluation.root_action_mapping.source_action",
+        "StepSimulator.sample_hidden_future_particles_search.particles.root_evaluation.root_action_mapping.edge_public_occurrence_count",
+        "StepSimulator.stsr006_particle_search_audit",
+        "StepSimulator.stsr006_particle_search_audit.duplicate_occurrence_mapping",
+        "StepSimulator.stsr006_particle_search_audit.unsupported_anchor_fails_closed",
+    ):
+        assert required_api in capability.required_python_api
+
+
+def test_t099_canonical_source_verifier_requires_bridge_checks() -> None:
+    verifier = (
+        Path(__file__).parents[1] / "scripts" / "verify_lightspeed_source.sh"
+    ).read_text(encoding="utf-8")
+
+    for required_check in (
+        '"sample_hidden_future_particles_search"',
+        '"stsr006_particle_search_audit"',
+        "validate_t099_particle_search_audit",
+        "validate_t099_particle_search_bridge",
+        "scripts/test_t096_particle_search_bridge.py",
+        "${STSRL_LIGHTSPEED_BUILD_JOBS:-2}",
+    ):
+        assert required_check in verifier
+    assert (
+        'PYTHONPATH="$worktree/$build_dir:$repo_root/src${PYTHONPATH:+:' not in verifier
+    )
 
 
 def test_lightspeed_source_identity_manifest_path_is_cwd_stable(

@@ -147,6 +147,10 @@ from pathlib import Path
 import sys
 
 from sts_combat_rl.sim.lightspeed_source import load_lightspeed_source_manifest
+from sts_combat_rl.sim.t099_particle_search_bridge import (
+    validate_t099_particle_search_audit,
+    validate_t099_particle_search_bridge,
+)
 
 
 def fail(message: str) -> None:
@@ -192,6 +196,8 @@ for method_name in (
     "t096_anchor_distribution_metadata",
     "t096_visibility_audit",
     "sample_hidden_future_particles",
+    "sample_hidden_future_particles_search",
+    "stsr006_particle_search_audit",
     "legal_battle_start_encounters",
     "rebuild_battle_start",
 ):
@@ -452,6 +458,17 @@ if failed_visibility_audit:
         + ", ".join(failed_visibility_audit)
     )
 
+validate_t099_particle_search_audit(sim.stsr006_particle_search_audit())
+t099_bridge = validate_t099_particle_search_bridge(
+    sim.sample_hidden_future_particles_search(17, 0, 2, 1, False)
+)
+if t099_bridge["anchor_public_information_projection"] != t096_projection:
+    fail("T099 bridge anchor projection disagrees with the ordinary T096 projection")
+if t099_bridge["anchor_ordered_public_legal_actions"] != (
+    t096_projection["ordered_public_legal_actions"]
+):
+    fail("T099 bridge anchor actions disagree with the ordinary T096 projection")
+
 encounter_candidates = sim.legal_battle_start_encounters()
 if not isinstance(encounter_candidates, list) or not encounter_candidates:
     fail("StepSimulator.legal_battle_start_encounters() must return candidates")
@@ -647,6 +664,7 @@ observed_capabilities = {
     "native_terminal_resource_identity",
     "constructed_battle_start_transforms",
     "native_t096_public_information_hidden_future_sampler",
+    "native_stsr006_particle_search_bridge",
 }
 missing = sorted(observed_capabilities.difference(expected_capabilities))
 if missing:
@@ -659,6 +677,7 @@ python3 scripts/stsrl_api_smoke.py --build-dir "$build_dir"
 PYTHONPATH="$worktree/$build_dir" python3 scripts/test_t096_public_information_sampler.py
 PYTHONPATH="$worktree/$build_dir" python3 scripts/test_t096_visibility_transitions.py \
     --build-dir "$build_dir"
+python3 scripts/test_t096_particle_search_bridge.py --build-dir "$build_dir"
 python3 scripts/test_battle_search_v2_tree_geometry.py --build-dir "$build_dir"
 
 echo "clean sts_lightspeed pinned-source build passed"

@@ -1,6 +1,6 @@
 # Current Status
 
-Last reviewed: 2026-09-18.
+Last reviewed: 2026-09-20.
 
 This document is the main maintainer's canonical execution-result report for
 the planner and describes the latest `main` branch only. Results from local
@@ -277,6 +277,29 @@ The durable report validator also passed; its output is retained as
 `70972562a0e8978e1cf68ca06d2e34ebc5ed08ce522027a1a82379c2251d9567`).
 No formal T096 rerun, convergence ladder, Search, training, native change,
 controller promotion, Non-Combat update, T034 closure, or T066 work occurred.
+
+T099 is a final candidate on PR #115 with implementation/operational evidence
+head `84f62274441ed0622a11f866810747851d216116`, pending the required exact-head
+dual final acceptance. It advances the canonical native integration pin to
+`lsmfttb/sts_lightspeed refs/heads/stsrl/main @
+97f59b620efe5ee1571f8da298c99d1e21c1149b`; the previous pin and reviewed native
+PR #20 head are both proven ancestors, and a fresh fetch resolves the active
+ref to that exact commit. The clean disposable source verifier rebuilt the
+exact native worktree with 16 build workers in 18.96 seconds and passed native
+API, T096/T098 visibility/sampler, STSRL-006 audit, bounded two-particle
+particle-to-Search, duplicate-occurrence mapping, Frozen Eye/known-draw,
+unsupported-anchor, and Search-v2 geometry checks. The focused STSRL checks
+passed 63 tests, with compileall, shell syntax, diff, format, changed-file
+Ruff (apart from three unchanged baseline TRY004 findings), and mock fixtures
+also passing. Evidence is retained under
+`/mnt/d/DeadlyCatCoding/STSRL-T099-evidence/` with the native lineage,
+disposable-verifier, and final-verification logs recorded in the T099 task
+candidate result. T099 records only the mixed native capability boundary: the
+outer sampler is public-consistent, each continuation is
+`full_simulator_state_oracle_like`, values are
+`full_state_continuation_strategy_fusion_proxy`, and no cross-particle
+aggregation/action selection, convergence, Search change, training,
+controller promotion, T034 closure, Non-Combat update, or T066 work occurred.
 
 The task index lists the canonical lifecycle state for the published backlog.
 The M1 model-guided Oracle search sandbox is complete through synthesis. It
