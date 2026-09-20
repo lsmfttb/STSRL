@@ -32,11 +32,14 @@ transaction.
 
 ## Current and parked navigation
 
-| ID | State | Task | Contract | Boundary |
-|---|---|---|---|---|
-| T034 | BLOCKED | Public-consistent hidden-future sampler boundary | [contract](T034-public-consistent-hidden-future-sampler.md) | native public-consistent hidden-future support remains the blocker |
-| T063 | DRAFT | Oracle-guided public battle learning | [contract](T063-oracle-guided-public-battle-learning.md) | simulator-only Oracle assistance; no human trajectories |
-| T066 | DRAFT | Alternating joint policy improvement and natural scale gate | [contract](T066-alternating-joint-policy-improvement-and-natural-scale-gate.md) | separate battle/non-combat policies; not authorized by prior work |
+Lifecycle states live only in [`ARCHIVE.md`](ARCHIVE.md). This table is a
+stable shortcut to current contracts and planning context.
+
+| ID | Task | Contract | Navigation |
+|---|---|---|---|
+| T034 | Public-consistent hidden-future sampler boundary | [contract](T034-public-consistent-hidden-future-sampler.md) | current blocker and information boundary in `current_status.md` |
+| T063 | Oracle-guided public battle learning | [contract](T063-oracle-guided-public-battle-learning.md) | parked simulator-only direction |
+| T066 | Alternating joint policy improvement and natural scale gate | [contract](T066-alternating-joint-policy-improvement-and-natural-scale-gate.md) | parked separate Battle/Non-Combat direction |
 
 The next scientific successor after the documentation maintenance boundary is
 T101, the separately specified bounded particle-count convergence task. T100
@@ -44,30 +47,31 @@ does not publish, authorize, or pre-specify that experiment.
 
 ## Recently completed
 
-These rows provide local context around the current boundary. The full row for
-every task is in [`ARCHIVE.md`](ARCHIVE.md).
+These rows provide stable contract shortcuts around the current boundary. The
+full lifecycle row and terminal meaning for every task are in [`ARCHIVE.md`](ARCHIVE.md);
+accepted science is summarized in [`../current_status.md`](../current_status.md).
 
-| ID | State | Contract | Durable result |
-|---|---|---|---|
-| T089 | DONE | [Frozen-Search Self-Generated Non-Combat Policy Improvement](T089-frozen-search-self-generated-non-combat-policy.md) | `NON_COMBAT_POLICY_IMPROVEMENT_NOT_ESTABLISHED`; no promotion or T066 continuation |
-| T090 | DONE | [Search-v2 Action-Utility Battle Student](T090-search-v2-action-utility-battle-student.md) | `BATTLE_STUDENT_TARGET_COVERAGE_INSUFFICIENT`; no training or promotion |
-| T091 | DONE | [Battle Teacher Data-Surface Density Audit](T091-battle-teacher-data-surface-density-audit.md) | `ROOT_PARTIAL_SUPERVISION_TOO_SPARSE_OR_BIASED`; internal surface remains feasible |
-| T092 | DONE | [Internal Search-State Teacher Data-Surface Gate](T092-internal-search-state-teacher-data-surface.md) | `INTERNAL_SEARCH_SURFACE_DENSE_ENOUGH`; no Search change or student claim |
-| T093 | DONE | [Internal-State Partial-Ranking Public Battle-Student Distillation Gate](T093-internal-state-partial-ranking-battle-student.md) | `INTERNAL_STATE_STUDENT_EFFECTIVE_DIVERSITY_INSUFFICIENT`; no training or integration |
-| T094 | DONE | [A-Cohort Supervision Attrition Decision Audit](T094-a-cohort-supervision-attrition-decision-audit.md) | `A_COHORT_CANONICALIZATION_LIMITING`; no Search or controller rerun |
-| T095 | DONE | [Repeated-Public-State Oracle Aggregation Feasibility Audit](T095-repeated-public-state-oracle-aggregation-feasibility.md) | `EMPIRICAL_PUBLIC_AGGREGATION_TOO_SPARSE`; no aggregation or scientific promotion |
-| T096 | DONE | [Battle Public-Information Hidden-Future Sampler Pilot](T096-battle-public-information-hidden-future-sampler-pilot.md) | `NATIVE_PUBLIC_VISIBILITY_FIDELITY_INSUFFICIENT`; fidelity gaps remain explicit |
-| T097 | DONE | [Native Visibility Capability Source Acceptance](T097-native-visibility-capability-source-acceptance.md) | `NATIVE_PUBLIC_INFORMATION_CAPABILITY_ACCEPTED`; reproducible native capability input |
-| T098 | DONE | [T096 Public-Information Fidelity Re-entry](T098-t096-public-information-fidelity-reentry.md) | `PUBLIC_HIDDEN_FUTURE_SAMPLER_FIDELITY_READY`; no convergence or controller claim |
-| T099 | DONE | [Native Particle-Search Bridge Source Acceptance](T099-native-particle-search-bridge-source-acceptance.md) | `NATIVE_PARTICLE_SEARCH_BRIDGE_CAPABILITY_ACCEPTED`; mixed bridge capability only |
-| T100 | DONE | [Repository Information-Architecture Compaction](T100-repository-information-architecture-compaction.md) | `REPOSITORY_INFORMATION_ARCHITECTURE_COMPACTED`; no scientific or runtime change |
+| ID | Contract | Navigation |
+|---|---|---|
+| T089 | [Frozen-Search Self-Generated Non-Combat Policy Improvement](T089-frozen-search-self-generated-non-combat-policy.md) | current-status and archive result |
+| T090 | [Search-v2 Action-Utility Battle Student](T090-search-v2-action-utility-battle-student.md) | current-status and archive result |
+| T091 | [Battle Teacher Data-Surface Density Audit](T091-battle-teacher-data-surface-density-audit.md) | current-status and archive result |
+| T092 | [Internal Search-State Teacher Data-Surface Gate](T092-internal-search-state-teacher-data-surface.md) | current-status and archive result |
+| T093 | [Internal-State Partial-Ranking Public Battle-Student Distillation Gate](T093-internal-state-partial-ranking-battle-student.md) | current-status and archive result |
+| T094 | [A-Cohort Supervision Attrition Decision Audit](T094-a-cohort-supervision-attrition-decision-audit.md) | current-status and archive result |
+| T095 | [Repeated-Public-State Oracle Aggregation Feasibility Audit](T095-repeated-public-state-oracle-aggregation-feasibility.md) | current-status and archive result |
+| T096 | [Battle Public-Information Hidden-Future Sampler Pilot](T096-battle-public-information-hidden-future-sampler-pilot.md) | current-status and archive result |
+| T097 | [Native Visibility Capability Source Acceptance](T097-native-visibility-capability-source-acceptance.md) | current-status and archive result |
+| T098 | [T096 Public-Information Fidelity Re-entry](T098-t096-public-information-fidelity-reentry.md) | current-status and archive result |
+| T099 | [Native Particle-Search Bridge Source Acceptance](T099-native-particle-search-bridge-source-acceptance.md) | current-status and archive result |
+| T100 | [Repository Information-Architecture Compaction](T100-repository-information-architecture-compaction.md) | this navigation repair and archive result |
 
 ## Lifecycle and review rules
 
-The Current and Parked table is a convenience view, not a lifecycle database.
-The merged archive in `main` is the single durable lifecycle registry; this page
-is derived navigation and may be stale or incomplete while a PR is in flight.
-A task may be in flight before its candidate registry/navigation rows land: in
+The Current and Parked tables are convenience views, not a lifecycle database.
+The merged archive in `main` is the single durable lifecycle registry; these
+tables are derived navigation and may be stale or incomplete while a PR is in
+flight. A task may be in flight before its candidate registry row lands: in
 that case,
 the unique open PR with exact-spec `SPEC APPROVED` and
 `implementation_authorized=true` is temporary execution authority.

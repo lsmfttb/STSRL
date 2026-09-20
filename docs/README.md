@@ -33,6 +33,18 @@ elsewhere in current documentation. Historical task contracts remain evidence
 of the workflow that governed those tasks and do not override the current
 workflow.
 
+## Single-owner rule for volatile facts
+
+Keep each fact in one owning surface: `tasks/ARCHIVE.md` owns landed task
+lifecycle; the exact task PR owns in-flight execution and approval state;
+`current_status.md` owns accepted current science and the successor boundary;
+`sts_lightspeed_source_manifest.json` owns the exact native identity; task
+contracts own task semantics; and `collaboration_workflow.md` plus
+`project_architecture.md` own governance and architecture. `README.md`,
+`docs/README.md`, `AGENTS.md`, and the Planner Dashboard provide navigation or
+stable reminders only. They must link to the owner rather than maintain a
+mutable duplicate.
+
 ## Information lifecycle and default reading order
 
 STSRL deliberately keeps four layers separate:
@@ -85,10 +97,18 @@ landed project truth into one document.
   navigation and planning context.
 - [`tasks/ARCHIVE.md`](tasks/ARCHIVE.md): complete durable task lifecycle
   registry with historical IDs, states, contract links, and lookup notes.
-- [`m1_model_guided_search_sandbox_synthesis.md`](m1_model_guided_search_sandbox_synthesis.md):
-  M1 evidence synthesis and post-M1 task-batch recommendation.
 - [`experiment_log.md`](experiment_log.md): curated dated results. Results
   explain evidence; they do not create architectural rules.
+
+### Long-horizon design and retained synthesis
+
+- [`battle_dataset_search_and_sl_plan.md`](battle_dataset_search_and_sl_plan.md):
+  long-horizon Battle/search and SL design roadmap, not current-state truth.
+- [`normal_information_search_and_resource_value_plan.md`](normal_information_search_and_resource_value_plan.md):
+  long-horizon normal-information design plan, not current-state truth.
+- [`m1_model_guided_search_sandbox_synthesis.md`](m1_model_guided_search_sandbox_synthesis.md):
+  retained historical synthesis and planning context, not the current task
+  queue or an implementation authority.
 
 ### Collaboration
 
@@ -141,8 +161,8 @@ landed project truth into one document.
   during execution instead of duplicating that policy inside each task.
 - Update `current_status.md` when implementation capability or the immediate
   blocker changes.
-- Put future design in the relevant roadmap; do not mix dated experiment
-  narratives into roadmaps.
+- Put future design in the relevant long-horizon roadmap; do not mix dated
+  experiment narratives into roadmaps.
 - Put dated measurements in `experiment_log.md`.
 - Move superseded plans to `history/` instead of leaving contradictory current
   instructions in place.
@@ -158,6 +178,11 @@ landed project truth into one document.
   existing root-level documents at their established paths when moving them
   would create broad link churn; do not perform a mass historical migration for
   cosmetic organization.
+- Existing root-level `tNNN_*` handoffs, readiness notes, implementation
+  boundaries, and task-scoped support files are retained legacy paths. They are
+  not current-status surfaces or lifecycle authorities; link them from the
+  owning task or archive when historical context is needed. New task support
+  belongs under `docs/tasks/support/Txxx/`.
 
 ## Branch Workflow
 

@@ -24,12 +24,10 @@ their distributions, labels, and evaluation reports remain separate.
 
 ## Accepted runtime and native baseline
 
-- The canonical native source is
-  `lsmfttb/sts_lightspeed`, `refs/heads/stsrl/main`, at
-  `97f59b620efe5ee1571f8da298c99d1e21c1149b`.
-- T097 accepted the reproducible native public-information capability at pin
-  `d309170198e21e57041a84dcfdbc255cdda4052e`; T099 advanced the source pin
-  after proving the old pin and reviewed native PR #20 lineage.
+- The canonical native source identity, ref, and exact commit are owned by
+  [`sts_lightspeed_source_manifest.json`](sts_lightspeed_source_manifest.json);
+  T097 and T099 retain their historical lineage and evidence in their task
+  contracts and PR records.
 - T099 accepted the native particle/Search bridge capability. Its outer
   particle distribution is public-consistent; each continuation is
   `full_simulator_state_oracle_like`; returned values are a
