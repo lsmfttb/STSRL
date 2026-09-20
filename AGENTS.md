@@ -213,13 +213,11 @@ authoritative source and overrides shorter summaries elsewhere.
 - The Main Maintainer does not implement feature code directly. It remains the
   independent code reviewer and publishes every review or re-review conclusion
   on the pull request. Merge hygiene and pre-landing synchronization are
-  Maintainer responsibilities, but task landing is not authorized by Maintainer
-  acceptance alone.
+  Maintainer responsibilities, but task landing is not authorized by Maintainer acceptance alone.
 - Both final acceptances must refer to the same exact final PR head: Maintainer
   implementation/operational acceptance and Planner scientific/architecture
   acceptance. Any material head change after either acceptance requires
-  re-acceptance for the new head. After both are recorded, the Planner may land
-  the task directly under `docs/collaboration_workflow.md`.
+  re-acceptance for the new head. After both are recorded, Planner may land the task directly under `docs/collaboration_workflow.md`.
 - Implementer handoffs must follow [`docs/implementer_coordination.md`](docs/implementer_coordination.md):
   a wait timeout is not completion, an empty thread projection is not proof of
   no work, and the Maintainer must read/verify the result and continue the
