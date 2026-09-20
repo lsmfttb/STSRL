@@ -25,9 +25,10 @@ acceptance meaning.
    PRs, and Git history retain past reasoning and evidence.
 
 The Issues are intentionally low-friction memory and operating surfaces; they
-do not authorize implementation. Merged `main` remains the durable authority
-for landed lifecycle state. A task's PR owns its exact execution, review, and
-approval transaction.
+do not authorize implementation. The merged `ARCHIVE.md` registry is the
+authority for landed lifecycle state; this README is convenience/derived
+navigation only. A task's PR owns its exact execution, review, and approval
+transaction.
 
 ## Current and parked navigation
 
