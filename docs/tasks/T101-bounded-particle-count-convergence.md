@@ -123,7 +123,13 @@ Required scientific inputs include:
 No learned checkpoint, teacher dataset, human trajectory, human strategy label,
 or model output is an input.
 
-Required eligibility predicates are:
+Reuse mode: `scientific_quality_claim`, narrowly limited to T101's bounded
+particle-proxy stability and cost diagnostic under the frozen cohort, sampler,
+Search, and information-regime semantics in this contract. Reuse does not
+promote the retained artifacts into controller, model, posterior, or
+public-information-optimal evidence.
+
+Required predicates are:
 
 - exact artifact kind/schema/path/SHA-256 matches the accepted provenance record;
 - the T087 source population contains exactly 413 occurrence-safe identities
