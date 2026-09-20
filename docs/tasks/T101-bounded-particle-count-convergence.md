@@ -123,6 +123,27 @@ Required scientific inputs include:
 No learned checkpoint, teacher dataset, human trajectory, human strategy label,
 or model output is an input.
 
+Required eligibility predicates are:
+
+- exact artifact kind/schema/path/SHA-256 matches the accepted provenance record;
+- the T087 source population contains exactly 413 occurrence-safe identities
+  with A/B/C counts 93/192/128 and the accepted ordering/bindings;
+- required restore/source payloads for a selected identity are complete and
+  hash-bound;
+- the consumed T088 evidence identifies unguided Search v2 @400 as the accepted
+  Arm-B baseline and is not a smoke/debug/named override;
+- no required input is marked partial, debug-only, superseded for this reuse
+  mode, or scientifically ineligible under T081;
+- the current-native restore/public/legal-action preflight passes before a
+  record can become a formal T101 state.
+
+The proposed claim boundary is only bounded particle-proxy stability and cost
+on the admitted 24-state cohort under the frozen semantics in this contract.
+
+If any required qualification fact is unavailable, ambiguous, or cannot be
+verified from retained provenance, fail closed before scientific execution.
+Do not infer eligibility from a filename, local path, or successful parsing.
+
 Before use, every retained scientific input must be admitted through the
 repository's existing artifact-eligibility/provenance rules. Missing,
 incompatible, unverifiable, or semantically superseded required input blocks
@@ -575,7 +596,7 @@ Use when the complete valid study finishes but either:
 
 - at least one state has non-unanimous N32 best decision-class sets across the
   four sampler replicates; or
-- no N< =32 provides uniform prefix agreement across the full cohort.
+- no N<=32 provides uniform prefix agreement across the full cohort.
 
 Report exact unstable states, strata, margins/gaps, replicate patterns, and
 cost. This is a valid negative result.
