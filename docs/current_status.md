@@ -103,8 +103,11 @@ the exact lifecycle and terminal meaning of T034 and related tasks.
 
 ## Active scientific boundary
 
-No task is promoted merely by appearing in a document or Planner Issue. T063
-and T066 remain non-active scientific directions; see
+The immediate possible scientific successor after T100 is T101, the separately
+specified bounded particle-count convergence task. This records successor
+ordering/boundary only; it does not publish or authorize T101. No task is
+promoted merely by appearing in a document or Planner Issue. T063 and T066
+remain non-active scientific directions; see
 [`tasks/ARCHIVE.md`](tasks/ARCHIVE.md) for their exact lifecycle and terminal
 meanings. T100's repository-maintenance work does not publish or authorize a
 successor experiment.
