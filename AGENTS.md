@@ -200,9 +200,9 @@ authoritative source and overrides shorter summaries elsewhere.
   is a fast-forward; record that base/remote comparison as well.
 - A task Implementer starts only after a valid exact-commit specification
   approval with `implementation_authorized=true`. Task lifecycle state for
-  landed work is authoritative only in merged `docs/tasks/README.md`; the
-  unique approved open task PR is temporary in-flight authority under the
-  serial workflow.
+  landed work is authoritative only in merged `docs/tasks/ARCHIVE.md`; the
+  compact `docs/tasks/README.md` is navigation, and the unique approved open
+  task PR is temporary in-flight authority under the serial workflow.
 - The task Implementer is a sub-agent of the Main Maintainer. The Maintainer
   prioritizes the highest-cost-effectiveness current model that is sufficiently
   capable for the task, including inexpensive options such as Luna when

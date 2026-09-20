@@ -47,8 +47,8 @@ STSRL deliberately keeps four layers separate:
    events. The unique approved open task PR is temporary authority until it
    lands.
 3. **Durable current truth:** `current_status.md`, the architecture and
-   collaboration documents, and the compact current task index describe what
-   is true on merged `main`.
+   collaboration documents, the compact current task navigation, and the
+   complete `tasks/ARCHIVE.md` registry describe what is true on merged `main`.
 4. **Retained history:** [`tasks/ARCHIVE.md`](tasks/ARCHIVE.md), individual
    task contracts, experiment records, PRs, and Git history preserve past
    reasoning and evidence.
@@ -81,10 +81,10 @@ landed project truth into one document.
 
 - [`current_status.md`](current_status.md): concise state of implementation and
   immediate work.
-- [`tasks/README.md`](tasks/README.md): executable task backlog, dependencies,
-  and readiness.
-- [`tasks/ARCHIVE.md`](tasks/ARCHIVE.md): compact historical task IDs, lifecycle
-  states, contract links, and lookup notes.
+- [`tasks/README.md`](tasks/README.md): compact current/recent/parked task
+  navigation and planning context.
+- [`tasks/ARCHIVE.md`](tasks/ARCHIVE.md): complete durable task lifecycle
+  registry with historical IDs, states, contract links, and lookup notes.
 - [`m1_model_guided_search_sandbox_synthesis.md`](m1_model_guided_search_sandbox_synthesis.md):
   M1 evidence synthesis and post-M1 task-batch recommendation.
 - [`experiment_log.md`](experiment_log.md): curated dated results. Results
@@ -173,7 +173,8 @@ Before merge, the exact final head requires Planner scientific/architectural
 acceptance plus Maintainer implementation/operational acceptance; after both are
 recorded on the same exact head, Planner may land the task under the current
 collaboration workflow. Merged task lifecycle remains authoritative in
-`tasks/README.md`.
+`tasks/ARCHIVE.md`; `tasks/README.md` is compact current/recent/parked
+navigation only.
 
 At the start of maintainer work and before branch creation or execution
 readiness, the Maintainer must refresh and exactly synchronize local `main`

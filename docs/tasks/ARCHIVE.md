@@ -1,10 +1,11 @@
-# Historical Task Archive
+# Task Lifecycle Registry and Historical Archive
 
-This compact archive is the durable lookup for task history. It keeps every
-published task ID, lifecycle state, primary contract link, dependency summary,
-and terminal/provenance note from the former full task index. The linked task
-documents remain authoritative for complete scope, evidence, and acceptance
-meaning. The archive intentionally does not duplicate long experiment reports.
+This compact archive is the single complete durable lifecycle registry for
+published and landed tasks. It keeps every task ID, lifecycle state, primary
+contract link, dependency summary, and terminal/provenance note from the former
+full task index. The linked task documents remain authoritative for complete
+scope, evidence, and acceptance meaning. The registry intentionally does not
+duplicate long experiment reports.
 
 | ID | State | Task contract | Depends on | Historical lookup |
 |---|---|---|---|---|

@@ -1,13 +1,15 @@
-# Task Index
+# Task Navigation
 
 Task contracts are the durable specifications for one task. Read the
 [`collaboration workflow`](../collaboration_workflow.md) before starting work.
 
-This page is the short navigation surface for current work. The complete
-historical task index is [`ARCHIVE.md`](ARCHIVE.md); it preserves every task
-ID, lifecycle state, contract link, and compact historical lookup note without
-requiring the default reader to scan old reports. Individual task documents
-remain the authoritative contracts and retain their full acceptance meaning.
+This page is the short current/recent/parked navigation surface. The complete
+durable lifecycle registry is [`ARCHIVE.md`](ARCHIVE.md); it preserves every
+published or landed task ID, lifecycle state, contract link, and compact
+historical lookup note without requiring the default reader to scan old
+reports. This page is a convenience view, not lifecycle authority. Individual
+task documents remain the authoritative contracts and retain their full
+acceptance meaning.
 
 ## Reading order and authority
 
@@ -27,7 +29,7 @@ do not authorize implementation. Merged `main` remains the durable authority
 for landed lifecycle state. A task's PR owns its exact execution, review, and
 approval transaction.
 
-## Active Backlog and parked work
+## Current and parked navigation
 
 | ID | State | Task | Contract | Boundary |
 |---|---|---|---|---|
@@ -61,10 +63,11 @@ every task is in [`ARCHIVE.md`](ARCHIVE.md).
 
 ## Lifecycle and review rules
 
-The Active and Parked table is a compact view, not a second lifecycle
-database. The archive and this page preserve the same task IDs and links; the
-merged Active Backlog in `main` remains authoritative for landed lifecycle
-state. A task may be in flight before its candidate row lands: in that case,
+The Current and Parked table is a convenience view, not a lifecycle database.
+The merged archive in `main` is the single durable lifecycle registry; this page
+is derived navigation and may be stale or incomplete while a PR is in flight.
+A task may be in flight before its candidate registry/navigation rows land: in
+that case,
 the unique open PR with exact-spec `SPEC APPROVED` and
 `implementation_authorized=true` is temporary execution authority.
 
