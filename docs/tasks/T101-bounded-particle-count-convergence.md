@@ -155,6 +155,48 @@ repository's existing artifact-eligibility/provenance rules. Missing,
 incompatible, unverifiable, or semantically superseded required input blocks
 scientific execution rather than being guessed or silently regenerated.
 
+### Historical producer identity versus current execution identity
+
+Artifact provenance and current execution compatibility are separate facts.
+
+The retained T085/T087/T088 source artifacts keep their exact producer-era
+native identities and exact hash-bound source-manifest provenance. T101 must
+validate those historical identities as historical producer facts; it must not
+rewrite, normalize, or reinterpret a retained artifact as though it had been
+produced by the current T101 native commit.
+
+Separately, T101 execution is bound to the exact current native identity owned
+by `docs/sts_lightspeed_source_manifest.json` and frozen by this contract.
+Compatibility of a retained Battle-start record with that current consumer
+runtime is established only by T101's current-native restore, public-projection,
+ordered-public-legal-action, and T099 bridge preflight on the selected record.
+
+Therefore T101 must not satisfy historical artifact admission merely by adding
+the current T101 native commit to a broad historical T085 runtime/provenance
+allowlist. In particular, the current T101 commit must not thereby become an
+accepted historical producer identity for T085 artifacts or a blanket
+compatibility claim for arbitrary T085 execution.
+
+If an existing shared helper conflates historical producer provenance with the
+current consumer runtime, implementation may make the minimum provenance-only
+refactor or task-scoped adaptation needed to separate those checks, provided
+that:
+
+- retained T085/T087/T088 artifact bytes, hashes, producer identities, schemas,
+  and historical acceptance semantics remain unchanged;
+- a retained artifact falsely claiming the current T101 commit as its producer
+  fails closed;
+- existing historical T085/T087/T088 execution-identity gates are not broadened
+  merely to unblock T101;
+- current T101 native identity is checked independently and exactly;
+- current-native restore/public/legal/bridge parity remains the only T101
+  compatibility admission for execution on the new native identity;
+- no simulator, Search, action-space, sampler, or mechanics behavior changes.
+
+This separation is a provenance-boundary repair only. It does not make a
+historical artifact current-native evidence and does not weaken any frozen T101
+scientific predicate.
+
 ## Frozen Information And Search Semantics
 
 T101 freezes:
