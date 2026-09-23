@@ -31,6 +31,7 @@ from sts_combat_rl.sim.t101_particle_convergence import (
     T101_REQUIRED_INPUT_ROLES,
     T101_REQUIRED_RETENTION_ROLES,
     T101_RETENTION_ROLE_SCHEMAS,
+    T101_SEED_ALGORITHM,
     T101IncompleteError,
     analyze_t101_batch,
     analyze_t101_formal,
@@ -404,10 +405,19 @@ def _canary_evidence(
 def test_seed_derivation_is_stable_replica_specific_unsigned_u64() -> None:
     seeds = [derive_t101_sampler_seed("A:000", index) for index in range(4)]
     assert seeds == [
-        10046088244788687893,
-        4622857574342692748,
-        12922516365528137350,
-        296393966930998735,
+        8668616451759604074,
+        11417437864501354461,
+        13016923129194496710,
+        532729408135493124,
+    ]
+    assert seeds == [
+        int.from_bytes(
+            hashlib.sha256(b"T101-v1" + b"A:000" + str(index).encode("ascii")).digest()[
+                :8
+            ],
+            "big",
+        )
+        for index in range(4)
     ]
     assert len(set(seeds)) == 4
     assert all(0 <= seed < 2**64 for seed in seeds)
@@ -680,6 +690,10 @@ def test_formal_plan_is_exact_96_jobs_modulo_sharded_and_not_authorized() -> Non
         output_root="/retained/t101",
     )
     assert plan["formal_authorized"] is False
+    assert plan["seed_algorithm"] == T101_SEED_ALGORITHM
+    assert plan["seed_algorithm"] == (
+        "sha256-domain-identity-decimal-replicate-u64be-v1"
+    )
     assert plan["job_count"] == 96
     assert {job["particle_count"] for job in plan["jobs"]} == {32}
     assert {job["search_simulations"] for job in plan["jobs"]} == {400}
@@ -697,6 +711,13 @@ def test_formal_plan_is_exact_96_jobs_modulo_sharded_and_not_authorized() -> Non
     changed_search["search_configuration"]["search_simulations"] = 399
     with pytest.raises(T101IncompleteError, match="Search semantics"):
         validate_t101_formal_plan(changed_search)
+
+    changed_seed_algorithm = deepcopy(plan)
+    changed_seed_algorithm["seed_algorithm"] = (
+        "sha256-domain-nul-identity-nul-decimal-replicate-u64be-v1"
+    )
+    with pytest.raises(T101IncompleteError, match="formal plan schema"):
+        validate_t101_formal_plan(changed_seed_algorithm)
 
     with pytest.raises(T101IncompleteError, match="lower-worker"):
         build_t101_formal_plan(

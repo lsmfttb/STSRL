@@ -39,7 +39,7 @@ T101_FORMAL_JOB_COUNT = T101_FORMAL_STATE_COUNT * T101_REPLICATES
 T101_NATIVE_COMMIT = "97f59b620efe5ee1571f8da298c99d1e21c1149b"
 T101_NATIVE_REF = "refs/heads/stsrl/main"
 T101_VALUE_SEMANTICS = "strategy_fusion_mean_proxy"
-T101_SEED_ALGORITHM = "sha256-domain-nul-identity-nul-decimal-replicate-u64be-v1"
+T101_SEED_ALGORITHM = "sha256-domain-identity-decimal-replicate-u64be-v1"
 T101_RANK_STATISTIC = "exact-pairwise-order-relation-agreement-v1"
 T101_REQUIRED_INPUT_ROLES = frozenset(
     {
@@ -160,10 +160,10 @@ def _stratum(row: Mapping[str, object]) -> str:
 def derive_t101_sampler_seed(selection_identity: str, replicate_index: int) -> int:
     """Derive the documented unsigned 64-bit native sampler seed.
 
-    The preimage is UTF-8 ``T101-v1``, NUL, the exact selection identity, NUL,
-    and the base-10 replicate index.  The first eight digest bytes are decoded
-    as an unsigned big-endian integer.  This is deterministic and does not read
-    or infer simulator PRNG state.
+    The preimage is the direct concatenation of UTF-8 ``T101-v1``, the exact
+    UTF-8 selection identity, and the ASCII base-10 replicate index.  The first
+    eight digest bytes are decoded as an unsigned big-endian integer.  This is
+    deterministic and does not read or infer simulator PRNG state.
     """
 
     if not isinstance(selection_identity, str) or not selection_identity:
@@ -175,9 +175,8 @@ def derive_t101_sampler_seed(selection_identity: str, replicate_index: int) -> i
     ):
         raise T101IncompleteError("replicate index must be in 0..3")
     material = (
-        b"T101-v1\0"
+        b"T101-v1"
         + selection_identity.encode("utf-8")
-        + b"\0"
         + str(replicate_index).encode("ascii")
     )
     return int.from_bytes(hashlib.sha256(material).digest()[:8], "big")
