@@ -41,6 +41,22 @@ T101_NATIVE_REF = "refs/heads/stsrl/main"
 T101_VALUE_SEMANTICS = "strategy_fusion_mean_proxy"
 T101_SEED_ALGORITHM = "sha256-domain-nul-identity-nul-decimal-replicate-u64be-v1"
 T101_RANK_STATISTIC = "exact-pairwise-order-relation-agreement-v1"
+T101_REQUIRED_INPUT_ROLES = frozenset(
+    {
+        "t087_formal",
+        "t087_report",
+        "t087_retention",
+        "t085_selection",
+        "t085_restore",
+        "t085_canonical_a",
+        "t085_canonical_b",
+        "t085_canonical_c",
+        "t088_formal_raw",
+        "t088_final_report",
+        "t088_retention",
+        "native_source_manifest",
+    }
+)
 T101_REQUIRED_RETENTION_ROLES = frozenset(
     {
         "input_admission",
@@ -53,10 +69,30 @@ T101_REQUIRED_RETENTION_ROLES = frozenset(
         "final_report",
     }
 )
+T101_RETENTION_ROLE_SCHEMAS = {
+    "input_admission": "t101-input-admission-v1",
+    "cohort_admission": "t101-cohort-admission-v1",
+    "canary_evidence": "t101-canary-evidence-v1",
+    "formal_plan": "t101-formal-plan-v1",
+    "formal_evidence": "t101-formal-evidence-index-v1",
+    "convergence_analysis": "t101-convergence-analysis-v1",
+    "cost_report": "t101-cost-report-v1",
+    "final_report": "t101-final-report-v1",
+}
 
 
 class T101IncompleteError(ValueError):
     """Required T101 evidence is absent, ambiguous, or inconsistent."""
+
+
+class T101AdmissionExclusion(T101IncompleteError):
+    """A support candidate failed after a bridge call whose cost is retained."""
+
+    def __init__(
+        self, message: str, *, bridge_call_runtime: Mapping[str, object]
+    ) -> None:
+        super().__init__(message)
+        self.bridge_call_runtime = dict(bridge_call_runtime)
 
 
 def _canonical_sha256(value: object) -> str:
@@ -84,6 +120,26 @@ def _finite(value: object, label: str) -> float:
 def _nonnegative_int(value: object, label: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 0:
         raise T101IncompleteError(f"{label} must be a non-negative integer")
+    return value
+
+
+def _sha256_text(value: object, label: str) -> str:
+    if (
+        not isinstance(value, str)
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise T101IncompleteError(f"{label} must be a lowercase SHA-256")
+    return value
+
+
+def _implementation_head(value: object) -> str:
+    if (
+        not isinstance(value, str)
+        or len(value) != 40
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise T101IncompleteError("implementation head must be a full SHA-1")
     return value
 
 
@@ -185,6 +241,89 @@ def build_t101_input_admission(
     return result
 
 
+def validate_t101_input_admission(value: object) -> dict[str, object]:
+    """Revalidate the complete fail-closed T101 scientific-input bundle."""
+
+    if not isinstance(value, Mapping):
+        raise T101IncompleteError("input admission is missing")
+    artifacts = value.get("artifacts")
+    if (
+        value.get("schema_id") != "t101-input-admission-v1"
+        or value.get("task_id") != T101_TASK_ID
+        or value.get("reuse_mode") != "scientific_quality_claim"
+        or value.get("claim_boundary")
+        != "bounded particle-proxy stability and cost under frozen T101 semantics"
+        or value.get("eligible") is not True
+        or value.get("failed_roles") != []
+        or not isinstance(artifacts, Mapping)
+        or set(artifacts) != T101_REQUIRED_INPUT_ROLES
+    ):
+        raise T101IncompleteError(
+            "complete eligible T101 input admission is unavailable"
+        )
+    for role in sorted(T101_REQUIRED_INPUT_ROLES):
+        report = artifacts.get(role)
+        if (
+            not isinstance(report, Mapping)
+            or report.get("schema_version") != "artifact-eligibility-v1"
+            or report.get("eligible") is not True
+            or report.get("reuse_mode") != "scientific_quality_claim"
+            or report.get("claim_boundary")
+            != "bounded particle-proxy stability and cost under frozen T101 semantics"
+        ):
+            raise T101IncompleteError(f"input eligibility report {role} is invalid")
+        qualification = report.get("artifact")
+        requirements = report.get("requirements")
+        if not isinstance(qualification, Mapping) or not isinstance(
+            requirements, Mapping
+        ):
+            raise T101IncompleteError(
+                f"input eligibility identity for {role} is missing"
+            )
+        artifact_identity = qualification.get("artifact")
+        integrity = qualification.get("integrity")
+        if (
+            not isinstance(artifact_identity, Mapping)
+            or not isinstance(integrity, Mapping)
+            or artifact_identity.get("id") != role
+            or requirements.get("artifact_id") != role
+            or artifact_identity.get("kind") != requirements.get("artifact_kind")
+            or artifact_identity.get("kind") != artifact_identity.get("schema_id")
+            or integrity.get("sha256") != requirements.get("sha256")
+            or not isinstance(artifact_identity.get("path"), str)
+            or not artifact_identity["path"]
+            or not isinstance(artifact_identity.get("schema_id"), str)
+            or not artifact_identity["schema_id"]
+            or isinstance(artifact_identity.get("size_bytes"), bool)
+            or not isinstance(artifact_identity.get("size_bytes"), int)
+            or artifact_identity["size_bytes"] < 0
+        ):
+            raise T101IncompleteError(
+                f"input eligibility identity for {role} is inconsistent"
+            )
+        _sha256_text(integrity.get("sha256"), f"input artifact {role}")
+        predicates = report.get("predicates")
+        if (
+            not isinstance(predicates, Sequence)
+            or isinstance(predicates, (str, bytes))
+            or not predicates
+            or any(
+                not isinstance(predicate, Mapping)
+                or predicate.get("result") is not True
+                for predicate in predicates
+            )
+        ):
+            raise T101IncompleteError(
+                f"input eligibility predicates for {role} are incomplete"
+            )
+    validate_t101_native_identity(value.get("native_identity"))
+    try:
+        validate_t099_particle_search_audit(value.get("t099_bridge_audit"))
+    except T099ParticleSearchBridgeError as exc:
+        raise T101IncompleteError(f"T099 bridge audit failed closed: {exc}") from exc
+    return dict(value)
+
+
 def validate_t101_bridge_report(
     value: object, *, particle_count: int
 ) -> dict[str, Any]:
@@ -204,6 +343,18 @@ def validate_t101_bridge_report(
             "bridge call differs from particle_start=0, Search-v2@400, no-potion"
         )
     for particle in report["particles"]:
+        if particle["sampler_seed"] != report["sampler_seed_input"]:
+            raise T101IncompleteError(
+                "per-particle sampler seed differs from the bridge sampler seed"
+            )
+        root = particle["root_evaluation"]
+        if (
+            root["simulations_requested"] != T101_SEARCH_SIMULATIONS
+            or root["include_potions"] is not False
+        ):
+            raise T101IncompleteError(
+                "per-particle root evaluation differs from Search-v2@400 no-potion"
+            )
         for row in particle["root_rows"]:
             _finite(row.get("mean_value"), "required root mean_value")
             _finite(row.get("evaluation_sum"), "required root evaluation_sum")
@@ -256,6 +407,40 @@ def _selection_key(row: Mapping[str, object]) -> tuple[str, str]:
     return hashlib.sha256(identity.encode("utf-8")).hexdigest(), identity
 
 
+def _validate_admission_bridge_runtime(
+    value: object, *, success: bool
+) -> dict[str, object]:
+    if not isinstance(value, Mapping):
+        raise T101IncompleteError("admission bridge-call runtime is missing")
+    wall = _finite(value.get("wall_clock_time_s"), "admission bridge wall time")
+    expected_status = "success_no_retry" if success else "failed_no_retry"
+    if (
+        wall < 0
+        or value.get("particle_count") != 2
+        or value.get("search_simulations_per_particle") != T101_SEARCH_SIMULATIONS
+        or not isinstance(value.get("worker_id"), str)
+        or not value["worker_id"]
+        or value.get("shard_index") != 0
+        or value.get("effective_concurrency") != 1
+        or value.get("failure_retry_status") != expected_status
+        or value.get("retry_reason") is not None
+        or not isinstance(value.get("single_worker_reason"), str)
+        or not value["single_worker_reason"]
+    ):
+        raise T101IncompleteError("admission bridge-call runtime is incomplete")
+    return {
+        "wall_clock_time_s": wall,
+        "particle_count": 2,
+        "search_simulations_per_particle": T101_SEARCH_SIMULATIONS,
+        "worker_id": value["worker_id"],
+        "shard_index": 0,
+        "effective_concurrency": 1,
+        "failure_retry_status": expected_status,
+        "retry_reason": None,
+        "single_worker_reason": value["single_worker_reason"],
+    }
+
+
 def _validate_admission_evidence(value: object) -> dict[str, object]:
     if not isinstance(value, Mapping):
         raise T101IncompleteError("admission evidence is missing")
@@ -278,6 +463,9 @@ def _validate_admission_evidence(value: object) -> dict[str, object]:
         "search_configuration_unchanged": True,
         "bridge_report_sha256": _canonical_sha256(report),
         "admission_bridge_report": report,
+        "bridge_call_runtime": _validate_admission_bridge_runtime(
+            value.get("bridge_call_runtime"), success=True
+        ),
     }
 
 
@@ -311,16 +499,21 @@ def select_t101_cohort(
             try:
                 structural = _validate_admission_evidence(admit(candidate))
             except T101IncompleteError as exc:
-                attempted.append(
-                    {
-                        "selection_identity": identity,
-                        "stratum": stratum,
-                        "source_ordinal": source_ordinal,
-                        "selection_digest": digest,
-                        "admitted": False,
-                        "exclusion_reason": str(exc),
-                    }
-                )
+                exclusion: dict[str, object] = {
+                    "selection_identity": identity,
+                    "stratum": stratum,
+                    "source_ordinal": source_ordinal,
+                    "selection_digest": digest,
+                    "admitted": False,
+                    "exclusion_reason": str(exc),
+                }
+                if isinstance(exc, T101AdmissionExclusion):
+                    exclusion["bridge_call_runtime"] = (
+                        _validate_admission_bridge_runtime(
+                            exc.bridge_call_runtime, success=False
+                        )
+                    )
+                attempted.append(exclusion)
                 continue
             row = {
                 "selection_identity": identity,
@@ -425,6 +618,9 @@ def validate_t101_selected_cohort(value: object) -> list[dict[str, object]]:
             )
             if structural.get("bridge_report_sha256") != _canonical_sha256(report):
                 raise T101IncompleteError("admission bridge evidence hash changed")
+            _validate_admission_bridge_runtime(
+                structural.get("bridge_call_runtime"), success=True
+            )
             admitted.append(
                 {
                     "selection_identity": identity,
@@ -438,6 +634,10 @@ def validate_t101_selected_cohort(value: object) -> list[dict[str, object]]:
                 or not raw["exclusion_reason"]
             ):
                 raise T101IncompleteError("excluded admission reason is missing")
+            if "bridge_call_runtime" in raw:
+                _validate_admission_bridge_runtime(
+                    raw.get("bridge_call_runtime"), success=False
+                )
         else:
             raise T101IncompleteError("cohort admission result is ambiguous")
     if admitted != rows:
@@ -602,6 +802,7 @@ def analyze_t101_batch(value: object) -> dict[str, object]:
             for edge, ordinals in partition
         ],
         "ordered_public_legal_actions": report["anchor_ordered_public_legal_actions"],
+        "public_information_projection": report["anchor_public_information_projection"],
         "per_occurrence_rows_retained": True,
         "hidden_future_fingerprints": [
             particle["hidden_future_fingerprint"] for particle in report["particles"]
@@ -646,6 +847,8 @@ def validate_t101_canary_ladder(value: object) -> dict[str, object]:
             or call.get("shard_index") != 0
             or call.get("effective_concurrency") != 1
             or call.get("failure_retry_status") != "success_no_retry"
+            or not isinstance(call.get("single_worker_reason"), str)
+            or not call["single_worker_reason"]
         ):
             raise T101IncompleteError(
                 "canary worker/concurrency/failure provenance is incomplete"
@@ -655,6 +858,7 @@ def validate_t101_canary_ladder(value: object) -> dict[str, object]:
             "shard_index": 0,
             "effective_concurrency": 1,
             "failure_retry_status": "success_no_retry",
+            "single_worker_reason": call["single_worker_reason"],
         }
     reference = parsed[32]
     expected_seed = derive_t101_sampler_seed(identity, 0)
@@ -725,6 +929,44 @@ def validate_t101_canary_evidence(value: object) -> dict[str, object]:
         or any(ch not in "0123456789abcdef" for ch in head)
     ):
         raise T101IncompleteError("canary implementation head is invalid")
+    authorization = value.get("authorization")
+    if (
+        not isinstance(authorization, Mapping)
+        or set(authorization)
+        != {
+            "schema_id",
+            "task_id",
+            "authorization_kind",
+            "authorized",
+            "authorization_id",
+            "implementation_head",
+            "input_admission_sha256",
+            "cohort_admission_sha256",
+            "maintainer_attestation",
+        }
+        or authorization.get("schema_id") != "t101-maintainer-canary-authorization-v1"
+        or authorization.get("task_id") != T101_TASK_ID
+        or authorization.get("authorization_kind") != "bounded_canary"
+        or authorization.get("authorized") is not True
+        or not isinstance(authorization.get("authorization_id"), str)
+        or not authorization["authorization_id"]
+        or authorization.get("implementation_head") != head
+        or authorization.get("maintainer_attestation")
+        != {
+            "role": "maintainer",
+            "decision": "CANARY_AUTHORIZED",
+            "exact_head": head,
+        }
+    ):
+        raise T101IncompleteError("canary authorization provenance is invalid")
+    _sha256_text(
+        authorization.get("input_admission_sha256"),
+        "canary input-admission binding",
+    )
+    _sha256_text(
+        authorization.get("cohort_admission_sha256"),
+        "canary cohort-admission binding",
+    )
     ladders = value.get("ladders")
     if (
         not isinstance(ladders, Sequence)
@@ -787,18 +1029,13 @@ def build_t101_formal_plan(
     output_root: str,
     shard_count: int = 16,
     worker_count: int = 16,
+    lower_worker_reason: str | None = None,
 ) -> dict[str, object]:
     """Build a non-authorizing exact 96-job, modulo-sharded formal plan."""
 
     cohort = validate_t101_selected_cohort(cohort_admission)
-    if input_admission.get("eligible") is not True:
-        raise T101IncompleteError("input admission has not passed")
-    if (
-        not isinstance(implementation_head, str)
-        or len(implementation_head) != 40
-        or any(ch not in "0123456789abcdef" for ch in implementation_head)
-    ):
-        raise T101IncompleteError("implementation head must be a full SHA-1")
+    inputs = validate_t101_input_admission(input_admission)
+    implementation_head = _implementation_head(implementation_head)
     if (
         isinstance(shard_count, bool)
         or not isinstance(shard_count, int)
@@ -809,6 +1046,13 @@ def build_t101_formal_plan(
         or worker_count > min(16, shard_count)
     ):
         raise T101IncompleteError("formal shard/worker topology is invalid")
+    target_workers = min(16, shard_count)
+    if (worker_count < target_workers) != (
+        isinstance(lower_worker_reason, str) and bool(lower_worker_reason)
+    ):
+        raise T101IncompleteError(
+            "formal lower-worker topology requires exactly one documented reason"
+        )
     jobs: list[dict[str, object]] = []
     for state_ordinal, row in enumerate(cohort):
         identity = _identity(row)
@@ -830,16 +1074,37 @@ def build_t101_formal_plan(
                     "output_name": f"job-{ordinal:03d}.json",
                 }
             )
-    return {
+    bridge_runtimes = [
+        (
+            row.get("structural_evidence", {}).get("bridge_call_runtime")
+            if row.get("admitted") is True
+            and isinstance(row.get("structural_evidence"), Mapping)
+            else row.get("bridge_call_runtime")
+        )
+        for row in cohort_admission.get("attempted", [])
+        if isinstance(row, Mapping)
+        and (row.get("admitted") is True or "bridge_call_runtime" in row)
+    ]
+    checked_runtimes = [
+        _validate_admission_bridge_runtime(
+            runtime,
+            success=runtime.get("failure_retry_status") == "success_no_retry",
+        )
+        for runtime in bridge_runtimes
+        if isinstance(runtime, Mapping)
+    ]
+    if len(checked_runtimes) != len(bridge_runtimes):
+        raise T101IncompleteError(
+            "support-admission bridge cost evidence is incomplete"
+        )
+    plan = {
         "schema_id": "t101-formal-plan-v1",
         "task_id": T101_TASK_ID,
         "formal_authorized": False,
         "implementation_head": implementation_head,
         "input_admission_sha256": _canonical_sha256(input_admission),
         "cohort_admission_sha256": _canonical_sha256(cohort_admission),
-        "native_identity": validate_t101_native_identity(
-            input_admission.get("native_identity")
-        ),
+        "native_identity": validate_t101_native_identity(inputs.get("native_identity")),
         "seed_algorithm": T101_SEED_ALGORITHM,
         "value_semantics": T101_VALUE_SEMANTICS,
         "search_configuration": {
@@ -854,12 +1119,166 @@ def build_t101_formal_plan(
         "topology": {
             "shard_count": shard_count,
             "worker_count": worker_count,
+            "lower_worker_reason": lower_worker_reason,
             "assignment": "formal-job-ordinal-modulo-shard-count-v1",
         },
         "output_root": output_root,
+        "support_admission_cost": {
+            "bridge_call_count": len(checked_runtimes),
+            "successful_call_count": sum(
+                row["failure_retry_status"] == "success_no_retry"
+                for row in checked_runtimes
+            ),
+            "failed_call_count": sum(
+                row["failure_retry_status"] == "failed_no_retry"
+                for row in checked_runtimes
+            ),
+            "wall_clock_time_s": _distribution(
+                [float(row["wall_clock_time_s"]) for row in checked_runtimes]
+            ),
+            "sum_bridge_call_wall_clock_time_s": sum(
+                float(row["wall_clock_time_s"]) for row in checked_runtimes
+            ),
+        },
         "job_count": len(jobs),
         "jobs": jobs,
     }
+    return validate_t101_formal_plan(plan)
+
+
+def validate_t101_formal_plan(value: object) -> dict[str, object]:
+    """Revalidate every immutable formal-plan binding before execution/analysis."""
+
+    if not isinstance(value, Mapping):
+        raise T101IncompleteError("formal plan is missing")
+    topology = value.get("topology")
+    jobs = value.get("jobs")
+    search = value.get("search_configuration")
+    support_cost = value.get("support_admission_cost")
+    if (
+        value.get("schema_id") != "t101-formal-plan-v1"
+        or value.get("task_id") != T101_TASK_ID
+        or value.get("formal_authorized") is not False
+        or value.get("seed_algorithm") != T101_SEED_ALGORITHM
+        or value.get("value_semantics") != T101_VALUE_SEMANTICS
+        or not isinstance(value.get("output_root"), str)
+        or not value["output_root"]
+        or value.get("job_count") != T101_FORMAL_JOB_COUNT
+        or not isinstance(topology, Mapping)
+        or not isinstance(jobs, Sequence)
+        or isinstance(jobs, (str, bytes))
+        or len(jobs) != T101_FORMAL_JOB_COUNT
+        or search
+        != {
+            "search_variant": "unchanged_unguided_search_v2",
+            "search_simulations": T101_SEARCH_SIMULATIONS,
+            "policy_prior_enabled": False,
+            "learned_leaf_value_enabled": False,
+            "progressive_bias_enabled": False,
+            "include_potions": False,
+            "action_space": "ActionSpaceConfig.initial_no_potions()",
+        }
+    ):
+        raise T101IncompleteError(
+            "formal plan schema or frozen Search semantics changed"
+        )
+    _implementation_head(value.get("implementation_head"))
+    _sha256_text(value.get("input_admission_sha256"), "input admission binding")
+    _sha256_text(value.get("cohort_admission_sha256"), "cohort admission binding")
+    validate_t101_native_identity(value.get("native_identity"))
+    shard_count = topology.get("shard_count")
+    worker_count = topology.get("worker_count")
+    if (
+        isinstance(shard_count, bool)
+        or not isinstance(shard_count, int)
+        or shard_count < 1
+        or isinstance(worker_count, bool)
+        or not isinstance(worker_count, int)
+        or worker_count < 1
+        or worker_count > min(16, shard_count)
+        or (
+            worker_count < min(16, shard_count)
+            and (
+                not isinstance(topology.get("lower_worker_reason"), str)
+                or not topology["lower_worker_reason"]
+            )
+        )
+        or (
+            worker_count == min(16, shard_count)
+            and topology.get("lower_worker_reason") is not None
+        )
+        or topology.get("assignment") != "formal-job-ordinal-modulo-shard-count-v1"
+    ):
+        raise T101IncompleteError("formal plan topology changed")
+    if not isinstance(support_cost, Mapping):
+        raise T101IncompleteError("support-admission cost summary is missing")
+    call_count = support_cost.get("bridge_call_count")
+    successes = support_cost.get("successful_call_count")
+    failures = support_cost.get("failed_call_count")
+    wall_distribution = support_cost.get("wall_clock_time_s")
+    if (
+        any(
+            isinstance(item, bool) or not isinstance(item, int) or item < 0
+            for item in (call_count, successes, failures)
+        )
+        or successes + failures != call_count
+        or not isinstance(wall_distribution, Mapping)
+        or wall_distribution.get("count") != call_count
+        or _finite(
+            support_cost.get("sum_bridge_call_wall_clock_time_s"),
+            "support-admission total wall time",
+        )
+        < 0
+    ):
+        raise T101IncompleteError("support-admission cost summary is malformed")
+
+    states: dict[int, tuple[str, str]] = {}
+    replicates: dict[int, set[int]] = defaultdict(set)
+    for ordinal, raw_job in enumerate(jobs):
+        if not isinstance(raw_job, Mapping):
+            raise T101IncompleteError("formal plan job is malformed")
+        state_ordinal = raw_job.get("state_ordinal")
+        replicate_index = raw_job.get("replicate_index")
+        identity = raw_job.get("selection_identity")
+        stratum = raw_job.get("stratum")
+        if (
+            raw_job.get("job_ordinal") != ordinal
+            or raw_job.get("shard_index") != ordinal % shard_count
+            or isinstance(state_ordinal, bool)
+            or not isinstance(state_ordinal, int)
+            or state_ordinal not in range(T101_FORMAL_STATE_COUNT)
+            or isinstance(replicate_index, bool)
+            or not isinstance(replicate_index, int)
+            or replicate_index not in range(T101_REPLICATES)
+            or not isinstance(identity, str)
+            or not identity
+            or stratum not in T101_SOURCE_COUNTS
+            or raw_job.get("sampler_seed")
+            != derive_t101_sampler_seed(identity, replicate_index)
+            or raw_job.get("particle_start") != 0
+            or raw_job.get("particle_count") != 32
+            or raw_job.get("search_simulations") != T101_SEARCH_SIMULATIONS
+            or raw_job.get("include_potions") is not False
+            or raw_job.get("output_name") != f"job-{ordinal:03d}.json"
+        ):
+            raise T101IncompleteError("formal plan job identity/configuration changed")
+        state = (identity, str(stratum))
+        prior = states.setdefault(state_ordinal, state)
+        if prior != state or replicate_index in replicates[state_ordinal]:
+            raise T101IncompleteError("formal plan state/replicate matrix changed")
+        replicates[state_ordinal].add(replicate_index)
+    if (
+        set(states) != set(range(T101_FORMAL_STATE_COUNT))
+        or len({identity for identity, _stratum_name in states.values()})
+        != T101_FORMAL_STATE_COUNT
+        or Counter(stratum for _identity_value, stratum in states.values())
+        != Counter({"A": 8, "B": 8, "C": 8})
+        or any(
+            indices != set(range(T101_REPLICATES)) for indices in replicates.values()
+        )
+    ):
+        raise T101IncompleteError("formal plan is not the exact 24-state R=4 matrix")
+    return dict(value)
 
 
 def _work_counter_sums(particles: Sequence[Mapping[str, object]]) -> dict[str, int]:
@@ -896,14 +1315,9 @@ def _work_counter_distributions(
 def validate_t101_formal_rows(
     rows: Iterable[Mapping[str, object]], plan: Mapping[str, object]
 ) -> list[dict[str, object]]:
+    plan = validate_t101_formal_plan(plan)
     jobs = plan.get("jobs")
-    if (
-        plan.get("schema_id") != "t101-formal-plan-v1"
-        or not isinstance(jobs, Sequence)
-        or isinstance(jobs, (str, bytes))
-        or len(jobs) != T101_FORMAL_JOB_COUNT
-    ):
-        raise T101IncompleteError("formal plan is malformed")
+    assert isinstance(jobs, Sequence) and not isinstance(jobs, (str, bytes))
     expected = {
         (job["selection_identity"], job["replicate_index"]): job
         for job in jobs
@@ -987,13 +1401,16 @@ def analyze_t101_formal(
             raise T101IncompleteError("state does not have four sampler replicates")
         reference_partition = state_rows[0]["decision_class_partition"]
         reference_actions = state_rows[0]["ordered_public_legal_actions"]
+        reference_projection = state_rows[0]["public_information_projection"]
         if any(
             row["decision_class_partition"] != reference_partition
             or row["ordered_public_legal_actions"] != reference_actions
+            or row["public_information_projection"] != reference_projection
             for row in state_rows[1:]
         ):
             raise T101IncompleteError(
-                "public actions or Search-equivalence partition changed across replicates"
+                "public projection, actions, or Search-equivalence partition changed "
+                "across replicates"
             )
         best_sets: list[list[str]] = []
         class_means: dict[str, list[float]] = defaultdict(list)
@@ -1168,6 +1585,9 @@ def analyze_t101_formal(
         "cohort_summaries": summaries,
         "cost_report": {
             "schema_id": "t101-cost-report-v1",
+            "task_id": T101_TASK_ID,
+            "support_admission": dict(plan["support_admission_cost"]),
+            "formal_topology": dict(plan["topology"]),
             "formal_n32_calls": formal_cost_rows,
             "formal_n32_wall_clock_time_s": _distribution(
                 [float(row["wall_clock_time_s"]) for row in formal]
@@ -1216,6 +1636,7 @@ def analyze_t101_formal(
 def build_t101_retention_manifest(
     artifacts: Mapping[str, Mapping[str, object]],
     *,
+    producer_provenance: Mapping[str, object],
     regeneration_commands: Sequence[str],
     retention_reason: str,
     deletion_condition: str,
@@ -1232,14 +1653,45 @@ def build_t101_retention_manifest(
             or not reference["path"]
             or not isinstance(reference.get("schema_id"), str)
             or not reference["schema_id"]
+            or reference["schema_id"] != T101_RETENTION_ROLE_SCHEMAS.get(role)
             or not isinstance(reference.get("sha256"), str)
             or len(reference["sha256"]) != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in str(reference["sha256"])
+            )
             or isinstance(reference.get("size_bytes"), bool)
             or not isinstance(reference.get("size_bytes"), int)
             or reference["size_bytes"] < 0
         ):
             raise T101IncompleteError(f"retained artifact {role} reference is invalid")
         normalized[role] = dict(reference)
+    if (
+        set(producer_provenance)
+        != {
+            "task_id",
+            "implementation_head",
+            "native_identity",
+            "input_admission_artifact_sha256",
+            "cohort_admission_artifact_sha256",
+            "formal_plan_artifact_sha256",
+        }
+        or producer_provenance.get("task_id") != T101_TASK_ID
+    ):
+        raise T101IncompleteError("retention producer provenance is incomplete")
+    provenance = dict(producer_provenance)
+    provenance["implementation_head"] = _implementation_head(
+        provenance.get("implementation_head")
+    )
+    provenance["native_identity"] = validate_t101_native_identity(
+        provenance.get("native_identity")
+    )
+    for name in (
+        "input_admission_artifact_sha256",
+        "cohort_admission_artifact_sha256",
+        "formal_plan_artifact_sha256",
+    ):
+        provenance[name] = _sha256_text(provenance.get(name), name)
     if not regeneration_commands or not all(regeneration_commands):
         raise T101IncompleteError("retention regeneration commands are missing")
     if not retention_reason or not deletion_condition:
@@ -1247,6 +1699,7 @@ def build_t101_retention_manifest(
     return {
         "schema_id": "t101-retention-manifest-v1",
         "task_id": T101_TASK_ID,
+        "producer_provenance": provenance,
         "artifact_references": normalized,
         "regeneration_commands": list(regeneration_commands),
         "retention_reason": retention_reason,
@@ -1257,7 +1710,10 @@ def build_t101_retention_manifest(
 __all__ = [
     "T101_COUNTS",
     "T101_NATIVE_COMMIT",
+    "T101_REQUIRED_INPUT_ROLES",
     "T101_REQUIRED_RETENTION_ROLES",
+    "T101_RETENTION_ROLE_SCHEMAS",
+    "T101AdmissionExclusion",
     "T101IncompleteError",
     "analyze_t101_batch",
     "analyze_t101_formal",
@@ -1270,7 +1726,9 @@ __all__ = [
     "validate_t101_bridge_report",
     "validate_t101_canary_evidence",
     "validate_t101_canary_ladder",
+    "validate_t101_formal_plan",
     "validate_t101_formal_rows",
+    "validate_t101_input_admission",
     "validate_t101_native_identity",
     "validate_t101_selected_cohort",
 ]

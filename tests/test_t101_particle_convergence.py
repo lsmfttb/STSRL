@@ -17,6 +17,7 @@ from sts_combat_rl.commands.t101_particle_convergence import (
     T101PathError,
     analyze_t101_formal_from_paths,
     build_parser,
+    build_t101_retention_from_paths,
     prepare_t101_canary_authorization_from_paths,
     prepare_t101_formal_authorization_from_paths,
     prepare_t101_formal_plan_from_paths,
@@ -27,7 +28,9 @@ from sts_combat_rl.sim.t099_particle_search_bridge import (
 from sts_combat_rl.sim.t101_particle_convergence import (
     T101_COUNTS,
     T101_NATIVE_COMMIT,
+    T101_REQUIRED_INPUT_ROLES,
     T101_REQUIRED_RETENTION_ROLES,
+    T101_RETENTION_ROLE_SCHEMAS,
     T101IncompleteError,
     analyze_t101_batch,
     analyze_t101_formal,
@@ -38,6 +41,7 @@ from sts_combat_rl.sim.t101_particle_convergence import (
     derive_t101_sampler_seed,
     select_t101_cohort,
     validate_t101_canary_ladder,
+    validate_t101_formal_plan,
     validate_t101_formal_rows,
     validate_t101_selected_cohort,
 )
@@ -243,31 +247,59 @@ def _native() -> dict[str, object]:
 
 
 def _admission() -> dict[str, object]:
-    qualification = ArtifactQualification(
-        artifact={"id": "t087", "kind": "natural"},
-        integrity={"sha256": "a" * 64},
-        facts={
-            "record_count": Fact(413),
-            "source.coverage": Fact("accepted_ordered_abc"),
-            "override_kind": Fact("none"),
-        },
-    )
-    requirements = EligibilityRequirements(
-        reuse_mode="scientific_quality_claim",
-        claim_boundary="bounded particle proxy",
-        predicates=(
-            Predicate("record_count", "equals", 413),
-            Predicate("source.coverage", "equals", "accepted_ordered_abc"),
-        ),
-        artifact_id="t087",
-        artifact_kind="natural",
-        sha256="a" * 64,
-    )
+    qualifications = {}
+    for index, role in enumerate(sorted(T101_REQUIRED_INPUT_ROLES), 1):
+        digest = f"{index:064x}"
+        qualification = ArtifactQualification(
+            artifact={
+                "id": role,
+                "kind": f"{role}-schema",
+                "path": f"/retained/{role}.json",
+                "schema_id": f"{role}-schema",
+                "size_bytes": index,
+            },
+            integrity={"sha256": digest},
+            facts={
+                "record_count": Fact(413),
+                "source.coverage": Fact("accepted_ordered_abc"),
+                "override_kind": Fact("none"),
+            },
+        )
+        requirements = EligibilityRequirements(
+            reuse_mode="scientific_quality_claim",
+            claim_boundary=(
+                "bounded particle-proxy stability and cost under frozen T101 semantics"
+            ),
+            predicates=(
+                Predicate("record_count", "equals", 413),
+                Predicate("source.coverage", "equals", "accepted_ordered_abc"),
+            ),
+            artifact_id=role,
+            artifact_kind=f"{role}-schema",
+            sha256=digest,
+        )
+        qualifications[role] = (qualification, requirements)
     return build_t101_input_admission(
-        {"t087": (qualification, requirements)},
+        qualifications,
         native_identity=_native(),
         bridge_audit=_audit(),
     )
+
+
+def _admission_runtime(
+    status: str = "success_no_retry",
+) -> dict[str, object]:
+    return {
+        "wall_clock_time_s": 0.25,
+        "particle_count": 2,
+        "search_simulations_per_particle": 400,
+        "worker_id": "unit-admission",
+        "shard_index": 0,
+        "effective_concurrency": 1,
+        "failure_retry_status": status,
+        "retry_reason": None,
+        "single_worker_reason": "unit deterministic admission",
+    }
 
 
 def _source() -> list[dict[str, object]]:
@@ -288,6 +320,7 @@ def _cohort() -> dict[str, object]:
             "occurrence_mapping_complete": True,
             "search_configuration_unchanged": True,
             "bridge_report": _bridge(2),
+            "bridge_call_runtime": _admission_runtime(),
             # Deliberately ignored by the selector.
             "outcome": "PLAYER_VICTORY",
             "ranking": 999,
@@ -298,6 +331,9 @@ def _cohort() -> dict[str, object]:
 def _canary_evidence(
     cohort: dict[str, object], implementation_head: str = "c" * 40
 ) -> dict[str, object]:
+    canonical = __import__(
+        "sts_combat_rl.sim.t101_particle_convergence", fromlist=["_canonical_sha256"]
+    )._canonical_sha256
     selected = [
         next(row for row in cohort["selected"] if row["stratum"] == stratum)
         for stratum in ("A", "B", "C")
@@ -325,6 +361,7 @@ def _canary_evidence(
                             "shard_index": 0,
                             "effective_concurrency": 1,
                             "failure_retry_status": "success_no_retry",
+                            "single_worker_reason": "bounded unit canary",
                         }
                         for count in T101_COUNTS
                     },
@@ -335,6 +372,21 @@ def _canary_evidence(
         "schema_id": "t101-canary-evidence-v1",
         "task_id": "T101",
         "implementation_head": implementation_head,
+        "authorization": {
+            "schema_id": "t101-maintainer-canary-authorization-v1",
+            "task_id": "T101",
+            "authorization_kind": "bounded_canary",
+            "authorized": True,
+            "authorization_id": "canary-fixture",
+            "implementation_head": implementation_head,
+            "input_admission_sha256": canonical(_admission()),
+            "cohort_admission_sha256": canonical(cohort),
+            "maintainer_attestation": {
+                "role": "maintainer",
+                "decision": "CANARY_AUTHORIZED",
+                "exact_head": implementation_head,
+            },
+        },
         "selected": [
             {
                 "selection_identity": row["selection_identity"],
@@ -413,6 +465,7 @@ def test_cohort_selection_is_deterministic_exact_8_each_and_value_blind() -> Non
             "occurrence_mapping_complete": True,
             "search_configuration_unchanged": True,
             "bridge_report": _bridge(2, offset=-100.0, reverse=True),
+            "bridge_call_runtime": _admission_runtime(),
             "outcome": "PLAYER_LOSS",
             "ranking": -999,
         },
@@ -433,6 +486,7 @@ def test_cohort_selection_retains_exclusions_and_never_backfills_strata() -> Non
             "occurrence_mapping_complete": True,
             "search_configuration_unchanged": True,
             "bridge_report": _bridge(2),
+            "bridge_call_runtime": _admission_runtime(),
         }
 
     report = select_t101_cohort(_source(), admit=admit)
@@ -496,6 +550,16 @@ def test_bridge_invocation_freezes_t099_nopot_search400_surface() -> None:
         }
     ]
 
+    changed_seed = _bridge(32, seed=123)
+    changed_seed["particles"][0]["sampler_seed"] = 124
+    with pytest.raises(T101IncompleteError, match="per-particle sampler seed"):
+        analyze_t101_batch(changed_seed)
+
+    changed_root = _bridge(32, seed=123)
+    changed_root["particles"][0]["root_evaluation"]["simulations_requested"] = 399
+    with pytest.raises(T101IncompleteError, match="root evaluation"):
+        analyze_t101_batch(changed_root)
+
 
 def test_canary_proves_direct_ladder_is_exact_nested_prefix() -> None:
     full = _bridge(32, seed=derive_t101_sampler_seed("A:000", 0))
@@ -515,6 +579,7 @@ def test_canary_proves_direct_ladder_is_exact_nested_prefix() -> None:
                 "shard_index": 0,
                 "effective_concurrency": 1,
                 "failure_retry_status": "success_no_retry",
+                "single_worker_reason": "bounded unit canary",
             }
             for count in T101_COUNTS
         },
@@ -553,6 +618,59 @@ def test_analysis_uses_native_equivalence_classes_without_occurrence_weight() ->
     with pytest.raises(T101IncompleteError, match="duplicate public occurrences"):
         analyze_t101_batch(inconsistent)
 
+    tied = _bridge(32)
+    for particle in tied["particles"]:
+        for root_row in particle["root_rows"]:
+            root_row["mean_value"] = 0.5
+            root_row["evaluation_sum"] = 1.0
+        particle["root_evaluation"]["root_rows"] = particle["root_rows"]
+        particle["root_evaluation"]["best_action_value"] = 0.5
+        particle["root_evaluation"]["min_action_value"] = 0.5
+    tied_analysis = analyze_t101_batch(tied)
+    tied_n32 = next(
+        row for row in tied_analysis["metrics"] if row["particle_count"] == 32
+    )
+    assert tied_n32["best_decision_class_set"] == ["search-edge:0", "search-edge:1"]
+
+
+@pytest.mark.parametrize(
+    ("mutate", "match"),
+    [
+        (
+            lambda report: report["particles"][0].__setitem__(
+                "root_action_mapping_ambiguous", True
+            ),
+            "mapping is ambiguous",
+        ),
+        (
+            lambda report: report.__setitem__(
+                "anchor_ordered_public_legal_actions",
+                [
+                    *report["anchor_ordered_public_legal_actions"],
+                    _action("card", 2, "Defend"),
+                ],
+            ),
+            "legal actions disagree",
+        ),
+        (
+            lambda report: report["anchor_public_information_projection"].update(
+                {
+                    "information_fidelity": "unsupported_fidelity",
+                    "draw_knowledge_unsupported_reasons": ["unit unsupported"],
+                }
+            ),
+            "unsupported-fidelity anchor",
+        ),
+    ],
+)
+def test_t101_reuses_t099_fail_closed_anchor_and_mapping_validation(
+    mutate, match
+) -> None:
+    report = _bridge(32)
+    mutate(report)
+    with pytest.raises(T101IncompleteError, match=match):
+        analyze_t101_batch(report)
+
 
 def test_formal_plan_is_exact_96_jobs_modulo_sharded_and_not_authorized() -> None:
     plan = build_t101_formal_plan(
@@ -567,6 +685,38 @@ def test_formal_plan_is_exact_96_jobs_modulo_sharded_and_not_authorized() -> Non
     assert {job["search_simulations"] for job in plan["jobs"]} == {400}
     assert {job["include_potions"] for job in plan["jobs"]} == {False}
     assert [job["shard_index"] for job in plan["jobs"][:18]] == list(range(16)) + [0, 1]
+    assert plan["support_admission_cost"]["bridge_call_count"] == 24
+    assert plan["support_admission_cost"]["successful_call_count"] == 24
+
+    changed_native = deepcopy(plan)
+    changed_native["native_identity"]["commit"] = "0" * 40
+    with pytest.raises(T101IncompleteError, match="native identity"):
+        validate_t101_formal_plan(changed_native)
+
+    changed_search = deepcopy(plan)
+    changed_search["search_configuration"]["search_simulations"] = 399
+    with pytest.raises(T101IncompleteError, match="Search semantics"):
+        validate_t101_formal_plan(changed_search)
+
+    with pytest.raises(T101IncompleteError, match="lower-worker"):
+        build_t101_formal_plan(
+            _cohort(),
+            input_admission=_admission(),
+            implementation_head="c" * 40,
+            output_root="/retained/t101",
+            worker_count=8,
+        )
+    reduced = build_t101_formal_plan(
+        _cohort(),
+        input_admission=_admission(),
+        implementation_head="c" * 40,
+        output_root="/retained/t101",
+        worker_count=8,
+        lower_worker_reason="documented native memory cap",
+    )
+    assert reduced["topology"]["lower_worker_reason"] == (
+        "documented native memory cap"
+    )
 
 
 def _formal_rows(plan: dict[str, object], *, reverse_last: bool = False):
@@ -630,6 +780,14 @@ def test_complete_formal_analysis_classifies_strict_stability_and_cost() -> None
     assert negative["n32_reference_unanimous_all_states"] is False
     assert negative["smallest_uniform_prefix_n"] is None
 
+    changed_projection_rows = _formal_rows(plan)
+    changed_report = changed_projection_rows[1]["bridge_report"]
+    changed_report["anchor_public_information_projection"]["floor_num"] = 2
+    for particle in changed_report["particles"]:
+        particle["public_information_projection"]["floor_num"] = 2
+    with pytest.raises(T101IncompleteError, match="public projection"):
+        analyze_t101_formal(changed_projection_rows, plan)
+
 
 @pytest.mark.parametrize(
     ("mutate", "match"),
@@ -670,7 +828,7 @@ def test_retention_requires_all_artifact_roles_and_exact_identity_shape() -> Non
     artifacts = {
         role: {
             "path": f"/retained/{role}.json",
-            "schema_id": f"t101-{role}-v1",
+            "schema_id": T101_RETENTION_ROLE_SCHEMAS[role],
             "sha256": f"{index:064x}",
             "size_bytes": index,
         }
@@ -678,6 +836,14 @@ def test_retention_requires_all_artifact_roles_and_exact_identity_shape() -> Non
     }
     manifest = build_t101_retention_manifest(
         artifacts,
+        producer_provenance={
+            "task_id": "T101",
+            "implementation_head": "c" * 40,
+            "native_identity": _native(),
+            "input_admission_artifact_sha256": "1" * 64,
+            "cohort_admission_artifact_sha256": "2" * 64,
+            "formal_plan_artifact_sha256": "3" * 64,
+        },
         regeneration_commands=[
             "python -m sts_combat_rl.commands.t101_particle_convergence"
         ],
@@ -689,6 +855,7 @@ def test_retention_requires_all_artifact_roles_and_exact_identity_shape() -> Non
     with pytest.raises(T101IncompleteError, match="missing roles"):
         build_t101_retention_manifest(
             artifacts,
+            producer_provenance=manifest["producer_provenance"],
             regeneration_commands=["regenerate"],
             retention_reason="reason",
             deletion_condition="condition",
@@ -774,6 +941,30 @@ def test_path_command_prepares_non_authorizing_plan_and_requires_all_shards(
     )
     assert published["final_report"]["terminal_classification"] == (
         "BOUNDED_PARTICLE_PROXY_STABILITY_OBSERVED"
+    )
+    retained_paths = {
+        "input_admission": admission_path,
+        "cohort_admission": cohort_path,
+        "canary_evidence": canary_path,
+        "formal_plan": plan_path,
+        **{
+            role: reference["path"]
+            for role, reference in published["artifacts"].items()
+        },
+    }
+    retained = build_t101_retention_from_paths(
+        artifact_specs=[
+            f"{role}={path}" for role, path in sorted(retained_paths.items())
+        ],
+        output_path=tmp_path / "retention.json",
+        regeneration_commands=[
+            "python -m sts_combat_rl.commands.t101_particle_convergence analyze"
+        ],
+        retention_reason="T101 scientific evidence",
+        deletion_condition="after all accepted consumers expire",
+    )
+    assert retained["manifest"]["producer_provenance"]["implementation_head"] == (
+        "c" * 40
     )
     with pytest.raises(T101PathError, match="every planned shard"):
         analyze_t101_formal_from_paths(

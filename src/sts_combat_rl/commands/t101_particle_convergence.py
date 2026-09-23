@@ -27,6 +27,7 @@ from sts_combat_rl.commands import t088_canary
 from sts_combat_rl.sim.lightspeed_source import load_lightspeed_source_manifest
 from sts_combat_rl.sim.t101_particle_convergence import (
     T101_REQUIRED_RETENTION_ROLES,
+    T101_RETENTION_ROLE_SCHEMAS,
     T101IncompleteError,
     _canonical_sha256,
     analyze_t101_formal,
@@ -35,7 +36,10 @@ from sts_combat_rl.sim.t101_particle_convergence import (
     build_t101_retention_manifest,
     select_t101_cohort,
     validate_t101_canary_evidence,
+    validate_t101_formal_plan,
     validate_t101_formal_rows,
+    validate_t101_input_admission,
+    validate_t101_selected_cohort,
 )
 from sts_combat_rl.sim.t101_particle_execution import (
     T101NativeRecordRunner,
@@ -88,6 +92,7 @@ def _normalized_reference(role: str, value: object) -> dict[str, object]:
         or not value["schema_id"]
         or not isinstance(value.get("sha256"), str)
         or len(value["sha256"]) != 64
+        or any(character not in "0123456789abcdef" for character in value["sha256"])
         or isinstance(size, bool)
         or not isinstance(size, int)
         or size < 0
@@ -199,6 +204,8 @@ def run_t101_readiness_from_paths(
     t088_final_report_path: Path,
     t088_retention_path: Path,
     artifact_root: Path,
+    worker_id: str,
+    single_worker_reason: str,
     adapter_factory: object | None = None,
     runner_factory: object = T101NativeRecordRunner,
 ) -> dict[str, object]:
@@ -374,7 +381,16 @@ def run_t101_readiness_from_paths(
         selected_records=selected_records,
         canonical_records_by_stratum=maps,
     )
-    cohort_admission = select_t101_cohort(source_rows, admit=runner.admit)
+    if not isinstance(worker_id, str) or not worker_id:
+        raise T101PathError("support-admission worker identity is missing")
+    cohort_admission = select_t101_cohort(
+        source_rows,
+        admit=lambda row: runner.admit(
+            row,
+            worker_id=worker_id,
+            single_worker_reason=single_worker_reason,
+        ),
+    )
     root = artifact_root.resolve()
     references_out = {
         "input_admission": _write_new(
@@ -408,10 +424,8 @@ def prepare_t101_canary_authorization_from_paths(
         schema_id="t101-cohort-admission-v1",
         label="T101 cohort admission",
     )
-    if inputs.get("eligible") is not True or cohort.get("supported") is not True:
-        raise T101PathError(
-            "canary authorization preparation requires passed readiness"
-        )
+    validate_t101_input_admission(inputs)
+    validate_t101_selected_cohort(cohort)
     return {
         "schema_id": "t101-canary-authorization-preparation-v1",
         "task_id": "T101",
@@ -438,6 +452,16 @@ def _validate_canary_against_plan(
     canary: Mapping[str, object], plan: Mapping[str, object]
 ) -> None:
     validate_t101_canary_evidence(canary)
+    plan = validate_t101_formal_plan(plan)
+    authorization = canary.get("authorization")
+    if (
+        not isinstance(authorization, Mapping)
+        or authorization.get("input_admission_sha256")
+        != plan.get("input_admission_sha256")
+        or authorization.get("cohort_admission_sha256")
+        != plan.get("cohort_admission_sha256")
+    ):
+        raise T101PathError("canary authorization differs from the formal plan inputs")
     jobs = plan.get("jobs")
     if not isinstance(jobs, Sequence) or isinstance(jobs, (str, bytes)):
         raise T101PathError("formal plan jobs are missing")
@@ -585,6 +609,8 @@ def run_t101_canary_from_paths(
         schema_id="t101-cohort-admission-v1",
         label="T101 cohort admission",
     )
+    validate_t101_input_admission(inputs)
+    validate_t101_selected_cohort(cohort)
     destination = output_path.resolve()
     try:
         destination.relative_to(artifact_root.resolve())
@@ -695,6 +721,7 @@ def prepare_t101_formal_plan_from_paths(
     output_path: Path,
     shard_count: int = 16,
     worker_count: int = 16,
+    lower_worker_reason: str | None = None,
 ) -> dict[str, object]:
     """Write the immutable formal plan with authorization explicitly false."""
 
@@ -721,6 +748,7 @@ def prepare_t101_formal_plan_from_paths(
         output_root=str(root),
         shard_count=shard_count,
         worker_count=worker_count,
+        lower_worker_reason=lower_worker_reason,
     )
     return {"plan": plan, "artifact": _write_new(destination, plan)}
 
@@ -944,6 +972,8 @@ def analyze_t101_formal_from_paths(
         "prefix_disagreements": prefix_disagreements,
         "cohort_summaries": analysis["cohort_summaries"],
         "observed_cost": {
+            "support_admission": cost["support_admission"],
+            "formal_topology": cost["formal_topology"],
             "formal_n32_wall_clock_time_s": cost["formal_n32_wall_clock_time_s"],
             "sum_formal_n32_call_wall_clock_time_s": cost[
                 "sum_formal_n32_call_wall_clock_time_s"
@@ -992,16 +1022,58 @@ def build_t101_retention_from_paths(
     deletion_condition: str,
 ) -> dict[str, object]:
     references: dict[str, dict[str, object]] = {}
+    documents: dict[str, dict[str, object]] = {}
     for spec in artifact_specs:
         role, path = _parse_role_path(spec)
         if role in references:
             raise T101PathError(f"duplicate retained artifact role: {role}")
-        document = _read_json(path, schema_id=_peek_schema(path), label=role)
+        expected_schema = T101_RETENTION_ROLE_SCHEMAS.get(role)
+        if expected_schema is None:
+            raise T101PathError(f"unknown retained artifact role: {role}")
+        document = _read_json(path, schema_id=expected_schema, label=role)
+        documents[role] = document
         references[role] = _artifact_reference(
             path, schema_id=str(document["schema_id"])
         )
+    if set(documents) != set(T101_REQUIRED_RETENTION_ROLES):
+        raise T101PathError("retention requires every exact T101 artifact role")
+    inputs = validate_t101_input_admission(documents["input_admission"])
+    cohort = documents["cohort_admission"]
+    validate_t101_selected_cohort(cohort)
+    canary = validate_t101_canary_evidence(documents["canary_evidence"])
+    plan = validate_t101_formal_plan(documents["formal_plan"])
+    if (
+        plan["input_admission_sha256"] != _canonical_sha256(inputs)
+        or plan["cohort_admission_sha256"] != _canonical_sha256(cohort)
+        or canary.get("implementation_head") != plan["implementation_head"]
+    ):
+        raise T101PathError("retained T101 readiness/plan/canary bindings differ")
+    for role in (
+        "formal_evidence",
+        "convergence_analysis",
+        "cost_report",
+        "final_report",
+    ):
+        if documents[role].get("task_id") != "T101":
+            raise T101PathError(f"retained artifact {role} task identity changed")
+    if (
+        documents["convergence_analysis"].get("terminal_classification")
+        != documents["final_report"].get("terminal_classification")
+        or documents["cost_report"].get("schema_id") != "t101-cost-report-v1"
+    ):
+        raise T101PathError("retained T101 analysis/final/cost artifacts disagree")
     manifest = build_t101_retention_manifest(
         references,
+        producer_provenance={
+            "task_id": "T101",
+            "implementation_head": plan["implementation_head"],
+            "native_identity": plan["native_identity"],
+            "input_admission_artifact_sha256": references["input_admission"]["sha256"],
+            "cohort_admission_artifact_sha256": references["cohort_admission"][
+                "sha256"
+            ],
+            "formal_plan_artifact_sha256": references["formal_plan"]["sha256"],
+        },
         regeneration_commands=regeneration_commands,
         retention_reason=retention_reason,
         deletion_condition=deletion_condition,
@@ -1045,6 +1117,8 @@ def build_parser() -> argparse.ArgumentParser:
     for name in ("t088-formal-raw", "t088-final-report", "t088-retention"):
         readiness.add_argument(f"--{name}", type=Path, required=True)
     readiness.add_argument("--artifact-root", type=Path, required=True)
+    readiness.add_argument("--worker-id", required=True)
+    readiness.add_argument("--single-worker-reason", required=True)
 
     canary = modes.add_parser("canary")
     canary.add_argument("--authorization", type=Path, required=True)
@@ -1069,6 +1143,7 @@ def build_parser() -> argparse.ArgumentParser:
     plan.add_argument("--output", type=Path, required=True)
     plan.add_argument("--shard-count", type=int, default=16)
     plan.add_argument("--worker-count", type=int, default=16)
+    plan.add_argument("--lower-worker-reason")
 
     shard = modes.add_parser("formal-shard")
     shard.add_argument("--authorization", type=Path, required=True)
@@ -1130,6 +1205,8 @@ def main(argv: list[str] | None = None) -> int:
                 t088_final_report_path=args.t088_final_report,
                 t088_retention_path=args.t088_retention,
                 artifact_root=args.artifact_root,
+                worker_id=args.worker_id,
+                single_worker_reason=args.single_worker_reason,
             )
         elif args.mode == "canary-authorization":
             result = prepare_t101_canary_authorization_from_paths(
@@ -1166,6 +1243,7 @@ def main(argv: list[str] | None = None) -> int:
                 output_path=args.output,
                 shard_count=args.shard_count,
                 worker_count=args.worker_count,
+                lower_worker_reason=args.lower_worker_reason,
             )
         elif args.mode == "formal-shard":
             result = run_t101_formal_shard_from_paths(

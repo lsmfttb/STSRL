@@ -24,11 +24,15 @@ from sts_combat_rl.sim.t101_particle_convergence import (
     T101_COUNTS,
     T101_NATIVE_COMMIT,
     T101_NATIVE_REF,
+    T101_SEARCH_SIMULATIONS,
+    T101AdmissionExclusion,
     T101IncompleteError,
     _canonical_sha256,
     call_t101_bridge,
     derive_t101_sampler_seed,
     validate_t101_canary_ladder,
+    validate_t101_formal_plan,
+    validate_t101_input_admission,
     validate_t101_selected_cohort,
 )
 
@@ -122,16 +126,43 @@ class T101NativeRecordRunner:
             )
         return adapter, restored, method
 
-    def admit(self, record: Mapping[str, object]) -> dict[str, object]:
+    def admit(
+        self,
+        record: Mapping[str, object],
+        *,
+        worker_id: str,
+        single_worker_reason: str,
+    ) -> dict[str, object]:
+        if (
+            not isinstance(worker_id, str)
+            or not worker_id
+            or not isinstance(single_worker_reason, str)
+            or not single_worker_reason
+        ):
+            raise T101ExecutionError(
+                "support-admission worker identity/reason is missing"
+            )
         adapter, restored, method = self._restore(record)
         seed = derive_t101_sampler_seed(str(record["selection_identity"]), 0)
+        started = time.perf_counter()
         try:
             report = call_t101_bridge(
                 adapter, restored, sampler_seed=seed, particle_count=2
             )
         except (RuntimeError, TypeError, ValueError) as exc:
-            raise T101ExecutionError(
-                f"{record['selection_identity']}: bounded admission bridge failed"
+            raise T101AdmissionExclusion(
+                f"{record['selection_identity']}: bounded admission bridge failed",
+                bridge_call_runtime={
+                    "wall_clock_time_s": time.perf_counter() - started,
+                    "particle_count": 2,
+                    "search_simulations_per_particle": T101_SEARCH_SIMULATIONS,
+                    "worker_id": worker_id,
+                    "shard_index": 0,
+                    "effective_concurrency": 1,
+                    "failure_retry_status": "failed_no_retry",
+                    "retry_reason": None,
+                    "single_worker_reason": single_worker_reason,
+                },
             ) from exc
         return {
             "restore_exact_accepted_state": True,
@@ -141,6 +172,17 @@ class T101NativeRecordRunner:
             "search_configuration_unchanged": True,
             "restore_method": method,
             "bridge_report": report,
+            "bridge_call_runtime": {
+                "wall_clock_time_s": time.perf_counter() - started,
+                "particle_count": 2,
+                "search_simulations_per_particle": T101_SEARCH_SIMULATIONS,
+                "worker_id": worker_id,
+                "shard_index": 0,
+                "effective_concurrency": 1,
+                "failure_retry_status": "success_no_retry",
+                "retry_reason": None,
+                "single_worker_reason": single_worker_reason,
+            },
         }
 
     def canary_ladder(self, record: Mapping[str, object]) -> dict[str, object]:
@@ -208,6 +250,12 @@ def _authorization(
     implementation_head: str,
     bindings: Mapping[str, str],
 ) -> dict[str, object]:
+    if (
+        not isinstance(implementation_head, str)
+        or len(implementation_head) != 40
+        or any(character not in "0123456789abcdef" for character in implementation_head)
+    ):
+        raise T101ExecutionError(f"{kind} implementation head is invalid")
     if not isinstance(value, Mapping):
         raise T101ExecutionError(f"{kind} authorization is missing")
     required = {
@@ -255,6 +303,7 @@ def execute_t101_canary(
 ) -> dict[str, object]:
     if not isinstance(worker_id, str) or not worker_id:
         raise T101ExecutionError("canary worker identity is missing")
+    validate_t101_input_admission(input_admission)
     cohort = validate_t101_selected_cohort(cohort_admission)
     bindings = {
         "input_admission_sha256": _canonical_sha256(input_admission),
@@ -285,6 +334,7 @@ def execute_t101_canary(
                 "shard_index": 0,
                 "effective_concurrency": 1,
                 "failure_retry_status": "success_no_retry",
+                "single_worker_reason": "bounded three-state direct-ladder canary",
             }
             for count in T101_COUNTS
             if isinstance(calls.get(str(count)), Mapping)
@@ -321,10 +371,11 @@ def execute_t101_formal_shard(
     effective_concurrency: int,
     retry_reason: str | None = None,
 ) -> dict[str, object]:
-    topology = plan.get("topology")
-    jobs = plan.get("jobs")
-    if not isinstance(topology, Mapping) or not isinstance(jobs, Sequence):
-        raise T101ExecutionError("formal plan is malformed")
+    plan = validate_t101_formal_plan(plan)
+    topology = plan["topology"]
+    jobs = plan["jobs"]
+    assert isinstance(topology, Mapping)
+    assert isinstance(jobs, Sequence) and not isinstance(jobs, (str, bytes))
     shard_count = topology.get("shard_count")
     if (
         isinstance(shard_count, bool)
