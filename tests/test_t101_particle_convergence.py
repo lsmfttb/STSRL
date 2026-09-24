@@ -3,16 +3,20 @@ from __future__ import annotations
 import hashlib
 import json
 from copy import deepcopy
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+import sts_combat_rl.sim.t101_particle_execution as t101_execution
 from sts_combat_rl.artifact_eligibility import (
     ArtifactQualification,
     EligibilityRequirements,
     Fact,
     Predicate,
 )
+from sts_combat_rl.commands import t085_native_execution as t085_execution
+from sts_combat_rl.commands import t101_particle_convergence as t101_command
 from sts_combat_rl.commands.t101_particle_convergence import (
     T101PathError,
     analyze_t101_formal_from_paths,
@@ -48,6 +52,7 @@ from sts_combat_rl.sim.t101_particle_convergence import (
 )
 from sts_combat_rl.sim.t101_particle_execution import (
     T101ExecutionError,
+    T101NativeRecordRunner,
     execute_t101_canary,
     execute_t101_formal_shard,
 )
@@ -680,6 +685,119 @@ def test_t101_reuses_t099_fail_closed_anchor_and_mapping_validation(
     mutate(report)
     with pytest.raises(T101IncompleteError, match=match):
         analyze_t101_batch(report)
+
+
+def test_t101_current_native_identity_gate_is_exact_and_independent(
+    monkeypatch,
+) -> None:
+    manifest = SimpleNamespace(
+        integration=SimpleNamespace(
+            repository_url="https://github.com/lsmfttb/sts_lightspeed.git",
+            ref="refs/heads/stsrl/main",
+            commit=T101_NATIVE_COMMIT,
+        ),
+        capability_ids=(
+            "native_t096_public_information_hidden_future_sampler",
+            "native_stsr006_particle_search_bridge",
+        ),
+    )
+    monkeypatch.setattr(
+        t101_execution, "load_lightspeed_source_manifest", lambda: manifest
+    )
+    pinned_identity = {
+        "repository": "lsmfttb/sts_lightspeed",
+        "ref": "refs/heads/stsrl/main",
+        "commit": T101_NATIVE_COMMIT,
+    }
+    assert pinned_identity["commit"] == "97f59b620efe5ee1571f8da298c99d1e21c1149b"
+    assert pinned_identity not in t085_execution._T085_ACCEPTED_RUNTIME_IDENTITIES
+    assert t101_execution._current_native_identity() == pinned_identity
+
+    manifest.integration.commit = "d62ff35579b54d70a7428afdf84743c94df3fe0c"
+    with pytest.raises(T101ExecutionError, match="current native identity"):
+        t101_execution._current_native_identity()
+
+
+def test_t101_admission_requires_current_restore_public_action_parity(
+    monkeypatch,
+) -> None:
+    selection_identity = "A:000"
+    expected_context = {"projection": "accepted"}
+    canonical_record = SimpleNamespace(public_run_context=expected_context)
+    bridge_calls = []
+
+    monkeypatch.setattr(t101_execution, "_current_native_identity", dict)
+    monkeypatch.setattr(
+        t101_execution,
+        "restore_t085_canonical_record",
+        lambda *_args: (SimpleNamespace(raw={}), "current_native_restore"),
+    )
+    monkeypatch.setattr(
+        t101_execution,
+        "read_native_public_projection",
+        lambda *_args: {"projection": "changed"},
+    )
+    monkeypatch.setattr(
+        t101_execution,
+        "build_public_run_context",
+        lambda *_args, **_kwargs: {"projection": "changed"},
+    )
+    monkeypatch.setattr(
+        t101_execution,
+        "call_t101_bridge",
+        lambda *_args, **_kwargs: bridge_calls.append("called"),
+    )
+    runner = T101NativeRecordRunner(
+        adapter_factory=lambda: SimpleNamespace(legal_actions=lambda _state: []),
+        selected_records={selection_identity: object()},
+        canonical_records_by_stratum={
+            "A": {selection_identity: canonical_record},
+        },
+    )
+
+    with pytest.raises(T101ExecutionError, match="projection/legal actions changed"):
+        runner.admit(
+            {"selection_identity": selection_identity, "cohort": "A"},
+            worker_id="test-worker",
+            single_worker_reason="unit-test boundary only",
+        )
+    assert bridge_calls == []
+
+
+def test_t101_path_uses_historical_t085_producer_validation(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+    gate = SimpleNamespace(
+        canonical_records_by_cohort={"A": {}, "B": {}, "C": {}},
+        cohorts={"A": (), "B": (), "C": ()},
+    )
+
+    def admit(**kwargs):
+        captured.update(kwargs)
+        return {}, gate, {}
+
+    monkeypatch.setattr(
+        t101_command.t088_canary,
+        "_admit_t088_canary_inputs_from_paths",
+        admit,
+    )
+    result = t101_command._native_runner_from_paths(
+        implementation_head="a" * 40,
+        t087_formal_path=Path("unused-formal"),
+        t087_report_path=Path("unused-report"),
+        t087_retention_path=Path("unused-retention"),
+        t085_selection_path=Path("unused-selection"),
+        t085_restore_path=Path("unused-restore"),
+        a_pool_path=Path("unused-a"),
+        b_pool_path=Path("unused-b"),
+        c_pool_path=Path("unused-c"),
+        b_source_manifest_path=Path("unused-b-manifest"),
+        c_source_manifest_path=Path("unused-c-manifest"),
+        adapter_factory=lambda: object(),
+        runner_factory=lambda **kwargs: kwargs,
+    )
+
+    assert captured["historical_t085_producer_only"] is True
+    assert result["canonical_records_by_stratum"] == gate.canonical_records_by_cohort
 
 
 def test_formal_plan_is_exact_96_jobs_modulo_sharded_and_not_authorized() -> None:

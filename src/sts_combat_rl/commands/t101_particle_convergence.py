@@ -223,6 +223,7 @@ def run_t101_readiness_from_paths(
         c_pool_path=c_pool_path,
         b_source_manifest_path=b_source_manifest_path,
         c_source_manifest_path=c_source_manifest_path,
+        historical_t085_producer_only=True,
     )
     retention = _read_json(
         t088_retention_path,
@@ -563,6 +564,7 @@ def _native_runner_from_paths(
         c_pool_path=c_pool_path,
         b_source_manifest_path=b_source_manifest_path,
         c_source_manifest_path=c_source_manifest_path,
+        historical_t085_producer_only=True,
     )
     maps = getattr(gate, "canonical_records_by_cohort", None)
     cohorts = getattr(gate, "cohorts", None)

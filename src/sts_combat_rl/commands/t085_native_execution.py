@@ -675,6 +675,7 @@ def resolve_t085_canonical_records(
     expected_source_manifest_path: str | Path | None = None,
     expected_source_manifest_sha256: str | None = None,
     selected_source_checkpoint_ids: Sequence[str] | None = None,
+    historical_producer_only: bool = False,
 ) -> dict[str, BattleStartCheckpointRecord]:
     """Load one explicitly typed, verified source artifact.
 
@@ -682,6 +683,11 @@ def resolve_t085_canonical_records(
     never be silently interpreted as the T052 fixed cohort, and vice versa.
     For a manifest-bound assisted pool, validation remains full-file streaming
     while the returned map is limited to the requested source identities.
+    ``historical_producer_only`` is reserved for T101's retained-artifact
+    admission: it validates the frozen producer identity and artifact bytes,
+    while T101 independently validates its live native identity and restores
+    every selected record before admission. The default keeps T085's live
+    runtime check unchanged.
     """
     resolved = Path(path).resolve(strict=True)
     source_manifest_binding = _validate_t085_source_manifest_binding(
@@ -689,6 +695,7 @@ def resolve_t085_canonical_records(
         artifact_kind=artifact_kind,
         manifest_path=expected_source_manifest_path,
         manifest_sha256=expected_source_manifest_sha256,
+        historical_producer_only=historical_producer_only,
     )
     bound_native_identity = (
         _t085_source_manifest_bound_identity(source_manifest_binding[0])
@@ -727,6 +734,7 @@ def resolve_t085_canonical_records(
             ),
             expected_assistance_level=expected_assistance_level,
             selected_record_ids=selected_source_checkpoint_ids,
+            historical_producer_only=historical_producer_only,
         )
         selected_records = dict(stream_summary.selected_records)
         if not selected_records:
@@ -848,7 +856,13 @@ def resolve_t085_canonical_records(
             if artifact_kind == "assisted_pool":
                 _validate_t085_b_source_pool(
                     loaded_assisted,
-                    controller=build_t085_cohort_b_source_controller(),
+                    controller=(
+                        build_t085_cohort_b_source_controller(
+                            historical_producer_only=True
+                        )
+                        if historical_producer_only
+                        else build_t085_cohort_b_source_controller()
+                    ),
                     expected_seeds=expected_pool_seeds,
                     bound_native_identity=bound_native_identity,
                 )
@@ -859,7 +873,13 @@ def resolve_t085_canonical_records(
                 )
                 _validate_t085_c_source_pool(
                     source_pool,
-                    controller=build_t085_cohort_c_source_controller(),
+                    controller=(
+                        build_t085_cohort_c_source_controller(
+                            historical_producer_only=True
+                        )
+                        if historical_producer_only
+                        else build_t085_cohort_c_source_controller()
+                    ),
                     expected_seeds=expected_pool_seeds,
                     bound_native_identity=bound_native_identity,
                 )
@@ -2657,6 +2677,7 @@ class T085UnguidedBattleSearchV2Controller:
     expected_native_identity: Mapping[str, object] | None = field(
         default=None, repr=False, compare=False
     )
+    historical_producer_only: bool = field(default=False, repr=False, compare=False)
     provenance: ControllerProvenance = field(init=False)  # type: ignore[assignment]
     _validated_native_identity: Mapping[str, object] = field(
         init=False, repr=False, compare=False
@@ -2671,10 +2692,20 @@ class T085UnguidedBattleSearchV2Controller:
             raise T085NativeExecutionError(
                 "T085 unguided v2 requires initial_no_potions action space"
             )
-        native_identity = _validate_t085_native_source_manifest(
-            "battle_search_v2",
-            expected_native_identity=self.expected_native_identity,
-        )
+        if self.historical_producer_only:
+            if (
+                not isinstance(self.expected_native_identity, Mapping)
+                or dict(self.expected_native_identity) != T085_NATIVE_IDENTITY
+            ):
+                raise T085NativeExecutionError(
+                    "historical Cohort C provenance requires the exact T085 producer identity"
+                )
+            native_identity = dict(T085_NATIVE_IDENTITY)
+        else:
+            native_identity = _validate_t085_native_source_manifest(
+                "battle_search_v2",
+                expected_native_identity=self.expected_native_identity,
+            )
         object.__setattr__(self, "_validated_native_identity", native_identity)
         object.__setattr__(
             self,
@@ -2743,19 +2774,33 @@ class T085UnguidedBattleSearchV2Controller:
         )
 
 
-def build_t085_cohort_c_source_controller() -> RoutedRunController:
+def build_t085_cohort_c_source_controller(
+    *, historical_producer_only: bool = False
+) -> RoutedRunController:
     """Build the exact repository-owned current-occupancy source controller."""
 
     return RoutedRunController(
-        battle=T085UnguidedBattleSearchV2Controller(simulations=100),
+        battle=T085UnguidedBattleSearchV2Controller(
+            simulations=100,
+            expected_native_identity=(
+                T085_NATIVE_IDENTITY if historical_producer_only else None
+            ),
+            historical_producer_only=historical_producer_only,
+        ),
         non_combat=PolicyController(ExpertNonCombatDriver(seed=42042)),
     )
 
 
-def build_t085_cohort_b_source_controller() -> RoutedRunController:
+def build_t085_cohort_b_source_controller(
+    *, historical_producer_only: bool = False
+) -> RoutedRunController:
     """Build the exact T085 Cohort-B assisted source controller."""
 
-    native_identity = _validate_t085_native_source_manifest("battle_search")
+    native_identity = (
+        dict(T085_NATIVE_IDENTITY)
+        if historical_producer_only
+        else _validate_t085_native_source_manifest("battle_search")
+    )
     return RoutedRunController(
         battle=OracleSearchController(
             simulations=20,
@@ -4215,6 +4260,7 @@ def _t085_stream_verified_b_source_pool(
     expected_assistance_level: str | None,
     selected_record_ids: Sequence[str] = (),
     retain_battle_start_projections: bool = False,
+    historical_producer_only: bool = False,
 ) -> tuple[dict[str, object], _T085BSourcePoolStreamSummary]:
     """Validate a bound B pool and retain only the requested in-memory view."""
 
@@ -4224,6 +4270,7 @@ def _t085_stream_verified_b_source_pool(
         artifact_kind="assisted_pool",
         manifest_path=source_manifest_path,
         manifest_sha256=source_manifest_sha256,
+        historical_producer_only=historical_producer_only,
     )
     if source_manifest_binding is None:  # pragma: no cover - manifest is required
         raise T085NativeExecutionError(
@@ -4271,7 +4318,11 @@ def _t085_stream_verified_b_source_pool(
         stream_kwargs["retain_battle_start_projections"] = True
     stream_summary = _validate_t085_b_source_pool_jsonl(
         resolved,
-        controller=build_t085_cohort_b_source_controller(),
+        controller=(
+            build_t085_cohort_b_source_controller(historical_producer_only=True)
+            if historical_producer_only
+            else build_t085_cohort_b_source_controller()
+        ),
         expected_seeds=expected_seeds,
         bound_native_identity=bound_native_identity,
         **stream_kwargs,
@@ -5527,17 +5578,18 @@ def _validate_t085_source_manifest_binding(
     manifest_path: str | Path | None,
     manifest_sha256: str | None,
     expected_native_identity: Mapping[str, object] | None = None,
+    historical_producer_only: bool = False,
 ) -> tuple[dict[str, object], Path] | None:
     """Bind a source pool path to its frozen T085 source manifest.
 
-    The live backend must always be one of the finite accepted historical or
-    current identities.  By default, the manifest's own identity is then
-    accepted only when it is exactly one of those same identities and is
-    returned as its artifact provenance.  This keeps retained historical
-    ``d62ff355`` source pools valid under an active ``96052d24`` runtime while
-    allowing fresh current manifests through the same resolver.  An explicit
-    expected identity additionally requires live and document identity to
-    match that exact approved value; arbitrary identities remain rejected.
+    By default, verify the live T085 backend against its finite accepted
+    identities, then validate the manifest's producer identity under the
+    existing T085 compatibility rules. T101 may explicitly request
+    ``historical_producer_only`` to validate retained producer provenance
+    without treating the historical native commit as the current runtime.
+    That mode requires the exact T085 producer identity and does not validate
+    live compatibility; T101 performs its own exact current-runtime, restore,
+    public-projection, legal-action, and bridge checks on selected records.
     """
 
     if (manifest_path is None) != (manifest_sha256 is None):
@@ -5545,7 +5597,15 @@ def _validate_t085_source_manifest_binding(
             "T085 source manifest path and SHA-256 must be supplied together"
         )
     if manifest_path is None:
+        if historical_producer_only:
+            raise T085NativeExecutionError(
+                "historical T085 producer validation requires a source manifest"
+            )
         return None
+    if historical_producer_only and expected_native_identity is not None:
+        raise T085NativeExecutionError(
+            "historical T085 producer validation cannot bind a runtime identity"
+        )
     if artifact_kind == "fixed_cohort":
         raise T085NativeExecutionError(
             "fixed-cohort artifacts cannot carry a T085 source-generation manifest"
@@ -5612,7 +5672,18 @@ def _validate_t085_source_manifest_binding(
         )
     backend = "battle_search_v2" if artifact_kind == "natural_pool" else "battle_search"
     document_native_identity = document.get("native_identity")
-    if expected_native_identity is None:
+    if historical_producer_only:
+        if not isinstance(document_native_identity, Mapping):
+            raise T085NativeExecutionError(
+                "T085 source-generation manifest native identity is malformed"
+            )
+        document_identity = dict(document_native_identity)
+        if document_identity != T085_NATIVE_IDENTITY:
+            raise T085NativeExecutionError(
+                "T085 source-generation manifest does not claim the exact historical producer identity"
+            )
+        bound_native_identity = dict(T085_NATIVE_IDENTITY)
+    elif expected_native_identity is None:
         # Validate the live runtime independently of the retained artifact's
         # identity.  Historical d62 artifacts are intentionally consumable
         # while the active runtime is the approved telemetry descendant.
