@@ -109,6 +109,7 @@ duplicate long experiment reports.
 | T099 | DONE | [Native Particle-Search Bridge Source Acceptance](T099-native-particle-search-bridge-source-acceptance.md) | T017, T020, T096, T097, T098 | `NATIVE_PARTICLE_SEARCH_BRIDGE_CAPABILITY_ACCEPTED`; pin `97f59b6` |
 | T100 | DONE | [Repository Information-Architecture Compaction](T100-repository-information-architecture-compaction.md) | T099, current governance | `REPOSITORY_INFORMATION_ARCHITECTURE_COMPACTED`; documentation only |
 | T101 | DONE | [Bounded Particle-Count Convergence and Cost Diagnostic](T101-bounded-particle-count-convergence.md) | T004, T078, T081, T087, T088, T096, T098, T099, T100 | `SUPPORTED_COHORT_INSUFFICIENT`; N=2 admission attempted all 413 candidates (A/B/C 93/192/128), admitted 0; no canary/formal run or convergence result |
+| T102 | READY | [Structured Agent-to-Planner Notification and Attribution Protocol](T102-agent-planner-notification-protocol.md) | T100, T101, current governance | governance-only; durable-source-first Agent→Planner notification, retry/idempotency, duplicate-Planner deduplication, notification-not-authority |
 
 ## Same-ID contract and amendment files
 
