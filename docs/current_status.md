@@ -1,6 +1,6 @@
 # Current Status
 
-Last updated: 2026-09-20.
+Last updated: 2026-09-25.
 
 This is the compact, merge-stable projection of the accepted project state on
 `main`. It answers what is true now; it does not narrate a PR's approval or
@@ -103,14 +103,24 @@ the exact lifecycle and terminal meaning of T034 and related tasks.
 
 ## Active scientific boundary
 
-The immediate possible scientific successor after T100 is T101, the separately
-specified bounded particle-count convergence task. This records successor
-ordering/boundary only; it does not publish or authorize T101. No task is
-promoted merely by appearing in a document or Planner Issue. T063 and T066
-remain non-active scientific directions; see
-[`tasks/ARCHIVE.md`](tasks/ARCHIVE.md) for their exact lifecycle and terminal
-meanings. T100's repository-maintenance work does not publish or authorize a
-successor experiment.
+T101's frozen N=2 support-admission run ended as
+`SUPPORTED_COHORT_INSUFFICIENT`: all 413 candidates were attempted across
+A/B/C (93/192/128), with no admitted state. The first hash-ordered candidate
+in each stratum was independently diagnosed as failing the native
+T099 Search-v2 occurrence-mapping boundary; the cohort artifact retains the
+generic bridge-failure exclusion for every attempt. No 24-state cohort,
+canary, formal shard, or particle-stability result was produced. This is a
+support-domain result, not convergence evidence. See
+[`T101`](tasks/T101-bounded-particle-count-convergence.md) and its exact PR
+record for detailed provenance. The terminal retention manifest is retained
+under `artifacts/t101-bounded-particle-convergence-361a77d/admission/`
+(`t101-terminal-retention-manifest-v1`, SHA-256
+`922ef003d2fa15dea57f59c71fa99bfb6f5a418d48026b04ed3019d7e6cf4f97`).
+
+No successor task is authorized by this result. T063 and T066 remain non-active
+scientific directions; see [`tasks/ARCHIVE.md`](tasks/ARCHIVE.md) for their
+exact lifecycle and terminal meanings. No task is promoted merely by appearing
+in a document or Planner Issue.
 
 The retained closed-route conclusions remain available through the task archive
 and contracts, including the earlier Oracle-guided Search, later-act reach,

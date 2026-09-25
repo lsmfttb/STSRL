@@ -73,6 +73,27 @@ from sts_combat_rl.sim.search_guidance_inference import (
 from sts_combat_rl.sim.torch_policy_value import OUTCOME_TARGET_KIND
 
 
+@pytest.fixture(autouse=True)
+def _pin_t085_tests_to_approved_runtime_identity(monkeypatch) -> None:
+    """Keep T085 unit tests independent of the repository's newer T101 pin."""
+    manifest = SimpleNamespace(
+        integration=SimpleNamespace(
+            repository_url="https://github.com/lsmfttb/sts_lightspeed.git",
+            ref="refs/heads/stsrl/main",
+            commit=t085_execution.T085_ACTIVE_NATIVE_IDENTITY["commit"],
+        ),
+        capability_ids=(
+            "native_battle_search_root",
+            "native_battle_search_v2_tree_internal",
+        ),
+    )
+    monkeypatch.setattr(
+        t085_execution,
+        "load_lightspeed_source_manifest",
+        lambda: manifest,
+    )
+
+
 def _hold_t085_finalization_lock(root: str, ready) -> None:
     with t085_execution._t085_cohort_b_finalization_lock(root):
         ready.set()
@@ -1401,7 +1422,47 @@ def test_t085_source_manifest_binding_uses_assisted_pool_schema_for_b(
     assert bound["source_pool_artifact"]["schema_id"] == (
         t085_execution.ASSISTED_SOURCE_POOL_SCHEMA_ID
     )
+    validate_live_runtime = t085_execution._validate_t085_native_source_manifest
+    monkeypatch.setattr(
+        t085_execution,
+        "_validate_t085_native_source_manifest",
+        lambda *args, **kwargs: pytest.fail(
+            "historical producer validation must not inspect the live T085 runtime"
+        ),
+    )
+    historical_bound, _ = t085_execution._validate_t085_source_manifest_binding(
+        pool_path,
+        artifact_kind="assisted_pool",
+        manifest_path=manifest_path,
+        manifest_sha256=t085_execution.sha256_file(manifest_path),
+        historical_producer_only=True,
+    )
+    assert historical_bound["native_identity"] == t085_execution.T085_NATIVE_IDENTITY
 
+    false_current_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    false_current_manifest["native_identity"] = {
+        "repository": "lsmfttb/sts_lightspeed",
+        "ref": "refs/heads/stsrl/main",
+        "commit": "97f59b620efe5ee1571f8da298c99d1e21c1149b",
+    }
+    manifest_path.write_text(
+        json.dumps(false_current_manifest, sort_keys=True),
+        encoding="utf-8",
+    )
+    with pytest.raises(T085NativeExecutionError, match="exact historical producer"):
+        t085_execution._validate_t085_source_manifest_binding(
+            pool_path,
+            artifact_kind="assisted_pool",
+            manifest_path=manifest_path,
+            manifest_sha256=t085_execution.sha256_file(manifest_path),
+            historical_producer_only=True,
+        )
+
+    monkeypatch.setattr(
+        t085_execution,
+        "_validate_t085_native_source_manifest",
+        validate_live_runtime,
+    )
     current_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     current_manifest["native_identity"] = dict(
         t085_execution.T085_ACTIVE_NATIVE_IDENTITY
@@ -2417,6 +2478,41 @@ def test_t085_cohort_c_final_manifest_binds_merged_pool_for_resolver(
     )
     assert bound["cohort"] == "C"
     assert bound["source_pool_artifact"]["path"] == str(pool_path.resolve())
+    live_native_validator = t085_execution._validate_t085_native_source_manifest
+    historical_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    historical_manifest["native_identity"] = dict(t085_execution.T085_NATIVE_IDENTITY)
+    manifest_path.write_text(
+        json.dumps(historical_manifest, sort_keys=True),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        t085_execution,
+        "_validate_t085_native_source_manifest",
+        lambda *args, **kwargs: pytest.fail(
+            "historical Cohort C validation must not inspect the live T085 runtime"
+        ),
+    )
+    historical_resolved = resolve_t085_canonical_records(
+        pool_path,
+        expected_sha256=t085_execution.sha256_file(pool_path),
+        artifact_kind="natural_pool",
+        expected_source_run_count=128,
+        expected_source_run_identity_inventory=tuple(f"run-{seed}" for seed in seeds),
+        expected_source_run_seed_inventory=seeds,
+        expected_source_manifest_path=manifest_path,
+        expected_source_manifest_sha256=t085_execution.sha256_file(manifest_path),
+        historical_producer_only=True,
+    )
+    assert set(historical_resolved) == {f"checkpoint-{seed}" for seed in seeds}
+    monkeypatch.setattr(
+        t085_execution,
+        "_validate_t085_native_source_manifest",
+        live_native_validator,
+    )
+    manifest_path.write_text(
+        json.dumps(manifest, sort_keys=True),
+        encoding="utf-8",
+    )
     forged_manifest_path = artifact_root / "source" / "cohort-c" / "forged.json"
     forged_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     forged_manifest["policy_prior_callback"] = "caller-injected"

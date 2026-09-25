@@ -275,8 +275,14 @@ def _load_canonical_maps(
     c_pool_path: Path,
     b_source_manifest_path: Path,
     c_source_manifest_path: Path,
+    historical_t085_producer_only: bool = False,
 ) -> tuple[dict[str, Mapping[str, object]], dict[str, dict[str, object]]]:
-    """Resolve full pools with the existing T085 verifier, never a local parser."""
+    """Resolve full pools with the existing T085 verifier, never a local parser.
+
+    T088 keeps the default live-runtime verification. T101 opts into checking
+    the exact historical producer identity here, then applies its own current
+    runtime and selected-record restore checks before admission.
+    """
 
     sources = _source_references(restore_document)
     refs: dict[str, dict[str, object]] = {}
@@ -308,6 +314,7 @@ def _load_canonical_maps(
             artifact_kind="natural_pool",
             expected_source_manifest_path=c_source_manifest_path,
             expected_source_manifest_sha256=str(manifests["C"]["sha256"]),
+            historical_producer_only=historical_t085_producer_only,
         )
         maps = {
             "A": resolve_t085_canonical_records(
@@ -322,6 +329,7 @@ def _load_canonical_maps(
                 expected_source_manifest_path=b_source_manifest_path,
                 expected_source_manifest_sha256=str(manifests["B"]["sha256"]),
                 selected_source_checkpoint_ids=selected_b_ids,
+                historical_producer_only=historical_t085_producer_only,
             ),
             "C": _restrict_to_selected_records(
                 c_full_map,
@@ -559,6 +567,7 @@ def _admit_t088_canary_inputs_from_paths(
     c_pool_path: Path,
     b_source_manifest_path: Path,
     c_source_manifest_path: Path,
+    historical_t085_producer_only: bool = False,
 ) -> tuple[dict[str, object], object, dict[str, Mapping[str, object]]]:
     """Perform T088's full read-only retained-input admission boundary."""
 
@@ -605,6 +614,7 @@ def _admit_t088_canary_inputs_from_paths(
         c_pool_path=c_pool_path,
         b_source_manifest_path=b_source_manifest_path,
         c_source_manifest_path=c_source_manifest_path,
+        historical_t085_producer_only=historical_t085_producer_only,
     )
     try:
         gate = load_t087_t085_input_gate(
