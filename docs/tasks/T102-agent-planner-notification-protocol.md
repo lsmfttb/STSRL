@@ -246,6 +246,36 @@ must not create competing Planner authority.
 This receipt is coordination metadata only. It is not scientific acceptance or
 merge authorization.
 
+### Lost review-owner recovery
+
+The deterministic receipt owner must not be silently stolen merely because a
+chat turn is slow, disconnected, or no longer visible.
+
+If the owning Planner conversation is genuinely unavailable before recording an
+authoritative decision, ownership may move only through an explicit durable
+recovery record, for example:
+
+```text
+PLANNER_REVIEW_REASSIGNMENT
+
+notification_id: github-pr-comment:<id>
+previous_receipt_comment_id: <id>
+new_receipt_comment_id: <id>
+reason: <explicit user recovery request or explicit prior-owner release>
+```
+
+A timeout or lack of chat response is not sufficient reason for reassignment.
+
+The surviving Planner branch may create the reassignment record when the user
+explicitly asks it to recover the already-claimed review and the branch has
+verified that no authoritative Planner decision was recorded after the prior
+receipt. An explicit release by the prior owning Planner is also sufficient.
+
+After reassignment, all branches must treat the named new receipt as owner.
+
+This recovery rule handles a lost conversation without introducing an automatic
+lease/timeout that could cause two Planner branches to exercise authority.
+
 ## Existing Decision Recovery
 
 A receiving Planner must prefer durable prior decisions over conversational
@@ -448,6 +478,14 @@ An STSRL Implementer encounters a semantic question. It reports to Main
 Maintainer. Maintainer classifies the question and only then sends a Planner
 notification if the issue is genuinely Planner-owned.
 
+### Scenario G — winning Planner conversation is lost
+
+Two Planner conversations raced and receipt A won by lower GitHub comment ID.
+Conversation A is subsequently unavailable and recorded no authoritative
+decision. Conversation B must not take over from silence alone. After an
+explicit user recovery request or prior-owner release, B records a durable
+reassignment from receipt A to its receipt and then continues the review.
+
 ## Verification
 
 Required focused verification:
@@ -459,6 +497,8 @@ Required focused verification:
   authority;
 - no wording allows STSRL Implementer to bypass Main Maintainer by default;
 - duplicate Planner branch scenario has a deterministic single-owner outcome;
+- a lost winning branch can recover only through explicit durable reassignment,
+  never timeout-based claim stealing;
 - retries reuse the same notification ID;
 - stale-head notification cannot authorize review/landing of a newer head;
 - manual user review requests remain supported;
@@ -491,6 +531,8 @@ Use only when:
 - retry/idempotency semantics are defined;
 - duplicate Planner conversations deterministically converge to one review
   owner before authority is exercised;
+- lost-owner recovery requires explicit durable reassignment rather than a
+  timeout;
 - notification-versus-authority separation is explicit;
 - existing exact-head final acceptance and merge rules remain intact;
 - Implementer/Maintainer coordination remains intact;
